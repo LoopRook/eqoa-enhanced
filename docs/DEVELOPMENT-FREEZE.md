@@ -1,6 +1,7 @@
 # Development freeze — EQOA Enhanced 0.1.0
 
-The owner requested a final distribution check and a development freeze. The
+The owner requested a final distribution check and a freeze of this agent's
+client/map/release work. Other agents' authorized work is unaffected. The
 current published client remains 0.1.0; no further game change or release is part
 of this closeout. The package audit found no missing required game-runtime files.
 
