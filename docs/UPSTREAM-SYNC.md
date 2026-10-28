@@ -45,3 +45,12 @@ Follow FORK.md and the footprint manifest. Merge origin/master regularly through
 short-lived branches, preserve full ancestry, and keep master a pure fast-forward
 mirror. Never push master to looprook or publish through its release workflow.
 The owner decides the license; existing MIT/OFL notices remain intact.
+
+## Enhanced 0.1.0 follow-up
+
+Merge bfdb12e integrates upstream7912c73. Only the fork README conflicted; keep
+our player guide. Upstream GM MoveTo/loading/walker code is retained, and actual
+disc regressions exercise the corrected floor placement with negative controls.
+Versioned release routing and packaging are documented in RELEASING.md and
+RELEASE-0.1.0-VERIFICATION.md. The original hygiene report is historical;0.1.0
+subsequently enables fork-owned updates under the owner's explicit request.

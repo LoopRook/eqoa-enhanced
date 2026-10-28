@@ -26,7 +26,7 @@ const CHOICE_ROW: i32 = ROWS - 2;
 /// Rows a second a stick held all the way scrolls.
 const STICK_RATE: f32 = 10.0;
 /// Where the release's notes are read when the game cannot show them.
-const RELEASE: &str = "github.com/DabDavis/eqoa-rust-client-vanilla/releases";
+const RELEASE: &str = crate::fork_ext::release::RELEASE_PAGE;
 
 /// The window's answer.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -412,7 +412,8 @@ mod tests {
         assert!(lines[gap + 1].title && String::from_utf16_lossy(&lines[gap + 1].text).contains("Section 1"));
         let unread = opened(WhatsNew::Unread);
         let text: String = unread.lines.as_ref().unwrap().iter().map(|l| String::from_utf16_lossy(&l.text) + " ").collect();
-        assert!(text.contains("could not be read") && text.contains("eqoa-rust-client-vanilla"));
+        assert!(text.contains("could not be read") && text.contains("eqoa-enhanced"));
+        assert!(!text.contains("eqoa-rust-client-vanilla"), "never direct enhanced players to vanilla updates");
         assert!(unread.lines.as_ref().unwrap().iter().all(|l| !l.title), "no section titles");
         let nothing = opened(WhatsNew::Nothing);
         assert!(nothing.lines.as_ref().unwrap().iter().any(|l| String::from_utf16_lossy(&l.text).contains("not written yet")));

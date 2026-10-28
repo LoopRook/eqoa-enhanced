@@ -2,6 +2,13 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-10-28 · Enhanced 0.1.0
+
+- Download one Windows ZIP, extract and double-click eqoa.exe. No build tools or BAT required.
+- Automatic updates and update notes now come from Enhanced versioned releases.
+- Preserve upstream's GM Goto fix: find the floor again after destination zones load.
+- Retain the enhanced map, guidance, quests, HUD options and disabled upstream report submission.
+
 ## 2026-10-28 · Upstream integration and fork hygiene
 
 - Integrate upstream fishing, GM tools, character shadows and housekeeping while preserving enhanced features.

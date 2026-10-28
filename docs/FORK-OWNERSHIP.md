@@ -6,7 +6,7 @@ explicit override of the original hygiene brief.
 
 The executable policy is [fork-footprint.json](fork-footprint.json), checked by
 [check_fork_footprint.py](../tools/check_fork_footprint.py). Its reviewed upstream
-base is `8d9035096a2deb447854d5fcff4ef25225f80fd1`.
+base is `7912c7393df7d85655d5816980fae1217cc48a32`.
 
 **Reviewed budgets:** exact final shared footprints after adapter extraction,
 including the approved animation guards and regressions. Existing restored map
@@ -30,6 +30,10 @@ The manifest lists explicit ownership patterns for:
 
 A new file outside these patterns requires explicit review. A binary edit in a
 shared file always fails; fork-owned binary map assets remain permitted.
+
+Versioned delivery is fork-owned too: VERSION, .github/workflows/enhanced-release.yml,
+and the named player package/verifier/remote-release guard tools and tests.
+The Windows ZIP contains runtime files only; release tooling stays in source.
 
 ## Exact shared-file allowlist
 
@@ -57,6 +61,8 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/eqoa/src/settings.rs` | 333 | 22 | Restored map/quest settings plus one adapter reference per settings hook. |
 | `crates/eqoa/src/touch.rs` | 79 | 2 | Restored map and tracker touch input. |
 | `crates/eqoa/src/ui.rs` | 9 | 5 | Map UI state and input integration. |
+| `crates/eqoa/src/update.rs` | 3 | 3 | Fork release routing and fork-owned notes; updater mechanics unchanged. |
+| `crates/eqoa/src/updatewnd.rs` | 3 | 2 | Fork release page link and regression assertions. |
 | `crates/eqoa/src/viewer.rs` | 200 | 11 | Restored map/quest dialogs and focus integration. |
 | `crates/esf/src/mesh.rs` | 9 | 0 | Terrain mesh lookup for restored map. |
 | `crates/net/src/session.rs` | 418 | 30 | Restored group/map/quest protocol state. |
@@ -100,6 +106,13 @@ mods/telemetry boundary. Saved setting keys and enhanced option IDs (1000+) rema
 stable. Existing restored/map/quest code is outside this one-call cleanup; its
 shared touch points are documented by the allowlist above and MAP-RELEASE-HANDOFF.md.
 Future map isolation behind a crate or feature flag remains a separate candidate.
+
+The updater also crosses the fork boundary once through fork_ext::release::base;
+its notes and release-page link are fork-owned. Released builds require channel
+enhanced; local and unrelated build channels do not start an updater.
+
+The release manifest additionally checks the updater channel resolver, compiled
+fork notes and update-window release page exactly once each (15 named seams total).
 
 ## Run and review
 

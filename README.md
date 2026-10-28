@@ -21,6 +21,9 @@ network and gameplay improvements while developing its enhanced features.
 
 ## Play on Windows
 
+**[EQOA Enhanced Windows releases](https://github.com/LoopRook/eqoa-enhanced/releases)**
+
+
 1. Extract the prepared **EQOA Enhanced Windows build** into a folder.
 2. Double-click **eqoa.exe**. Preview builds may give the executable a versioned name.
 3. On first launch, select your locally owned Frontiers disc image.
@@ -33,8 +36,9 @@ BAT/CMD files are optional shortcuts: Start-EQOA.bat selects a local development
 build; Play Map Preview.cmd also selects an isolated test profile. The EXE is
 the normal player entry point. The external parser has its own setup for now.
 
-Public Enhanced release packaging and its update channel are still being
-prepared. Current prepared local builds can already be launched directly.
+Release builds update from [this fork's releases](https://github.com/LoopRook/eqoa-enhanced/releases),
+with size/SHA256 checks before replacement. Local source builds do not update
+automatically. Releases use MAJOR.MINOR.PATCH versions, starting with 0.1.0.
 
 ## Development and status
 

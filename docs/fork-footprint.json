@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "reviewed_base": "8d9035096a2deb447854d5fcff4ef25225f80fd1",
-  "review_state": "Shared diffs reviewed against pinned 8d90350 after adapter extraction; exact maximum budgets, including approved animation regressions. Final whole-branch review recorded in FORK-HYGIENE-STATUS.md.",
+  "reviewed_base": "7912c7393df7d85655d5816980fae1217cc48a32",
+  "review_state": "Reviewed upstream7912c73 merge plus fork release seams; only updater route/notes/page and assertions differ in new shared files.",
   "fork_owned": [
     "AGENTS.md",
     "FORK.md",
@@ -36,7 +36,14 @@
     "tools/check_fork_footprint.py",
     "tools/test_fork_footprint.py",
     "web/report-policy.js",
-    "web/report-policy.test.mjs"
+    "web/report-policy.test.mjs",
+    "VERSION",
+    "tools/build_player_release.py",
+    "tools/test_player_release.py",
+    "tools/verify_player_release.py",
+    ".github/workflows/enhanced-release.yml",
+    "tools/check_release_assets.py",
+    "tools/test_release_assets.py"
   ],
   "shared": {
     ".gitignore": {
@@ -193,6 +200,16 @@
       "added": 31,
       "deleted": 7,
       "reason": "Fork reporting policy transport integration."
+    },
+    "crates/eqoa/src/update.rs": {
+      "added": 3,
+      "deleted": 3,
+      "reason": "Fork release routing and fork-owned update notes; upstream updater mechanics unchanged."
+    },
+    "crates/eqoa/src/updatewnd.rs": {
+      "added": 3,
+      "deleted": 2,
+      "reason": "Fork release page link with fork/vanilla UI regression assertions."
     }
   },
   "immutable": [
@@ -271,6 +288,24 @@
       "path": "crates/eqoa/src/settings.rs",
       "name": "settings description",
       "pattern": "\\bfork_settings::description\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/update.rs",
+      "name": "fork release channel",
+      "pattern": "crate::fork_ext::release::base\\(CHANNEL\\)",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/update.rs",
+      "name": "fork compiled update notes",
+      "pattern": "include_str!\\(\"\\.\\./\\.\\./\\.\\./FORK-UPDATE-NOTES\\.md\"\\)",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/updatewnd.rs",
+      "name": "fork release page",
+      "pattern": "crate::fork_ext::release::RELEASE_PAGE",
       "count": 1
     }
   ]

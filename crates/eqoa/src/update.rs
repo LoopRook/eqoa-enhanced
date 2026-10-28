@@ -231,7 +231,7 @@ pub const NOTES_FILE: &str = "update-notes.md";
 /// This build's own update notes, as they were when it was built: the
 /// sections the release's have and these lack are what is new.
 #[cfg(not(target_arch = "wasm32"))]
-const OWN_NOTES: &str = include_str!("../../../UPDATE-NOTES.md");
+const OWN_NOTES: &str = include_str!("../../../FORK-UPDATE-NOTES.md");
 
 /// A section of the update notes: `## <date> · <title>` and its bullets (a
 /// bullet's wrapped lines joined), as plain text (`plain`).
@@ -670,7 +670,6 @@ mod native {
     use std::time::{Duration, Instant, SystemTime};
 
     /// The release this build follows.
-    const RELEASE: &str = "https://github.com/DabDavis/eqoa-rust-client-vanilla/releases/download/dev/";
 
     struct Shared {
         state: State,
@@ -747,7 +746,8 @@ mod native {
             return;
         }
         let Ok(exe) = std::env::current_exe() else { return };
-        let base = test.unwrap_or_else(|| RELEASE.to_string());
+        let Some(release) = crate::fork_ext::release::base(CHANNEL) else { return };
+        let base = test.unwrap_or_else(|| release.to_string());
         let every = super::intervals(std::env::var("EQOA_UPDATE_EVERY").ok().as_deref());
         let state = if updated.is_some() { State::Done } else { State::Checking };
         let found = updated.as_ref().map(|v| format!("started by the update to {v}"));

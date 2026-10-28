@@ -66,9 +66,12 @@ fork notes separate); options (retain Shadows ID46, fork IDs1043..1052); setting
 fishing/GM and fork map state). See docs/UPSTREAM-SYNC.md for validation.
 CLAUDE.md retains upstream text plus one FORK.md scope override.
 
-Local builds have no updater channel. Before publishing fork CI builds, change
-the updater release URLs from upstream to this fork; otherwise enhanced players
-would receive vanilla replacements. No release workflow is triggered here.
+Local builds have no updater channel. Published builds use channel enhanced and
+follow LoopRook/eqoa-enhanced/releases/latest/download/. The versioned release
+workflow runs only for semantic tags matching VERSION, after build/test/package
+checks. It publishes complete verified assets before marking the release latest.
+Never use the upstream dev channel or force-move a published version tag. Read
+docs/RELEASING.md before publishing; the original hygiene pass itself made no release.
 
 ## Handoff references
 
