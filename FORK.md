@@ -5,6 +5,13 @@ useful upstream setup and reference material is linked from docs/DEVELOPMENT.md.
 The existing MIT license and third-party notices remain intact. The owner has
 not selected different licensing terms; compare docs/LICENSE-OPTIONS.md.
 
+## Current freeze
+
+Development is frozen at published 0.1.0 at the owner's request. Read
+[docs/DEVELOPMENT-FREEZE.md](docs/DEVELOPMENT-FREEZE.md) for audited data sources,
+optional companion-folder behavior and retained limits before starting more work.
+Do not treat those follow-ups as authorization to continue development.
+
 ## Goals and ownership
 
 Keep upstream engine/gameplay improvements while retaining the circular minimap,
