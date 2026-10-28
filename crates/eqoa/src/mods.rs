@@ -197,10 +197,10 @@ pub fn launch_parser() -> bool {
 
     // Try windowed pythonw first (no console window flash), then python
     let candidates = [
-        ("C:\\Python314\\pythonw.exe", vec!["-m", "eqoa_parser.app", "--client"]),
-        ("pythonw", vec!["-m", "eqoa_parser.app", "--client"]),
-        ("C:\\Python314\\python.exe", vec!["-m", "eqoa_parser.app", "--client"]),
-        ("python", vec!["-m", "eqoa_parser.app", "--client"]),
+        ("C:\\Python314\\pythonw.exe", vec!["-m", "eqoa_parser", "--client"]),
+        ("pythonw", vec!["-m", "eqoa_parser", "--client"]),
+        ("C:\\Python314\\python.exe", vec!["-m", "eqoa_parser", "--client"]),
+        ("python", vec!["-m", "eqoa_parser", "--client"]),
     ];
 
     let repo_dir = Path::new("C:\\Users\\hocka\\Github Projects\\EQOA Parser");
