@@ -1,7 +1,7 @@
 """
 EQOA Enhanced Client - Desktop Launcher & Mod Manager
-Provides a graphical interface to manage mods, toggle QoL/UI features,
-and launch the native Rust client with or without the live combat parser.
+Provides a graphical interface to manage mods, server connection,
+toggle QoL/UI features, and launch the native Rust client.
 """
 
 import os
@@ -9,7 +9,7 @@ import sys
 import json
 import subprocess
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 
 # Resolve base directories
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,9 +18,53 @@ EXE_PATH = os.path.join(SCRIPT_DIR, "eqoa.exe")
 PARSER_DIR = r"C:\Users\hocka\Github Projects\EQOA Parser"
 PARSER_APP = os.path.join(PARSER_DIR, "eqoa_parser", "app.py")
 
-# AppData configuration path for client.opt
+# AppData configuration paths
 APPDATA_DIR = os.path.join(os.environ.get("APPDATA", ""), "eqoa-rs")
 CLIENT_OPT = os.path.join(APPDATA_DIR, "client.opt")
+SERVER_OPT = os.path.join(APPDATA_DIR, "server.opt")
+DISC_OPT = os.path.join(APPDATA_DIR, "disc.opt")
+
+
+def read_server():
+    if os.path.isfile(SERVER_OPT):
+        try:
+            with open(SERVER_OPT, "r", encoding="utf-8") as f:
+                s = f.read().strip()
+                if s:
+                    return s
+        except Exception:
+            pass
+    return "eqoa.live"
+
+
+def save_server(server_str):
+    os.makedirs(APPDATA_DIR, exist_ok=True)
+    try:
+        with open(SERVER_OPT, "w", encoding="utf-8") as f:
+            f.write(server_str.strip() + "\n")
+    except Exception:
+        pass
+
+
+def read_disc():
+    if os.path.isfile(DISC_OPT):
+        try:
+            with open(DISC_OPT, "r", encoding="utf-8") as f:
+                d = f.read().strip()
+                if d and os.path.isfile(d):
+                    return d
+        except Exception:
+            pass
+    return ""
+
+
+def save_disc(disc_path):
+    os.makedirs(APPDATA_DIR, exist_ok=True)
+    try:
+        with open(DISC_OPT, "w", encoding="utf-8") as f:
+            f.write(disc_path.strip() + "\n")
+    except Exception:
+        pass
 
 
 def read_client_options():
@@ -111,11 +155,13 @@ class LauncherApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("EverQuest Online Adventures - Enhanced Launcher")
-        self.geometry("640x660")
+        self.geometry("640x730")
         self.resizable(False, False)
         self.configure(bg="#1a1c23")
 
         self.options = read_client_options()
+        self.current_server = read_server()
+        self.current_disc = read_disc()
         self.mods = list_discovered_mods()
 
         self.style = ttk.Style(self)
@@ -124,14 +170,12 @@ class LauncherApp(tk.Tk):
         self.style.configure("TLabel", background="#1a1c23", foreground="#e1e1e6", font=("Segoe UI", 10))
         self.style.configure("Header.TLabel", font=("Segoe UI", 16, "bold"), foreground="#ffd700")
         self.style.configure("SubHeader.TLabel", font=("Segoe UI", 10), foreground="#9999aa")
-        self.style.configure("Section.TLabel", font=("Segoe UI", 11, "bold"), foreground="#58a6ff")
-        self.style.configure("TCheckbutton", background="#1a1c23", foreground="#e1e1e6", font=("Segoe UI", 10))
 
         self.create_widgets()
 
     def create_widgets(self):
         # Header banner
-        header_frame = tk.Frame(self, bg="#1a1c23", pady=10)
+        header_frame = tk.Frame(self, bg="#1a1c23", pady=8)
         header_frame.pack(fill="x", padx=20)
 
         lbl_title = ttk.Label(header_frame, text="EverQuest Online Adventures", style="Header.TLabel")
@@ -147,56 +191,86 @@ class LauncherApp(tk.Tk):
         lbl_status.pack(anchor="w", pady=(2, 0))
 
         # Separator
-        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=20, pady=6)
+        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=20, pady=4)
+
+        # Server Connection Frame
+        srv_frame = tk.LabelFrame(self, text=" Server Connection (No Cheat Patches or Patched ISO Needed!) ", bg="#1a1c23", fg="#58a6ff", font=("Segoe UI", 10, "bold"), padx=15, pady=8)
+        srv_frame.pack(fill="x", padx=20, pady=4)
+
+        srv_row = tk.Frame(srv_frame, bg="#1a1c23")
+        srv_row.pack(fill="x", pady=2)
+
+        lbl_srv = tk.Label(srv_row, text="Server Host / IP:", bg="#1a1c23", fg="#ffffff", font=("Segoe UI", 9, "bold"))
+        lbl_srv.pack(side="left", padx=(0, 10))
+
+        self.var_server = tk.StringVar(value=self.current_server)
+        self.cmb_server = ttk.Combobox(srv_row, textvariable=self.var_server, values=["eqoa.live", "127.0.0.1", "localhost"], width=28)
+        self.cmb_server.pack(side="left", padx=(0, 10))
+
+        lbl_srv_info = tk.Label(srv_row, text="(Default: eqoa.live for Sandstorm)", bg="#1a1c23", fg="#8b949e", font=("Segoe UI", 8))
+        lbl_srv_info.pack(side="left")
+
+        # Disc file row
+        disc_row = tk.Frame(srv_frame, bg="#1a1c23")
+        disc_row.pack(fill="x", pady=(4, 0))
+
+        lbl_disc_title = tk.Label(disc_row, text="Game Disc ISO:", bg="#1a1c23", fg="#ffffff", font=("Segoe UI", 9, "bold"))
+        lbl_disc_title.pack(side="left", padx=(0, 10))
+
+        disc_display = os.path.basename(self.current_disc) if self.current_disc else "(Prompt on first start)"
+        self.lbl_disc = tk.Label(disc_row, text=disc_display, bg="#1a1c23", fg="#3fb950" if self.current_disc else "#d29922", font=("Segoe UI", 9))
+        self.lbl_disc.pack(side="left", padx=(0, 10))
+
+        btn_browse = tk.Button(disc_row, text="Browse ISO...", command=self.browse_disc, bg="#21262d", fg="#c9d1d9", relief="flat", font=("Segoe UI", 8), padx=8, pady=1)
+        btn_browse.pack(side="right")
 
         # UI & QoL Features Frame
-        ui_frame = tk.LabelFrame(self, text=" Enhanced UI & Quality of Life Features ", bg="#1a1c23", fg="#58a6ff", font=("Segoe UI", 11, "bold"), padx=15, pady=10)
-        ui_frame.pack(fill="x", padx=20, pady=5)
+        ui_frame = tk.LabelFrame(self, text=" Enhanced UI & Quality of Life Features ", bg="#1a1c23", fg="#58a6ff", font=("Segoe UI", 10, "bold"), padx=15, pady=6)
+        ui_frame.pack(fill="x", padx=20, pady=4)
 
         self.var_target_hp = tk.BooleanVar(value=self.options.get("target_hp_percent", True))
         chk_hp = tk.Checkbutton(ui_frame, text="Target Health Percentage (show exact % on target bar)", variable=self.var_target_hp, bg="#1a1c23", fg="#ffffff", selectcolor="#2d333b", activebackground="#1a1c23", activeforeground="#ffffff", font=("Segoe UI", 9))
-        chk_hp.pack(anchor="w", pady=2)
+        chk_hp.pack(anchor="w", pady=1)
 
         self.var_xp_details = tk.BooleanVar(value=self.options.get("xp_details", True))
         chk_xp = tk.Checkbutton(ui_frame, text="Detailed XP Progress (numerical values & % on XP bar)", variable=self.var_xp_details, bg="#1a1c23", fg="#ffffff", selectcolor="#2d333b", activebackground="#1a1c23", activeforeground="#ffffff", font=("Segoe UI", 9))
-        chk_xp.pack(anchor="w", pady=2)
+        chk_xp.pack(anchor="w", pady=1)
 
         self.var_hud_numbers = tk.BooleanVar(value=self.options.get("hud_numbers", True))
         chk_nums = tk.Checkbutton(ui_frame, text="HUD Numbers (numerical player Health & Power overlays)", variable=self.var_hud_numbers, bg="#1a1c23", fg="#ffffff", selectcolor="#2d333b", activebackground="#1a1c23", activeforeground="#ffffff", font=("Segoe UI", 9))
-        chk_nums.pack(anchor="w", pady=2)
+        chk_nums.pack(anchor="w", pady=1)
 
         self.var_minimap = tk.BooleanVar(value=self.options.get("minimap", True))
         chk_mini = tk.Checkbutton(ui_frame, text="Minimap (live radar under ability bars, toggle with N)", variable=self.var_minimap, bg="#1a1c23", fg="#ffffff", selectcolor="#2d333b", activebackground="#1a1c23", activeforeground="#ffffff", font=("Segoe UI", 9))
-        chk_mini.pack(anchor="w", pady=2)
+        chk_mini.pack(anchor="w", pady=1)
 
         self.var_stats_box = tk.BooleanVar(value=self.options.get("stats_box", False))
         chk_stat = tk.Checkbutton(ui_frame, text="On-Screen Stats Box (AC, resists, base stats, toggle with B)", variable=self.var_stats_box, bg="#1a1c23", fg="#ffffff", selectcolor="#2d333b", activebackground="#1a1c23", activeforeground="#ffffff", font=("Segoe UI", 9))
-        chk_stat.pack(anchor="w", pady=2)
+        chk_stat.pack(anchor="w", pady=1)
 
         self.var_tracker = tk.BooleanVar(value=self.options.get("quest_tracker", True))
         chk_track = tk.Checkbutton(ui_frame, text="Quest Tracker & Map Markers (objective count under minimap)", variable=self.var_tracker, bg="#1a1c23", fg="#ffffff", selectcolor="#2d333b", activebackground="#1a1c23", activeforeground="#ffffff", font=("Segoe UI", 9))
-        chk_track.pack(anchor="w", pady=2)
+        chk_track.pack(anchor="w", pady=1)
 
         # Installed Mods Frame
-        mods_frame = tk.LabelFrame(self, text=" Installed Mods (mods/ folder) ", bg="#1a1c23", fg="#58a6ff", font=("Segoe UI", 11, "bold"), padx=15, pady=10)
-        mods_frame.pack(fill="both", expand=True, padx=20, pady=8)
+        mods_frame = tk.LabelFrame(self, text=" Installed Mods (mods/ folder) ", bg="#1a1c23", fg="#58a6ff", font=("Segoe UI", 10, "bold"), padx=15, pady=6)
+        mods_frame.pack(fill="both", expand=True, padx=20, pady=4)
 
-        # Mod listbox / items
         for mod in self.mods:
             mod_row = tk.Frame(mods_frame, bg="#1a1c23")
-            mod_row.pack(fill="x", pady=2)
+            mod_row.pack(fill="x", pady=1)
 
-            mod_lbl = tk.Label(mod_row, text=f"• {mod['name']} (v{mod.get('version', '1.0')})", bg="#1a1c23", fg="#388bfd", font=("Segoe UI", 10, "bold"))
+            mod_lbl = tk.Label(mod_row, text=f"• {mod['name']} (v{mod.get('version', '1.0')})", bg="#1a1c23", fg="#388bfd", font=("Segoe UI", 9, "bold"))
             mod_lbl.pack(anchor="w")
 
-            desc_lbl = tk.Label(mod_row, text=f"   {mod.get('description', '')}", bg="#1a1c23", fg="#8b949e", font=("Segoe UI", 9), wraplength=560, justify="left")
+            desc_lbl = tk.Label(mod_row, text=f"   {mod.get('description', '')}", bg="#1a1c23", fg="#8b949e", font=("Segoe UI", 8), wraplength=560, justify="left")
             desc_lbl.pack(anchor="w")
 
-        btn_folder = tk.Button(mods_frame, text="📁 Open 'mods' Folder", command=self.open_mods_folder, bg="#21262d", fg="#c9d1d9", relief="flat", font=("Segoe UI", 9), padx=10, pady=4)
-        btn_folder.pack(anchor="e", pady=(8, 0))
+        btn_folder = tk.Button(mods_frame, text="📁 Open 'mods' Folder", command=self.open_mods_folder, bg="#21262d", fg="#c9d1d9", relief="flat", font=("Segoe UI", 9), padx=10, pady=3)
+        btn_folder.pack(anchor="e", pady=(4, 0))
 
         # Bottom Action Bar
-        bottom_frame = tk.Frame(self, bg="#16181d", pady=15)
+        bottom_frame = tk.Frame(self, bg="#16181d", pady=12)
         bottom_frame.pack(fill="x", side="bottom")
 
         btn_play = tk.Button(bottom_frame, text="▶  PLAY EQOA", command=self.launch_game, bg="#238636", fg="#ffffff", activebackground="#2ea043", font=("Segoe UI", 11, "bold"), padx=20, pady=8, relief="flat", cursor="hand2")
@@ -205,10 +279,23 @@ class LauncherApp(tk.Tk):
         btn_parser = tk.Button(bottom_frame, text="⚔  Play with Combat Parser", command=self.launch_with_parser, bg="#1f6feb", fg="#ffffff", activebackground="#388bfd", font=("Segoe UI", 10, "bold"), padx=15, pady=8, relief="flat", cursor="hand2")
         btn_parser.pack(side="right", padx=5)
 
-        lbl_hint = tk.Label(bottom_frame, text="Press Esc in-game for Options -> Extended", bg="#16181d", fg="#8b949e", font=("Segoe UI", 8))
+        lbl_hint = tk.Label(bottom_frame, text="World Map: M | Minimap: N | Stats: B | Options: Esc", bg="#16181d", fg="#8b949e", font=("Segoe UI", 8))
         lbl_hint.pack(side="left", padx=20)
 
+    def browse_disc(self):
+        f = filedialog.askopenfilename(title="Select EQOA Frontiers ISO", filetypes=[("PS2 ISO files", "*.iso"), ("All files", "*.*")])
+        if f:
+            self.current_disc = f
+            save_disc(f)
+            self.lbl_disc.config(text=os.path.basename(f), fg="#3fb950")
+
     def save_current_options(self):
+        # Save server
+        srv = self.var_server.get().strip()
+        if srv:
+            save_server(srv)
+
+        # Save UI options
         self.options["target_hp_percent"] = self.var_target_hp.get()
         self.options["xp_details"] = self.var_xp_details.get()
         self.options["hud_numbers"] = self.var_hud_numbers.get()
