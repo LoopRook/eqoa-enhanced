@@ -195,20 +195,30 @@ pub fn launch_parser() -> bool {
         }
     }
 
-    // Try common python paths and local parser repo if available
+    // Try windowed pythonw first (no console window flash), then python
     let candidates = [
-        ("C:\\Python314\\python.exe", vec!["C:\\Users\\hocka\\Github Projects\\EQOA Parser\\eqoa_parser\\app.py", "--client"]),
+        ("C:\\Python314\\pythonw.exe", vec!["-m", "eqoa_parser.app", "--client"]),
+        ("pythonw", vec!["-m", "eqoa_parser.app", "--client"]),
+        ("C:\\Python314\\python.exe", vec!["-m", "eqoa_parser.app", "--client"]),
         ("python", vec!["-m", "eqoa_parser.app", "--client"]),
     ];
+
+    let repo_dir = Path::new("C:\\Users\\hocka\\Github Projects\\EQOA Parser");
 
     for (cmd, args) in candidates {
         let mut command = Command::new(cmd);
         command.args(&args);
 
-        // Run from the parser repo directory if it exists
-        let repo_dir = Path::new("C:\\Users\\hocka\\Github Projects\\EQOA Parser");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // CREATE_NO_WINDOW prevents command prompt flash if python.exe is used
+            command.creation_flags(0x08000000);
+        }
+
         if repo_dir.is_dir() {
             command.current_dir(repo_dir);
+            command.env("PYTHONPATH", repo_dir);
         }
 
         if let Ok(child) = command.spawn() {
