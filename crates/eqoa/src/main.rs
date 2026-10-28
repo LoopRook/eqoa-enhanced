@@ -124,6 +124,7 @@ mod trainer;
 mod trails;
 mod options;
 mod settings;
+mod telemetry;
 mod social;
 mod wholist;
 mod zones;

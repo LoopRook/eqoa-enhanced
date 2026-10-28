@@ -3660,6 +3660,19 @@ impl Play {
         self.entities.slots.iter().flatten().filter_map(|e| e.creature.as_ref().map(|c| c.name.trim().to_string())).collect()
     }
 
+    /// Looks up the name of an entity by its id.
+    pub fn entity_name(&self, id: u32) -> Option<String> {
+        if Some(id) == self.self_id32() {
+            return Some(self.player.name.clone());
+        }
+        if id == self.pet_id && !self.pet_name.is_empty() {
+            return Some(self.pet_name.clone());
+        }
+        self.entities.slots.iter().flatten().find(|e| e.id == id)
+            .and_then(|e| e.creature.as_ref())
+            .map(|c| c.name.trim().to_string())
+    }
+
     /// Targets the creature called `name` (as a click on it would), 0x0010.
     /// As 0x007E would: the creature named `name` becomes the player's pet
     /// (a test hook; no server here sends 0x007E).
@@ -5047,6 +5060,44 @@ impl Play {
         // the player's or its pet's hit: the guide's kill when it dies
         if amount > 0 && (Some(attacker) == me || (attacker == self.pet_id && self.pet_id != u32::MAX)) {
             self.guide.hit(defender, self.session.now());
+        }
+        // Local combat telemetry broadcast for EQOA Parser (no admin or packet sniffing needed)
+        {
+            let is_self = Some(attacker) == me;
+            let is_pet = attacker == self.pet_id && self.pet_id != u32::MAX;
+            let actor = if is_self {
+                "you".to_string()
+            } else if is_pet {
+                "pet".to_string()
+            } else {
+                self.entity_name(attacker).unwrap_or_else(|| format!("{attacker:#010x}"))
+            };
+            let target_name = if Some(defender) == me {
+                "you".to_string()
+            } else if defender == self.pet_id && self.pet_id != u32::MAX {
+                "pet".to_string()
+            } else {
+                self.entity_name(defender).unwrap_or_else(|| format!("{defender:#010x}"))
+            };
+            let kind = if amount < 0 {
+                "heal"
+            } else if is_self || is_pet {
+                "damage"
+            } else {
+                "damage_taken"
+            };
+            let now_sec = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0.0, |d| d.as_secs_f64());
+            let json = format!(
+                r#"{{"ts":{:.3},"actor":"{}","target":"{}","amount":{},"ability":"melee","kind":"{}"}}"#,
+                now_sec,
+                actor,
+                target_name,
+                amount.abs(),
+                kind
+            );
+            crate::telemetry::broadcast(&json);
         }
         // the player's own hit: after a swap the swing timer follows the
         // server's rounds (`attackclock`), whatever the damage numbers show
