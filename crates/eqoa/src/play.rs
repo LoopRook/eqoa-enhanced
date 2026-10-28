@@ -7195,21 +7195,49 @@ impl Play {
     /// target.
     fn mini_view(&self) -> crate::map::mini::MiniView {
         let me = self.self_id32();
-        let group: Vec<u32> = self.group.members[..self.group.count()].iter().map(|m| m.id).collect();
+        let group: Vec<u32> = self.group.members[..self.group.count()]
+            .iter()
+            .map(|m| m.id)
+            .collect();
         let dots = self
             .entities
             .slots
             .iter()
             .flatten()
-            .filter(|e| Some(e.id) != me && !group.contains(&e.id) && e.p18 & 2 == 0 && self.in_scene(e))
+            .filter(|e| {
+                Some(e.id) != me && !group.contains(&e.id) && e.p18 & 2 == 0 && self.in_scene(e)
+            })
             .filter_map(|e| {
                 let c = e.creature.as_ref()?;
-                let color = if c.p256 < 2 { 0 } else if c.p299 & 1 != 0 { 2 } else { 1 };
-                Some(([e.actor_pos[0], e.actor_pos[2]], NAME_COLORS[color]))
+                let color = if c.p256 < 2 {
+                    0
+                } else if c.p299 & 1 != 0 {
+                    2
+                } else {
+                    1
+                };
+                (e.p19 != 0
+                    && !c.name.trim().is_empty()
+                    && e.actor_pos.iter().all(|v| v.is_finite()))
+                .then(|| crate::map::mini::Dot {
+                    id: e.id,
+                    at: [e.actor_pos[0], e.actor_pos[2]],
+                    color: NAME_COLORS[color],
+                    name: c.name.clone(),
+                    level: (c.level > 0).then_some(c.level),
+                    player: c.p255 != 0,
+                })
             })
             .collect();
-        let target = self.actor_pos(self.target).filter(|_| Some(self.target) != me).map(|p| [p[0], p[2]]);
-        crate::map::mini::MiniView { dots, target, marks: self.mini_marks() }
+        let target = self
+            .actor_pos(self.target)
+            .filter(|_| Some(self.target) != me)
+            .map(|p| [p[0], p[2]]);
+        crate::map::mini::MiniView {
+            dots,
+            target,
+            marks: self.mini_marks(),
+        }
     }
 
     /// The marks on the minimap (`map::mini::Mark`: a kind, a world, a place
@@ -7851,6 +7879,58 @@ mod commands {
     /// on the session's clock past 2^31 (from 00:54 UTC) the u32 port kept
     /// the window open for good after the first cast; this holds on any
     /// clock. The control: that port, on that clock, never lets go.
+    #[test]
+    fn minimap_entity_tooltips_keep_server_names_levels_and_validity() {
+        let mut p = play();
+        p.player.world = 0;
+        let base = net::entity::Entity {
+            id: 9001,
+            world: 0,
+            p19: 1,
+            actor_pos: [10.0, 0.0, 20.0],
+            creature: Some(net::entity::Creature {
+                name: "A rare mob".into(),
+                level: 17,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut corpse = base.clone();
+        corpse.id = 9002;
+        corpse.p18 = 2;
+        let mut inactive = base.clone();
+        inactive.id = 9003;
+        inactive.p19 = 0;
+        let mut foreign = base.clone();
+        foreign.id = 9004;
+        foreign.world = 1;
+        let mut bad = base.clone();
+        bad.id = 9005;
+        bad.actor_pos[0] = f32::NAN;
+        let mut player = base.clone();
+        player.id = 9006;
+        let c = player.creature.as_mut().unwrap();
+        c.level = 0;
+        c.p255 = 1;
+        p.entities.slots = vec![
+            Some(base),
+            Some(corpse),
+            Some(inactive),
+            Some(foreign),
+            Some(bad),
+            Some(player),
+        ];
+        let mv = p.mini_view();
+        assert_eq!(mv.dots.len(), 2);
+        assert_eq!(
+            (&*mv.dots[0].name, mv.dots[0].level, mv.dots[0].at),
+            ("A rare mob", Some(17), [10.0, 20.0])
+        );
+        assert!(!mv.dots[0].player);
+        assert!(mv.dots[1].player);
+        assert_eq!(mv.dots[1].level, None);
+    }
+
     #[test]
     fn map_search_cancels_existing_combat_info_and_target_holds() {
         let (mut p,mut cam,_)=aim_rig(0);

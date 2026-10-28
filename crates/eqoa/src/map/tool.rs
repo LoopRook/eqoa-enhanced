@@ -63,7 +63,13 @@ pub fn shot(s: &Shot, out: &str) -> Result<(), Box<dyn std::error::Error>> {
     let t = Instant::now();
     let mut frames = 0u32;
     map.show();
-    map.search.update(world, s.at, Vec::new(), Vec::new());
+    // Offline visual fixtures only; never injected by the playable client.
+    let samples = if std::env::var_os("EQOA_MAP_SAMPLE_NPCS").is_some() {
+        vec![super::mini::Dot{id:1,at:[s.at[0]+30.0,s.at[1]+40.0],color:super::theme::KNOWN,
+            name:"Water Rat".into(),level:Some(7),player:false}]
+    } else { Vec::new() };
+    let live=samples.iter().map(|d|super::search::Live{name:d.name.clone(),world,at:d.at,level:d.level.unwrap_or(0)}).collect();
+    map.search.update(world, s.at, live, Vec::new());
     if let Ok(value)=std::env::var("EQOA_MAP_WAYPOINT") {
         if let Some((x,z))=value.split_once(',').and_then(|(x,z)|Some((x.parse::<f32>().ok()?,z.parse::<f32>().ok()?))) {map.set_waypoint(world,Some([x,z]));if std::env::var_os("EQOA_MAP_TRACK_PIN").is_some(){map.search.track_waypoint();}}
     }
@@ -141,14 +147,17 @@ pub fn shot(s: &Shot, out: &str) -> Result<(), Box<dyn std::error::Error>> {
             vui: Some(&vui),
             quest_marks: None,
         };
-        map.mini_frame(
-            &cx,
-            &super::mini::MiniView {
-                dots: Vec::new(),
-                target: None,
-                marks: Vec::new(),
-            },
-        );
+        let mv=super::mini::MiniView { dots:samples.clone(),target:None,marks:Vec::new() };
+        map.mini_frame(&cx,&mv);
+        if std::env::var_os("EQOA_MAP_MINI_HOVER_NPC").is_some() {
+            if let Some(d)=samples.first() {
+                let r=super::mini::window_rect(s.size,super::mini::inner());
+                let k=(r[2]-r[0])/(super::mini::inner()[2]-super::mini::inner()[0])as f32;
+                let c=map.mini.circle;
+                map.mini_hover(Some([c[0]+(d.at[0]-s.at[0])*k/map.mini.scale,c[1]+(d.at[1]-s.at[1])*k/map.mini.scale]));
+                map.mini_frame(&cx,&mv);
+            }
+        }
     }
     // Exercise the same pointer coordinate line that overlapped Search in play.
     if std::env::var_os("EQOA_MAP_COORDS").is_some() && map.open {map.pointer_seen=true;map.cursor=[s.size.0 as f32*0.45,s.size.1 as f32*0.45];let cx=Context{lib:&lib,device:&device,queue:&queue,format:render::TARGET_FORMAT,size:s.size,dt:1.0/60.0,player,world,origin:[1000.0,1000.0],group:Vec::new(),in_group:false,target:None,sticks:[0.0;4],keyboard:true,words:words.as_ref(),vui:Some(&vui),quest_marks:None};map.frame(&cx);}

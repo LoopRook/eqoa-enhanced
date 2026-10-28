@@ -43,6 +43,34 @@ pub fn text(r: &mut dyn Raster, s: &str, at: [i32; 2], width: i32, c: [f32; 4]) 
     r.draw_string(at, c, &wide(&s));
 }
 
+/// Vector search symbol: no missing-font glyph or quest-question-mark ambiguity.
+pub fn magnifier(r: &mut dyn Raster, b: [i32; 4], color: [f32; 4]) {
+    let (x, y) = (b[0] + 8, b[1] + 8);
+    for i in 0..24 {
+        let a = i as f32 * std::f32::consts::TAU / 24.0;
+        let z = (i + 1) as f32 * std::f32::consts::TAU / 24.0;
+        let point = |t: f32, rad: f32| {
+            [
+                x + (t.cos() * rad).round() as i32,
+                y + (t.sin() * rad).round() as i32,
+            ]
+        };
+        r.fill_fan(
+            color,
+            [point(a, 5.0), point(a, 4.0), point(z, 4.0), point(z, 5.0)],
+        );
+    }
+    r.fill_fan(
+        color,
+        [
+            [x + 3, y + 5],
+            [x + 5, y + 3],
+            [x + 10, y + 8],
+            [x + 8, y + 10],
+        ],
+    );
+}
+
 pub fn font() -> Option<esf::font::Font> {
     use ab_glyph::{Font, FontArc, PxScale, ScaleFont, point};
     let bundled = include_bytes!("../../resources/map-ui/SpaceMono-Regular.ttf");

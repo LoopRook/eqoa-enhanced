@@ -73,6 +73,7 @@ pub mod skin {
 pub struct Search {
     pub open: bool,
     pub toolbar_top: Option<i32>,
+    pub hover: Option<[f32; 2]>,
     waypoint: Option<(i32, [f32; 2])>,
     pub query: String,
     pub tab: Tab,
@@ -90,6 +91,14 @@ pub struct Search {
     cached: RefCell<Option<(String, Tab, Rc<Vec<ResultRow>>)>>,
 }
 
+fn mini_search_rect(m: [f32; 4]) -> [i32; 4] {
+    [
+        m[2] as i32 - 20,
+        m[3] as i32 + 2,
+        m[2] as i32,
+        m[3] as i32 + 22,
+    ]
+}
 fn valid(at: [f32; 2]) -> bool {
     at.iter().all(|x| x.is_finite() && x.abs() < 10_000_000.0)
 }
@@ -250,15 +259,13 @@ impl Search {
                 .waypoint
                 .filter(|(world, _)| world == w && *w == self.world)
                 .map(|(_, at)| (at, false)),
-            Target::Npc(name) => self.nearest(name).map(|at| (at, true)).or_else(|| {
-                self.live
-                    .iter()
-                    .filter(|n| n.world == self.world && n.name.eq_ignore_ascii_case(name))
-                    .min_by(|a, b| {
-                        distance(a.at, self.player).total_cmp(&distance(b.at, self.player))
-                    })
-                    .map(|n| (n.at, false))
-            }),
+            Target::Npc(name) => self
+                .live
+                .iter()
+                .filter(|n| n.world == self.world && n.name.eq_ignore_ascii_case(name))
+                .min_by(|a, b| distance(a.at, self.player).total_cmp(&distance(b.at, self.player)))
+                .map(|n| (n.at, false))
+                .or_else(|| self.nearest(name).map(|at| (at, true))),
             Target::Group(id) => self
                 .group
                 .iter()
@@ -324,11 +331,11 @@ impl Search {
             Tab::Npcs => {
                 // One pass over the database, rather than a database scan per
                 // result. The search popup must not stall the game loop.
-                let mut names = BTreeMap::<String, (String, Option<[f32; 2]>, usize, u8)>::new();
+                let mut names = BTreeMap::<String, (String, Option<[f32; 2]>, usize, Option<(u8,u8)>)>::new();
                 for s in self.known.iter().filter(|s| matches(&s.name)) {
                     let row = names
                         .entry(s.name.to_lowercase())
-                        .or_insert_with(|| (s.name.clone(), None, 0, 0));
+                        .or_insert_with(|| (s.name.clone(), None, 0, None));
                     if s.world == self.world
                         && row.1.is_none_or(|at| {
                             distance(s.at, self.player) < distance(at, self.player)
@@ -344,20 +351,23 @@ impl Search {
                 {
                     let row = names
                         .entry(n.name.to_lowercase())
-                        .or_insert_with(|| (n.name.clone(), None, 0, n.level));
-                    if row.1.is_none() {
+                        .or_insert_with(|| (n.name.clone(), None, 0, None));
+                    if row.2 == 0 || row.1.is_none_or(|at| distance(n.at,self.player)<distance(at,self.player)) {
                         row.1 = Some(n.at);
                     }
                     row.2 += 1;
-                    row.3 = n.level;
+                    if n.level > 0 {
+                        row.3=Some(row.3.map_or((n.level,n.level),|(lo,hi)|(lo.min(n.level),hi.max(n.level))));
+                    }
                 }
-                for (name, at, count, level) in names.into_values() {
+                for (name, at, count, levels) in names.into_values() {
                     let detail = if count > 0 {
-                        format!("{count} live nearby; level {level}")
+                        let level=levels.map_or_else(||"level unknown".into(),|(lo,hi)|if lo==hi{format!("level {lo}")}else{format!("levels {lo}-{hi}")});
+                        format!("Spawned nearby: {count}; {level}")
                     } else if at.is_some() {
-                        "Known spawn; presence unknown".into()
+                        "Not detected (range/spawn unknown)".into()
                     } else {
-                        "Recorded in another world".into()
+                        "Other world; not detected".into()
                     };
                     out.push(ResultRow {
                         name: name.clone(),
@@ -545,15 +555,18 @@ impl Search {
             })
         };
         let (x, y) = mini
-            .map(|m| (m[0] as i32, m[3] as i32 + 2))
+            .map(|m| {
+                let b = mini_search_rect(m);
+                (b[0], b[1])
+            })
             .unwrap_or((left as i32 + 8, self.toolbar_top.unwrap_or(top as i32 + 34)));
         let title = if mini.is_some() {
-            "Search".into()
+            String::new()
         } else {
             format!("Search  {}", bind("map_search"))
         };
         let width = if mini.is_some() {
-            76
+            20
         } else {
             r.string_width(&wide(&title)) + 16
         };
@@ -564,22 +577,37 @@ impl Search {
             Action::Open,
             self.open,
         );
+        if mini.is_some() {
+            t::magnifier(r, [x, y, x + 20, y + 20], t::TEXT);
+            if !self.open
+                && self.hover.is_some_and(|p| {
+                    inside(p, [x as f32, y as f32, (x + 20) as f32, (y + 20) as f32])
+                })
+            {
+                let text = format!("Search / {}", bind("map_search"));
+                let w = r.string_width(&wide(&text)) + 12;
+                let b = [(x - w - 4).max(left as i32 + 2), y, x - 4, y + 20];
+                t::panel(r, b);
+                t::text(r, &text, [b[0] + 6, b[1] + 3], b[2] - b[0] - 12, t::TEXT);
+            }
+        }
         if self.guide.is_some() {
             let title = if mini.is_some() {
                 "X".into()
             } else {
                 format!("Stop  {}", bind("map_stop"))
             };
-            let end = mini.map_or(x + width + 10 + r.string_width(&wide(&title)) + 12, |m| {
-                m[2] as i32
-            });
-            self.button(
-                r,
-                [x + width + 3, y, end, y + 20],
-                &title,
-                Action::Stop,
-                false,
-            );
+            let stop = if mini.is_some() {
+                [x - 23, y, x - 3, y + 20]
+            } else {
+                [
+                    x + width + 3,
+                    y,
+                    x + width + 10 + r.string_width(&wide(&title)) + 12,
+                    y + 20,
+                ]
+            };
+            self.button(r, stop, &title, Action::Stop, false);
         }
         if mini.is_none() && self.waypoint.is_some_and(|(w, _)| w == self.world) {
             let bx = self.hits.last().map_or(x + width + 4, |h| h.0[2] + 4);
@@ -592,7 +620,10 @@ impl Search {
             );
         }
         if let Some(m) = mini {
-            if let Some(s) = self.status() {
+            if let Some(s) = self.status().filter(|_| {
+                self.hover
+                    .is_some_and(|p| inside(p, [m[0], m[1], m[2], m[3] + 22.0]))
+            }) {
                 let b = [m[0] as i32, y + 23, right as i32 - 3, y + 42];
                 t::fill(r, b, t::SURFACE);
                 t::text(r, &s, [b[0] + 4, b[1] + 3], b[2] - b[0] - 8, t::TEXT);
@@ -825,6 +856,51 @@ mod tests {
         s
     }
     #[test]
+    fn map_refinement_minimap_search_uses_a_compact_hit_target() {
+        let b = mini_search_rect([474.0, 50.0, 586.0, 162.0]);
+        assert_eq!((b[2] - b[0], b[3] - b[1]), (20, 20));
+        assert!(b[2] <= 586 && b[0] >= 474);
+    }
+    #[test]
+    fn map_refinement_presence_changes_with_observation_without_claiming_absence() {
+        let mut s = known();
+        s.query = "Rat".into();
+        let row = s.results();
+        assert!(row[0].detail.contains("Not detected"));
+        s.update(
+            0,
+            [0.0; 2],
+            vec![Live {
+                name: "Rat".into(),
+                world: 0,
+                at: [3.0, 4.0],
+                level: 7,
+            }],
+            vec![],
+        );
+        assert!(s.results()[0].detail.contains("Spawned nearby"));
+        s.update(0, [0.0; 2], vec![], vec![]);
+        assert!(s.results()[0].detail.contains("Not detected"));
+        assert!(!s.results()[0].detail.contains("Down"));
+    }
+    #[test]
+    fn map_refinement_confirmed_spawn_guides_to_the_live_position() {
+        let mut s = known();
+        s.update(
+            0,
+            [0.0; 2],
+            vec![Live {
+                name: "Rat".into(),
+                world: 0,
+                at: [3.0, 4.0],
+                level: 7,
+            }],
+            vec![],
+        );
+        assert_eq!(s.destination(), Some(([3.0, 4.0], false)));
+    }
+
+    #[test]
     fn forge_database_preserves_world_and_xz_not_height() {
         let db = imported(r#"{"Rat":{"world":[0,2],"pos":[[10,500,20],[30,600,40]]}}"#);
         assert_eq!(
@@ -843,7 +919,7 @@ mod tests {
         assert!(imported("broken").is_empty());
     }
     #[test]
-    fn nearest_spawn_is_in_this_world_even_with_live_matches() {
+    fn live_match_is_preferred_and_recorded_fallback_stays_in_this_world() {
         let mut s = known();
         s.update(
             0,
@@ -856,8 +932,8 @@ mod tests {
             }],
             vec![],
         );
-        assert_eq!(s.destination(), Some(([10.0, 20.0], true)));
-        assert!(s.results()[0].detail.contains("1 live"));
+        assert_eq!(s.destination(), Some(([3.0, 4.0], false)));
+        assert!(s.results()[0].detail.contains("Spawned nearby: 1"));
         s.update(0, [99.0, 199.0], vec![], vec![]);
         assert_eq!(s.destination(), Some(([100.0, 200.0], true)));
         s.update(3, [0.0, 0.0], vec![], vec![]);
@@ -973,7 +1049,7 @@ mod tests {
             }],
             vec![],
         );
-        assert!(s.results()[0].detail.contains("1 live"));
+        assert!(s.results()[0].detail.contains("Spawned nearby: 1"));
         s.update(0, [0.0, 0.0], vec![], vec![]);
         assert!(
             !s.results()[0].detail.contains("live"),

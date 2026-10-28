@@ -1,5 +1,7 @@
 # Native map release handoff
 
+Read MAP-REFINEMENT.md for the subsequent compact controls, entity hover, spawn-state wording and input correction.
+
 ## Start here
 
 This delivers a playable native map milestone on the **enhanced** line, implementation commit 928868e, based on
@@ -16,15 +18,15 @@ data. The shipped UI is Rust/WGPU; no browser runtime is embedded in the game.
 
 | Area | Behavior and implementation |
 |---|---|
-| Search | Native temporary NPC / Group / Places panel. Case-insensitive name fragments across the historical Forge catalog and server-visible NPCs. Search closes after choosing a result. |
-| NPC guidance | Shared target identity on world map and minimap. Gold historical locations/dashes coexist with green live matches. Historical coordinates never imply a creature is spawned. Native entity observations are limited to what this client receives. |
+| Search | Spawned nearby for current living observations; Not detected (range/spawn unknown) for unobserved recorded names. Native temporary NPC / Group / Places panel. Case-insensitive name fragments across the historical Forge catalog and server-visible NPCs. Search closes after choosing a result. |
+| NPC guidance | Shared target identity on world map and minimap. The nearest current live match is preferred for guidance, with historical coordinates as fallback; gold historical locations/dashes coexist with green live matches. Historical coordinates never imply a creature is spawned. Native entity observations are limited to what this client receives. |
 | Group guidance | Member ID/name plus a valid scene actor position or active channel-40 position. Other-world/unavailable positions have no arrow. Roster departure clears the selected member. |
 | Personal pin | Set the normal map waypoint, then **Track waypoint**, or find **Personal waypoint** under Places. Guidance follows pin changes, stops at arrival/deletion, and produces no false arrow in another world. Stop does not delete unrelated waypoints. |
-| Circle | Terrain and pre-tooltip minimap UI use the same GPU circle. Far markers clamp to its rim. Popup/tooltip/control ranges remain unmasked. Corner clicks and wheel events do not hit the circle. Border geometry is computed in window pixels because the game's frame x/y scales differ. |
-| Layout | Search/track toolbar follows measured title, progress, coordinate and notice chrome. Do not restore a fixed y offset: that caused the reported coordinate overlap. |
+| Circle | Terrain and pre-tooltip minimap UI use the same GPU circle. Far markers clamp to its rim. Popup/tooltip/control ranges remain unmasked. Corner clicks and wheel events do not hit the circle. Entity dots now retain ID/name/level/kind and show the nearest visible dot tooltip. Border geometry is computed in window pixels because the game's frame x/y scales differ. |
+| Layout | A 20-unit vector magnifier replaces the minimap Search bar; wheel zoom remains. Guide captions appear on hover. Search/track toolbar follows measured title, progress, coordinate and notice chrome. Do not restore a fixed y offset: that caused the reported coordinate overlap. |
 | Styling | Map controls, labels, tooltips and XP camp badges use the native theme. Zoomed-out camps use compact neutral diamonds; closer XP badges use dark surfaces, thin borders, white text and a small accent. Coach identity and semantic marker colors remain recognizable. |
 | Suggest | Mouse/keyboard keeps the map visible with name, optional note, location, validation, Submit and Cancel. Existing community transport, selected coordinates and approval feedback remain. Controllers retain the existing soft-keyboard flow. No real marker submission was made by automated validation. |
-| Input | F2 Search and F4 Stop have persisted Controls rows and optional controller-button assignments. The existing M/N/zoom/group-waypoint rows remain. Labels resolve saved bindings. Typing owns input and releases prior attack/info/aim holds. |
+| Input | F2 Search and F4 Stop have persisted Controls rows and optional controller-button assignments. The existing M/N/zoom/group-waypoint rows remain. Labels resolve saved bindings. Typing owns input and releases prior attack/info/aim holds. Background focus no longer invents a virtual pad when no controllers exist; real unplug behavior remains. |
 
 Guidance is direction/distance, not obstacle-aware routing or automatic movement.
 

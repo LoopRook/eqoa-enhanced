@@ -1,0 +1,40 @@
+{
+  "executableSha256": "77d0b7e1efe37a94b073d36bd51e5acbaac6878273f2e3d3665ab22b84d4db7e",
+  "data": "Synthetic Water Rat ID 1 level 7, at player+[30,40]. Historical catalog is real pinned Forge data; these are offline UI fixtures, not a live-server spawn check.",
+  "world": "TUNARIA.ESF",
+  "player": [
+    25300,
+    15200
+  ],
+  "scale": 5,
+  "cases": [
+    {
+      "Mini": true,
+      "Name": "refined-minimap",
+      "Size": "1280x720"
+    },
+    {
+      "Hover": true,
+      "Mini": true,
+      "Name": "refined-mob-hover",
+      "Size": "1280x720"
+    },
+    {
+      "Name": "refined-spawn-search",
+      "Query": "rat",
+      "Size": "1280x720"
+    },
+    {
+      "Hover": true,
+      "Mini": true,
+      "Name": "refined-mob-portrait",
+      "Size": "720x1280"
+    }
+  ],
+  "imageSha256": {
+    "refined-minimap.png": "2b2a7587b9d98b524e6a6d511c13f5e568ad58fe3f925f8a24e1156c1ee307ef",
+    "refined-mob-hover.png": "88855d89ef209dfcf94b3495543ced2d0a273de947dc6d331dee73a5d055db77",
+    "refined-mob-portrait.png": "9c0c7b3e1cfd3c02c0ceadd47ede25389681ace1588d096251b14f580158ce71",
+    "refined-spawn-search.png": "257be7aa46822c42703315447d48d5c176a11d416381317ec189495e89cf124d"
+  }
+}

@@ -21,6 +21,7 @@ for the separate executable, isolated profile, controls and live-server checks.
 - Selecting a result guides on both maps. Gold recorded locations/dashes and
   green live matches coexist. Minimap guidance clips to its rim; Stop clears only
   this guide. Existing quest/coach/camp/community/personal/group marks remain.
+- Minimap NPC/player dots have name/level/kind/distance hover cards. Search distinguishes Spawned nearby from Not detected (range/spawn unknown), and guides to a live match before historical fallback.
 - Group guidance uses valid current-world actor/channel-40 positions; unavailable
   positions produce no arrow, and roster departure clears the target.
 - Search (F2) and Stop (F4) have persisted Controls rows, button assignment and

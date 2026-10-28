@@ -629,6 +629,15 @@ pub enum Pick {
     Nothing,
 }
 
+#[cfg(any(windows, test))]
+fn background_pick(pick: Pick, focus: Focus, front: bool, has_pads: bool) -> Pick {
+    if pick == Pick::All && focus == Focus::Auto && !front {
+        if has_pads { Pick::Idle } else { Pick::Nothing }
+    } else {
+        pick
+    }
+}
+
 /// Which controllers a window reads (the Extended page's Controller Focus):
 /// `names` the connected ones in their order (the first controller first),
 /// `in_front` whether this window has the focus, `seat` it among the
@@ -922,7 +931,7 @@ impl Gamepads {
         // (Windows.Gaming.Input), so a window alone keeps that there: XInput,
         // which reads them behind, is for a window among others
         #[cfg(windows)]
-        let pick = if pick == Pick::All && focus == Focus::Auto && !front { Pick::Idle } else { pick };
+        let pick = background_pick(pick, focus, front, !pads.is_empty());
         // a controller pressed while this window has the focus and reads
         // none, said once a time it comes to the front: the presses a
         // player saw "ignored" (a second box, 2026-10-25) held back by these
@@ -999,8 +1008,8 @@ impl Gamepads {
             }
         }
         if pick == Pick::Idle {
-            // still there, at rest: as it was found, motors and all
-            any = true;
+            // A resting source must actually exist; focus cannot plug one in.
+            any = !pads.is_empty();
             motors = pads.iter().any(|c| c.rumbles);
         }
         self.raw = raw.sticks;
@@ -1805,6 +1814,26 @@ mod tests {
 
     /// Off, Window and a Pad, each as it says; Auto alone reads every one,
     /// in front or not, as the client always did.
+    #[test]
+    fn map_refinement_focus_without_a_controller_never_plugs_a_phantom_pad() {
+        assert_eq!(
+            background_pick(Pick::All, Focus::Auto, false, false),
+            Pick::Nothing
+        );
+        assert_eq!(
+            background_pick(Pick::All, Focus::Auto, false, true),
+            Pick::Idle
+        );
+        assert_eq!(
+            background_pick(Pick::All, Focus::Auto, true, false),
+            Pick::All
+        );
+        assert_eq!(
+            background_pick(Pick::One("pad".into()), Focus::Pad(1), false, true),
+            Pick::One("pad".into())
+        );
+    }
+
     #[test]
     fn a_window_reads_what_its_focus_says() {
         let pads = ["p1", "p2", "p3"];

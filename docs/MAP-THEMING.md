@@ -41,7 +41,7 @@ API and a full visual editor are separate future work.
 
 `crates/eqoa/src/map/theme.rs` supplies the native map's surface, input, border,
 focus, selection, text and semantic marker colors. Search, map controls,
-minimap controls and the inline Suggest form consume these helpers. The embedded
+minimap controls and the inline Suggest form consume these helpers. The small minimap search icon is a vector magnifier from theme::magnifier; keep it distinct from quest question marks. Search/Stop remain binding-driven. The embedded
 Space Mono font is rasterized once into the native font atlas at three times the
 logical size. Labels/tooltips retain that full-resolution atlas while using 12-unit logical metrics via Ui::add_font_at_height; do not downsample the bitmap before upload, which blurs enlarged text. Its SIL OFL notice is in `crates/eqoa/resources/map-ui/OFL.txt`.
 

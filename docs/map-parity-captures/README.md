@@ -48,3 +48,18 @@ Both use the same Northern Ro camp tooltip, player (24109,16574), hover
 remain the same; the latter keeps full font atlas detail instead of enlarging
 a reduced bitmap. These supersede the first milestone's label quality.
 Executable/image hashes and parameters are in text-manifest.json.
+
+
+## Compact controls, entity hover and spawn labels
+
+- [Compact minimap](refined-minimap.png)
+- [NPC name/level/distance hover](refined-mob-hover.png)
+- [Spawned and not-detected search rows](refined-spawn-search.png)
+- [Portrait hover layout](refined-mob-portrait.png)
+
+These offline UI captures deliberately inject one **synthetic** Water Rat,
+level 7, at player + (30,40); they are not evidence of a real server spawn.
+The historical catalog remains the pinned real reference data. Reproduce with
+EQOA_MAP_SAMPLE_NPCS=1; minimap hover additionally uses EQOA_MAP_MINI=1 and
+EQOA_MAP_MINI_HOVER_NPC=1. Normal gameplay never injects these fixtures.
+Parameters and executable/image hashes are in refinement-manifest.json.

@@ -16,7 +16,7 @@ Sign in normally; account files are not copied from the normal client.
 ## Controls and behavior
 
 - **M**: open/close the existing world map. **N**: toggle minimap.
-- **F2** or **Search** beside the minimap: open a temporary search panel.
+- **F2** or the **magnifier** beside the minimap: open a temporary search panel.
 - Type part of an NPC name. **Tab** switches NPCs / Group / Places. Arrow keys
   select; **Enter** or a result click starts guidance and closes search.
 - Set a personal pin with the map click/waypoint control, then choose **Track waypoint**, or **Personal waypoint** under Places. Its pink guide follows pin changes and stops on arrival/deletion.
@@ -27,7 +27,17 @@ Sign in normally; account files are not copied from the normal client.
 NPC search combines Forge's recorded locations with actual nearby NPCs received
 by the client. Gold marks/dashes show historical locations; green marks show
 matching live NPCs. Both can appear simultaneously. A historical location never
-proves a creature is spawned. Sightings disappear when the server removes them.
+proves a creature is spawned. Sightings disappear when the server removes them. Search shows **Spawned nearby**
+for a current living NPC observation, and **Not detected (range/spawn unknown)**
+for an unobserved recorded name. Not detected never means confirmed dead or
+despawned. A result guides to the nearest live match when available, then falls
+back to historical spawn coordinates. This is not a server-wide spawn query.
+
+Hover an NPC/player dot for its name, reported level (or unknown), kind and
+distance. Corpse/inactive/other-world entities do not produce living dots.
+The minimap search button is a compact magnifier; hover it for its saved binding.
+Mouse-wheel zoom remains. Guide details appear on hover rather than in a
+permanent strip; the small X still stops guidance. The yellow ? is a quest step.
 
 Group guidance follows a selected member's actor position, or an active group
 position update in the same world. Unavailable or other-world positions produce
@@ -56,7 +66,9 @@ by the automated checks; its test HTTP endpoint runs on loopback.
 5. Rebind Search/Stop, restart, and verify the keys and displayed labels agree.
 6. Set a personal pin, Track waypoint, move it, arrive and clear it; confirm guidance updates or stops appropriately.
 7. Move the pointer across the world map: Search must stay below coordinates/notices. Check circular minimap edges, marker hover, and wheel input.
-8. Check quests, coaches, camps, community pins and group waypoints. Open Suggest, check location/name/note, then cancel without submitting.
+8. Hover ordinary NPC/player dots and verify name, level, kind and distance; check blank terrain and clipped corners show no entity tooltip.
+9. Alt-Tab with no controller and return/click search: there must be no controller-disconnected warning. With a real controller, confirm a genuine unplug still warns.
+10. Check quests, coaches, camps, community pins and group waypoints. Open Suggest, check location/name/note, then cancel without submitting.
 
 ## Current limits
 

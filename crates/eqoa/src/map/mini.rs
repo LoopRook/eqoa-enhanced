@@ -174,11 +174,67 @@ impl Mark {
 pub const TIP_TITLE: [f32; 4] = [1.0, 0.86, 0.45, 1.0];
 pub const TIP_TEXT: [f32; 4] = [0.95, 0.93, 0.86, 1.0];
 
+/// One current scene observation; historical spawn records never become dots.
+#[derive(Clone, Debug)]
+pub struct Dot {
+    pub id: u32,
+    pub at: [f32; 2],
+    pub color: [f32; 4],
+    pub name: String,
+    pub level: Option<u8>,
+    pub player: bool,
+}
+impl Dot {
+    fn card(&self, from: [f32; 2]) -> Vec<(String, [f32; 4])> {
+        let level = self
+            .level
+            .filter(|l| *l > 0)
+            .map_or_else(|| "Level unknown".into(), |l| format!("Level {l}"));
+        vec![
+            (self.name.clone(), TIP_TITLE),
+            (
+                format!("{level} / {}", if self.player { "Player" } else { "NPC" }),
+                TIP_TEXT,
+            ),
+            (
+                format!(
+                    "{:.0} away / observed nearby",
+                    (self.at[0] - from[0]).hypot(self.at[1] - from[1])
+                ),
+                TIP_TEXT,
+            ),
+        ]
+    }
+}
+fn dot_under<'a>(
+    dots: &'a [Dot],
+    to: &dyn Fn([f32; 2]) -> [f32; 2],
+    cursor: [f32; 2],
+    circle: [f32; 3],
+    reach: f32,
+) -> Option<([f32; 2], &'a Dot)> {
+    let inside = |p: [f32; 2]| (p[0] - circle[0]).hypot(p[1] - circle[1]) <= circle[2];
+    if !inside(cursor) {
+        return None;
+    }
+    dots.iter()
+        .filter_map(|dot| {
+            let q = to(dot.at);
+            (inside(q) && (q[0] - cursor[0]).hypot(q[1] - cursor[1]) <= reach).then_some((q, dot))
+        })
+        .min_by(|(a, da), (b, db)| {
+            (a[0] - cursor[0])
+                .hypot(a[1] - cursor[1])
+                .total_cmp(&(b[0] - cursor[0]).hypot(b[1] - cursor[1]))
+                .then(da.id.cmp(&db.id))
+        })
+}
+
 /// What the minimap is given each frame besides what the map keeps.
 #[derive(Clone, Debug, Default)]
 pub struct MiniView {
     /// the creatures and players in view: (x, z) and their names' colour
-    pub dots: Vec<([f32; 2], [f32; 4])>,
+    pub dots: Vec<Dot>,
     /// the target's place (x, z), when it is in view
     pub target: Option<[f32; 2]>,
     /// marks of every kind (`Mark`): the XP camps and coach stops, the
@@ -482,10 +538,10 @@ impl Map {
         for q in &mut ui.quads[from..] {
             q.clip = cut;
         }
-        for &(at, color) in &mv.dots {
-            let q = to_px(at);
+        for entity in &mv.dots {
+            let q = to_px(entity.at);
             if on(q, dot + dot_o) {
-                square_dot(ui, white, cut, f(q), dot / px_line, dot_o / px_line, color);
+                square_dot(ui, white, cut, f(q), dot / px_line, dot_o / px_line, entity.color);
             }
         }
         // the target: a white ring round its dot
@@ -566,11 +622,14 @@ impl Map {
         // the card of the mark under the mouse's pointer, left of the frame,
         // drawn as the map's cards are
         let reach = (MARK_REACH * px_line).max(half) + px_line;
-        if let (Some(vui), Some((q, m))) = (cx.vui, self.mini.cursor.filter(|c|(c[0]-mid[0]).hypot(c[1]-mid[1])<=self.mini.circle[2]).and_then(|c| mark_under(&placed, c, reach))) {
+        let hover = self.mini.cursor.filter(|c|(c[0]-mid[0]).hypot(c[1]-mid[1])<=self.mini.circle[2]);
+        let entity_tip = hover.and_then(|cursor| dot_under(&mv.dots, &to_px, cursor, self.mini.circle, (dot + dot_o + px_line).max(3.0*px_line)))
+            .map(|(q,d)| (q,d.card(c)));
+        let tip = entity_tip.or_else(|| hover.and_then(|cursor| mark_under(&placed,cursor,reach)).map(|(q,m)| (q,m.tip.clone())));
+        if let (Some(vui), Some((q, tip))) = (cx.vui, tip) {
             r.ui.anchor = Anchor::Middle;
             r.ui.vertical = Vertical::Middle;
-            let lines: Vec<(Vec<u16>, [f32; 4])> = m
-                .tip
+            let lines: Vec<(Vec<u16>, [f32; 4])> = tip
                 .iter()
                 .flat_map(|(l, c)| wrap(l, TIP_WIDTH, |s| vui.string_width(&r, s)).into_iter().map(move |l| (l, *c)))
                 .take(TIP_LINES)
@@ -608,6 +667,7 @@ impl Map {
             let m1 = f([outer[2], outer[3]]);
             r=r.with_font(l.control_font,super::theme::FONT_SCALE);
             let search_start=r.ui.quads.len();
+            self.search.hover = self.mini.cursor.map(f);
             self.search
                 .draw(&mut r, vui, [tl, br], Some([m0[0], m0[1], m1[0], m1[1]]));
             // UI coordinates extend past the central frame on wide/tall
@@ -649,6 +709,55 @@ pub fn dot_radius(size: (u32, u32)) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn map_refinement_hover_chooses_the_nearest_visible_entity_and_keeps_level() {
+        let make = |id, at| Dot {
+            id,
+            at,
+            color: [1.0; 4],
+            name: "Rat".into(),
+            level: Some(7),
+            player: false,
+        };
+        let dots = vec![
+            make(2, [52.0, 50.0]),
+            make(1, [50.0, 50.0]),
+            make(3, [101.0, 50.0]),
+        ];
+        let circle = [50.0, 50.0, 50.0];
+        let (_, d) = dot_under(&dots, &|p| p, [50.0, 50.0], circle, 5.0)
+            .expect("entity at pointer has a tooltip");
+        assert_eq!(d.id, 1);
+        let tip = d
+            .card([50.0, 40.0])
+            .into_iter()
+            .map(|l| l.0)
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            tip.contains("Rat")
+                && tip.contains("Level 7")
+                && tip.contains("NPC")
+                && tip.contains("10")
+        );
+        assert!(
+            dot_under(&dots, &|p| p, [101.0, 50.0], circle, 5.0).is_none(),
+            "masked corners must not hover"
+        );
+        assert!(
+            dot_under(&dots, &|p| p, [5.0, 50.0], circle, 5.0).is_none(),
+            "blank terrain has no entity tooltip"
+        );
+        let mut unknown = d.clone();
+        unknown.level = None;
+        assert!(
+            !unknown
+                .card([0.0; 2])
+                .iter()
+                .any(|l| l.0.contains("Level 0"))
+        );
+    }
 
     /// The frame sits under the quick menu's name plate (to y 53) and left of
     /// its column of icons (from x 589), in the HUD's right half, and clear

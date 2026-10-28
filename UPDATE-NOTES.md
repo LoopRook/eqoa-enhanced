@@ -5,6 +5,16 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
+## 2026-10-28 · Minimap hover and compact search
+
+- Hover NPC/player dots for name, level when known, kind and distance.
+- The large minimap Search button is now a small magnifier. Mouse-wheel zoom
+  remains, and guidance details appear while hovering.
+- NPC search says Spawned nearby when a living match is currently observed.
+  Not detected means out of range or not spawned; the client cannot tell which.
+  Guidance follows a live match first and falls back to recorded locations.
+- Returning focus with no controller no longer reports a controller disconnect.
+
 ## 2026-10-28 · Map text clarity
 
 - Map names, XP labels and marker tooltips now retain the font's full detail when
