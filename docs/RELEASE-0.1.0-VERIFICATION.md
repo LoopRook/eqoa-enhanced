@@ -73,3 +73,42 @@ a wrong-directory negative control. 41 Python tests pass; the unchanged tag's
 original assertion passes with the canonical environment. YAML/Bash/PowerShell
 and executed source-output fixtures pass. Independent recovery review found no
 new defect. Game/Rust/packager code and v0.1.0 were not changed for this correction.
+
+## Published artifact verification
+
+Published [v0.1.0](https://github.com/LoopRook/eqoa-enhanced/releases/tag/v0.1.0)
+on 2026-10-28 through [successful CI 40740158035](https://github.com/LoopRook/eqoa-enhanced/actions/runs/40740158035).
+The control workflow revision is 1d5554b; the immutable game source/build commit
+is c7fddfc35a2f2d4185793af95b2e595a12e6a0e9. Initial failed CI history is retained;
+no tag, release version or game code was rewritten to recover.
+
+- CI: 40 tagged Python tooling tests passed; Cargo 1,228 reported passed, 0 failed,
+  2 ignored across 91 summaries. The source-aware fixture limits above apply. The
+  improved future Windows-path fixtures separately passed 41 local tooling tests.
+- Independent verifier checked all five downloaded public assets, exact seven ZIP
+  members, embedded source/fork URL, static runtime, catalog, file hashes and sizes.
+- An anonymous HTTPS GET downloaded the player ZIP and matched its checksum.
+  Anonymous releases/latest/download/update.txt returned the same version 0.1.0,
+  source commit and raw payload bytes/hash/size as the release assets.
+- Published EXE SHA256:
+  b35ed060520e512cc875d4b7c95019b3e7c1bcae260aee673565444bbddefb25
+  (23,830,528 bytes).
+- Player ZIP SHA256:
+  959811da1b438daa2e93f4b2327ffb6850a156f343bf565ba16ff6867fb92fb3
+  (8,737,801 bytes; approximately 8.7 MB).
+- The exact downloaded CI EXE ran natively from the extracted player folder,
+  finding its adjacent catalog without any BAT/CMD or database environment setup.
+  Minimap, mob-hover and spawn-search screenshots all matched the prior baseline
+  byte for byte. These are offline synthetic UI checks using the locally owned
+  disc, not a live-server/group/despawn playtest.
+- Both normal local launch locations (root eqoa.exe and target/release/eqoa.exe)
+  now contain that same published EXE and catalog. Old EXEs remain in ignored
+  backups; accounts/settings and the original documentation stash were retained.
+- GitHub's latest release is v0.1.0 (published, not draft). The player README points
+  directly to the Windows ZIP; the raw EXE/manifest/notes are updater assets.
+
+Only version tags publish future builds. Existing local source builds retain no
+channel unless explicitly built as a release. No master push, parser repository
+change, alternative license selection, animation PR or worktree pruning occurred.
+Artifact-action deprecation annotations were nonfatal; the runner used Node 24
+successfully. Updating those action pins is future CI maintenance.

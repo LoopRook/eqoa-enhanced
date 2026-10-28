@@ -21,7 +21,7 @@ network and gameplay improvements while developing its enhanced features.
 
 ## Play on Windows
 
-**[EQOA Enhanced Windows releases](https://github.com/LoopRook/eqoa-enhanced/releases)**
+**[Download EQOA Enhanced 0.1.0 for Windows x64 — 8.7 MB](https://github.com/LoopRook/eqoa-enhanced/releases/download/v0.1.0/EQOA-Enhanced-0.1.0-Windows-x64.zip)**
 
 
 1. Extract the prepared **EQOA Enhanced Windows build** into a folder.

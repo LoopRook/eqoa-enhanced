@@ -2,6 +2,10 @@
 
 Spec: the owner's EQOA Enhanced Fork Hygiene Brief, October 28, 2026.
 
+This records the original hygiene checkpoint. The owner subsequently requested
+versioned releases and fork-owned updates: v0.1.0 is now published. See
+RELEASE-0.1.0-VERIFICATION.md and RELEASING.md for current delivery status.
+
 ## Rulings
 
 - README.md remains the enhanced GitHub landing page: the owner's later direct
@@ -59,8 +63,8 @@ Licensing and parser sources remain unchanged.
 - Whether and when to submit the prepared animation branch to upstream.
 - Later isolation of restored features behind a crate/feature flag; outside this
   pass. Full Forge parity and runtime themes remain planned map work.
-- Before public fork CI releases, repoint updater URLs to the fork. Current local
-  no-channel builds do not self-update; no release workflow is triggered here.
+- Resolved in 0.1.0: versioned fork CI releases and updater URLs now point to
+  Enhanced, with verified assets. Plain local no-channel builds still do not update.
 
 ## Delivery closeout
 

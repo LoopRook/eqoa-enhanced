@@ -27,10 +27,10 @@ versioned GitHub release pipeline. Updater follows the fork's latest release.
 - [x] Review and merge upstream 7912c73; keep enhanced README and upstream changelog.
 - [x] Add tested fork update policy and player package/manifest generation.
 - [x] Add tag-triggered Windows release workflow, player download README and notes.
-- [ ] Run focused upstream disc regressions, full available suite, native/browser
+- [x] Run focused upstream disc regressions, full available suite, native/browser
       build, footprint checks and packaged EXE/corruption/account exclusion checks.
-- [ ] Independent review, resolve findings, commit/push enhanced and immutable tag.
-- [ ] Confirm CI/release assets, updater manifest and player download. Record
+- [x] Independent review, resolve findings, commit/push enhanced and immutable tag.
+- [x] Confirm CI/release assets, updater manifest and player download. Record
       source/version/hashes/skips and refresh the normal local EXEs.
 
 ## Review ledger
@@ -43,3 +43,12 @@ versioned GitHub release pipeline. Updater follows the fork's latest release.
   fixture omissions and real disc controls are recorded in release verification.
 - Source commit, exact stamped native rebuild/package, tag CI and public download
   verification remain the final gates. No release has been published yet.
+
+## Completion
+
+- Source c7fddfc tagged v0.1.0; release-control recovery 1d5554b preserves that tag.
+- CI 40740158035 passed and published all assets after remote byte verification.
+- Public ZIP/manifest were fetched anonymously and matched checksums. Exact
+  published EXE passed all three native map captures and refreshed local launchers.
+- README has the direct player download. Detailed provenance, test limits and
+  recovery audit trail are in RELEASE-0.1.0-VERIFICATION.md.

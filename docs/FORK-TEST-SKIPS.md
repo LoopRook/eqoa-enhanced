@@ -1,5 +1,8 @@
 # Workspace fixture skips — 2026-10-28
 
+This is the original hygiene run. The newer 0.1.0 totals, two added fixture tests
+and separate disc-enabled controls are in RELEASE-0.1.0-VERIFICATION.md.
+
 The final Windows run of `cargo test --locked --workspace -- --nocapture
 --test-threads=1` completed with exit 0. Evidence is the local
 `hygiene-workspace.log` retained in this task's staging directory. No second

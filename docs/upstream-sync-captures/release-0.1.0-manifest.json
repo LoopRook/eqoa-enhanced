@@ -1,0 +1,12 @@
+{
+  "version": "0.1.0",
+  "sourceCommit": "c7fddfc35a2f2d4185793af95b2e595a12e6a0e9",
+  "ciRun": "https://github.com/LoopRook/eqoa-enhanced/actions/runs/40740158035",
+  "executableSha256": "b35ed060520e512cc875d4b7c95019b3e7c1bcae260aee673565444bbddefb25",
+  "fixture": "Offline synthetic Water Rat level7; player25300,15200; 1280x720; owned disc; pinned historical catalog; no live server check",
+  "matchesExistingBaseline": [
+    "minimap.png",
+    "mob-hover.png",
+    "spawn-search.png"
+  ]
+}
