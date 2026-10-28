@@ -9,3 +9,5 @@
 *.EEmemory
 /run/
 /web/dist/
+
+*.exe
