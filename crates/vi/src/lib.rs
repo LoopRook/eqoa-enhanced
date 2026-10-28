@@ -18,6 +18,7 @@
 
 pub mod camera;
 pub mod character;
+pub mod clipstack;
 pub mod coll;
 pub mod creature;
 pub mod effect;
@@ -41,6 +42,7 @@ pub mod tod;
 pub mod trail;
 pub mod atmosphere;
 pub mod selfstate;
+pub mod shadow;
 pub mod spell;
 pub mod strtab;
 pub mod swing;

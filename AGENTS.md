@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+Read `FORK.md` first for enhanced scope, ownership boundaries, and merge policy.
+
 ## Project Structure & Module Organization
 
 This Rust 2024 workspace implements a native EQOA: Frontiers client. Read `docs/MODDING-AND-PARSER-ROADMAP.md` for enhanced-branch goals, parser failures, and Forge map parity requirements. Read docs/MAP-RELEASE-HANDOFF.md before extending the map.

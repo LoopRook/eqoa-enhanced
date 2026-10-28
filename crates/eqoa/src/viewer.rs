@@ -36,6 +36,12 @@ fn hour(start: Instant) -> f32 {
 /// `VIClient::UpdateTimeOfDay` keeps it (`Session::time_of_day`: 0x0013's
 /// clock B on the local timer); else, before the server set it, `hour`'s.
 pub fn game_hour(play: Option<&crate::play::Play>, start: Instant) -> f32 {
+    // the GM's day-night entry stopped `UpdateTimeOfDay` (`adminplay`)
+    if std::env::var_os("EQOA_HOUR").is_none()
+        && let Some(h) = play.and_then(|p| p.frozen_hour())
+    {
+        return h;
+    }
     if std::env::var_os("EQOA_HOUR").is_none()
         && let Some(h) = play.and_then(|p| p.session.time_of_day())
     {
@@ -457,6 +463,7 @@ pub fn shot_with(
                 let keys = console.poll(report, true, false, dead);
                 if let Some(p) = play.as_mut() {
                     p.pad_mode(console.mode());
+                    p.fishing_pad(console.sticks());
                     for (k, down) in keys {
                         eprintln!("pad key {k} {}", if down { "down" } else { "up" });
                         p.set_key(k, down, &mut walker, aspect);
@@ -1073,6 +1080,7 @@ pub fn shot_with(
         let mut frame = lit(proj, v, shot_hour, Some((shot_eye, &walker.scene)), Some(&mut weather));
         frame.0.point = point;
         let (sky_bb, world_bb) = weather.render(&walker.eye);
+        renderer.particles_end = batches.len();
         batches.extend(world_bb);
         let mut rot = v;
         rot.w_axis = glam::Vec4::W;
@@ -1099,6 +1107,18 @@ pub fn shot_with(
             let drawn = fl.frame(&mut walker.scene, &vi::vect::Vect3::of(shot_eye.x, shot_eye.y, shot_eye.z), view.view_proj);
             fl.upload(&mut renderer, &device, &queue, lib, &walker.scene, &drawn);
             eprintln!("{}", fl.describe());
+        }
+        // the characters' blob shadows at the shot's camera (`shadows`),
+        // after the particle system's batches
+        if crate::settings::client().shadows {
+            let casters = match play.as_ref() {
+                Some(p) => p.shadow_casters(&mut walker, lib),
+                None => crate::shadows::walker_caster(&mut walker, lib, None).into_iter().collect(),
+            };
+            let mut sh = crate::shadows::Shadows::new();
+            sh.frame(&mut walker.scene, lib, &casters, &shot_lod_eye, view.view_proj, view.eye);
+            sh.upload(&mut renderer, &device, &queue, lib, &proj);
+            eprintln!("{}", sh.describe());
         }
         streamed = Some(streamer);
         if let Some(p) = &mut play {
@@ -1683,9 +1703,9 @@ impl PerfSpan {
 }
 
 impl Perf {
-    const NAMES: [&str; 16] = [
+    const NAMES: [&str; 17] = [
         "stream", "walk", "play", "pose", "zones", "sound", "weather", "particles", "lights", "acquire", "hud", "encode", "submit",
-        "gpu wait", "volumes", "flora",
+        "gpu wait", "volumes", "flora", "shadows",
     ];
 
     /// Always made; printed under `EQOA_PERF` (`?perf`).
@@ -1813,6 +1833,8 @@ struct App {
     fx: Option<crate::fx::Fx>,
     /// The radial flora round the walk (`flora.rs`).
     flora: Option<crate::flora::Flora>,
+    /// The characters' blob shadows (`shadows.rs`).
+    shadows: crate::shadows::Shadows,
     /// The sky and the weather (made once, kept across worlds as the
     /// scene's is), and this frame's sky billboards.
     weather: Option<crate::weather::Weather>,
@@ -2001,6 +2023,7 @@ fn run_app(lib: Library, source: Source, play: Option<crate::play::Play>, pendin
         batches: Vec::new(),
         fx: None,
         flora: None,
+        shadows: Default::default(),
         weather: None,
         sky_batches: Vec::new(),
         body_at: 0,
@@ -2564,6 +2587,7 @@ impl App {
         let aspect = self.gfx.as_ref().map_or(4.0 / 3.0, |g| g.config.width as f32 / g.config.height as f32);
         if let (Some(p), Some(w)) = (self.play.as_mut(), self.walker.as_mut()) {
             p.pad_mode(self.console.mode());
+            p.fishing_pad(self.console.sticks());
             for (k, down) in keys {
                 p.set_key(k, down, w, aspect);
             }
@@ -3589,6 +3613,52 @@ impl App {
                 && !(down && event.repeat)
             {
                 p.mail_key(k, down);
+            }
+            return;
+        }
+        // The fishing window (mode 36): Space casts and throws (X),
+        // Escape leaves (triangle), Enter its chat line, C held the chat
+        // box's history with the arrows' up and down, the codes the game's
+        // keyboard gives `VIWndFishing::OnKeyDown` (32, 27, 13, 67, 19, 20);
+        // E the catch list's pick (X), as in the other windows; while the
+        // chat line is up it takes the keyboard.
+        if let Some(p) = self.play.as_mut()
+            && p.typing.is_none()
+            && p.fishing_owns()
+        {
+            let down = event.state == ElementState::Pressed;
+            if p.fishing_typing() {
+                let named = match &event.logical_key {
+                    Key::Named(NamedKey::Backspace) => Some(8),
+                    Key::Named(NamedKey::Escape) => Some(27),
+                    Key::Named(NamedKey::Enter) => Some(13),
+                    Key::Named(NamedKey::ArrowLeft) => Some(17),
+                    Key::Named(NamedKey::ArrowRight) => Some(18),
+                    _ => None,
+                };
+                if let Some(k) = named {
+                    p.fishing_key(k, down);
+                } else if down && let Some(t) = &event.text {
+                    for c in t.chars().filter(|c| c.is_ascii() && !c.is_ascii_control()) {
+                        p.fishing_key(c as i32, true);
+                    }
+                }
+                return;
+            }
+            let k = match &event.logical_key {
+                Key::Named(NamedKey::Space) => Some(32),
+                Key::Named(NamedKey::Escape) => Some(27),
+                Key::Named(NamedKey::Enter) => Some(13),
+                Key::Named(NamedKey::ArrowUp) => Some(19),
+                Key::Named(NamedKey::ArrowDown) => Some(20),
+                Key::Character(c) if c.eq_ignore_ascii_case("c") => Some(99),
+                Key::Character(c) if c.eq_ignore_ascii_case("e") => Some(134),
+                _ => None,
+            };
+            if let Some(k) = k
+                && !(down && event.repeat)
+            {
+                p.fishing_key(k, down);
             }
             return;
         }
@@ -4818,6 +4888,7 @@ impl ApplicationHandler for App {
                 let batches = &mut self.batches;
                 let fx = &mut self.fx;
                 let flora = &mut self.flora;
+                let shadows = &mut self.shadows;
                 let weather = &mut self.weather;
                 let sky_batches = &mut self.sky_batches;
                 let mut bb_view = None;
@@ -4970,6 +5041,23 @@ impl ApplicationHandler for App {
                     if let Some(p) = play.as_mut() {
                         lights.0.point = p.point_light(w, now, hour_now, weather.as_ref());
                     }
+                    // the characters' blob shadows (`VIScene::RenderShadows`,
+                    // `shadows`): drawn after the particle system's batches,
+                    // which these are, before the weather's; none with the
+                    // options' Shadows off or under the loading screen
+                    mark(perf, 8);
+                    g.renderer.particles_end = batches.len();
+                    if crate::settings::client().shadows && !loading {
+                        let casters = match play.as_ref() {
+                            Some(p) => p.shadow_casters(w, lib),
+                            None => crate::shadows::walker_caster(w, lib, None).into_iter().collect(),
+                        };
+                        shadows.frame(&mut w.scene, lib, &casters, &crate::lod::eye(&w.cam, &w.eye.position), proj * v, lights.0.eye);
+                        shadows.upload(&mut g.renderer, &g.device, &g.queue, lib, &proj);
+                    } else {
+                        shadows.clear(&mut g.renderer, &g.device, &g.queue, lib);
+                    }
+                    mark(perf, 16);
                     if let Some(wx) = weather.as_mut() {
                         let (sky, world) = wx.render(&w.eye);
                         *sky_batches = sky;
@@ -5142,7 +5230,7 @@ impl ApplicationHandler for App {
                     g.renderer.draw_plates(&g.device, &mut enc, st, &f.depth, f.size);
                 }
                 if let Some((v, p)) = bb_view {
-                    g.renderer.draw_billboards(&g.device, &g.queue, &mut enc, st, &f.depth, v, p, &self.batches, &textures);
+                    g.renderer.draw_billboards_and_shadows(&g.device, &g.queue, &mut enc, st, &f.depth, v, p, &self.batches, &textures, &view);
                 }
                 g.renderer.curve.apply(&g.queue, &mut enc, &f.color);
                 // the names, then the minimap (`map::mini`: over the names,
@@ -5197,6 +5285,8 @@ mod tests {
     /// drawn a second, every one 33.3 ms after the last where 16.7 were
     /// asked, so all late, and 6 ms of CPU a frame by phase: the CPU was not
     /// what was short. The control: frames on time say none are late.
+
+
     #[test]
     fn the_reports_frames_line_says_what_was_short() {
         let mut cpu = [0.0; Perf::NAMES.len()];

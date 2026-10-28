@@ -35,7 +35,8 @@
 //!   alone, `render::set_mipmaps`), Flora (On, the game's: the plants it
 //!   grows round the camera, `flora`; Off: none), Environment (On, the
 //!   game's: the effect volumes, ground fog, dust, leaves, light shafts and
-//!   flocks, `fx`; Off: none), Art (Frontiers' or the 2002 disc's, `era`,
+//!   flocks, `fx`; Off: none), Shadows (On, the game's: the characters' blob
+//!   shadows, `shadows`; Off: none) and Art (Frontiers' or the 2002 disc's, `era`,
 //!   as F9 swaps it: drawn as it moves, the 2002 disc asked for the first
 //!   time) and Map Markers (On: the map's XP camps and coaches, `map::markers`;
 //!   Off: neither; the map's own X or ○ turns it too);
@@ -547,7 +548,7 @@ impl WndOptions {
     /// VSync (26) turn over, VSync natively only (a page's stays on with
     /// sound 9: the browser paces it); Name Distance (27) by tens from the
     /// game's 22 to 200 (`step_name_distance`); Text (30) goes between Sharp and
-    /// Smooth; Target of Target (31), Mana Bars (42), Minimap (44), Stats Box (47), Quest Markers (45), Quest Tracker (46), Update Notices (29), Overlapping
+    /// Smooth; Target of Target (31), Mana Bars (42), Minimap (1044), Stats Box (1047), Quest Markers (1045), Quest Tracker (1046), Update Notices (29), Overlapping
     /// Names (34, Hide and Show), Mipmaps (35) and Loading Screens (38,
     /// Longer and Instant) turn over;
     /// Output Device (32) goes round the system default and the devices
@@ -623,15 +624,15 @@ impl WndOptions {
                     // (`Play::agree_power_bars`)
                     42 => c.mana_bars = !c.mana_bars,
                     // Minimap: drawn or not from the next frame (`map::mini`)
-                    44 => c.minimap = !c.minimap,
+                    1044 => c.minimap = !c.minimap,
                     // Stats Box: drawn or not from the next frame (`statbox`)
-                    47 => c.stats_box = !c.stats_box,
+                    1047 => c.stats_box = !c.stats_box,
                     // Quest Markers: the server told from the next frame
                     // (`Play::agree_quest_marks`), the map's marks drawn or not
-                    45 => c.quest_markers = !c.quest_markers,
+                    1045 => c.quest_markers = !c.quest_markers,
                     // Quest Tracker: the server told from the next frame
                     // (`Play::agree_quest_progress`), the HUD's list drawn or not
-                    46 => c.quest_tracker = !c.quest_tracker,
+                    1046 => c.quest_tracker = !c.quest_tracker,
                     // Overlapping Names: the plates kept from the next
                     // frame (`play::labels`)
                     34 => c.overlapping_names = !c.overlapping_names,
@@ -657,19 +658,21 @@ impl WndOptions {
                     // Environment: the effect volumes from the next frame (`viewer`, `fx`)
                     37 => c.environment = !c.environment,
                     // Map Markers: the map's camps and coaches from its next frame (`map::markers`)
-                    43 => c.map_markers = !c.map_markers,
+                    1043 => c.map_markers = !c.map_markers,
                     // Target HP %: drawn beside target gauge
-                    48 => c.target_hp_percent = !c.target_hp_percent,
+                    1048 => c.target_hp_percent = !c.target_hp_percent,
                     // XP Details: numbers and percent on XP gauge
-                    49 => c.xp_details = !c.xp_details,
+                    1049 => c.xp_details = !c.xp_details,
                     // HUD Numbers: player HP and power values
-                    50 => c.hud_numbers = !c.hud_numbers,
+                    1050 => c.hud_numbers = !c.hud_numbers,
                     // Open Mods Folder
-                    51 => crate::mods::open_mods_folder(),
+                    1051 => crate::mods::open_mods_folder(),
                     // Launch Combat Parser companion
-                    52 => {
+                    1052 => {
                         let _ = crate::mods::launch_parser();
                     }
+                    // Shadows: drawn or not from the next frame (`viewer`, `shadows`)
+                    46 => c.shadows = !c.shadows,
                     // Output Device: the sound opened there from the next
                     // frame (`audio::retarget`)
                     32 => step_output(&mut c, &crate::audio::outputs().listed.map(|l| l.1).unwrap_or_default(), d),
@@ -765,11 +768,11 @@ impl WndOptions {
             return false;
         }
         if self.page == 3 && self.cat.is_some() {
-            if self.item == 51 {
+            if self.item == 1051 {
                 crate::mods::open_mods_folder();
                 cues.push(8);
                 return false;
-            } else if self.item == 52 {
+            } else if self.item == 1052 {
                 let _ = crate::mods::launch_parser();
                 cues.push(8);
                 return false;
@@ -1117,7 +1120,9 @@ const CONTROLS: &str = "Controls";
 /// Extended's rows, by the item each changes (`change`), and their labels.
 /// A row is drawn by its item (`value_text`, or `slider_at` for a slider)
 /// and shown on the page of the category that lists it (`CATEGORIES`).
-const EXTENDED_ITEMS: [(i32, &str); 39] = [
+// Upstream IDs stay below 1000; enhanced-only IDs 1043..1052 avoid future collisions.
+// These are transient UI identities, not persisted settings keys.
+const EXTENDED_ITEMS: [(i32, &str); 40] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1147,16 +1152,17 @@ const EXTENDED_ITEMS: [(i32, &str); 39] = [
     (39, "Render Scale"),
     (40, "HUD"),
     (42, "Mana Bars"),
-    (43, "Map Markers"),
-    (44, "Minimap"),
-    (45, "Quest Markers"),
-    (46, "Quest Tracker"),
-    (47, "Stats Box"),
-    (48, "Target HP %"),
-    (49, "XP Details"),
-    (50, "HUD Numbers"),
-    (51, "Open Mods Folder"),
-    (52, "Combat Parser"),
+    (46, "Shadows"),
+    (1043, "Map Markers"),
+    (1044, "Minimap"),
+    (1045, "Quest Markers"),
+    (1046, "Quest Tracker"),
+    (1047, "Stats Box"),
+    (1048, "Target HP %"),
+    (1049, "XP Details"),
+    (1050, "HUD Numbers"),
+    (1051, "Open Mods Folder"),
+    (1052, "Combat Parser"),
 ];
 
 /// What a category's page says beside its Back legend.
@@ -1187,16 +1193,16 @@ struct Category {
 /// Video, UI, Controller, etc."), each a page of `PAGE_MOST` rows at most.
 const CATEGORIES: [Category; 9] = [
     Category { name: "Video", items: VIDEO, note: Note::Scale },
-    Category { name: "World", items: &[20, 35, 36, 37, 25, 43], note: Note::None },
-    Category { name: "UI", items: &[22, 31, 42, 44, 47, 29], note: Note::None },
+    Category { name: "World", items: &[20, 35, 36, 37, 46, 25], note: Note::None },
+    Category { name: "UI", items: &[22, 31, 42, 1044, 1047, 29], note: Note::None },
     Category { name: "Controller", items: &[16, 19], note: Note::Reads },
     Category { name: "Camera", items: &[15, 17, 18], note: Note::None },
     Category { name: "Characters", items: &[12, 23, 24, 27, 34], note: Note::Server },
     Category { name: "Sound", items: SOUND, note: Note::Output },
     // the quests' (UI holds its six): the marks a server sends for the map
     // and its tracker for the HUD
-    Category { name: "Quests", items: &[45, 46, 30, 40], note: Note::None },
-    Category { name: "Mods & Addons", items: &[48, 49, 50, 51, 52], note: Note::None },
+    Category { name: "Map & Quests", items: &[1045, 1046, 1043, 30, 40], note: Note::None },
+    Category { name: "Mods & Addons", items: &[1048, 1049, 1050, 1051, 1052], note: Note::None },
 ];
 
 /// Video's rows: natively Display first (F3 20261024-201507: full screen was
@@ -1280,15 +1286,16 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         29 => on_off(c.update_notices),
         31 => on_off(c.target_of_target),
         42 => on_off(c.mana_bars),
-        44 => on_off(c.minimap),
-        47 => on_off(c.stats_box),
-        45 => on_off(c.quest_markers),
-        46 => on_off(c.quest_tracker),
+        1044 => on_off(c.minimap),
+        1047 => on_off(c.stats_box),
+        1045 => on_off(c.quest_markers),
+        1046 => on_off(c.quest_tracker),
         34 => wide(if c.overlapping_names { "Show" } else { "Hide" }),
         35 => on_off(c.mipmaps),
         36 => on_off(c.flora),
         37 => on_off(c.environment),
-        43 => on_off(c.map_markers),
+        1043 => on_off(c.map_markers),
+        46 => on_off(c.shadows),
         38 => wide(if c.loading_longer { "Longer" } else { "Instant" }),
         39 => wide(&format!("x{}", c.render_scale)),
         40 => wide(match c.hud {
@@ -1301,11 +1308,11 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         }),
         32 => wide(c.output.as_ref().map_or(SYSTEM_DEFAULT, |d| d.as_str())),
         33 => wide(if crate::display::full() { "Full Screen" } else { "Window" }),
-        48 => on_off(c.target_hp_percent),
-        49 => on_off(c.xp_details),
-        50 => on_off(c.hud_numbers),
-        51 => wide("Open"),
-        52 => wide(if crate::mods::is_parser_running() { "Running" } else { "Launch" }),
+        1048 => on_off(c.target_hp_percent),
+        1049 => on_off(c.xp_details),
+        1050 => on_off(c.hud_numbers),
+        1051 => wide("Open"),
+        1052 => wide(if crate::mods::is_parser_running() { "Running" } else { "Launch" }),
         _ => return None,
     })
 }
@@ -1388,6 +1395,25 @@ mod tests {
 
     /// The four held settings change only when saved; the live ones at
     /// once; Triangle on the menu puts the live ones back.
+    #[test]
+    fn upstream_shadows_and_enhanced_quest_tracker_toggle_independently() {
+        use crate::settings;
+        settings::testing::reset(true);
+        let (mut w,mut o,mut cues,mut ups)=(WndOptions::default(),GameOptions::default(),Vec::new(),Vec::new());
+        assert!(settings::client().shadows && settings::client().quest_tracker);
+        w.item=46;w.change(&mut o,1,&mut cues,&mut ups);
+        assert!(!settings::client().shadows && settings::client().quest_tracker);
+        w.item=1046;w.change(&mut o,1,&mut cues,&mut ups);
+        assert!(!settings::client().shadows && !settings::client().quest_tracker);
+        let text=settings::client().to_text();
+        let restored=ClientOptions::from_text(&text);
+        assert!(!restored.shadows && !restored.quest_tracker);
+        assert!(text.contains("shadows=off") && text.contains("quest_tracker=off"));
+        w.item=46;w.change(&mut o,1,&mut cues,&mut ups);
+        assert!(settings::client().shadows && !settings::client().quest_tracker);
+        settings::testing::reset(true);
+    }
+
     #[test]
     fn held_settings_wait_for_save() {
         let mut w = WndOptions::default();
@@ -1600,7 +1626,7 @@ mod tests {
         assert_eq!((w.row, cues.last()), (5, Some(&9)), "Video's last row (six, a page's most)");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.cat, w.cat_sel, w.item), (3, None, 0, -1), "back to the categories, Video still lit");
-        // World: Fog, Mipmaps, Flora, Environment, Art, Map Markers
+        // World: Fog, Mipmaps, Flora, Environment, Shadows, Art
         press(&mut w, &mut o, key::DOWN, &mut cues);
         press(&mut w, &mut o, key::CROSS, &mut cues);
         assert_eq!((w.cat, w.item), (Some(1), 20), "World, Fog");
@@ -1641,19 +1667,19 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().environment, "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.item, 46, "Shadows");
+        assert!(settings::client().shadows, "on: the game's");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::client().shadows, settings::client().environment, settings::client().flora, cues.last()), (false, true, true, Some(&11)), "off, the others still on");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::client().shadows, "and back: two values");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 25, "Art, on World since 2026-10-25");
         assert_eq!(settings::art(), esf::Era::Frontiers, "Frontiers', the disc the game runs off");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::art(), cues.last()), (esf::Era::Y2002, Some(&11)), "the 2002 disc's");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::art(), esf::Era::Frontiers, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 43, "Map Markers");
-        assert!(settings::client().map_markers, "on: the camps and coaches marked");
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().map_markers, cues.last()), (false, Some(&11)), "off");
-        press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert!(settings::client().map_markers, "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.row, cues.last()), (5, Some(&9)), "World's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
@@ -1686,16 +1712,16 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().mana_bars, "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 44, "Minimap");
+        assert_eq!(w.item, 1044, "Minimap");
         assert!(settings::client().minimap, "on: the map round the player under the quick menus");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().minimap, cues.last()), (false, Some(&11)), "off");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().minimap, "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 47, "Stats Box");
+        assert_eq!(w.item, 1047, "Stats Box");
         assert!(!settings::client().stats_box, "off: no box, the default");
-        assert_eq!(value_text(&vui, 47), Some(wide(vui.words.get(552, vui.language))), "Off, the game's word");
+        assert_eq!(value_text(&vui, 1047), Some(wide(vui.words.get(552, vui.language))), "Off, the game's word");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().stats_box, cues.last()), (true, Some(&11)), "on");
         press(&mut w, &mut o, key::LEFT, &mut cues);
@@ -1847,19 +1873,26 @@ mod tests {
         // Quests: Quest Markers
         press(&mut w, &mut o, key::DOWN, &mut cues);
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(7), 45), "Quests, Quest Markers");
+        assert_eq!((w.cat, w.item), (Some(7), 1045), "Quests, Quest Markers");
         assert!(settings::client().quest_markers, "on: the map's marks where the server sends them");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().quest_markers, cues.last()), (false, Some(&11)), "off");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().quest_markers, "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 46, "Quest Tracker");
+        assert_eq!(w.item, 1046, "Quest Tracker");
         assert!(settings::client().quest_tracker, "on: the HUD's list where the server sends it");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().quest_tracker, cues.last()), (false, Some(&11)), "off");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().quest_tracker, "and back: two values");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.item, 1043, "Map Markers, in Map & Quests");
+        let was=settings::client().map_markers;
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!(settings::client().map_markers,!was);
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert_eq!(settings::client().map_markers,was);
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 30, "Text");
         assert_eq!(settings::client().text, render::ui::TextFilter::Sharp, "Sharp, the default");
@@ -1875,22 +1908,22 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::client().hud, render::ui::HudFilter::Nearest, "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (3, Some(&9)), "Quests' last row");
+        assert_eq!((w.row, cues.last()), (4, Some(&9)), "Map & Quests' last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.cat_sel, cues.last()), (8, Some(&11)), "Mods & Addons, the new category");
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.cat_sel, cues.last()), (8, Some(&9)), "Mods & Addons, the last category");
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.row, w.item), (Some(8), 0, 48), "Mods & Addons page: Target HP % first");
+        assert_eq!((w.cat, w.row, w.item), (Some(8), 0, 1048), "Mods & Addons page: Target HP % first");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, w.item), (1, 49), "XP Details");
+        assert_eq!((w.row, w.item), (1, 1049), "XP Details");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, w.item), (2, 50), "HUD Numbers");
+        assert_eq!((w.row, w.item), (2, 1050), "HUD Numbers");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, w.item), (3, 51), "Open Mods Folder");
+        assert_eq!((w.row, w.item), (3, 1051), "Open Mods Folder");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, w.item), (4, 52), "Combat Parser");
+        assert_eq!((w.row, w.item), (4, 1052), "Combat Parser");
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.row, cues.last()), (4, Some(&9)), "Mods & Addons last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);

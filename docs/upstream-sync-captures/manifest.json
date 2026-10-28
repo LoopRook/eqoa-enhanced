@@ -1,0 +1,228 @@
+{
+  "upstream": "8d90350",
+  "enhancedBaseline": "8aeaf91",
+  "executableSha256": "a089aa987fd28e6ba68cb64c92f5ce4fcc61be71eb6f9ab542dec3ac2cdbc80d",
+  "fixture": "Offline synthetic Water Rat level 7 at player + (30,40), historical catalog pinned as in map handoff.",
+  "cases": [
+    {
+      "case": "minimap",
+      "before": "refined-minimap.png",
+      "sha256": "2b2a7587b9d98b524e6a6d511c13f5e568ad58fe3f925f8a24e1156c1ee307ef",
+      "identicalToEnhancedBaseline": true
+    },
+    {
+      "case": "mob-hover",
+      "before": "refined-mob-hover.png",
+      "sha256": "88855d89ef209dfcf94b3495543ced2d0a273de947dc6d331dee73a5d055db77",
+      "identicalToEnhancedBaseline": true
+    },
+    {
+      "case": "spawn-search",
+      "before": "refined-spawn-search.png",
+      "sha256": "257be7aa46822c42703315447d48d5c176a11d416381317ec189495e89cf124d",
+      "identicalToEnhancedBaseline": true
+    }
+  ],
+  "sourceAudit": {
+    "upstreamAddedFiles": [
+      {
+        "path": "crates/eqoa/src/admin.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/eqoa/src/adminplay.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/eqoa/src/buffpc.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/eqoa/src/fishing.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/eqoa/src/fishplay.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/eqoa/src/gotownd.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/eqoa/src/netstat.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/eqoa/src/shadows.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/render/src/shadow.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/render/src/shadow.wgsl",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/render/tests/overlay_order.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/render/tests/shadow.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/vi/src/clipstack.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/vi/src/shadow.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/vi/tests/oracle_clip.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/vi/tests/oracle_shadow.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/vi/tests/world_rooms.rs",
+        "matchesPinnedUpstream": true
+      },
+      {
+        "path": "crates/vi/tests/world_shadow.rs",
+        "matchesPinnedUpstream": true
+      }
+    ],
+    "enhancedFeatureFiles": [
+      {
+        "path": "crates/eqoa/src/map/build.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/cells.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/chrome.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/community.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/group_waypoint.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/markers.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/markers_data.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/mini.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/mod.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/picture.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/quests.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/search.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/store.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/suggest.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/tests.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/theme.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/tool.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/map/view.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/mapsuggest.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/groupmark.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/mods.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/telemetry.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/statbox.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/binds.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/bindpage.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/ui.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/eqoa/src/input.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/render/src/map.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/render/src/map.wgsl",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/render/src/ui.rs",
+        "matchesEnhancedBaseline": true
+      },
+      {
+        "path": "crates/render/src/ui.wgsl",
+        "matchesEnhancedBaseline": true
+      }
+    ]
+  }
+}

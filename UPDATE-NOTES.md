@@ -5,34 +5,22 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
-## 2026-10-28 · Minimap hover and compact search
-
-- Hover NPC/player dots for name, level when known, kind and distance.
-- The large minimap Search button is now a small magnifier. Mouse-wheel zoom
-  remains, and guidance details appear while hovering.
-- NPC search says Spawned nearby when a living match is currently observed.
-  Not detected means out of range or not spawned; the client cannot tell which.
-  Guidance follows a live match first and falls back to recorded locations.
-- Returning focus with no controller no longer reports a controller disconnect.
-
-## 2026-10-28 · Map text clarity
-
-- Map names, XP labels and marker tooltips now retain the font's full detail when
-  enlarged. Their size, wrapping and layout stay the same.
-
-## 2026-10-28 · Map search and guidance preview
-
-- The minimap is now circular. Search stays below the map coordinates and status messages.
-- Set a personal waypoint and choose Track waypoint to follow its pink guide on both maps.
-- Map labels and XP camp badges share the compact theme; zoomed-out camps use small neutral markers.
-
-- The native map now carries the compact dark UI treatment with thin borders, red focus and selection, and Space Mono text. Mouse/keyboard Suggest keeps the map visible while naming and annotating a community marker.
-
-- Find NPCs, group members and camp/coach locations in a temporary map panel. F2 opens search; F4 stops guidance. Both can be changed in Controls.
-- Follow recorded spawn locations on the minimap while actual nearby matches highlight separately. Group guidance follows valid same-world positions.
-- After changing keys in Controls, the map's keyboard legend now shows the keys
-  you chose, including zoom, waypoints, markers, towns, and quest markers.
-- A control with no keyboard key assigned is shown as unbound.
+## 2026-10-28 · Shadows under the characters, fishing, and the GM's TEST menu
+- Every character near the camera now has a shadow under its feet, as on the PS2: a soft dark
+  patch on the ground, and on docks, counters and steps, fading where the ground falls away.
+  Inside a building, as on the PS2, only the characters you could see through its doorways
+  and openings cast one. Options, Extended, World, Shadows turns them off.
+- Spell lightning and weapon trails are drawn over the spells' sparks and the shadows, and
+  under the rain and snow, in the PS2's order (they were drawn under the sparks).
+- Fishing works as on the PS2 on a server that offers it (none of ours does yet): the Fishing
+  window, its power meter (✕ or the left stick to cast and throw), the catch list (Take All,
+  one item, Leave All), its messages, and the splash on the water.
+- On a server that gives your account the game's GM channel, the start menu shows TEST first,
+  as a GM's PS2 did, with its Buff PC and Goto windows. Every other player sees no change.
+- A full buddy list on the other side now says so ("Add buddy failed: Your buddy's buddy list
+  is full."), and the game answers the server's connection check and its other housekeeping
+  as a PS2 does. Your position goes to the server at the PS2's own rate (every 101.7 ms; it
+  was 100).
 
 ## 2026-10-28 · You can run again after casting a spell
 - Since about 00:55 UTC this morning, casting a spell left you walking, unable to run, until

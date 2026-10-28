@@ -82,7 +82,7 @@ From a Windows checkout with Rust on PATH:
 
 This builds `eqoa` with `--release --locked`, verifies the pinned external catalog,
 creates a content-addressed executable, two equivalent preview launchers, licenses,
-README, manifest and ZIP in ignored `run/map-parity-preview/`. `-CatalogPath` uses
+README, upstream MIT notice, manifest and ZIP in ignored `run/map-parity-preview/`. `-CatalogPath` uses
 an existing verified catalog; otherwise the script downloads the pinned public
 resource. `-SkipBuild` packages an already built executable. `CARGO_TARGET_DIR`
 is respected. The ZIP uses an explicit allowlist: it never contains `profile/`,

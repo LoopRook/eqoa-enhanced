@@ -35,6 +35,7 @@ if ($CatalogPath) {
     Invoke-WebRequest -Uri "https://raw.githubusercontent.com/mmvest/FrontiersForge/$taskRevision/scripts/resources/entity_database.json" -OutFile $taskCatalog
 }
 if ((Get-FileHash -LiteralPath $taskCatalog -Algorithm SHA256).Hash.ToLowerInvariant() -ne $taskCatalogSha) { throw 'Catalog checksum mismatch; refusing to package.' }
+Copy-Item -LiteralPath (Join-Path $taskRoot 'LICENSE') -Destination (Join-Path $OutputDirectory 'LICENSE') -Force
 Copy-Item -LiteralPath (Join-Path $taskRoot 'docs/licenses/FrontiersForge-MIT.txt') -Destination (Join-Path $OutputDirectory 'FrontiersForge-MIT.txt') -Force
 Copy-Item -LiteralPath (Join-Path $taskRoot 'crates/eqoa/resources/map-ui/OFL.txt') -Destination (Join-Path $OutputDirectory 'SpaceMono-OFL.txt') -Force
 Copy-Item -LiteralPath (Join-Path $taskRoot 'docs/MAP-PLAYTEST.md') -Destination (Join-Path $OutputDirectory 'README.md') -Force
@@ -56,7 +57,7 @@ $taskManifest = [ordered]@{ sourceCommit=$taskCommit; sourceModified=$taskDirty;
 $taskManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutputDirectory 'release-manifest.json') -Encoding utf8
 # Allowlist distribution files. Never archive profile/, game.opt, logs, disc
 # images, cache, or arbitrary content from an existing preview directory.
-$taskFiles = @($taskName,'map-entities.json','FrontiersForge-MIT.txt','SpaceMono-OFL.txt','README.md','Play Map Preview.cmd','Play Map UI Preview.cmd','release-manifest.json')
+$taskFiles = @($taskName,'LICENSE','map-entities.json','FrontiersForge-MIT.txt','SpaceMono-OFL.txt','README.md','Play Map Preview.cmd','Play Map UI Preview.cmd','release-manifest.json')
 $taskZip = Join-Path $OutputDirectory "map-preview-$($taskSha.Substring(0,12)).zip"
 Compress-Archive -LiteralPath ($taskFiles | ForEach-Object { Join-Path $OutputDirectory $_ }) -DestinationPath $taskZip -Force
 Write-Output "Launcher: $(Join-Path $OutputDirectory 'Play Map Preview.cmd')"

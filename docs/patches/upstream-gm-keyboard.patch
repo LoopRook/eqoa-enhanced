@@ -1,0 +1,41 @@
+--- a/crates/eqoa/src/viewer.rs
++++ b/crates/eqoa/src/viewer.rs
+@@ -1375,0 +1376,19 @@
++}
++
++/// Native keys for the upstream GM windows; interpreted before chat/gameplay.
++fn admin_key_in(event: &KeyIn) -> Option<(i32, bool)> {
++    let down=event.state==ElementState::Pressed;
++    if down && event.repeat {return None;}
++    let key=match &event.logical_key {
++        Key::Named(NamedKey::ArrowUp)=>19,
++        Key::Named(NamedKey::ArrowDown)=>20,
++        Key::Named(NamedKey::ArrowLeft)=>17,
++        Key::Named(NamedKey::ArrowRight)=>18,
++        Key::Named(NamedKey::Enter)=>13,
++        Key::Named(NamedKey::Escape)|Key::Named(NamedKey::Backspace)=>27,
++        Key::Character(c) if c.eq_ignore_ascii_case("e")=>134,
++        Key::Character(c) if c.eq_ignore_ascii_case("q")=>133,
++        Key::Character(c) if c.eq_ignore_ascii_case("c")=>135,
++        _=>return None,
++    };
++    Some((key,down))
+@@ -3503,0 +3523,6 @@
++        // GM Goto/Buff PC own native keys, too: never fall through to chat
++        // or held movement. Their separate edit box uses normal mode 2.
++        if let Some(p)=self.play.as_mut().filter(|p|p.typing.is_none() && p.admin_owns()) {
++            if let Some((key,down))=admin_key_in(&event) {p.admin_key(key,down);}
++            return;
++        }
+@@ -5101,0 +5127,11 @@
++    fn upstream_gm_windows_receive_native_keys_before_chat_or_movement() {
++        for (name,code) in [("up",19),("down",20),("left",17),("right",18),("enter",13),("e",134),("escape",27),("backspace",27),("q",133),("c",135)] {
++            assert_eq!(admin_key_in(&KeyIn::named(name,true)),Some((code,true)), "{name}");
++            assert_eq!(admin_key_in(&KeyIn::named(name,false)),Some((code,false)), "release {name}");
++        }
++        assert_eq!(admin_key_in(&KeyIn::named("w",true)),None,"unknown keys cannot move the player in a GM window");
++        let repeat=KeyIn{repeat:true,..KeyIn::named("enter",true)};
++        assert_eq!(admin_key_in(&repeat),None,"repeated confirmation must not open chat");
++    }
++
++    #[test]
