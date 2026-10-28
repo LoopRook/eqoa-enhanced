@@ -5,6 +5,39 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
+## 2026-10-28 · You can run again after casting a spell
+- Since about 00:55 UTC this morning, casting a spell left you walking, unable to run, until
+  you logged in again: you walk while you cast, and the game thought the cast never ended. The
+  clock change below already cured it; the cast's timing is now kept the way the PS2 keeps it,
+  so no clock can bring it back.
+- Dying now ends the slowed walk of a spell you were casting, as on the PS2.
+
+## 2026-10-28 · The game's clock can no longer run out mid-session
+- The game's network clock now starts from a small number each time you log in, so it can
+  never reach the size that stopped the loading screen this morning, and it no longer runs
+  out on November 21 (it would have frozen the loading screen, the alarm and some windows'
+  timing for anyone playing at that moment, until they logged in again). Nothing changes in
+  how the game plays.
+
+## 2026-10-28 · Entering the world no longer closes the game
+- Since about 00:55 UTC on October 28 the game closed itself as you entered the world, on
+  every server, at the loading screen. Its turning gears were timed by a clock that counts
+  milliseconds from the computer's date, and that count passed a size the gears' animation
+  could not hold. The gears now keep a clock of their own, and no animation can step outside
+  its frames any more, whatever its clock says.
+
+## 2026-10-28 · Character select smooth at Render Scale x2 and x4, and HUD Nearest by default
+- With Render Scale at x2 or x4 (Options, Extended, Video), character select and the other
+  screens before the world are smooth again. The HUD's Sharp filter (Extended, UI, HUD), which
+  draws the menus' art, did far more work for each pixel than it needed, and those screens
+  are covered in that art from edge to edge: at the larger scales a browser could fall below
+  30 frames a second there while Freeport, crowds and all, kept up. Sharp now does about a
+  quarter of the work and looks exactly as before; the start menu's windows and the HUD in
+  the world are lighter with it too.
+- HUD is back to Nearest by default, the PS2's own way of drawing the menus' and the HUD's
+  art, which costs the least to draw. Sharp is still on that row for anyone who wants every
+  texel of that art drawn evenly at any window size (if you had chosen it, choose it again).
+
 ## 2026-10-27 · The touch controls laid out as a PS4 controller
 - On a phone or tablet held sideways the on-screen controller is now laid out like a
   PS4 controller, with two sticks: the left one walks and the right one turns the camera.

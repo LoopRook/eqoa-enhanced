@@ -42,17 +42,21 @@ or a browser (each described where it lives below):
   Minimap, Stats Box, Update Notices), Controller (Controller Focus, Capture Controller),
   Camera (Distance, Turn Speed, Screen Shake), Characters (Level of Detail, NPC/PC Display and
   Distance, Name Distance, Overlapping Names), Sound (Sound in Background, Output Device:
-  the system's default, followed when it changes, or a device by its name) and
-  Quests (Quest Markers, Quest Tracker, Text: Sharp or Smooth, HUD: Sharp or Nearest), and the rows below.
+  the system's default, followed when it changes, or a device by its name),
+  Quests (Quest Markers, Quest Tracker, Text: Sharp or Smooth, HUD: Nearest or Sharp), and
+  Mods & Addons (Target HP %, XP Details, HUD Numbers, Launch Parser, Open Mods Folder), and the rows below.
 - **A render scale and a sharp HUD**: Render Scale (off unless chosen) x2 or
   x4 draws the whole picture, the world and everything over it, two or
   four times the window's size each way and averages it down, which smooths
   every edge, leaf and fence and changes nothing else (the game's texture
   levels go by distance, not by pixels), at the most the graphics card allows
-  where the window is too large (Video's page says so); HUD Sharp, on by
-  default as Text's Sharp is, draws the windows' and the HUD's art with every
-  texel as wide as every other at any window size (Nearest, the game's
-  sampling, makes some a pixel wider than others).
+  where the window is too large (Video's page says so); HUD Sharp (off unless
+  chosen: the default is Nearest, the game's sampling, as Sharp costs more to
+  draw) draws the windows' and the HUD's art with every
+  texel as wide as every other at any window size (Nearest makes some a pixel
+  wider than others). The world's textures stay as
+  the game filters them: a crisp filter for them was tried and taken out the
+  same day.
 - **More ability bars**: the Extended page's Ability Bars adds a third and a
   fourth, five abilities each, on the HUD and in the spell book, on a server
   that keeps abilities past the game's ten slots.
