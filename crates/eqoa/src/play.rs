@@ -25,6 +25,9 @@ mod fishplay;
 #[path = "adminplay.rs"]
 mod adminplay;
 
+#[path = "fork_ext/play.rs"]
+mod fork_hooks;
+
 use crate::walker::{Placing, Spawn, Walker};
 use esf::Library;
 use net::entity::{Entities, MAX_SLOTS, RETAIL_SLOTS};
@@ -5190,44 +5193,7 @@ impl Play {
         if amount > 0 && (Some(attacker) == me || (attacker == self.pet_id && self.pet_id != u32::MAX)) {
             self.guide.hit(defender, now);
         }
-        // Local combat telemetry broadcast for EQOA Parser (no admin or packet sniffing needed)
-        {
-            let is_self = Some(attacker) == me;
-            let is_pet = attacker == self.pet_id && self.pet_id != u32::MAX;
-            let actor = if is_self {
-                "you".to_string()
-            } else if is_pet {
-                "pet".to_string()
-            } else {
-                self.entity_name(attacker).unwrap_or_else(|| format!("{attacker:#010x}"))
-            };
-            let target_name = if Some(defender) == me {
-                "you".to_string()
-            } else if defender == self.pet_id && self.pet_id != u32::MAX {
-                "pet".to_string()
-            } else {
-                self.entity_name(defender).unwrap_or_else(|| format!("{defender:#010x}"))
-            };
-            let kind = if amount < 0 {
-                "heal"
-            } else if is_self || is_pet {
-                "damage"
-            } else {
-                "damage_taken"
-            };
-            let now_sec = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0.0, |d| d.as_secs_f64());
-            let json = format!(
-                r#"{{"ts":{:.3},"actor":"{}","target":"{}","amount":{},"ability":"melee","kind":"{}"}}"#,
-                now_sec,
-                actor,
-                target_name,
-                amount.abs(),
-                kind
-            );
-            crate::telemetry::broadcast(&json);
-        }
+        self.fork_combat_event(attacker, amount, defender);
         if self.options.no_damage != 0 {
             return;
         }

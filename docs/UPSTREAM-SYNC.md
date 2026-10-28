@@ -29,7 +29,8 @@ Conflicts and resolutions:
   match their respective baselines. Shared integration was reviewed separately.
 
 Prerequisite-based disc/oracle checks can return early. Final hygiene validation
-will list skipped names and actual prerequisites. These checks are not a claim
+lists skipped names and actual prerequisites in FORK-TEST-SKIPS.md; commands,
+final build results and map hashes are in FORK-VERIFICATION.md. These checks are not a claim
 of live fishing, GM permissions, moving group, or every indoor shadow behavior.
 
 ## Known upstream issue

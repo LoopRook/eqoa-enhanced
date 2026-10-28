@@ -11,6 +11,9 @@ use crate::ui::{Raster, UiRaster, Vui, icon_id, wide};
 use render::ui::{Anchor, Quad, Vertical};
 use vi::ui::TextScroll;
 
+#[path = "fork_ext/hud.rs"]
+mod fork_hud;
+
 /// What the HUD reads off the client this frame.
 #[derive(Clone, Debug, Default)]
 pub struct HudState {
@@ -278,38 +281,9 @@ impl Hud {
         }
         p = [p[0] + 59, p[1] + 21];
         draw_gauge(vui, ui, 7, 136, p, true, s.self_hp as f32 / 255.0);
-        if crate::settings::client().hud_numbers {
-            if let Some(font) = ui.assets.font {
-                let pct = ((s.self_hp as f32 / 255.0) * 100.0).round() as i32;
-                let text = wide(&format!("{pct}%"));
-                let f = &ui.ui.fonts[font];
-                let scale = 0.6;
-                let tw = f.string_width(&text) as f32 * scale;
-                let tx = (p[0] as f32 + 30.0 - tw / 2.0).round();
-                let ty = (p[1] as f32 - 1.0).round();
-                for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
-                    ui.ui.text_scaled(font, tx + dx, ty + dy, scale, [0.0, 0.0, 0.0, 0.95], &text);
-                }
-                ui.ui.text_scaled(font, tx, ty, scale, [1.0, 1.0, 1.0, 1.0], &text);
-            }
-        }
         p[1] += 10;
         let v = if s.max_power == 0 { 0.0 } else { s.power as f32 / s.max_power as f32 };
         draw_gauge(vui, ui, 9, 136, p, true, v);
-        if crate::settings::client().hud_numbers && s.max_power > 0 {
-            if let Some(font) = ui.assets.font {
-                let text = wide(&format!("{}/{}", s.power, s.max_power));
-                let f = &ui.ui.fonts[font];
-                let scale = 0.6;
-                let tw = f.string_width(&text) as f32 * scale;
-                let tx = (p[0] as f32 + 30.0 - tw / 2.0).round();
-                let ty = (p[1] as f32 - 1.0).round();
-                for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
-                    ui.ui.text_scaled(font, tx + dx, ty + dy, scale, [0.0, 0.0, 0.0, 0.95], &text);
-                }
-                ui.ui.text_scaled(font, tx, ty, scale, [0.4, 0.7, 1.0, 1.0], &text);
-            }
-        }
         p[1] += 10;
         let need = exp_for_level(s.level + 1);
         let v = s.exp as f32 / need as f32;
@@ -333,21 +307,6 @@ impl Hud {
         let part = part.clamp(0.0, 1.0);
         draw_gauge(vui, ui, 152, 151, [p[0], p[1] + 10], true, part);
         draw_gauge(vui, ui, 8, 136, p, true, v);
-        if crate::settings::client().xp_details && need > 0 {
-            if let Some(font) = ui.assets.font {
-                let pct = (v * 100.0).clamp(0.0, 100.0);
-                let text = wide(&format!("{}/{} ({:.1}%)", s.exp, need, pct));
-                let f = &ui.ui.fonts[font];
-                let scale = 0.6;
-                let tw = f.string_width(&text) as f32 * scale;
-                let tx = (p[0] as f32 + 30.0 - tw / 2.0).round();
-                let ty = (p[1] as f32 - 1.0).round();
-                for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
-                    ui.ui.text_scaled(font, tx + dx, ty + dy, scale, [0.0, 0.0, 0.0, 0.95], &text);
-                }
-                ui.ui.text_scaled(font, tx, ty, scale, [1.0, 0.85, 0.35, 1.0], &text);
-            }
-        }
         self.draw_group(vui, ui, GROUP_AT, s);
         for g in member_gauges(s) {
             draw_gauge(vui, ui, g.bar, 136, g.at, g.lit, g.v);
@@ -366,6 +325,7 @@ impl Hud {
             draw_gauge(vui, ui, g.bar, 136, g.at, g.lit, g.v);
         }
         self.draw_report(vui, ui, [20, 421]);
+        fork_hud::draw(ui, s);
         // the minimap's place, out at a wide window's right and up a tall
         // one's top with the quick menus (`map::mini::FRAME`)
         if s.minimap {
@@ -404,6 +364,7 @@ impl Hud {
     /// the bar's art, solid as its words are (a tester asked that it not
     /// fade), with its key and what it does on it.
     fn draw_report(&mut self, vui: &Vui, ui: &mut UiRaster, at: [i32; 2]) {
+        if !crate::report_policy::enabled() { return; }
         let label = wide("F3  Report a bug");
         let w = vui.string_width(ui, &label) + 28;
         self.note(ui, [at[0], at[1], at[0] + w, at[1] + vui.entry(26).uv1[1]], Pick::Report);
@@ -490,28 +451,6 @@ impl Hud {
         self.scroll.text_scroll(vui, ui, &name, [0.0, 0.0, 0.0, self.glow0], 8);
         p = [p[0] + 10, p[1] + 25];
         draw_gauge(vui, ui, 7, 136, p, has, s.target_hp as f32 / 255.0);
-        if crate::settings::client().target_hp_percent && has {
-            if let Some(font) = ui.assets.font {
-                let pct = ((s.target_hp as f32 / 255.0) * 100.0).round() as i32;
-                let text = wide(&format!("{pct}%"));
-                let f = &ui.ui.fonts[font];
-                let scale = 0.65;
-                let tw = f.string_width(&text) as f32 * scale;
-                let tx = (p[0] as f32 + 30.0 - tw / 2.0).round();
-                let ty = (p[1] as f32 - 1.0).round();
-                let col = if pct > 50 {
-                    [0.4, 1.0, 0.4, 1.0]
-                } else if pct > 20 {
-                    [1.0, 0.9, 0.3, 1.0]
-                } else {
-                    [1.0, 0.3, 0.3, 1.0]
-                };
-                for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
-                    ui.ui.text_scaled(font, tx + dx, ty + dy, scale, [0.0, 0.0, 0.0, 0.95], &text);
-                }
-                ui.ui.text_scaled(font, tx, ty, scale, col, &text);
-            }
-        }
         p = [p[0] + 65, p[1] + 2];
         if let (Some(d), true) = (s.target_info, has) {
             let icon = match d {
@@ -762,7 +701,7 @@ mod tests {
             let mut hud = Hud::new();
             hud.draw(&vui, &mut assets.raster(&mut ui), &HudState::default());
             assert_eq!(hud.pick([me[0] - side, me[1] - up]), Some(Pick::Me), "{size:?}");
-            assert_eq!(hud.pick([report[0] - side, report[1] + up]), Some(Pick::Report), "{size:?}");
+            assert_eq!(hud.pick([report[0] - side, report[1] + up]), None, "reporting is disabled: {size:?}");
             if side + up > 0.0 {
                 assert_eq!((hud.pick(me), hud.pick(report)), (None, None), "{size:?}: the game's places");
             }

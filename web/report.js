@@ -10,6 +10,9 @@
 // (a file of the build that would not load, a module that would not unpack,
 // a page older than the server's) is a notice with a Send report button.
 //
+// Enhanced disables the UI and uploads by default (report-policy.js), preserving
+// the console and local crash diagnostics. Explicit loopback fixtures retain the
+// upstream dialogs for tests.
 // Nothing is sent unless the player presses Send, and the account name and
 // the password are taken out of everything that is: the client names each
 // it sends Station (window.eqoaSecret, web::secret), since the player signs
@@ -20,8 +23,8 @@
 // are its to catch. The client's exports reach it through window.eqoaClient
 // (main.js, once the wasm is up).
 
-const params = new URLSearchParams(location.search);
-const REPORTS = (params.get('reports') || '/eqoa/reports').replace(/\/+$/, '');
+import { reportsEndpoint } from './report-policy.js';
+const REPORTS = reportsEndpoint(location.href);
 const LOG_LINES = 200;
 const LOG_LINE_MAX = 400;
 const NOTE_MAX = 1000;
@@ -159,9 +162,10 @@ function fit(text, max) {
 }
 
 async function post(route, body) {
+  if (!REPORTS || !['report', 'crash'].includes(route)) throw new Error('Report uploads are disabled in EQOA Enhanced');
   let r;
   try {
-    r = await fetch(`${REPORTS}/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    r = await fetch(`${REPORTS}/${route}`, { method: 'POST', redirect: 'error', credentials: 'omit', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   } catch {
     throw new Error('the report server could not be reached');
   }
@@ -208,7 +212,7 @@ function problem(key, text) {
   }
   console.warn(`problem (${key}): ${text}`);
   notice('problem:' + key, 'bad', text, [
-    ['Send report', () => open(text), true],
+    ...(REPORTS ? [['Send report', () => open(text), true]] : []),
     ['Dismiss', () => notice('problem:' + key)],
   ]);
 }
@@ -321,6 +325,7 @@ function show(k, title, intro, sendLabel) {
 // F3, the HUD's button, the gate's, or a notice's: `note` starts the note.
 // After a crash it is the crash's dialog again.
 async function open(note = '') {
+  if (!REPORTS) return;
   if (dead) {
     if ($('report')) $('report').hidden = false;
     return;
@@ -349,6 +354,11 @@ function crash(title, detail) {
   }
   crashText = `${title}\n${detail.trimEnd()}${kept ? `\n\n[client, as last kept]\n${kept.trimEnd()}` : ''}\n\n${dump()}`;
   store.drop(MARK);
+  if (!REPORTS) {
+    store.set('eqoa.enhanced.crash', scrub(crashText));
+    notice('crash', 'bad', `${title}. Reload the page to play again. Diagnostics are kept locally; report uploads are disabled in EQOA Enhanced.`);
+    return;
+  }
   dialog();
   $('rp-crash').hidden = false;
   $('rp-crash').textContent = detail.split('\n').slice(0, 12).join('\n');
@@ -399,7 +409,7 @@ async function send() {
 // sees it.
 for (const ev of ['keydown', 'keyup']) {
   addEventListener(ev, (e) => {
-    if (e.key !== 'F3') return;
+    if (!REPORTS || e.key !== 'F3') return;
     e.preventDefault();
     e.stopImmediatePropagation();
     if (ev === 'keydown' && !e.repeat && !kind) open();
@@ -470,6 +480,13 @@ function lastSession() {
     return;
   }
   const when = new Date(m.when).toLocaleString();
+  if (!REPORTS) {
+    notice('last-session', 'bad', `The last session (${when}) ended unexpectedly. Diagnostics are kept locally; report uploads are disabled in EQOA Enhanced.`, [
+      ['Dismiss', () => notice('last-session')],
+      ['Delete', () => { store.drop(MARK); notice('last-session'); }],
+    ]);
+    return;
+  }
   notice('last-session', 'bad', `The last session (${when}) ended without the page closing: the tab or the browser may have crashed.`, [
     ['Send crash report', async () => {
       notice('last-session', 'bad', 'Sending…');
@@ -491,6 +508,8 @@ function lastSession() {
 // ---- for main.js and the client
 
 const api = {
+  enabled: !!REPORTS,
+  diagnostics: () => scrub(crashText || dump()),
   notice,
   problem,
   open,
@@ -508,5 +527,10 @@ window.eqoaProblem = ([key, text]) => problem(key, text);
 window.eqoaCrash = ([title, detail]) => crash(title, detail);
 window.eqoaReportOpen = () => open();
 
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', lastSession);
-else lastSession();
+function ready() {
+  const gate = $('report-gate');
+  if (gate && !REPORTS) { gate.hidden = true; gate.disabled = true; }
+  lastSession();
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready);
+else ready();

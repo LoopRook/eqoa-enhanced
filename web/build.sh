@@ -27,7 +27,7 @@ if [ -n "$OPT" ]; then
     "$OPT" -O2 --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals \
         --enable-reference-types --enable-multivalue "$STAGE/eqoa_bg.wasm" -o "$STAGE/eqoa_bg.wasm"
 fi
-cp web/main.js web/report.js web/unpack.js web/sound.js web/tick.js web/fxview.js web/discstore.js web/spellfx.js "$STAGE/"
+cp web/main.js web/report.js web/report-policy.js web/unpack.js web/sound.js web/tick.js web/fxview.js web/discstore.js web/spellfx.js "$STAGE/"
 # the pages' icon: the program's own drawn disc (crates/eqoa/src/icon_art.rs)
 cp web/disc.svg "$STAGE/"
 # the page as an installed app (main.js "installing"): its manifest, whose start_url and

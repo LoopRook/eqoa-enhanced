@@ -48,6 +48,9 @@
 //! (`frame_due`, `frame_wait`): a page's animation frames and the native
 //! window's redraws both go through it.
 
+#[path = "fork_ext/settings.rs"]
+mod fork_settings;
+
 use crate::options::GameOptions;
 use std::cell::Cell;
 use vi::fpu::{Ee, F};
@@ -951,15 +954,7 @@ impl ClientOptions {
         if let Some(d) = self.output {
             s.push_str(&format!("output={}\n", d.as_str()));
         }
-        if !self.target_hp_percent {
-            s.push_str("target_hp_percent=off\n");
-        }
-        if !self.xp_details {
-            s.push_str("xp_details=off\n");
-        }
-        if !self.hud_numbers {
-            s.push_str("hud_numbers=off\n");
-        }
+        fork_settings::write(&self, &mut s);
         s
     }
 
@@ -1045,12 +1040,6 @@ impl ClientOptions {
                 ("hud", "nearest") => c.hud = render::ui::HudFilter::Nearest,
                 ("hud", "sharp") => c.hud = render::ui::HudFilter::Sharp,
                 ("output", v) if !v.is_empty() => c.output = Some(DeviceName::new(v)),
-                ("target_hp_percent", "on") => c.target_hp_percent = true,
-                ("target_hp_percent", "off") => c.target_hp_percent = false,
-                ("xp_details", "on") => c.xp_details = true,
-                ("xp_details", "off") => c.xp_details = false,
-                ("hud_numbers", "on") => c.hud_numbers = true,
-                ("hud_numbers", "off") => c.hud_numbers = false,
                 ("ability_bars", v) => {
                     if let Some(n) = v.parse::<u8>().ok().filter(|&n| (ABILITY_BARS_GAME as i32..=crate::hudmenu::MAX_BARS).contains(&(n as i32))) {
                         c.ability_bars = n;
@@ -1077,7 +1066,7 @@ impl ClientOptions {
                         c.controller[w - 1] = f;
                     }
                 }
-                _ => {}
+                (k, v) => fork_settings::parse(&mut c, k, v),
             }
         }
         c
@@ -1439,7 +1428,7 @@ pub fn describe() -> String {
         FrameRate::Display => "the display's",
     };
     format!(
-        "level of detail {}, brightness {} of {BRIGHTNESS_STEPS}, fog {} of {}{}, frame rate {rate}{}, vsync {}, render scale x{}{}, camera distance {}, camera turn speed {}%, screen shake {}, controller focus {}, capture controller {}, sound in background {}, output device {}, ability bars {}, npc/pc display {}, npc/pc view distance {}, name distance {}, overlapping names {}, art {}, update notices {}, shouts {}, target of target {}, mana bars {}, minimap {}, stats box {}, quest markers {}, quest tracker {}, text {}, hud {}, mipmaps {}, flora {}, shadows {}, environment {}, map markers {}, map towns {}, loading screens {}, target hp % {}, xp details {}, hud numbers {}; {}",
+        "level of detail {}, brightness {} of {BRIGHTNESS_STEPS}, fog {} of {}{}, frame rate {rate}{}, vsync {}, render scale x{}{}, camera distance {}, camera turn speed {}%, screen shake {}, controller focus {}, capture controller {}, sound in background {}, output device {}, ability bars {}, npc/pc display {}, npc/pc view distance {}, name distance {}, overlapping names {}, art {}, update notices {}, shouts {}, target of target {}, mana bars {}, minimap {}, stats box {}, quest markers {}, quest tracker {}, text {}, hud {}, mipmaps {}, flora {}, shadows {}, environment {}, map markers {}, map towns {}, loading screens {}{}; {}",
         if c.lod { "on" } else { "off" },
         c.brightness,
         c.fog,
@@ -1491,9 +1480,7 @@ pub fn describe() -> String {
         if c.map_markers { "on" } else { "off" },
         if c.map_towns { "on" } else { "off" },
         if c.loading_longer { "longer" } else { "instant" },
-        if c.target_hp_percent { "on" } else { "off" },
-        if c.xp_details { "on" } else { "off" },
-        if c.hud_numbers { "on" } else { "off" },
+        fork_settings::description(&c),
         kept_where()
     )
 }

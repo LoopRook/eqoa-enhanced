@@ -1,0 +1,277 @@
+{
+  "schema_version": 1,
+  "reviewed_base": "8d9035096a2deb447854d5fcff4ef25225f80fd1",
+  "review_state": "Shared diffs reviewed against pinned 8d90350 after adapter extraction; exact maximum budgets, including approved animation regressions. Final whole-branch review recorded in FORK-HYGIENE-STATUS.md.",
+  "fork_owned": [
+    "AGENTS.md",
+    "FORK.md",
+    "FORK-UPDATE-NOTES.md",
+    "README.md",
+    "docs/**",
+    "design/map-parity/**",
+    "mods/**",
+    "EQOA-Launcher.pyw",
+    "Start-EQOA.bat",
+    "Start-EQOA-With-Parser.bat",
+    "Start-Launcher.bat",
+    "crates/eqoa/resources/map-ui/**",
+    "crates/eqoa/src/map/**",
+    "crates/eqoa/src/questguide/**",
+    "crates/eqoa/src/groupmark.rs",
+    "crates/eqoa/src/mapsuggest.rs",
+    "crates/eqoa/src/statbox.rs",
+    "crates/eqoa/src/tracker.rs",
+    "crates/eqoa/src/fork_ext/**",
+    "crates/eqoa/src/report_policy.rs",
+    "crates/eqoa/src/report_policy_transport_tests.rs",
+    "crates/render/src/map.rs",
+    "crates/render/src/map.wgsl",
+    "crates/render/tests/map_circle.rs",
+    "crates/esf/tests/terrain_alone.rs",
+    "tools/build-map-preview.ps1",
+    "tools/gen_map_markers.py",
+    "tools/gen_quest_guide.py",
+    "tools/parser_launch.py",
+    "tools/test_parser_launch.py",
+    "tools/check_fork_footprint.py",
+    "tools/test_fork_footprint.py",
+    "web/report-policy.js",
+    "web/report-policy.test.mjs"
+  ],
+  "shared": {
+    ".gitignore": {
+      "added": 6,
+      "deleted": 0,
+      "reason": "Fork-local generated output and scratch configuration exclusions."
+    },
+    "Cargo.lock": {
+      "added": 2,
+      "deleted": 0,
+      "reason": "Fork dependency resolution; license metadata stays unchanged."
+    },
+    "crates/eqoa/Cargo.toml": {
+      "added": 4,
+      "deleted": 0,
+      "reason": "Fork dependency and release build settings; license metadata stays unchanged."
+    },
+    "crates/eqoa/src/bindpage.rs": {
+      "added": 16,
+      "deleted": 16,
+      "reason": "Restored and map input settings rows."
+    },
+    "crates/eqoa/src/binds.rs": {
+      "added": 93,
+      "deleted": 80,
+      "reason": "Restored/map controls and saved binding defaults."
+    },
+    "crates/eqoa/src/client_image.rs": {
+      "added": 10,
+      "deleted": 0,
+      "reason": "Map theme font/image resources."
+    },
+    "crates/eqoa/src/hideui.rs": {
+      "added": 3,
+      "deleted": 3,
+      "reason": "Restored map and tracker visibility."
+    },
+    "crates/eqoa/src/hud.rs": {
+      "added": 294,
+      "deleted": 7,
+      "reason": "Existing restored map/quest/group/Stats Box integrations plus one fork HUD adapter."
+    },
+    "crates/eqoa/src/input.rs": {
+      "added": 32,
+      "deleted": 3,
+      "reason": "Map controls and focus/input behavior."
+    },
+    "crates/eqoa/src/lod.rs": {
+      "added": 9,
+      "deleted": 8,
+      "reason": "Restored map terrain observation."
+    },
+    "crates/eqoa/src/main.rs": {
+      "added": 30,
+      "deleted": 0,
+      "reason": "Restored module registration, fork_ext boundary, and report policy module."
+    },
+    "crates/eqoa/src/options.rs": {
+      "added": 196,
+      "deleted": 43,
+      "reason": "Existing restored option entries plus one adapter reference per fork option hook."
+    },
+    "crates/eqoa/src/play.rs": {
+      "added": 745,
+      "deleted": 47,
+      "reason": "Restored/map state and observations plus one combat event adapter."
+    },
+    "crates/eqoa/src/report.rs": {
+      "added": 18,
+      "deleted": 9,
+      "reason": "Fork reporting policy transport integration."
+    },
+    "crates/eqoa/src/settings.rs": {
+      "added": 333,
+      "deleted": 22,
+      "reason": "Restored map/quest settings plus one adapter reference per settings hook."
+    },
+    "crates/eqoa/src/touch.rs": {
+      "added": 79,
+      "deleted": 2,
+      "reason": "Restored map and tracker touch input."
+    },
+    "crates/eqoa/src/ui.rs": {
+      "added": 9,
+      "deleted": 5,
+      "reason": "Map UI state and input integration."
+    },
+    "crates/eqoa/src/viewer.rs": {
+      "added": 200,
+      "deleted": 11,
+      "reason": "Restored map/quest dialogs and focus integration."
+    },
+    "crates/esf/src/mesh.rs": {
+      "added": 9,
+      "deleted": 0,
+      "reason": "Terrain mesh lookup for restored map."
+    },
+    "crates/net/src/session.rs": {
+      "added": 418,
+      "deleted": 30,
+      "reason": "Restored group/map/quest protocol state."
+    },
+    "crates/render/src/fans.rs": {
+      "added": 1,
+      "deleted": 1,
+      "reason": "Restored UI render behavior."
+    },
+    "crates/render/src/lib.rs": {
+      "added": 50,
+      "deleted": 4,
+      "reason": "Restored map rendering pipeline and exports."
+    },
+    "crates/render/src/ui.rs": {
+      "added": 97,
+      "deleted": 8,
+      "reason": "Map circle clipping and map font rendering."
+    },
+    "crates/render/src/ui.wgsl": {
+      "added": 16,
+      "deleted": 7,
+      "reason": "Circle clipping in UI shader."
+    },
+    "crates/vi/src/csprite.rs": {
+      "added": 85,
+      "deleted": 11,
+      "reason": "Animation bounds guards and negative-control regression tests."
+    },
+    "crates/vi/src/hsprite.rs": {
+      "added": 69,
+      "deleted": 3,
+      "reason": "Animation bounds guards and negative-control regression tests."
+    },
+    "crates/vi/src/ui.rs": {
+      "added": 3,
+      "deleted": 2,
+      "reason": "Restored player-facing UI behavior."
+    },
+    "release/README.txt": {
+      "added": 1,
+      "deleted": 1,
+      "reason": "Enhanced Windows bundle startup instructions."
+    },
+    "web/build.sh": {
+      "added": 1,
+      "deleted": 1,
+      "reason": "Include the fork reporting policy module in browser assets."
+    },
+    "web/main.js": {
+      "added": 48,
+      "deleted": 0,
+      "reason": "Restored browser input/map bindings."
+    },
+    "web/report.js": {
+      "added": 31,
+      "deleted": 7,
+      "reason": "Fork reporting policy transport integration."
+    }
+  },
+  "immutable": [
+    "LICENSE",
+    "UPDATE-NOTES.md"
+  ],
+  "claude_override": "On this enhanced fork, FORK.md defines scope and overrides the Vanilla rules above.",
+  "hooks": [
+    {
+      "path": "crates/eqoa/src/main.rs",
+      "name": "fork boundary module",
+      "pattern": "^mod fork_ext;",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/main.rs",
+      "name": "report policy module",
+      "pattern": "^mod report_policy;",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/play.rs",
+      "name": "combat event",
+      "pattern": "\\bself\\.fork_combat_event\\s*\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/hud.rs",
+      "name": "HUD draw",
+      "pattern": "\\bfork_hud::draw\\s*\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/options.rs",
+      "name": "options CATEGORY",
+      "pattern": "\\bfork_options::CATEGORY\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/options.rs",
+      "name": "options ITEMS",
+      "pattern": "\\bfork_options::ITEMS\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/options.rs",
+      "name": "options change",
+      "pattern": "\\bfork_options::change\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/options.rs",
+      "name": "options activate",
+      "pattern": "\\bfork_options::activate\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/options.rs",
+      "name": "options value_text",
+      "pattern": "\\bfork_options::value_text\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/settings.rs",
+      "name": "settings write",
+      "pattern": "\\bfork_settings::write\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/settings.rs",
+      "name": "settings parse",
+      "pattern": "\\bfork_settings::parse\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/settings.rs",
+      "name": "settings description",
+      "pattern": "\\bfork_settings::description\\b",
+      "count": 1
+    }
+  ]
+}

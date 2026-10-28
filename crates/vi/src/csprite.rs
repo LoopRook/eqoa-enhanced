@@ -592,4 +592,62 @@ mod tests {
         assert_eq!((cs.item_node(0), cs.item_node(1), cs.item_node(2)), (Some(6), Some(10), None), "the flag set: each slot's node");
         assert_eq!(cs.item_node(6), None, "past the slots");
     }
+
+    #[test]
+    fn an_action_with_a_missing_or_out_of_range_clip_starts_no_play() {
+        use crate::hsprite::{Anim, Frame, Frames, LOOP, ONCE, STOP_END};
+        use std::collections::HashMap;
+
+        for playing in [false, true] {
+            // Clip 0 is the control; -1 is missing and 1 is past the table.
+            for clip in [0, -1, 1] {
+                let sc = AnimScene::<Ee> {
+                    time: 0,
+                    anims: vec![Anim {
+                        num_nodes: 0,
+                        num_frames: 1,
+                        play_rate: F::new(30.0),
+                        play_speed: F::ONE,
+                        playback_type: LOOP,
+                        nodes: Vec::new(),
+                        frames: Frames::Full(vec![Frame::default()]),
+                        triggers: Vec::new(),
+                    }],
+                    ref_maps: vec![HashMap::new()],
+                };
+                let mut cs = CSprite::<Ee>::new(HSprite::new(0), 2, 9, 0, F::ONE, false);
+                cs.anim_time = 20_000;
+                cs.entries[0].animation = [0, 0];
+                cs.entries[22].animation = [clip, clip];
+                cs.entries[22].sync = ONCE;
+                cs.set_anim_priorities();
+                if playing {
+                    cs.set_defaults(&sc, &mut Rand(1));
+                }
+                let old = cs.cur[0].play;
+                assert_eq!(cs.set_animation(22, 0, &sc, &mut Rand(1)), 1);
+                assert_eq!(cs.cur[0].anim, 22);
+                if clip == 0 {
+                    assert_ne!(cs.cur[0].play, -1, "a valid clip starts");
+                    let p = cs.h.plays.get(cs.cur[0].play);
+                    assert_eq!(p.anim, 0);
+                    assert_eq!(p.playback_type, ONCE);
+                    assert_eq!(p.blend_mode, if playing { 1 } else { 0 });
+                } else {
+                    assert_eq!(cs.cur[0].play, -1, "an absent clip starts no play");
+                }
+                if playing {
+                    assert_eq!(
+                        cs.h.plays.get(old).playback_type,
+                        STOP_END,
+                        "the old play stops"
+                    );
+                }
+                assert_eq!(
+                    cs.h.plays.len(),
+                    usize::from(playing) + usize::from(clip == 0)
+                );
+            }
+        }
+    }
 }

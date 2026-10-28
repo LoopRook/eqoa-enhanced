@@ -14,24 +14,27 @@ network and gameplay improvements while developing its enhanced features.
 - Quests, coaches, XP camps, community suggestions, remappable controls and
   reusable map presentation tokens.
 - HUD enhancements, companion/addon entry points and native combat telemetry.
-  The parser is an external companion, maintained separately.
+  The parser is an external companion, maintained separately; see
+  [companion setup](docs/COMPANION-LAUNCH.md).
 - Upstream fishing, GM windows, character shadows and protocol improvements.
   Features requiring server support depend on the connected server.
 
-## Run on Windows
+## Play on Windows
 
-You need a locally owned Frontiers disc image. No disc or decrypted game data is
-distributed here. With Rust installed, build a complete map bundle:
+1. Extract the prepared **EQOA Enhanced Windows build** into a folder.
+2. Double-click **eqoa.exe**. Preview builds may give the executable a versioned name.
+3. On first launch, select your locally owned Frontiers disc image.
 
-```powershell
-./tools/build-map-preview.ps1
-```
+Keep the included map catalog and supporting files in the extracted folder.
+The game requires no Rust installation, Python, terminal or build commands.
+No disc image or decrypted game data is distributed here.
 
-Run **Play Map Preview.cmd** in the generated folder. It includes the pinned NPC
-catalog and notices, and uses an isolated profile. A prepared checkout can also
-use **Start-EQOA.bat**, which prefers target/release/eqoa.exe, then root eqoa.exe.
-The historical NPC catalog must sit beside the executable. A source merge alone
-does not rebuild installed executables.
+BAT/CMD files are optional shortcuts: Start-EQOA.bat selects a local development
+build; Play Map Preview.cmd also selects an isolated test profile. The EXE is
+the normal player entry point. The external parser has its own setup for now.
+
+Public Enhanced release packaging and its update channel are still being
+prepared. Current prepared local builds can already be launched directly.
 
 ## Development and status
 

@@ -483,6 +483,9 @@ impl<M: Model> HSprite<M> {
     /// otherwise.
     pub fn set_play_frame(&mut self, i: i32, frame: F<M>, sc: &AnimScene<M>) {
         let nf = sc.anims[self.plays.get(i).anim].num_frames;
+        if nf <= 0 {
+            return;
+        }
         let p = self.plays.get_mut(i);
         let fi = frame.0 as i32;
         p.frame_a = fi;
@@ -599,7 +602,7 @@ impl<M: Model> HSprite<M> {
             } else {
                 F::new(p.frame_a as f32) - p.frame_t
             };
-            if p.frame_rate != F::ZERO {
+            if p.frame_rate != F::ZERO && nf > 0 {
                 let acc = p.time_accum + dt;
                 let n = (acc * p.frame_rate).0 as i32;
                 p.time_accum = acc - F::new(n as f32) * p.frame_duration;
@@ -892,5 +895,56 @@ mod tests {
             let x = posed_at(t);
             assert!((-1.0..60.0).contains(&x), "{t}: {x}");
         }
+    }
+
+    #[test]
+    fn seeking_an_empty_clip_leaves_its_timing_unchanged() {
+        for nf in [0, -1] {
+            for playback_type in [LOOP, ONCE] {
+                let mut sc = clip();
+                sc.anims[0].num_frames = nf;
+                sc.anims[0].frames = Frames::Full(Vec::new());
+                let mut h = HSprite::<Ee>::new(0);
+                let i = h.add_play(0, playback_type, F::ONE, &sc);
+                sc.time = 125;
+                h.set_play_frame(i, F::new(5.25), &sc);
+                let p = h.plays.get(i);
+                assert_eq!((p.frame_a, p.frame_b, p.last_time), (0, 0, 0));
+                assert_eq!((p.time_accum, p.frame_t), (F::ZERO, F::ZERO));
+            }
+        }
+        // A nonempty clip still seeks to the requested frame and fraction.
+        let sc = clip();
+        let mut h = HSprite::<Ee>::new(0);
+        let i = h.add_play(0, LOOP, F::ONE, &sc);
+        h.set_play_frame(i, F::new(5.25), &sc);
+        let p = h.plays.get(i);
+        assert_eq!((p.frame_a, p.frame_b), (5, 6));
+        assert!((p.frame_t.0 - 0.25).abs() < 0.0001);
+    }
+
+    #[test]
+    fn an_empty_clip_keeps_its_clock_and_blend_without_advancing_frames() {
+        for nf in [0, -1] {
+            for speed in [F::ONE, -F::ONE] {
+                let mut sc = clip();
+                sc.anims[0].num_frames = nf;
+                sc.anims[0].frames = Frames::Full(Vec::new());
+                let mut h = HSprite::<Ee>::new(0);
+                h.add_root();
+                let i = h.add_interpolated_play(0, LOOP, speed, 250, &sc);
+                sc.time = 125;
+                h.process(-1, &sc);
+                let p = h.plays.get(i);
+                assert_eq!((p.frame_a, p.frame_b, p.last_time), (0, 0, 125));
+                assert_eq!(p.weight, F::new(0.5));
+                assert_eq!(h.nodes[0].frame.trans.x, F::ZERO);
+            }
+        }
+        assert_eq!(
+            posed_at(1000),
+            30.0,
+            "the control: a nonempty clip advances"
+        );
     }
 }

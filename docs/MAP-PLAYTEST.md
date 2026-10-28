@@ -6,12 +6,15 @@ code is untouched. See MAP-RELEASE-HANDOFF.md for implementation and validation.
 
 ## Launch
 
-Close the previous game, then run **Play Map Preview.cmd** beside the preview
-executable. **Play Map UI Preview.cmd** is an equivalent alias. In the source
-checkout these live under run/map-parity-preview/; build/package them with
-tools/build-map-preview.ps1. The launcher selects the current versioned
-executable and an isolated profile/. Select your locally owned disc if prompted.
-Sign in normally; account files are not copied from the normal client.
+Extract the complete build folder and double-click its EQOA executable. In this
+preview its filename starts with eqoa-map-preview-. Select your locally owned
+Frontiers disc if prompted, then sign in normally. No build commands are needed.
+Keep map-entities.json and the supporting files beside the executable.
+
+For a separate test profile, optionally run Play Map Preview.cmd instead.
+Play Map UI Preview.cmd is an equivalent shortcut. These select the same EXE
+with an isolated profile/; account files are not copied from your normal client.
+Developer build and packaging instructions belong in docs/DEVELOPMENT.md.
 
 ## Controls and behavior
 

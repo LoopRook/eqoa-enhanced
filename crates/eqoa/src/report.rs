@@ -5,7 +5,8 @@
 //! before it (Dab's Mod's F3 and crash reports). Nothing is sent unless the
 //! player says so, and the account name and the password the game sent
 //! Station are taken out of all of it (`secret`), as is the home directory's
-//! path.
+//! path. Enhanced disables the reporting UI and transport by default through
+//! `report_policy`; the log and local crash files below are still kept.
 //!
 //! In a page they are web/report.js's (its dialog, the canvas's picture, the
 //! page's own log and what it catches); the client hands it its state, the
@@ -53,13 +54,16 @@ pub fn frame_drawn() {
 
 /// F3 or the HUD's Report a bug: the report's dialog.
 pub fn open() {
+    if !crate::report_policy::enabled() { return; }
     #[cfg(target_arch = "wasm32")]
     crate::web::open_report();
     #[cfg(not(target_arch = "wasm32"))]
     native::open();
 }
 
-/// The report server: `EQOA_REPORTS=<base>` names another (a test's).
+/// Upstream's historical endpoint, retained for reference and denial tests.
+/// Enhanced only allows an explicit loopback fixture through `report_policy`.
+#[cfg(test)]
 pub const SERVER: &str = "https://eqoaclassic.com/eqoa/reports";
 
 /// A string as a JSON string, quotes and all.
@@ -139,7 +143,7 @@ pub use native::{Key, caught, clean_exit, click, crash, draw, is_open, is_report
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
-    use super::{SERVER, base64, fit, json_string, scrub};
+    use super::{base64, fit, json_string, scrub};
     use std::collections::VecDeque;
     use std::fs::File;
     use std::io::{BufRead, Write};
@@ -743,19 +747,21 @@ mod native {
 
     // ---- sending ------------------------------------------------------------
 
-    fn server() -> String {
-        std::env::var("EQOA_REPORTS").unwrap_or_else(|_| SERVER.to_string()).trim_end_matches('/').to_string()
-    }
-
     /// A POST of `body` (JSON) to the server's `route`: the report's id.
     pub(super) fn post(route: &str, body: String) -> Result<String, String> {
+        post_to(std::env::var("EQOA_REPORTS").ok().as_deref(), route, body)
+    }
+
+    pub(super) fn post_to(endpoint: Option<&str>, route: &str, body: String) -> Result<String, String> {
+        let url = crate::report_policy::upload_url(endpoint, route)?;
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_connect(Some(Duration::from_secs(10)))
             .timeout_global(Some(Duration::from_secs(60)))
+            .proxy(None)
+            .max_redirects(0)
             .http_status_as_error(false)
             .build()
             .into();
-        let url = format!("{}/{route}", server());
         let mut r = agent.post(&url).header("Content-Type", "application/json").send(body).map_err(|e| format!("the report server could not be reached ({e})"))?;
         let status = r.status().as_u16();
         let text = r.body_mut().with_config().limit(64 * 1024).read_to_string().unwrap_or_default();
@@ -1136,7 +1142,7 @@ mod native {
 
     /// F3, the report's key (`binds::reserved` keeps it from the game).
     pub fn is_report_key(k: &winit::keyboard::Key) -> bool {
-        *k == winit::keyboard::Key::Named(winit::keyboard::NamedKey::F3)
+        crate::report_policy::enabled() && *k == winit::keyboard::Key::Named(winit::keyboard::NamedKey::F3)
     }
 
     /// A key of the window's as the dialog takes it (the keyboard's own
@@ -1240,6 +1246,7 @@ mod native {
     /// on, by the first window: two would offer one): the 2D layer's `r`,
     /// the game's `vui`.
     pub fn draw(vui: &Vui, r: &mut dyn Raster) {
+        if !crate::report_policy::enabled() { return; }
         let mut d = lock(&DIALOG);
         if d.is_none() {
             let mut offered = lock(&OFFERED);
@@ -1454,6 +1461,8 @@ mod native {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+
+    include!("report_policy_transport_tests.rs");
 
     /// `caught` hands a panic back as its message (gilrs's index panic is a
     /// formatted String, a literal a &str) and a value through as it is, its

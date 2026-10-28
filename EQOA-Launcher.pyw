@@ -15,8 +15,7 @@ from tkinter import ttk, messagebox, filedialog
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MODS_DIR = os.path.join(SCRIPT_DIR, "mods")
 EXE_PATH = os.path.join(SCRIPT_DIR, "eqoa.exe")
-PARSER_DIR = r"C:\Users\hocka\Github Projects\EQOA Parser"
-PARSER_APP = os.path.join(PARSER_DIR, "eqoa_parser", "app.py")
+from tools.parser_launch import ParserLaunchError, launch_parser
 
 # AppData configuration paths
 APPDATA_DIR = os.path.join(os.environ.get("APPDATA", ""), "eqoa-rs")
@@ -323,9 +322,11 @@ class LauncherApp(tk.Tk):
             messagebox.showerror("Error", f"Could not find eqoa.exe in:\n{SCRIPT_DIR}")
             return
 
-        # Start parser in companion mode if script exists
-        if os.path.isfile(PARSER_APP):
-            subprocess.Popen([sys.executable, PARSER_APP, "--client"], cwd=PARSER_DIR)
+        try:
+            launch_parser(SCRIPT_DIR)
+        except ParserLaunchError as exc:
+            messagebox.showerror("Combat Parser", str(exc))
+            return
 
         # Start game client
         subprocess.Popen([EXE_PATH], cwd=SCRIPT_DIR)

@@ -28,13 +28,21 @@ AGENTS.md and docs/MAP-RELEASE-HANDOFF.md govern retained functionality.
 
 ## Tasks
 
-- [ ] Review all 23 upstream commits and changed subsystems against their tests.
-- [ ] Merge origin/master with full ancestry, resolve every conflict by intent,
+- [x] Review all 23 upstream commits and changed subsystems against their tests.
+- [x] Merge origin/master with full ancestry, resolve every conflict by intent,
       and record resolutions and retained feature anchors.
-- [ ] Run locked workspace tests, new GPU tests and release build; inspect
+- [x] Run locked workspace tests, new GPU tests and release build; inspect
       deterministic native map captures and report fixture skips/live limits.
-- [ ] Obtain independent source review; address actionable integration findings.
-- [ ] Write the brief enhanced README.md and link its detailed development reference. Add sourced license choices
+- [x] Obtain independent source review; address actionable integration findings.
+- [x] Write the brief enhanced README.md and link its detailed development reference. Add sourced license choices
       without changing LICENSE or Cargo metadata.
 - [ ] Commit validated integration, fast-forward local enhanced, refresh normal
       executables and preview bundle, and record upstream ancestry/provenance.
+
+## Hygiene continuation
+
+The owner supplied EQOA Enhanced Fork Hygiene Brief after the first merge.
+FORK-HYGIENE-STATUS.md is the continuation ledger; FORK-VERIFICATION.md records
+final command results and FORK-TEST-SKIPS.md names every omitted fixture check.
+The later owner instruction keeps an enhanced root README and makes direct EXE
+launch the player path. Developer build commands stay in DEVELOPMENT.md.

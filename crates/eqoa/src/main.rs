@@ -129,8 +129,7 @@ mod trainer;
 mod trails;
 mod options;
 mod settings;
-mod telemetry;
-pub mod mods;
+mod fork_ext;
 mod social;
 mod wholist;
 mod zones;
@@ -159,6 +158,7 @@ mod gpustart;
 #[cfg(not(target_arch = "wasm32"))]
 mod nothrottle;
 mod report;
+mod report_policy;
 mod ui;
 mod update;
 #[cfg(not(target_arch = "wasm32"))]

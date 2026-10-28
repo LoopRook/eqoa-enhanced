@@ -1,0 +1,481 @@
+//! Drag-and-drop mod engine and companion manager for EQOA Native Rust.
+//! Discovers mods in the `./mods/` directory and manages companion tools
+//! like the EQOA Combat Parser.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use std::process::{Child, Command};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Mutex;
+
+/// One mod discovered in the `mods/` directory.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModManifest {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub description: String,
+    pub enabled: bool,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub path: PathBuf,
+}
+
+/// Active combat parser child process, if started through the client.
+#[cfg(not(target_arch = "wasm32"))]
+static RUNNING_PARSER: Mutex<Option<Child>> = Mutex::new(None);
+
+/// The path to the `mods/` directory beside the executable or in current directory.
+pub fn mods_dir() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let p = parent.join("mods");
+            if p.is_dir() {
+                return p;
+            }
+        }
+    }
+    PathBuf::from("mods")
+}
+
+/// Ensures the `mods/` directory exists and creates default starter templates.
+pub fn ensure_mods_dir() {
+    let dir = mods_dir();
+    let _ = fs::create_dir_all(&dir);
+
+    // Create a helpful README explaining drag-and-drop modding.
+    let readme = dir.join("README.txt");
+    if !readme.exists() {
+        let text = "\
+EQOA Native Rust - Mod Directory
+================================
+
+Drop your mod folders in this directory!
+Each mod can be a folder containing a `mod.json` file.
+
+Example folder structure:
+  mods/
+    my_custom_ui/
+      mod.json
+      (textures, resources...)
+    eqoa_parser/
+      mod.json
+
+You can toggle mods on or off directly inside the game from:
+Options -> Extended -> Mods
+";
+        let _ = fs::write(readme, text);
+    }
+
+    // Create starter entry for EQOA Combat Parser companion
+    let parser_dir = dir.join("eqoa_parser");
+    let parser_json = parser_dir.join("mod.json");
+    if !parser_json.exists() {
+        let _ = fs::create_dir_all(&parser_dir);
+        let parser_manifest = include_str!("../../../../mods/eqoa_parser/mod.json");
+        let _ = fs::write(parser_json, parser_manifest);
+    }
+}
+
+/// Opens the `mods/` folder in the system file manager.
+pub fn open_mods_folder() {
+    ensure_mods_dir();
+    let dir = mods_dir();
+    #[cfg(windows)]
+    {
+        let _ = Command::new("explorer.exe").arg(&dir).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open").arg(&dir).spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = Command::new("xdg-open").arg(&dir).spawn();
+    }
+}
+
+/// Discovers all mods located in `mods/`.
+pub fn list_mods() -> Vec<ModManifest> {
+    ensure_mods_dir();
+    let dir = mods_dir();
+    let mut mods = Vec::new();
+
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return mods;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let folder_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        let manifest_file = path.join("mod.json");
+
+        if manifest_file.exists() {
+            if let Ok(content) = fs::read_to_string(&manifest_file) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let id = v
+                        .get("id")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or(folder_name)
+                        .to_string();
+                    let name = v
+                        .get("name")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or(folder_name)
+                        .to_string();
+                    let version = v
+                        .get("version")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("1.0.0")
+                        .to_string();
+                    let author = v
+                        .get("author")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("Community")
+                        .to_string();
+                    let description = v
+                        .get("description")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let enabled = v.get("enabled").and_then(|b| b.as_bool()).unwrap_or(true);
+                    let command = v
+                        .get("command")
+                        .and_then(|s| s.as_str())
+                        .map(|s| s.to_string());
+                    let args = v
+                        .get("args")
+                        .and_then(|a| a.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    mods.push(ModManifest {
+                        id,
+                        name,
+                        version,
+                        author,
+                        description,
+                        enabled,
+                        command,
+                        args,
+                        path,
+                    });
+                    continue;
+                }
+            }
+        }
+
+        // Mod without mod.json: fallback representation
+        mods.push(ModManifest {
+            id: folder_name.to_string(),
+            name: folder_name.replace('_', " "),
+            version: "1.0.0".to_string(),
+            author: "Local".to_string(),
+            description: "Custom local mod package".to_string(),
+            enabled: true,
+            command: None,
+            args: Vec::new(),
+            path,
+        });
+    }
+
+    mods
+}
+
+/// Checks the child owned by this client; a separate launcher owns its own child.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn is_parser_running() -> bool {
+    let Ok(mut lock) = RUNNING_PARSER.lock() else {
+        return false;
+    };
+    if let Some(child) = lock.as_mut() {
+        if matches!(child.try_wait(), Ok(None)) {
+            return true;
+        }
+        *lock = None;
+    }
+    false
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn is_parser_running() -> bool {
+    false
+}
+
+/// Compatibility for callers that only need success/failure.
+pub fn launch_parser() -> bool {
+    launch_parser_result().is_ok()
+}
+
+/// Launch exactly the manifest command and args, reporting configuration failures.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn launch_parser_result() -> Result<(), String> {
+    let mut lock = RUNNING_PARSER
+        .lock()
+        .map_err(|_| "Parser process lock is unavailable.".to_string())?;
+    if let Some(child) = lock.as_mut() {
+        if matches!(child.try_wait(), Ok(None)) {
+            return Ok(());
+        }
+    }
+    *lock = None;
+    ensure_mods_dir();
+    let manifest = mods_dir().join("eqoa_parser/mod.json");
+    let plan = parser_plan(&manifest, std::env::var_os("EQOA_PARSER_DIR").as_deref())?;
+    let mut command = Command::new(&plan.command);
+    command.args(&plan.args).current_dir(&plan.cwd);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW, including python.exe
+    }
+    let child = command.spawn().map_err(|e| {
+        format!(
+            "Cannot launch parser command {}: {e}",
+            plan.command.display()
+        )
+    })?;
+    *lock = Some(child);
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn launch_parser_result() -> Result<(), String> {
+    Err("Combat parser launching is available in the native client only.".to_string())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+struct ParserLaunch {
+    command: PathBuf,
+    args: Vec<String>,
+    cwd: PathBuf,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parser_plan(
+    manifest_path: &Path,
+    configured: Option<&std::ffi::OsStr>,
+) -> Result<ParserLaunch, String> {
+    let manifest_path = fs::canonicalize(manifest_path).map_err(|e| {
+        format!(
+            "Cannot read parser manifest {}: {e}",
+            manifest_path.display()
+        )
+    })?;
+    let text = fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("Cannot read parser manifest: {e}"))?;
+    let manifest: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("Invalid parser manifest: {e}"))?;
+    if manifest.get("id").and_then(|v| v.as_str()) != Some("eqoa_parser") {
+        return Err("Parser manifest id must be eqoa_parser.".to_string());
+    }
+    if manifest
+        .get("enabled")
+        .is_some_and(|v| v.as_bool() != Some(true))
+    {
+        return Err("The parser is disabled in mod.json.".to_string());
+    }
+    let command = manifest
+        .get("command")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| "Parser manifest command must be a nonempty string.".to_string())?;
+    let args = match manifest.get("args") {
+        None => Vec::new(),
+        Some(serde_json::Value::Array(values)) => values
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| "Parser manifest args must be an array of strings.".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err("Parser manifest args must be an array of strings.".to_string()),
+    };
+    let configured = configured
+        .filter(|v| !v.to_string_lossy().trim().is_empty())
+        .ok_or_else(|| {
+            "Set EQOA_PARSER_DIR to the parser source or installation directory.".to_string()
+        })?;
+    let folder = manifest_path
+        .parent()
+        .ok_or_else(|| "Parser manifest has no directory.".to_string())?;
+    let base = folder
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| "Parser manifest is outside the mods directory.".to_string())?;
+    let mut cwd = PathBuf::from(configured);
+    if !cwd.is_absolute() {
+        cwd = base.join(cwd);
+    }
+    if !cwd.is_dir() {
+        return Err(format!(
+            "EQOA_PARSER_DIR is not a directory: {}",
+            cwd.display()
+        ));
+    }
+    let cwd = fs::canonicalize(cwd).map_err(|e| format!("Cannot access EQOA_PARSER_DIR: {e}"))?;
+    let search_path: Vec<_> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    let command = find_command(command, folder, &search_path).ok_or_else(|| {
+        format!("Parser command was not found beside mod.json or on PATH: {command}")
+    })?;
+    Ok(ParserLaunch { command, args, cwd })
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    struct Fixture {
+        root: PathBuf,
+        manifest: PathBuf,
+        cwd: PathBuf,
+    }
+    impl Fixture {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let root = std::env::temp_dir().join(format!(
+                "eqoa-mod-launch-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            let folder = root.join("mods/eqoa_parser");
+            let cwd = root.join("parser source");
+            fs::create_dir_all(&folder).unwrap();
+            fs::create_dir_all(&cwd).unwrap();
+            let this = Self {
+                root,
+                manifest: folder.join("mod.json"),
+                cwd,
+            };
+            this.write(serde_json::json!({"id":"eqoa_parser", "enabled":true, "command":std::env::current_exe().unwrap(), "args":["-m", "eqoa_parser", "--client", "a \"quoted\" arg"]}));
+            this
+        }
+        fn write(&self, value: serde_json::Value) {
+            fs::write(&self.manifest, value.to_string()).unwrap();
+        }
+        fn plan(&self) -> Result<ParserLaunch, String> {
+            parser_plan(&self.manifest, Some(self.cwd.as_os_str()))
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn manifest_command_args_and_working_directory_drive_launch() {
+        let f = Fixture::new();
+        let plan = f.plan().unwrap();
+        assert_eq!(plan.command, std::env::current_exe().unwrap());
+        assert_eq!(
+            plan.args,
+            ["-m", "eqoa_parser", "--client", "a \"quoted\" arg"]
+        );
+        assert_eq!(plan.cwd, fs::canonicalize(&f.cwd).unwrap());
+        assert!(
+            parser_plan(&f.manifest, None)
+                .unwrap_err()
+                .contains("EQOA_PARSER_DIR")
+        );
+    }
+
+    #[test]
+    fn launch_rejects_missing_disabled_and_malformed_manifest() {
+        let f = Fixture::new();
+        fs::remove_file(&f.manifest).unwrap();
+        assert!(f.plan().is_err());
+        f.write(
+            serde_json::json!({"id":"eqoa_parser", "enabled":false,"command":"python", "args":[]}),
+        );
+        assert!(f.plan().unwrap_err().contains("disabled"));
+        f.write(serde_json::json!({"id":"eqoa_parser", "command":"python", "args":[12]}));
+        assert!(f.plan().unwrap_err().contains("args"));
+    }
+
+    #[test]
+    fn relative_command_and_directory_resolve_from_installation() {
+        let f = Fixture::new();
+        let program = f.manifest.parent().unwrap().join("companion.exe");
+        fs::write(&program, "test fixture").unwrap();
+        f.write(serde_json::json!({"id":"eqoa_parser", "command":"./companion.exe", "args":[]}));
+        let plan = parser_plan(&f.manifest, Some(std::ffi::OsStr::new("parser source"))).unwrap();
+        assert_eq!(
+            fs::canonicalize(plan.command).unwrap(),
+            fs::canonicalize(program).unwrap()
+        );
+        assert_eq!(plan.cwd, fs::canonicalize(&f.cwd).unwrap());
+        f.write(serde_json::json!({"id":"eqoa_parser", "command":"./missing.exe", "args":[]}));
+        assert!(f.plan().unwrap_err().contains("command"));
+    }
+
+    #[test]
+    fn bare_commands_fall_back_to_search_path() {
+        let f = Fixture::new();
+        let executable = std::env::current_exe().unwrap();
+        let name = executable.file_name().unwrap().to_str().unwrap();
+        assert_eq!(
+            find_command(
+                name,
+                f.manifest.parent().unwrap(),
+                &[executable.parent().unwrap().to_path_buf()]
+            )
+            .unwrap(),
+            executable
+        );
+        assert!(
+            find_command(
+                "eqoa-deliberately-missing",
+                f.manifest.parent().unwrap(),
+                &[]
+            )
+            .is_none()
+        );
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn find_command(command: &str, directory: &Path, search_path: &[PathBuf]) -> Option<PathBuf> {
+    let program = Path::new(command);
+    if program.is_absolute() {
+        return program.is_file().then(|| program.to_path_buf());
+    }
+    if command.contains('/') || command.contains('\\') {
+        let path = directory.join(program);
+        return path.is_file().then_some(path);
+    }
+    for folder in std::iter::once(directory).chain(search_path.iter().map(PathBuf::as_path)) {
+        let path = folder.join(command);
+        if path.is_file() {
+            return Some(path);
+        }
+        #[cfg(windows)]
+        if path.extension().is_none() {
+            let extensions =
+                std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+            for extension in extensions.split(';').filter(|s| !s.is_empty()) {
+                let candidate = folder.join(format!("{command}{extension}"));
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}

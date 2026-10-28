@@ -1,5 +1,14 @@
 # Development
 
+## Player delivery
+
+Players should receive a prepared Windows ZIP, extract it and double-click
+eqoa.exe (or the versioned preview EXE). They do not build from source or need
+Python for the game. Keep build commands in developer documentation.
+Start-EQOA.bat is a checkout convenience; Play Map Preview.cmd selects an isolated
+profile and catalog for testing. Neither is a required player launcher.
+The Python desktop launcher and external parser remain optional companion tools.
+
 ## Build and test
 
 Use the Rust toolchain pinned by .github/workflows/dev.yml. From the workspace:

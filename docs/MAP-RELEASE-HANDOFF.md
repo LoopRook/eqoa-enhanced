@@ -173,3 +173,20 @@ Pre-integration primary-checkout documentation is retained in a named local Git
 stash (`pre-map-integration documentation`) and a local backup if integration
 needed to clear older drafts; updated documents include their content. Do not
 blindly pop an older draft over this handoff.
+
+## Upstream synchronization and hygiene handoff
+
+The October 28 merge retains all 23 upstream commits through8d90350. Enhanced source
+remains separate from the vanilla master mirror. See FORK.md, FORK-OWNERSHIP.md,
+UPSTREAM-SYNC.md and FORK-VERIFICATION.md before another merge. New companion/HUD
+implementation now lives under fork_ext/; restored map/quest code was retained.
+
+The final cleanup disables upstream bug-report UI/uploads while keeping local
+logs. Its fresh minimap, mob-hover and spawn-search captures match this map
+milestone byte for byte. hygiene-manifest.json under upstream-sync-captures/
+records the executable and image hashes. The earlier source-audit manifest is a
+historical pre-extraction record, not a claim that legacy mods.rs still exists.
+
+Normal launchers must receive the verified executable and pinned catalog after
+the source fast-forward. Companion setup uses EQOA_PARSER_DIR and mod.json; see
+COMPANION-LAUNCH.md. Source integration does not install parser dependencies.

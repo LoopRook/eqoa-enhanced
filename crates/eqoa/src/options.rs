@@ -102,6 +102,9 @@
 
 #![allow(clippy::too_many_arguments)]
 
+#[path = "fork_ext/options.rs"]
+mod fork_options;
+
 use crate::bindpage::ControlsPage;
 use crate::pointer::{Hits, key, rows_rect};
 use crate::settings::{BRIGHTNESS_STEPS, CAMERA_MAX, CAMERA_MIN, CAMERA_STEP, ClientOptions, ENTITY_SLOTS_GAME, ENTITY_SLOTS_MAX, ENTITY_SLOTS_STEP, ENTITY_VIEW_GAME, ENTITY_VIEW_MAX, ENTITY_VIEW_STEP, Focus, FrameRate, NAME_DISTANCE_GAME, NAME_DISTANCE_MAX, TURN_MAX, TURN_MIN, TURN_STEP};
@@ -659,18 +662,6 @@ impl WndOptions {
                     37 => c.environment = !c.environment,
                     // Map Markers: the map's camps and coaches from its next frame (`map::markers`)
                     1043 => c.map_markers = !c.map_markers,
-                    // Target HP %: drawn beside target gauge
-                    1048 => c.target_hp_percent = !c.target_hp_percent,
-                    // XP Details: numbers and percent on XP gauge
-                    1049 => c.xp_details = !c.xp_details,
-                    // HUD Numbers: player HP and power values
-                    1050 => c.hud_numbers = !c.hud_numbers,
-                    // Open Mods Folder
-                    1051 => crate::mods::open_mods_folder(),
-                    // Launch Combat Parser companion
-                    1052 => {
-                        let _ = crate::mods::launch_parser();
-                    }
                     // Shadows: drawn or not from the next frame (`viewer`, `shadows`)
                     46 => c.shadows = !c.shadows,
                     // Output Device: the sound opened there from the next
@@ -724,7 +715,7 @@ impl WndOptions {
                         let at = all.iter().position(|&r| r == crate::settings::frame_rate()).unwrap_or(0);
                         c.frame_rate = Some(all[(at + if d < 0 { all.len() - 1 } else { 1 }) % all.len()]);
                     }
-                    _ => {}
+                    _ => { fork_options::change(&mut c, self.item); }
                 }
                 crate::settings::set_client(c);
             }
@@ -767,16 +758,9 @@ impl WndOptions {
             self.page_window(vui, r, CATEGORIES[c].items.len() as i32 + 3);
             return false;
         }
-        if self.page == 3 && self.cat.is_some() {
-            if self.item == 1051 {
-                crate::mods::open_mods_folder();
-                cues.push(8);
-                return false;
-            } else if self.item == 1052 {
-                let _ = crate::mods::launch_parser();
-                cues.push(8);
-                return false;
-            }
+        if self.page == 3 && self.cat.is_some() && fork_options::activate(self.item) {
+            cues.push(8);
+            return false;
         }
         if self.page != -1 {
             cues.push(9);
@@ -1120,9 +1104,9 @@ const CONTROLS: &str = "Controls";
 /// Extended's rows, by the item each changes (`change`), and their labels.
 /// A row is drawn by its item (`value_text`, or `slider_at` for a slider)
 /// and shown on the page of the category that lists it (`CATEGORIES`).
-// Upstream IDs stay below 1000; enhanced-only IDs 1043..1052 avoid future collisions.
+// Upstream IDs stay below 1000; enhanced map IDs 1043..1047 avoid future collisions.
 // These are transient UI identities, not persisted settings keys.
-const EXTENDED_ITEMS: [(i32, &str); 40] = [
+const EXTENDED_ITEMS: [(i32, &str); 35] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1158,11 +1142,6 @@ const EXTENDED_ITEMS: [(i32, &str); 40] = [
     (1045, "Quest Markers"),
     (1046, "Quest Tracker"),
     (1047, "Stats Box"),
-    (1048, "Target HP %"),
-    (1049, "XP Details"),
-    (1050, "HUD Numbers"),
-    (1051, "Open Mods Folder"),
-    (1052, "Combat Parser"),
 ];
 
 /// What a category's page says beside its Back legend.
@@ -1202,7 +1181,7 @@ const CATEGORIES: [Category; 9] = [
     // the quests' (UI holds its six): the marks a server sends for the map
     // and its tracker for the HUD
     Category { name: "Map & Quests", items: &[1045, 1046, 1043, 30, 40], note: Note::None },
-    Category { name: "Mods & Addons", items: &[1048, 1049, 1050, 1051, 1052], note: Note::None },
+    fork_options::CATEGORY,
 ];
 
 /// Video's rows: natively Display first (F3 20261024-201507: full screen was
@@ -1248,14 +1227,19 @@ const fn fits(cats: &[Category]) -> bool {
 
 const _: () = assert!(fits(&CATEGORIES), "a category's page would scroll: give its rows another category");
 
+/// The registered rows, including the fork's own page.
+fn extended_items() -> impl Iterator<Item = &'static (i32, &'static str)> {
+    EXTENDED_ITEMS.iter().chain(fork_options::ITEMS.iter())
+}
+
 /// Whether `item` is one of Extended's rows.
 fn extended(item: i32) -> bool {
-    EXTENDED_ITEMS.iter().any(|&(i, _)| i == item)
+    extended_items().any(|&(i, _)| i == item)
 }
 
 /// An Extended row's label.
 fn label_of(item: i32) -> &'static str {
-    EXTENDED_ITEMS.iter().find(|&&(i, _)| i == item).map_or("", |&(_, l)| l)
+    extended_items().find(|&&(i, _)| i == item).map_or("", |&(_, l)| l)
 }
 
 /// An Extended row's value as its frame shows it; none for a slider
@@ -1308,12 +1292,7 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         }),
         32 => wide(c.output.as_ref().map_or(SYSTEM_DEFAULT, |d| d.as_str())),
         33 => wide(if crate::display::full() { "Full Screen" } else { "Window" }),
-        1048 => on_off(c.target_hp_percent),
-        1049 => on_off(c.xp_details),
-        1050 => on_off(c.hud_numbers),
-        1051 => wide("Open"),
-        1052 => wide(if crate::mods::is_parser_running() { "Running" } else { "Launch" }),
-        _ => return None,
+        _ => return fork_options::value_text(vui, item, &c),
     })
 }
 
@@ -1541,6 +1520,7 @@ mod tests {
     /// control).
     #[test]
     fn the_extended_pages() {
+        let item_named = |label| extended_items().find(|&&(_, name)| name == label).unwrap().0;
         use crate::pointer::testing::{NullRaster, vui};
         use crate::settings::{self, testing};
         testing::reset(false);
@@ -1915,15 +1895,15 @@ mod tests {
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.cat_sel, cues.last()), (8, Some(&9)), "Mods & Addons, the last category");
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.row, w.item), (Some(8), 0, 1048), "Mods & Addons page: Target HP % first");
+        assert_eq!((w.cat, w.row, w.item), (Some(8), 0, item_named("Target HP %")), "Mods & Addons page: Target HP % first");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, w.item), (1, 1049), "XP Details");
+        assert_eq!((w.row, w.item), (1, item_named("XP Details")), "XP Details");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, w.item), (2, 1050), "HUD Numbers");
+        assert_eq!((w.row, w.item), (2, item_named("HUD Numbers")), "HUD Numbers");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, w.item), (3, 1051), "Open Mods Folder");
+        assert_eq!((w.row, w.item), (3, item_named("Open Mods Folder")), "Open Mods Folder");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, w.item), (4, 1052), "Combat Parser");
+        assert_eq!((w.row, w.item), (4, item_named("Combat Parser")), "Combat Parser");
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.row, cues.last()), (4, Some(&9)), "Mods & Addons last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
@@ -2086,10 +2066,10 @@ mod tests {
             v.sort();
             v
         };
-        let all: Vec<i32> = EXTENDED_ITEMS.iter().map(|&(i, _)| i).collect();
+        let all: Vec<i32> = extended_items().map(|&(i, _)| i).collect();
         assert_eq!(listed(&CATEGORIES), all);
         assert!(fits(&CATEGORIES));
-        assert!(EXTENDED_ITEMS.iter().all(|&(i, l)| !l.is_empty() && label_of(i) == l));
+        assert!(extended_items().all(|&(i, l)| !l.is_empty() && label_of(i) == l));
         let short = [Category { name: "Video", items: &[13, 20], note: Note::None }];
         assert_ne!(listed(&short), all, "the control: rows left out");
         let seven = [Category { name: "Video", items: &[13, 20, 14, 26, 25, 12, 15], note: Note::None }];

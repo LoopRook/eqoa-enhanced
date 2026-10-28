@@ -1,0 +1,21 @@
+{
+  "fixture": "Offline synthetic Water Rat level7; pinned historical Forge catalog; player25300,15200; scale5; 1280x720",
+  "cases": [
+    {
+      "case": "minimap",
+      "matchesMergedBaseline": true,
+      "sha256": "2b2a7587b9d98b524e6a6d511c13f5e568ad58fe3f925f8a24e1156c1ee307ef"
+    },
+    {
+      "case": "mob-hover",
+      "matchesMergedBaseline": true,
+      "sha256": "88855d89ef209dfcf94b3495543ced2d0a273de947dc6d331dee73a5d055db77"
+    },
+    {
+      "case": "spawn-search",
+      "matchesMergedBaseline": true,
+      "sha256": "257be7aa46822c42703315447d48d5c176a11d416381317ec189495e89cf124d"
+    }
+  ],
+  "executableSha256": "5555caebd557dc923cdcadf3910f39ff21a259832fc92627855b0698ad33912c"
+}
