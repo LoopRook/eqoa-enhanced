@@ -1,0 +1,53 @@
+{
+  "beforeExecutableSha256": "99f189e16f635b31408bf529693c0e6e60d036cac422c41a5565239a09856fc0",
+  "afterExecutableSha256": "1bf4d36a9a52e3e5acaef9a53c7e813bbab6d289de4e7ec4a6e03ea63b4dd0e4",
+  "captureCases": [
+    {
+      "Name": "world-search",
+      "X": "25300",
+      "Scale": "5",
+      "Z": "15200",
+      "Size": "1280x720",
+      "Hover": "25100,15900",
+      "Query": "rat"
+    },
+    {
+      "Scale": "35",
+      "Name": "world-overview",
+      "Z": "12000",
+      "Size": "1280x720",
+      "X": "13000"
+    },
+    {
+      "Scale": "5",
+      "X": "25300",
+      "Track": true,
+      "Mini": true,
+      "Name": "minimap-guide-wide",
+      "Size": "1920x1080",
+      "Query": "Water Rat",
+      "Z": "15200"
+    },
+    {
+      "Name": "minimap-search-portrait",
+      "X": "25300",
+      "Mini": true,
+      "Scale": "5",
+      "Z": "15200",
+      "Size": "720x1280",
+      "Query": "rat"
+    }
+  ],
+  "imageSha256": {
+    "after-waypoint-guide.png": "9c71db7c8959bb71f10faa94f7c85860429452caa58b9d1d4014f741e239df4d",
+    "after-minimap-guide-wide.png": "fef3078374d1c42026d01fed957faac13591576d43d585e20cf6a1fdff5a356a",
+    "after-world-overview.png": "e0f32ec3bbfe9602cbd3977a89ad890aee7ddd3b31d4f8408110b5137aced4a3",
+    "after-suggest.png": "838143213f0a7b5710a18f9bf2542ec84abd1f244605d7ed11b82427a81b372c",
+    "after-world-search.png": "d183451941ca6a1f67d2cd9054461a73a84ac253358be642264bd1ceaae7cf64",
+    "before-world-overview.png": "bf702d61791594dd426eb00535a8aca2eeaa4471d298aa9ebf76da1d54179bf0",
+    "before-minimap-search-portrait.png": "5e21dae463312b3316e12dd9c2758e86683ef77b83ac1247090249ca473c1f8e",
+    "before-minimap-guide-wide.png": "b431809bc0aff7ccaab8ee7d5ce2a8cb209defa8226fbdd64ea7e2c0f712058c",
+    "before-world-search.png": "4bf7317d1d227a3bdb2e70163cfea9ec5ca9a2ec2eedc8d9de00183b519b9036",
+    "after-minimap-search-portrait.png": "00d1c3b9cd49d25240ed4da48c1b5efce2c0bf31ddfbe2381e9538f741153e3d"
+  }
+}

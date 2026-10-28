@@ -1,91 +1,78 @@
-# EQOA Enhanced Client & Parser Modding Roadmap
+# EQOA Enhanced Client, Parser & Map Roadmap
 
-This document tracks the architecture, implementation phases, and deliverables for the **EQOA Enhanced Client** and the companion **EQOA Combat Parser**.
+## Goals and Current Status
 
----
+This branch (`enhanced`) extends the native client while retaining upstream engine updates. Goals are usable QoL features, a working combat parser, community addons, and world-map/minimap parity with FrontiersForge in both appearance and function.
 
-## Project Status: All Core Deliverables Completed
+**Current ownership:** another agent handles parser implementation and integration. This chat documents parser findings and prioritizes map parity now, independently of parser completion. See `MAP-PARITY.md` for the map walkthrough and acceptance checklist.
 
-| Phase | Description | Status | Commit / Reference |
-| :--- | :--- | :---: | :--- |
-| **Phase 1: QoL Restoration** | Restored World Map (`M`), Minimap (`N`), Quest Tracker, Quest Markers, Stat Box (`B`), and resolved upstream merge conflicts with render scale and HUD filtering. | **DONE** | Commit `bd50b49` |
-| **Phase 2: Live Combat Telemetry** | Non-blocking UDP telemetry broadcast from client (`127.0.0.1:28015`) and `ClientSocketSource` in EQOA Parser. Completely eliminates Windows Admin elevation, packet sniffing, and PINE memory scanning. | **DONE** | Client `2007dad`<br>Parser `0dd87f4` |
-| **Phase 3: Drag-and-Drop Mod System & UI Enhancements** | Created `crates/eqoa/src/mods.rs` and `./mods/` engine. Added in-game **Options → Extended → Mods & Addons** menu. Implemented **Target HP %**, **XP Details**, and **HUD Numbers** overlays. | **DONE** | Commit `5e64004` |
-| **Phase 4: Parser as a First-Class Mod** | Built `./mods/eqoa_parser/mod.json` companion descriptor. Added in-game 1-button launch and explorer folder shortcut. | **DONE** | Commit `5e64004` |
-| **Phase 5: Release Binaries & 1-Click Launchers** | Compiled standalone optimized `target/release/eqoa.exe` (22.9 MB). Created `Start-EQOA.bat` and `Start-EQOA-With-Parser.bat` for zero-configuration, non-coder execution. | **DONE** | Commit `c2ac4aa` |
+**Status reviewed October 28, 2026: incomplete.** The user reports that the parser does not work and the maps do not match Forge. Earlier "all core deliverables completed" and "zero-configuration" claims described code added, not verified player workflows. A compiled executable or a passing receiver test is insufficient to close either goal.
 
----
+**Map milestone delivered:** native NPC / Group / Places search, shared guidance,
+personal-pin tracking, circular minimap, measured toolbar placement, themed labels
+and XP badges, remappable controls and inline Suggest. See MAP-RELEASE-HANDOFF.md
+for source, screenshots, packaging, tests and live acceptance checks. Full Forge
+parity remains incomplete. Parser findings below are historical review evidence;
+another agent may have changed the companion since that review.
 
-## System Architecture
+## Implementation Inventory
 
-```mermaid
-flowchart TD
-    subgraph Client ["EQOA Enhanced Client (eqoa.exe)"]
-        Engine["Core 3D Engine (Upstream Master)"]
-        QoL["Restored QoL (Map, Minimap, Quests, Stats)"]
-        UIEnhancements["Enhanced UI (Target HP %, XP Details, HUD Numbers)"]
-        Menu["Options > Extended > Mods & Addons"]
-        ModEngine["Mods Engine (crates/eqoa/src/mods.rs)"]
-        Telemetry["UDP Combat Telemetry (127.0.0.1:28015)"]
-    end
+| Area | Present | Remaining acceptance work |
+| --- | --- | --- |
+| QoL restoration | World map, minimap, quest markers/tracker, Stats Box (`bd50b49`) | Verify after upstream merges; restoration does not establish Forge parity. |
+| Combat telemetry | Rust localhost UDP sender and Python `ClientSocketSource` (`2007dad`; parser `0dd87f4`) | Verify live combat end to end, attribution, event coverage, and connection status. |
+| HUD enhancements | Target HP %, XP Details, HUD Numbers (`5e64004`) | Validate settings and displayed values. |
+| Addon infrastructure | Manifest discovery, mods folder, parser launch shortcut (`5e64004`) | Define a real addon contract; arbitrary resources and enable/disable controls are not integrated into a general runtime. |
+| Distribution | Local executable, batch scripts (`c2ac4aa`), desktop launcher (`482abb1`, `8cd81aa`) | Portable installation, consistent launching, actionable failures, and release packaging. |
 
-    subgraph ModsDir ["mods/ Directory"]
-        Readme["mods/README.txt"]
-        ParserMod["mods/eqoa_parser/mod.json"]
-        UserMods["mods/<custom_mod>/"]
-    end
+## Parser: Architecture and Confirmed Gaps
 
-    subgraph ParserApp ["EQOA Combat Parser Companion"]
-        ClientSource["ClientSocketSource (eqoa_parser/net/sources.py)"]
-        StatsEngine["Fight Segmenter & Stats Engine"]
-        MeterUI["Live DPS/HPS Meter & Details Window"]
-    end
+The implementation is currently an **external Python companion**, reading JSON events from the Rust client at `127.0.0.1:28015`. It is not an in-process game mod. The file `mods/eqoa_parser/mod.json` is a descriptor; the Rust launch function hard-codes commands instead of using the manifest's command and arguments.
 
-    Engine --> QoL
-    Engine --> UIEnhancements
-    Menu --> ModEngine
-    ModsDir --> ModEngine
-    Engine --> Telemetry
-    Telemetry -->|Direct UDP (No Admin Required)| ClientSource
-    ClientSource --> StatsEngine
-    StatsEngine --> MeterUI
-```
+The user selected external integration with [LoopRook/EQOA-Parser](https://github.com/LoopRook/EQOA-Parser). Treat it as a companion tool, with consistent installation, launch controls, and status. The proposed implementation is in `parser-integration-design.md`.
 
----
+Evidence from the October 28 review:
 
-## Detailed Deliverables Summary
+- The desktop launcher invokes `eqoa_parser/app.py` directly. Reproducing this command fails with `ImportError: attempted relative import with no known parent package`. The package entry point is `python -m eqoa_parser --client`.
+- Desktop, batch, in-game, and manifest launch paths disagree. Several hard-code `C:\Users\hocka\Github Projects\EQOA Parser`; Python discovery is also machine-specific. A successful process spawn does not prove parser readiness.
+- `ClientSocketSource` reports active traffic unconditionally. It cannot currently distinguish waiting for a client from receiving combat events.
+- The Rust event hook is in `Play::damage_indication`; ability is always `melee`. JSON is assembled manually. Ability attribution, group damage classification, and multibox session separation need explicit validation and contracts.
+- Existing CI archives omit the enhanced launcher, mods folder, and companion dependencies. Local startup scripts are not a portable distribution.
+- The parser's existing packaged GUI executable requests administrator privileges for packet capture. Native-client mode needs a windowed build without that requirement.
+- `packaging/entry.py` omits `--client` from its source flags, so the packaged live build prepends `--live` to `--client`; CLI validation rejects that combination. This was reproduced by checking the packaged argument-selection helper and CLI validator without starting the UI.
 
-### 1. Enhanced In-Game Options (`Options → Extended → Mods & Addons`)
-Users can access all new features directly in the graphical options menu:
-* **Target HP %:** Shows exact percentage (e.g. `100%`, `45%`) beside the target gauge with colored status and shadow outline.
-* **XP Details:** Shows current XP, total XP needed for next level, and exact percentage (e.g. `14,250 / 22,000 (64.7%)`) centered over the XP gauge.
-* **HUD Numbers:** Overlays exact numerical percentages and values directly on player HP and Power gauges.
-* **Open Mods Folder:** One click opens the `mods/` folder in Windows Explorer so users can simply drag and drop mods in.
-* **Combat Parser:** Displays `Launch` or `Running` status, allowing the player to spawn the companion meter with a single button press.
+Verification: `python -m pytest -q -p no:cacheprovider tests/test_client_source.py` passes (1 test) in the parser checkout outside the execution sandbox. The sandbox blocked even a raw localhost UDP control, so its timeout is not evidence of a product defect. The earlier 1,023-test claim is historical and was not reverified. No live game-to-meter success has been verified.
 
-### 2. Zero-Admin Combat Meter Hook
-* **Rust Client:** Broadcasts structured combat events (attacker, target, damage amount, ability, pet status) over local UDP `127.0.0.1:28015`.
-* **Python Parser:** Uses `ClientSocketSource` via `python -m eqoa_parser.app --client`. No `pktmon`, no Npcap, no PINE memory scanning, and zero Administrator elevation required. Full test suite passing (1,023 tests).
+## FrontiersForge Map Parity
 
-### 3. Drag-and-Drop Mod Structure
-```text
-c:\Users\hocka\Github Projects\EQOA Native Rust\
-├── eqoa.exe                        <-- Pre-compiled standalone release executable (22.9 MB)
-├── Start-EQOA.bat                  <-- 1-click game launcher
-├── Start-EQOA-With-Parser.bat      <-- 1-click game + live combat parser launcher
-└── mods/
-    ├── README.txt                  <-- Instructions for community modding
-    └── eqoa_parser/
-        └── mod.json                <-- Combat parser companion descriptor
-```
+Reference: [mmvest/FrontiersForge](https://github.com/mmvest/FrontiersForge), reviewed at commit `4026d5cebcede24943ece8dc34833e584f46cd90`. Inspect `scripts/world_map/world_map.lua`, its modules, and `scripts/mini_map/mini_map.lua` when implementing parity. This requirement was missing from the earlier roadmap.
 
----
+| Capability | Forge reference | Native client baseline / gap |
+| --- | --- | --- |
+| World-map presentation | Handmade Tunaria art; per-world maps; configurable labels, tint, indicators, and control panel | Generated terrain retained; compact native theme delivered. Forge artwork/calibration and matched Forge visual verification remain. |
+| Creature search | Name and level filters, recorded spawn regions, selected results | Native case-insensitive name search delivered across recorded/live NPCs; level/fuzzy filters remain. |
+| Discovery journal | Persist encountered creatures; merge/share journal data | No equivalent map journal found. |
+| Saved locations | Named custom locations, search, persistence, sharing | Personal/group waypoints and community pins exist; no equivalent location manager found. |
+| Shared tracking | World-map selection guides minimap toward a spawn and highlights nearby matches | Shared NPC/group/personal-pin guidance delivered. Moving group and zoning checks remain. |
+| Indoor minimap | Height-aware geometry, automatic ceiling cuts, textured/height-shaded modes | Reuses terrain tiles; no equivalent cave/ceiling rendering found. |
+| Minimap controls | Optional player rotation, entity filters, tracking lists, appearance settings | Circular north-up HUD minimap with zoom, search and guide delivered; rotation/filter/list parity remains. |
 
-## Upstream Synchronization Guide
-To pull in future engine updates, bug fixes, or optimizations from DabDavis:
-```bash
-git checkout enhanced
+Completion requires both a behavior checklist and visual comparisons against the pinned Forge reference, covering outdoor terrain, towns, caves/dungeons, multiple worlds, search, saved data, and tracking. A map opening successfully is not parity. Keep game data out of the repository; assess provenance before reusing external map art or databases.
+
+## Next Milestones
+
+1. Prioritize Forge-style map presentation, NPC search, minimap-integrated search, and NPC/group-member guidance. Keep themes separate from behavior (`MAP-THEMING.md`). Follow `MAP-PARITY.md`; parser work does not block this.
+2. Complete map parity with discovery journals, saved locations, minimap controls, indoor rendering, and matched visual verification.
+3. Parser implementation/integration remains with the other agent. Preserve this document's diagnostic evidence for that work; this chat makes no parser code changes.
+4. Revisit a general addon framework separately from map parity and built-in HUD features.
+
+## Upstream Synchronization
+
+Merge upstream engine changes into `enhanced`, preserving enhanced features:
+
+```sh
 git fetch origin master
 git merge origin/master
 ```
-All enhanced features (options, QoL map/minimap, HUD text, mods engine, telemetry socket) are decoupled and modularized to minimize merge friction.
+
+Run relevant regression checks after each merge. Release workflows currently target `master`; verify enhanced packaging explicitly before distributing it.
