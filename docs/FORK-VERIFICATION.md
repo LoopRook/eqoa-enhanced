@@ -93,3 +93,27 @@ all indoor shadow cases still require player/server checks. The map playtest and
 remaining full-parity items stay in MAP-PLAYTEST.md and MAP-RELEASE-HANDOFF.md.
 No parser overhaul, license change, public release, master push or PR submission
 is included in this pass.
+
+## Final Git and packaged delivery checks
+
+    git diff origin/master...HEAD --stat
+    142 files changed, 24115 insertions(+), 1223 deletions(-)
+    python -X utf8 tools/check_fork_footprint.py
+    PASS: 110 fork-owned changed paths; 31 reviewed shared paths; 12 hooks once each
+
+The final documentation closeout does not change production source or these
+shared footprints. Local enhanced fast-forwarded to source 73915b0; both enhanced
+and codex/upstream-sync-2026-10-28 were pushed to looprook. No master push occurred.
+GitHub's default branch changed from master to enhanced, then was verified through
+the repository API so its landing page displays the enhanced README.
+
+Both installed normal EXEs match the native SHA above. The generated preview
+ZIP contains exactly 9 allowlisted files; CRC, EXE/catalog SHA and the clean-source
+manifest were checked. Direct EXE mapshot without EQOA_MAP_DATABASE or CMD setup
+finds the bundled catalog and matches the spawn-search screenshot. This is an
+offline executable/data-loading smoke test, not a login/live-server playtest.
+Old EXEs remain in ignored backup directories; profiles and accounts were retained.
+
+Public release/channel publication remains separate. The source README now tells
+players to extract a prepared build and double-click the EXE; build commands stay
+in developer docs. Optional scripts select a local build or isolated test profile.

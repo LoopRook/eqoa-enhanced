@@ -36,7 +36,7 @@ AGENTS.md and docs/MAP-RELEASE-HANDOFF.md govern retained functionality.
 - [x] Obtain independent source review; address actionable integration findings.
 - [x] Write the brief enhanced README.md and link its detailed development reference. Add sourced license choices
       without changing LICENSE or Cargo metadata.
-- [ ] Commit validated integration, fast-forward local enhanced, refresh normal
+- [x] Commit validated integration, fast-forward local enhanced, refresh normal
       executables and preview bundle, and record upstream ancestry/provenance.
 
 ## Hygiene continuation

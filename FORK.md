@@ -48,7 +48,8 @@ suggestions distinct from bug-report uploads.
 ## Upstream sync and conflicts
 
 origin is upstream, looprook is this fork, and joukop remains unchanged. Keep
-master a fast-forward-only mirror of origin/master; never commit fork changes or
+master a fast-forward-only mirror of origin/master; GitHub defaults to enhanced
+so its landing page shows the fork README. Never commit fork changes or
 push master to looprook. Merge origin/master into enhanced through a short-lived
 sync branch. Keep rerere.enabled on. Do not rebase shared enhanced history, force
 push it, prune protected worktrees or discard the saved documentation stash.

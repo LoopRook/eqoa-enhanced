@@ -47,9 +47,10 @@ extraction; the checker passes all 31 paths and 12 named hooks.
 
 Independent whole-branch review found no actionable defects and confirmed spec
 alignment, merge ancestry, preserved map files and all footprint checks. Its full
-report is retained as docs/FORK-HYGIENE-REVIEW.md. Final commit/push and normal
-executable/preview refresh follow this verified state. Licensing and parser
-sources remain unchanged.
+report is retained as docs/FORK-HYGIENE-REVIEW.md. Source cleanup 73915b0 is committed and pushed to both enhanced and the sync
+branch on looprook. The primary enhanced checkout fast-forwarded to that exact
+source. Both normal EXEs and the preview ZIP are refreshed and hash-verified.
+Licensing and parser sources remain unchanged.
 
 ## Remaining owner decisions
 
@@ -60,3 +61,19 @@ sources remain unchanged.
   pass. Full Forge parity and runtime themes remain planned map work.
 - Before public fork CI releases, repoint updater URLs to the fork. Current local
   no-channel builds do not self-update; no release workflow is triggered here.
+
+## Delivery closeout
+
+- GitHub default branch is enhanced, so the repository landing page shows this
+  fork's player README. master remains upstream-only and was not pushed.
+- Root README and bundled playtest instructions lead with direct EXE launch.
+  BAT/CMD files are optional development or isolated-profile shortcuts.
+- Installed root eqoa.exe and target/release/eqoa.exe match the verified source
+  binary SHA256 5555caebd557dc923cdcadf3910f39ff21a259832fc92627855b0698ad33912c.
+  Previous binaries are retained under ignored run/pre-hygiene-* directories.
+- Prepared bundle: run/map-parity-preview/map-preview-5555caebd557.zip. Its manifest
+  pins source 73915b0 and the catalog; nine allowlisted files pass CRC/hash checks.
+  No profile, account or disc files are included. The direct packaged EXE finds
+  its adjacent catalog without CMD environment and matches the search capture.
+- No GitHub release or CI build was published. Worktrees and the documentation
+  stash remain available. The animation proposal remains unpushed/unsubmitted.
