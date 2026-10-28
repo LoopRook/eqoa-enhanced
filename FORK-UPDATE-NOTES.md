@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-10-28 · Minimap render scale
+
+- The minimap stays in place and keeps its size when Render Scale changes.
+
 ## 2026-10-28 · Enhanced 0.1.0
 
 - Download one Windows ZIP, extract and double-click eqoa.exe. No build tools or BAT required.

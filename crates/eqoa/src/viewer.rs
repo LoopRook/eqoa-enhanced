@@ -1190,7 +1190,7 @@ pub fn shot_with(
     let mini = play.as_ref();
     let mut rgba = render::capture_around(&device, &queue, &mut renderer, w, h, loading.as_ref().map_or(&view, |l| &l.0), &refs, particles, sky, |enc, tv, depth| {
         if let Some(p) = mini {
-            p.map.draw_mini(&device, enc, tv, depth, (w, h));
+            p.map.draw_mini(&device, enc, tv, depth);
         }
     });
     // the map up covers the frame: the picture is the map's
@@ -5238,7 +5238,7 @@ impl ApplicationHandler for App {
                 let play = self.play.as_ref();
                 g.renderer.draw_text_around(&g.device, &mut enc, &f.color, &f.depth, f.size, |enc| {
                     if let Some(p) = play {
-                        p.map.draw_mini(&g.device, enc, &f.color, &f.depth, f.size);
+                        p.map.draw_mini(&g.device, enc, &f.color, &f.depth);
                     }
                 });
                 if let Some(p) = &self.play {
