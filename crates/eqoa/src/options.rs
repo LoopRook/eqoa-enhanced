@@ -1869,11 +1869,11 @@ mod tests {
         assert_eq!(settings::client().text, render::ui::TextFilter::Sharp, "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 40, "HUD");
-        assert_eq!((settings::client().hud, value_text(&vui, 40)), (render::ui::HudFilter::Sharp, Some(wide("Sharp"))), "Sharp, the default, as Text's");
+        assert_eq!((settings::client().hud, value_text(&vui, 40)), (render::ui::HudFilter::Nearest, Some(wide("Nearest"))), "Nearest, the game's and the default");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().hud, value_text(&vui, 40), cues.last()), (render::ui::HudFilter::Nearest, Some(wide("Nearest")), Some(&11)), "Nearest, the game's");
+        assert_eq!((settings::client().hud, value_text(&vui, 40), cues.last()), (render::ui::HudFilter::Sharp, Some(wide("Sharp")), Some(&11)), "Sharp");
         press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert_eq!(settings::client().hud, render::ui::HudFilter::Sharp, "and back: two values");
+        assert_eq!(settings::client().hud, render::ui::HudFilter::Nearest, "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.row, cues.last()), (3, Some(&9)), "Quests' last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);

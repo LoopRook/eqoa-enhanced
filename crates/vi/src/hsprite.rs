@@ -483,18 +483,12 @@ impl<M: Model> HSprite<M> {
     /// otherwise.
     pub fn set_play_frame(&mut self, i: i32, frame: F<M>, sc: &AnimScene<M>) {
         let nf = sc.anims[self.plays.get(i).anim].num_frames;
-        if nf <= 0 {
-            return;
-        }
         let p = self.plays.get_mut(i);
         let fi = frame.0 as i32;
         p.frame_a = fi;
         p.time_accum = (frame - F::from_int(fi)) * p.frame_duration;
         if p.playback_type == ONCE {
-            if p.frame_a < 0 {
-                p.frame_a = 0;
-            }
-            if nf - 1 < p.frame_a {
+            if nf - 1 < fi {
                 p.frame_a = nf - 1;
             }
             p.frame_b = p.frame_a + 1;
@@ -503,7 +497,7 @@ impl<M: Model> HSprite<M> {
                 p.time_accum = F::ZERO;
             }
         } else {
-            p.frame_a = ((fi % nf) + nf) % nf;
+            p.frame_a = fi % nf;
             p.frame_b = p.frame_a + 1;
             if nf - 1 < p.frame_b {
                 p.frame_b = 0;
@@ -612,9 +606,6 @@ impl<M: Model> HSprite<M> {
                 if F::ZERO < p.speed {
                     p.frame_a += n;
                     if p.playback_type == ONCE {
-                        if p.frame_a < 0 {
-                            p.frame_a = 0;
-                        }
                         if nf - 1 < p.frame_a {
                             p.frame_a = nf - 1;
                         }
@@ -624,8 +615,8 @@ impl<M: Model> HSprite<M> {
                             p.time_accum = F::ZERO;
                             p.playback_type = STOP_END;
                         }
-                    } else if nf > 0 {
-                        p.frame_a = ((p.frame_a % nf) + nf) % nf;
+                    } else {
+                        p.frame_a %= nf;
                         p.frame_b = p.frame_a + 1;
                         if nf - 1 < p.frame_b {
                             p.frame_b = 0;
@@ -637,17 +628,17 @@ impl<M: Model> HSprite<M> {
                         if p.frame_a < 0 {
                             p.frame_a = 0;
                         }
-                        if nf - 1 < p.frame_a {
-                            p.frame_a = nf - 1;
-                        }
                         p.frame_b = p.frame_a - 1;
                         if p.frame_b < 0 {
                             p.frame_b = p.frame_a;
                             p.time_accum = F::ZERO;
                             p.playback_type = STOP_END;
                         }
-                    } else if nf > 0 {
-                        p.frame_a = ((p.frame_a % nf) + nf) % nf;
+                    } else {
+                        p.frame_a %= nf;
+                        if p.frame_a < 0 {
+                            p.frame_a += nf;
+                        }
                         p.frame_b = p.frame_a - 1;
                         if p.frame_b < 0 {
                             p.frame_b = nf - 1;

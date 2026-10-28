@@ -5078,9 +5078,16 @@ impl Play {
         let rest = &r.data[r.pos..];
         let rgb = (crate::s2::get().damage_rgb && rest.len() >= 3).then(|| [rest[0], rest[1], rest[2]]);
         let me = self.self_id32();
+        let now = self.session.now();
+        // the player's own hit: after a swap the swing timer follows the
+        // server's rounds (`attackclock`), whatever the damage numbers show
+        if Some(attacker) == me {
+            let delay = self.attack.kind().map_or(3500, |k| if vi::swing::swing_effect(k) == 0 { 3500 } else { vi::swing::swing_delay(k) });
+            self.attack.own_hit(now, delay as u32);
+        }
         // the player's or its pet's hit: the guide's kill when it dies
         if amount > 0 && (Some(attacker) == me || (attacker == self.pet_id && self.pet_id != u32::MAX)) {
-            self.guide.hit(defender, self.session.now());
+            self.guide.hit(defender, now);
         }
         // Local combat telemetry broadcast for EQOA Parser (no admin or packet sniffing needed)
         {
@@ -5119,12 +5126,6 @@ impl Play {
                 kind
             );
             crate::telemetry::broadcast(&json);
-        }
-        // the player's own hit: after a swap the swing timer follows the
-        // server's rounds (`attackclock`), whatever the damage numbers show
-        if Some(attacker) == me {
-            let delay = self.attack.kind().map_or(3500, |k| if vi::swing::swing_effect(k) == 0 { 3500 } else { vi::swing::swing_delay(k) });
-            self.attack.own_hit(self.session.now(), delay as u32);
         }
         if self.options.no_damage != 0 {
             return;
