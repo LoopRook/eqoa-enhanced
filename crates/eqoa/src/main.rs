@@ -125,6 +125,7 @@ mod trails;
 mod options;
 mod settings;
 mod telemetry;
+pub mod mods;
 mod social;
 mod wholist;
 mod zones;

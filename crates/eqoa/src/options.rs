@@ -658,6 +658,18 @@ impl WndOptions {
                     37 => c.environment = !c.environment,
                     // Map Markers: the map's camps and coaches from its next frame (`map::markers`)
                     43 => c.map_markers = !c.map_markers,
+                    // Target HP %: drawn beside target gauge
+                    48 => c.target_hp_percent = !c.target_hp_percent,
+                    // XP Details: numbers and percent on XP gauge
+                    49 => c.xp_details = !c.xp_details,
+                    // HUD Numbers: player HP and power values
+                    50 => c.hud_numbers = !c.hud_numbers,
+                    // Open Mods Folder
+                    51 => crate::mods::open_mods_folder(),
+                    // Launch Combat Parser companion
+                    52 => {
+                        let _ = crate::mods::launch_parser();
+                    }
                     // Output Device: the sound opened there from the next
                     // frame (`audio::retarget`)
                     32 => step_output(&mut c, &crate::audio::outputs().listed.map(|l| l.1).unwrap_or_default(), d),
@@ -751,6 +763,17 @@ impl WndOptions {
             self.row = 0;
             self.page_window(vui, r, CATEGORIES[c].items.len() as i32 + 3);
             return false;
+        }
+        if self.page == 3 && self.cat.is_some() {
+            if self.item == 51 {
+                crate::mods::open_mods_folder();
+                cues.push(8);
+                return false;
+            } else if self.item == 52 {
+                let _ = crate::mods::launch_parser();
+                cues.push(8);
+                return false;
+            }
         }
         if self.page != -1 {
             cues.push(9);
@@ -1094,7 +1117,7 @@ const CONTROLS: &str = "Controls";
 /// Extended's rows, by the item each changes (`change`), and their labels.
 /// A row is drawn by its item (`value_text`, or `slider_at` for a slider)
 /// and shown on the page of the category that lists it (`CATEGORIES`).
-const EXTENDED_ITEMS: [(i32, &str); 34] = [
+const EXTENDED_ITEMS: [(i32, &str); 39] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1129,6 +1152,11 @@ const EXTENDED_ITEMS: [(i32, &str); 34] = [
     (45, "Quest Markers"),
     (46, "Quest Tracker"),
     (47, "Stats Box"),
+    (48, "Target HP %"),
+    (49, "XP Details"),
+    (50, "HUD Numbers"),
+    (51, "Open Mods Folder"),
+    (52, "Combat Parser"),
 ];
 
 /// What a category's page says beside its Back legend.
@@ -1157,7 +1185,7 @@ struct Category {
 
 /// Extended's categories, in its menu's order (the user's: "Extended, then
 /// Video, UI, Controller, etc."), each a page of `PAGE_MOST` rows at most.
-const CATEGORIES: [Category; 8] = [
+const CATEGORIES: [Category; 9] = [
     Category { name: "Video", items: VIDEO, note: Note::Scale },
     Category { name: "World", items: &[20, 35, 36, 37, 25, 43], note: Note::None },
     Category { name: "UI", items: &[22, 31, 42, 44, 47, 29], note: Note::None },
@@ -1168,6 +1196,7 @@ const CATEGORIES: [Category; 8] = [
     // the quests' (UI holds its six): the marks a server sends for the map
     // and its tracker for the HUD
     Category { name: "Quests", items: &[45, 46, 30, 40], note: Note::None },
+    Category { name: "Mods & Addons", items: &[48, 49, 50, 51, 52], note: Note::None },
 ];
 
 /// Video's rows: natively Display first (F3 20261024-201507: full screen was
@@ -1272,6 +1301,11 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         }),
         32 => wide(c.output.as_ref().map_or(SYSTEM_DEFAULT, |d| d.as_str())),
         33 => wide(if crate::display::full() { "Full Screen" } else { "Window" }),
+        48 => on_off(c.target_hp_percent),
+        49 => on_off(c.xp_details),
+        50 => on_off(c.hud_numbers),
+        51 => wide("Open"),
+        52 => wide(if crate::mods::is_parser_running() { "Running" } else { "Launch" }),
         _ => return None,
     })
 }
@@ -1844,7 +1878,22 @@ mod tests {
         assert_eq!((w.row, cues.last()), (3, Some(&9)), "Quests' last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.cat_sel, cues.last()), (7, Some(&9)), "Quests, the last category");
+        assert_eq!((w.cat_sel, cues.last()), (8, Some(&11)), "Mods & Addons, the new category");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.cat_sel, cues.last()), (8, Some(&9)), "Mods & Addons, the last category");
+        press(&mut w, &mut o, key::CROSS, &mut cues);
+        assert_eq!((w.cat, w.row, w.item), (Some(8), 0, 48), "Mods & Addons page: Target HP % first");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, w.item), (1, 49), "XP Details");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, w.item), (2, 50), "HUD Numbers");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, w.item), (3, 51), "Open Mods Folder");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, w.item), (4, 52), "Combat Parser");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (4, Some(&9)), "Mods & Addons last row");
+        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         // Triangle: the menu, then closed with every setting put back
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.sel), (-1, 3), "the menu, on Extended");

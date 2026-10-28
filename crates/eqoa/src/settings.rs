@@ -729,6 +729,12 @@ pub struct ClientOptions {
     /// a device by its name, the default while it is not connected
     /// (`audio::retarget`). Each window its own.
     pub output: Option<DeviceName>,
+    /// Target HP %: display numerical HP percentage next to target's health bar
+    pub target_hp_percent: bool,
+    /// XP Details: display numerical XP and percentage on the XP bar
+    pub xp_details: bool,
+    /// HUD Numbers: display player HP and Power numerical values on the HUD
+    pub hud_numbers: bool,
 }
 
 /// Render Scale's steps, the first the game's picture as drawn.
@@ -807,6 +813,9 @@ impl Default for ClientOptions {
             render_scale: 1,
             hud: render::ui::HudFilter::Sharp,
             output: None,
+            target_hp_percent: true,
+            xp_details: true,
+            hud_numbers: true,
         }
     }
 }
@@ -931,6 +940,15 @@ impl ClientOptions {
         if let Some(d) = self.output {
             s.push_str(&format!("output={}\n", d.as_str()));
         }
+        if !self.target_hp_percent {
+            s.push_str("target_hp_percent=off\n");
+        }
+        if !self.xp_details {
+            s.push_str("xp_details=off\n");
+        }
+        if !self.hud_numbers {
+            s.push_str("hud_numbers=off\n");
+        }
         s
     }
 
@@ -1014,6 +1032,12 @@ impl ClientOptions {
                 ("hud", "nearest") => c.hud = render::ui::HudFilter::Nearest,
                 ("hud", "sharp") => c.hud = render::ui::HudFilter::Sharp,
                 ("output", v) if !v.is_empty() => c.output = Some(DeviceName::new(v)),
+                ("target_hp_percent", "on") => c.target_hp_percent = true,
+                ("target_hp_percent", "off") => c.target_hp_percent = false,
+                ("xp_details", "on") => c.xp_details = true,
+                ("xp_details", "off") => c.xp_details = false,
+                ("hud_numbers", "on") => c.hud_numbers = true,
+                ("hud_numbers", "off") => c.hud_numbers = false,
                 ("ability_bars", v) => {
                     if let Some(n) = v.parse::<u8>().ok().filter(|&n| (ABILITY_BARS_GAME as i32..=crate::hudmenu::MAX_BARS).contains(&(n as i32))) {
                         c.ability_bars = n;
@@ -1402,7 +1426,7 @@ pub fn describe() -> String {
         FrameRate::Display => "the display's",
     };
     format!(
-        "level of detail {}, brightness {} of {BRIGHTNESS_STEPS}, fog {} of {}{}, frame rate {rate}{}, vsync {}, render scale x{}{}, camera distance {}, camera turn speed {}%, screen shake {}, controller focus {}, capture controller {}, sound in background {}, output device {}, ability bars {}, npc/pc display {}, npc/pc view distance {}, name distance {}, overlapping names {}, art {}, update notices {}, shouts {}, target of target {}, mana bars {}, minimap {}, stats box {}, quest markers {}, quest tracker {}, text {}, hud {}, mipmaps {}, flora {}, environment {}, map markers {}, map towns {}, loading screens {}; {}",
+        "level of detail {}, brightness {} of {BRIGHTNESS_STEPS}, fog {} of {}{}, frame rate {rate}{}, vsync {}, render scale x{}{}, camera distance {}, camera turn speed {}%, screen shake {}, controller focus {}, capture controller {}, sound in background {}, output device {}, ability bars {}, npc/pc display {}, npc/pc view distance {}, name distance {}, overlapping names {}, art {}, update notices {}, shouts {}, target of target {}, mana bars {}, minimap {}, stats box {}, quest markers {}, quest tracker {}, text {}, hud {}, mipmaps {}, flora {}, environment {}, map markers {}, map towns {}, loading screens {}, target hp % {}, xp details {}, hud numbers {}; {}",
         if c.lod { "on" } else { "off" },
         c.brightness,
         c.fog,
@@ -1453,6 +1477,9 @@ pub fn describe() -> String {
         if c.map_markers { "on" } else { "off" },
         if c.map_towns { "on" } else { "off" },
         if c.loading_longer { "longer" } else { "instant" },
+        if c.target_hp_percent { "on" } else { "off" },
+        if c.xp_details { "on" } else { "off" },
+        if c.hud_numbers { "on" } else { "off" },
         kept_where()
     )
 }
@@ -1932,7 +1959,7 @@ mod tests {
             "Screen Shake only off, Capture Controller only on"
         );
         testing::reset(false);
-        assert_eq!(describe(), "level of detail on, brightness 5 of 10, fog 5 of 10 (the game's), frame rate the display's (not chosen), vsync on, render scale x1, camera distance 11, camera turn speed 100%, screen shake on, controller focus auto, capture controller off, sound in background on, output device the system default, ability bars 2, npc/pc display 24, npc/pc view distance 100, name distance 22, overlapping names hide, art frontiers, update notices on, shouts heard, target of target off, mana bars on, minimap on, stats box off, quest markers on, quest tracker on, text sharp, hud sharp, mipmaps on, flora on, environment on, map markers on, map towns on, loading screens longer; kept in the page's storage");
+        assert_eq!(describe(), "level of detail on, brightness 5 of 10, fog 5 of 10 (the game's), frame rate the display's (not chosen), vsync on, render scale x1, camera distance 11, camera turn speed 100%, screen shake on, controller focus auto, capture controller off, sound in background on, output device the system default, ability bars 2, npc/pc display 24, npc/pc view distance 100, name distance 22, overlapping names hide, art frontiers, update notices on, shouts heard, target of target off, mana bars on, minimap on, stats box off, quest markers on, quest tracker on, text sharp, hud sharp, mipmaps on, flora on, environment on, map markers on, map towns on, loading screens longer, target hp % on, xp details on, hud numbers on; kept in the page's storage");
         testing::reset(true);
         assert!(describe().ends_with("refused: nothing is kept"));
         testing::reset(false);

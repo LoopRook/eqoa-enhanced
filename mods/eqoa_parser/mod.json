@@ -1,0 +1,10 @@
+{
+  "id": "eqoa_parser",
+  "name": "EQOA Combat Parser",
+  "version": "1.0.0",
+  "author": "LoopRook",
+  "description": "Real-time DPS meter and combat parser hooked directly into client telemetry without admin elevation.",
+  "enabled": true,
+  "command": "python",
+  "args": ["-m", "eqoa_parser.app", "--client"]
+}
