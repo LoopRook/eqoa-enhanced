@@ -36,7 +36,7 @@ Guidance is direction/distance, not obstacle-aware routing or automatic movement
 - `play.rs`: supplies actual entity/group observations; `map/mod.rs` synchronizes
   persisted personal pins after arrival/deletion processing.
 - `map/theme.rs`: surfaces, borders, text and semantic marker tokens, embedded font
-  and logical label-font generation. Controls use a supersampled font separately.
+  and source-resolution font. Labels keep small logical metrics without reducing their atlas; controls use the supersampled font separately.
 - `map/suggest.rs` and `mapsuggest.rs`: in-map form versus retained controller
   editor; both feed the original community submission API.
 - `map/mini.rs`: circle projection, marker/rim placement, pointer hit shape and
@@ -109,6 +109,28 @@ Space Mono Regular is embedded under SIL OFL 1.1; its notice lives in
 `crates/eqoa/resources/map-ui/OFL.txt`. Forge's notice is in
 `docs/licenses/FrontiersForge-MIT.txt`. Both accompany the player bundle.
 Disc data and the downloaded catalog remain untracked.
+
+## Font clarity follow-up
+
+The first milestone reduced labels/tooltips from a 36-pixel source to a 12-pixel
+bitmap before the game enlarged them. The result was visibly blurred while
+controls remained crisp. Labels now upload the full source raster through
+Ui::add_font_at_height. Only layout metrics round to the old height/width;
+wrapping, panel sizes and glyph UV detail are preserved. Ordinary add_font
+calls retain their original behavior. Do not reintroduce CPU bitmap reduction.
+
+Matched [text before](map-parity-captures/text-before.png) and
+[text after](map-parity-captures/text-after.png) show the same Northern Ro tooltip.
+Parameters and hashes are in map-parity-captures/text-manifest.json.
+The new regression failed before the fix and passed afterward; all 54 renderer
+tests and 905 client tests passed (2 existing FX benchmarks ignored).
+Release compilation and deterministic native captures passed.
+
+The normal Start-EQOA.bat prefers target/release/eqoa.exe, then root eqoa.exe.
+A source merge does not refresh these ignored executable files. Build/install
+the verified binary and put map-entities.json beside each installed executable
+when testing the normal launchers. Existing game profiles remain separate from
+the preview bundle's profile.
 
 ## Validation and review
 

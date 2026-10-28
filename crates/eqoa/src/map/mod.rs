@@ -1236,7 +1236,7 @@ impl Map {
             assets.font = Some(ui.add_font(cx.device, cx.queue, &f));
         }
         let control_font=theme::font().map(|f|{
-            assets.font=Some(ui.add_font(cx.device,cx.queue,&theme::label_font(&f)));
+            assets.font=Some(ui.add_font_at_height(cx.device,cx.queue,&f,f.height.div_ceil(3)));
             ui.add_font(cx.device,cx.queue,&f)
         });
         self.layers = Some(Layers { map, white, ui, assets, control_font, view: cx.lib.view() });

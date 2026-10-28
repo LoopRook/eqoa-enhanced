@@ -97,45 +97,6 @@ pub fn font() -> Option<esf::font::Font> {
     })
 }
 
-pub fn label_font(source: &esf::font::Font) -> esf::font::Font {
-    let height = source.height.div_ceil(3);
-    let glyphs = source
-        .glyphs
-        .iter()
-        .map(|g| {
-            let width = u32::from(g.width).div_ceil(3) as u8;
-            let mut rgba = vec![0; usize::from(width) * height as usize * 4];
-            for y in 0..height {
-                for x in 0..u32::from(width) {
-                    let mut alpha = 0u32;
-                    for dy in 0..3 {
-                        for dx in 0..3 {
-                            let (sx, sy) = (x * 3 + dx, y * 3 + dy);
-                            if sx < u32::from(g.width) && sy < source.height {
-                                alpha += u32::from(
-                                    g.rgba[((sy * u32::from(g.width) + sx) * 4 + 3) as usize],
-                                );
-                            }
-                        }
-                    }
-                    let o = ((y * u32::from(width) + x) * 4) as usize;
-                    rgba[o..o + 4].copy_from_slice(&[255, 255, 255, ((alpha + 4) / 9) as u8]);
-                }
-            }
-            esf::font::Glyph {
-                code: g.code,
-                width,
-                rgba,
-            }
-        })
-        .collect();
-    esf::font::Font {
-        id: source.id,
-        height,
-        glyphs,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #[test]

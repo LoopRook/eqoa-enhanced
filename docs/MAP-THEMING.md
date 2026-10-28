@@ -43,7 +43,7 @@ API and a full visual editor are separate future work.
 focus, selection, text and semantic marker colors. Search, map controls,
 minimap controls and the inline Suggest form consume these helpers. The embedded
 Space Mono font is rasterized once into the native font atlas at three times the
-logical size. Its SIL OFL notice is in `crates/eqoa/resources/map-ui/OFL.txt`.
+logical size. Labels/tooltips retain that full-resolution atlas while using 12-unit logical metrics via Ui::add_font_at_height; do not downsample the bitmap before upload, which blurs enlarged text. Its SIL OFL notice is in `crates/eqoa/resources/map-ui/OFL.txt`.
 
 `EQOA_MAP_FONT` can name a local TTF override; unreadable/invalid fonts fall back
 to embedded Space Mono. Map controls, labels, tooltips and XP camp badges use the font override. The

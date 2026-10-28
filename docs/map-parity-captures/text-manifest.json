@@ -1,0 +1,18 @@
+{
+  "beforeSha256": "1bf4d36a9a52e3e5acaef9a53c7e813bbab6d289de4e7ec4a6e03ea63b4dd0e4",
+  "afterSha256": "67f7a951248287c404af1fda43d644c466c12d9c433d7adaa0a412f8ecf3cc36",
+  "world": "TUNARIA.ESF",
+  "size": "1280x720",
+  "player": [
+    24109,
+    16574
+  ],
+  "heading": 0,
+  "scale": 5,
+  "hover": [
+    24123.5,
+    16547.0
+  ],
+  "beforeImageSha256": "cb1b60c5f170797990a797e30db3ffa10718e2326e7c40798cd1ee27f1a016fa",
+  "afterImageSha256": "f0cb172b1c62d8298ca8b558216556d6fca9fb977922f93b849bc23f09870dc5"
+}

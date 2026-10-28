@@ -5,6 +5,11 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
+## 2026-10-28 · Map text clarity
+
+- Map names, XP labels and marker tooltips now retain the font's full detail when
+  enlarged. Their size, wrapping and layout stay the same.
+
 ## 2026-10-28 · Map search and guidance preview
 
 - The minimap is now circular. Search stays below the map coordinates and status messages.

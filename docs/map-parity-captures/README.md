@@ -39,3 +39,12 @@ Remove unused environment variables between cases; an empty value still enables
 presence-based flags. The old preview already exposed the hover-coordinate line;
 the final capture additionally exercises the explicit coordinate flag. Fixtures
 supply no live actors or group roster. Never commit disc/config/account files.
+
+## Font clarity follow-up
+
+Compare [text-before.png](text-before.png) with [text-after.png](text-after.png).
+Both use the same Northern Ro camp tooltip, player (24109,16574), hover
+(24123.5,16547.0), scale 5, and 1280x720 window. Label/card geometry and wrapping
+remain the same; the latter keeps full font atlas detail instead of enlarging
+a reduced bitmap. These supersede the first milestone's label quality.
+Executable/image hashes and parameters are in text-manifest.json.
