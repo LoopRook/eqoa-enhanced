@@ -7,6 +7,7 @@ struct VsIn {
     @location(2) color: vec4<f32>,
     // the quad's texture rectangle: least uv, greatest uv
     @location(3) rect: vec4<f32>,
+    @location(4) circle: vec4<f32>,
 };
 
 struct VsOut {
@@ -14,6 +15,7 @@ struct VsOut {
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
     @location(2) rect: vec4<f32>,
+    @location(3) circle: vec4<f32>,
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -26,6 +28,7 @@ fn vs_main(v: VsIn) -> VsOut {
     o.uv = v.uv;
     o.color = v.color;
     o.rect = v.rect;
+    o.circle=vec4<f32>((v.pos-v.circle.xy)*v.circle.zw,select(0.0,1.0,v.circle.z>0.0),0.0);
     return o;
 }
 
@@ -46,7 +49,7 @@ fn keep(uv: vec2<f32>, rect: vec4<f32>) -> vec2<f32> {
 
 @fragment
 fn fs_main(i: VsOut) -> @location(0) vec4<f32> {
-    return textureSample(tex, samp, own(i)) * i.color;
+    return circular(textureSample(tex, samp, own(i)) * i.color,i);
 }
 
 @fragment
@@ -55,7 +58,7 @@ fn fs_tested(i: VsOut) -> @location(0) vec4<f32> {
     if (c.a < 0.5) {
         discard;
     }
-    return c;
+    return circular(c,i);
 }
 
 // A font's quad through the filtering sampler under the options' Text
@@ -81,7 +84,7 @@ fn sharp(i: VsOut) -> vec2<f32> {
 
 @fragment
 fn fs_sharp(i: VsOut) -> @location(0) vec4<f32> {
-    return textureSample(tex, samp, sharp(i)) * i.color;
+    return circular(textureSample(tex, samp, sharp(i)) * i.color,i);
 }
 
 @fragment
@@ -90,14 +93,14 @@ fn fs_sharp_tested(i: VsOut) -> @location(0) vec4<f32> {
     if (c.a < 0.5) {
         discard;
     }
-    return c;
+    return circular(c,i);
 }
 
 // Smooth: the texels mixed across their whole width, as the GS magnifies a
 // font's texture.
 @fragment
 fn fs_smooth(i: VsOut) -> @location(0) vec4<f32> {
-    return textureSample(tex, samp, i.uv) * i.color;
+    return circular(textureSample(tex, samp, i.uv) * i.color,i);
 }
 
 @fragment
@@ -106,7 +109,7 @@ fn fs_smooth_tested(i: VsOut) -> @location(0) vec4<f32> {
     if (c.a < 0.5) {
         discard;
     }
-    return c;
+    return circular(c,i);
 }
 
 // The other textures' quad under the options' HUD Sharp (`HudFilter`): the
@@ -165,7 +168,7 @@ fn mix_clear(uv: vec2<f32>) -> vec4<f32> {
 
 @fragment
 fn fs_art_sharp(i: VsOut) -> @location(0) vec4<f32> {
-    return mix_clear(art_sharp(i)) * i.color;
+    return circular(mix_clear(art_sharp(i)) * i.color,i);
 }
 
 @fragment
@@ -174,5 +177,11 @@ fn fs_art_sharp_tested(i: VsOut) -> @location(0) vec4<f32> {
     if (c.a < 0.5) {
         discard;
     }
+    return circular(c,i);
+}
+
+// Mask after sampling: implicit-derivative texture filters remain uniform.
+fn circular(c:vec4<f32>,i:VsOut)->vec4<f32> {
+    if (i.circle.z>0.0 && length(i.circle.xy)>1.0) {discard;}
     return c;
 }

@@ -129,8 +129,8 @@ pub const TEXT: [f32; 4] = [0.95, 0.93, 0.86, 1.0];
 pub const RARE: [f32; 4] = [1.0, 0.62, 0.35, 1.0];
 pub const DROPS: [f32; 4] = [0.72, 0.9, 1.0, 1.0];
 /// The XP badge: its fill and its letters.
-pub const BADGE: [f32; 4] = [0.6, 0.07, 0.07, 1.0];
-pub const BADGE_TEXT: [f32; 4] = [1.0, 0.86, 0.3, 1.0];
+pub const BADGE: [f32; 4] = super::theme::SURFACE;
+pub const BADGE_TEXT: [f32; 4] = super::theme::TEXT;
 
 impl Marker {
     /// Where it is, (x, z).
@@ -421,7 +421,7 @@ fn rect(ui: &mut Ui, white: usize, r: [f32; 4], color: [f32; 4]) {
 }
 
 /// A line from `a` to `b` (frame points), `half` of its width each side.
-fn segment(ui: &mut Ui, white: usize, a: [f32; 2], b: [f32; 2], half: f32, color: [f32; 4]) {
+pub(crate) fn segment(ui: &mut Ui, white: usize, a: [f32; 2], b: [f32; 2], half: f32, color: [f32; 4]) {
     let d = [b[0] - a[0], b[1] - a[1]];
     let l = d[0].hypot(d[1]).max(1e-6);
     let n = [-d[1] / l * half, d[0] / l * half];
@@ -503,14 +503,16 @@ pub fn draw_badges(ui: &mut Ui, assets: &crate::ui::UiAssets, vui: &vi::ui::Vui,
         // far out: a small red mark each, no letters
         for &(_, p) in camps {
             rect(ui, white, [p[0] - 4.5, p[1] - 4.5, p[0] + 4.5, p[1] + 4.5], OUTLINE);
-            rect(ui, white, [p[0] - 3.5, p[1] - 3.5, p[0] + 3.5, p[1] + 3.5], BADGE);
+            let at=|x:f32,y:f32|[p[0]+x,p[1]+y];
+            fill(ui,white,[at(0.0,-3.5),at(3.5,0.0),at(0.0,3.5),at(-3.5,0.0)],super::theme::MUTED);
         }
         return;
     }
     let (hw, hh) = (tw / 2.0 + 4.0, h / 2.0);
     for &(_, p) in camps {
-        rect(ui, white, [p[0] - hw - 1.5, p[1] - hh - 1.5, p[0] + hw + 1.5, p[1] + hh + 1.5], OUTLINE);
+        rect(ui, white, [p[0] - hw - 1.0, p[1] - hh - 1.0, p[0] + hw + 1.0, p[1] + hh + 1.0], super::theme::BORDER);
         rect(ui, white, [p[0] - hw, p[1] - hh, p[0] + hw, p[1] + hh], BADGE);
+        rect(ui,white,[p[0]-hw,p[1]-hh,p[0]-hw+1.0,p[1]+hh],super::theme::ACCENT);
     }
     let mut r = assets.raster(ui);
     for &(m, p) in camps {

@@ -3428,7 +3428,7 @@ impl Play {
         }
         if game_frame {
             let now = self.session.now();
-            let busy = self.mode != 0 || self.map.open || self.search.open || self.typing.is_some();
+            let busy = self.mode != 0 || self.map.open || self.map.search.open || self.search.open || self.typing.is_some();
             if self.aim_hold && now.wrapping_sub(self.aim_at) as i32 > 300 && !busy {
                 self.begin_manual_camera(cam, dir);
                 self.aim_hold = false;
@@ -3782,6 +3782,19 @@ impl Play {
         self.keyboard = !finger;
         let (Click::Target(x, y) | Click::Interact(x, y) | Click::Right(x, y)) = c;
         let f = render::ui::frame_from_window(size, [x as f32, y as f32]);
+        if self.map.suggestion.pointer(f,matches!(c,Click::Right(..))) {return true;}
+        // Map chrome remains actionable with search open; closing the popup
+        // must not swallow Suggest/Close/zoom and require a second click.
+        if self.map.open && self.map.search.open && !matches!(c,Click::Right(..)) {
+            let keys=self.map.point(f,finger);
+            if !keys.is_empty(){self.map.search.hide();self.press(&keys);return true;}
+        }
+        if (self.mode == 0 || self.map.open)
+            && self.map.search.pointer(f, matches!(c, Click::Right(..)))
+        {
+            if self.map.search.open { self.release_map_search_holds(); }
+            return true;
+        }
         // the map, while it is up: its buttons and glyphs; a right click is △;
         // a click on the map itself puts the waypoint there or takes it away
         if self.map.open {
@@ -3837,6 +3850,7 @@ impl Play {
                 }
                 // the minimap: the map opened, as the compass opens it
                 Some(crate::hud::Pick::Minimap) => {
+                    if !self.map.mini_contains([x as f32,y as f32]) {return false;}
                     self.map.show();
                     return true;
                 }
@@ -4389,7 +4403,7 @@ impl Play {
     /// Whether a pointer may look round: in play (no window up) and with the
     /// camera free (the start menu's framing takes it, `m_p06DC4`).
     pub fn look_free(&self) -> bool {
-        self.mode == 0 && self.locks.1 && !self.map.open
+        self.mode == 0 && self.locks.1 && !self.map.open && !self.map.search.open
     }
 
     /// What `UpdateControls` reads of the client this frame.
@@ -4428,8 +4442,8 @@ impl Play {
             casting: casting((a, b), now as i64),
             // the window's (`mode_locks`) and the client's other holds (the
             // start menu's framing, the manual camera, a server's search)
-            move_ok: self.locks.0 && mode_locks(self.mode).0,
-            look_ok: self.locks.1 && mode_locks(self.mode).1,
+            move_ok: self.locks.0 && mode_locks(self.mode).0 && !self.map.search.open,
+            look_ok: self.locks.1 && mode_locks(self.mode).1 && !self.map.search.open,
             rooted: self.rooted,
             // IsTimedOut (8 s with nothing arriving) is not applied:
             // go-eqoa-server sends nothing while nothing changes, so it would
@@ -4573,6 +4587,28 @@ impl Play {
             self.presses.key(key, down, self.session.timer() as u32, crate::input::from_device());
         }
         self.keyboard = false;
+        if self.map.suggestion.open {
+            if down {self.map.suggestion.key(match key {134=>"enter",144|132=>"escape",138=>"up",139=>"down",140|142=>"tab",_=>""},None);}
+            self.release_map_search_holds();
+            return;
+        }
+        if self.map.search.open {
+            self.release_map_search_holds();
+            if down {
+                self.map.search.key(
+                    match key {
+                        138 => "up",
+                        139 => "down",
+                        134 => "enter",
+                        144 | 132 => "escape",
+                        140 | 142 => "tab",
+                        _ => "",
+                    },
+                    None,
+                );
+            }
+            return;
+        }
         if self.typing.is_some() || self.window_key(key, down) {
             return;
         }
@@ -6814,12 +6850,22 @@ impl Play {
         self.cues.extend(cues.into_iter().map(crate::sound::Cue::Ui));
     }
 
+    /// A temporary map query must release holds begun in play. Match the
+    /// game's release semantics, including the explicit auto-attack setting.
+    pub fn release_map_search_holds(&mut self) {
+        self.attack_release();
+        self.info_up=false;
+        self.aim_hold=false;
+    }
+
     /// Whether the keyboard is typing into an edit box (the edit box, the
     /// quick chat's, the bank's, the NPC windows', support's and mail's
     /// editors, the plain line before the HUD): its keys are never remapped
     /// (`binds`).
     pub fn keyboard_typing(&mut self) -> bool {
-        self.typing.is_some()
+        self.map.search.open
+            || self.map.suggestion.open
+            || self.typing.is_some()
             || self.mode == 2
             || self.quick_typing()
             || (self.bank_owns() && self.bank_typing())
@@ -6946,9 +6992,10 @@ impl Play {
     /// when a window comes up (the server's, a dialog) or the player dies.
     #[allow(clippy::too_many_arguments)]
     pub fn map_frame(&mut self, walker: &Walker, lib: &Library, device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat, size: (u32, u32), dt: f32, sticks: [f32; 4]) {
-        if self.map.open && (self.mode != 0 || self.is_dead()) {
+        if (self.map.open || self.map.search.open) && (self.mode != 0 || self.is_dead()) {
             self.map.close();
         }
+        if self.map.search.open { self.release_map_search_holds(); }
         // a community marker the map asked to suggest: the edit box for its
         // name (`mapsuggest`); the group's waypoint asked, said to the group,
         // and kept while its sender is in the group (`groupmark`)
@@ -6966,7 +7013,7 @@ impl Play {
             .filter(|(_, m)| Some(m.id) != me)
             .filter_map(|(index, m)| {
                 // the entity's actor while it has one, else channel 0x40's place in this world
-                let pos = self.actor_pos(m.id).or_else(|| (m.x == self.player.world as i32).then_some(m.pos))?;
+                let pos = self.actor_pos(m.id).or_else(|| (m.active && m.x == self.player.world as i32).then_some(m.pos))?;
                 Some((pos, index))
             })
             .collect();
@@ -6990,6 +7037,46 @@ impl Play {
             vui: self.hud.as_ref().map(|h| &h.0),
             quest_marks: quest_marks_of(&self.session, &self.guide, guide_on),
         };
+        let live = self
+            .entities
+            .slots
+            .iter()
+            .flatten()
+            .filter(|e| Some(e.id) != me && e.p18 & 2 == 0 && e.p19 != 0 && self.in_scene(e))
+            .filter_map(|e| {
+                let c = e.creature.as_ref()?;
+                (c.p255 == 0 && !c.name.trim().is_empty()).then(|| crate::map::search::Live {
+                    name: c.name.clone(),
+                    world: cx.world,
+                    at: [e.actor_pos[0], e.actor_pos[2]],
+                    level: c.level,
+                })
+            })
+            .collect();
+        let members = self.group.members[..self.group.count()]
+            .iter()
+            .filter(|m| self.group.in_group && Some(m.id) != me)
+            .map(|m| {
+                let local = self.actor_pos(m.id);
+                crate::map::search::Member {
+                    id: m.id,
+                    name: m.name.clone(),
+                    world: if local.is_some() {
+                        Some(cx.world)
+                    } else if m.active {
+                        Some(m.x)
+                    } else {
+                        None
+                    },
+                    at: local
+                        .map(|p| [p[0], p[2]])
+                        .or_else(|| m.active.then_some([m.pos[0], m.pos[2]])),
+                }
+            })
+            .collect();
+        self.map
+            .search
+            .update(cx.world, [p.position.x.0, p.position.z.0], live, members);
         self.map.frame(&cx);
         // the minimap where the quick menus are, not under Hide UI
         if self.minimap_up() && !crate::hideui::hidden() {
@@ -7764,6 +7851,45 @@ mod commands {
     /// on the session's clock past 2^31 (from 00:54 UTC) the u32 port kept
     /// the window open for good after the first cast; this holds on any
     /// clock. The control: that port, on that clock, never lets go.
+    #[test]
+    fn map_search_cancels_existing_combat_info_and_target_holds() {
+        let (mut p,mut cam,_)=aim_rig(0);
+        p.options.auto_attack=0;p.auto_attack=true;p.info_up=true;p.aim_hold=true;
+        p.map.search.open=true;p.release_map_search_holds();
+        assert!(!p.auto_attack,"Space held before search must be released");
+        assert!(!p.info_up,"Q held before search must be released");
+        assert!(!p.aim_hold,"Tab/L1 held before search must be released");
+        // A late controller event must not reopen the manual camera either.
+        p.aim_hold=true;p.aim_at=p.session.now().wrapping_sub(400);
+        p.manual_frame_on(&mut cam,Vect3::of(0.0,0.0,1.0),true);
+        assert_eq!(p.mode,0);assert!(!p.aim_hold);
+        p.options.auto_attack=1;p.auto_attack=true;p.release_map_search_holds();
+        assert!(p.auto_attack,"the explicit toggle setting keeps its usual release semantics");
+    }
+
+    #[test]
+    fn map_search_focus_stops_motion_and_camera_without_changing_game_mode() {
+        let mut p = play();
+        p.mode = 0;
+        p.locks = (true, true);
+        assert!(p.control_client().move_ok);
+        assert!(p.look_free());
+        p.map.search.open = true;
+        assert!(p.keyboard_typing());
+        assert!(
+            !p.control_client().move_ok,
+            "a query must stop autorun and held controller sticks"
+        );
+        assert!(!p.control_client().look_ok);
+        assert!(
+            !p.look_free(),
+            "mouse drags must not capture the cursor over the results"
+        );
+        assert_eq!(p.mode, 0);
+        p.map.search.open = false;
+        assert!(p.control_client().move_ok);
+    }
+
     #[test]
     fn a_cast_walks_for_its_time_on_any_clock() {
         for now in [1_000i64, (1 << 31) - 500, (1 << 31) + 232_000, (1 << 32) - 900, 1 << 40] {

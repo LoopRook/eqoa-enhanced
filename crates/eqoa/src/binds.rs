@@ -125,6 +125,20 @@ pub const ROWS: &[Row] = &[
     row("tilt_up", "Tilt up, zoom in", &["pageup"], Pad::None, "On the map: zoom in."),
     row("tilt_down", "Tilt down, zoom out", &["pagedown"], Pad::None, "On the map: zoom out."),
     row("map", "{421}", &["m"], Pad::None, "Again, or Escape, closes it."),
+    row(
+        "map_search",
+        "Map: search NPCs, group and places",
+        &["f2"],
+        Pad::None,
+        "Type to search; Tab changes the list, arrows select, Enter guides, Escape closes.",
+    ),
+    row(
+        "map_stop",
+        "Map: stop guidance",
+        &["f4"],
+        Pad::None,
+        "Clears map search guidance without changing personal or group waypoints.",
+    ),
     row("map_in", "{421}: zoom in", &["=", "+"], Pad::None, ""),
     row("map_out", "{421}: zoom out", &["-", "_"], Pad::None, ""),
     row("map_group_waypoint", "{421}: group waypoint", &["g"], Pad::None, "On the map, in a group: a waypoint for every member, said in the group's chat, where |s puts yours, else where you stand. Also |s held, or Shift+click."),
@@ -454,7 +468,8 @@ impl Binds {
         let mut b = Binds::default();
         let button = |n: &str| BUTTONS.iter().position(|x| x.0 == n).map(|i| i as u8);
         for line in s.lines() {
-            let Some((k, v)) = line.split_once('=') else { continue };
+            let Some((k, v)) = line.split_once('=') else { continue;
+            };
             if let Some(id) = k.strip_prefix("key.") {
                 let Some(r) = row_named(id) else { continue };
                 if v.is_empty() {
@@ -817,13 +832,17 @@ mod tests {
             "Insert" => NamedKey::Insert,
             "Shift" => NamedKey::Shift,
             "F1" => NamedKey::F1,
+            "F2" => NamedKey::F2,
+            "F4" => NamedKey::F4,
             "F5" => NamedKey::F5,
             "F6" => NamedKey::F6,
             "F7" => NamedKey::F7,
             "F8" => NamedKey::F8,
             "F9" => NamedKey::F9,
             "F11" => NamedKey::F11,
-            other => panic!("the dispatch matches NamedKey::{other}: give it a name here and a row"),
+            other => {
+                panic!("the dispatch matches NamedKey::{other}: give it a name here and a row")
+            }
         }
     }
 
@@ -882,8 +901,8 @@ mod tests {
         b.bind_key(talk, "q");
         assert!(b.is_default(), "{b:?}");
         // the L1 row's ` and ~ go together
-        b.bind_key(cycle, "f2");
-        assert_eq!((b.alias("`"), b.alias("~"), b.alias("f2")), (Alias::Nothing, Alias::Nothing, Alias::To("`")));
+        b.bind_key(cycle, "f10");
+        assert_eq!((b.alias("`"), b.alias("~"), b.alias("f10")), (Alias::Nothing, Alias::Nothing, Alias::To("`")));
         // a row moved onto another's alternate takes it; the other keeps its
         // first key (no swap: it is not on ~)
         let mut c = Binds::default();
@@ -1116,7 +1135,7 @@ mod tests {
         assert_eq!(e.key("up", false, false, true, &b), key("w"), "let go while typing: still w, so the walk stops");
         assert_eq!(e.key("w", true, false, false, &b), key("up"), "W took the arrow's place: the quick menu's up");
         assert_eq!(e.key("w", false, false, false, &b), key("up"));
-        b.bind_key(row_named("menu_up").unwrap(), "f2");
+        b.bind_key(row_named("menu_up").unwrap(), "f10");
         assert_eq!(e.key("w", true, false, false, &b), None, "W's rows both moved off it: nothing");
         assert_eq!(e.key("w", false, false, false, &b), None);
         // typing: as it is
@@ -1124,8 +1143,8 @@ mod tests {
         assert_eq!(e.key("up", false, false, false, &b), key("up"), "let go as pressed");
         assert_eq!(e.key("w", true, false, true, &b), key("w"));
         // a capture's key
-        e.hold_back("f2");
-        assert_eq!(e.key("f2", false, false, false, &b), None);
+        e.hold_back("f10");
+        assert_eq!(e.key("f10", false, false, false, &b), None);
         // △'s row, which has no key in the game, given B: B presses △
         b.bind_key(row_named("clear_target").unwrap(), "b");
         assert_eq!(e.key("b", true, false, false, &b), Some(Sent::Button(bit::TRIANGLE)));

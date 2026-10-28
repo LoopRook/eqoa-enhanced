@@ -70,6 +70,8 @@ const ZOOM_STEP: f32 = 1.25;
 pub struct Mini {
     /// world units a frame pixel (`SCALE`, the wheel's)
     pub scale: f32,
+    pub circle:[f32;3],
+    pub masked_until:usize,
     /// drawn this frame (`Map::mini_frame` made its quads)
     pub up: bool,
     /// where its frame is in the window, pixels (`Map::mini_contains`)
@@ -86,7 +88,7 @@ pub struct Mini {
 
 impl Default for Mini {
     fn default() -> Self {
-        Mini { scale: SCALE, up: false, frame_px: [0.0; 4], wanted: Vec::new(), cursor: None, map_marks: None }
+        Mini { circle:[0.0;3],masked_until:0,scale: SCALE, up: false, frame_px: [0.0; 4], wanted: Vec::new(), cursor: None, map_marks: None }
     }
 }
 
@@ -226,10 +228,10 @@ fn clip(r: [f32; 4], shown: [f32; 4], to_px: impl Fn([f32; 2]) -> [f32; 2]) -> O
 /// Window pixel `q`, outside rectangle `r`, brought in along the line from
 /// `mid` to the rectangle's edge: where something farther than the minimap
 /// shows is marked on its rim.
-fn to_rim(mid: [f32; 2], q: [f32; 2], r: [f32; 4]) -> [f32; 2] {
+pub(crate) fn to_rim(mid: [f32; 2], q: [f32; 2], r: [f32; 4]) -> [f32; 2] {
     let d = [q[0] - mid[0], q[1] - mid[1]];
     let half = [(r[2] - r[0]) / 2.0, (r[3] - r[1]) / 2.0];
-    let k = (d[0].abs() / half[0].max(1e-6)).max(d[1].abs() / half[1].max(1e-6));
+    let k = d[0].hypot(d[1])/half[0].min(half[1]).max(1e-6);
     if k <= 1.0 {
         return q;
     }
@@ -250,6 +252,13 @@ fn square(q: [f32; 2], r: f32) -> [[f32; 2]; 4] {
 /// A diamond `r` either side of `q`: its points up, right, down and left.
 fn diamond(q: [f32; 2], r: f32) -> [[f32; 2]; 4] {
     [[q[0], q[1] - r], [q[0] + r, q[1]], [q[0], q[1] + r], [q[0] - r, q[1]]]
+}
+
+fn ring_quad(size:(u32,u32),c:[f32;3],i:usize,n:usize,width:f32)->[[f32;2];4] {
+    let a=i as f32*std::f32::consts::TAU/n as f32;let b=(i+1)as f32*std::f32::consts::TAU/n as f32;
+    let at=|t:f32,r:f32|frame_from_window(size,[c[0]+r*t.cos(),c[1]+r*t.sin()]);
+    let inner=(c[2]-width).max(0.0);
+    [at(a,inner),at(a,c[2]),at(b,c[2]),at(b,inner)]
 }
 
 /// A plain quad at frame points `pos`, cut to `cut`, pushed as it is (the
@@ -332,7 +341,8 @@ impl Map {
     /// wheel's there: `mini_wheel`).
     pub fn mini_contains(&self, p: [f32; 2]) -> bool {
         let r = self.mini.frame_px;
-        self.mini.up && !self.open && p[0] >= r[0] && p[0] < r[2] && p[1] >= r[1] && p[1] < r[3]
+        let c=if self.mini.circle[2]>0.0 {self.mini.circle}else{[(r[0]+r[2])*0.5,(r[1]+r[3])*0.5,(r[2]-r[0]).min(r[3]-r[1])*0.5]};
+        self.mini.up && !self.open && (p[0]-c[0]).hypot(p[1]-c[1])<=c[2]
     }
 
     /// The wheel's `lines` over the minimap (up positive: in).
@@ -349,6 +359,9 @@ impl Map {
     /// Not drawn this frame (Minimap off, a window up, Hide UI, the map up):
     /// nothing composed, its tiles no longer kept for it.
     pub fn mini_off(&mut self) {
+        if !self.open {
+            self.search.hide();
+        }
         self.mini.up = false;
         self.mini.wanted.clear();
     }
@@ -388,6 +401,7 @@ impl Map {
         // world units a window pixel; the player at the middle, north up
         let s = self.mini.scale / k;
         let mid = [(inside[0] + inside[2]) / 2.0, (inside[1] + inside[3]) / 2.0];
+        self.mini.circle=[mid[0],mid[1],(inside[2]-inside[0]).min(inside[3]-inside[1])*0.5];
         let c = [p[0], p[2]];
         let to_px = |q: [f32; 2]| [mid[0] + (q[0] - c[0]) / s, mid[1] + (q[1] - c[1]) / s];
         let shown = [c[0] - (mid[0] - inside[0]) * s, c[1] - (mid[1] - inside[1]) * s, c[0] + (inside[2] - mid[0]) * s, c[1] + (inside[3] - mid[1]) * s];
@@ -507,16 +521,27 @@ impl Map {
                 plain(ui, white, diamond(q, rr).map(f), color, cut);
             }
         }
+        let guide_start = ui.quads.len();
+        self.search
+            .draw_guidance(ui, white, |at| f(to_px(at)), [a[0], a[1], b[0], b[1]], true);
+        for q in &mut ui.quads[guide_start..] {
+            q.clip = cut;
+        }
         let mut r = l.assets.raster(ui);
         if let Some(vui) = cx.vui {
             // the border, a window's frame round it, placed as the HUD's right side is
             r.ui.anchor = Anchor::Right;
             r.ui.vertical = Vertical::Top;
-            vui.blit_frame(&mut r, [FRAME[0], FRAME[1]], [FRAME[2] - FRAME[0], FRAME[3] - FRAME[1]], &vi::ui::frame_sets()[0], 3, 1.0, true);
+            // A thin circular ring; the same circle clips terrain and marks.
+            r.ui.anchor=Anchor::Middle;r.ui.vertical=Vertical::Middle;
+            let ring_start=r.ui.quads.len();
+            for i in 0..96 {plain(r.ui,white,ring_quad(size,self.mini.circle,i,96,px_line),super::theme::BORDER,None);}
+            for q in &mut r.ui.quads[ring_start..] {q.clip=Some(render::ui::WHOLE);}
+            r.ui.anchor=Anchor::Right;r.ui.vertical=Vertical::Top;
             // north, up: the compass turns with the camera, the minimap does not
             let i = inner();
             let h = vui.font_height(&r);
-            vui.draw_centered_string_ex(&mut r, &vi::ui::wide("N"), (i[0] + i[2]) / 2, i[1] + h / 2, [1.0, 1.0, 1.0, 0.85], 3, true);
+            vui.draw_centered_string_ex(&mut r, &vi::ui::wide("N"), (i[0] + i[2]) / 2, i[1] + h / 2 + 5, [1.0, 1.0, 1.0, 0.95], 3, true);
             // the quests' "!" and "?" over the other marks, where they were
             // placed in the window (cut to the pictures as the marks are)
             r.ui.anchor = Anchor::Middle;
@@ -537,10 +562,11 @@ impl Map {
         for (rr, color) in [(dr * 0.85 + o, OUTLINE), (dr * 0.85, super::MARKER)] {
             plain(r.ui, white, view::dart(mid, heading, rr).map(f), color, cut);
         }
+        self.mini.masked_until=r.ui.quads.len();
         // the card of the mark under the mouse's pointer, left of the frame,
         // drawn as the map's cards are
         let reach = (MARK_REACH * px_line).max(half) + px_line;
-        if let (Some(vui), Some((q, m))) = (cx.vui, self.mini.cursor.and_then(|c| mark_under(&placed, c, reach))) {
+        if let (Some(vui), Some((q, m))) = (cx.vui, self.mini.cursor.filter(|c|(c[0]-mid[0]).hypot(c[1]-mid[1])<=self.mini.circle[2]).and_then(|c| mark_under(&placed, c, reach))) {
             r.ui.anchor = Anchor::Middle;
             r.ui.vertical = Vertical::Middle;
             let lines: Vec<(Vec<u16>, [f32; 4])> = m
@@ -573,6 +599,21 @@ impl Map {
                 }
             }
         }
+        if let Some(vui) = cx.vui {
+            r.ui.anchor = Anchor::Middle;
+            r.ui.vertical = Vertical::Middle;
+            let tl = f([0.0, 0.0]);
+            let br = f([size.0 as f32, size.1 as f32]);
+            let m0 = f([outer[0], outer[1]]);
+            let m1 = f([outer[2], outer[3]]);
+            r=r.with_font(l.control_font,super::theme::FONT_SCALE);
+            let search_start=r.ui.quads.len();
+            self.search
+                .draw(&mut r, vui, [tl, br], Some([m0[0], m0[1], m1[0], m1[1]]));
+            // UI coordinates extend past the central frame on wide/tall
+            // windows. Match the tooltip and full map's actual-window clip.
+            for q in &mut r.ui.quads[search_start..] { q.clip=Some(render::ui::WHOLE); }
+        }
         self.mini.wanted = wanted;
         self.mini.frame_px = outer;
         self.mini.up = true;
@@ -591,8 +632,9 @@ impl Map {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        l.map.draw(device, &mut pass, size);
-        l.ui.draw(device, &mut pass, size);
+        l.map.draw_circle(device, &mut pass, size,self.mini.circle);
+        l.ui.draw_circle_range(device,&mut pass,size,0..self.mini.masked_until,self.mini.circle);
+        l.ui.draw_range(device,&mut pass,size,self.mini.masked_until..l.ui.quads.len());
     }
 }
 
@@ -658,6 +700,21 @@ mod tests {
     /// another world's mark, and a quest's on the pictures, which stays where
     /// it lies.
     #[test]
+    fn border_outer_points_match_the_gpu_circle_at_every_aspect() {
+        for size in [(640,480),(1920,1080),(720,1280)] {
+            let r=window_rect(size,inner());let c=[(r[0]+r[2])*0.5,(r[1]+r[3])*0.5,(r[2]-r[0]).min(r[3]-r[1])*0.5];
+            for i in 0..96 {let q=ring_quad(size,c,i,96,1.5);for point in [q[1],q[2]] {let p=window_from_frame(size,point);assert!(((p[0]-c[0]).hypot(p[1]-c[1])-c[2]).abs()<0.002,"{size:?}: border must match the mask at every angle");}}
+        }
+    }
+
+    #[test]
+    fn diagonal_guidance_uses_a_circle_rim_and_corners_are_outside() {
+        let mid=[50.0,50.0];let q=to_rim(mid,[200.0,200.0],[0.0,0.0,100.0,100.0]);
+        assert!(((q[0]-50.0).hypot(q[1]-50.0)-50.0).abs()<0.01,"{q:?} is on the circle");
+        let mut m=Map::default();m.mini.up=true;m.mini.frame_px=[0.0,0.0,100.0,100.0];
+        assert!(m.mini_contains(mid));assert!(!m.mini_contains([1.0,1.0]));
+    }
+    #[test]
     fn the_quests_marks_point_the_way_from_the_rim() {
         let mark = |kind, world, at: [f32; 2]| Mark { kind, world, at, tip: Vec::new() };
         let marks = [
@@ -676,7 +733,7 @@ mod tests {
         assert_eq!(kinds, [MarkKind::Camp, MarkKind::QuestOffer, MarkKind::QuestStep]);
         let near = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3;
         assert!(near(placed[0].0, [60.0, 70.0]), "the camp where it lies: {:?}", placed[0].0);
-        assert!(near(placed[1].0, [95.0, 50.0]), "the far quest on the east rim: {:?}", placed[1].0);
+        assert!(near(placed[1].0, [92.0, 50.0]), "the far quest on the east rim: {:?}", placed[1].0);
         assert!(near(placed[2].0, [30.0, 20.0]), "the near one where it lies: {:?}", placed[2].0);
         assert!(place_marks(&marks, 2, &to_px, inside, 3.0, mid, [5.0, 8.0, 95.0, 92.0]).is_empty(), "no marks of world 2");
     }
@@ -764,7 +821,7 @@ mod tests {
         assert_eq!(to_rim(mid, [60.0, 40.0], r), [60.0, 40.0]);
         assert_eq!(to_rim(mid, [250.0, 50.0], r), [100.0, 50.0]);
         let q = to_rim(mid, [50.0 + 300.0, 50.0 - 150.0], r);
-        assert!((q[0] - 100.0).abs() < 1e-3 && (q[1] - 25.0).abs() < 1e-3, "{q:?}");
+        assert!(((q[0]-50.0).hypot(q[1]-50.0)-50.0).abs()<1e-3 && ((q[0]-50.0)+2.0*(q[1]-50.0)).abs()<1e-3,"on the circle along the original bearing: {q:?}");
     }
 
     /// A world rectangle cut to what the minimap shows: its window place and

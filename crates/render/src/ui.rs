@@ -527,6 +527,7 @@ struct Vertex {
     /// The quad's texture rectangle (its corners' least and greatest uv):
     /// what the fragment keeps to (`ui.wgsl`).
     rect: [f32; 4],
+    circle: [f32;4],
 }
 
 /// One quad: its corners in screen pixels and texture coordinates, in fan
@@ -684,7 +685,7 @@ impl Ui {
                             buffers: &[Some(wgpu::VertexBufferLayout {
                                 array_stride: std::mem::size_of::<Vertex>() as u64,
                                 step_mode: wgpu::VertexStepMode::Vertex,
-                                attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Float32x4],
+                                attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4],
                             })],
                         },
                         primitive: Default::default(),
@@ -908,6 +909,13 @@ impl Ui {
 
     /// `draw`, for the quads in `range` only (around a window's 3D, `split`).
     pub fn draw_range<'a>(&'a self, device: &wgpu::Device, pass: &mut wgpu::RenderPass<'a>, size: (u32, u32), range: std::ops::Range<usize>) {
+        self.draw_range_masked(device,pass,size,range,None);
+    }
+    /// Mask only a content range; tooltips and controls can draw outside it.
+    pub fn draw_circle_range<'a>(&'a self,device:&wgpu::Device,pass:&mut wgpu::RenderPass<'a>,size:(u32,u32),range:std::ops::Range<usize>,circle:[f32;3]) {
+        self.draw_range_masked(device,pass,size,range,Some(circle));
+    }
+    fn draw_range_masked<'a>(&'a self,device:&wgpu::Device,pass:&mut wgpu::RenderPass<'a>,size:(u32,u32),range:std::ops::Range<usize>,circle:Option<[f32;3]>) {
         let range = range.start.min(self.quads.len())..range.end.min(self.quads.len());
         if range.is_empty() {
             return;
@@ -934,6 +942,7 @@ impl Ui {
                 uv: q.uv[i],
                 color: q.color,
                 rect,
+                circle:circle.filter(|c|c[2].is_finite()&&c[2]>0.0).map_or([0.0;4],|c|[c[0]/tw*2.0-1.0,1.0-c[1]/th*2.0,tw/(2.0*c[2]),th/(2.0*c[2])]),
             };
             v.extend([p(0), p(1), p(2), p(0), p(2), p(3)]);
         }

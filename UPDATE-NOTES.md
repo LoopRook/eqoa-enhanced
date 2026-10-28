@@ -5,6 +5,20 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
+## 2026-10-28 · Map search and guidance preview
+
+- The minimap is now circular. Search stays below the map coordinates and status messages.
+- Set a personal waypoint and choose Track waypoint to follow its pink guide on both maps.
+- Map labels and XP camp badges share the compact theme; zoomed-out camps use small neutral markers.
+
+- The native map now carries the compact dark UI treatment with thin borders, red focus and selection, and Space Mono text. Mouse/keyboard Suggest keeps the map visible while naming and annotating a community marker.
+
+- Find NPCs, group members and camp/coach locations in a temporary map panel. F2 opens search; F4 stops guidance. Both can be changed in Controls.
+- Follow recorded spawn locations on the minimap while actual nearby matches highlight separately. Group guidance follows valid same-world positions.
+- After changing keys in Controls, the map's keyboard legend now shows the keys
+  you chose, including zoom, waypoints, markers, towns, and quest markers.
+- A control with no keyboard key assigned is shown as unbound.
+
 ## 2026-10-28 · You can run again after casting a spell
 - Since about 00:55 UTC this morning, casting a spell left you walking, unable to run, until
   you logged in again: you walk while you cast, and the game thought the cast never ended. The

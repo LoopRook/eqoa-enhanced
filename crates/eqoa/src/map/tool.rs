@@ -36,6 +36,16 @@ pub fn shot(s: &Shot, out: &str) -> Result<(), Box<dyn std::error::Error>> {
         lib.add(f, esf::Container::open(disc.read(f)?)?);
     }
     let words = disc.read("WORDS.TXT").ok().and_then(|b| crate::spelling::words(&b));
+    crate::modules::load_now(crate::modules::Module::Support, std::path::Path::new(&iso));
+    let atlas = crate::modules::get(crate::modules::Module::Support)
+        .and_then(|b| vi::ui::read_atlas(&b))
+        .unwrap_or_default();
+    let textures = disc
+        .read("TEXTURES.TXT")
+        .ok()
+        .and_then(|b| vi::strtab::StringTable::parse(&b))
+        .unwrap_or_default();
+    let vui = vi::ui::Vui::new(words.clone().unwrap_or_default(), textures, atlas);
     let world = crate::play::WORLD_FILES.iter().position(|f| f.eq_ignore_ascii_case(&s.world)).unwrap_or(0) as i32;
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
@@ -53,6 +63,18 @@ pub fn shot(s: &Shot, out: &str) -> Result<(), Box<dyn std::error::Error>> {
     let t = Instant::now();
     let mut frames = 0u32;
     map.show();
+    map.search.update(world, s.at, Vec::new(), Vec::new());
+    if let Ok(value)=std::env::var("EQOA_MAP_WAYPOINT") {
+        if let Some((x,z))=value.split_once(',').and_then(|(x,z)|Some((x.parse::<f32>().ok()?,z.parse::<f32>().ok()?))) {map.set_waypoint(world,Some([x,z]));if std::env::var_os("EQOA_MAP_TRACK_PIN").is_some(){map.search.track_waypoint();}}
+    }
+    if let Ok(query) = std::env::var("EQOA_MAP_QUERY") {
+        map.search.query = query;
+        map.search.open = true;
+        if std::env::var_os("EQOA_MAP_TRACK").is_some() {
+            map.search.key("enter", None);
+        }
+    }
+    if std::env::var_os("EQOA_MAP_SUGGEST_FORM").is_some(){map.suggestion.show(super::community::Spot{world,at:s.at},"Community marker".into());}
     // `EQOA_MAP_HOVER=<x>,<z>`: that world point taken as the mouse's, its
     // marker's card shown (`markers`)
     map.hover_world = std::env::var("EQOA_MAP_HOVER").ok().and_then(|v| {
@@ -61,7 +83,7 @@ pub fn shot(s: &Shot, out: &str) -> Result<(), Box<dyn std::error::Error>> {
     });
     let player = Some(([s.at[0], 0.0, s.at[1]], s.heading));
     loop {
-        let cx = Context { lib: &lib, device: &device, queue: &queue, format: render::TARGET_FORMAT, size: s.size, dt: 1.0 / 60.0, player, world, origin: [1000.0, 1000.0], group: Vec::new(), in_group: false, target: None, sticks: [0.0; 4], keyboard: true, words: words.as_ref(), vui: None, quest_marks: None };
+        let cx = Context { lib: &lib, device: &device, queue: &queue, format: render::TARGET_FORMAT, size: s.size, dt: 1.0 / 60.0, player, world, origin: [1000.0, 1000.0], group: Vec::new(), in_group: false, target: None, sticks: [0.0; 4], keyboard: true, words: words.as_ref(), vui: Some(&vui), quest_marks: None };
         map.budget = budget;
         map.frame(&cx);
         frames += 1;
@@ -77,8 +99,13 @@ pub fn shot(s: &Shot, out: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
     // a few more frames: the view's tiles asked of the cache and shown
     for _ in 0..30 {
-        let cx = Context { lib: &lib, device: &device, queue: &queue, format: render::TARGET_FORMAT, size: s.size, dt: 1.0 / 60.0, player, world, origin: [1000.0, 1000.0], group: Vec::new(), in_group: false, target: None, sticks: [0.0; 4], keyboard: true, words: words.as_ref(), vui: None, quest_marks: None };
+        let cx = Context { lib: &lib, device: &device, queue: &queue, format: render::TARGET_FORMAT, size: s.size, dt: 1.0 / 60.0, player, world, origin: [1000.0, 1000.0], group: Vec::new(), in_group: false, target: None, sticks: [0.0; 4], keyboard: true, words: words.as_ref(), vui: Some(&vui), quest_marks: None };
         map.frame(&cx);
+    }
+    if std::env::var_os("EQOA_MAP_PROFILE").is_some() {
+        let start=Instant::now();
+        for _ in 0..100 {std::hint::black_box(map.search.results());}
+        eprintln!("map search: {:.3} ms/query, 100 queries over actual loaded catalog",start.elapsed().as_secs_f64()*10.0);
     }
     if let Some(w) = &map.world {
         let st = w.builder.stats;
@@ -91,6 +118,40 @@ pub fn shot(s: &Shot, out: &str) -> Result<(), Box<dyn std::error::Error>> {
             peak_mb().unwrap_or(0.0)
         );
     }
+    if std::env::var_os("EQOA_MAP_MINI").is_some() {
+        let search_open = map.search.open;
+        map.close();
+        map.search.open = search_open;
+        let cx = Context {
+            lib: &lib,
+            device: &device,
+            queue: &queue,
+            format: render::TARGET_FORMAT,
+            size: s.size,
+            dt: 1.0 / 60.0,
+            player,
+            world,
+            origin: [1000.0, 1000.0],
+            group: Vec::new(),
+            in_group: false,
+            target: None,
+            sticks: [0.0; 4],
+            keyboard: true,
+            words: words.as_ref(),
+            vui: Some(&vui),
+            quest_marks: None,
+        };
+        map.mini_frame(
+            &cx,
+            &super::mini::MiniView {
+                dots: Vec::new(),
+                target: None,
+                marks: Vec::new(),
+            },
+        );
+    }
+    // Exercise the same pointer coordinate line that overlapped Search in play.
+    if std::env::var_os("EQOA_MAP_COORDS").is_some() && map.open {map.pointer_seen=true;map.cursor=[s.size.0 as f32*0.45,s.size.1 as f32*0.45];let cx=Context{lib:&lib,device:&device,queue:&queue,format:render::TARGET_FORMAT,size:s.size,dt:1.0/60.0,player,world,origin:[1000.0,1000.0],group:Vec::new(),in_group:false,target:None,sticks:[0.0;4],keyboard:true,words:words.as_ref(),vui:Some(&vui),quest_marks:None};map.frame(&cx);}
     let (w, h) = s.size;
     let px = capture(&map, &device, &queue, s.size)?;
     let mut e = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(out)?), w, h);
@@ -131,6 +192,7 @@ pub fn capture(map: &Map, device: &wgpu::Device, queue: &wgpu::Queue, size: (u32
         });
     }
     map.draw(device, &mut enc, &tv, &depth, size);
+    map.draw_mini(device, &mut enc, &tv, &depth, size);
     enc.copy_texture_to_buffer(
         target.as_image_copy(),
         wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },

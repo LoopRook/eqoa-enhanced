@@ -23,9 +23,21 @@ impl Play {
     /// there, as the game's own boxes take the target's name (`open_edit`),
     /// so the player sees whose spot goes.
     pub(super) fn take_map_suggest(&mut self) {
+        if let Some(outcome)=self.map.suggestion.take() {
+            if let Some(draft)=self.map.community.draft.take() {
+                if let crate::map::suggest::Outcome::Submit{name,note}=outcome {self.map.community.send(draft.spot,&name,&note);}
+            }
+        }
         let Some(spot) = self.map.take_suggest() else { return };
         let target = self.map.take_suggest_target();
         let follow = self.map.following();
+        if self.keyboard {
+            self.map.search.hide();
+            self.release_map_search_holds();
+            self.map.suggestion.show(spot,if target {self.target_name().unwrap_or_default()}else{String::new()});
+            self.map.community.draft=Some(Draft{spot,name:None,follow});
+            return;
+        }
         self.map.close();
         self.map.community.draft = Some(Draft { spot, name: None, follow });
         self.open_edit(community::NAME_PURPOSE, community::NAME_MAX, -1, target);
@@ -89,6 +101,7 @@ mod tests {
         let mut s = Session::connect_with(Box::new(Nowhere), ([127, 0, 0, 1], 5000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
         s.self_id = Some(0x100);
         let mut p = Play::new(s, Player::default(), Box::default());
+        p.keyboard=false;
         p.map = crate::map::testing::up((1280, 720));
         p.map.community.set_base(Some(base.to_string()));
         // a cache of its own, empty (none of the machine's)
@@ -97,6 +110,25 @@ mod tests {
     }
 
     /// The edit box's keys as the game hands them (`edit_key`, `run_edit`):
+    #[test]
+    fn keyboard_suggest_keeps_map_visible_and_full_payload() {
+        let (base,asked)=serve(|_| (200, Vec::new(), "{\"id\":3}".to_string()));
+        let mut p=play(&base);p.keyboard=true;
+        assert!(p.map.key(key::L3,true));p.take_map_suggest();
+        assert!(p.map.open,"Suggest must keep the map visible for keyboard/mouse players");
+        assert_eq!(p.mode,0);assert!(p.map.suggestion.open);
+        let spot=p.map.community.draft.as_ref().unwrap().spot;
+        p.map.suggestion.name="Test marker".into();p.map.suggestion.note="Beside the road".into();
+        p.map.suggestion.key("enter",None);p.map.suggestion.key("enter",None);p.take_map_suggest();
+        assert!(p.map.open);assert!(until(5.0,||{p.map.community.frame(true);!suggestions(&asked).is_empty()}));
+        let sent=suggestions(&asked);let v:serde_json::Value=serde_json::from_str(&sent[0].body).unwrap();
+        assert_eq!(v["name"],"Test marker");assert_eq!(v["note"],"Beside the road");
+        assert_eq!(v["world"].as_i64(),Some(i64::from(spot.world)));
+        assert_eq!(v["x"].as_f64().unwrap() as f32,spot.at[0]);
+        p.map.key(key::L3,true);p.take_map_suggest();p.map.suggestion.key("escape",None);p.take_map_suggest();
+        assert!(p.map.open);assert_eq!(suggestions(&asked).len(),1);
+    }
+
     /// the text typed, then Enter (13) or Escape (27).
     fn type_in(p: &mut Play, text: &str, enter: bool) {
         p.edit.set_text(&crate::ui::wide(text));

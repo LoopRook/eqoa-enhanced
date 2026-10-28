@@ -570,6 +570,7 @@ version = "0.1.0"
 name = "eqoa"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "console_error_panic_hook",
  "cpal",
  "dnas",

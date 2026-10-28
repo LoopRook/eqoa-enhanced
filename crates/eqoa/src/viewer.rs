@@ -421,7 +421,7 @@ pub fn shot_with(
             {
                 p.map.show();
             }
-            touch.window = play.as_ref().is_some_and(|p| p.window_up() || p.map.open);
+            touch.window = play.as_ref().is_some_and(|p| p.window_up() || p.map.open || p.map.search.open);
             touch.dpad = play.as_mut().is_some_and(|p| p.quick_dpad());
             for (_, id, phase, at) in touch_script.iter().filter(|e| e.0 == t) {
                 touch.touch(*id, *phase, *at, Instant::now(), (w, h));
@@ -3235,6 +3235,42 @@ impl App {
         {
             self.held.remove(&n);
         }
+        if let Some(p)=self.play.as_mut().filter(|p|p.map.suggestion.open) {
+            p.release_map_search_holds();
+            if event.state==ElementState::Pressed {let name=crate::binds::name_of(&event.logical_key).unwrap_or_default();p.map.suggestion.key(&name,event.text.as_deref());}
+            return;
+        }
+        // A map query owns text before any global gameplay shortcut.
+        if let Some(p) = self.play.as_mut().filter(|p| p.map.search.open) {
+            p.release_map_search_holds();
+            if event.state == ElementState::Pressed {
+                let name = crate::binds::name_of(&event.logical_key).unwrap_or_default();
+                p.map.search.key(&name, event.text.as_deref());
+            }
+            return;
+        }
+        if event.state == ElementState::Pressed && !event.repeat {
+            if let Some(p) = self.play.as_mut() {
+                if p.mode == 0 && !p.keyboard_typing() {
+                    match event.logical_key {
+                        Key::Named(NamedKey::F2) => {
+                            if !p.minimap_up() && !p.map.open {
+                                p.map.show();
+                            }
+                            p.map.search.toggle();
+                            if p.map.search.open { p.release_map_search_holds(); }
+                            self.held.clear();
+                            return;
+                        }
+                        Key::Named(NamedKey::F4) => {
+                            p.map.search.stop();
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
         // F9 (`era`): the art swapped, whatever window is up
         if event.state == ElementState::Pressed && !event.repeat && event.logical_key == Key::Named(NamedKey::F9) {
             self.toggle_era();
@@ -3250,6 +3286,7 @@ impl App {
                 k => held_name(k),
             };
             if let Some(n) = name {
+                p.keyboard=true;
                 p.map.keyboard_key(&n, event.state == ElementState::Pressed, event.repeat);
             }
             return;
@@ -4552,7 +4589,13 @@ impl ApplicationHandler for App {
                     MouseScrollDelta::PixelDelta(p) => (p.y as f32 / 40.0, p.y as f32 / 100.0),
                 };
                 let at = [self.cursor.0 as f32, self.cursor.1 as f32];
-                if let Some(p) = self.play.as_mut().filter(|p| p.map.open) {
+                if self.play.as_ref().is_some_and(|p|p.map.suggestion.open) {
+                    // The form owns the pointer; no map or camera wheel action.
+                } else if let Some(p) = self.play.as_mut().filter(|p| p.map.search.open) {
+                    p.map
+                        .search
+                        .key(if steps > 0.0 { "up" } else { "down" }, None);
+                } else if let Some(p) = self.play.as_mut().filter(|p| p.map.open) {
                     p.map.wheel(steps, Some(at));
                 } else if let Some(p) = self.play.as_mut().filter(|p| p.map.mini_contains(at)) {
                     // over the minimap: its zoom, not the camera's
@@ -4747,7 +4790,7 @@ impl ApplicationHandler for App {
                     }
                 }
                 self.touch.holds = self.play.as_ref().is_some_and(|p| p.map.open);
-                self.touch.window = self.play.as_ref().is_some_and(|p| p.window_up() || p.map.open);
+                self.touch.window = self.play.as_ref().is_some_and(|p| p.window_up() || p.map.open || p.map.search.open);
                 self.touch.dpad = self.play.as_mut().is_some_and(|p| p.quick_dpad());
                 mark(&mut self.perf, 0);
                 self.grab_pointer(true);

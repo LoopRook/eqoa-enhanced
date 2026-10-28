@@ -16,6 +16,7 @@ struct Vertex {
     pos: [f32; 2],
     uv: [f32; 2],
     color: [f32; 4],
+    circle: [f32;4],
 }
 
 /// One quad: its corners in window pixels (y down) and texture coordinates,
@@ -123,7 +124,7 @@ impl MapLayer {
                 buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Float32x4],
                 })],
             },
             primitive: Default::default(),
@@ -224,6 +225,13 @@ impl MapLayer {
     /// depth attachment), in the order made, each run of one texture one
     /// draw.
     pub fn draw<'a>(&'a self, device: &wgpu::Device, pass: &mut wgpu::RenderPass<'a>, size: (u32, u32)) {
+        self.draw_masked(device,pass,size,None);
+    }
+    /// Circular window-pixel mask used by the minimap, independent of tiles.
+    pub fn draw_circle<'a>(&'a self,device:&wgpu::Device,pass:&mut wgpu::RenderPass<'a>,size:(u32,u32),circle:[f32;3]) {
+        self.draw_masked(device,pass,size,Some(circle));
+    }
+    fn draw_masked<'a>(&'a self,device:&wgpu::Device,pass:&mut wgpu::RenderPass<'a>,size:(u32,u32),circle:Option<[f32;3]>) {
         let quads: Vec<&MapQuad> = self.quads.iter().filter(|q| matches!(self.textures.get(q.tex), Some(Some(_)))).collect();
         if quads.is_empty() {
             return;
@@ -231,7 +239,7 @@ impl MapLayer {
         let (w, h) = (size.0.max(1) as f32, size.1.max(1) as f32);
         let mut v = Vec::with_capacity(quads.len() * 6);
         for q in &quads {
-            let p = |i: usize| Vertex { pos: [q.pos[i][0] / w * 2.0 - 1.0, 1.0 - q.pos[i][1] / h * 2.0], uv: q.uv[i], color: q.color };
+            let p = |i: usize| Vertex { pos: [q.pos[i][0] / w * 2.0 - 1.0, 1.0 - q.pos[i][1] / h * 2.0], uv: q.uv[i], circle:circle.filter(|c|c[2].is_finite()&&c[2]>0.0).map_or([0.0;4],|c|[c[0]/w*2.0-1.0,1.0-c[1]/h*2.0,w/(2.0*c[2]),h/(2.0*c[2])]), color: q.color };
             v.extend([p(0), p(1), p(2), p(0), p(2), p(3)]);
         }
         let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("map"), contents: bytemuck::cast_slice(&v), usage: wgpu::BufferUsages::VERTEX });

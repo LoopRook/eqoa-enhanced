@@ -19,6 +19,8 @@ web-time.workspace = true
 flate2.workspace = true
 # the community map markers' list (`map::community`), natively and in a page
 serde_json.workspace = true
+# Supersampled native map theme font (Space Mono, SIL OFL).
+ab_glyph = "0.2.32"
 winit = "0.30.13"
 pollster = "1.0.1"
 glam = "0.34.1"

@@ -224,11 +224,13 @@ impl UiAssets {
     }
 
     pub fn raster<'a>(&'a self, ui: &'a mut Ui) -> UiRaster<'a> {
-        UiRaster { assets: self, ui, glyphs: Default::default() }
+        UiRaster { assets: self, ui, glyphs: Default::default(), font_override:None, text_scale:1.0 }
     }
 }
 
 pub struct UiRaster<'a> {
+    font_override: Option<usize>,
+    text_scale: f32,
     pub assets: &'a UiAssets,
     pub ui: &'a mut Ui,
     /// The button glyphs drawn, where (for a pointer).
@@ -236,9 +238,11 @@ pub struct UiRaster<'a> {
 }
 
 impl UiRaster<'_> {
+    pub fn with_font(mut self,font:Option<usize>,scale:f32)->Self {if font.is_some(){self.font_override=font;self.text_scale=scale;}self}
+
     fn text(&mut self, at: [i32; 2], color: [f32; 4], s: &[u16]) {
-        if let Some(f) = self.assets.font {
-            self.ui.text(f, at[0], at[1], color, s);
+        if let Some(f) = self.font_override.or(self.assets.font) {
+            self.ui.text_scaled(f, at[0] as f32, at[1] as f32, self.text_scale, color, s);
             if color[3] > 0.0 {
                 let (w, h) = (self.string_width(s).max(0), self.point_size());
                 let (a, b) = (self.ui.placed([at[0] as f32, at[1] as f32]), self.ui.placed([(at[0] + w) as f32, (at[1] + h) as f32]));
@@ -367,11 +371,11 @@ impl Raster for UiRaster<'_> {
     }
 
     fn string_width(&self, s: &[u16]) -> i32 {
-        self.assets.font.map_or(0, |f| self.ui.fonts[f].string_width(s))
+        self.font_override.or(self.assets.font).map_or(0, |f| (self.ui.fonts[f].string_width(s) as f32*self.text_scale).ceil() as i32)
     }
 
     fn point_size(&self) -> i32 {
-        self.assets.font.map_or(0, |f| self.ui.fonts[f].height as i32)
+        self.font_override.or(self.assets.font).map_or(0, |f| (self.ui.fonts[f].height as f32*self.text_scale).ceil() as i32)
     }
 
     fn viewport(&self) -> [i32; 4] {
