@@ -8,7 +8,7 @@ echo.
 cd /d "%~dp0"
 
 echo [1/2] Starting EQOA Combat Parser Companion (Direct Telemetry)...
-start "EQOA Combat Parser" /d "C:\Users\hocka\Github Projects\EQOA Parser" python -m eqoa_parser --client
+start "" /d "C:\Users\hocka\Github Projects\EQOA Parser" pythonw -m eqoa_parser --client
 
 echo [2/2] Launching EQOA Enhanced Native Client...
 if exist "target\release\eqoa.exe" (
