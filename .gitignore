@@ -11,3 +11,5 @@
 /web/dist/
 
 *.exe
+__pycache__/
+*.pyc
