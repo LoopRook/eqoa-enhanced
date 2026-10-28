@@ -102,3 +102,33 @@ Still required before final release completion: clean committed metadata-stamped
 - Actions concurrency may replace excess pending jobs; this can require rerunning an unpublished queued version but cannot reintroduce the reviewed downgrade race because each running publisher rechecks monotonic history under the shared lock.
 - The import guard addresses the demonstrated Visual C++ dependency contract. It is not a general Windows loader validator, signature attestation service or guarantee against arbitrary manually crafted PE files. No new affected valid build was identified, and actual static/dynamic executable controls support the intended contract.
 - Repository tag protection and external manual mutations of release state remain outside this scoped implementation review. The workflow neither force-moves tags nor modifies an already-published release through its normal path.
+
+
+# CI platform recovery review
+
+Verdict: PASS. No actionable defect found in the narrow recovery diff. The new control workflow can build the original v0.1.0 source without moving its tag, and the Windows directory test retains its intended behavioral check.
+
+Reviewed release-ci-recovery.patch, current .github/workflows/enhanced-release.yml and tools/test_parser_launch.py, and the appended recovery evidence in release-packaging-report.md. Read-only Git inspection confirms refs/tags/v0.1.0 resolves to c7fddfc35a2f2d4185793af95b2e595a12e6a0e9. No tests/builds were rerun, no subagents were used, and no source files were changed. This report is the only reviewer write.
+
+## Source identity
+
+- Workflow32-35 checks out the requested dispatch tag, with the existing push ref as fallback. Validation49-57 requires canonical VERSION, exact tag/version equality, a full actual HEAD hash, a peeled refs/tags/<tag> commit equal to HEAD, and enhanced ancestry.
+- Validated tag and actual source commit are emitted only after all checks succeed. EQOA_BUILD_COMMIT is exported from that actual source commit at60, before Cargo runs. The dispatch configuration's GITHUB_SHA is no longer used as the executable stamp.
+- Publish109-114 consumes the validated build outputs and checks out the actual source commit. Local and downloaded manifests are asserted against that same commit/version at124 and140. All release commands use the validated release tag. The original tagged packager, release notes and guards therefore remain the publication inputs.
+- The original tag contains check_release_assets.py with the reviewed draft and monotonic checks; checking out the older tag does not lose those guards. There are no tag-create, tag-move or history-rewrite operations in the recovery diff.
+
+## Windows recovery and assertion
+
+- Workflow39-44 canonicalizes RUNNER_TEMP after Python setup, verifies that it is an existing directory, and exports TMPDIR/TEMP/TMP for subsequent processes. This changes the runner environment without changing the original tagged test or game code. The supplied evidence reproduces the original raw-string assertion failure with an actual short-path alias and its success with canonical TEMP.
+- test_parser_launch.py now compares actual child CWD using Path.samefile, so alternate spellings of the same directory are accepted. It still asserts exact quoted/backslash arguments, rejects the installation root as the working directory, and adds a child-process control proving that selecting a different parser directory does not match the prior directory. This preserves the intended directory behavior rather than weakening it to string normalization alone.
+- The updated test file runs in future source revisions. Rebuilding original v0.1.0 intentionally still uses its original test; the canonical runner environment is the fix exercised for that immutable tag.
+
+## Publication safeguards
+
+The constant publication concurrency group remains at101-103. Monotonic history checking127, unpublished-draft validation129, exact post-upload asset checking137, full downloaded-byte verification140 and final publication141 retain their order and fail-closed behavior. Static CRT flags, explicit MSVC target, the full workspace test gate and clean-source packaging remain unchanged. Concurrent push/dispatch builds can coexist, but their publication jobs serialize and recheck remote history.
+
+## Evidence and limits
+
+The appended implementation report records41 Python tests passing, ten parser tests passing under a real8.3 TEMP alias, original-tag red/green path reproduction, actual workflow-script fixtures for canonical temporary paths and source identity, invalid tag/source/ancestry rejection, and YAML/Bash/PowerShell syntax checks. These execution results are attributed to the implementing agent/root and were not repeated by this reviewer.
+
+Root reports the original tagged production package already validates its seven ZIP members and static executable, with a map capture matching the baseline. Actual dispatch of the newly committed control workflow from enhanced with tag=v0.1.0, and successful CI/public asset verification, remain the final operational checks. This review approves the recovery source change; it does not claim that recovery CI has already completed.

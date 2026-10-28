@@ -3,6 +3,12 @@ name: Enhanced versioned release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Immutable release tag to build (for example, v0.1.0)'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -15,25 +21,43 @@ jobs:
   windows:
     if: github.repository == 'LoopRook/eqoa-enhanced'
     runs-on: windows-2022
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      commit: ${{ steps.release.outputs.commit }}
     env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       EQOA_UPDATE_CHANNEL: enhanced
-      EQOA_BUILD_COMMIT: ${{ github.sha }}
       RUSTFLAGS: -C target-feature=+crt-static
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+      - name: Use canonical Windows temporary directory
+        shell: pwsh
+        run: |
+          $canonicalTemp = (python -c "import os; print(os.path.realpath(os.environ['RUNNER_TEMP']))").Trim()
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $canonicalTemp -PathType Container)) { throw 'Cannot resolve runner temporary directory' }
+          foreach ($name in @('TMPDIR', 'TEMP', 'TMP')) { "$name=$canonicalTemp" >> $env:GITHUB_ENV }
       - name: Validate semantic version and reviewed ancestry
+        id: release
         shell: pwsh
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
           if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw 'VERSION must be MAJOR.MINOR.PATCH' }
-          if ($env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag must match VERSION' }
-          git merge-base --is-ancestor $env:GITHUB_SHA origin/enhanced
+          if ($env:RELEASE_TAG -ne "v$version") { throw 'Tag must match VERSION' }
+          $sourceCommit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Cannot resolve checked-out source commit' }
+          $tagCommit = (git rev-parse --verify "refs/tags/$($env:RELEASE_TAG)^{commit}").Trim()
+          if ($LASTEXITCODE -ne 0 -or $tagCommit -ne $sourceCommit) { throw 'Checked-out source must match the immutable release tag' }
+          git merge-base --is-ancestor $sourceCommit origin/enhanced
           if ($LASTEXITCODE -ne 0) { throw 'Release must be reviewed enhanced history' }
+          "tag=$($env:RELEASE_TAG)" >> $env:GITHUB_OUTPUT
+          "commit=$sourceCommit" >> $env:GITHUB_OUTPUT
+          "EQOA_BUILD_COMMIT=$sourceCommit" >> $env:GITHUB_ENV
       - name: Fetch the reviewed upstream policy base
         shell: pwsh
         run: |
@@ -82,8 +106,12 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.windows.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.windows.outputs.commit }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.windows.outputs.commit }}
       - uses: actions/download-artifact@v4
         with:
           name: enhanced-windows
@@ -92,23 +120,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          python3 tools/verify_player_release.py out --commit "$GITHUB_SHA" --version "$version"
+          version="${RELEASE_TAG#v}"
+          python3 tools/verify_player_release.py out --commit "$RELEASE_COMMIT" --version "$version"
           test -f "docs/releases/$version.md"
           gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isDraft > existing.json
           python3 tools/check_release_assets.py history existing.json --version "$version"
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft,assets > draft.json 2>/dev/null; then
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets > draft.json 2>/dev/null; then
             python3 tools/check_release_assets.py draft draft.json --version "$version" --allow-missing
           else
-            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
               --verify-tag --draft --title "EQOA Enhanced $version" \
               --notes-file "docs/releases/$version.md"
           fi
-          gh release upload "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" --clobber
-          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft,assets > uploaded.json
+          gh release upload "$RELEASE_TAG" out/* --repo "$GITHUB_REPOSITORY" --clobber
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets > uploaded.json
           python3 tools/check_release_assets.py draft uploaded.json --version "$version"
           remote_directory="$(mktemp -d)"
-          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir "$remote_directory"
-          python3 tools/verify_player_release.py "$remote_directory" --commit "$GITHUB_SHA" --version "$version"
-          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest \
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$remote_directory"
+          python3 tools/verify_player_release.py "$remote_directory" --commit "$RELEASE_COMMIT" --version "$version"
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest \
             --notes-file "docs/releases/$version.md"

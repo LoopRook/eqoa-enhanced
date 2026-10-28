@@ -36,3 +36,16 @@ still build from source but need their own verified runtime packages before bein
 added to the updater manifest. Upstream master/dev workflows remain unchanged and
 must not be used to publish this fork. The companion parser is optional/separate.
 Existing license terms/notices remain unchanged; no alternative license was chosen.
+
+## Retry an existing tag after a CI environment fix
+
+Never move the tag. Commit the workflow-only fix to enhanced, then use Enhanced
+versioned release's Run workflow with the existing tag (for example, v0.1.0).
+The workflow definition comes from the selected branch, but source checkout,
+version/ancestry verification, build metadata and publication all use the actual
+immutable tag commit. A game-code change requires a new release version instead.
+
+The initial0.1.0tag run exposed a Windows short-path/long-path fixture mismatch.
+Canonical runner temporary directories allow its unchanged test to run correctly;
+future test code also compares directory identity rather than spelling. Both the
+original failure and the successful recovery run remain part of the audit trail.

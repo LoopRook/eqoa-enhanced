@@ -34,7 +34,22 @@ class ParserLaunchTests(unittest.TestCase):
         self.write_manifest(command=sys.executable, args=["-c", code, str(output), 'a "quoted" arg', "back\\slash"])
         child = parser_launch.launch_parser(self.base)
         self.assertEqual(child.wait(timeout=10), 0)
-        self.assertEqual(json.loads(output.read_text()), [str(self.parser), ['a "quoted" arg', "back\\slash"]])
+        actual_cwd, actual_args = json.loads(output.read_text())
+        self.assertTrue(Path(actual_cwd).samefile(self.parser))
+        self.assertFalse(Path(actual_cwd).samefile(self.base))
+        self.assertEqual(actual_args, ['a "quoted" arg', "back\\slash"])
+
+    def test_changed_working_directory_does_not_match_previous_directory(self):
+        changed_directory = self.base / "different parser directory"
+        changed_directory.mkdir()
+        os.environ["EQOA_PARSER_DIR"] = str(changed_directory)
+        output = self.base / "changed-cwd.json"
+        code = "import json,os,sys; from pathlib import Path; Path(sys.argv[1]).write_text(json.dumps(os.getcwd()))"
+        self.write_manifest(command=sys.executable, args=["-c", code, str(output)])
+        self.assertEqual(parser_launch.launch_parser(self.base).wait(timeout=10), 0)
+        actual_cwd = Path(json.loads(output.read_text()))
+        self.assertTrue(actual_cwd.samefile(changed_directory))
+        self.assertFalse(actual_cwd.samefile(self.parser))
 
     def test_missing_setting_reports_configuration_instead_of_launching(self):
         os.environ.pop("EQOA_PARSER_DIR", None)

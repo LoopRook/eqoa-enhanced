@@ -56,3 +56,20 @@ No parser repository changes, player data, development tools, BATs or disc data
 are part of the package. Existing license notices are retained without selecting
 new terms. Moving groups, zoning, despawns and server-specific features retain
 the live-player checks described in MAP-PLAYTEST.md.
+
+## First CI attempt and recovery
+
+Original tag source remains c7fddfc35a2f2d4185793af95b2e595a12e6a0e9. The initial
+[CI run 40738499391](https://github.com/LoopRook/eqoa-enhanced/actions/runs/40738499391)
+passed source/ancestry/toolchain/footprint gates, then stopped on one Python test:
+Windows reported the same directory as RUNNER~1 versus runneradmin. No release
+was published. The original tag test was reproduced failing under an 8.3 temporary
+path and passing under a canonical path; this was a fixture assertion problem.
+
+The recovery workflow uses a canonical runner temp directory, supports dispatch
+for an existing tag, and stamps/publishes the checked-out tag's commit rather than
+the control workflow revision. Future fixtures use samefile with exact argv and
+a wrong-directory negative control. 41 Python tests pass; the unchanged tag's
+original assertion passes with the canonical environment. YAML/Bash/PowerShell
+and executed source-output fixtures pass. Independent recovery review found no
+new defect. Game/Rust/packager code and v0.1.0 were not changed for this correction.
