@@ -10,15 +10,12 @@ current.
 - Vanilla: nothing that changes the game's picture or play beyond what README "Vanilla" keeps
   (widescreen, the untethered frame rate, the mouse and the touch screen, the keyboard with WASD and
   the Controls page, 1,000 lines of chat, no green backdrop behind the start menu's windows, the
-  Extended options, the updater, the problem and crash reports, the 2002 disc's art on F9, Hide UI
-  on H, names from farther and smaller zoomed out (and every one in a crowd, Overlapping Names Show),
-  Ignore Shouts kept, Update Notices, Text Sharp or Smooth, Loading Screens Longer or Instant, Render
-  Scale x1, x2 or x4 (off unless chosen), HUD Sharp or Nearest (Sharp by default, as Text's: the
-  user's of 2026-10-27, "have HUD and Text crisp on by default")).
-  A new client-side addition is the user's call: ask first. Sharp filtering is for the 2D layer and
-  the text only: the world's textures are drawn smooth, as the game filters them (the user,
-  2026-10-27, after a Crisp row for them: "world textures cant render proper without smooth. so
-  only use for UI, Text").
+  Extended options, the map (its XP camps, coaches, routes and town names, and the community's markers: suggested from the
+  map, accepted by a GM, the list asked of eqoaclassic.com on any server) and the minimap (N), the Stats Box (B, off by default), the updater, the problem and crash reports, the 2002 disc's art on F9, Hide UI
+  on H, Target of Target, names from farther and smaller zoomed out (and every one in a crowd, Overlapping Names Show), Ignore Shouts kept, Update Notices, Text
+  Sharp or Smooth, Loading Screens Longer or Instant, Render Scale x1, x2 or x4, HUD Sharp or Nearest, Mana Bars from a server that sends others' power, Quest Markers on
+  the map and the Quest Tracker from a server that sends them, else the client's own quest guide's, labelled "(guide)"). A
+  new client-side addition is the user's call: ask first.
   Fixes are made here and are not carried to eqoa-rs any more (the user, 2026-10-23: "vanilla
   only"); its remote `eqoa-rs` stays for reading it. Link no private repository from anything
   public here.
