@@ -932,3 +932,53 @@ fn n_suggests_a_spot() {
     none.key(key::L3, true);
     assert_eq!(none.take_suggest(), None, "the control: no view");
 }
+
+#[test]
+fn world_map_stays_in_window_coordinates_at_render_scales() {
+    let instance = render::wgpu::Instance::new(render::wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&render::wgpu::RequestAdapterOptions::default())) else {
+        eprintln!("SKIP world map render-scale GPU test: no adapter");
+        return;
+    };
+    let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default())) else {
+        eprintln!("SKIP world map render-scale GPU test: no device");
+        return;
+    };
+    let lib = esf::Library::new();
+    for size in [(64, 64), (80, 48)] {
+        let cx = Context { lib: &lib, device: &device, queue: &queue, format: render::TARGET_FORMAT, size, dt: 0.0, player: None, world: 0, origin: [0.0; 2], group: Vec::new(), in_group: false, target: None, sticks: [0.0; 4], keyboard: true, words: None, vui: None, quest_marks: None };
+        let mut map = Map::default();
+        map.size = size;
+        map.open = true;
+        map.layers(&cx);
+        let layers = map.layers.as_mut().unwrap();
+        // Backdrop covering the full window in blue
+        layers.map.quads.push(MapQuad::rect(layers.white, [0.0, 0.0, size.0 as f32, size.1 as f32], [0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 1.0, 1.0]));
+        // Terrain quad in bottom-right quadrant [x0, y0, x1, y1] in red
+        let (x0, y0, x1, y1) = (size.0 as f32 * 0.5, size.1 as f32 * 0.5, size.0 as f32 - 4.0, size.1 as f32 - 4.0);
+        layers.map.quads.push(MapQuad::rect(layers.white, [x0, y0, x1, y1], [0.0, 0.0, 1.0, 1.0], [1.0, 0.0, 0.0, 1.0]));
+        // UI quad aligned over terrain center
+        let (ux0, uy0, ux1, uy1) = (x0 + 4.0, y0 + 4.0, x1 - 4.0, y1 - 4.0);
+        let ui_pts = [[ux0, uy0], [ux1, uy0], [ux1, uy1], [ux0, uy1]].map(|p| render::ui::frame_from_window(size, p));
+        layers.ui.quads.push(render::ui::Quad { tex: layers.assets.white.unwrap(), blend: 3, pos: ui_pts, uv: [[0.5, 0.5]; 4], color: [0.0, 1.0, 0.0, 1.0], clip: None });
+
+        for k in [1, 2, 4, 2, 1] {
+            let target = (size.0 * k, size.1 * k);
+            let pixels = super::tool::capture(&map, &device, &queue, target).unwrap();
+            let pixel = |x: u32, y: u32| {
+                let idx = ((y * target.0 + x) * 4) as usize;
+                [pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]]
+            };
+            // Backdrop in top-left
+            assert!(pixel(4 * k, 4 * k)[2] > 200, "backdrop top-left missing at size {size:?} scale {k}");
+            // Backdrop in bottom-right
+            assert!(pixel((size.0 - 2) * k, (size.1 - 2) * k)[2] > 200, "backdrop bottom-right missing at size {size:?} scale {k}");
+            // Terrain in bottom-right (outside UI quad)
+            assert!(pixel((x0 as u32 + 2) * k, (y0 as u32 + 2) * k)[0] > 200, "terrain missing at size {size:?} scale {k}");
+            // UI quad aligned over terrain
+            let mid_x = ((ux0 + ux1) * 0.5) as u32;
+            let mid_y = ((uy0 + uy1) * 0.5) as u32;
+            assert!(pixel(mid_x * k, mid_y * k)[1] > 200, "UI quad missing/misaligned at size {size:?} scale {k}");
+        }
+    }
+}

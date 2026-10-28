@@ -1701,9 +1701,10 @@ impl Map {
     }
 
     /// The map over the frame, while it is up: its own pass into `target`
-    /// (a `size` window, `depth` its depth buffer).
-    pub fn draw(&self, device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, depth: &wgpu::TextureView, size: (u32, u32)) {
+    /// (`depth` its depth buffer).
+    pub fn draw(&self, device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, depth: &wgpu::TextureView) {
         let (true, Some(l)) = (self.open, self.layers.as_ref()) else { return };
+        let size = (target.texture().width(), target.texture().height());
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("map"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: target, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })],
@@ -1712,7 +1713,11 @@ impl Map {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        l.map.draw(device, &mut pass, size);
+        // Terrain and the backdrop use window pixels; the render target
+        // may be larger when supersampling. UI quads use frame coordinates
+        // and normalize against the target.
+        let window = self.size;
+        l.map.draw(device, &mut pass, window);
         l.ui.draw(device, &mut pass, size);
     }
 

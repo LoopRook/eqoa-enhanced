@@ -200,7 +200,7 @@ pub fn capture(map: &Map, device: &wgpu::Device, queue: &wgpu::Queue, size: (u32
             multiview_mask: None,
         });
     }
-    map.draw(device, &mut enc, &tv, &depth, size);
+    map.draw(device, &mut enc, &tv, &depth);
     map.draw_mini(device, &mut enc, &tv, &depth);
     enc.copy_texture_to_buffer(
         target.as_image_copy(),
