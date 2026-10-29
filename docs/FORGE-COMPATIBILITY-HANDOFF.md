@@ -3,8 +3,8 @@
 ## Stop instruction and task
 
 The owner requested a clean stopping point because weekly usage is nearly spent.
-Finish only the already-active drawing slice, preserve its exact tested state,
-then STOP. Do not automatically start another phase or launch a successor agent.
+The already-active drawing slice is now finished and committed. Its exact tested
+state and preparation artifacts are preserved. STOP here. Do not automatically start another phase or launch a successor agent.
 Resume implementation only when the owner authorizes continuation. This document
 is meant for a fresh agent with zero conversation history.
 
@@ -71,10 +71,12 @@ Already committed in Forge:
 | 4e002c5 | Early preview and live acceptance instructions |
 | 4e88236 | Common widgets, exact Begin tuple order, typed scope recovery |
 | 9afa4c2 | Bit operations, clean os, protected pcall and coroutine removal |
+| e4620d8 | Detailed handoff and durable, inert future preparation |
+| b32deda | Scoped window/background drawing primitives and geometry limits |
 
-At handoff drafting, only drawing changes were active in bridge.rs plus new
-bridge_drawlist.rs / bridge_drawlist_tests.rs. The final checkpoint section below
-must record their final commit or exact unfinished state. No Forge push occurred.
+The drawing slice is committed at b32deda0353e51db9adbc073977cfc0041abb0ee.
+Implementation is clean; this handoff closeout changes documentation only. No
+Forge push occurred.
 Do not assume ignored preparation files are compiled or accepted implementation.
 
 ## What is implemented
@@ -237,7 +239,7 @@ pointers are a host convenience, not proof sol2 supplies C++ defaults automatica
 
 Durable reports: FORGE-{COMPATIBILITY-STATUS,COMPATIBILITY-MATRIX,RUNTIME-SPIKE,
 DISCOVERY,PACKAGE-LOADER,TEXTURE-RESOURCES,LIFECYCLE-MANAGER,APP-INTEGRATION,
-HEALTH-ADAPTER,HEARTS-BRIDGE,HEALTH-PLUMBING,UI-BRIDGE-NEXT,STDLIB}-REPORT.md
+HEALTH-ADAPTER,HEARTS-BRIDGE,HEALTH-PLUMBING,UI-BRIDGE-NEXT,STDLIB,DRAWLIST}-REPORT.md
 (the status/matrix names have no -REPORT suffix). The machine-readable matrix is
 `docs/forge-compatibility-matrix.json`; its original unimplemented baseline is
 historical, not automatically maintained coverage. Scanner is lexical regex,
@@ -296,6 +298,42 @@ just to repeat already-completed focused verification.
 
 ## Final stop checkpoint
 
-PENDING: drawing worker is finishing its already-authorized slice. The lead must
-replace this paragraph with the final commit/status, exact tests/skips, no-process
-confirmation and preservation check before calling the handoff finished.
+Stopped on 2026-10-29 after code commit
+`b32deda0353e51db9adbc073977cfc0041abb0ee`. The following closeout commit contains
+only this handoff and the status ledger. No next phase, successor, merge, push or
+Forge release has started. Resume only on fresh owner authorization.
+
+Final rebuilt pinned serial addon suite: **108 passed, 0 failed**, with four
+explicit Windows symlink-operation privilege skips (1314). No GPU/source/PNG
+prerequisite skips. Root checked the actual Compiling line and final result in
+`target/drawlist-prep/addons-restored.log`; this is the authoritative final log.
+Focused drawing tests: nine passed. Actual wrong-window-target and omitted-fill
+negative controls failed their intended pixel assertions, then clean production
+source was restored. See FORGE-DRAWLIST-REPORT.md for exact scope and caveats.
+
+One intermediate post-restore run reused a negative binary because Copy-Item
+preserved an old source timestamp: 105 passed/three expected fill failures with
+no Compiling line. Source hashes were correct; updating its timestamp forced the
+actual rebuild and the authoritative 108/108 GREEN run. Do not cite that stale
+run as final evidence. Initial RED also exposed a host test-fixture MissingEnd
+abort; fixture cleanup was corrected before GREEN, as the report records.
+
+Drawing includes real window/background target separation, rectangle/circle/
+triangle/ngon fill and outline, private window/callback lifetime tokens and a
+shared per-frame geometry quota. Rounded rectangles reserve 520 units; automatic
+circle estimates account conservatively for native tessellation. One hundred
+radius20 balls fit; repeated excessive radius4096 geometry is rejected. Omitted
+argument defaults are a host convenience; window handle lifetime is stricter than
+upstream raw pointers. Context teardown assumptions remain documented limits.
+
+At closeout all three workers were confirmed idle, the global cargo/rustc/link/
+eqoa process count was zero, and implementation git status was clean. All seven
+preserved preparation attachments matched manifest.savedSha256. Formatting and
+diff checks passed. The final documentation commit is followed by a reviewed-base
+footprint check and clean-status verification. No native/WASM/full-workspace or
+release build was repeated for this bounded native-private drawing slice.
+
+Full compatibility is still incomplete. Fonts, real sound integration, remaining
+game adapters and required unchanged-addon acceptance remain, along with live
+server/window/DPI/input gates. The delivered early preview remains the older
+7bf02d3 build, not a package of this final checkpoint.

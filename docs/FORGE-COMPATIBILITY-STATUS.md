@@ -208,3 +208,18 @@ instructions. Uncompiled sound, font design, player audit and preview tooling ar
 preserved under docs/forge-handoff/2026-10-29/, not solely in ignored target/.
 No successor agent or public Forge release is being started. Resume only after
 the owner authorizes continuation.
+
+## 2026-10-29: final clean budget-stop checkpoint
+
+Drawing code committed as b32deda0353e51db9adbc073977cfc0041abb0ee. Final rebuilt
+pinned serial addon suite: 108 passed, zero failed, four explicit Windows1314
+symlink-operation skips, no GPU/source/PNG prerequisite skips. Root verified the
+actual compile and result in target/drawlist-prep/addons-restored.log; the earlier
+stale negative-binary run is not final evidence. Focused drawing tests: nine
+passed; both intentional pixel faults failed and clean source was restored.
+
+All three workers are idle, no cargo/rustc/link/eqoa processes remain, and code is
+committed cleanly. Seven durable preparation attachments match their saved hash
+manifest. Full details, remaining gaps and resume instructions are in
+FORGE-COMPATIBILITY-HANDOFF.md. This documentation closeout starts no new phase,
+successor or release. Stop here until the owner authorizes continuation.
