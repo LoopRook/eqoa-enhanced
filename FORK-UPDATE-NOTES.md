@@ -8,6 +8,10 @@ Upstream changes remain in UPDATE-NOTES.md.
   rescan, settings and profile controls. Unsupported addon features show failures.
 - Native addons and the parser manifest use the mods folder beside the executable,
   even when launching from a different working directory.
+- Forge addons can now load and play sounds through the native Windows MCI sound
+  backend (`UiForge.LoadSound`, `PlaySound`, `StopSound`, `IsSoundPlaying`,
+  `SetSoundVolume`, `ReleaseSound`). Non-Windows builds report unsupported and
+  return nil. Handle, file-size, and aggregate budgets are enforced.
 - Preview packaging and interactive checks are still pending; full Forge addon
   compatibility is not yet available.
 

@@ -16,6 +16,7 @@ use super::{
     bridge::Bridge,
     discovery::DiscoveredAddon,
     host::{Host, Snapshot},
+    sound::SoundBank,
     storage::Storage,
     textures::Textures,
 };
@@ -70,6 +71,7 @@ struct Instance {
     host: Host,
     bridge: Bridge,
     textures: Rc<RefCell<Textures>>,
+    sound_bank: Rc<RefCell<SoundBank>>,
     visibility: super::visibility::VisibilityLease,
     initialized: bool,
     active: bool,
@@ -156,6 +158,13 @@ impl Manager {
             }
         }
     }
+    pub fn suspend_sound(&self) {
+        for e in &self.entries {
+            if let Some(i) = &e.instance {
+                i.sound_bank.borrow_mut().set_active(false);
+            }
+        }
+    }
     pub fn health_readiness(&self) -> Option<&'static str> {
         if self.health_waiting {
             Some(
@@ -231,6 +240,7 @@ impl Manager {
                 let instance = entry.instance.as_mut().unwrap();
                 instance.host.snapshot.set(snapshot);
                 instance.active = true;
+                instance.sound_bank.borrow_mut().set_active(true);
                 instance.visibility.update(snapshot.health, true);
                 instance.resources_retired = false;
                 let first = !instance.initialized;
@@ -253,6 +263,10 @@ impl Manager {
                 let messages = i.textures.borrow_mut().drain_diagnostics();
                 for message in messages {
                     self.diagnostic(Some(&entry.metadata.id), "texture", message);
+                }
+                let messages = i.sound_bank.borrow_mut().drain_diagnostics();
+                for message in messages {
+                    self.diagnostic(Some(&entry.metadata.id), "sound", message);
                 }
             }
         }
@@ -307,11 +321,15 @@ impl Manager {
         let bridge = Bridge::install(&host).map_err(|e| e.to_string())?;
         let textures = Textures::new(&self.device, &self.queue, self.renderer.clone());
         Textures::install_for_addon(&textures, &host.lua, metadata).map_err(|e| e.to_string())?;
+        let sound_bank = Rc::new(RefCell::new(SoundBank::new().map_err(|e| e.to_string())?));
+        SoundBank::install_for_addon(&sound_bank, &host.lua, metadata)
+            .map_err(|e| e.to_string())?;
         Ok(Instance {
             host,
             function,
             bridge,
             textures,
+            sound_bank,
             visibility,
             initialized: false,
             active: false,
@@ -405,6 +423,7 @@ impl Manager {
         {
             // Clear before invoking user code so a failing cleanup cannot repeat.
             i.active = false;
+            i.sound_bank.borrow_mut().set_active(false);
             if let Err(e) = Self::invoke(i, 1, Value::Nil, rendering) {
                 entry.status = Status::Failed;
                 self.diagnostic(Some(&entry.metadata.id), "cleanup", e.to_string());
@@ -416,6 +435,9 @@ impl Manager {
         }
         // A callback failure is terminal even during an ordinary transition.
         if disposition == Disposition::Retire || entry.status == Status::Failed {
+            if let Some(i) = entry.instance.as_mut() {
+                i.sound_bank.borrow_mut().close_all();
+            }
             self.retire(entry);
         }
         if entry.status != Status::Failed {
@@ -599,6 +621,7 @@ impl Manager {
                 i.visibility.clear();
             }
             if let Some(i) = entry.instance.as_mut() {
+                i.sound_bank.borrow_mut().close_all();
                 i.resources_retired = false;
             }
             self.retire(entry);
@@ -1666,5 +1689,167 @@ mod tests {
             Status::Disabled
         );
         manager.shutdown();
+    }
+
+    fn generate_pcm_wav(samples: usize) -> Vec<u8> {
+        let data_size = (samples * 4) as u32;
+        let file_size = 36 + data_size;
+        let mut buf = Vec::with_capacity(44 + data_size as usize);
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&file_size.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes());
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&2u16.to_le_bytes());
+        buf.extend_from_slice(&44100u32.to_le_bytes());
+        buf.extend_from_slice(&176400u32.to_le_bytes());
+        buf.extend_from_slice(&4u16.to_le_bytes());
+        buf.extend_from_slice(&16u16.to_le_bytes());
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&data_size.to_le_bytes());
+        buf.resize(44 + data_size as usize, 0);
+        buf
+    }
+
+    #[test]
+    fn forge_manager_sound_lifecycle_disable_retains_handles_reenable_plays_and_terminal_closes() {
+        let Some(mut gpu) = Gpu::new() else {
+            return;
+        };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        let res = scripts.0.join("a/resources");
+        fs::create_dir_all(&res).unwrap();
+        fs::write(res.join("sound.wav"), generate_pcm_wav(8)).unwrap();
+        scripts.package(
+            "a",
+            true,
+            r#"
+            if not snd then
+                snd = UiForge.LoadSound("sound.wav")
+                assert(snd, "sound must load")
+            end
+            UiForge.PlaySound(snd)
+        "#,
+        );
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        assert_eq!(manager.entries[0].status, Status::Enabled);
+        let bank = manager.entries[0]
+            .instance
+            .as_ref()
+            .unwrap()
+            .sound_bank
+            .clone();
+        assert_eq!(bank.borrow().len(), 1);
+        assert!(bank.borrow().is_active());
+        let handles = bank.borrow().handles();
+
+        manager.queue(Command::Enable("a".into(), false));
+        gpu.frame(&mut manager);
+        assert!(!bank.borrow().is_active(), "disable must deactivate bank");
+        assert_eq!(bank.borrow().len(), 1, "disable must retain handles");
+
+        manager.queue(Command::Enable("a".into(), true));
+        gpu.frame(&mut manager);
+        assert!(bank.borrow().is_active(), "re-enable must activate bank");
+        assert_eq!(
+            bank.borrow().handles(),
+            handles,
+            "re-enable must reuse handles"
+        );
+
+        manager.shutdown();
+        assert_eq!(bank.borrow().len(), 0, "shutdown must close aliases");
+    }
+
+    #[test]
+    fn forge_manager_sound_inactive_callback_playback_blocked() {
+        let Some(mut gpu) = Gpu::new() else {
+            return;
+        };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        let res = scripts.0.join("a/resources");
+        fs::create_dir_all(&res).unwrap();
+        fs::write(res.join("sound.wav"), generate_pcm_wav(8)).unwrap();
+        scripts.package(
+            "a",
+            true,
+            r#"
+            if not snd then
+                snd = UiForge.LoadSound("sound.wav")
+                assert(snd)
+            end
+            UiForge.RegisterCallback(UiForge.CallbackType.DisableScript, function()
+                played_while_disabled = UiForge.PlaySound(snd)
+            end)
+        "#,
+        );
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        manager.queue(Command::Enable("a".into(), false));
+        gpu.frame(&mut manager);
+        let retained = lua(&manager, "a");
+        assert!(
+            !retained
+                .globals()
+                .get::<bool>("played_while_disabled")
+                .unwrap(),
+            "playback must be rejected while disabled"
+        );
+    }
+
+    #[test]
+    fn forge_manager_sound_failed_reload_preserves_old_bank() {
+        let Some(mut gpu) = Gpu::new() else {
+            return;
+        };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        let res = scripts.0.join("a/resources");
+        fs::create_dir_all(&res).unwrap();
+        fs::write(res.join("sound.wav"), generate_pcm_wav(8)).unwrap();
+        scripts.package(
+            "a",
+            true,
+            r#"
+            if not snd then
+                snd = UiForge.LoadSound("sound.wav")
+                assert(snd)
+            end
+        "#,
+        );
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        let bank = manager.entries[0]
+            .instance
+            .as_ref()
+            .unwrap()
+            .sound_bank
+            .clone();
+        let old_handles = bank.borrow().handles();
+
+        fs::write(scripts.0.join("a/main.lua"), "this is not valid Lua !!!").unwrap();
+        manager.queue(Command::Reload("a".into()));
+        gpu.frame(&mut manager);
+        assert_eq!(
+            bank.borrow().handles(),
+            old_handles,
+            "failed reload must preserve old bank"
+        );
+
+        fs::write(scripts.0.join("a/main.lua"), "count=(count or 0)+1").unwrap();
+        manager.queue(Command::Reload("a".into()));
+        gpu.frame(&mut manager);
+        gpu.frame(&mut manager);
+        assert!(
+            manager.entries[0]
+                .instance
+                .as_ref()
+                .map_or(true, |i| { i.sound_bank.borrow().handles() != old_handles }),
+            "successful replacement must close old bank"
+        );
     }
 }

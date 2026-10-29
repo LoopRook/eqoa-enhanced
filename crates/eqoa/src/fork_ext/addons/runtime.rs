@@ -208,6 +208,7 @@ impl Runtime {
     fn pause_health(&self) {
         if let Some(Graphics::Managed(active)) = &self.graphics {
             active.manager.suspend_health();
+            active.manager.suspend_sound();
         }
         super::visibility::publish(false);
     }
@@ -290,6 +291,7 @@ impl Runtime {
                     Err(e) => {
                         active.manager.after_render();
                         active.manager.suspend_health();
+                        active.manager.suspend_sound();
                         super::visibility::publish(false);
                         self.want_mouse = false;
                         crate::say(&format!("Addons paused: {e}"));
@@ -561,6 +563,7 @@ fn render_managed(
     manager.after_render();
     if result.is_err() {
         manager.suspend_health();
+        manager.suspend_sound();
     }
     super::visibility::publish(result.is_ok() && manager.health_hidden());
     result

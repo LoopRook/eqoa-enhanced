@@ -3,6 +3,7 @@ mod bridge;
 mod capture;
 pub(crate) mod game_health;
 mod runtime;
+pub(crate) mod sound;
 pub(crate) mod visibility;
 pub(crate) use runtime::Runtime;
 static OPEN_REQUEST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
