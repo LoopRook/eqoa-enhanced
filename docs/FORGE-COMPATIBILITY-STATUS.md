@@ -223,3 +223,29 @@ committed cleanly. Seven durable preparation attachments match their saved hash
 manifest. Full details, remaining gaps and resume instructions are in
 FORGE-COMPATIBILITY-HANDOFF.md. This documentation closeout starts no new phase,
 successor or release. Stop here until the owner authorizes continuation.
+
+## 2026-10-29: native sound stage accepted; stopped at local checkpoint
+
+The owner resumed one bounded stage using saved Paseo profiles. Kimi implemented
+Windows MCI sound; MiniMax independently reviewed it after Argon hit its own
+quota. Claude was unavailable and Codex review was avoided to preserve weekly
+allowance. Antigravity remains available through other models.
+
+Code commits: 3ffe587 -> ada9092 -> 6cab6c1 ->
+4e4dc737ca1c31e9d85a152da2cb48500038db5f. Two review rounds corrected Linux test
+gates, resource-root containment, signed invalid IDs, native playback evidence,
+reload cleanup assertions and diagnostics. Final Unicode truncation regression
+reproduced a panic before the helper fix and passed after it. All review blockers
+and final minor follow-up are accepted in independent rev.5.
+
+133 addon tests passed with four existing symlink privilege skips; required
+native MCI test, native build and WASM check passed. Final Unicode-only change
+passed 23 focused sound tests; the full suite was not repeated after that tiny
+change. No Linux run or audible user confirmation is claimed. Exact evidence
+and remaining adaptations: FORGE-SOUND-REPORT.md and
+forge-handoff/2026-10-29/sound-stage/.
+
+Sound APIs/lifecycle are accepted locally; full compatibility remains incomplete.
+Fonts are next, then remaining native game adapters/unchanged HUD suites and live
+acceptance. No enhanced merge/push/release or new preview package. No new phase
+started at closeout; preserve Codex allowance and wait for owner continuation.

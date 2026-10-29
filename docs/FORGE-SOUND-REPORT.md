@@ -173,7 +173,7 @@ WAV: `open`, cached `load_sound`, `play` (looping), `status … mode` returned
 | I4 — Real-MCI masking / missing query | Fixed | `waveOutGetNumDevs` preflight, looping clip, `query_sound_mode` assertions; required-native mode cannot skip. |
 | I5 — Vacuous reload-close assertion | Fixed | Old bank `len() == 0` and `is_empty()` asserted after successful replacement. |
 | M6 — Stop/query/volume diagnostics | Fixed | Failures record `MciCommandFailed`. |
-| M7 — Diagnostic message size | Fixed | Capped at 2048 chars. |
+| M7 — Diagnostic message size | Fixed | Capped at 2048 bytes. |
 | M8 — Lossy `Path::display()` | Fixed | Uses validated `canonical_str`. |
 | N4 — Silent terminal close retry | Fixed | Records bounded `MciCloseFailed` diagnostic. |
 | M10 — Dead code | Fixed | Removed `SoundRecord.id`, `SoundId::as_i32`, `RecorderBackend::push_response`, `clear_diagnostic`, `with_backend`; test accessors gated `#[cfg(test)]`. |
@@ -212,3 +212,16 @@ All logs are copied to:
 - `forge-multibyte-truncate-red.log` / `forge-multibyte-truncate-green.log` —
   multibyte truncation RED.
 - `forge-sound-fix2.log` / `forge-sound-fix3.log` — focused sound tests.
+
+## Lead closeout and independent acceptance
+
+Final code commit: `4e4dc737ca1c31e9d85a152da2cb48500038db5f`.
+Substantive reviewed commit: `6cab6c1b26eeef10a5e8983d3588bbd7a8dfd530`.
+MiniMax independent review rev.5 accepted all blockers and the UTF-8 follow-up.
+Durable brief, review rounds and log hash manifest:
+`docs/forge-handoff/2026-10-29/sound-stage/`.
+
+The 133-test full addon run/native/WASM evidence predates only the final tiny
+Unicode diagnostic helper/test change; that follow-up passed 23 sound tests.
+No full-suite count of 134 is claimed. Audible listening/Linux execution remain
+unperformed. No release/push/enhanced merge or new preview package was produced.

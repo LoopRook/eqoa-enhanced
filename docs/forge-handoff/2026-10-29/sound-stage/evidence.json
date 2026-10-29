@@ -1,0 +1,56 @@
+[
+  {
+    "file": "forge-addons-fix2.log",
+    "localPath": "C:\\Users\\hocka\\Github Projects\\EQOA Native Rust\\run\\forge-sound-stage\\forge-addons-fix2.log",
+    "sha256": "1ff6f9b9a7ac5c2e5f0ae0712730004cfb68f95e267ea1840e052c220e6ac815",
+    "bytes": 35518
+  },
+  {
+    "file": "forge-sound-native-required-fix2.log",
+    "localPath": "C:\\Users\\hocka\\Github Projects\\EQOA Native Rust\\run\\forge-sound-stage\\forge-sound-native-required-fix2.log",
+    "sha256": "bdef8781a5e8e35b903cb12538251639256c2a0902aa3545188e2e1afee45b55",
+    "bytes": 4242
+  },
+  {
+    "file": "forge-native-build-fix2.log",
+    "localPath": "C:\\Users\\hocka\\Github Projects\\EQOA Native Rust\\run\\forge-sound-stage\\forge-native-build-fix2.log",
+    "sha256": "e25b4471528e408b135bbfcf312036b1fd9a434abf515a216ed28e91e00c1fb4",
+    "bytes": 8250
+  },
+  {
+    "file": "forge-wasm-check-fix2.log",
+    "localPath": "C:\\Users\\hocka\\Github Projects\\EQOA Native Rust\\run\\forge-sound-stage\\forge-wasm-check-fix2.log",
+    "sha256": "a57884e9e746222fd5507ad9caf6f757d934bb02008e499c3081ef2a5d26dc23",
+    "bytes": 10364
+  },
+  {
+    "file": "forge-res-escape-red.log",
+    "localPath": "C:\\Users\\hocka\\Github Projects\\EQOA Native Rust\\run\\forge-sound-stage\\forge-res-escape-red.log",
+    "sha256": "0ad72cbd6d37a383ddcc6023589a580242c812556467d8368db08f05fd446bdd",
+    "bytes": 5496
+  },
+  {
+    "file": "forge-res-escape-green.log",
+    "localPath": "C:\\Users\\hocka\\Github Projects\\EQOA Native Rust\\run\\forge-sound-stage\\forge-res-escape-green.log",
+    "sha256": "88fbd613c4bcef0e9d832ff7e92959250b07099916f8a3d57174ad20fbc623a9",
+    "bytes": 4418
+  },
+  {
+    "file": "forge-multibyte-truncate-red.log",
+    "localPath": "C:\\Users\\hocka\\Github Projects\\EQOA Native Rust\\run\\forge-sound-stage\\forge-multibyte-truncate-red.log",
+    "sha256": "f964c44115a21cdcc27daa35a06bf59c90e82881152e4775db142b0e00e877e0",
+    "bytes": 5482
+  },
+  {
+    "file": "forge-multibyte-truncate-green.log",
+    "localPath": "C:\\Users\\hocka\\Github Projects\\EQOA Native Rust\\run\\forge-sound-stage\\forge-multibyte-truncate-green.log",
+    "sha256": "2221eba23752306ad365af9d5b53a53939a6435926a7ac37d3bb4a39a0b92608",
+    "bytes": 4452
+  },
+  {
+    "file": "forge-sound-fix3.log",
+    "localPath": "C:\\Users\\hocka\\Github Projects\\EQOA Native Rust\\run\\forge-sound-stage\\forge-sound-fix3.log",
+    "sha256": "1ff265ded6234af397f7299d7c64b78f273479bbe461325204176df18b7ff4de",
+    "bytes": 8590
+  }
+]

@@ -1,5 +1,26 @@
 # Forge compatibility continuation handoff
 
+## Latest checkpoint: accepted sound stage (2026-10-29)
+
+The owner authorized resuming the next bounded stage after the earlier budget
+stop. That stage is now complete and stopped at local code commit
+`4e4dc737ca1c31e9d85a152da2cb48500038db5f`. Windows MCI sound APIs and instance
+lifecycle are implemented and independently accepted by MiniMax rev.5; Kimi was
+the implementation worker. Claude was down, Codex was at96% weekly and Argon
+had an individual quota limit; other Antigravity models remain available.
+
+Read `FORGE-SOUND-REPORT.md` and `forge-handoff/2026-10-29/sound-stage/` for exact
+review dispositions, evidence and limitations. 133 addon tests/native MCI/
+native build/WASM passed at substantive fix6cab6c1; the final Unicode-only helper
+follow-up passed23 sound tests. Four existing Windows1314 symlink skips; no
+native MCI/GPU/source/PNG skips in those accepted runs. No Linux execution or
+user listening is claimed. No new preview, public release, enhanced merge or
+push. Next stage is queued fonts; do not redo sound implementation from the
+older uncompiled draft below. Stop here until owner continuation.
+
+The remainder records the earlier checkpoint and historical decisions; this
+latest section supersedes statements that sound is still unimplemented.
+
 ## Stop instruction and task
 
 The owner requested a clean stopping point because weekly usage is nearly spent.
@@ -189,7 +210,7 @@ Do not overwrite this directory or its future user profile.
 
 1. Read final checkpoint, git status/log and current source; do not redo completed
    research/tests just because old prep notes describe it as missing.
-2. Review/activate real sound and implement fonts, then load unchanged packaged
+2. Sound is accepted (see latest checkpoint). Implement fonts, then load unchanged packaged
    uiforge_example with original private click_tally and gear PNG. Sound prep is
    NOT compiled. Fonts are design only. Test every expanded UI section, settings,
    clicks, save/load, audio state, font sizes/fallback, failure and reload.
