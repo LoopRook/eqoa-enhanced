@@ -1,9 +1,11 @@
 # Addon testing instructions
 
-This source work has not been packaged as a player preview. Before packaging,
-the integration lead must bring in the already-published native map fixes and
-complete the preview checks. These instructions describe the intended reviewed
-native build; they are not a release announcement.
+An isolated local early preview has been produced from source commit
+`7bf02d39a3ce5dc209550a9d61bf344ffe625ec3`. It bundles unchanged `screen_grid`
+and `retro_health_hearts` with the four original hearts PNGs, both released
+native map fixes, and a separate profile. Use the preview package's launcher
+and README for disc setup and live checks. This is not a public release or full
+Forge compatibility; FF_Example and larger UI suites remain pending.
 
 1. Open **Options → Mods & Addons → Open Mods Folder**. This folder is beside
    the client executable, regardless of the directory used to launch it.
@@ -29,8 +31,9 @@ end
 ImGui.End()
 ```
 
-This is not evidence that FF_Example or health hearts already work. Many Forge
-game-data/action APIs are still unsupported. Both native maps remain the defaults;
+The unchanged hearts script has passed native GPU fixtures with real PNGs and
+changing HP snapshots. Actual server health delivery and live interaction still
+require player testing. FF_Example and many game-data/action APIs remain unsupported. Both native maps remain the defaults;
 no Forge map port or PCSX2 texture-pack installation is required.
 
 For developer fixtures only, `EQOA_FORGE_MODS` selects an explicit source root and
@@ -38,7 +41,7 @@ For developer fixtures only, `EQOA_FORGE_MODS` selects an explicit source root a
 single-script fixture instead of the managed runtime, with a single Context total.
 Do not ship the downloaded source-reference tree or point fixtures at user profiles.
 
-Interactive checks still required once a concrete preview is packaged: manager
+Interactive checks required with the early preview: manager
 open/close in pregame and in world, keyboard/IME focus, presses held across overlay
 focus changes, mouse drags/releases, losing focus, resize and monitor DPI changes,
 render scale x1/x2/x4, restart/profile persistence, and launching from an unrelated

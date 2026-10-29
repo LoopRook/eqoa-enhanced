@@ -173,3 +173,24 @@ public release, or full compatibility claim was made.
 - Unchanged pinned hearts plus original four PNGs passed real shared WGPU acceptance: full1395/half690/death0 red fill pixels, same four cached handles reused after disable/re-enable, upstream plain reenable leaves native bar visible, explicit saved profile Load reasserts suppression. Local artifacts target/forge-hearts-{full,partial,death}.png;256x192 fixture crops fifth-heart right edge and is not layout/DPI acceptance.
 - Meaningful RED receipt/intent/manager checks and two actual controlled negative HUD/cache source oracles were observed before restored GREEN. Final serial --locked pinned addons **80 passed,0 failed**, four explicit Windows1314 symlink-operation skips, no GPU/source/PNG prerequisite skips. Focused runtime8, HUD8, Play adapter3 passed; native development build and WASM check passed; diff --check passed. No exhaustive workspace/release tests/package/commit/push.
 - See docs/FORGE-HEALTH-PLUMBING-REPORT.md for exact commands/hashes/limits. Root owns exact footprint review and concrete preview. Actual live server stats-before/after-WorldEntry ordering/current-HP updates, native HUD captures, input/DPI and packaged player acceptance remain gates. Build slot free after checks.
+
+## 2026-10-29: local early preview delivered; next UI slice started
+
+- Root independently reran the pinned serial addon suite: 80 passed, four explicit
+  Windows symlink privilege skips (1314), no GPU/source/PNG prerequisite skips.
+- Exact reviewed shared footprints pass against upstream base `7912c739`:
+  HUD +299/-8, Play +756/-48, viewer +233/-12. Health source checkpoint `345fc8f`;
+  dependency-notice checkpoint `7bf02d3` adds documentation only.
+- Local release build passed with `EQOA_UPDATE_CHANNEL` and `EQOA_BUILD_COMMIT`
+  absent. Executable SHA256: `21984f39e488bcef5aa15a710234e6d956214cf1ee73a544863d3bf6c2c72e2f`.
+- Early preview under original checkout `run/forge-compatibility-preview/21984f39e488/`:
+  two unchanged scripts, four original PNGs, pinned catalog, isolated launcher,
+  and license notices. Sixteen unique archive entries independently compared
+  byte-for-byte to disk; no profile/disc/config/logs. ZIP SHA256:
+  `f44ccaddb647d8090174411ea0e53577c0585c35747f12e0e401080ceeb82910`.
+- Player live checks requested: current HP/damage/healing/death, zoning/reconnect,
+  startup readiness, input/DPI, x1/x2/x4 render scales and native maps. No live
+  server/account execution or public Forge release claimed.
+- Next slice: source-correct ImGui widget/container semantics and stack recovery;
+  native BitOp preparation proceeds separately. Full non-map compatibility and
+  the native author contract remain incomplete.
