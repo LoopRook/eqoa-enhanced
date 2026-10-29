@@ -249,3 +249,14 @@ Sound APIs/lifecycle are accepted locally; full compatibility remains incomplete
 Fonts are next, then remaining native game adapters/unchanged HUD suites and live
 acceptance. No enhanced merge/push/release or new preview package. No new phase
 started at closeout; preserve Codex allowance and wait for owner continuation.
+
+## Owner decision: Wereoxxs gates the first public dev build
+
+First public development build: the full unchanged `wereoxxs_ui` package works
+with real game data and interactions, settings/profiles and lifecycle controls.
+Include its hotbars/cooldowns, casting, player/target/group/effects/compass, chat
+and damage meter; hotbars alone are not this gate. UIForge example is an internal
+checkpoint. Modern and ARPG UI are later compatibility targets and do not block
+this first dev build. The seven-package full-compatibility goal remains later.
+Native maps stay defaults; optional Forge maps are excluded from the gate.
+No build was published and no new implementation phase started by this decision.

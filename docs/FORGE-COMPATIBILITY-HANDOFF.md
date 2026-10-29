@@ -1,5 +1,24 @@
 # Forge compatibility continuation handoff
 
+## Owner-approved first public dev-build gate
+
+The owner approved fully working `wereoxxs_ui` as the first public development
+build milestone. This includes the whole package: independently positioned
+hotbars with visible cooldowns, casting bar, player/target/group frames, effects,
+compass, chat and damage meter, with its settings/profile and enable/disable/
+reload behavior tested against actual gameplay. Merely loading the package or
+showing only its hotbars is insufficient.
+
+Modern UI (`avoids_modern_ui`) and ARPG UI (`arpg_ui`) remain eventual
+compatibility targets but do not block this first dev build. The original
+seven-package full-compatibility goal remains the later release gate, not the
+first development-build gate. UIForge example acceptance is an internal
+infrastructure checkpoint. Native maps remain defaults; optional Forge maps do
+not block either gate. Describe the dev build's actually verified support
+explicitly; do not advertise unrestricted Forge compatibility. This records a
+future release criterion, not authorization to publish an untested build or to
+change normal automatic updates.
+
 ## Latest checkpoint: accepted sound stage (2026-10-29)
 
 The owner authorized resuming the next bounded stage after the earlier budget
