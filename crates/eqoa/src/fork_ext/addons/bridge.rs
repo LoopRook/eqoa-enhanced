@@ -6,6 +6,11 @@ use std::{
     ffi::{CStr, CString},
     rc::Rc,
 };
+#[path = "bridge_drawlist.rs"]
+mod drawlist;
+#[cfg(test)]
+#[path = "bridge_drawlist_tests.rs"]
+mod drawlist_tests;
 #[cfg(test)]
 #[path = "bridge_next_tests.rs"]
 mod next_tests;
@@ -87,6 +92,9 @@ struct Frame {
     epoch: i32,
     context: *mut sys::ImGuiContext,
     calls: usize,
+    invocation: u64,
+    geometry: usize,
+    geometry_context: usize,
     stack: Vec<Stack>,
 }
 
@@ -154,35 +162,12 @@ impl Frame {
 struct DrawList {
     frame: Rc<RefCell<Frame>>,
     epoch: i32,
+    context: usize,
+    target: drawlist::Target,
 }
 impl UserData for DrawList {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method(
-            "AddLine",
-            |_, list, (a, b, color, thickness): (AnyUserData, AnyUserData, i64, Option<f32>)| {
-                let a = *a.borrow::<Vec2>()?;
-                let b = *b.borrow::<Vec2>()?;
-                let thickness = finite(thickness.unwrap_or(1.0))?;
-                if !(0.0..=64.0).contains(&thickness) {
-                    return Err(mlua::Error::runtime("line thickness outside spike bounds"));
-                }
-                let mut frame = list.frame.borrow_mut();
-                frame.check()?;
-                if frame.epoch != list.epoch {
-                    return Err(mlua::Error::runtime("expired ImGui draw-list handle"));
-                }
-                unsafe {
-                    sys::ImDrawList_AddLine(
-                        sys::igGetBackgroundDrawList(std::ptr::null_mut()),
-                        a.raw(),
-                        b.raw(),
-                        color as u32,
-                        thickness,
-                    );
-                }
-                Ok(())
-            },
-        );
+        drawlist::methods(methods);
     }
 }
 
@@ -239,18 +224,7 @@ impl Bridge {
                 Ok((size.x, size.y))
             })?,
         )?;
-        let f = frame.clone();
-        imgui.set(
-            "GetBackgroundDrawList",
-            lua.create_function(move |_, ()| {
-                let mut state = f.borrow_mut();
-                state.check()?;
-                Ok(DrawList {
-                    frame: f.clone(),
-                    epoch: state.epoch,
-                })
-            })?,
-        )?;
+        drawlist::install(lua, &imgui, &frame)?;
         let f = frame.clone();
         imgui.set(
             "GetColorU32",
@@ -692,7 +666,14 @@ impl Bridge {
                 state.context = std::ptr::null_mut();
                 return Err(mlua::Error::runtime("no active ImGui frame"));
             }
-            state.epoch = unsafe { sys::igGetFrameCount() };
+            let epoch = unsafe { sys::igGetFrameCount() };
+            let context = state.context as usize;
+            if state.epoch != epoch || state.geometry_context != context {
+                state.geometry = 0;
+                state.geometry_context = context;
+            }
+            state.epoch = epoch;
+            state.invocation = state.invocation.wrapping_add(1);
             state.calls = 0;
             state.active = true;
         }
