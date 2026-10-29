@@ -212,13 +212,18 @@ pub(crate) fn install_package_loader(
     lua: &Lua,
     addon: &DiscoveredAddon,
     util_table: Table,
+    bit_table: Table,
+    os_table: Table,
     host_registry: Rc<RefCell<HashMap<String, Value>>>,
 ) -> LuaResult<()> {
     let package: Table = lua.globals().get("package")?;
     let package_loaded: Table = package.get("loaded")?;
 
-    // Pre-populate frontiers_forge.util in package.loaded
+    // Pre-populate frontiers_forge.util, bit, and os in package.loaded
     package_loaded.set("frontiers_forge.util", Value::Table(util_table.clone()))?;
+    package_loaded.set("bit", Value::Table(bit_table.clone()))?;
+    package_loaded.set("os", Value::Table(os_table.clone()))?;
+    package_loaded.set("coroutine", Value::Nil)?;
 
     let addon_data = addon.clone();
     let host_reg = host_registry;
@@ -235,13 +240,22 @@ pub(crate) fn install_package_loader(
         if name == "ffi" {
             return Err(mlua::Error::runtime("ffi module is unavailable"));
         }
+        if name == "coroutine" {
+            return Err(mlua::Error::runtime("coroutine module is unavailable"));
+        }
         // Consult registered native modules first (e.g. imgui, uiforge, frontiers_forge.player, etc.)
         if let Some(val) = host_reg.borrow().get(&name) {
             return Ok(val.clone());
         }
-        // frontiers_forge.util default snapshot table
+        // Native modules take precedence over disk lookup
         if name == "frontiers_forge.util" {
             return Ok(Value::Table(util_table.clone()));
+        }
+        if name == "bit" {
+            return Ok(Value::Table(bit_table.clone()));
+        }
+        if name == "os" {
+            return Ok(Value::Table(os_table.clone()));
         }
         // Unknown frontiers_forge.* fails naming unsupported API
         if name.starts_with("frontiers_forge.") {
@@ -1059,5 +1073,120 @@ mod tests {
         // Requiring valid_mod must succeed without 'nesting depth exceeded' or 'cycle detected'
         let valid_res: String = host.lua.load("return require('valid_mod')").eval().unwrap();
         assert_eq!(valid_res, "valid");
+    }
+    #[test]
+    fn forge_package_require_shared_budget_fixture_cannot_exceed_limit() {
+        let temp = TempDir::new("shared_budget");
+        let root = temp.path();
+
+        let pkg = root.join("heavy_addon");
+        fs::create_dir_all(pkg.join("modules")).unwrap();
+        // Submodule consumes 120,000 instructions
+        fs::write(
+            pkg.join("modules").join("heavy_worker.lua"),
+            r#"
+            for i = 1, 120000 do end
+            return { done = true }
+            "#,
+        )
+        .unwrap();
+        // Main addon requires worker, then attempts another 120,000 instructions (exceeding 200,000 total)
+        fs::write(
+            pkg.join("heavy_addon.lua"),
+            r#"
+            completed = false
+            local worker = require("heavy_worker")
+            for i = 1, 120000 do end
+            completed = true
+            "#,
+        )
+        .unwrap();
+
+        let disc = discover(root);
+        let addon = disc.addons.iter().find(|a| a.id == "heavy_addon").unwrap();
+        let host = Host::for_addon(addon).unwrap();
+        let err = host.run_addon(addon).unwrap_err().to_string();
+        assert!(err.contains("instruction budget exceeded"), "got: {err}");
+        assert_eq!(
+            host.lua.globals().get::<Option<bool>>("completed").unwrap(),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn forge_package_require_bit_and_os_cannot_be_shadowed_by_disk() {
+        let temp = TempDir::new("anti_shadow_test");
+        let root = temp.path();
+
+        let pkg = root.join("shadow_addon");
+        fs::create_dir_all(pkg.join("modules")).unwrap();
+        // Attempt to shadow 'bit' and 'os' via private module files
+        fs::write(
+            pkg.join("modules").join("bit.lua"),
+            "return { shadow = 'bit' }",
+        )
+        .unwrap();
+        fs::write(
+            pkg.join("modules").join("os.lua"),
+            "return { shadow = 'os' }",
+        )
+        .unwrap();
+        fs::write(
+            pkg.join("shadow_addon.lua"),
+            r#"
+            b = require("bit")
+            o = require("os")
+            "#,
+        )
+        .unwrap();
+
+        let disc = discover(root);
+        let addon = disc.addons.iter().find(|a| a.id == "shadow_addon").unwrap();
+        let host = Host::for_addon(addon).unwrap();
+        host.run_addon(addon).unwrap();
+
+        // Native modules must be returned, NOT the private shadow files
+        let b: Table = host.lua.globals().get("b").unwrap();
+        assert!(matches!(
+            b.get::<Value>("band").unwrap(),
+            Value::Function(_)
+        ));
+        assert_eq!(b.get::<Value>("shadow").unwrap(), Value::Nil);
+
+        let o: Table = host.lua.globals().get("o").unwrap();
+        assert!(matches!(
+            o.get::<Value>("clock").unwrap(),
+            Value::Function(_)
+        ));
+        assert_eq!(o.get::<Value>("shadow").unwrap(), Value::Nil);
+    }
+
+    #[test]
+    fn forge_package_table_identity_and_per_host_isolation() {
+        let temp = TempDir::new("identity_isolation");
+        let root = temp.path();
+        let pkg = root.join("mod_pkg");
+        fs::create_dir_all(&pkg).unwrap();
+        fs::write(pkg.join("mod_pkg.lua"), "-- empty").unwrap();
+
+        let disc = discover(root);
+        let addon = disc.addons.iter().find(|a| a.id == "mod_pkg").unwrap();
+
+        let host1 = Host::for_addon(addon).unwrap();
+        let host2 = Host::for_addon(addon).unwrap();
+
+        // 1. Within one host, require("bit") matches package.loaded["bit"]
+        let b1: Table = host1.lua.load("return require('bit')").eval().unwrap();
+        let b1_loaded: Table = host1
+            .lua
+            .load("return package.loaded['bit']")
+            .eval()
+            .unwrap();
+        b1.set("marker", "host1_bit").unwrap();
+        assert_eq!(b1_loaded.get::<String>("marker").unwrap(), "host1_bit");
+
+        // 2. Across different hosts, states are strictly isolated
+        let b2: Table = host2.lua.load("return require('bit')").eval().unwrap();
+        assert_eq!(b2.get::<Value>("marker").unwrap(), Value::Nil);
     }
 }

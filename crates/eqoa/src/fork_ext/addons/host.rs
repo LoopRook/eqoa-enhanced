@@ -28,32 +28,62 @@ pub(crate) struct Host {
     pub lua: Lua,
     pub snapshot: Rc<Cell<Snapshot>>,
     remaining: Rc<Cell<u32>>,
+    fatal: Rc<Cell<bool>>,
     addon: Option<DiscoveredAddon>,
     host_registry: Rc<RefCell<HashMap<String, Value>>>,
 }
 
-fn create_base_host() -> Result<(Lua, Rc<Cell<Snapshot>>, Table, Rc<Cell<u32>>)> {
+struct BaseHost {
+    lua: Lua,
+    snapshot: Rc<Cell<Snapshot>>,
+    util: Table,
+    bit: Table,
+    clean_os: Table,
+    remaining: Rc<Cell<u32>>,
+    fatal: Rc<Cell<bool>>,
+}
+
+fn create_base_host() -> Result<BaseHost> {
     let lua = Lua::new_with(
-        StdLib::TABLE | StdLib::STRING | StdLib::MATH | StdLib::PACKAGE,
+        StdLib::TABLE | StdLib::STRING | StdLib::MATH | StdLib::PACKAGE | StdLib::OS,
         Default::default(),
     )?;
     lua.set_memory_limit(8 * 1024 * 1024)?;
-    // Deliberately constrained spike: protected calls/coroutines could catch a
-    // budget error and continue forever. Broader Lua compatibility is a later gate.
+
+    // Extract original pcall before modifying globals
+    let orig_pcall: Function = lua.globals().get("pcall")?;
+
+    // Deliberately constrained spike: strip dangerous functions and coroutine
     for key in [
         "dofile",
         "loadfile",
         "load",
         "loadstring",
-        "pcall",
         "xpcall",
         "collectgarbage",
+        "coroutine",
     ] {
         lua.globals().set(key, Value::Nil)?;
     }
     let package: Table = lua.globals().get("package")?;
     package.set("loadlib", Value::Nil)?;
     package.set("loaders", lua.create_table()?)?;
+    let package_loaded: Table = package.get("loaded")?;
+    package_loaded.set("coroutine", Value::Nil)?;
+
+    // Extract clean os whitelist (clock, date) and remove dangerous functions
+    let os_orig: Table = lua.globals().get("os")?;
+    let clock_fn: Function = os_orig.get("clock")?;
+    let date_fn: Function = os_orig.get("date")?;
+    let clean_os = lua.create_table()?;
+    clean_os.set("clock", clock_fn)?;
+    clean_os.set("date", date_fn)?;
+    lua.globals().set("os", clean_os.clone())?;
+    package_loaded.set("os", clean_os.clone())?;
+
+    // Native bit module table
+    let bit_table = super::bit::create_module(&lua)?;
+    package_loaded.set("bit", bit_table.clone())?;
 
     let snapshot = Rc::new(Cell::new(Snapshot::default()));
     let util = lua.create_table()?;
@@ -91,44 +121,82 @@ fn create_base_host() -> Result<(Lua, Rc<Cell<Snapshot>>, Table, Rc<Cell<u32>>)>
     lua.globals().set("UiForge", forge)?;
 
     let remaining = Rc::new(Cell::new(0u32));
+    let fatal = Rc::new(Cell::new(false));
     let budget = remaining.clone();
+    let fatal_hook = fatal.clone();
     lua.set_global_hook(
         HookTriggers::new().every_nth_instruction(1000),
         move |_, _| {
-            let next = budget
-                .get()
-                .checked_sub(1000)
-                .ok_or_else(|| mlua::Error::runtime("Forge instruction budget exceeded"))?;
+            let next = budget.get().checked_sub(1000).ok_or_else(|| {
+                fatal_hook.set(true);
+                mlua::Error::runtime("Forge instruction budget exceeded")
+            })?;
             budget.set(next);
             Ok(VmState::Continue)
         },
     )?;
 
-    Ok((lua, snapshot, util, remaining))
+    // Install protected pcall wrapper that rethrows if the instruction budget was exceeded
+    let fatal_pcall = fatal.clone();
+    let pcall_fn = lua.create_function(move |_, args: mlua::MultiValue| {
+        let call_res = orig_pcall.call::<mlua::MultiValue>(args);
+        if fatal_pcall.get() {
+            return Err(mlua::Error::runtime("Forge instruction budget exceeded"));
+        }
+        call_res
+    })?;
+    lua.globals().set("pcall", pcall_fn)?;
+
+    Ok(BaseHost {
+        lua,
+        snapshot,
+        util,
+        bit: bit_table,
+        clean_os,
+        remaining,
+        fatal,
+    })
 }
 
 impl Host {
     pub fn for_addon(addon: &DiscoveredAddon) -> Result<Self> {
-        let (lua, snapshot, util, remaining) = create_base_host()?;
+        let base = create_base_host()?;
         let host_registry = Rc::new(RefCell::new(HashMap::new()));
-        super::package::install_package_loader(&lua, addon, util, host_registry.clone())?;
+        super::package::install_package_loader(
+            &base.lua,
+            addon,
+            base.util,
+            base.bit,
+            base.clean_os,
+            host_registry.clone(),
+        )?;
 
         Ok(Self {
-            lua,
-            snapshot,
-            remaining,
+            lua: base.lua,
+            snapshot: base.snapshot,
+            remaining: base.remaining,
+            fatal: base.fatal,
             addon: Some(addon.clone()),
             host_registry,
         })
     }
 
     pub fn new() -> Result<Self> {
-        let (lua, snapshot, util, remaining) = create_base_host()?;
-        lua.globals().set(
+        let base = create_base_host()?;
+        let util_t = base.util.clone();
+        let bit_t = base.bit.clone();
+        let os_t = base.clean_os.clone();
+        base.lua.globals().set(
             "require",
-            lua.create_function(move |_, name: String| {
+            base.lua.create_function(move |_, name: String| {
                 if name == "frontiers_forge.util" {
-                    Ok(util.clone())
+                    Ok(Value::Table(util_t.clone()))
+                } else if name == "bit" {
+                    Ok(Value::Table(bit_t.clone()))
+                } else if name == "os" {
+                    Ok(Value::Table(os_t.clone()))
+                } else if name == "coroutine" {
+                    Err(mlua::Error::runtime("coroutine module is unavailable"))
                 } else {
                     Err(mlua::Error::runtime(format!(
                         "unsupported spike module: {name}"
@@ -138,9 +206,10 @@ impl Host {
         )?;
 
         Ok(Self {
-            lua,
-            snapshot,
-            remaining,
+            lua: base.lua,
+            snapshot: base.snapshot,
+            remaining: base.remaining,
+            fatal: base.fatal,
             addon: None,
             host_registry: Rc::new(RefCell::new(HashMap::new())),
         })
@@ -203,7 +272,12 @@ impl Host {
 
     pub fn run(&self, function: &Function) -> Result<()> {
         self.remaining.set(200_000);
-        function.call(())
+        self.fatal.set(false);
+        let res = function.call(());
+        if self.fatal.get() {
+            return Err(mlua::Error::runtime("Forge instruction budget exceeded"));
+        }
+        res
     }
 
     #[cfg(test)]
@@ -216,14 +290,19 @@ impl Host {
             return Err(mlua::Error::runtime("unknown callback type"));
         }
         self.remaining.set(200_000);
-        match self
+        self.fatal.set(false);
+        let res = match self
             .lua
             .named_registry_value::<Table>("forge_callbacks")?
             .get::<Option<Function>>(kind + 1)?
         {
             Some(callback) => callback.call(value),
             None => Ok(Value::Nil),
+        };
+        if self.fatal.get() {
+            return Err(mlua::Error::runtime("Forge instruction budget exceeded"));
         }
+        res
     }
 }
 
@@ -258,5 +337,200 @@ mod tests {
         );
         host.execute("assert(package.loadlib == nil); assert(require('frontiers_forge.util').IsInGame() == 0)").unwrap();
         assert!(host.execute("require('ffi')").is_err());
+    }
+    #[test]
+    fn forge_host_pcall_catches_ordinary_errors_and_preserves_multireturns_and_identity() {
+        let host = Host::new().unwrap();
+        // 1. Success with arbitrary multiple returns including nil
+        host.execute(
+            r#"
+            local ok, a, b, c, d = pcall(function()
+                return 1, nil, "three", { x = 4 }
+            end)
+            assert(ok == true)
+            assert(a == 1)
+            assert(b == nil)
+            assert(c == "three")
+            assert(type(d) == "table" and d.x == 4)
+            "#,
+        )
+        .unwrap();
+
+        // 2. Failure with error table identity preserved
+        host.execute(
+            r#"
+            local err_obj = { code = 404, message = "not found" }
+            local ok, err = pcall(function()
+                error(err_obj)
+            end)
+            assert(ok == false)
+            assert(err == err_obj, "error object identity must be preserved")
+            assert(err.code == 404)
+            "#,
+        )
+        .unwrap();
+
+        // 3. Nested pcall
+        host.execute(
+            r#"
+            local ok_out, res_out = pcall(function()
+                local ok_in, err_in = pcall(function()
+                    error("inner failure")
+                end)
+                assert(ok_in == false)
+                assert(string.find(err_in, "inner failure"))
+                return "outer success"
+            end)
+            assert(ok_out == true)
+            assert(res_out == "outer success")
+            "#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn forge_host_pcall_cannot_swallow_budget_exhaustion_finite_control_and_recovers() {
+        let host = Host::new().unwrap();
+        // Finite negative control: 1,000,000 iterations exceeds 200,000 budget
+        // Outer marker is placed AFTER pcall: if pcall swallowed error, outer_marker would become true.
+        let source = r#"
+            outer_marker = false
+            inner_marker = false
+            pcall(function()
+                pcall(function()
+                    for i = 1, 1000000 do
+                    end
+                    inner_marker = true
+                end)
+                outer_marker = true
+            end)
+        "#;
+        let err = host.execute(source).unwrap_err().to_string();
+        assert!(
+            err.contains("instruction budget exceeded"),
+            "expected budget error, got: {err}"
+        );
+        // Neither inner nor outer completion markers must ever be reached
+        assert_eq!(
+            host.lua
+                .globals()
+                .get::<Option<bool>>("inner_marker")
+                .unwrap(),
+            Some(false)
+        );
+        assert_eq!(
+            host.lua
+                .globals()
+                .get::<Option<bool>>("outer_marker")
+                .unwrap(),
+            Some(false)
+        );
+
+        // Next independent host call must cleanly recover with replenished budget
+        host.execute("recovered = 42").unwrap();
+        assert_eq!(host.lua.globals().get::<i32>("recovered").unwrap(), 42);
+    }
+
+    #[test]
+    fn forge_host_clean_os_clock_date_and_blocks_unsafe_functions() {
+        let host = Host::new().unwrap();
+        // os.clock returns non-negative number
+        host.execute(
+            r#"
+            local t = os.clock()
+            assert(type(t) == "number" and t >= 0)
+            "#,
+        )
+        .unwrap();
+
+        // os.date format and UTC table
+        host.execute(
+            r#"
+            local year_str = os.date("%Y")
+            assert(type(year_str) == "string" and string.len(year_str) == 4)
+            local utc = os.date("!*t")
+            assert(type(utc) == "table")
+            assert(type(utc.year) == "number" and utc.year >= 2024)
+            assert(type(utc.month) == "number" and utc.month >= 1 and utc.month <= 12)
+            assert(type(utc.day) == "number" and utc.day >= 1 and utc.day <= 31)
+            "#,
+        )
+        .unwrap();
+
+        // Dangerous os functions must be nil in both _G.os and require("os")
+        host.execute(
+            r#"
+            assert(os.execute == nil)
+            assert(os.exit == nil)
+            assert(os.remove == nil)
+            assert(os.rename == nil)
+            assert(os.getenv == nil)
+            assert(os.tmpname == nil)
+
+            local req_os = require("os")
+            assert(req_os.execute == nil)
+            assert(req_os.exit == nil)
+            assert(req_os.remove == nil)
+            assert(req_os.rename == nil)
+            assert(req_os.getenv == nil)
+            "#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn forge_host_coroutine_and_dangerous_libraries_strictly_absent() {
+        let host = Host::new().unwrap();
+        // coroutine is nil in _G and cannot be required
+        host.execute(
+            r#"
+            assert(coroutine == nil)
+            assert(xpcall == nil)
+            assert(loadfile == nil)
+            assert(dofile == nil)
+            assert(load == nil)
+            assert(loadstring == nil)
+            assert(collectgarbage == nil)
+            assert(package.loadlib == nil)
+            "#,
+        )
+        .unwrap();
+
+        assert!(host.execute("require('coroutine')").is_err());
+        assert!(host.execute("require('io')").is_err());
+        assert!(host.execute("require('ffi')").is_err());
+    }
+
+    #[test]
+    fn forge_host_callback_top_boundary_fatal_reset_and_recovery() {
+        let host = Host::new().unwrap();
+        // Register a callback that trips the instruction budget
+        host.execute(
+            r#"
+            UiForge.RegisterCallback(UiForge.CallbackType.Save, function()
+                for i = 1, 1000000 do end
+                return "finished"
+            end)
+        "#,
+        )
+        .unwrap();
+
+        let err = host.callback(2, Value::Nil).unwrap_err().to_string();
+        assert!(
+            err.contains("instruction budget exceeded"),
+            "expected budget error, got: {err}"
+        );
+
+        // Next callback or run call resets fatal flag and budget at fresh top-level boundary
+        host.execute(
+            r#"
+            UiForge.RegisterCallback(UiForge.CallbackType.Save, function()
+                return "recovered"
+            end)
+        "#,
+        )
+        .unwrap();
+        let res = host.callback(2, Value::Nil).unwrap();
+        assert!(matches!(res, Value::String(ref s) if s.to_str().unwrap() == "recovered"));
     }
 }
