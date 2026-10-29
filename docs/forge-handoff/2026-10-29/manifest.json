@@ -1,0 +1,44 @@
+[
+  {
+    "file": "sound.rs.txt",
+    "source": "C:\\Users\\hocka\\.paseo\\worktrees\\1usktejc\\minimap-scale-fix-preview\\target\\forge-preview-prep\\sound.rs",
+    "sourceSha256": "06147df3081cbde373e5af1914022e54010f2387f597bd81c0709d3deb58c2f5",
+    "savedSha256": "06147df3081cbde373e5af1914022e54010f2387f597bd81c0709d3deb58c2f5"
+  },
+  {
+    "file": "sound-contract-next.md",
+    "source": "C:\\Users\\hocka\\.paseo\\worktrees\\1usktejc\\minimap-scale-fix-preview\\target\\forge-preview-prep\\sound-contract-next.md",
+    "sourceSha256": "e5e4b8fde319556e0e673c42beb71bb007d856740b65a1ebc3d27b0106e33fbe",
+    "savedSha256": "386527b481db539c5e76065b24115a3924cba72d5f1ffc1d76fb2a9fbafb11cf"
+  },
+  {
+    "file": "media-contract.md",
+    "source": "C:\\Users\\hocka\\.paseo\\worktrees\\1usktejc\\minimap-scale-fix-preview\\target\\forge-preview-prep\\media-contract.md",
+    "sourceSha256": "ec2c55abd38e202451ef7bbcab175419434f12d4adbca7f9ea03cd4b215cfce6",
+    "savedSha256": "2bf1bff17504ffb613b37fb9ac2fe395891cef8bce1855d4d1187dc03242d8e9"
+  },
+  {
+    "file": "uiforge-next-gap.md",
+    "source": "C:\\Users\\hocka\\.paseo\\worktrees\\1usktejc\\minimap-scale-fix-preview\\target\\forge-preview-prep\\uiforge-next-gap.md",
+    "sourceSha256": "1d3fd1488c5d00cc8891cbdad1779bb2d6c87a04f9333b042a894ae4c414e6dc",
+    "savedSha256": "7c756cb2fdd59b766830623d7d1f0b5732d28f0f84730ab0c137d6990f336b31"
+  },
+  {
+    "file": "prepare-preview.ps1.txt",
+    "source": "C:\\Users\\hocka\\.paseo\\worktrees\\1usktejc\\minimap-scale-fix-preview\\target\\forge-preview-prep\\prepare-preview.ps1",
+    "sourceSha256": "ba6d90cad72d361d446d0f73ca6812d5db433072f1b6a699862484d2e5837d68",
+    "savedSha256": "ba6d90cad72d361d446d0f73ca6812d5db433072f1b6a699862484d2e5837d68"
+  },
+  {
+    "file": "preview-packager-notes.md",
+    "source": "C:\\Users\\hocka\\.paseo\\worktrees\\1usktejc\\minimap-scale-fix-preview\\target\\forge-preview-prep\\README.md",
+    "sourceSha256": "2e78f4e3080fc89fba41982f313f9cb01e5de7a236d34ef3ebc517254af052bc",
+    "savedSha256": "2e78f4e3080fc89fba41982f313f9cb01e5de7a236d34ef3ebc517254af052bc"
+  },
+  {
+    "file": "player-next-contract.md",
+    "source": "C:\\Users\\hocka\\.paseo\\worktrees\\1usktejc\\forge-compatibility\\target\\player-next-contract.md",
+    "sourceSha256": "863a1c376f9a3615eb10f9bd886036281d212535d09a8cd687e39d3f681e9f74",
+    "savedSha256": "6067e057af8d21dbee350e62680e273f24d59027625853e3ca1862640e8e9e93"
+  }
+]

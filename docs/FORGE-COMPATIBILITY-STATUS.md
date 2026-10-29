@@ -194,3 +194,17 @@ public release, or full compatibility claim was made.
 - Next slice: source-correct ImGui widget/container semantics and stack recovery;
   native BitOp preparation proceeds separately. Full non-map compatibility and
   the native author contract remain incomplete.
+
+## 2026-10-29: owner-requested usage stop and handoff
+
+The owner requested stopping at the next clean checkpoint near weekly usage
+limits. No new phase is authorized during closeout. UI and stdlib are committed
+at 4e88236 / 9afa4c2; root independently verified the combined pinned suite
+99/99 with four explicit symlink privilege skips and no fixture skips. The
+already-active drawing slice is the only implementation allowed to finish.
+
+Read FORGE-COMPATIBILITY-HANDOFF.md for the final drawing result and continuation
+instructions. Uncompiled sound, font design, player audit and preview tooling are
+preserved under docs/forge-handoff/2026-10-29/, not solely in ignored target/.
+No successor agent or public Forge release is being started. Resume only after
+the owner authorizes continuation.

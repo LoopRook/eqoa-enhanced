@@ -1,0 +1,472 @@
+param(
+    [Parameter(Mandatory=$false)]
+    [string]$SourceRoot,
+
+    [Parameter(Mandatory=$false)]
+    [string]$ExecutablePath,
+
+    [Parameter(Mandatory=$false)]
+    [string]$OutputDirectory,
+
+    [Parameter(Mandatory=$false)]
+    [string]$CatalogPath,
+
+    [switch]$ValidateOnly
+)
+
+$ErrorActionPreference = 'Stop'
+
+Write-Host "=== EQOA FrontiersForge Early Preview Packager ===" -ForegroundColor Cyan
+
+# 1. Resolve and validate SourceRoot
+if (-not $SourceRoot) {
+    if ($ValidateOnly) {
+        # Default to parent directory for ValidateOnly convenience if omitted
+        $SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
+    } else {
+        throw "Mandatory parameter -SourceRoot is required for packaging. Provide the explicit Forge source worktree."
+    }
+}
+$SourceRoot = [System.IO.Path]::GetFullPath($SourceRoot)
+if (-not (Test-Path -LiteralPath $SourceRoot)) {
+    throw "SourceRoot directory does not exist: '$SourceRoot'"
+}
+Write-Host "SourceRoot:     $SourceRoot"
+
+# 2. Resolve common main repo root using git rev-parse --git-common-dir with safe.directory
+$gitCommonDir = (& git -c "safe.directory=$SourceRoot" -C $SourceRoot rev-parse --path-format=absolute --git-common-dir 2>$null)
+if (-not $gitCommonDir) {
+    $gitCommonDir = (& git -c "safe.directory=$SourceRoot" -C $SourceRoot rev-parse --git-common-dir 2>$null)
+    if ($gitCommonDir -and -not [System.IO.Path]::IsPathRooted($gitCommonDir)) {
+        $gitCommonDir = Join-Path $SourceRoot $gitCommonDir
+    }
+}
+$mainRepoRoot = if ($gitCommonDir) {
+    (Resolve-Path (Join-Path $gitCommonDir.Trim() "..")).Path
+} else {
+    $SourceRoot
+}
+Write-Host "Main repo root: $mainRepoRoot"
+
+# 3. SourceRoot Git HEAD and Cleanliness Check
+$sourceCommit = (& git -c "safe.directory=$SourceRoot" -C $SourceRoot rev-parse HEAD 2>$null).Trim()
+$sourceStatus = (& git -c "safe.directory=$SourceRoot" -C $SourceRoot status --porcelain --untracked-files=normal 2>$null)
+$sourceDirty = [bool]$sourceStatus
+
+if ($ValidateOnly) {
+    if ($sourceDirty) {
+        Write-Host "Note: SourceRoot has uncommitted modifications (permitted during ValidateOnly; packaging will enforce clean tree)." -ForegroundColor Yellow
+    } else {
+        Write-Host "SourceRoot tree is clean (HEAD: $sourceCommit)." -ForegroundColor Green
+    }
+} else {
+    if ($sourceDirty) {
+        throw "SourceRoot '$SourceRoot' is not clean! Packaging requires a clean source tree (sourceModified=false) to guarantee provenance."
+    }
+    Write-Host "SourceRoot verified clean (HEAD: $sourceCommit)." -ForegroundColor Green
+}
+
+# 4. Verify FrontiersForge reference repo and pinned commit
+$refRoot = Join-Path $mainRepoRoot "run/forge-compat-reference"
+if (-not (Test-Path -LiteralPath $refRoot)) {
+    throw "FrontiersForge reference directory not found at '$refRoot'"
+}
+$pinnedFfCommit = "4026d5cebcede24943ece8dc34833e584f46cd90"
+$actualFfCommit = (& git -c "safe.directory=$refRoot" -C $refRoot rev-parse HEAD 2>$null).Trim()
+if ($actualFfCommit -ne $pinnedFfCommit) {
+    throw "FrontiersForge reference commit mismatch! Expected '$pinnedFfCommit', got '$actualFfCommit'"
+}
+
+# 5. Verify the selected 2 scripts and 4 PNGs are unmodified vs pinned reference
+$refRelativePaths = @(
+    "scripts/screen_grid.lua",
+    "scripts/retro_health_hearts.lua",
+    "scripts/resources/retro_health_hearts/heart_accent.png",
+    "scripts/resources/retro_health_hearts/heart_border.png",
+    "scripts/resources/retro_health_hearts/heart_fill.png",
+    "scripts/resources/retro_health_hearts/heart_highlight.png"
+)
+
+$diffArgs = @(
+    "-c", "safe.directory=$refRoot",
+    "-C", $refRoot,
+    "diff", "--exit-code", $pinnedFfCommit, "--"
+) + $refRelativePaths
+& git @diffArgs
+if ($LASTEXITCODE -ne 0) {
+    throw "FrontiersForge reference files differ from pinned commit '$pinnedFfCommit'!"
+}
+
+$statusArgs = @(
+    "-c", "safe.directory=$refRoot",
+    "-C", $refRoot,
+    "status", "--porcelain", "--"
+) + $refRelativePaths
+$refStatus = (& git @statusArgs)
+if ($refStatus) {
+    throw "FrontiersForge reference files have uncommitted working tree changes: $refStatus"
+}
+Write-Host "Verified FrontiersForge reference commit ($actualFfCommit) and 6 pinned addon files unmodified." -ForegroundColor Green
+
+# 6. Resolve and verify map catalog (SHA 37be57d7996fbf7e7ef936c3e6ced1c3a14f611462346bc204eba5929cce11ca)
+$pinnedCatalogSha = "37be57d7996fbf7e7ef936c3e6ced1c3a14f611462346bc204eba5929cce11ca"
+$catalogCandidates = @()
+if ($CatalogPath) { $catalogCandidates += $CatalogPath }
+$catalogCandidates += (Join-Path $mainRepoRoot "run/map-parity-preview/map-entities.json")
+$catalogCandidates += (Join-Path $refRoot "scripts/resources/entity_database.json")
+
+$resolvedCatalogBytes = $null
+$resolvedCatalogSource = $null
+
+foreach ($cand in $catalogCandidates) {
+    if (Test-Path -LiteralPath $cand) {
+        $rawBytes = [System.IO.File]::ReadAllBytes($cand)
+        $sha = [System.BitConverter]::ToString(([System.Security.Cryptography.SHA256]::Create()).ComputeHash($rawBytes)).Replace("-","").ToLowerInvariant()
+        if ($sha -eq $pinnedCatalogSha) {
+            $resolvedCatalogBytes = $rawBytes
+            $resolvedCatalogSource = $cand
+            break
+        }
+        # Check if Windows CRLF normalization yields the pinned LF hash
+        $text = [System.Text.Encoding]::UTF8.GetString($rawBytes).Replace("`r`n", "`n")
+        $lfBytes = [System.Text.Encoding]::UTF8.GetBytes($text)
+        $lfSha = [System.BitConverter]::ToString(([System.Security.Cryptography.SHA256]::Create()).ComputeHash($lfBytes)).Replace("-","").ToLowerInvariant()
+        if ($lfSha -eq $pinnedCatalogSha) {
+            $resolvedCatalogBytes = $lfBytes
+            $resolvedCatalogSource = "$cand (normalized LF)"
+            break
+        }
+    }
+}
+
+if (-not $resolvedCatalogBytes) {
+    throw "Failed to locate entity catalog matching pinned SHA256 '$pinnedCatalogSha'."
+}
+Write-Host "Verified map catalog pin from: $resolvedCatalogSource" -ForegroundColor Green
+
+# 7. Addon sources map and hashes
+$addonSources = [ordered]@{
+    "screen_grid.lua" = Join-Path $refRoot "scripts/screen_grid.lua"
+    "retro_health_hearts.lua" = Join-Path $refRoot "scripts/retro_health_hearts.lua"
+    "heart_accent.png" = Join-Path $refRoot "scripts/resources/retro_health_hearts/heart_accent.png"
+    "heart_border.png" = Join-Path $refRoot "scripts/resources/retro_health_hearts/heart_border.png"
+    "heart_fill.png" = Join-Path $refRoot "scripts/resources/retro_health_hearts/heart_fill.png"
+    "heart_highlight.png" = Join-Path $refRoot "scripts/resources/retro_health_hearts/heart_highlight.png"
+}
+
+$addonSourceHashes = [ordered]@{}
+foreach ($name in $addonSources.Keys) {
+    $srcPath = $addonSources[$name]
+    $h = (Get-FileHash -LiteralPath $srcPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $addonSourceHashes[$name] = $h
+}
+
+# 8. Verify license notices in SourceRoot
+$licenseNative = Join-Path $SourceRoot "LICENSE"
+$licenseFf = Join-Path $SourceRoot "docs/licenses/FrontiersForge-MIT.txt"
+$licenseSpaceMono = Join-Path $SourceRoot "crates/eqoa/resources/map-ui/OFL.txt"
+
+foreach ($lic in @($licenseNative, $licenseFf, $licenseSpaceMono, (Join-Path $SourceRoot "docs/licenses/Native-Addon-Runtime-NOTICES.txt"))) {
+    if (-not (Test-Path -LiteralPath $lic)) {
+        throw "Missing required license file in SourceRoot: '$lic'"
+    }
+}
+Write-Host "Verified native, FrontiersForge, and SpaceMono license files in SourceRoot." -ForegroundColor Green
+
+# Exit early if only validating
+if ($ValidateOnly) {
+    Write-Host "`nAll pre-flight packaging validations PASSED." -ForegroundColor Green
+    return
+}
+
+# 9. Verify explicit ExecutablePath
+if (-not $ExecutablePath) {
+    throw "Mandatory parameter -ExecutablePath is required for packaging. Provide the explicit built native executable."
+}
+if (-not (Test-Path -LiteralPath $ExecutablePath)) {
+    throw "Executable does not exist at '$ExecutablePath'"
+}
+
+$taskExeSha = (Get-FileHash -LiteralPath $ExecutablePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$taskSha12 = $taskExeSha.Substring(0, 12)
+$taskExeName = "eqoa-forge-preview-$taskSha12.exe"
+
+Write-Host "Target executable: $ExecutablePath"
+Write-Host "Executable SHA256: $taskExeSha"
+Write-Host "Packaged name:     $taskExeName"
+
+# 10. OutputDirectory containment and fresh-artifact verification
+$basePreviewDir = [System.IO.Path]::GetFullPath((Join-Path $mainRepoRoot "run/forge-compatibility-preview"))
+if (-not $OutputDirectory) {
+    $OutputDirectory = Join-Path $basePreviewDir $taskSha12
+} else {
+    $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
+}
+
+if (-not $OutputDirectory.StartsWith(($basePreviewDir.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar), [System.StringComparison]::OrdinalIgnoreCase) -or $OutputDirectory.Length -le $basePreviewDir.Length) {
+    throw "OutputDirectory '$OutputDirectory' must be a subdirectory contained under '$basePreviewDir'"
+}
+
+if (Test-Path -LiteralPath $OutputDirectory) {
+    $existingItems = @(Get-ChildItem -LiteralPath $OutputDirectory -Force)
+    if ($existingItems.Count -gt 0) {
+        throw "Output directory '$OutputDirectory' already exists and contains $($existingItems.Count) item(s). Aborting to guarantee fresh artifacts."
+    }
+} else {
+    New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+}
+Write-Host "Using fresh output directory: $OutputDirectory"
+
+# 11. Copy executable and write catalog
+$destExe = Join-Path $OutputDirectory $taskExeName
+Copy-Item -LiteralPath $ExecutablePath -Destination $destExe -Force
+[System.IO.File]::WriteAllBytes((Join-Path $OutputDirectory "map-entities.json"), $resolvedCatalogBytes)
+
+# 12. Copy licenses from SourceRoot
+Copy-Item -LiteralPath $licenseNative -Destination (Join-Path $OutputDirectory "LICENSE") -Force
+Copy-Item -LiteralPath $licenseFf -Destination (Join-Path $OutputDirectory "FrontiersForge-MIT.txt") -Force
+Copy-Item -LiteralPath $licenseSpaceMono -Destination (Join-Path $OutputDirectory "SpaceMono-OFL.txt") -Force
+
+Copy-Item -LiteralPath (Join-Path $SourceRoot "docs/licenses/Native-Addon-Runtime-NOTICES.txt") -Destination (Join-Path $OutputDirectory "Native-Addon-Runtime-NOTICES.txt")
+
+# 13. Copy and byte-verify addon scripts and textures under mods/FrontiersForge/scripts/
+$destScriptsDir = Join-Path $OutputDirectory "mods/FrontiersForge/scripts"
+$destHeartsResDir = Join-Path $destScriptsDir "resources/retro_health_hearts"
+New-Item -ItemType Directory -Force -Path $destHeartsResDir | Out-Null
+
+$destAddonPaths = @{
+    "screen_grid.lua" = Join-Path $destScriptsDir "screen_grid.lua"
+    "retro_health_hearts.lua" = Join-Path $destScriptsDir "retro_health_hearts.lua"
+    "heart_accent.png" = Join-Path $destHeartsResDir "heart_accent.png"
+    "heart_border.png" = Join-Path $destHeartsResDir "heart_border.png"
+    "heart_fill.png" = Join-Path $destHeartsResDir "heart_fill.png"
+    "heart_highlight.png" = Join-Path $destHeartsResDir "heart_highlight.png"
+}
+
+foreach ($k in $destAddonPaths.Keys) {
+    $src = $addonSources[$k]
+    $dst = $destAddonPaths[$k]
+    Copy-Item -LiteralPath $src -Destination $dst -Force
+    $srcB = [System.IO.File]::ReadAllBytes($src)
+    $dstB = [System.IO.File]::ReadAllBytes($dst)
+    if ($srcB.Length -ne $dstB.Length) {
+        throw "Byte length mismatch copying '$k' to '$dst'!"
+    }
+    for ($i = 0; $i -lt $srcB.Length; $i++) {
+        if ($srcB[$i] -ne $dstB[$i]) {
+            throw "Byte content mismatch at offset $i copying '$k' to '$dst'!"
+        }
+    }
+}
+Write-Host "Copied and byte-verified all 6 addon files into mods/FrontiersForge/scripts/." -ForegroundColor Green
+
+# 14. Create Launchers with environment scrubbing
+$launcherContent = @"
+@echo off
+setlocal
+cd /d "%~dp0"
+set "EQOA_FORGE_SPIKE="
+set "EQOA_FORGE_MODS="
+set "EQOA_OFFSCREEN="
+set "EQOA_CONFIG=%~dp0profile"
+set "EQOA_MAP_DATABASE=%~dp0map-entities.json"
+start "" /D "%~dp0" "%~dp0$taskExeName"
+endlocal
+"@
+
+$normalizedLauncher = $launcherContent.Replace("`r`n", "`n").Replace("`n", "`r`n")
+foreach ($launcherName in @('Play Forge Early Preview.cmd', 'Play Forge Preview.cmd')) {
+    [System.IO.File]::WriteAllText(
+        (Join-Path $OutputDirectory $launcherName),
+        $normalizedLauncher,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+}
+
+# 15. Generate README.md
+$readmeContent = @"
+# EQOA FrontiersForge Compatibility: Early Test Preview
+
+> **EARLY TEST BUILD**: This standalone preview contains early native compatibility hooks for FrontiersForge addons.
+> Only **Screen Grid** and **Retro Health Hearts** are currently supported in this preview build.
+> Broader suites (FF_Example, UIForge_Example, ARPG_UI, Avoids_Modern_UI, Wereoxxs_UI) and EE-memory hooks remain pending.
+
+---
+
+## Quick Start & Disc Setup
+
+1. Launch using **`Play Forge Early Preview.cmd`**.
+   - The launcher scrubs inherited spike/test environment variables and isolates configuration to `profile/` and `map-entities.json`.
+   - The local updater is disabled by root's verified build compilation; the launcher uses an isolated local profile. Server access works normally.
+2. When prompted by the desktop file picker, select your local EQOA / Frontiers disc image (`.iso`).
+3. To enable addons, open **Options > Mods & Addons > Addon Manager**.
+   - Legacy and FrontiersForge addons are **initially disabled by default**.
+   - Toggle **screen_grid** or **retro_health_hearts** to active.
+
+---
+
+## Playtest Verification Checklist
+
+Please verify the following scenarios during playtesting:
+
+1. **Ready-State Indicator**:
+   - Check that the Addon Manager shows Enabled. If health stats are unavailable, it displays a waiting explanation; report that message if it persists after login.
+2. **HP Health Hearts Display**:
+   - Verify health display across full HP, partial damage, death (0 HP), and regeneration. Zone and reconnect, then confirm hearts resume with current HP.
+   - When active, the native health bar should be suppressed in favor of hearts.
+3. **Startup Prior to Login**:
+   - Addon lifecycle hooks must execute cleanly on the pregame and character selection screens before logging into a server.
+4. **Disable / Re-Enable Preserving Textures**:
+   - Toggling hearts off and on in Addon Manager must preserve textures without leaking handles, corrupting GPU state, or crashing.
+5. **Profile Save / Load Health Suppression**:
+   - Upstream plain re-enable restores the native health bar.
+   - Triggering an explicit profile Load must properly reassert native health bar suppression.
+6. **Render Scale and Native Maps**:
+   - Check that x1, x2, and x4 render scales with both native maps remain functional and unaffected.
+7. **Input & DPI Scaling**:
+   - Confirm UI scaling and mouse/controller interactions remain properly aligned at different window sizes and DPI scales.
+
+---
+
+## File Layout
+
+- ``$taskExeName``: Native EQOA game client.
+- ``map-entities.json``: Pinned FrontiersForge entity catalog (SHA256: ``$pinnedCatalogSha``).
+- ``mods/FrontiersForge/scripts/``: Pinned script tree containing ``screen_grid.lua`` and ``retro_health_hearts.lua``.
+- ``mods/FrontiersForge/scripts/resources/retro_health_hearts/``: PNG texture assets.
+- ``profile/``: Isolated runtime settings and state (excluded from distribution zip).
+"@
+
+[System.IO.File]::WriteAllText(
+    (Join-Path $OutputDirectory "README.md"),
+    $readmeContent.Replace("`r`n", "`n").Replace("`n", "`r`n"),
+    [System.Text.UTF8Encoding]::new($false)
+)
+
+# 16. Create Provenance Manifest
+$manifest = [ordered]@{
+    previewType = "early-forge-test"
+    executable = $taskExeName
+    executableSha256 = $taskExeSha
+    sourceCommit = $sourceCommit
+    sourceModified = $sourceDirty
+    frontiersForgeCommit = $pinnedFfCommit
+    catalogPin = $pinnedCatalogSha
+    addonSourceHashes = $addonSourceHashes
+    bundledAddons = @(
+        "mods/FrontiersForge/scripts/screen_grid.lua",
+        "mods/FrontiersForge/scripts/retro_health_hearts.lua"
+    )
+    bundledResources = @(
+        "mods/FrontiersForge/scripts/resources/retro_health_hearts/heart_accent.png",
+        "mods/FrontiersForge/scripts/resources/retro_health_hearts/heart_border.png",
+        "mods/FrontiersForge/scripts/resources/retro_health_hearts/heart_fill.png",
+        "mods/FrontiersForge/scripts/resources/retro_health_hearts/heart_highlight.png"
+    )
+    updaterDisabledResponsibility = "root-local-build-verified"
+    excludedFromArchive = @(
+        "profile/",
+        "*.opt",
+        "*.log",
+        "disc images",
+        "credentials",
+        ".git"
+    )
+}
+
+$manifestJson = $manifest | ConvertTo-Json -Depth 5
+[System.IO.File]::WriteAllText(
+    (Join-Path $OutputDirectory "release-manifest.json"),
+    $manifestJson.Replace("`r`n", "`n").Replace("`n", "`r`n"),
+    [System.Text.UTF8Encoding]::new($false)
+)
+
+# 17. Build Strict Allowlist ZIP Archive
+$allowlistRelativePaths = @(
+    $taskExeName,
+    "map-entities.json",
+    "LICENSE",
+    "FrontiersForge-MIT.txt",
+    "SpaceMono-OFL.txt",
+    "Native-Addon-Runtime-NOTICES.txt",
+    "README.md",
+    "Play Forge Early Preview.cmd",
+    "Play Forge Preview.cmd",
+    "release-manifest.json",
+    "mods/FrontiersForge/scripts/screen_grid.lua",
+    "mods/FrontiersForge/scripts/retro_health_hearts.lua",
+    "mods/FrontiersForge/scripts/resources/retro_health_hearts/heart_accent.png",
+    "mods/FrontiersForge/scripts/resources/retro_health_hearts/heart_border.png",
+    "mods/FrontiersForge/scripts/resources/retro_health_hearts/heart_fill.png",
+    "mods/FrontiersForge/scripts/resources/retro_health_hearts/heart_highlight.png"
+)
+
+# Record expected file hashes on disk prior to archiving
+$expectedHashes = @{}
+foreach ($rel in $allowlistRelativePaths) {
+    $full = Join-Path $OutputDirectory $rel
+    if (-not (Test-Path -LiteralPath $full)) {
+        throw "Allowlisted file missing before archiving: $full"
+    }
+    $h = (Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant()
+    $expectedHashes[$rel.Replace('\', '/')] = $h
+}
+
+$taskZip = Join-Path $OutputDirectory "eqoa-forge-preview-$taskSha12.zip"
+if (Test-Path -LiteralPath $taskZip) {
+    Remove-Item -LiteralPath $taskZip -Force
+}
+
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+$archive = [System.IO.Compression.ZipFile]::Open($taskZip, [System.IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($rel in $allowlistRelativePaths) {
+        $fullPath = Join-Path $OutputDirectory $rel
+        $entryName = $rel.Replace('\', '/')
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $fullPath, $entryName, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+    }
+} finally {
+    $archive.Dispose()
+}
+
+# 18. Validate Created ZIP Archive Entries, Exact Paths, and Exact Content Hashes
+$sha256 = [System.Security.Cryptography.SHA256]::Create()
+$verifyArchive = [System.IO.Compression.ZipFile]::OpenRead($taskZip)
+try {
+    $entries = @($verifyArchive.Entries)
+    if ($entries.Count -ne $allowlistRelativePaths.Count) {
+        throw "Archive entry count ($($entries.Count)) does not match allowlist ($($allowlistRelativePaths.Count))!"
+    }
+    foreach ($entry in $entries) {
+        $normalized = $entry.FullName.Replace('\', '/')
+        if (-not $expectedHashes.ContainsKey($normalized)) {
+            throw "Unauthorized file detected in zip archive: $normalized"
+        }
+        if ($normalized -like "profile/*" -or $normalized -like "*.log" -or $normalized -like "*.iso" -or $normalized -like "*.opt") {
+            throw "Prohibited runtime/profile file leaked into archive: $normalized"
+        }
+        $stream = $entry.Open()
+        try {
+            $bytes = $sha256.ComputeHash($stream)
+            $entrySha = [System.BitConverter]::ToString($bytes).Replace("-","").ToLowerInvariant()
+        } finally {
+            $stream.Dispose()
+        }
+        if ($entrySha -ne $expectedHashes[$normalized]) {
+            throw "Archive entry '$normalized' checksum mismatch! Expected $($expectedHashes[$normalized]), got $entrySha"
+        }
+    }
+} finally {
+    $verifyArchive.Dispose()
+    $sha256.Dispose()
+}
+
+$zipSha = (Get-FileHash -LiteralPath $taskZip -Algorithm SHA256).Hash.ToLowerInvariant()
+
+Write-Host "`n=== Preview Packaging Completed Successfully ===" -ForegroundColor Green
+Write-Host "Directory: $OutputDirectory"
+Write-Host "Launcher:  $(Join-Path $OutputDirectory 'Play Forge Early Preview.cmd')"
+Write-Host "Archive:   $taskZip"
+Write-Host "Zip SHA:   $zipSha"
