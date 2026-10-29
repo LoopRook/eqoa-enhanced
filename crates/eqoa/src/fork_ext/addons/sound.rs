@@ -15,8 +15,6 @@
 //! activated while the instance is enabled/running. Ordinary disable stops
 //! playback but preserves handles; terminal events close all aliases.
 
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
@@ -70,11 +68,6 @@ impl SoundId {
     pub fn as_u32(self) -> u32 {
         self.0
     }
-
-    /// Returns the positive integer identifier as signed `i32` matching C++ `int`.
-    pub fn as_i32(self) -> i32 {
-        self.0 as i32
-    }
 }
 
 impl fmt::Display for SoundId {
@@ -118,6 +111,7 @@ fn parse_lua_sound_id(raw: i64) -> Option<SoundId> {
 /// Diagnostic outcome from a sound operation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SoundDiagnostic {
+    #[cfg(not(windows))]
     UnsupportedPlatform(&'static str),
     PathSanitizationFailed(&'static str),
     FileNotFound(PathBuf),
@@ -151,6 +145,7 @@ pub enum SoundDiagnostic {
 impl fmt::Display for SoundDiagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            #[cfg(not(windows))]
             Self::UnsupportedPlatform(p) => {
                 write!(f, "sound playback is unsupported on platform '{p}'")
             }
@@ -198,6 +193,7 @@ impl fmt::Display for SoundDiagnostic {
 /// touching the OS.
 pub(crate) trait MciBackend {
     fn send(&mut self, command: &str) -> Result<String, String>;
+    #[allow(dead_code)]
     fn as_any(&self) -> &dyn std::any::Any;
 }
 
@@ -215,6 +211,8 @@ unsafe extern "system" {
         hwndCallback: *mut core::ffi::c_void,
     ) -> u32;
     fn mciGetErrorStringW(fdwError: u32, lpszErrorText: *mut u16, cchErrorText: u32) -> u32;
+    #[allow(dead_code)]
+    fn waveOutGetNumDevs() -> u32;
 }
 
 #[cfg(windows)]
@@ -295,7 +293,6 @@ fn default_backend() -> Box<dyn MciBackend> {
 }
 
 struct SoundRecord {
-    id: SoundId,
     alias: String,
     canonical_path: PathBuf,
     file_size: u64,
@@ -343,14 +340,6 @@ impl SoundBank {
         Self::with_owner_id_and_backend(owner_id, default_backend())
     }
 
-    pub fn owner_id(&self) -> u64 {
-        self.owner_id
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.active
-    }
-
     /// Activates or deactivates the bank. Deactivation stops playback immediately
     /// but preserves handles so ordinary disable/enable cycles survive.
     pub fn set_active(&mut self, active: bool) {
@@ -360,23 +349,28 @@ impl SoundBank {
         self.active = active;
     }
 
-    pub fn last_diagnostic(&self) -> Option<&SoundDiagnostic> {
+    #[cfg(test)]
+    pub(crate) fn is_active(&self) -> bool {
+        self.active
+    }
+
+    #[cfg(test)]
+    pub(crate) fn last_diagnostic(&self) -> Option<&SoundDiagnostic> {
         self.last_diagnostic.as_ref()
     }
 
-    pub fn clear_diagnostic(&mut self) {
-        self.last_diagnostic = None;
-    }
-
-    pub fn len(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
         self.sounds.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.sounds.is_empty()
     }
 
-    pub fn aggregate_bytes(&self) -> u64 {
+    #[cfg(test)]
+    pub(crate) fn aggregate_bytes(&self) -> u64 {
         self.aggregate_bytes
     }
 
@@ -401,7 +395,12 @@ impl SoundBank {
 
     fn record(&mut self, diag: SoundDiagnostic) {
         self.last_diagnostic = Some(diag.clone());
-        let text = diag.to_string();
+        let mut text = diag.to_string();
+        const MAX_DIAGNOSTIC_CHARS: usize = 2048;
+        if text.len() > MAX_DIAGNOSTIC_CHARS {
+            text.truncate(MAX_DIAGNOSTIC_CHARS);
+            text.push_str("…[truncated]");
+        }
         if self.diagnostics.contains(&text) {
             return;
         }
@@ -502,7 +501,6 @@ impl SoundBank {
             self.sounds.insert(
                 sound_id,
                 SoundRecord {
-                    id: sound_id,
                     alias,
                     canonical_path: canonical,
                     file_size,
@@ -583,7 +581,16 @@ impl SoundBank {
                 return false;
             }
         };
-        self.backend.send(&format!("stop {alias}")).is_ok()
+        match self.backend.send(&format!("stop {alias}")) {
+            Ok(_) => true,
+            Err(err) => {
+                self.record(SoundDiagnostic::MciCommandFailed {
+                    command: format!("stop {alias}"),
+                    error: err,
+                });
+                false
+            }
+        }
     }
 
     pub fn is_sound_playing(&mut self, sound_id: Option<SoundId>) -> bool {
@@ -591,13 +598,30 @@ impl SoundBank {
         let Some(id) = sound_id else {
             return false;
         };
+        match self.query_sound_mode(id) {
+            Ok(mode) => mode.eq_ignore_ascii_case("playing"),
+            Err(_) => false,
+        }
+    }
+
+    fn query_sound_mode(&mut self, id: SoundId) -> Result<String, String> {
         let alias = match self.sounds.get(&id) {
             Some(r) => r.alias.clone(),
-            None => return false,
+            None => return Err("invalid sound id".into()),
         };
         match self.backend.send(&format!("status {alias} mode")) {
-            Ok(mode) => mode.trim().eq_ignore_ascii_case("playing"),
-            Err(_) => false,
+            Ok(mode) => {
+                let mode = mode.trim().to_lowercase();
+                self.last_diagnostic = None;
+                Ok(mode)
+            }
+            Err(err) => {
+                self.record(SoundDiagnostic::MciCommandFailed {
+                    command: format!("status {alias} mode"),
+                    error: err.clone(),
+                });
+                Err(err)
+            }
         }
     }
 
@@ -621,9 +645,19 @@ impl SoundBank {
             }
         };
         let mci_vol = (volume * 1000.0) as u32;
-        self.backend
+        match self
+            .backend
             .send(&format!("setaudio {alias} volume to {mci_vol}"))
-            .is_ok()
+        {
+            Ok(_) => true,
+            Err(err) => {
+                self.record(SoundDiagnostic::MciCommandFailed {
+                    command: format!("setaudio {alias} volume to {mci_vol}"),
+                    error: err,
+                });
+                false
+            }
+        }
     }
 
     pub fn release_sound(&mut self, sound_id: Option<SoundId>) {
@@ -635,6 +669,11 @@ impl SoundBank {
             return;
         };
         if record.close_attempts >= MAX_CLOSE_RETRIES {
+            self.record(SoundDiagnostic::MciCloseFailed {
+                alias: record.alias.clone(),
+                attempts: record.close_attempts,
+                error: "max close retries reached; OS release not guaranteed".into(),
+            });
             self.sounds.insert(id, record);
             return;
         }
@@ -785,6 +824,8 @@ fn resolve_sound_path(
     sanitize_path_string(path_str)?;
 
     let path = Path::new(path_str);
+    let canonical_script_root = fs::canonicalize(script_root)
+        .map_err(|_| SoundDiagnostic::FileNotFound(script_root.to_path_buf()))?;
 
     if path.is_absolute() {
         let (canonical, canonical_str) = canonicalize_sound_path(path)?;
@@ -793,18 +834,8 @@ fn resolve_sound_path(
             return Ok((canonical, canonical_str));
         }
 
-        let canon_root = fs::canonicalize(script_root)
-            .map_err(|_| SoundDiagnostic::FileNotFound(script_root.to_path_buf()))?;
-        if is_contained_in(&canonical, &canon_root) {
+        if is_contained_in(&canonical, &canonical_script_root) {
             return Ok((canonical, canonical_str));
-        }
-
-        for res_dir in resource_dirs {
-            if let Ok(canon_res) = fs::canonicalize(res_dir) {
-                if is_contained_in(&canonical, &canon_res) {
-                    return Ok((canonical, canonical_str));
-                }
-            }
         }
 
         return Err(SoundDiagnostic::PathSanitizationFailed(
@@ -815,12 +846,21 @@ fn resolve_sound_path(
     let normalized = path_str.replace('\\', "/");
 
     for res_dir in resource_dirs {
+        let canon_res = match fs::canonicalize(res_dir) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        // A resource root must itself be inside the active script root; a
+        // swapped junction/symlink pointing elsewhere must not widen access.
+        if !canon_res.starts_with(&canonical_script_root) {
+            continue;
+        }
         let candidate = res_dir.join(Path::new(&normalized));
         if candidate.exists() || candidate.is_symlink() {
             if let Ok((canonical_candidate, candidate_str)) = canonicalize_sound_path(&candidate) {
-                let canon_res = fs::canonicalize(res_dir)
-                    .map_err(|_| SoundDiagnostic::FileNotFound(res_dir.to_path_buf()))?;
-                if is_contained_in(&canonical_candidate, &canon_res) {
+                if is_contained_in(&canonical_candidate, &canonical_script_root)
+                    && is_contained_in(&canonical_candidate, &canon_res)
+                {
                     return Ok((canonical_candidate, candidate_str));
                 }
             }
@@ -984,10 +1024,6 @@ impl RecorderBackend {
     pub fn log(&self) -> Vec<String> {
         self.log.borrow().clone()
     }
-
-    pub fn push_response(&self, response: Result<String, String>) {
-        self.responses.borrow_mut().push(response);
-    }
 }
 
 #[cfg(test)]
@@ -1068,7 +1104,6 @@ mod tests {
         bank.sounds.insert(
             id,
             SoundRecord {
-                id,
                 alias: "uiforge_snd_test_1".to_string(),
                 canonical_path: PathBuf::from("dummy.wav"),
                 file_size: 100,
@@ -1150,17 +1185,36 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn forge_sound_monotonic_id_exhaustion_guard() {
         let mut bank = SoundBank::with_owner_id_and_backend(102, Box::new(NoopBackend));
         bank.set_active(true);
         bank.next_sound_id = MAX_SOUND_ID_U32 + 1;
 
-        let script_root = PathBuf::from("C:\\Windows\\Media");
-        let res = bank.load_sound("C:\\Windows\\Media\\tada.wav", &script_root, &[]);
+        let dir = temp_dir("id_exhaust");
+        let wav = dir.join("silence.wav");
+        fs::write(&wav, generate_minimal_pcm_wav(8)).unwrap();
+        let res = bank.load_sound(&wav.to_string_lossy(), &dir, &[dir.clone()]);
         assert!(res.is_none());
         assert!(matches!(
             bank.last_diagnostic(),
             Some(SoundDiagnostic::IdExhausted(_))
+        ));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn forge_sound_load_returns_unsupported_platform_on_non_windows() {
+        let mut bank = SoundBank::with_owner_id_and_backend(102, Box::new(NoopBackend));
+        bank.set_active(true);
+        let dir = temp_dir("unsupported");
+        let wav = dir.join("silence.wav");
+        fs::write(&wav, generate_minimal_pcm_wav(8)).unwrap();
+        let res = bank.load_sound(&wav.to_string_lossy(), &dir, &[dir.clone()]);
+        assert!(res.is_none());
+        assert!(matches!(
+            bank.last_diagnostic(),
+            Some(SoundDiagnostic::UnsupportedPlatform(_))
         ));
     }
 
@@ -1184,6 +1238,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn forge_sound_handle_and_file_size_limits() {
         let mut bank = SoundBank::with_owner_id_and_backend(104, Box::new(NoopBackend));
         bank.set_active(true);
@@ -1211,7 +1266,6 @@ mod tests {
         bank.sounds.insert(
             id,
             SoundRecord {
-                id,
                 alias: "uiforge_snd_mock_1".to_string(),
                 canonical_path: PathBuf::from("mock.wav"),
                 file_size: 500,
@@ -1241,58 +1295,71 @@ mod tests {
     #[cfg(windows)]
     fn forge_sound_real_mci_generated_wav_playback_or_explicit_device_skip() {
         let required = native_sound_required();
+        let devices = unsafe { waveOutGetNumDevs() };
+        if devices == 0 {
+            let msg = "SKIP: no Windows MCI wave-out devices present".to_string();
+            if required {
+                panic!("EQOA_SOUND_NATIVE_REQUIRED: {msg}");
+            }
+            eprintln!("{msg}");
+            return;
+        }
+
         let mut bank = SoundBank::with_owner_id(106);
         bank.set_active(true);
         let dir = temp_dir("mci");
         let wav_path = dir.join("silence.wav");
-        let wav_bytes = generate_minimal_pcm_wav(4410);
+        // 2 seconds of silence at 44.1 kHz stereo 16-bit; loop for determinism.
+        let wav_bytes = generate_minimal_pcm_wav(88200);
         std::fs::write(&wav_path, &wav_bytes).unwrap();
 
-        let id = match bank.load_sound(&wav_path.to_string_lossy(), &dir, &[dir.clone()]) {
-            Some(id) => id,
-            None => {
-                let msg = format!(
-                    "Windows MCI audio device not available or open failed: {:?}",
+        let id = bank
+            .load_sound(&wav_path.to_string_lossy(), &dir, &[dir.clone()])
+            .unwrap_or_else(|| {
+                panic!(
+                    "MCI open failed (devices={devices}): {:?}",
                     bank.last_diagnostic()
-                );
-                if required {
-                    panic!("EQOA_SOUND_NATIVE_REQUIRED: {msg}");
-                }
-                eprintln!("SKIP: {msg}");
-                return;
-            }
-        };
+                )
+            });
 
         assert_eq!(bank.len(), 1);
         let cached_id = bank.load_sound(&wav_path.to_string_lossy(), &dir, &[dir.clone()]);
         assert_eq!(cached_id, Some(id));
         assert_eq!(bank.len(), 1);
 
-        let play_ok = bank.play_sound(
-            Some(id),
-            Some(PlayOptions {
-                volume: 0.5,
-                looping: false,
-            }),
+        assert!(
+            bank.play_sound(
+                Some(id),
+                Some(PlayOptions {
+                    volume: 0.5,
+                    looping: true,
+                })
+            ),
+            "MCI play failed: {:?}",
+            bank.last_diagnostic()
         );
-        if play_ok {
-            assert!(bank.is_sound_playing(Some(id)), "sound must report playing");
-            assert!(bank.set_sound_volume(Some(id), 0.8));
-            assert!(bank.stop_sound(Some(id)));
-            assert!(
-                !bank.is_sound_playing(Some(id)),
-                "sound must report stopped"
-            );
-        } else {
-            let msg = format!(
-                "Windows MCI play returned false (device missing or muted in CI): {:?}",
-                bank.last_diagnostic()
-            );
-            if required {
-                panic!("EQOA_SOUND_NATIVE_REQUIRED: {msg}");
-            }
-            eprintln!("SKIP: {msg}");
-        }
+
+        assert_eq!(
+            bank.query_sound_mode(id),
+            Ok("playing".into()),
+            "MCI status query must report playing"
+        );
+        assert!(
+            bank.set_sound_volume(Some(id), 0.8),
+            "MCI setaudio volume failed: {:?}",
+            bank.last_diagnostic()
+        );
+        assert!(
+            bank.stop_sound(Some(id)),
+            "MCI stop failed: {:?}",
+            bank.last_diagnostic()
+        );
+        assert_eq!(
+            bank.query_sound_mode(id),
+            Ok("stopped".into()),
+            "MCI status query must report stopped after stop"
+        );
+
         bank.release_sound(Some(id));
         assert_eq!(bank.len(), 0);
     }
@@ -1508,7 +1575,6 @@ mod tests {
         bank.sounds.insert(
             SoundId::new(1).unwrap(),
             SoundRecord {
-                id: SoundId::new(1).unwrap(),
                 alias: "uiforge_snd_filler".to_string(),
                 canonical_path: wav_path.clone(),
                 file_size: 1,
@@ -1520,7 +1586,6 @@ mod tests {
             bank.sounds.insert(
                 SoundId::new(i).unwrap(),
                 SoundRecord {
-                    id: SoundId::new(i).unwrap(),
                     alias: format!("uiforge_snd_filler_{i}"),
                     canonical_path: wav_path.clone(),
                     file_size: 1,
@@ -1615,6 +1680,58 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
+    fn forge_sound_resource_root_outside_script_root_rejected() {
+        let dir = temp_dir("res_escape");
+        let script_root = dir.join("addon");
+        let external_res = dir.join("external_res");
+        fs::create_dir_all(&script_root).unwrap();
+        fs::create_dir_all(&external_res).unwrap();
+        let inside = script_root.join("inside.wav");
+        let outside = external_res.join("outside.wav");
+        fs::write(&inside, generate_minimal_pcm_wav(8)).unwrap();
+        fs::write(&outside, generate_minimal_pcm_wav(8)).unwrap();
+
+        let mut bank = SoundBank::with_owner_id_and_backend(400, Box::new(NoopBackend));
+        bank.set_active(true);
+
+        // Relative path via a resource directory outside script_root must reject.
+        assert!(
+            bank.load_sound("outside.wav", &script_root, &[external_res.clone()])
+                .is_none()
+        );
+        assert!(matches!(
+            bank.last_diagnostic(),
+            Some(SoundDiagnostic::FileNotFound(_))
+                | Some(SoundDiagnostic::PathSanitizationFailed(_))
+        ));
+
+        // Absolute path via a resource directory outside script_root must reject.
+        assert!(
+            bank.load_sound(
+                &outside.to_string_lossy(),
+                &script_root,
+                &[external_res.clone()]
+            )
+            .is_none()
+        );
+        assert!(matches!(
+            bank.last_diagnostic(),
+            Some(SoundDiagnostic::PathSanitizationFailed(_))
+        ));
+
+        // A valid file inside script_root still works when an external resource dir is also listed.
+        assert!(
+            bank.load_sound(
+                "inside.wav",
+                &script_root,
+                &[script_root.clone(), external_res]
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
     fn forge_sound_negative_zero_and_overflow_ids_rejected_in_lua() {
         let lua = Lua::new();
         let uiforge_table = lua.create_table().expect("create table");
@@ -1658,6 +1775,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn forge_sound_aggregate_budget_rejects_before_os_open() {
         let dir = temp_dir("aggregate");
         let wav_path = dir.join("silence.wav");
@@ -1695,7 +1813,6 @@ mod tests {
         bank.sounds.insert(
             id,
             SoundRecord {
-                id,
                 alias: "uiforge_snd_retry_1".to_string(),
                 canonical_path: PathBuf::from("retry.wav"),
                 file_size: 100,
@@ -1745,6 +1862,58 @@ mod tests {
         bank.record(SoundDiagnostic::InvalidSoundId(2));
         let diags = bank.drain_diagnostics();
         assert_eq!(diags.len(), 2);
+    }
+
+    #[test]
+    fn forge_sound_stop_query_volume_failure_records_diagnostic() {
+        let dir = temp_dir("cmd_fail");
+        let wav_path = dir.join("silence.wav");
+        fs::write(&wav_path, generate_minimal_pcm_wav(8)).unwrap();
+
+        let recorder = RecorderBackend::new(vec![
+            Ok("".into()),               // open
+            Err("stop failed".into()),   // stop
+            Err("status failed".into()), // is_sound_playing
+            Err("volume failed".into()), // set_sound_volume
+        ]);
+        let mut bank = SoundBank::with_owner_id_and_backend(305, Box::new(recorder));
+        bank.set_active(true);
+
+        let id = bank
+            .load_sound(&wav_path.to_string_lossy(), &dir, &[dir.clone()])
+            .unwrap();
+
+        assert!(!bank.stop_sound(Some(id)));
+        assert!(matches!(
+            bank.last_diagnostic(),
+            Some(SoundDiagnostic::MciCommandFailed { .. })
+        ));
+
+        assert!(!bank.is_sound_playing(Some(id)));
+        assert!(matches!(
+            bank.last_diagnostic(),
+            Some(SoundDiagnostic::MciCommandFailed { command, .. }) if command.starts_with("status")
+        ));
+
+        assert!(!bank.set_sound_volume(Some(id), 0.5));
+        assert!(matches!(
+            bank.last_diagnostic(),
+            Some(SoundDiagnostic::MciCommandFailed { command, .. }) if command.starts_with("setaudio")
+        ));
+    }
+
+    #[test]
+    fn forge_sound_diagnostic_message_truncation() {
+        let mut bank = SoundBank::with_owner_id_and_backend(306, Box::new(NoopBackend));
+        let long_error = "x".repeat(5000);
+        bank.record(SoundDiagnostic::MciCommandFailed {
+            command: long_error.clone(),
+            error: long_error.clone(),
+        });
+        let diags = bank.drain_diagnostics();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].len() <= 2048 + "…[truncated]".len());
+        assert!(diags[0].ends_with("…[truncated]"));
     }
 
     fn wav_bytes_len(samples: usize) -> u64 {
