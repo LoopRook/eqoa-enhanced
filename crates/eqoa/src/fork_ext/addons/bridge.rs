@@ -6,6 +6,11 @@ use std::{
     ffi::{CStr, CString},
     rc::Rc,
 };
+#[cfg(test)]
+#[path = "bridge_next_tests.rs"]
+mod next_tests;
+#[path = "bridge_widgets.rs"]
+mod widgets;
 
 #[derive(Clone, Copy)]
 struct Vec2(f32, f32);
@@ -61,9 +66,17 @@ impl Vec4 {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Stack {
     Window,
+    Child,
+    Tree,
+    MenuBar,
+    MainMenuBar,
+    Menu,
+    TabBar,
+    TabItem,
+    TextWrap,
     Color,
     ClipRect,
 }
@@ -86,6 +99,9 @@ impl Frame {
                 "ImGui is unavailable outside the active spike frame",
             ));
         }
+        if unsafe { !(*self.context).WithinFrameScope || sys::igGetFrameCount() != self.epoch } {
+            return Err(mlua::Error::runtime("expired ImGui frame"));
+        }
         self.calls += 1;
         if self.calls > 4096 {
             return Err(mlua::Error::runtime("ImGui call budget exceeded"));
@@ -93,41 +109,44 @@ impl Frame {
         Ok(())
     }
     fn pop(&mut self, kind: Stack) -> Result<()> {
-        let index = self
-            .stack
-            .iter()
-            .rposition(|k| *k == kind)
-            .ok_or_else(|| mlua::Error::runtime("unbalanced ImGui pop/end"))?;
-        self.stack.remove(index);
+        match self.stack.last() {
+            Some(top) if *top == kind => {}
+            Some(top) => {
+                return Err(mlua::Error::runtime(format!(
+                    "unbalanced ImGui scopes: expected {kind:?}, unclosed {top:?}"
+                )));
+            }
+            None => {
+                return Err(mlua::Error::runtime(format!(
+                    "unbalanced ImGui pop/end: no {kind:?}"
+                )));
+            }
+        }
+        self.stack.pop();
         Ok(())
     }
     fn pop_clip_rect(&mut self) -> Result<()> {
-        let last_window = self.stack.iter().rposition(|k| *k == Stack::Window);
-        let search_start = match last_window {
-            Some(idx) => idx + 1,
-            None => 0,
-        };
-        let clip_idx = self.stack[search_start..]
-            .iter()
-            .rposition(|k| *k == Stack::ClipRect)
-            .map(|rel_idx| search_start + rel_idx);
-        match clip_idx {
-            Some(idx) => {
-                self.stack.remove(idx);
-                Ok(())
-            }
-            None => {
-                if self.stack.iter().any(|k| *k == Stack::ClipRect) {
-                    Err(mlua::Error::runtime(
-                        "cannot pop parent window clip rect from child window",
-                    ))
-                } else {
-                    Err(mlua::Error::runtime(
-                        "unbalanced ImGui pop/end: no active ClipRect",
-                    ))
-                }
-            }
+        self.pop(Stack::ClipRect)
+    }
+    fn room(&self) -> Result<()> {
+        if self.stack.len() >= 32 {
+            Err(mlua::Error::runtime("ImGui stack budget exceeded"))
+        } else {
+            Ok(())
         }
+    }
+    fn tab_item_parent(&self) -> bool {
+        self.stack.iter().rev().find(|k| {
+            matches!(
+                k,
+                Stack::Window
+                    | Stack::Child
+                    | Stack::Menu
+                    | Stack::MainMenuBar
+                    | Stack::TabBar
+                    | Stack::TabItem
+            )
+        }) == Some(&Stack::TabBar)
     }
 }
 
@@ -201,17 +220,13 @@ impl Bridge {
         let vec4 = lua.create_table()?;
         vec4.set(
             "new",
-            lua.create_function(|lua, args: mlua::MultiValue| {
-                match args.len() {
-                    0 => Ok(Vec4(0.0, 0.0, 0.0, 0.0)),
-                    4 => {
-                        let (x, y, z, w): (f32, f32, f32, f32) = lua.unpack_multi(args)?;
-                        Ok(Vec4(finite(x)?, finite(y)?, finite(z)?, finite(w)?))
-                    }
-                    _ => Err(mlua::Error::runtime(
-                        "ImVec4.new requires 0 or 4 arguments",
-                    )),
+            lua.create_function(|lua, args: mlua::MultiValue| match args.len() {
+                0 => Ok(Vec4(0.0, 0.0, 0.0, 0.0)),
+                4 => {
+                    let (x, y, z, w): (f32, f32, f32, f32) = lua.unpack_multi(args)?;
+                    Ok(Vec4(finite(x)?, finite(y)?, finite(z)?, finite(w)?))
                 }
+                _ => Err(mlua::Error::runtime("ImVec4.new requires 0 or 4 arguments")),
             })?,
         )?;
         lua.globals().set("ImVec4", vec4)?;
@@ -258,12 +273,7 @@ impl Bridge {
                 move |_, (label, open, flags): (String, Option<bool>, Option<i32>)| {
                     let label = text(&label)?;
                     let flags = flags.unwrap_or(0);
-                    let allowed = sys::ImGuiWindowFlags_NoTitleBar
-                        | sys::ImGuiWindowFlags_AlwaysAutoResize
-                        | sys::ImGuiWindowFlags_NoBackground;
-                    if flags & !allowed != 0 {
-                        return Err(mlua::Error::runtime("unsupported spike window flags"));
-                    }
+                    widgets::window_flags(flags)?;
                     let mut state = f.borrow_mut();
                     state.check()?;
                     if state.stack.len() >= 32 {
@@ -284,7 +294,7 @@ impl Bridge {
                     state.stack.push(Stack::Window);
                     // Begin(name) has one return; the open overload also returns open.
                     Ok(mlua::MultiValue::from_vec(if open.is_some() {
-                        vec![mlua::Value::Boolean(visible), mlua::Value::Boolean(is_open)]
+                        vec![mlua::Value::Boolean(is_open), mlua::Value::Boolean(visible)]
                     } else {
                         vec![mlua::Value::Boolean(visible)]
                     }))
@@ -297,20 +307,7 @@ impl Bridge {
             lua.create_function(move |_, ()| {
                 let mut state = f.borrow_mut();
                 state.check()?;
-                let last_window = state
-                    .stack
-                    .iter()
-                    .rposition(|k| *k == Stack::Window)
-                    .ok_or_else(|| mlua::Error::runtime("unbalanced ImGui pop/end"))?;
-                if state.stack[last_window + 1..]
-                    .iter()
-                    .any(|k| *k == Stack::ClipRect)
-                {
-                    return Err(mlua::Error::runtime(
-                        "cannot End window with unclosed ClipRect",
-                    ));
-                }
-                state.stack.remove(last_window);
+                state.pop(Stack::Window)?;
                 unsafe {
                     sys::igEnd();
                 }
@@ -361,23 +358,21 @@ impl Bridge {
         let f = frame.clone();
         imgui.set(
             "SameLine",
-            lua.create_function(
-                move |_, (offset, spacing): (Option<f32>, Option<f32>)| {
-                    let offset = match offset {
-                        Some(o) => finite(o)?,
-                        None => 0.0,
-                    };
-                    let spacing = match spacing {
-                        Some(s) => finite(s)?,
-                        None => -1.0,
-                    };
-                    f.borrow_mut().check()?;
-                    unsafe {
-                        sys::igSameLine(offset, spacing);
-                    }
-                    Ok(())
-                },
-            )?,
+            lua.create_function(move |_, (offset, spacing): (Option<f32>, Option<f32>)| {
+                let offset = match offset {
+                    Some(o) => finite(o)?,
+                    None => 0.0,
+                };
+                let spacing = match spacing {
+                    Some(s) => finite(s)?,
+                    None => -1.0,
+                };
+                f.borrow_mut().check()?;
+                unsafe {
+                    sys::igSameLine(offset, spacing);
+                }
+                Ok(())
+            })?,
         )?;
         let f = frame.clone();
         imgui.set(
@@ -398,7 +393,12 @@ impl Bridge {
                     let intersect = intersect.unwrap_or(true);
                     let mut state = f.borrow_mut();
                     state.check()?;
-                    if !state.stack.iter().any(|k| *k == Stack::Window) {
+                    if !state.stack.iter().any(|k| {
+                        matches!(
+                            k,
+                            Stack::Window | Stack::Child | Stack::Menu | Stack::MainMenuBar
+                        )
+                    }) {
                         return Err(mlua::Error::runtime("PushClipRect called outside window"));
                     }
                     if state.stack.len() >= 32 {
@@ -625,7 +625,7 @@ impl Bridge {
         imgui.set(
             "PushStyleColor",
             lua.create_function(move |_, (idx, r, g, b, a): (i32, f32, f32, f32, f32)| {
-                if idx != sys::ImGuiCol_Text as i32 {
+                if idx != sys::ImGuiCol_Text as i32 && idx != sys::ImGuiCol_PlotHistogram as i32 {
                     return Err(mlua::Error::runtime("unsupported spike style color"));
                 }
                 let col = sys::ImVec4_c {
@@ -659,7 +659,7 @@ impl Bridge {
                 Ok(())
             })?,
         )?;
-        lua.globals().set("ImGui", imgui)?;
+        lua.globals().set("ImGui", imgui.clone())?;
         let flags = lua.create_table()?;
         flags.set("NoTitleBar", sys::ImGuiWindowFlags_NoTitleBar)?;
         flags.set("AlwaysAutoResize", sys::ImGuiWindowFlags_AlwaysAutoResize)?;
@@ -674,6 +674,7 @@ impl Bridge {
         let colors = lua.create_table()?;
         colors.set("Text", sys::ImGuiCol_Text)?;
         lua.globals().set("ImGuiCol", colors)?;
+        widgets::install(lua, &imgui, &frame)?;
         Ok(Self { frame })
     }
 
@@ -687,6 +688,10 @@ impl Bridge {
             if state.context.is_null() {
                 return Err(mlua::Error::runtime("no ImGui Context"));
             }
+            if unsafe { !(*state.context).WithinFrameScope } {
+                state.context = std::ptr::null_mut();
+                return Err(mlua::Error::runtime("no active ImGui frame"));
+            }
             state.epoch = unsafe { sys::igGetFrameCount() };
             state.calls = 0;
             state.active = true;
@@ -699,12 +704,21 @@ impl Bridge {
             unsafe {
                 match op {
                     Stack::Window => sys::igEnd(),
+                    Stack::Child => sys::igEndChild(),
+                    Stack::Tree => sys::igTreePop(),
+                    Stack::MenuBar => sys::igEndMenuBar(),
+                    Stack::MainMenuBar => sys::igEndMainMenuBar(),
+                    Stack::Menu => sys::igEndMenu(),
+                    Stack::TabBar => sys::igEndTabBar(),
+                    Stack::TabItem => sys::igEndTabItem(),
+                    Stack::TextWrap => sys::igPopTextWrapPos(),
                     Stack::Color => sys::igPopStyleColor(1),
                     Stack::ClipRect => sys::igPopClipRect(),
                 }
             }
         }
         state.active = false;
+        state.context = std::ptr::null_mut();
         result?;
         if unbalanced {
             Err(mlua::Error::runtime("unbalanced ImGui stacks recovered"))
@@ -801,7 +815,9 @@ mod tests {
         let bridge = Bridge::install(&host).unwrap();
 
         // 1. ImVec4 userdata: 0-arg and 4-arg constructors, dyadic exact fraction values, setters
-        let script = host.compile(r#"
+        let script = host
+            .compile(
+                r#"
             local v0 = ImVec4.new()
             assert(v0.x == 0.0 and v0.y == 0.0 and v0.z == 0.0 and v0.w == 0.0)
             -- Use exact dyadic fractions (powers of two) to prevent f32/f64 rounding disparity
@@ -809,7 +825,9 @@ mod tests {
             assert(v4.x == 0.125 and v4.y == 0.25 and v4.z == 0.375 and v4.w == 0.5)
             v4.x = 0.875
             assert(v4.x == 0.875)
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         context.frame();
         bridge.invoke(|| host.run(&script)).unwrap();
         drop(context.render_legacy());
@@ -821,7 +839,9 @@ mod tests {
         assert!(err.to_string().contains("0 or 4 arguments"));
 
         // Frame recovery: verify active frame still functions after partial-constructor error
-        let recover1 = host.compile("assert(ImVec4.new(1, 2, 3, 4).w == 4)").unwrap();
+        let recover1 = host
+            .compile("assert(ImVec4.new(1, 2, 3, 4).w == 4)")
+            .unwrap();
         bridge.invoke(|| host.run(&recover1)).unwrap();
         drop(context.render_legacy());
 
@@ -838,7 +858,9 @@ mod tests {
 
         // 2. Checkbox multireturn order: (value, pressed)
         context.frame();
-        let script = host.compile(r#"
+        let script = host
+            .compile(
+                r#"
             assert(ImGui.Begin('chk_test', true, ImGuiWindowFlags.NoTitleBar))
             local val, pressed = ImGui.Checkbox('test_box', false)
             assert(type(val) == 'boolean' and val == false)
@@ -847,13 +869,17 @@ mod tests {
             local single = ImGui.Checkbox('test_box2', true)
             assert(single == true)
             ImGui.End()
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         bridge.invoke(|| host.run(&script)).unwrap();
         drop(context.render_legacy());
 
         // 3. Cursor positions (2 scalar numbers) and SetCursorPos, SameLine optional args
         context.frame();
-        let script = host.compile(r#"
+        let script = host
+            .compile(
+                r#"
             assert(ImGui.Begin('cursor_test', true, ImGuiWindowFlags.NoTitleBar))
             ImGui.Text('header')
             local cx, cy = ImGui.GetCursorPos()
@@ -871,13 +897,17 @@ mod tests {
             ImGui.SameLine(50.0, 5.0)
             ImGui.Text('spaced2')
             ImGui.End()
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         bridge.invoke(|| host.run(&script)).unwrap();
         drop(context.render_legacy());
 
         // 4. ClipRect lifecycle: normal Push/Pop balanced and nested clip rects
         context.frame();
-        let script = host.compile(r#"
+        let script = host
+            .compile(
+                r#"
             assert(ImGui.Begin('clip_test', true, ImGuiWindowFlags.NoTitleBar))
             ImGui.PushClipRect(10, 10, 100, 100, true)
             ImGui.PushClipRect(20, 20, 80, 80, true)
@@ -885,48 +915,66 @@ mod tests {
             ImGui.PopClipRect()
             ImGui.PopClipRect()
             ImGui.End()
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         bridge.invoke(|| host.run(&script)).unwrap();
         drop(context.render_legacy());
 
         // 5. Critical Guard: unclosed nested ClipRect before End becomes Lua error BEFORE native End,
         // and Bridge::invoke unwinds ClipRects before igEnd, preserving ImGui health
         context.frame();
-        let bad_clip = host.compile(r#"
+        let bad_clip = host
+            .compile(
+                r#"
             assert(ImGui.Begin('bad_clip', true, ImGuiWindowFlags.NoTitleBar))
             ImGui.PushClipRect(5, 5, 50, 50, true)
             ImGui.PushClipRect(10, 10, 40, 40, true)
             ImGui.End() -- Must report Lua error BEFORE native End
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         let err = bridge.invoke(|| host.run(&bad_clip)).unwrap_err();
         assert!(err.to_string().contains("unclosed ClipRect"));
 
         // Healthy second mod renders cleanly in the same frame count after unwind
-        let good_mod = host.compile(r#"
+        let good_mod = host
+            .compile(
+                r#"
             assert(ImGui.Begin('healthy_mod', true, ImGuiWindowFlags.NoTitleBar))
             ImGui.Text('recovered cleanly')
             ImGui.End()
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         bridge.invoke(|| host.run(&good_mod)).unwrap();
         drop(context.render_legacy());
 
         // 6. Child window cannot pop parent window's clip rect (separate negative control without pcall)
         context.frame();
-        let cross_clip = host.compile(r#"
+        let cross_clip = host
+            .compile(
+                r#"
             assert(ImGui.Begin('parent_win', true, ImGuiWindowFlags.NoTitleBar))
             ImGui.PushClipRect(1, 1, 20, 20, true)
             assert(ImGui.Begin('child_win', true, ImGuiWindowFlags.NoTitleBar))
             ImGui.PopClipRect() -- Must fail: cannot pop parent window clip rect
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         let err = bridge.invoke(|| host.run(&cross_clip)).unwrap_err();
         assert!(err.to_string().contains("parent window") || err.to_string().contains("ClipRect"));
 
         // Validate recovery after cross_clip error
-        let recover_win = host.compile(r#"
+        let recover_win = host
+            .compile(
+                r#"
             assert(ImGui.Begin('recovered_win', true, ImGuiWindowFlags.NoTitleBar))
             ImGui.Text('recovered after child pop error')
             ImGui.End()
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         bridge.invoke(|| host.run(&recover_win)).unwrap();
         drop(context.render_legacy());
     }
@@ -944,7 +992,8 @@ mod tests {
                 return;
             }
         };
-        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&Default::default())).unwrap();
         let mut context = Context::create();
         context
             .set_ini_filename::<std::path::PathBuf>(None)
@@ -985,8 +1034,13 @@ mod tests {
             }
         }
 
-        host.lua.globals().set("raw_tex_bytes", host.lua.create_string(&raw).unwrap()).unwrap();
-        let create_script = host.compile("tex = UiForge.CreateTextureFromMemory(raw_tex_bytes, 4, 4); assert(tex)").unwrap();
+        host.lua
+            .globals()
+            .set("raw_tex_bytes", host.lua.create_string(&raw).unwrap())
+            .unwrap();
+        let create_script = host
+            .compile("tex = UiForge.CreateTextureFromMemory(raw_tex_bytes, 4, 4); assert(tex)")
+            .unwrap();
         host.run(&create_script).unwrap();
 
         let (target_w, target_h) = (320, 240);
@@ -1036,7 +1090,9 @@ mod tests {
         "#).unwrap();
 
         for pass_index in 0..2 {
-            context.io_mut().set_display_size([target_w as f32, target_h as f32]);
+            context
+                .io_mut()
+                .set_display_size([target_w as f32, target_h as f32]);
             context.io_mut().set_display_framebuffer_scale([1.0, 1.0]);
             context.io_mut().set_delta_time(1.0 / 60.0);
             context.frame();
@@ -1062,7 +1118,8 @@ mod tests {
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
-                r.render(frame, &mut pass, FramebufferExtent::new(target_w, target_h)).unwrap();
+                r.render(frame, &mut pass, FramebufferExtent::new(target_w, target_h))
+                    .unwrap();
             }
 
             if pass_index == 0 {
@@ -1092,7 +1149,9 @@ mod tests {
             queue.submit([encoder.finish()]);
 
             let (send, recv) = std::sync::mpsc::channel();
-            readback_buf.slice(..).map_async(wgpu::MapMode::Read, move |res| send.send(res).unwrap());
+            readback_buf
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |res| send.send(res).unwrap());
             device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
             recv.recv().unwrap().unwrap();
 
@@ -1114,7 +1173,12 @@ mod tests {
 
             let get_pixel = |x: usize, y: usize| -> [u8; 4] {
                 let offset = (y * target_w as usize + x) * 4;
-                [pixels[offset], pixels[offset + 1], pixels[offset + 2], pixels[offset + 3]]
+                [
+                    pixels[offset],
+                    pixels[offset + 1],
+                    pixels[offset + 2],
+                    pixels[offset + 3],
+                ]
             };
 
             // 1. Image A (3-arg full texture):
@@ -1169,7 +1233,9 @@ mod tests {
         assert!(err.to_string().contains("positive"));
 
         // 3. Invalid handle type (passing ImVec2 instead of texture Handle)
-        let invalid_type = host.compile("ImGui.Image(ImVec2.new(10, 10), 16, 16)").unwrap();
+        let invalid_type = host
+            .compile("ImGui.Image(ImVec2.new(10, 10), 16, 16)")
+            .unwrap();
         let err = bridge.invoke(|| host.run(&invalid_type)).unwrap_err();
         assert!(err.to_string().contains("userdata") || err.to_string().contains("Handle"));
 
@@ -1178,15 +1244,20 @@ mod tests {
         // Frame 3: Texture release and deferred retirement
         context.frame();
         // Emit valid draw call first
-        let draw_before_release = host.compile(r#"
+        let draw_before_release = host
+            .compile(
+                r#"
             assert(ImGui.Begin('retire_test', true, ImGuiWindowFlags.NoTitleBar))
             ImGui.Image(tex, 16, 16)
             ImGui.End()
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         bridge.invoke(|| host.run(&draw_before_release)).unwrap();
 
         // Now release handle
-        host.run(&host.compile("UiForge.ReleaseTexture(tex)").unwrap()).unwrap();
+        host.run(&host.compile("UiForge.ReleaseTexture(tex)").unwrap())
+            .unwrap();
 
         // Next call with released handle must fail with 'expired'
         let stale_call = host.compile("ImGui.Image(tex, 16, 16)").unwrap();
@@ -1198,12 +1269,18 @@ mod tests {
 
         // Real ReleaseTexture foreign-bank rejection test using two banks installed on one Lua VM
         let bank2 = Textures::new(&device, &queue, renderer.clone());
-        let t2_handle = host.lua.load("return UiForge.CreateTextureFromMemory(raw_tex_bytes, 4, 4)").eval::<mlua::AnyUserData>().unwrap();
+        let t2_handle = host
+            .lua
+            .load("return UiForge.CreateTextureFromMemory(raw_tex_bytes, 4, 4)")
+            .eval::<mlua::AnyUserData>()
+            .unwrap();
         // Reinstall bank2 onto UiForge
         Textures::install(&bank2, &host.lua).unwrap();
         host.lua.globals().set("t2_handle", t2_handle).unwrap();
         // Attempting to release a handle belonging to bank 1 using bank 2's ReleaseTexture must fail with 'foreign'
-        let err = host.run(&host.compile("UiForge.ReleaseTexture(t2_handle)").unwrap()).unwrap_err();
+        let err = host
+            .run(&host.compile("UiForge.ReleaseTexture(t2_handle)").unwrap())
+            .unwrap_err();
         assert!(err.to_string().contains("foreign"));
 
         textures.borrow_mut().collect(true);
