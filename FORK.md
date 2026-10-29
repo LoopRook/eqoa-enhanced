@@ -13,6 +13,10 @@ optional companion-folder behavior and retained limits before starting more work
 Do not treat those follow-ups as authorization to continue this work. Other
 agents' already-authorized work is unaffected.
 
+The owner explicitly authorized this 0.1.1 patch release to resolve minimap and
+world map scaling under render scales 2x and 4x. This targeted patch is not a
+broad unfreeze; the client/map scope limits and freeze policies remain in effect.
+
 ## Goals and ownership
 
 Keep upstream engine/gameplay improvements while retaining the circular minimap,

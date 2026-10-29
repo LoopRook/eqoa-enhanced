@@ -11,9 +11,9 @@ Upstream changes remain in UPDATE-NOTES.md.
 - Preview packaging and interactive checks are still pending; full Forge addon
   compatibility is not yet available.
 
-## 2026-10-28 · Minimap render scale
+## 2026-10-28 · Enhanced 0.1.1
 
-- The minimap stays in place and keeps its size when Render Scale changes.
+- The circular minimap and full world map keep their position, dimensions, backdrop coverage, and UI alignment when Render Scale changes (2x and 4x).
 
 ## 2026-10-28 · Enhanced 0.1.0
 

@@ -5268,7 +5268,7 @@ impl ApplicationHandler for App {
                     }
                 });
                 if let Some(p) = &self.play {
-                    p.map.draw(&g.device, &mut enc, &f.color, &f.depth, f.size);
+                    p.map.draw(&g.device, &mut enc, &f.color, &f.depth);
                 }
                 g.renderer.scale.resolve(&mut enc, &target);
                 #[cfg(not(target_arch = "wasm32"))]

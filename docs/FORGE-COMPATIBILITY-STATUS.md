@@ -153,3 +153,15 @@ operations explicitly skipped for privilege error 1314. Health bindings are
 unit-integrated but not yet wired to real client snapshots or HUD visibility.
 This is a local foundation checkpoint, not full Forge compatibility or a release.
 Published enhanced 0.1.1 map changes will be merged before any preview package.
+
+### 2026-10-29 published map release integration
+
+Merged published enhanced 0.1.1 source fcd3923eb76ba037e49f1cb7380c829f66c5980b
+into the Forge branch after foundation checkpoint 3dc2a70. Resolution retained the
+unreleased addon notes, adopted the released Map::draw target-derived signature,
+and replaced the earlier minimap-only report with the released combined report.
+The native minimap and world map remain defaults; their published fixes are now
+included. Root verification after merge: 114 map tests passed (one explicit
+missing-disc prerequisite skip), locked WASM check passed (one existing unused
+variable warning), and reviewed-base footprint check passed. No Forge push,
+public release, or full compatibility claim was made.
