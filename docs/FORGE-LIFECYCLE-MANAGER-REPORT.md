@@ -33,8 +33,9 @@ The caller owns the **one Context/platform/shared renderer** and must:
 1. Begin its actual ImGui frame, then call `frame(actual_snapshot)`.
 2. Consume the Context's draw data through that shared backend and record the pass.
 3. Call `after_render()`. A second `frame()` before this boundary is rejected with
-   a diagnostic. Textures retired by failure, disable, reload or rescan stay alive
-   until this boundary. Active banks then collect ordinary explicit releases.
+   a diagnostic. Textures retired by failure, replacement or removal stay alive
+   until this boundary. All retained banks, including disabled instances, collect
+   ordinary explicit releases; live handles survive ordinary disable.
 4. Call `shutdown()` after its final pass is recorded, while the renderer/Context
    remain alive. Shutdown is idempotent and callbacks cannot render outside a
    bridge invocation. Drop performs best-effort nonrendering shutdown. If the caller
@@ -55,9 +56,11 @@ The caller owns the **one Context/platform/shared renderer** and must:
   entries and queued callbacks; no native game values are fabricated.
 - Normal disable saves healthy initialized state where possible, calls DisableScript
   once for the active transition, and preserves globals/module cache/callbacks.
-  Forced owner cleanup is independent of callback success. Re-enable resumes those
-  globals; authors must clear/recreate handles in lifecycle callbacks after cleanup.
-  A disable/re-enable burst with retirement pending waits until the next frame.
+  Successful ordinary disable retains its live texture bank too. Re-enable resumes
+  those globals and cached handles without rerunning initialization or Load.
+  Successful inactive Save/Load/Settings callbacks likewise retain cached textures.
+  Any new Lua callback error marks the owner Failed and forces retirement, including
+  errors during disable or inactive callbacks; re-enable requires Reload.
 - Reload prepares and parses a fresh environment before touching the old one.
   Read/syntax failure leaves the old active instance running. A valid replacement
   initializes on a subsequent frame, preserving disabled intent. Runtime failure
@@ -73,6 +76,59 @@ The caller owns the **one Context/platform/shared renderer** and must:
   invalidated entries retire only their banks; unaffected neighbors keep state.
 
 ## Storage
+
+### 2026-10-29 retained-texture correction
+
+Ordinary disable now explicitly selects retained disposition. Terminal failure,
+successful reload (including an already-disabled old VM), removed/changed rescan
+and eject select forced retirement. A cleanup exception overrides retention and
+keeps Failed/reload-needed semantics. Failed syntax reload preserves old handles.
+Successful inactive Save/Load/Settings no longer retire their cached allocations;
+explicit ReleaseTexture still collects through the existing post-render boundary.
+Disabled allocations remain charged to the same budgets and 16-VM cap.
+
+This corrects a native compatibility defect: pinned UiForge
+`ForgeScript::Disable` (forgescript_manager.cpp391-401) retains its environment and
+textures. Unchanged hearts caches four handles and skips Initialize after reenable.
+Its OnDisable releases native-bar suppression, while ordinary upstream Enable386-388
+only sets enabled=true. Plain reenable therefore resumes images with the native
+bar visible. No callback/claim restoration is invented. Hearts Load131-150 or an
+explicit settings toggle reasserts suppression; C++ profile application defers Load
+until after its script pass and only invokes enabled scripts with saved state.
+Native per-addon profile actions remain existing host extensions. Health claim
+installation/publication is still separate app plumbing; this correction does not
+claim that failed owners' HUD claims have been integrated or live hearts accepted.
+Saved-enabled pre-login startup also needs a separate bounded pending-intent layer:
+hearts initializes before its Render in-game guard. Availability may suppress an
+effective claim without discarding the requested intent. Disable/failure/eject or
+an explicit EnableHealthBar must clear that intent, with no restoration on plain
+reenable. That adaptation and real stats freshness/order remain future gates.
+
+Regression work changed the incorrect disabled-resource expiry assertions and
+added same-userdata/same-external-texture reenable GPU readback; inactive callback
+errors (Save/Load/Settings) and failing DisableScript must instead expire both old
+and newly allocated handles after consumption and reject plain reenable. Reload
+tests cover syntax failure and replacement for active and disabled old instances.
+Existing failure-isolation, OnEject and explicit-release controls remain exercised.
+
+RED: the disabled callback retention assertion failed. The first GPU fixture edit
+overlapped the victim window; after correcting that fixture, focused GPU RED failed
+at the intended healthy cached handle expiry after ordinary disable. No production
+change preceded these intended failures. Final command results follow below.
+
+- `cargo test --locked -p eqoa forge_manager_ -- --nocapture --test-threads=1`:
+  **6 passed, 0 failed**, all GPU prerequisites present. During verification, the
+  fixture also needed a warmup for the newly appearing ImGui image window and a
+  retained strong Lua reference to inspect replaced userdata; these were fixture
+  fixes, not additional production behavior changes.
+- With command-local `EQOA_FORGE_SPIKE` pointing to the pinned reference
+  `scripts/screen_grid.lua`, `cargo test --locked -p eqoa fork_ext::addons:: --
+  --nocapture --test-threads=1`: **73 passed, 0 failed**, four explicit Windows1314
+  symlink-operation skips (reported as passing tests, not ignored). Pinned grid,
+  cached-handle reenable/failure-isolation, runtime recovery and texture GPU tests
+  executed, including real post-upload allocator failure rollback.
+- `git diff --check`: passed with line-ending notices only. No repeated native,
+  WASM, map or exhaustive workspace builds; no source changes outside manager.rs.
 
 Caller-supplied configuration is separated from source under `<config>/addons`.
 The state registry is bounded JSON with `schemaVersion: 1` and boolean enabled

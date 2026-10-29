@@ -58,6 +58,12 @@ pub(crate) enum Command {
     Load(String),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Disposition {
+    Retain,
+    Retire,
+}
+
 struct Instance {
     // Function and Lua closures drop before the bank's final renderer reference.
     function: Function,
@@ -319,9 +325,6 @@ impl Manager {
             }
             Err(e) => self.fail(entry, "save", e.to_string(), rendering),
         }
-        if !entry.instance.as_ref().is_some_and(|i| i.active) {
-            self.retire(entry);
-        }
     }
 
     fn load(&mut self, entry: &mut Entry, rendering: bool) {
@@ -341,12 +344,15 @@ impl Manager {
             Ok(None) => {}
             Err(e) => self.diagnostic(Some(&entry.metadata.id), "storage", e),
         }
-        if !entry.instance.as_ref().is_some_and(|i| i.active) {
-            self.retire(entry);
-        }
     }
 
-    fn disable(&mut self, entry: &mut Entry, rendering: bool, save: bool) {
+    fn disable(
+        &mut self,
+        entry: &mut Entry,
+        rendering: bool,
+        save: bool,
+        disposition: Disposition,
+    ) {
         let active = entry.instance.as_ref().is_some_and(|i| i.active);
         if active && save {
             self.save(entry, rendering);
@@ -361,7 +367,11 @@ impl Manager {
                 self.diagnostic(Some(&entry.metadata.id), "cleanup", e.to_string());
             }
         }
-        self.retire(entry);
+        // Ordinary disable retains the environment and all live cached handles.
+        // A callback failure is terminal even during an ordinary transition.
+        if disposition == Disposition::Retire || entry.status == Status::Failed {
+            self.retire(entry);
+        }
         if entry.status != Status::Failed {
             entry.status = Status::Disabled;
         }
@@ -370,7 +380,7 @@ impl Manager {
     fn fail(&mut self, entry: &mut Entry, phase: &'static str, error: String, rendering: bool) {
         self.diagnostic(Some(&entry.metadata.id), phase, error);
         entry.status = Status::Failed;
-        self.disable(entry, rendering, false);
+        self.disable(entry, rendering, false, Disposition::Retire);
     }
 
     fn command(&mut self, command: Command) {
@@ -405,7 +415,7 @@ impl Manager {
                         self.diagnostic(Some(&entry.metadata.id), "storage", e);
                     }
                     if !enabled {
-                        self.disable(&mut entry, true, true);
+                        self.disable(&mut entry, true, true, Disposition::Retain);
                     } else if entry.instance.as_ref().is_some_and(|i| {
                         self.retired
                             .iter()
@@ -429,7 +439,7 @@ impl Manager {
                     match self.prepare(&entry.metadata) {
                         Err(e) => self.diagnostic(Some(&entry.metadata.id), "reload", e),
                         Ok(new) => {
-                            self.disable(&mut entry, true, true);
+                            self.disable(&mut entry, true, true, Disposition::Retire);
                             entry.instance = Some(new);
                             entry.status = Status::Disabled;
                             entry.not_before = self.frame_number + 1;
@@ -446,9 +456,6 @@ impl Manager {
                     i.resources_retired = false;
                     if let Err(e) = Self::invoke(i, 0, Value::Nil, true) {
                         self.fail(&mut entry, "settings", e.to_string(), true);
-                    }
-                    if !entry.instance.as_ref().is_some_and(|i| i.active) {
-                        self.retire(&mut entry);
                     }
                 }
             }
@@ -478,7 +485,7 @@ impl Manager {
             let intent = found.map(|index| {
                 let mut entry = old.remove(index);
                 let intent = entry.enabled_intent;
-                self.disable(&mut entry, rendering, true);
+                self.disable(&mut entry, rendering, true, Disposition::Retire);
                 intent
             });
             let key = match Storage::key(&metadata) {
@@ -506,7 +513,7 @@ impl Manager {
             });
         }
         for mut removed in old {
-            self.disable(&mut removed, rendering, true);
+            self.disable(&mut removed, rendering, true, Disposition::Retire);
         }
         self.entries.sort_by(|a, b| {
             a.metadata
@@ -527,7 +534,7 @@ impl Manager {
             if entry.status != Status::Failed {
                 self.save(entry, false);
             }
-            self.disable(entry, false, false);
+            self.disable(entry, false, false, Disposition::Retire);
             if let Some(i) = entry
                 .instance
                 .as_mut()
@@ -787,7 +794,7 @@ mod tests {
     "#;
 
     #[test]
-    fn forge_manager_callback_commands_observe_snapshot_and_retire_disabled_and_eject_resources() {
+    fn forge_manager_callbacks_retain_disabled_resources_and_retire_eject_resources() {
         let Some(mut gpu) = Gpu::new() else {
             return;
         };
@@ -832,14 +839,35 @@ mod tests {
         gpu.frame(&mut manager);
         manager.queue(Command::Save("a".into()));
         manager.queue(Command::Load("a".into()));
+        manager.queue(Command::Settings("a".into()));
         gpu.frame(&mut manager);
-        for key in ["save_texture", "load_texture"] {
+        for key in ["save_texture", "load_texture", "settings_texture"] {
             let handle = retained.globals().get::<AnyUserData>(key).unwrap();
             assert!(
-                Textures::raw(&handle).is_err(),
-                "disabled {key} must retire after callback"
+                Textures::raw(&handle).is_ok(),
+                "successful disabled {key} callback retains its cached allocation"
             );
         }
+        let released = retained
+            .globals()
+            .get::<AnyUserData>("save_texture")
+            .unwrap();
+        retained
+            .load("UiForge.ReleaseTexture(save_texture)")
+            .exec()
+            .unwrap();
+        gpu.frame(&mut manager);
+        assert!(Textures::raw(&released).is_err());
+        assert!(
+            Textures::raw(
+                &retained
+                    .globals()
+                    .get::<AnyUserData>("load_texture")
+                    .unwrap()
+            )
+            .is_ok(),
+            "explicit release must preserve other retained allocations"
+        );
         manager.shutdown();
         manager.shutdown();
         assert_eq!(retained.globals().get::<i32>("eject_count").unwrap(), 1);
@@ -953,7 +981,13 @@ mod tests {
         scripts.package("b",true,r#"
             count=(count or 0)+1
             if not texture then texture=UiForge.CreateTextureFromMemory(string.char(0,255,0,255),1,1) end
-            ImGui.GetBackgroundDrawList():AddLine(ImVec2.new(0,16),ImVec2.new(256,16),ImGui.GetColorU32(0,1,0,1),8)
+            if count>=4 then
+                ImGui.Begin('cached healthy texture')
+                ImGui.Image(texture,64,64)
+                ImGui.End()
+            else
+                ImGui.GetBackgroundDrawList():AddLine(ImVec2.new(0,16),ImVec2.new(256,16),ImGui.GetColorU32(0,1,0,1),8)
+            end
         "#);
         let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
         gpu.frame(&mut manager);
@@ -1014,12 +1048,125 @@ mod tests {
         manager.frame(Snapshot::default());
         assert!(
             Textures::raw(&healthy_handle).is_ok(),
-            "normal disable also defers retirement"
+            "normal disable retains its cached texture"
         );
         gpu.render();
         manager.after_render();
-        assert!(Textures::raw(&healthy_handle).is_err());
+        assert!(Textures::raw(&healthy_handle).is_ok());
+        let old_texture_id = Textures::raw(&healthy_handle).unwrap()._TexID;
+        manager.queue(Command::Enable("b".into(), true));
+        // Dear ImGui sizes a newly appearing window for one frame before
+        // emitting its contents; warm it without replacing the cached handle.
+        gpu.frame(&mut manager);
+        gpu.begin();
+        manager.frame(Snapshot::default());
+        let target = gpu.render();
+        let pixels = gpu.pixels(&target);
+        manager.after_render();
+        let resumed = lua(&manager, "b")
+            .globals()
+            .get::<AnyUserData>("texture")
+            .unwrap();
+        assert_eq!(
+            resumed.to_pointer(),
+            healthy_handle.to_pointer(),
+            "reenable reuses same cached Lua userdata"
+        );
+        assert_eq!(Textures::raw(&resumed).unwrap()._TexID, old_texture_id);
+        assert_eq!(count(&manager, "b"), 5);
+        assert_eq!(
+            manager
+                .entries
+                .iter()
+                .find(|e| e.metadata.id == "b")
+                .unwrap()
+                .status,
+            Status::Enabled
+        );
+        assert!(
+            pixels
+                .chunks_exact(4)
+                .any(|p| p[0] < 30 && p[1] > 220 && p[2] < 30),
+            "cached texture must render after reenable"
+        );
         manager.shutdown();
+        assert!(Textures::raw(&healthy_handle).is_err());
+    }
+
+    #[test]
+    fn forge_manager_cleanup_and_inactive_callback_errors_force_retirement() {
+        let Some(mut gpu) = Gpu::new() else { return };
+        for phase in ["cleanup", "save", "load", "settings"] {
+            let scripts = Scratch::new();
+            let config = Scratch::new();
+            scripts.package("a", true, r#"
+                count=(count or 0)+1
+                local function texture() return UiForge.CreateTextureFromMemory(string.char(255,0,0,255),1,1) end
+                local function maybe_fail(phase)
+                    if fail_phase==phase then bad_texture=texture();error('controlled-'..phase) end
+                end
+                if not texture_cache then
+                    texture_cache=texture()
+                    UiForge.RegisterCallback(UiForge.CallbackType.Save,function() maybe_fail('save');return {[1]=true} end)
+                    UiForge.RegisterCallback(UiForge.CallbackType.Load,function() maybe_fail('load') end)
+                    UiForge.RegisterCallback(UiForge.CallbackType.Settings,function() maybe_fail('settings') end)
+                    UiForge.RegisterCallback(UiForge.CallbackType.DisableScript,function() maybe_fail('cleanup') end)
+                end
+            "#);
+            let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+            gpu.frame(&mut manager);
+            let retained = lua(&manager, "a");
+            let cached = retained
+                .globals()
+                .get::<AnyUserData>("texture_cache")
+                .unwrap();
+            if phase == "cleanup" {
+                retained.globals().set("fail_phase", phase).unwrap();
+            }
+            manager.queue(Command::Enable("a".into(), false));
+            if phase != "cleanup" {
+                gpu.frame(&mut manager);
+                assert!(
+                    Textures::raw(&cached).is_ok(),
+                    "ordinary disable must retain before {phase} error"
+                );
+                retained.globals().set("fail_phase", phase).unwrap();
+                manager.queue(match phase {
+                    "save" => Command::Save("a".into()),
+                    "load" => Command::Load("a".into()),
+                    _ => Command::Settings("a".into()),
+                });
+            }
+            gpu.begin();
+            manager.frame(Snapshot::default());
+            assert_eq!(
+                manager.entries[0].status,
+                Status::Failed,
+                "{phase} failure requires reload"
+            );
+            let bad = retained
+                .globals()
+                .get::<AnyUserData>("bad_texture")
+                .unwrap();
+            assert!(Textures::raw(&cached).is_ok());
+            assert!(
+                Textures::raw(&bad).is_ok(),
+                "terminal allocations survive recorded pass"
+            );
+            gpu.render();
+            manager.after_render();
+            assert!(Textures::raw(&cached).is_err());
+            assert!(Textures::raw(&bad).is_err());
+            manager.queue(Command::Enable("a".into(), true));
+            gpu.frame(&mut manager);
+            assert_eq!(manager.entries[0].status, Status::Failed);
+            assert_eq!(
+                count(&manager, "a"),
+                1,
+                "failed retained VM cannot be resumed"
+            );
+            manager.shutdown();
+        }
     }
 
     #[test]
@@ -1033,16 +1180,32 @@ mod tests {
         scripts.package("b", true, SCRIPT);
         let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
         gpu.frame(&mut manager);
+        lua(&manager, "a")
+            .load("cached=UiForge.CreateTextureFromMemory(string.char(255,0,0,255),1,1)")
+            .exec()
+            .unwrap();
+        // mlua userdata references are weak with respect to their Lua owner.
+        // Keep the old VM alive in the test to inspect deferred GPU expiry.
+        let old_lua = lua(&manager, "a");
+        let old_handle = old_lua.globals().get::<AnyUserData>("cached").unwrap();
         fs::write(scripts.0.join("a/main.lua"), "this is not valid Lua !!!").unwrap();
         manager.queue(Command::Reload("a".into()));
         gpu.frame(&mut manager);
         assert_eq!(count(&manager, "a"), 2);
         assert_eq!(count(&manager, "b"), 2);
+        assert!(
+            Textures::raw(&old_handle).is_ok(),
+            "syntax failure preserves old texture"
+        );
         fs::write(scripts.0.join("a/main.lua"), SCRIPT).unwrap();
         fs::write(scripts.0.join("a/modules/private.lua"), "return {value=80}").unwrap();
         manager.queue(Command::Reload("a".into()));
         gpu.frame(&mut manager);
         gpu.frame(&mut manager);
+        assert!(
+            Textures::raw(&old_handle).is_err(),
+            "successful replacement retires old bank"
+        );
         assert_eq!(
             count(&manager, "a"),
             1,
@@ -1057,8 +1220,26 @@ mod tests {
         );
         manager.queue(Command::Enable("a".into(), false));
         gpu.frame(&mut manager);
+        let disabled_lua = lua(&manager, "a");
+        disabled_lua
+            .load("cached=UiForge.CreateTextureFromMemory(string.char(255,0,0,255),1,1)")
+            .exec()
+            .unwrap();
+        let disabled_handle = disabled_lua.globals().get::<AnyUserData>("cached").unwrap();
+        fs::write(scripts.0.join("a/main.lua"), "invalid Lua !!!").unwrap();
         manager.queue(Command::Reload("a".into()));
         gpu.frame(&mut manager);
+        assert!(
+            Textures::raw(&disabled_handle).is_ok(),
+            "syntax failure preserves disabled bank too"
+        );
+        fs::write(scripts.0.join("a/main.lua"), SCRIPT).unwrap();
+        manager.queue(Command::Reload("a".into()));
+        gpu.frame(&mut manager);
+        assert!(
+            Textures::raw(&disabled_handle).is_err(),
+            "replacement must retire even an already-disabled bank"
+        );
         assert!(
             !manager
                 .entries()
@@ -1071,7 +1252,7 @@ mod tests {
         manager.queue(Command::Rescan);
         gpu.frame(&mut manager);
         assert!(manager.entries().iter().all(|e| e.metadata.id != "a"));
-        assert_eq!(count(&manager, "b"), 7);
+        assert_eq!(count(&manager, "b"), 8);
         scripts.package("c", true, "count=(count or 0)+1");
         manager.queue(Command::Rescan);
         gpu.frame(&mut manager);
