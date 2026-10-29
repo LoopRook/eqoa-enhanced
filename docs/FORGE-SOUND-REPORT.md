@@ -10,7 +10,11 @@ query, bounded diagnostics, and old-bank cleanup oracle.
 ## Base / Head
 
 - **Base:** `ada9092` (`fix(addons): review round 1 for Forge sound stage`)
-- **Head:** local commit on `forge-compatibility` after this report (not pushed).
+- **Full reviewed code commit:** `6cab6c1` (`fix(addons): review round 2 for Forge sound stage`)
+- **Follow-up commit:** applies reviewer R1/R2 items below (multibyte-safe diagnostic
+  truncation and report head-sha accuracy). The final commit hash will be recorded
+  in the lead's final status; this report documents the change set up to and
+  including the follow-up.
 
 ## Files Changed
 
@@ -60,7 +64,8 @@ query, bounded diagnostics, and old-bank cleanup oracle.
     `suspend_health()`.
 - Diagnostics:
   - Bounded ring (`MAX_DIAGNOSTICS = 32`) with deduplication.
-  - Each diagnostic message capped at 2048 characters.
+  - Each diagnostic message capped at 2048 bytes, truncated only on UTF-8
+    character boundaries (avoids panic on multibyte paths or MCI error text).
   - Stop, query, volume, and terminal close failures record actionable
     diagnostics.
   - Drains into the existing manager diagnostic channel.
@@ -102,6 +107,7 @@ test result: ok. 133 passed; 0 failed; 0 ignored; 0 measured; 987 filtered out; 
   - `forge_sound_diagnostics_ring_bounded_and_deduplicated`.
   - `forge_sound_stop_query_volume_failure_records_diagnostic`.
   - `forge_sound_diagnostic_message_truncation`.
+  - `forge_sound_diagnostic_truncation_respects_multibyte_boundary_and_dedup`.
   - `forge_sound_load_returns_unsupported_platform_on_non_windows` (compiles
     only on non-Windows).
   - Existing validation, sanitization, lifecycle, limits, close-failure
@@ -119,6 +125,12 @@ test result: ok. 133 passed; 0 failed; 0 ignored; 0 measured; 987 filtered out; 
   preserved. After the containment fix the same test passes.
   - RED: `run/forge-sound-stage/forge-res-escape-red.log`
   - GREEN: `run/forge-sound-stage/forge-res-escape-green.log`
+- **Multibyte diagnostic truncation:** `forge_sound_diagnostic_truncation_respects_multibyte_boundary_and_dedup`
+  was run against the naive `text.truncate(2048)` implementation. It panicked
+  because byte 2048 fell inside a 3-byte UTF-8 character. The log is preserved.
+  After the char-boundary fix the same test passes.
+  - RED: `run/forge-sound-stage/forge-multibyte-truncate-red.log`
+  - GREEN: `run/forge-sound-stage/forge-multibyte-truncate-green.log`
 - **Historical RED for negative Lua IDs:** not preserved. The fix was made
   before capturing a failing log. This gap is recorded honestly below.
 
@@ -165,6 +177,8 @@ WAV: `open`, cached `load_sound`, `play` (looping), `status … mode` returned
 | M8 — Lossy `Path::display()` | Fixed | Uses validated `canonical_str`. |
 | N4 — Silent terminal close retry | Fixed | Records bounded `MciCloseFailed` diagnostic. |
 | M10 — Dead code | Fixed | Removed `SoundRecord.id`, `SoundId::as_i32`, `RecorderBackend::push_response`, `clear_diagnostic`, `with_backend`; test accessors gated `#[cfg(test)]`. |
+| R1 — `String::truncate` char boundary | Fixed | `record()` now finds a char boundary before truncating; constant renamed to `MAX_DIAGNOSTIC_BYTES`. |
+| R2 — Report head sha | Fixed | Report now records the full reviewed code commit `6cab6c1` and notes the follow-up commit. |
 | M9 — Resolver deduplication | Deferred | Per lead ruling; containment is enforced without unifying resolvers. |
 | M12 — Per-VM handle namespace | Documented adaptation | Each addon has an isolated Lua state and bank; handle `1` is not shared across VMs. |
 | RED→GREEN historical evidence | Not preserved | Only the resource-root RED was captured before fix; negative-ID RED was not. |
@@ -195,4 +209,6 @@ All logs are copied to:
 - `forge-native-build-fix2.log` — native build.
 - `forge-wasm-check-fix2.log` — WASM check.
 - `forge-res-escape-red.log` / `forge-res-escape-green.log` — containment RED.
-- `forge-sound-fix2.log` — focused sound tests.
+- `forge-multibyte-truncate-red.log` / `forge-multibyte-truncate-green.log` —
+  multibyte truncation RED.
+- `forge-sound-fix2.log` / `forge-sound-fix3.log` — focused sound tests.

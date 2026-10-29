@@ -396,9 +396,13 @@ impl SoundBank {
     fn record(&mut self, diag: SoundDiagnostic) {
         self.last_diagnostic = Some(diag.clone());
         let mut text = diag.to_string();
-        const MAX_DIAGNOSTIC_CHARS: usize = 2048;
-        if text.len() > MAX_DIAGNOSTIC_CHARS {
-            text.truncate(MAX_DIAGNOSTIC_CHARS);
+        const MAX_DIAGNOSTIC_BYTES: usize = 2048;
+        if text.len() > MAX_DIAGNOSTIC_BYTES {
+            let mut cut = MAX_DIAGNOSTIC_BYTES;
+            while cut > 0 && !text.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            text.truncate(cut);
             text.push_str("…[truncated]");
         }
         if self.diagnostics.contains(&text) {
@@ -1914,6 +1918,48 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert!(diags[0].len() <= 2048 + "…[truncated]".len());
         assert!(diags[0].ends_with("…[truncated]"));
+    }
+
+    #[test]
+    fn forge_sound_diagnostic_truncation_respects_multibyte_boundary_and_dedup() {
+        let mut bank = SoundBank::with_owner_id_and_backend(307, Box::new(NoopBackend));
+        // 2034 ASCII bytes followed by a 3-byte UTF-8 character, then more text.
+        // With the 13-byte "MCI command \"\"" wrapper, byte 2048 of the full
+        // diagnostic lands on the second byte of the first multibyte character.
+        let prefix = "a".repeat(2034);
+        let multibyte_tail = "あああああ";
+        let long_path = format!("{prefix}{multibyte_tail}");
+
+        bank.record(SoundDiagnostic::MciCommandFailed {
+            command: long_path.clone(),
+            error: "error".into(),
+        });
+        bank.record(SoundDiagnostic::MciCommandFailed {
+            command: long_path.clone(),
+            error: "error".into(),
+        });
+
+        let diags = bank.drain_diagnostics();
+        assert_eq!(
+            diags.len(),
+            1,
+            "truncated multibyte diagnostics must deduplicate"
+        );
+        let text = &diags[0];
+        assert!(
+            text.len() <= 2048 + "…[truncated]".len(),
+            "diagnostic length {len} exceeds bound",
+            len = text.len()
+        );
+        assert!(
+            text.is_char_boundary(text.len()),
+            "truncation must end on char boundary"
+        );
+        assert!(text.ends_with("…[truncated]"));
+        assert!(
+            std::str::from_utf8(text.as_bytes()).is_ok(),
+            "truncated diagnostic must be valid UTF-8"
+        );
     }
 
     fn wav_bytes_len(samples: usize) -> u64 {
