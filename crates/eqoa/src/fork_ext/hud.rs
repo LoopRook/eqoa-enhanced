@@ -2,6 +2,18 @@
 use super::{HudState, UiRaster};
 use render::ui::{Anchor, Vertical};
 
+pub(super) fn health_visible(s: &HudState) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        !s.forge_health_hidden
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = s;
+        true
+    }
+}
+
 #[derive(Debug)]
 struct Readout {
     text: String,
@@ -14,14 +26,16 @@ fn readouts(s: &HudState, need: u32, flags: [bool; 3]) -> Vec<Readout> {
     let [target_hp_percent, xp_details, hud_numbers] = flags;
     let mut out = Vec::with_capacity(4);
     if hud_numbers {
-        let pct = ((s.self_hp as f32 / 255.0) * 100.0).round() as i32;
-        out.push(Readout {
-            text: format!("{pct}%"),
-            center: [99, 35],
-            scale: 0.6,
-            color: [1.0; 4],
-            vertical: Vertical::Top,
-        });
+        if health_visible(s) {
+            let pct = ((s.self_hp as f32 / 255.0) * 100.0).round() as i32;
+            out.push(Readout {
+                text: format!("{pct}%"),
+                center: [99, 35],
+                scale: 0.6,
+                color: [1.0; 4],
+                vertical: Vertical::Top,
+            });
+        }
         if s.max_power > 0 {
             out.push(Readout {
                 text: format!("{}/{}", s.power, s.max_power),
@@ -90,6 +104,42 @@ pub(super) fn draw(ui: &mut UiRaster<'_>, s: &HudState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_health_visibility_suppresses_only_health_gauge_and_percent_label() {
+        let mut state = HudState {
+            self_hp: 128,
+            power: 4,
+            max_power: 10,
+            exp: 20,
+            target_name: Some("Target".into()),
+            target_hp: 128,
+            ..Default::default()
+        };
+        let shown = readouts(&state, 100, [true, true, true]);
+        assert!(health_visible(&state));
+        assert_eq!(shown.len(), 4);
+        state.forge_health_hidden = true;
+        assert!(
+            !health_visible(&state),
+            "native health gauge uses this same predicate"
+        );
+        let hidden = readouts(&state, 100, [true, true, true]);
+        assert_eq!(hidden.len(), 3);
+        assert_eq!(
+            hidden
+                .iter()
+                .map(|r| (&r.text, r.center))
+                .collect::<Vec<_>>(),
+            shown[1..]
+                .iter()
+                .map(|r| (&r.text, r.center))
+                .collect::<Vec<_>>(),
+            "power, XP and target labels unchanged"
+        );
+        state.forge_health_hidden = false;
+        assert_eq!(readouts(&state, 100, [true, true, true]).len(), 4);
+    }
     #[test]
     fn number_readouts_keep_text_positions_and_independent_switches() {
         let s = HudState {

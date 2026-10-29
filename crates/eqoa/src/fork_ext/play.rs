@@ -1,5 +1,43 @@
 //! The combat indication adapter; service code only receives plain combat data.
 use super::Play;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Play {
+    pub(crate) fn forge_snapshot(&self) -> crate::fork_ext::addons::host::Snapshot {
+        let connected = self.session.self_id.is_some() && self.disconnected.is_none() && !self.quit;
+        let hud_ready = self.hud_ready() && !self.loading_up();
+        crate::fork_ext::addons::host::Snapshot {
+            in_game: connected && hud_ready,
+            start_menu: self.start.as_ref().is_some_and(|s| s.menu.visible),
+            health: self.forge_health.snapshot(connected, hud_ready),
+        }
+    }
+}
+pub(super) fn health_hidden(play: &Play) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        play.forge_snapshot().health.is_available()
+            && !play.loading_up()
+            && crate::fork_ext::addons::visibility::published_health_hidden()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = play;
+        false
+    }
+}
+pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let hidden = health_hidden(play);
+        play.forge_health.hud_changed(hidden) || step || loading_changed
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = play;
+        step || loading_changed
+    }
+}
 use crate::fork_ext::telemetry::{CombatEvent, CombatKind};
 struct CombatSnapshot {
     actor: String,
@@ -82,6 +120,77 @@ mod tests {
         session.self_id = Some(0x100);
         Play::new(session, net::session::Player::default(), Box::default())
     }
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_health_play_snapshot_and_actual_hud_cache_predicate_follow_publication() {
+        use crate::fork_ext::addons::visibility::{publish, published_health_hidden};
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                publish(false);
+            }
+        }
+        let _reset = Reset;
+        publish(false);
+        let mut p = play();
+        let initial_loading = p.loading.wait.take(); // explicit entered-world fixture
+        p.hud = Some((
+            crate::ui::Vui::new(Default::default(), Default::default(), vec![]),
+            Default::default(),
+            crate::hud::Hud::new(),
+        ));
+        let mut bytes = vec![0; 233];
+        bytes[28..32].copy_from_slice(&0_i32.to_le_bytes());
+        bytes[32..36].copy_from_slice(&100_i32.to_le_bytes());
+        assert!(!p.forge_snapshot().managed().in_game);
+        p.forge_health.receive(&bytes);
+        assert!(
+            p.forge_snapshot().managed().in_game,
+            "zero HP remains an in-game death"
+        );
+        assert!(!health_redraw(&mut p, false, false));
+        publish(true);
+        assert!(published_health_hidden());
+        assert!(health_hidden(&p));
+        assert!(
+            health_redraw(&mut p, false, false),
+            "claim transition must invalidate cached quads without game step"
+        );
+        assert!(
+            !health_redraw(&mut p, false, false),
+            "unchanged claim can replay cache"
+        );
+        p.session.self_id = None;
+        assert!(!p.forge_snapshot().managed().in_game);
+        assert!(
+            health_redraw(&mut p, false, false),
+            "connect gap restores health despite previously published claim"
+        );
+        p.session.self_id = Some(0x100);
+        p.forge_health.reset();
+        assert!(
+            !p.forge_snapshot().managed().in_game,
+            "same id with reset has no fresh receipt"
+        );
+        p.forge_health.receive(&bytes);
+        assert!(health_redraw(&mut p, false, false));
+        publish(false);
+        assert!(health_redraw(&mut p, false, false));
+        assert!(health_redraw(&mut p, true, false));
+        assert!(health_redraw(&mut p, false, true));
+        p.disconnected = Some(0);
+        assert!(!p.forge_snapshot().managed().in_game);
+        p.disconnected = None;
+        p.quit = true;
+        assert!(!p.forge_snapshot().managed().in_game);
+        p.quit = false;
+        p.loading.wait = initial_loading;
+        assert!(
+            !p.forge_snapshot().managed().in_game,
+            "loading must not display health overlay"
+        );
+    }
+
     #[test]
     fn self_pet_and_other_attribution_keep_the_existing_parser_contract() {
         let mut p = play();

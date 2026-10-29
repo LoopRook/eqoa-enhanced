@@ -3145,7 +3145,7 @@ impl App {
         g.renderer.scale.resolve(&mut enc, &target);
         #[cfg(not(target_arch = "wasm32"))]
         g.forge_runtime.draw(&g.window, &g.device, &g.queue, g.config.format, &mut enc, &target,
-            crate::fork_ext::addons::host::Snapshot { in_game: false, start_menu: false });
+            crate::fork_ext::addons::host::Snapshot::default());
         g.queue.submit([enc.finish()]);
         #[cfg(not(target_arch = "wasm32"))]
         report_shot(g, frame.as_ref());
@@ -5273,10 +5273,9 @@ impl ApplicationHandler for App {
                 g.renderer.scale.resolve(&mut enc, &target);
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    let in_game = self.play.as_ref().is_some_and(|p| p.session.self_id.is_some() && p.hud_ready());
-                    let start_menu = self.play.as_ref().is_some_and(|p| p.start.as_ref().is_some_and(|s| s.menu.visible));
+                    let snapshot = self.play.as_ref().map_or_else(Default::default, |p| p.forge_snapshot());
                     g.forge_runtime.draw(&g.window, &g.device, &g.queue, g.config.format, &mut enc, &target,
-                        crate::fork_ext::addons::host::Snapshot { in_game, start_menu });
+                        snapshot);
                 }
                 mark(&mut self.perf, 11);
                 let sent = g.queue.submit([enc.finish()]);

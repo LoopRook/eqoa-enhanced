@@ -70,6 +70,7 @@ struct Instance {
     host: Host,
     bridge: Bridge,
     textures: Rc<RefCell<Textures>>,
+    visibility: super::visibility::VisibilityLease,
     initialized: bool,
     active: bool,
     ejected: bool,
@@ -99,6 +100,8 @@ pub(crate) struct Manager {
     frame_number: u64,
     awaiting_render: bool,
     snapshot: Snapshot,
+    health_waiting: bool,
+    health_claims: Rc<RefCell<super::health::HealthBarClaimsRegistry>>,
 }
 
 impl Manager {
@@ -123,6 +126,8 @@ impl Manager {
             frame_number: 0,
             awaiting_render: false,
             snapshot: Snapshot::default(),
+            health_waiting: false,
+            health_claims: Rc::new(RefCell::new(super::health::HealthBarClaimsRegistry::new())),
         };
         manager.rescan(false);
         manager
@@ -140,6 +145,27 @@ impl Manager {
     }
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
+    }
+    pub fn health_hidden(&self) -> bool {
+        self.health_claims.borrow().is_hidden()
+    }
+    pub fn suspend_health(&self) {
+        for e in &self.entries {
+            if let Some(i) = &e.instance {
+                i.visibility.suspend();
+            }
+        }
+    }
+    pub fn health_readiness(&self) -> Option<&'static str> {
+        if self.health_waiting {
+            Some(
+                "Waiting for current-world health stats. Health addons will appear when a valid update arrives.",
+            )
+        } else if !self.snapshot.health.is_available() {
+            Some("Health data unavailable: log in and wait for the player HUD.")
+        } else {
+            None
+        }
     }
     pub fn queue(&mut self, command: Command) {
         if self.shut_down {
@@ -164,11 +190,14 @@ impl Manager {
             return;
         }
         self.frame_number = self.frame_number.saturating_add(1);
+        self.health_waiting = snapshot.in_game && !snapshot.health.is_available();
+        let snapshot = snapshot.managed();
         self.snapshot = snapshot;
         self.awaiting_render = true;
         for e in &self.entries {
             if let Some(i) = &e.instance {
                 i.host.snapshot.set(snapshot);
+                i.visibility.update(snapshot.health, i.active);
             }
         }
         while let Some(command) = self.commands.pop_front() {
@@ -202,6 +231,7 @@ impl Manager {
                 let instance = entry.instance.as_mut().unwrap();
                 instance.host.snapshot.set(snapshot);
                 instance.active = true;
+                instance.visibility.update(snapshot.health, true);
                 instance.resources_retired = false;
                 let first = !instance.initialized;
                 // An entry that throws can still have registered cleanup callbacks.
@@ -240,6 +270,7 @@ impl Manager {
         self.awaiting_render = false;
     }
     pub fn shutdown(&mut self) {
+        super::visibility::publish(false);
         self.shutdown_inner(true);
     }
 
@@ -265,6 +296,11 @@ impl Manager {
     fn prepare(&self, metadata: &DiscoveredAddon) -> Result<Instance, String> {
         let host = Host::for_addon(metadata).map_err(|e| e.to_string())?;
         host.snapshot.set(self.snapshot);
+        let visibility = super::visibility::VisibilityLease::new(self.health_claims.clone())
+            .map_err(|e| e.to_string())?;
+        visibility.update(self.snapshot.health, false);
+        super::visibility::install_managed_health_adapter(&host, &visibility)
+            .map_err(|e| e.to_string())?;
         let function = host
             .compile_addon_entry(metadata)
             .map_err(|e| e.to_string())?;
@@ -276,6 +312,7 @@ impl Manager {
             function,
             bridge,
             textures,
+            visibility,
             initialized: false,
             active: false,
             ejected: false,
@@ -325,6 +362,9 @@ impl Manager {
             }
             Err(e) => self.fail(entry, "save", e.to_string(), rendering),
         }
+        if let Some(i) = entry.instance.as_ref().filter(|i| !i.active) {
+            i.visibility.clear();
+        }
     }
 
     fn load(&mut self, entry: &mut Entry, rendering: bool) {
@@ -343,6 +383,9 @@ impl Manager {
             }
             Ok(None) => {}
             Err(e) => self.diagnostic(Some(&entry.metadata.id), "storage", e),
+        }
+        if let Some(i) = entry.instance.as_ref().filter(|i| !i.active) {
+            i.visibility.clear();
         }
     }
 
@@ -368,6 +411,9 @@ impl Manager {
             }
         }
         // Ordinary disable retains the environment and all live cached handles.
+        if let Some(i) = &entry.instance {
+            i.visibility.clear();
+        }
         // A callback failure is terminal even during an ordinary transition.
         if disposition == Disposition::Retire || entry.status == Status::Failed {
             self.retire(entry);
@@ -456,6 +502,9 @@ impl Manager {
                     i.resources_retired = false;
                     if let Err(e) = Self::invoke(i, 0, Value::Nil, true) {
                         self.fail(&mut entry, "settings", e.to_string(), true);
+                    }
+                    if let Some(i) = entry.instance.as_ref().filter(|i| !i.active) {
+                        i.visibility.clear();
                     }
                 }
             }
@@ -546,6 +595,9 @@ impl Manager {
                 }
             }
             // Final callbacks can allocate resources even outside a UI frame.
+            if let Some(i) = &entry.instance {
+                i.visibility.clear();
+            }
             if let Some(i) = entry.instance.as_mut() {
                 i.resources_retired = false;
             }
@@ -560,6 +612,7 @@ impl Manager {
 
 impl Drop for Manager {
     fn drop(&mut self) {
+        super::visibility::publish(false);
         // If the caller omitted the render boundary, do not unregister handles
         // possibly present in outstanding draw data. Renderer teardown owns them.
         self.shutdown_inner(!self.awaiting_render);
@@ -828,6 +881,7 @@ mod tests {
         manager.frame(Snapshot {
             in_game: false,
             start_menu: true,
+            ..Snapshot::default()
         });
         gpu.render();
         manager.after_render();
@@ -1091,6 +1145,303 @@ mod tests {
         );
         manager.shutdown();
         assert!(Textures::raw(&healthy_handle).is_err());
+    }
+
+    #[test]
+    fn forge_manager_unchanged_pinned_hearts_real_png_lifecycle_and_hp_pixels() {
+        use sha2::{Digest, Sha256};
+        let Some(grid) = std::env::var_os("EQOA_FORGE_SPIKE") else {
+            eprintln!("SKIP pinned hearts: EQOA_FORGE_SPIKE prerequisite missing");
+            return;
+        };
+        let scripts_dir = Path::new(&grid).parent().unwrap();
+        let source_bytes =
+            fs::read(scripts_dir.join("retro_health_hearts.lua")).expect("pinned hearts source");
+        let source_hash = format!("{:x}", Sha256::digest(&source_bytes));
+        assert_eq!(
+            source_hash, "ac5c5b7ab8a245dfedfa7414d8938ef0608546c7618db17b44425c2467fafe37",
+            "unchanged audited source required"
+        );
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("a", true, std::str::from_utf8(&source_bytes).unwrap());
+        // Unchanged legacy script uses UiForge.resources_path (shared root),
+        // not a package-relative resource lookup.
+        let dest = scripts.0.join("resources/retro_health_hearts");
+        fs::create_dir_all(&dest).unwrap();
+        for name in [
+            "heart_accent.png",
+            "heart_border.png",
+            "heart_fill.png",
+            "heart_highlight.png",
+        ] {
+            let bytes =
+                fs::read(scripts_dir.join("resources/retro_health_hearts").join(name)).unwrap();
+            eprintln!("pinned hearts {name} SHA256 {:x}", Sha256::digest(&bytes));
+            fs::write(dest.join(name), bytes).unwrap();
+        }
+        assert_eq!(
+            fs::read(scripts.0.join("a/main.lua")).unwrap(),
+            source_bytes
+        );
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        let frame = |gpu: &mut Gpu, m: &mut Manager, hp: Option<i32>| {
+            let s = Snapshot {
+                in_game: true,
+                health: hp.map_or_else(super::super::health::HealthSnapshot::unavailable, |hp| {
+                    super::super::health::HealthSnapshot::new(true, hp, 100)
+                }),
+                ..Default::default()
+            };
+            gpu.begin();
+            m.frame(s);
+            let target = gpu.render();
+            let pixels = gpu.pixels(&target);
+            m.after_render();
+            assert_eq!(
+                m.entries[0].status,
+                Status::Enabled,
+                "unchanged hearts failed: {:?}",
+                m.diagnostics()
+            );
+            if let Some(hp) = hp {
+                let name = match hp {
+                    100 => "full",
+                    50 => "partial",
+                    0 => "death",
+                    _ => "other",
+                };
+                let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join(format!("../../target/forge-hearts-{name}.png"));
+                let mut encoder = png::Encoder::new(fs::File::create(path).unwrap(), 256, 192);
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+                encoder
+                    .write_header()
+                    .unwrap()
+                    .write_image_data(&pixels)
+                    .unwrap();
+            }
+            pixels
+                .chunks_exact(4)
+                .filter(|p| p[0] > 150 && p[1] < 80 && p[2] < 80)
+                .count()
+        };
+        frame(&mut gpu, &mut manager, None);
+        assert!(
+            !manager.diagnostics().iter().any(|d| d.phase == "texture"),
+            "real PNGs must load: {:?}",
+            manager.diagnostics()
+        );
+        assert!(!manager.health_hidden());
+        let retained = lua(&manager, "a");
+        let state = retained
+            .globals()
+            .get::<Table>("retro_health_hearts_state")
+            .unwrap();
+        assert!(state.get::<bool>("initialized").unwrap());
+        let handles: Vec<_> = [
+            "heart_accent_texture",
+            "heart_border_texture",
+            "heart_fill_texture",
+            "heart_highlight_texture",
+        ]
+        .into_iter()
+        .map(|k| state.get::<AnyUserData>(k).unwrap())
+        .collect();
+        let ids: Vec<_> = handles
+            .iter()
+            .map(|h| Textures::raw(h).unwrap()._TexID)
+            .collect();
+        frame(&mut gpu, &mut manager, Some(100)); // warm up appearing window
+        let full = frame(&mut gpu, &mut manager, Some(100));
+        assert!(
+            full > 100,
+            "actual full-health fill pixels required: {full}"
+        );
+        assert!(
+            manager.health_hidden(),
+            "prelogin Initialize desired suppression promotes on readiness"
+        );
+        let partial = frame(&mut gpu, &mut manager, Some(50));
+        let dead = frame(&mut gpu, &mut manager, Some(0));
+        assert!(
+            dead < partial && partial < full,
+            "actual HP fill ordering: dead={dead} partial={partial} full={full}"
+        );
+        eprintln!(
+            "pinned hearts pixels: full={full} partial={partial} death={dead}, source={source_hash}"
+        );
+        manager.queue(Command::Enable("a".into(), false));
+        gpu.begin();
+        manager.frame(Snapshot::default());
+        gpu.render();
+        manager.after_render();
+        assert!(!manager.health_hidden());
+        for (h, id) in handles.iter().zip(&ids) {
+            assert_eq!(Textures::raw(h).unwrap()._TexID, *id);
+        }
+        manager.queue(Command::Enable("a".into(), true));
+        frame(&mut gpu, &mut manager, Some(100));
+        let resumed = frame(&mut gpu, &mut manager, Some(100));
+        assert_eq!(
+            resumed, full,
+            "same cached four PNG handles render after reenable"
+        );
+        assert!(
+            !manager.health_hidden(),
+            "upstream OnDisable released label; ordinary Enable doesn't call Load"
+        );
+        let resumed_state = lua(&manager, "a")
+            .globals()
+            .get::<Table>("retro_health_hearts_state")
+            .unwrap();
+        assert_eq!(state.to_pointer(), resumed_state.to_pointer());
+        manager.queue(Command::Load("a".into()));
+        frame(&mut gpu, &mut manager, Some(100));
+        assert!(
+            manager.health_hidden(),
+            "explicit profile Load reasserts upstream setting"
+        );
+        manager.shutdown();
+        assert!(!manager.health_hidden());
+        for h in &handles {
+            assert!(Textures::raw(h).is_err());
+        }
+    }
+
+    #[test]
+    fn forge_manager_health_pending_cleanup_pause_reload_and_coherent_snapshot() {
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        let source = r#"
+            ui=require('frontiers_forge.ui');player=require('frontiers_forge.player');util=require('frontiers_forge.util')
+            assert(util.IsInGame()==0 or player.GetMaxHp()>0)
+            if not initialized then
+                initialized=true;ui.DisableHealthBar('owner')
+                UiForge.RegisterCallback(UiForge.CallbackType.DisableScript,function() ui.DisableHealthBar('cleanup');ui.EnableHealthBar('owner');if cleanup_throw then error('health cleanup fault') end end)
+                UiForge.RegisterCallback(UiForge.CallbackType.Load,function() ui.DisableHealthBar('owner') end)
+                UiForge.RegisterCallback(UiForge.CallbackType.Settings,function() ui.DisableHealthBar('inactive') end)
+                UiForge.RegisterCallback(UiForge.CallbackType.Save,function() return {[1]=true} end)
+                UiForge.RegisterCallback(UiForge.CallbackType.OnEject,function() ui.DisableHealthBar('eject');error('eject fault') end)
+            end
+            if throw then ui.DisableHealthBar('fault');error('health controlled') end
+        "#;
+        scripts.package("a", true, source);
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        let waiting = Snapshot {
+            in_game: true,
+            ..Default::default()
+        };
+        gpu.begin();
+        manager.frame(waiting);
+        gpu.render();
+        manager.after_render();
+        assert_eq!(
+            manager.entries[0].status,
+            Status::Enabled,
+            "prelogin Initialize must execute successfully"
+        );
+        assert!(!manager.health_hidden());
+        assert!(
+            manager
+                .health_readiness()
+                .unwrap()
+                .contains("current-world")
+        );
+        let ready = Snapshot {
+            health: super::super::health::HealthSnapshot::new(true, 0, 100),
+            ..waiting
+        };
+        gpu.begin();
+        manager.frame(ready);
+        gpu.render();
+        manager.after_render();
+        assert!(
+            manager.health_hidden(),
+            "pending Initialize promotes when ready"
+        );
+        manager.suspend_health();
+        assert!(!manager.health_hidden());
+        gpu.begin();
+        manager.frame(ready);
+        gpu.render();
+        manager.after_render();
+        assert!(manager.health_hidden());
+        fs::write(scripts.0.join("a/main.lua"), "invalid Lua !!!").unwrap();
+        manager.queue(Command::Reload("a".into()));
+        gpu.begin();
+        manager.frame(ready);
+        gpu.render();
+        manager.after_render();
+        assert!(
+            manager.health_hidden(),
+            "failed compile keeps original claim"
+        );
+        fs::write(scripts.0.join("a/main.lua"), source).unwrap();
+        manager.queue(Command::Enable("a".into(), false));
+        gpu.begin();
+        manager.frame(ready);
+        gpu.render();
+        manager.after_render();
+        assert!(!manager.health_hidden());
+        manager.queue(Command::Settings("a".into()));
+        manager.queue(Command::Load("a".into()));
+        gpu.begin();
+        manager.frame(ready);
+        gpu.render();
+        manager.after_render();
+        assert!(!manager.health_hidden());
+        manager.queue(Command::Enable("a".into(), true));
+        gpu.begin();
+        manager.frame(ready);
+        gpu.render();
+        manager.after_render();
+        assert!(
+            !manager.health_hidden(),
+            "plain reenable must not invent claim restoration"
+        );
+        manager.queue(Command::Load("a".into()));
+        gpu.begin();
+        manager.frame(ready);
+        gpu.render();
+        manager.after_render();
+        assert!(manager.health_hidden());
+        manager.queue(Command::Reload("a".into()));
+        gpu.begin();
+        manager.frame(ready);
+        gpu.render();
+        manager.after_render();
+        assert!(!manager.health_hidden(), "fresh staged VM isn't active yet");
+        gpu.begin();
+        manager.frame(ready);
+        gpu.render();
+        manager.after_render();
+        assert!(manager.health_hidden());
+        lua(&manager, "a").globals().set("throw", true).unwrap();
+        lua(&manager, "a")
+            .globals()
+            .set("cleanup_throw", true)
+            .unwrap();
+        gpu.begin();
+        manager.frame(ready);
+        gpu.render();
+        manager.after_render();
+        assert!(!manager.health_hidden());
+        assert_eq!(manager.entries[0].status, Status::Failed);
+        assert!(
+            manager
+                .diagnostics()
+                .iter()
+                .any(|d| d.phase == "cleanup" && d.message.contains("health cleanup fault"))
+        );
+        manager.shutdown();
+        assert!(
+            !manager.health_hidden(),
+            "eject exception cannot retain claim"
+        );
     }
 
     #[test]

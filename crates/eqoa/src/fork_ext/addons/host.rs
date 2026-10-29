@@ -12,6 +12,16 @@ use std::{
 pub(crate) struct Snapshot {
     pub in_game: bool,
     pub start_menu: bool,
+    pub health: super::health::HealthSnapshot,
+}
+impl Snapshot {
+    pub fn managed(mut self) -> Self {
+        if !self.in_game {
+            self.health = super::health::HealthSnapshot::unavailable();
+        }
+        self.in_game &= self.health.is_available();
+        self
+    }
 }
 
 pub(crate) struct Host {

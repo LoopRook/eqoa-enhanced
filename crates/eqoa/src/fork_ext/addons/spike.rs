@@ -142,6 +142,7 @@ impl Spike {
         self.host.snapshot.set(Snapshot {
             in_game,
             start_menu,
+            ..Snapshot::default()
         });
         if let Err(error) = self.draw_inner(window, encoder, target) {
             self.fail(error);

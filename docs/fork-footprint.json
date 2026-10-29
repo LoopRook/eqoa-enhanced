@@ -82,9 +82,9 @@
       "reason": "Restored map and tracker visibility."
     },
     "crates/eqoa/src/hud.rs": {
-      "added": 294,
-      "deleted": 7,
-      "reason": "Existing restored map/quest/group/Stats Box integrations plus one fork HUD adapter."
+      "added": 299,
+      "deleted": 8,
+      "reason": "Reviewed restored HUD and native addon health visibility field/gauge seam; implementation in fork_ext."
     },
     "crates/eqoa/src/input.rs": {
       "added": 32,
@@ -107,9 +107,9 @@
       "reason": "Existing restored option entries plus one adapter reference per fork option hook."
     },
     "crates/eqoa/src/play.rs": {
-      "added": 745,
-      "deleted": 47,
-      "reason": "Restored/map state and observations plus one combat event adapter."
+      "added": 756,
+      "deleted": 48,
+      "reason": "Reviewed restored state plus native health receipt/reset and cached HUD invalidation hooks; implementation in fork_ext."
     },
     "crates/eqoa/src/report.rs": {
       "added": 18,
@@ -132,7 +132,7 @@
       "reason": "Map UI state and input integration."
     },
     "crates/eqoa/src/viewer.rs": {
-      "added": 234,
+      "added": 233,
       "deleted": 12,
       "reason": "Restored map/quest integration plus reviewed native lazy addon Runtime state/init, owned window/raw input routing, pregame/live post-resolve frames and exiting cleanup hooks."
     },

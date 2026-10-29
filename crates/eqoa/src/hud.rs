@@ -17,6 +17,8 @@ mod fork_hud;
 /// What the HUD reads off the client this frame.
 #[derive(Clone, Debug, Default)]
 pub struct HudState {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub forge_health_hidden: bool,
     /// Whether the player's entity exists (`FindEntity(m_selfId)`).
     pub has_self: bool,
     /// The player's entity's +0x19, its health of 255.
@@ -280,7 +282,9 @@ impl Hud {
             self.draw_patch(ui, s);
         }
         p = [p[0] + 59, p[1] + 21];
-        draw_gauge(vui, ui, 7, 136, p, true, s.self_hp as f32 / 255.0);
+        if fork_hud::health_visible(s) {
+            draw_gauge(vui, ui, 7, 136, p, true, s.self_hp as f32 / 255.0);
+        }
         p[1] += 10;
         let v = if s.max_power == 0 { 0.0 } else { s.power as f32 / s.max_power as f32 };
         draw_gauge(vui, ui, 9, 136, p, true, v);

@@ -52,6 +52,7 @@ fn forge_gpu_pinned_grid_and_texture_fixture() {
     host.snapshot.set(Snapshot {
         in_game: true,
         start_menu: false,
+        ..Snapshot::default()
     });
     let (width, height) = (640, 360);
     let target = device.create_texture(&wgpu::TextureDescriptor {

@@ -92,6 +92,7 @@ impl Runtime {
         ))
     }
     pub(super) fn new(paths: Paths) -> Self {
+        super::visibility::publish(false);
         let discovery = super::discovery::discover(&paths.mods);
         let storage = Storage::new(paths.config.clone());
         let initial_enabled = discovery.addons.iter().any(|addon| {
@@ -157,6 +158,9 @@ impl Runtime {
             None => {}
         }
         self.want_mouse = mouse;
+        if self.error.is_some() {
+            self.pause_health();
+        }
         let consumed = match event {
             WindowEvent::KeyboardInput {
                 event,
@@ -201,6 +205,12 @@ impl Runtime {
     pub fn captures_motion(&self) -> bool {
         self.capture.motion(self.want_mouse)
     }
+    fn pause_health(&self) {
+        if let Some(Graphics::Managed(active)) = &self.graphics {
+            active.manager.suspend_health();
+        }
+        super::visibility::publish(false);
+    }
     pub fn draw(
         &mut self,
         window: &std::sync::Arc<Window>,
@@ -212,6 +222,7 @@ impl Runtime {
         snapshot: Snapshot,
     ) {
         if self.stopped {
+            super::visibility::publish(false);
             return;
         }
         if super::take_open_request() {
@@ -219,7 +230,10 @@ impl Runtime {
         }
         if self.graphics.is_none() && self.error.is_none() {
             match self.launch(self.open) {
-                Launch::Dormant => return,
+                Launch::Dormant => {
+                    super::visibility::publish(false);
+                    return;
+                }
                 Launch::Spike(_) => {
                     self.graphics = Spike::from_env(window, device, queue, format)
                         .map(|s| Graphics::Spike(Box::new(s)));
@@ -275,6 +289,8 @@ impl Runtime {
                     }
                     Err(e) => {
                         active.manager.after_render();
+                        active.manager.suspend_health();
+                        super::visibility::publish(false);
                         self.want_mouse = false;
                         crate::say(&format!("Addons paused: {e}"));
                         self.error = Some(e);
@@ -283,8 +299,15 @@ impl Runtime {
             }
             _ => {}
         }
+        let hidden = if self.error.is_none() && !self.stopped {
+            matches!(&self.graphics,Some(Graphics::Managed(a)) if a.manager.health_hidden())
+        } else {
+            false
+        };
+        super::visibility::publish(hidden);
     }
     pub fn shutdown(&mut self) {
+        self.pause_health();
         if self.stopped {
             return;
         }
@@ -439,6 +462,7 @@ struct FrameState {
 fn controls(ui: &Ui, manager: &Manager, open: &mut bool, root: Option<&PathBuf>) -> Vec<Action> {
     let mut actions = Vec::new();
     ui.window("Addons").opened(open).build(|| {
+        if let Some(readiness)=manager.health_readiness() {ui.text_wrapped(readiness);}
         if let Some(root)=root {ui.text_wrapped(root.to_string_lossy());}
         if ui.button("Rescan folder") {actions.push(Action::Rescan);}
         let entries=manager.entries();
@@ -535,6 +559,10 @@ fn render_managed(
     // This is a no-op for an already rendered (or not begun) native frame.
     context.end_frame();
     manager.after_render();
+    if result.is_err() {
+        manager.suspend_health();
+    }
+    super::visibility::publish(result.is_ok() && manager.health_hidden());
     result
 }
 
@@ -698,6 +726,36 @@ mod tests {
     }
 
     #[test]
+    fn forge_runtime_health_publication_resets_on_construction_pause_stop_and_drop() {
+        use super::super::visibility::{publish, published_health_hidden};
+        let root = Scratch::new();
+        let config = Scratch::new();
+        publish(true);
+        let mut runtime = Runtime::new(Paths::select(
+            root.0.clone(),
+            None,
+            Some(config.0.clone()),
+            None,
+        ));
+        assert!(
+            !published_health_hidden(),
+            "new graphics lifetime cannot inherit claims"
+        );
+        publish(true);
+        runtime.pause_health();
+        assert!(!published_health_hidden());
+        publish(true);
+        runtime.shutdown();
+        assert!(!published_health_hidden());
+        publish(true);
+        drop(runtime);
+        assert!(
+            !published_health_hidden(),
+            "idempotent shutdown also revokes stale publication"
+        );
+    }
+
+    #[test]
     fn forge_runtime_reopens_same_context_after_prepare_render_failure() {
         assert_failure_reopen(RenderFault::PrepareRender);
     }
@@ -717,6 +775,7 @@ mod tests {
         let config = Scratch::new();
         root.native(r#"
             frames=(frames or 0)+1
+            require('frontiers_forge.ui').DisableHealthBar('runtime recovery')
             if frames>=2 then
                 ImGui.GetBackgroundDrawList():AddLine(ImVec2.new(128,0),ImVec2.new(128,192),ImGui.GetColorU32(0,1,0,1),4)
             end
@@ -772,19 +831,29 @@ mod tests {
         let mut encoder = device.create_command_encoder(&Default::default());
         let mut plan = FramePlan::collect(Vec::new(), None);
         plan.fault = Some(fault);
+        let snapshot = Snapshot {
+            in_game: true,
+            health: super::super::health::HealthSnapshot::new(true, 1, 100),
+            ..Default::default()
+        };
         let error = render_managed(
             &mut context,
             &renderer,
             &mut manager,
             &mut encoder,
             &view,
-            Snapshot::default(),
+            snapshot,
             plan,
             None,
         )
         .err()
         .expect("injection must fail actual common helper");
         assert!(error.starts_with("injected"), "unexpected failure: {error}");
+        assert!(!manager.health_hidden());
+        assert!(
+            !super::super::visibility::published_health_hidden(),
+            "failed overlay cannot leave health hidden"
+        );
         queue.submit([encoder.finish()]);
         // This also closes a leaked frame before panicking in the RED run,
         // avoiding an unsafe native NewFrame assertion in the test process.
@@ -804,11 +873,13 @@ mod tests {
             &mut manager,
             &mut encoder,
             &view,
-            Snapshot::default(),
+            snapshot,
             FramePlan::collect(vec![Action::Save("a".into())], None),
             None,
         )
         .unwrap();
+        assert!(manager.health_hidden());
+        assert!(super::super::visibility::published_health_hidden());
         assert!(!context.end_frame());
         assert_eq!(unsafe { sys::igGetCurrentContext() }, original_context);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -861,6 +932,7 @@ mod tests {
             "failure path must retire the previous manager frame before reopening"
         );
         manager.shutdown();
+        assert!(!super::super::visibility::published_health_hidden());
     }
 
     #[test]

@@ -1,6 +1,8 @@
 //! Native-only, explicitly opted-in Forge feasibility host.
 mod bridge;
 mod capture;
+pub(crate) mod game_health;
+pub(crate) mod visibility;
 mod runtime;
 pub(crate) use runtime::Runtime;
 static OPEN_REQUEST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
