@@ -1849,7 +1849,16 @@ mod tests {
                 .instance
                 .as_ref()
                 .map_or(true, |i| { i.sound_bank.borrow().handles() != old_handles }),
-            "successful replacement must close old bank"
+            "successful replacement must use a new bank"
+        );
+        assert_eq!(
+            bank.borrow().len(),
+            0,
+            "successful replacement must close aliases in the old bank"
+        );
+        assert!(
+            bank.borrow().is_empty(),
+            "old bank must report empty after replacement closes aliases"
         );
     }
 }
