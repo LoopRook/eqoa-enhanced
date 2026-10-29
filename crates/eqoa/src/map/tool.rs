@@ -201,7 +201,7 @@ pub fn capture(map: &Map, device: &wgpu::Device, queue: &wgpu::Queue, size: (u32
         });
     }
     map.draw(device, &mut enc, &tv, &depth, size);
-    map.draw_mini(device, &mut enc, &tv, &depth, size);
+    map.draw_mini(device, &mut enc, &tv, &depth);
     enc.copy_texture_to_buffer(
         target.as_image_copy(),
         wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },

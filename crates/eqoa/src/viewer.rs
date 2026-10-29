@@ -1190,7 +1190,7 @@ pub fn shot_with(
     let mini = play.as_ref();
     let mut rgba = render::capture_around(&device, &queue, &mut renderer, w, h, loading.as_ref().map_or(&view, |l| &l.0), &refs, particles, sky, |enc, tv, depth| {
         if let Some(p) = mini {
-            p.map.draw_mini(&device, enc, tv, depth, (w, h));
+            p.map.draw_mini(&device, enc, tv, depth);
         }
     });
     // the map up covers the frame: the picture is the map's
@@ -1485,6 +1485,8 @@ pub struct PendingGfx {
 }
 
 struct Gfx {
+    #[cfg(not(target_arch = "wasm32"))]
+    forge_runtime: crate::fork_ext::addons::Runtime,
     window: Arc<Window>,
     /// None under `EQOA_OFFSCREEN`: frames go to `offscreen` and are never
     /// presented.
@@ -2992,7 +2994,12 @@ impl App {
         }
         let depth = render::depth_view(&device, config.width, config.height);
         let offscreen = surface.is_none().then(|| offscreen_target(&device, &config));
-        self.gfx = Some(Gfx { window, surface, offscreen, in_flight: None, device, queue, config, depth, renderer, models: Vec::new(), title: "EQOA".into(), present_modes: Vec::new() });
+        #[cfg(not(target_arch = "wasm32"))]
+        let forge_runtime = crate::fork_ext::addons::Runtime::from_env();
+        self.gfx = Some(Gfx {
+            #[cfg(not(target_arch = "wasm32"))]
+            forge_runtime,
+            window, surface, offscreen, in_flight: None, device, queue, config, depth, renderer, models: Vec::new(), title: "EQOA".into(), present_modes: Vec::new() });
         // before the world there is nothing to load: the pregame draws
         if self.host.is_some() {
             if let Some(g) = &self.gfx {
@@ -3136,6 +3143,9 @@ impl App {
             _ => g.renderer.draw_text(&g.device, &mut enc, &f.color, &f.depth, f.size),
         }
         g.renderer.scale.resolve(&mut enc, &target);
+        #[cfg(not(target_arch = "wasm32"))]
+        g.forge_runtime.draw(&g.window, &g.device, &g.queue, g.config.format, &mut enc, &target,
+            crate::fork_ext::addons::host::Snapshot { in_game: false, start_menu: false });
         g.queue.submit([enc.finish()]);
         #[cfg(not(target_arch = "wasm32"))]
         report_shot(g, frame.as_ref());
@@ -4257,6 +4267,8 @@ impl ApplicationHandler for App {
     /// teardown of the graphics, the sound and the controllers, so a
     /// program stuck in that holds no other window's controller.
     fn exiting(&mut self, _: &ActiveEventLoop) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(g) = &mut self.gfx { g.forge_runtime.shutdown(); }
         self.winplace.flush(true);
         #[cfg(not(target_arch = "wasm32"))]
         crate::multibox::leave();
@@ -4265,6 +4277,8 @@ impl ApplicationHandler for App {
     /// The mouse's own motion: the look while it holds the pointer.
     fn device_event(&mut self, _: &ActiveEventLoop, _: winit::event::DeviceId, event: winit::event::DeviceEvent) {
         if let winit::event::DeviceEvent::MouseMotion { delta } = event {
+            #[cfg(not(target_arch = "wasm32"))]
+            if self.gfx.as_ref().is_some_and(|g| g.forge_runtime.captures_motion()) { return; }
             self.mouse.motion(delta.0, delta.1);
         }
     }
@@ -4301,6 +4315,18 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(g) = &mut self.gfx
+            && g.forge_runtime.event(&g.window, &event)
+        {
+            // Keep physical pointer bookkeeping current without routing an
+            // addon-owned hover/drag into gameplay or the native map.
+            if let WindowEvent::CursorMoved { position, .. } = &event {
+                self.cursor = (position.x, position.y);
+                self.mouse.moved(position.x, position.y);
+            }
+            return;
+        }
         if let Some(g) = &self.gfx {
             self.winplace.event(&g.window, &event);
         }
@@ -5238,13 +5264,20 @@ impl ApplicationHandler for App {
                 let play = self.play.as_ref();
                 g.renderer.draw_text_around(&g.device, &mut enc, &f.color, &f.depth, f.size, |enc| {
                     if let Some(p) = play {
-                        p.map.draw_mini(&g.device, enc, &f.color, &f.depth, f.size);
+                        p.map.draw_mini(&g.device, enc, &f.color, &f.depth);
                     }
                 });
                 if let Some(p) = &self.play {
                     p.map.draw(&g.device, &mut enc, &f.color, &f.depth, f.size);
                 }
                 g.renderer.scale.resolve(&mut enc, &target);
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let in_game = self.play.as_ref().is_some_and(|p| p.session.self_id.is_some() && p.hud_ready());
+                    let start_menu = self.play.as_ref().is_some_and(|p| p.start.as_ref().is_some_and(|s| s.menu.visible));
+                    g.forge_runtime.draw(&g.window, &g.device, &g.queue, g.config.format, &mut enc, &target,
+                        crate::fork_ext::addons::host::Snapshot { in_game, start_menu });
+                }
                 mark(&mut self.perf, 11);
                 let sent = g.queue.submit([enc.finish()]);
                 #[cfg(not(target_arch = "wasm32"))]

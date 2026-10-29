@@ -52,14 +52,14 @@
       "reason": "Fork-local generated output and scratch configuration exclusions."
     },
     "Cargo.lock": {
-      "added": 2,
-      "deleted": 0,
-      "reason": "Fork dependency resolution; license metadata stays unchanged."
+      "added": 153,
+      "deleted": 3,
+      "reason": "Reviewed native Lua 5.1 and Dear ImGui 0.18 spike dependency resolution, including rustc-hash version disambiguation; license metadata stays unchanged."
     },
     "crates/eqoa/Cargo.toml": {
-      "added": 4,
+      "added": 8,
       "deleted": 0,
-      "reason": "Fork dependency and release build settings; license metadata stays unchanged."
+      "reason": "Reviewed native-only mlua and Dear ImGui spike dependencies plus existing fork/release settings; license metadata stays unchanged."
     },
     "crates/eqoa/src/bindpage.rs": {
       "added": 16,
@@ -132,9 +132,9 @@
       "reason": "Map UI state and input integration."
     },
     "crates/eqoa/src/viewer.rs": {
-      "added": 200,
-      "deleted": 11,
-      "reason": "Restored map/quest dialogs and focus integration."
+      "added": 234,
+      "deleted": 12,
+      "reason": "Restored map/quest integration plus reviewed native lazy addon Runtime state/init, owned window/raw input routing, pregame/live post-resolve frames and exiting cleanup hooks."
     },
     "crates/esf/src/mesh.rs": {
       "added": 9,

@@ -2,3 +2,5 @@
 pub mod mods;
 pub mod telemetry;
 pub mod release;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod addons;

@@ -2,6 +2,19 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## Unreleased — addon manager preview work
+
+- Native Mods & Addons gains an Addon Manager with enable/disable, reload,
+  rescan, settings and profile controls. Unsupported addon features show failures.
+- Native addons and the parser manifest use the mods folder beside the executable,
+  even when launching from a different working directory.
+- Preview packaging and interactive checks are still pending; full Forge addon
+  compatibility is not yet available.
+
+## 2026-10-28 · Minimap render scale
+
+- The minimap stays in place and keeps its size when Render Scale changes.
+
 ## 2026-10-28 · Enhanced 0.1.0
 
 - Download one Windows ZIP, extract and double-click eqoa.exe. No build tools or BAT required.

@@ -30,6 +30,10 @@ cpal = "0.16"
 # The gamepads natively (SDL's layout, force feedback); a page reads the
 # Gamepad API itself (`padmap`, `web::pad`).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+mlua = { version = "=0.12.2", default-features = false, features = ["lua51", "vendored"] }
+dear-imgui-rs = { version = "=0.18.0", default-features = false, features = ["build-from-source"] }
+dear-imgui-wgpu = { version = "=0.18.0", default-features = false, features = ["wgpu-30"] }
+dear-imgui-winit = { version = "=0.18.0", default-features = false }
 gilrs = "0.11.2"
 # The disc image's picker (`discs::settle`): the desktop's own file dialog,
 # Windows' common dialog, a Mac's open panel, on Linux the XDG desktop portal

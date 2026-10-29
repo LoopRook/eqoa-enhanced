@@ -13,6 +13,12 @@ including the approved animation guards and regressions. Existing restored map
 integrations intentionally retain their larger footprints. Passing the checker
 does not by itself approve a budget change; review each changed hunk first.
 
+The 2026-10-29 addon integration review inspected each viewer hunk against
+`63cdc77`: native Runtime field/init, window ownership routing, raw mouse gate,
+both final-target frame hooks and exiting cleanup. Implementation remains in
+`fork_ext/addons/`; the aggregate viewer footprint is +234/-12 against the
+reviewed upstream base above. Later upstream ref movement is a separate sync.
+
 ## Fork-owned files
 
 The manifest lists explicit ownership patterns for:
@@ -45,8 +51,8 @@ integration seams. No directory-wide shared allowlist exists.
 | Shared upstream path | Added max | Deleted max | Reviewed purpose |
 | --- | ---: | ---: | --- |
 | `.gitignore` | 6 | 0 | Fork-local generated output and scratch configuration exclusions. |
-| `Cargo.lock` | 2 | 0 | Fork dependency resolution; license metadata stays unchanged. |
-| `crates/eqoa/Cargo.toml` | 4 | 0 | Fork dependency and release build settings; license metadata stays unchanged. |
+| `Cargo.lock` | 153 | 3 | Reviewed native Lua/ImGui spike dependencies and rustc-hash version disambiguation; license metadata unchanged. |
+| `crates/eqoa/Cargo.toml` | 8 | 0 | Reviewed native-only Lua/ImGui spike dependencies and existing fork/release settings; license metadata unchanged. |
 | `crates/eqoa/src/bindpage.rs` | 16 | 16 | Restored and map input settings rows. |
 | `crates/eqoa/src/binds.rs` | 93 | 80 | Restored/map controls and saved binding defaults. |
 | `crates/eqoa/src/client_image.rs` | 10 | 0 | Map theme font/image resources. |
@@ -63,7 +69,7 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/eqoa/src/ui.rs` | 9 | 5 | Map UI state and input integration. |
 | `crates/eqoa/src/update.rs` | 3 | 3 | Fork release routing and fork-owned notes; updater mechanics unchanged. |
 | `crates/eqoa/src/updatewnd.rs` | 3 | 2 | Fork release page link and regression assertions. |
-| `crates/eqoa/src/viewer.rs` | 200 | 11 | Restored map/quest dialogs and focus integration. |
+| `crates/eqoa/src/viewer.rs` | 234 | 12 | Restored map/quest integration plus reviewed native lazy addon Runtime state/init, owned window/raw input routing, pregame/live post-resolve frames and exiting cleanup. |
 | `crates/esf/src/mesh.rs` | 9 | 0 | Terrain mesh lookup for restored map. |
 | `crates/net/src/session.rs` | 418 | 30 | Restored group/map/quest protocol state. |
 | `crates/render/src/fans.rs` | 1 | 1 | Restored UI render behavior. |

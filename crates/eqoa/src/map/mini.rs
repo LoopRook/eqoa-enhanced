@@ -680,10 +680,11 @@ impl Map {
     }
 
     /// The minimap over the frame, when it was composed this frame: its own
-    /// pass into `target` (a `size` window, `depth` its depth buffer),
+    /// pass into `target` (`depth` is its depth buffer),
     /// between the names and the HUD (`render::Renderer::draw_text_around`).
-    pub fn draw_mini(&self, device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, depth: &wgpu::TextureView, size: (u32, u32)) {
+    pub fn draw_mini(&self, device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, depth: &wgpu::TextureView) {
         let (true, false, Some(l)) = (self.mini.up, self.open, self.layers.as_ref()) else { return };
+        let size = (target.texture().width(), target.texture().height());
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("minimap"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: target, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })],
@@ -692,8 +693,14 @@ impl Map {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        l.map.draw_circle(device, &mut pass, size,self.mini.circle);
-        l.ui.draw_circle_range(device,&mut pass,size,0..self.mini.masked_until,self.mini.circle);
+        // Terrain and the stored circle use window pixels; the render target
+        // may be larger when supersampling. UI quads use frame coordinates,
+        // but their pixel-space mask must grow with the target.
+        let window = self.size;
+        let scale = size.0 as f32 / window.0.max(1) as f32;
+        let circle = self.mini.circle.map(|v| v * scale);
+        l.map.draw_circle(device, &mut pass, window, self.mini.circle);
+        l.ui.draw_circle_range(device, &mut pass, size, 0..self.mini.masked_until, circle);
         l.ui.draw_range(device,&mut pass,size,self.mini.masked_until..l.ui.quads.len());
     }
 }
@@ -709,6 +716,47 @@ pub fn dot_radius(size: (u32, u32)) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn minimap_stays_in_window_coordinates_at_render_scales() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+            eprintln!("SKIP minimap render-scale GPU test: no adapter");
+            return;
+        };
+        let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default())) else {
+            eprintln!("SKIP minimap render-scale GPU test: no device");
+            return;
+        };
+        let lib = esf::Library::new();
+        let size = (64, 64);
+        let cx = Context { lib: &lib, device: &device, queue: &queue, format: render::TARGET_FORMAT, size, dt: 0.0, player: None, world: 0, origin: [0.0; 2], group: Vec::new(), in_group: false, target: None, sticks: [0.0; 4], keyboard: true, words: None, vui: None, quest_marks: None };
+        let mut map = Map::default();
+        map.size = size;
+        map.layers(&cx);
+        let layers = map.layers.as_mut().unwrap();
+        layers.map.quads.push(MapQuad::rect(layers.white, [30.0, 20.0, 50.0, 40.0], [0.0, 0.0, 1.0, 1.0], [1.0; 4]));
+        let points = corners([37.0, 27.0, 43.0, 33.0]).map(|p| frame_from_window(size, p));
+        plain(&mut layers.ui, layers.assets.white.unwrap(), points, [1.0, 0.0, 0.0, 1.0], Some(render::ui::WHOLE));
+        let control = corners([52.0, 27.0, 58.0, 33.0]).map(|p| frame_from_window(size, p));
+        plain(&mut layers.ui, layers.assets.white.unwrap(), control, [0.0, 0.0, 1.0, 1.0], Some(render::ui::WHOLE));
+        map.mini.circle = [40.0, 30.0, 10.0];
+        map.mini.masked_until = 1;
+        map.mini.up = true;
+        for k in [1, 2, 4, 2, 1] {
+            let target = (size.0 * k, size.1 * k);
+            let pixels = super::super::tool::capture(&map, &device, &queue, target).unwrap();
+            let pixel = |x: u32, y: u32| pixels[((y * target.0 + x) * 4) as usize];
+            assert!(pixel(40 * k, 30 * k) > 200, "center missing at scale {k}");
+            assert!(pixel(45 * k, 30 * k) > 200, "terrain missing at scale {k}");
+            assert!(pixel(20 * k, 15 * k) < 10, "terrain shifted at scale {k}");
+            assert!(pixels[((30 * k * target.0 + 40 * k) * 4 + 1) as usize] < 10, "UI marker masked at scale {k}");
+            assert!(pixel(31 * k, 21 * k) < 10, "circle corner visible at scale {k}");
+            assert!(pixels[((30 * k * target.0 + 55 * k) * 4 + 2) as usize] > 200, "control missing at scale {k}");
+            assert!(map.mini_contains([40.0, 30.0]));
+            assert!(!map.mini_contains([31.0, 21.0]));
+        }
+    }
 
     #[test]
     fn map_refinement_hover_chooses_the_nearest_visible_entity_and_keeps_level() {

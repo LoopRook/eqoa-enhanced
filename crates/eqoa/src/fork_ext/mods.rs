@@ -1,5 +1,5 @@
 //! Drag-and-drop mod engine and companion manager for EQOA Native Rust.
-//! Discovers mods in the `./mods/` directory and manages companion tools
+//! Discovers mods beside the executable and manages companion tools
 //! like the EQOA Combat Parser.
 
 use std::fs;
@@ -27,17 +27,50 @@ pub struct ModManifest {
 #[cfg(not(target_arch = "wasm32"))]
 static RUNNING_PARSER: Mutex<Option<Child>> = Mutex::new(None);
 
-/// The path to the `mods/` directory beside the executable or in current directory.
+/// Native mods always live beside the executable, even before the folder exists.
 pub fn mods_dir() -> PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let p = parent.join("mods");
-            if p.is_dir() {
-                return p;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        match std::env::current_exe()
+            .map_err(|e| e.to_string())
+            .and_then(|exe| native_mods_dir(&exe))
+        {
+            Ok(path) => path,
+            Err(error) => {
+                crate::say(&format!("Cannot locate the client mods folder: {error}"));
+                // An exceptional executable lookup failure must not select cwd
+                // assets. Use an explicit private fallback and show the error.
+                std::env::temp_dir().join("eqoa-mods-unavailable")
             }
         }
     }
+    #[cfg(target_arch = "wasm32")]
     PathBuf::from("mods")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_mods_dir(executable: &Path) -> Result<PathBuf, String> {
+    if !executable.is_absolute() {
+        return Err("executable path must be absolute".into());
+    }
+    let beside = executable
+        .parent()
+        .ok_or("executable has no parent")?
+        .join("mods");
+    Ok(beside)
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod portable_root_tests {
+    #[test]
+    fn forge_mods_native_root_is_executable_relative_without_existing_folder() {
+        let parent = std::env::temp_dir().join("eqoa-root-selector-nonexistent");
+        assert_eq!(
+            super::native_mods_dir(&parent.join("client.exe")).unwrap(),
+            parent.join("mods")
+        );
+        assert!(super::native_mods_dir(std::path::Path::new("client.exe")).is_err());
+    }
 }
 
 /// Ensures the `mods/` directory exists and creates default starter templates.
@@ -52,11 +85,12 @@ pub fn ensure_mods_dir() {
 EQOA Native Rust - Mod Directory
 ================================
 
-Drop your mod folders in this directory!
-Each mod can be a folder containing a `mod.json` file.
+Drop legacy Lua files or complete addon folders into this directory.
+Native addon packages include a mod.json manifest.
 
 Example folder structure:
   mods/
+    example.lua
     my_custom_ui/
       mod.json
       (textures, resources...)
@@ -64,7 +98,8 @@ Example folder structure:
       mod.json
 
 You can toggle mods on or off directly inside the game from:
-Options -> Extended -> Mods
+Options -> Mods & Addons -> Addon Manager (native client)
+Unsupported addon APIs and missing resources are shown in the manager.
 ";
         let _ = fs::write(readme, text);
     }

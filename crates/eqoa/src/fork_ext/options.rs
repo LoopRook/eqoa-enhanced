@@ -3,16 +3,26 @@ use super::{Category, Note};
 use crate::settings::ClientOptions;
 use vi::ui::{Vui, wide};
 
-pub(super) const ITEMS: [(i32, &str); 5] = [
+pub(super) const ITEMS: &[(i32, &str)] = &[
     (1048, "Target HP %"),
     (1049, "XP Details"),
     (1050, "HUD Numbers"),
     (1051, "Open Mods Folder"),
     (1052, "Combat Parser"),
+    #[cfg(not(target_arch = "wasm32"))]
+    (1053, "Addon Manager"),
 ];
 pub(super) const CATEGORY: Category = Category {
     name: "Mods & Addons",
-    items: &[1048, 1049, 1050, 1051, 1052],
+    items: &[
+        1048,
+        1049,
+        1050,
+        1051,
+        1052,
+        #[cfg(not(target_arch = "wasm32"))]
+        1053,
+    ],
     note: Note::None,
 };
 pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
@@ -32,6 +42,8 @@ pub(super) fn activate(item: i32) -> bool {
                 crate::say(&format!("Combat parser: {error}"));
             }
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        1053 => crate::fork_ext::addons::request_open(),
         _ => return false,
     }
     true
@@ -43,6 +55,8 @@ pub(super) fn value_text(vui: &Vui, item: i32, c: &ClientOptions) -> Option<Vec<
         1049 => on_off(c.xp_details),
         1050 => on_off(c.hud_numbers),
         1051 => wide("Open"),
+        #[cfg(not(target_arch = "wasm32"))]
+        1053 => wide("Open"),
         1052 => wide(if crate::fork_ext::mods::is_parser_running() {
             "Running"
         } else {
@@ -55,6 +69,16 @@ pub(super) fn value_text(vui: &Vui, item: i32, c: &ClientOptions) -> Option<Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn addon_manager_action_requests_open_without_changing_settings_or_companion_rows() {
+        crate::fork_ext::addons::take_open_request();
+        assert!(activate(1053));
+        assert!(crate::fork_ext::addons::take_open_request());
+        assert!(!crate::fork_ext::addons::take_open_request());
+        assert!(ITEMS.iter().any(|(id, _)| *id == 1052));
+        assert!(CATEGORY.items.contains(&1053));
+    }
     #[test]
     fn number_toggles_change_only_their_own_saved_setting() {
         let defaults = ClientOptions::default();

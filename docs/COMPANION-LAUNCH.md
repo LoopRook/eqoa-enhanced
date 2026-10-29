@@ -20,6 +20,16 @@ Install the separate parser's documented dependencies in that interpreter.
 
 ## Manifest contract
 
+Native `mods` is now resolved beside the running client executable even when the
+folder does not exist yet. The client no longer switches to the shell's working
+directory merely because that executable-relative folder is missing. Open Mods
+Folder creates it and the default parser manifest there. If the OS cannot locate
+the executable, the client diagnoses that failure and uses a separate temporary
+`eqoa-mods-unavailable` folder rather than selecting working-directory assets.
+`EQOA_FORGE_MODS` is an explicit addon-runtime test override; it does not relocate
+the companion parser's manifest. Existing parser command/working-directory rules
+below remain intact.
+
 mods/eqoa_parser/mod.json supplies command and args. The default command is
 python with args -m eqoa_parser --client; that invokes the parser's __main__.py.
 A bare command is found beside the manifest first, then on PATH. An explicit
