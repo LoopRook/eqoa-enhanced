@@ -11,50 +11,46 @@
 //! a Windows build whose header reserves less.
 //!
 //! And the Windows program's own icon (Explorer, a pinned shortcut, the
-//! taskbar before the window sets its own): the owner's chosen .ico
-//! (`src/fork_ext/app_icon_ico.rs`: STANDARD when `EQOA_UPDATE_CHANNEL` is
-//! set, DEV otherwise), its images written into a resource file here and
-//! linked in: MSVC's linker takes the .res as it is, GNU's needs it as an
-//! object (windres). The same .ico is copied to OUT_DIR for the window's icon
-//! (`icon`, `fork_ext::app_icon`).
+//! taskbar before the window sets its own): the chosen .ico's images
+//! (`app_icon_ico`), written as an .ico and a resource file
+//! here and linked in: MSVC's linker takes the .res as it is, GNU's needs it
+//! as an object (windres). No game art: the save icon comes off the player's
+//! disc at run time (`icon`).
 
 #[allow(dead_code)]
-mod app_icon_ico {
-    include!("src/fork_ext/app_icon_ico.rs");
+mod icon_art {
+    include!("src/icon_art.rs");
 }
+#[allow(dead_code)] mod app_icon_ico { include!("src/fork_ext/app_icon_ico.rs"); }
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=src/icon_art.rs");
     println!("cargo:rerun-if-env-changed=EQOA_UPDATE_CHANNEL");
     println!("cargo:rerun-if-changed=src/fork_ext/app_icon_ico.rs");
-    for icon in ["resources/app-icon/eqoa-dev.ico", "resources/app-icon/eqoa-standard.ico"] {
-        println!("cargo:rerun-if-changed={icon}");
-    }
-
-    let set = app_icon_ico::choose(std::env::var("EQOA_UPDATE_CHANNEL").ok().as_deref());
-    let bytes = std::fs::read(set.file()).unwrap_or_else(|e| panic!("{}: {e}", set.file()));
-    let images: Vec<(u32, Vec<u8>)> = app_icon_ico::parse_ico(&bytes)
-        .unwrap_or_else(|e| panic!("{}: {e}", set.file()))
-        .into_iter()
-        .map(|image| (image.size, image.bytes))
-        .collect();
-    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    std::fs::write(out.join("app-icon.ico"), &bytes).expect("app-icon.ico");
-
+    println!("cargo:rerun-if-changed=resources/app-icon/eqoa-dev.ico");
+    println!("cargo:rerun-if-changed=resources/app-icon/eqoa-standard.ico");
+    app_icon_ico::stage();
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         match std::env::var("CARGO_CFG_TARGET_ENV").as_deref() {
             Ok("msvc") => println!("cargo:rustc-link-arg-bins=/STACK:8388608"),
             Ok("gnu") => println!("cargo:rustc-link-arg-bins=-Wl,--stack,8388608"),
             _ => {}
         }
-        windows_icon(&out, &images);
+        windows_icon();
     }
 }
 
+/// The sizes Windows picks from: the title bar, Explorer's views, the taskbar.
 #[allow(dead_code)]
-fn windows_icon(out: &std::path::Path, images: &[(u32, Vec<u8>)]) {
+const SIZES: [u32; 7] = [16, 24, 32, 48, 64, 128, 256];
+
+fn windows_icon() {
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    let images = app_icon_ico::images();
+    std::fs::write(out.join("eqoa.ico"), ico(&images)).expect("eqoa.ico");
     let res = out.join("eqoa.res");
-    std::fs::write(&res, resources(images)).expect("eqoa.res");
+    std::fs::write(&res, resources(&images)).expect("eqoa.res");
     match std::env::var("CARGO_CFG_TARGET_ENV").as_deref() {
         Ok("msvc") => println!("cargo:rustc-link-arg-bins={}", res.display()),
         Ok("gnu") => {
@@ -74,8 +70,41 @@ fn windows_icon(out: &std::path::Path, images: &[(u32, Vec<u8>)]) {
     }
 }
 
-/// One image's fields in the RT_GROUP_ICON directory.
+/// An icon image as a DIB: the header (twice the height, for the mask), the
+/// pixels bottom up as BGRA, then the AND mask (set where clear), its rows
+/// padded to four bytes.
 #[allow(dead_code)]
+fn dib(size: u32, rgba: &[u8]) -> Vec<u8> {
+    let s = size as usize;
+    let mask_row = s.div_ceil(32) * 4;
+    let mut d = Vec::with_capacity(40 + s * s * 4 + mask_row * s);
+    for v in [40u32, size, size * 2] {
+        d.extend_from_slice(&v.to_le_bytes());
+    }
+    d.extend_from_slice(&1u16.to_le_bytes()); // planes
+    d.extend_from_slice(&32u16.to_le_bytes()); // bits a pixel
+    for v in [0u32, (s * s * 4 + mask_row * s) as u32, 0, 0, 0, 0] {
+        d.extend_from_slice(&v.to_le_bytes());
+    }
+    for y in (0..s).rev() {
+        for x in 0..s {
+            let p = &rgba[(y * s + x) * 4..][..4];
+            d.extend_from_slice(&[p[2], p[1], p[0], p[3]]);
+        }
+    }
+    for y in (0..s).rev() {
+        let mut row = vec![0u8; mask_row];
+        for x in 0..s {
+            if rgba[(y * s + x) * 4 + 3] == 0 {
+                row[x / 8] |= 0x80 >> (x % 8);
+            }
+        }
+        d.extend_from_slice(&row);
+    }
+    d
+}
+
+/// The directory entry's fields shared by an .ico and a group icon resource.
 fn entry_head(size: u32, bytes: usize) -> Vec<u8> {
     let dim = if size >= 256 { 0 } else { size as u8 };
     let mut e = vec![dim, dim, 0, 0];
@@ -85,11 +114,27 @@ fn entry_head(size: u32, bytes: usize) -> Vec<u8> {
     e
 }
 
+/// An .ico file of the images.
+fn ico(images: &[(u32, Vec<u8>)]) -> Vec<u8> {
+    let mut f = Vec::new();
+    for v in [0u16, 1, images.len() as u16] {
+        f.extend_from_slice(&v.to_le_bytes());
+    }
+    let mut offset = 6 + 16 * images.len();
+    for (size, data) in images {
+        f.extend(entry_head(*size, data.len()));
+        f.extend_from_slice(&(offset as u32).to_le_bytes());
+        offset += data.len();
+    }
+    for (_, data) in images {
+        f.extend_from_slice(data);
+    }
+    f
+}
+
 /// A resource file (.res): its empty first entry, each image an RT_ICON
 /// named by its number, then the RT_GROUP_ICON (number 1) that lists them,
-/// which Explorer shows as the program's icon. The image bytes are the
-/// .ico's own PNG-compressed images, which Windows accepts as RT_ICON data.
-#[allow(dead_code)]
+/// which Explorer shows as the program's icon.
 fn resources(images: &[(u32, Vec<u8>)]) -> Vec<u8> {
     fn resource(out: &mut Vec<u8>, kind: u16, name: u16, flags: u16, data: &[u8]) {
         out.extend_from_slice(&(data.len() as u32).to_le_bytes());

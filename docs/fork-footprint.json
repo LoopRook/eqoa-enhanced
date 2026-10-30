@@ -63,9 +63,9 @@
       "reason": "Reviewed native-only mlua and Dear ImGui spike dependencies plus existing fork/release settings; license metadata stays unchanged."
     },
     "crates/eqoa/build.rs": {
-      "added": 33,
-      "deleted": 70,
-      "reason": "Owner-supplied program icons: embed the chosen .ico (STANDARD when EQOA_UPDATE_CHANNEL is set, DEV otherwise) instead of the drawn disc and copy it to OUT_DIR for the window icon; the stack and linker behavior is unchanged."
+      "added": 11,
+      "deleted": 3,
+      "reason": "One hook into fork_ext/app_icon_ico for the owner-supplied program icon: stage the chosen .ico in OUT_DIR and feed its images to the unchanged SIZES/dib/ico/resources path. Stack and linker behavior unchanged."
     },
     "crates/eqoa/src/bindpage.rs": {
       "added": 16,
@@ -93,9 +93,9 @@
       "reason": "Reviewed restored HUD and native addon health visibility field/gauge seam; implementation in fork_ext."
     },
     "crates/eqoa/src/icon.rs": {
-      "added": 23,
-      "deleted": 130,
-      "reason": "Fork keeps the owner's chosen program icon for the whole run instead of switching to the disc's memory-card save icon; the picture comes from fork_ext::app_icon."
+      "added": 4,
+      "deleted": 1,
+      "reason": "Two hooks into fork_ext::app_icon: the window/Dock picture comes from the chosen icon, and poll returns before the save-icon switch. Upstream save-icon code remains present and compiled."
     },
     "crates/eqoa/src/input.rs": {
       "added": 32,
@@ -108,9 +108,9 @@
       "reason": "Restored map terrain observation."
     },
     "crates/eqoa/src/main.rs": {
-      "added": 32,
-      "deleted": 2,
-      "reason": "Restored module registration, fork_ext boundary, report policy module, and the chosen program icon comment."
+      "added": 30,
+      "deleted": 0,
+      "reason": "Restored module registration, fork_ext boundary, and report policy module."
     },
     "crates/eqoa/src/options.rs": {
       "added": 196,
@@ -317,6 +317,30 @@
       "path": "crates/eqoa/src/updatewnd.rs",
       "name": "fork release page",
       "pattern": "crate::fork_ext::release::RELEASE_PAGE",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/build.rs",
+      "name": "app icon stage",
+      "pattern": "app_icon_ico::stage\\(\\)",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/build.rs",
+      "name": "app icon images",
+      "pattern": "let images = app_icon_ico::images\\(\\)",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/icon.rs",
+      "name": "app icon picture",
+      "pattern": "crate::fork_ext::app_icon::picture\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/icon.rs",
+      "name": "app icon keep",
+      "pattern": "crate::fork_ext::app_icon::keeps_icon\\(",
       "count": 1
     }
   ]
