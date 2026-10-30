@@ -13,6 +13,7 @@ pub(crate) fn request_open() {
 pub(crate) fn take_open_request() -> bool {
     OPEN_REQUEST.swap(false, std::sync::atomic::Ordering::AcqRel)
 }
+pub(crate) mod ability;
 pub(crate) mod bit;
 pub(crate) mod discovery;
 pub(crate) mod entity;

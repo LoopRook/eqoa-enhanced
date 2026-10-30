@@ -317,6 +317,96 @@ impl Play {
             crate::fork_ext::addons::entity::EntitiesSnapshot::default()
         };
 
+        let abilities = if in_game {
+            let mut snap_abilities = [crate::fork_ext::addons::ability::AbilitySnapshot::default();
+                crate::fork_ext::addons::ability::MAX_ABILITIES];
+            let mut ability_count = 0usize;
+            for a in self.abilities.values() {
+                if ability_count >= crate::fork_ext::addons::ability::MAX_ABILITIES {
+                    break;
+                }
+                let mut name_buf = [0u8; 32];
+                let n_bytes = a.name.as_bytes();
+                let n_len = n_bytes.len().min(32);
+                name_buf[..n_len].copy_from_slice(&n_bytes[..n_len]);
+
+                let mut desc_buf = [0u8; 64];
+                let d_bytes = a.desc.as_bytes();
+                let d_len = d_bytes.len().min(64);
+                desc_buf[..d_len].copy_from_slice(&d_bytes[..d_len]);
+
+                snap_abilities[ability_count] = crate::fork_ext::addons::ability::AbilitySnapshot {
+                    id: a.id as u32,
+                    display_index: a.display_index.max(0) as u32,
+                    spellbook_slot: a.slot.max(0) as u32,
+                    level: a.level.max(0) as u32,
+                    range: a.range,
+                    cast_time: a.cast_time.max(0) as u32,
+                    power_cost: a.power_cost.max(0) as u32,
+                    icon_background_ref: a.icon_back.max(0) as u32,
+                    icon_foreground_ref: a.icon_front.max(0) as u32,
+                    scope: a.scope.max(0) as u32,
+                    cooldown_seconds: a.cooldown.max(0) as u32,
+                    cooldown_lockout_ms: a.lockout.max(0) as u32,
+                    equip_requirements: a.equip_req.max(0) as u32,
+                    name: name_buf,
+                    name_len: n_len as u8,
+                    description: desc_buf,
+                    desc_len: d_len as u8,
+                    valid: a.valid != 0,
+                };
+                ability_count += 1;
+            }
+
+            let mut bars = [crate::fork_ext::addons::ability::AbilityBarSnapshot::default();
+                crate::fork_ext::addons::ability::MAX_BARS];
+            let selected_bar = (self.hud_menus.sel.clamp(0, 2)) as u8;
+
+            for b in 0..3 {
+                let def = &self.hud_menus.defs[b];
+                let slot_count = (def.count.clamp(0, 5)) as u8;
+                let selected_slot = (self.hud_menus.menus[b].sel.clamp(0, 4)) as u8;
+                let mut slots =
+                    [crate::fork_ext::addons::ability::AbilityBarSlotSnapshot::default();
+                        crate::fork_ext::addons::ability::MAX_BAR_SLOTS];
+
+                for (s_idx, entry) in def.entries.iter().take(5).enumerate() {
+                    let (source_type, source_index) = if entry.msg == 0x8060000 {
+                        let raw_idx = snap_abilities[..ability_count]
+                            .iter()
+                            .position(|ab| ab.id == entry.id as u32)
+                            .map(|idx| (idx + 1) as u32)
+                            .unwrap_or(0);
+                        (0x8060000, raw_idx)
+                    } else if entry.msg == 0x2030000 {
+                        (0x2030000, entry.id.max(0) as u32)
+                    } else {
+                        (0, 0)
+                    };
+                    slots[s_idx] = crate::fork_ext::addons::ability::AbilityBarSlotSnapshot {
+                        source_type,
+                        source_index,
+                        ability_icon_ref: entry.icon2,
+                    };
+                }
+
+                bars[b] = crate::fork_ext::addons::ability::AbilityBarSnapshot {
+                    slot_count,
+                    selected_slot,
+                    slots,
+                };
+            }
+
+            crate::fork_ext::addons::ability::AbilitiesSnapshot {
+                ability_count: ability_count as u8,
+                selected_bar,
+                abilities: snap_abilities,
+                bars,
+            }
+        } else {
+            crate::fork_ext::addons::ability::AbilitiesSnapshot::default()
+        };
+
         crate::fork_ext::addons::host::Snapshot {
             in_game,
             start_menu: self.start.as_ref().is_some_and(|s| s.menu.visible),
@@ -324,6 +414,7 @@ impl Play {
             player,
             group,
             entities,
+            abilities,
         }
     }
 }
