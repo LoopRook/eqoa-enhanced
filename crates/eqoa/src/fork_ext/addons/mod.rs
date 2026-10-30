@@ -24,6 +24,7 @@ pub(crate) mod health;
 pub(crate) mod host;
 pub(crate) mod manager;
 pub(crate) mod package;
+pub(crate) mod player;
 mod profile;
 mod spike;
 mod storage;

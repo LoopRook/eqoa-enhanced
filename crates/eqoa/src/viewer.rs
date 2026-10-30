@@ -5273,7 +5273,7 @@ impl ApplicationHandler for App {
                 g.renderer.scale.resolve(&mut enc, &target);
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    let snapshot = self.play.as_ref().map_or_else(Default::default, |p| p.forge_snapshot());
+                    let snapshot = self.play.as_ref().map_or_else(Default::default, |p| p.forge_snapshot(self.walker.as_ref()));
                     g.forge_runtime.draw(&g.window, &g.device, &g.queue, g.config.format, &mut enc, &target,
                         snapshot);
                 }

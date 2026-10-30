@@ -13,11 +13,13 @@ pub(crate) struct Snapshot {
     pub in_game: bool,
     pub start_menu: bool,
     pub health: super::health::HealthSnapshot,
+    pub player: super::player::PlayerSnapshot,
 }
 impl Snapshot {
     pub fn managed(mut self) -> Self {
         if !self.in_game {
             self.health = super::health::HealthSnapshot::unavailable();
+            self.player = super::player::PlayerSnapshot::default();
         }
         self.in_game &= self.health.is_available();
         self
@@ -171,14 +173,16 @@ impl Host {
             host_registry.clone(),
         )?;
 
-        Ok(Self {
+        let host = Self {
             lua: base.lua,
             snapshot: base.snapshot,
             remaining: base.remaining,
             fatal: base.fatal,
             addon: Some(addon.clone()),
             host_registry,
-        })
+        };
+        super::player::install_player_adapter(&host)?;
+        Ok(host)
     }
 
     pub fn new() -> Result<Self> {

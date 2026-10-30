@@ -341,6 +341,7 @@ impl Manager {
         visibility.update(self.snapshot.health, false);
         super::visibility::install_managed_health_adapter(&host, &visibility)
             .map_err(|e| e.to_string())?;
+        super::player::install_player_adapter(&host).map_err(|e| e.to_string())?;
         let function = host
             .compile_addon_entry(metadata)
             .map_err(|e| e.to_string())?;
