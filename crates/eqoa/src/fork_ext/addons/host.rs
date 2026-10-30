@@ -182,6 +182,7 @@ impl Host {
             host_registry,
         };
         super::player::install_player_adapter(&host)?;
+        super::visibility::install_standalone_ui_adapter(&host)?;
         Ok(host)
     }
 
@@ -249,6 +250,10 @@ impl Host {
     pub fn register_host_module(&self, name: impl Into<String>, value: Value) -> Result<()> {
         self.host_registry.borrow_mut().insert(name.into(), value);
         Ok(())
+    }
+
+    pub fn has_host_module(&self, name: &str) -> bool {
+        self.host_registry.borrow().contains_key(name)
     }
 
     pub fn resolve_resource(

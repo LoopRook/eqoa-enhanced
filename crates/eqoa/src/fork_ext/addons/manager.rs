@@ -105,6 +105,7 @@ pub(crate) struct Manager {
     snapshot: Snapshot,
     health_waiting: bool,
     health_claims: Rc<RefCell<super::health::HealthBarClaimsRegistry>>,
+    hud_claims: Rc<RefCell<super::visibility::HudClaimsRegistry>>,
 }
 
 impl Manager {
@@ -131,6 +132,7 @@ impl Manager {
             snapshot: Snapshot::default(),
             health_waiting: false,
             health_claims: Rc::new(RefCell::new(super::health::HealthBarClaimsRegistry::new())),
+            hud_claims: Rc::new(RefCell::new(super::visibility::HudClaimsRegistry::new())),
         };
         manager.rescan(false);
         manager
@@ -151,6 +153,14 @@ impl Manager {
     }
     pub fn health_hidden(&self) -> bool {
         self.health_claims.borrow().is_hidden()
+    }
+    #[allow(dead_code)]
+    pub fn is_hud_element_hidden(&self, element: &str) -> bool {
+        self.hud_claims.borrow().is_hidden(element)
+    }
+    #[allow(dead_code)]
+    pub fn hud_claims(&self) -> Rc<RefCell<super::visibility::HudClaimsRegistry>> {
+        self.hud_claims.clone()
     }
     pub fn suspend_health(&self) {
         for e in &self.entries {
@@ -336,8 +346,11 @@ impl Manager {
     fn prepare(&self, metadata: &DiscoveredAddon) -> Result<Instance, String> {
         let host = Host::for_addon(metadata).map_err(|e| e.to_string())?;
         host.snapshot.set(self.snapshot);
-        let visibility = super::visibility::VisibilityLease::new(self.health_claims.clone())
-            .map_err(|e| e.to_string())?;
+        let visibility = super::visibility::VisibilityLease::with_hud_claims(
+            self.health_claims.clone(),
+            self.hud_claims.clone(),
+        )
+        .map_err(|e| e.to_string())?;
         visibility.update(self.snapshot.health, false);
         super::visibility::install_managed_health_adapter(&host, &visibility)
             .map_err(|e| e.to_string())?;
