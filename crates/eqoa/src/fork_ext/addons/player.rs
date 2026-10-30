@@ -590,7 +590,11 @@ pub fn install_player_adapter(host: &Host) -> LuaResult<()> {
             "GetTargetEntityId",
             lua.create_function(move |_, ()| {
                 let snap = s.get().player;
-                Ok(if snap.available { snap.target_entity_id } else { 0 })
+                Ok(if snap.available {
+                    snap.target_entity_id
+                } else {
+                    0
+                })
             })?,
         )?;
     }
@@ -718,9 +722,12 @@ pub fn install_player_adapter(host: &Host) -> LuaResult<()> {
                 if snap.available && snap.location.valid {
                     let loc = snap.location;
                     let t = lua.create_table()?;
-                    let p_str = std::str::from_utf8(&loc.place[..loc.place_len as usize]).unwrap_or("");
-                    let c_str = std::str::from_utf8(&loc.compass[..loc.compass_len as usize]).unwrap_or("");
-                    let n_str = std::str::from_utf8(&loc.name[..loc.name_len as usize]).unwrap_or("");
+                    let p_str =
+                        std::str::from_utf8(&loc.place[..loc.place_len as usize]).unwrap_or("");
+                    let c_str =
+                        std::str::from_utf8(&loc.compass[..loc.compass_len as usize]).unwrap_or("");
+                    let n_str =
+                        std::str::from_utf8(&loc.name[..loc.name_len as usize]).unwrap_or("");
                     t.set("place", p_str)?;
                     t.set("compass", c_str)?;
                     t.set("name", n_str)?;
@@ -741,7 +748,8 @@ pub fn install_player_adapter(host: &Host) -> LuaResult<()> {
                 let snap = s.get().player;
                 if snap.available && snap.location.valid {
                     let loc = snap.location;
-                    let n_str = std::str::from_utf8(&loc.name[..loc.name_len as usize]).unwrap_or("");
+                    let n_str =
+                        std::str::from_utf8(&loc.name[..loc.name_len as usize]).unwrap_or("");
                     Ok(Value::String(lua_ctx.create_string(n_str)?))
                 } else {
                     Ok(Value::Nil)
@@ -763,7 +771,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     fn temp_test_dir(name: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("eqoa_player_test_{}_{}", name, std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("eqoa_player_test_{}_{}", name, std::process::id()));
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         path
@@ -792,7 +801,9 @@ mod tests {
         let addon = test_addon(&dir);
         let host = Host::for_addon(&addon).unwrap();
 
-        let script = host.compile(r#"
+        let script = host
+            .compile(
+                r#"
             local P = require("frontiers_forge.player")
             assert(P.GetName() == nil, "name must be nil")
             assert(P.GetLevel() == 0, "level must be 0")
@@ -821,7 +832,9 @@ mod tests {
             assert(P.GetHeadingRadians() == 0.0)
             assert(P.GetHeadingDegrees() == 0.0)
             return true
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
 
         host.run(&script).unwrap();
     }
@@ -875,7 +888,7 @@ mod tests {
         p_snap.is_auto_attacking = true;
         p_snap.is_dead = false;
         p_snap.class_id = 3; // Shadowknight
-        p_snap.race_id = 2;  // Dark Elf
+        p_snap.race_id = 2; // Dark Elf
         p_snap.available = true;
 
         host.snapshot.set(Snapshot {
@@ -887,9 +900,12 @@ mod tests {
                 max_hp: 3200,
             },
             player: p_snap,
+            ..Default::default()
         });
 
-        let script = host.compile(r#"
+        let script = host
+            .compile(
+                r#"
             local P = require("frontiers_forge.player")
             assert(P.GetName() == "Wererat")
             assert(P.GetLevel() == 60)
@@ -938,7 +954,9 @@ mod tests {
             assert(P.GetRaceId() == 2)
             assert(P.GetRaceName() == "Dark Elf")
             return true
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
 
         host.run(&script).unwrap();
     }
@@ -960,9 +978,12 @@ mod tests {
             start_menu: false,
             health: crate::fork_ext::addons::health::HealthSnapshot::default(),
             player: p_snap,
+            ..Default::default()
         });
 
-        let script = host.compile(r#"
+        let script = host
+            .compile(
+                r#"
             local P = require("frontiers_forge.player")
             local c = P.GetCoordinates()
             assert(math.abs(c.x - 100.5) < 0.001)
@@ -988,7 +1009,9 @@ mod tests {
             local deg = P.GetHeadingDegrees()
             assert(math.abs(deg - 90.0) < 0.001)
             return true
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
 
         host.run(&script).unwrap();
     }
@@ -1025,9 +1048,12 @@ mod tests {
             start_menu: false,
             health: crate::fork_ext::addons::health::HealthSnapshot::default(),
             player: p_snap,
+            ..Default::default()
         });
 
-        let script = host.compile(r#"
+        let script = host
+            .compile(
+                r#"
             local P = require("frontiers_forge.player")
             local loc = P.GetLocation()
             assert(loc ~= nil)
@@ -1039,7 +1065,9 @@ mod tests {
 
             assert(P.GetLocationName() == "Neriak, Nektulos (C)")
             return true
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
 
         host.run(&script).unwrap();
     }
@@ -1050,13 +1078,17 @@ mod tests {
         let addon = test_addon(&dir);
         let host = Host::for_addon(&addon).unwrap();
 
-        let script = host.compile(r#"
+        let script = host
+            .compile(
+                r#"
             local P = require("frontiers_forge.player")
             _G.read_stats = function()
                 return P.GetLevel(), P.GetCurrentHp(), P.GetCurrentPwr()
             end
             return true
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         host.run(&script).unwrap();
 
         let read_fn: mlua::Function = host.lua.globals().get("read_stats").unwrap();
@@ -1082,6 +1114,7 @@ mod tests {
                 max_hp: 1500,
             },
             player: p1,
+            ..Default::default()
         });
 
         let (lvl1, hp1, pwr1): (u32, u32, u32) = read_fn.call(()).unwrap();

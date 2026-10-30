@@ -21,15 +21,27 @@ impl Play {
                 let pos = w.cam.walk.phys.position;
                 let vel = w.cam.walk.phys.velocity;
                 let h_rad = w.cam.walk.phys.angles.x.0;
-                ([pos.x.0, pos.y.0, pos.z.0], [vel.x.0, vel.y.0, vel.z.0], h_rad)
+                (
+                    [pos.x.0, pos.y.0, pos.z.0],
+                    [vel.x.0, vel.y.0, vel.z.0],
+                    h_rad,
+                )
             } else if let Some((at, _)) = self.self_at {
                 (at, [0.0, 0.0, 0.0], 0.0)
             } else {
                 ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], 0.0)
             };
 
-            let target_entity_id = if self.target == u32::MAX { 0 } else { self.target };
-            let pet_entity_id = if self.pet_id == u32::MAX { None } else { Some(self.pet_id) };
+            let target_entity_id = if self.target == u32::MAX {
+                0
+            } else {
+                self.target
+            };
+            let pet_entity_id = if self.pet_id == u32::MAX {
+                None
+            } else {
+                Some(self.pet_id)
+            };
 
             let cur_pwr = self.stats.stat.get(9).copied().unwrap_or(0).max(0) as u32;
             let max_pwr = self.stats.stat.get(10).copied().unwrap_or(0).max(0) as u32;
@@ -46,10 +58,14 @@ impl Play {
                 let rows = g.map_or(1, |g| g.rows);
                 let cell = g.map_or(1.0, |g| g.cell_size.0);
                 let origin = g.map_or([0.0; 3], |g| [g.origin.x.0, g.origin.y.0, g.origin.z.0]);
-                let bounds = self.start.as_ref().and_then(|s| s.bounds.get(world as usize).copied().flatten());
+                let bounds = self
+                    .start
+                    .as_ref()
+                    .and_then(|s| s.bounds.get(world as usize).copied().flatten());
 
                 if cols == 1 && rows == 1 {
-                    let mut loc = crate::fork_ext::addons::player::PlayerLocationSnapshot::default();
+                    let mut loc =
+                        crate::fork_ext::addons::player::PlayerLocationSnapshot::default();
                     loc.place[..3].copy_from_slice(b"***");
                     loc.place_len = 3;
                     loc.name[..3].copy_from_slice(b"***");
@@ -57,8 +73,16 @@ impl Play {
                     loc.valid = true;
                     loc
                 } else if cell > 0.0 {
-                    let col = if p.x.0 < 0.0 { (p.x.0 / cell).ceil() as i32 } else { (p.x.0 / cell).floor() as i32 };
-                    let row = if p.z.0 < 0.0 { (p.z.0 / cell).ceil() as i32 } else { (p.z.0 / cell).floor() as i32 };
+                    let col = if p.x.0 < 0.0 {
+                        (p.x.0 / cell).ceil() as i32
+                    } else {
+                        (p.x.0 / cell).floor() as i32
+                    };
+                    let row = if p.z.0 < 0.0 {
+                        (p.z.0 / cell).ceil() as i32
+                    } else {
+                        (p.z.0 / cell).floor() as i32
+                    };
                     let in_cell_x = p.x.0 - col as f32 * cell - origin[0];
                     let in_cell_z = p.z.0 - row as f32 * cell - origin[2];
                     let r_idx = row - 1;
@@ -74,9 +98,22 @@ impl Play {
                         641
                     };
 
-                    let place_str = self.words.as_ref().map(|w| w.get(zone_id as i32, 0)).unwrap_or("");
-                    const DIRS: [[i32; 3]; 3] = [[1426, 1422, 1427], [1425, 1430, 1424], [1428, 1423, 1429]];
-                    let third = |v: f32| if v < -333.34 { 0 } else if v <= 333.34 { 1 } else { 2 };
+                    let place_str = self
+                        .words
+                        .as_ref()
+                        .map(|w| w.get(zone_id as i32, 0))
+                        .unwrap_or("");
+                    const DIRS: [[i32; 3]; 3] =
+                        [[1426, 1422, 1427], [1425, 1430, 1424], [1428, 1423, 1429]];
+                    let third = |v: f32| {
+                        if v < -333.34 {
+                            0
+                        } else if v <= 333.34 {
+                            1
+                        } else {
+                            2
+                        }
+                    };
                     let dir_id = DIRS[third(in_cell_z)][third(in_cell_x)];
                     let compass_str = self.words.as_ref().map(|w| w.get(dir_id, 0)).unwrap_or("");
                     let name_str = if compass_str.is_empty() {
@@ -85,7 +122,8 @@ impl Play {
                         format!("{place_str} ({compass_str})")
                     };
 
-                    let mut loc = crate::fork_ext::addons::player::PlayerLocationSnapshot::default();
+                    let mut loc =
+                        crate::fork_ext::addons::player::PlayerLocationSnapshot::default();
                     let p_bytes = place_str.as_bytes();
                     let p_len = p_bytes.len().min(64);
                     loc.place[..p_len].copy_from_slice(&p_bytes[..p_len]);
@@ -118,8 +156,16 @@ impl Play {
                 level: self.dump.player.level.max(0) as u32,
                 exp: self.dump.player.exp.max(0) as u32,
                 exp_debt: self.dump.player.p2c.max(0) as u32,
-                current_hp: self.forge_health.snapshot(connected, hud_ready).current_hp.max(0) as u32,
-                max_hp: self.forge_health.snapshot(connected, hud_ready).max_hp.max(0) as u32,
+                current_hp: self
+                    .forge_health
+                    .snapshot(connected, hud_ready)
+                    .current_hp
+                    .max(0) as u32,
+                max_hp: self
+                    .forge_health
+                    .snapshot(connected, hud_ready)
+                    .max_hp
+                    .max(0) as u32,
                 base_hp: self.stats.base.get(8).copied().unwrap_or(0).max(0) as u32,
                 current_pwr: cur_pwr,
                 max_pwr: max_pwr,
@@ -165,11 +211,119 @@ impl Play {
             crate::fork_ext::addons::player::PlayerSnapshot::default()
         };
 
+        let group = if in_game && self.group.in_group {
+            let mut members = [crate::fork_ext::addons::group::GroupMemberSnapshot::default();
+                crate::fork_ext::addons::group::MAX_GROUP_MEMBERS];
+            let count = self
+                .group
+                .members
+                .len()
+                .min(crate::fork_ext::addons::group::MAX_GROUP_MEMBERS);
+            for (i, m) in self.group.members.iter().take(count).enumerate() {
+                let mut name_buf = [0u8; 24];
+                let bytes = m.name.as_bytes();
+                let copy_len = bytes.len().min(24);
+                name_buf[..copy_len].copy_from_slice(&bytes[..copy_len]);
+                members[i] = crate::fork_ext::addons::group::GroupMemberSnapshot {
+                    entity_id: m.id,
+                    name: name_buf,
+                    name_len: copy_len as u8,
+                    active: m.active,
+                    hp_known: m.hp_known != 0,
+                    percent_hp_255: m.hp,
+                    position: m.pos,
+                };
+            }
+            crate::fork_ext::addons::group::GroupSnapshot {
+                in_group: true,
+                is_leader: self.group.leader,
+                member_count: count as u8,
+                members,
+            }
+        } else {
+            crate::fork_ext::addons::group::GroupSnapshot::default()
+        };
+
+        let entities = if in_game {
+            let mut snap_entities = [crate::fork_ext::addons::entity::EntitySnapshot::default();
+                crate::fork_ext::addons::entity::MAX_ENTITIES];
+            for i in 0..24 {
+                if let Some(Some(e)) = self.entities.slots.get(i) {
+                    let mut name_buf = [0u8; 24];
+                    let mut name_len = 0u8;
+                    let mut level = 0u8;
+                    let mut target_id = 0u32;
+                    let mut class_byte = 0u8;
+                    let mut status_flags = 0u8;
+                    if let Some(c) = &e.creature {
+                        let bytes = c.name.as_bytes();
+                        let copy_len = bytes.len().min(24);
+                        name_buf[..copy_len].copy_from_slice(&bytes[..copy_len]);
+                        name_len = copy_len as u8;
+                        level = c.level;
+                        target_id = c.target;
+                        class_byte = c.p256;
+                        status_flags = c.flags262;
+                    }
+                    let is_target =
+                        self.target != u32::MAX && self.target != 0 && e.id == self.target;
+                    let disposition = if is_target { self.target_info } else { None };
+                    snap_entities[i] = crate::fork_ext::addons::entity::EntitySnapshot {
+                        id: e.id,
+                        level,
+                        health_percent_255: e.p19,
+                        position: e.pos,
+                        name: name_buf,
+                        name_len,
+                        target_id,
+                        class_byte,
+                        status_flags,
+                        disposition,
+                        is_populated: e.id != 0 && level > 0,
+                    };
+                }
+            }
+            // Slot 0 invariant: 0th index is always the player in FrontiersForge.
+            // If slot 0 is not populated or has id 0, synthesize slot 0 from player state:
+            if !snap_entities[0].is_populated {
+                let player_id = self.self_id32().unwrap_or(0);
+                let hp_pct_255 = if player.max_hp > 0 {
+                    ((player.current_hp as u64 * 255) / player.max_hp as u64).min(255) as u8
+                } else {
+                    0
+                };
+                let is_target =
+                    self.target != u32::MAX && self.target != 0 && player_id == self.target;
+                let disposition = if is_target { self.target_info } else { None };
+                snap_entities[0] = crate::fork_ext::addons::entity::EntitySnapshot {
+                    id: player_id,
+                    level: player.level.min(255) as u8,
+                    health_percent_255: hp_pct_255,
+                    position: player.position,
+                    name: player.name,
+                    name_len: player.name_len,
+                    target_id: player.target_entity_id,
+                    class_byte: 2, // 2 is player character
+                    status_flags: 0,
+                    disposition,
+                    is_populated: player_id != 0 && player.level > 0,
+                };
+            }
+            crate::fork_ext::addons::entity::EntitiesSnapshot {
+                count: 24,
+                entities: snap_entities,
+            }
+        } else {
+            crate::fork_ext::addons::entity::EntitiesSnapshot::default()
+        };
+
         crate::fork_ext::addons::host::Snapshot {
             in_game,
             start_menu: self.start.as_ref().is_some_and(|s| s.menu.visible),
             health: self.forge_health.snapshot(connected, hud_ready),
             player,
+            group,
+            entities,
         }
     }
 }

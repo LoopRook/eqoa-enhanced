@@ -15,10 +15,12 @@ pub(crate) fn take_open_request() -> bool {
 }
 pub(crate) mod bit;
 pub(crate) mod discovery;
+pub(crate) mod entity;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod fonts;
 #[cfg(test)]
 mod gpu_test;
+pub(crate) mod group;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod health;
 pub(crate) mod host;

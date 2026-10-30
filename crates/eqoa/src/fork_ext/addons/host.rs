@@ -14,12 +14,16 @@ pub(crate) struct Snapshot {
     pub start_menu: bool,
     pub health: super::health::HealthSnapshot,
     pub player: super::player::PlayerSnapshot,
+    pub group: super::group::GroupSnapshot,
+    pub entities: super::entity::EntitiesSnapshot,
 }
 impl Snapshot {
     pub fn managed(mut self) -> Self {
         if !self.in_game {
             self.health = super::health::HealthSnapshot::unavailable();
             self.player = super::player::PlayerSnapshot::default();
+            self.group = super::group::GroupSnapshot::default();
+            self.entities = super::entity::EntitiesSnapshot::default();
         }
         self.in_game &= self.health.is_available();
         self
@@ -183,6 +187,9 @@ impl Host {
         };
         super::player::install_player_adapter(&host)?;
         super::visibility::install_standalone_ui_adapter(&host)?;
+        super::group::install_group_adapter(&host)?;
+        super::entity::install_entity_adapter(&host)?;
+        super::entity::install_entity_list_adapter(&host)?;
         Ok(host)
     }
 
