@@ -11,8 +11,8 @@
 //! a Windows build whose header reserves less.
 //!
 //! And the Windows program's own icon (Explorer, a pinned shortcut, the
-//! taskbar before the window sets its own): the drawn disc (`src/icon_art.rs`,
-//! the same drawing the window takes), written as an .ico and a resource file
+//! taskbar before the window sets its own): the chosen .ico's images
+//! (`app_icon_ico`), written as an .ico and a resource file
 //! here and linked in: MSVC's linker takes the .res as it is, GNU's needs it
 //! as an object (windres). No game art: the save icon comes off the player's
 //! disc at run time (`icon`).
@@ -21,10 +21,16 @@
 mod icon_art {
     include!("src/icon_art.rs");
 }
+#[allow(dead_code)] mod app_icon_ico { include!("src/fork_ext/app_icon_ico.rs"); }
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/icon_art.rs");
+    println!("cargo:rerun-if-env-changed=EQOA_UPDATE_CHANNEL");
+    println!("cargo:rerun-if-changed=src/fork_ext/app_icon_ico.rs");
+    println!("cargo:rerun-if-changed=resources/app-icon/eqoa-dev.ico");
+    println!("cargo:rerun-if-changed=resources/app-icon/eqoa-standard.ico");
+    app_icon_ico::stage();
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         match std::env::var("CARGO_CFG_TARGET_ENV").as_deref() {
             Ok("msvc") => println!("cargo:rustc-link-arg-bins=/STACK:8388608"),
@@ -36,11 +42,12 @@ fn main() {
 }
 
 /// The sizes Windows picks from: the title bar, Explorer's views, the taskbar.
+#[allow(dead_code)]
 const SIZES: [u32; 7] = [16, 24, 32, 48, 64, 128, 256];
 
 fn windows_icon() {
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    let images: Vec<(u32, Vec<u8>)> = SIZES.iter().map(|&s| (s, dib(s, &icon_art::disc_rgba(s)))).collect();
+    let images = app_icon_ico::images();
     std::fs::write(out.join("eqoa.ico"), ico(&images)).expect("eqoa.ico");
     let res = out.join("eqoa.res");
     std::fs::write(&res, resources(&images)).expect("eqoa.res");
@@ -66,6 +73,7 @@ fn windows_icon() {
 /// An icon image as a DIB: the header (twice the height, for the mask), the
 /// pixels bottom up as BGRA, then the AND mask (set where clear), its rows
 /// padded to four bytes.
+#[allow(dead_code)]
 fn dib(size: u32, rgba: &[u8]) -> Vec<u8> {
     let s = size as usize;
     let mask_row = s.div_ceil(32) * 4;

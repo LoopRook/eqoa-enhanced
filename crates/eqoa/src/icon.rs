@@ -40,7 +40,7 @@ fn key() -> String {
 /// The picture a window opens with: the save icon kept for this disc, else
 /// the drawn disc.
 fn start_picture() -> Vec<u8> {
-    kept(&key()).unwrap_or_else(|| disc().to_vec())
+    crate::fork_ext::app_icon::picture(BIG).unwrap_or_else(|| kept(&key()).unwrap_or_else(|| disc().to_vec()))
 }
 
 /// The save icon kept for `disc` (`settings::kept_icon`), if one is and it
@@ -189,6 +189,9 @@ static PHASE: Mutex<Phase> = Mutex::new(Phase::Waiting);
 /// (on a thread), kept for the next start and put on the window. Nothing
 /// after that.
 pub fn poll(window: &Window) {
+    if crate::fork_ext::app_icon::keeps_icon() {
+        return;
+    }
     let mut phase = PHASE.lock().unwrap();
     match &*phase {
         Phase::Done => {}
