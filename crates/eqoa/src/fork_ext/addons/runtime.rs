@@ -301,12 +301,16 @@ impl Runtime {
             }
             _ => {}
         }
-        let hidden = if self.error.is_none() && !self.stopped {
-            matches!(&self.graphics,Some(Graphics::Managed(a)) if a.manager.health_hidden())
+        if self.error.is_none() && !self.stopped {
+            if let Some(Graphics::Managed(a)) = &self.graphics {
+                let claims = a.manager.hud_claims();
+                super::visibility::publish_claims(&claims.borrow());
+            } else {
+                super::visibility::publish(false);
+            }
         } else {
-            false
-        };
-        super::visibility::publish(hidden);
+            super::visibility::publish(false);
+        }
     }
     pub fn shutdown(&mut self) {
         self.pause_health();

@@ -450,6 +450,9 @@ pub(super) fn health_hidden(play: &Play) -> bool {
 pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        for msg in crate::fork_ext::addons::chat::take_outgoing_chat() {
+            play.chat_line(&msg);
+        }
         let hidden = health_hidden(play);
         play.forge_health.hud_changed(hidden) || step || loading_changed
     }

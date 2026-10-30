@@ -527,12 +527,77 @@ pub(crate) fn install_standalone_ui_adapter(host: &Host) -> mlua::Result<()> {
     install_managed_health_adapter(host, &lease)
 }
 
-thread_local! { static PUBLISHED: Cell<bool> = const { Cell::new(false) }; }
-pub(crate) fn publish(hidden: bool) {
-    PUBLISHED.set(hidden);
+#[derive(Clone, Copy, Default, Debug)]
+pub struct PublishedVisibility {
+    pub health_bar: bool,
+    pub power_bar: bool,
+    pub exp_bar: bool,
+    pub compass: bool,
+    pub target: bool,
+    pub group: bool,
+    pub pet: bool,
+    pub chat: bool,
+    pub ability_bar: bool,
+    pub active_effects: bool,
 }
+
+impl PublishedVisibility {
+    pub fn any_hidden(&self) -> bool {
+        self.health_bar
+            || self.power_bar
+            || self.exp_bar
+            || self.compass
+            || self.target
+            || self.group
+            || self.pet
+            || self.chat
+            || self.ability_bar
+            || self.active_effects
+    }
+}
+
+thread_local! {
+    static PUBLISHED_VIS: Cell<PublishedVisibility> = const { Cell::new(PublishedVisibility {
+        health_bar: false,
+        power_bar: false,
+        exp_bar: false,
+        compass: false,
+        target: false,
+        group: false,
+        pet: false,
+        chat: false,
+        ability_bar: false,
+        active_effects: false,
+    }) };
+}
+
+pub(crate) fn publish(hidden: bool) {
+    let mut vis = PUBLISHED_VIS.get();
+    vis.health_bar = hidden;
+    PUBLISHED_VIS.set(vis);
+}
+
+pub(crate) fn publish_claims(claims: &HudClaimsRegistry) {
+    PUBLISHED_VIS.set(PublishedVisibility {
+        health_bar: claims.is_hidden("health_bar"),
+        power_bar: claims.is_hidden("power_bar"),
+        exp_bar: claims.is_hidden("main_exp_bar") || claims.is_hidden("secondary_exp_bar"),
+        compass: claims.is_hidden("compass_face") || claims.is_hidden("compass_back"),
+        target: claims.is_hidden("target_nameplate"),
+        group: claims.is_hidden("group_member_panel") || claims.is_hidden("group_compass_marks"),
+        pet: claims.is_hidden("pet_panel"),
+        chat: claims.is_hidden("chat_window"),
+        ability_bar: claims.is_hidden("hotbar_draw_compact") || claims.is_hidden("hotbar_draw_expanded"),
+        active_effects: claims.is_hidden("active_effects"),
+    });
+}
+
+pub(crate) fn published_visibility() -> PublishedVisibility {
+    PUBLISHED_VIS.get()
+}
+
 pub(crate) fn published_health_hidden() -> bool {
-    PUBLISHED.get()
+    PUBLISHED_VIS.get().health_bar
 }
 
 #[cfg(test)]

@@ -76,7 +76,70 @@ fn readouts(s: &HudState, need: u32, flags: [bool; 3]) -> Vec<Readout> {
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn should_suppress_quad(
+    q: &render::ui::Quad,
+    vis: &crate::fork_ext::addons::visibility::PublishedVisibility,
+) -> bool {
+    let min_x = q.pos[0][0].min(q.pos[1][0]).min(q.pos[2][0]).min(q.pos[3][0]);
+    let max_x = q.pos[0][0].max(q.pos[1][0]).max(q.pos[2][0]).max(q.pos[3][0]);
+    let min_y = q.pos[0][1].min(q.pos[1][1]).min(q.pos[2][1]).min(q.pos[3][1]);
+    let max_y = q.pos[0][1].max(q.pos[1][1]).max(q.pos[2][1]).max(q.pos[3][1]);
+
+    // 1. Compass: center [39, 54], radius ~25
+    if vis.compass && min_x >= 10.0 && max_x <= 70.0 && min_y >= 25.0 && max_y <= 85.0 {
+        return true;
+    }
+
+    // 2. Power bar: y around [43..56], x around [65..215]
+    if vis.power_bar && min_x >= 60.0 && max_x <= 215.0 && min_y >= 43.0 && max_y <= 56.0 {
+        return true;
+    }
+
+    // 3. Exp bar: y around [55..80], x around [60..215]
+    if vis.exp_bar && min_x >= 60.0 && max_x <= 215.0 && min_y >= 55.0 && max_y <= 80.0 {
+        return true;
+    }
+
+    // 4. Entire Me plate if health + power + exp are all hidden
+    if vis.health_bar
+        && vis.power_bar
+        && vis.exp_bar
+        && min_x >= 5.0
+        && max_x <= 215.0
+        && min_y >= 10.0
+        && max_y <= 85.0
+    {
+        return true;
+    }
+
+    // 5. Group display: GROUP_AT = [10, 110]
+    if vis.group && min_x >= 5.0 && max_x <= 230.0 && min_y >= 100.0 && max_y <= 360.0 {
+        return true;
+    }
+
+    // 6. Target display: TARGET_AT = [-146, 381] or bottom right
+    if vis.target && min_y >= 370.0 && max_y <= 450.0 {
+        return true;
+    }
+
+    // 7. Chat strip: [-3, 331]
+    if vis.chat && min_y >= 325.0 && max_y <= 460.0 && max_x <= 220.0 {
+        return true;
+    }
+
+    false
+}
+
 pub(super) fn draw(ui: &mut UiRaster<'_>, s: &HudState) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let vis = crate::fork_ext::addons::visibility::published_visibility();
+        if vis.any_hidden() {
+            ui.ui.quads.retain(|q| !should_suppress_quad(q, &vis));
+        }
+    }
+
     let Some(font) = ui.assets.font else { return };
     let c = crate::settings::client();
     let labels = readouts(

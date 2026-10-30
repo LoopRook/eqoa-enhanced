@@ -339,8 +339,23 @@ impl Manager {
         self.diagnostics.push(Diagnostic {
             id: id.map(str::to_owned),
             phase,
-            message,
+            message: message.clone(),
         });
+        let log_line = format!(
+            "[{:?}] [{}] {}\n",
+            phase,
+            id.unwrap_or("general"),
+            message
+        );
+        let log_path = self.root.join("addons_error.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            use std::io::Write;
+            let _ = f.write_all(log_line.as_bytes());
+        }
     }
 
     fn prepare(&self, metadata: &DiscoveredAddon) -> Result<Instance, String> {
