@@ -2,7 +2,7 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
-## Unreleased — addon manager preview work
+## 2026-10-30 · Addon manager preview work
 
 - Native Mods & Addons gains an Addon Manager with enable/disable, reload,
   rescan, settings and profile controls. Unsupported addon features show failures.
@@ -12,6 +12,10 @@ Upstream changes remain in UPDATE-NOTES.md.
   backend (`UiForge.LoadSound`, `PlaySound`, `StopSound`, `IsSoundPlaying`,
   `SetSoundVolume`, `ReleaseSound`). Non-Windows builds report unsupported and
   return nil. Handle, file-size, and aggregate budgets are enforced.
+- Forge addon hide-UI claims now gate each stock HUD element at its draw site
+  (compass, target, group, pet, power/exp bars, chat window, ability bars,
+  active effects, and group compass marks) instead of using a bounding-box quad
+  filter. Each claim name matches the reference package behavior.
 - Preview packaging and interactive checks are still pending; full Forge addon
   compatibility is not yet available.
 

@@ -399,6 +399,13 @@ impl HudMenus {
         self.sel.clamp(0, MENUS as i32 - 1) as usize
     }
 
+    /// Whether the currently selected menu is one of the ability/hotbar menus
+    /// (0, 1, 4 or 5), as opposed to the items stack (2) or gear sets (3).
+    pub(crate) fn selected_is_ability_bar(&self) -> bool {
+        let k = self.up();
+        k != ITEMS && k != GEAR
+    }
+
     /// The menu up, drawn.
     pub fn draw(&mut self, vui: &Vui, r: &mut dyn Raster, now: i64, name: &dyn Fn(u32, i64) -> Vec<u16>) {
         let k = self.up();

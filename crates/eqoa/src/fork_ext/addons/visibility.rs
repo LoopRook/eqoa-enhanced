@@ -534,7 +534,8 @@ pub struct PublishedVisibility {
     pub exp_bar: bool,
     pub compass: bool,
     pub target: bool,
-    pub group: bool,
+    pub group_panel: bool,
+    pub group_compass_marks: bool,
     pub pet: bool,
     pub chat: bool,
     pub ability_bar: bool,
@@ -548,7 +549,8 @@ impl PublishedVisibility {
             || self.exp_bar
             || self.compass
             || self.target
-            || self.group
+            || self.group_panel
+            || self.group_compass_marks
             || self.pet
             || self.chat
             || self.ability_bar
@@ -563,7 +565,8 @@ thread_local! {
         exp_bar: false,
         compass: false,
         target: false,
-        group: false,
+        group_panel: false,
+        group_compass_marks: false,
         pet: false,
         chat: false,
         ability_bar: false,
@@ -584,7 +587,8 @@ pub(crate) fn publish_claims(claims: &HudClaimsRegistry) {
         exp_bar: claims.is_hidden("main_exp_bar") || claims.is_hidden("secondary_exp_bar"),
         compass: claims.is_hidden("compass_face") || claims.is_hidden("compass_back"),
         target: claims.is_hidden("target_nameplate"),
-        group: claims.is_hidden("group_member_panel") || claims.is_hidden("group_compass_marks"),
+        group_panel: claims.is_hidden("group_member_panel"),
+        group_compass_marks: claims.is_hidden("group_compass_marks"),
         pet: claims.is_hidden("pet_panel"),
         chat: claims.is_hidden("chat_window"),
         ability_bar: claims.is_hidden("hotbar_draw_compact") || claims.is_hidden("hotbar_draw_expanded"),

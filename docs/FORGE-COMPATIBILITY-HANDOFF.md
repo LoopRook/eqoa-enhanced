@@ -67,27 +67,34 @@ reviews were Gemini Flash reviewing Gemini Flash.
 | Hide group / pet panels | Not tested |
 | Icons | **None** (see below) |
 
-### Why the hides fail (scout, DeepSeek, file:line verified 2026-10-30)
+### Why the hides failed and how they are fixed
 
-Health works because it is gated at its draw site (`fork_hud::health_visible`, `fork_ext/hud.rs:5`).
-Everything else goes through `should_suppress_quad` (`fork_ext/hud.rs:89-129`), which drops HUD quads
-whose bounding box falls inside hard-coded 640x448 boxes. That design is the bug:
+Health already worked because it is gated at its draw site (`fork_hud::health_visible`,
+`fork_ext/hud.rs:6`). Everything else used to go through a bounding-box quad filter
+(`should_suppress_quad`, since removed), which dropped HUD quads whose bounding box fell inside
+hard-coded 640x448 boxes. That design missed ability bars and active effects (drawn after the
+filter), the rotated compass on widescreen, the chat window (matched the target block instead),
+and group/pet bars (above the box). It also left several claim names without a consumer.
 
-- Ability bars (`hud_menus.draw`, `play.rs:7683`) and active effects (`influence::draw`,
-  `play.rs:7552`) have no box at all, and both are drawn after the filter runs.
-- Compass (`draw_compass`, `hud.rs:475-495`) is a rotated quad, so its box exceeds x 10-70 at most
-  headings; on a widescreen window `Anchor::Left` shifts it (`render/src/ui.rs:398-401`) and it never
-  matches.
-- Chat's box (y 325-460, x <= 220) matches the target block (`TARGET_AT=[20,348]`, `hud.rs:177`); the
-  real chat window (`wnd_chat.draw`, `play.rs:7556-7561`, anchored right) is drawn later, elsewhere.
-- Group bars start at y 93 (`GROUP_AT`, `hud.rs:176`), above the box's 100: expect group hide to fail.
-- Claim names with no consumer: `hotbar_draw_compact`/`_expanded`, `active_effects`, `chat_window`,
-  `group_compass_marks` (`addons/visibility.rs`).
+The fix gates each element at its draw site:
 
-**Fix direction:** delete the bounding-box filter; gate each element at its draw site with a
-`fork_hud::*_visible` hook as health does (compass, target, group, pet, chat window, ability bars,
-effects, group compass marks), each a one-line hook in the shared file within budget. Test each with
-a negative control (the element draws when unclaimed, not when claimed), and at a widescreen size.
+| Element | Draw-site gate | Claim name(s) |
+|---|---|---|
+| Compass | `hud.rs:281` | `compass_face`, `compass_back` |
+| Group compass marks | `hud.rs:526` | `group_compass_marks` |
+| Target nameplate | `hud.rs:336` | `target_nameplate` |
+| Group panel | `hud.rs:320` | `group_member_panel` |
+| Pet panel | `hud.rs:327` | `pet_panel` |
+| Power bar | `hud.rs:292` | `power_bar` |
+| Experience bars | `hud.rs:316` | `main_exp_bar`, `secondary_exp_bar` |
+| Chat window | `hud.rs:332` | `chat_window` |
+| Ability bars | `play.rs` via `fork_hud::draw_hud_menus` | `hotbar_draw_compact`, `hotbar_draw_expanded` |
+| Active effects | `play.rs` via `fork_hud::draw_active_effects` | `active_effects` |
+
+`fork_ext/hud.rs` owns the visibility predicates and the play.rs wrappers so shared files only need
+a one-line hook call. `PublishedVisibility.group` was split into `group_panel` and
+`group_compass_marks` so the two can be hidden independently. Behavior tests with negative controls
+run at 1280x720 and cover every element in the table (`cargo test --locked -p eqoa --bin eqoa forge_ -- --test-threads=1`).
 
 ### Icons
 
@@ -103,7 +110,7 @@ a negative control (the element draws when unclaimed, not when claimed), and at 
 
 ## Next, in order
 
-1. Hide claims at the draw sites (above). Owner retests all hide options, including group and pet.
+1. ~~Hide claims at the draw sites.~~ Done; owner retests all hide options, including group and pet.
 2. Ability/effect icons through `Icon.GetTexture`, and the resources packaging fix.
 3. Remaining live checks: cooldowns, casting bar, D-pad bar rotation on a real controller, damage meter,
    settings/profile save and load, enable/disable/reload.
@@ -117,8 +124,10 @@ From the Forge worktree, one cargo build at a time on the machine:
 ```powershell
 $env:CARGO_TARGET_DIR='C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility/target'
 cargo test --locked -p eqoa --bin eqoa fork_ext::addons:: -- --test-threads=1
+cargo test --locked -p eqoa --bin eqoa forge_ -- --test-threads=1
 cargo check --locked -p eqoa --target wasm32-unknown-unknown
 python tools/check_fork_footprint.py --base 7912c7393df7d85655d5816980fae1217cc48a32
+cargo build --release --locked -p eqoa
 & "$env:CARGO_TARGET_DIR\release\eqoa.exe" "C:\Users\hocka\Documents\PS2 Games\EverQuest - Online Adventures - Frontiers (USA).iso"
 ```
 

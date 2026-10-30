@@ -223,6 +223,11 @@ impl UiAssets {
         self.surfaces.get(&id).copied()
     }
 
+    #[cfg(test)]
+    pub(crate) fn add_surface_for_test(&mut self, id: u32, tex: usize) {
+        self.surfaces.insert(id, tex);
+    }
+
     pub fn raster<'a>(&'a self, ui: &'a mut Ui) -> UiRaster<'a> {
         UiRaster { assets: self, ui, glyphs: Default::default(), font_override:None, text_scale:1.0 }
     }
@@ -398,12 +403,19 @@ pub(crate) mod tests {
     use super::*;
 
     /// A layer on the machine's GPU (any backend), as a window lays itself out
-    /// on it; None without an adapter.
-    pub(crate) fn layer() -> Option<Ui> {
+    /// on it; None without an adapter. Also returns the device and queue so
+    /// tests can upload placeholder surfaces.
+    pub(crate) fn layer_with_device() -> Option<(Ui, wgpu::Device, wgpu::Queue)> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
-        let (device, _queue) = pollster::block_on(adapter.request_device(&Default::default())).ok()?;
-        Some(Ui::new(&device, render::TARGET_FORMAT, render::DEPTH_FORMAT))
+        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).ok()?;
+        let ui = Ui::new(&device, render::TARGET_FORMAT, render::DEPTH_FORMAT);
+        Some((ui, device, queue))
+    }
+
+    /// A layer on the machine's GPU (any backend); None without an adapter.
+    pub(crate) fn layer() -> Option<Ui> {
+        layer_with_device().map(|(ui, _, _)| ui)
     }
 
     /// A name scrolled (`VIUITextScroll`: the viewport saved, cut to its

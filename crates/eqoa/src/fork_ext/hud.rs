@@ -1,8 +1,9 @@
 //! HUD-number adapter; stock HUD layout remains in the parent.
 use super::{HudState, UiRaster};
 use render::ui::{Anchor, Vertical};
+use vi::ui::{Raster, Vui};
 
-pub(super) fn health_visible(s: &HudState) -> bool {
+pub(crate) fn health_visible(s: &HudState) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
         !s.forge_health_hidden
@@ -11,6 +12,106 @@ pub(super) fn health_visible(s: &HudState) -> bool {
     {
         let _ = s;
         true
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn published<F: FnOnce(&crate::fork_ext::addons::visibility::PublishedVisibility) -> bool>(f: F) -> bool {
+    f(&crate::fork_ext::addons::visibility::published_visibility())
+}
+
+#[cfg(target_arch = "wasm32")]
+mod visibility_stub {
+    pub struct PublishedVisibility {
+        pub compass: bool,
+        pub group_compass_marks: bool,
+        pub target: bool,
+        pub group_panel: bool,
+        pub pet: bool,
+        pub power_bar: bool,
+        pub exp_bar: bool,
+        pub chat: bool,
+        pub ability_bar: bool,
+        pub active_effects: bool,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn published<F: FnOnce(&visibility_stub::PublishedVisibility) -> bool>(_: F) -> bool {
+    true
+}
+
+pub(crate) fn compass_visible(_s: &HudState) -> bool {
+    published(|v| !v.compass)
+}
+
+pub(crate) fn group_compass_marks_visible(_s: &HudState) -> bool {
+    published(|v| !v.group_compass_marks)
+}
+
+pub(crate) fn target_visible(_s: &HudState) -> bool {
+    published(|v| !v.target)
+}
+
+pub(crate) fn group_visible(_s: &HudState) -> bool {
+    published(|v| !v.group_panel)
+}
+
+pub(crate) fn pet_visible(_s: &HudState) -> bool {
+    published(|v| !v.pet)
+}
+
+pub(crate) fn power_bar_visible(_s: &HudState) -> bool {
+    published(|v| !v.power_bar)
+}
+
+pub(crate) fn exp_bar_visible(_s: &HudState) -> bool {
+    published(|v| !v.exp_bar)
+}
+
+pub(crate) fn chat_window_visible() -> bool {
+    published(|v| !v.chat)
+}
+
+pub(crate) fn ability_bar_visible() -> bool {
+    published(|v| !v.ability_bar)
+}
+
+pub(crate) fn active_effects_visible() -> bool {
+    published(|v| !v.active_effects)
+}
+
+/// Draws the stock active-effects bar unless an addon has claimed it.
+pub(crate) fn draw_active_effects(vui: &Vui, r: &mut dyn Raster, fx: &net::dump::Effects) {
+    if active_effects_visible() {
+        crate::influence::draw(vui, r, fx);
+    }
+}
+
+/// Draws the stock chat window unless an addon has claimed it.
+pub(crate) fn draw_chat_window(
+    wnd: &mut crate::chat::WndChat,
+    vui: &Vui,
+    r: &mut dyn Raster,
+    now: u32,
+    dt: f32,
+) {
+    if chat_window_visible() {
+        wnd.draw(vui, r, now, dt);
+    }
+}
+
+/// Draws the HUD menu carousel, suppressing only the ability/hotbar menus
+/// (indices 0, 1, 4 and 5) when an addon has claimed them.
+pub(crate) fn draw_hud_menus(
+    menus: &mut crate::hudmenu::HudMenus,
+    vui: &Vui,
+    r: &mut dyn Raster,
+    now: i64,
+    name: &dyn Fn(u32, i64) -> Vec<u16>,
+) {
+    if ability_bar_visible() || !menus.selected_is_ability_bar() {
+        menus.draw(vui, r, now, name);
     }
 }
 
@@ -76,70 +177,7 @@ fn readouts(s: &HudState, need: u32, flags: [bool; 3]) -> Vec<Readout> {
     out
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn should_suppress_quad(
-    q: &render::ui::Quad,
-    vis: &crate::fork_ext::addons::visibility::PublishedVisibility,
-) -> bool {
-    let min_x = q.pos[0][0].min(q.pos[1][0]).min(q.pos[2][0]).min(q.pos[3][0]);
-    let max_x = q.pos[0][0].max(q.pos[1][0]).max(q.pos[2][0]).max(q.pos[3][0]);
-    let min_y = q.pos[0][1].min(q.pos[1][1]).min(q.pos[2][1]).min(q.pos[3][1]);
-    let max_y = q.pos[0][1].max(q.pos[1][1]).max(q.pos[2][1]).max(q.pos[3][1]);
-
-    // 1. Compass: center [39, 54], radius ~25
-    if vis.compass && min_x >= 10.0 && max_x <= 70.0 && min_y >= 25.0 && max_y <= 85.0 {
-        return true;
-    }
-
-    // 2. Power bar: y around [43..56], x around [65..215]
-    if vis.power_bar && min_x >= 60.0 && max_x <= 215.0 && min_y >= 43.0 && max_y <= 56.0 {
-        return true;
-    }
-
-    // 3. Exp bar: y around [55..80], x around [60..215]
-    if vis.exp_bar && min_x >= 60.0 && max_x <= 215.0 && min_y >= 55.0 && max_y <= 80.0 {
-        return true;
-    }
-
-    // 4. Entire Me plate if health + power + exp are all hidden
-    if vis.health_bar
-        && vis.power_bar
-        && vis.exp_bar
-        && min_x >= 5.0
-        && max_x <= 215.0
-        && min_y >= 10.0
-        && max_y <= 85.0
-    {
-        return true;
-    }
-
-    // 5. Group display: GROUP_AT = [10, 110]
-    if vis.group && min_x >= 5.0 && max_x <= 230.0 && min_y >= 100.0 && max_y <= 360.0 {
-        return true;
-    }
-
-    // 6. Target display: TARGET_AT = [-146, 381] or bottom right
-    if vis.target && min_y >= 370.0 && max_y <= 450.0 {
-        return true;
-    }
-
-    // 7. Chat strip: [-3, 331]
-    if vis.chat && min_y >= 325.0 && max_y <= 460.0 && max_x <= 220.0 {
-        return true;
-    }
-
-    false
-}
-
 pub(super) fn draw(ui: &mut UiRaster<'_>, s: &HudState) {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let vis = crate::fork_ext::addons::visibility::published_visibility();
-        if vis.any_hidden() {
-            ui.ui.quads.retain(|q| !should_suppress_quad(q, &vis));
-        }
-    }
-
     let Some(font) = ui.assets.font else { return };
     let c = crate::settings::client();
     let labels = readouts(
@@ -167,6 +205,191 @@ pub(super) fn draw(ui: &mut UiRaster<'_>, s: &HudState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fork_ext::addons::health::InstanceToken;
+    use crate::fork_ext::addons::visibility::HudClaimsRegistry;
+
+    fn set_claims(elements: &[&str]) {
+        let mut reg = HudClaimsRegistry::new();
+        let token = InstanceToken::next().unwrap();
+        for el in elements {
+            reg.disable(el, token, "test");
+        }
+        crate::fork_ext::addons::visibility::publish_claims(&reg);
+    }
+
+    fn clear_claims() {
+        crate::fork_ext::addons::visibility::publish_claims(&HudClaimsRegistry::new());
+    }
+
+    #[derive(Default)]
+    struct BlitRecorder {
+        blits: Vec<(u32, [i32; 2])>,
+        centered: Vec<(String, [i32; 2])>,
+    }
+
+    impl Raster for BlitRecorder {
+        fn blit(&mut self, id: u32, _flags: u32, at: [i32; 2], _a: [i32; 2], _b: [i32; 2], _mode: i32, _alpha: f32) {
+            self.blits.push((id, at));
+        }
+        fn stretch_blit(&mut self, id: u32, _flags: u32, at: [i32; 2], _size: [i32; 2], _a: [i32; 2], _b: [i32; 2], _mode: i32, _alpha: f32) {
+            self.blits.push((id, at));
+        }
+        fn fill_fan(&mut self, _color: [f32; 4], _corners: [[i32; 2]; 4]) {}
+        fn blit_full(&mut self, id: u32, _flags: u32, at: [i32; 2], _mode: i32, _alpha: f32) {
+            self.blits.push((id, at));
+        }
+        fn draw_string(&mut self, at: [i32; 2], _color: [f32; 4], s: &[u16]) {
+            self.centered.push((String::from_utf16_lossy(s), at));
+        }
+        fn draw_centered_string(&mut self, at: [i32; 2], _color: [f32; 4], s: &[u16], _mode: u32) {
+            self.centered.push((String::from_utf16_lossy(s), at));
+        }
+        fn string_width(&self, _s: &[u16]) -> i32 { 0 }
+        fn point_size(&self) -> i32 { 12 }
+        fn viewport(&self) -> [i32; 4] { [0, 0, 639, 447] }
+        fn set_viewport(&mut self, _v: [i32; 4]) {}
+    }
+
+    fn test_vui() -> Vui {
+        let atlas = (0..252)
+            .map(|_| vi::ui::UiTexEntry {
+                uv1: [16, 16],
+                ..Default::default()
+            })
+            .collect();
+        Vui::new(Default::default(), Default::default(), atlas)
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_visibility_queries_mirror_claims() {
+        clear_claims();
+        assert!(compass_visible(&HudState::default()));
+        assert!(group_compass_marks_visible(&HudState::default()));
+        assert!(target_visible(&HudState::default()));
+        assert!(group_visible(&HudState::default()));
+        assert!(pet_visible(&HudState::default()));
+        assert!(power_bar_visible(&HudState::default()));
+        assert!(exp_bar_visible(&HudState::default()));
+        assert!(chat_window_visible());
+        assert!(ability_bar_visible());
+        assert!(active_effects_visible());
+
+        set_claims(&[
+            "compass_face",
+            "compass_back",
+            "group_compass_marks",
+            "target_nameplate",
+            "group_member_panel",
+            "pet_panel",
+            "power_bar",
+            "main_exp_bar",
+            "secondary_exp_bar",
+            "chat_window",
+            "hotbar_draw_compact",
+            "hotbar_draw_expanded",
+            "active_effects",
+        ]);
+        assert!(!compass_visible(&HudState::default()));
+        assert!(!group_compass_marks_visible(&HudState::default()));
+        assert!(!target_visible(&HudState::default()));
+        assert!(!group_visible(&HudState::default()));
+        assert!(!pet_visible(&HudState::default()));
+        assert!(!power_bar_visible(&HudState::default()));
+        assert!(!exp_bar_visible(&HudState::default()));
+        assert!(!chat_window_visible());
+        assert!(!ability_bar_visible());
+        assert!(!active_effects_visible());
+
+        clear_claims();
+        assert!(compass_visible(&HudState::default()));
+        assert!(chat_window_visible());
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_active_effects_wrapper_draws_only_while_unclaimed() {
+        let vui = test_vui();
+        let mut fx = net::dump::Effects::default();
+        fx.count = 1;
+        fx.icon[0] = 123;
+
+        clear_claims();
+        let mut r = BlitRecorder::default();
+        draw_active_effects(&vui, &mut r, &fx);
+        let shown = r.blits.len();
+        assert!(shown > 0, "active effects bar draws when unclaimed");
+
+        set_claims(&["active_effects"]);
+        let mut r = BlitRecorder::default();
+        draw_active_effects(&vui, &mut r, &fx);
+        assert_eq!(r.blits.len(), 0, "active effects bar does not draw when claimed");
+
+        clear_claims();
+        let mut r = BlitRecorder::default();
+        draw_active_effects(&vui, &mut r, &fx);
+        assert_eq!(r.blits.len(), shown, "releasing the claim restores drawing");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_chat_window_wrapper_draws_only_while_unclaimed() {
+        let vui = test_vui();
+        let mut wnd = crate::chat::WndChat::new();
+        wnd.mode = 1;
+        wnd.text.add_text(&crate::ui::wide("hello"), [1.0; 4], 0, |_| 0);
+
+        clear_claims();
+        let mut r = BlitRecorder::default();
+        draw_chat_window(&mut wnd, &vui, &mut r, 0, 0.0);
+        let shown = r.blits.len() + r.centered.len();
+        assert!(shown > 0, "chat window draws when unclaimed");
+
+        set_claims(&["chat_window"]);
+        let mut r = BlitRecorder::default();
+        draw_chat_window(&mut wnd, &vui, &mut r, 0, 0.0);
+        assert_eq!(r.blits.len() + r.centered.len(), 0, "chat window does not draw when claimed");
+
+        clear_claims();
+        let mut r = BlitRecorder::default();
+        draw_chat_window(&mut wnd, &vui, &mut r, 0, 0.0);
+        assert_eq!(r.blits.len() + r.centered.len(), shown, "releasing the claim restores drawing");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_hud_menus_wrapper_draws_only_ability_bars_while_unclaimed() {
+        use crate::hudmenu::HudMenus;
+        let vui = test_vui();
+        let mut menus = HudMenus::default();
+        menus.build(&Default::default(), &Default::default(), &Default::default(), Default::default());
+        // Menu 0 is the first ability bar.
+        menus.sel = 0;
+
+        clear_claims();
+        let mut r = BlitRecorder::default();
+        draw_hud_menus(&mut menus, &vui, &mut r, 0, &|_, _| Vec::new());
+        let shown = r.blits.len();
+        assert!(shown > 0, "ability bar menu draws when unclaimed");
+
+        set_claims(&["hotbar_draw_compact", "hotbar_draw_expanded"]);
+        let mut r = BlitRecorder::default();
+        draw_hud_menus(&mut menus, &vui, &mut r, 0, &|_, _| Vec::new());
+        assert_eq!(r.blits.len(), 0, "ability bar menu does not draw when claimed");
+
+        // Items menu (2) must still draw while ability bars are claimed.
+        menus.sel = 2;
+        let mut r = BlitRecorder::default();
+        draw_hud_menus(&mut menus, &vui, &mut r, 0, &|_, _| Vec::new());
+        assert!(r.blits.len() > 0, "items menu still draws while ability bars are claimed");
+
+        clear_claims();
+        menus.sel = 0;
+        let mut r = BlitRecorder::default();
+        draw_hud_menus(&mut menus, &vui, &mut r, 0, &|_, _| Vec::new());
+        assert_eq!(r.blits.len(), shown, "releasing the claim restores drawing");
+    }
+
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn forge_health_visibility_suppresses_only_health_gauge_and_percent_label() {

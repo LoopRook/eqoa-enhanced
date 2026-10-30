@@ -7549,7 +7549,7 @@ impl Play {
             r.ui.anchor = Anchor::Left;
             r.ui.vertical = Vertical::Top;
             if crate::influence::shown(self.mode) {
-                crate::influence::draw(vui, &mut r, &self.effects);
+                crate::hud::fork_hud::draw_active_effects(vui, &mut r, &self.effects);
             }
             r.ui.anchor = Anchor::Right;
             r.ui.vertical = Vertical::Bottom;
@@ -7558,7 +7558,7 @@ impl Play {
                     let rr = &r;
                     c.text.add_text(&crate::ui::wide(&text), color, at, |s| vi::ui::Raster::string_width(rr, s));
                 }
-                c.draw(vui, &mut r, now, dt);
+                crate::hud::fork_hud::draw_chat_window(c, vui, &mut r, now, dt);
                 self.cues.extend(c.cues.drain(..).map(crate::sound::Cue::Ui));
             }
             r.ui.anchor = Anchor::Middle;
@@ -7680,7 +7680,7 @@ impl Play {
                         _ => Vec::new(),
                     }
                 };
-                self.hud_menus.draw(vui, &mut r, now as i64, &name);
+                crate::hud::fork_hud::draw_hud_menus(&mut self.hud_menus, vui, &mut r, now as i64, &name);
             }
             // `EQOA_GLYPHS=1`: the button glyphs drawn, whenever they change
             if std::env::var_os("EQOA_GLYPHS").is_some() && r.glyphs.list != self.glyphs.list {
