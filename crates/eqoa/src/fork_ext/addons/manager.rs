@@ -168,6 +168,7 @@ impl Manager {
                 i.visibility.suspend();
             }
         }
+        super::visibility::publish(false);
     }
     pub fn suspend_sound(&self) {
         for e in &self.entries {
@@ -318,6 +319,7 @@ impl Manager {
             }
         }
         self.awaiting_render = false;
+        super::visibility::publish_claims(&self.hud_claims.borrow());
     }
     pub fn shutdown(&mut self) {
         super::visibility::publish(false);

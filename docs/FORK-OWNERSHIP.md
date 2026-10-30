@@ -64,16 +64,16 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/eqoa/src/binds.rs` | 93 | 80 | Restored/map controls and saved binding defaults. |
 | `crates/eqoa/src/client_image.rs` | 10 | 0 | Map theme font/image resources. |
 | `crates/eqoa/src/hideui.rs` | 3 | 3 | Restored map and tracker visibility. |
-| `crates/eqoa/src/hud.rs` | 299 | 8 | Reviewed restored HUD and native addon health visibility field/gauge seam; implementation in fork_ext. |
+| `crates/eqoa/src/hud.rs` | 314 | 14 | Reviewed restored HUD and native addon hide-UI draw-site gates for compass, gauges, group/pet/target panels, and group compass marks; implementation in fork_ext. |
 | `crates/eqoa/src/input.rs` | 32 | 3 | Map controls and focus/input behavior. |
 | `crates/eqoa/src/lod.rs` | 9 | 8 | Restored map terrain observation. |
 | `crates/eqoa/src/main.rs` | 30 | 0 | Restored module registration, fork_ext boundary, and report policy module. |
 | `crates/eqoa/src/options.rs` | 196 | 43 | Existing restored option entries plus one adapter reference per fork option hook. |
-| `crates/eqoa/src/play.rs` | 756 | 48 | Reviewed restored state plus native health receipt/reset and cached HUD invalidation hooks; implementation in fork_ext. |
+| `crates/eqoa/src/play.rs` | 761 | 53 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, and addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus; implementation in fork_ext. |
 | `crates/eqoa/src/report.rs` | 18 | 9 | Fork reporting policy transport integration. |
 | `crates/eqoa/src/settings.rs` | 333 | 22 | Restored map/quest settings plus one adapter reference per settings hook. |
 | `crates/eqoa/src/touch.rs` | 79 | 2 | Restored map and tracker touch input. |
-| `crates/eqoa/src/ui.rs` | 9 | 5 | Map UI state and input integration. |
+| `crates/eqoa/src/ui.rs` | 10 | 6 | Map UI state and input integration plus one-line pub(crate) visibility on UiAssets.surfaces for fork-owned HUD tests. |
 | `crates/eqoa/src/update.rs` | 3 | 3 | Fork release routing and fork-owned notes; updater mechanics unchanged. |
 | `crates/eqoa/src/updatewnd.rs` | 3 | 2 | Fork release page link and regression assertions. |
 | `crates/eqoa/src/viewer.rs` | 233 | 12 | Restored map/quest integration plus reviewed native lazy addon Runtime state/init, owned window/raw input routing, pregame/live post-resolve frames and exiting cleanup. |

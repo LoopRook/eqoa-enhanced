@@ -5,6 +5,7 @@ use super::health::HealthSnapshot;
 pub(crate) struct GameHealth {
     received: Option<(i32, i32)>,
     last_hud_hidden: bool,
+    last_vis: super::visibility::PublishedVisibility,
 }
 impl GameHealth {
     pub fn receive(&mut self, bytes: &[u8]) {
@@ -24,6 +25,11 @@ impl GameHealth {
     pub fn hud_changed(&mut self, hidden: bool) -> bool {
         let changed = self.last_hud_hidden != hidden;
         self.last_hud_hidden = hidden;
+        changed
+    }
+    pub fn vis_changed(&mut self, vis: super::visibility::PublishedVisibility) -> bool {
+        let changed = self.last_vis != vis;
+        self.last_vis = vis;
         changed
     }
 }

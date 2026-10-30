@@ -191,6 +191,7 @@ struct Gauge {
 /// its health as the player's own frame stacks them (10 below), lit as its
 /// health is. A member's bar is 46 high and the next 48 on (`DrawGroup`).
 fn member_gauges(s: &HudState) -> Vec<Gauge> {
+    if !fork_hud::group_visible(s) { return Vec::new(); }
     s.group
         .iter()
         .enumerate()
@@ -207,6 +208,7 @@ fn member_gauges(s: &HudState) -> Vec<Gauge> {
 /// below it): each where there is one to show, the target of target's only
 /// with its bar.
 fn target_gauges(s: &HudState) -> Vec<Gauge> {
+    if !fork_hud::target_visible(s) { return Vec::new(); }
     let mut out = Vec::new();
     if s.target_name.is_none() {
         return out;
@@ -287,9 +289,7 @@ impl Hud {
         }
         p[1] += 10;
         let v = if s.max_power == 0 { 0.0 } else { s.power as f32 / s.max_power as f32 };
-        if fork_hud::power_bar_visible(s) {
-            draw_gauge(vui, ui, 9, 136, p, true, v);
-        }
+        if fork_hud::power_bar_visible(s) { draw_gauge(vui, ui, 9, 136, p, true, v); }
         p[1] += 10;
         let need = exp_for_level(s.level + 1);
         let v = s.exp as f32 / need as f32;
@@ -311,10 +311,8 @@ impl Hud {
             }
         }
         let part = part.clamp(0.0, 1.0);
-        if fork_hud::exp_bar_visible(s) {
-            draw_gauge(vui, ui, 152, 151, [p[0], p[1] + 10], true, part);
-            draw_gauge(vui, ui, 8, 136, p, true, v);
-        }
+        if fork_hud::secondary_exp_bar_visible(s) { draw_gauge(vui, ui, 152, 151, [p[0], p[1] + 10], true, part); }
+        if fork_hud::main_exp_bar_visible(s) { draw_gauge(vui, ui, 8, 136, p, true, v); }
         self.draw_group(vui, ui, GROUP_AT, s);
         for g in member_gauges(s) {
             draw_gauge(vui, ui, g.bar, 136, g.at, g.lit, g.v);
@@ -329,10 +327,8 @@ impl Hud {
         }
         self.draw_target(vui, ui, TARGET_AT, s);
         self.draw_target_of_target(vui, ui, TOT_AT, s);
-        if fork_hud::target_visible(s) {
-            for g in target_gauges(s) {
-                draw_gauge(vui, ui, g.bar, 136, g.at, g.lit, g.v);
-            }
+        for g in target_gauges(s) {
+            draw_gauge(vui, ui, g.bar, 136, g.at, g.lit, g.v);
         }
         self.draw_report(vui, ui, [20, 421]);
         fork_hud::draw(ui, s);
@@ -361,6 +357,7 @@ impl Hud {
     /// without a target or a name. A pointer on it asks the game's Assist
     /// Target (`Pick::TargetsTarget`).
     fn draw_target_of_target(&mut self, vui: &Vui, ui: &mut UiRaster, at: [i32; 2], s: &HudState) {
+        if !fork_hud::target_visible(s) { return; }
         let Some(name) = s.target_of_target.as_deref().filter(|_| s.target_name.is_some()) else { return };
         self.note(ui, [at[0], at[1], at[0] + TOT_WIDTH, at[1] + vui.entry(26).uv1[1]], Pick::TargetsTarget);
         vui.blit_bar(ui, &[], [0.0; 4], at, 25, 26, TOT_WIDTH, 3, self.glow0, 0, true);
@@ -520,32 +517,31 @@ impl Hud {
         let start = *self.patch_start.get_or_insert(s.time_ms);
         let phase = (s.time_ms - start) % 1500;
         let (uv, size, tex_size) = ([3.0f32, 3.0], [10, 10], 16.0f32);
-        if fork_hud::group_compass_marks_visible(s) {
-            for m in &s.patches {
-                if Some(m.id) == s.self_id || (phase > 1350 && s.target == m.id) {
-                    continue;
-                }
-                let Some(at) = m.pos else { continue };
-                let d = [at[0] - s.camera[0], at[1] - s.camera[1], at[2] - s.camera[2]];
-                let Some(p) = patch_point(s.heading, d) else { continue };
-                let (hx, hy) = ((size[0] >> 1) as f32, (size[1] >> 1) as f32);
-                let color = match m.index {
-                    1 => [0.0, 1.0, 0.0, 1.0],
-                    2 => [0.0, 0.0, 1.0, 1.0],
-                    3 => [0.0, 1.0, 1.0, 1.0],
-                    _ => [1.0, 1.0, 0.0, 1.0],
-                };
-                let (u0, v0) = (uv[0] / tex_size, uv[1] / tex_size);
-                let (u1, v1) = ((uv[0] + size[0] as f32) / tex_size, (uv[1] + size[1] as f32) / tex_size);
-                ui.ui.push(Quad {
-                    tex,
-                    blend: 0,
-                    pos: [[p[0] - hx, p[1] - hy], [p[0] + hx, p[1] - hy], [p[0] + hx, p[1] + hy], [p[0] - hx, p[1] + hy]],
-                    uv: [[u0, v0], [u1, v0], [u1, v1], [u0, v1]],
-                    color,
-                    clip: None,
-                });
+        for m in &s.patches {
+            if !fork_hud::group_compass_marks_visible(s) { continue; }
+            if Some(m.id) == s.self_id || (phase > 1350 && s.target == m.id) {
+                continue;
             }
+            let Some(at) = m.pos else { continue };
+            let d = [at[0] - s.camera[0], at[1] - s.camera[1], at[2] - s.camera[2]];
+            let Some(p) = patch_point(s.heading, d) else { continue };
+            let (hx, hy) = ((size[0] >> 1) as f32, (size[1] >> 1) as f32);
+            let color = match m.index {
+                1 => [0.0, 1.0, 0.0, 1.0],
+                2 => [0.0, 0.0, 1.0, 1.0],
+                3 => [0.0, 1.0, 1.0, 1.0],
+                _ => [1.0, 1.0, 0.0, 1.0],
+            };
+            let (u0, v0) = (uv[0] / tex_size, uv[1] / tex_size);
+            let (u1, v1) = ((uv[0] + size[0] as f32) / tex_size, (uv[1] + size[1] as f32) / tex_size);
+            ui.ui.push(Quad {
+                tex,
+                blend: 0,
+                pos: [[p[0] - hx, p[1] - hy], [p[0] + hx, p[1] - hy], [p[0] + hx, p[1] + hy], [p[0] - hx, p[1] + hy]],
+                uv: [[u0, v0], [u1, v0], [u1, v1], [u0, v1]],
+                color,
+                clip: None,
+            });
         }
         for (w, color) in [(s.group_waypoint, crate::map::group_waypoint::COLOR), (s.waypoint, crate::map::WAYPOINT)] {
             let Some(p) = w.map(|w| waypoint_point(s.heading, s.camera, w)) else { continue };
@@ -792,5 +788,4 @@ mod tests {
             }
         }
     }
-
 }

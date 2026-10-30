@@ -3892,11 +3892,11 @@ impl Play {
             // its bottom (each answers in its own place)
             let (side, up) = (render::ui::side(size), render::ui::top(size));
             // the compass opens the map (the touch screen's way to it)
-            if crate::map::on_compass([f[0] + side, f[1] + up]) && self.hud.is_some() {
+            if crate::hud::fork_hud::compass_visible(&crate::hud::HudState::default()) && crate::map::on_compass([f[0] + side, f[1] + up]) && self.hud.is_some() {
                 self.map.show();
                 return true;
             }
-            if let Some(k) = self.hud_menus.point([f[0] - side, f[1] + up]) {
+            if crate::hud::fork_hud::hud_menu_visible(&self.hud_menus) && let Some(k) = self.hud_menus.point([f[0] - side, f[1] + up]) {
                 // the pad key it stands for in S2's record, let go at once
                 self.note_hud_key(k, true);
                 self.hud_key(k);
@@ -3904,7 +3904,7 @@ impl Play {
                 return true;
             }
             // the chat box: the chat line, as R3 opens it
-            if self.wnd_chat.as_ref().is_some_and(|w| w.contains([f[0] - side, f[1] - up])) {
+            if crate::hud::fork_hud::chat_window_visible() && self.wnd_chat.as_ref().is_some_and(|w| w.contains([f[0] - side, f[1] - up])) {
                 self.open_edit(0xB0F0000, 128, -1, false);
                 self.edit.title = self.chat_title();
                 return true;

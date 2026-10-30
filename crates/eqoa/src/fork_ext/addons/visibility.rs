@@ -527,11 +527,12 @@ pub(crate) fn install_standalone_ui_adapter(host: &Host) -> mlua::Result<()> {
     install_managed_health_adapter(host, &lease)
 }
 
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct PublishedVisibility {
     pub health_bar: bool,
     pub power_bar: bool,
-    pub exp_bar: bool,
+    pub main_exp_bar: bool,
+    pub secondary_exp_bar: bool,
     pub compass: bool,
     pub target: bool,
     pub group_panel: bool,
@@ -542,11 +543,13 @@ pub struct PublishedVisibility {
     pub active_effects: bool,
 }
 
+#[allow(dead_code)]
 impl PublishedVisibility {
     pub fn any_hidden(&self) -> bool {
         self.health_bar
             || self.power_bar
-            || self.exp_bar
+            || self.main_exp_bar
+            || self.secondary_exp_bar
             || self.compass
             || self.target
             || self.group_panel
@@ -562,7 +565,8 @@ thread_local! {
     static PUBLISHED_VIS: Cell<PublishedVisibility> = const { Cell::new(PublishedVisibility {
         health_bar: false,
         power_bar: false,
-        exp_bar: false,
+        main_exp_bar: false,
+        secondary_exp_bar: false,
         compass: false,
         target: false,
         group_panel: false,
@@ -575,16 +579,18 @@ thread_local! {
 }
 
 pub(crate) fn publish(hidden: bool) {
-    let mut vis = PUBLISHED_VIS.get();
-    vis.health_bar = hidden;
-    PUBLISHED_VIS.set(vis);
+    PUBLISHED_VIS.set(PublishedVisibility {
+        health_bar: hidden,
+        ..PublishedVisibility::default()
+    });
 }
 
 pub(crate) fn publish_claims(claims: &HudClaimsRegistry) {
     PUBLISHED_VIS.set(PublishedVisibility {
         health_bar: claims.is_hidden("health_bar"),
         power_bar: claims.is_hidden("power_bar"),
-        exp_bar: claims.is_hidden("main_exp_bar") || claims.is_hidden("secondary_exp_bar"),
+        main_exp_bar: claims.is_hidden("main_exp_bar"),
+        secondary_exp_bar: claims.is_hidden("secondary_exp_bar"),
         compass: claims.is_hidden("compass_face") || claims.is_hidden("compass_back"),
         target: claims.is_hidden("target_nameplate"),
         group_panel: claims.is_hidden("group_member_panel"),

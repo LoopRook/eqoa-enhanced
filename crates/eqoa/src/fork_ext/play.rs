@@ -454,7 +454,14 @@ pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) 
             play.chat_line(&msg);
         }
         let hidden = health_hidden(play);
-        play.forge_health.hud_changed(hidden) || step || loading_changed
+        let vis = if play.forge_snapshot(None).health.is_available() && !play.loading_up() {
+            crate::fork_ext::addons::visibility::published_visibility()
+        } else {
+            Default::default()
+        };
+        let hud_changed = play.forge_health.hud_changed(hidden);
+        let vis_changed = play.forge_health.vis_changed(vis);
+        hud_changed || vis_changed || step || loading_changed
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -602,6 +609,23 @@ mod tests {
         assert!(health_redraw(&mut p, false, false));
         publish(false);
         assert!(health_redraw(&mut p, false, false));
+        let mut reg = crate::fork_ext::addons::visibility::HudClaimsRegistry::new();
+        let tok = crate::fork_ext::addons::health::InstanceToken::next().unwrap();
+        reg.disable("compass_face", tok, "test");
+        crate::fork_ext::addons::visibility::publish_claims(&reg);
+        assert!(
+            health_redraw(&mut p, false, false),
+            "non-health PublishedVisibility change must invalidate cached HUD quads"
+        );
+        assert!(
+            !health_redraw(&mut p, false, false),
+            "unchanged non-health visibility can replay cache"
+        );
+        publish(false);
+        assert!(
+            health_redraw(&mut p, false, false),
+            "releasing non-health visibility claim invalidates cached HUD quads"
+        );
         assert!(health_redraw(&mut p, true, false));
         assert!(health_redraw(&mut p, false, true));
         p.disconnected = Some(0);
@@ -615,6 +639,143 @@ mod tests {
             !p.forge_snapshot(None).managed().in_game,
             "loading must not display health overlay"
         );
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_play_click_gates_hidden_compass_ability_bar_and_chat_while_keys_and_typing_work() {
+        use crate::fork_ext::addons::{
+            health::InstanceToken,
+            visibility::{HudClaimsRegistry, publish, publish_claims},
+        };
+        use crate::mouse::Click;
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                publish(false);
+            }
+        }
+        let _reset = Reset;
+        publish(false);
+
+        let mut p = play();
+        let _ = p.loading.wait.take();
+        let make_vui = || {
+            let atlas = (0..252)
+                .map(|_| vi::ui::UiTexEntry {
+                    uv1: [16, 16],
+                    ..Default::default()
+                })
+                .collect();
+            crate::ui::Vui::new(Default::default(), Default::default(), atlas)
+        };
+        let vui = make_vui();
+        p.hud = Some((
+            make_vui(),
+            Default::default(),
+            crate::hud::Hud::new(),
+        ));
+        p.hud_menus.build(
+            &Default::default(),
+            &Default::default(),
+            &Default::default(),
+            Default::default(),
+        );
+        p.hud_menus.sel = 0;
+
+        let mut wnd = crate::chat::WndChat::new();
+        wnd.mode = 1;
+        wnd.text.add_text(&crate::ui::wide("hello"), [1.0; 4], 0, |_| 0);
+        struct DummyRaster;
+        impl vi::ui::Raster for DummyRaster {
+            fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+            fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+            fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
+            fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
+            fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) {}
+            fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) {}
+            fn string_width(&self, _: &[u16]) -> i32 { 0 }
+            fn point_size(&self) -> i32 { 12 }
+            fn viewport(&self) -> [i32; 4] { [0, 0, 639, 447] }
+            fn set_viewport(&mut self, _: [i32; 4]) {}
+        }
+        wnd.draw(&vui, &mut DummyRaster, 0, 0.0);
+        assert!(wnd.contains([422.0, 420.0]));
+        p.wnd_chat = Some(wnd);
+
+        let size = (1280, 720);
+        let (side, up) = (render::ui::side(size), render::ui::top(size));
+        let compass_win = render::ui::window_from_frame(size, [39.0 - side, 54.0 - up]);
+        let menu_at = [430, 25];
+        let ability_win = render::ui::window_from_frame(
+            size,
+            [menu_at[0] as f32 + 10.0 + side, menu_at[1] as f32 + 10.0 - up],
+        );
+        let chat_win = render::ui::window_from_frame(size, [422.0 + side, 420.0 + up]);
+
+        let mut reg = HudClaimsRegistry::new();
+        let tok = InstanceToken::next().unwrap();
+        for el in [
+            "compass_face",
+            "compass_back",
+            "hotbar_draw_compact",
+            "hotbar_draw_expanded",
+            "chat_window",
+        ] {
+            reg.disable(el, tok, "test");
+        }
+        publish_claims(&reg);
+
+        // Clicks on hidden compass, ability bar, and chat window do nothing
+        assert!(
+            !p.point(Click::Target(compass_win[0] as f64, compass_win[1] as f64), size, false),
+            "click on hidden compass must do nothing"
+        );
+        assert!(!p.map.open);
+
+        assert!(
+            !p.point(Click::Target(ability_win[0] as f64, ability_win[1] as f64), size, false),
+            "click on hidden ability bar must do nothing"
+        );
+        assert_eq!(p.hud_menus.sel, 0);
+
+        assert!(
+            !p.point(Click::Target(chat_win[0] as f64, chat_win[1] as f64), size, false),
+            "click on hidden chat window must do nothing"
+        );
+        assert_eq!(p.mode, 0);
+
+        // Keyboard/pad hotbar keys and chat typing still work while hidden
+        p.hud_key(crate::hudmenu::Key::Right);
+        assert_ne!(p.hud_menus.sel, 0, "pad/keyboard hotbar keys still work while hidden");
+        p.hud_menus.sel = 0;
+
+        p.open_edit(0xB0F0000, 128, -1, false);
+        assert_eq!(p.mode, 2, "chat typing still opens while chat window is hidden");
+        p.mode = 0;
+
+        // Unhidden: clicks on compass, ability bar, and chat window work
+        publish(false);
+
+        assert!(
+            p.point(Click::Target(compass_win[0] as f64, compass_win[1] as f64), size, false),
+            "click on unhidden compass opens map"
+        );
+        assert!(p.map.open);
+        p.map.open = false;
+
+        assert!(
+            p.point(Click::Target(ability_win[0] as f64, ability_win[1] as f64), size, false),
+            "click on unhidden ability bar switches menu"
+        );
+        assert_ne!(p.hud_menus.sel, 0);
+        p.hud_menus.sel = 0;
+
+        assert!(
+            p.point(Click::Target(chat_win[0] as f64, chat_win[1] as f64), size, false),
+            "click on unhidden chat window opens chat line"
+        );
+        assert_eq!(p.mode, 2);
     }
 
     #[test]

@@ -570,8 +570,10 @@ fn render_managed(
     if result.is_err() {
         manager.suspend_health();
         manager.suspend_sound();
+        super::visibility::publish(false);
+    } else {
+        super::visibility::publish_claims(&manager.hud_claims().borrow());
     }
-    super::visibility::publish(result.is_ok() && manager.health_hidden());
     result
 }
 
