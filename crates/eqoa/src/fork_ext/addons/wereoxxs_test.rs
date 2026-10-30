@@ -262,6 +262,17 @@ fn rich_in_game_snapshot() -> Snapshot {
     msg1.seq = 2;
     snap.chat.messages[1] = msg1;
 
+    // Target entity
+    snap.player.target_entity_id = 2002;
+    let mut target_ent = super::entity::EntitySnapshot::default();
+    target_ent.id = 2002;
+    target_ent.is_populated = true;
+    target_ent.level = 15;
+    target_ent.health_percent_255 = 180;
+    target_ent.disposition = Some(1); // Hostile
+    copy_str_to_array("Moss Snake", &mut target_ent.name, &mut target_ent.name_len);
+    snap.entities.entities[0] = target_ent;
+
     snap
 }
 
@@ -600,5 +611,76 @@ fn forge_wereoxxs_complete_symbol_surface_contract() {
 
     gpu.begin();
     bridge.invoke(|| host.run(&check_script)).unwrap();
+    gpu.render();
+}
+
+#[test]
+fn forge_wereoxxs_all_windows_rendered_without_drawlist_nil_errors() {
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!(
+            "SKIP forge_wereoxxs_all_windows_rendered_without_drawlist_nil_errors: reference scripts root not found"
+        );
+        return;
+    };
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.id == "wereoxxs_ui")
+        .expect("wereoxxs_ui package must be discovered");
+
+    let Some(mut gpu) = TestGpu::new() else {
+        eprintln!("SKIP forge_wereoxxs_all_windows_rendered_without_drawlist_nil_errors: GPU fixture unavailable");
+        return;
+    };
+
+    let host = Host::for_addon(addon).expect("Host::for_addon must succeed");
+    let bridge = Bridge::install(&host).unwrap();
+
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, addon).unwrap();
+
+    let font_bank = Rc::new(RefCell::new(super::fonts::FontBank::new(
+        0,
+        super::fonts::current_context_epoch(),
+    )));
+    super::fonts::FontBank::install_for_addon(&font_bank, &host.lua, addon).unwrap();
+
+    let snap = rich_in_game_snapshot();
+    host.snapshot.set(snap);
+
+    // Frame 1: Initial load
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    // Turn on ALL 8 windows
+    let win_table: Table = host.lua.globals().get("windows").unwrap();
+    win_table.set("bars", true).unwrap();
+    win_table.set("casting", true).unwrap();
+    win_table.set("player", true).unwrap();
+    win_table.set("target", true).unwrap();
+    win_table.set("group", true).unwrap();
+    win_table.set("compass", true).unwrap();
+    win_table.set("meter", true).unwrap();
+    win_table.set("chat", true).unwrap();
+
+    // Frame 2: Render with all windows enabled (exercising AddText, AddImage, PushClipRect, PopClipRect)
+    gpu.begin();
+    bridge
+        .invoke(|| {
+            host.lua
+                .load("cast_preview_ms = math.floor(ImGui.GetTime() * 1000)")
+                .exec()?;
+            host.run_addon(addon)
+        })
+        .expect("wereoxxs_ui with all windows enabled must render without error");
+    gpu.render();
+
+    // Frame 3: Render again to ensure state stability across frames
+    gpu.begin();
+    bridge
+        .invoke(|| host.run_addon(addon))
+        .expect("wereoxxs_ui subsequent frame must render without error");
     gpu.render();
 }

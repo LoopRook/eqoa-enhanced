@@ -9,7 +9,7 @@ use std::{
     collections::HashMap,
     fs,
     io::Read,
-    path::{Path, PathBuf},
+    path::PathBuf,
     rc::Rc,
 };
 
@@ -581,6 +581,7 @@ pub(crate) fn decode_png_to_rgba8(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use crate::fork_ext::addons::bridge::Bridge;
     use crate::fork_ext::addons::discovery::discover;
     use crate::fork_ext::addons::host::Host;

@@ -7,7 +7,6 @@ use super::*;
 // reserve that full-circle upper bound, including quarter-arc end points.
 const GEOMETRY_LIMIT: usize = 196_608;
 const AUTO_POINTS: usize = 520;
-const ROUND_RECT_POINTS: usize = AUTO_POINTS;
 
 #[derive(Clone, Copy)]
 pub(super) enum Target {
@@ -195,7 +194,210 @@ fn point(v: AnyUserData) -> Result<sys::ImVec2_c> {
     Ok(v.raw())
 }
 
+fn texture_ref(val: mlua::Value) -> Result<sys::ImTextureRef_c> {
+    match val {
+        mlua::Value::UserData(ud) => super::super::textures::Textures::raw(&ud),
+        mlua::Value::LightUserData(lud) => Ok(sys::ImTextureRef_c {
+            _TexData: lud.0.cast(),
+            _TexID: lud.0 as u64,
+        }),
+        _ => Err(mlua::Error::runtime("expected texture handle or pointer")),
+    }
+}
+
 pub(super) fn methods<M: UserDataMethods<DrawList>>(m: &mut M) {
+    m.add_method(
+        "AddText",
+        |_lua, d, args: mlua::MultiValue| {
+            let vec: Vec<mlua::Value> = args.into_iter().collect();
+            match vec.len() {
+                3 => {
+                    let pos = point(match &vec[0] {
+                        mlua::Value::UserData(ud) => ud.clone(),
+                        _ => return Err(mlua::Error::runtime("AddText arg 1 must be ImVec2")),
+                    })?;
+                    let col = match &vec[1] {
+                        mlua::Value::Integer(i) => color(*i)?,
+                        mlua::Value::Number(n) => color(*n as i64)?,
+                        _ => return Err(mlua::Error::runtime("AddText arg 2 must be color")),
+                    };
+                    let text_str = match &vec[2] {
+                        mlua::Value::String(s) => s.to_str()?.to_string(),
+                        mlua::Value::Integer(i) => i.to_string(),
+                        mlua::Value::Number(n) => n.to_string(),
+                        other => other.to_string()?,
+                    };
+                    let c_text = text(&text_str)?;
+                    let points = text_str.len().max(1);
+                    d.emit(points, |p| unsafe {
+                        sys::ImDrawList_AddText_Vec2(
+                            p,
+                            pos,
+                            col,
+                            c_text.as_ptr(),
+                            std::ptr::null(),
+                        )
+                    })
+                }
+                5 => {
+                    let font_ud = match &vec[0] {
+                        mlua::Value::UserData(ud) => ud.clone(),
+                        _ => return Err(mlua::Error::runtime("AddText arg 1 must be font userdata")),
+                    };
+                    let font_size = match &vec[1] {
+                        mlua::Value::Number(n) => finite(*n as f32)?,
+                        mlua::Value::Integer(i) => finite(*i as f32)?,
+                        _ => return Err(mlua::Error::runtime("AddText arg 2 must be font size number")),
+                    };
+                    let pos = point(match &vec[2] {
+                        mlua::Value::UserData(ud) => ud.clone(),
+                        _ => return Err(mlua::Error::runtime("AddText arg 3 must be ImVec2")),
+                    })?;
+                    let col = match &vec[3] {
+                        mlua::Value::Integer(i) => color(*i)?,
+                        mlua::Value::Number(n) => color(*n as i64)?,
+                        _ => return Err(mlua::Error::runtime("AddText arg 4 must be color")),
+                    };
+                    let text_str = match &vec[4] {
+                        mlua::Value::String(s) => s.to_str()?.to_string(),
+                        mlua::Value::Integer(i) => i.to_string(),
+                        mlua::Value::Number(n) => n.to_string(),
+                        other => other.to_string()?,
+                    };
+                    let font = font_ud.borrow::<super::super::fonts::LuaImFont>()?;
+                    let raw_font = match &*font.state.borrow() {
+                        super::super::fonts::FontHandleState::Ready { raw_font, .. } => *raw_font,
+                        _ => std::ptr::null_mut(),
+                    };
+                    let c_text = text(&text_str)?;
+                    let points = text_str.len().max(1);
+                    d.emit(points, |p| unsafe {
+                        if raw_font.is_null() {
+                            sys::ImDrawList_AddText_Vec2(
+                                p,
+                                pos,
+                                col,
+                                c_text.as_ptr(),
+                                std::ptr::null(),
+                            )
+                        } else {
+                            sys::ImDrawList_AddText_FontPtr(
+                                p,
+                                raw_font,
+                                font_size,
+                                pos,
+                                col,
+                                c_text.as_ptr(),
+                                std::ptr::null(),
+                                0.0,
+                                std::ptr::null(),
+                            )
+                        }
+                    })
+                }
+                _ => Err(mlua::Error::runtime(
+                    "invalid AddText arguments: expected (pos, col, text) or (font, font_size, pos, col, text)",
+                )),
+            }
+        },
+    );
+
+    m.add_method(
+        "AddImage",
+        |_lua, d, args: mlua::MultiValue| {
+            let vec: Vec<mlua::Value> = args.into_iter().collect();
+            match vec.len() {
+                3 => {
+                    let tex = texture_ref(vec[0].clone())?;
+                    let p_min = point(match &vec[1] {
+                        mlua::Value::UserData(ud) => ud.clone(),
+                        _ => return Err(mlua::Error::runtime("AddImage arg 2 must be ImVec2")),
+                    })?;
+                    let p_max = point(match &vec[2] {
+                        mlua::Value::UserData(ud) => ud.clone(),
+                        _ => return Err(mlua::Error::runtime("AddImage arg 3 must be ImVec2")),
+                    })?;
+                    let uv_min = sys::ImVec2_c { x: 0.0, y: 0.0 };
+                    let uv_max = sys::ImVec2_c { x: 1.0, y: 1.0 };
+                    let col = 0xFFFFFFFFu32;
+                    d.emit(4, |p| unsafe {
+                        sys::ImDrawList_AddImage(p, tex, p_min, p_max, uv_min, uv_max, col)
+                    })
+                }
+                5 => {
+                    let tex = texture_ref(vec[0].clone())?;
+                    let p_min = point(match &vec[1] {
+                        mlua::Value::UserData(ud) => ud.clone(),
+                        _ => return Err(mlua::Error::runtime("AddImage arg 2 must be ImVec2")),
+                    })?;
+                    let p_max = point(match &vec[2] {
+                        mlua::Value::UserData(ud) => ud.clone(),
+                        _ => return Err(mlua::Error::runtime("AddImage arg 3 must be ImVec2")),
+                    })?;
+                    let uv_min = point(match &vec[3] {
+                        mlua::Value::UserData(ud) => ud.clone(),
+                        _ => return Err(mlua::Error::runtime("AddImage arg 4 must be ImVec2")),
+                    })?;
+                    let uv_max = point(match &vec[4] {
+                        mlua::Value::UserData(ud) => ud.clone(),
+                        _ => return Err(mlua::Error::runtime("AddImage arg 5 must be ImVec2")),
+                    })?;
+                    let col = 0xFFFFFFFFu32;
+                    d.emit(4, |p| unsafe {
+                        sys::ImDrawList_AddImage(p, tex, p_min, p_max, uv_min, uv_max, col)
+                    })
+                }
+                6 => {
+                    let tex = texture_ref(vec[0].clone())?;
+                    let p_min = point(match &vec[1] {
+                        mlua::Value::UserData(ud) => ud.clone(),
+                        _ => return Err(mlua::Error::runtime("AddImage arg 2 must be ImVec2")),
+                    })?;
+                    let p_max = point(match &vec[2] {
+                        mlua::Value::UserData(ud) => ud.clone(),
+                        _ => return Err(mlua::Error::runtime("AddImage arg 3 must be ImVec2")),
+                    })?;
+                    let uv_min = point(match &vec[3] {
+                        mlua::Value::UserData(ud) => ud.clone(),
+                        _ => return Err(mlua::Error::runtime("AddImage arg 4 must be ImVec2")),
+                    })?;
+                    let uv_max = point(match &vec[4] {
+                        mlua::Value::UserData(ud) => ud.clone(),
+                        _ => return Err(mlua::Error::runtime("AddImage arg 5 must be ImVec2")),
+                    })?;
+                    let col = match &vec[5] {
+                        mlua::Value::Integer(i) => color(*i)?,
+                        mlua::Value::Number(n) => color(*n as i64)?,
+                        _ => return Err(mlua::Error::runtime("AddImage arg 6 must be color")),
+                    };
+                    d.emit(4, |p| unsafe {
+                        sys::ImDrawList_AddImage(p, tex, p_min, p_max, uv_min, uv_max, col)
+                    })
+                }
+                _ => Err(mlua::Error::runtime(
+                    "invalid AddImage arguments: expected (texture, p_min, p_max, [uv_min, uv_max, [col]])",
+                )),
+            }
+        },
+    );
+
+    m.add_method(
+        "PushClipRect",
+        |_, d, (min, max, intersect): (AnyUserData, AnyUserData, Option<bool>)| {
+            let (min, max) = (point(min)?, point(max)?);
+            let intersect = intersect.unwrap_or(false);
+            d.emit(0, |p| unsafe {
+                sys::ImDrawList_PushClipRect(p, min, max, intersect)
+            })
+        },
+    );
+
+    m.add_method("PopClipRect", |_, d, ()| {
+        d.emit(0, |p| unsafe {
+            sys::ImDrawList_PopClipRect(p)
+        })
+    });
+
     m.add_method(
         "AddLine",
         |_, d, (a, b, c, t): (AnyUserData, AnyUserData, i64, Option<f32>)| {
@@ -225,7 +427,7 @@ pub(super) fn methods<M: UserDataMethods<DrawList>>(m: &mut M) {
                 flags(f)?,
                 thickness(t)?,
             );
-            d.emit(if r > 0. { ROUND_RECT_POINTS } else { 4 }, |p| unsafe {
+            d.emit_estimate(4, if r > 0. { Some(r) } else { None }, |p| unsafe {
                 sys::ImDrawList_AddRect(p, a, b, c, r, t, f)
             })
         },
@@ -234,7 +436,7 @@ pub(super) fn methods<M: UserDataMethods<DrawList>>(m: &mut M) {
         "AddRectFilled",
         |_, d, (a, b, c, r, f): (AnyUserData, AnyUserData, i64, Option<f32>, Option<i32>)| {
             let (a, b, c, r, f) = (point(a)?, point(b)?, color(c)?, rounding(r)?, flags(f)?);
-            d.emit(if r > 0. { ROUND_RECT_POINTS } else { 4 }, |p| unsafe {
+            d.emit_estimate(4, if r > 0. { Some(r) } else { None }, |p| unsafe {
                 sys::ImDrawList_AddRectFilled(p, a, b, c, r, f)
             })
         },
