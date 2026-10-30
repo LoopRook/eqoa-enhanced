@@ -5,7 +5,7 @@
 **Lead Agent:** Antigravity Autonomous Lead (`161daabb-f8a9-450c-aefd-a7460c3aad92`)  
 **Worktree:** `C:/Users/hocka/.paseo/worktrees/1usktejc/wereoxxs-overnight-20261030`  
 **Branch:** `forge-wereoxxs-overnight-20261030`  
-**Head Commit:** `31eb76d`  
+**Head Commit:** `c0eb72f`  
 **Execution Policy:** Antigravity-only (`gemini-3.8-flash-high` / `medium`), unattended, zero unauthorized pushes/merges, strictly bounded footprint.
 
 ---
@@ -114,16 +114,50 @@ While all automated tests (unit, integration, lifecycle, headless GPU, WASM, and
 
 ---
 
-## 6. How to Run Locally
+## 6. Where to Get the Executable & How to Test
 
-To test `wereoxxs_ui` in the native client:
-1. Ensure the mod is linked in the `mods` folder:
-   ```powershell
-   # If not already present in mods/:
-   Copy-Item -Recurse "run\forge-compat-reference\scripts\wereoxxs_ui" "mods\wereoxxs_ui"
-   ```
-2. Launch the native client:
-   ```powershell
-   cargo run --release -p eqoa --
-   ```
-3. Open the FrontiersForge Addons window / Settings in-game to enable `wereoxxs_ui`.
+### 6.1 Artifact Locations
+- **Compiled Release Executable:**
+  `C:\Users\hocka\.paseo\worktrees\1usktejc\forge-compatibility\target\release\eqoa.exe`
+  - Size: 27,027,456 bytes
+  - Architecture: x86_64 Windows (Native GUI application)
+  - Features: wgpu rendering, winit input/windowing, Dear ImGui bridge with reverse stack unwinding, 14 FrontiersForge native adapters.
+
+- **Deployed Mod Directory:**
+  `C:\Users\hocka\.paseo\worktrees\1usktejc\forge-compatibility\target\release\mods\wereoxxs_ui\`
+  - Automatically discovered by `eqoa.exe` via executable-relative `mods/` path.
+  - Contains `wereoxxs_ui.lua`, `modules/` (all 9 submodules), `resources/` (art/fonts), and `README.md`.
+  - Master unmodified source: `C:\Users\hocka\Github Projects\EQOA Native Rust\run\forge-compat-reference\scripts\wereoxxs_ui\`.
+
+- **Disc Image (Locally Owned):**
+  `C:\Users\hocka\Documents\PS2 Games\EverQuest - Online Adventures - Frontiers (USA).iso`
+
+---
+
+### 6.2 Testing Instructions
+
+#### Option 1: Direct Executable Launch (Recommended for Testing)
+Launch the freshly built release binary with the disc image:
+```powershell
+& "C:\Users\hocka\.paseo\worktrees\1usktejc\forge-compatibility\target\release\eqoa.exe" "C:\Users\hocka\Documents\PS2 Games\EverQuest - Online Adventures - Frontiers (USA).iso"
+```
+
+#### Option 2: Cargo Run from Worktree
+```powershell
+cd "C:\Users\hocka\.paseo\worktrees\1usktejc\wereoxxs-overnight-20261030"
+$env:CARGO_TARGET_DIR = 'C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility/target'
+cargo run --release -p eqoa -- "C:\Users\hocka\Documents\PS2 Games\EverQuest - Online Adventures - Frontiers (USA).iso"
+```
+
+#### Inside the Game:
+1. When the game boots to title / character screen or in-world, press **Escape** (or open the Options menu) to access the FrontiersForge Addons panel.
+2. Verify `wereoxxs_ui` is listed under Discovered Addons with zero diagnostics.
+3. Toggle `wereoxxs_ui` to **Enabled**.
+4. Observe the Wereoxxs UI elements:
+   - Modern player frame (HP/Mana/Level/Exp).
+   - Party frames and target frame.
+   - Dual 10-slot ability bars with recast timers and hotkey bindings.
+   - Minimap tape compass with degree ticks and cardinal directions.
+   - Live solo and group damage/healing meters.
+   - Filterable chat window with tabbed channels.
+5. Click the gear icon or open Settings to configure scales, positions, and window toggles. All changes persist automatically to your user profile.

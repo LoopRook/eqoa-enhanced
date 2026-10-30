@@ -25,7 +25,7 @@
 | **6. Chat & Combat Log Adapters** | `frontiers_forge.chat`, `frontiers_forge.combat` | Completed | `20341e3` | `6d7a0a1` | 172 passed, 0 failed in addon suite. Independent Flash reviewer `a288b33e-405e-461a-bdbb-c08ad84d6dcf`: PASS. Monotonic scrollback, zero-alloc snapshot, full damage/healing attribution. |
 | **7. Input & D-Pad Hook** | `frontiers_forge.input` (D-pad rotation request/withdraw, key hooks, text capture) | Completed | `6d7a0a1` | `d07e943` | 177 passed, 0 failed in addon suite. Independent Flash reviewer `2bb489f2-5635-4958-b16b-9ffea45e17f7`: PASS. D-pad rotation OR aggregation, key claims, 1s text capture lapse. |
 | **8. Full Package Integration** | `wereoxxs_ui` execution, settings/profile, lifecycle | Completed | `d07e943` | `31eb76d` | 183 passed, 0 failed in addon suite. Independent Flash reviewer `be3d8c77-0017-4a48-a4a4-d3bd9249b9db`: PASS. All 13 modules, 5 callbacks, ImGui widget additions, stack unwinding, headless GPU pipeline verified. |
-| **9. Morning Checkpoint & Handoff** | Checkpoint, handoff documentation, local preview prep | Completed | `31eb76d` | HEAD | Completed prior to 11:00 AM EDT cutoff. |
+| **9. Morning Checkpoint & Handoff** | Checkpoint, handoff documentation, local preview prep, 76-symbol contract test | Completed | `31eb76d` | `c0eb72f` | 184 passed, 0 failed in addon suite. Release binary built and test deployment verified. |
 
 ---
 
@@ -40,6 +40,7 @@
 - **Stage 6 Suite:** 172 passed, 0 failed in 18.18s (`fork_ext::addons`), 7 dedicated chat/combat tests passed.
 - **Stage 7 Suite:** 177 passed, 0 failed in 18.45s (`fork_ext::addons`), 5 dedicated input/dpad tests passed.
 - **Stage 8 Suite:** 183 passed, 0 failed in 18.23s (`fork_ext::addons`), 9 dedicated wereoxxs and bridge tests passed.
+- **Stage 9 Suite:** 184 passed, 0 failed in 21.64s (`fork_ext::addons`), complete 76-symbol contract test passing.
 - **WASM Check:** Clean compilation (`wasm32-unknown-unknown`).
 - **Footprint Check:** **PASS** against reviewed base `7912c7393df7d85655d5816980fae1217cc48a32` (204 fork-owned, 33 shared strictly within budget).
 - **Independent Flash Reviewer (Stage 1):** `cbc223a6-a816-421e-aca6-394086f5d159`: **PASS**.
