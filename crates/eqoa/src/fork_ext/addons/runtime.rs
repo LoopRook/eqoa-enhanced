@@ -423,7 +423,7 @@ impl FramePlan {
     }
 }
 
-fn dispatch_frame(
+pub(super) fn dispatch_frame(
     ui: &Ui,
     manager: &mut Manager,
     snapshot: Snapshot,
@@ -435,7 +435,12 @@ fn dispatch_frame(
     let mut called = false;
     let mut selected = plan
         .settings
-        .filter(|id| manager.entries().iter().any(|e| e.metadata.id == *id));
+        .filter(|id| {
+            manager
+                .entries()
+                .iter()
+                .any(|e| e.metadata.id == *id && e.enabled_intent)
+        });
     if let Some(id) = selected.as_ref() {
         let name = manager
             .entries()

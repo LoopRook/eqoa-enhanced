@@ -453,15 +453,26 @@ pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) 
         for msg in crate::fork_ext::addons::chat::take_outgoing_chat() {
             play.chat_line(&msg);
         }
+        let options_closed =
+            if crate::fork_ext::addons::take_close_options_on_open() && play.mode == 34 {
+                play.mode = 0;
+                play.apply_camera = true;
+                play.sound_ops.push(crate::options::OptionsUp::PreviewEnd);
+                true
+            } else {
+                false
+            };
+        let ready = play.forge_snapshot(None).health.is_available() && !play.loading_up();
+        crate::fork_ext::addons::visibility::set_play_ready(ready);
         let hidden = health_hidden(play);
-        let vis = if play.forge_snapshot(None).health.is_available() && !play.loading_up() {
+        let vis = if ready {
             crate::fork_ext::addons::visibility::published_visibility()
         } else {
             Default::default()
         };
         let hud_changed = play.forge_health.hud_changed(hidden);
         let vis_changed = play.forge_health.vis_changed(vis);
-        hud_changed || vis_changed || step || loading_changed
+        hud_changed || vis_changed || options_closed || step || loading_changed
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -776,6 +787,133 @@ mod tests {
             "click on unhidden chat window opens chat line"
         );
         assert_eq!(p.mode, 2);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_addon_manager_open_from_options_exits_mode_34_and_restores_all_hud_elements_and_connect_gap_cache() {
+        use crate::fork_ext::addons::{
+            health::InstanceToken,
+            visibility::{HudClaimsRegistry, publish, publish_claims},
+        };
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                let _ = crate::fork_ext::addons::take_open_request();
+                publish(false);
+            }
+        }
+        let _reset = Reset;
+        let _ = crate::fork_ext::addons::take_open_request();
+        publish(false);
+
+        let mut p = play();
+        let _ = p.loading.wait.take();
+        p.hud = Some((
+            crate::ui::Vui::new(Default::default(), Default::default(), vec![]),
+            Default::default(),
+            crate::hud::Hud::new(),
+        ));
+        let mut bytes = vec![0; 233];
+        bytes[28..32].copy_from_slice(&100_i32.to_le_bytes());
+        bytes[32..36].copy_from_slice(&100_i32.to_le_bytes());
+        p.forge_health.receive(&bytes);
+        assert!(!health_redraw(&mut p, false, false));
+
+        // Simulate opening Start Menu -> Options -> Extended -> Mods & Addons (Play.mode == 34),
+        // where ability bars and active effects are suppressed by Play::draw_hud's mode checks.
+        p.mode = 34;
+        p.apply_camera = false;
+        p.sound_ops.clear();
+        assert!(!crate::influence::shown(p.mode));
+        assert!(!((p.mode == 0 || p.mode == 30 || p.mode == 38) && !p.search.open));
+
+        // Activating "Addon Manager" (option item 1053 -> request_open) must request the overlay
+        // AND exit mode 34 on the next HUD redraw check so ability bars and active effects are no longer stuck hidden.
+        crate::fork_ext::addons::request_open();
+        assert!(
+            health_redraw(&mut p, false, false),
+            "opening Addon Manager from mode 34 must invalidate HUD cache and exit VIWndOptions"
+        );
+        assert_eq!(p.mode, 0, "Addon Manager activation must exit mode 34 to mode 0");
+        assert!(p.apply_camera, "exiting mode 34 must restore camera");
+        assert!(
+            p.sound_ops
+                .iter()
+                .any(|op| matches!(op, crate::options::OptionsUp::PreviewEnd)),
+            "exiting mode 34 must end options sound preview"
+        );
+        assert!(crate::influence::shown(p.mode));
+        assert!((p.mode == 0 || p.mode == 30 || p.mode == 38) && !p.search.open);
+        assert!(crate::fork_ext::addons::take_open_request());
+
+        // Now verify that when all non-health HUD elements have published claims and Play hits a
+        // connect gap / unready frame before Runtime::draw runs, fork_hud visibility predicates
+        // agree with health_redraw and report visible so ui.keep() never caches stale hidden quads.
+        let mut reg = HudClaimsRegistry::new();
+        let tok = InstanceToken::next().unwrap();
+        for el in [
+            "health_bar",
+            "power_bar",
+            "main_exp_bar",
+            "secondary_exp_bar",
+            "compass_face",
+            "compass_back",
+            "target_nameplate",
+            "group_member_panel",
+            "group_compass_marks",
+            "pet_panel",
+            "chat_window",
+            "hotbar_draw_compact",
+            "hotbar_draw_expanded",
+            "active_effects",
+        ] {
+            reg.disable(el, tok, "test");
+        }
+        publish_claims(&reg);
+        assert!(health_redraw(&mut p, false, false));
+
+        let hud_state = crate::hud::HudState::default();
+        assert!(!crate::hud::fork_hud::compass_visible(&hud_state));
+        assert!(!crate::hud::fork_hud::group_compass_marks_visible(&hud_state));
+        assert!(!crate::hud::fork_hud::target_visible(&hud_state));
+        assert!(!crate::hud::fork_hud::group_visible(&hud_state));
+        assert!(!crate::hud::fork_hud::pet_visible(&hud_state));
+        assert!(!crate::hud::fork_hud::power_bar_visible(&hud_state));
+        assert!(!crate::hud::fork_hud::main_exp_bar_visible(&hud_state));
+        assert!(!crate::hud::fork_hud::secondary_exp_bar_visible(&hud_state));
+        assert!(!crate::hud::fork_hud::exp_bar_visible(&hud_state));
+        assert!(!crate::hud::fork_hud::chat_window_visible());
+        assert!(!crate::hud::fork_hud::ability_bar_visible());
+        assert!(!crate::hud::fork_hud::active_effects_visible());
+
+        // Connect gap occurs while PUBLISHED_VIS still holds claims:
+        p.session.self_id = None;
+        assert!(
+            health_redraw(&mut p, false, false),
+            "connect gap must invalidate HUD cache for all elements"
+        );
+        assert!(crate::hud::fork_hud::compass_visible(&hud_state));
+        assert!(crate::hud::fork_hud::group_compass_marks_visible(&hud_state));
+        assert!(crate::hud::fork_hud::target_visible(&hud_state));
+        assert!(crate::hud::fork_hud::group_visible(&hud_state));
+        assert!(crate::hud::fork_hud::pet_visible(&hud_state));
+        assert!(crate::hud::fork_hud::power_bar_visible(&hud_state));
+        assert!(crate::hud::fork_hud::main_exp_bar_visible(&hud_state));
+        assert!(crate::hud::fork_hud::secondary_exp_bar_visible(&hud_state));
+        assert!(crate::hud::fork_hud::exp_bar_visible(&hud_state));
+        assert!(crate::hud::fork_hud::chat_window_visible());
+        assert!(crate::hud::fork_hud::ability_bar_visible());
+        assert!(crate::hud::fork_hud::active_effects_visible());
+
+        // Reconnect restores readiness and reapplies active claims:
+        p.session.self_id = Some(0x100);
+        p.forge_health.receive(&bytes);
+        assert!(health_redraw(&mut p, false, false));
+        assert!(!crate::hud::fork_hud::compass_visible(&hud_state));
+        assert!(!crate::hud::fork_hud::ability_bar_visible());
+        assert!(!crate::hud::fork_hud::active_effects_visible());
+        assert!(!crate::hud::fork_hud::chat_window_visible());
     }
 
     #[test]

@@ -7,11 +7,17 @@ pub(crate) mod sound;
 pub(crate) mod visibility;
 pub(crate) use runtime::Runtime;
 static OPEN_REQUEST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static CLOSE_OPTIONS_ON_OPEN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 pub(crate) fn request_open() {
     OPEN_REQUEST.store(true, std::sync::atomic::Ordering::Release);
+    CLOSE_OPTIONS_ON_OPEN.store(true, std::sync::atomic::Ordering::Release);
 }
 pub(crate) fn take_open_request() -> bool {
     OPEN_REQUEST.swap(false, std::sync::atomic::Ordering::AcqRel)
+}
+pub(crate) fn take_close_options_on_open() -> bool {
+    CLOSE_OPTIONS_ON_OPEN.swap(false, std::sync::atomic::Ordering::AcqRel)
 }
 pub(crate) mod ability;
 pub(crate) mod bit;

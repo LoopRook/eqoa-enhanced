@@ -17,7 +17,7 @@ pub(crate) fn health_visible(s: &HudState) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn published<F: FnOnce(&crate::fork_ext::addons::visibility::PublishedVisibility) -> bool>(f: F) -> bool {
-    f(&crate::fork_ext::addons::visibility::published_visibility())
+    f(&crate::fork_ext::addons::visibility::effective_visibility())
 }
 
 #[cfg(target_arch = "wasm32")]

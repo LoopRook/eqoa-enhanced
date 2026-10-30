@@ -562,6 +562,7 @@ impl PublishedVisibility {
 }
 
 thread_local! {
+    static PLAY_READY: Cell<bool> = const { Cell::new(true) };
     static PUBLISHED_VIS: Cell<PublishedVisibility> = const { Cell::new(PublishedVisibility {
         health_bar: false,
         power_bar: false,
@@ -579,6 +580,7 @@ thread_local! {
 }
 
 pub(crate) fn publish(hidden: bool) {
+    PLAY_READY.set(true);
     PUBLISHED_VIS.set(PublishedVisibility {
         health_bar: hidden,
         ..PublishedVisibility::default()
@@ -586,6 +588,7 @@ pub(crate) fn publish(hidden: bool) {
 }
 
 pub(crate) fn publish_claims(claims: &HudClaimsRegistry) {
+    PLAY_READY.set(true);
     PUBLISHED_VIS.set(PublishedVisibility {
         health_bar: claims.is_hidden("health_bar"),
         power_bar: claims.is_hidden("power_bar"),
@@ -600,6 +603,18 @@ pub(crate) fn publish_claims(claims: &HudClaimsRegistry) {
         ability_bar: claims.is_hidden("hotbar_draw_compact") || claims.is_hidden("hotbar_draw_expanded"),
         active_effects: claims.is_hidden("active_effects"),
     });
+}
+
+pub(crate) fn set_play_ready(ready: bool) {
+    PLAY_READY.set(ready);
+}
+
+pub(crate) fn effective_visibility() -> PublishedVisibility {
+    if PLAY_READY.get() {
+        PUBLISHED_VIS.get()
+    } else {
+        PublishedVisibility::default()
+    }
 }
 
 pub(crate) fn published_visibility() -> PublishedVisibility {

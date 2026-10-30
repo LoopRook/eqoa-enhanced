@@ -684,3 +684,266 @@ fn forge_wereoxxs_all_windows_rendered_without_drawlist_nil_errors() {
         .expect("wereoxxs_ui subsequent frame must render without error");
     gpu.render();
 }
+
+
+#[test]
+fn forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_elements() {
+    use super::{
+        runtime::{Action, FramePlan, dispatch_frame},
+        storage::Storage,
+        visibility::{PublishedVisibility, publish, published_visibility},
+    };
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            publish(false);
+        }
+    }
+    let _reset = Reset;
+    publish(false);
+
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!(
+            "SKIP forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_elements: reference scripts root not found"
+        );
+        return;
+    };
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.id == "wereoxxs_ui")
+        .expect("wereoxxs_ui package must be discovered");
+
+    let config_dir = ScratchDir::new();
+    let storage = Storage::new(Some(config_dir.0.clone()));
+    let key = Storage::key(addon).expect("Storage::key must succeed");
+
+    let write_profile = |flags: &[(&str, bool)]| {
+        let lua = mlua::Lua::new();
+        let root_tbl = lua.create_table().unwrap();
+        let win_tbl = lua.create_table().unwrap();
+        for &(k, v) in flags {
+            win_tbl.set(k, v).unwrap();
+        }
+        root_tbl.set("windows", win_tbl).unwrap();
+        storage
+            .save_profile(&key, mlua::Value::Table(root_tbl))
+            .expect("save_profile must succeed");
+    };
+
+    let all_hide_keys = [
+        "hide_ability_bars",
+        "hide_player_bars",
+        "hide_active_effects",
+        "hide_game_group",
+        "hide_pet_panel",
+        "hide_game_compass",
+        "hide_game_chat",
+        "hide_target_nameplate",
+    ];
+    let all_true: Vec<(&str, bool)> = all_hide_keys.iter().map(|&k| (k, true)).collect();
+
+    // (a) Saved profile has every hide_* option ticked, while state.json has wereoxxs_ui DISABLED.
+    write_profile(&all_true);
+    storage
+        .set_enabled(&key, false)
+        .expect("set_enabled(false) must succeed");
+
+    let mut manager = Manager::new(
+        root.clone(),
+        Some(config_dir.0.clone()),
+        &gpu.device,
+        &gpu.queue,
+        gpu.renderer.clone(),
+    );
+
+    let snap = rich_in_game_snapshot();
+    gpu.frame(&mut manager, snap.clone());
+    gpu.frame(&mut manager, snap.clone());
+
+    let entry = manager
+        .entries()
+        .into_iter()
+        .find(|e| e.metadata.id == "wereoxxs_ui")
+        .expect("wereoxxs_ui entry must exist");
+    assert_eq!(entry.status, Status::Disabled);
+    assert!(!entry.enabled_intent);
+    assert_eq!(
+        published_visibility(),
+        PublishedVisibility::default(),
+        "disabled addon at startup with all-hidden profile must publish zero hide claims"
+    );
+    assert!(!published_visibility().any_hidden());
+
+    let hud_state = crate::hud::HudState::default();
+    assert!(crate::hud::fork_hud::compass_visible(&hud_state));
+    assert!(crate::hud::fork_hud::group_compass_marks_visible(&hud_state));
+    assert!(crate::hud::fork_hud::target_visible(&hud_state));
+    assert!(crate::hud::fork_hud::group_visible(&hud_state));
+    assert!(crate::hud::fork_hud::pet_visible(&hud_state));
+    assert!(crate::hud::fork_hud::power_bar_visible(&hud_state));
+    assert!(crate::hud::fork_hud::main_exp_bar_visible(&hud_state));
+    assert!(crate::hud::fork_hud::secondary_exp_bar_visible(&hud_state));
+    assert!(crate::hud::fork_hud::exp_bar_visible(&hud_state));
+    assert!(crate::hud::fork_hud::chat_window_visible());
+    assert!(crate::hud::fork_hud::ability_bar_visible());
+    assert!(crate::hud::fork_hud::active_effects_visible());
+
+    // Attempting to dispatch Settings on a disabled addon must be rejected and return None.
+    gpu.context.io_mut().set_display_size([1024.0, 768.0]);
+    gpu.context
+        .io_mut()
+        .set_display_framebuffer_scale([1.0, 1.0]);
+    gpu.context.io_mut().set_delta_time(1.0 / 60.0);
+    let ui = gpu.context.frame();
+    let selected = dispatch_frame(
+        ui,
+        &mut manager,
+        snap.clone(),
+        FramePlan::collect(vec![Action::Settings("wereoxxs_ui".into())], None),
+    );
+    gpu.render();
+    manager.after_render();
+    assert_eq!(
+        selected, None,
+        "disabled addon must not open or execute Settings window"
+    );
+    assert!(!published_visibility().any_hidden());
+
+    // (b) Enable wereoxxs_ui at runtime -> frame 1 initializes and invokes Load(saved),
+    // frame 2 runs ApplyGameUiState with the loaded profile and hides all gated elements.
+    manager.queue(Command::Enable("wereoxxs_ui".into(), true));
+    gpu.frame(&mut manager, snap.clone());
+    gpu.frame(&mut manager, snap.clone());
+
+    let all_hidden = PublishedVisibility {
+        health_bar: true,
+        power_bar: true,
+        main_exp_bar: true,
+        secondary_exp_bar: true,
+        compass: true,
+        target: true,
+        group_panel: true,
+        group_compass_marks: true,
+        pet: true,
+        chat: true,
+        ability_bar: true,
+        active_effects: true,
+    };
+    assert_eq!(
+        published_visibility(),
+        all_hidden,
+        "enabling wereoxxs_ui with all-hidden profile must hide all 12 gated HUD fields"
+    );
+    assert!(!crate::hud::fork_hud::compass_visible(&hud_state));
+    assert!(!crate::hud::fork_hud::group_compass_marks_visible(&hud_state));
+    assert!(!crate::hud::fork_hud::target_visible(&hud_state));
+    assert!(!crate::hud::fork_hud::group_visible(&hud_state));
+    assert!(!crate::hud::fork_hud::pet_visible(&hud_state));
+    assert!(!crate::hud::fork_hud::power_bar_visible(&hud_state));
+    assert!(!crate::hud::fork_hud::main_exp_bar_visible(&hud_state));
+    assert!(!crate::hud::fork_hud::secondary_exp_bar_visible(&hud_state));
+    assert!(!crate::hud::fork_hud::exp_bar_visible(&hud_state));
+    assert!(!crate::hud::fork_hud::chat_window_visible());
+    assert!(!crate::hud::fork_hud::ability_bar_visible());
+    assert!(!crate::hud::fork_hud::active_effects_visible());
+
+    // (d) While enabled, untick each hide_* option one by one and verify its gated element(s)
+    // immediately become visible while all other elements stay hidden; then re-tick.
+    for &unticked_key in &all_hide_keys {
+        let mut flags = all_true.clone();
+        for (k, v) in &mut flags {
+            if *k == unticked_key {
+                *v = false;
+            }
+        }
+        write_profile(&flags);
+        manager.queue(Command::Load("wereoxxs_ui".into()));
+        gpu.frame(&mut manager, snap.clone());
+
+        let vis = published_visibility();
+        let mut expected = all_hidden;
+        match unticked_key {
+            "hide_ability_bars" => {
+                expected.ability_bar = false;
+                assert!(crate::hud::fork_hud::ability_bar_visible());
+            }
+            "hide_player_bars" => {
+                expected.health_bar = false;
+                expected.power_bar = false;
+                expected.main_exp_bar = false;
+                expected.secondary_exp_bar = false;
+                assert!(crate::hud::fork_hud::power_bar_visible(&hud_state));
+                assert!(crate::hud::fork_hud::main_exp_bar_visible(&hud_state));
+                assert!(crate::hud::fork_hud::secondary_exp_bar_visible(&hud_state));
+                assert!(crate::hud::fork_hud::exp_bar_visible(&hud_state));
+            }
+            "hide_active_effects" => {
+                expected.active_effects = false;
+                assert!(crate::hud::fork_hud::active_effects_visible());
+            }
+            "hide_game_group" => {
+                expected.group_panel = false;
+                expected.group_compass_marks = false;
+                assert!(crate::hud::fork_hud::group_visible(&hud_state));
+                assert!(crate::hud::fork_hud::group_compass_marks_visible(&hud_state));
+            }
+            "hide_pet_panel" => {
+                expected.pet = false;
+                assert!(crate::hud::fork_hud::pet_visible(&hud_state));
+            }
+            "hide_game_compass" => {
+                expected.compass = false;
+                assert!(crate::hud::fork_hud::compass_visible(&hud_state));
+            }
+            "hide_game_chat" => {
+                expected.chat = false;
+                assert!(crate::hud::fork_hud::chat_window_visible());
+            }
+            "hide_target_nameplate" => {
+                expected.target = false;
+                assert!(crate::hud::fork_hud::target_visible(&hud_state));
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            vis, expected,
+            "unticking {unticked_key} while enabled must unhide only its gated element(s)"
+        );
+
+        // Re-tick back to true
+        write_profile(&all_true);
+        manager.queue(Command::Load("wereoxxs_ui".into()));
+        gpu.frame(&mut manager, snap.clone());
+        assert_eq!(published_visibility(), all_hidden);
+    }
+
+    // (b cont.) Disable wereoxxs_ui at runtime -> all claims released at once on that frame.
+    manager.queue(Command::Enable("wereoxxs_ui".into(), false));
+    gpu.frame(&mut manager, snap.clone());
+    assert_eq!(
+        published_visibility(),
+        PublishedVisibility::default(),
+        "disabling wereoxxs_ui at runtime must release all hide claims at once"
+    );
+    assert!(!published_visibility().any_hidden());
+    assert!(crate::hud::fork_hud::compass_visible(&hud_state));
+    assert!(crate::hud::fork_hud::ability_bar_visible());
+    assert!(crate::hud::fork_hud::active_effects_visible());
+    assert!(crate::hud::fork_hud::chat_window_visible());
+
+    // (c) Re-enable wereoxxs_ui at runtime -> reapplies claims per wereoxxs_ui.lua's own source
+    // behavior (Cleanup's RestoreGameUi clears game_ui_hidden while preserving windows).
+    manager.queue(Command::Enable("wereoxxs_ui".into(), true));
+    gpu.frame(&mut manager, snap.clone());
+    assert_eq!(
+        published_visibility(),
+        all_hidden,
+        "re-enabling wereoxxs_ui must reapply hide claims per wereoxxs_ui.lua source behavior"
+    );
+}
