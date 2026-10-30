@@ -6,6 +6,9 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 - NPC search works even if map-entities.json is missing or the game is started from inside the ZIP.
 - Minimap search now preserves continuous autorun and follow movement while the search query panel is open.
+- The program uses the selected EQOA icon on the window, taskbar and eqoa.exe:
+  DEV in development builds, STANDARD in official releases. It no longer changes
+  to the memory-card save icon after the disc is chosen.
 
 ## 2026-10-28 · Enhanced 0.1.1
 

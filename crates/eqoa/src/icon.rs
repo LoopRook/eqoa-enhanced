@@ -1,24 +1,17 @@
-//! The program's icon (F3 pass 17, the user: "the program icon is ugly", then
-//! "memcard icon i meant once the ISO is chosen, but we ship a custom one
-//! also"): the drawn disc the program carries (`icon_art`) until the
-//! player's disc is known, then EQOA's own memory-card save icon off it
-//! (`saveicon`), rendered once SUPPORT has come and kept in the config
-//! directory (`saveicon.png`, with the disc it came from in `saveicon.key`),
-//! so a later start with that disc opens its window with it already, before
-//! SUPPORT is unpacked again. Another disc, or none, shows the drawn disc.
+//! The program's icon: the owner's chosen .ico (`fork_ext::app_icon`, picked
+//! at build time: STANDARD for an official release, DEV otherwise) on the
+//! window, the taskbar and the .exe, for the whole run. The fork no longer
+//! switches to the game's memory-card save icon off the player's disc.
 //!
 //! Where it shows: Windows, the window's title bar and taskbar button (and
-//! the .exe's own icon, the drawn disc, for Explorer and a pinned shortcut:
-//! build.rs); Linux, the window under X11 (`_NET_WM_ICON`; Wayland takes a
-//! program's icon from its desktop entry, which a loose binary has none of);
-//! macOS, the Dock (`NSApplication`'s icon image: winit sets no window icon
-//! there).
+//! the .exe's own icon for Explorer and a pinned shortcut: build.rs); Linux,
+//! the window under X11 (`_NET_WM_ICON`; Wayland takes a program's icon from
+//! its desktop entry, which a loose binary has none of); macOS, the Dock
+//! (`NSApplication`'s icon image: winit sets no window icon there).
 
-use std::sync::Mutex;
-use std::sync::mpsc::{Receiver, TryRecvError};
 use winit::window::{Icon, Window, WindowAttributes};
 
-/// The picture's own size: the cache's, the Dock's and Windows' taskbar's.
+/// The picture's own size: the Dock's and Windows' taskbar's.
 const BIG: u32 = 256;
 /// The window's (X11 scales it as it needs).
 const WINDOW: u32 = 128;
@@ -26,47 +19,10 @@ const WINDOW: u32 = 128;
 #[cfg(windows)]
 const SMALL: u32 = 32;
 
-/// The drawn disc, `BIG` square: the program's own.
-pub fn disc() -> &'static [u8] {
-    static DISC: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-    DISC.get_or_init(|| crate::icon_art::disc_rgba(BIG))
-}
-
-/// The disc this run plays: the save icon kept is shown only for it.
-fn key() -> String {
-    crate::disc_path(None)
-}
-
-/// The picture a window opens with: the save icon kept for this disc, else
-/// the drawn disc.
-fn start_picture() -> Vec<u8> {
-    kept(&key()).unwrap_or_else(|| disc().to_vec())
-}
-
-/// The save icon kept for `disc` (`settings::kept_icon`), if one is and it
-/// reads as a picture of the size kept.
-fn kept(disc: &str) -> Option<Vec<u8>> {
-    decode(&crate::settings::kept_icon(disc)?)
-}
-
-/// A kept PNG as `BIG`-square RGBA, if it is one.
-fn decode(png_bytes: &[u8]) -> Option<Vec<u8>> {
-    let mut dec = png::Decoder::new(std::io::Cursor::new(png_bytes));
-    dec.set_transformations(png::Transformations::EXPAND);
-    let mut reader = dec.read_info().ok()?;
-    let mut buf = vec![0; reader.output_buffer_size()?];
-    let info = reader.next_frame(&mut buf).ok()?;
-    (info.width == BIG && info.height == BIG && info.color_type == png::ColorType::Rgba && info.bit_depth == png::BitDepth::Eight).then(|| {
-        buf.truncate(info.buffer_size());
-        buf
-    })
-}
-
-/// Keeps a rendered save icon for `disc`, for the next start.
-fn keep(disc: &str, rgba: &[u8]) {
-    if let Err(e) = encode(rgba, BIG).and_then(|png| crate::settings::keep_icon(disc, &png)) {
-        eprintln!("icon: the save icon is not kept ({e})");
-    }
+/// `size` square RGBA from the chosen icon, or None if it cannot be read.
+fn picture(size: u32) -> Option<Vec<u8>> {
+    let (from, rgba) = crate::fork_ext::app_icon::rgba(size)?;
+    Some(shrink(&rgba, from, size))
 }
 
 /// A square RGBA picture as PNG.
@@ -125,39 +81,27 @@ pub fn shrink(rgba: &[u8], from: u32, to: u32) -> Vec<u8> {
     out
 }
 
-fn icon(rgba: &[u8], size: u32) -> Option<Icon> {
-    Icon::from_rgba(shrink(rgba, BIG, size), size, size).ok()
+fn icon(size: u32) -> Option<Icon> {
+    Icon::from_rgba(picture(size)?, size, size).ok()
 }
 
 /// A window's attributes with the program's icon, as it opens.
 pub fn attributes(a: WindowAttributes) -> WindowAttributes {
-    let picture = start_picture();
-    let a = a.with_window_icon(icon(&picture, WINDOW));
+    let a = a.with_window_icon(icon(WINDOW));
     #[cfg(windows)]
     let a = {
         use winit::platform::windows::WindowAttributesExtWindows;
-        a.with_window_icon(icon(&picture, SMALL)).with_taskbar_icon(icon(&picture, BIG))
+        a.with_window_icon(icon(SMALL)).with_taskbar_icon(icon(BIG))
     };
     a
-}
-
-/// The picture on a window that is open (and the Dock's).
-fn apply(window: &Window, rgba: &[u8]) {
-    window.set_window_icon(icon(rgba, WINDOW));
-    #[cfg(windows)]
-    {
-        use winit::platform::windows::WindowExtWindows;
-        window.set_window_icon(icon(rgba, SMALL));
-        window.set_taskbar_icon(icon(rgba, BIG));
-    }
-    #[cfg(target_os = "macos")]
-    dock(rgba);
 }
 
 /// macOS: the Dock's picture, as the program starts (winit's `resumed`).
 #[cfg(target_os = "macos")]
 pub fn dock_now() {
-    dock(&start_picture());
+    if let Some(picture) = picture(BIG) {
+        dock(&picture);
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -173,50 +117,9 @@ fn dock(rgba: &[u8]) {
     unsafe { NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&*image)) };
 }
 
-/// Where the save icon stands this run.
-enum Phase {
-    /// SUPPORT not here yet
-    Waiting,
-    /// being drawn on a thread of its own (a few hundred milliseconds)
-    Drawing(Receiver<Option<Vec<u8>>>),
-    /// on the window, or there is none to put there
-    Done,
-}
-
-static PHASE: Mutex<Phase> = Mutex::new(Phase::Waiting);
-
-/// Once a frame: when SUPPORT has come, the game's save icon is drawn off it
-/// (on a thread), kept for the next start and put on the window. Nothing
-/// after that.
-pub fn poll(window: &Window) {
-    let mut phase = PHASE.lock().unwrap();
-    match &*phase {
-        Phase::Done => {}
-        Phase::Waiting => {
-            if let Some(image) = crate::modules::get(crate::modules::Module::Support) {
-                let (tx, rx) = std::sync::mpsc::channel();
-                let disc = key();
-                std::thread::spawn(move || {
-                    let picture = crate::saveicon::read(&image).map(|i| i.render(BIG));
-                    match &picture {
-                        Some(p) => keep(&disc, p),
-                        None => eprintln!("icon: no save icon in SUPPORT; the drawn disc stays"),
-                    }
-                    let _ = tx.send(picture);
-                });
-                *phase = Phase::Drawing(rx);
-            }
-        }
-        Phase::Drawing(rx) => match rx.try_recv() {
-            Ok(Some(p)) => {
-                apply(window, &p);
-                *phase = Phase::Done;
-            }
-            Ok(None) | Err(TryRecvError::Disconnected) => *phase = Phase::Done,
-            Err(TryRecvError::Empty) => {}
-        },
-    }
-}
+/// The fork keeps the chosen program icon for the whole run, so there is
+/// nothing to poll. The viewer still calls this once a frame.
+pub fn poll(_window: &Window) {}
 
 #[cfg(test)]
 mod tests {
@@ -266,15 +169,5 @@ mod tests {
         assert!(small[(16 * 32 + 2) * 4 + 3] > 200, "the ring stays solid");
         // control: a nearest pick of a size that does not divide still has its size
         assert_eq!(shrink(&big, BIG, 48).len(), 48 * 48 * 4);
-    }
-
-    #[test]
-    fn a_kept_icon_is_for_its_own_disc() {
-        let picture = disc().to_vec();
-        keep("a.iso", &picture);
-        assert_eq!(kept("a.iso").as_deref(), Some(&picture[..]), "kept for its disc");
-        // control: another disc's (or none kept) shows the drawn disc instead
-        assert!(kept("b.iso").is_none(), "another disc's is not shown");
-        assert!(decode(b"not a png").is_none());
     }
 }
