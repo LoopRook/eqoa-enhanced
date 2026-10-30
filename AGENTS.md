@@ -29,7 +29,7 @@ Linux builds require `libasound2-dev`, `libudev-dev`, and `pkg-config`.
 
 Use four-space indentation, `snake_case` functions/modules, `PascalCase` types, and `SCREAMING_SNAKE_CASE` constants. Match surrounding formatting; use rustfmt on touched code. No custom formatter or Clippy gate is configured.
 
-Game-logic arithmetic and comparisons use `ee::*`. Preserve `vi`'s `#[repr(C)]` layouts for oracle checks. Read `CLAUDE.md` before changing ported systems; README describes their reference checks and architecture.
+Game-logic arithmetic and comparisons use `ee::*`. Preserve `vi`'s `#[repr(C)]` layouts for oracle checks. Read `CLAUDE.md` (fork rules, branches, agents), and upstream's `docs/upstream/CLAUDE.md` before changing ported systems; README describes their reference checks and architecture.
 
 ## Testing Guidelines
 
@@ -37,7 +37,7 @@ Use Rust's built-in `#[test]` framework with descriptive behavior-based names. A
 
 ## Commit & Pull Request Guidelines
 
-Commits mix imperative summaries and scoped prefixes such as `fix(launcher):` and `feat(ui, mods):`. Keep commits focused. PRs should explain changes, link relevant issues, list validation and skips, and include screenshots for visual changes. Update `UPDATE-NOTES.md` for player-visible changes. Push complete, tested changes: program changes on `master` trigger CI releases consumed by the updater.
+Commits mix imperative summaries and scoped prefixes such as `fix(launcher):` and `feat(ui, mods):`. Keep commits focused. PRs should explain changes, link relevant issues, list validation and skips, and include screenshots for visual changes. Update `FORK-UPDATE-NOTES.md` for player-visible changes (`UPDATE-NOTES.md` stays upstream's). Work on your own feature branch from `develop`; commit there only. Merging into `develop`, merging into `enhanced` (stable), tagging and pushing are the lead's, with the owner's approval. Never commit to `master`.
 
 ## Game Data & Configuration
 

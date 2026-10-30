@@ -91,9 +91,9 @@ integration seams. No directory-wide shared allowlist exists.
 | `web/main.js` | 48 | 0 | Restored browser input/map bindings. |
 | `web/report.js` | 31 | 7 | Fork reporting policy transport integration. |
 
-`CLAUDE.md` is a separate exact-content exception: upstream text, one blank line,
-then `On this enhanced fork, FORK.md defines scope and overrides the Vanilla rules above.`
-No other fork edits are accepted. `UPDATE-NOTES.md` and `LICENSE` must match
+`CLAUDE.md` is fork-owned (since 2026-10-30). Upstream's CLAUDE.md is kept
+verbatim in `docs/upstream/CLAUDE.md`; the checker (`claude_upstream_copy`) fails
+unless that copy equals upstream's at the reviewed base. `UPDATE-NOTES.md` and `LICENSE` must match
 upstream. The checker also compares `license` and `license-file` values in both
 package/workspace-package sections of every upstream Cargo manifest; dependency
 or feature budgets cannot authorize a license change. Third-party license notices

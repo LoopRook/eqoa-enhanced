@@ -41,9 +41,10 @@ outside this hygiene pass. Controller/pointer behavior remains upstream's.
 
 ## Next synchronization
 
-Follow FORK.md and the footprint manifest. Merge origin/master regularly through
-short-lived branches, preserve full ancestry, and keep master a pure fast-forward
-mirror. Never push master to looprook or publish through its release workflow.
+Follow FORK.md and the footprint manifest. Merge origin/master into develop
+regularly through short-lived sync/<date> branches, preserve full ancestry, and
+keep master a pure fast-forward mirror. Keep our CLAUDE.md on conflict; replace
+docs/upstream/CLAUDE.md with upstream's new CLAUDE.md and review its diff. Never push master to looprook or publish through its release workflow.
 The owner decides the license; existing MIT/OFL notices remain intact.
 
 ## Enhanced 0.1.0 follow-up

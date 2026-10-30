@@ -216,7 +216,7 @@
     "LICENSE",
     "UPDATE-NOTES.md"
   ],
-  "claude_override": "On this enhanced fork, FORK.md defines scope and overrides the Vanilla rules above.",
+  "claude_upstream_copy": "docs/upstream/CLAUDE.md",
   "hooks": [
     {
       "path": "crates/eqoa/src/main.rs",

@@ -62,8 +62,11 @@ suggestions distinct from bug-report uploads.
 origin is upstream, looprook is this fork, and joukop remains unchanged. Keep
 master a fast-forward-only mirror of origin/master; GitHub defaults to enhanced
 so its landing page shows the fork README. Never commit fork changes or
-push master to looprook. Merge origin/master into enhanced through a short-lived
-sync branch. Keep rerere.enabled on. Do not rebase shared enhanced history, force
+push master to looprook. Since 2026-10-30, enhanced is the stable branch and
+develop the development branch (CLAUDE.md "Branches and worktrees"): features
+merge into develop, merge origin/master into develop through a short-lived
+sync/<date> branch, and develop merges into enhanced only for an approved release.
+Keep rerere.enabled on. Do not rebase shared enhanced or develop history, force
 push it, prune protected worktrees or discard the saved documentation stash.
 
 On a shared-file conflict, retain upstream's implementation and reapply the
@@ -76,7 +79,10 @@ Conflicts: README (enhanced landing page, owner override); UPDATE-NOTES (upstrea
 fork notes separate); options (retain Shadows ID46, fork IDs1043..1052); settings
 (preserve both serialized groups); Play initialization (retain upstream timing,
 fishing/GM and fork map state). See docs/UPSTREAM-SYNC.md for validation.
-CLAUDE.md retains upstream text plus one FORK.md scope override.
+CLAUDE.md is the fork's own (since 2026-10-30); upstream's is kept verbatim in
+docs/upstream/CLAUDE.md, which the checker holds equal to upstream at the
+reviewed base. On a sync, keep our CLAUDE.md, refresh the copy and review
+upstream's changes to it for rules worth adopting.
 
 Local builds have no updater channel. Published builds use channel enhanced and
 follow LoopRook/eqoa-enhanced/releases/latest/download/. The versioned release

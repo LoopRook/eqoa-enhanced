@@ -33,11 +33,12 @@ class FootprintTests(unittest.TestCase):
             "shared": {"shared.rs": {"added": 1, "deleted": 0, "reason": "one hook"},
                        "Cargo.toml": {"added": 1, "deleted": 0, "reason": "dependency"}},
             "immutable": ["LICENSE", "UPDATE-NOTES.md"],
-            "claude_override": "On this fork, FORK.md overrides Vanilla rules.",
+            "claude_upstream_copy": "docs/upstream/CLAUDE.md",
             "license_manifests": ["Cargo.toml"],
             "hooks": [{"path": "shared.rs", "pattern": "fork_hook\\(", "count": 1}],
         }
-        self.write("CLAUDE.md", "Vanilla rules\n\n" + self.manifest["claude_override"] + "\n")
+        self.write("CLAUDE.md", "Fork's own rules\n")
+        self.write("docs/upstream/CLAUDE.md", "Vanilla rules\n")
         self.write("shared.rs", "upstream();\nfork_hook();\n")
 
     def git(self, *args):
@@ -112,11 +113,23 @@ class FootprintTests(unittest.TestCase):
                 self.assertIn("immutable upstream file changed: " + path, result.stdout)
                 self.write(path, original)
 
-    def test_claude_only_allows_exact_scope_override(self):
-        self.write("CLAUDE.md", "Different rules\n\n" + self.manifest["claude_override"] + "\n")
+    def test_claude_is_the_forks_own_and_not_a_shared_path(self):
+        self.write("CLAUDE.md", "Rewritten for the fork\nwith many lines\n" * 50)
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("CLAUDE.md:", result.stdout)
+
+    def test_upstream_claude_copy_must_equal_upstream(self):
+        self.write("docs/upstream/CLAUDE.md", "Stale vanilla rules\n")
         result = self.check()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("CLAUDE.md must equal upstream", result.stdout)
+        self.assertIn("docs/upstream/CLAUDE.md must equal upstream CLAUDE.md", result.stdout)
+
+    def test_upstream_claude_copy_must_exist(self):
+        (self.root / "docs/upstream/CLAUDE.md").unlink()
+        result = self.check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("docs/upstream/CLAUDE.md must equal upstream CLAUDE.md", result.stdout)
 
     def test_cargo_license_cannot_change_within_shared_budget(self):
         self.manifest["shared"]["Cargo.toml"].update(added=5, deleted=5)

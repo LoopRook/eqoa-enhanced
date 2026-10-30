@@ -76,7 +76,8 @@ def check(root, policy, base, show_diff=False):
         if path in immutable:
             errors.append(f"immutable upstream file changed: {path}")
             continue
-        if path == "CLAUDE.md" and policy.get("claude_override"):
+        if path == "CLAUDE.md" and policy.get("claude_upstream_copy"):
+            fork_count += 1
             continue
         budget = policy["shared"].get(path)
         if budget is None and any(fnmatch.fnmatchcase(path, pattern) for pattern in policy["fork_owned"]):
@@ -99,11 +100,12 @@ def check(root, policy, base, show_diff=False):
                 print(f"--- /dev/null\n+++ b/{path}")
                 for line in (root / path).read_text(encoding="utf-8", errors="replace").splitlines():
                     print("+" + line)
-    if policy.get("claude_override"):
-        expected = normalized(read_upstream(root, base, "CLAUDE.md")).rstrip("\n") + "\n\n" + policy["claude_override"] + "\n"
-        current = root / "CLAUDE.md"
-        if not current.is_file() or normalized(current.read_text(encoding="utf-8")) != expected:
-            errors.append("CLAUDE.md must equal upstream plus exactly the documented FORK.md scope override")
+    # CLAUDE.md is the fork's own; upstream's is kept verbatim beside it for review at each sync.
+    if policy.get("claude_upstream_copy"):
+        copy_path = policy["claude_upstream_copy"]
+        copy = root / copy_path
+        if not copy.is_file() or normalized(copy.read_text(encoding="utf-8")) != normalized(read_upstream(root, base, "CLAUDE.md")):
+            errors.append(f"{copy_path} must equal upstream CLAUDE.md at {base}")
     # Inspect every tracked Cargo manifest, not only manifests with allowed edits.
     cargo_paths = {path for path in git(root, "ls-files", "-z").decode("utf-8").split("\0")
                    if path == "Cargo.toml" or path.endswith("/Cargo.toml")}
