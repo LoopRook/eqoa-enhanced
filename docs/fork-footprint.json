@@ -82,9 +82,9 @@
       "reason": "Restored map and tracker visibility."
     },
     "crates/eqoa/src/hud.rs": {
-      "added": 637,
-      "deleted": 28,
-      "reason": "Reviewed restored HUD and native addon hide-UI draw-site gates for compass, gauges, group/pet/target panels, group compass marks; tests and fork_ext implementation."
+      "added": 331,
+      "deleted": 26,
+      "reason": "Reviewed restored HUD and native addon hide-UI draw-site gates for compass, gauges, group/pet/target panels, and group compass marks; one-line hook calls, fork_ext implementation and tests."
     },
     "crates/eqoa/src/hudmenu.rs": {
       "added": 7,
@@ -132,9 +132,9 @@
       "reason": "Restored map and tracker touch input."
     },
     "crates/eqoa/src/ui.rs": {
-      "added": 25,
-      "deleted": 9,
-      "reason": "Map UI state and input integration plus test-only surface helpers for HUD draw-site tests."
+      "added": 11,
+      "deleted": 8,
+      "reason": "Map UI state and input integration plus one-line pub(crate) visibility on UiAssets.surfaces for fork-owned HUD tests."
     },
     "crates/eqoa/src/viewer.rs": {
       "added": 233,

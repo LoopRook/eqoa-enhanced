@@ -205,6 +205,7 @@ pub(super) fn draw(ui: &mut UiRaster<'_>, s: &HudState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::{Hud, HudState, MemberState, PatchMember, PetState};
     use crate::fork_ext::addons::health::InstanceToken;
     use crate::fork_ext::addons::visibility::HudClaimsRegistry;
 
@@ -258,6 +259,27 @@ mod tests {
             })
             .collect();
         Vui::new(Default::default(), Default::default(), atlas)
+    }
+
+    /// A layer on the machine's GPU (any backend) with device and queue so
+    /// tests can upload placeholder surfaces; None without an adapter.
+    fn layer_with_device() -> Option<(render::ui::Ui, render::wgpu::Device, render::wgpu::Queue)> {
+        let instance = render::wgpu::Instance::new(render::wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&render::wgpu::RequestAdapterOptions::default())).ok()?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).ok()?;
+        let ui = render::ui::Ui::new(&device, render::TARGET_FORMAT, render::DEPTH_FORMAT);
+        Some((ui, device, queue))
+    }
+
+    fn test_assets(ui: &mut render::ui::Ui, device: &render::wgpu::Device, queue: &render::wgpu::Queue) -> crate::ui::UiAssets {
+        let mut assets = crate::ui::UiAssets::default();
+        let tex = ui.add_texture(device, queue, 1, 1, &[255; 4]);
+        // Empty atlas rows resolve to "(null)" through Vui::entry_id.
+        assets.surfaces.insert(vi::ui::icon_id("(null)"), tex);
+        assets.surfaces.insert(vi::ui::icon_id(""), tex);
+        assets.surfaces.insert(vi::ui::icon_id("sheet1"), tex);
+        assets.surfaces.insert(vi::ui::icon_id("Patch_Art"), tex);
+        assets
     }
 
     #[test]
@@ -469,5 +491,272 @@ mod tests {
         let target_only = readouts(&s, 100, [true, false, false]);
         assert_eq!(target_only.len(), 1);
         assert_eq!(target_only[0].text, "50%");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_hud_compass_hides_at_draw_site_on_widescreen() {
+        let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((mut ui, device, queue)) = layer_with_device() else {
+            eprintln!("SKIP: no graphics adapter");
+            return;
+        };
+        let assets = test_assets(&mut ui, &device, &queue);
+        let vui = test_vui();
+        let size = (1280, 720);
+
+        clear_claims();
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &HudState { has_self: false, ..Default::default() });
+        let baseline = ui.quads.len();
+
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &HudState { has_self: true, heading: 0.0, ..Default::default() });
+        let unclaimed = ui.quads.len();
+        assert!(unclaimed > baseline, "compass draws when unclaimed");
+
+        set_claims(&["compass_face", "compass_back"]);
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &HudState { has_self: true, heading: 0.0, ..Default::default() });
+        let claimed = ui.quads.len();
+        assert_eq!(claimed, baseline, "compass does not draw when claimed");
+
+        clear_claims();
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &HudState { has_self: true, heading: 0.0, ..Default::default() });
+        assert_eq!(ui.quads.len(), unclaimed, "releasing the claim restores drawing");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_hud_power_bar_hides_at_draw_site() {
+        let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((mut ui, device, queue)) = layer_with_device() else {
+            eprintln!("SKIP: no graphics adapter");
+            return;
+        };
+        let assets = test_assets(&mut ui, &device, &queue);
+        let vui = test_vui();
+        let size = (1280, 720);
+        let with_power = HudState { power: 5, max_power: 10, ..Default::default() };
+
+        set_claims(&["power_bar"]);
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_power);
+        let baseline = ui.quads.len();
+
+        clear_claims();
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_power);
+        let unclaimed = ui.quads.len();
+        assert!(unclaimed > baseline, "power bar draws when unclaimed");
+
+        set_claims(&["power_bar"]);
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_power);
+        assert_eq!(ui.quads.len(), baseline, "power bar does not draw when claimed");
+
+        clear_claims();
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_power);
+        assert_eq!(ui.quads.len(), unclaimed, "releasing the claim restores drawing");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_hud_exp_bars_hides_at_draw_site() {
+        let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((mut ui, device, queue)) = layer_with_device() else {
+            eprintln!("SKIP: no graphics adapter");
+            return;
+        };
+        let assets = test_assets(&mut ui, &device, &queue);
+        let vui = test_vui();
+        let size = (1280, 720);
+        let with_exp = HudState { level: 1, exp: 50, max_power: 0, ..Default::default() };
+
+        set_claims(&["main_exp_bar", "secondary_exp_bar"]);
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_exp);
+        let baseline = ui.quads.len();
+
+        clear_claims();
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_exp);
+        let unclaimed = ui.quads.len();
+        assert!(unclaimed > baseline, "exp bars draw when unclaimed");
+
+        set_claims(&["main_exp_bar", "secondary_exp_bar"]);
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_exp);
+        assert_eq!(ui.quads.len(), baseline, "exp bars do not draw when claimed");
+
+        clear_claims();
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_exp);
+        assert_eq!(ui.quads.len(), unclaimed, "releasing the claim restores drawing");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_hud_group_panel_hides_at_draw_site() {
+        let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((mut ui, device, queue)) = layer_with_device() else {
+            eprintln!("SKIP: no graphics adapter");
+            return;
+        };
+        let assets = test_assets(&mut ui, &device, &queue);
+        let vui = test_vui();
+        let size = (1280, 720);
+
+        clear_claims();
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &HudState { group_count: 1, ..Default::default() });
+        let baseline = ui.quads.len();
+
+        let with_group = HudState {
+            group_count: 2,
+            group: vec![MemberState { id: 2, name: "Ally".into(), is_target: false, hp: Some((128, false, false)), power: None }],
+            ..Default::default()
+        };
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_group);
+        let unclaimed = ui.quads.len();
+        assert!(unclaimed > baseline, "group panel draws when unclaimed");
+
+        set_claims(&["group_member_panel"]);
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_group);
+        assert_eq!(ui.quads.len(), baseline, "group panel does not draw when claimed");
+
+        clear_claims();
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_hud_pet_panel_hides_at_draw_site() {
+        let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((mut ui, device, queue)) = layer_with_device() else {
+            eprintln!("SKIP: no graphics adapter");
+            return;
+        };
+        let assets = test_assets(&mut ui, &device, &queue);
+        let vui = test_vui();
+        let size = (1280, 720);
+
+        clear_claims();
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &HudState { group_count: 1, ..Default::default() });
+        let baseline = ui.quads.len();
+
+        let with_pet = HudState {
+            group_count: 1,
+            pet: Some(PetState { name: "Bub".into(), is_target: false, creature: None }),
+            ..Default::default()
+        };
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_pet);
+        let unclaimed = ui.quads.len();
+        assert!(unclaimed > baseline, "pet panel draws when unclaimed");
+
+        set_claims(&["pet_panel"]);
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_pet);
+        assert_eq!(ui.quads.len(), baseline, "pet panel does not draw when claimed");
+
+        clear_claims();
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_hud_target_nameplate_hides_at_draw_site() {
+        let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((mut ui, device, queue)) = layer_with_device() else {
+            eprintln!("SKIP: no graphics adapter");
+            return;
+        };
+        let assets = test_assets(&mut ui, &device, &queue);
+        let vui = test_vui();
+        let size = (1280, 720);
+        let with_target = HudState {
+            target_name: Some("Casil".into()),
+            target_hp: 128,
+            target_info: Some(0),
+            ..Default::default()
+        };
+
+        clear_claims();
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_target);
+        let unclaimed = ui.quads.len();
+        assert!(unclaimed > 0, "target nameplate draws when unclaimed");
+
+        set_claims(&["target_nameplate"]);
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_target);
+        let claimed = ui.quads.len();
+        assert!(claimed < unclaimed, "target nameplate does not draw when claimed");
+
+        clear_claims();
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_hud_group_compass_marks_hides_at_draw_site() {
+        let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((mut ui, device, queue)) = layer_with_device() else {
+            eprintln!("SKIP: no graphics adapter");
+            return;
+        };
+        let assets = test_assets(&mut ui, &device, &queue);
+        let vui = test_vui();
+        let size = (1280, 720);
+
+        clear_claims();
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &HudState { has_self: true, heading: 0.0, ..Default::default() });
+        let baseline = ui.quads.len();
+
+        let with_marks = HudState {
+            has_self: true,
+            heading: 0.0,
+            camera: [0.0, 0.0, 0.0],
+            patches: vec![PatchMember { index: 1, id: 2, pos: Some([0.0, 0.0, 100.0]) }],
+            ..Default::default()
+        };
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_marks);
+        let unclaimed = ui.quads.len();
+        assert!(unclaimed > baseline, "group compass marks draw when unclaimed");
+
+        set_claims(&["group_compass_marks"]);
+        ui.begin(size);
+        let mut hud = Hud::new();
+        hud.draw(&vui, &mut assets.raster(&mut ui), &with_marks);
+        assert_eq!(ui.quads.len(), baseline, "group compass marks do not draw when claimed");
+
+        clear_claims();
     }
 }
