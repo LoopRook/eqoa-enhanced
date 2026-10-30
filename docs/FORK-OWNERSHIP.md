@@ -48,11 +48,13 @@ integration seams. No directory-wide shared allowlist exists.
 | `.gitignore` | 6 | 0 | Fork-local generated output and scratch configuration exclusions. |
 | `Cargo.lock` | 2 | 0 | Fork dependency resolution; license metadata stays unchanged. |
 | `crates/eqoa/Cargo.toml` | 4 | 0 | Fork dependency and release build settings; license metadata stays unchanged. |
+| `crates/eqoa/build.rs` | 11 | 3 | One app-icon hook into fork_ext/app_icon_ico; upstream drawn-disc helpers retained. |
 | `crates/eqoa/src/bindpage.rs` | 16 | 16 | Restored and map input settings rows. |
 | `crates/eqoa/src/binds.rs` | 93 | 80 | Restored/map controls and saved binding defaults. |
 | `crates/eqoa/src/client_image.rs` | 10 | 0 | Map theme font/image resources. |
 | `crates/eqoa/src/hideui.rs` | 3 | 3 | Restored map and tracker visibility. |
 | `crates/eqoa/src/hud.rs` | 294 | 7 | Existing restored map/quest/group/Stats Box integrations plus one fork HUD adapter. |
+| `crates/eqoa/src/icon.rs` | 4 | 1 | Two app-icon hooks: chosen picture and no save-icon switch; upstream save-icon code retained. |
 | `crates/eqoa/src/input.rs` | 32 | 3 | Map controls and focus/input behavior. |
 | `crates/eqoa/src/lod.rs` | 9 | 8 | Restored map terrain observation. |
 | `crates/eqoa/src/main.rs` | 30 | 0 | Restored module registration, fork_ext boundary, and report policy module. |
@@ -100,6 +102,8 @@ still verifies execution and placement. Do not add duplicate hook names in comme
 | `crates/eqoa/src/hud.rs` | `fork_hud::draw(...)` |
 | `crates/eqoa/src/options.rs` | `fork_options::{CATEGORY, ITEMS, change, activate, value_text}`, once each |
 | `crates/eqoa/src/settings.rs` | `fork_settings::{write, parse, description}`, once each |
+| `crates/eqoa/build.rs` | `app_icon_ico::{stage, images}`, once each |
+| `crates/eqoa/src/icon.rs` | `fork_ext::app_icon::{picture, keeps_icon}`, once each |
 
 `fork_ext/{play,hud,options,settings}.rs` contains app-private adapters imported as
 child modules by the corresponding shared parent. `fork_ext/mod.rs` owns the common
@@ -113,7 +117,7 @@ its notes and release-page link are fork-owned. Released builds require channel
 enhanced; local and unrelated build channels do not start an updater.
 
 The release manifest additionally checks the updater channel resolver, compiled
-fork notes and update-window release page exactly once each (15 named seams total).
+fork notes and update-window release page exactly once each (19 named seams total).
 
 ## Run and review
 
