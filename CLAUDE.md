@@ -7,6 +7,11 @@ that run unchanged FrontiersForge packages), the native maps and guidance, and q
 features. Additions are this fork's purpose. Each one is the owner's call: propose it, then build
 it once approved.
 
+Two goals shape every change. **Modular**: syncing upstream stays cheap, so fork code lives in
+fork-owned files and upstream's files carry only hook calls. **Moddable**: other people build mods
+on this client, so the addon API is a stable, documented contract (its capabilities, its versions,
+and visible diagnostics for what is unsupported) rather than an accident of the implementation.
+
 The owner does not write code. Agents implement; the owner plays the build and decides acceptance.
 Report results in a player's terms, with what was tested and what was not.
 
@@ -39,8 +44,9 @@ Report results in a player's terms, with what was tested and what was not.
   owner's live test.
 - Upstream sync: branch `sync/<date>` from `develop`, merge `origin/master` (procedure:
   `docs/UPSTREAM-SYNC.md`), test, merge into `develop`. A CLAUDE.md conflict always resolves to this
-  file; refresh `docs/upstream/CLAUDE.md` from the new upstream, read upstream's diff for rules worth
-  adopting here, and move `reviewed_base` in `docs/fork-footprint.json` deliberately.
+  file automatically (`.gitattributes` `merge=ours`; each clone needs `git config merge.ours.driver
+  true` once). Refresh `docs/upstream/CLAUDE.md` from the new upstream, read upstream's diff for rules
+  worth adopting here, and move `reviewed_base` in `docs/fork-footprint.json` deliberately.
 - Hotfix: branch from `enhanced`, release, then merge `enhanced` back into `develop`.
 - Commit as LoopRook (the repo-local git config). Pushing to `looprook`, tagging and merging into
   `enhanced` need the owner's go-ahead each time. Nothing of the fork goes to `origin` or `master`.
@@ -70,7 +76,9 @@ section there before changing a ported system (anything under `crates/vi`, `ee`,
 
 - New fork code goes in fork-owned files (`crates/eqoa/src/fork_ext/`, `map/`, `questguide/`, ...);
   shared upstream files get a hook call within their budget. `python tools/check_fork_footprint.py
-  --base <reviewed_base>` must PASS; a budget grows only with a reviewed reason.
+  --base <reviewed_base>` must PASS; a budget grows only with a reviewed reason. Deleting or
+  rewriting upstream code in a shared file means the design is wrong: keep upstream's code and
+  route around it with a hook. Put this in every worker's instructions.
 - Game-logic floats and compares go through `ee::*`. `vi` structs stay `#[repr(C)]` in the EE layout.
 - Port game behaviour from the decomp, line by line. The decomp, eqoa-port's oracle and the 2002
   disc are not on this machine, so oracle tests skip here: say so in the report.

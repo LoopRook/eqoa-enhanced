@@ -4,6 +4,7 @@
   "review_state": "Reviewed upstream7912c73 merge plus fork release seams; only updater route/notes/page and assertions differ in new shared files.",
   "fork_owned": [
     "AGENTS.md",
+    ".gitattributes",
     "FORK.md",
     "FORK-UPDATE-NOTES.md",
     "README.md",
@@ -14,6 +15,7 @@
     "Start-EQOA.bat",
     "Start-EQOA-With-Parser.bat",
     "Start-Launcher.bat",
+    "crates/eqoa/resources/app-icon/**",
     "crates/eqoa/resources/map-ui/**",
     "crates/eqoa/src/map/**",
     "crates/eqoa/src/questguide/**",
@@ -61,6 +63,11 @@
       "deleted": 0,
       "reason": "Reviewed native-only mlua and Dear ImGui spike dependencies plus existing fork/release settings; license metadata stays unchanged."
     },
+    "crates/eqoa/build.rs": {
+      "added": 11,
+      "deleted": 3,
+      "reason": "One hook into fork_ext/app_icon_ico for the owner-supplied program icon: stage the chosen .ico in OUT_DIR and feed its images to the unchanged SIZES/dib/ico/resources path. Stack and linker behavior unchanged."
+    },
     "crates/eqoa/src/bindpage.rs": {
       "added": 16,
       "deleted": 16,
@@ -85,6 +92,11 @@
       "added": 314,
       "deleted": 14,
       "reason": "Reviewed restored HUD and native addon hide-UI draw-site gates for compass, gauges, group/pet/target panels, and group compass marks; one-line hook calls, fork_ext implementation and tests."
+    },
+    "crates/eqoa/src/icon.rs": {
+      "added": 4,
+      "deleted": 1,
+      "reason": "Two hooks into fork_ext::app_icon: the window/Dock picture comes from the chosen icon, and poll returns before the save-icon switch. Upstream save-icon code remains present and compiled."
     },
     "crates/eqoa/src/input.rs": {
       "added": 32,
@@ -306,6 +318,30 @@
       "path": "crates/eqoa/src/updatewnd.rs",
       "name": "fork release page",
       "pattern": "crate::fork_ext::release::RELEASE_PAGE",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/build.rs",
+      "name": "app icon stage",
+      "pattern": "app_icon_ico::stage\\(\\)",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/build.rs",
+      "name": "app icon images",
+      "pattern": "let images = app_icon_ico::images\\(\\)",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/icon.rs",
+      "name": "app icon picture",
+      "pattern": "crate::fork_ext::app_icon::picture\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/icon.rs",
+      "name": "app icon keep",
+      "pattern": "crate::fork_ext::app_icon::keeps_icon\\(",
       "count": 1
     }
   ]
