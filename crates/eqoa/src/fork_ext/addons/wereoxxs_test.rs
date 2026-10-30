@@ -328,6 +328,9 @@ fn forge_wereoxxs_in_game_full_execution_and_lifecycle() {
         .build();
 
     // Frame 1: Initial run and callback registration
+    context.io_mut().set_display_size([1024.0, 768.0]);
+    context.io_mut().set_display_framebuffer_scale([1.0, 1.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
     context.frame();
     bridge
         .invoke(|| host.run_addon(addon))
@@ -416,6 +419,9 @@ fn forge_wereoxxs_in_game_full_execution_and_lifecycle() {
     assert_eq!(loaded_win.get::<bool>("compass").unwrap(), false);
 
     // 4. Call Settings callback inside an active ImGui frame
+    context.io_mut().set_display_size([1024.0, 768.0]);
+    context.io_mut().set_display_framebuffer_scale([1.0, 1.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
     context.frame();
     bridge
         .invoke(|| {
@@ -426,6 +432,9 @@ fn forge_wereoxxs_in_game_full_execution_and_lifecycle() {
     drop(context.render_legacy());
 
     // 5. Run Frame 2: subsequent frame execution with state preserved
+    context.io_mut().set_display_size([1024.0, 768.0]);
+    context.io_mut().set_display_framebuffer_scale([1.0, 1.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
     context.frame();
     bridge
         .invoke(|| host.run_addon(addon))
@@ -511,4 +520,85 @@ fn forge_wereoxxs_headless_gpu_manager_pipeline() {
         Status::Disabled,
         "wereoxxs_ui status must be Disabled after disable command"
     );
+}
+
+#[test]
+fn forge_wereoxxs_complete_symbol_surface_contract() {
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!(
+            "SKIP forge_wereoxxs_complete_symbol_surface_contract: reference scripts root not found"
+        );
+        return;
+    };
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.id == "wereoxxs_ui")
+        .expect("wereoxxs_ui package must be discovered");
+
+    let Some(mut gpu) = TestGpu::new() else {
+        eprintln!("SKIP forge_wereoxxs_complete_symbol_surface_contract: GPU fixture unavailable");
+        return;
+    };
+
+    let host = Host::for_addon(addon).expect("Host::for_addon must succeed");
+    let bridge = Bridge::install(&host).unwrap();
+
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, addon).unwrap();
+
+    let font_bank = Rc::new(RefCell::new(super::fonts::FontBank::new(
+        0,
+        super::fonts::current_context_epoch(),
+    )));
+    super::fonts::FontBank::install_for_addon(&font_bank, &host.lua, addon).unwrap();
+
+    let check_script = host
+        .compile(
+            r#"
+        -- 1. All 14 frontiers_forge modules
+        local modules = {
+            'player', 'entity_list', 'entity', 'group',
+            'ability_bar', 'ability_list', 'ability', 'icon',
+            'effects', 'combat', 'chat', 'input', 'ui', 'util'
+        }
+        for _, mod_name in ipairs(modules) do
+            local m = require('frontiers_forge.' .. mod_name)
+            assert(type(m) == 'table', 'frontiers_forge.' .. mod_name .. ' must be a table')
+        end
+
+        -- 2. UiForge globals
+        assert(type(UiForge) == 'table', 'UiForge table missing')
+        assert(type(UiForge.CallbackType) == 'table', 'UiForge.CallbackType missing')
+        assert(type(UiForge.LoadFont) == 'function', 'UiForge.LoadFont missing')
+        assert(type(UiForge.LoadTexture) == 'function', 'UiForge.LoadTexture missing')
+        assert(type(UiForge.RegisterCallback) == 'function', 'UiForge.RegisterCallback missing')
+        assert(type(UiForge.ReleaseTexture) == 'function', 'UiForge.ReleaseTexture missing')
+        assert(type(UiForge.resources_path) == 'string', 'UiForge.resources_path missing')
+
+        -- 3. All 62 Dear ImGui functions called across wereoxxs_ui
+        local imgui_funcs = {
+            'Begin', 'BeginChild', 'BeginCombo', 'BeginPopup', 'BeginTabBar', 'BeginTabItem',
+            'Button', 'CalcTextSize', 'Checkbox', 'ColorEdit4', 'Dummy', 'End', 'EndChild',
+            'EndCombo', 'EndPopup', 'EndTabBar', 'EndTabItem', 'GetColorU32', 'GetContentRegionAvail',
+            'GetCursorScreenPos', 'GetFrameHeight', 'GetScrollMaxY', 'GetScrollY', 'GetTextLineHeight',
+            'GetTime', 'GetWindowDrawList', 'GetWindowPos', 'InputTextWithHint', 'InvisibleButton',
+            'IsItemActive', 'IsMouseDragging', 'IsMouseHoveringRect', 'IsWindowFocused', 'IsWindowHovered',
+            'OpenPopup', 'PopFont', 'PopID', 'PopStyleColor', 'PushFont', 'PushID', 'PushStyleColor',
+            'RadioButton', 'SameLine', 'Selectable', 'Separator', 'SetCursorScreenPos',
+            'SetKeyboardFocusHere', 'SetNextItemWidth', 'SetNextWindowPos', 'SetNextWindowSize',
+            'SetScrollHereY', 'SetTooltip', 'SetWindowFontScale', 'SetWindowPos', 'SliderFloat',
+            'SliderInt', 'Text', 'TextColored', 'TextDisabled', 'TextWrapped', 'TreeNode', 'TreePop'
+        }
+        for _, fn_name in ipairs(imgui_funcs) do
+            assert(type(ImGui[fn_name]) == 'function', 'ImGui.' .. fn_name .. ' must be a function')
+        end
+    "#,
+        )
+        .unwrap();
+
+    gpu.begin();
+    bridge.invoke(|| host.run(&check_script)).unwrap();
+    gpu.render();
 }
