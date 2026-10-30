@@ -6,7 +6,7 @@
 - **Worktree:** `C:/Users/hocka/.paseo/worktrees/1usktejc/wereoxxs-overnight-20261030`
 - **Branch:** `forge-wereoxxs-overnight-20261030`
 - **Base Commit:** `039bbff`
-- **Current Phase:** Stage 5 (Ability, Cooldown & Cast Adapters)
+- **Current Phase:** Stage 6 (Chat & Combat Log Adapters)
 - **Cutoff:** `2026-10-30T15:00:00Z` (11:00 AM EDT)
 - **Execution Policy:** Unattended overnight run, Antigravity-only, flash models for subagents/reviews, rigorous behavior tests with RED/GREEN evidence, bounded stages, morning handoff by 11 AM EDT.
 
@@ -21,8 +21,8 @@
 | **2. Player & Walker Adapter** | `frontiers_forge.player` (name, level, exp, debt, hp/max_hp, pwr/max_pwr, stats, resists, CMs, 3D coordinates, heading, entity_id, target sentinel, classes, races, location) | Completed | `d6fef70` | `4c2e20b` | 148 passed, 0 failed in addon suite. Independent Flash reviewer `72d14b5f-5a3e-4d49-bc4b-52817c15e4c4`: PASS. |
 | **3. UI & HUD Hide Adapters** | `frontiers_forge.ui` (hide ability bars, health/power bars, group, pet, compass with per-instance claims and cleanup, 35 methods, GetHiddenBy, class/disposition icons) | Completed | `4c2e20b` | `d39def3` | 152 passed, 0 failed in addon suite. Independent Flash reviewer `247467c1-ac64-43ba-9f5a-6287bd11b7c2`: PASS. |
 | **4. Group, Entity & Target Adapters** | `frontiers_forge.group`, `frontiers_forge.entity`, `frontiers_forge.entity_list` (member queries/iterators, entity status flags, poison/disease, disposition, bounds checks, slot 0 player synthesis) | Completed | `d39def3` | `af3dc23` | 159 passed, 0 failed in addon suite. Independent Flash reviewer `0373e210-b5d4-429b-9d3f-499e9d6c4d05`: PASS. |
-| **5. Ability, Cooldown & Cast Adapters** | `frontiers_forge.ability_bar`, `ability_list`, `ability`, `icon`, `casting_bar` | In Progress | `af3dc23` | TBD | Hotbar buttons, cooldown dimming/seconds, casting bar fill. |
-| **6. Chat & Combat Log Adapters** | `frontiers_forge.chat`, `frontiers_forge.combat` | Planned | TBD | TBD | Tabbed chat window and damage meter data feed. |
+| **5. Ability, Cooldown & Cast Adapters** | `frontiers_forge.ability_bar`, `ability_list`, `ability`, `icon` (hotbars, lockout event bus, queries/iterators, shared icon claims) | Completed | `af3dc23` | `20341e3` | 165 passed, 0 failed in addon suite. Independent Flash reviewer `cafa5d46-e443-4193-a740-5bbca3f8544b`: PASS. |
+| **6. Chat & Combat Log Adapters** | `frontiers_forge.chat`, `frontiers_forge.combat` | In Progress | `20341e3` | TBD | Tabbed chat window and damage meter data feed. |
 | **7. Input & D-Pad Hook** | `frontiers_forge.input` (D-pad rotation request/withdraw) | Planned | TBD | TBD | Ability bar horizontal D-pad navigation. |
 | **8. Full Package Integration** | `wereoxxs_ui` execution, settings/profile, lifecycle | Planned | TBD | TBD | First public dev-build gate. |
 | **9. Morning Checkpoint & Handoff** | Checkpoint, handoff documentation, local preview prep if automated milestone met | Planned | TBD | TBD | Due before 11:00 AM EDT. |
@@ -36,12 +36,14 @@
 - **Stage 2 Suite:** 148 passed, 0 failed in 18.97s (`fork_ext::addons`), 5 dedicated player tests passed.
 - **Stage 3 Suite:** 152 passed, 0 failed in 17.52s (`fork_ext::addons`), 6 dedicated UI tests passed.
 - **Stage 4 Suite:** 159 passed, 0 failed in 17.37s (`fork_ext::addons`), 7 dedicated group/entity/target tests passed.
+- **Stage 5 Suite:** 165 passed, 0 failed in 17.97s (`fork_ext::addons`), 6 dedicated ability/icon tests passed.
 - **WASM Check:** Clean compilation (`wasm32-unknown-unknown`).
-- **Footprint Check:** **PASS** against reviewed base `7912c7393df7d85655d5816980fae1217cc48a32` (198 fork-owned, 33 shared strictly within budget).
+- **Footprint Check:** **PASS** against reviewed base `7912c7393df7d85655d5816980fae1217cc48a32` (199 fork-owned, 33 shared strictly within budget).
 - **Independent Flash Reviewer (Stage 1):** `cbc223a6-a816-421e-aca6-394086f5d159`: **PASS**.
 - **Independent Flash Reviewer (Stage 2):** `72d14b5f-5a3e-4d49-bc4b-52817c15e4c4`: **PASS**.
 - **Independent Flash Reviewer (Stage 3):** `247467c1-ac64-43ba-9f5a-6287bd11b7c2`: **PASS**.
 - **Independent Flash Reviewer (Stage 4):** `0373e210-b5d4-429b-9d3f-499e9d6c4d05`: **PASS**.
+- **Independent Flash Reviewer (Stage 5):** `cafa5d46-e443-4193-a740-5bbca3f8544b`: **PASS**.
 
 ---
 
