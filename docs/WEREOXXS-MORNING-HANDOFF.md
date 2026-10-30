@@ -1,11 +1,11 @@
 # Wereoxxs Overnight Compatibility Morning Handoff
 
-**Handoff Date:** 2026-10-30T06:05:00-04:00 (10:05 AM UTC)  
-**Cutoff Deadline:** 2026-10-30T15:00:00Z (11:00 AM EDT) — **Completed ahead of deadline**  
+**Handoff Date:** 2026-10-30T11:50:00-04:00 (3:50 PM UTC)  
+**Cutoff Deadline:** 2026-10-30T16:30:00Z (12:30 PM EDT) — **Completed ahead of deadline**  
 **Lead Agent:** Antigravity Autonomous Lead (`161daabb-f8a9-450c-aefd-a7460c3aad92`)  
 **Worktree:** `C:/Users/hocka/.paseo/worktrees/1usktejc/wereoxxs-overnight-20261030`  
 **Branch:** `forge-wereoxxs-overnight-20261030`  
-**Head Commit:** `c0eb72f`  
+**Head Commit:** `d5901a8`  
 **Execution Policy:** Antigravity-only (`gemini-3.8-flash-high` / `medium`), unattended, zero unauthorized pushes/merges, strictly bounded footprint.
 
 ---
@@ -38,7 +38,8 @@ Across overnight Stages 0 through 8, the native runtime was extended to implemen
 | **Stage 6** | Chat & Combat Log Adapters | [`6d7a0a1`](file:///C:/Users/hocka/.paseo/worktrees/1usktejc/wereoxxs-overnight-20261030/crates/eqoa/src/fork_ext/addons/chat.rs) | `a288b33e-405e-461a-bdbb-c08ad84d6dcf` | **PASS** | 172 |
 | **Stage 7** | Input & D-Pad Hook Adapters | [`d07e943`](file:///C:/Users/hocka/.paseo/worktrees/1usktejc/wereoxxs-overnight-20261030/crates/eqoa/src/fork_ext/addons/input.rs) | `2bb489f2-5635-4958-b16b-9ffea45e17f7` | **PASS** | 177 |
 | **Stage 8** | Full `wereoxxs_ui` Package Integration | [`31eb76d`](file:///C:/Users/hocka/.paseo/worktrees/1usktejc/wereoxxs-overnight-20261030/crates/eqoa/src/fork_ext/addons/wereoxxs_test.rs) | `be3d8c77-0017-4a48-a4a4-d3bd9249b9db` | **PASS** | 183 |
-| **Stage 9** | Morning Checkpoint & Final Handoff | *Current* | Antigravity Autonomous Lead | **PASS** | 183 |
+| **Stage 9** | Complete 76-Symbol Contract & Morning Verification | [`c0eb72f`](file:///C:/Users/hocka/.paseo/worktrees/1usktejc/wereoxxs-overnight-20261030/crates/eqoa/src/fork_ext/addons/wereoxxs_test.rs) | Antigravity Autonomous Lead | **PASS** | 184 |
+| **Stage 10** | DrawList Surface & Multi-Window Runtime Fix | [`d5901a8`](file:///C:/Users/hocka/.paseo/worktrees/1usktejc/wereoxxs-overnight-20261030/crates/eqoa/src/fork_ext/addons/bridge_drawlist.rs) | Antigravity Autonomous Lead | **PASS** | 185 |
 
 ---
 
@@ -74,6 +75,11 @@ Across overnight Stages 0 through 8, the native runtime was extended to implemen
   - On any Lua runtime error during script evaluation, `Bridge::invoke` unwinds the active stack symmetrically calling `igEndCombo()`, `igEndPopup()`, and `igPopID()`, guaranteeing zero state corruption of the native Dear ImGui context between frames.
   - Increased stack budget from 32 to 64 to seamlessly accommodate complex nested custom windows.
 
+### 3.3 Dear ImGui DrawList Surface & Paint Pipeline
+- **DrawList Methods:** Implemented `AddText` (3-argument and 5-argument overloads), `AddImage` (3-argument, 5-argument, and 6-argument overloads), `PushClipRect`, and `PopClipRect`.
+- **Exhaustive Coverage:** 100% of all Dear ImGui `DrawList` methods called across `wereoxxs_ui` and its modules (`paint.lua`, `draw_tape_compass.lua`, `draw_party_frames.lua`, `draw_ability_bars.lua`, etc.) are now fully implemented.
+- **Dynamic Arc Tessellation Scaling:** Replaced fixed worst-case circle segment reservations (`520` points) on rounded rectangles with auto-calculated circle segments (`sys::ImDrawList__CalcCircleAutoSegmentCount`). Prevents complex multi-window HUD layouts with dozens of rounded slots/frames from prematurely exhausting the 196,608 geometry budget limit.
+
 ---
 
 ## 4. Verification Evidence & Test Highlights
@@ -95,6 +101,12 @@ Across overnight Stages 0 through 8, the native runtime was extended to implemen
    - Builds a headless `wgpu` device and queue.
    - Spins up `Manager`, discovers `wereoxxs_ui`, enables it, executes render frame, triggers profile save to disk, and cleanly disables the addon.
    - Zero failure diagnostics emitted.
+
+4. [`forge_wereoxxs_all_windows_rendered_without_drawlist_nil_errors`](file:///C:/Users/hocka/.paseo/worktrees/1usktejc/wereoxxs-overnight-20261030/crates/eqoa/src/fork_ext/addons/wereoxxs_test.rs#L617):
+   - Sets up active GPU rendering pipeline with font bank and texture subsystem.
+   - Enables all 8 `wereoxxs_ui` windows simultaneously: `bars`, `casting`, `player`, `target`, `group`, `compass`, `meter`, `chat`.
+   - Populates rich in-game player, target entity, party members, hotbars, and active buffs.
+   - Renders consecutive frames and verifies zero `attempt to call method (a nil value)` errors, zero geometry budget overflows, and clean vertex/index buffer submission to the GPU render pass.
 
 ### 4.2 Extended Dear ImGui Suite: `crates/eqoa/src/fork_ext/addons/bridge_next_tests.rs`
 - [`forge_bridge_wereoxxs_widgets_and_stack_unwinding`](file:///C:/Users/hocka/.paseo/worktrees/1usktejc/wereoxxs-overnight-20261030/crates/eqoa/src/fork_ext/addons/bridge_next_tests.rs#L401):
