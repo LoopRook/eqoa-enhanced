@@ -72,6 +72,7 @@ struct Instance {
     bridge: Bridge,
     textures: Rc<RefCell<Textures>>,
     sound_bank: Rc<RefCell<SoundBank>>,
+    font_bank: Rc<RefCell<super::fonts::FontBank>>,
     visibility: super::visibility::VisibilityLease,
     initialized: bool,
     active: bool,
@@ -268,10 +269,35 @@ impl Manager {
                 for message in messages {
                     self.diagnostic(Some(&entry.metadata.id), "sound", message);
                 }
+                let messages = i.font_bank.borrow_mut().drain_diagnostics();
+                for message in messages {
+                    self.diagnostic(Some(&entry.metadata.id), "font", message);
+                }
             }
         }
         self.entries = entries;
     }
+    pub fn flush_pending_fonts(&mut self, context: &mut dear_imgui_rs::Context) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let epoch = super::fonts::current_context_epoch();
+            let mut diags = Vec::new();
+            for entry in &mut self.entries {
+                if let Some(instance) = &mut entry.instance {
+                    let mut bank = instance.font_bank.borrow_mut();
+                    bank.set_context_epoch(epoch);
+                    bank.flush_pending(context);
+                    for diag in bank.drain_diagnostics() {
+                        diags.push((entry.metadata.id.clone(), diag));
+                    }
+                }
+            }
+            for (id, diag) in diags {
+                self.diagnostic(Some(&id), "font", diag);
+            }
+        }
+    }
+
     pub fn after_render(&mut self) {
         for bank in self.retired.drain(..) {
             bank.borrow_mut().collect(true);
@@ -324,12 +350,19 @@ impl Manager {
         let sound_bank = Rc::new(RefCell::new(SoundBank::new().map_err(|e| e.to_string())?));
         SoundBank::install_for_addon(&sound_bank, &host.lua, metadata)
             .map_err(|e| e.to_string())?;
+        let font_bank = Rc::new(RefCell::new(super::fonts::FontBank::new(
+            0,
+            super::fonts::current_context_epoch(),
+        )));
+        super::fonts::FontBank::install_for_addon(&font_bank, &host.lua, metadata)
+            .map_err(|e| e.to_string())?;
         Ok(Instance {
             host,
             function,
             bridge,
             textures,
             sound_bank,
+            font_bank,
             visibility,
             initialized: false,
             active: false,

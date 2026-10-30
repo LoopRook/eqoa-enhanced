@@ -84,12 +84,14 @@ enum Stack {
     TextWrap,
     Color,
     ClipRect,
+    Font,
 }
 
 #[derive(Default)]
 struct Frame {
     active: bool,
     epoch: i32,
+    context_epoch: u64,
     context: *mut sys::ImGuiContext,
     calls: usize,
     invocation: u64,
@@ -633,6 +635,87 @@ impl Bridge {
                 Ok(())
             })?,
         )?;
+        let f = frame.clone();
+        imgui.set(
+            "PushFont",
+            lua.create_function(move |_, font_val: Option<mlua::Value>| {
+                let mut state = f.borrow_mut();
+                state.check()?;
+                state.room()?;
+                let font_ptr = match font_val {
+                    None | Some(mlua::Value::Nil) => std::ptr::null_mut(),
+                    Some(mlua::Value::UserData(ud)) => {
+                        let font = ud.borrow::<super::fonts::LuaImFont>()?;
+                        if font.context_epoch != state.context_epoch {
+                            return Err(mlua::Error::runtime("stale or foreign font handle from different context"));
+                        }
+                        match &*font.state.borrow() {
+                            super::fonts::FontHandleState::Ready { raw_font, .. } => *raw_font,
+                            super::fonts::FontHandleState::Pending { .. }
+                            | super::fonts::FontHandleState::Fallback => std::ptr::null_mut(),
+                        }
+                    }
+                    _ => return Err(mlua::Error::runtime("expected ImFont or nil for PushFont")),
+                };
+                unsafe {
+                    if font_ptr.is_null() {
+                        sys::igPushFont(std::ptr::null_mut(), 0.0);
+                    } else {
+                        sys::igPushFont(font_ptr, (*font_ptr).LegacySize);
+                    }
+                }
+                state.stack.push(Stack::Font);
+                Ok(())
+            })?,
+        )?;
+        let f = frame.clone();
+        imgui.set(
+            "PopFont",
+            lua.create_function(move |_, ()| {
+                let mut state = f.borrow_mut();
+                state.check()?;
+                state.pop(Stack::Font)?;
+                unsafe {
+                    sys::igPopFont();
+                }
+                Ok(())
+            })?,
+        )?;
+        let f = frame.clone();
+        imgui.set(
+            "CalcTextSize",
+            lua.create_function(
+                move |_, (text, _ending, hide_hash, wrap_width): (String, Option<String>, Option<bool>, Option<f32>)| {
+                    f.borrow_mut().check()?;
+                    let c_text = std::ffi::CString::new(text).map_err(|e| mlua::Error::runtime(e.to_string()))?;
+                    let hide = hide_hash.unwrap_or(false);
+                    let wrap = wrap_width.unwrap_or(-1.0);
+                    let size = unsafe {
+                        sys::igCalcTextSize(c_text.as_ptr(), std::ptr::null(), hide, wrap)
+                    };
+                    Ok((size.x, size.y))
+                },
+            )?,
+        )?;
+        let f = frame.clone();
+        imgui.set(
+            "SetWindowFontScale",
+            lua.create_function(move |_, scale: f32| {
+                let mut state = f.borrow_mut();
+                state.check()?;
+                if !scale.is_finite() || scale <= 0.0 {
+                    return Err(mlua::Error::runtime("font scale must be positive"));
+                }
+                unsafe {
+                    let win = sys::igGetCurrentWindow();
+                    if !win.is_null() {
+                        (*win).FontWindowScale = scale;
+                        sys::igUpdateCurrentFontSize(0.0);
+                    }
+                }
+                Ok(())
+            })?,
+        )?;
         lua.globals().set("ImGui", imgui.clone())?;
         let flags = lua.create_table()?;
         flags.set("NoTitleBar", sys::ImGuiWindowFlags_NoTitleBar)?;
@@ -673,6 +756,7 @@ impl Bridge {
                 state.geometry_context = context;
             }
             state.epoch = epoch;
+            state.context_epoch = super::fonts::current_context_epoch();
             state.invocation = state.invocation.wrapping_add(1);
             state.calls = 0;
             state.active = true;
@@ -695,6 +779,7 @@ impl Bridge {
                     Stack::TextWrap => sys::igPopTextWrapPos(),
                     Stack::Color => sys::igPopStyleColor(1),
                     Stack::ClipRect => sys::igPopClipRect(),
+                    Stack::Font => sys::igPopFont(),
                 }
             }
         }

@@ -338,6 +338,7 @@ impl Active {
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ) -> Result<Self, String> {
+        super::fonts::bump_context_epoch();
         let mut context = Context::create();
         context
             .set_ini_filename::<PathBuf>(None)
@@ -505,6 +506,7 @@ fn render_managed(
             .io_mut()
             .set_display_size([extent.width() as f32, extent.height() as f32]);
         context.io_mut().set_display_framebuffer_scale([1.0, 1.0]);
+        manager.flush_pending_fonts(context);
         let ui = context.try_frame().map_err(|e| e.to_string())?;
         let mut open = plan.controls.unwrap_or(false);
         if open {
