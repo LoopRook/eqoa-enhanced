@@ -27,6 +27,7 @@ pub(crate) mod group;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod health;
 pub(crate) mod host;
+pub(crate) mod input;
 pub(crate) mod manager;
 pub(crate) mod package;
 pub(crate) mod player;

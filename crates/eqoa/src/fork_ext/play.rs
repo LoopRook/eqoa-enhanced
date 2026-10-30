@@ -429,6 +429,7 @@ impl Play {
             abilities,
             chat,
             combat,
+            input: crate::fork_ext::addons::input::InputSnapshot::default(),
         }
     }
 }

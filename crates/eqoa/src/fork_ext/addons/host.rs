@@ -19,6 +19,7 @@ pub(crate) struct Snapshot {
     pub abilities: super::ability::AbilitiesSnapshot,
     pub chat: super::chat::ChatSnapshot,
     pub combat: super::combat::CombatSnapshot,
+    pub input: super::input::InputSnapshot,
 }
 impl Snapshot {
     pub fn managed(mut self) -> Self {
@@ -30,6 +31,7 @@ impl Snapshot {
             self.abilities = super::ability::AbilitiesSnapshot::default();
             self.chat = super::chat::ChatSnapshot::default();
             self.combat = super::combat::CombatSnapshot::default();
+            self.input = super::input::InputSnapshot::default();
         }
         self.in_game &= self.health.is_available();
         self
@@ -202,6 +204,7 @@ impl Host {
         super::ability::install_icon_adapter(&host)?;
         super::chat::install_chat_adapter(&host)?;
         super::combat::install_combat_adapter(&host)?;
+        super::input::install_input_adapter(&host)?;
         Ok(host)
     }
 
