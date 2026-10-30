@@ -14,6 +14,7 @@
     "Start-EQOA.bat",
     "Start-EQOA-With-Parser.bat",
     "Start-Launcher.bat",
+    "crates/eqoa/resources/app-icon/**",
     "crates/eqoa/resources/map-ui/**",
     "crates/eqoa/src/map/**",
     "crates/eqoa/src/questguide/**",
@@ -61,6 +62,11 @@
       "deleted": 0,
       "reason": "Reviewed native-only mlua and Dear ImGui spike dependencies plus existing fork/release settings; license metadata stays unchanged."
     },
+    "crates/eqoa/build.rs": {
+      "added": 33,
+      "deleted": 70,
+      "reason": "Owner-supplied program icons: embed the chosen .ico (STANDARD when EQOA_UPDATE_CHANNEL is set, DEV otherwise) instead of the drawn disc and copy it to OUT_DIR for the window icon; the stack and linker behavior is unchanged."
+    },
     "crates/eqoa/src/bindpage.rs": {
       "added": 16,
       "deleted": 16,
@@ -86,6 +92,11 @@
       "deleted": 8,
       "reason": "Reviewed restored HUD and native addon health visibility field/gauge seam; implementation in fork_ext."
     },
+    "crates/eqoa/src/icon.rs": {
+      "added": 23,
+      "deleted": 130,
+      "reason": "Fork keeps the owner's chosen program icon for the whole run instead of switching to the disc's memory-card save icon; the picture comes from fork_ext::app_icon."
+    },
     "crates/eqoa/src/input.rs": {
       "added": 32,
       "deleted": 3,
@@ -97,9 +108,9 @@
       "reason": "Restored map terrain observation."
     },
     "crates/eqoa/src/main.rs": {
-      "added": 30,
-      "deleted": 0,
-      "reason": "Restored module registration, fork_ext boundary, and report policy module."
+      "added": 32,
+      "deleted": 2,
+      "reason": "Restored module registration, fork_ext boundary, report policy module, and the chosen program icon comment."
     },
     "crates/eqoa/src/options.rs": {
       "added": 196,

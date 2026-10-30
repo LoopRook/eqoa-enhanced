@@ -14,6 +14,9 @@ Upstream changes remain in UPDATE-NOTES.md.
   return nil. Handle, file-size, and aggregate budgets are enforced.
 - Preview packaging and interactive checks are still pending; full Forge addon
   compatibility is not yet available.
+- The program uses the selected EQOA icon on the window, taskbar and eqoa.exe:
+  DEV in development builds, STANDARD in official releases. It no longer changes
+  to the memory-card save icon after the disc is chosen.
 
 ## 2026-10-28 · Enhanced 0.1.1
 

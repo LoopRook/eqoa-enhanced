@@ -4,3 +4,5 @@ pub mod telemetry;
 pub mod release;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod addons;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod app_icon;

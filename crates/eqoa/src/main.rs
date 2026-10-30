@@ -66,8 +66,8 @@ mod craft;
 mod craftwnd;
 mod death;
 mod discs;
-// the program's icon: the drawn disc it carries, then the game's own save
-// icon off the player's disc (natively; a page has its favicon)
+// the program's icon: the owner's chosen .ico, the same for the whole run
+// (natively; a page has its favicon)
 #[cfg(not(target_arch = "wasm32"))]
 mod icon;
 #[cfg(not(target_arch = "wasm32"))]
