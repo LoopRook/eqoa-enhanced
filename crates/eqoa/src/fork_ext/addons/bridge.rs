@@ -85,6 +85,9 @@ enum Stack {
     Color,
     ClipRect,
     Font,
+    Combo,
+    Popup,
+    Id,
 }
 
 #[derive(Default)]
@@ -138,8 +141,8 @@ impl Frame {
     fn pop_clip_rect(&mut self) -> Result<()> {
         self.pop(Stack::ClipRect)
     }
-    fn room(&self) -> Result<()> {
-        if self.stack.len() >= 32 {
+    pub(super) fn room(&self) -> Result<()> {
+        if self.stack.len() >= 64 {
             Err(mlua::Error::runtime("ImGui stack budget exceeded"))
         } else {
             Ok(())
@@ -252,9 +255,7 @@ impl Bridge {
                     widgets::window_flags(flags)?;
                     let mut state = f.borrow_mut();
                     state.check()?;
-                    if state.stack.len() >= 32 {
-                        return Err(mlua::Error::runtime("ImGui stack budget exceeded"));
-                    }
+                    state.room()?;
                     let mut is_open = open.unwrap_or(true);
                     let visible = unsafe {
                         sys::igBegin(
@@ -377,9 +378,7 @@ impl Bridge {
                     }) {
                         return Err(mlua::Error::runtime("PushClipRect called outside window"));
                     }
-                    if state.stack.len() >= 32 {
-                        return Err(mlua::Error::runtime("ImGui stack budget exceeded"));
-                    }
+                    state.room()?;
                     unsafe {
                         sys::igPushClipRect(
                             sys::ImVec2_c { x: min_x, y: min_y },
@@ -601,7 +600,7 @@ impl Bridge {
         imgui.set(
             "PushStyleColor",
             lua.create_function(move |_, (idx, r, g, b, a): (i32, f32, f32, f32, f32)| {
-                if idx != sys::ImGuiCol_Text as i32 && idx != sys::ImGuiCol_PlotHistogram as i32 {
+                if idx < 0 || idx >= sys::ImGuiCol_COUNT as i32 {
                     return Err(mlua::Error::runtime("unsupported spike style color"));
                 }
                 let col = sys::ImVec4_c {
@@ -612,9 +611,7 @@ impl Bridge {
                 };
                 let mut state = f.borrow_mut();
                 state.check()?;
-                if state.stack.len() >= 32 {
-                    return Err(mlua::Error::runtime("ImGui stack budget exceeded"));
-                }
+                state.room()?;
                 unsafe {
                     sys::igPushStyleColor_Vec4(idx, col);
                 }
@@ -625,12 +622,18 @@ impl Bridge {
         let f = frame.clone();
         imgui.set(
             "PopStyleColor",
-            lua.create_function(move |_, ()| {
+            lua.create_function(move |_, count: Option<i32>| {
                 let mut state = f.borrow_mut();
                 state.check()?;
-                state.pop(Stack::Color)?;
-                unsafe {
-                    sys::igPopStyleColor(1);
+                let n = count.unwrap_or(1);
+                if n <= 0 {
+                    return Err(mlua::Error::runtime("PopStyleColor count must be positive"));
+                }
+                for _ in 0..n {
+                    state.pop(Stack::Color)?;
+                    unsafe {
+                        sys::igPopStyleColor(1);
+                    }
                 }
                 Ok(())
             })?,
@@ -647,7 +650,9 @@ impl Bridge {
                     Some(mlua::Value::UserData(ud)) => {
                         let font = ud.borrow::<super::fonts::LuaImFont>()?;
                         if font.context_epoch != state.context_epoch {
-                            return Err(mlua::Error::runtime("stale or foreign font handle from different context"));
+                            return Err(mlua::Error::runtime(
+                                "stale or foreign font handle from different context",
+                            ));
                         }
                         match &*font.state.borrow() {
                             super::fonts::FontHandleState::Ready { raw_font, .. } => *raw_font,
@@ -685,9 +690,16 @@ impl Bridge {
         imgui.set(
             "CalcTextSize",
             lua.create_function(
-                move |_, (text, _ending, hide_hash, wrap_width): (String, Option<String>, Option<bool>, Option<f32>)| {
+                move |_,
+                      (text, _ending, hide_hash, wrap_width): (
+                    String,
+                    Option<String>,
+                    Option<bool>,
+                    Option<f32>,
+                )| {
                     f.borrow_mut().check()?;
-                    let c_text = std::ffi::CString::new(text).map_err(|e| mlua::Error::runtime(e.to_string()))?;
+                    let c_text = std::ffi::CString::new(text)
+                        .map_err(|e| mlua::Error::runtime(e.to_string()))?;
                     let hide = hide_hash.unwrap_or(false);
                     let wrap = wrap_width.unwrap_or(-1.0);
                     let size = unsafe {
@@ -729,8 +741,65 @@ impl Bridge {
         )?;
         lua.globals().set("ImGuiInputTextFlags", flags)?;
         let colors = lua.create_table()?;
-        colors.set("Text", sys::ImGuiCol_Text)?;
+        for (name, col) in [
+            ("Text", sys::ImGuiCol_Text),
+            ("TextDisabled", sys::ImGuiCol_TextDisabled),
+            ("WindowBg", sys::ImGuiCol_WindowBg),
+            ("ChildBg", sys::ImGuiCol_ChildBg),
+            ("PopupBg", sys::ImGuiCol_PopupBg),
+            ("Border", sys::ImGuiCol_Border),
+            ("BorderShadow", sys::ImGuiCol_BorderShadow),
+            ("FrameBg", sys::ImGuiCol_FrameBg),
+            ("FrameBgHovered", sys::ImGuiCol_FrameBgHovered),
+            ("FrameBgActive", sys::ImGuiCol_FrameBgActive),
+            ("TitleBg", sys::ImGuiCol_TitleBg),
+            ("TitleBgActive", sys::ImGuiCol_TitleBgActive),
+            ("TitleBgCollapsed", sys::ImGuiCol_TitleBgCollapsed),
+            ("MenuBarBg", sys::ImGuiCol_MenuBarBg),
+            ("ScrollbarBg", sys::ImGuiCol_ScrollbarBg),
+            ("ScrollbarGrab", sys::ImGuiCol_ScrollbarGrab),
+            ("ScrollbarGrabHovered", sys::ImGuiCol_ScrollbarGrabHovered),
+            ("ScrollbarGrabActive", sys::ImGuiCol_ScrollbarGrabActive),
+            ("CheckMark", sys::ImGuiCol_CheckMark),
+            ("SliderGrab", sys::ImGuiCol_SliderGrab),
+            ("SliderGrabActive", sys::ImGuiCol_SliderGrabActive),
+            ("Button", sys::ImGuiCol_Button),
+            ("ButtonHovered", sys::ImGuiCol_ButtonHovered),
+            ("ButtonActive", sys::ImGuiCol_ButtonActive),
+            ("Header", sys::ImGuiCol_Header),
+            ("HeaderHovered", sys::ImGuiCol_HeaderHovered),
+            ("HeaderActive", sys::ImGuiCol_HeaderActive),
+            ("Separator", sys::ImGuiCol_Separator),
+            ("SeparatorHovered", sys::ImGuiCol_SeparatorHovered),
+            ("SeparatorActive", sys::ImGuiCol_SeparatorActive),
+            ("ResizeGrip", sys::ImGuiCol_ResizeGrip),
+            ("ResizeGripHovered", sys::ImGuiCol_ResizeGripHovered),
+            ("ResizeGripActive", sys::ImGuiCol_ResizeGripActive),
+            ("TabHovered", sys::ImGuiCol_TabHovered),
+            ("Tab", sys::ImGuiCol_Tab),
+            ("TabSelected", sys::ImGuiCol_TabSelected),
+            ("TabDimmed", sys::ImGuiCol_TabDimmed),
+            ("TabDimmedSelected", sys::ImGuiCol_TabDimmedSelected),
+            ("PlotLines", sys::ImGuiCol_PlotLines),
+            ("PlotLinesHovered", sys::ImGuiCol_PlotLinesHovered),
+            ("PlotHistogram", sys::ImGuiCol_PlotHistogram),
+            ("PlotHistogramHovered", sys::ImGuiCol_PlotHistogramHovered),
+        ] {
+            colors.set(name, col as i32)?;
+        }
         lua.globals().set("ImGuiCol", colors)?;
+
+        let conds = lua.create_table()?;
+        for (name, cond) in [
+            ("None", 0),
+            ("Always", sys::ImGuiCond_Always),
+            ("Once", sys::ImGuiCond_Once),
+            ("FirstUseEver", sys::ImGuiCond_FirstUseEver),
+            ("Appearing", sys::ImGuiCond_Appearing),
+        ] {
+            conds.set(name, cond as i32)?;
+        }
+        lua.globals().set("ImGuiCond", conds)?;
         widgets::install(lua, &imgui, &frame)?;
         Ok(Self { frame })
     }
@@ -780,6 +849,9 @@ impl Bridge {
                     Stack::Color => sys::igPopStyleColor(1),
                     Stack::ClipRect => sys::igPopClipRect(),
                     Stack::Font => sys::igPopFont(),
+                    Stack::Combo => sys::igEndCombo(),
+                    Stack::Popup => sys::igEndPopup(),
+                    Stack::Id => sys::igPopID(),
                 }
             }
         }

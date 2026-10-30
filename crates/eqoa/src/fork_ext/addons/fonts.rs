@@ -104,8 +104,15 @@ impl std::fmt::Display for FontDiagnostic {
             Self::HandleLimitExceeded { limit } => {
                 write!(f, "font handle limit {limit} exceeded")
             }
-            Self::AggregateLimitExceeded { current, adding, max } => {
-                write!(f, "aggregate font size {current}+{adding} exceeds limit {max}")
+            Self::AggregateLimitExceeded {
+                current,
+                adding,
+                max,
+            } => {
+                write!(
+                    f,
+                    "aggregate font size {current}+{adding} exceeds limit {max}"
+                )
             }
             Self::ValidationFailed(err) => write!(f, "font validation failed: {err}"),
         }
@@ -205,13 +212,14 @@ impl FontBank {
             return Some(fallback_handle(self, cache_key));
         }
 
-        let canonical_path = match resolve_font_path(path_str, &addon.script_root, &addon.resource_dirs) {
-            Ok(p) => p,
-            Err(diag) => {
-                self.record_diagnostic(diag);
-                return Some(fallback_handle(self, cache_key));
-            }
-        };
+        let canonical_path =
+            match resolve_font_path(path_str, &addon.script_root, &addon.resource_dirs) {
+                Ok(p) => p,
+                Err(diag) => {
+                    self.record_diagnostic(diag);
+                    return Some(fallback_handle(self, cache_key));
+                }
+            };
 
         let file_size = match fs::metadata(&canonical_path) {
             Ok(meta) => meta.len(),
@@ -300,7 +308,10 @@ impl FontBank {
                     *state = FontHandleState::Fallback;
                 } else {
                     // If legacy renderer claimed (as in headless unit tests), rebuild atlas
-                    let _ = context.font_atlas().try_claim_legacy_renderer().map(|r| r.build());
+                    let _ = context
+                        .font_atlas()
+                        .try_claim_legacy_renderer()
+                        .map(|r| r.build());
                     *state = FontHandleState::Ready {
                         raw_font: font_ptr,
                         size_pixels: *size_pixels,
@@ -352,7 +363,9 @@ pub fn sanitize_path_string(path_str: &str) -> Result<(), FontDiagnostic> {
             ));
         }
         if ch == '\0' {
-            return Err(FontDiagnostic::PathSanitizationFailed("null bytes prohibited"));
+            return Err(FontDiagnostic::PathSanitizationFailed(
+                "null bytes prohibited",
+            ));
         }
         if (ch as u32) < 0x20 {
             return Err(FontDiagnostic::PathSanitizationFailed(
@@ -414,9 +427,8 @@ pub fn resolve_font_path(
         .unwrap_or_else(|_| script_root.to_path_buf());
 
     let path = Path::new(path_str);
-    let is_relative = !path_str.starts_with('/')
-        && !path_str.starts_with('\\')
-        && !path_str.contains(':');
+    let is_relative =
+        !path_str.starts_with('/') && !path_str.starts_with('\\') && !path_str.contains(':');
 
     if is_relative {
         let normalized = path_str.replace('\\', "/");
@@ -445,8 +457,8 @@ pub fn resolve_font_path(
         }
         Err(FontDiagnostic::FileNotFound(PathBuf::from(path_str)))
     } else {
-        let canonical = fs::canonicalize(path)
-            .map_err(|_| FontDiagnostic::FileNotFound(path.to_path_buf()))?;
+        let canonical =
+            fs::canonicalize(path).map_err(|_| FontDiagnostic::FileNotFound(path.to_path_buf()))?;
         if is_allowed_system_fonts_path(&canonical) {
             return Ok(canonical);
         }
@@ -467,7 +479,8 @@ mod tests {
     use dear_imgui_rs::Context;
 
     fn temp_test_dir(name: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("eqoa_font_test_{}_{}", name, std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("eqoa_font_test_{}_{}", name, std::process::id()));
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         path
@@ -543,8 +556,15 @@ mod tests {
         // Arbitrary absolute path outside script root and system fonts rejected
         let foreign = std::env::temp_dir().join("foreign_font.ttf");
         fs::write(&foreign, b"dummy foreign font").unwrap();
-        let res = resolve_font_path(&foreign.to_string_lossy(), &addon.script_root, &addon.resource_dirs);
-        assert!(matches!(res, Err(FontDiagnostic::PathSanitizationFailed(_))));
+        let res = resolve_font_path(
+            &foreign.to_string_lossy(),
+            &addon.script_root,
+            &addon.resource_dirs,
+        );
+        assert!(matches!(
+            res,
+            Err(FontDiagnostic::PathSanitizationFailed(_))
+        ));
 
         #[cfg(windows)]
         {
@@ -632,7 +652,11 @@ mod tests {
         context.set_ini_filename::<PathBuf>(None).unwrap();
         context.io_mut().set_display_size([800.0, 600.0]);
         context.io_mut().set_delta_time(1.0 / 60.0);
-        context.font_atlas().try_claim_legacy_renderer().unwrap().build();
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
 
         let host = Host::for_addon(&addon).unwrap();
         let bridge = Bridge::install(&host).unwrap();
@@ -641,7 +665,9 @@ mod tests {
 
         // Frame 0: LoadFont returns Pending handle. PushFont uses default font safely.
         context.frame();
-        let script0 = host.compile(r#"
+        let script0 = host
+            .compile(
+                r#"
             times20 = UiForge.LoadFont("C:\\Windows\\Fonts\\times.ttf", 20.0)
             times36 = UiForge.LoadFont("C:\\Windows\\Fonts\\times.ttf", 36.0)
             assert(times20 ~= nil and times36 ~= nil)
@@ -650,7 +676,9 @@ mod tests {
             ImGui.PopFont()
             _G.w0 = w0
             _G.h0 = h0
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         bridge.invoke(|| host.run(&script0)).unwrap();
         drop(context.render_legacy());
         let w0: f32 = host.lua.globals().get("w0").unwrap();
@@ -662,7 +690,9 @@ mod tests {
 
         // Frame 1: PushFont now uses real baked 20px and 36px fonts!
         context.frame();
-        let script1 = host.compile(r#"
+        let script1 = host
+            .compile(
+                r#"
             ImGui.PushFont(times20)
             local w20, h20 = ImGui.CalcTextSize("Hello EQOA")
             ImGui.PopFont()
@@ -675,7 +705,9 @@ mod tests {
             _G.h20 = h20
             _G.w36 = w36
             _G.h36 = h36
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         bridge.invoke(|| host.run(&script1)).unwrap();
         let w20: f32 = host.lua.globals().get("w20").unwrap();
         let h20: f32 = host.lua.globals().get("h20").unwrap();
@@ -703,7 +735,11 @@ mod tests {
         context.set_ini_filename::<PathBuf>(None).unwrap();
         context.io_mut().set_display_size([800.0, 600.0]);
         context.io_mut().set_delta_time(1.0 / 60.0);
-        context.font_atlas().try_claim_legacy_renderer().unwrap().build();
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
 
         let host = Host::for_addon(&addon).unwrap();
         let bridge = Bridge::install(&host).unwrap();
@@ -712,21 +748,29 @@ mod tests {
 
         context.frame();
         // Script pushes font and deliberately throws error without calling PopFont
-        let bad_script = host.compile(r#"
+        let bad_script = host
+            .compile(
+                r#"
             local font = UiForge.LoadFont("missing.ttf", 20.0)
             ImGui.PushFont(font)
             error("controlled error mid-font")
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         let res = bridge.invoke(|| host.run(&bad_script));
         assert!(res.is_err());
 
         // Next healthy script in same frame must run cleanly
-        let good_script = host.compile(r#"
+        let good_script = host
+            .compile(
+                r#"
             local font = UiForge.LoadFont("missing.ttf", 20.0)
             ImGui.PushFont(font)
             ImGui.PopFont()
             _G.good = true
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         bridge.invoke(|| host.run(&good_script)).unwrap();
         assert_eq!(host.lua.globals().get::<bool>("good").unwrap(), true);
         drop(context.render_legacy());
@@ -741,7 +785,11 @@ mod tests {
         context.set_ini_filename::<PathBuf>(None).unwrap();
         context.io_mut().set_display_size([800.0, 600.0]);
         context.io_mut().set_delta_time(1.0 / 60.0);
-        context.font_atlas().try_claim_legacy_renderer().unwrap().build();
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
 
         let host = Host::for_addon(&addon).unwrap();
         let bridge = Bridge::install(&host).unwrap();
@@ -749,10 +797,14 @@ mod tests {
         FontBank::install_for_addon(&font_bank, &host.lua, &addon).unwrap();
 
         context.frame();
-        let script = host.compile(r#"
+        let script = host
+            .compile(
+                r#"
             font = UiForge.LoadFont("missing.ttf", 20.0)
             return font
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         bridge.invoke(|| host.run(&script)).unwrap();
         drop(context.render_legacy());
         drop(context);
@@ -763,12 +815,20 @@ mod tests {
         new_context.set_ini_filename::<PathBuf>(None).unwrap();
         new_context.io_mut().set_display_size([800.0, 600.0]);
         new_context.io_mut().set_delta_time(1.0 / 60.0);
-        new_context.font_atlas().try_claim_legacy_renderer().unwrap().build();
+        new_context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
 
         new_context.frame();
-        let stale_script = host.compile(r#"
+        let stale_script = host
+            .compile(
+                r#"
             ImGui.PushFont(font)
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         let err = bridge.invoke(|| host.run(&stale_script)).unwrap_err();
         assert!(err.to_string().contains("stale or foreign font handle"));
         drop(new_context.render_legacy());
@@ -780,26 +840,38 @@ mod tests {
         context.set_ini_filename::<PathBuf>(None).unwrap();
         context.io_mut().set_display_size([800.0, 600.0]);
         context.io_mut().set_delta_time(1.0 / 60.0);
-        context.font_atlas().try_claim_legacy_renderer().unwrap().build();
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
 
         let host = Host::new().unwrap();
         let bridge = Bridge::install(&host).unwrap();
 
         context.frame();
-        let script = host.compile(r#"
+        let script = host
+            .compile(
+                r#"
             assert(ImGui.Begin("ScaleTest"))
             ImGui.SetWindowFontScale(1.5)
             ImGui.Text("Scaled text")
             ImGui.End()
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         assert!(bridge.invoke(|| host.run(&script)).is_ok());
 
         // Invalid non-positive or non-finite scale rejected
-        let bad = host.compile(r#"
+        let bad = host
+            .compile(
+                r#"
             assert(ImGui.Begin("BadScale"))
             ImGui.SetWindowFontScale(0.0)
             ImGui.End()
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         assert!(bridge.invoke(|| host.run(&bad)).is_err());
         drop(context.render_legacy());
     }

@@ -398,3 +398,166 @@ fn forge_bridge_next_scope_failure_unwinds_before_healthy_neighbor_gpu_readback(
         );
     }
 }
+
+#[test]
+fn forge_bridge_wereoxxs_widgets_and_stack_unwinding() {
+    let mut context = context();
+    let host = Host::new().unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+
+    // Frame 1: Exercise new widgets inside window
+    context.frame();
+    let script = host.compile(r#"
+        assert(ImGuiCond.FirstUseEver == 4, 'ImGuiCond.FirstUseEver missing')
+        assert(ImGuiCol.FrameBg ~= nil, 'ImGuiCol.FrameBg missing')
+        assert(ImGuiCol.FrameBgHovered ~= nil, 'ImGuiCol.FrameBgHovered missing')
+        assert(ImGuiCol.Tab ~= nil, 'ImGuiCol.Tab missing')
+
+        ImGui.SetNextWindowPos(10, 20, ImGuiCond.Always)
+        ImGui.SetNextWindowSize(300, 200, ImGuiCond.Always)
+        local visible = ImGui.Begin('TestWereoxxsWidgets')
+        assert(visible, 'window should be visible')
+
+        local wx, wy = ImGui.GetWindowPos()
+        assert(wx >= 0 and wy >= 0, 'GetWindowPos returned invalid')
+
+        local aw, ah = ImGui.GetContentRegionAvail()
+        assert(aw > 0 and ah > 0, 'GetContentRegionAvail positive')
+
+        local fh = ImGui.GetFrameHeight()
+        assert(fh > 0, 'GetFrameHeight positive')
+
+        local lh = ImGui.GetTextLineHeight()
+        assert(lh > 0, 'GetTextLineHeight positive')
+
+        local sy = ImGui.GetScrollY()
+        local max_sy = ImGui.GetScrollMaxY()
+        assert(sy >= 0 and max_sy >= 0, 'Scroll values non-negative')
+        ImGui.SetScrollHereY(1.0)
+
+        ImGui.SetCursorScreenPos(15, 25)
+        ImGui.SetNextItemWidth(100)
+
+        local btn = ImGui.InvisibleButton('inv_btn', 50, 20)
+        assert(type(btn) == 'boolean')
+
+        local txt, entered = ImGui.InputTextWithHint('##hint_test', 'type here', 'hello', ImGuiInputTextFlags.EnterReturnsTrue)
+        assert(txt == 'hello', 'InputTextWithHint returns current text')
+        assert(type(entered) == 'boolean')
+
+        -- ID stack push/pop string & int
+        ImGui.PushID('string_id')
+        ImGui.PushID(42)
+        ImGui.PopID()
+        ImGui.PopID()
+
+        -- PushStyleColor and multi-pop
+        ImGui.PushStyleColor(ImGuiCol.Text, 1.0, 0.0, 0.0, 1.0)
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, 0.0, 1.0, 0.0, 1.0)
+        ImGui.PopStyleColor(2)
+
+        -- Selectable
+        local sel = ImGui.Selectable('Option 1', true)
+        assert(type(sel) == 'boolean')
+
+        -- Combo (returns false when closed)
+        local combo_open = ImGui.BeginCombo('test_combo', 'preview')
+        assert(type(combo_open) == 'boolean')
+        if combo_open then
+            ImGui.Selectable('item', false)
+            ImGui.EndCombo()
+        end
+
+        -- Popup
+        ImGui.OpenPopup('test_popup')
+        if ImGui.BeginPopup('test_popup') then
+            ImGui.Text('popup text')
+            ImGui.EndPopup()
+        end
+
+        -- Mouse queries
+        local dragging = ImGui.IsMouseDragging(0)
+        assert(type(dragging) == 'boolean')
+        local hovering = ImGui.IsMouseHoveringRect(0, 0, 100, 100)
+        assert(type(hovering) == 'boolean')
+        local focused = ImGui.IsWindowFocused()
+        assert(type(focused) == 'boolean')
+        local hovered = ImGui.IsWindowHovered()
+        assert(type(hovered) == 'boolean')
+
+        ImGui.End()
+    "#).unwrap();
+    bridge.invoke(|| host.run(&script)).unwrap();
+    drop(context.render_legacy());
+
+    // Frame 2: Unbalanced EndCombo when not opened
+    context.frame();
+    let broken_combo = host
+        .compile(
+            r#"
+        ImGui.Begin('broken_combo')
+        ImGui.EndCombo()
+    "#,
+        )
+        .unwrap();
+    let err = bridge.invoke(|| host.run(&broken_combo)).unwrap_err();
+    assert!(err.to_string().contains("unbalanced"));
+    drop(context.render_legacy());
+
+    // Frame 3: Unbalanced EndPopup when not opened
+    context.frame();
+    let broken_popup = host
+        .compile(
+            r#"
+        ImGui.Begin('broken_popup')
+        ImGui.EndPopup()
+    "#,
+        )
+        .unwrap();
+    let err = bridge.invoke(|| host.run(&broken_popup)).unwrap_err();
+    assert!(err.to_string().contains("unbalanced"));
+    drop(context.render_legacy());
+
+    // Frame 4: Unbalanced PopID when nothing pushed
+    context.frame();
+    let broken_id = host
+        .compile(
+            r#"
+        ImGui.Begin('broken_id')
+        ImGui.PopID()
+    "#,
+        )
+        .unwrap();
+    let err = bridge.invoke(|| host.run(&broken_id)).unwrap_err();
+    assert!(err.to_string().contains("unbalanced"));
+    drop(context.render_legacy());
+
+    // Frame 5: Stack unwinding on PushID leak
+    context.frame();
+    let broken_unwind = host
+        .compile(
+            r#"
+        ImGui.Begin('broken_unwind')
+        ImGui.PushID('leak')
+        error('simulated unwind error')
+    "#,
+        )
+        .unwrap();
+    let err = bridge.invoke(|| host.run(&broken_unwind)).unwrap_err();
+    assert!(err.to_string().contains("simulated unwind error"));
+    drop(context.render_legacy());
+
+    // Frame 6: Ensure healthy next frame after unwinding all errors
+    context.frame();
+    let clean = host
+        .compile(
+            r#"
+        ImGui.Begin('clean')
+        ImGui.Text('clean frame after unwinding')
+        ImGui.End()
+    "#,
+        )
+        .unwrap();
+    bridge.invoke(|| host.run(&clean)).unwrap();
+    drop(context.render_legacy());
+}

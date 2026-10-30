@@ -20,6 +20,7 @@ pub(crate) struct Snapshot {
     pub chat: super::chat::ChatSnapshot,
     pub combat: super::combat::CombatSnapshot,
     pub input: super::input::InputSnapshot,
+    pub effects: super::effects::EffectsSnapshot,
 }
 impl Snapshot {
     pub fn managed(mut self) -> Self {
@@ -32,6 +33,7 @@ impl Snapshot {
             self.chat = super::chat::ChatSnapshot::default();
             self.combat = super::combat::CombatSnapshot::default();
             self.input = super::input::InputSnapshot::default();
+            self.effects = super::effects::EffectsSnapshot::default();
         }
         self.in_game &= self.health.is_available();
         self
@@ -110,6 +112,42 @@ fn create_base_host() -> Result<BaseHost> {
     util.set(
         "IsStartMenuOpen",
         lua.create_function(move |_, ()| Ok(i32::from(state.get().start_menu)))?,
+    )?;
+    let state = snapshot.clone();
+    util.set(
+        "IsUiBusy",
+        lua.create_function(move |_, ()| Ok(state.get().start_menu))?,
+    )?;
+    let state = snapshot.clone();
+    util.set(
+        "GetCompassDegrees",
+        lua.create_function(move |_, ()| {
+            let deg = (state.get().player.heading_rad.to_degrees() as f64).rem_euclid(360.0);
+            Ok(deg)
+        })?,
+    )?;
+    util.set(
+        "GetBearingToPoint",
+        lua.create_function(|_, (from, to): (Table, Table)| {
+            let from_x: f64 = from.get("x").unwrap_or(0.0);
+            let from_z: f64 = from.get("z").unwrap_or(0.0);
+            let to_x: f64 = to.get("x").unwrap_or(0.0);
+            let to_z: f64 = to.get("z").unwrap_or(0.0);
+            let dx = to_x - from_x;
+            let dz = to_z - from_z;
+            let deg = (-dx).atan2(-dz).to_degrees().rem_euclid(360.0);
+            Ok(deg)
+        })?,
+    )?;
+    util.set(
+        "GetExpRequiredForLevel",
+        lua.create_function(|_, level: i32| {
+            if (1..=59).contains(&level) {
+                Ok(Some(crate::hud::exp_for_level(level + 1)))
+            } else {
+                Ok(None)
+            }
+        })?,
     )?;
 
     lua.set_named_registry_value("forge_callbacks", lua.create_table()?)?;
@@ -205,6 +243,7 @@ impl Host {
         super::chat::install_chat_adapter(&host)?;
         super::combat::install_combat_adapter(&host)?;
         super::input::install_input_adapter(&host)?;
+        super::effects::install_effects_adapter(&host)?;
         Ok(host)
     }
 

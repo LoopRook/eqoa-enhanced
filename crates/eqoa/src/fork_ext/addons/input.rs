@@ -225,9 +225,7 @@ pub(crate) fn create_module(
     // 7. IsKeyHookInstalled()
     t.set(
         "IsKeyHookInstalled",
-        lua.create_function(|_, ()| {
-            Ok(INPUT_STATE.with(|s| s.borrow().key_hook_installed))
-        })?,
+        lua.create_function(|_, ()| Ok(INPUT_STATE.with(|s| s.borrow().key_hook_installed)))?,
     )?;
 
     // 8. InstallKeyHook()
@@ -320,7 +318,9 @@ pub(crate) fn create_module(
 
                 // Update text capture
                 let now = Instant::now();
-                state.text_capture_owners.retain(|_, t| now.duration_since(*t).as_secs_f32() <= TEXT_CAPTURE_LAPSE_SECS);
+                state
+                    .text_capture_owners
+                    .retain(|_, t| now.duration_since(*t).as_secs_f32() <= TEXT_CAPTURE_LAPSE_SECS);
                 state.text_capture = !state.text_capture_owners.is_empty();
 
                 if state.hook_claims.is_empty() {
@@ -343,7 +343,8 @@ pub(crate) fn create_module(
                     if *curr == owner {
                         return Ok((true, None, None));
                     } else {
-                        let err_msg = format!("the {} key is owned by {}", get_key_name(code), curr);
+                        let err_msg =
+                            format!("the {} key is owned by {}", get_key_name(code), curr);
                         return Ok((false, Some(err_msg), Some(curr.clone())));
                     }
                 }
@@ -369,7 +370,12 @@ pub(crate) fn create_module(
             let code = (key_char & 0xFF) as u8;
             INPUT_STATE.with(|s| {
                 let mut state = s.borrow_mut();
-                if state.key_claims.get(&code).map(|o| o == &owner).unwrap_or(false) {
+                if state
+                    .key_claims
+                    .get(&code)
+                    .map(|o| o == &owner)
+                    .unwrap_or(false)
+                {
                     state.key_claims.remove(&code);
                     state.suppress_shadow.remove(&code);
                 }
@@ -418,7 +424,9 @@ pub(crate) fn create_module(
                     state.text_capture_owners.remove(&owner);
                 }
                 let now = Instant::now();
-                state.text_capture_owners.retain(|_, t| now.duration_since(*t).as_secs_f32() <= TEXT_CAPTURE_LAPSE_SECS);
+                state
+                    .text_capture_owners
+                    .retain(|_, t| now.duration_since(*t).as_secs_f32() <= TEXT_CAPTURE_LAPSE_SECS);
                 state.text_capture = !state.text_capture_owners.is_empty();
                 Ok(true)
             })
@@ -428,9 +436,7 @@ pub(crate) fn create_module(
     // 18. IsTextCaptureActive()
     t.set(
         "IsTextCaptureActive",
-        lua.create_function(|_, ()| {
-            Ok(INPUT_STATE.with(|s| s.borrow().text_capture))
-        })?,
+        lua.create_function(|_, ()| Ok(INPUT_STATE.with(|s| s.borrow().text_capture)))?,
     )?;
 
     // 19. SetKeySuppressed(owner, key_char, suppressed) OR (key_char, suppressed)
@@ -520,7 +526,9 @@ pub(crate) fn create_module(
             INPUT_STATE.with(|s| {
                 let mut state = s.borrow_mut();
                 let now = Instant::now();
-                state.text_capture_owners.retain(|_, t| now.duration_since(*t).as_secs_f32() <= TEXT_CAPTURE_LAPSE_SECS);
+                state
+                    .text_capture_owners
+                    .retain(|_, t| now.duration_since(*t).as_secs_f32() <= TEXT_CAPTURE_LAPSE_SECS);
                 state.text_capture = !state.text_capture_owners.is_empty();
             });
 
@@ -577,17 +585,13 @@ pub(crate) fn create_module(
     // 23. GetDroppedKeyCount()
     t.set(
         "GetDroppedKeyCount",
-        lua.create_function(|_, ()| {
-            Ok(INPUT_STATE.with(|s| s.borrow().dropped_keys))
-        })?,
+        lua.create_function(|_, ()| Ok(INPUT_STATE.with(|s| s.borrow().dropped_keys)))?,
     )?;
 
     // 24. IsDpadHookInstalled()
     t.set(
         "IsDpadHookInstalled",
-        lua.create_function(|_, ()| {
-            Ok(INPUT_STATE.with(|s| s.borrow().dpad_installed))
-        })?,
+        lua.create_function(|_, ()| Ok(INPUT_STATE.with(|s| s.borrow().dpad_installed)))?,
     )?;
 
     // 25. InstallDpadHook()
@@ -637,9 +641,7 @@ pub(crate) fn create_module(
     // 28. GetDpadHookError()
     t.set(
         "GetDpadHookError",
-        lua.create_function(|_, ()| {
-            Ok(INPUT_STATE.with(|s| s.borrow().dpad_error.clone()))
-        })?,
+        lua.create_function(|_, ()| Ok(INPUT_STATE.with(|s| s.borrow().dpad_error.clone())))?,
     )?;
 
     // 29. AcquireDpadRotation(owner)
@@ -697,9 +699,7 @@ pub(crate) fn create_module(
     // 32. IsDpadRotated()
     t.set(
         "IsDpadRotated",
-        lua.create_function(|_, ()| {
-            Ok(INPUT_STATE.with(|s| s.borrow().dpad_rotated))
-        })?,
+        lua.create_function(|_, ()| Ok(INPUT_STATE.with(|s| s.borrow().dpad_rotated)))?,
     )?;
 
     // 33. Update()
@@ -712,7 +712,9 @@ pub(crate) fn create_module(
                 let mut state = s.borrow_mut();
                 // Check text capture timeout
                 let now = Instant::now();
-                state.text_capture_owners.retain(|_, t| now.duration_since(*t).as_secs_f32() <= TEXT_CAPTURE_LAPSE_SECS);
+                state
+                    .text_capture_owners
+                    .retain(|_, t| now.duration_since(*t).as_secs_f32() <= TEXT_CAPTURE_LAPSE_SECS);
                 state.text_capture = !state.text_capture_owners.is_empty();
 
                 // Check suspension / re-installation
@@ -759,7 +761,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     fn temp_test_dir(name: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("eqoa_input_test_{}_{}", name, std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("eqoa_input_test_{}_{}", name, std::process::id()));
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         path
@@ -797,7 +800,10 @@ mod tests {
     fn forge_input_constants_and_types() {
         let host = test_host("constants");
         let lua = &host.lua;
-        let input: mlua::Table = lua.load("return require('frontiers_forge.input')").eval().unwrap();
+        let input: mlua::Table = lua
+            .load("return require('frontiers_forge.input')")
+            .eval()
+            .unwrap();
 
         // button_mask
         let mask: mlua::Table = input.get("button_mask").unwrap();
@@ -921,9 +927,9 @@ mod tests {
         lua.load(setup_script).exec().unwrap();
 
         // Push some events from Rust
-        record_key_event(0x0D, true);  // Enter pressed
+        record_key_event(0x0D, true); // Enter pressed
         record_key_event(0x0D, false); // Enter released
-        record_key_event(0x20, true);  // Space pressed (unclaimed)
+        record_key_event(0x20, true); // Space pressed (unclaimed)
 
         let poll_script = r#"
             local Input = require('frontiers_forge.input')

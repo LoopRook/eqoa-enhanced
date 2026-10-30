@@ -430,6 +430,7 @@ impl Play {
             chat,
             combat,
             input: crate::fork_ext::addons::input::InputSnapshot::default(),
+            effects: crate::fork_ext::addons::effects::EffectsSnapshot::default(),
         }
     }
 }

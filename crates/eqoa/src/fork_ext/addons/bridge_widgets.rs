@@ -679,6 +679,357 @@ pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> R
         Stack::TabItem,
         sys::igEndTabItem,
     )?;
+
+    // Window queries and position
+    let f = frame.clone();
+    imgui.set(
+        "GetWindowPos",
+        lua.create_function(move |_, ()| {
+            f.borrow_mut().check()?;
+            let pos = unsafe { sys::igGetWindowPos() };
+            Ok((pos.x, pos.y))
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "SetWindowPos",
+        lua.create_function(move |_, (x, y, cond): (f32, f32, Option<i32>)| {
+            f.borrow_mut().check()?;
+            let pos = sys::ImVec2_c {
+                x: finite(x)?,
+                y: finite(y)?,
+            };
+            unsafe {
+                sys::igSetWindowPos_Vec2(pos, cond.unwrap_or(0));
+            }
+            Ok(())
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "SetNextWindowPos",
+        lua.create_function(
+            move |_, (x, y, cond, px, py): (f32, f32, Option<i32>, Option<f32>, Option<f32>)| {
+                f.borrow_mut().check()?;
+                let pos = sys::ImVec2_c {
+                    x: finite(x)?,
+                    y: finite(y)?,
+                };
+                let pivot = sys::ImVec2_c {
+                    x: finite(px.unwrap_or(0.0))?,
+                    y: finite(py.unwrap_or(0.0))?,
+                };
+                unsafe {
+                    sys::igSetNextWindowPos(pos, cond.unwrap_or(0), pivot);
+                }
+                Ok(())
+            },
+        )?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "SetNextWindowSize",
+        lua.create_function(move |_, (w, h, cond): (f32, f32, Option<i32>)| {
+            f.borrow_mut().check()?;
+            let size = sys::ImVec2_c {
+                x: finite(w)?,
+                y: finite(h)?,
+            };
+            unsafe {
+                sys::igSetNextWindowSize(size, cond.unwrap_or(0));
+            }
+            Ok(())
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "IsWindowFocused",
+        lua.create_function(move |_, flags: Option<i32>| {
+            f.borrow_mut().check()?;
+            Ok(unsafe { sys::igIsWindowFocused(flags.unwrap_or(0)) })
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "IsWindowHovered",
+        lua.create_function(move |_, flags: Option<i32>| {
+            f.borrow_mut().check()?;
+            Ok(unsafe { sys::igIsWindowHovered(flags.unwrap_or(0)) })
+        })?,
+    )?;
+
+    // Cursor, layout, and queries
+    let f = frame.clone();
+    imgui.set(
+        "SetCursorScreenPos",
+        lua.create_function(move |_, (x, y): (f32, f32)| {
+            f.borrow_mut().check()?;
+            unsafe {
+                sys::igSetCursorScreenPos(sys::ImVec2_c {
+                    x: finite(x)?,
+                    y: finite(y)?,
+                });
+            }
+            Ok(())
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "SetNextItemWidth",
+        lua.create_function(move |_, width: f32| {
+            f.borrow_mut().check()?;
+            unsafe {
+                sys::igSetNextItemWidth(finite(width)?);
+            }
+            Ok(())
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "GetContentRegionAvail",
+        lua.create_function(move |_, ()| {
+            f.borrow_mut().check()?;
+            let avail = unsafe { sys::igGetContentRegionAvail() };
+            Ok((avail.x, avail.y))
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "GetFrameHeight",
+        lua.create_function(move |_, ()| {
+            f.borrow_mut().check()?;
+            Ok(unsafe { sys::igGetFrameHeight() })
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "GetTextLineHeight",
+        lua.create_function(move |_, ()| {
+            f.borrow_mut().check()?;
+            Ok(unsafe { sys::igGetTextLineHeight() })
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "GetScrollY",
+        lua.create_function(move |_, ()| {
+            f.borrow_mut().check()?;
+            Ok(unsafe { sys::igGetScrollY() })
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "GetScrollMaxY",
+        lua.create_function(move |_, ()| {
+            f.borrow_mut().check()?;
+            Ok(unsafe { sys::igGetScrollMaxY() })
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "SetScrollHereY",
+        lua.create_function(move |_, ratio: Option<f32>| {
+            f.borrow_mut().check()?;
+            unsafe {
+                sys::igSetScrollHereY(ratio.unwrap_or(0.5));
+            }
+            Ok(())
+        })?,
+    )?;
+
+    // Mouse queries and invisible button
+    let f = frame.clone();
+    imgui.set(
+        "IsMouseDragging",
+        lua.create_function(move |_, (button, threshold): (Option<i32>, Option<f32>)| {
+            f.borrow_mut().check()?;
+            Ok(unsafe { sys::igIsMouseDragging(button.unwrap_or(0), threshold.unwrap_or(-1.0)) })
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "IsMouseHoveringRect",
+        lua.create_function(
+            move |_, (x1, y1, x2, y2, clip): (f32, f32, f32, f32, Option<bool>)| {
+                f.borrow_mut().check()?;
+                let r_min = sys::ImVec2_c {
+                    x: finite(x1)?,
+                    y: finite(y1)?,
+                };
+                let r_max = sys::ImVec2_c {
+                    x: finite(x2)?,
+                    y: finite(y2)?,
+                };
+                Ok(unsafe { sys::igIsMouseHoveringRect(r_min, r_max, clip.unwrap_or(true)) })
+            },
+        )?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "InvisibleButton",
+        lua.create_function(
+            move |_, (id, w, h, flags): (String, f32, f32, Option<i32>)| {
+                let id = text(&id)?;
+                let size = sys::ImVec2_c {
+                    x: finite(w)?,
+                    y: finite(h)?,
+                };
+                f.borrow_mut().check()?;
+                Ok(unsafe { sys::igInvisibleButton(id.as_ptr(), size, flags.unwrap_or(0)) })
+            },
+        )?,
+    )?;
+
+    // ID stack
+    let f = frame.clone();
+    imgui.set(
+        "PushID",
+        lua.create_function(move |_, val: Value| {
+            let mut state = f.borrow_mut();
+            state.check()?;
+            state.room()?;
+            match val {
+                Value::String(s) => {
+                    let cs = text(&s.to_str()?)?;
+                    unsafe { sys::igPushID_Str(cs.as_ptr()) };
+                }
+                Value::Integer(i) => {
+                    unsafe { sys::igPushID_Int(i as std::os::raw::c_int) };
+                }
+                _ => return Err(mlua::Error::runtime("PushID requires string or integer")),
+            }
+            state.stack.push(Stack::Id);
+            Ok(())
+        })?,
+    )?;
+    scope_end(lua, imgui, frame, "PopID", Stack::Id, sys::igPopID)?;
+
+    // Combos
+    let f = frame.clone();
+    imgui.set(
+        "BeginCombo",
+        lua.create_function(
+            move |_, (label, preview, flags): (String, Option<String>, Option<i32>)| {
+                let label = text(&label)?;
+                let preview = preview.map(|p| text(&p)).transpose()?;
+                let mut state = f.borrow_mut();
+                state.check()?;
+                state.room()?;
+                let open = unsafe {
+                    sys::igBeginCombo(
+                        label.as_ptr(),
+                        preview.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()),
+                        flags.unwrap_or(0),
+                    )
+                };
+                if open {
+                    state.stack.push(Stack::Combo);
+                }
+                Ok(open)
+            },
+        )?,
+    )?;
+    scope_end(lua, imgui, frame, "EndCombo", Stack::Combo, sys::igEndCombo)?;
+
+    // Popups
+    let f = frame.clone();
+    imgui.set(
+        "OpenPopup",
+        lua.create_function(move |_, (str_id, flags): (String, Option<i32>)| {
+            let str_id = text(&str_id)?;
+            f.borrow_mut().check()?;
+            unsafe {
+                sys::igOpenPopup_Str(str_id.as_ptr(), flags.unwrap_or(0));
+            }
+            Ok(())
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "BeginPopup",
+        lua.create_function(move |_, (str_id, flags): (String, Option<i32>)| {
+            let str_id = text(&str_id)?;
+            let mut state = f.borrow_mut();
+            state.check()?;
+            state.room()?;
+            let open = unsafe { sys::igBeginPopup(str_id.as_ptr(), flags.unwrap_or(0)) };
+            if open {
+                state.stack.push(Stack::Popup);
+            }
+            Ok(open)
+        })?,
+    )?;
+    scope_end(lua, imgui, frame, "EndPopup", Stack::Popup, sys::igEndPopup)?;
+
+    // Selectable
+    let f = frame.clone();
+    imgui.set(
+        "Selectable",
+        lua.create_function(
+            move |_,
+                  (label, selected, flags, w, h): (
+                String,
+                Option<bool>,
+                Option<i32>,
+                Option<f32>,
+                Option<f32>,
+            )| {
+                let label = text(&label)?;
+                let size = sys::ImVec2_c {
+                    x: finite(w.unwrap_or(0.0))?,
+                    y: finite(h.unwrap_or(0.0))?,
+                };
+                f.borrow_mut().check()?;
+                Ok(unsafe {
+                    sys::igSelectable_Bool(
+                        label.as_ptr(),
+                        selected.unwrap_or(false),
+                        flags.unwrap_or(0),
+                        size,
+                    )
+                })
+            },
+        )?,
+    )?;
+
+    // Text inputs
+    let f = frame.clone();
+    imgui.set(
+        "InputTextWithHint",
+        lua.create_function(
+            move |_,
+                  (label, hint, current_text, flags): (
+                String,
+                String,
+                Option<String>,
+                Option<i32>,
+            )| {
+                let label = text(&label)?;
+                let hint = text(&hint)?;
+                let cur = current_text.unwrap_or_default();
+                let mut buf = vec![0u8; 4096];
+                let bytes = cur.as_bytes();
+                let copy_len = bytes.len().min(4095);
+                buf[..copy_len].copy_from_slice(&bytes[..copy_len]);
+                buf[copy_len] = 0;
+                f.borrow_mut().check()?;
+                let ret = unsafe {
+                    sys::igInputTextWithHint(
+                        label.as_ptr(),
+                        hint.as_ptr(),
+                        buf.as_mut_ptr() as *mut std::os::raw::c_char,
+                        buf.len(),
+                        flags.unwrap_or(0),
+                        None,
+                        std::ptr::null_mut(),
+                    )
+                };
+                let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+                let out_text = String::from_utf8_lossy(&buf[..len]).to_string();
+                Ok((out_text, ret))
+            },
+        )?,
+    )?;
     let windows: Table = lua.globals().get("ImGuiWindowFlags")?;
     for &(name, value) in WINDOWS {
         windows.set(name, value)?;

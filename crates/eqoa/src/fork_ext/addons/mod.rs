@@ -18,6 +18,7 @@ pub(crate) mod bit;
 pub(crate) mod chat;
 pub(crate) mod combat;
 pub(crate) mod discovery;
+pub(crate) mod effects;
 pub(crate) mod entity;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod fonts;
@@ -35,3 +36,5 @@ mod profile;
 mod spike;
 mod storage;
 mod textures;
+#[cfg(test)]
+mod wereoxxs_test;

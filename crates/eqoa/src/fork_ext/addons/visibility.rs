@@ -40,9 +40,9 @@ impl HudClaimsRegistry {
     }
 
     pub fn is_hidden(&self, element: &str) -> bool {
-        self.claims
-            .get(element)
-            .map_or(false, |instances| instances.values().any(|set| !set.is_empty()))
+        self.claims.get(element).map_or(false, |instances| {
+            instances.values().any(|set| !set.is_empty())
+        })
     }
 
     pub fn release_instance(&mut self, token: InstanceToken) {
@@ -198,7 +198,9 @@ fn disable_element(
     }
     let set = intent.desired.entry(element.to_string()).or_default();
     if !set.contains(label) && set.len() >= health::MAX_OWNERS_PER_VM {
-        return Err(mlua::Error::runtime("VM owner claims limit exceeded (max 32)"));
+        return Err(mlua::Error::runtime(
+            "VM owner claims limit exceeded (max 32)",
+        ));
     }
     set.insert(label.to_owned());
     intent.project(snapshot);
@@ -262,12 +264,32 @@ pub(crate) fn install_managed_health_adapter(
     bind_element!("DisableHealthBar", "EnableHealthBar", "health_bar");
     bind_element!("DisablePowerBar", "EnablePowerBar", "power_bar");
     bind_element!("DisableMainExpBar", "EnableMainExpBar", "main_exp_bar");
-    bind_element!("DisableSecondaryExpBar", "EnableSecondaryExpBar", "secondary_exp_bar");
-    bind_element!("DisableTargetNameplate", "EnableTargetNameplate", "target_nameplate");
-    bind_element!("DisableGroupMemberPanel", "EnableGroupMemberPanel", "group_member_panel");
-    bind_element!("DisableGroupCompassMarkers", "EnableGroupCompassMarkers", "group_compass_marks");
+    bind_element!(
+        "DisableSecondaryExpBar",
+        "EnableSecondaryExpBar",
+        "secondary_exp_bar"
+    );
+    bind_element!(
+        "DisableTargetNameplate",
+        "EnableTargetNameplate",
+        "target_nameplate"
+    );
+    bind_element!(
+        "DisableGroupMemberPanel",
+        "EnableGroupMemberPanel",
+        "group_member_panel"
+    );
+    bind_element!(
+        "DisableGroupCompassMarkers",
+        "EnableGroupCompassMarkers",
+        "group_compass_marks"
+    );
     bind_element!("DisablePetPanel", "EnablePetPanel", "pet_panel");
-    bind_element!("DisableActiveEffectsDisplay", "EnableActiveEffectsDisplay", "active_effects");
+    bind_element!(
+        "DisableActiveEffectsDisplay",
+        "EnableActiveEffectsDisplay",
+        "active_effects"
+    );
     bind_element!("DisableChatWindow", "EnableChatWindow", "chat_window");
 
     // 2. Compound element functions
@@ -426,9 +448,10 @@ pub(crate) fn install_managed_health_adapter(
             let disp_opt: Option<i64> = match val {
                 Some(Value::Integer(i)) => Some(i),
                 Some(Value::Number(n)) => Some(n as i64),
-                Some(Value::String(s)) => {
-                    s.to_str().ok().and_then(|str_val| str_val.parse::<i64>().ok())
-                }
+                Some(Value::String(s)) => s
+                    .to_str()
+                    .ok()
+                    .and_then(|str_val| str_val.parse::<i64>().ok()),
                 _ => None,
             };
             match disp_opt {
@@ -446,9 +469,10 @@ pub(crate) fn install_managed_health_adapter(
             let class_opt: Option<u32> = match val {
                 Some(Value::Integer(i)) if i >= 0 => Some(i as u32),
                 Some(Value::Number(n)) if n >= 0.0 => Some(n as u32),
-                Some(Value::String(s)) => {
-                    s.to_str().ok().and_then(|str_val| str_val.parse::<u32>().ok())
-                }
+                Some(Value::String(s)) => s
+                    .to_str()
+                    .ok()
+                    .and_then(|str_val| str_val.parse::<u32>().ok()),
                 _ => None,
             };
             const CLASS_ICON_TEX_IDS: [u32; 15] = [
@@ -479,15 +503,18 @@ pub(crate) fn install_managed_health_adapter(
 
     ui.set(
         "GetClassIconTexture",
-        host.lua.create_function(|_, _: Option<u32>| Ok((Value::Nil, Value::Nil, Value::Nil)))?,
+        host.lua
+            .create_function(|_, _: Option<u32>| Ok((Value::Nil, Value::Nil, Value::Nil)))?,
     )?;
     ui.set(
         "DrawDispositionIcon",
-        host.lua.create_function(|_, _: mlua::MultiValue| Ok(false))?,
+        host.lua
+            .create_function(|_, _: mlua::MultiValue| Ok(false))?,
     )?;
     ui.set(
         "DrawClassIcon",
-        host.lua.create_function(|_, _: mlua::MultiValue| Ok(false))?,
+        host.lua
+            .create_function(|_, _: mlua::MultiValue| Ok(false))?,
     )?;
 
     host.register_host_module("frontiers_forge.ui", Value::Table(ui))
@@ -667,8 +694,10 @@ mod tests {
     fn forge_ui_adapter_single_and_compound_suppression_and_get_hidden_by() {
         let registry = Rc::new(RefCell::new(HealthBarClaimsRegistry::new()));
         let hud_claims = Rc::new(RefCell::new(HudClaimsRegistry::new()));
-        let lease_a = VisibilityLease::with_hud_claims(registry.clone(), hud_claims.clone()).unwrap();
-        let lease_b = VisibilityLease::with_hud_claims(registry.clone(), hud_claims.clone()).unwrap();
+        let lease_a =
+            VisibilityLease::with_hud_claims(registry.clone(), hud_claims.clone()).unwrap();
+        let lease_b =
+            VisibilityLease::with_hud_claims(registry.clone(), hud_claims.clone()).unwrap();
         let host_a = host();
         let host_b = host();
         install_managed_health_adapter(&host_a, &lease_a).unwrap();
@@ -680,11 +709,19 @@ mod tests {
         // PowerBar
         host_a.execute("local UI = require('frontiers_forge.ui'); assert(UI.DisablePowerBar('mod_a') == true)").unwrap();
         assert!(hud_claims.borrow().is_hidden("power_bar"));
-        let owners_1: Vec<String> = host_a.lua.load("return require('frontiers_forge.ui').GetHiddenBy('power_bar')").eval().unwrap();
+        let owners_1: Vec<String> = host_a
+            .lua
+            .load("return require('frontiers_forge.ui').GetHiddenBy('power_bar')")
+            .eval()
+            .unwrap();
         assert_eq!(owners_1, vec!["mod_a"]);
 
         host_b.execute("local UI = require('frontiers_forge.ui'); assert(UI.DisablePowerBar('mod_b') == true)").unwrap();
-        let owners_2: Vec<String> = host_a.lua.load("return require('frontiers_forge.ui').GetHiddenBy('power_bar')").eval().unwrap();
+        let owners_2: Vec<String> = host_a
+            .lua
+            .load("return require('frontiers_forge.ui').GetHiddenBy('power_bar')")
+            .eval()
+            .unwrap();
         assert_eq!(owners_2, vec!["mod_a", "mod_b"]);
 
         // Compound Compass
@@ -699,14 +736,25 @@ mod tests {
 
         // Enable one owner on power bar
         host_a.execute("local UI = require('frontiers_forge.ui'); assert(UI.EnablePowerBar('mod_a') == true)").unwrap();
-        assert!(hud_claims.borrow().is_hidden("power_bar"), "mod_b still holds power_bar");
-        let owners_3: Vec<String> = host_a.lua.load("return require('frontiers_forge.ui').GetHiddenBy('power_bar')").eval().unwrap();
+        assert!(
+            hud_claims.borrow().is_hidden("power_bar"),
+            "mod_b still holds power_bar"
+        );
+        let owners_3: Vec<String> = host_a
+            .lua
+            .load("return require('frontiers_forge.ui').GetHiddenBy('power_bar')")
+            .eval()
+            .unwrap();
         assert_eq!(owners_3, vec!["mod_b"]);
 
         // Drop lease_b: mod_b claims must vanish
         drop(lease_b);
         assert!(!hud_claims.borrow().is_hidden("power_bar"));
-        let owners_4: Vec<String> = host_a.lua.load("return require('frontiers_forge.ui').GetHiddenBy('power_bar')").eval().unwrap();
+        let owners_4: Vec<String> = host_a
+            .lua
+            .load("return require('frontiers_forge.ui').GetHiddenBy('power_bar')")
+            .eval()
+            .unwrap();
         assert!(owners_4.is_empty());
 
         // Restore compass and ability bar
@@ -728,17 +776,38 @@ mod tests {
         install_managed_health_adapter(&host, &lease).unwrap();
         lease.update(HealthSnapshot::new(true, 100, 100), true);
 
-        host.execute("local UI = require('frontiers_forge.ui'); assert(UI.DisableUI('all_mod') == true)").unwrap();
+        host.execute(
+            "local UI = require('frontiers_forge.ui'); assert(UI.DisableUI('all_mod') == true)",
+        )
+        .unwrap();
         for el in ALL_UI_ELEMENTS {
-            assert!(hud_claims.borrow().is_hidden(el), "element {el} must be hidden by DisableUI");
-            let owners: Vec<String> = host.lua.load(&format!("return require('frontiers_forge.ui').GetHiddenBy('{el}')")).eval().unwrap();
+            assert!(
+                hud_claims.borrow().is_hidden(el),
+                "element {el} must be hidden by DisableUI"
+            );
+            let owners: Vec<String> = host
+                .lua
+                .load(&format!(
+                    "return require('frontiers_forge.ui').GetHiddenBy('{el}')"
+                ))
+                .eval()
+                .unwrap();
             assert_eq!(owners, vec!["all_mod"]);
         }
-        assert!(registry.borrow().is_hidden(), "health bar must also be registered in HealthBarClaimsRegistry");
+        assert!(
+            registry.borrow().is_hidden(),
+            "health bar must also be registered in HealthBarClaimsRegistry"
+        );
 
-        host.execute("local UI = require('frontiers_forge.ui'); assert(UI.EnableUI('all_mod') == true)").unwrap();
+        host.execute(
+            "local UI = require('frontiers_forge.ui'); assert(UI.EnableUI('all_mod') == true)",
+        )
+        .unwrap();
         for el in ALL_UI_ELEMENTS {
-            assert!(!hud_claims.borrow().is_hidden(el), "element {el} must be restored by EnableUI");
+            assert!(
+                !hud_claims.borrow().is_hidden(el),
+                "element {el} must be restored by EnableUI"
+            );
         }
         assert!(!registry.borrow().is_hidden());
     }
