@@ -407,6 +407,18 @@ impl Play {
             crate::fork_ext::addons::ability::AbilitiesSnapshot::default()
         };
 
+        let chat = if in_game {
+            crate::fork_ext::addons::chat::snapshot_chat(&self.chat, self.session.now())
+        } else {
+            crate::fork_ext::addons::chat::ChatSnapshot::default()
+        };
+
+        let combat = if in_game {
+            crate::fork_ext::addons::combat::snapshot_combat_events()
+        } else {
+            crate::fork_ext::addons::combat::CombatSnapshot::default()
+        };
+
         crate::fork_ext::addons::host::Snapshot {
             in_game,
             start_menu: self.start.as_ref().is_some_and(|s| s.menu.visible),
@@ -415,6 +427,8 @@ impl Play {
             group,
             entities,
             abilities,
+            chat,
+            combat,
         }
     }
 }
@@ -491,6 +505,8 @@ fn snapshot(play: &Play, attacker: u32, amount: i32, defender: u32) -> CombatSna
 }
 impl Play {
     pub(super) fn fork_combat_event(&self, _attacker: u32, _amount: i32, _defender: u32) {
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::fork_ext::addons::combat::record_combat_event(_attacker, _amount, _defender);
         // Unit tests never emit to a real companion. The browser has no native socket
         // or SystemTime clock; neither is touched by this hook there.
         #[cfg(all(not(target_arch = "wasm32"), not(test)))]

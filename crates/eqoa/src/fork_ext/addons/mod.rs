@@ -15,6 +15,8 @@ pub(crate) fn take_open_request() -> bool {
 }
 pub(crate) mod ability;
 pub(crate) mod bit;
+pub(crate) mod chat;
+pub(crate) mod combat;
 pub(crate) mod discovery;
 pub(crate) mod entity;
 #[cfg(not(target_arch = "wasm32"))]
