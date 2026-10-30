@@ -1,0 +1,3 @@
+# The fork owns CLAUDE.md; upstream edits to it never conflict (keep ours).
+# Needs the local driver once per clone: git config merge.ours.driver true
+CLAUDE.md merge=ours
