@@ -2333,6 +2333,34 @@ mod tests {
         assert_eq!(answers(&mut s), [(251, vec![0x09, 0x7E, 1, 0, 0, 0])], "again for another offer (each world entry)");
     }
 
+    // go-eqoa-server's offers and sets past 0x7E00 (0x7E0E-0x7E13) are
+    // opcodes this client has no case for, as CLIENT's dispatcher has none:
+    // each passed on as one (play reads none of them) and nothing answered.
+    // The control: the same look finds the answer to 0x7E00's offer.
+    #[test]
+    fn the_servers_other_offers_go_unanswered() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        answers(&mut s);
+        for op in [0x7E0Eu16, 0x7E0F, 0x7E10, 0x7E11, 0x7E12, 0x7E13] {
+            let mut m = op.to_le_bytes().to_vec();
+            m.extend([1, 0, 0, 0]);
+            let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m);
+            assert!(matches!(&ev[..], [Event::Opcode { op: o, .. }] if *o == op), "{op:#06x}: {ev:?}");
+        }
+        assert_eq!(answers(&mut s), [], "nothing answered");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x00, 0x7E, 204, 0, 0, 0, 0xE8, 0x03, 0, 0]);
+        assert_eq!(s.entity_view_offer, Some((204, 1000)), "0x7E00's offer still taken");
+        s.send_entity_view(24, 100);
+        assert_eq!(answers(&mut s), [(251, vec![0x00, 0x7E, 24, 0, 0, 0, 100, 0, 0, 0])], "the control: 0x7E00's answer");
+    }
+
     // A state channel's update that comes before the world entry (live, a
     // moment before the dump) is the game's once it is in the world: the
     // session keeps it and hands it out right after the WorldEntry, in
