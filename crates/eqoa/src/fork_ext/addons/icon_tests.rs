@@ -1439,3 +1439,70 @@ fn forge_icon_unresolvable_id_looked_up_once_not_every_frame() {
     );
 }
 
+#[test]
+fn forge_icon_negative_signed_hash_resolves_and_lua_negative_control() {
+    let mut lib = esf::Library::new();
+    let negative_id = -1000i32; // 0xFFFFFC18 as u32
+    let expected_u32 = negative_id as u32;
+    lib.add("SPELLICON.ESF", make_test_container_with_surface(negative_id, 32, 32));
+
+    icons::update_live_data(&lib, None, &[expected_u32]);
+    assert!(
+        icons::snapshot_has_icon(expected_u32),
+        "surface with negative signed ID (bit 31=1) must be indexed by u32 hash"
+    );
+
+    let gpu = match TestGpu::new() {
+        Some(g) => g,
+        None => return,
+    };
+    let host = Host::new().unwrap();
+    let textures = Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    icons::attach_icon_cache(&host.lua, textures).unwrap();
+
+    // 1. Positive 32-bit representation (as unsigned integer in Lua)
+    let (loaded_pos, w1, h1): (bool, u32, u32) = host
+        .lua
+        .load(format!(
+            r#"
+            local Icon = require("frontiers_forge.icon")
+            local tex, w, h = Icon.GetTexture({expected_u32})
+            return tex ~= nil, w or 0, h or 0
+            "#
+        ))
+        .eval()
+        .unwrap();
+    assert!(loaded_pos, "GetTexture with unsigned u32 must resolve");
+    assert_eq!((w1, h1), (32, 32));
+
+    // 2. Negative 32-bit integer representation (as passed by Lua when signed)
+    let (loaded_neg, w2, h2): (bool, u32, u32) = host
+        .lua
+        .load(format!(
+            r#"
+            local Icon = require("frontiers_forge.icon")
+            local tex, w, h = Icon.GetTexture({negative_id})
+            return tex ~= nil, w or 0, h or 0
+            "#
+        ))
+        .eval()
+        .unwrap();
+    assert!(loaded_neg, "GetTexture with negative signed integer must resolve");
+    assert_eq!((w2, h2), (32, 32));
+
+    // 3. Negative control: hash 0 (which was the bug when max(0) clamped negative hashes) returns nil
+    let (loaded_zero, _, _): (bool, u32, u32) = host
+        .lua
+        .load(
+            r#"
+            local Icon = require("frontiers_forge.icon")
+            local tex, w, h = Icon.GetTexture(0)
+            return tex ~= nil, w or 0, h or 0
+            "#,
+        )
+        .eval()
+        .unwrap();
+    assert!(!loaded_zero, "Negative control: hash 0 must return nil");
+}
+
+

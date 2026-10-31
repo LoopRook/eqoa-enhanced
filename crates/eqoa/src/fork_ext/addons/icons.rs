@@ -1148,6 +1148,7 @@ pub fn install_base_icon_adapter(lua: &Lua, host: &super::host::Host) -> LuaResu
         lua.create_function(|lua, hash: Value| {
             let hash_u32 = match hash {
                 Value::Integer(i) if i > 0 => i as u32,
+                Value::Integer(i) if i < -1 => i as i32 as u32,
                 Value::Number(n) if n > 0.0 => n as u32,
                 _ => return Ok(Value::Nil),
             };
@@ -1246,6 +1247,7 @@ pub fn attach_icon_cache(
         lua.create_function(|lua, hash: Value| {
             let hash_u32 = match hash {
                 Value::Integer(i) if i > 0 => i as u32,
+                Value::Integer(i) if i < -1 => i as i32 as u32,
                 Value::Number(n) if n > 0.0 => n as u32,
                 _ => return Ok(Value::Nil),
             };
@@ -1274,6 +1276,7 @@ pub fn attach_icon_cache(
             lua.create_function(move |lua, (hash, opts): (Value, Option<Table>)| {
                 let hash_u32 = match hash {
                     Value::Integer(i) if i > 0 => i as u32,
+                    Value::Integer(i) if i < -1 => (i as i32) as u32,
                     Value::Number(n) if n > 0.0 => n as u32,
                     _ => return Ok((Value::Nil, Value::Nil, Value::Nil)),
                 };
