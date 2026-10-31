@@ -1038,8 +1038,7 @@ fn forge_claimed_enter_focuses_addon_input_and_say_window_stays_closed() {
     assert_eq!(code, Some(0x0D));
     super::input::record_key_event(code.unwrap(), true);
 
-    let wants_key_capture =
-        super::input::is_text_capture_active() || code.is_some_and(super::input::is_key_suppressed);
+    let wants_key_capture = super::input::wants_key_capture(false, code, false, true);
     assert!(wants_key_capture, "claimed Enter must be captured by addon");
 
     // In viewer, when wants_key_capture is true, the event is consumed by Addon
@@ -1142,8 +1141,7 @@ fn forge_unclaimed_enter_opens_say_window_as_before() {
     let code = super::input::logical_key_to_code(&enter_key);
     assert_eq!(code, Some(0x0D));
 
-    let wants_key_capture =
-        super::input::is_text_capture_active() || code.is_some_and(super::input::is_key_suppressed);
+    let wants_key_capture = super::input::wants_key_capture(false, code, false, true);
     assert!(
         !wants_key_capture,
         "unclaimed Enter must NOT be captured by addon"
@@ -1308,8 +1306,7 @@ fn forge_claimed_unsuppressed_key_delivers_to_addon_and_reaches_game() {
     super::input::record_key_event(code.unwrap(), true);
 
     // wants_key_capture must be FALSE because the key is not suppressed and text capture is inactive
-    let wants_key_capture =
-        super::input::is_text_capture_active() || code.is_some_and(super::input::is_key_suppressed);
+    let wants_key_capture = super::input::wants_key_capture(false, code, false, true);
     assert!(
         !wants_key_capture,
         "claimed but unsuppressed key must NOT be captured/swallowed by addon"
@@ -1331,5 +1328,110 @@ fn forge_claimed_unsuppressed_key_delivers_to_addon_and_reaches_game() {
     assert_ne!(
         play.hud_menus.sel, 0,
         "game receives unsuppressed hotkey/input normally"
+    );
+}
+
+#[test]
+fn forge_dialog_receives_enter_even_when_addon_suppresses_enter() {
+    use winit::keyboard::{Key, NamedKey};
+
+    super::input::reset_input_state();
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!(
+            "SKIP forge_dialog_receives_enter_even_when_addon_suppresses_enter: reference scripts root not found"
+        );
+        return;
+    };
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.name == "wereoxxs_ui")
+        .unwrap();
+
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+    let host = Host::for_addon(addon).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, addon).unwrap();
+    let font_bank = Rc::new(RefCell::new(super::fonts::FontBank::new(
+        0,
+        super::fonts::current_context_epoch(),
+    )));
+    super::fonts::FontBank::install_for_addon(&font_bank, &host.lua, addon).unwrap();
+
+    host.snapshot.set(rich_in_game_snapshot());
+
+    // Frame 1: Initial load
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    // Turn on chat window so Enter is claimed and suppressed
+    let win_table: Table = host.lua.globals().get("windows").unwrap();
+    win_table.set("chat", true).unwrap();
+
+    // Frame 2: Pump wereoxxs_ui so PumpEnterKey claims & suppresses Enter
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    assert!(
+        super::input::is_key_claimed(0x0D),
+        "Enter must be claimed by wereoxxs_ui"
+    );
+    assert!(
+        super::input::is_key_suppressed(0x0D),
+        "Enter must be suppressed by wereoxxs_ui"
+    );
+
+    // Enter key event
+    let enter_key = Key::Named(NamedKey::Enter);
+    let code = super::input::logical_key_to_code(&enter_key);
+    assert_eq!(code, Some(0x0D));
+
+    // Case 1: Game dialog is open (mode 9: VIWndPrivChat, mode 14: mbox, or mode 7: response)
+    let mut play = create_test_play();
+    play.mode = 9; // Dialog is active!
+    assert!(
+        !crate::fork_ext::is_plain_play(Some(&mut play)),
+        "mode 9 must NOT be plain play"
+    );
+
+    let wants_key_capture_dialog = super::input::wants_key_capture(
+        false,
+        code,
+        false,
+        crate::fork_ext::is_plain_play(Some(&mut play)),
+    );
+    assert!(
+        !wants_key_capture_dialog,
+        "Enter must NOT be captured by addon while game dialog is active (fails before fix)"
+    );
+
+    // Because wants_key_capture was false, Enter reaches the game dialog
+    let handled = play.dialog_key(crate::dialog::Key::Enter);
+    assert!(handled, "dialog_key must receive and handle Enter");
+    assert_eq!(
+        play.mode, 0,
+        "dialog confirmation must close dialog and return to mode 0"
+    );
+
+    // Case 2: Now in plain play (mode 0, no UI/dialogs)
+    assert!(
+        crate::fork_ext::is_plain_play(Some(&mut play)),
+        "mode 0 must be plain play"
+    );
+    let wants_key_capture_plain = super::input::wants_key_capture(
+        false,
+        code,
+        false,
+        crate::fork_ext::is_plain_play(Some(&mut play)),
+    );
+    assert!(
+        wants_key_capture_plain,
+        "Enter MUST be captured by addon during plain play"
     );
 }

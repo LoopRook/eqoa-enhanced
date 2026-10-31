@@ -165,6 +165,21 @@ pub fn winit_key_to_code(event: &KeyEvent) -> Option<u8> {
     logical_key_to_code(&event.logical_key)
 }
 
+/// Evaluates whether a keyboard event should be captured by the addon runtime.
+/// Key suppression only replaces what that key does in plain gameplay (opening
+/// the client's Say window), never input to game pop-ups, dialogs, menus, or
+/// native windows (`plain_play` is false). Text capture and focused widgets
+/// take the keyboard regardless.
+pub fn wants_key_capture(
+    keyboard: bool,
+    code: Option<u8>,
+    is_synthetic: bool,
+    plain_play: bool,
+) -> bool {
+    (keyboard || is_text_capture_active() || (plain_play && code.is_some_and(is_key_suppressed)))
+        && !is_synthetic
+}
+
 fn get_key_name(code: u8) -> String {
     match code {
         0x0D => "Enter".to_string(),

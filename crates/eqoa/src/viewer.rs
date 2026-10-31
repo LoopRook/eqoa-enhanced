@@ -4317,7 +4317,7 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(g) = &mut self.gfx
-            && g.forge_runtime.event(&g.window, &event)
+            && g.forge_runtime.event(&g.window, &event, crate::fork_ext::is_plain_play(self.play.as_mut()))
         {
             // Keep physical pointer bookkeeping current without routing an
             // addon-owned hover/drag into gameplay or the native map.

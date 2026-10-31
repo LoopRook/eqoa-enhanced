@@ -131,7 +131,7 @@ impl Runtime {
         self.open = true;
         self.error = None;
     }
-    pub fn event(&mut self, window: &Window, event: &WindowEvent) -> bool {
+    pub fn event(&mut self, window: &Window, event: &WindowEvent, plain_play: bool) -> bool {
         let (mut keyboard, mut mouse) = (false, false);
         match self.graphics.as_mut() {
             Some(Graphics::Managed(active)) => {
@@ -174,10 +174,8 @@ impl Runtime {
                         super::input::record_key_event(code, event.state == ElementState::Pressed);
                     }
                 }
-                let wants_key_capture = (keyboard
-                    || super::input::is_text_capture_active()
-                    || code.is_some_and(super::input::is_key_suppressed))
-                    && !is_synthetic;
+                let wants_key_capture =
+                    super::input::wants_key_capture(keyboard, code, *is_synthetic, plain_play);
                 match event.state {
                     ElementState::Pressed => {
                         self.capture.press(button, wants_key_capture) == Owner::Addon
