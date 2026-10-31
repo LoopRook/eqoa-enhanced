@@ -1463,6 +1463,7 @@ mod tests {
         assert_eq!(textures.borrow().entries.len(), 0);
         assert_eq!(textures.borrow().allocated_bytes, 0);
 
+        host.lua.gc_collect().unwrap();
         let current_mem = host.lua.used_memory();
         host.lua.set_memory_limit(current_mem).unwrap();
 
