@@ -58,7 +58,8 @@ This entry records future work only; no navigation or movement behavior changes 
 - **Status:** Requested 2026-10-31; design pending (a scout will first check how Forge/UiForge and Wereoxxs handle profiles on PCSX2).
 - **Problem:** all clients on one PC share one settings/profile file per mod and one window-layout file (imgui.ini), so two clients open for two accounts overwrite each other's settings and layouts.
 - **Goal (owner):** save named profiles per character or role and choose which to load, as players did on PCSX2; each client keeps its own.
-- **Open questions for the owner:** load automatically per character (remember the last profile per character) or always ask; whether a profile includes window positions.
+- **Owner decisions (2026-10-31):** load automatically per character; profiles include window positions. Named profiles (e.g. Healer, Tank) can be shared by many characters (a druid and a shaman both on "Healer"); each character remembers its profile; a character without one gets the default plus a quick pick/save choice; optional "use for all characters of this class". Each client loads its own character's profile, which ends the multibox clash.
+- **Also decided:** the eqoa/1 compatibility promise with a capability query is adopted; hook functions that do nothing must fail honestly (false plus a diagnostic) instead of reporting success.
 
 ## Release policy for Forge work (owner, 2026-10-31)
 
