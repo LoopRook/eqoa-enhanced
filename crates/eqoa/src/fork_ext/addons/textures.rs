@@ -1419,6 +1419,7 @@ mod tests {
         assert_eq!(textures.borrow().allocated_bytes, 0);
 
         // Constrain memory limit to current used bytes so create_userdata will fail
+        host.lua.gc_collect().unwrap();
         let current_mem = host.lua.used_memory();
         host.lua.set_memory_limit(current_mem).unwrap();
 
