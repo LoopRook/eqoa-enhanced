@@ -4529,7 +4529,7 @@ impl Play {
             casting: casting((a, b), now as i64),
             // the window's (`mode_locks`) and the client's other holds (the
             // start menu's framing, the manual camera, a server's search)
-            move_ok: self.locks.0 && mode_locks(self.mode).0 && !self.map.search.open,
+            move_ok: self.locks.0 && mode_locks(self.mode).0 && (!self.map.search.open || self.autorun || self.following),
             look_ok: self.locks.1 && mode_locks(self.mode).1 && !self.map.search.open,
             rooted: self.rooted,
             // IsTimedOut (8 s with nothing arriving) is not applied:
