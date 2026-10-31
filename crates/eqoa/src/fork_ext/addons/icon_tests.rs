@@ -767,7 +767,7 @@ fn forge_icon_real_disc_ui_and_item_icon_pixel_match() {
     let mut lib = esf::Library::new();
     lib.add("UI.CSF", ui_container);
     lib.add("ITEMICON.ESF", item_container);
-    icons::update_live_data(&lib, None);
+    icons::update_live_data(&lib, None, &[item_id]);
 
     let gpu = match TestGpu::new() {
         Some(g) => g,
@@ -843,30 +843,47 @@ fn forge_icon_real_disc_ui_and_item_icon_pixel_match() {
     );
 }
 
+fn make_test_container_with_surface(dict_id: i32, w: i32, h: i32) -> esf::Container {
+    let pal_entries = 256;
+    let mut body = Vec::new();
+    body.extend_from_slice(&dict_id.to_le_bytes());
+    body.extend_from_slice(&w.to_le_bytes());
+    body.extend_from_slice(&h.to_le_bytes());
+    body.extend_from_slice(&1i32.to_le_bytes()); // depth = 1
+    body.extend_from_slice(&1i32.to_le_bytes()); // mips = 1
+    body.extend_from_slice(&(pal_entries as i32).to_le_bytes());
+    let mut pal = vec![0u8; pal_entries * 4];
+    pal[4] = 255;
+    pal[5] = 0;
+    pal[6] = 0;
+    pal[7] = 255;
+    body.extend_from_slice(&pal);
+    body.extend_from_slice(&w.to_le_bytes());
+    let mut pix = vec![0u8; (w * h) as usize];
+    pix[0] = 1;
+    body.extend_from_slice(&pix);
+
+    let body_len = body.len();
+    let mut rec = Vec::new();
+    rec.extend_from_slice(&0x1000u16.to_le_bytes()); // SURFACE
+    rec.extend_from_slice(&0i16.to_le_bytes());
+    rec.extend_from_slice(&(body_len as i32).to_le_bytes());
+    rec.extend_from_slice(&0u32.to_le_bytes());
+    rec.extend_from_slice(&body);
+
+    esf::Container::parse_records(rec)
+}
+
 #[test]
 fn forge_icon_zone_streaming_does_not_trigger_resnapshot() {
     let mut lib = esf::Library::new();
-    let mut ui_c = esf::Container::empty();
-    ui_c.surfaces.push(esf::Surface {
-        dict_id: 100,
-        width: 32,
-        height: 32,
-        depth: 1,
-        mips: 1,
-        pal_off: 0,
-        pal_entries: 0,
-        row_bytes: 128,
-        pix_off: 0,
-        bpp: 32,
-    });
-    ui_c.data = vec![0u8; 1024];
-    lib.add("UI.CSF", ui_c);
+    lib.add("UI.CSF", make_test_container_with_surface(100, 32, 32));
 
     // Initial update snapshots UI.CSF
-    icons::update_live_data(&lib, None);
+    icons::update_live_data(&lib, None, &[]);
     let count1 = icons::snapshot_count();
     let bytes1 = icons::snapshot_size_bytes();
-    assert_eq!(bytes1, 1024);
+    assert_eq!(bytes1, 4096); // 32x32x4 decoded RGBA
 
     // Simulate zone streaming: add multiple unrelated world/zone containers
     for i in 1..=10 {
@@ -876,7 +893,7 @@ fn forge_icon_zone_streaming_does_not_trigger_resnapshot() {
     }
 
     // Call update_live_data again as happens per frame
-    icons::update_live_data(&lib, None);
+    icons::update_live_data(&lib, None, &[]);
 
     // Snapshot count must NOT increase, and snapshot size must remain only the icon containers
     assert_eq!(
@@ -888,6 +905,239 @@ fn forge_icon_zone_streaming_does_not_trigger_resnapshot() {
         icons::snapshot_size_bytes(),
         bytes1,
         "snapshot size must not clone streamed zone containers"
+    );
+}
+
+#[test]
+fn forge_icon_server_art_outside_ui_resolves_after_prefetch() {
+    let mut lib = esf::Library::new();
+    lib.add("UI.CSF", make_test_container_with_surface(1001, 32, 32));
+    lib.add("SS-ART.CSF", make_test_container_with_surface(77777, 32, 32));
+
+    // Prefetch id 77777 (server art outside UI.CSF)
+    icons::update_live_data(&lib, None, &[77777]);
+    assert!(
+        icons::snapshot_has_icon(77777),
+        "prefetched server art icon must be present in snapshot"
+    );
+
+    let gpu = match TestGpu::new() {
+        Some(g) => g,
+        None => return,
+    };
+    let host = Host::new().unwrap();
+    let textures = Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    icons::attach_icon_cache(&host.lua, textures).unwrap();
+
+    let (loaded, w, h): (bool, u32, u32) = host
+        .lua
+        .load(
+            r#"
+            local Icon = require("frontiers_forge.icon")
+            local tex, w, h = Icon.GetTexture(77777)
+            return tex ~= nil, w or 0, h or 0
+            "#,
+        )
+        .eval()
+        .unwrap();
+
+    assert!(loaded, "server art icon outside UI.CSF must resolve after prefetch");
+    assert_eq!((w, h), (32, 32));
+}
+
+#[test]
+fn forge_icon_prefetch_set_follows_game_state_lists() {
+    use std::collections::BTreeMap;
+    let mut abilities = BTreeMap::new();
+    let mut ab1 = net::dump::Ability::default();
+    ab1.icon_front = 54321;
+    ab1.icon_back = 12345;
+    abilities.insert(1, ab1);
+
+    let mut hud_menus = crate::hudmenu::HudMenus::default();
+    hud_menus.defs[0].entries = vec![crate::hudmenu::Entry {
+        icon2: 33333,
+        x08: 44444,
+        msg: 0,
+        id: 0,
+    }];
+
+    let mut effects = net::dump::Effects::default();
+    effects.count = 2;
+    effects.icon[0] = 66666;
+    effects.icon[1] = 77777;
+
+    let inventory = vec![net::dump::NetItem {
+        item: net::dump::Item {
+            icon: 88888,
+            icon2: 99999,
+            ..Default::default()
+        },
+        ..Default::default()
+    }];
+
+    let ids = icons::collect_prefetch_ids(
+        &abilities,
+        &hud_menus,
+        &effects,
+        &inventory,
+    );
+
+    assert!(ids.contains(&54321), "must contain ability icon_front");
+    assert!(ids.contains(&12345), "must contain ability icon_back");
+    assert!(ids.contains(&33333), "must contain hudmenu icon2");
+    assert!(ids.contains(&44444), "must contain hudmenu x08");
+    assert!(ids.contains(&66666), "must contain effect icon 0");
+    assert!(ids.contains(&77777), "must contain effect icon 1");
+    assert!(ids.contains(&88888), "must contain item icon");
+    assert!(ids.contains(&99999), "must contain item icon2");
+}
+
+#[test]
+fn forge_icon_lazy_fallback_queues_and_resolves_on_next_frame() {
+    let mut lib = esf::Library::new();
+    lib.add("UI.CSF", make_test_container_with_surface(1001, 32, 32));
+    lib.add("ADDART.CSF", make_test_container_with_surface(88888, 32, 32));
+
+    // Frame 1: update without prefetching 88888
+    icons::update_live_data(&lib, None, &[]);
+    assert!(
+        !icons::snapshot_has_icon(88888),
+        "88888 must not be in snapshot before prefetch or lazy lookup"
+    );
+
+    let gpu = match TestGpu::new() {
+        Some(g) => g,
+        None => return,
+    };
+    let host = Host::new().unwrap();
+    let textures = Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    icons::attach_icon_cache(&host.lua, textures).unwrap();
+
+    // Frame 1 Lua call: not in snapshot -> returns nil, queues for next frame
+    let frame1_loaded: bool = host
+        .lua
+        .load(
+            r#"
+            local Icon = require("frontiers_forge.icon")
+            local tex, w, h = Icon.GetTexture(88888)
+            return tex ~= nil
+            "#,
+        )
+        .eval()
+        .unwrap();
+    assert!(!frame1_loaded, "frame 1 lookup must return nil and queue hash");
+
+    // Frame 2: update_live_data drains the pending queue and loads 88888 from ADDART.CSF
+    icons::update_live_data(&lib, None, &[]);
+    assert!(
+        icons::snapshot_has_icon(88888),
+        "frame 2 must have resolved and loaded queued hash 88888"
+    );
+
+    // Frame 2 Lua call: now resolved and returns texture!
+    let (frame2_loaded, w, h): (bool, u32, u32) = host
+        .lua
+        .load(
+            r#"
+            local Icon = require("frontiers_forge.icon")
+            local tex, w, h = Icon.GetTexture(88888)
+            return tex ~= nil, w or 0, h or 0
+            "#,
+        )
+        .eval()
+        .unwrap();
+    assert!(frame2_loaded, "frame 2 lookup must succeed for queued hash");
+    assert_eq!((w, h), (32, 32));
+}
+
+#[test]
+fn forge_icon_real_disc_enumerated_ability_icons_resolve() {
+    let iso_path = "C:/Users/hocka/Documents/PS2 Games/EverQuest - Online Adventures - Frontiers (USA).iso";
+    let mut iso = match iso::Iso::open(iso_path) {
+        Ok(iso) => iso,
+        Err(e) => {
+            eprintln!("SKIP forge_icon: failed to open disc {iso_path}: {e}");
+            return;
+        }
+    };
+
+    let ui_bytes = match iso.read("UI.CSF") {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("SKIP forge_icon: UI.CSF not found on disc: {e}");
+            return;
+        }
+    };
+
+    let ui_container = match esf::Container::open(ui_bytes) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("SKIP forge_icon: failed to parse UI.CSF: {e}");
+            return;
+        }
+    };
+
+    let mut lib = esf::Library::new();
+    let file_idx = lib.add("UI.CSF", ui_container);
+    icons::update_live_data(&lib, None, &[]);
+
+    let c = lib.file(file_idx);
+    let ability_surfaces: Vec<esf::Surface> = c
+        .surfaces
+        .iter()
+        .filter(|s| s.width == 32 && s.height == 32)
+        .cloned()
+        .collect();
+
+    assert_eq!(
+        ability_surfaces.len(),
+        48,
+        "UI.CSF must contain exactly 48 32x32 ability icon surfaces"
+    );
+
+    let opts = icons::TrimOptions {
+        trim_transparent: true,
+        trim_color: true,
+    };
+
+    let mut matched = 0;
+    for s in &ability_surfaces {
+        let stock_img = s
+            .decode(&lib.file(file_idx).data)
+            .expect("stock HUD decode must succeed on UI.CSF ability surface");
+
+        assert!(
+            icons::snapshot_has_icon(s.dict_id as u32),
+            "snapshot must contain UI.CSF ability surface {}",
+            s.dict_id
+        );
+
+        icons::with_active_provider(|p| {
+            let decoded = p
+                .decode_icon(s.dict_id as u32)
+                .expect("provider must decode ability surface");
+            assert_eq!(
+                decoded.rgba, stock_img.rgba,
+                "provider decoded pixels must match stock HUD decode byte-for-byte"
+            );
+        });
+
+        let trimmed = icons::trim_rgba(&stock_img.rgba, stock_img.width, stock_img.height, opts);
+        assert!(
+            trimmed.is_some(),
+            "trim must succeed on UI.CSF ability surface {}",
+            s.dict_id
+        );
+        matched += 1;
+    }
+
+    assert_eq!(matched, 48);
+    let snap_size = icons::snapshot_size_bytes();
+    eprintln!(
+        "SUCCESS forge_icon: all 48/48 enumerated ability icon surfaces from UI.CSF resolved, matched stock HUD byte-for-byte, and trimmed ok (snapshot size: {} bytes / {:.2} MiB)",
+        snap_size,
+        snap_size as f64 / (1024.0 * 1024.0)
     );
 }
 

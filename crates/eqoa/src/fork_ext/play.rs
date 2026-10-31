@@ -27,6 +27,8 @@ thread_local! {
     static CACHED_ATLAS: std::cell::RefCell<Option<crate::fork_ext::addons::icons::SafeAtlas>> = const { std::cell::RefCell::new(None) };
 }
 
+
+
 pub(crate) fn frame_library(_play: &Play, _lib: &esf::Library) {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -69,7 +71,13 @@ pub(crate) fn frame_library(_play: &Play, _lib: &esf::Library) {
             CACHED_ATLAS.with(|ca| ca.borrow().clone())
         };
 
-        crate::fork_ext::addons::icons::update_live_data(_lib, atlas);
+        let prefetch_ids = crate::fork_ext::addons::icons::collect_prefetch_ids(
+            &_play.abilities,
+            &_play.hud_menus,
+            &_play.effects,
+            &_play.dump.inventory.items,
+        );
+        crate::fork_ext::addons::icons::update_live_data(_lib, atlas, &prefetch_ids);
     }
 }
 

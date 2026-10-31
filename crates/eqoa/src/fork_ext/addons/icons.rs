@@ -454,8 +454,21 @@ impl IconCache {
             }
         }
 
-        let icon = provider.decode_icon(hash)?;
-        let (cropped, tw, th) = trim_rgba(&icon.rgba, icon.width, icon.height, trim)?;
+        let icon = match provider.decode_icon(hash) {
+            Some(i) => i,
+            None => return None,
+        };
+        let (cropped, tw, th) = match trim_rgba(&icon.rgba, icon.width, icon.height, trim) {
+            Some(t) => t,
+            None => {
+                log_icon_error(hash, "trimmed empty");
+                return None;
+            }
+        };
+        if tw == 0 || th == 0 {
+            log_icon_error(hash, "trimmed empty");
+            return None;
+        }
 
         let handle = self
             .textures
@@ -574,132 +587,20 @@ pub struct SafeAtlas {
     pub textures: vi::strtab::StringTable,
 }
 
-#[derive(Clone)]
-pub struct SafeSurface {
-    #[allow(dead_code)]
-    pub dict_id: i32,
-    pub surface: esf::Surface,
-    pub container_data: Arc<Vec<u8>>,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct TrackedFileId {
-    pub file_idx: usize,
-    pub data_len: usize,
-    pub surfaces_len: usize,
-    pub data_ptr: usize,
-}
-
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SafeLibrary {
-    pub surfaces: HashMap<i32, SafeSurface>,
+    pub surfaces: HashMap<i32, Arc<DecodedIcon>>,
     pub view: esf::Era,
-    pub tracked_files: Vec<TrackedFileId>,
-    #[allow(dead_code)]
     pub total_bytes: usize,
 }
 
-fn is_icon_container_name(name: &str) -> bool {
-    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
-    base.eq_ignore_ascii_case("SPELLICON.ESF")
-        || base.eq_ignore_ascii_case("ITEMICON.ESF")
-        || base.eq_ignore_ascii_case("UI.CSF")
-}
-
-fn collect_needed_files(lib: &esf::Library, atlas: Option<&SafeAtlas>) -> Vec<usize> {
-    let mut needed = HashSet::new();
-    let is_2002 = lib.view() == esf::Era::Y2002;
-
-    // 1. By target name: SPELLICON.ESF, ITEMICON.ESF, UI.CSF
-    for (i, (name, _)) in lib.files.iter().enumerate() {
-        if is_icon_container_name(name) {
-            let file_to_use = if is_2002 {
-                lib.stand_in_of(i).unwrap_or(i)
-            } else {
-                i
-            };
-            needed.insert(file_to_use);
-        }
-    }
-
-    // 2. By dict lookup for any HUD atlas icon surfaces
-    if let Some(atlas) = atlas {
-        for entry in &atlas.entries {
-            let name = atlas.textures.get(entry.row, 0);
-            if !name.is_empty() && name != "_null_" {
-                let dict_id = vi::ui::icon_id(name) as i32;
-                if let Some(r) = lib.lookup(dict_id) {
-                    needed.insert(r.file);
-                }
-            }
-        }
-    }
-
-    let mut result: Vec<usize> = needed.into_iter().collect();
-    result.sort_unstable();
-    result
-}
-
-fn compute_tracked_files(lib: &esf::Library, needed: &[usize]) -> Vec<TrackedFileId> {
-    needed
-        .iter()
-        .map(|&f| {
-            let c = &lib.files[f].1;
-            TrackedFileId {
-                file_idx: f,
-                data_len: c.data.len(),
-                surfaces_len: c.surfaces.len(),
-                data_ptr: c.data.as_ptr() as usize,
-            }
-        })
-        .collect()
-}
-
 impl SafeLibrary {
-    pub fn from_library(lib: &esf::Library, atlas: Option<&SafeAtlas>) -> Self {
-        let needed_files = collect_needed_files(lib, atlas);
-        let tracked_files = compute_tracked_files(lib, &needed_files);
-
-        let mut surfaces = HashMap::new();
-        let mut total_bytes = 0usize;
-
-        for &f in &needed_files {
-            let c = &lib.files[f].1;
-            if c.surfaces.is_empty() {
-                continue;
-            }
-            total_bytes += c.data.len();
-            let data = Arc::new(c.data.clone());
-            for s in &c.surfaces {
-                if lib.lookup(s.dict_id).is_some_and(|r| r.file == f) || lib.stands_for(f).is_none() {
-                    surfaces.insert(
-                        s.dict_id,
-                        SafeSurface {
-                            dict_id: s.dict_id,
-                            surface: s.clone(),
-                            container_data: data.clone(),
-                        },
-                    );
-                }
-            }
-        }
-
-        Self {
-            surfaces,
-            view: lib.view(),
-            tracked_files,
-            total_bytes,
-        }
+    pub fn decode_surface(&self, dict_id: i32) -> Option<DecodedIcon> {
+        self.surfaces.get(&dict_id).map(|d| (**d).clone())
     }
 
-    pub fn decode_surface(&self, dict_id: i32) -> Option<DecodedIcon> {
-        let s = self.surfaces.get(&dict_id)?;
-        let img = s.surface.decode(&s.container_data)?;
-        Some(DecodedIcon {
-            width: img.width,
-            height: img.height,
-            rgba: img.rgba,
-        })
+    pub fn has_surface(&self, dict_id: i32) -> bool {
+        self.surfaces.contains_key(&dict_id)
     }
 }
 
@@ -711,7 +612,12 @@ pub struct LiveLibraryProvider {
 
 impl IconProvider for LiveLibraryProvider {
     fn decode_icon(&self, id: u32) -> Option<DecodedIcon> {
-        self.lib.decode_surface(id as i32)
+        if let Some(d) = self.lib.decode_surface(id as i32) {
+            Some(d)
+        } else {
+            queue_pending_lookup(id);
+            None
+        }
     }
 
     fn decode_ui_texture(&self, tex_id: u32) -> Option<DecodedIcon> {
@@ -725,7 +631,13 @@ impl IconProvider for LiveLibraryProvider {
             return None;
         }
         let dict_id = vi::ui::icon_id(name);
-        let full = self.lib.decode_surface(dict_id as i32)?;
+        let full = match self.lib.decode_surface(dict_id as i32) {
+            Some(f) => f,
+            None => {
+                queue_pending_lookup(dict_id);
+                return None;
+            }
+        };
         let src_x = entry.uv0[0];
         let src_y = entry.uv0[1];
         let w = entry.uv1[0];
@@ -767,6 +679,90 @@ thread_local! {
     static ART_GENERATION: Cell<u64> = const { Cell::new(0) };
     static SNAPSHOT_COUNT: Cell<u64> = const { Cell::new(0) };
     static ACTIVE_CACHES: RefCell<Vec<std::rc::Weak<RefCell<IconCache>>>> = const { RefCell::new(Vec::new()) };
+    static PENDING_LOOKUPS: RefCell<Option<HashSet<u32>>> = const { RefCell::new(None) };
+}
+
+pub fn queue_pending_lookup(id: u32) {
+    PENDING_LOOKUPS.with(|p| {
+        let mut borrow = p.borrow_mut();
+        borrow.get_or_insert_with(HashSet::new).insert(id);
+    });
+}
+
+pub fn drain_pending_lookups() -> Vec<u32> {
+    PENDING_LOOKUPS.with(|p| {
+        p.borrow_mut().take().map_or(Vec::new(), |s| s.into_iter().collect())
+    })
+}
+
+pub fn collect_prefetch_ids(
+    abilities: &std::collections::BTreeMap<i64, net::dump::Ability>,
+    hud_menus: &crate::hudmenu::HudMenus,
+    effects: &net::dump::Effects,
+    inventory: &[net::dump::NetItem],
+) -> Vec<u32> {
+    let mut ids = Vec::new();
+    for ability in abilities.values() {
+        if ability.icon_front != 0 && ability.icon_front != -1 {
+            ids.push(ability.icon_front as u32);
+        }
+        if ability.icon_back != 0 && ability.icon_back != -1 {
+            ids.push(ability.icon_back as u32);
+        }
+    }
+    for menu in &hud_menus.defs {
+        for entry in &menu.entries {
+            if entry.icon2 != -1 && entry.icon2 != 0 {
+                ids.push(entry.icon2 as u32);
+            }
+            if entry.x08 != -1 && entry.x08 != 0 {
+                ids.push(entry.x08 as u32);
+            }
+        }
+    }
+    for i in 0..(effects.count as usize).min(8) {
+        let ic = effects.icon[i];
+        if ic != 0 && ic != u32::MAX {
+            ids.push(ic);
+        }
+    }
+    for item in inventory {
+        if item.item.icon != 0 && item.item.icon != -1 {
+            ids.push(item.item.icon as u32);
+        }
+        if item.item.icon2 != 0 && item.item.icon2 != -1 {
+            ids.push(item.item.icon2 as u32);
+        }
+    }
+    ids
+}
+
+pub fn log_icon_error(hash: u32, reason: &str) {
+    use std::sync::Mutex;
+    static LOGGED: Mutex<Option<HashSet<u32>>> = Mutex::new(None);
+    let mut guard = match LOGGED.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    let set = guard.get_or_insert_with(HashSet::new);
+    if !set.insert(hash) {
+        return;
+    }
+    drop(guard);
+
+    let log_dir = crate::fork_ext::mods::mods_dir();
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_path = log_dir.join("addons_error.log");
+    let line = format!("[icon] 0x{:08X} ({}) {}
+", hash, hash, reason);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        use std::io::Write;
+        let _ = f.write_all(line.as_bytes());
+    }
 }
 
 pub fn cleanup_active_stale() {
@@ -797,23 +793,127 @@ pub fn snapshot_size_bytes() -> usize {
     SAFE_LIBRARY.with(|sl| sl.borrow().as_ref().map_or(0, |l| l.total_bytes))
 }
 
-pub fn update_live_data(lib: &esf::Library, atlas: Option<SafeAtlas>) {
+#[allow(dead_code)]
+pub fn snapshot_has_icon(id: u32) -> bool {
+    SAFE_LIBRARY.with(|sl| {
+        sl.borrow()
+            .as_ref()
+            .map_or(false, |lib| lib.has_surface(id as i32))
+    })
+}
+
+pub fn update_live_data(lib: &esf::Library, atlas: Option<SafeAtlas>, prefetch_ids: &[u32]) {
     if let Some(a) = atlas {
         LIVE_ATLAS.with(|la| *la.borrow_mut() = Some(a));
     }
     let atlas_ref = LIVE_ATLAS.with(|la| la.borrow().clone());
 
-    let needed_files = collect_needed_files(lib, atlas_ref.as_ref());
-    let current_tracked = compute_tracked_files(lib, &needed_files);
-
-    let needs_update = SAFE_LIBRARY.with(|sl| match &*sl.borrow() {
-        Some(existing) => existing.view != lib.view() || existing.tracked_files != current_tracked,
+    let needs_rebuild = SAFE_LIBRARY.with(|sl| match &*sl.borrow() {
+        Some(existing) => existing.view != lib.view(),
         None => true,
     });
-    if needs_update {
-        let safe_lib = Arc::new(SafeLibrary::from_library(lib, atlas_ref.as_ref()));
+
+    if needs_rebuild {
+        let mut surfaces = HashMap::new();
+        let mut total_bytes = 0usize;
+
+        // 1. Preload UI.CSF surfaces
+        let is_2002 = lib.view() == esf::Era::Y2002;
+        for (i, (name, _)) in lib.files.iter().enumerate() {
+            let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+            if base.eq_ignore_ascii_case("UI.CSF") {
+                let file_idx = if is_2002 {
+                    lib.stand_in_of(i).unwrap_or(i)
+                } else {
+                    i
+                };
+                if file_idx < lib.files.len() {
+                    let c = &lib.files[file_idx].1;
+                    for s in &c.surfaces {
+                        if let Some(img) = s.decode(&c.data) {
+                            total_bytes += img.rgba.len();
+                            surfaces.insert(
+                                s.dict_id,
+                                Arc::new(DecodedIcon {
+                                    width: img.width,
+                                    height: img.height,
+                                    rgba: img.rgba,
+                                }),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Preload HUD atlas entries
+        if let Some(atlas) = atlas_ref.as_ref() {
+            for entry in &atlas.entries {
+                let name = atlas.textures.get(entry.row, 0);
+                if !name.is_empty() && name != "_null_" {
+                    let dict_id = vi::ui::icon_id(name) as i32;
+                    if !surfaces.contains_key(&dict_id) {
+                        if let Some((c, s)) = lib.surface(dict_id) {
+                            if let Some(img) = s.decode(&c.data) {
+                                total_bytes += img.rgba.len();
+                                surfaces.insert(
+                                    dict_id,
+                                    Arc::new(DecodedIcon {
+                                        width: img.width,
+                                        height: img.height,
+                                        rgba: img.rgba,
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let safe_lib = Arc::new(SafeLibrary {
+            surfaces,
+            view: lib.view(),
+            total_bytes,
+        });
         SAFE_LIBRARY.with(|sl| *sl.borrow_mut() = Some(safe_lib));
         SNAPSHOT_COUNT.with(|c| c.set(c.get().wrapping_add(1)));
+    }
+
+    // 3. Process prefetch_ids and drained pending lookups
+    let mut to_lookup = drain_pending_lookups();
+    to_lookup.extend_from_slice(prefetch_ids);
+
+    if !to_lookup.is_empty() {
+        SAFE_LIBRARY.with(|sl| {
+            let mut sl_borrow = sl.borrow_mut();
+            if let Some(safe_lib) = sl_borrow.as_mut() {
+                let lib_mut = Arc::make_mut(safe_lib);
+                for id in to_lookup {
+                    let dict_id = id as i32;
+                    if lib_mut.surfaces.contains_key(&dict_id) {
+                        continue;
+                    }
+                    if let Some((c, s)) = lib.surface(dict_id) {
+                        if let Some(img) = s.decode(&c.data) {
+                            lib_mut.total_bytes += img.rgba.len();
+                            lib_mut.surfaces.insert(
+                                dict_id,
+                                Arc::new(DecodedIcon {
+                                    width: img.width,
+                                    height: img.height,
+                                    rgba: img.rgba,
+                                }),
+                            );
+                        } else {
+                            log_icon_error(id, "surface decode failed");
+                        }
+                    } else {
+                        log_icon_error(id, "not found in library or snapshot");
+                    }
+                }
+            }
+        });
     }
 }
 
