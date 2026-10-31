@@ -215,6 +215,25 @@ unsafe extern "system" {
     fn waveOutGetNumDevs() -> u32;
 }
 
+/// Tests that need real playback skip on machines without an audio output
+/// (CI runners), unless EQOA_SOUND_NATIVE_REQUIRED demands real playback.
+#[cfg(test)]
+pub(crate) fn skip_without_audio_output(test: &str) -> bool {
+    #[cfg(windows)]
+    let present = unsafe { waveOutGetNumDevs() } > 0;
+    #[cfg(not(windows))]
+    let present = false;
+    if present {
+        return false;
+    }
+    let msg = format!("SKIP {test}: no audio output device (MCI wave-out) present");
+    if std::env::var_os("EQOA_SOUND_NATIVE_REQUIRED").is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true")) {
+        panic!("EQOA_SOUND_NATIVE_REQUIRED: {msg}");
+    }
+    eprintln!("{msg}");
+    true
+}
+
 #[cfg(windows)]
 impl WindowsMciBackend {
     fn new() -> Self {

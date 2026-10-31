@@ -1779,6 +1779,9 @@ mod tests {
 
     #[test]
     fn forge_manager_sound_lifecycle_disable_retains_handles_reenable_plays_and_terminal_closes() {
+        if super::super::sound::skip_without_audio_output("forge_manager_sound_lifecycle") {
+            return;
+        }
         let Some(mut gpu) = Gpu::new() else {
             return;
         };
@@ -1868,6 +1871,9 @@ mod tests {
 
     #[test]
     fn forge_manager_sound_failed_reload_preserves_old_bank() {
+        if super::super::sound::skip_without_audio_output("forge_manager_sound_failed_reload") {
+            return;
+        }
         let Some(mut gpu) = Gpu::new() else {
             return;
         };
