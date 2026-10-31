@@ -2,6 +2,17 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-10-31 · Upstream updates (unreleased)
+
+- Ground Fog option added under Options > Extended > World (PS2 look by default, or Exact) and Shadows moved to Characters.
+- Duels with wagers and an orange compass marker on servers that support them (Community > Duel).
+- Sound commands are no longer dropped in large crowds and busy battles, and distant or blocked creature swings are quieted.
+- Walking while casting is timed to match PlayStation 2 behavior, with legs moving naturally.
+- Glowing weapon blades, crystals, eyes, and particle blend effects restored to their full console brightness.
+- Final live patch features recovered from save states: group search (LFG on and off), stack auctions, and multi-recipient mail.
+- Falling from Sandstorm's boon no longer hangs in midair with a loading screen.
+- Master Class rank upgrades can be purchased again without being rejected as duplicate classes.
+
 ## 2026-10-31 · Enhanced 0.2.0
 
 - Mods: EQOA Enhanced can now run FrontiersForge UI mods natively, no emulator needed. The game creates the mods folder automatically if missing. Turn mods on in Options, Extended, Mods & Addons, Addon Manager. Mods are off until you turn them on.
