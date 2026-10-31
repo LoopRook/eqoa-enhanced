@@ -20,12 +20,39 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-pub const MAX_ABILITIES: usize = 64;
+pub const MAX_ABILITIES: usize = 256;
 pub const MAX_BARS: usize = 3;
 pub const MAX_BAR_SLOTS: usize = 5;
+pub const MAX_ITEM_RECORDS: usize = 40;
+pub const MAX_ITEM_SLOTS: usize = MAX_ITEM_RECORDS;
 
 pub const ABILITY_SOURCE_TAG: u32 = 0x8060000;
 pub const ITEM_SOURCE_TAG: u32 = 0x2030000;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ItemSnapshot {
+    pub name: [u8; 32],
+    pub name_len: u8,
+    pub description: [u8; 64],
+    pub desc_len: u8,
+    pub icon_ref: u32,
+    pub slot_id: u32,
+    pub populated: bool,
+}
+
+impl Default for ItemSnapshot {
+    fn default() -> Self {
+        Self {
+            name: [0u8; 32],
+            name_len: 0,
+            description: [0u8; 64],
+            desc_len: 0,
+            icon_ref: 0,
+            slot_id: 0,
+            populated: false,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AbilitySnapshot {
@@ -110,10 +137,11 @@ impl Default for AbilityBarSnapshot {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AbilitiesSnapshot {
-    pub ability_count: u8,
+    pub ability_count: u16,
     pub selected_bar: u8,
     pub abilities: [AbilitySnapshot; MAX_ABILITIES],
     pub bars: [AbilityBarSnapshot; MAX_BARS],
+    pub items: [ItemSnapshot; MAX_ITEM_SLOTS],
 }
 
 impl Default for AbilitiesSnapshot {
@@ -123,6 +151,7 @@ impl Default for AbilitiesSnapshot {
             selected_bar: 0,
             abilities: [AbilitySnapshot::default(); MAX_ABILITIES],
             bars: [AbilityBarSnapshot::default(); MAX_BARS],
+            items: [ItemSnapshot::default(); MAX_ITEM_SLOTS],
         }
     }
 }
@@ -275,23 +304,35 @@ pub(crate) fn create_ability_object(lua: &Lua, snap: &AbilitySnapshot) -> LuaRes
     Ok(t)
 }
 
-pub(crate) fn create_item_object(lua: &Lua, index: u32, icon_ref: i32) -> LuaResult<Table> {
+pub(crate) fn create_item_object(lua: &Lua, snap: &ItemSnapshot) -> LuaResult<Table> {
     let t = lua.create_table()?;
+    let name = snap.name;
+    let name_len = snap.name_len as usize;
     t.set(
         "GetName",
-        lua.create_function(move |lua_ctx, ()| Ok(Value::String(lua_ctx.create_string("Item")?)))?,
+        lua.create_function(move |lua_ctx, ()| {
+            let s = std::str::from_utf8(&name[..name_len.min(name.len())]).unwrap_or("");
+            Ok(Value::String(lua_ctx.create_string(s)?))
+        })?,
     )?;
+    let desc = snap.description;
+    let desc_len = snap.desc_len as usize;
     t.set(
         "GetDescription",
-        lua.create_function(move |lua_ctx, ()| Ok(Value::String(lua_ctx.create_string("")?)))?,
+        lua.create_function(move |lua_ctx, ()| {
+            let s = std::str::from_utf8(&desc[..desc_len.min(desc.len())]).unwrap_or("");
+            Ok(Value::String(lua_ctx.create_string(s)?))
+        })?,
     )?;
+    let icon_ref = snap.icon_ref;
     t.set(
         "GetIconRef",
         lua.create_function(move |_, ()| Ok(icon_ref))?,
     )?;
+    let slot_id = snap.slot_id;
     t.set(
         "GetSlotId",
-        lua.create_function(move |_, ()| Ok(index + 1))?,
+        lua.create_function(move |_, ()| Ok(slot_id))?,
     )?;
     Ok(t)
 }
@@ -728,6 +769,7 @@ pub fn install_ability_bar_adapter(host: &Host) -> LuaResult<()> {
     bar_mod.set(
         "GetSlotUITexId",
         lua.create_function(|_, slot_index: usize| {
+            // FrontiersForge compact HUD slot glyphs: slot 0..1 potion (5), slot 2..3 gem (3)
             const STATIC_GLYPHS: [i32; 5] = [5, 5, 3, 2, 0];
             if slot_index >= 5 {
                 return Err(mlua::Error::runtime(format!(
@@ -765,7 +807,7 @@ pub fn install_ability_bar_adapter(host: &Host) -> LuaResult<()> {
             && (source_index as usize) <= snap_abilities.ability_count as usize
         {
             let a = snap_abilities.abilities[source_index as usize - 1];
-            if a.valid { Some(a) } else { None }
+            Some(a)
         } else {
             None
         };
@@ -791,22 +833,28 @@ pub fn install_ability_bar_adapter(host: &Host) -> LuaResult<()> {
             })?,
         )?;
 
-        let icon_ref = slot.ability_icon_ref;
+        let item_snap = if source_type == ITEM_SOURCE_TAG && (source_index as usize) < snap_abilities.items.len() {
+            let it = snap_abilities.items[source_index as usize];
+            if it.populated && it.slot_id != 0 {
+                Some(it)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         t.set(
             "GetItem",
             lua.create_function(move |lua_ctx, ()| {
-                if source_type == ITEM_SOURCE_TAG {
-                    Ok(Value::Table(create_item_object(
-                        lua_ctx,
-                        source_index,
-                        icon_ref,
-                    )?))
+                if let Some(ref it) = item_snap {
+                    Ok(Value::Table(create_item_object(lua_ctx, it)?))
                 } else {
                     Ok(Value::Nil)
                 }
             })?,
         )?;
 
+        let icon_ref = slot.ability_icon_ref;
         t.set(
             "GetIconRef",
             lua.create_function(move |_, ()| Ok(icon_ref))?,
@@ -866,9 +914,7 @@ pub fn install_ability_bar_adapter(host: &Host) -> LuaResult<()> {
                     && (slot.source_index as usize) <= snap.abilities.ability_count as usize
                 {
                     let a = snap.abilities.abilities[slot.source_index as usize - 1];
-                    if a.valid {
-                        return Ok(Value::Table(create_ability_object(lua_ctx, &a)?));
-                    }
+                    return Ok(Value::Table(create_ability_object(lua_ctx, &a)?));
                 }
                 Ok(Value::Nil)
             })?,
@@ -890,15 +936,13 @@ pub fn install_ability_bar_adapter(host: &Host) -> LuaResult<()> {
                     return Ok(Value::Nil);
                 }
                 let slot = bar.slots[slot_index];
-                if slot.source_type == ITEM_SOURCE_TAG {
-                    Ok(Value::Table(create_item_object(
-                        lua_ctx,
-                        slot.source_index,
-                        slot.ability_icon_ref,
-                    )?))
-                } else {
-                    Ok(Value::Nil)
+                if slot.source_type == ITEM_SOURCE_TAG && (slot.source_index as usize) < snap.abilities.items.len() {
+                    let it = &snap.abilities.items[slot.source_index as usize];
+                    if it.populated && it.slot_id != 0 {
+                        return Ok(Value::Table(create_item_object(lua_ctx, it)?));
+                    }
                 }
+                Ok(Value::Nil)
             })?,
         )?;
     }
@@ -1030,6 +1074,17 @@ mod tests {
             source_index: 3,
             ability_icon_ref: 500,
         };
+        let mut item_name = [0u8; 32];
+        item_name[..4].copy_from_slice(b"Item");
+        snap.items[3] = ItemSnapshot {
+            name: item_name,
+            name_len: 4,
+            description: [0u8; 64],
+            desc_len: 0,
+            icon_ref: 500,
+            slot_id: 1,
+            populated: true,
+        };
 
         host.snapshot.set(Snapshot {
             in_game: true,
@@ -1069,6 +1124,133 @@ mod tests {
             assert(item ~= nil, "item must not be nil")
             assert(item:GetName() == "Item", "item name must be Item")
             assert(item:GetIconRef() == 500, "item icon must be 500")
+            "#,
+        );
+        chunk.exec().unwrap();
+    }
+
+    #[test]
+    fn forge_ability_bar_item_slots_and_stock_glyphs() {
+        let dir = temp_test_dir("item_slots_test");
+        let addon = test_addon(&dir);
+        let host = Host::for_addon(&addon).unwrap();
+
+        let mut snap = AbilitiesSnapshot::default();
+        snap.bars[2].slot_count = 4;
+        snap.bars[2].slots[0] = AbilityBarSlotSnapshot {
+            source_type: ITEM_SOURCE_TAG,
+            source_index: 0,
+            ability_icon_ref: 0x12345678,
+        };
+        snap.bars[2].slots[1] = AbilityBarSlotSnapshot {
+            source_type: 0,
+            source_index: 0,
+            ability_icon_ref: -1,
+        };
+
+        let mut item_name = [0u8; 32];
+        item_name[..17].copy_from_slice(b"Healing Potion 01");
+        let mut item_desc = [0u8; 64];
+        item_desc[..12].copy_from_slice(b"Heals 100 HP");
+
+        snap.items[0] = ItemSnapshot {
+            name: item_name,
+            name_len: 17,
+            description: item_desc,
+            desc_len: 12,
+            icon_ref: 0x12345678,
+            slot_id: 1,
+            populated: true,
+        };
+
+        host.snapshot.set(Snapshot {
+            in_game: true,
+            abilities: snap,
+            ..Default::default()
+        });
+
+        let chunk = host.lua.load(
+            r#"
+            local AbilityBar = require("frontiers_forge.ability_bar")
+            local item = AbilityBar.GetItem(2, 0)
+            assert(item ~= nil, "item on bar 2 slot 0 must not be nil")
+            assert(item:GetName() == "Healing Potion 01", "name must match")
+            assert(item:GetDescription() == "Heals 100 HP", "desc must match")
+            assert(item:GetIconRef() == 0x12345678, "icon_ref must match")
+            assert(item:GetSlotId() == 1, "slot_id must match")
+
+            local slot0 = AbilityBar.GetAbilitySlot(2, 0)
+            assert(slot0:IsEmpty() == false, "slot 0 must not be empty")
+            assert(slot0:GetItemIndex() == 0, "item index must be 0")
+            assert(slot0:GetIconRef() == 0x12345678, "slot icon ref must match")
+
+            -- Negative control: unassigned slot returns nil for GetItem
+            local empty_item = AbilityBar.GetItem(2, 1)
+            assert(empty_item == nil, "unassigned quickslot must return nil")
+
+            -- Verify stock compact glyph IDs: slots 0..1 are 5 (potion), slots 2..3 are 3/2
+            assert(AbilityBar.GetSlotUITexId(0) == 5, "glyph 0 must be 5")
+            assert(AbilityBar.GetSlotUITexId(1) == 5, "glyph 1 must be 5")
+            assert(AbilityBar.GetSlotUITexId(2) == 3, "glyph 2 must be 3")
+            assert(AbilityBar.GetSlotUITexId(3) == 2, "glyph 3 must be 2")
+            "#,
+        );
+        chunk.exec().unwrap();
+    }
+
+    #[test]
+    fn forge_abilities_spellbook_capacity_above_64() {
+        let dir = temp_test_dir("large_spellbook_test");
+        let addon = test_addon(&dir);
+        let host = Host::for_addon(&addon).unwrap();
+
+        let mut snap = AbilitiesSnapshot::default();
+        snap.ability_count = 100;
+
+        let mut name = [0u8; 32];
+        name[..15].copy_from_slice(b"High Rank Spell");
+        snap.abilities[95] = AbilitySnapshot {
+            id: 9999,
+            display_index: 95,
+            spellbook_slot: 95,
+            level: 50,
+            range: 100.0,
+            cast_time: 3,
+            power_cost: 50,
+            icon_background_ref: 0x11112222,
+            icon_foreground_ref: 0x33334444,
+            scope: 1,
+            cooldown_seconds: 10,
+            cooldown_lockout_ms: 0,
+            equip_requirements: 0,
+            name,
+            name_len: 15,
+            description: [0u8; 64],
+            desc_len: 0,
+            valid: true,
+        };
+
+        snap.bars[0].slot_count = 5;
+        snap.bars[0].slots[0] = AbilityBarSlotSnapshot {
+            source_type: ABILITY_SOURCE_TAG,
+            source_index: 96,
+            ability_icon_ref: 0x33334444,
+        };
+
+        host.snapshot.set(Snapshot {
+            in_game: true,
+            abilities: snap,
+            ..Default::default()
+        });
+
+        let chunk = host.lua.load(
+            r#"
+            local AbilityBar = require("frontiers_forge.ability_bar")
+            local ab = AbilityBar.GetAbility(0, 0)
+            assert(ab ~= nil, "ability past index 64 must not be dropped")
+            assert(ab:GetName() == "High Rank Spell", "name must match")
+            assert(ab:GetIconForegroundRef() == 0x33334444, "fg ref must match")
+            assert(ab:GetIconBackgroundRef() == 0x11112222, "bg ref must match")
             "#,
         );
         chunk.exec().unwrap();

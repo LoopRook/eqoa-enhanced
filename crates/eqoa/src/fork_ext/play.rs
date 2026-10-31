@@ -418,6 +418,17 @@ impl Play {
                 let d_len = d_bytes.len().min(64);
                 desc_buf[..d_len].copy_from_slice(&d_bytes[..d_len]);
 
+                let bg_ref = if a.icon_back != 0 && a.icon_back != -1 {
+                    (a.icon_back as i32) as u32
+                } else {
+                    0
+                };
+                let fg_ref = if a.icon_front != 0 && a.icon_front != -1 {
+                    (a.icon_front as i32) as u32
+                } else {
+                    0
+                };
+
                 snap_abilities[ability_count] = crate::fork_ext::addons::ability::AbilitySnapshot {
                     id: a.id as u32,
                     display_index: a.display_index.max(0) as u32,
@@ -426,8 +437,8 @@ impl Play {
                     range: a.range,
                     cast_time: a.cast_time.max(0) as u32,
                     power_cost: a.power_cost.max(0) as u32,
-                    icon_background_ref: a.icon_back.max(0) as u32,
-                    icon_foreground_ref: a.icon_front.max(0) as u32,
+                    icon_background_ref: bg_ref,
+                    icon_foreground_ref: fg_ref,
                     scope: a.scope.max(0) as u32,
                     cooldown_seconds: a.cooldown.max(0) as u32,
                     cooldown_lockout_ms: a.lockout.max(0) as u32,
@@ -439,6 +450,37 @@ impl Play {
                     valid: a.valid != 0,
                 };
                 ability_count += 1;
+            }
+
+            let mut snap_items = [crate::fork_ext::addons::ability::ItemSnapshot::default();
+                crate::fork_ext::addons::ability::MAX_ITEM_RECORDS];
+            for (k, it) in self.dump.inventory.items.iter().enumerate().take(crate::fork_ext::addons::ability::MAX_ITEM_RECORDS) {
+                let mut name_buf = [0u8; 32];
+                let n_bytes = it.item.name.as_bytes();
+                let n_len = n_bytes.len().min(32);
+                name_buf[..n_len].copy_from_slice(&n_bytes[..n_len]);
+
+                let mut desc_buf = [0u8; 64];
+                let d_bytes = it.item.desc.as_bytes();
+                let d_len = d_bytes.len().min(64);
+                desc_buf[..d_len].copy_from_slice(&d_bytes[..d_len]);
+
+                let icon_raw = crate::inventory::item_icon(it, net::session::EXPANSION_FLAGS);
+                let icon_ref = if icon_raw != 0 && icon_raw != -1 {
+                    (icon_raw as i32) as u32
+                } else {
+                    0
+                };
+
+                snap_items[k] = crate::fork_ext::addons::ability::ItemSnapshot {
+                    name: name_buf,
+                    name_len: n_len as u8,
+                    description: desc_buf,
+                    desc_len: d_len as u8,
+                    icon_ref,
+                    slot_id: (k + 1) as u32,
+                    populated: true,
+                };
             }
 
             let mut bars = [crate::fork_ext::addons::ability::AbilityBarSnapshot::default();
@@ -454,22 +496,33 @@ impl Play {
                         crate::fork_ext::addons::ability::MAX_BAR_SLOTS];
 
                 for (s_idx, entry) in def.entries.iter().take(5).enumerate() {
-                    let (source_type, source_index) = if entry.msg == 0x8060000 {
+                    let (source_type, source_index, ability_icon_ref) = if entry.msg == 0x8060000 {
                         let raw_idx = snap_abilities[..ability_count]
                             .iter()
                             .position(|ab| ab.id == entry.id as u32)
                             .map(|idx| (idx + 1) as u32)
                             .unwrap_or(0);
-                        (0x8060000, raw_idx)
+                        let icon_ref = if raw_idx > 0 && (raw_idx as usize) <= ability_count {
+                            snap_abilities[raw_idx as usize - 1].icon_foreground_ref as i32
+                        } else {
+                            -1
+                        };
+                        (0x8060000, raw_idx, icon_ref)
                     } else if entry.msg == 0x2030000 {
-                        (0x2030000, entry.id.max(0) as u32)
+                        let item_idx = entry.id.max(0) as usize;
+                        let icon_ref = if item_idx < snap_items.len() && snap_items[item_idx].populated {
+                            snap_items[item_idx].icon_ref as i32
+                        } else {
+                            -1
+                        };
+                        (0x2030000, item_idx as u32, icon_ref)
                     } else {
-                        (0, 0)
+                        (0, 0, -1)
                     };
                     slots[s_idx] = crate::fork_ext::addons::ability::AbilityBarSlotSnapshot {
                         source_type,
                         source_index,
-                        ability_icon_ref: entry.icon2,
+                        ability_icon_ref,
                     };
                 }
 
@@ -480,11 +533,49 @@ impl Play {
                 };
             }
 
+            // Diagnostic slot change telemetry (throttled: emit once when slot layout changes)
+            static PREV_SLOTS: std::sync::Mutex<Option<[[(u32, u32, [u8; 32], u8); 5]; 3]>> =
+                std::sync::Mutex::new(None);
+            let mut current_slots = [[(0u32, 0u32, [0u8; 32], 0u8); 5]; 3];
+            for b in 0..3 {
+                for s in 0..5 {
+                    let slot = &bars[b].slots[s];
+                    if slot.source_type == 0x8060000 && slot.source_index >= 1 && (slot.source_index as usize) <= ability_count {
+                        let ab = &snap_abilities[slot.source_index as usize - 1];
+                        current_slots[b][s] = (ab.icon_background_ref, ab.icon_foreground_ref, ab.name, ab.name_len);
+                    } else if slot.source_type == 0x2030000 && (slot.source_index as usize) < snap_items.len() {
+                        let it = &snap_items[slot.source_index as usize];
+                        if it.populated {
+                            current_slots[b][s] = (0, it.icon_ref, it.name, it.name_len);
+                        }
+                    }
+                }
+            }
+            if let Ok(mut prev_guard) = PREV_SLOTS.lock() {
+                if prev_guard.as_ref() != Some(&current_slots) {
+                    for b in 0..3 {
+                        for s in 0..bars[b].slot_count as usize {
+                            let (bg, fg, name_bytes, name_len) = current_slots[b][s];
+                            let name = if name_len > 0 {
+                                String::from_utf8_lossy(&name_bytes[..name_len as usize]).to_string()
+                            } else {
+                                "empty".to_string()
+                            };
+                            eprintln!(
+                                "[hotbar] bar {b} slot {s} -> (bg: 0x{bg:08X}, fg: 0x{fg:08X}) {name}"
+                            );
+                        }
+                    }
+                    *prev_guard = Some(current_slots);
+                }
+            }
+
             crate::fork_ext::addons::ability::AbilitiesSnapshot {
-                ability_count: ability_count as u8,
+                ability_count: ability_count as u16,
                 selected_bar,
                 abilities: snap_abilities,
                 bars,
+                items: snap_items,
             }
         } else {
             crate::fork_ext::addons::ability::AbilitiesSnapshot::default()
