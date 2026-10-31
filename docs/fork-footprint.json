@@ -89,8 +89,8 @@
       "reason": "Restored map and tracker visibility."
     },
     "crates/eqoa/src/hud.rs": {
-      "added": 314,
-      "deleted": 14,
+      "added": 316,
+      "deleted": 15,
       "reason": "Reviewed restored HUD and native addon hide-UI draw-site gates for compass, gauges, group/pet/target panels, and group compass marks; one-line hook calls, fork_ext implementation and tests."
     },
     "crates/eqoa/src/icon.rs": {

@@ -53,6 +53,8 @@ pub(super) struct Textures {
     budget: TexturesBudget,
     allocated_bytes: usize,
     diagnostics: Vec<String>,
+    missing_paths: std::collections::HashSet<String>,
+    log_path: Option<PathBuf>,
 }
 
 struct Handle {
@@ -82,6 +84,8 @@ impl Textures {
             budget: clamped,
             allocated_bytes: 0,
             diagnostics: Vec::new(),
+            missing_paths: std::collections::HashSet::new(),
+            log_path: None,
         }))
     }
 
@@ -99,6 +103,20 @@ impl Textures {
                 self.diagnostics.remove(0);
             }
             self.diagnostics.push(msg);
+        }
+    }
+
+    pub fn add_missing_texture(&mut self, id: &str, path: String, detail: String) {
+        if self.missing_paths.insert(path.clone()) {
+            if let Some(log_path) = &self.log_path {
+                let log_line = format!(
+                    "[\"texture\"] [{id}] failed to resolve relative texture '{path}': {detail}\n"
+                );
+                if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(log_path) {
+                    use std::io::Write;
+                    let _ = f.write_all(log_line.as_bytes());
+                }
+            }
         }
     }
 
@@ -269,6 +287,14 @@ impl Textures {
         addon: &DiscoveredAddon,
     ) -> Result<()> {
         owner.borrow_mut().set_budget(ADDON_BUDGET);
+        let log_path = if addon.package_root.join("mod.lua").is_file() {
+            addon.package_root.join("addons_error.log")
+        } else if let Some(parent) = addon.package_root.parent() {
+            parent.join("addons_error.log")
+        } else {
+            addon.package_root.join("addons_error.log")
+        };
+        owner.borrow_mut().log_path = Some(log_path);
         Self::install_memory_and_release(owner, lua)?;
 
         let forge: Table = lua.globals().get("UiForge")?;
@@ -310,6 +336,10 @@ impl Textures {
             let canon_file = if is_relative {
                 match super::package::resolve_resource(&addon_data, &path_str) {
                     Ok(p) => p,
+                    Err(super::package::ResourceError::NotFound(err)) => {
+                        bank.borrow_mut().add_missing_texture(&addon_data.id, path_str.clone(), err);
+                        return Ok(Value::Nil);
+                    }
                     Err(err) => {
                         bank.borrow_mut().add_diagnostic(format!(
                             "failed to resolve relative texture '{path_str}': {err}"
@@ -322,8 +352,12 @@ impl Textures {
                 let canon = match pb.canonicalize() {
                     Ok(p) => p,
                     Err(e) => {
-                        bank.borrow_mut()
-                            .add_diagnostic(format!("texture file unresolvable '{path_str}': {e}"));
+                        if e.kind() == std::io::ErrorKind::NotFound || !pb.exists() {
+                            bank.borrow_mut().add_missing_texture(&addon_data.id, path_str.clone(), e.to_string());
+                        } else {
+                            bank.borrow_mut()
+                                .add_diagnostic(format!("texture file unresolvable '{path_str}': {e}"));
+                        }
                         return Ok(Value::Nil);
                     }
                 };
@@ -974,13 +1008,12 @@ mod tests {
 
         let diagnostics = textures.borrow_mut().drain_diagnostics();
         assert!(
-            diagnostics.len() >= 5,
-            "expected at least 5 diagnostics, got: {diagnostics:?}"
+            diagnostics.len() >= 4,
+            "expected at least 4 diagnostics, got: {diagnostics:?}"
         );
         assert!(
-            diagnostics.iter().any(
-                |d| d.contains("failed to resolve relative texture") || d.contains("not found")
-            )
+            !diagnostics.iter().any(|d| d.contains("nonexistent.png")),
+            "missing optional texture raises no visible diagnostic"
         );
         assert!(
             diagnostics
@@ -988,6 +1021,89 @@ mod tests {
                 .any(|d| d.contains("failed to decode PNG") || d.contains("invalid PNG header"))
         );
         assert!(diagnostics.iter().any(|d| d.contains("parent traversal")));
+        let log_content = fs::read_to_string(root.join("addons_error.log")).unwrap_or_default();
+        assert!(
+            log_content.contains("nonexistent.png"),
+            "missing optional texture logged to addons_error.log: {log_content}"
+        );
+        let lines_before = log_content.lines().filter(|l| l.contains("nonexistent.png")).count();
+        assert_eq!(lines_before, 1, "logged once for missing path");
+        // Repeating probe must not write another line
+        let missing_again: Value = host.lua.load("return UiForge.LoadTexture('nonexistent.png')").eval().unwrap();
+        assert_eq!(missing_again, Value::Nil);
+        let log_content2 = fs::read_to_string(root.join("addons_error.log")).unwrap_or_default();
+        let lines_after = log_content2.lines().filter(|l| l.contains("nonexistent.png")).count();
+        assert_eq!(lines_after, 1, "at most once per missing path");
+    }
+
+    #[test]
+    fn forge_texture_missing_optional_returns_nil_without_visible_diagnostic_corrupt_png_stays_visible() {
+        let Some(gpu) = TestGpu::try_new() else {
+            eprintln!("SKIP forge_texture: no GPU adapter");
+            return;
+        };
+        let temp = TempDir::new("missing_vs_corrupt");
+        let root = temp.path();
+        let res = root.join("resources");
+        fs::create_dir_all(&res).unwrap();
+        fs::write(root.join("mod.lua"), "-- mod").unwrap();
+        fs::write(res.join("corrupt.png"), b"not a png at all").unwrap();
+
+        let disc = discover(root);
+        let addon = &disc.addons[0];
+        let host = Host::for_addon(addon).unwrap();
+        let textures = Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+        Textures::install_for_addon(&textures, &host.lua, addon).unwrap();
+
+        // 1. Missing optional texture (e.g. class_icons/bard.png)
+        let missing: Value = host
+            .lua
+            .load("return UiForge.LoadTexture('class_icons/bard.png')")
+            .eval()
+            .unwrap();
+        assert_eq!(missing, Value::Nil, "missing optional texture must return nil");
+        let diags = textures.borrow_mut().drain_diagnostics();
+        assert!(
+            diags.is_empty(),
+            "missing optional texture must raise no visible diagnostic, got: {diags:?}"
+        );
+
+        let log_content = fs::read_to_string(root.join("addons_error.log")).unwrap_or_default();
+        assert!(
+            log_content.contains("class_icons/bard.png"),
+            "missing optional texture logged to addons_error.log: {log_content}"
+        );
+
+        // Probe repeatedly: must log at most once per missing path
+        for _ in 0..5 {
+            let m: Value = host
+                .lua
+                .load("return UiForge.LoadTexture('class_icons/bard.png')")
+                .eval()
+                .unwrap();
+            assert_eq!(m, Value::Nil);
+        }
+        let diags_repeat = textures.borrow_mut().drain_diagnostics();
+        assert!(diags_repeat.is_empty(), "repeated misses still raise no visible diagnostics");
+        let log_repeat = fs::read_to_string(root.join("addons_error.log")).unwrap_or_default();
+        assert_eq!(
+            log_repeat.lines().filter(|l| l.contains("class_icons/bard.png")).count(),
+            1,
+            "missing path logged at most once in addons_error.log"
+        );
+
+        // 2. Corrupt PNG: must return nil AND raise a visible diagnostic
+        let corrupt: Value = host
+            .lua
+            .load("return UiForge.LoadTexture('corrupt.png')")
+            .eval()
+            .unwrap();
+        assert_eq!(corrupt, Value::Nil, "corrupt PNG returns nil");
+        let corrupt_diags = textures.borrow_mut().drain_diagnostics();
+        assert!(
+            corrupt_diags.iter().any(|d| d.contains("failed to decode PNG")),
+            "corrupt PNG must raise a visible diagnostic, got: {corrupt_diags:?}"
+        );
     }
 
     #[test]

@@ -278,7 +278,7 @@ impl Hud {
         self.picks.clear();
         let mut p = [10, 15];
         self.note(ui, [10, 15, 200, 80], Pick::Me);
-        vui.blit(ui, 6, p);
+        if fork_hud::compass_visible(s) { vui.blit(ui, 6, p); }
         if s.has_self {
             self.draw_compass(ui, s);
             self.draw_patch(ui, s);
@@ -513,6 +513,7 @@ impl Hud {
     /// way, magenta, at any distance (`waypoint_point`), and the group's
     /// waypoint in its orange under it.
     fn draw_patch(&mut self, ui: &mut UiRaster, s: &HudState) {
+        if !fork_hud::compass_visible(s) { return; }
         let Some(tex) = ui.assets.surface(icon_id("Patch_Art")) else { return };
         let start = *self.patch_start.get_or_insert(s.time_ms);
         let phase = (s.time_ms - start) % 1500;

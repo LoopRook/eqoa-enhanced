@@ -312,12 +312,14 @@ mod tests {
 
     fn test_assets(ui: &mut render::ui::Ui, device: &render::wgpu::Device, queue: &render::wgpu::Queue) -> crate::ui::UiAssets {
         let mut assets = crate::ui::UiAssets::default();
-        let tex = ui.add_texture(device, queue, 1, 1, &[255; 4]);
+        let tex_null = ui.add_texture(device, queue, 1, 1, &[255; 4]);
+        let tex_sheet1 = ui.add_texture(device, queue, 1, 1, &[255; 4]);
+        let tex_patch = ui.add_texture(device, queue, 1, 1, &[255; 4]);
         // Empty atlas rows resolve to "(null)" through Vui::entry_id.
-        assets.surfaces.insert(vi::ui::icon_id("(null)"), tex);
-        assets.surfaces.insert(vi::ui::icon_id(""), tex);
-        assets.surfaces.insert(vi::ui::icon_id("sheet1"), tex);
-        assets.surfaces.insert(vi::ui::icon_id("Patch_Art"), tex);
+        assets.surfaces.insert(vi::ui::icon_id("(null)"), tex_null);
+        assets.surfaces.insert(vi::ui::icon_id(""), tex_null);
+        assets.surfaces.insert(vi::ui::icon_id("sheet1"), tex_sheet1);
+        assets.surfaces.insert(vi::ui::icon_id("Patch_Art"), tex_patch);
         assets
     }
 
@@ -592,31 +594,59 @@ mod tests {
         let assets = test_assets(&mut ui, &device, &queue);
         let vui = test_vui();
         let size = (1280, 720);
+        let side = render::ui::side(size);
+        let sheet1 = assets.surface(vi::ui::icon_id("sheet1")).unwrap();
+        let patch_art = assets.surface(vi::ui::icon_id("Patch_Art")).unwrap();
+
+        let state = HudState {
+            has_self: true,
+            heading: 0.0,
+            camera: [0.0, 0.0, 0.0],
+            waypoint: Some([0.0, -100.0]),
+            patches: vec![crate::hud::PatchMember {
+                id: 2,
+                index: 1,
+                pos: Some([10.0, 0.0, 20.0]),
+            }],
+            ..Default::default()
+        };
+
+        let is_compass_quad = |q: &render::ui::Quad| -> bool {
+            q.tex == sheet1
+                || q.tex == patch_art
+                || q.color == crate::map::WAYPOINT
+                || (q.pos[0][0] <= 65.0 - side && q.pos[0][1] <= 85.0)
+        };
 
         clear_claims();
         ui.begin(size);
         let mut hud = Hud::new();
-        hud.draw(&vui, &mut assets.raster(&mut ui), &HudState { has_self: false, ..Default::default() });
-        let baseline = ui.quads.len();
-
-        ui.begin(size);
-        let mut hud = Hud::new();
-        hud.draw(&vui, &mut assets.raster(&mut ui), &HudState { has_self: true, heading: 0.0, ..Default::default() });
-        let unclaimed = ui.quads.len();
-        assert!(unclaimed > baseline, "compass draws when unclaimed");
+        hud.draw(&vui, &mut assets.raster(&mut ui), &state);
+        let unclaimed_quads = ui.quads.len();
+        let compass_quads = ui.quads.iter().filter(|q| is_compass_quad(q)).count();
+        assert!(compass_quads >= 4, "all compass quads (ring/needle, face, patch, dot) draw when unclaimed: got {compass_quads}");
+        assert!(ui.quads.iter().any(|q| q.tex == sheet1), "compass face quad present");
+        assert!(ui.quads.iter().any(|q| q.color == crate::map::WAYPOINT), "pink waypoint dot present");
+        assert!(ui.quads.iter().any(|q| q.pos[0][0] <= 65.0 - side && q.pos[0][1] <= 85.0), "compass ring/needle quad present");
 
         set_claims(&["compass_face", "compass_back"]);
         ui.begin(size);
         let mut hud = Hud::new();
-        hud.draw(&vui, &mut assets.raster(&mut ui), &HudState { has_self: true, heading: 0.0, ..Default::default() });
-        let claimed = ui.quads.len();
-        assert_eq!(claimed, baseline, "compass does not draw when claimed");
+        hud.draw(&vui, &mut assets.raster(&mut ui), &state);
+        let claimed_compass_quads = ui.quads.iter().filter(|q| is_compass_quad(q)).count();
+        assert_eq!(claimed_compass_quads, 0, "NO compass quads (ring, needle, dot included) remain when claimed, got {claimed_compass_quads}");
+        assert!(!ui.quads.iter().any(|q| q.tex == sheet1), "no compass face quad when claimed");
+        assert!(!ui.quads.iter().any(|q| q.tex == patch_art), "no compass patch or dot quads when claimed");
+        assert!(!ui.quads.iter().any(|q| q.color == crate::map::WAYPOINT), "no pink dot quad when claimed");
+        assert!(!ui.quads.iter().any(|q| q.pos[0][0] <= 65.0 - side && q.pos[0][1] <= 85.0), "no compass ring or needle quad when claimed");
 
         clear_claims();
         ui.begin(size);
         let mut hud = Hud::new();
-        hud.draw(&vui, &mut assets.raster(&mut ui), &HudState { has_self: true, heading: 0.0, ..Default::default() });
-        assert_eq!(ui.quads.len(), unclaimed, "releasing the claim restores drawing");
+        hud.draw(&vui, &mut assets.raster(&mut ui), &state);
+        assert_eq!(ui.quads.len(), unclaimed_quads, "releasing the claims restores all drawing");
+        let restored_compass_quads = ui.quads.iter().filter(|q| is_compass_quad(q)).count();
+        assert_eq!(restored_compass_quads, compass_quads, "all compass quads return when released");
     }
 
     #[test]
@@ -987,10 +1017,12 @@ mod tests {
         let compass_state = HudState { has_self: true, heading: 0.0, ..Default::default() };
 
         clear_claims();
+        set_claims(&["compass_face", "compass_back"]);
         ui.begin(size);
         let mut hud = Hud::new();
-        hud.draw(&vui, &mut assets.raster(&mut ui), &HudState { has_self: false, ..Default::default() });
+        hud.draw(&vui, &mut assets.raster(&mut ui), &compass_state);
         let baseline_compass = ui.quads.len();
+        clear_claims();
 
         ui.begin(size);
         let mut hud = Hud::new();

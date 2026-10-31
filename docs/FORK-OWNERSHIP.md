@@ -65,7 +65,7 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/eqoa/src/binds.rs` | 93 | 80 | Restored/map controls and saved binding defaults. |
 | `crates/eqoa/src/client_image.rs` | 10 | 0 | Map theme font/image resources. |
 | `crates/eqoa/src/hideui.rs` | 3 | 3 | Restored map and tracker visibility. |
-| `crates/eqoa/src/hud.rs` | 314 | 14 | Reviewed restored HUD and native addon hide-UI draw-site gates for compass, gauges, group/pet/target panels, and group compass marks; implementation in fork_ext. |
+| `crates/eqoa/src/hud.rs` | 316 | 15 | Reviewed restored HUD and native addon hide-UI draw-site gates for compass, gauges, group/pet/target panels, and group compass marks; implementation in fork_ext. |
 | `crates/eqoa/src/icon.rs` | 4 | 1 | Two app-icon hooks: chosen picture and no save-icon switch; upstream save-icon code retained. |
 | `crates/eqoa/src/input.rs` | 32 | 3 | Map controls and focus/input behavior. |
 | `crates/eqoa/src/lod.rs` | 9 | 8 | Restored map terrain observation. |
