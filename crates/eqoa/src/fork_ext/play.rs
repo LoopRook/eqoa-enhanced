@@ -1,6 +1,16 @@
 //! The combat indication adapter; service code only receives plain combat data.
 use super::Play;
 
+pub(crate) fn frame_library(_lib: &esf::Library) {
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::fork_ext::addons::icons::set_live_library(_lib as *const esf::Library);
+}
+
+pub(crate) fn art_changed() {
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::fork_ext::addons::icons::notify_art_changed();
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 impl Play {
     pub(crate) fn forge_snapshot(

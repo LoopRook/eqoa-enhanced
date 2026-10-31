@@ -254,13 +254,19 @@ impl Host {
         let os_t = base.clean_os.clone();
         base.lua.globals().set(
             "require",
-            base.lua.create_function(move |_, name: String| {
+            base.lua.create_function(move |lua, name: String| {
                 if name == "frontiers_forge.util" {
                     Ok(Value::Table(util_t.clone()))
                 } else if name == "bit" {
                     Ok(Value::Table(bit_t.clone()))
                 } else if name == "os" {
                     Ok(Value::Table(os_t.clone()))
+                } else if name == "frontiers_forge.icon" {
+                    if let Ok(icon_t) = lua.named_registry_value::<mlua::Table>("__forge_icon_mod") {
+                        Ok(Value::Table(icon_t))
+                    } else {
+                        Err(mlua::Error::runtime("frontiers_forge.icon not attached"))
+                    }
                 } else if name == "coroutine" {
                     Err(mlua::Error::runtime("coroutine module is unavailable"))
                 } else {

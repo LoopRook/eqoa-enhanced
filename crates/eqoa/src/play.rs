@@ -2011,6 +2011,7 @@ impl Play {
     /// steps on.
     pub fn frame(&mut self, walker: &mut Walker, lib: &Library, mut g: Gpu, game_ms: i64, game_frame: bool, mut sound: Option<&mut crate::sound::Sound>) -> Option<u32> {
         self.take_modules(sound.as_deref_mut());
+        fork_hooks::frame_library(lib);
         self.drawn = self.drawn.wrapping_add(1);
         let now = self.session.now();
         // the loading screen's gears, turning by the clock (`SetTime(now)`)
@@ -4227,6 +4228,7 @@ impl Play {
         self.spells = None;
         self.rings.art_changed();
         self.loading.art_changed();
+        fork_hooks::art_changed();
         self.add_chat(crate::era::line(era).to_string(), [1.0; 4]);
     }
 

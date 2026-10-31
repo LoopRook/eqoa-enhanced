@@ -44,7 +44,7 @@ struct TextureEntry {
     byte_size: usize,
 }
 
-pub(super) struct Textures {
+pub(crate) struct Textures {
     device: wgpu::Device,
     queue: wgpu::Queue,
     renderer: Rc<RefCell<WgpuRenderer>>,
@@ -55,11 +55,21 @@ pub(super) struct Textures {
     diagnostics: Vec<String>,
 }
 
-struct Handle {
-    owner: Rc<RefCell<Textures>>,
-    id: u64,
+#[derive(Clone)]
+pub(crate) struct Handle {
+    pub(crate) owner: Rc<RefCell<Textures>>,
+    pub(crate) id: u64,
 }
-impl UserData for Handle {}
+impl UserData for Handle {
+    fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_method(
+            mlua::MetaMethod::Eq,
+            |_, this, other: mlua::UserDataRef<Self>| {
+                Ok(this.id == other.id && Rc::ptr_eq(&this.owner, &other.owner))
+            },
+        );
+    }
+}
 
 impl Textures {
     pub fn new(
@@ -119,7 +129,7 @@ impl Textures {
         }
     }
 
-    fn upload_rgba8(
+    pub(crate) fn upload_rgba8(
         &mut self,
         owner: &Rc<RefCell<Self>>,
         label: &str,
@@ -270,6 +280,7 @@ impl Textures {
     ) -> Result<()> {
         owner.borrow_mut().set_budget(ADDON_BUDGET);
         Self::install_memory_and_release(owner, lua)?;
+        super::icons::attach_icon_cache(lua, owner.clone())?;
 
         let forge: Table = lua.globals().get("UiForge")?;
 
@@ -438,6 +449,25 @@ impl Textures {
             _TexData: std::ptr::null_mut(),
             _TexID: entry.external.texture_id().id(),
         })
+    }
+
+    pub(crate) fn mark_dead(&mut self, id: u64) -> bool {
+        if let Some(entry) = self.entries.get_mut(&id) {
+            entry.alive = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(test)]
+    pub fn cached_count_for_test(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[cfg(test)]
+    pub fn allocated_bytes_for_test(&self) -> usize {
+        self.allocated_bytes
     }
 
     pub fn collect(&mut self, all: bool) {
