@@ -2,7 +2,7 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
-## 2026-10-30 · Addon manager preview work
+## 2026-10-31 · Addon manager preview work (unreleased)
 
 - Native Mods & Addons gains an Addon Manager with enable/disable, reload,
   rescan, settings and profile controls. Unsupported addon features show failures.
