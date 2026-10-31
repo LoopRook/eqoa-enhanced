@@ -6,7 +6,7 @@ explicit override of the original hygiene brief.
 
 The executable policy is [fork-footprint.json](fork-footprint.json), checked by
 [check_fork_footprint.py](../tools/check_fork_footprint.py). Its reviewed upstream
-base is `7912c7393df7d85655d5816980fae1217cc48a32`.
+base is `ad941f5ca18a9238c5c5e51bdb77b9abb6afd37d`.
 
 **Reviewed budgets:** exact final shared footprints after adapter extraction,
 including the approved animation guards and regressions. Existing restored map
@@ -66,23 +66,23 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/eqoa/src/binds.rs` | 93 | 80 | Restored/map controls and saved binding defaults. |
 | `crates/eqoa/src/client_image.rs` | 10 | 0 | Map theme font/image resources. |
 | `crates/eqoa/src/hideui.rs` | 3 | 3 | Restored map and tracker visibility. |
-| `crates/eqoa/src/hud.rs` | 316 | 15 | Reviewed restored HUD and native addon hide-UI draw-site gates for compass, gauges, group/pet/target panels, and group compass marks; implementation in fork_ext. |
+| `crates/eqoa/src/hud.rs` | 308 | 12 | Reviewed restored HUD and native addon hide-UI draw-site gates for compass, gauges, group/pet/target panels, and group compass marks; implementation in fork_ext. |
 | `crates/eqoa/src/icon.rs` | 4 | 1 | Two app-icon hooks: chosen picture and no save-icon switch; upstream save-icon code retained. |
 | `crates/eqoa/src/input.rs` | 32 | 3 | Map controls and focus/input behavior. |
 | `crates/eqoa/src/lod.rs` | 9 | 8 | Restored map terrain observation. |
 | `crates/eqoa/src/main.rs` | 30 | 0 | Restored module registration, fork_ext boundary, and report policy module. |
 | `crates/eqoa/src/options.rs` | 196 | 43 | Existing restored option entries plus one adapter reference per fork option hook. |
-| `crates/eqoa/src/play.rs` | 761 | 53 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, and addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus; implementation in fork_ext. |
+| `crates/eqoa/src/play.rs` | 763 | 53 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, and addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus; implementation in fork_ext. |
 | `crates/eqoa/src/report.rs` | 18 | 9 | Fork reporting policy transport integration. |
-| `crates/eqoa/src/settings.rs` | 333 | 22 | Restored map/quest settings plus one adapter reference per settings hook. |
+| `crates/eqoa/src/settings.rs` | 338 | 23 | Restored map/quest settings plus one adapter reference per settings hook. |
 | `crates/eqoa/src/touch.rs` | 79 | 2 | Restored map and tracker touch input. |
 | `crates/eqoa/src/ui.rs` | 10 | 6 | Map UI state and input integration plus one-line pub(crate) visibility on UiAssets.surfaces for fork-owned HUD tests. |
 | `crates/eqoa/src/update.rs` | 3 | 3 | Fork release routing and fork-owned notes; updater mechanics unchanged. |
 | `crates/eqoa/src/updatewnd.rs` | 3 | 2 | Fork release page link and regression assertions. |
-| `crates/eqoa/src/viewer.rs` | 233 | 12 | Restored map/quest integration plus reviewed native lazy addon Runtime state/init, owned window/raw input routing, pregame/live post-resolve frames and exiting cleanup. |
+| `crates/eqoa/src/viewer.rs` | 235 | 12 | Restored map/quest integration plus reviewed native lazy addon Runtime state/init, owned window/raw input routing, pregame/live post-resolve frames and exiting cleanup. |
 | `crates/esf/src/mesh.rs` | 9 | 0 | Terrain mesh lookup for restored map. |
-| `crates/net/src/session.rs` | 418 | 30 | Restored group/map/quest protocol state. |
-| `crates/render/src/fans.rs` | 1 | 1 | Restored UI render behavior. |
+| `crates/net/src/session.rs` | 421 | 30 | Restored group/map/quest protocol state. |
+| `crates/render/src/fans.rs` | 0 | 0 | Restored UI render behavior. |
 | `crates/render/src/lib.rs` | 50 | 4 | Restored map rendering pipeline and exports. |
 | `crates/render/src/ui.rs` | 97 | 8 | Map circle clipping and map font rendering. |
 | `crates/render/src/ui.wgsl` | 16 | 7 | Circle clipping in UI shader. |

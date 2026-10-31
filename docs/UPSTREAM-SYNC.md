@@ -55,3 +55,26 @@ disc regressions exercise the corrected floor placement with negative controls.
 Versioned release routing and packaging are documented in RELEASING.md and
 RELEASE-0.1.0-VERIFICATION.md. The original hygiene report is historical;0.1.0
 subsequently enables fork-owned updates under the owner's explicit request.
+
+## 2026-10-31 sync
+
+Upstream range: 7912c73..ad941f5 (86 commits). Incorporates duels, live group
+search, live look dyes, 16-bit ground fog (`fog16`), frame stall diagnostics,
+and sound backlogs.
+
+Conflicted files and resolutions:
+- README: retained fork landing page and release download links per owner policy.
+- binds.rs: retained upstream corpse window description and appended fork map note.
+- hud.rs: retained upstream patch closure, duel patch, and `bearing_point`; reapplied
+  group compass marks draw gate and fork `HudState` fields.
+- options.rs: kept upstream Ground Fog (ID 47) on World and Shadows (ID 46) on
+  Characters; preserved fork Map & Quests page and IDs 1043..1047.
+- settings.rs: unioned `ps2_fog` with fork map settings across defaults, parsing,
+  serialization, and updated `describe()` test.
+- viewer.rs: routed addon events in `window_event` before upstream stall timing;
+  updated touch pad perf mark to phase 17.
+- play.rs: unioned upstream duel/live/trigger fields with fork map and health state.
+- session.rs: unioned upstream opcodes 0x7E07..0x7E0D with fork opcodes 0x7E01..0x7E06
+  and preserved respective state handlers.
+- fans.rs: adopted upstream `draw_fans` device signature cleanly.
+- lib.rs: exported both `fog16` and fork `map` modules.
