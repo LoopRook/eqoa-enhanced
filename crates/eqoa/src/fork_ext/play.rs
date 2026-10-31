@@ -24,10 +24,8 @@ enum AtlasKey {
 #[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static CACHED_ATLAS_KEY: std::cell::Cell<AtlasKey> = const { std::cell::Cell::new(AtlasKey::None) };
-    static CACHED_ATLAS: std::cell::RefCell<Option<crate::fork_ext::addons::icons::SafeAtlas>> = const { std::cell::RefCell::new(None) };
+    static CACHED_ATLAS: std::cell::RefCell<Option<std::sync::Arc<crate::fork_ext::addons::icons::SafeAtlas>>> = const { std::cell::RefCell::new(None) };
 }
-
-
 
 pub(crate) fn frame_library(_play: &Play, _lib: &esf::Library) {
     #[cfg(not(target_arch = "wasm32"))]
@@ -50,17 +48,17 @@ pub(crate) fn frame_library(_play: &Play, _lib: &esf::Library) {
                     for i in 0..252 {
                         entries.push(vui.entry(i));
                     }
-                    Some(crate::fork_ext::addons::icons::SafeAtlas {
+                    Some(std::sync::Arc::new(crate::fork_ext::addons::icons::SafeAtlas {
                         entries,
                         textures: vui.textures.clone(),
-                    })
+                    }))
                 }
                 AtlasKey::UiData(_) => {
                     let (entries, textures) = _play.ui_data.as_ref().unwrap();
-                    Some(crate::fork_ext::addons::icons::SafeAtlas {
+                    Some(std::sync::Arc::new(crate::fork_ext::addons::icons::SafeAtlas {
                         entries: entries.clone(),
                         textures: textures.clone(),
-                    })
+                    }))
                 }
                 AtlasKey::None => None,
             };
@@ -68,10 +66,10 @@ pub(crate) fn frame_library(_play: &Play, _lib: &esf::Library) {
             CACHED_ATLAS.with(|ca| *ca.borrow_mut() = built.clone());
             built
         } else {
-            CACHED_ATLAS.with(|ca| ca.borrow().clone())
+            None
         };
 
-        let prefetch_ids = crate::fork_ext::addons::icons::collect_prefetch_ids(
+        let prefetch_ids = crate::fork_ext::addons::icons::get_cached_or_collect_prefetch_ids(
             &_play.abilities,
             &_play.hud_menus,
             &_play.effects,

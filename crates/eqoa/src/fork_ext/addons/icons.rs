@@ -581,17 +581,76 @@ impl IconCache {
 // Safe library & atlas representation (100% safe Rust, zero raw pointers)
 // -----------------------------------------------------------------------------
 
-#[derive(Clone, Default)]
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::AtomicU64;
+
+#[cfg(not(target_arch = "wasm32"))]
+static ATLAS_CLONE_COUNT: AtomicU64 = AtomicU64::new(0);
+#[cfg(not(target_arch = "wasm32"))]
+static SAFE_LIBRARY_CLONE_COUNT: AtomicU64 = AtomicU64::new(0);
+#[cfg(not(target_arch = "wasm32"))]
+static LOOKUP_ATTEMPT_COUNT: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub fn atlas_clone_count() -> u64 {
+    ATLAS_CLONE_COUNT.load(Ordering::Relaxed)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub fn safe_library_clone_count() -> u64 {
+    SAFE_LIBRARY_CLONE_COUNT.load(Ordering::Relaxed)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub fn lookup_attempt_count() -> u64 {
+    LOOKUP_ATTEMPT_COUNT.load(Ordering::Relaxed)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub fn reset_test_counters() {
+    ATLAS_CLONE_COUNT.store(0, Ordering::Relaxed);
+    SAFE_LIBRARY_CLONE_COUNT.store(0, Ordering::Relaxed);
+    LOOKUP_ATTEMPT_COUNT.store(0, Ordering::Relaxed);
+}
+
+#[derive(Default)]
 pub struct SafeAtlas {
     pub entries: Vec<vi::ui::UiTexEntry>,
     pub textures: vi::strtab::StringTable,
 }
 
-#[derive(Clone, Default)]
+impl Clone for SafeAtlas {
+    fn clone(&self) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        ATLAS_CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
+        Self {
+            entries: self.entries.clone(),
+            textures: self.textures.clone(),
+        }
+    }
+}
+
+#[derive(Default)]
 pub struct SafeLibrary {
     pub surfaces: HashMap<i32, Arc<DecodedIcon>>,
     pub view: esf::Era,
     pub total_bytes: usize,
+}
+
+impl Clone for SafeLibrary {
+    fn clone(&self) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        SAFE_LIBRARY_CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
+        Self {
+            surfaces: self.surfaces.clone(),
+            view: self.view,
+            total_bytes: self.total_bytes,
+        }
+    }
 }
 
 impl SafeLibrary {
@@ -606,7 +665,7 @@ impl SafeLibrary {
 
 pub struct LiveLibraryProvider {
     lib: Arc<SafeLibrary>,
-    atlas: Option<SafeAtlas>,
+    atlas: Option<Arc<SafeAtlas>>,
     generation: u64,
 }
 
@@ -675,11 +734,13 @@ impl IconProvider for LiveLibraryProvider {
 thread_local! {
     static CUSTOM_PROVIDER: RefCell<Option<Box<dyn IconProvider>>> = const { RefCell::new(None) };
     static SAFE_LIBRARY: RefCell<Option<Arc<SafeLibrary>>> = const { RefCell::new(None) };
-    static LIVE_ATLAS: RefCell<Option<SafeAtlas>> = const { RefCell::new(None) };
+    static LIVE_ATLAS: RefCell<Option<Arc<SafeAtlas>>> = const { RefCell::new(None) };
     static ART_GENERATION: Cell<u64> = const { Cell::new(0) };
     static SNAPSHOT_COUNT: Cell<u64> = const { Cell::new(0) };
     static ACTIVE_CACHES: RefCell<Vec<std::rc::Weak<RefCell<IconCache>>>> = const { RefCell::new(Vec::new()) };
     static PENDING_LOOKUPS: RefCell<Option<HashSet<u32>>> = const { RefCell::new(None) };
+    static FAILED_LOOKUPS: RefCell<Option<HashSet<u32>>> = const { RefCell::new(None) };
+    static PREFETCH_FINGERPRINT: Cell<u64> = const { Cell::new(0) };
 }
 
 pub fn queue_pending_lookup(id: u32) {
@@ -695,6 +756,38 @@ pub fn drain_pending_lookups() -> Vec<u32> {
     })
 }
 
+pub fn get_cached_or_collect_prefetch_ids(
+    abilities: &std::collections::BTreeMap<i64, net::dump::Ability>,
+    hud_menus: &crate::hudmenu::HudMenus,
+    effects: &net::dump::Effects,
+    inventory: &[net::dump::NetItem],
+) -> Vec<u32> {
+    let mut h = 0xcbf29ce484222325u64;
+    for a in abilities.values() {
+        h = (h ^ (a.icon_front as u64)).wrapping_mul(0x100000001b3);
+        h = (h ^ (a.icon_back as u64)).wrapping_mul(0x100000001b3);
+    }
+    for m in &hud_menus.defs {
+        for e in &m.entries {
+            h = (h ^ (e.icon2 as u64)).wrapping_mul(0x100000001b3);
+            h = (h ^ (e.x08 as u64)).wrapping_mul(0x100000001b3);
+        }
+    }
+    for i in 0..(effects.count as usize).min(8) {
+        h = (h ^ (effects.icon[i] as u64)).wrapping_mul(0x100000001b3);
+    }
+    for it in inventory {
+        h = (h ^ (it.item.icon as u64)).wrapping_mul(0x100000001b3);
+        h = (h ^ (it.item.icon2 as u64)).wrapping_mul(0x100000001b3);
+    }
+
+    let prev_h = PREFETCH_FINGERPRINT.with(|pf| pf.get());
+    if h == prev_h && prev_h != 0 {
+        return Vec::new();
+    }
+    PREFETCH_FINGERPRINT.with(|pf| pf.set(h));
+    collect_prefetch_ids(abilities, hud_menus, effects, inventory)
+}
 pub fn collect_prefetch_ids(
     abilities: &std::collections::BTreeMap<i64, net::dump::Ability>,
     hud_menus: &crate::hudmenu::HudMenus,
@@ -794,6 +887,12 @@ pub fn snapshot_size_bytes() -> usize {
 }
 
 #[allow(dead_code)]
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub fn clone_snapshot_arc() -> Option<Arc<SafeLibrary>> {
+    SAFE_LIBRARY.with(|sl| sl.borrow().clone())
+}
+
 pub fn snapshot_has_icon(id: u32) -> bool {
     SAFE_LIBRARY.with(|sl| {
         sl.borrow()
@@ -802,11 +901,10 @@ pub fn snapshot_has_icon(id: u32) -> bool {
     })
 }
 
-pub fn update_live_data(lib: &esf::Library, atlas: Option<SafeAtlas>, prefetch_ids: &[u32]) {
+pub fn update_live_data(lib: &esf::Library, atlas: Option<Arc<SafeAtlas>>, prefetch_ids: &[u32]) {
     if let Some(a) = atlas {
         LIVE_ATLAS.with(|la| *la.borrow_mut() = Some(a));
     }
-    let atlas_ref = LIVE_ATLAS.with(|la| la.borrow().clone());
 
     let needs_rebuild = SAFE_LIBRARY.with(|sl| match &*sl.borrow() {
         Some(existing) => existing.view != lib.view(),
@@ -814,6 +912,10 @@ pub fn update_live_data(lib: &esf::Library, atlas: Option<SafeAtlas>, prefetch_i
     });
 
     if needs_rebuild {
+        FAILED_LOOKUPS.with(|fl| fl.borrow_mut().as_mut().map(|s| s.clear()));
+        PREFETCH_FINGERPRINT.with(|pf| pf.set(0));
+
+        let atlas_ref = LIVE_ATLAS.with(|la| la.borrow().clone());
         let mut surfaces = HashMap::new();
         let mut total_bytes = 0usize;
 
@@ -888,30 +990,56 @@ pub fn update_live_data(lib: &esf::Library, atlas: Option<SafeAtlas>, prefetch_i
         SAFE_LIBRARY.with(|sl| {
             let mut sl_borrow = sl.borrow_mut();
             if let Some(safe_lib) = sl_borrow.as_mut() {
-                let lib_mut = Arc::make_mut(safe_lib);
-                for id in to_lookup {
-                    let dict_id = id as i32;
-                    if lib_mut.surfaces.contains_key(&dict_id) {
-                        continue;
+                FAILED_LOOKUPS.with(|fl| {
+                    let mut fl_borrow = fl.borrow_mut();
+                    let failed = fl_borrow.get_or_insert_with(HashSet::new);
+                    // Fast filter: only examine IDs not already cached and not previously failed
+                    let needed: Vec<u32> = to_lookup
+                        .into_iter()
+                        .filter(|&id| {
+                            !safe_lib.surfaces.contains_key(&(id as i32)) && !failed.contains(&id)
+                        })
+                        .collect();
+
+                    if needed.is_empty() {
+                        return;
                     }
-                    if let Some((c, s)) = lib.surface(dict_id) {
-                        if let Some(img) = s.decode(&c.data) {
-                            lib_mut.total_bytes += img.rgba.len();
-                            lib_mut.surfaces.insert(
-                                dict_id,
-                                Arc::new(DecodedIcon {
-                                    width: img.width,
-                                    height: img.height,
-                                    rgba: img.rgba,
-                                }),
-                            );
+
+                    // Look up surfaces first WITHOUT calling make_mut
+                    let mut newly_decoded = Vec::new();
+                    for id in needed {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        LOOKUP_ATTEMPT_COUNT.fetch_add(1, Ordering::Relaxed);
+                        let dict_id = id as i32;
+                        if let Some((c, s)) = lib.surface(dict_id) {
+                            if let Some(img) = s.decode(&c.data) {
+                                newly_decoded.push((
+                                    dict_id,
+                                    Arc::new(DecodedIcon {
+                                        width: img.width,
+                                        height: img.height,
+                                        rgba: img.rgba,
+                                    }),
+                                ));
+                            } else {
+                                failed.insert(id);
+                                log_icon_error(id, "surface decode failed");
+                            }
                         } else {
-                            log_icon_error(id, "surface decode failed");
+                            failed.insert(id);
+                            log_icon_error(id, "not found in library or snapshot");
                         }
-                    } else {
-                        log_icon_error(id, "not found in library or snapshot");
                     }
-                }
+
+                    // ONLY call make_mut if at least one id is actually new and resolvable!
+                    if !newly_decoded.is_empty() {
+                        let lib_mut = Arc::make_mut(safe_lib);
+                        for (dict_id, icon) in newly_decoded {
+                            lib_mut.total_bytes += icon.rgba.len();
+                            lib_mut.surfaces.insert(dict_id, icon);
+                        }
+                    }
+                });
             }
         });
     }

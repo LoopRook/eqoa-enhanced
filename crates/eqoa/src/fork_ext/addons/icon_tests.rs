@@ -1267,3 +1267,175 @@ fn forge_icon_after_render_cleans_unreferenced_stale_textures() {
 
     icons::set_custom_icon_provider(None);
 }
+
+#[test]
+fn forge_icon_steady_frames_zero_atlas_and_safelibrary_clones() {
+    let mut lib = esf::Library::new();
+    lib.add("UI.CSF", make_test_container_with_surface(1001, 32, 32));
+
+    let mut abilities = std::collections::BTreeMap::new();
+    let mut ab = net::dump::Ability::default();
+    ab.icon_front = 1001;
+    abilities.insert(1, ab);
+
+    // Initial frame: initialize library and snapshot
+    let ids = icons::get_cached_or_collect_prefetch_ids(
+        &abilities,
+        &crate::hudmenu::HudMenus::default(),
+        &net::dump::Effects::default(),
+        &[],
+    );
+    icons::update_live_data(&lib, None, &ids);
+
+    // Baseline frame: registers steady fingerprint
+    let base_ids = icons::get_cached_or_collect_prefetch_ids(
+        &abilities,
+        &crate::hudmenu::HudMenus::default(),
+        &net::dump::Effects::default(),
+        &[],
+    );
+    icons::update_live_data(&lib, None, &base_ids);
+
+    // Simulate an active provider holding an Arc to SafeLibrary (strong_count > 1)
+    let _held_provider_arc = icons::clone_snapshot_arc().expect("snapshot must exist");
+
+    // Reset counters before steady frames
+    icons::reset_test_counters();
+
+    // Run 10 steady frames with unchanged abilities
+    for _ in 0..10 {
+        let steady_ids = icons::get_cached_or_collect_prefetch_ids(
+            &abilities,
+            &crate::hudmenu::HudMenus::default(),
+            &net::dump::Effects::default(),
+            &[],
+        );
+        // Fingerprint unchanged -> steady_ids is empty
+        assert!(steady_ids.is_empty(), "steady frame prefetch ids must be empty");
+        icons::update_live_data(&lib, None, &steady_ids);
+    }
+
+    // Even if prefetch_ids is passed with already-cached abilities, zero clones occur
+    for _ in 0..5 {
+        icons::update_live_data(&lib, None, &[1001]);
+    }
+
+    assert_eq!(
+        icons::atlas_clone_count(),
+        0,
+        "steady frames must perform zero atlas clones"
+    );
+    assert_eq!(
+        icons::safe_library_clone_count(),
+        0,
+        "steady frames must perform zero SafeLibrary clones"
+    );
+}
+
+#[test]
+fn forge_icon_newly_learned_ability_resolves_on_next_frame() {
+    let mut lib = esf::Library::new();
+    lib.add("UI.CSF", make_test_container_with_surface(1001, 32, 32));
+    lib.add("SS-ART.CSF", make_test_container_with_surface(77777, 32, 32));
+
+    let mut abilities = std::collections::BTreeMap::new();
+    let mut ab1 = net::dump::Ability::default();
+    ab1.icon_front = 1001;
+    abilities.insert(1, ab1);
+
+    // Frame 1: only ability 1
+    let ids1 = icons::get_cached_or_collect_prefetch_ids(
+        &abilities,
+        &crate::hudmenu::HudMenus::default(),
+        &net::dump::Effects::default(),
+        &[],
+    );
+    icons::update_live_data(&lib, None, &ids1);
+    assert!(icons::snapshot_has_icon(1001));
+    assert!(!icons::snapshot_has_icon(77777));
+
+    let gpu = match TestGpu::new() {
+        Some(g) => g,
+        None => return,
+    };
+    let host = Host::new().unwrap();
+    let textures = Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    icons::attach_icon_cache(&host.lua, textures).unwrap();
+
+    // Player learns new ability with icon 77777
+    let mut ab2 = net::dump::Ability::default();
+    ab2.icon_front = 77777;
+    abilities.insert(2, ab2);
+
+    // Frame 2: prefetch detects list change
+    let ids2 = icons::get_cached_or_collect_prefetch_ids(
+        &abilities,
+        &crate::hudmenu::HudMenus::default(),
+        &net::dump::Effects::default(),
+        &[],
+    );
+    assert!(ids2.contains(&77777));
+    icons::update_live_data(&lib, None, &ids2);
+
+    // Newly learned ability's icon resolves on next frame!
+    assert!(
+        icons::snapshot_has_icon(77777),
+        "newly learned ability icon must resolve on next frame after list changes"
+    );
+
+    let (loaded, w, h): (bool, u32, u32) = host
+        .lua
+        .load(
+            r#"
+            local Icon = require("frontiers_forge.icon")
+            local tex, w, h = Icon.GetTexture(77777)
+            return tex ~= nil, w or 0, h or 0
+            "#,
+        )
+        .eval()
+        .unwrap();
+    assert!(loaded);
+    assert_eq!((w, h), (32, 32));
+}
+
+#[test]
+fn forge_icon_unresolvable_id_looked_up_once_not_every_frame() {
+    let mut lib = esf::Library::new();
+    lib.add("UI.CSF", make_test_container_with_surface(1001, 32, 32));
+
+    // Reset counters
+    icons::reset_test_counters();
+
+    let unresolvable = 999999u32;
+
+    // Frame 1: looked up in library, not found, recorded in failed lookups
+    icons::update_live_data(&lib, None, &[unresolvable]);
+    assert_eq!(
+        icons::lookup_attempt_count(),
+        1,
+        "first encounter of unresolvable ID must attempt lookup exactly once"
+    );
+
+    // Frames 2..10: repeated encounter must NOT retry lookup
+    for _ in 2..=10 {
+        icons::update_live_data(&lib, None, &[unresolvable]);
+    }
+    assert_eq!(
+        icons::lookup_attempt_count(),
+        1,
+        "unresolvable ID must not be retried every frame"
+    );
+
+    // Simulate art / library view change
+    lib.set_view(esf::Era::Y2002);
+    icons::update_live_data(&lib, None, &[]);
+
+    // After art/library change, retry is permitted once
+    icons::update_live_data(&lib, None, &[unresolvable]);
+    assert_eq!(
+        icons::lookup_attempt_count(),
+        2,
+        "unresolvable ID may retry once after an art/library change"
+    );
+}
+
