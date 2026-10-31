@@ -908,77 +908,7 @@ pub fn install_ability_bar_adapter(host: &Host) -> LuaResult<()> {
 }
 
 pub fn install_icon_adapter(host: &Host) -> LuaResult<()> {
-    let lua = &host.lua;
-    let icon_mod = lua.create_table()?;
-
-    let icon_claims = Rc::new(RefCell::new(HashSet::<String>::new()));
-
-    // Acquire
-    {
-        let claims = icon_claims.clone();
-        icon_mod.set(
-            "Acquire",
-            lua.create_function(move |_, owner: String| {
-                claims.borrow_mut().insert(owner);
-                Ok(true)
-            })?,
-        )?;
-    }
-
-    // Release
-    {
-        let claims = icon_claims.clone();
-        icon_mod.set(
-            "Release",
-            lua.create_function(move |_, owner: String| {
-                claims.borrow_mut().remove(&owner);
-                Ok(())
-            })?,
-        )?;
-    }
-
-    // GetOwnerCount
-    {
-        let claims = icon_claims.clone();
-        icon_mod.set(
-            "GetOwnerCount",
-            lua.create_function(move |_, ()| Ok(claims.borrow().len()))?,
-        )?;
-    }
-
-    // HasClaim
-    {
-        let claims = icon_claims.clone();
-        icon_mod.set(
-            "HasClaim",
-            lua.create_function(move |_, owner: String| Ok(claims.borrow().contains(&owner)))?,
-        )?;
-    }
-
-    // GetTexture(hash, opts)
-    icon_mod.set(
-        "GetTexture",
-        lua.create_function(|_, (_hash, _opts): (Value, Option<Table>)| {
-            // Decoded icon textures gracefully return nil when not decoded or unavailable.
-            // Wereoxxs UI checks `if fg ~= nil then draw_list:AddImage(fg, ...)` and falls back to slot plate color.
-            Ok((Value::Nil, Value::Nil, Value::Nil))
-        })?,
-    )?;
-
-    // GetUITexture(tex_id)
-    icon_mod.set(
-        "GetUITexture",
-        lua.create_function(|_, _tex_id: Value| Ok((Value::Nil, Value::Nil, Value::Nil)))?,
-    )?;
-
-    // GetSurfaceInfo(hash)
-    icon_mod.set(
-        "GetSurfaceInfo",
-        lua.create_function(|_, _hash: Value| Ok(Value::Nil))?,
-    )?;
-
-    host.register_host_module("frontiers_forge.icon", Value::Table(icon_mod))?;
-    Ok(())
+    super::icons::install_base_icon_adapter(&host.lua, host)
 }
 
 #[cfg(test)]

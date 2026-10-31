@@ -119,9 +119,9 @@
       "reason": "Existing restored option entries plus one adapter reference per fork option hook."
     },
     "crates/eqoa/src/play.rs": {
-      "added": 761,
+      "added": 763,
       "deleted": 53,
-      "reason": "Reviewed restored state plus native health receipt/reset, cached HUD invalidation, and addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus; implementation in fork_ext."
+      "reason": "Reviewed restored state plus native health receipt/reset, cached HUD invalidation, and addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, plus live esf::Library icon provider hook and F9 art_changed icon cache drop; implementation in fork_ext."
     },
     "crates/eqoa/src/report.rs": {
       "added": 18,

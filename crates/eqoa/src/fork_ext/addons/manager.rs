@@ -310,6 +310,7 @@ impl Manager {
     }
 
     pub fn after_render(&mut self) {
+        super::icons::cleanup_active_stale();
         for bank in self.retired.drain(..) {
             bank.borrow_mut().collect(true);
         }
