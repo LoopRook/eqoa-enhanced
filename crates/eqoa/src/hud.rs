@@ -732,7 +732,7 @@ mod tests {
             let mut hud = Hud::new();
             hud.draw(&vui, &mut assets.raster(&mut ui), &HudState::default());
             assert_eq!(hud.pick([me[0] - side, me[1] - up]), Some(Pick::Me), "{size:?}");
-            assert_eq!(hud.pick([report[0] - side, report[1] + up]), None, "reporting is disabled: {size:?}");
+            assert_eq!(hud.pick([report[0] - side, report[1] + up]), Some(Pick::Report), "{size:?}");
             if side + up > 0.0 {
                 assert_eq!((hud.pick(me), hud.pick(report)), (None, None), "{size:?}: the game's places");
             }

@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-10-31 · Unreleased
+
+- Problem reports and crash reports now save directly to your Desktop as a zip file with diagnostics and logs, opening your file manager with the report ready to share.
+
 ## 2026-10-31 · Enhanced 0.2.1
 
 - Brings in the latest improvements from the original vanilla client, with all Enhanced features and mods unchanged.
