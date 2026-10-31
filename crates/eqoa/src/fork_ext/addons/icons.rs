@@ -8,12 +8,16 @@ use super::textures::{Handle, Textures};
 use mlua::{Lua, Result as LuaResult, Table, Value};
 use std::{
     cell::{Cell, RefCell},
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 pub const MAX_CACHED_ICONS: usize = 64;
+pub const UI_TEX_COUNT: u32 = 0xFC; // 252 entries
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DecodedIcon {
@@ -24,11 +28,13 @@ pub struct DecodedIcon {
 
 pub trait IconProvider {
     fn decode_icon(&self, id: u32) -> Option<DecodedIcon>;
+    fn decode_ui_texture(&self, _tex_id: u32) -> Option<DecodedIcon> {
+        None
+    }
     #[allow(dead_code)]
     fn era(&self) -> esf::Era {
         esf::Era::Frontiers
     }
-    #[allow(dead_code)]
     fn generation(&self) -> u64 {
         0
     }
@@ -116,76 +122,111 @@ pub fn trim_rgba(
     rgba: &[u8],
     w: u32,
     h: u32,
-    trim: TrimOptions,
+    opts: TrimOptions,
 ) -> Option<(Vec<u8>, u32, u32)> {
-    if w == 0 || h == 0 || rgba.len() != (w * h * 4) as usize {
+    if w == 0 || h == 0 || rgba.len() < (w * h * 4) as usize {
         return None;
     }
-    if !trim.trim_transparent && !trim.trim_color {
-        return Some((rgba.to_vec(), w, h));
-    }
 
-    let pad_color = if trim.trim_color {
+    let pad_color = if opts.trim_color {
         detect_padding_color(rgba, w, h)
     } else {
         None
     };
 
-    let mut min_x = w;
-    let mut min_y = h;
-    let mut max_x = 0i64 - 1;
-    let mut max_y = 0i64 - 1;
+    let is_padded = |x: u32, y: u32| -> bool {
+        let o = ((y * w + x) * 4) as usize;
+        let a = rgba[o + 3];
+        if opts.trim_transparent && a == 0 {
+            return true;
+        }
+        if let Some(target) = pad_color {
+            if rgba[o..o + 4] == target {
+                return true;
+            }
+        }
+        false
+    };
 
-    for y in 0..h {
-        let row = (y * w * 4) as usize;
-        for x in 0..w {
-            let o = row + (x * 4) as usize;
-            let a = rgba[o + 3];
-            let mut is_padding = false;
-            if trim.trim_transparent && a == 0 {
-                is_padding = true;
-            } else if let Some(pad) = pad_color {
-                if rgba[o..o + 4] == pad {
-                    is_padding = true;
-                }
+    let mut min_x = 0u32;
+    let mut max_x = w;
+    let mut min_y = 0u32;
+    let mut max_y = h;
+
+    while min_y < max_y {
+        let mut all_padded = true;
+        for x in min_x..max_x {
+            if !is_padded(x, min_y) {
+                all_padded = false;
+                break;
             }
-            if !is_padding {
-                if x < min_x {
-                    min_x = x;
-                }
-                if (x as i64) > max_x {
-                    max_x = x as i64;
-                }
-                if y < min_y {
-                    min_y = y;
-                }
-                if (y as i64) > max_y {
-                    max_y = y as i64;
-                }
-            }
+        }
+        if all_padded {
+            min_y += 1;
+        } else {
+            break;
         }
     }
 
-    if max_x < 0 {
-        // Every pixel was padding so there is nothing to draw.
-        return None;
+    while max_y > min_y {
+        let mut all_padded = true;
+        for x in min_x..max_x {
+            if !is_padded(x, max_y - 1) {
+                all_padded = false;
+                break;
+            }
+        }
+        if all_padded {
+            max_y -= 1;
+        } else {
+            break;
+        }
     }
 
-    if min_x == 0 && min_y == 0 && max_x == (w as i64 - 1) && max_y == (h as i64 - 1) {
-        return Some((rgba.to_vec(), w, h));
+    while min_x < max_x {
+        let mut all_padded = true;
+        for y in min_y..max_y {
+            if !is_padded(min_x, y) {
+                all_padded = false;
+                break;
+            }
+        }
+        if all_padded {
+            min_x += 1;
+        } else {
+            break;
+        }
     }
 
-    let tw = (max_x - min_x as i64 + 1) as u32;
-    let th = (max_y - min_y as i64 + 1) as u32;
-    let mut cropped = vec![0u8; (tw * th * 4) as usize];
-    for y in 0..th {
-        let src_row = (((min_y + y) * w + min_x) * 4) as usize;
-        let dst_row = (y * tw * 4) as usize;
-        let len = (tw * 4) as usize;
-        cropped[dst_row..dst_row + len].copy_from_slice(&rgba[src_row..src_row + len]);
+    while max_x > min_x {
+        let mut all_padded = true;
+        for y in min_y..max_y {
+            if !is_padded(max_x - 1, y) {
+                all_padded = false;
+                break;
+            }
+        }
+        if all_padded {
+            max_x -= 1;
+        } else {
+            break;
+        }
     }
 
-    Some((cropped, tw, th))
+    let new_w = max_x.saturating_sub(min_x);
+    let new_h = max_y.saturating_sub(min_y);
+    if new_w == 0 || new_h == 0 {
+        return Some((rgba[0..((w * h * 4) as usize)].to_vec(), w, h));
+    }
+
+    let mut out = Vec::with_capacity((new_w * new_h * 4) as usize);
+    for y in min_y..max_y {
+        let row_start = ((y * w + min_x) * 4) as usize;
+        let row_end = row_start + (new_w * 4) as usize;
+        out.extend_from_slice(&rgba[row_start..row_end]);
+    }
+
+    Some((out, new_w, new_h))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -194,19 +235,30 @@ pub struct IconKey {
     pub trim: TrimOptions,
 }
 
-#[derive(Clone, Debug)]
-pub struct IconEntry {
-    pub handle_id: u64,
-    pub width: u32,
-    pub height: u32,
-    pub last_used: u64,
+#[derive(Clone)]
+struct CachedTexture {
+    handle_id: u64,
+    width: u32,
+    height: u32,
+    stale: bool,
+    token: Arc<()>,
+}
+
+impl CachedTexture {
+    fn is_live(&self) -> bool {
+        Arc::strong_count(&self.token) > 1
+    }
 }
 
 pub struct IconCache {
     textures: Rc<RefCell<Textures>>,
-    cache: HashMap<IconKey, IconEntry>,
+    icons: HashMap<IconKey, CachedTexture>,
+    ui_textures: HashMap<u32, CachedTexture>,
+    stale_textures: Vec<CachedTexture>,
+    lru_order: VecDeque<IconKey>,
     claims: HashSet<String>,
-    use_counter: u64,
+    budget_diag_logged: bool,
+    ui_tex_diag_logged: bool,
     last_generation: u64,
 }
 
@@ -214,9 +266,13 @@ impl IconCache {
     pub fn new(textures: Rc<RefCell<Textures>>) -> Self {
         Self {
             textures,
-            cache: HashMap::new(),
+            icons: HashMap::new(),
+            ui_textures: HashMap::new(),
+            stale_textures: Vec::new(),
+            lru_order: VecDeque::new(),
             claims: HashSet::new(),
-            use_counter: 0,
+            budget_diag_logged: false,
+            ui_tex_diag_logged: false,
             last_generation: 0,
         }
     }
@@ -229,7 +285,33 @@ impl IconCache {
     pub fn release(&mut self, owner: &str) {
         self.claims.remove(owner);
         if self.claims.is_empty() {
-            self.drop_cache();
+            let mut textures = self.textures.borrow_mut();
+            self.icons.retain(|_, entry| {
+                if !entry.is_live() {
+                    textures.mark_dead(entry.handle_id);
+                    false
+                } else {
+                    true
+                }
+            });
+            self.ui_textures.retain(|_, entry| {
+                if !entry.is_live() {
+                    textures.mark_dead(entry.handle_id);
+                    false
+                } else {
+                    true
+                }
+            });
+            self.lru_order.retain(|k| self.icons.contains_key(k));
+            self.stale_textures.retain(|entry| {
+                if !entry.is_live() {
+                    textures.mark_dead(entry.handle_id);
+                    false
+                } else {
+                    true
+                }
+            });
+            textures.collect(false);
         }
     }
 
@@ -242,16 +324,62 @@ impl IconCache {
     }
 
     pub fn cached_count(&self) -> usize {
-        self.cache.len()
+        self.icons.len() + self.ui_textures.len()
     }
 
     pub fn drop_cache(&mut self) {
         let mut textures = self.textures.borrow_mut();
-        for entry in self.cache.values() {
-            textures.mark_dead(entry.handle_id);
-        }
+        self.icons.retain(|_, entry| {
+            if !entry.is_live() {
+                textures.mark_dead(entry.handle_id);
+                false
+            } else {
+                true
+            }
+        });
+        self.ui_textures.retain(|_, entry| {
+            if !entry.is_live() {
+                textures.mark_dead(entry.handle_id);
+                false
+            } else {
+                true
+            }
+        });
+        self.lru_order.retain(|k| self.icons.contains_key(k));
+        self.stale_textures.retain(|entry| {
+            if !entry.is_live() {
+                textures.mark_dead(entry.handle_id);
+                false
+            } else {
+                true
+            }
+        });
         textures.collect(false);
-        self.cache.clear();
+    }
+
+    fn check_generation(&mut self, current_gen: u64) {
+        if current_gen != self.last_generation {
+            self.last_generation = current_gen;
+            // F2: Mark existing entries stale without invalidating live handles.
+            for entry in self.icons.values_mut() {
+                entry.stale = true;
+            }
+            for entry in self.ui_textures.values_mut() {
+                entry.stale = true;
+            }
+        }
+    }
+
+    fn cleanup_stale(&mut self) {
+        let mut textures = self.textures.borrow_mut();
+        self.stale_textures.retain(|entry| {
+            if !entry.is_live() {
+                textures.mark_dead(entry.handle_id);
+                false
+            } else {
+                true
+            }
+        });
     }
 
     pub fn get_or_load(
@@ -259,31 +387,128 @@ impl IconCache {
         hash: u32,
         trim: TrimOptions,
         provider: &dyn IconProvider,
-    ) -> Option<(u64, u32, u32)> {
-        let current_gen = provider.generation();
-        if current_gen != self.last_generation {
-            self.drop_cache();
-            self.last_generation = current_gen;
-        }
+    ) -> Option<(u64, u32, u32, Arc<()>)> {
+        self.check_generation(provider.generation());
+        self.cleanup_stale();
 
         let key = IconKey { hash, trim };
-        if let Some(entry) = self.cache.get_mut(&key) {
-            self.use_counter = self.use_counter.wrapping_add(1);
-            entry.last_used = self.use_counter;
-            return Some((entry.handle_id, entry.width, entry.height));
+        if let Some(entry) = self.icons.get_mut(&key) {
+            if !entry.stale {
+                self.lru_order.retain(|k| k != &key);
+                self.lru_order.push_back(key);
+                return Some((entry.handle_id, entry.width, entry.height, entry.token.clone()));
+            } else {
+                let old = self.icons.remove(&key).unwrap();
+                self.lru_order.retain(|k| k != &key);
+                self.stale_textures.push(old);
+            }
+        }
+
+        // Bounded icon cache: max 64 textures
+        let current_count = self.icons.len() + self.ui_textures.len();
+        if current_count >= MAX_CACHED_ICONS {
+            // Find oldest icon not held by live Lua handle
+            let mut evicted_key = None;
+            for candidate in &self.lru_order {
+                if let Some(entry) = self.icons.get(candidate) {
+                    if !entry.is_live() {
+                        evicted_key = Some(*candidate);
+                        break;
+                    }
+                }
+            }
+            if let Some(evict) = evicted_key {
+                self.lru_order.retain(|k| k != &evict);
+                if let Some(removed) = self.icons.remove(&evict) {
+                    let mut textures = self.textures.borrow_mut();
+                    textures.mark_dead(removed.handle_id);
+                    textures.collect(false);
+                }
+            } else if current_count >= MAX_CACHED_ICONS {
+                // All 64 are actively held by live handles! Refuse new allocation with diagnostic.
+                if !self.budget_diag_logged {
+                    self.budget_diag_logged = true;
+                    eprintln!(
+                        "frontiers_forge.icon: icon texture budget exceeded ({}/{} live handles held)",
+                        current_count, MAX_CACHED_ICONS
+                    );
+                }
+                return None;
+            }
         }
 
         let icon = provider.decode_icon(hash)?;
         let (cropped, tw, th) = trim_rgba(&icon.rgba, icon.width, icon.height, trim)?;
 
-        // Enforce bounded cache (LRU eviction)
-        if self.cache.len() >= MAX_CACHED_ICONS {
-            if let Some((&lru_key, _)) = self
-                .cache
-                .iter()
-                .min_by_key(|(_, entry)| entry.last_used)
-            {
-                if let Some(removed) = self.cache.remove(&lru_key) {
+        let handle = self
+            .textures
+            .borrow_mut()
+            .upload_rgba8(&self.textures, "icon", tw, th, &cropped)
+            .ok()?;
+        let handle_id = handle.id;
+        let token = Arc::new(());
+
+        self.icons.insert(
+            key,
+            CachedTexture {
+                handle_id,
+                width: tw,
+                height: th,
+                stale: false,
+                token: token.clone(),
+            },
+        );
+        self.lru_order.push_back(key);
+
+        Some((handle_id, tw, th, token))
+    }
+
+    pub fn get_or_load_ui_texture(
+        &mut self,
+        tex_id: u32,
+        provider: &dyn IconProvider,
+    ) -> Option<(u64, u32, u32, Arc<()>)> {
+        if tex_id >= UI_TEX_COUNT {
+            return None;
+        }
+
+        self.check_generation(provider.generation());
+        self.cleanup_stale();
+
+        if let Some(entry) = self.ui_textures.get_mut(&tex_id) {
+            if !entry.stale {
+                return Some((entry.handle_id, entry.width, entry.height, entry.token.clone()));
+            } else {
+                let old = self.ui_textures.remove(&tex_id).unwrap();
+                self.stale_textures.push(old);
+            }
+        }
+
+        let icon = match provider.decode_ui_texture(tex_id) {
+            Some(i) => i,
+            None => {
+                if !self.ui_tex_diag_logged {
+                    self.ui_tex_diag_logged = true;
+                    eprintln!("frontiers_forge.icon: GetUITexture: HUD atlas or UI surface is unavailable");
+                }
+                return None;
+            }
+        };
+
+        let current_count = self.icons.len() + self.ui_textures.len();
+        if current_count >= MAX_CACHED_ICONS {
+            let mut evicted_key = None;
+            for candidate in &self.lru_order {
+                if let Some(entry) = self.icons.get(candidate) {
+                    if !entry.is_live() {
+                        evicted_key = Some(*candidate);
+                        break;
+                    }
+                }
+            }
+            if let Some(evict) = evicted_key {
+                self.lru_order.retain(|k| k != &evict);
+                if let Some(removed) = self.icons.remove(&evict) {
                     let mut textures = self.textures.borrow_mut();
                     textures.mark_dead(removed.handle_id);
                     textures.collect(false);
@@ -294,28 +519,151 @@ impl IconCache {
         let handle = self
             .textures
             .borrow_mut()
-            .upload_rgba8(&self.textures, "icon", tw, th, &cropped)
+            .upload_rgba8(&self.textures, "ui_icon", icon.width, icon.height, &icon.rgba)
             .ok()?;
         let handle_id = handle.id;
+        let token = Arc::new(());
 
-        self.use_counter = self.use_counter.wrapping_add(1);
-        self.cache.insert(
-            key,
-            IconEntry {
+        self.ui_textures.insert(
+            tex_id,
+            CachedTexture {
                 handle_id,
-                width: tw,
-                height: th,
-                last_used: self.use_counter,
+                width: icon.width,
+                height: icon.height,
+                stale: false,
+                token: token.clone(),
             },
         );
 
-        Some((handle_id, tw, th))
+        Some((handle_id, icon.width, icon.height, token))
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Safe library & atlas representation (100% safe Rust, zero raw pointers)
+// -----------------------------------------------------------------------------
+
+#[derive(Clone, Default)]
+pub struct SafeAtlas {
+    pub entries: Vec<vi::ui::UiTexEntry>,
+    pub textures: vi::strtab::StringTable,
+}
+
+#[derive(Clone)]
+pub struct SafeSurface {
+    #[allow(dead_code)]
+    pub dict_id: i32,
+    pub surface: esf::Surface,
+    pub container_data: Arc<Vec<u8>>,
+}
+
+#[derive(Clone)]
+pub struct SafeLibrary {
+    pub surfaces: HashMap<i32, SafeSurface>,
+    pub view: esf::Era,
+    pub file_count: usize,
+}
+
+impl SafeLibrary {
+    pub fn from_library(lib: &esf::Library) -> Self {
+        let mut surfaces = HashMap::new();
+        for (i, (_name, c)) in lib.files.iter().enumerate() {
+            if c.surfaces.is_empty() {
+                continue;
+            }
+            let data = Arc::new(c.data.clone());
+            for s in &c.surfaces {
+                if lib.lookup(s.dict_id).is_some_and(|r| r.file == i) || lib.stands_for(i).is_none() {
+                    surfaces.insert(
+                        s.dict_id,
+                        SafeSurface {
+                            dict_id: s.dict_id,
+                            surface: s.clone(),
+                            container_data: data.clone(),
+                        },
+                    );
+                }
+            }
+        }
+        Self {
+            surfaces,
+            view: lib.view(),
+            file_count: lib.files.len(),
+        }
+    }
+
+    pub fn decode_surface(&self, dict_id: i32) -> Option<DecodedIcon> {
+        let s = self.surfaces.get(&dict_id)?;
+        let img = s.surface.decode(&s.container_data)?;
+        Some(DecodedIcon {
+            width: img.width,
+            height: img.height,
+            rgba: img.rgba,
+        })
+    }
+}
+
+pub struct LiveLibraryProvider {
+    lib: Arc<SafeLibrary>,
+    atlas: Option<SafeAtlas>,
+    generation: u64,
+}
+
+impl IconProvider for LiveLibraryProvider {
+    fn decode_icon(&self, id: u32) -> Option<DecodedIcon> {
+        self.lib.decode_surface(id as i32)
+    }
+
+    fn decode_ui_texture(&self, tex_id: u32) -> Option<DecodedIcon> {
+        let atlas = self.atlas.as_ref()?;
+        if tex_id as usize >= atlas.entries.len() {
+            return None;
+        }
+        let entry = atlas.entries[tex_id as usize];
+        let name = atlas.textures.get(entry.row, 0);
+        if name.is_empty() || name == "_null_" {
+            return None;
+        }
+        let dict_id = vi::ui::icon_id(name);
+        let full = self.lib.decode_surface(dict_id as i32)?;
+        let src_x = entry.uv0[0];
+        let src_y = entry.uv0[1];
+        let w = entry.uv1[0];
+        let h = entry.uv1[1];
+        if src_x < 0 || src_y < 0 || w <= 0 || h <= 0 {
+            return None;
+        }
+        let (src_x, src_y, w, h) = (src_x as u32, src_y as u32, w as u32, h as u32);
+        if src_x + w > full.width || src_y + h > full.height {
+            return None;
+        }
+        let mut cropped = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h {
+            let src_off = ((src_y + y) * full.width + src_x) as usize * 4;
+            let dst_off = (y * w) as usize * 4;
+            cropped[dst_off..dst_off + (w as usize * 4)]
+                .copy_from_slice(&full.rgba[src_off..src_off + (w as usize * 4)]);
+        }
+        Some(DecodedIcon {
+            width: w,
+            height: h,
+            rgba: cropped,
+        })
+    }
+
+    fn era(&self) -> esf::Era {
+        self.lib.view
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation
     }
 }
 
 thread_local! {
     static CUSTOM_PROVIDER: RefCell<Option<Box<dyn IconProvider>>> = const { RefCell::new(None) };
-    static LIVE_LIBRARY: Cell<Option<*const esf::Library>> = const { Cell::new(None) };
+    static SAFE_LIBRARY: RefCell<Option<Arc<SafeLibrary>>> = const { RefCell::new(None) };
+    static LIVE_ATLAS: RefCell<Option<SafeAtlas>> = const { RefCell::new(None) };
     static ART_GENERATION: Cell<u64> = const { Cell::new(0) };
 }
 
@@ -323,8 +671,18 @@ pub fn set_custom_icon_provider(provider: Option<Box<dyn IconProvider>>) {
     CUSTOM_PROVIDER.with(|p| *p.borrow_mut() = provider);
 }
 
-pub fn set_live_library(lib: *const esf::Library) {
-    LIVE_LIBRARY.with(|l| l.set(Some(lib)));
+pub fn update_live_data(lib: &esf::Library, atlas: Option<SafeAtlas>) {
+    let needs_update = SAFE_LIBRARY.with(|sl| match &*sl.borrow() {
+        Some(existing) => existing.view != lib.view() || existing.file_count != lib.files.len(),
+        None => true,
+    });
+    if needs_update {
+        let safe_lib = Arc::new(SafeLibrary::from_library(lib));
+        SAFE_LIBRARY.with(|sl| *sl.borrow_mut() = Some(safe_lib));
+    }
+    if let Some(a) = atlas {
+        LIVE_ATLAS.with(|la| *la.borrow_mut() = Some(a));
+    }
 }
 
 pub fn notify_art_changed() {
@@ -336,39 +694,24 @@ pub fn with_active_provider<R, F: FnOnce(&dyn IconProvider) -> R>(f: F) -> R {
         if let Some(ref p) = *custom.borrow() {
             return f(p.as_ref());
         }
-        LIVE_LIBRARY.with(|lib_ptr| {
-            if let Some(ptr) = lib_ptr.get() {
-                let lib = unsafe { &*ptr };
-                let art_gen = ART_GENERATION.with(|g| g.get());
-                struct LiveProvider<'a>(&'a esf::Library, u64);
-                impl<'a> IconProvider for LiveProvider<'a> {
-                    fn decode_icon(&self, id: u32) -> Option<DecodedIcon> {
-                        let (c, s) = self.0.surface(id as i32)?;
-                        let img = s.decode(&c.data)?;
-                        Some(DecodedIcon {
-                            width: img.width,
-                            height: img.height,
-                            rgba: img.rgba,
-                        })
-                    }
-                    fn era(&self) -> esf::Era {
-                        self.0.view()
-                    }
-                    fn generation(&self) -> u64 {
-                        self.1
-                    }
-                }
-                f(&LiveProvider(lib, art_gen))
-            } else {
-                struct NullProvider;
-                impl IconProvider for NullProvider {
-                    fn decode_icon(&self, _: u32) -> Option<DecodedIcon> {
-                        None
-                    }
-                }
-                f(&NullProvider)
+        let safe_lib = SAFE_LIBRARY.with(|sl| sl.borrow().clone());
+        if let Some(lib) = safe_lib {
+            let atlas = LIVE_ATLAS.with(|la| la.borrow().clone());
+            let generation = ART_GENERATION.with(|g| g.get());
+            let live = LiveLibraryProvider {
+                lib,
+                atlas,
+                generation,
+            };
+            return f(&live);
+        }
+        struct EmptyProvider;
+        impl IconProvider for EmptyProvider {
+            fn decode_icon(&self, _id: u32) -> Option<DecodedIcon> {
+                None
             }
-        })
+        }
+        f(&EmptyProvider)
     })
 }
 
@@ -434,7 +777,7 @@ pub fn install_base_icon_adapter(lua: &Lua, host: &super::host::Host) -> LuaResu
         "GetUITexture",
         lua.create_function(|_, _tex_id: Value| {
             if !UI_TEX_DIAG_LOGGED.swap(true, Ordering::Relaxed) {
-                eprintln!("frontiers_forge.icon: GetUITexture is not implemented");
+                eprintln!("frontiers_forge.icon: GetUITexture is not implemented in base adapter");
             }
             Ok((Value::Nil, Value::Nil, Value::Nil))
         })?,
@@ -536,35 +879,60 @@ pub fn attach_icon_cache(
         )?;
     }
 
+    // GetSurfaceInfo
+    icon_mod.set(
+        "GetSurfaceInfo",
+        lua.create_function(|lua, hash: Value| {
+            let hash_u32 = match hash {
+                Value::Integer(i) if i > 0 => i as u32,
+                Value::Number(n) if n > 0.0 => n as u32,
+                _ => return Ok(Value::Nil),
+            };
+            with_active_provider(|provider| {
+                if let Some(icon) = provider.decode_icon(hash_u32) {
+                    let info = lua.create_table()?;
+                    info.set("width", icon.width)?;
+                    info.set("height", icon.height)?;
+                    info.set("format", 2)?;
+                    info.set("palette_count", 0)?;
+                    info.set("palette_format", 0)?;
+                    Ok(Value::Table(info))
+                } else {
+                    Ok(Value::Nil)
+                }
+            })
+        })?,
+    )?;
+
     // GetTexture
     {
         let cache_ref = cache.clone();
         let textures_ref = textures.clone();
         icon_mod.set(
             "GetTexture",
-            lua.create_function(move |lua, (hash_val, opts): (Value, Option<Table>)| {
-                let hash = match hash_val {
-                    Value::Integer(i) if i > 0 && i != -1 => i as u32,
-                    Value::Number(n) if n > 0.0 && n < 4294967295.0 => n as u32,
+            lua.create_function(move |lua, (hash, opts): (Value, Option<Table>)| {
+                let hash_u32 = match hash {
+                    Value::Integer(i) if i > 0 => i as u32,
+                    Value::Number(n) if n > 0.0 => n as u32,
                     _ => return Ok((Value::Nil, Value::Nil, Value::Nil)),
                 };
-                if hash == 0 || hash == 0xFFFFFFFF {
-                    return Ok((Value::Nil, Value::Nil, Value::Nil));
-                }
-
                 let trim = TrimOptions::from_lua_table(opts.as_ref());
-
                 let result = with_active_provider(|provider| {
-                    cache_ref.borrow_mut().get_or_load(hash, trim, provider)
+                    cache_ref.borrow_mut().get_or_load(hash_u32, trim, provider)
                 });
 
-                if let Some((handle_id, tw, th)) = result {
+                if let Some((handle_id, tw, th, token)) = result {
                     let handle = Handle {
                         owner: textures_ref.clone(),
                         id: handle_id,
+                        token: Some(token),
                     };
                     let ud = lua.create_userdata(handle)?;
-                    Ok((Value::UserData(ud), Value::Integer(tw as i64), Value::Integer(th as i64)))
+                    Ok((
+                        Value::UserData(ud),
+                        Value::Integer(tw as i64),
+                        Value::Integer(th as i64),
+                    ))
                 } else {
                     Ok((Value::Nil, Value::Nil, Value::Nil))
                 }
@@ -573,15 +941,42 @@ pub fn attach_icon_cache(
     }
 
     // GetUITexture
-    icon_mod.set(
-        "GetUITexture",
-        lua.create_function(|_, _tex_id: Value| {
-            if !UI_TEX_DIAG_LOGGED.swap(true, Ordering::Relaxed) {
-                eprintln!("frontiers_forge.icon: GetUITexture is not implemented");
-            }
-            Ok((Value::Nil, Value::Nil, Value::Nil))
-        })?,
-    )?;
+    {
+        let cache_ref = cache.clone();
+        let textures_ref = textures;
+        icon_mod.set(
+            "GetUITexture",
+            lua.create_function(move |lua, tex_id: Value| {
+                let tex_id_u32 = match tex_id {
+                    Value::Integer(i) if i >= 0 && i < UI_TEX_COUNT as i64 => i as u32,
+                    Value::Number(n) if n >= 0.0 && n < UI_TEX_COUNT as f64 => n as u32,
+                    _ => return Ok((Value::Nil, Value::Nil, Value::Nil)),
+                };
+
+                let result = with_active_provider(|provider| {
+                    cache_ref
+                        .borrow_mut()
+                        .get_or_load_ui_texture(tex_id_u32, provider)
+                });
+
+                if let Some((handle_id, tw, th, token)) = result {
+                    let handle = Handle {
+                        owner: textures_ref.clone(),
+                        id: handle_id,
+                        token: Some(token),
+                    };
+                    let ud = lua.create_userdata(handle)?;
+                    Ok((
+                        Value::UserData(ud),
+                        Value::Integer(tw as i64),
+                        Value::Integer(th as i64),
+                    ))
+                } else {
+                    Ok((Value::Nil, Value::Nil, Value::Nil))
+                }
+            })?,
+        )?;
+    }
 
     Ok(cache)
 }

@@ -1,9 +1,28 @@
 //! The combat indication adapter; service code only receives plain combat data.
 use super::Play;
 
-pub(crate) fn frame_library(_lib: &esf::Library) {
+pub(crate) fn frame_library(_play: &Play, _lib: &esf::Library) {
     #[cfg(not(target_arch = "wasm32"))]
-    crate::fork_ext::addons::icons::set_live_library(_lib as *const esf::Library);
+    {
+        let atlas = if let Some((vui, _, _)) = &_play.hud {
+            let mut entries = Vec::with_capacity(252);
+            for i in 0..252 {
+                entries.push(vui.entry(i));
+            }
+            Some(crate::fork_ext::addons::icons::SafeAtlas {
+                entries,
+                textures: vui.textures.clone(),
+            })
+        } else if let Some((entries, textures)) = &_play.ui_data {
+            Some(crate::fork_ext::addons::icons::SafeAtlas {
+                entries: entries.clone(),
+                textures: textures.clone(),
+            })
+        } else {
+            None
+        };
+        crate::fork_ext::addons::icons::update_live_data(_lib, atlas);
+    }
 }
 
 pub(crate) fn art_changed() {

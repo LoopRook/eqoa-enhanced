@@ -59,6 +59,8 @@ pub(crate) struct Textures {
 pub(crate) struct Handle {
     pub(crate) owner: Rc<RefCell<Textures>>,
     pub(crate) id: u64,
+    #[allow(dead_code)]
+    pub(crate) token: Option<std::sync::Arc<()>>,
 }
 impl UserData for Handle {
     fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
@@ -225,6 +227,7 @@ impl Textures {
         Ok(Handle {
             owner: owner.clone(),
             id: next_id,
+            token: None,
         })
     }
 
