@@ -17,6 +17,7 @@ use std::{
 };
 
 pub const MAX_CACHED_ICONS: usize = 64;
+pub const MAX_CACHED_UI_TEXTURES: usize = 64;
 pub const UI_TEX_COUNT: u32 = 0xFC; // 252 entries
 
 #[derive(Clone, Debug, PartialEq)]
@@ -256,8 +257,10 @@ pub struct IconCache {
     ui_textures: HashMap<u32, CachedTexture>,
     stale_textures: Vec<CachedTexture>,
     lru_order: VecDeque<IconKey>,
+    ui_lru_order: VecDeque<u32>,
     claims: HashSet<String>,
     budget_diag_logged: bool,
+    ui_tex_budget_diag_logged: bool,
     ui_tex_diag_logged: bool,
     last_generation: u64,
 }
@@ -270,11 +273,23 @@ impl IconCache {
             ui_textures: HashMap::new(),
             stale_textures: Vec::new(),
             lru_order: VecDeque::new(),
+            ui_lru_order: VecDeque::new(),
             claims: HashSet::new(),
             budget_diag_logged: false,
+            ui_tex_budget_diag_logged: false,
             ui_tex_diag_logged: false,
             last_generation: 0,
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn stale_count(&self) -> usize {
+        self.stale_textures.len()
+    }
+
+    #[allow(dead_code)]
+    pub fn ui_cached_count(&self) -> usize {
+        self.ui_textures.len()
     }
 
     pub fn acquire(&mut self, owner: &str) -> bool {
@@ -303,6 +318,7 @@ impl IconCache {
                 }
             });
             self.lru_order.retain(|k| self.icons.contains_key(k));
+            self.ui_lru_order.retain(|id| self.ui_textures.contains_key(id));
             self.stale_textures.retain(|entry| {
                 if !entry.is_live() {
                     textures.mark_dead(entry.handle_id);
@@ -346,6 +362,7 @@ impl IconCache {
             }
         });
         self.lru_order.retain(|k| self.icons.contains_key(k));
+        self.ui_lru_order.retain(|id| self.ui_textures.contains_key(id));
         self.stale_textures.retain(|entry| {
             if !entry.is_live() {
                 textures.mark_dead(entry.handle_id);
@@ -405,7 +422,7 @@ impl IconCache {
         }
 
         // Bounded icon cache: max 64 textures
-        let current_count = self.icons.len() + self.ui_textures.len();
+        let current_count = self.icons.len();
         if current_count >= MAX_CACHED_ICONS {
             // Find oldest icon not held by live Lua handle
             let mut evicted_key = None;
@@ -424,7 +441,7 @@ impl IconCache {
                     textures.mark_dead(removed.handle_id);
                     textures.collect(false);
                 }
-            } else if current_count >= MAX_CACHED_ICONS {
+            } else {
                 // All 64 are actively held by live handles! Refuse new allocation with diagnostic.
                 if !self.budget_diag_logged {
                     self.budget_diag_logged = true;
@@ -477,6 +494,8 @@ impl IconCache {
 
         if let Some(entry) = self.ui_textures.get_mut(&tex_id) {
             if !entry.stale {
+                self.ui_lru_order.retain(|&id| id != tex_id);
+                self.ui_lru_order.push_back(tex_id);
                 return Some((entry.handle_id, entry.width, entry.height, entry.token.clone()));
             } else {
                 let old = self.ui_textures.remove(&tex_id).unwrap();
@@ -495,24 +514,29 @@ impl IconCache {
             }
         };
 
-        let current_count = self.icons.len() + self.ui_textures.len();
-        if current_count >= MAX_CACHED_ICONS {
-            let mut evicted_key = None;
-            for candidate in &self.lru_order {
-                if let Some(entry) = self.icons.get(candidate) {
+        if self.ui_textures.len() >= MAX_CACHED_UI_TEXTURES {
+            let mut evicted_id = None;
+            for &candidate in &self.ui_lru_order {
+                if let Some(entry) = self.ui_textures.get(&candidate) {
                     if !entry.is_live() {
-                        evicted_key = Some(*candidate);
+                        evicted_id = Some(candidate);
                         break;
                     }
                 }
             }
-            if let Some(evict) = evicted_key {
-                self.lru_order.retain(|k| k != &evict);
-                if let Some(removed) = self.icons.remove(&evict) {
+            if let Some(evict) = evicted_id {
+                self.ui_lru_order.retain(|&id| id != evict);
+                if let Some(removed) = self.ui_textures.remove(&evict) {
                     let mut textures = self.textures.borrow_mut();
                     textures.mark_dead(removed.handle_id);
                     textures.collect(false);
                 }
+            } else {
+                if !self.ui_tex_budget_diag_logged {
+                    self.ui_tex_budget_diag_logged = true;
+                    eprintln!("frontiers_forge.icon: UI texture budget exceeded (64/64 live handles held)");
+                }
+                return None;
             }
         }
 
@@ -524,6 +548,7 @@ impl IconCache {
         let handle_id = handle.id;
         let token = Arc::new(());
 
+        self.ui_lru_order.push_back(tex_id);
         self.ui_textures.insert(
             tex_id,
             CachedTexture {
@@ -741,6 +766,21 @@ thread_local! {
     static LIVE_ATLAS: RefCell<Option<SafeAtlas>> = const { RefCell::new(None) };
     static ART_GENERATION: Cell<u64> = const { Cell::new(0) };
     static SNAPSHOT_COUNT: Cell<u64> = const { Cell::new(0) };
+    static ACTIVE_CACHES: RefCell<Vec<std::rc::Weak<RefCell<IconCache>>>> = const { RefCell::new(Vec::new()) };
+}
+
+pub fn cleanup_active_stale() {
+    ACTIVE_CACHES.with(|caches| {
+        let mut list = caches.borrow_mut();
+        list.retain(|weak| {
+            if let Some(cache) = weak.upgrade() {
+                cache.borrow_mut().cleanup_stale();
+                true
+            } else {
+                false
+            }
+        });
+    });
 }
 
 pub fn set_custom_icon_provider(provider: Option<Box<dyn IconProvider>>) {
@@ -913,6 +953,7 @@ pub fn attach_icon_cache(
     textures: Rc<RefCell<Textures>>,
 ) -> LuaResult<Rc<RefCell<IconCache>>> {
     let cache = Rc::new(RefCell::new(IconCache::new(textures.clone())));
+    ACTIVE_CACHES.with(|caches| caches.borrow_mut().push(Rc::downgrade(&cache)));
 
     let icon_mod: Table = match lua.named_registry_value::<Table>("__forge_icon_mod") {
         Ok(t) => t,

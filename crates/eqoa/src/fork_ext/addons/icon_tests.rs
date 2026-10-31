@@ -691,7 +691,7 @@ fn forge_icon_get_ui_texture() {
 }
 
 #[test]
-fn forge_icon_real_disc_ability_and_item_icon_pixel_match() {
+fn forge_icon_real_disc_ui_and_item_icon_pixel_match() {
     let iso_path = std::env::var("EQOA_ISO").ok().or_else(|| {
         let p = "C:/Users/hocka/Documents/PS2 Games/EverQuest - Online Adventures - Frontiers (USA).iso";
         if std::path::Path::new(p).exists() {
@@ -714,6 +714,8 @@ fn forge_icon_real_disc_ability_and_item_icon_pixel_match() {
         }
     };
 
+    // Note: SPELLICON.ESF is not present on the EQOA Frontiers disc.
+    // The disc stores UI and ability plate textures in DATA2/UI.CSF and item icons in DATA/ITEMICON.ESF.
     let ui_bytes = match iso.read("UI.CSF") {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -746,12 +748,12 @@ fn forge_icon_real_disc_ability_and_item_icon_pixel_match() {
         }
     };
 
-    // Find first decodable ability surface in UI.CSF
+    // Find first decodable ability/UI surface in UI.CSF
     let Some(ability_surface) = ui_container.surfaces.iter().find(|s| s.decode(&ui_container.data).is_some()) else {
         eprintln!("SKIP forge_icon: no decodable surface in UI.CSF");
         return;
     };
-    let ability_img = ability_surface.decode(&ui_container.data).unwrap();
+    let stock_ability = ability_surface.decode(&ui_container.data).unwrap();
     let ability_id = ability_surface.dict_id as u32;
 
     // Find first decodable item surface in ITEMICON.ESF
@@ -759,7 +761,7 @@ fn forge_icon_real_disc_ability_and_item_icon_pixel_match() {
         eprintln!("SKIP forge_icon: no decodable surface in ITEMICON.ESF");
         return;
     };
-    let item_img = item_surface.decode(&item_container.data).unwrap();
+    let stock_item = item_surface.decode(&item_container.data).unwrap();
     let item_id = item_surface.dict_id as u32;
 
     let mut lib = esf::Library::new();
@@ -793,8 +795,18 @@ fn forge_icon_real_disc_ability_and_item_icon_pixel_match() {
         ))
         .eval()
         .unwrap();
-    assert_eq!(ab_w, ability_img.width);
-    assert_eq!(ab_h, ability_img.height);
+    assert_eq!(ab_w, stock_ability.width);
+    assert_eq!(ab_h, stock_ability.height);
+
+    // Byte-for-byte pixel comparison for ability icon against stock HUD decode path
+    icons::with_active_provider(|p| {
+        let decoded = p.decode_icon(ability_id).expect("provider must decode ability icon");
+        assert_eq!(
+            decoded.rgba,
+            stock_ability.rgba,
+            "ability icon pixels must match stock HUD decode path byte-for-byte"
+        );
+    });
 
     // Query item icon via Lua
     let (it_w, it_h): (u32, u32) = host
@@ -810,13 +822,23 @@ fn forge_icon_real_disc_ability_and_item_icon_pixel_match() {
         ))
         .eval()
         .unwrap();
-    assert_eq!(it_w, item_img.width);
-    assert_eq!(it_h, item_img.height);
+    assert_eq!(it_w, stock_item.width);
+    assert_eq!(it_h, stock_item.height);
+
+    // Byte-for-byte pixel comparison for item icon against stock HUD decode path
+    icons::with_active_provider(|p| {
+        let decoded = p.decode_icon(item_id).expect("provider must decode item icon");
+        assert_eq!(
+            decoded.rgba,
+            stock_item.rgba,
+            "item icon pixels must match stock HUD decode path byte-for-byte"
+        );
+    });
 
     let snap_size = icons::snapshot_size_bytes();
     assert!(snap_size > 0, "snapshot size must be greater than zero");
     eprintln!(
-        "SUCCESS forge_icon: real disc ability icon {} ({}x{}) and item icon {} ({}x{}) matched stock HUD decode path (snapshot: {} bytes / {:.2} MiB)",
+        "SUCCESS forge_icon: real disc ability icon {} ({}x{}) and item icon {} ({}x{}) matched stock HUD decode path byte-for-byte (snapshot: {} bytes / {:.2} MiB)",
         ability_id, ab_w, ab_h, item_id, it_w, it_h, snap_size, snap_size as f64 / (1024.0 * 1024.0)
     );
 }
@@ -867,4 +889,131 @@ fn forge_icon_zone_streaming_does_not_trigger_resnapshot() {
         bytes1,
         "snapshot size must not clone streamed zone containers"
     );
+}
+
+#[test]
+fn forge_icon_ui_texture_budget_does_not_starve_get_texture() {
+    let mut provider = SyntheticProvider::new();
+    // 64 distinct UI textures
+    for id in 0..64 {
+        provider.add_ui_tex(id, 16, 16, vec![255, 255, 0, 255].repeat(256));
+    }
+    // 1 ability icon
+    let (w, h, rgba) = make_test_icon_surface();
+    provider.add(9001, w, h, rgba);
+    icons::set_custom_icon_provider(Some(Box::new(provider)));
+
+    let gpu = match TestGpu::new() {
+        Some(g) => g,
+        None => return,
+    };
+    let host = Host::new().unwrap();
+    let textures = Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    textures.borrow_mut().set_budget(super::textures::ADDON_BUDGET);
+    let cache = icons::attach_icon_cache(&host.lua, textures).unwrap();
+
+    // Fill all 64 UI texture slots (host.execute resets the instruction budget to 200,000)
+    host.execute(
+        r#"
+        local Icon = require("frontiers_forge.icon")
+        Icon.Acquire("ui_test")
+        _G.ui_held = {}
+        for id = 0, 63 do
+            _G.ui_held[id + 1] = Icon.GetUITexture(id)
+            assert(_G.ui_held[id + 1] ~= nil)
+        end
+        "#,
+    )
+    .unwrap();
+    assert_eq!(cache.borrow().ui_cached_count(), 64);
+
+    // Calling GetTexture must NOT return nil (it has its own independent 64-texture budget)
+    let (icon_tex_loaded, ab_w, ab_h): (bool, u32, u32) = host
+        .lua
+        .load(
+            r#"
+            local Icon = require("frontiers_forge.icon")
+            local tex, w, h = Icon.GetTexture(9001, { trim_color = true })
+            return tex ~= nil, w, h
+            "#,
+        )
+        .eval()
+        .unwrap();
+    assert!(icon_tex_loaded, "filling UI textures must not starve GetTexture");
+    assert_eq!((ab_w, ab_h), (22, 22));
+
+    icons::set_custom_icon_provider(None);
+}
+
+#[test]
+fn forge_icon_after_render_cleans_unreferenced_stale_textures() {
+    let mut provider = SyntheticProvider::new();
+    provider.add(1001, 10, 10, vec![255, 0, 0, 255].repeat(100));
+    icons::set_custom_icon_provider(Some(Box::new(provider)));
+
+    let gpu = match TestGpu::new() {
+        Some(g) => g,
+        None => return,
+    };
+    let host = Host::new().unwrap();
+    let textures = Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    textures.borrow_mut().set_budget(super::textures::ADDON_BUDGET);
+    let cache = icons::attach_icon_cache(&host.lua, textures.clone()).unwrap();
+
+    host.lua
+        .load(
+            r#"
+            local Icon = require("frontiers_forge.icon")
+            Icon.Acquire("stale_test")
+            _G.stale_held = Icon.GetTexture(1001)
+            assert(_G.stale_held ~= nil)
+            "#,
+        )
+        .exec()
+        .unwrap();
+
+    // F9 / art change
+    icons::notify_art_changed();
+
+    // Provider gen 1
+    let mut provider2 = SyntheticProvider::new();
+    provider2.add(1001, 10, 10, vec![0, 0, 255, 255].repeat(100));
+    provider2.generation = 1;
+    icons::set_custom_icon_provider(Some(Box::new(provider2)));
+
+    // Requesting under gen 1 moves old texture to stale_textures
+    host.lua
+        .load(
+            r#"
+            local Icon = require("frontiers_forge.icon")
+            _G.fresh_held = Icon.GetTexture(1001)
+            assert(_G.fresh_held ~= nil)
+            "#,
+        )
+        .exec()
+        .unwrap();
+    assert_eq!(cache.borrow().stale_count(), 1);
+
+    // Drop the held old handle in Lua and collect GC
+    host.lua
+        .load(
+            r#"
+            _G.stale_held = nil
+            "#,
+        )
+        .exec()
+        .unwrap();
+    host.lua.gc_collect().unwrap();
+
+    // Call cleanup_active_stale (as called per-frame by after_render) WITHOUT calling GetTexture
+    icons::cleanup_active_stale();
+
+    // Stale texture must be cleaned up immediately
+    assert_eq!(
+        cache.borrow().stale_count(),
+        0,
+        "stale textures without live Lua handles must be freed during after_render without GetTexture"
+    );
+
+    icons::set_custom_icon_provider(None);
 }

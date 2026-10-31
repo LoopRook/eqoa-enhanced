@@ -1,26 +1,74 @@
 //! The combat indication adapter; service code only receives plain combat data.
 use super::Play;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(not(target_arch = "wasm32"))]
+static ATLAS_REBUILD_COUNT: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub fn atlas_rebuild_count() -> u64 {
+    ATLAS_REBUILD_COUNT.load(Ordering::Relaxed)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AtlasKey {
+    None,
+    Hud(usize),
+    UiData(usize),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! {
+    static CACHED_ATLAS_KEY: std::cell::Cell<AtlasKey> = const { std::cell::Cell::new(AtlasKey::None) };
+    static CACHED_ATLAS: std::cell::RefCell<Option<crate::fork_ext::addons::icons::SafeAtlas>> = const { std::cell::RefCell::new(None) };
+}
+
 pub(crate) fn frame_library(_play: &Play, _lib: &esf::Library) {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let atlas = if let Some((vui, _, _)) = &_play.hud {
-            let mut entries = Vec::with_capacity(252);
-            for i in 0..252 {
-                entries.push(vui.entry(i));
-            }
-            Some(crate::fork_ext::addons::icons::SafeAtlas {
-                entries,
-                textures: vui.textures.clone(),
-            })
-        } else if let Some((entries, textures)) = &_play.ui_data {
-            Some(crate::fork_ext::addons::icons::SafeAtlas {
-                entries: entries.clone(),
-                textures: textures.clone(),
-            })
+        let current_key = if let Some((vui, _, _)) = &_play.hud {
+            AtlasKey::Hud(&vui.textures as *const _ as usize)
+        } else if let Some((_, textures)) = &_play.ui_data {
+            AtlasKey::UiData(textures as *const _ as usize)
         } else {
-            None
+            AtlasKey::None
         };
+
+        let prev_key = CACHED_ATLAS_KEY.with(|k| k.get());
+        let atlas = if current_key != prev_key {
+            CACHED_ATLAS_KEY.with(|k| k.set(current_key));
+            let built = match current_key {
+                AtlasKey::Hud(_) => {
+                    let (vui, _, _) = _play.hud.as_ref().unwrap();
+                    let mut entries = Vec::with_capacity(252);
+                    for i in 0..252 {
+                        entries.push(vui.entry(i));
+                    }
+                    Some(crate::fork_ext::addons::icons::SafeAtlas {
+                        entries,
+                        textures: vui.textures.clone(),
+                    })
+                }
+                AtlasKey::UiData(_) => {
+                    let (entries, textures) = _play.ui_data.as_ref().unwrap();
+                    Some(crate::fork_ext::addons::icons::SafeAtlas {
+                        entries: entries.clone(),
+                        textures: textures.clone(),
+                    })
+                }
+                AtlasKey::None => None,
+            };
+            ATLAS_REBUILD_COUNT.fetch_add(1, Ordering::Relaxed);
+            CACHED_ATLAS.with(|ca| *ca.borrow_mut() = built.clone());
+            built
+        } else {
+            CACHED_ATLAS.with(|ca| ca.borrow().clone())
+        };
+
         crate::fork_ext::addons::icons::update_live_data(_lib, atlas);
     }
 }
@@ -993,5 +1041,29 @@ mod tests {
         assert_eq!(value["amount"], 2147483648u64);
         assert_eq!(value["kind"], "heal");
         assert_eq!(value["ability"], "melee");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_play_steady_frame_does_not_rebuild_atlas() {
+        let mut p = play();
+        let vui = crate::ui::Vui::new(Default::default(), Default::default(), vec![vi::ui::UiTexEntry::default(); 252]);
+        p.hud = Some((vui, Default::default(), crate::hud::Hud::new()));
+
+        let lib = esf::Library::new();
+
+        frame_library(&p, &lib);
+        let count1 = atlas_rebuild_count();
+
+        for _ in 0..10 {
+            frame_library(&p, &lib);
+        }
+        let count2 = atlas_rebuild_count();
+
+        assert_eq!(
+            count1,
+            count2,
+            "steady frames must not rebuild the HUD atlas or clone TEXTURES.TXT"
+        );
     }
 }
