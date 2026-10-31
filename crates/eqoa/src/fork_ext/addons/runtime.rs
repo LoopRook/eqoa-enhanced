@@ -168,9 +168,19 @@ impl Runtime {
                 ..
             } => {
                 let button = Button::Key(event.physical_key);
+                let code = super::input::winit_key_to_code(event);
+                if let Some(code) = code {
+                    if !is_synthetic && !event.repeat {
+                        super::input::record_key_event(code, event.state == ElementState::Pressed);
+                    }
+                }
+                let wants_key_capture = (keyboard
+                    || super::input::is_text_capture_active()
+                    || code.is_some_and(super::input::is_key_suppressed))
+                    && !is_synthetic;
                 match event.state {
                     ElementState::Pressed => {
-                        self.capture.press(button, keyboard && !is_synthetic) == Owner::Addon
+                        self.capture.press(button, wants_key_capture) == Owner::Addon
                     }
                     ElementState::Released => self.capture.release(button) == Owner::Addon,
                 }
@@ -433,14 +443,12 @@ pub(super) fn dispatch_frame(
         manager.queue(command);
     }
     let mut called = false;
-    let mut selected = plan
-        .settings
-        .filter(|id| {
-            manager
-                .entries()
-                .iter()
-                .any(|e| e.metadata.id == *id && e.enabled_intent)
-        });
+    let mut selected = plan.settings.filter(|id| {
+        manager
+            .entries()
+            .iter()
+            .any(|e| e.metadata.id == *id && e.enabled_intent)
+    });
     if let Some(id) = selected.as_ref() {
         let name = manager
             .entries()

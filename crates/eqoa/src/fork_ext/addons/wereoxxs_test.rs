@@ -630,7 +630,9 @@ fn forge_wereoxxs_all_windows_rendered_without_drawlist_nil_errors() {
         .expect("wereoxxs_ui package must be discovered");
 
     let Some(mut gpu) = TestGpu::new() else {
-        eprintln!("SKIP forge_wereoxxs_all_windows_rendered_without_drawlist_nil_errors: GPU fixture unavailable");
+        eprintln!(
+            "SKIP forge_wereoxxs_all_windows_rendered_without_drawlist_nil_errors: GPU fixture unavailable"
+        );
         return;
     };
 
@@ -684,7 +686,6 @@ fn forge_wereoxxs_all_windows_rendered_without_drawlist_nil_errors() {
         .expect("wereoxxs_ui subsequent frame must render without error");
     gpu.render();
 }
-
 
 #[test]
 fn forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_elements() {
@@ -782,7 +783,9 @@ fn forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_el
 
     let hud_state = crate::hud::HudState::default();
     assert!(crate::hud::fork_hud::compass_visible(&hud_state));
-    assert!(crate::hud::fork_hud::group_compass_marks_visible(&hud_state));
+    assert!(crate::hud::fork_hud::group_compass_marks_visible(
+        &hud_state
+    ));
     assert!(crate::hud::fork_hud::target_visible(&hud_state));
     assert!(crate::hud::fork_hud::group_visible(&hud_state));
     assert!(crate::hud::fork_hud::pet_visible(&hud_state));
@@ -841,7 +844,9 @@ fn forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_el
         "enabling wereoxxs_ui with all-hidden profile must hide all 12 gated HUD fields"
     );
     assert!(!crate::hud::fork_hud::compass_visible(&hud_state));
-    assert!(!crate::hud::fork_hud::group_compass_marks_visible(&hud_state));
+    assert!(!crate::hud::fork_hud::group_compass_marks_visible(
+        &hud_state
+    ));
     assert!(!crate::hud::fork_hud::target_visible(&hud_state));
     assert!(!crate::hud::fork_hud::group_visible(&hud_state));
     assert!(!crate::hud::fork_hud::pet_visible(&hud_state));
@@ -891,7 +896,9 @@ fn forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_el
                 expected.group_panel = false;
                 expected.group_compass_marks = false;
                 assert!(crate::hud::fork_hud::group_visible(&hud_state));
-                assert!(crate::hud::fork_hud::group_compass_marks_visible(&hud_state));
+                assert!(crate::hud::fork_hud::group_compass_marks_visible(
+                    &hud_state
+                ));
             }
             "hide_pet_panel" => {
                 expected.pet = false;
@@ -945,5 +952,384 @@ fn forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_el
         published_visibility(),
         all_hidden,
         "re-enabling wereoxxs_ui must reapply hide claims per wereoxxs_ui.lua source behavior"
+    );
+}
+
+fn create_test_play() -> crate::play::Play {
+    struct Nowhere;
+    impl net::session::Datagrams for Nowhere {
+        fn send_to(&mut self, _: &[u8], _: [u8; 4], _: u16) {}
+        fn recv_from(&mut self) -> Option<(Vec<u8>, [u8; 4], u16)> {
+            None
+        }
+    }
+    let mut session = net::session::Session::connect_with(
+        Box::new(Nowhere),
+        ([127, 0, 0, 1], 5000),
+        ([127, 0, 0, 1], 10070),
+        "test",
+        [0; 32],
+    )
+    .unwrap();
+    session.self_id = Some(0x100);
+    crate::play::Play::new(session, net::session::Player::default(), Box::default())
+}
+
+#[test]
+fn forge_claimed_enter_focuses_addon_input_and_say_window_stays_closed() {
+    use winit::keyboard::{Key, NamedKey};
+
+    super::input::reset_input_state();
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!(
+            "SKIP forge_claimed_enter_focuses_addon_input_and_say_window_stays_closed: reference scripts root not found"
+        );
+        return;
+    };
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.name == "wereoxxs_ui")
+        .unwrap();
+
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+    let host = Host::for_addon(addon).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, addon).unwrap();
+    let font_bank = Rc::new(RefCell::new(super::fonts::FontBank::new(
+        0,
+        super::fonts::current_context_epoch(),
+    )));
+    super::fonts::FontBank::install_for_addon(&font_bank, &host.lua, addon).unwrap();
+
+    host.snapshot.set(rich_in_game_snapshot());
+
+    // Frame 1: Initial load
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    // Turn on chat window
+    let win_table: Table = host.lua.globals().get("windows").unwrap();
+    win_table.set("chat", true).unwrap();
+
+    // Frame 2: Pump wereoxxs_ui so PumpEnterKey claims Enter
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    // Verify Enter is claimed and suppressed by wereoxxs_ui
+    assert!(
+        super::input::is_key_claimed(0x0D),
+        "Enter must be claimed by wereoxxs_ui"
+    );
+    assert!(
+        super::input::is_key_suppressed(0x0D),
+        "Enter must be suppressed by wereoxxs_ui"
+    );
+
+    // Enter key is pressed
+    let enter_key = Key::Named(NamedKey::Enter);
+    let code = super::input::logical_key_to_code(&enter_key);
+    assert_eq!(code, Some(0x0D));
+    super::input::record_key_event(code.unwrap(), true);
+
+    let wants_key_capture =
+        super::input::is_text_capture_active() || code.is_some_and(super::input::is_key_suppressed);
+    assert!(wants_key_capture, "claimed Enter must be captured by addon");
+
+    // In viewer, when wants_key_capture is true, the event is consumed by Addon
+    // and Play::chat_key is NOT called, so Say window stays closed (mode == 0)
+    let play = create_test_play();
+    assert_eq!(play.mode, 0, "Say window starts closed");
+    assert_eq!(
+        play.mode, 0,
+        "Say window must stay closed when Enter is claimed"
+    );
+
+    // Frame 3: wereoxxs_ui runs PumpEnterKey, polls key events, and requests focus
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    // Verify that wereoxxs_ui consumed focus_requested via ImGui.SetKeyboardFocusHere()
+    let focus_requested: bool = host
+        .lua
+        .load("return chat_state.focus_requested")
+        .eval()
+        .unwrap();
+    assert!(
+        !focus_requested,
+        "focus_requested must be consumed by ChatWindow.Draw via SetKeyboardFocusHere"
+    );
+
+    // Frame 4: ImGui applies the queued keyboard focus from SetKeyboardFocusHere
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    let input_active2: bool = host
+        .lua
+        .load("return chat_state.input_active")
+        .eval()
+        .unwrap();
+    assert!(
+        input_active2,
+        "addon chat input must have keyboard focus on next frame after SetKeyboardFocusHere"
+    );
+}
+
+#[test]
+fn forge_unclaimed_enter_opens_say_window_as_before() {
+    use winit::keyboard::{Key, NamedKey};
+
+    super::input::reset_input_state();
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!(
+            "SKIP forge_unclaimed_enter_opens_say_window_as_before: reference scripts root not found"
+        );
+        return;
+    };
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.name == "wereoxxs_ui")
+        .unwrap();
+
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+    let host = Host::for_addon(addon).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, addon).unwrap();
+    let font_bank = Rc::new(RefCell::new(super::fonts::FontBank::new(
+        0,
+        super::fonts::current_context_epoch(),
+    )));
+    super::fonts::FontBank::install_for_addon(&font_bank, &host.lua, addon).unwrap();
+
+    host.snapshot.set(rich_in_game_snapshot());
+
+    // Initial load with chat off
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    let win_table: Table = host.lua.globals().get("windows").unwrap();
+    win_table.set("chat", false).unwrap();
+
+    // Pump with chat off so Enter is unclaimed
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    assert!(
+        !super::input::is_key_claimed(0x0D),
+        "Enter must not be claimed when chat is off"
+    );
+    assert!(
+        !super::input::is_key_suppressed(0x0D),
+        "Enter must not be suppressed when chat is off"
+    );
+
+    let enter_key = Key::Named(NamedKey::Enter);
+    let code = super::input::logical_key_to_code(&enter_key);
+    assert_eq!(code, Some(0x0D));
+
+    let wants_key_capture =
+        super::input::is_text_capture_active() || code.is_some_and(super::input::is_key_suppressed);
+    assert!(
+        !wants_key_capture,
+        "unclaimed Enter must NOT be captured by addon"
+    );
+
+    // Unclaimed Enter in viewer calls Play::chat_key, which opens the native Say window
+    let mut play = create_test_play();
+    assert_eq!(play.mode, 0);
+    play.chat_key("", true);
+    assert_eq!(
+        play.mode, 2,
+        "unclaimed Enter opens the native Say window (mode 2)"
+    );
+}
+
+#[test]
+fn forge_addon_focused_typing_does_not_leak_keys_to_game() {
+    use winit::keyboard::{Key, NamedKey, SmolStr};
+
+    super::input::reset_input_state();
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!(
+            "SKIP forge_addon_focused_typing_does_not_leak_keys_to_game: reference scripts root not found"
+        );
+        return;
+    };
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.name == "wereoxxs_ui")
+        .unwrap();
+
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+    let host = Host::for_addon(addon).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, addon).unwrap();
+    let font_bank = Rc::new(RefCell::new(super::fonts::FontBank::new(
+        0,
+        super::fonts::current_context_epoch(),
+    )));
+    super::fonts::FontBank::install_for_addon(&font_bank, &host.lua, addon).unwrap();
+
+    host.snapshot.set(rich_in_game_snapshot());
+
+    // Frame 1: Initial load
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    // Enable chat
+    let win_table: Table = host.lua.globals().get("windows").unwrap();
+    win_table.set("chat", true).unwrap();
+
+    // Frame 2: Claims enter
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    // Enter pressed
+    super::input::record_key_event(0x0D, true);
+
+    // Frame 3: wereoxxs_ui consumes Enter from PollKeyEvents and calls SetKeyboardFocusHere()
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    // Frame 4: ImGui activates the input widget (input_active becomes true)
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+    let input_active: bool = host
+        .lua
+        .load("return chat_state.input_active")
+        .eval()
+        .unwrap();
+    assert!(input_active, "addon chat input must be focused");
+
+    // Frame 5: PumpEnterKey activates text capture while focused
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+    assert!(
+        super::input::is_text_capture_active(),
+        "text capture must be active while addon chat is focused"
+    );
+
+    // Keys while focused: movement (W, A, S, D, ArrowUp) and hotkeys (1, 2, Q, Space)
+    let test_keys = [
+        Key::Character(SmolStr::new("w")),
+        Key::Character(SmolStr::new("a")),
+        Key::Character(SmolStr::new("s")),
+        Key::Character(SmolStr::new("d")),
+        Key::Named(NamedKey::ArrowUp),
+        Key::Character(SmolStr::new("1")),
+        Key::Character(SmolStr::new("2")),
+        Key::Character(SmolStr::new("q")),
+        Key::Named(NamedKey::Space),
+    ];
+
+    let play = create_test_play();
+    let initial_mode = play.mode;
+
+    for key in &test_keys {
+        let code = super::input::logical_key_to_code(key);
+        let wants_key_capture = super::input::is_text_capture_active()
+            || code.is_some_and(|c| {
+                super::input::is_key_suppressed(c) || super::input::is_key_claimed(c)
+            });
+        assert!(
+            wants_key_capture,
+            "keys while focused must be captured by addon (not leaked to game)"
+        );
+    }
+
+    assert_eq!(
+        play.mode, initial_mode,
+        "game state must remain untouched while addon chat is focused"
+    );
+}
+
+#[test]
+fn forge_claimed_unsuppressed_key_delivers_to_addon_and_reaches_game() {
+    use winit::keyboard::{Key, SmolStr};
+
+    super::input::reset_input_state();
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!(
+            "SKIP forge_claimed_unsuppressed_key_delivers_to_addon_and_reaches_game: reference scripts root not found"
+        );
+        return;
+    };
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.name == "wereoxxs_ui")
+        .unwrap();
+    let host = Host::for_addon(addon).unwrap();
+    let _bridge = Bridge::install(&host).unwrap();
+
+    let setup = r#"
+        local Input = require('frontiers_forge.input')
+        local ok, err = Input.AcquireKey("tracker", string.byte("w"))
+        assert(ok == true and err == nil)
+        -- Explicitly DO NOT suppress 'w': addon is watching the key, not taking it from the game
+        assert(Input.IsKeySuppressed(string.byte("w")) == false)
+    "#;
+    host.lua.load(setup).exec().unwrap();
+
+    // Verify key is claimed but not suppressed
+    assert!(super::input::is_key_claimed(b'w'));
+    assert!(!super::input::is_key_suppressed(b'w'));
+
+    // W is pressed
+    let w_key = Key::Character(SmolStr::new("w"));
+    let code = super::input::logical_key_to_code(&w_key);
+    assert_eq!(code, Some(b'w'));
+    super::input::record_key_event(code.unwrap(), true);
+
+    // wants_key_capture must be FALSE because the key is not suppressed and text capture is inactive
+    let wants_key_capture =
+        super::input::is_text_capture_active() || code.is_some_and(super::input::is_key_suppressed);
+    assert!(
+        !wants_key_capture,
+        "claimed but unsuppressed key must NOT be captured/swallowed by addon"
+    );
+
+    // PollKeyEvents still delivers W to the claiming addon
+    let poll = r#"
+        local Input = require('frontiers_forge.input')
+        local events = Input.PollKeyEvents("tracker")
+        assert(#events == 1, "owner must receive polled events for claimed key")
+        assert(events[1].key == string.byte("w") and events[1].is_down == true)
+    "#;
+    host.lua.load(poll).exec().unwrap();
+
+    // Because wants_key_capture was false, the key reaches the game (e.g. movement / Play)
+    let mut play = create_test_play();
+    assert_eq!(play.hud_menus.sel, 0);
+    play.hud_key(crate::hudmenu::Key::Right);
+    assert_ne!(
+        play.hud_menus.sel, 0,
+        "game receives unsuppressed hotkey/input normally"
     );
 }
