@@ -41,6 +41,30 @@ pub fn channel_of_slot(slot: usize) -> Option<u8> {
     }
 }
 
+/// The live game's look (go-eqoa-server's 0x7E0C, [`crate::session::OP_LIVE_LOOK`]):
+/// SOE's live CLIENT (eqoa-live-1500, in the Corsten and Lostologist save
+/// states) reads a colour (`VIColor32`: r, g, b, a) for each held item, each
+/// armour slot and the robe where the disc's reads a tint, and per armour
+/// slot the variant its ArmorGroup is picked by (`GetArmorGroupResourceID`,
+/// 0-3; the Frontiers disc's art has none, so it picks nothing). Its
+/// `ApplyLook` hands each colour to `SetArmorSlot` / `SetRobe` / `SetHelm`,
+/// which with no ArmorGroup make it the slot's layer colour, where the disc's
+/// take `GetTintColor(tint)`; nothing draws the held items' colours.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct LiveColors {
+    /// The three attach items' (primary, secondary, shield), `+0x296`.
+    pub items: [[u8; 4]; 3],
+    /// Chest, bracer, gloves, legs, boots, helm (the armour sets' order), `+0x2A2`.
+    pub armor: [[u8; 4]; 6],
+    /// Each slot's ArmorGroup variant, `+0x2BE`.
+    pub variants: [u8; 6],
+    /// The robe's, `+0x2BA`.
+    pub robe: [u8; 4],
+}
+
+/// The live game's entity channel: 201 bytes (the disc's 162).
+pub const LIVE_STATE_SIZE: usize = 201;
+
 /// `VICreatureEntity`'s part of the update.
 #[derive(Clone, Debug, Default)]
 pub struct Creature {
@@ -62,6 +86,9 @@ pub struct Creature {
     pub face: u8,
     pub robe: u8,
     pub robe_tint: u8,
+    /// The live game's colours, when the channel was the live game's (then
+    /// `armor_tint` and `robe_tint` are 0: it carries none).
+    pub colors: Option<LiveColors>,
     pub name: String,
     pub level: u8,
     /// +0x255: runs its own walk physics (players) rather than being carried
@@ -95,7 +122,16 @@ pub struct Entity {
     /// +0x19 (byte 27): `TargetInRange` refuses a target where it is 0.
     pub p19: u8,
     pub model: u32,
+    /// `m_model2`: when not 0 the body drawn in `m_model`'s place
+    /// (`GetModel`).
     pub model2: u32,
+    /// The body the game draws (the character cache's model): `GetModel()`
+    /// as the actor was made with it, then as `Changed` sets it after each
+    /// update, which is only when it differs from the update's OLD `m_model`
+    /// (`ReadUpdate` keeps `int oldModel = m_model`, not `GetModel()`). So a
+    /// `model2` set is drawn at once, and one cleared to 0 stays drawn until
+    /// `model` itself changes or the entity is made again.
+    pub drawn_model: u32,
     pub scale: f32,
     pub creature: Option<Creature>,
     /// `Extrapolate`: where it was drawn minus where it now is, run down to
@@ -138,7 +174,18 @@ fn wrap(mut a: f32) -> f32 {
 }
 
 impl Entity {
-    fn read_update(&mut self, r: &mut Reader) {
+    /// `VIEntity::GetModel`: `model2` when it is not 0, else `model`.
+    pub fn model(&self) -> u32 {
+        if self.model2 != 0 { self.model2 } else { self.model }
+    }
+
+    /// `ReadUpdate`: the disc's CLIENT's, or with `live` the live game's
+    /// (`VICreatureEntity::ReadUpdate`, Corsten's 0x013D2870), which reads
+    /// [`LiveColors`] after the armour sets in place of the tints, and no
+    /// robe tint.
+    fn read_update(&mut self, r: &mut Reader, live: bool) {
+        // ReadUpdate: what `Changed` is handed
+        let (old_world, old_model) = (self.world, self.model);
         for i in 0..3 {
             self.pos[i] = dequantize(r.bytes(3));
         }
@@ -154,6 +201,13 @@ impl Entity {
         self.model = r.u32();
         self.model2 = r.u32();
         self.scale = r.f32();
+        // Changed: another dimension makes the actor again (`OnWorldLoaded`,
+        // `CreateActor` with `GetModel()`); else the body follows `GetModel()`
+        // only when that differs from the old `m_model`
+        let model = self.model();
+        if old_world != self.world || old_model != model {
+            self.drawn_model = model;
+        }
         if self.kind == TYPE_CREATURE {
             let mut c = Creature {
                 velocity: dequantize_vect(r.bytes(3), 21.0),
@@ -175,11 +229,29 @@ impl Entity {
             }
             c.item_types = [r.u8(), r.u8()];
             c.armor.copy_from_slice(&pad6(r.bytes(6)));
-            c.armor_tint.copy_from_slice(&pad6(r.bytes(6)));
-            c.hair = [r.u8(), r.u8(), r.u8()];
-            c.face = r.u8();
-            c.robe = r.u8();
-            c.robe_tint = r.u8();
+            if live {
+                // four single-byte reads each, r first
+                let rgba = |r: &mut Reader| [r.u8(), r.u8(), r.u8(), r.u8()];
+                let mut l = LiveColors::default();
+                for i in 0..3 {
+                    l.items[i] = rgba(r);
+                }
+                for i in 0..6 {
+                    l.armor[i] = rgba(r);
+                    l.variants[i] = r.u8();
+                }
+                l.robe = rgba(r);
+                c.colors = Some(l);
+                c.hair = [r.u8(), r.u8(), r.u8()];
+                c.face = r.u8();
+                c.robe = r.u8();
+            } else {
+                c.armor_tint.copy_from_slice(&pad6(r.bytes(6)));
+                c.hair = [r.u8(), r.u8(), r.u8()];
+                c.face = r.u8();
+                c.robe = r.u8();
+                c.robe_tint = r.u8();
+            }
             r.u32();
             r.u8();
             let name = r.bytes(24);
@@ -228,11 +300,16 @@ pub struct Entities {
     /// How many slots are read: CLIENT's 24, or as many as a server that
     /// offers more and the player's NPC/PC Display have agreed.
     pub limit: usize,
+    /// The server told this client the live game's look is in force
+    /// (`Session::live_look`): a channel of [`LIVE_STATE_SIZE`] bytes or more
+    /// is then read as the live CLIENT reads it; any other as the disc's, as
+    /// every channel is on a server that never offered it (Sandstorm).
+    pub live_look: bool,
 }
 
 impl Default for Entities {
     fn default() -> Self {
-        Entities { slots: vec![None; MAX_SLOTS], limit: RETAIL_SLOTS }
+        Entities { slots: vec![None; MAX_SLOTS], limit: RETAIL_SLOTS, live_look: false }
     }
 }
 
@@ -279,7 +356,7 @@ impl Entities {
         let e = self.slots[ch].get_or_insert_with(|| Entity { id, kind, ..Default::default() });
         e.id = id;
         let old_vel = e.creature.as_ref().map(|c| c.velocity);
-        e.read_update(&mut r);
+        e.read_update(&mut r, self.live_look && data.len() >= LIVE_STATE_SIZE);
         sync(e);
         if created {
             e.vel = [0.0; 3];
@@ -344,6 +421,85 @@ mod tests {
         v[1..5].copy_from_slice(&id.to_le_bytes());
         v[5] = TYPE_CREATURE;
         v
+    }
+
+    /// The body drawn (`drawn_model`) as `Changed` keeps it: `GetModel()`
+    /// (`model2` when not 0) when the actor is made, then only where that
+    /// differs from the update's OLD `m_model`. So a `model2` set is drawn at
+    /// once, one cleared stays drawn until the model itself changes, and an
+    /// entity from another dimension is made again (`OnWorldLoaded`). The
+    /// steps where `GetModel()` read afresh would differ are the clears.
+    #[test]
+    fn the_body_drawn_follows_changed() {
+        let (human, elf, rat) = (0x70D8_98C6u32, 0x156B_9CA9u32, 0x1234_5678u32);
+        let state = |model: u32, model2: u32, world: i8| {
+            let mut v = creature(500);
+            v[17] = world as u8;
+            v[28..32].copy_from_slice(&model.to_le_bytes());
+            v[32..36].copy_from_slice(&model2.to_le_bytes());
+            v
+        };
+        let mut e = Entities::default();
+        let mut step = |model, model2, world| {
+            e.channel(3, &state(model, model2, world), Some(7), 0, 100, |_| {});
+            let x = e.slots[3].as_ref().unwrap();
+            (x.model(), x.drawn_model)
+        };
+        assert_eq!(step(human, rat, 0), (rat, rat), "made with GetModel()");
+        assert_eq!(step(human, rat, 0), (rat, rat));
+        assert_eq!(step(human, 0, 0), (human, rat), "model2 cleared: still drawn (the old model is the new GetModel())");
+        assert_eq!(step(elf, 0, 0), (elf, elf), "the model changed");
+        assert_eq!(step(elf, rat, 0), (rat, rat), "model2 set: at once");
+        assert_eq!(step(elf, 0, 0), (elf, rat), "cleared again: still drawn");
+        assert_eq!(step(elf, 0, 2), (elf, elf), "another dimension: made again");
+        assert_eq!(step(0, 0, 2), (0, 0), "model 0: nothing");
+    }
+
+    /// go-eqoa-server's `entity.LiveChannel` for a dyed player (its
+    /// `livelook_test.go` player: chest d10000ff, boots 5a5a78ff, robe
+    /// 008221ff, the primary 0000ffff) and the disc's channel of the same
+    /// player (`SerializePlayerUpdate`).
+    const LIVE_DYED: &str = "01a186010082003200000a000096000000000000000000000000017f00000000000000000000803f00000000000000000000fffa5842c2ca21c000000000000000000044332211887766550000000000000000000000000000000003000404030201040000ffffffffffffffffffffd10000ff00ffffffff00ffffffff00ffffffff005a5a78ff00ffffffff00008221ff0102030202060000000054696e63746f7269610000000000000000000000000000002a000201030d0000ffffffff00180000010074737271";
+    const DISC_DYED: &str = "01a186010082003200000a000096000000000000000000000000017f00000000000000000000803f00000000000000000000fffa5842c2ca21c00000000000000000004433221188776655000000000000000000000000000000000300040403020104000000000000010203020201060000000054696e63746f7269610000000000000000000000000000002a000201030d0000ffffffff00180000010074737271";
+
+    fn unhex(s: &str) -> Vec<u8> {
+        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    }
+
+    /// The live game's channel, as the server sends it to a client of the
+    /// live look, reads as the live CLIENT's ReadUpdate reads it: the entity
+    /// the disc's channel of the same player reads as, its colours, its
+    /// variants, and no tints. The controls: the same bytes before the look
+    /// is in force are the disc's reading (the name lands elsewhere), and a
+    /// channel of the disc's 162 bytes is the disc's whatever is in force (a
+    /// server that never offered the look, Sandstorm).
+    #[test]
+    fn the_live_channel() {
+        let (live, disc) = (unhex(LIVE_DYED), unhex(DISC_DYED));
+        assert_eq!((live.len(), disc.len()), (LIVE_STATE_SIZE, 162));
+        let read = |data: &[u8], live_look: bool| {
+            let mut e = Entities { live_look, ..Default::default() };
+            e.channel(1, data, Some(7), 0, 100, |_| {});
+            e.slots[1].clone().unwrap()
+        };
+        let (l, d) = (read(&live, true), read(&disc, true));
+        let (lc, dc) = (l.creature.clone().unwrap(), d.creature.clone().unwrap());
+        assert_eq!(lc.name, "Tinctoria");
+        assert_eq!((lc.level, lc.race, lc.class, lc.hair, lc.face, lc.robe), (42, 3, 13, [1, 2, 3], 2, 2));
+        assert_eq!((l.pos, l.model, l.scale), (d.pos, d.model, d.scale));
+        assert_eq!((lc.name.as_str(), lc.level, lc.race, lc.class, lc.npc_flags, lc.items, lc.armor), (dc.name.as_str(), dc.level, dc.race, dc.class, dc.npc_flags, dc.items, dc.armor));
+        assert_eq!((lc.hair, lc.face, lc.robe, lc.p255, lc.p256, lc.flags262, lc.p264, lc.p299), (dc.hair, dc.face, dc.robe, dc.p255, dc.p256, dc.flags262, dc.p264, dc.p299));
+        let colors = lc.colors.unwrap();
+        assert_eq!(colors.armor, [[0xD1, 0, 0, 0xFF], [0xFF; 4], [0xFF; 4], [0xFF; 4], [0x5A, 0x5A, 0x78, 0xFF], [0xFF; 4]]);
+        assert_eq!(colors.robe, [0x00, 0x82, 0x21, 0xFF]);
+        assert_eq!(colors.items, [[0, 0, 0xFF, 0xFF], [0xFF; 4], [0xFF; 4]]);
+        assert_eq!(colors.variants, [0; 6]);
+        assert_eq!((lc.armor_tint, lc.robe_tint), ([0; 6], 0), "the live channel carries no tints");
+        assert!(dc.colors.is_none(), "the disc's 162 bytes are the disc's, the live look in force or not");
+        assert_eq!(dc.robe_tint, 1, "the disc's channel's robe tint (the server's byte 110)");
+
+        let not_yet = read(&live, false).creature.unwrap();
+        assert!(not_yet.colors.is_none() && not_yet.name != "Tinctoria", "the control: before the look is in force, read as the disc's");
     }
 
     /// A slot past the limit is not read (CLIENT's `type < 24` until a server

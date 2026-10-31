@@ -49,13 +49,29 @@ pub struct Admin {
     /// walker
     position: bool,
     position_lines: Vec<(Vec<u16>, [i32; 2])>,
+    /// the server's names for the TRIGGER entries (0x7E08, not retail),
+    /// shown in their place (`trigger_labels`)
+    pub triggers: [Option<crate::admin::Trigger>; crate::admin::TRIGGERS],
 }
 
 impl Default for Admin {
     /// `VIClientPart382E8`'s constructor and `VIClient`'s values for the
     /// rest (the creatures walked and glided, the day-night cycle running).
     fn default() -> Self {
-        Admin { part: Part::default(), buffs: BuffPc::default(), goto: Goto::new(), net: NetStat::default(), channels: vec![None; 40], keys: Vec::new(), opening: None, go: None, walks: true, glides: true, held_hour: None, light: 0, fast: false, stats: false, bps: false, position: false, position_lines: Vec::new() }
+        Admin { part: Part::default(), buffs: BuffPc::default(), goto: Goto::new(), net: NetStat::default(), channels: vec![None; 40], keys: Vec::new(), opening: None, go: None, walks: true, glides: true, held_hour: None, light: 0, fast: false, stats: false, bps: false, position: false, position_lines: Vec::new(), triggers: Default::default() }
+    }
+}
+
+/// The TRIGGER entries' labels on `menus` (keyed by `Do2`'s message and the
+/// entry's id): a named one's name and tail, dimmed when it is off; the rest
+/// their word.
+pub fn set_trigger_labels(menus: &mut crate::client_image::Menus, triggers: &[Option<crate::admin::Trigger>]) {
+    menus.labels.retain(|k, _| k.0 != crate::admin::TRIGGER_ENTRY);
+    for (i, t) in triggers.iter().enumerate() {
+        if let Some(t) = t {
+            let label = crate::client_image::Label { text: crate::ui::wide(&t.name), tail: crate::ui::wide(t.tail()), dim: !t.on };
+            menus.labels.insert((crate::admin::TRIGGER_ENTRY, i as i32), label);
+        }
     }
 }
 
@@ -101,9 +117,22 @@ impl Play {
         false
     }
 
-    /// The opcodes the GM's channel reads (0x0700, `Recv0700`); true when
-    /// handled.
+    /// The opcodes the GM's channel reads (0x0700, `Recv0700`; and the
+    /// server's trigger names, 0x7E08); true when handled.
     pub(super) fn admin_opcode(&mut self, op: u16, data: &[u8]) -> bool {
+        if op == crate::admin::OP_TRIGGER_NAMES {
+            match crate::admin::read_triggers(data) {
+                Some(t) => {
+                    let state = |t: &crate::admin::Trigger| [(!t.on, " (off)"), (t.running, " (running)")].iter().filter(|s| s.0).map(|s| s.1).collect::<String>();
+                    let named: Vec<String> = t.iter().enumerate().filter_map(|(i, t)| t.as_ref().map(|t| format!("{} {}{}", i + 1, t.name, state(t)))).collect();
+                    eprintln!("gm: trigger names: {}", if named.is_empty() { "none".into() } else { named.join(", ") });
+                    self.admin.triggers = t;
+                    self.trigger_labels();
+                }
+                None => eprintln!("gm: 0x7E08 of {} bytes cut short: the trigger names kept", data.len()),
+            }
+            return true;
+        }
         if op != crate::admin::OP_ADMIN_IN {
             return false;
         }
@@ -113,6 +142,14 @@ impl Play {
             None => eprintln!("gm: 0x0700 sub-op {:?}: not one Recv0700 reads", data.first()),
         }
         true
+    }
+
+    /// The TRIGGER entries' labels as the server named them (an entry it
+    /// left unnamed shows the game's word): set on the start menu's menus,
+    /// now and whenever CLIENT's image makes them anew (`client_data`).
+    pub(super) fn trigger_labels(&mut self) {
+        let Some(s) = self.start.as_mut() else { return };
+        set_trigger_labels(&mut s.menus, &self.admin.triggers);
     }
 
     /// `PromptWithName(name)`: word 1189, a space and the name (128 at
@@ -533,6 +570,34 @@ mod tests {
         assert!(sent(&mut p).is_empty());
     }
 
+    /// SOE's final live client's GM slash commands through `Play`: taken and
+    /// nothing sent while the GM's channel is off (no chat line either);
+    /// with it on, each one's 0x0701 (the rest of the line after the
+    /// command). The control: a slash command no one knows still goes to
+    /// the server as said.
+    #[test]
+    fn the_live_gm_commands() {
+        let mut p = play();
+        let lines = ["/rst_mastr Bob", "/rst_both Bob", "/rem_abil Bob Fireball", "/banktunar 50", "/servdown"];
+        for l in lines {
+            p.chat_line(l);
+        }
+        let said = p.session.record.replace(Vec::new()).unwrap_or_default();
+        assert!(said.is_empty(), "off: nothing, not even the line ({} sent)", said.len());
+        p.admin_opcode(0x0700, &[35, 2]);
+        for l in lines {
+            p.chat_line(l);
+        }
+        let str_ = |sub: u8, s: &[u8]| {
+            let mut v = vec![1, 7, sub, s.len() as u8, 0, 0, 0];
+            v.extend(s);
+            v
+        };
+        assert_eq!(sent(&mut p), vec![str_(57, b"Bob"), str_(58, b"Bob"), str_(59, b"Bob Fireball"), vec![1, 7, 56, 100], vec![1, 7, 101]]);
+        p.chat_line("/nosuch x");
+        assert!(!p.session.record.replace(Vec::new()).unwrap_or_default().is_empty(), "the control: said");
+    }
+
     /// The TEST menu's own entries: Extrapolate and Interpolate flip, the
     /// personal light runs On, Off, Auto, the day-night cycle holds the
     /// hour and lets go, Fast run is 15 and back to the mastery's speed,
@@ -606,6 +671,80 @@ mod tests {
                 assert!((at - pos[1]).abs() < 0.5, "the control stays at the centre's height: {at}");
             }
             assert!(!p.loading(), "the screen is down");
+        }
+    }
+
+    /// 0x7E08's body as go-eqoa-server writes it (`admin::read_triggers`).
+    fn names(list: &[(u8, u8, &str)]) -> Vec<u8> {
+        let mut m = vec![list.len() as u8];
+        for (entry, flags, name) in list {
+            m.extend([*entry, *flags, name.len() as u8]);
+            m.extend(name.as_bytes());
+        }
+        m
+    }
+
+    /// The server's trigger names through `Play`: 0x7E08 is the channel's,
+    /// each set replacing the last whole (a trigger taken away goes from its
+    /// entry), and the labels go on the TRIGGER entries' keys, the rest
+    /// left alone. The controls: a set cut short changes nothing; another
+    /// opcode is not the channel's; without CLIENT's menus nothing is set,
+    /// and they get the names when they come (`client_data`'s call).
+    #[test]
+    fn the_trigger_names_through_play() {
+        use crate::admin::TRIGGER_ENTRY;
+        let mut p = play();
+        assert!(p.admin_opcode(0x7E08, &names(&[(0, 1, "Invasion"), (2, 3, "Zombies")])));
+        assert_eq!(p.admin.triggers[0].as_ref().map(|t| t.name.as_str()), Some("Invasion"));
+        assert_eq!(p.admin.triggers[2].as_ref().map(|t| t.tail()), Some(" *"));
+        assert!(p.start.is_none(), "no menus here: nothing to label");
+        p.trigger_labels();
+        assert!(p.admin_opcode(0x7E08, &names(&[(2, 1, "Zombies")])));
+        assert!(p.admin.triggers[0].is_none(), "the whole set: Invasion taken away");
+        let before = p.admin.triggers.clone();
+        assert!(p.admin_opcode(0x7E08, &[1, 0, 1, 9, b'x']), "a cut set is still the channel's");
+        assert_eq!(p.admin.triggers, before, "the control: a set cut short changes nothing");
+        assert!(!p.admin_opcode(0x7E09, &[0]), "the control: not the channel's");
+
+        use crate::client_image::Label;
+        let label = |text: &str, tail: &str, dim| Label { text: crate::ui::wide(text), tail: crate::ui::wide(tail), dim };
+        let mut menus = crate::client_image::Menus::default();
+        menus.labels.insert((0xA101_0000, 0), label("KILL!", "", false));
+        super::set_trigger_labels(&mut menus, &[Some(crate::admin::Trigger { name: "Invasion".into(), on: false, running: true }), None]);
+        assert_eq!(menus.labels.get(&(TRIGGER_ENTRY, 0)), Some(&label("Invasion", " *", true)), "off: dimmed; running: the star");
+        assert_eq!(menus.labels.len(), 2, "one trigger's label, and another entry's left alone");
+        super::set_trigger_labels(&mut menus, &[None, Some(crate::admin::Trigger { name: "Two".into(), on: true, running: false })]);
+        assert!(!menus.labels.contains_key(&(TRIGGER_ENTRY, 0)), "a trigger taken away loses its label");
+        assert_eq!(menus.labels.get(&(TRIGGER_ENTRY, 1)), Some(&label("Two", "", false)), "the control: on and idle, plain");
+        assert_eq!(menus.labels.get(&(0xA101_0000, 0)), Some(&label("KILL!", "", false)), "the control: KILL's left alone");
+    }
+
+    /// The labels' keys are the TRIGGER entries the TEST menu reaches out
+    /// of the player's CLIENT image (SKIPs without it): TEST, Programming,
+    /// TRIGGER, each entry `Do2`'s message with its id 0 to 7 in order, so
+    /// each named entry finds its label. The control: no other entry of
+    /// any menu reached has a label.
+    #[test]
+    fn the_trigger_labels_meet_the_test_menus_entries() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/client.bin");
+        let Some(img) = std::fs::read(&path).ok().and_then(crate::client_image::ClientImage::from_bytes) else {
+            eprintln!("SKIP: no run/client.bin");
+            return;
+        };
+        let mut d = crate::startmenu::StartData::from_image(&img);
+        let named: Vec<_> = (0..8).map(|i| Some(crate::admin::Trigger { name: format!("T{i}"), on: true, running: false })).collect();
+        super::set_trigger_labels(&mut d.menus, &named);
+        let triggers: Vec<_> = d.menus.list.iter().flat_map(|m| m.entries.iter()).filter(|e| e.msg == crate::admin::TRIGGER_ENTRY).map(|e| (e.word, e.id)).collect();
+        assert_eq!(triggers, (0..8).map(|i| (507, i)).collect::<Vec<_>>(), "TRIGGER's eight entries, in order");
+        for m in &d.menus.list {
+            for e in &m.entries {
+                let label = d.menus.labels.get(&(e.msg, e.id));
+                if e.msg == crate::admin::TRIGGER_ENTRY {
+                    assert_eq!(label.map(|l| String::from_utf16_lossy(&l.text)), Some(format!("T{}", e.id)));
+                } else {
+                    assert!(label.is_none(), "the control: {:08X} {} has none", e.msg, e.id);
+                }
+            }
         }
     }
 }

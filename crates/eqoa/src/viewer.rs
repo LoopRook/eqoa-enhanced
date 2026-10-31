@@ -335,6 +335,8 @@ pub fn shot_with(
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
     let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))?;
     let mut renderer = Renderer::new(&device, &queue, render::TARGET_FORMAT);
+    renderer.set_ps2_sums(render::fog16::supported(&adapter));
+    renderer.set_ps2_sequential(fog_sequential());
     renderer.scroll_time = Some(script.as_ref().map_or(0, |s| s.ms) as f32 / 1000.0);
     if let Some(f) = arial(lib) {
         renderer.set_font(&device, &queue, &f);
@@ -365,6 +367,9 @@ pub fn shot_with(
         let tab = std::env::var_os("EQOA_TAB").is_some();
         let mut parts = crate::particles::Particles::new(&walker.scene, 0);
         let mut held_fx: Option<crate::particles::Held> = None;
+        // the last frame's spell bolts and weapon trails, drawn by the shot
+        let mut shot_bolts: Vec<render::billboard::Strips> = Vec::new();
+        let mut shot_trails: Vec<render::billboard::Strips> = Vec::new();
         fx = crate::fx::enabled().then(crate::fx::Fx::new);
         // `EQOA_SPELL=n`: SPELLFX's n-th effect, cast by the character at a
         // stand-in 6 ahead of it at EQOA_AT (offline, no server).
@@ -558,6 +563,9 @@ pub fn shot_with(
                 let frame_s = frame_ms as f32 / 1000.0;
                 // the keys' and the pad's sticks are in `sticks` already
                 mouse.moving = crate::mouse::moving(&sticks, &[0.0; 4], play.as_ref().is_some_and(|p| p.autorun));
+                // the look turns the walk as the last console frame left it
+                // (`Walker::rewind`)
+                walker.rewind();
                 let (look, zoom) = mouse.look(&mut walker, inverted, frame_s);
                 if let Some(p) = play.as_mut() {
                     p.wheel_style(&mut walker, zoom, &mut mouse.back);
@@ -734,10 +742,14 @@ pub fn shot_with(
                     if let Some(k) = k {
                         if p.search_open() {
                             p.search_key(k, down);
+                        } else if p.lfg_owns() {
+                            p.lfg_key(k, down);
                         } else if p.bank_owns() {
                             p.bank_key(k, down);
                         } else if p.npcw_owns() {
                             p.npcw_key(k, down);
+                        } else if p.duel_owns() {
+                            p.duel_key(k, down);
                         } else if p.support_owns() {
                             p.support_key(k, down);
                         } else if p.mode == 5 {
@@ -967,11 +979,11 @@ pub fn shot_with(
                 }
                 sp.frame(&mut bodies, &casts, SELF, Some(&mut walker.cam.effect), t, &walker.eye, lib, None);
                 batches.append(&mut sp.batches);
-                renderer.strips = std::mem::take(&mut sp.strips);
+                shot_bolts = std::mem::take(&mut sp.strips);
             }
             if let Some(sp) = play.as_mut().and_then(|p| p.spells.as_mut()) {
                 batches.append(&mut sp.batches);
-                renderer.strips = std::mem::take(&mut sp.strips);
+                shot_bolts = std::mem::take(&mut sp.strips);
             }
             // the particles of the items in hands (an epic weapon's)
             if let Some(p) = play.as_ref() {
@@ -980,7 +992,7 @@ pub fn shot_with(
             }
             // the weapon trails (VITrailFxRender) after them
             if let Some(p) = play.as_mut() {
-                renderer.strips.append(&mut p.trail_strips);
+                shot_trails = std::mem::take(&mut p.trail_strips);
             }
             // the atmosphere every frame; the last frame's lights and render
             // are the shot's
@@ -1024,16 +1036,28 @@ pub fn shot_with(
         let mut g = renderer.upload(&device, &queue, &body, &[model], &textures);
         renderer.set_palette(&queue, &g, &palette);
         crate::play::place_body(&mut g, &walker, model);
-        if let Some(p) = play.as_mut().filter(|p| p.has_self()) {
-            p.place_self(&walker, model, &palette, &renderer, &queue);
-            g.visible = false;
+        if let Some(p) = play.as_mut() {
+            if p.has_self() {
+                p.place_self(&walker, model, &palette, &renderer, &queue);
+            }
+            g.visible &= crate::play::plain_body_shown(Some(&*p));
         }
         gpu.push(g);
-        // the trial's projectiles where the last frame left them
+        // the trial's projectiles where the last frame left them, and the
+        // meshes its animated sprites carry (`Spells::meshes`)
         if let Some((sp, _, _)) = &trial {
             for (id, m) in &sp.flying {
                 if let Some(model) = lib.lookup(*id as i32).and_then(|r| lib.build_model(r)) {
                     gpu.push(renderer.upload(&device, &queue, &model, &[m.to_cols()], &textures));
+                }
+            }
+            for (id, m, palette) in &sp.meshes {
+                if let Some(model) = lib.lookup(*id as i32).and_then(|r| lib.build_model(r)) {
+                    let g = renderer.upload(&device, &queue, &model, &[m.to_cols()], &textures);
+                    if !palette.is_empty() {
+                        renderer.set_palette(&queue, &g, palette);
+                    }
+                    gpu.push(g);
                 }
             }
         }
@@ -1090,6 +1114,11 @@ pub fn shot_with(
             crate::sky::update(&mut renderer, &device, &queue, &mut gpu, at, f, &textures);
         }
         view = frame.0;
+        // the last frame's bolts lit by the shot's lights, its trails unlit
+        // after them (`spells::light_bolts`)
+        crate::spells::light_bolts(&mut shot_bolts, &view, fx.as_ref().map_or(Vec3::ZERO, |f| f.raster_normal()));
+        renderer.strips = shot_bolts;
+        renderer.strips.append(&mut shot_trails);
         // the volumes as the shot's camera sees them (the walk's clock does
         // not move: nothing steps again)
         if let Some(fx) = fx.as_mut().filter(|_| crate::settings::client().environment) {
@@ -1153,7 +1182,8 @@ pub fn shot_with(
             eprintln!("play: {}", p.describe());
             for e in p.entities.slots.iter().flatten() {
                 let name = e.creature.as_ref().map(|c| c.name.as_str()).unwrap_or("");
-                eprintln!("  entity {:#x} {name:24} model {:#010x} at ({:.1}, {:.1}, {:.1})", e.id, e.model, e.pos[0], e.pos[1], e.pos[2]);
+                let two = if e.model2 != 0 || e.drawn_model != e.model { format!(" model2 {:#010x} drawn {:#010x}", e.model2, e.drawn_model) } else { String::new() };
+                eprintln!("  entity {:#x} {name:24} model {:#010x}{two} at ({:.1}, {:.1}, {:.1})", e.id, e.model, e.pos[0], e.pos[1], e.pos[2]);
             }
         }
     }
@@ -1336,6 +1366,34 @@ fn report_shot(g: &Gfx, frame: Option<&wgpu::SurfaceTexture>) {
     crate::report::set_shot(t.width(), t.height(), &rgba);
 }
 
+/// The corpse, merchant and trade windows' keys (modes 1, 10, 15, 16) on
+/// the keyboard, as the game's keys and pad buttons: the arrows the d-pad,
+/// Enter or E ✕, Escape or Backspace △, Q □ (a trade's accept, as the
+/// game's 81/113), Space the game's 32 (a trade's chat line, as R3) but in
+/// the corpse's window, where it is ✕: on the pad the attack (✕, Space on
+/// the keyboard) opens a corpse and in its window takes the row chosen
+/// (`VIWndList::OnKeyDown`: LEAVE ALL closes it, an item takes it, TAKE ALL
+/// takes everything), while 32 there is nothing to the game
+/// (`VIWndLoot::OnKeyDown` takes 27, 132 and 134), so the key that opened
+/// it did nothing in it (F3 20261029-024647: "spacebar can open loot, it
+/// should also allow you to close or loot the items as well").
+pub(crate) fn npcw_key_of(key: &Key, mode: i32) -> Option<i32> {
+    use crate::startmenu::keys as K;
+    match key {
+        Key::Named(NamedKey::ArrowUp) => Some(K::UP),
+        Key::Named(NamedKey::ArrowDown) => Some(K::DOWN),
+        Key::Named(NamedKey::ArrowLeft) => Some(K::LEFT),
+        Key::Named(NamedKey::ArrowRight) => Some(K::RIGHT),
+        Key::Named(NamedKey::Enter) => Some(K::CROSS),
+        Key::Character(c) if c.eq_ignore_ascii_case("e") => Some(K::CROSS),
+        Key::Character(c) if c.eq_ignore_ascii_case("q") => Some(113),
+        Key::Named(NamedKey::Space) if mode == 1 => Some(K::CROSS),
+        Key::Named(NamedKey::Space) => Some(32),
+        Key::Named(NamedKey::Escape) | Key::Named(NamedKey::Backspace) => Some(K::ESCAPE),
+        _ => None,
+    }
+}
+
 /// A key as the game's keyboard gives it (`VIKeyboard::Read`): 13 Enter,
 /// 27 Escape, 8 Backspace, 9 Tab, 17-20 the cursor keys (left, right, up,
 /// down), 21-24 Page Up, Page Down, End, Home; a character as itself.
@@ -1473,6 +1531,16 @@ fn mark(perf: &mut Option<Perf>, phase: usize) {
 /// Frames drawn so far (the browser page's rate readout).
 pub static FRAMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// `EQOA_FOG16=sequential` (natively): the ground fog a PS2 frame keeps drawn
+/// a fan at a time, the GS's arithmetic exactly (`render::fog16`'s reference,
+/// to measure its sums against: slow).
+fn fog_sequential() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    return std::env::var("EQOA_FOG16").is_ok_and(|v| v == "sequential");
+    #[cfg(target_arch = "wasm32")]
+    false
+}
+
 /// A surface and device made before the event loop: a browser's, where the
 /// adapter is the canvas's own (WebGL2) and asking for it is asynchronous.
 /// `attrs` puts the window on the same canvas.
@@ -1482,6 +1550,8 @@ pub struct PendingGfx {
     pub config: wgpu::SurfaceConfiguration,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
+    /// the adapter can add up the ground fog's sums (`render::fog16`)
+    pub ps2_sums: bool,
 }
 
 struct Gfx {
@@ -1567,15 +1637,17 @@ impl Gfx {
     }
 
     /// The window's texture to draw this frame on (`Ok(None)`: frames are
-    /// drawn offscreen), or `Err` when it gives none: covered (on macOS wgpu
-    /// answers `Occluded` at once while no part of the window can be seen, a
-    /// full-screen window behind another; `covered`, a test's script's),
-    /// timed out, or its surface outdated or lost, which is configured again.
+    /// drawn offscreen), or `Err` when it gives none: covered (`Err(true)`:
+    /// on macOS wgpu answers `Occluded` at once while no part of the window
+    /// can be seen, a full-screen window behind another; `covered`, a test's
+    /// script's), or (`Err(false)`) timed out, or its surface outdated or
+    /// lost, which is configured again: wgpu waits a second for one before it
+    /// says timed out, and a frame that waited so is a stall's (`stall`).
     /// The frame's uploads are submitted all the same: wgpu keeps every
     /// queued write until a submission takes it, and a window left behind
     /// another grew by each frame's until the machine ran out of memory (F3
     /// 20261024-093648: two windows on a Mac).
-    fn acquire(&self, covered: bool) -> Result<Option<wgpu::SurfaceTexture>, ()> {
+    fn acquire(&self, covered: bool) -> Result<Option<wgpu::SurfaceTexture>, bool> {
         let stale = match (&self.surface, covered) {
             (_, true) => None,
             (None, false) => return Ok(None),
@@ -1589,7 +1661,7 @@ impl Gfx {
         if let Some(surface) = stale {
             surface.configure(&self.device, &self.config);
         }
-        Err(())
+        Err(stale.is_none())
     }
 }
 
@@ -1628,6 +1700,9 @@ struct Perf {
     worst: f64,
     /// seconds per phase since `since`
     total: [f64; Perf::NAMES.len()],
+    /// this frame's seconds per phase (from `begin`), for a stall's line
+    /// (`stall`)
+    frame: [f64; Perf::NAMES.len()],
     /// the last frame's models and draw calls
     drawn: (u32, u32),
     /// the frames the Frame Rate skipped since `since` (a page's animation
@@ -1705,9 +1780,9 @@ impl PerfSpan {
 }
 
 impl Perf {
-    const NAMES: [&str; 17] = [
+    const NAMES: [&str; 18] = [
         "stream", "walk", "play", "pose", "zones", "sound", "weather", "particles", "lights", "acquire", "hud", "encode", "submit",
-        "gpu wait", "volumes", "flora", "shadows",
+        "gpu wait", "volumes", "flora", "shadows", "pads",
     ];
 
     /// Always made; printed under `EQOA_PERF` (`?perf`).
@@ -1721,7 +1796,7 @@ impl Perf {
 
     fn new(print: bool) -> Perf {
         let now = Instant::now();
-        Perf { print, since: now, mark: now, frames: 0, worst: 0.0, total: [0.0; Perf::NAMES.len()], drawn: (0, 0), skipped: 0, gaps: Vec::new(), last_start: None, last: None }
+        Perf { print, since: now, mark: now, frames: 0, worst: 0.0, total: [0.0; Perf::NAMES.len()], frame: [0.0; Perf::NAMES.len()], drawn: (0, 0), skipped: 0, gaps: Vec::new(), last_start: None, last: None }
     }
 
     /// Five seconds begun again at `now` (what was kept of the last whole
@@ -1736,6 +1811,7 @@ impl Perf {
             self.restart(now);
         }
         self.mark = now;
+        self.frame = [0.0; Perf::NAMES.len()];
     }
 
     /// A frame not drawn in the world (the pregame's, a hidden window's):
@@ -1752,8 +1828,15 @@ impl Perf {
     /// The time since the last mark goes to phase `i`.
     fn mark(&mut self, i: usize) {
         let now = Instant::now();
-        self.total[i] += (now - self.mark).as_secs_f64();
+        let t = (now - self.mark).as_secs_f64();
+        self.total[i] += t;
+        self.frame[i] += t;
         self.mark = now;
+    }
+
+    /// This frame's phases so far, by name (`stall::Watch::end`).
+    fn frame_phases(&self) -> Vec<(&'static str, f64)> {
+        Perf::NAMES.iter().copied().zip(self.frame).collect()
     }
 
     /// The span so far.
@@ -1879,6 +1962,8 @@ struct App {
     /// the window's coming to the front, said in the log once (`arrival`),
     /// and the controllers' buttons the last frame read (its first press)
     arrival: crate::arrival::Arrival,
+    /// Frames a second or more apart, and where the time went (`stall`).
+    stall: crate::stall::Watch,
     pad_down: u16,
     /// the sticks `UpdateControls` got last frame: the pad's, the keys', the
     /// mouse's and the touch screen's (for a report)
@@ -1927,6 +2012,9 @@ struct App {
     /// `EQOA_SAY=<line>@<ms>[;...]`: what a test's script says in the
     /// world's chat line then (ms on `clock`), as a playshot's does.
     say_script: Vec<(i64, String)>,
+    /// `EQOA_TARGET=<name>@<ms>[;...]`: the creature of that name targeted
+    /// then (ms on `clock`), as a playshot's does.
+    target_script: Vec<(i64, String)>,
     /// `EQOA_PLAY_KEYS=<key>@<ms>[;...]`: keys a test's script presses then
     /// (ms on `clock`; a key by its `keys.opt` name), down and up through the
     /// keyboard's dispatch, as a controller's button on a key's row is
@@ -2049,6 +2137,7 @@ fn run_app(lib: Library, source: Source, play: Option<crate::play::Play>, pendin
         keys_edge: Default::default(),
         pad_edge: Default::default(),
         arrival: Default::default(),
+        stall: Default::default(),
         pad_down: 0,
         sticks_used: [0.0; 4],
         mouse: crate::mouse::Mouse::default(),
@@ -2072,6 +2161,9 @@ fn run_app(lib: Library, source: Source, play: Option<crate::play::Play>, pendin
         era_loading: None,
         art_script: std::env::var("EQOA_ART_AT").map(|v| v.split(';').filter_map(|t| t.trim().parse().ok()).collect()).unwrap_or_default(),
         say_script: std::env::var("EQOA_SAY")
+            .map(|v| v.split(';').filter_map(|s| s.rsplit_once('@').and_then(|(l, t)| Some((t.trim().parse().ok()?, l.to_string())))).collect())
+            .unwrap_or_default(),
+        target_script: std::env::var("EQOA_TARGET")
             .map(|v| v.split(';').filter_map(|s| s.rsplit_once('@').and_then(|(l, t)| Some((t.trim().parse().ok()?, l.to_string())))).collect())
             .unwrap_or_default(),
         key_script: std::env::var("EQOA_PLAY_KEYS")
@@ -2640,7 +2732,12 @@ impl App {
         // the left button steers while the player moves (`Mouse::moving`)
         self.mouse.moving = crate::mouse::moving(&a, &pad, self.play.as_ref().is_some_and(|p| p.autorun));
         let ((look, zoom), feel) = match self.walker.as_mut() {
-            Some(w) if free => (self.mouse.look(w, inverted, self.frame_s), crate::mouse::look(w, tx, ty, pinch, inverted, self.frame_s)),
+            Some(w) if free => {
+                // the looks turn the walk as the last console frame left it
+                // (`Walker::rewind`), so the frame's walk steps on from them
+                w.rewind();
+                (self.mouse.look(w, inverted, self.frame_s), crate::mouse::look(w, tx, ty, pinch, inverted, self.frame_s))
+            }
             // the manual camera (L1 or R1 held): the mouse's and a finger's
             // drags look with it (the client's, `mouse::aim`); the wheel is
             // nothing
@@ -2892,6 +2989,10 @@ impl App {
         if let Some(p) = &self.perf {
             let _ = writeln!(o, "{}", p.describe());
         }
+        // the frames a second or more after the last, and the disc's reads
+        // (`stall`)
+        let _ = writeln!(o, "{}", self.stall.describe());
+        let _ = writeln!(o, "{}", crate::stall::disc::describe());
         if let Some(g) = &self.gfx {
             let _ = writeln!(o, "surface {}x{} {:?}, {}", g.config.width, g.config.height, g.config.format, if g.window.fullscreen().is_some() { "full screen" } else { "a window" });
         }
@@ -2956,6 +3057,7 @@ impl App {
                 c.dist.0,
                 c.flags
             );
+            let _ = writeln!(o, "body's last changes (back from now: locomotion, the layers' animations, speed): {}", w.describe_changes());
             let cam = &w.cam;
             let _ = writeln!(o, "camera: distance {:.2} of {:.2} (chosen {:.2}), pitch {:.3} (default {:.3})", cam.cur.dist.0, cam.max_orbit_distance.0, w.reach.chosen(cam).0, cam.cur.orbit.y.0, cam.def_orbit_pitch.0);
         }
@@ -2976,8 +3078,10 @@ impl App {
     }
 
     /// The renderer on a configured surface (or none: an offscreen target of
-    /// the configuration's size), then the scene.
-    fn attach(&mut self, window: Arc<Window>, surface: Option<wgpu::Surface<'static>>, config: wgpu::SurfaceConfiguration, device: wgpu::Device, queue: wgpu::Queue) {
+    /// the configuration's size), then the scene. `ps2_sums`: the adapter can
+    /// add up the ground fog's sums, so the options' Ground Fog at PS2 blends
+    /// it as a PS2 frame keeps it (`render::fog16`); without, as it is.
+    fn attach(&mut self, window: Arc<Window>, surface: Option<wgpu::Surface<'static>>, config: wgpu::SurfaceConfiguration, device: wgpu::Device, queue: wgpu::Queue, ps2_sums: bool) {
         // in front or not as it opens: a window opened behind another (the
         // system can refuse a program the front) has no `Focused` to say so
         self.pads.focused = window.has_focus();
@@ -2986,6 +3090,11 @@ impl App {
         #[cfg(not(target_arch = "wasm32"))]
         crate::gpulost::watch(&device);
         let mut renderer = Renderer::new(&device, &queue, config.format);
+        renderer.set_ps2_sums(ps2_sums);
+        renderer.set_ps2_sequential(fog_sequential());
+        if !ps2_sums {
+            eprintln!("ground fog: blended as it is (the adapter cannot add up its sums in float textures)");
+        }
         if let Some(f) = arial(&self.lib) {
             renderer.set_font(&device, &queue, &f);
         }
@@ -3102,7 +3211,7 @@ impl App {
         let covered = self.covered_script.iter().any(|&(a, b)| (a..b).contains(&now)) || page_hidden();
         let frame = match g.acquire(covered) {
             Ok(f) => f,
-            Err(()) => {
+            Err(_) => {
                 self.hidden_until = hidden_gap();
                 return;
             }
@@ -3137,6 +3246,12 @@ impl App {
                 if w > 0 && h > 0 {
                     let draws: Vec<render::Draw> = scene.models.iter().map(|&m| render::Draw::Model(m)).collect();
                     g.renderer.draw_viewport(&g.queue, &mut enc, &f.color, &f.depth, &scene.view, &draws, [x, y, w, h]);
+                    // then its particles (`VIParticleSystem::Render` after the actors)
+                    if !scene.billboards.is_empty() {
+                        let textures = render::library_textures(&host.pre.res.lib);
+                        let (v, p) = scene.camera;
+                        g.renderer.draw_billboards_viewport(&g.device, &g.queue, &mut enc, &f.color, &f.depth, v, p, &scene.billboards, &textures, [x, y, w, h]);
+                    }
                 }
                 g.renderer.draw_ui(&g.device, &mut enc, &f.color, &f.depth, f.size, s..n);
             }
@@ -3437,6 +3552,54 @@ impl App {
             }
             return;
         }
+        // The live client's group search (mode 42, `groupsearch`): the
+        // arrows, Enter or E (X), Escape or Backspace (triangle), Q (square:
+        // the help), Tab and ` (R1 and L1: the column sorted by); its edit
+        // takes the keyboard.
+        if let Some(p) = self.play.as_mut()
+            && p.typing.is_none()
+            && p.lfg_owns()
+        {
+            let down = event.state == ElementState::Pressed;
+            if p.lfg_typing() {
+                let named = match &event.logical_key {
+                    Key::Named(NamedKey::Backspace) => Some(8),
+                    Key::Named(NamedKey::Escape) => Some(27),
+                    Key::Named(NamedKey::Enter) => Some(13),
+                    Key::Named(NamedKey::ArrowLeft) => Some(17),
+                    Key::Named(NamedKey::ArrowRight) => Some(18),
+                    _ => None,
+                };
+                if let Some(k) = named {
+                    p.lfg_key(k, down);
+                } else if down && let Some(t) = &event.text {
+                    for c in t.chars().filter(|c| c.is_ascii() && !c.is_ascii_control()) {
+                        p.lfg_key(c as i32, true);
+                    }
+                }
+                return;
+            }
+            use crate::startmenu::keys as K;
+            let k = match &event.logical_key {
+                Key::Named(NamedKey::ArrowUp) => Some(K::UP),
+                Key::Named(NamedKey::ArrowDown) => Some(K::DOWN),
+                Key::Named(NamedKey::ArrowLeft) => Some(K::LEFT),
+                Key::Named(NamedKey::ArrowRight) => Some(K::RIGHT),
+                Key::Named(NamedKey::Enter) => Some(K::CROSS),
+                Key::Character(c) if c.eq_ignore_ascii_case("e") => Some(K::CROSS),
+                Key::Character(c) if c.eq_ignore_ascii_case("q") => Some(133),
+                Key::Character(c) if c.as_str() == "`" || c.as_str() == "~" => Some(140),
+                Key::Named(NamedKey::Tab) => Some(142),
+                Key::Named(NamedKey::Escape) | Key::Named(NamedKey::Backspace) => Some(K::ESCAPE),
+                _ => None,
+            };
+            if let Some(k) = k
+                && !(down && event.repeat)
+            {
+                p.lfg_key(k, down);
+            }
+            return;
+        }
         // The bank (mode 11): the arrows, Enter or E (X), Escape
         // (triangle); the auction form's editor takes the keyboard.
         if let Some(p) = self.play.as_mut()
@@ -3481,15 +3644,18 @@ impl App {
             return;
         }
         // The corpse, merchant and trade windows (modes 1, 10, 15,
-        // 16): the arrows, Enter or E (X), Escape (triangle), Q
-        // (accept a trade), Space (the trade's chat line, which then
-        // takes the keyboard as the edit box does).
+        // 16), and the duel's invitation and wager (43, 44, the trade's
+        // copy): `npcw_key_of`'s keys; the trade's and the wager's chat
+        // line, once Space has opened it, takes the keyboard as the edit box
+        // does.
         if let Some(p) = self.play.as_mut()
             && p.typing.is_none()
-            && p.npcw_owns()
+            && (p.npcw_owns() || p.duel_owns())
         {
             let down = event.state == ElementState::Pressed;
-            if p.npcw_typing() {
+            let duel = p.duel_owns();
+            let send = |p: &mut crate::play::Play, k: i32, down: bool| if duel { p.duel_key(k, down) } else { p.npcw_key(k, down) };
+            if (duel && p.duel_typing()) || (!duel && p.npcw_typing()) {
                 let named = match &event.logical_key {
                     Key::Named(NamedKey::Backspace) => Some(8),
                     Key::Named(NamedKey::Escape) => Some(27),
@@ -3499,31 +3665,18 @@ impl App {
                     _ => None,
                 };
                 if let Some(k) = named {
-                    p.npcw_key(k, down);
+                    send(p, k, down);
                 } else if down && let Some(t) = &event.text {
                     for c in t.chars().filter(|c| c.is_ascii() && !c.is_ascii_control()) {
-                        p.npcw_key(c as i32, true);
+                        send(p, c as i32, true);
                     }
                 }
                 return;
             }
-            use crate::startmenu::keys as K;
-            let k = match &event.logical_key {
-                Key::Named(NamedKey::ArrowUp) => Some(K::UP),
-                Key::Named(NamedKey::ArrowDown) => Some(K::DOWN),
-                Key::Named(NamedKey::ArrowLeft) => Some(K::LEFT),
-                Key::Named(NamedKey::ArrowRight) => Some(K::RIGHT),
-                Key::Named(NamedKey::Enter) => Some(K::CROSS),
-                Key::Character(c) if c.eq_ignore_ascii_case("e") => Some(K::CROSS),
-                Key::Character(c) if c.eq_ignore_ascii_case("q") => Some(113),
-                Key::Named(NamedKey::Space) => Some(32),
-                Key::Named(NamedKey::Escape) | Key::Named(NamedKey::Backspace) => Some(K::ESCAPE),
-                _ => None,
-            };
-            if let Some(k) = k
+            if let Some(k) = npcw_key_of(&event.logical_key, p.mode)
                 && !(down && event.repeat)
             {
-                p.npcw_key(k, down);
+                send(p, k, down);
             }
             return;
         }
@@ -4144,7 +4297,7 @@ impl ApplicationHandler for App {
         }
         if let Some(p) = self.pending.take() {
             let window = Arc::new(el.create_window(p.attrs).expect("window"));
-            self.attach(window, Some(p.surface), p.config, p.device, p.queue);
+            self.attach(window, Some(p.surface), p.config, p.device, p.queue, p.ps2_sums);
             return;
         }
         // where the player last had it (`winplace`)
@@ -4168,6 +4321,7 @@ impl ApplicationHandler for App {
             #[cfg(not(target_arch = "wasm32"))]
             crate::report::set_gpu(format!("{} ({:?})", info.name, info.backend));
             let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).expect("device");
+            let ps2_sums = render::fog16::supported(&adapter);
             let config = wgpu::SurfaceConfiguration {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 format: render::TARGET_FORMAT,
@@ -4179,7 +4333,7 @@ impl ApplicationHandler for App {
                 view_formats: Vec::new(),
                 color_space: wgpu::SurfaceColorSpace::Auto,
             };
-            self.attach(window, None, config, device, queue);
+            self.attach(window, None, config, device, queue, ps2_sums);
             return;
         }
         // each step in the log, and a start that dies in the driver tries
@@ -4242,7 +4396,8 @@ impl ApplicationHandler for App {
         surface.configure(&device, &config);
         #[cfg(not(target_arch = "wasm32"))]
         start.done();
-        self.attach(window, Some(surface), config, device, queue);
+        let ps2_sums = render::fog16::supported(&adapter);
+        self.attach(window, Some(surface), config, device, queue, ps2_sums);
         if let Some(g) = self.gfx.as_mut() {
             g.present_modes = offered;
         }
@@ -4276,14 +4431,51 @@ impl ApplicationHandler for App {
 
     /// The mouse's own motion: the look while it holds the pointer.
     fn device_event(&mut self, _: &ActiveEventLoop, _: winit::event::DeviceId, event: winit::event::DeviceEvent) {
-        if let winit::event::DeviceEvent::MouseMotion { delta } = event {
-            #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(target_arch = "wasm32"))]
+        if let winit::event::DeviceEvent::MouseMotion { .. } = &event {
             if self.gfx.as_ref().is_some_and(|g| g.forge_runtime.captures_motion()) { return; }
-            self.mouse.motion(delta.0, delta.1);
         }
+        self.stall.enter(Instant::now());
+        let what = if let winit::event::DeviceEvent::MouseMotion { delta } = event {
+            self.mouse.motion(delta.0, delta.1);
+            "the mouse's motion"
+        } else {
+            "a device's event"
+        };
+        self.stall.leave(what, Instant::now());
     }
 
-    fn about_to_wait(&mut self, _el: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        self.stall.enter(Instant::now());
+        self.turn(el);
+        self.stall.leave("the loop's turn", Instant::now());
+    }
+
+    /// Each window event, its time the client's own when it draws no frame
+    /// (`stall`).
+    fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(g) = &mut self.gfx
+            && g.forge_runtime.event(&g.window, &event, crate::fork_ext::is_plain_play(self.play.as_mut()))
+        {
+            // Keep physical pointer bookkeeping current without routing an
+            // addon-owned hover/drag into gameplay or the native map.
+            if let WindowEvent::CursorMoved { position, .. } = &event {
+                self.cursor = (position.x, position.y);
+                self.mouse.moved(position.x, position.y);
+            }
+            return;
+        }
+        let what = crate::stall::event_name(&event);
+        self.stall.enter(Instant::now());
+        self.handle_window_event(el, id, event);
+        self.stall.leave(what, Instant::now());
+    }
+}
+
+impl App {
+    /// `about_to_wait`: the loop's turn, between its events and its wait.
+    fn turn(&mut self, _el: &ActiveEventLoop) {
         self.winplace.flush(false);
         // a model viewer draws on input alone, but not while the 2002 disc's
         // files are coming (`poll_era` takes them on a frame) or a test's F9
@@ -4314,19 +4506,7 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(g) = &mut self.gfx
-            && g.forge_runtime.event(&g.window, &event, crate::fork_ext::is_plain_play(self.play.as_mut()))
-        {
-            // Keep physical pointer bookkeeping current without routing an
-            // addon-owned hover/drag into gameplay or the native map.
-            if let WindowEvent::CursorMoved { position, .. } = &event {
-                self.cursor = (position.x, position.y);
-                self.mouse.moved(position.x, position.y);
-            }
-            return;
-        }
+    fn handle_window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         if let Some(g) = &self.gfx {
             self.winplace.event(&g.window, &event);
         }
@@ -4382,6 +4562,9 @@ impl ApplicationHandler for App {
                     crate::settings::set_display_refresh(g.window.current_monitor().and_then(|m| m.refresh_rate_millihertz()));
                 }
             }
+            // minimised (Windows sends a size of nothing): no frame comes, and
+            // the time until one does is no stall
+            WindowEvent::Resized(s) if s.width == 0 || s.height == 0 => self.stall.away(),
             WindowEvent::Resized(s) if s.width > 0 && s.height > 0 => {
                 let Some(g) = &mut self.gfx else { return };
                 let Some(surface) = &g.surface else { return };
@@ -4820,12 +5003,15 @@ impl ApplicationHandler for App {
                     if let Some(p) = &mut self.perf {
                         p.away();
                     }
+                    self.stall.away();
                     self.host_frame(el, game_frame);
                     return;
                 }
                 if let Some(p) = &mut self.perf {
                     p.begin();
                 }
+                // a stall: this frame a second or more after the last (`stall`)
+                self.stall.begin(frame_start, crate::audio::game_waits(), self.play.as_ref().map(|p| p.heard()));
                 if self.quit_at.is_some_and(|q| self.clock.elapsed().as_secs_f64() >= q) {
                     el.exit();
                     return;
@@ -4875,6 +5061,9 @@ impl ApplicationHandler for App {
                 {
                     p.add_from(&w.scene, first);
                 }
+                mark(&mut self.perf, 0);
+                // the controllers (XInput, HID, gilrs) and the windows they
+                // are shared with (`multibox`), and the touch pad's clicks
                 self.poll_pad(el);
                 for c in self.touch.take_clicks() {
                     self.click(c, true);
@@ -4888,7 +5077,7 @@ impl ApplicationHandler for App {
                 self.touch.holds = self.play.as_ref().is_some_and(|p| p.map.open);
                 self.touch.window = self.play.as_ref().is_some_and(|p| p.window_up() || p.map.open || p.map.search.open);
                 self.touch.dpad = self.play.as_mut().is_some_and(|p| p.quick_dpad());
-                mark(&mut self.perf, 0);
+                mark(&mut self.perf, 17);
                 self.grab_pointer(true);
                 let sticks = self.sticks();
                 self.sticks_used = sticks;
@@ -4924,6 +5113,7 @@ impl ApplicationHandler for App {
                 let console = &mut self.console;
                 let pads = &mut self.pads;
                 let say_script = &mut self.say_script;
+                let target_script = &mut self.target_script;
                 let walk_view = self.walker.as_mut().map(|w| {
                     // UpdateControls, on the sticks and the keyboard's axes,
                     // as the client stands
@@ -4938,6 +5128,11 @@ impl ApplicationHandler for App {
                     if let Some(p) = play {
                         while say_script.first().is_some_and(|s| s.0 <= now) {
                             p.chat_line(&say_script.remove(0).1);
+                        }
+                        while target_script.first().is_some_and(|s| s.0 <= now) {
+                            let name = target_script.remove(0).1;
+                            let found = p.target_by_name(&name);
+                            crate::say(&format!("script: target {name}: {found}"));
                         }
                         let gpu = crate::play::Gpu { renderer: &mut g.renderer, device: &g.device, queue: &g.queue };
                         // The server named the player's model: dress the walker in it.
@@ -4998,9 +5193,15 @@ impl ApplicationHandler for App {
                         crate::play::place_body(body, w, m);
                     }
                     // Dressed as the server says: the plain body gives way.
-                    if let Some(p) = play.as_mut().filter(|p| p.has_self()) {
-                        p.place_self(w, m, &palette, &g.renderer, &g.queue);
-                        if let Some(body) = g.models.get_mut(body_at) {
+                    // In play it never shows (`play::plain_body_shown`): the
+                    // player is drawn once the server's entity for it comes
+                    if let Some(p) = play.as_mut() {
+                        if p.has_self() {
+                            p.place_self(w, m, &palette, &g.renderer, &g.queue);
+                        }
+                        if let Some(body) = g.models.get_mut(body_at)
+                            && !crate::play::plain_body_shown(Some(&*p))
+                        {
                             body.visible = false;
                         }
                     }
@@ -5048,18 +5249,15 @@ impl ApplicationHandler for App {
                         bb_view = Some((v, proj));
                     }
                     // the spell effects' particles after the world's, their lightning before
+                    let mut bolts = Vec::new();
                     if let Some(sp) = play.as_mut().and_then(|p| p.spells.as_mut()) {
                         batches.append(&mut sp.batches);
-                        g.renderer.strips = std::mem::take(&mut sp.strips);
+                        bolts = std::mem::take(&mut sp.strips);
                     }
                     // the particles of the items in hands (an epic weapon's)
                     if let Some(p) = play.as_ref() {
                         let held = held_fx.get_or_insert_with(|| crate::particles::Held::new(now));
                         batches.extend(held.frame(lib, &p.in_hand(lib, w, m), &w.eye.position, now));
-                    }
-                    // the weapon trails (VITrailFxRender) after them
-                    if let Some(p) = play.as_mut() {
-                        g.renderer.strips.append(&mut p.trail_strips);
                     }
                     mark(perf, 7);
                     let hour_now = game_hour(play.as_ref(), clock);
@@ -5067,12 +5265,26 @@ impl ApplicationHandler for App {
                     if let Some(p) = play.as_mut() {
                         lights.0.point = p.point_light(w, now, hour_now, weather.as_ref());
                     }
+                    // the bolts lit by the scene's lights (`spells::light_bolts`),
+                    // the weapon trails (VITrailFxRender) after them unlit
+                    crate::spells::light_bolts(&mut bolts, &lights.0, fx.as_ref().map_or(Vec3::ZERO, |f| f.raster_normal()));
+                    g.renderer.strips = bolts;
+                    if let Some(p) = play.as_mut() {
+                        g.renderer.strips.append(&mut p.trail_strips);
+                    }
                     // the characters' blob shadows (`VIScene::RenderShadows`,
                     // `shadows`): drawn after the particle system's batches,
                     // which these are, before the weather's; none with the
                     // options' Shadows off or under the loading screen
                     mark(perf, 8);
                     g.renderer.particles_end = batches.len();
+                    // the creatures' sound triggers kept as the console trips
+                    // them, for the ones it rasters (`keep_rastered_trips`)
+                    if let Some(p) = play.as_mut()
+                        && !loading
+                    {
+                        p.keep_rastered_trips(w, proj * v, lights.0.eye);
+                    }
                     if crate::settings::client().shadows && !loading {
                         let casters = match play.as_ref() {
                             Some(p) => p.shadow_casters(w, lib),
@@ -5119,12 +5331,26 @@ impl ApplicationHandler for App {
                     mark(perf, 15);
                     lights
                 });
+                // the stall this frame found, said now that it has read what
+                // the game server sent meanwhile (`stall`)
+                if let Some(line) = self.stall.after_pump(self.play.as_ref().map(|p| p.heard()), Instant::now()) {
+                    crate::say(&line);
+                }
                 let ms = self.clock.elapsed().as_millis() as i64;
                 let covered = self.covered_script.iter().any(|&(a, b)| (a..b).contains(&ms)) || page_hidden();
                 let frame = match g.acquire(covered) {
                     Ok(f) => f,
-                    Err(()) => {
+                    Err(covered) => {
                         self.hidden_until = hidden_gap();
+                        // covered: nothing to draw on, no stall; the surface
+                        // failing (timed out after wgpu's second, outdated,
+                        // lost): the frame ends here, its wait the acquire's
+                        mark(&mut self.perf, 9);
+                        if covered {
+                            self.stall.away();
+                        } else if let Some(p) = &self.perf {
+                            self.stall.end(frame_start, Instant::now(), p.frame_phases(), self.play.as_ref().is_some_and(|p| p.loading()));
+                        }
                         if let Some(p) = &mut self.perf {
                             p.away();
                         }
@@ -5236,6 +5462,14 @@ impl ApplicationHandler for App {
                 render::set_mipmaps(crate::settings::client().mipmaps);
                 g.renderer.scale.set(crate::settings::client().render_scale as u32);
                 let f = g.renderer.scale.targets(&g.device, &target, &g.depth, (g.config.width, g.config.height));
+                // the ground fog a PS2 frame keeps reads the frame: a target
+                // that cannot be copied (a page's canvas) draws the scene in
+                // the curve's texture (`render::fog16`)
+                if loading.is_none() {
+                    g.renderer.read_frame_through(&f.color);
+                } else {
+                    g.renderer.curve.set_through(false);
+                }
                 let scene = g.renderer.curve.scene_target(&g.device, f.size);
                 let st = scene.as_ref().unwrap_or(&f.color);
                 g.renderer.draw(&g.queue, &mut enc, st, &f.depth, loading.as_ref().map_or(&view, |l| &l.0), &refs);
@@ -5250,7 +5484,7 @@ impl ApplicationHandler for App {
                 // the effect volumes' fans, then the particles over them,
                 // all in the scene (the Brightness curve takes them too)
                 if loading.is_none() {
-                    g.renderer.draw_fans(&g.queue, &mut enc, st, &f.depth, &view);
+                    g.renderer.draw_fans(&g.device, &g.queue, &mut enc, st, &f.depth, &view);
                     // the name plates where VIScene::Render draws them: the
                     // particles and the rest after, over them
                     g.renderer.draw_plates(&g.device, &mut enc, st, &f.depth, f.size);
@@ -5297,7 +5531,9 @@ impl ApplicationHandler for App {
                 mark(&mut self.perf, 13);
                 if let Some(p) = &mut self.perf {
                     p.drawn = g.renderer.drawn.get();
+                    let phases = p.frame_phases();
                     p.end(frame_start);
+                    self.stall.end(frame_start, Instant::now(), phases, self.play.as_ref().is_some_and(|p| p.loading()));
                 }
                 // The page's picture of this frame, if it asked, and the
                 // report's state of the client (`report`).
@@ -5366,6 +5602,30 @@ mod tests {
         let s = frames(false);
         assert_eq!(s.frames, 5);
         assert!(s.gaps.iter().any(|&g| g > 1900.0), "the control: the pause counted as a frame's: {:?}", s.gaps);
+    }
+
+    /// The corpse, merchant and trade windows' keys: Space is ✕ in the
+    /// corpse's window (mode 1), the key that opened it (the attack: ✕ on the
+    /// pad, whose ✕ takes the row there), and the game's 32 in the merchant's
+    /// and the trade's (a trade's chat line, as R3); the rest the same in all
+    /// four: Enter and E ✕, Escape and Backspace △ (27), Q □ (113), the
+    /// arrows the d-pad. The control: Space was 32 in all four.
+    #[test]
+    fn space_is_cross_in_the_corpses_window_alone() {
+        let space = Key::Named(NamedKey::Space);
+        assert_eq!(npcw_key_of(&space, 1), Some(134));
+        for mode in [10, 15, 16] {
+            assert_eq!(npcw_key_of(&space, mode), Some(32), "mode {mode}: the game's 32");
+        }
+        for mode in [1, 10, 15, 16] {
+            let k = |key: Key| npcw_key_of(&key, mode);
+            assert_eq!((k(Key::Named(NamedKey::Enter)), k(Key::Character("e".into())), k(Key::Character("E".into()))), (Some(134), Some(134), Some(134)));
+            assert_eq!((k(Key::Named(NamedKey::Escape)), k(Key::Named(NamedKey::Backspace))), (Some(27), Some(27)));
+            assert_eq!(k(Key::Character("q".into())), Some(113));
+            let arrows = [NamedKey::ArrowUp, NamedKey::ArrowDown, NamedKey::ArrowLeft, NamedKey::ArrowRight].map(|a| k(Key::Named(a)));
+            assert_eq!(arrows, [Some(138), Some(139), Some(136), Some(137)]);
+            assert_eq!(k(Key::Character("w".into())), None);
+        }
     }
 
     /// VSync's present mode: on, Fifo whatever is offered; off, Immediate,

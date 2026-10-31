@@ -321,7 +321,11 @@ impl Play {
     fn trade_message(&mut self, m: TradeMsg) {
         match m {
             TradeMsg::Accepted(id) => {
-                // Trade02: the partner's id, the setup, mode 15 (Start)
+                // Trade02: SetMode(0), whatever was up put away (the start
+                // menu and its inventory stayed beside the trade, and an item
+                // picked looked doubled: the user, 2026-10-29), the partner's
+                // id, the setup, mode 15 (Start)
+                self.set_mode_zero();
                 let coin = self.coin();
                 let st = &mut self.npcw.trade_state;
                 st.partner = id;
@@ -516,7 +520,13 @@ mod tests {
         }
         let mut s = Session::connect_with(Box::new(Nowhere), ([127, 0, 0, 1], 5000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
         s.self_id = Some(0x100);
+        s.record = Some(Vec::new());
         Play::new(s, Player::default(), Box::default())
+    }
+
+    /// What `p` has sent since the last look.
+    fn sent(p: &mut Play) -> Vec<Vec<u8>> {
+        p.session.record.as_mut().map(std::mem::take).unwrap_or_default().into_iter().map(|(_, d)| d).collect()
     }
 
     /// A corpse record as 0x0018 carries it: the server's key in `m_invIndex`.
@@ -576,6 +586,89 @@ mod tests {
         assert!(q.npcw_opcode(0x0019, &[0, 0x02]));
         assert!(q.npcw.corpse.as_ref().unwrap().items.is_empty());
         assert_eq!(ids(&q.dump.inventory), vec![(9, 23)]);
+    }
+
+    /// `Trade02` puts the start menu away first (`SetMode(0)`): an inventory
+    /// opened while the trade was asked stayed up beside the trade window and
+    /// took the keys too, so an item picked looked doubled (the user,
+    /// 2026-10-29). Opened again, the start menu shows its main menu, not the
+    /// inventory it was closed over (`ShowMain`). The control: with nothing
+    /// open the trade opens the same. Needs `run/client.bin` (SKIPs without).
+    #[test]
+    fn an_accepted_trade_puts_the_start_menu_away() {
+        use crate::pointer::testing::{NullRaster, vui};
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/client.bin");
+        let Some(img) = std::fs::read(&path).ok().and_then(crate::client_image::ClientImage::from_bytes) else {
+            eprintln!("SKIP: no run/client.bin");
+            return;
+        };
+        let mut p = play();
+        p.start = Some(crate::startmenu::StartData::from_image(&img));
+        p.start.as_mut().unwrap().menu.visible = true;
+        p.items.visible = true;
+        p.mode = 13;
+        p.trade_message(TradeMsg::Accepted(0x99));
+        assert_eq!((p.mode, p.npcw.trade_state.partner), (15, 0x99));
+        assert!(!p.start.as_ref().unwrap().menu.visible, "the start menu (and the inventory in it) put away");
+        // the trade done, the start menu opened again: its main menu, not the inventory
+        p.trade_message(TradeMsg::Done);
+        assert_eq!(p.mode, 0);
+        p.start_open = Some(false);
+        let (vui, mut r) = (vui(), NullRaster);
+        let loc = crate::startmenu::Location { world: 0, pos: [0.0; 3], cols: 1, rows: 1, cell: 1.0, origin: [0.0; 3], bounds: None };
+        p.run_start_menu(&vui, &mut r, &loc);
+        assert!(p.start.as_ref().unwrap().menu.visible && !p.items.visible, "the main menu, the items put away");
+        // the control: nothing was open
+        let mut q = play();
+        q.trade_message(TradeMsg::Accepted(0x99));
+        assert_eq!(q.mode, 15);
+    }
+
+    /// Space in the corpse's window is ✕ (`viewer::npcw_key_of`), as on the
+    /// pad the attack that opened the corpse (✕, Space on the keyboard) is
+    /// the window's ✕ too: on LEAVE ALL, where the window opens, it leaves
+    /// the corpse (0x0016), on an item takes that item (0x0019, the server's
+    /// key and the count), on TAKE ALL takes everything (0x001A), each row
+    /// chosen as a pointer chooses it. The control: Space as the game's 32
+    /// (what it was until 2026-10-29: `VIWndLoot` takes no 32) sends nothing
+    /// and leaves the window up (F3 20261029-024647).
+    #[test]
+    fn space_takes_from_the_corpse_as_cross_does() {
+        use crate::pointer::testing::{NullRaster, vui};
+        use winit::keyboard::{Key, NamedKey};
+        let (vui, mut r) = (vui(), NullRaster);
+        let space = crate::viewer::npcw_key_of(&Key::Named(NamedKey::Space), 1).unwrap();
+        assert_eq!(space, crate::pointer::key::CROSS);
+        // the corpse's window up on two records, row `row` chosen by the
+        // pointer; Space's key pressed and let go: what was sent
+        let mut press = |key: i32, row: i32| {
+            let mut p = play();
+            p.npcw.corpse = Some(ItemList { p04: 0, items: vec![record(7, 1, 3, 1, "Snake Fang"), record(9, 4, 5, 20, "Snake Scale")] });
+            p.mode = 1;
+            p.npcw.loot_open = true;
+            p.run_npcw(&vui, &mut r);
+            if row != 0 {
+                // the corpse list at (144, 10), its rows 44 high (`loot`'s test)
+                let at = [144.0 + 57.0, 10.0 + 44.0 * row as f32 + 22.0];
+                assert_eq!(p.npcw_point(at), vec![crate::pointer::MOVED], "row {row} chosen");
+            }
+            sent(&mut p);
+            for down in [true, false] {
+                p.npcw_key(key, down);
+                p.run_npcw(&vui, &mut r);
+            }
+            (sent(&mut p), p.mode)
+        };
+        let op = |o: u16| o.to_le_bytes().to_vec();
+        let mut one = op(0x0019);
+        one.extend(5u32.to_le_bytes());
+        one.extend(4u32.to_le_bytes());
+        assert_eq!(press(space, 0).0, vec![op(0x0016)], "LEAVE ALL: the corpse left");
+        assert_eq!(press(space, 2).0, vec![one], "the scales: taken, four of them");
+        assert_eq!(press(space, 3).0, vec![op(0x001A)], "TAKE ALL");
+        for row in [0, 2, 3] {
+            assert_eq!(press(32, row), (vec![], 1), "the control, row {row}: the game's 32 sends nothing, the window stays");
+        }
     }
 
     /// 0x0085 (`LootOptions`): why a corpse did not open, as a line in the

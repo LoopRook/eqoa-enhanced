@@ -109,6 +109,22 @@ pub struct Menu {
 pub struct Menus {
     pub list: Vec<Menu>,
     by_va: HashMap<u32, usize>,
+    /// What an entry shows in place of its word, by the entry's message and
+    /// id, set at run time (the server's names for the TRIGGER entries,
+    /// `adminplay`).
+    pub labels: HashMap<(u32, i32), Label>,
+}
+
+/// An entry's text set at run time (`Menus::labels`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Label {
+    pub text: Vec<u16>,
+    /// kept whole after the text when the text is cut to the bar
+    /// (`startmenu::fit_label`)
+    pub tail: Vec<u16>,
+    /// drawn dimmed, as a choice that does nothing now (a trigger switched
+    /// off)
+    pub dim: bool,
 }
 
 impl Menus {
@@ -124,6 +140,11 @@ impl Menus {
         let entries = img.ptr_at(va + 8).map(|e| self.entries(img, e, count)).unwrap_or_default();
         self.list[k].entries = entries;
         k
+    }
+
+    /// The menu loaded from the `VIMenuDef` at `va`, if one was.
+    pub fn index_of(&self, va: u32) -> Option<usize> {
+        self.by_va.get(&va).copied()
     }
 
     /// A menu built at run time (the item menus `UpdateQuickBars` fills).

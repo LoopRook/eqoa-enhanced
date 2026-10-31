@@ -24,6 +24,10 @@ mod groupmark;
 mod fishplay;
 #[path = "adminplay.rs"]
 mod adminplay;
+#[path = "liveplay.rs"]
+mod liveplay;
+#[path = "duelplay.rs"]
+mod duelplay;
 
 #[path = "fork_ext/play.rs"]
 mod fork_hooks;
@@ -136,6 +140,9 @@ pub struct Play {
     /// know sends 0x07B2: none in Sandstorm's captures, none in
     /// go-eqoa-server).
     send_interval: u32,
+    /// The entity channels' updates since the world entry, and when the last
+    /// came (the session's clock): a report's trace says them.
+    entity_updates: (u64, u32),
     puppets: Vec<Option<Puppet>>,
     /// The sounds the client asked for this frame (`PlaySound`, `PlayCue`).
     pub cues: Vec<crate::sound::Cue>,
@@ -206,9 +213,15 @@ pub struct Play {
     following: bool,
     follow_id: u32,
     /// `m_p2BB40` .. `m_p2BB48`: the player's own cast (`CastingCombat`),
-    /// on the session's clock; the walk walks through it (`cast_window`,
-    /// `casting`).
+    /// on `m_p07568`, VITimer's ticks (`Session::timer`), to which the
+    /// console adds the cast's time as it comes; the walk walks through it
+    /// (`cast_window`, `casting`).
     cast_window: (i64, i64),
+    /// The player's own last casts (`CastingCombat`): the tick each came at,
+    /// its time and its effect, oldest first: what a report gives of the
+    /// walk's cast window (F3 20261029-224916, "stuck walking often after
+    /// engaging in combat").
+    own_casts: std::collections::VecDeque<(i64, i32, u32)>,
     /// `m_p06DC8`: 0x00FC's byte, the player held in place.
     rooted: bool,
     /// `m_p06DC0` and `m_p06DC4`: movement and the camera allowed
@@ -326,9 +339,11 @@ pub struct Play {
     /// The camera: the race cameras (CLIENT's, when its image was read), the
     /// preset the start menu's framing put aside (`m_camPreset`) and the
     /// style's (`m_camSaved`), whether the world was entered (`m_p2BD50`),
-    /// and whether a preset was saved, and what the start menu last asked
-    /// of it (`OpenStartMenu`'s ApplyRaceCamera: true; `CloseStartMenu`'s
-    /// ApplyDefaultCamera: false), done with the next frame.
+    /// and whether a preset was saved, and what the start menu has asked of
+    /// it since, in the order asked (`OpenStartMenu`'s ApplyRaceCamera: true;
+    /// `CloseStartMenu`'s ApplyDefaultCamera: false), done with the next
+    /// frame (`start_menu_camera`), or at once by a message that moves the
+    /// camera after it (`set_mode_0`).
     pub race_cams: Option<[Vec<crate::camstyle::RaceCamera>; 2]>,
     /// The personal light (`SetPersonalLight(actor, 20, (1, 0.69, 0.36))`).
     pub light: vi::tod::PersonalLight<vi::fpu::Ee>,
@@ -336,7 +351,7 @@ pub struct Play {
     cam_saved: crate::camstyle::Preset,
     cam_entered: bool,
     race_framed: bool,
-    race_frame_due: Option<bool>,
+    race_frame_due: Vec<bool>,
     /// The weapon trails (`VITrailFx`'s pool) and this frame's strips.
     trails: vi::trail::Trails<Ee>,
     pub trail_strips: Vec<render::billboard::Strips>,
@@ -486,8 +501,13 @@ pub struct Play {
     support: support::SupportWindows,
     /// fishing: `VIClientPart3FC10` and its window, mode 36 (`fishplay`)
     fish: fishplay::Fishing,
+    /// duels: the live client's duel part and `VIWndDuel`, modes 43 and 44
+    /// (`duelplay`)
+    duel: duelplay::Duel,
     /// the GM's channel, its TEST menu and windows (`adminplay`)
     admin: adminplay::Admin,
+    /// the live client's group search, mode 42 (`liveplay`)
+    live: liveplay::LivePlay,
     /// The button glyphs the last HUD frame drew, where (`pointer`).
     glyphs: crate::pointer::Glyphs,
     /// The wheel's lines not yet turned into a window's up or down.
@@ -895,13 +915,13 @@ fn held_items(cs: &CSprite<Ee>, c: &net::entity::Creature) -> Held {
 /// Built in the art its model is drawn in (`esf::Library::view_for`): the
 /// 2002 disc's, whole, for a model that disc has while its art is drawn.
 fn build_puppet(lib: &Library, g: &mut Gpu, e: &net::entity::Entity, look: Option<vi::cust::Look>, slot: usize, game_ms: i64) -> Option<Puppet> {
-    let era = lib.view_for(e.model as i32);
+    let era = lib.view_for(e.drawn_model as i32);
     lib.with_view(era, || build_puppet_in(lib, g, e, look, slot, game_ms, era))
 }
 
 fn build_puppet_in(lib: &Library, g: &mut Gpu, e: &net::entity::Entity, look: Option<vi::cust::Look>, slot: usize, game_ms: i64, era: esf::Era) -> Option<Puppet> {
     let textures = render::library_textures(lib);
-    lib.lookup(e.model as i32).and_then(|r| {
+    lib.lookup(e.drawn_model as i32).and_then(|r| {
                     let mut model = lib.build_model(r)?;
                     let mut anims = AnimScene { time: game_ms, ..Default::default() };
                     let mut rand = Rand(slot as u64 + 1);
@@ -918,7 +938,7 @@ fn build_puppet_in(lib: &Library, g: &mut Gpu, e: &net::entity::Entity, look: Op
                         dress(&mut model, &vi::cust::apply_look_with(cs, look, helm_worn, |id| lib.surface(id as i32).is_some(), &crate::s2::get().cust()));
                     }
                     let gpu = g.renderer.upload(g.device, g.queue, &model, &[render::IDENTITY], &textures);
-                    Some(Puppet { id: e.id, model: e.model, look, sprite, anims, rand, gpu, attached, held, projectile, name_at: None, slot4_at: None, actor_m: Matrix44::identity(), centre: Matrix44::identity(), weapons, trail: Default::default(), first: true, shown: false, era })
+                    Some(Puppet { id: e.id, model: e.drawn_model, look, sprite, anims, rand, gpu, attached, held, projectile, name_at: None, slot4_at: None, actor_m: Matrix44::identity(), centre: Matrix44::identity(), weapons, trail: Default::default(), first: true, shown: false, era })
                 })
 }
 
@@ -988,7 +1008,7 @@ fn attach(lib: &Library, g: &mut Gpu, cs: &CSprite<Ee>, c: &net::entity::Creatur
         && let Some(h) = vi::cust::helm_with(c.armor[5], &t)
         && let Some(mut m) = lib.lookup(h as i32).and_then(|r| lib.build_model(r))
     {
-        let tint = t.tint_at_most(c.armor_tint[5]);
+        let tint = look_of(c).helm_color(&t);
         for b in &mut m.batches {
             for l in &mut b.layers {
                 l.color = tint;
@@ -1034,9 +1054,9 @@ fn redo(was: (u32, u32, Option<vi::cust::Look>, Held), now: (u32, u32, Option<vi
 /// it is now, dressed in `look`. The puppet it replaced, when it was made
 /// anew.
 fn apply(lib: &Library, g: &mut Gpu, p: &mut Option<Puppet>, e: &net::entity::Entity, look: Option<vi::cust::Look>, slot: usize, game_ms: i64) -> Option<Option<Puppet>> {
-    let r = p.as_ref().map_or(Redo::Build, |p| redo((p.id, p.model, p.look, p.held), (e.id, e.model, look, held_by(p.sprite.as_ref(), e.creature.as_ref()))));
+    let r = p.as_ref().map_or(Redo::Build, |p| redo((p.id, p.model, p.look, p.held), (e.id, e.drawn_model, look, held_by(p.sprite.as_ref(), e.creature.as_ref()))));
     // the art swapped (F9) since it was built: made anew in the art now
-    let r = if p.as_ref().is_some_and(|p| p.era != lib.view_for(e.model as i32)) { Redo::Build } else { r };
+    let r = if p.as_ref().is_some_and(|p| p.era != lib.view_for(e.drawn_model as i32)) { Redo::Build } else { r };
     match r {
         Redo::Keep => None,
         Redo::Build => Some(std::mem::replace(p, build_puppet(lib, g, e, look, slot, game_ms))),
@@ -1060,6 +1080,63 @@ fn let_go(s: &mut crate::sound::Sound, p: &Option<Puppet>) {
     s.let_go(&cs.sounds(), cs.snd.channel);
 }
 
+/// The creatures whose sounds are made this frame (`VICSprite::Process`'s
+/// half): the `RETAIL_SLOTS` nearest the listener (`walker.eye.position`,
+/// where `CalcVolumeAndPan` measures from), where they are drawn
+/// (`actor_pos`), nearer first, the player's own not among them (its sprite
+/// sounds through the walker). The PS2 has 24 entity slots, the server's 24
+/// nearest, and runs every one's sounds every frame (`UpdateCreatures`);
+/// with more shown (NPC/PC Display, a server's 0x7E00) the device was asked
+/// for every one's within earshot, more than its packet and its 46 voices
+/// were made for, and a crowd's swings, hits and steps went unheard (F3
+/// pass 25: "sound cutting out when many mobs on screen"). At 24 or fewer,
+/// every one, as before.
+fn heard_slots(slots: &[Option<net::entity::Entity>], me: Option<u32>, listener: &Vect3<Ee>) -> Vec<bool> {
+    let mut heard = vec![false; slots.len()];
+    let mut by: Vec<(f32, usize)> = slots
+        .iter()
+        .enumerate()
+        .filter_map(|(k, e)| e.as_ref().filter(|e| Some(e.id) != me).map(|e| (k, e)))
+        .map(|(k, e)| {
+            let d = [e.actor_pos[0] - listener.x.0, e.actor_pos[1] - listener.y.0, e.actor_pos[2] - listener.z.0];
+            (d[0] * d[0] + d[1] * d[1] + d[2] * d[2], k)
+        })
+        .collect();
+    if by.len() > RETAIL_SLOTS {
+        by.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        by.truncate(RETAIL_SLOTS);
+    }
+    for (_, k) in by {
+        heard[k] = true;
+    }
+    heard
+}
+
+/// Of `drawn` ((slot, its actor, its off distance)), the slots whose actor
+/// `VIScene::RasterActor` does not raster under the view `view_proj` from
+/// `at` (`World::raster_actors`, its distances from `eye`, as the shadows'
+/// queue goes by), one with no actor among them.
+fn unrastered(world: &mut vi::world::World<Ee>, drawn: &[(usize, Option<usize>, F<Ee>)], view_proj: glam::Mat4, at: glam::Vec3, eye: &Vect3<Ee>) -> Vec<usize> {
+    let offs: std::collections::HashMap<usize, F<Ee>> = drawn.iter().filter_map(|&(_, a, off)| a.filter(|&a| a < world.actors.len()).map(|a| (a, off))).collect();
+    let cam = crate::shadows::game_camera(view_proj, at);
+    let rastered: std::collections::HashSet<usize> = world.raster_actors(&cam, eye, &|a| offs.get(&a).copied()).into_iter().collect();
+    drawn.iter().filter(|(_, a, _)| !a.is_some_and(|a| rastered.contains(&a))).map(|&(slot, _, _)| slot).collect()
+}
+
+/// A creature not heard this frame (`heard_slots`): its loop stopped, as one
+/// out of earshot is (`VICSprite::Process` with a volume of 0), and its
+/// tripped sound triggers let go unplayed, as a creature in no slot trips
+/// none.
+fn hush(cs: &mut CSprite<Ee>, s: &mut crate::sound::Sound) {
+    if cs.snd.channel != -1 {
+        s.dev.stop(cs.snd.channel);
+        cs.snd.channel = -1;
+    }
+    for i in 0..cs.h.triggers.len() {
+        cs.h.reset_trigger(i);
+    }
+}
+
 /// `ApplyLook`'s `SetVisible`: a creature whose `Flag1` is up (state byte
 /// 154's bit 1, an invisible one: Sandstorm sets it on the caster's own
 /// channel) has its skins hidden (`VIClientPart06D00::Apply`'s
@@ -1067,6 +1144,17 @@ fn let_go(s: &mut crate::sound::Sound, p: &Option<Puppet>) {
 /// its name stay. No creature (none sent yet) is shown.
 fn skins_shown(c: Option<&net::entity::Creature>) -> bool {
     c.is_none_or(|c| c.flags262 & 1 == 0)
+}
+
+/// Whether the walker's plain body (the human the walk is built on) is drawn:
+/// only with no server (a walk of the world alone). In play the player is
+/// the server's entity for it, dressed (`Play::place_self`), as CLIENT's
+/// player is its `VIEntity`'s sprite, which there is none of before the
+/// entity's first update: the plain human had shown in its place between
+/// the world entry and that update, or a world change and the next (F3
+/// 20261028-231959, a gnome drawn a human first).
+pub fn plain_body_shown(play: Option<&Play>) -> bool {
+    play.is_none()
 }
 
 /// The walker's body as the game rasters the player's actor: hidden past its
@@ -1273,7 +1361,17 @@ fn move_line(e: &net::entity::Entity, c: &net::entity::Creature, now: u32) -> St
 }
 
 fn look_of(c: &net::entity::Creature) -> vi::cust::Look {
-    vi::cust::Look { armor: c.armor, armor_tint: c.armor_tint, hair: c.hair, face: c.face, robe: c.robe as i8, robe_tint: c.robe_tint }
+    vi::cust::Look {
+        armor: c.armor,
+        armor_tint: c.armor_tint,
+        hair: c.hair,
+        face: c.face,
+        robe: c.robe as i8,
+        robe_tint: c.robe_tint,
+        // the live game's channel's colours, when the server sends its look
+        armor_color: c.colors.map(|l| l.armor),
+        robe_color: c.colors.map(|l| l.robe),
+    }
 }
 
 /// A creature's look and hands as its channel sent them, raw (a problem
@@ -1282,8 +1380,19 @@ fn look_of(c: &net::entity::Creature) -> vi::cust::Look {
 /// 4 and 5 Sandstorm's own, 128-255 none) rather than leaving it to a picture.
 fn look_line(c: &net::entity::Creature) -> String {
     let hex = |ids: &[u32; 3]| ids.map(|id| format!("{id:#x}")).join(", ");
+    // the live game's look's colours, when the server sent it
+    let colors = c.colors.map_or(String::new(), |l| {
+        let rgba = |c: &[u8; 4]| format!("{:02x}{:02x}{:02x}{:02x}", c[0], c[1], c[2], c[3]);
+        format!(
+            "; live colours armor [{}] robe {} items [{}] variants {:?}",
+            l.armor.iter().map(rgba).collect::<Vec<_>>().join(" "),
+            rgba(&l.robe),
+            l.items.iter().map(rgba).collect::<Vec<_>>().join(" "),
+            l.variants
+        )
+    });
     format!(
-        "look: robe {} tint {}, armor {:?} tints {:?}, hair {:?}, face {}; items [{}] over [{}] types {:?}",
+        "look: robe {} tint {}, armor {:?} tints {:?}, hair {:?}, face {}; items [{}] over [{}] types {:?}{colors}",
         c.robe,
         c.robe_tint,
         c.armor,
@@ -1363,10 +1472,12 @@ mod entity_actors {
 
     const SIGNPOST: u32 = 0x6A82352C;
     const HUMAN: u32 = 0x70D898C6;
+    /// Sandstorm's blocker: a box of collision, nothing to draw.
+    const BLOCKER: u32 = 0x6F412342;
 
     /// TUNARIA's zones round Freeport's open ground and CHAR.ESF, and the
-    /// collision world made of them; None without the disc.
-    fn freeport(x: f32, z: f32) -> Option<(Library, World<Ee>)> {
+    /// world's file; None without the disc.
+    fn freeport_lib(x: f32, z: f32) -> Option<(Library, usize)> {
         let iso = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
         if !iso.exists() {
             eprintln!("SKIP: no run/eqoa.iso");
@@ -1377,6 +1488,12 @@ mod entity_actors {
         lib.add("CHAR.ESF", crate::stream::open_file(&iso, "CHAR.ESF").unwrap());
         let mut src = crate::stream::FileZones::open(&iso, "TUNARIA.ESF").unwrap();
         crate::stream::fill(&mut lib, w, x, z, &mut src);
+        Some((lib, w))
+    }
+
+    /// `freeport_lib`, and the collision world made of it.
+    fn freeport(x: f32, z: f32) -> Option<(Library, World<Ee>)> {
+        let (lib, w) = freeport_lib(x, z)?;
         let world = World::load(&lib, w)?;
         Some((lib, world))
     }
@@ -1389,6 +1506,117 @@ mod entity_actors {
         s.init(Vect3::of(x - 4.0, y + 1.2, z), Vect3::of(x + 4.0, y + 1.2, z), F::new(0.6));
         let mut f = Filter::new(FilterKind::Scene, -1);
         if w.collide_sphere(&mut s, &mut f) { f.hit_actor } else { -2 }
+    }
+
+    /// A creature's sound triggers are kept only where the console trips them
+    /// (F3 pass 25, sound cutting out in a crowd): `VIHSprite::Process` runs
+    /// for the actors `VIScene::RasterActor` rasters, so a creature 10 behind
+    /// the camera on Freeport's open ground is among the unrastered and one
+    /// 10 ahead is not; turned round, the other way about. The controls: a
+    /// slot with no actor counts as unrastered, and one past its off distance
+    /// (8 here) too, ahead or not.
+    #[test]
+    fn a_creature_behind_the_camera_trips_no_sound() {
+        let (x, z) = (25275.115f32, 15766.627f32);
+        let Some((lib, file)) = freeport_lib(x, z) else { return };
+        let mut w = Walker::arrive(World::load(&lib, file).unwrap(), crate::walker::Spawn::ground(x, z, 0.0));
+        let eye = w.eye.position;
+        let dir = w.eye.direction;
+        let (ex, ez) = (eye.x.0, eye.z.0);
+        let (dx, dz) = {
+            let n = (dir.x.0 * dir.x.0 + dir.z.0 * dir.z.0).sqrt();
+            (dir.x.0 / n, dir.z.0 / n)
+        };
+        let ground = |w: &mut Walker, x: f32, z: f32| [x, crate::walker::ground(&mut w.scene, x, z).unwrap(), z];
+        let ahead = ground(&mut w, ex + dx * 10.0, ez + dz * 10.0);
+        let behind = ground(&mut w, ex - dx * 10.0, ez - dz * 10.0);
+        let mut p = super::commands::play();
+        for (slot, id, at) in [(3usize, 0x30u32, ahead), (4, 0x40, behind)] {
+            p.entities.slots[slot] = Some(net::entity::Entity { id, kind: net::entity::TYPE_CREATURE, model: HUMAN, drawn_model: HUMAN, scale: 1.0, pos: at, actor_pos: at, creature: Some(net::entity::Creature::default()), ..Default::default() });
+        }
+        p.place_actors(&mut w, &lib);
+        let (a3, a4) = (p.actors[3].map(|a| a.actor), p.actors[4].map(|a| a.actor));
+        assert!(a3.is_some() && a4.is_some(), "both have their actors");
+        let eye_g = glam::Vec3::new(eye.x.0, eye.y.0, eye.z.0);
+        let view = |d: glam::Vec3| crate::walker::projection_to(4.0 / 3.0, 300.0) * glam::camera::rh::view::look_to_mat4(eye_g, d, glam::Vec3::Y);
+        let forward = glam::Vec3::new(dir.x.0, dir.y.0, dir.z.0);
+        // the same look down, turned round
+        let back = glam::Vec3::new(-dir.x.0, dir.y.0, -dir.z.0);
+        let lod_eye = crate::lod::eye(&w.cam, &w.eye.position);
+        let off = F::<Ee>::new(100.0);
+        let drawn = [(3usize, a3, off), (4, a4, off)];
+        assert_eq!(unrastered(&mut w.scene, &drawn, view(forward), eye_g, &lod_eye), vec![4], "the one behind trips nothing");
+        assert_eq!(unrastered(&mut w.scene, &drawn, view(back), eye_g, &lod_eye), vec![3], "turned round, the other");
+        assert_eq!(unrastered(&mut w.scene, &[(3, None, off)], view(forward), eye_g, &lod_eye), vec![3], "the control: no actor");
+        assert_eq!(unrastered(&mut w.scene, &[(3, a3, F::new(8.0))], view(forward), eye_g, &lod_eye), vec![3], "the control: past its off distance");
+    }
+
+    /// The creatures heard (`heard_slots`): the 24 nearest the listener where
+    /// they are drawn, the player's own never among them. The controls: 24
+    /// and fewer are every one, and a tie keeps the lower slot.
+    #[test]
+    fn the_24_nearest_creatures_are_heard() {
+        let at = |d: f32| net::entity::Entity { id: 1000 + d as u32, kind: net::entity::TYPE_CREATURE, actor_pos: [d, 0.0, 0.0], ..Default::default() };
+        let listener = Vect3::of(0.0, 0.0, 0.0);
+        // 30 creatures 1..30 away in slots 30 down to 1, the player in slot 0
+        let mut slots: Vec<Option<net::entity::Entity>> = vec![None; MAX_SLOTS];
+        slots[0] = Some(net::entity::Entity { id: 0x100, ..at(0.0) });
+        for k in 1..=30 {
+            slots[31 - k] = Some(at(k as f32));
+        }
+        let heard = heard_slots(&slots, Some(0x100), &listener);
+        let who: Vec<usize> = (0..MAX_SLOTS).filter(|&k| heard[k]).collect();
+        assert_eq!(who, (7..=30).collect::<Vec<usize>>(), "the 24 nearest (1 to 24 away: slots 30 down to 7)");
+        assert!(!heard[0], "never the player's own");
+        // 24, then 20: every one
+        for n in [24usize, 20] {
+            let mut few: Vec<Option<net::entity::Entity>> = vec![None; MAX_SLOTS];
+            for k in 0..n {
+                few[k * 3] = Some(at(100.0 + k as f32));
+            }
+            assert_eq!(heard_slots(&few, None, &listener).iter().filter(|&&h| h).count(), n, "{n}: every one");
+        }
+        // a tie at the 24th: the lower slot
+        let mut tie: Vec<Option<net::entity::Entity>> = vec![None; MAX_SLOTS];
+        for k in 0..25 {
+            tie[k] = Some(at(if k < 23 { k as f32 } else { 50.0 }));
+        }
+        let h = heard_slots(&tie, None, &listener);
+        assert!(h[23] && !h[24], "the tie's lower slot");
+    }
+
+    /// A creature past the 24 (`hush`): its loop stopped and its tripped
+    /// triggers let go, unplayed. The control: before it, the loop plays and
+    /// the trigger is tripped.
+    #[test]
+    fn a_creature_not_heard_is_hushed() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        let Some(mut s) = crate::sound::Sound::offline(&path) else {
+            eprintln!("SKIP: no run/eqoa.iso");
+            return;
+        };
+        let Some((lib, _)) = freeport_lib(25275.0, 15766.0) else { return };
+        let r = lib.lookup(HUMAN as i32).expect("CHAR.ESF has it");
+        let mut cs = vi::character::load_csprite(&lib, r, &mut AnimScene::default(), &mut AnimCache::new(), &mut Rand(1)).expect("a CSprite");
+        assert!(!cs.h.triggers.is_empty(), "the human has sound triggers");
+        // a looped wave played as its loop
+        let mut lp = vec![0x35u8; 64 * 16];
+        for b in 0..64 {
+            lp[b * 16] = 0x24;
+            lp[b * 16 + 1] = 0;
+        }
+        lp[1] = 4;
+        lp[63 * 16 + 1] = 3;
+        let w = s.dev.create_wave(1, 64, 22050, 1.0, 0.0, 1, &lp);
+        let mut link = s.audio().link();
+        s.dev.flush(&mut link);
+        let h = s.dev.play(w, 0, 0);
+        assert!(h >= 0 && s.dev.is_playing(h), "the control: the loop plays");
+        cs.snd.channel = h;
+        cs.h.triggers[0].tripped = 1;
+        hush(&mut cs, &mut s);
+        assert!(!s.dev.is_playing(h) && cs.snd.channel == -1, "the loop stopped");
+        assert!(cs.h.triggers.iter().all(|t| t.tripped == 0), "the trips let go");
     }
 
     /// `place_actor` over an entity's time in a slot: made with its first
@@ -1458,28 +1686,184 @@ mod entity_actors {
         assert_eq!(place_actor(&mut w, &lib, None, n), (None, false));
         assert_eq!(w.actors.len(), count);
     }
+
+    /// An entity's actor is of the body the game draws (`GetModel()` as
+    /// `Changed` keeps it), off the channel's own bytes: a signpost sent with
+    /// a blocker's model in `model2` is the blocker; `model2` cleared, still
+    /// the blocker (the old `m_model` equals the new `GetModel()`); the
+    /// model changed, a human. The control: the model's own sprite, which the
+    /// actor had before `model2` was read.
+    #[test]
+    fn an_actor_is_of_the_body_drawn() {
+        let (x, z) = (25275.115f32, 15766.627f32);
+        let Some((lib, world)) = freeport(x, z) else { return };
+        let mut w = Walker::arrive(world, crate::walker::Spawn::ground(x, z, 0.0));
+        let mut p = super::commands::play();
+        let sprite_of = |w: &mut Walker, id: u32| w.scene.find_sprite(&lib, lib.lookup(id as i32).unwrap());
+        let (post, blocker, human) = (sprite_of(&mut w, SIGNPOST), sprite_of(&mut w, BLOCKER), sprite_of(&mut w, HUMAN));
+        assert!(post.is_some() && blocker.is_some() && human.is_some() && post != blocker, "the control: three sprites");
+        let mut send = |p: &mut Play, w: &mut Walker, model: u32, model2: u32| {
+            let mut v = vec![0u8; 162];
+            v[0] = 1;
+            v[1..5].copy_from_slice(&0x0135_5d7eu32.to_le_bytes());
+            v[5] = net::entity::TYPE_CREATURE;
+            v[28..32].copy_from_slice(&model.to_le_bytes());
+            v[32..36].copy_from_slice(&model2.to_le_bytes());
+            let id = p.session.self_id;
+            p.entities.channel(3, &v, id, 0, UPDATE_RATE, |_| {});
+            p.place_actors(w, &lib);
+            p.actors[3].map(|a| w.scene.actors[a.actor].sprite).flatten()
+        };
+        assert_eq!(send(&mut p, &mut w, SIGNPOST, 0), post, "the control: the model's own");
+        assert_eq!(send(&mut p, &mut w, SIGNPOST, BLOCKER), blocker, "model2: drawn in its place");
+        assert_eq!(send(&mut p, &mut w, SIGNPOST, 0), blocker, "model2 cleared: still drawn");
+        assert_eq!(send(&mut p, &mut w, HUMAN, 0), human, "the model changed");
+    }
+
+    /// Sandstorm's blockers (F3 20261028-233048, an unnamed creature where
+    /// the player stood; a quest's gate the players ran past): CHAR.ESF's
+    /// 0x6F412342 is a SimpleSprite with an empty prim buffer and a
+    /// collision buffer, a closed box 5 a side about its origin. With nothing
+    /// to draw no puppet is built for it, and still its entity has its actor
+    /// (`LoadRes` puts any sprite on it), so the player's run at one 6 ahead
+    /// stops at its face (2.5 from its middle) less the walk's sphere (0.6),
+    /// and at one of scale 2 (its face 5 from it) as much sooner. The
+    /// controls: the run with the slot empty goes on past where it stood,
+    /// and so it does past an entity of model 0 (the null sprite, no actor).
+    #[test]
+    fn the_player_stops_at_a_blocker_that_draws_nothing() {
+        let (x, z) = (25275.115f32, 15766.627f32);
+        let Some((lib, file)) = freeport_lib(x, z) else { return };
+        let r = lib.lookup(BLOCKER as i32).expect("CHAR.ESF has it");
+        assert!(lib.build_model(r).is_none(), "nothing to draw");
+        // 1.5 s forward, (model, place, scale) in slot 3 as `place_actors`
+        // makes its actor: the place each frame, the place it began, whether
+        // the entity had an actor
+        let run = |entity: Option<(u32, [f32; 3], f32)>| {
+            let mut w = Walker::arrive(World::load(&lib, file).unwrap(), crate::walker::Spawn::ground(x, z, 0.0));
+            let p0 = w.cam.walk.phys.position.to_array();
+            let mut p = super::commands::play();
+            if let Some((model, at, scale)) = entity {
+                let creature = Some(net::entity::Creature::default());
+                p.entities.slots[3] = Some(net::entity::Entity { id: 0x0135_5d7e, kind: net::entity::TYPE_CREATURE, model, drawn_model: model, scale, pos: at, actor_pos: at, creature, ..Default::default() });
+            }
+            p.place_actors(&mut w, &lib);
+            let made = p.actors[3].is_some();
+            assert!(p.puppets[3].is_none(), "no puppet: nothing was drawn for it");
+            let t0 = w.scene.time;
+            let mut at = Vec::new();
+            for i in 1..=45 {
+                w.frame(crate::walker::Controls { fwd: 1.0, ..Default::default() }, t0 + i * 33);
+                at.push(w.cam.walk.phys.position.to_array());
+            }
+            (at, p0, made)
+        };
+        let (free, p0, _) = run(None);
+        let end = free[free.len() - 1];
+        let (dx, dz) = (end[0] - p0[0], end[2] - p0[2]);
+        let len = (dx * dx + dz * dz).sqrt();
+        let (ux, uz) = (dx / len, dz / len);
+        assert!(len > 8.0, "the control runs on: {len}");
+        let ahead = |p: [f32; 3]| (p[0] - p0[0]) * ux + (p[2] - p0[2]) * uz;
+        // on the ground the run crosses there (the topmost floor at that spot
+        // is a roof over it)
+        let ground = free.iter().min_by(|a, b| (ahead(**a) - 6.0).abs().total_cmp(&(ahead(**b) - 6.0).abs())).unwrap()[1];
+        let spot = [p0[0] + ux * 6.0, ground, p0[2] + uz * 6.0];
+        let (null, _, made) = run(Some((0, spot, 1.0)));
+        assert!(!made, "model 0: no actor");
+        assert_eq!(null, free, "model 0 is nothing to the run");
+        for (scale, face) in [(1.0f32, 2.5f32), (2.0, 5.0)] {
+            let (blocked, _, made) = run(Some((BLOCKER, spot, scale)));
+            let got = ahead(blocked[blocked.len() - 1]);
+            eprintln!("a blocker of scale {scale} 6 ahead: stopped {got:.3} ahead, its face at {:.1} (free: {:.2})", 6.0 - face, ahead(end));
+            assert!(made, "scale {scale}: its actor");
+            assert!(got < 6.0 - face - 0.5 && got > 6.0 - face - 0.8, "scale {scale}: stopped at its face less the walk's sphere, at {got}");
+        }
+    }
+
+    /// The player's own body is drawn at its entity's scale, as
+    /// `VIEntity::Changed`'s `SetActorScale` scales the player's actor as any
+    /// other's: go-eqoa-server's 0.9 for a gnome makes the walker's actor (the
+    /// body's model matrix, and with it its shadow, its spells' places, its
+    /// trail) 0.9 of a human's 1.0, its scene actor too (`place_self_actor`).
+    /// The walk is the walk control's own (`InitParms`' constants, which
+    /// nothing in CLIENT scales): the same steps over the same ground end bit
+    /// for bit where the 1.0 walk ends. The controls: the body at 1.0 (and
+    /// an entity with no scale, 0, taken as 1 as for any entity).
+    #[test]
+    fn the_players_body_is_drawn_at_its_entitys_scale() {
+        let (x, z) = (25275.115f32, 15766.627f32);
+        let Some((lib, file)) = freeport_lib(x, z) else { return };
+        let human = lib.lookup(HUMAN as i32).expect("CHAR.ESF has it");
+        let walker = || {
+            let mut w = Walker::arrive(World::load(&lib, file).unwrap(), crate::walker::Spawn::ground(x, z, 0.0));
+            w.set_character(&lib, human);
+            w
+        };
+        let (mut small, mut plain) = (walker(), walker());
+        let mut p = super::commands::play();
+        let me = |scale: f32| net::entity::Entity { id: 0x100, kind: net::entity::TYPE_CREATURE, model: HUMAN, drawn_model: HUMAN, scale, creature: Some(net::entity::Creature::default()), ..Default::default() };
+        p.entities.slots[0] = Some(me(0.9));
+        p.place_self_actor(&mut small, &lib);
+        assert_eq!(small.scale.0, 0.9, "the entity's scale");
+        let a = p.self_actor.expect("its scene actor").actor;
+        assert_eq!(small.scene.actors[a].scale.0, 0.9, "its scene actor's");
+        let mut q = super::commands::play();
+        q.entities.slots[0] = Some(me(0.0));
+        q.place_self_actor(&mut plain, &lib);
+        assert_eq!(plain.scale.0, 1.0, "the control: no scale is 1");
+        // the body's model matrix: its axes 0.9 of the plain body's
+        let axis = |m: [[f32; 4]; 4], k: usize| (m[k][0] * m[k][0] + m[k][1] * m[k][1] + m[k][2] * m[k][2]).sqrt();
+        let ((ms, _), (mp, _)) = (small.pose(), plain.pose());
+        for k in 0..3 {
+            let ratio = axis(ms, k) / axis(mp, k);
+            assert!((ratio - 0.9).abs() < 1e-5, "axis {k}: {ratio}");
+        }
+        assert!((axis(walker().actor().to_cols(), 0) - 1.0).abs() < 1e-6, "the control: a walker's own scale is 1");
+        // the walk: the same steps, the same places
+        let t0 = small.scene.time;
+        for i in 1..=45 {
+            let c = crate::walker::Controls { fwd: 1.0, strafe: if i > 20 { 0.5 } else { 0.0 }, ..Default::default() };
+            small.frame(c, t0 + i * 33);
+            plain.frame(c, t0 + i * 33);
+            assert_eq!(small.cam.walk.committed.position.to_array().map(f32::to_bits), plain.cam.walk.committed.position.to_array().map(f32::to_bits), "frame {i}");
+        }
+        let (a0, a1) = (plain.cam.walk.committed.position.to_array(), [x, 0.0, z]);
+        assert!(((a0[0] - a1[0]).powi(2) + (a0[2] - a1[2]).powi(2)).sqrt() > 5.0, "the walk went somewhere");
+    }
 }
+
+/// `CycleTarget`'s reach: a creature this far from the camera, squared
+/// (200), or farther is never targeted.
+const CYCLE_REACH2: f32 = 40000.0;
 
 /// What `TargetCentre` reads of a creature with an actor: its id, where it is
 /// measured (a character's slot 4, else its place), its +0x18 bit 0 (the
-/// selectable flag) and whether it is of a player's side (`m_p256` 3).
+/// selectable flag), whether it is of a player's side (`m_p256` 3) and how
+/// far its place is from the camera, squared.
 #[derive(Clone, Copy, Debug)]
 struct Seen {
     id: u32,
     at: [f32; 3],
     selectable: bool,
     side: bool,
+    d2: f32,
 }
 
 /// `TargetCentre`'s choice: of the creatures `seen`, not the player `me`,
 /// not the pet, none of a player's side, the selectable ones in view
-/// (`view_proj`'s frustum: `m_frustum.Cull(pos, 0)`) the one whose place lies
-/// nearest the middle of the picture through `game` (x and y after the
-/// divide), the first of equals; none when there is none.
+/// (`view_proj`'s frustum: `m_frustum.Cull(pos, 0)`) within `CycleTarget`'s
+/// reach the one whose place lies nearest the middle of the picture through
+/// `game` (x and y after the divide), the first of equals; none when there is
+/// none. The reach is not the console's: its `TargetCentre` takes any
+/// distance, the 24 creatures a PS2 keeps reaching 300 (and vanilla's NPC/PC
+/// View Distance 1,000), so the crosshair took what Tab could not, out of
+/// sight too (the user, 2026-10-29: "holding r1 with the crosshair sight lets
+/// players target normally untargetable npcs", then Tab's reach).
 fn centre_choice(seen: &[Seen], me: Option<u32>, pet: u32, game: glam::Mat4, view_proj: glam::Mat4) -> Option<u32> {
     let (mut best, mut best_d) = (None, 999999.0f32);
     for s in seen {
-        if Some(s.id) == me || s.id == pet || s.side || !s.selectable {
+        if Some(s.id) == me || s.id == pet || s.side || !s.selectable || s.d2 >= CYCLE_REACH2 {
             continue;
         }
         let pos = glam::Vec3::from(s.at).extend(1.0);
@@ -1895,9 +2279,11 @@ impl Play {
         crate::s2::begin_session();
         // a world entry shows what Hide UI hid (`hideui`)
         crate::hideui::show();
+        // no server's feature word yet (`live`): the disc's until a 0x07F5
+        crate::live::set_features(Default::default());
         // Msg000D reads `m_speed` out of the dump
         let speed = dump.speed;
-        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), actors: vec![None; MAX_SLOTS], self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: None, death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, rumbles: Vec::new(), glyphs: Default::default(), wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default() };
+        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, send_interval: 100, entity_updates: (0, 0), puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), actors: vec![None; MAX_SLOTS], self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), own_casts: Default::default(), rooted: false, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, rumbles: Vec::new(), glyphs: Default::default(), wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default() };
         p.take_abilities();
         p.npcw_world_entry();
         // world entry: LoadModels and StreamFillCache under the loading screen
@@ -1921,6 +2307,10 @@ impl Play {
         self.start = Some(crate::startmenu::StartData::from_image(img));
         self.race_cams = Some(crate::camstyle::race_cameras(img));
         self.map.client_data(img);
+        // the server's trigger names, if they came before the menus
+        self.trigger_labels();
+        // and the duel's entry, if the server's feature word came before them
+        self.duel_menu_again();
     }
 
     /// CLIENT's and SUPPORT's data, taken up as each image comes
@@ -1957,6 +2347,26 @@ impl Play {
         self.hud.as_ref().map(|h| (&h.0, &h.1))
     }
 
+    /// What a report says of the walk's limits: the run and walk speeds the
+    /// server gave (the dump, 0x00F8, Class Mastery), the holds on it (0x00FC,
+    /// the window's locks, the follow) and the cast window, with the player's
+    /// own last casts (each one's time, how long ago, its effect).
+    fn walk_line(&self) -> String {
+        let now = self.session.timer();
+        let (a, b) = self.cast_window;
+        let window = if casting((a, b), now) { format!("walking, {:.2} s more", (b - now) as f64 / 983.04) } else { "none".into() };
+        let casts: Vec<String> = self.own_casts.iter().map(|&(at, time, fx)| format!("time {time} {:.1} s ago ({fx:#010x})", (now - at) as f64 / 983.04)).collect();
+        format!(
+            "run speed {:.3}, walk speed {:.3}, rooted {}, movement {}, following {}; cast window {window}; the last own casts: {}",
+            self.speed,
+            self.walk_speed,
+            self.rooted,
+            if self.locks.0 { "allowed" } else { "held (a window's mode)" },
+            self.following,
+            if casts.is_empty() { "none".into() } else { casts.join(", ") }
+        )
+    }
+
     /// What a report says of play (`report`): the character, where it is
     /// (`at`, the walker's), the entities round it and what has come of
     /// CLIENT and SUPPORT.
@@ -1972,6 +2382,7 @@ impl Play {
         let _ = writeln!(o, "server's patch: {}", crate::s2::get().describe());
         let target = if self.target == u32::MAX { "none".to_string() } else { format!("{:#x}", self.target) };
         let _ = writeln!(o, "mode {}, target {target}, dead {}, autorun {}, auto-attack {}", self.mode, self.is_dead(), self.autorun, self.auto_attack);
+        let _ = writeln!(o, "walk: {}", self.walk_line());
         let start = match (&self.start, self.modules_taken[0]) {
             (Some(_), _) => "in",
             (None, true) => "CLIENT came but was not read",
@@ -1992,17 +2403,36 @@ impl Play {
         if let Some(w) = self.loading.wait {
             let _ = writeln!(o, "loading screen: up {} ms, for the zones round {:?}{}", self.session.now() as i64 - w.since, w.at, if w.entering { ", the world's file first" } else { "" });
         }
+        let d = self.duel_part();
+        if d.features != 0 || d.running || d.set || !d.queue.is_empty() || self.duel_owns() {
+            let wnd = self.duel_window_line();
+            let _ = writeln!(o, "duel: features {:#x}, id {}, on {}, set {}, may fight {:#x} {:#x}, {} waiting, wager {}/{} accepted {}/{}{wnd}", d.features, d.duel_id, d.running, d.set, d.a, d.b, d.queue.len(), d.my_tunar, d.their_tunar, d.my_acc, d.their_acc);
+        }
         let _ = writeln!(o, "entities: {} of {}, drawn to {} (the server's most {:?})", self.entities.slots.iter().flatten().count(), self.entities.limit, crate::settings::entity_view(), self.session.entity_view_offer);
         let now = self.session.now();
+        let (n, last) = self.entity_updates;
+        let _ = writeln!(o, "{}; {n} entity updates since the world entry{}", self.session.net_line(), if n > 0 { format!(", the last {} ms ago", now.wrapping_sub(last)) } else { String::new() });
         for e in self.entities.slots.iter().flatten() {
             let name = e.creature.as_ref().map_or("", |c| c.name.as_str());
-            let _ = writeln!(o, "  {:#x} kind {} model {:#x} {name:?} at {:?}", e.id, e.kind, e.model, e.pos);
+            let two = if e.model2 != 0 || e.drawn_model != e.model { format!(" model2 {:#x} drawn {:#x}", e.model2, e.drawn_model) } else { String::new() };
+            let _ = writeln!(o, "  {:#x} kind {} model {:#x}{two} {name:?} at {:?}", e.id, e.kind, e.model, e.pos);
+            // what the game's targeting reads of it (`CycleTarget`,
+            // `TargetCentre`: the byte 26 bit 0, in this world; byte 27 for
+            // `TargetInRange`) and the npc flags □ talks by
+            let npc = e.creature.as_ref().map_or(String::new(), |c| format!(", npc flags {:#x}", c.npc_flags));
+            let _ = writeln!(o, "    targeting: selectable {}{}, world {} (the player's {}), byte 27 {}{npc}", e.p18 & 1 != 0, if e.p18 & 2 != 0 { ", a corpse" } else { "" }, e.world, self.player.world, e.p19);
             if let Some(c) = &e.creature {
                 let _ = writeln!(o, "    {}", look_line(c));
                 let _ = writeln!(o, "    {}", move_line(e, c, now));
             }
         }
         o
+    }
+
+    /// What the game server's datagrams have come to so far, for a stall's
+    /// line (`stall`).
+    pub fn heard(&self) -> crate::stall::Heard {
+        crate::stall::Heard { count: self.session.datagrams_in, last: self.session.last_datagram }
     }
 
     /// One frame. Returns the player's model when the server has just named
@@ -2041,6 +2471,14 @@ impl Play {
                 }
                 Event::DialogBox { id, text, options } => self.dialog_box(id, &text, &options),
                 Event::Opcode { op: 0x005E, .. } => self.msg_005e(walker),
+                // the live game's duel (`duelplay`): 0x1502 (the feature word
+                // with `liveplay`'s, below)
+                Event::Opcode { op: op @ crate::duel::OP_IN, data } => {
+                    self.duel_opcode(op, &data, Some(walker));
+                }
+                // PumpMessages' connect: the duel part reset (the live
+                // client's)
+                Event::Promoted => self.duel_reset(),
                 Event::Teleport { world, pos, hpr, token } => self.msg_00b2(walker, world, pos, hpr, token, now as i64),
                 // 0x00F8: `m_speed`, then SetSpeed (a speed buff, a snare)
                 Event::Speed(v) => self.set_speed(v),
@@ -2137,6 +2575,15 @@ impl Play {
                     self.cues.push(crate::sound::Cue::Ui(1));
                 }
                 Event::Opcode { op: 0x0E02, data } => self.who.recv(&data),
+                // the live client's feature word and group search, and the
+                // server's offer of the live auction form (`liveplay`); the
+                // word goes to the duel part's copy too (`duelplay`)
+                Event::Opcode { op: op @ (0x07F5 | 0x0840 | 0x7E0B), data } => {
+                    if op == crate::duel::OP_FEATURES {
+                        self.duel_opcode(op, &data, Some(walker));
+                    }
+                    self.live_opcode(op, &data);
+                }
                 // a server's player search (`playersearch`, `s2`): 0x1501
                 // empties the list, a 0x1500 is a player found. The patch's
                 // window keeps them whether it is up or not, as its handler
@@ -2166,6 +2613,7 @@ impl Play {
                     self.craft_outs.extend(out);
                 }
                 Event::Opcode { op: 0x0D41, data } => self.mail_recv(&data),
+                Event::Opcode { op: crate::gram::OP_LIVE_MAIL, data } => self.mail_offer(&data),
                 Event::Opcode { op: 0x1402, data } => self.cm_msgs.push(data),
                 Event::Opcode { op: 0x0468, data } => {
                     if let Some(o) = self.guild.recv_0468(&data) {
@@ -2384,11 +2832,14 @@ impl Play {
                 // Channel44: the server-load channels (`adminplay`)
                 Event::State { channel: channel @ 0x44..=0x6B, data } => self.admin_channel44(channel, &data),
                 Event::State { channel, data } if let Some(slot) = net::entity::slot_of_channel(channel) => {
+                    self.entity_updates = (self.entity_updates.0 + 1, now);
                     let self_id = self.session.self_id;
                     let skel = self.puppets[slot].as_ref().and_then(|p| p.sprite.as_ref()).map_or(0, |s| s.skel_type);
                     let scene = &mut walker.scene;
                     let walk = &mut self.walks[slot];
                     let had = self.actors[slot];
+                    // the live game's look, when the server said it is in force
+                    self.entities.live_look = self.session.live_look;
                     self.entities.channel(slot, &data, self_id, now, UPDATE_RATE, |e| {
                         if walk.as_ref().map(|w| w.0) != Some(e.id) {
                             let mut w = WalkControl::<Ee>::default();
@@ -2454,7 +2905,13 @@ impl Play {
                         // CastingCombat: a cast of the player's own stamps the
                         // cast window, through which the walk walks
                         if op == 0x00B1 && Some(c.caster) == self.self_id32() {
-                            self.cast_window = cast_window(self.cast_window, self.session.now() as i64, c.time);
+                            let now = self.session.timer();
+                            self.cast_window = cast_window(self.cast_window, now, c.time);
+                            eprintln!("play: own cast (0x00B1): time {}, effect {:#010x}; walking {:.2} s", c.time, c.effect, (self.cast_window.1 - now) as f64 / 983.04);
+                            if self.own_casts.len() == 4 {
+                                self.own_casts.pop_front();
+                            }
+                            self.own_casts.push_back((now, c.time, c.effect));
                         }
                         if !(op == 0x0776 && Some(c.caster) == self.self_id32()) {
                             self.casts.push(c);
@@ -2594,6 +3051,8 @@ impl Play {
                 self.alarm_outs(vec![o]);
             }
         }
+        // the duel part's Process: its waiting invitations (`duelplay`)
+        self.duel_tick();
         let self_id = self.session.self_id;
         // UpdateGame: the player's own actor where its walk has taken it,
         // before the other creatures walk
@@ -2636,22 +3095,26 @@ impl Play {
         let clock = self.session.timer();
         self.position_due(&walker.cam.walk.committed, clock);
         let me = self.self_id32();
+        // the creatures that make their sounds: the PS2's 24 (`heard`)
+        let heard = heard_slots(&self.entities.slots, me, &walker.eye.position);
         // the far characters' turns, by how many were far the last frame
         let every = far_pose_every(self.far_last);
         let mut far = 0;
         for (slot, entity) in self.entities.slots.iter().enumerate() {
-            let want = entity.as_ref().filter(|e| Some(e.id) != me && e.model != 0);
+            // each one as the game draws it: its `GetModel()` as `Changed`
+            // last set it (`drawn_model`)
+            let want = entity.as_ref().filter(|e| Some(e.id) != me && e.drawn_model != 0);
             if let Some(e) = entity
                 && Some(e.id) == me
-                && e.model != 0
-                && self.self_model != Some(e.model)
+                && e.drawn_model != 0
+                && self.self_model != Some(e.drawn_model)
             {
-                self.self_model = Some(e.model);
-                new_model = Some(e.model);
+                self.self_model = Some(e.drawn_model);
+                new_model = Some(e.drawn_model);
             }
             if let Some(e) = entity
                 && Some(e.id) == me
-                && e.model != 0
+                && e.drawn_model != 0
             {
                 let look = e.creature.as_ref().map(look_of);
                 apply(lib, &mut g, &mut self.self_puppet, e, look, slot, game_ms);
@@ -2732,9 +3195,14 @@ impl Play {
                             );
                         }
                     }
-                    // VICSprite::Process: the sounds its triggers fired
+                    // VICSprite::Process: the sounds its triggers fired, for the
+                    // 24 heard (`heard_slots`); past them it is quiet
                     if let Some(s) = sound.as_deref_mut() {
-                        cs.process_sounds(&walker.eye.position, &walker.eye.direction, &at, Some(&mut s.sink()));
+                        if heard[slot] {
+                            cs.process_sounds(&walker.eye.position, &walker.eye.direction, &at, Some(&mut s.sink()));
+                        } else {
+                            hush(cs, s);
+                        }
                     }
                     // VIHSprite::Raster's Process at the skeleton's level for
                     // its distance, from the eye the levels go by
@@ -2783,8 +3251,8 @@ impl Play {
         self.fishing_frame(walker, lib, game_ms);
         self.draw_projectiles(walker, lib, &mut g);
         // the player's own swing, on its walker's pose
+        let actor = walker.actor();
         if let (Some(p), Some(cs)) = (self.self_puppet.as_mut(), walker.sprite.as_mut()) {
-            let actor = Matrix44::transform(&Vect3::new(walker.cam.walk.phys.angles.x, F::ZERO, F::ZERO), F::ONE, &walker.cam.walk.phys.smooth_location());
             let centre = cs.h.calc_trans_about_center(&actor, &walker.anims);
             crate::trails::process(&mut self.trails, &mut p.trail, cs, &p.weapons, &centre, game_ms);
             self.self_at = Some((walker.cam.walk.phys.smooth_location().to_array(), slot_point(cs, 4, &centre)));
@@ -2808,25 +3276,8 @@ impl Play {
         // and its Screen Shake: off, the spell effects' shake ended before
         // the camera applies it
         crate::camstyle::screen_shake(&mut walker.cam, crate::settings::screen_shake());
-        // Every OpenStartMenu frames (a return from the spell book or the
-        // trainer too) and every CloseStartMenu restores, an entry's window
-        // included (its message closes the menu first), so the windows open
-        // from it are drawn over the play camera. A preset is applied only
-        // once one was saved (no race table, none).
-        match self.race_frame_due.take() {
-            Some(true) => {
-                if let Some(p) = crate::camstyle::apply_race(&mut walker.cam, rc, &mut walker.scene) {
-                    self.cam_preset = p;
-                    self.race_framed = true;
-                    self.locks = (false, false);
-                }
-            }
-            Some(false) if self.race_framed => {
-                crate::camstyle::apply(&mut walker.cam, &self.cam_preset);
-                self.locks = (true, true);
-            }
-            _ => {}
-        }
+        // what the start menu asked of the camera since the last frame
+        self.start_menu_camera(&mut walker.cam, &mut walker.scene);
         // DeathCamera: the eye swung round the body, the fade at 4 s; a step
         // a frame of the game's (it rises and turns by a constant a frame),
         // the eye it left kept between them
@@ -2881,13 +3332,18 @@ impl Play {
     fn place_self_actor(&mut self, walker: &mut Walker, lib: &Library) {
         self.actors_scene(walker);
         let me = self.self_id32();
+        // the body drawn at its entity's scale (`Changed`'s `SetActorScale`):
+        // a gnome's 0.9 where the server sends it
+        if let Some(e) = self.entities.slots.iter().flatten().find(|e| Some(e.id) == me) {
+            walker.scale = actor_scale(e.scale);
+        }
         let c = &walker.cam.walk.committed;
         let (at, hpr) = (c.smooth_location(), Vect3::new(c.angles.x, F::ZERO, F::ZERO));
         let dead = walker.sprite.as_ref().is_some_and(|cs| cs.dead);
-        let want = self.entities.slots.iter().flatten().find(|e| Some(e.id) == me && e.model != 0).map(|e| ActorAt {
+        let want = self.entities.slots.iter().flatten().find(|e| Some(e.id) == me && e.drawn_model != 0).map(|e| ActorAt {
             id: e.id,
-            model: e.model,
-            era: lib.view_for(e.model as i32),
+            model: e.drawn_model,
+            era: lib.view_for(e.drawn_model as i32),
             at,
             hpr,
             scale: actor_scale(e.scale),
@@ -2899,27 +3355,34 @@ impl Play {
 
     /// `VIClient::Extrapolate`'s `SetActorPos`/`SetActorHpr` (with
     /// `VIEntity::CreateActor`/`ReleaseActor`) for every entity but the
-    /// player: each one drawn has an actor of its model's sprite at its
-    /// actor's place, turn (a creature with its own walk kept level) and
-    /// scale, its copy dead with its sprite; a creature's is a capsule the
-    /// player's walk stops at. `RefreshCollision`: a creature new, or every
-    /// one after the ignore list changed, collideable unless the list names
-    /// it.
+    /// player: each one has an actor of its model's sprite at its actor's
+    /// place, turn (a creature with its own walk kept level) and scale, its
+    /// copy dead with its sprite; a creature's is a capsule the player's walk
+    /// stops at. `RefreshCollision`: a creature new, or every one after the
+    /// ignore list changed, collideable unless the list names it.
+    ///
+    /// The sprite is the model's whether or not it draws anything:
+    /// `VIClientPart06D00::LoadRes` puts on the actor whatever sprite the
+    /// dictionary has (model 0 is the null sprite, which meets nothing). So
+    /// an entity with no puppet, its model holding nothing to draw, still
+    /// has its actor: Sandstorm's blockers are CHAR.ESF's 0x6F412342, a
+    /// SimpleSprite with an empty prim buffer and a collision buffer, an
+    /// invisible wall (F3 20261028-233048).
     fn place_actors(&mut self, walker: &mut Walker, lib: &Library) {
         self.actors_scene(walker);
         let me = self.self_id32();
         let refresh = std::mem::take(&mut self.refresh_collision);
         for slot in 0..MAX_SLOTS {
             let e = self.entities.slots[slot].as_ref().filter(|e| Some(e.id) != me);
-            let want = match (e, self.puppets[slot].as_ref()) {
-                (Some(e), Some(p)) => {
-                    let level = e.creature.as_ref().is_some_and(|c| c.p255 != 0);
-                    let hpr = if level { [e.actor_hpr[0], 0.0, 0.0] } else { e.actor_hpr };
-                    let dead = p.sprite.as_ref().is_some_and(|cs| cs.dead);
-                    Some(ActorAt { id: e.id, model: p.model, era: p.era, at: v3(e.actor_pos), hpr: v3(hpr), scale: actor_scale(e.scale), dead })
-                }
-                _ => None,
-            };
+            let want = e.filter(|e| e.drawn_model != 0).map(|e| {
+                let level = e.creature.as_ref().is_some_and(|c| c.p255 != 0);
+                let hpr = if level { [e.actor_hpr[0], 0.0, 0.0] } else { e.actor_hpr };
+                let (model, era, dead) = match self.puppets[slot].as_ref() {
+                    Some(p) => (p.model, p.era, p.sprite.as_ref().is_some_and(|cs| cs.dead)),
+                    None => (e.drawn_model, lib.view_for(e.drawn_model as i32), false),
+                };
+                ActorAt { id: e.id, model, era, at: v3(e.actor_pos), hpr: v3(hpr), scale: actor_scale(e.scale), dead }
+            });
             let (a, made) = place_actor(&mut walker.scene, lib, self.actors[slot], want);
             self.actors[slot] = a;
             if let (Some(a), Some(c)) = (a, e.and_then(|e| e.creature.as_ref()))
@@ -2976,7 +3439,7 @@ impl Play {
         if walker.sprite.as_ref().is_some_and(|cs| !cs.holds_items) {
             attack = [11, 11];
         }
-        let actor = Matrix44::transform(&Vect3::new(walker.cam.walk.phys.angles.x, F::ZERO, F::ZERO), F::ONE, &walker.cam.walk.phys.smooth_location());
+        let actor = walker.actor();
         let has_self = me.is_some_and(|me| self.entities.slots.iter().flatten().any(|e| e.id == me));
         if has_self {
             let anims = &walker.anims;
@@ -3036,11 +3499,15 @@ impl Play {
     /// One GPU model for each flying at once, kept for the next (as the
     /// boids', `fx.rs`); those not flying are not drawn.
     fn draw_projectiles(&mut self, walker: &Walker, lib: &Library, g: &mut Gpu) {
+        let none: [(u32, Matrix44<Ee>, Vec<[[f32; 4]; 4]>); 0] = [];
         let flying = self.spells.as_ref().map_or(&[][..], |s| &s.flying[..]);
+        // and the meshes the effects' animated sprites carry (`Spells::meshes`)
+        let meshes = self.spells.as_ref().map_or(&none[..], |s| &s.meshes[..]);
         let eye = crate::lod::eye(&walker.cam, &walker.eye.position);
         let textures = render::library_textures(lib);
         let mut used: std::collections::BTreeMap<u32, usize> = Default::default();
-        for (id, m) in flying {
+        let all = flying.iter().map(|(id, m)| (id, m, &[][..])).chain(meshes.iter().map(|(id, m, p)| (id, m, &p[..])));
+        for (id, m, palette) in all {
             if !crate::lod::within(&m.m[3].xyz(), &eye, crate::lod::OFF_DIST) {
                 continue;
             }
@@ -3052,6 +3519,9 @@ impl Play {
             }
             let gpu = &mut pool[*n];
             g.renderer.set_instances(g.queue, gpu, &[m.to_cols()]);
+            if !palette.is_empty() {
+                g.renderer.set_palette(g.queue, gpu, palette);
+            }
             gpu.visible = true;
             *n += 1;
         }
@@ -3183,7 +3653,9 @@ impl Play {
             }
             let mut dead = false;
             if let Some(c) = &e.creature {
-                if c.p256 == 3 {
+                // a pet (of a player's side) is passed over, but the duel's
+                // (the live client's `IsDueling`)
+                if c.p256 == 3 && !self.is_dueling(e.id) {
                     continue;
                 }
                 dead = c.state == 14;
@@ -3201,7 +3673,7 @@ impl Play {
             if !near && !inside {
                 continue;
             }
-            if e.p18 & 1 == 0 || d2 >= 40000.0 {
+            if e.p18 & 1 == 0 || d2 >= CYCLE_REACH2 {
                 continue;
             }
             // the game's camera's x; read only past 5 away and not near,
@@ -3494,6 +3966,7 @@ impl Play {
     /// the target changed (`DrawReticle(1)`).
     fn target_centre(&mut self, walker: &Walker, view_proj: glam::Mat4) -> bool {
         let (proj, view) = walker.view(4.0 / 3.0);
+        let eye = walker.eye_position();
         let seen: Vec<Seen> = self
             .entities
             .slots
@@ -3502,7 +3975,9 @@ impl Play {
             .filter_map(|(k, e)| {
                 let e = e.as_ref().filter(|e| self.in_scene(e))?;
                 let at = self.slot4_of(k).unwrap_or(e.actor_pos);
-                Some(Seen { id: e.id, at, selectable: e.p18 & 1 != 0, side: e.creature.as_ref().is_some_and(|c| c.p256 == 3) })
+                let d2 = (glam::Vec3::from(e.actor_pos) - eye).length_squared();
+                let side = e.creature.as_ref().is_some_and(|c| c.p256 == 3) && !self.is_dueling(e.id);
+                Some(Seen { id: e.id, at, selectable: e.p18 & 1 != 0, side, d2 })
             })
             .collect();
         let choice = centre_choice(&seen, self.self_id32(), self.pet_id, proj * view, view_proj);
@@ -3561,13 +4036,23 @@ impl Play {
     /// when the loading screen comes down (`loading_step`), and the token
     /// waits for it (`arrival`). With no self (`m_selfId` -1) nothing
     /// moves, and a move into a world the table lacks cannot be made: both
-    /// are answered at once, as the PS2 answers whatever happens.
+    /// are answered at once, as the PS2 answers whatever happens. First, as
+    /// `Msg00B2` begins, the camera's shake and its manual camera end at
+    /// once; then, before `Respawn`, `SetMode(0)` over whatever window is up
+    /// (`set_mode_0`): the start menu closed and the play camera put back,
+    /// so that `Respawn` sets the follow orbit down behind the player at the
+    /// arrival, not the start menu's framing of the character.
     fn msg_00b2(&mut self, walker: &mut Walker, world: u8, pos: [f32; 3], hpr: [f32; 3], token: u32, now: i64) {
-        if self.session.self_id.is_some() && self.teleport(walker, world, pos, hpr, now) {
-            self.arrival.push(token);
-        } else {
-            self.session.answer_teleport(token);
+        walker.cam.effect.reset();
+        walker.cam.effect.end_manual(F::ZERO);
+        if self.session.self_id.is_some() {
+            self.set_mode_0(walker);
+            if self.teleport(walker, world, pos, hpr, now) {
+                self.arrival.push(token);
+                return;
+            }
         }
+        self.session.answer_teleport(token);
     }
 
     /// `Respawn` done (the loading screen down): each move's token answered,
@@ -3675,7 +4160,9 @@ impl Play {
             }
         } else {
             eprintln!("play: teleport to {pos:?}");
-            let far = crate::loading::far(walker_at(walker), pos);
+            // held only where a PS2 would read zones for it (`needs_read`)
+            let from = walker_at(walker);
+            let far = crate::loading::far(from, pos) && crate::loading::needs_read(&walker.scene.zone_bounds, from, pos);
             if placing == Placing::MoveTo {
                 walker.move_to(pos, hpr[0]);
             } else {
@@ -4009,6 +4496,9 @@ impl Play {
         if self.npcw_owns() {
             return self.npcw_point(f);
         }
+        if self.duel_owns() {
+            return self.duel_point(f);
+        }
         if self.support_owns() {
             return self.support_point(f);
         }
@@ -4020,6 +4510,9 @@ impl Play {
         }
         if self.mail_owns() {
             return self.mail_point(f);
+        }
+        if self.lfg_owns() {
+            return self.lfg_point(f);
         }
         if let Some(s) = self.start.as_mut() {
             match self.mode {
@@ -4175,6 +4668,10 @@ impl Play {
         }
         let rest_at = if wide.get(n) == Some(&(b' ' as u16)) { n + 1 } else { n };
         let rest = String::from_utf16_lossy(&wide[rest_at.min(wide.len())..]);
+        // the live client's `/lfg` on a server that sends its feature word (`liveplay`)
+        if cmd == "/lfg" && crate::live::features().live() && self.lfg_command(&wide[n..]) {
+            return;
+        }
         let back = self.channel;
         match cmd.as_str() {
             "/sa" | "/say" => {
@@ -4205,6 +4702,12 @@ impl Play {
             "/create" => self.admin_slash(0xA111_1000, &rest),
             "/mastery" => self.admin_slash(0xA136_0000, &rest),
             "/tradelvl" => self.admin_slash(0xA137_0000, &rest),
+            // SOE's final live client's GM commands (its ChatLine, 0x012C88D0)
+            "/servdown" => self.admin_slash(0xA138_0000, &rest),
+            "/banktunar" => self.admin_slash(0xA139_0000, &rest),
+            "/rst_mastr" => self.admin_slash(0xA13A_0000, &rest),
+            "/rst_both" => self.admin_slash(0xA13B_0000, &rest),
+            "/rem_abil" => self.admin_slash(0xA13C_0000, &rest),
             "/r" | "/reply" => {
                 if !self.reply_name.is_empty() {
                     let line = format!("/t {} {}", self.reply_name, rest);
@@ -4270,15 +4773,16 @@ impl Play {
     }
 
     /// `Msg005E`: the player died. The death pose, its spells ended, the
-    /// cue, back to play with autorun, the follow and auto-attack off, every
-    /// invitation refused (3), and `ResetCamera`: the death camera from where
-    /// the camera is.
+    /// cue, back to play (`SetMode(0)`: out of the start menu with the play
+    /// camera put back, `set_mode_0`) with autorun, the follow and
+    /// auto-attack off, every invitation refused (3), and `ResetCamera`: the
+    /// death camera from where the camera is.
     fn msg_005e(&mut self, walker: &mut Walker) {
         if let Some(cs) = walker.sprite.as_mut() {
             cs.set_death(true, false, &walker.anims, &mut self.spell_rand, None);
             self.dead_casters.push(crate::spells::SELF);
         }
-        self.mode = 0;
+        self.set_mode_0(walker);
         self.cues.push(crate::sound::Cue::Named("death", 0.4));
         // m_p2BB40, m_p2BB48: no cast walks the body
         self.cast_window = (0, 0);
@@ -4526,7 +5030,7 @@ impl Play {
             swung: now.wrapping_sub(self.swung) < 1000,
             target,
             autorun: self.autorun,
-            casting: casting((a, b), now as i64),
+            casting: casting((a, b), self.session.timer()),
             // the window's (`mode_locks`) and the client's other holds (the
             // start menu's framing, the manual camera, a server's search)
             move_ok: self.locks.0 && mode_locks(self.mode).0 && (!self.map.search.open || self.autorun || self.following),
@@ -4579,6 +5083,10 @@ impl Play {
             self.npcw_key(key, down);
             return true;
         }
+        if self.duel_owns() {
+            self.duel_key(key, down);
+            return true;
+        }
         if self.support_owns() {
             self.support_key(key, down);
             return true;
@@ -4593,6 +5101,10 @@ impl Play {
         }
         if self.mail_owns() {
             self.mail_key(key, down);
+            return true;
+        }
+        if self.lfg_owns() {
+            self.lfg_key(key, down);
             return true;
         }
         if self.start.is_some() {
@@ -4912,15 +5424,23 @@ impl Play {
         (st, loc)
     }
 
-    /// `OpenStartMenu(a)` (done with the next HUD frame): the table for the
-    /// bank and expansion, mode 13, auto-attack off, the main menu shown
-    /// (`a` resets it).
+    /// `OpenStartMenu(a)` (done with the next HUD frame): `SetMode(0)` first
+    /// (out of a start menu already up by `CloseStartMenu(0)`, its play camera
+    /// put back before the character is framed again, so a framing is never
+    /// what is saved to put back), the table for the bank and expansion, mode
+    /// 13, auto-attack off, the main menu shown and the item menu down
+    /// (`ShowMain`; `a` resets it), and the character framed
+    /// (`ApplyRaceCamera`, `start_menu_camera`).
     pub fn open_start_menu(&mut self, reset: bool) {
         if self.start.is_some() {
+            if self.mode == 13 {
+                self.close_start_menu(0);
+            }
             self.start_open = Some(reset);
             self.mode = 13;
             self.auto_attack = false;
-            self.race_frame_due = Some(true);
+            self.items.visible = false;
+            self.race_frame_due.push(true);
         }
     }
 
@@ -4981,13 +5501,76 @@ impl Play {
         }
     }
 
-    /// `CloseStartMenu(mode)`.
+    /// `CloseStartMenu(mode)`: the play camera put back
+    /// (`ApplyDefaultCamera`, `start_menu_camera`), `mode`, and the menu down
+    /// (an open not shown yet is not shown: the game's is shown at once).
     fn close_start_menu(&mut self, mode: i32) {
-        self.race_frame_due = Some(false);
+        self.race_frame_due.push(false);
         self.mode = mode;
+        self.start_open = None;
         if let Some(s) = self.start.as_mut() {
             s.menu.visible = false;
         }
+    }
+
+    /// `VIWndGame::SetMode(0)`, for the one window this client keeps apart
+    /// from the mode: the start menu (its inventory in it) draws and takes
+    /// keys while it is visible, whatever the mode, so it is closed as
+    /// `SetMode(0)` closes it (`CloseStartMenu(0)`); every other window runs
+    /// in its own mode only and goes with the mode put to 0.
+    fn set_mode_zero(&mut self) {
+        if self.mode == 13 || self.start.as_ref().is_some_and(|s| s.menu.visible) {
+            self.close_start_menu(0);
+        } else {
+            self.mode = 0;
+        }
+    }
+
+    /// What the start menu asked of the camera since it was last looked at,
+    /// done in the order asked (`race_frame_due`), as the game does each at
+    /// once: `ApplyRaceCamera` (the camera saved, then the character framed
+    /// in orbit mode 1 by the race's record, the walk and the camera held)
+    /// and `ApplyDefaultCamera` (the camera saved put back, both let go). So
+    /// every OpenStartMenu frames (a return from the spell book or the
+    /// trainer too) and every CloseStartMenu restores, an entry's window
+    /// included (its message closes the menu first), the windows opened from
+    /// it drawn over the play camera; a menu opened and closed between two
+    /// frames leaves the camera as it was. A preset is applied only once one
+    /// was saved (no race table, none).
+    fn start_menu_camera<S: vi::scene::Scene<Ee>>(&mut self, cam: &mut WalkCamera<Ee>, scene: &mut S) {
+        let rc = self.race_camera();
+        for frame in std::mem::take(&mut self.race_frame_due) {
+            if frame {
+                if let Some(p) = crate::camstyle::apply_race(cam, rc, scene) {
+                    self.cam_preset = p;
+                    self.race_framed = true;
+                    self.locks = (false, false);
+                }
+            } else if self.race_framed {
+                crate::camstyle::apply(cam, &self.cam_preset);
+                self.locks = (true, true);
+            }
+        }
+    }
+
+    /// `VIWndGame::SetMode(0)` as a message calls it over whatever is up (a
+    /// server's move, a death): back to play, the windows going with the
+    /// mode, and out of the start menu (13) by `CloseStartMenu(0)`, whose
+    /// `ApplyDefaultCamera` puts the play camera back now, before the message
+    /// moves the camera itself (`Respawn`: behind the player at the
+    /// arrival); then `UpdateMode`'s play: the walk and the camera let go.
+    /// With the mode set to 0 alone, the menu stayed drawn over play taking
+    /// no keys, the character framed (orbit mode 1) and the walk held, and
+    /// Start then saved that framing as the camera to put back: closed, the
+    /// camera orbited on its own round a player who walked and turned under
+    /// it (F3 20261028-021802, a coach taken with the inventory up).
+    fn set_mode_0(&mut self, walker: &mut Walker) {
+        if self.mode == 13 {
+            self.close_start_menu(0);
+        }
+        self.start_menu_camera(&mut walker.cam, &mut walker.scene);
+        self.mode = 0;
+        self.locks = (true, true);
     }
 
     /// The start menu's waiting work, with the raster: the open, then each
@@ -4997,8 +5580,9 @@ impl Play {
         let now = self.session.now() as i64;
         let expansion = self.session.expansion;
         // OpenStartMenu: the bank's tables when the bank has the auction
-        // (GetBank()->GetP78CC())
-        let bank_tables = self.dump.bank.p78cc;
+        // (GetBank()->GetP78CC()); the live client's feature word's bit 0x01
+        // when a server sends one (`live`)
+        let bank_tables = crate::live::features().auction(self.dump.bank.p78cc);
         // and its first entry, TEST, while the GM's channel is enabled
         let test = self.admin.part.test_entry();
         let mut actions = Vec::new();
@@ -5027,7 +5611,11 @@ impl Play {
         let mut outs = Vec::new();
         if let Some(reset) = self.start_open.take() {
             s.pick_test(bank_tables, expansion, test);
+            liveplay::group_menu(&mut s.menus);
             s.menu.visible = true;
+            // ShowMain: the items put away (m_items->SetVisible(false)), so
+            // an inventory the menu was closed over never opens with it
+            self.items.visible = false;
             s.menu.show_main(vui, r, reset, now, loc);
         }
         let mut cues = Vec::new();
@@ -5343,6 +5931,7 @@ impl Play {
                     self.open_start_menu(false);
                 }
                 crate::classmastery::CmUp::Send(m) => self.session.send(&m),
+                crate::classmastery::CmUp::Warn(id) => self.warn(id),
             }
         }
     }
@@ -5845,11 +6434,17 @@ impl Play {
         if self.admin_action(id, arg) {
             return;
         }
+        // the live client's duel part (`IsMine`, `Use`): Community > Duel
+        if self.duel_action(id) {
+            return;
+        }
         let target = self.target;
         match id {
             // VIBankControl::IsCommand / Do: the auction search
             0xA801_0000 | 0xA802_0000 | 0xA803_0000 => self.open_auction_search(id),
             0x0701_0000 | 0x0704_0000 | 0x0705_0000 | 0x0706_0000 => self.group_action(id),
+            // the group chat's Show and Hide, the live group search (`liveplay`)
+            0x0707_0000 | 0x0209_0000 | 0x020A_0000 | 0x020B_0000 => self.lfg_action(id, arg),
             0x0B01_0000 => self.group_changed(0),
             0x0B02_0000 => self.group_changed(1),
             0x0B03_0000 => {
@@ -5911,7 +6506,11 @@ impl Play {
                 self.session.send_opcode([30, 66, 67, 68][k]);
                 self.emote = Some([56, 57, 60, 61][k]);
             }
-            0x0A01_0000 => self.logout(),
+            // a duel on or set surrendered first (the live client's)
+            0x0A01_0000 => {
+                self.duel_logout();
+                self.logout();
+            }
             0x0B05_2000 => self.session.send_opcode(69),
             // the guild roster: ShowInvite (OpenGuildMenu, mode 21), or word 570
             0x0B05_1001 => {
@@ -6548,7 +7147,9 @@ impl Play {
         }
         let Some(m) = self.entities.slots.iter().flatten().find(|e| Some(e.id) == me) else { return false };
         let (Some(tc), Some(mc)) = (&t.creature, &m.creature) else { return false };
-        if mc.p256 == 2 && (tc.p256 == 2 || tc.p256 == 3) {
+        // a player against a player or a pet: none, but the duel's (the live
+        // client's `IsDueling`)
+        if mc.p256 == 2 && !self.is_dueling(t.id) && (tc.p256 == 2 || tc.p256 == 3) {
             return false;
         }
         if tc.npc_flags & 0x400 != 0 {
@@ -6939,10 +7540,12 @@ impl Play {
             || self.quick_typing()
             || (self.bank_owns() && self.bank_typing())
             || (self.npcw_owns() && self.npcw_typing())
+            || self.duel_typing()
             || (self.support_owns() && self.support_typing())
             || (self.mail_owns() && self.mail_typing())
             || (self.fishing_owns() && self.fishing_typing())
             || (self.admin_owns() && self.admin_typing())
+            || (self.lfg_owns() && self.lfg_typing())
     }
 
     /// The modes whose window takes the start menu's keys.
@@ -7476,6 +8079,7 @@ impl Play {
             target: self.target,
             camera: walker.eye.position.to_array(),
             time_ms,
+            duel: self.duel_patch(),
             waypoint: self.map.waypoint(self.player.world as i32),
             group_waypoint: self.map.group_waypoint(self.player.world as i32),
             minimap: self.minimap_up(),
@@ -7583,6 +8187,7 @@ impl Play {
             self.run_class_mastery(vui, &mut r);
             self.run_factions(vui, &mut r);
             self.run_npcw(vui, &mut r);
+            self.run_duel(vui, &mut r);
             self.run_bank(vui, &mut r);
             self.run_panels(vui, &mut r);
             self.run_guild(vui, &mut r);
@@ -7590,6 +8195,7 @@ impl Play {
             self.run_support(vui, &mut r);
             self.run_fishing(vui, &mut r, walker);
             self.run_admin(vui, &mut r);
+            self.run_group_search(vui, &mut r, &start_loc);
             self.run_edit(vui, &r);
             if self.mode == 2 {
                 let mut cues = Vec::new();
@@ -7668,7 +8274,7 @@ impl Play {
             // UpdateQuickBars, then the menu up (the HUD's, in play; L2's
             // menus open over it without `UpdateMode`, so it stays up there;
             // a server's player search hides them while it is up)
-            if (self.mode == 0 || self.mode == 30 || self.mode == 38) && !self.search.open {
+            if (self.mode == 0 || self.mode == 30 || self.mode == 38 || self.mode == 43) && !self.search.open {
                 let bars = self.hud_bars();
                 self.hud_menus.build(&self.abilities, &self.dump.inventory, &self.gear, bars);
                 let abilities = &self.abilities;
@@ -7876,6 +8482,40 @@ impl Play {
         self.self_puppet.is_some()
     }
 
+    /// The creatures' sound triggers as the console trips them: inside
+    /// `VIHSprite::Process`, which it runs for an actor `VIScene::RasterActor`
+    /// rasters (within its off distance, its bound inside the clip volume the
+    /// walk reaches it under: `World::raster_actors`, as the shadows' queue
+    /// takes it, under the drawn view `view_proj` from `at`), and for the
+    /// target (`TrackTarget`'s `CalcSlotWorldTransform`). This client poses
+    /// every creature within its off distance whichever way the camera looks,
+    /// so one behind the camera or a wall tripped the sounds of its swings,
+    /// hits and steps, which a PS2 never plays: the trips of a creature the
+    /// console does not raster are let go here, after the frame that posed it
+    /// (its sounds are made at the next, `process_sounds`). The rarer ways
+    /// the console poses one off screen (a spell effect on it, a damage
+    /// number's first frame, the player's walk brushing it) are not followed.
+    pub fn keep_rastered_trips(&mut self, walker: &mut Walker, view_proj: glam::Mat4, at: glam::Vec3) {
+        let me = self.self_id32();
+        let mut drawn = Vec::new();
+        for (slot, e) in self.entities.slots.iter().enumerate() {
+            let Some(e) = e.as_ref().filter(|e| Some(e.id) != me && e.id != self.target) else { continue };
+            let Some(p) = self.puppets[slot].as_ref().filter(|p| p.sprite.as_ref().is_some_and(|cs| cs.h.triggers.iter().any(|t| t.tripped != 0))) else { continue };
+            let actor = self.actors[slot].filter(|a| a.id == e.id).map(|a| a.actor);
+            drawn.push((slot, actor, F::<Ee>::new(crate::lod::off_dist(&p.gpu.lod_dists))));
+        }
+        if drawn.is_empty() {
+            return;
+        }
+        let eye = crate::lod::eye(&walker.cam, &walker.eye.position);
+        for slot in unrastered(&mut walker.scene, &drawn, view_proj, at, &eye) {
+            let Some(cs) = self.puppets[slot].as_mut().and_then(|p| p.sprite.as_mut()) else { continue };
+            for i in 0..cs.h.triggers.len() {
+                cs.h.reset_trigger(i);
+            }
+        }
+    }
+
     /// The characters `VIScene::RasterActor` rasters this frame, as
     /// `RenderShadow` reads them (`shadows`), in their slots' order: each
     /// creature drawn (`Puppet::shown`, its actor's bound off the walker's
@@ -7956,7 +8596,7 @@ mod commands {
 
     /// Play on a session nothing answers, the player 0x100, no words (a
     /// word is said as "(word n)").
-    fn play() -> Play {
+    pub(super) fn play() -> Play {
         play_with(Box::default())
     }
 
@@ -7972,6 +8612,20 @@ mod commands {
         let mut s = Session::connect_with(Box::new(Nowhere), ([127, 0, 0, 1], 5000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
         s.self_id = Some(0x100);
         Play::new(s, Player::default(), dump)
+    }
+
+    /// The plain human body is drawn only for a walk with no server: in play
+    /// the player is the server's entity for it, so between the world entry
+    /// and that entity's first update nothing stands in for it (F3
+    /// 20261028-231959: a gnome was drawn a human first), and once it has
+    /// come the dressed body is drawn (`has_self`). The control: with no
+    /// play the plain body is the walk's character.
+    #[test]
+    fn the_plain_body_is_never_drawn_in_play() {
+        assert!(plain_body_shown(None), "the control: a walk with no server draws it");
+        let p = play();
+        assert!(!p.has_self(), "no entity for the player yet");
+        assert!(!plain_body_shown(Some(&p)), "in play, before the player's entity, no plain body");
     }
 
     /// The cast window as the console keeps it (longs): a cast at `now`
@@ -8095,12 +8749,28 @@ mod commands {
         assert!(!old_casting(old((0, 0), 1_000, 1500), 61_000), "and below 2^31 it let go");
     }
 
+    /// The window is on `m_p07568`, VITimer's 983.04 ticks a second, and the
+    /// console adds the cast's time to it as it comes: a 2000 cast walks the
+    /// body 2.0345 s, not 2 (the client had it on milliseconds, 34 ms short).
+    /// The control: on milliseconds the walk is over by 2.030 s.
+    #[test]
+    fn a_casts_time_is_vitimer_ticks() {
+        let at = |us: i64| net::session::ticks(us);
+        let w = cast_window((0, 0), at(0), 2000);
+        assert!(casting(w, at(2_030_000)), "2.030 s on: 1995 ticks, walking still");
+        assert!(!casting(w, at(2_040_000)), "2.040 s on: 2005 ticks, running");
+        assert_eq!(at(1_000_000), 983, "983.04 ticks a second");
+        let ms = cast_window((0, 0), 0, 2000);
+        assert!(!casting(ms, 2_030), "the control: on milliseconds it is over by 2.030 s");
+    }
+
     /// What `UpdateControls` reads: walking only through the player's own
-    /// cast, on the session's clock. The control: no cast, no walk.
+    /// cast, on the game's clock (VITimer's ticks). The control: no cast, no
+    /// walk.
     #[test]
     fn the_walk_walks_only_through_the_players_cast() {
         let mut p = play();
-        let now = p.session.now() as i64;
+        let now = p.session.timer();
         assert!(!p.control_client().casting, "the control: no cast yet");
         p.cast_window = cast_window(p.cast_window, now, 60_000);
         assert!(p.control_client().casting, "a cast a minute long: walking");
@@ -8320,6 +8990,63 @@ mod commands {
         assert_eq!(also.cam.walk.phys.position.y.0, floor - 2.0, "a dump's SetLocation as it is");
     }
 
+    /// Sandstorm's boon (F3 pass 25): "A great wind stirs across Freeport.",
+    /// then every player there is moved (0x00B2) 71 up into its sky, all to
+    /// one point. From Freeport's coach, 358 away, a PS2 reads no zone for it
+    /// (the four round the point are in its cache: `loading::needs_read`) and
+    /// shows its loading screen for a moment; here the screen comes down as
+    /// the zones are in, the move is answered with its first 0x40 from the air
+    /// at once, and the walk falls. Held its second, the walk stood in the air
+    /// with nothing sent, and the players the boon moved after it were put on
+    /// it there (their `Respawn` casts meet its capsule). Control: the same
+    /// move from Highpass, 3,871 away, reads them all and is held.
+    #[test]
+    fn the_boons_move_across_freeport_is_not_held() {
+        let iso = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        if !iso.exists() {
+            eprintln!("SKIP: no run/eqoa.iso");
+            return;
+        }
+        crate::s2::with_rules(crate::s2::Rules::retail(), || {
+            let (coach, highpass) = ((25273.0f32, 15723.0f32), (23533.45f32, 18890.77f32));
+            let boon = [25619.072f32, 125.0, 15629.557];
+            let mut lib = Library::new();
+            let w = lib.add("TUNARIA.ESF", crate::stream::open_file(&iso, "TUNARIA.ESF").unwrap());
+            let mut src = crate::stream::FileZones::open(&iso, "TUNARIA.ESF").unwrap();
+            crate::stream::fill(&mut lib, w, coach.0, coach.1, &mut src);
+            crate::stream::fill(&mut lib, w, highpass.0, highpass.1, &mut src);
+            let tunaria = || vi::world::World::load(&lib, w).unwrap();
+            let answer = |token: i64| {
+                let mut w = net::stream::Writer::op(0x0049);
+                w.signed(token);
+                (drdp::TYPE_GUARANTEED, w.data)
+            };
+            let mut p = play();
+            p.session.record = Some(Vec::new());
+            let mut walker = Walker::arrive(tunaria(), Spawn::ground(coach.0, coach.1, 0.0));
+            p.loading_step(&mut walker, true);
+            p.session.record.as_mut().unwrap().clear();
+            let now = p.session.now() as i64;
+            p.msg_00b2(&mut walker, 0, boon, [0.0; 3], 7, now);
+            assert!(p.loading(), "up for the move");
+            p.loading_step(&mut walker, true);
+            assert!(!p.loading(), "down as its zones are in: a PS2 reads none");
+            let c = walker.cam.walk.committed.position;
+            assert_eq!([c.x.0, c.y.0, c.z.0], boon, "in the air where the server put it");
+            let at = vi::selfstate::encode(0, &walker.cam.walk.committed, 0, p.target);
+            assert_eq!(std::mem::take(p.session.record.as_mut().unwrap()), [answer(7), (0x40, at)], "answered, and the 0x40 from the air");
+            // control: from Highpass the zones round the point are read, and
+            // the screen stays up its second
+            let mut q = play();
+            let mut from_hp = Walker::arrive(tunaria(), Spawn::ground(highpass.0, highpass.1, 0.0));
+            q.loading_step(&mut from_hp, true);
+            let now = q.session.now() as i64;
+            q.msg_00b2(&mut from_hp, 0, boon, [0.0; 3], 8, now);
+            q.loading_step(&mut from_hp, true);
+            assert!(q.loading(), "control: from Highpass, held");
+        });
+    }
+
     /// `SendPosition` every `m_p07578` ticks of the game's clock: 100 until
     /// 0x07B2 sets another, the first at once (`m_p07570` -1 from
     /// `Connect`). Controls: one tick short of the interval sends nothing,
@@ -8385,6 +9112,10 @@ mod commands {
             crate::stream::fill(&mut lib, w, b.0, b.1, &mut src);
             let tunaria = || vi::world::World::load(&lib, w).unwrap();
             let mut walker = Walker::arrive(tunaria(), Spawn::ground(a.0, a.1, 0.0));
+            // the world entry's own screen down first, as in play: a move
+            // while it is up is held from when it went up (`Screen::begin`)
+            p.loading_step(&mut walker, true);
+            assert!(!p.loading());
             // the game's clock (`Session::timer`), which the arrival's 0x40
             // reads too: a frame's never behind it
             let mut now = 0i64;
@@ -8464,6 +9195,191 @@ mod commands {
             assert!(!p.loading());
             assert_eq!(there.cam.walk.committed.position, before);
             assert_eq!(sent(&mut p), [answer(4)]);
+        });
+    }
+
+    /// A coach taken with the start menu's inventory up (F3 20261028-021802,
+    /// Liav's: "your camera becomes detached from your character"):
+    /// `Msg00B2`'s `SetMode(0)` closes the start menu before `Respawn`
+    /// (`CloseStartMenu(0)`'s `ApplyDefaultCamera`: the play camera put back,
+    /// the walk and the camera let go), so after the coach's two moves the
+    /// camera is the follow orbit (mode 3) behind the player at the distance
+    /// it had, the menu down; opened again, the menu frames the character
+    /// with its item menu down, and closed it puts the follow orbit back.
+    /// Across worlds (a boat) the walk built there takes the follow orbit; a
+    /// death with the menu up closes it the same way. Opened again over
+    /// itself the menu is closed first, and opened and closed between two
+    /// frames it leaves the camera as it was. The controls: the move as the
+    /// client made it (`Respawn` alone, the mode set to 0 and the menu left
+    /// up) leaves the framing (orbit mode 1) on in play under the menu, the
+    /// walk held, and the menu opened and closed again puts the framing back
+    /// as the play camera (the camera orbiting on its own round a player who
+    /// walks and turns under it); a boat taken so carries the framing; a
+    /// framing saved over the framing puts a framing back; and the close
+    /// alone puts back the camera the open before saved.
+    #[test]
+    fn a_coach_taken_with_the_inventory_up_leaves_the_camera_behind_the_player() {
+        let iso = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        let client = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/client.bin");
+        let Some(img) = std::fs::read(&client).ok().and_then(crate::client_image::ClientImage::from_bytes) else {
+            eprintln!("SKIP: no run/client.bin");
+            return;
+        };
+        if !iso.exists() {
+            eprintln!("SKIP: no run/eqoa.iso");
+            return;
+        }
+        crate::s2::with_rules(crate::s2::Rules::retail(), || {
+            let (a, b) = ((25275.115f32, 15766.627f32), (23533.45f32, 18890.77f32));
+            let mut lib = Library::new();
+            let w = lib.add("TUNARIA.ESF", crate::stream::open_file(&iso, "TUNARIA.ESF").unwrap());
+            let mut src = crate::stream::FileZones::open(&iso, "TUNARIA.ESF").unwrap();
+            crate::stream::fill(&mut lib, w, a.0, a.1, &mut src);
+            crate::stream::fill(&mut lib, w, b.0, b.1, &mut src);
+            let tunaria = || vi::world::World::load(&lib, w).unwrap();
+            let at_a = [a.0, crate::walker::ground(&mut tunaria(), a.0, a.1).unwrap() + 1.0, a.1];
+            let at_b = [b.0, crate::walker::ground(&mut tunaria(), b.0, b.1).unwrap() + 1.0, b.1];
+            let odus = [7338.18f32, 54.21, 11124.25];
+            // in play at Freeport: the first entry's follow orbit
+            // (`ToggleCameraStyle`), zoomed out to 8
+            let in_play = || {
+                let mut p = play();
+                p.client_data(&img);
+                let mut walker = Walker::arrive(tunaria(), Spawn::ground(a.0, a.1, 0.5));
+                p.loading_step(&mut walker, true);
+                let rc = p.race_camera();
+                p.cam_saved = crate::camstyle::toggle(&mut walker.cam, false, rc, &mut walker.scene);
+                p.cam_entered = true;
+                walker.cam.set_orbit_distance(F::new(8.0));
+                walker.eye = walker.cam.process(&mut walker.scene);
+                (p, walker)
+            };
+            // what the frame's end does with the camera
+            let frame_end = |p: &mut Play, walker: &mut Walker| p.start_menu_camera(&mut walker.cam, &mut walker.scene);
+            // the start menu up (its HUD frame showing it, its frame's end
+            // framing the character), then its inventory (`ShowItems`)
+            let inventory_up = |p: &mut Play, walker: &mut Walker| {
+                p.open_start_menu(true);
+                if p.start_open.take().is_some() {
+                    p.start.as_mut().unwrap().menu.visible = true;
+                }
+                frame_end(p, walker);
+                p.items.visible = true;
+            };
+            let menu_up = |p: &Play| p.start.as_ref().is_some_and(|s| s.menu.visible);
+            // the follow orbit's angle off straight behind the walk's heading
+            let off_behind = |walker: &Walker| {
+                let c = &walker.cam;
+                let d = (c.cur.orbit.x.0 - c.walk.committed.angles.x.0 - std::f32::consts::PI).rem_euclid(std::f32::consts::TAU);
+                d.min(std::f32::consts::TAU - d)
+            };
+            // the far hold of each move past (FAR_HOLD_MS ago)
+            let ago = |p: &Play| p.session.now() as i64 - crate::loading::FAR_HOLD_MS;
+            // a coach: two moves, each come down before the next
+            let hops = [(at_b, 2.0f32), (at_a, 4.0)];
+
+            let (mut p, mut walker) = in_play();
+            inventory_up(&mut p, &mut walker);
+            assert_eq!((walker.cam.camera_mode, p.locks, menu_up(&p)), (1, (false, false), true), "the character framed, the walk and the camera held");
+            for (k, (to, heading)) in hops.into_iter().enumerate() {
+                let since = ago(&p);
+                p.msg_00b2(&mut walker, 0, to, [heading, 0.0, 0.0], k as u32, since);
+                p.loading_step(&mut walker, true);
+                frame_end(&mut p, &mut walker);
+                assert!(!p.loading());
+                assert_eq!((walker.cam.camera_mode, walker.cam.cur.dist.0), (3, 8.0), "move {k}: the follow orbit, at the 8 it had");
+                assert!(off_behind(&walker) < 1e-3, "move {k}: behind the player at the arrival, {} off", off_behind(&walker));
+            }
+            assert_eq!((p.mode, menu_up(&p), p.start_open, p.locks), (0, false, None, (true, true)), "the menu down, the walk and the camera let go");
+            let c = p.control_client();
+            assert!(c.move_ok && c.look_ok);
+            // opened again: framed, its item menu down; closed: the follow orbit
+            p.open_start_menu(true);
+            assert!(!p.items.visible, "ShowMain: the item menu down");
+            frame_end(&mut p, &mut walker);
+            assert_eq!(walker.cam.camera_mode, 1, "framed");
+            p.close_start_menu(0);
+            frame_end(&mut p, &mut walker);
+            assert_eq!((walker.cam.camera_mode, walker.cam.cur.dist.0, p.locks), (3, 8.0, (true, true)), "the follow orbit put back");
+            // opened again over itself: closed first, so what is put back is
+            // still the follow orbit
+            for _ in 0..2 {
+                p.open_start_menu(true);
+                frame_end(&mut p, &mut walker);
+            }
+            assert_eq!(walker.cam.camera_mode, 1);
+            p.close_start_menu(0);
+            frame_end(&mut p, &mut walker);
+            assert_eq!(walker.cam.camera_mode, 3, "the follow orbit, not the framing");
+            // zoomed in to 5 since the last open; the control: the close
+            // alone (the open's ask overwritten by it, as the client kept
+            // one) puts back the camera the open before saved, at 8
+            walker.cam.set_orbit_distance(F::new(5.0));
+            p.race_frame_due.push(false);
+            frame_end(&mut p, &mut walker);
+            assert_eq!(walker.cam.cur.dist.0, 8.0, "the control: the camera of the open before");
+            // opened and closed between two frames: the camera as it was
+            walker.cam.set_orbit_distance(F::new(5.0));
+            p.open_start_menu(true);
+            p.close_start_menu(0);
+            frame_end(&mut p, &mut walker);
+            assert_eq!((walker.cam.camera_mode, walker.cam.cur.dist.0, p.start_open), (3, 5.0, None), "as it was, the open not shown");
+
+            // the control: the move as the client made it, `Respawn` alone
+            let (mut q, mut w2) = in_play();
+            inventory_up(&mut q, &mut w2);
+            for (to, heading) in hops {
+                let since = ago(&q);
+                q.teleport(&mut w2, 0, to, [heading, 0.0, 0.0], since);
+                q.loading_step(&mut w2, true);
+                frame_end(&mut q, &mut w2);
+            }
+            assert_eq!((w2.cam.camera_mode, q.mode, menu_up(&q)), (1, 0, true), "the control: the framing on in play, under the menu");
+            assert!(!q.control_client().move_ok, "the control: the walk held");
+            // Start in play, and the menu closed again
+            q.open_start_menu(true);
+            frame_end(&mut q, &mut w2);
+            q.close_start_menu(0);
+            frame_end(&mut q, &mut w2);
+            assert_eq!(w2.cam.camera_mode, 1, "the control: the framing put back as the play camera");
+            // the control: a framing saved over the framing puts a framing back
+            let (mut q, mut w2) = in_play();
+            q.open_start_menu(true);
+            frame_end(&mut q, &mut w2);
+            q.race_frame_due.push(true);
+            frame_end(&mut q, &mut w2);
+            q.close_start_menu(0);
+            frame_end(&mut q, &mut w2);
+            assert_eq!(w2.cam.camera_mode, 1, "the control: the framing put back");
+
+            // a boat into Odus with the menu up: the walk built there (on
+            // Tunaria's geometry: the camera is the test) takes the follow
+            // orbit; taken as the client took it, the framing
+            for msg in [true, false] {
+                let (mut p, mut walker) = in_play();
+                inventory_up(&mut p, &mut walker);
+                let since = ago(&p);
+                if msg {
+                    p.msg_00b2(&mut walker, 2, odus, [1.0, 0.0, 0.0], 9, since);
+                } else {
+                    p.teleport(&mut walker, 2, odus, [1.0, 0.0, 0.0], since);
+                }
+                let (file, spawn) = p.take_world_change().expect("a world change");
+                assert_eq!(file, "ODUS.ESF");
+                let mut there = Walker::arrive(tunaria(), spawn);
+                p.world_entered(&mut there);
+                frame_end(&mut p, &mut there);
+                let want = if msg { (3, 8.0) } else { (1, walker.cam.cur.dist.0) };
+                assert_eq!((there.cam.camera_mode, there.cam.cur.dist.0), want, "{}", if msg { "the follow orbit carried" } else { "the control: the framing carried" });
+            }
+
+            // a death with the menu up: closed, the play camera put back for
+            // the death camera to start from
+            let (mut p, mut walker) = in_play();
+            inventory_up(&mut p, &mut walker);
+            p.msg_005e(&mut walker);
+            assert_eq!((walker.cam.camera_mode, walker.cam.cur.dist.0, p.mode, menu_up(&p)), (3, 8.0, 0, false));
+            assert!(p.death.is_some());
         });
     }
 
@@ -8744,13 +9660,14 @@ mod commands {
     /// a player's side, one not selectable and one behind the camera never;
     /// one at the wide window's edge only when nothing else is in view, and
     /// none at all is none. The controls: measured through the 16:9 view as
-    /// drawn, A would be nearer.
+    /// drawn, A would be nearer. Nothing 200 or more from the camera, Tab's
+    /// reach, though nearer the middle (just inside it is the control).
     #[test]
     fn the_target_is_the_creature_nearest_the_middle() {
         let view = glam::camera::rh::view::look_to_mat4(glam::Vec3::ZERO, glam::Vec3::Z, glam::Vec3::Y);
         let game = crate::walker::projection_to(4.0 / 3.0, 6000.0) * view;
         let drawn = crate::walker::projection_to(16.0 / 9.0, 6000.0) * view;
-        let seen = |id: u32, at: [f32; 3]| Seen { id, at, selectable: true, side: false };
+        let seen = |id: u32, at: [f32; 3]| Seen { id, at, selectable: true, side: false, d2: glam::Vec3::from(at).length_squared() };
         let a = seen(1, [0.5, 0.0, 10.0]);
         let b = seen(2, [0.0, 0.3, 10.0]);
         let others = [
@@ -8770,6 +9687,13 @@ mod commands {
         assert_eq!(centre_choice(&others, Some(0x100), 7, game, drawn), None);
         // the control: measured as drawn
         assert_eq!(centre_choice(&[a, b], Some(0x100), 7, drawn, drawn), Some(1));
+        // Tab's reach: dead ahead at 250 is passed over for one off to the
+        // side at 20; just inside 200 it is taken; alone at 250, nothing
+        let far = seen(8, [0.0, 0.0, 250.0]);
+        let side = seen(9, [3.0, 0.0, 20.0]);
+        assert_eq!(centre_choice(&[far, side], Some(0x100), 7, game, drawn), Some(9));
+        assert_eq!(centre_choice(&[seen(8, [0.0, 0.0, 199.0]), side], Some(0x100), 7, game, drawn), Some(8));
+        assert_eq!(centre_choice(&[far], Some(0x100), 7, game, drawn), None);
     }
 
     /// The choice made the target: a change stops the attack and drops the
@@ -9413,13 +10337,15 @@ mod commands {
         let r = p.report([0.0; 3]);
         let lines: Vec<&str> = r.lines().collect();
         let at = lines.iter().position(|l| l.contains("\"Coachman Quicksteed\"")).expect("the coachman's line");
+        assert_eq!(lines.get(at + 1).copied(), Some("    targeting: selectable false, world 0 (the player's 0), byte 27 0, npc flags 0x0"), "first how it may be targeted");
         assert_eq!(
-            lines.get(at + 1).copied(),
+            lines.get(at + 2).copied(),
             Some("    look: robe 255 tint 0, armor [0, 0, 0, 0, 2, 0] tints [255, 255, 255, 255, 255, 255], hair [2, 3, 1], face 3; items [0xbf7e7dcb, 0x0, 0x0] over [0x0, 0x0, 0x0] types [1, 0]")
         );
-        assert!(lines.get(at + 2).is_some_and(|l| l.starts_with("    move: state 0 walking 0, velocity [0.00, 0.00, 0.00], updated ")), "then how it moves: {:?}", lines.get(at + 2));
+        assert!(lines.get(at + 3).is_some_and(|l| l.starts_with("    move: state 0 walking 0, velocity [0.00, 0.00, 0.00], updated ")), "then how it moves: {:?}", lines.get(at + 3));
         let plain = lines.iter().position(|l| l.starts_with("  0x42 kind 129")).expect("the plain entity's line");
-        assert!(!lines.get(plain + 1).is_some_and(|l| l.contains("look:") || l.contains("move:")), "an entity with no creature part has no look or move line");
+        assert!(lines.get(plain + 1).is_some_and(|l| l.starts_with("    targeting: selectable false") && !l.contains("npc flags")), "every entity's targeting, a creature's npc flags alone: {:?}", lines.get(plain + 1));
+        assert!(!lines.get(plain + 2).is_some_and(|l| l.contains("look:") || l.contains("move:")), "an entity with no creature part has no look or move line");
     }
 
     /// A report's move line: the state and velocity the channel last sent,

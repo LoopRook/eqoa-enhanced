@@ -508,7 +508,7 @@ pub fn parse_reply(d: &[u8]) -> Option<Reply> {
 
 /// The whole exchange against `addr` (the auth server, port 9735).
 pub fn login(addr: impl ToSocketAddrs, user: &str, password: &str) -> Result<Login, Error> {
-    let addr = addr.to_socket_addrs()?.next().ok_or_else(|| std::io::Error::other("no address"))?;
+    let addr = crate::addr::pick(addr.to_socket_addrs()?).ok_or_else(|| std::io::Error::other("no address"))?;
     let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
     s.set_read_timeout(Some(Duration::from_secs(10)))?;
     let mut x = Exchange::new(user, password);
@@ -535,6 +535,28 @@ mod tests {
         assert_eq!(&r[84..88], b"EQOA");
         // CBC: an all-zero second block still encrypts to something else.
         assert_ne!(&r[56..64], &[0; 8]);
+    }
+
+    /// A password of 31 characters reaches the server whole, in the request
+    /// and in the UDP token (the server reads each to its NUL); the 32 bytes
+    /// hold no more, so a longer one is cut (the page's editor stops at 31).
+    #[test]
+    fn a_31_character_password_goes_whole() {
+        use aes::cipher::{BlockDecrypt, KeyInit, generic_array::GenericArray};
+        let pw = "abcdefghijklmnopqrstuvwxyz01234";
+        assert_eq!(pw.len(), 31);
+        let plain = des_soe_decrypt(&login_request("dab", pw)[48..80]);
+        assert_eq!(&plain[..31], pw.as_bytes());
+        assert_eq!(plain[31], 0, "the NUL the server reads to");
+        let mut t = udp_token(pw);
+        let c = aes::Aes256::new(GenericArray::from_slice(&AES_KEY));
+        for block in t.chunks_mut(16) {
+            c.decrypt_block(GenericArray::from_mut_slice(block));
+        }
+        assert_eq!((&t[..31], t[31]), (pw.as_bytes(), 0));
+        // the control: a 40-character one keeps its first 31
+        let plain = des_soe_decrypt(&login_request("dab", &format!("{pw}567890123"))[48..80]);
+        assert_eq!((&plain[..31], plain[31]), (pw.as_bytes(), 0));
     }
 
     fn frame(ty: u32, len: usize) -> Vec<u8> {

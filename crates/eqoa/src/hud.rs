@@ -57,6 +57,9 @@ pub struct HudState {
     pub group: Vec<MemberState>,
     /// Every member, for `DrawPatch`.
     pub patches: Vec<PatchMember>,
+    /// The live client's duel (0x1502 sub 8): its centre while the duel is on
+    /// and in the player's world, for `DrawPatch`'s orange patch (`duel.rs`).
+    pub duel: Option<[f32; 3]>,
     /// The map's waypoint in this world (x, z): a dot on the compass's rim
     /// at any distance, the client's own (`map::Map::click`).
     pub waypoint: Option<[f32; 2]>,
@@ -72,6 +75,7 @@ pub struct HudState {
     /// The Stats Box's rows (`statbox`) while it is up: drawn under the
     /// effects' icons, a pointer on it opens the Summary.
     pub stats_box: Option<crate::statbox::View>,
+
     /// `m_selfId` and `m_target`.
     pub self_id: Option<u32>,
     pub target: u32,
@@ -518,21 +522,8 @@ impl Hud {
         let start = *self.patch_start.get_or_insert(s.time_ms);
         let phase = (s.time_ms - start) % 1500;
         let (uv, size, tex_size) = ([3.0f32, 3.0], [10, 10], 16.0f32);
-        for m in &s.patches {
-            if !fork_hud::group_compass_marks_visible(s) { continue; }
-            if Some(m.id) == s.self_id || (phase > 1350 && s.target == m.id) {
-                continue;
-            }
-            let Some(at) = m.pos else { continue };
-            let d = [at[0] - s.camera[0], at[1] - s.camera[1], at[2] - s.camera[2]];
-            let Some(p) = patch_point(s.heading, d) else { continue };
+        let mut patch = |p: [f32; 2], color: [f32; 4]| {
             let (hx, hy) = ((size[0] >> 1) as f32, (size[1] >> 1) as f32);
-            let color = match m.index {
-                1 => [0.0, 1.0, 0.0, 1.0],
-                2 => [0.0, 0.0, 1.0, 1.0],
-                3 => [0.0, 1.0, 1.0, 1.0],
-                _ => [1.0, 1.0, 0.0, 1.0],
-            };
             let (u0, v0) = (uv[0] / tex_size, uv[1] / tex_size);
             let (u1, v1) = ((uv[0] + size[0] as f32) / tex_size, (uv[1] + size[1] as f32) / tex_size);
             ui.ui.push(Quad {
@@ -543,6 +534,28 @@ impl Hud {
                 color,
                 clip: None,
             });
+        };
+        for m in &s.patches {
+            if !fork_hud::group_compass_marks_visible(s) { continue; }
+            if Some(m.id) == s.self_id || (phase > 1350 && s.target == m.id) {
+                continue;
+            }
+            let Some(at) = m.pos else { continue };
+            let d = [at[0] - s.camera[0], at[1] - s.camera[1], at[2] - s.camera[2]];
+            let Some(p) = patch_point(s.heading, d) else { continue };
+            let color = match m.index {
+                1 => [0.0, 1.0, 0.0, 1.0],
+                2 => [0.0, 0.0, 1.0, 1.0],
+                3 => [0.0, 1.0, 1.0, 1.0],
+                _ => [1.0, 1.0, 0.0, 1.0],
+            };
+            patch(p, color);
+        }
+        // the live client's duel, last (eqoa-live-1500's DrawPatch, 0x0135E124):
+        // the duel's centre in orange, at any distance
+        if let Some(c) = s.duel {
+            let d = [c[0] - s.camera[0], c[1] - s.camera[1], c[2] - s.camera[2]];
+            patch(bearing_point(s.heading, d), crate::duel::ORANGE);
         }
         for (w, color) in [(s.group_waypoint, crate::map::group_waypoint::COLOR), (s.waypoint, crate::map::WAYPOINT)] {
             let Some(p) = w.map(|w| waypoint_point(s.heading, s.camera, w)) else { continue };
@@ -569,19 +582,19 @@ fn patch_point(yaw: f32, d: [f32; 3]) -> Option<[f32; 2]> {
     if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() > 2000.0 {
         return None;
     }
-    Some(rim_point(yaw, d))
+    Some(bearing_point(yaw, d))
 }
 
 /// Where the map's waypoint `w` (x, z) goes on the compass seen from the
 /// camera at `camera` turned to `yaw`: `DrawPatch`'s rim at its bearing,
 /// however far it is (the client's own: a member past 2000 has no patch).
 fn waypoint_point(yaw: f32, camera: [f32; 3], w: [f32; 2]) -> [f32; 2] {
-    rim_point(yaw, [w[0] - camera[0], 0.0, w[1] - camera[2]])
+    bearing_point(yaw, [w[0] - camera[0], 0.0, w[1] - camera[2]])
 }
 
-/// `DrawPatch`'s rim: 27 pixels out from (39, 55) at the bearing of `d`
-/// from a camera turned to `yaw`.
-fn rim_point(yaw: f32, d: [f32; 3]) -> [f32; 2] {
+/// `patch_point` at any distance (the live client's duel patch measures
+/// none).
+fn bearing_point(yaw: f32, d: [f32; 3]) -> [f32; 2] {
     use std::f32::consts::PI;
     let (center, radius) = ([39.0f32, 55.0], 27.0f32);
     // HPR with y zeroed
@@ -613,7 +626,7 @@ pub fn draw_gauge(vui: &Vui, ui: &mut dyn Raster, bar: i32, frame: i32, at: [i32
 
 #[cfg(test)]
 mod tests {
-    use super::{Gauge, Hud, HudState, MemberState, Pick, member_gauges, patch_point, target_gauges, waypoint_point};
+    use super::{Gauge, Hud, HudState, MemberState, Pick, bearing_point, member_gauges, patch_point, target_gauges, waypoint_point};
 
     fn near(a: [f32; 2], b: [f32; 2]) -> bool {
         (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3
@@ -637,6 +650,10 @@ mod tests {
         // 2000 is the edge, measured before y is dropped
         assert!(patch_point(0.0, [0.0, 0.0, 2000.0]).is_some());
         assert!(patch_point(0.0, [0.0, 100.0, 1998.0]).is_none());
+        // the live client's duel patch measures no distance: past the edge
+        // it is where a member would be within it
+        assert!(near(bearing_point(0.0, [100.0, 0.0, 0.0]), [12.0, 55.0]));
+        assert!(near(bearing_point(0.0, [4000.0, 0.0, 0.0]), [12.0, 55.0]));
     }
 
     /// The map's waypoint sits on the rim at its bearing from the camera,

@@ -104,6 +104,10 @@ pub fn look_of(c: &CharRecord, helm: bool) -> vi::cust::Look {
         face: c.face as u8,
         robe: if c.robe == -1 { -1 } else { c.robe as i8 },
         robe_tint: c.robe_tint,
+        // the live game's record's colours (`ShowCharacter`'s SetArmorSlot
+        // and SetRobe take them), when the server sent its look
+        armor_color: c.colors.map(|l| l.armor),
+        robe_color: c.colors.map(|l| l.robe),
     }
 }
 
@@ -366,6 +370,14 @@ impl CharSelect {
             st.process(cx.now);
             if let (Some(f), Some(g)) = (self.figure.as_mut(), cx.gpu.as_ref()) {
                 f.pose(g, cx.now);
+            }
+            // the scene's particles: the arena's braziers and the items in
+            // the figure's hands (an epic weapon's glow)
+            if let Some(lib) = cx.lib {
+                st.particles_frame(lib, cx.now);
+                if let Some(f) = self.figure.as_mut() {
+                    f.particles_frame(lib, &st.eye.position, cx.now);
+                }
             }
             cx.r.mark_split();
             self.shown = true;
@@ -671,7 +683,8 @@ impl CharSelect {
             return self.cust.scene(st);
         }
         let f = self.figure.as_ref().filter(|_| self.shown)?;
-        Some(Scene { view: st.view(), viewport: VIEWPORT, models: st.models().chain(f.models()).collect() })
+        let billboards = st.fx.iter().chain(&f.fx).cloned().collect();
+        Some(Scene { view: st.view(), viewport: VIEWPORT, models: st.models().chain(f.models()).collect(), billboards, camera: st.camera() })
     }
 }
 

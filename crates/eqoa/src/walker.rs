@@ -92,6 +92,51 @@ pub struct Walker {
     /// The walk on the console's frames (`frame_with`); None before the
     /// first frame.
     kept: Option<Kept>,
+    /// The walk put back this frame (`rewind`), not yet kept again
+    /// (`keep_left`).
+    rewound: bool,
+    /// The camera's place as `rewind` found it, and how far the walk was
+    /// put back (the last frame drawn's place less the console frame's, in
+    /// doubles): a place given the camera after that was given round the
+    /// console frame (`camera_as_drawn`).
+    given: Option<(Vect3<Ee>, [f64; 3])>,
+    /// The player's actor's scale: its entity's (`m_scale`, the state
+    /// channel's), as `VIEntity::Changed`'s `SetActorScale` gives the player's
+    /// own actor as any other's (play sets it, `place_self_actor`; 1 with no
+    /// server). The body is drawn at it; the walk's collision is the walk
+    /// control's own (`InitParms`' constants, which nothing in CLIENT scales).
+    pub scale: F<Ee>,
+    /// The body's last changes of locomotion or of either layer's animation,
+    /// as `pose_sounding` leaves them, oldest first (`BODY_CHANGES`): what a
+    /// report gives of the legs (F3 20261030-172342, "a rapid stutter step"
+    /// walking while casting, which no trace could show).
+    pub changes: std::collections::VecDeque<BodyChange>,
+}
+
+/// One change of the body's locomotion or animations (`Walker::changes`):
+/// the scene's clock it was drawn at, the walk's locomotion, the two layers'
+/// animations and the body's speed then.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BodyChange {
+    pub at: i64,
+    pub loco: i32,
+    pub anim: [i32; 2],
+    pub speed: f32,
+}
+
+/// How many of the body's changes a walker keeps.
+pub const BODY_CHANGES: usize = 16;
+
+/// `c` kept when its locomotion or an animation differs from the last kept
+/// (a speed alone is no change), the oldest let go past `BODY_CHANGES`.
+fn note_change(changes: &mut std::collections::VecDeque<BodyChange>, c: BodyChange) {
+    if changes.back().is_some_and(|b| (b.loco, b.anim) == (c.loco, c.anim)) {
+        return;
+    }
+    if changes.len() == BODY_CHANGES {
+        changes.pop_front();
+    }
+    changes.push_back(c);
 }
 
 /// The console's frame: two fields of NTSC video (59.94 Hz), 33.37 ms. The
@@ -200,7 +245,7 @@ impl Walker {
         cam.set_orbit_distance(dist);
         cam.set_orbit_angle_behind();
         let eye = cam.process(&mut scene);
-        Walker { cam, scene, eye, sprite: None, anims: AnimScene::default(), rand: Rand(1), shake: 0, reach: Default::default(), kept: None }
+        Walker { cam, scene, eye, sprite: None, anims: AnimScene::default(), rand: Rand(1), shake: 0, reach: Default::default(), kept: None, rewound: false, given: None, scale: F::ONE, changes: Default::default() }
     }
 
     /// `Respawn`'s placing: the character stood at `pos` (on the ground
@@ -258,11 +303,12 @@ impl Walker {
     }
 
     /// The actor's transform: the body's render position, turned to its
-    /// heading (`VIMatrix44::Transform(hpr, 1, pos)`).
-    fn actor(&self) -> Matrix44<Ee> {
+    /// heading, at the actor's scale (`VIMatrix44::Transform(hpr, scale,
+    /// pos)`).
+    pub fn actor(&self) -> Matrix44<Ee> {
         let p = self.cam.walk.phys.smooth_location();
         let hpr = Vect3::new(self.cam.walk.phys.angles.x, F::ZERO, F::ZERO);
-        Matrix44::transform(&hpr, F::ONE, &p)
+        Matrix44::transform(&hpr, self.scale, &p)
     }
 
     /// The character's model matrix and skin palette for this frame:
@@ -279,6 +325,7 @@ impl Walker {
         let Some(cs) = self.sprite.as_mut() else { return (actor.to_cols(), Vec::new()) };
         self.anims.time = self.scene.time;
         self.cam.walk.update_sprite(cs, &self.anims, &mut self.rand);
+        note_change(&mut self.changes, BodyChange { at: self.scene.time, loco: self.cam.walk.committed.loco_state, anim: [cs.cur[0].anim, cs.cur[1].anim], speed: self.cam.walk.phys.velocity.magnitude().0 });
         if sound.is_some() {
             let at = self.cam.walk.phys.smooth_location();
             cs.process_sounds(&self.eye.position, &self.eye.direction, &at, sound);
@@ -311,7 +358,8 @@ impl Walker {
     /// through `reach` (the follow orbit's way back out). The walk keeps the
     /// console's frames (`Kept`): `UpdateControls` reads it as the last of
     /// them left it, and it is drawn on the way to the next, where the
-    /// camera's `Process` finds it.
+    /// camera's `Process` finds it. A place given the camera on the walk put
+    /// back is moved onto the walk as last drawn (`camera_as_drawn`).
     pub fn frame_with(&mut self, keys: [f32; 4], now_ms: i64, c: &crate::controls::Client, game_frame: bool) -> crate::controls::Changed {
         self.rewind();
         // UpdateGame sets the run speed and calls InitIntermediate every
@@ -331,6 +379,7 @@ impl Walker {
         let ahead = self.ahead();
         self.scene.time = now_ms;
         self.draw_between(&ahead, now_ms);
+        self.camera_as_drawn();
         let next = self.cam.effect.sample;
         if !game_frame {
             self.cam.effect.sample = self.shake;
@@ -349,16 +398,30 @@ impl Walker {
     /// with the directions it steers by made again from it. A walk moved
     /// since the last frame drawn (a place given, the loading screen's hold,
     /// the first frame) is not put back: the console frames begin where it
-    /// stands.
-    fn rewind(&mut self) {
+    /// stands. Once a frame: the mouse's look calls it before it turns the
+    /// body (`mouse::set_heading`, `pitch_body`), so the turn is made on the
+    /// kept frame, as a control, and the console frames step on from it; a
+    /// turn made on the walk as drawn would read as a walk moved, and with
+    /// the console frames begun again every frame drawn none was ever
+    /// stepped (F3 20261028-130331: the run slid on at its speed with the
+    /// keys let go, and from a stand never got up to it).
+    pub fn rewind(&mut self) {
+        if std::mem::replace(&mut self.rewound, true) {
+            return;
+        }
         let w = &mut self.cam.walk;
         match &self.kept {
             Some(k) if same(&w.phys, &k.left.0) && same(&w.committed, &k.left.1) => {
+                let (l, a) = (&k.left.0, &k.at.0);
+                let d = |u: F<Ee>, v: F<Ee>| u.0 as f64 - v.0 as f64;
+                let back = [d(l.position.x, a.position.x), d(l.position.y, a.position.y) + d(l.height_offset, a.height_offset), d(l.position.z, a.position.z)];
+                self.given = Some((self.cam.cur.camera_pos, back));
                 w.phys = k.at.0;
                 w.committed = k.at.1;
                 w.update_directions();
             }
             _ => {
+                self.given = None;
                 let mut at = w.phys;
                 at.force = Vect3::default();
                 at.torque = Vect3::default();
@@ -444,6 +507,36 @@ impl Walker {
         (w.phys, w.committed) = (p, p);
     }
 
+    /// A place given the follow orbit's camera on the walk put back
+    /// (`set_orbit_angle`, which puts the camera at once at its angle round
+    /// the walk as it stands: the mouse's steer and look, a finger's, the
+    /// wheel's style), moved by however far the walk was put back: onto the
+    /// walk as last drawn, as every such place was given before the walk kept
+    /// the console's frames. The camera's `Process` takes the orbit's angle
+    /// from the way the camera is from the body as drawn now; given round the
+    /// console frame kept, a place was off the body's line by however far the
+    /// body had been drawn on from that frame across it, a part of a console
+    /// frame's way or more, so with a sidestep (A or D steered by the right
+    /// button, or the left on the move) the angle went 0.7 to 4 degrees off
+    /// the body's back and back again at the console's 30 frames a second, the
+    /// eye jumping as much as 0.2 a frame drawn at 144 (F3 20261029-024411:
+    /// "the camera becomes very jittery and as such blurry"), and a finger's
+    /// look while running jumped too. Given round the walk as last drawn,
+    /// `Process` finds the body one frame drawn on, as with the keys alone.
+    fn camera_as_drawn(&mut self) {
+        let Some((found, back)) = self.given.take() else { return };
+        let cam = &mut self.cam;
+        let bits = |v: &Vect3<Ee>| [v.x.bits(), v.y.bits(), v.z.bits()];
+        if cam.camera_mode != 3 || bits(&found) == bits(&cam.cur.camera_pos) {
+            return;
+        }
+        let p = cam.cur.camera_pos;
+        let on = |u: F<Ee>, d: f64| F::new((u.0 as f64 + d) as f32);
+        let moved = Vect3::new(on(p.x, back[0]), on(p.y, back[1]), on(p.z, back[2]));
+        cam.cur.camera_pos = moved;
+        cam.last.camera_pos = moved;
+    }
+
     /// After the camera's `Process`, what is kept of the frame drawn. The
     /// camera sets the walk's NO_TURN as it swings round what is in its way
     /// and clears it once round, and nothing else touches it: the kept walk
@@ -460,6 +553,7 @@ impl Walker {
         let landed = old & ON_FLOOR == 0 && new & ON_FLOOR != 0 && new & SUBMERGED == 0 && old & SUBMERGED == 0;
         w.parm118 = if landed { 16 } else { 0 };
         k.left = (w.phys, w.committed);
+        self.rewound = false;
     }
 
 
@@ -476,6 +570,15 @@ impl Walker {
     /// Where the camera is.
     pub fn eye_position(&self) -> Vec3 {
         Vec3::from(self.eye.position.to_array())
+    }
+
+    /// The body's last changes (`changes`) as a report gives them: each
+    /// one's time back from the last frame drawn, its locomotion, the two
+    /// layers' animations and the speed.
+    pub fn describe_changes(&self) -> String {
+        let now = self.scene.time;
+        let parts: Vec<String> = self.changes.iter().map(|c| format!("{:.2} s loco {} {:?} {:.2}", (c.at - now) as f64 / 1000.0, c.loco, c.anim, c.speed)).collect();
+        if parts.is_empty() { "none yet".into() } else { parts.join(" · ") }
     }
 
     pub fn describe(&self) -> String {
@@ -763,6 +866,27 @@ impl AnimatedProps {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// A report's record of the legs keeps each change of the locomotion or
+    /// of a layer's animation, the newest 16: a stutter between two of them
+    /// shows as many changes close together. The control: the same state
+    /// drawn again, or at another speed alone, is no change.
+    #[test]
+    fn the_body_keeps_its_last_changes() {
+        let mut ch = std::collections::VecDeque::new();
+        let c = |at: i64, loco: i32, a: i32, speed: f32| BodyChange { at, loco, anim: [a, a], speed };
+        note_change(&mut ch, c(0, 3, 3, 8.85));
+        note_change(&mut ch, c(33, 3, 3, 7.5));
+        assert_eq!(ch.len(), 1, "the control: the same state at another speed is no change");
+        note_change(&mut ch, c(66, 1, 1, 3.8));
+        note_change(&mut ch, c(99, 1, 39, 3.0));
+        assert_eq!(ch.iter().map(|x| x.at).collect::<Vec<_>>(), vec![0, 66, 99], "a locomotion's and an animation's change kept");
+        for k in 0..40 {
+            note_change(&mut ch, c(100 + k, (k % 2) as i32, 0, 3.0));
+        }
+        assert_eq!(ch.len(), BODY_CHANGES, "the newest {BODY_CHANGES} kept");
+        assert_eq!(ch.back().unwrap().at, 139, "the newest last");
+    }
 
     /// The disc's TUNARIA.ESF with the zones round (x, z) read and the
     /// collision world made; None without `run/eqoa.iso`.
@@ -1327,4 +1451,273 @@ pub(crate) mod tests {
         let c = run(false).unwrap();
         assert!(c > 15.0, "the control: drawn through, {c}");
     }
+    /// The right button steering a run with the mouse on the move (camera
+    /// mode 3: the look turns the body every frame drawn,
+    /// `mouse::look_held`, as `Viewer::sticks` calls it), at 144 frames a
+    /// second: from a stand the run gets up to the stick's pace, and let go
+    /// of it stops as the stick's run stops. The look turns the walk as the
+    /// last console frame left it (`rewind` first). The control: the look
+    /// made on the walk as drawn, as until 2026-10-28, read as a walk moved
+    /// whenever the mouse moved, so the console frames began again every
+    /// frame drawn and none was stepped: the velocity stayed as it was when
+    /// the mouse began to move, the run from a stand crept (F3
+    /// 20261028-130331, 022421) and the run let go of slid on at its pace
+    /// (054552). With the mouse still the look changes nothing and both
+    /// step alike.
+    #[test]
+    fn a_run_steered_by_the_mouse_keeps_the_consoles_frames() {
+        let go = Controls { fwd: 1.0, ..Default::default() }.axes();
+        let Some(base) = open_ground() else { return };
+        let t0 = base.scene.time;
+        let moved = |a: Vect3<Ee>, b: Vect3<Ee>| ((b.x.0 - a.x.0).powi(2) + (b.z.0 - a.z.0).powi(2)).sqrt();
+        // 144 frames a second: the stick on from frame `on` to frame 288 and
+        // the button held from frame `held` on (`None`: never), the mouse a
+        // pixel a frame; the pace over the run's last second, and the ground
+        // covered from frame 288 to the end (one second on)
+        let run = |on: u64, held: Option<u64>, fixed: bool| -> (f32, f32) {
+            let mut w = open_ground().unwrap();
+            crate::camstyle::set_style(&mut w.cam, 3, None, &mut w.scene);
+            let mut path = Vec::new();
+            for k in 1..=432 {
+                let now = drawn_at(t0, 144.0, 0.0, k);
+                let steer = held.is_some_and(|h| k >= h);
+                if steer {
+                    if fixed {
+                        w.rewind();
+                    }
+                    let dx = if k % 2 == 0 { 1.0 } else { -1.0 };
+                    crate::mouse::look_held(&mut w.cam, [false, true], dx, 0.0, false, 1.0 / 144.0, held.is_some_and(|h| k > h));
+                }
+                let c = crate::controls::Client { steer, ..Default::default() };
+                w.frame_with(if (on..=288).contains(&k) { go } else { [0.0; 4] }, now, &c, true);
+                path.push((now, w.cam.walk.phys.position));
+            }
+            (speed(&path[144..288]), moved(path[287].1, path[431].1))
+        };
+        let stick = run(1, None, true);
+        let from_a_stand = (run(11, Some(1), true), run(11, Some(1), false));
+        let while_running = (run(1, Some(216), true), run(1, Some(216), false));
+        eprintln!("(pace, stop): the stick alone {stick:?}; the button from a stand {from_a_stand:?}; the button while running {while_running:?}");
+        assert!(stick.0 > 8.0 && stick.1 < 3.0, "the stick's run: {stick:?}");
+        for (case, (fixed, control)) in [("from a stand", from_a_stand), ("while running", while_running)] {
+            assert!((fixed.0 / stick.0 - 1.0).abs() < 0.005, "{case}: the pace {fixed:?}, the stick's {stick:?}");
+            assert!((fixed.1 - stick.1).abs() < 0.1, "{case}: the stop {fixed:?}, the stick's {stick:?}");
+            if case == "from a stand" {
+                assert!(control.0 < 0.7 * stick.0, "the control, {case}: it creeps, {control:?}");
+            } else {
+                assert!(control.1 > 6.0, "the control, {case}: it slides on, {control:?}");
+            }
+        }
+    }
+
+    /// The floor the walk's own probe finds under (x, z) from `y` down
+    /// `reach` (a 0.001 sphere, `VIWalkFloorFilter`): the topmost.
+    fn floor_under(w: &mut World<Ee>, x: f32, z: f32, y: f32, reach: f32) -> Option<f32> {
+        let mut s = CollSphere::<Ee>::default();
+        s.init(Vect3::of(x, y, z), Vect3::of(x, y - reach, z), F::new(0.001));
+        let mut f = Filter::new(FilterKind::WalkFloor, -1);
+        w.collide_sphere(&mut s, &mut f).then(|| s.hit_point().y.0)
+    }
+
+    /// A run steered by the mouse over Freeport's slopes (camera mode 3, the
+    /// right button held, the mouse a pixel a frame either way, at 75 frames
+    /// a second, jib's rate) is drawn on the ground under it all the way, as
+    /// the console's own frames stand on it, and runs: up jib's slope
+    /// south-west of the docks from a stand (F3 20261028-150758: "it phases
+    /// characters into slopes, forces them to walk"), and down the side of
+    /// the mound by the harbour with the button taken while running (022842:
+    /// "you sink through it sometimes into the ground partially or float in
+    /// the air as you move around it"). Drawn between two console frames on
+    /// a straight line, the feet are within a few centimetres of the ground
+    /// (2 cm here; 3 mm in 99 frames of 100 round Freeport). The control: the
+    /// look made on the walk as drawn, as until c752913: the console frames
+    /// begun again every frame drawn, only the place, the facing and the
+    /// height offset were drawn on, and the rest of the walk stayed as it
+    /// was when the mouse began to move: its speed, its locomotion and the
+    /// floor it stood on. Each look-ahead's `Move` took the whole climb since
+    /// that floor as one step and smoothed it (`m_heightOffset -= rise`,
+    /// held at -0.6): the body ran 0.6 under the slope, standing (locomotion
+    /// 0); going down, the step-down test failed against that floor and each
+    /// look-ahead fell from rest: it floated over the slope, more than a
+    /// metre by the mound's foot.
+    #[test]
+    fn a_run_steered_by_the_mouse_keeps_to_the_ground_of_a_slope() {
+        let go = Controls { fwd: 1.0, ..Default::default() }.axes();
+        // From 12 back of (x, z) along `heading`, 3.5 s, the button held from
+        // frame `held` on, drawn at `hz`: the feet against the floor under
+        // them at worst both ways (none within 3 under: 3 over) and the frames
+        // drawn running (locomotion 3), from the hold's second second on.
+        let run = |(x, y, z): (f32, f32, f32), heading: f32, held: u64, hz: f64, fixed: bool| -> Option<(f32, f32, usize, usize)> {
+            let mut fw = Vect3::<Ee>::default();
+            fw.hpr(F::new(heading), F::ZERO, F::ZERO);
+            let (sx, sz) = (x - fw.x.0 * 12.0, z - fw.z.0 * 12.0);
+            let mut world = tunaria_round(sx, sz)?;
+            let sy = floor_under(&mut world, sx, sz, y + 2.0, 8.0)?;
+            let mut w = Walker::arrive(world, Spawn { pos: [sx, sy, sz], heading, placing: Placing::AsGiven });
+            crate::camstyle::set_style(&mut w.cam, 3, None, &mut w.scene);
+            let t0 = w.scene.time;
+            let (mut sunk, mut over, mut running, mut late) = (0.0f32, 0.0f32, 0, 0);
+            for k in 1.. {
+                let now = drawn_at(t0, hz, 0.0, k);
+                if now - t0 > 3500 {
+                    break;
+                }
+                let steer = k >= held;
+                if steer {
+                    if fixed {
+                        w.rewind();
+                    }
+                    let dx = if k % 2 == 0 { 1.0 } else { -1.0 };
+                    crate::mouse::look_held(&mut w.cam, [false, true], dx, 0.0, false, 1.0 / hz as f32, k > held);
+                }
+                w.frame_with(go, now, &crate::controls::Client { steer, ..Default::default() }, true);
+                if !steer {
+                    continue;
+                }
+                let feet = w.cam.walk.phys.smooth_location();
+                let e = floor_under(&mut w.scene, feet.x.0, feet.z.0, feet.y.0 + 1.2, 4.2).map_or(3.0, |g| feet.y.0 - g);
+                (sunk, over) = (sunk.min(e), over.max(e));
+                if drawn_at(t0, hz, 0.0, held) + 1000 <= now {
+                    late += 1;
+                    running += (w.cam.walk.phys.loco_state == 3) as usize;
+                }
+            }
+            Some((sunk, over, running, late))
+        };
+        let up = ((25291.62f32, 55.656654f32, 15822.053f32), 3.0 * std::f32::consts::FRAC_PI_2, 1);
+        let down = ((25429.738f32, 58.026684f32, 15730.957f32), std::f32::consts::PI, 75);
+        let Some(console) = run(up.0, up.1, up.2, 1000.0 / CONSOLE_FRAME_MS, true) else { return };
+        for (case, (at, heading, held)) in [("up jib's slope from a stand", up), ("down the mound while running", down)] {
+            let fixed = run(at, heading, held, 75.0, true).unwrap();
+            let control = run(at, heading, held, 75.0, false).unwrap();
+            eprintln!("{case}: (most sunk, most over, frames running of): {fixed:?}, the control {control:?}");
+            assert!(fixed.0 > -0.05 && fixed.1 < 0.05, "{case}: the feet off the ground by {fixed:?}");
+            assert!(fixed.2 * 10 >= fixed.3 * 9, "{case}: running on {} of {} frames", fixed.2, fixed.3);
+            if held == 1 {
+                assert!(control.0 < -0.5 && control.2 == 0, "the control, {case}: under the slope and standing, {control:?}");
+            } else {
+                assert!(control.1 > 1.0, "the control, {case}: over the slope, {control:?}");
+            }
+        }
+        // the console's own frames stand on that ground (drawn at its rate,
+        // each frame drawn is one)
+        eprintln!("up jib's slope at the console's rate: {console:?}");
+        assert!(console.0 > -0.002 && console.1 < 0.002, "the console's frames off the ground by {console:?}");
+    }
+
+    /// `frame_with`'s steps as they were until 2026-10-29 (the control): a
+    /// place given the camera on the walk put back left round the console
+    /// frame kept.
+    fn frame_given_round_the_kept_frame(w: &mut Walker, keys: [f32; 4], now: i64, c: &crate::controls::Client) {
+        w.rewind();
+        crate::controls::update_controls(w, keys, c);
+        let dt_s = (now - w.scene.time).clamp(0, 100) as f32 / 1000.0;
+        w.step_kept(now);
+        let ahead = w.ahead();
+        w.scene.time = now;
+        w.draw_between(&ahead, now);
+        w.given = None;
+        w.eye = w.reach.process(&mut w.cam, &mut w.scene, dt_s);
+        w.keep_left();
+    }
+
+    /// A run with a sidestep steered by the mouse (W and A with the left
+    /// button held on the move, which steers as the right does: the walk on
+    /// the body's own axes and the camera put behind the body by the look
+    /// every frame drawn, `mouse::look_held` after `rewind`, as
+    /// `Viewer::sticks` calls them), at 144 frames a second and jib's 91, the
+    /// mouse still or a pixel a frame: the eye moves as evenly as with the
+    /// keys alone (its largest change of pace from one frame drawn to the
+    /// next no larger, the floats' own steps at x 22000 apart) and the camera
+    /// keeps one angle off the body's back (the frame drawn's sidestep, as
+    /// before the walk kept the console's frames); a finger's look while
+    /// running too. The control: the place the look gives left round the
+    /// console frame kept (`frame_with` without `camera_as_drawn`, as until
+    /// 2026-10-29), where the camera's `Process` found the body drawn on
+    /// across it: the angle off the back swung 0.7 to 4 degrees at the
+    /// console's 30 frames a second and the eye jumped 0.2 (F3
+    /// 20261029-024411: "the camera becomes very jittery and as such
+    /// blurry"). The walk keeps the same console frames either way, bit for
+    /// bit, and with the keys alone the camera is the same too.
+    #[test]
+    fn a_sidestep_steered_by_the_mouse_keeps_the_camera_smooth() {
+        use std::f64::consts::{PI, TAU};
+        #[derive(Clone, Copy, Debug)]
+        enum Look {
+            Keys,
+            /// the left button held, the mouse this many pixels a frame
+            Steer(f32),
+            /// a finger's drag in the follow orbit, a pixel a frame
+            Finger,
+        }
+        struct Run {
+            /// the eye's largest change of pace (mm a frame drawn), over the last 2 s
+            jump: f64,
+            /// how far its angle off the body's back swings (degrees), over the last 2 s
+            swing: f64,
+            kept: Vec<WalkPhysics<Ee>>,
+            eyes: Vec<[u32; 3]>,
+        }
+        let go = Controls { fwd: 1.0, strafe: -1.0, ..Default::default() }.axes();
+        let Some(base) = open_ground() else { return };
+        let t0 = base.scene.time;
+        let run = |hz: f64, look: Look, fixed: bool| -> Run {
+            let mut w = open_ground().unwrap();
+            crate::camstyle::set_style(&mut w.cam, 3, None, &mut w.scene);
+            let (mut at, mut off, mut kept, mut eyes) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            for k in 1..=(hz * 3.0) as u64 {
+                let now = drawn_at(t0, hz, 0.0, k);
+                w.rewind();
+                match look {
+                    Look::Steer(dx) => {
+                        crate::mouse::look_held(&mut w.cam, [true, true], dx, 0.0, false, 1.0 / hz as f32, k > 1);
+                    }
+                    Look::Finger => {
+                        crate::mouse::look_cam(&mut w.cam, 1.0, 0.0, 0.0, false, 1.0 / hz as f32);
+                    }
+                    Look::Keys => {}
+                }
+                let c = crate::controls::Client { steer: matches!(look, Look::Steer(_)), ..Default::default() };
+                if fixed {
+                    w.frame_with(go, now, &c, true);
+                } else {
+                    frame_given_round_the_kept_frame(&mut w, go, now, &c);
+                }
+                let k = w.kept.unwrap();
+                if (kept.len() as i64) < k.frames {
+                    kept.push(k.at.0);
+                }
+                let (e, b) = (w.eye.position, w.cam.walk.phys.position);
+                eyes.push([e.x.bits(), e.y.bits(), e.z.bits()]);
+                if now - t0 >= 1000 {
+                    at.push((e.x.0 as f64, e.z.0 as f64));
+                    let way = (e.x.0 as f64 - b.x.0 as f64).atan2(e.z.0 as f64 - b.z.0 as f64);
+                    let back = w.cam.walk.phys.angles.x.0 as f64 + PI;
+                    off.push(((way - back + PI).rem_euclid(TAU) - PI).to_degrees());
+                }
+            }
+            let jump = at.windows(3).map(|p| (p[2].0 - 2.0 * p[1].0 + p[0].0).hypot(p[2].1 - 2.0 * p[1].1 + p[0].1) * 1000.0).fold(0.0, f64::max);
+            let swing = off.iter().cloned().fold(f64::MIN, f64::max) - off.iter().cloned().fold(f64::MAX, f64::min);
+            Run { jump, swing, kept, eyes }
+        };
+        let same_frames = |a: &Run, b: &Run| a.kept.len() == b.kept.len() && a.kept.iter().zip(&b.kept).all(|(x, y)| same(x, y));
+        let (keys, keys_then) = (run(144.0, Look::Keys, true), run(144.0, Look::Keys, false));
+        assert!(same_frames(&keys, &keys_then) && keys.eyes == keys_then.eyes, "the keys alone: the walk and the camera as before, bit for bit");
+        assert!(keys.kept.len() >= 89, "{} console frames", keys.kept.len());
+        let keys91 = run(91.0, Look::Keys, true);
+        eprintln!("the keys alone: the eye's largest jump {:.2} mm at 144 Hz, {:.2} at 91", keys.jump, keys91.jump);
+        for (hz, look, smooth) in [(144.0, Look::Steer(0.0), keys.jump), (144.0, Look::Steer(1.0), keys.jump), (91.0, Look::Steer(0.0), keys91.jump), (144.0, Look::Finger, keys.jump)] {
+            let (now, then) = (run(hz, look, true), run(hz, look, false));
+            eprintln!("{look:?} at {hz} Hz: the eye's largest jump {:.2} mm, its angle off the back swinging {:.3} degrees; the control {:.2} mm, {:.3} degrees", now.jump, now.swing, then.jump, then.swing);
+            assert!(now.jump < smooth * 1.25, "{look:?} at {hz} Hz: the eye jumps {} mm, with the keys alone {smooth}", now.jump);
+            if let Look::Steer(_) = look {
+                assert!(now.swing < 0.5, "{look:?} at {hz} Hz: the camera swings {} degrees round the body", now.swing);
+                assert!(then.jump > 100.0 && then.swing > 2.5, "the control, {look:?} at {hz} Hz: {} mm, {} degrees", then.jump, then.swing);
+                assert!(same_frames(&now, &then), "{look:?} at {hz} Hz: the walk keeps the same console frames");
+            } else {
+                assert!(then.jump > 50.0, "the control, {look:?}: {} mm", then.jump);
+            }
+        }
+    }
 }
+

@@ -5,6 +5,229 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
+## 2026-10-31 · Glowing weapons shine again
+- Many weapons and things in the world give off a light of their own on a PS2, and this client
+  had been drawing them only as bright as the light around them. The Sword of Virtue's blade,
+  guard and pommel now gleam white and pale blue by day and night, as on a PlayStation 2, and so
+  do Virtus Ferrum and the blades made like it (the Nitefyre Scimitar, Northwind Longsword, Blood
+  Iron Longblade), and a great many glowing staves, wands, totems, rapiers and axes. The same goes
+  for the glowing crystals, lamps and creatures' eyes the world has.
+- Character select now shows what the PlayStation 2 shows there: the white flames on the stage's
+  braziers, their sparks rising, and your weapon's glow (an epic weapon's column of light) in your
+  character's hand.
+- A problem report (F3) now says, for each creature round you, whether the server lets it be
+  targeted: press F3 next to something you cannot target.
+
+## 2026-10-31 · Sound in a crowd, Sandstorm's boon, walking while casting
+- Sounds no longer cut out in a big fight or a crowd. When many creatures swing, get hit or cast
+  at once, the game used to lose the sounds that did not fit its one message a frame to the sound
+  chip (a PS2 does too, about one frame in ten of a 24-creature fight), and with more than the
+  game's 24 creatures shown (NPC/PC Display) many more of them. Every sound now plays.
+- As on a PS2, creatures behind the camera or a wall no longer make their swing, hit and step
+  sounds, and with more than 24 creatures shown only the 24 nearest you are heard.
+- When Sandstorm's boon throws everyone in Freeport into the sky, you fall at once now, as on a
+  PS2. The game kept a second's loading screen for any trip of 200 or more, which held you in the
+  air with nothing sent: to everyone else you hung there, and players thrown up after you landed
+  on you and stood in the air. A long trip that loads a new place (Return Home, a coach to another
+  town) still keeps its second.
+- While casting you walk for exactly as long as on a PS2 (a hair longer than before). A problem
+  report (F3) now says what is keeping you walking and what your character's legs were doing, so
+  send one right when you are stuck walking or your steps stutter.
+
+## 2026-10-30 · Your character there from your first moment in the world
+- Now and then you could come into the world without your own character drawn, and with an empty compass and bars, until something about you changed. The server's first word about you had come a moment before the world itself and was thrown away; it is kept now.
+
+## 2026-10-30 · Ground fog as the PlayStation 2 shows it
+- The low fog that lies over Freeport's streets, Neriak and the rest of the world is now drawn the
+  way the PlayStation 2's picture kept it. The console's screen held only 32 shades of each colour,
+  so each thin layer of fog either changed the picture by a whole shade or not at all: its fog came
+  out as a long, low, dimmer band, where ours was a brighter cloud. That look, with the console's
+  fine dither grain in it, is the new default.
+- If you prefer the brighter fog, Options, Extended, World has a new row, Ground Fog: PS2 (the
+  default) or Exact. Shadows moved from World to Characters to make room for it.
+
+## 2026-10-30 · Master Class ranks can be bought again
+- Class Mastery: buying the next rank of the Master Class you already have no longer stops with
+  "You cannot possess more than one Master Class at a time." Only a second, different Master Class
+  is refused.
+
+## 2026-10-30 · Spell effects' missing shapes
+- Some spell effects carry moving shapes as well as sparkles, and those were never drawn. The
+  warrior's Furious, Frenzied and Desperate Defense now raise their column of yellow-green flame
+  round the warrior, and another effect its two green glowing forms sweeping round the caster, as
+  on a PlayStation 2.
+
+## 2026-10-30 · Spell lightning lit like the world
+- The lightning of spells (a wizard's or a druid's bolt and the like) is lit by the day, the night
+  and your lantern as the PlayStation 2 lights it: in daylight a blue or green bolt comes out paler
+  and brighter, at night it keeps more of its own colour. It had been drawn in its bare colour at
+  every hour. The trails of weapons stay as they were: the game draws them unlit.
+
+## 2026-10-30 · Glowing weapons and spell effects as bright as on a PS2
+- Every particle was drawn at half the strength the PlayStation 2 draws it with: the glow round an
+  epic or magic weapon such as the Sword of Virtue, the sparkles, clouds and flashes of every spell,
+  the fires, smoke and sparkles placed in the world, rain and snow, the stars, and the lightning of
+  spells and the trails of weapons. They now light up as much as on a console: a glowing blade
+  glows again.
+- How it was found: the same character with the Sword of Virtue in hand and Minor Healing cast on
+  it, side by side with the decompiled game's own drawing. The glow came out at about two thirds of
+  the game's, and now matches it; the world's models, the sky's dome, water and the HUD are drawn
+  as before.
+
+## 2026-10-30 · SOE's final patch features, recovered from the Corsten and Lostologist save states!
+- The game kept changing after the Frontiers disc, and its final client went with SOE's servers: no
+  disc ever had it. Two save states made in the live game, Corsten's and Lostologist's, still held it
+  in the console's memory, and the features below were read out of it and rebuilt, as they worked
+  when the servers closed. They need a server that runs them (eqoaclassic does); on Sandstorm and
+  other servers nothing changes, except for the lines that say "on every server".
+- **How close is it to SOE's?** Everything you see is SOE's own: each window's layout, text, keys and
+  rules, and every message the client sends and reads, were read instruction by instruction out of
+  that final client and made to do the same. (The rest of this client is checked bit for bit
+  against the decompiled Frontiers disc; the final client has no decompilation, so these were read
+  straight from its machine code.) What SOE's servers did with those messages went with the
+  servers: where the client does not say, eqoaclassic does what we chose to fit what the client
+  expects. That covers who a group search finds, how a stack's items are shared among several
+  bidders, the words a reset says, and duel hits on players being halved.
+- **Duels.** The start menu's Community has a Duel entry: Duel > Invite challenges your target, Duel >
+  Surrender gives up the duel you are in. Quitting during a duel gives it up too.
+- A challenge opens the game's own duel window: who challenges you, their guild, race, class and
+  level, with ✕ to accept and △ to decline (Enter or E, and Escape, on the keyboard). It counts its
+  last ten seconds down; an invitation that comes while another window is up waits until you are
+  back in play.
+- Accepted, both of you get the wager window, the trade window's twin: put tunar on the duel with
+  ✕ on the Tunar box (no more than you carry), □ (Q) to accept, △ to take an accept back or to call
+  the duel off, Space for a chat line. When both accept the duel begins, and the winner takes both
+  stakes. Only tunar can be wagered: an item put in is refused with a line.
+- In a duel you can attack your opponent and their pet as you would a creature, and Tab and R1
+  cycle to their pet. An orange mark on the compass points to where the duel began.
+- **Looking for a group.** The Group menu has Search, Register and Unregister. Register (or typing
+  `/lfg on`) puts you on the list of players looking for a group, Unregister (`/lfg off`) takes you
+  off it. Search opens the game's window for it: pick any races and classes and a level range (type
+  -1 for the levels you could hunt with), Search, and the players found are listed with their race,
+  class and level, sorted by any column with R1 or Tab and L1. ✕ on a player invites them to your
+  group or sends them a tell; □ shows the window's help. A group's leader looks for players to fill
+  it, a player alone for a group.
+- **Auctions of stacks.** You can put up a whole stack, or part of one: the form asks how many, and
+  the prices are each item's. Bidding asks how many you want, "Buy all now" buys the whole stack at
+  its price each, and the bidders' list shows how many each one asked for. Items with Lore can be put
+  up too. The Ogre and the Alchemist show in the auction's pickers and in an item's races and
+  classes only when the server has them.
+- **Mail to several players.** A letter can go to several players at once: write their names in To
+  with commas or semicolons between them. If a name is nobody's, the letter is not sent and the box
+  names who was not found, so you can put it right. If someone's mailbox is full, or they have too
+  many unread letters from you, the chat says so in red, naming them, and everyone else gets it.
+- A letter you read shows who it went to, under From, and its options have Reply All between Reply
+  and Delete: it answers the sender and everyone else it went to.
+- **Dyed armour.** Armour, robes and helms can be any colour, sent the way the game did it at its
+  end (on eqoaclassic a game master sets them). Each dyed piece is drawn in its colour on your
+  character, on everyone near you and on the character select screen. Armour that is not dyed looks
+  exactly as before.
+- **On every server, Sandstorm included:** buying a second Master Class while you have one is
+  refused at once, with "You cannot possess more than one Master Class at a time." in red, where it
+  used to only warn and then let you ask the server anyway.
+- On every server: destroying an item asks 'Destroy item "<its name>"?', so you can see which one
+  you picked, and selling one to a merchant asks 'Sell item "<its name>"?' for everything but loot.
+  Both start on No.
+- On every server: a petition the staff have closed no longer says only "System is temporarily
+  unavailable. (Code: -8)": the game's explanation follows, that the petition may have been
+  addressed (the box has room for its start, as the game's had). In your inbox, up from the first
+  letter goes round to the last, and down from the last to the first. The Group menu's Show Chat
+  and Hide Chat now tell the server (they did nothing).
+- For GMs, on every server: the game's /rst_mastr, /rst_both, /rem_abil, /banktunar and /servdown
+  are typed in the chat, and work while the server has your GM commands on.
+- **Also in this build:** your own character is now drawn at the size the server gives it, as
+  everyone else is: on eqoaclassic a gnome is a little smaller than before (9 tenths). How you walk
+  and what you bump into are as before.
+
+## 2026-10-29 · The who list in CM order on Sandstorm, as on a PS2
+- On Sandstorm the who list now shows players in the server's own order, highest combat masteries
+  first, whenever you open it again or press Update and nobody has come or gone since: Sandstorm's
+  patch keeps the server's order then, as it does on a PS2. The first time you open it, and after
+  L1 or R1 (left or right), it is sorted by the column as before.
+
+## 2026-10-29 · One question for all your crash reports, and freezes written down
+- If the game stopped more than once since you last sent its crash reports, the next start now
+  asks about all of them at once and says how many there are. Send sends them all, Delete deletes
+  them all, and Not now keeps them for later. Until now it asked about one at a time, the newest,
+  so the same question came back at every start.
+- The music is now read from the disc ahead of playing it, as the browser version does. A slow
+  disc (a drive waking up, or a busy one) now only makes the music start a little late, where it
+  could hold the whole game up for as long as the read took.
+- When the game freezes for a second or more, it now writes down how long, and what it was doing,
+  in its log. A problem report (F3) sent afterwards carries that, and when you play two windows it
+  carries the other window's too, so a report of freezes says what held them up.
+
+## 2026-10-29 · Space loots a corpse as well as opening it
+- In a corpse's window Space now does what the controller's ✕ does there, the button that opened
+  it: on LEAVE ALL it closes the window, on an item it takes that item, and on TAKE ALL it takes
+  everything. It used to do nothing there, so you had to switch to E or Enter.
+
+## 2026-10-29 · A steady camera while you strafe with the mouse held
+- Running while holding a mouse button (the right one, or the left one while you move) and
+  stepping sideways with A or D no longer makes the camera shake from side to side, which blurred
+  the picture at a high frame rate. It now follows you as smoothly as with the keys alone.
+- The same goes for dragging the camera round with a finger on a touch screen while you run.
+
+## 2026-10-29 · Playing over a phone's hotspot
+- The game connects on networks that give servers IPv6 addresses, as many phone hotspots do: it
+  now takes a server's IPv4 address when there is one, and on a network with IPv6 alone it goes
+  through the network's own way to IPv4. Before, the server list stopped there with "An address
+  incompatible with the requested protocol was used".
+
+## 2026-10-29 · Longer passwords at the login
+- The Station login, the new-account page and the change-password page now take a password of up
+  to 31 characters, the most the login can send. They stopped at 15, so a longer password made on
+  a server's website could not be typed in.
+
+## 2026-10-29 · A trade no longer opens over your inventory
+- When the other player accepts your trade while you have your inventory (or any other part of the
+  Start menu) open, the menu now closes and the trade window opens on its own, as on the PS2. Both
+  used to stay up, taking your button presses, so an item you picked could look as if it had been
+  copied.
+- Opening the Start menu after that shows the main menu, not the inventory it was closed over.
+
+## 2026-10-29 · The aiming crosshair reaches no farther than a tap
+- Holding R1 or L1 (Tab or ` on the keyboard) to aim with the crosshair now targets only what a
+  tap of the same button could: creatures within 200 of the camera. It used to take whatever lay
+  nearest the crosshair however far off, even creatures too far away to be drawn, and with a long
+  NPC/PC View Distance out to 1,000.
+
+## 2026-10-29 · A creature's second body
+- A server can send a creature or a player with a second body to show in place of its own (the
+  live game did, for its upgraded models). This client now shows that body, and bumps into it,
+  as the PS2 does: until now it always showed the first one.
+
+## 2026-10-29 · Invisible walls stop you again
+- An invisible wall that the server puts up as a creature now stops you, as on the PS2.
+  Sandstorm uses them to keep players out of a place until a quest lets them through, and this
+  client let you walk straight through them: it made a creature solid only once it had a body
+  to draw, and these have none.
+
+## 2026-10-28 · No stand-in when you enter the world
+- When you enter the world or change worlds, a human man no longer stands in for your character
+  for a moment before your own appears: the game draws you once the server has described you, as
+  the PS2 does.
+
+## 2026-10-28 · Steering with the mouse runs as the stick does; coaches with the menu open
+- Steering with the mouse (the right button held, or either button in first person) keeps your
+  run as it is with the keys or a controller again. Since yesterday's update, a mouse that moved
+  held your speed at what it was when the mouse began to move: from a stand you only crept
+  forward until the mouse stopped, a run you let go of slid on, and on slopes your character sank
+  into the ground going up and floated over it going down.
+- A coach, a boat or a port that moves you while the start menu or the inventory is open now
+  closes it first and gives you your own camera back, as on the PS2. The camera had stayed in the
+  menu's close-up of your character, and after opening and closing the menu again it sat at one
+  angle round you instead of following behind you. Dying with the menu open is fixed the same way.
+- Problem reports (F3) now say how the connection to the server is doing, so a report from a
+  world where no one else shows up tells whether the server still hears you.
+
+## 2026-10-28 · GMs see their server's names for the TRIGGER entries
+- For GMs only, on a server that names its triggers (eqoaclassic): TEST, Programming, TRIGGER
+  now shows each trigger's name where the PS2 shows eight lines all called TRIGGER. A trigger
+  that is switched off is greyed out, and one that is going on now has a * after its name. A
+  line with no trigger still says TRIGGER. Picking a line fires it as before. Every other
+  player, and every other server, sees no change.
+
 ## 2026-10-28 · Goto Zone lands on the ground; fishing on eqoaclassic
 - The GM's Goto Zone (TEST, Navigation) now sets you down on the ground of the square you pick,
   as the PS2 does. It left you under the ground there, and you fell.

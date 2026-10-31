@@ -15,6 +15,7 @@
 pub mod billboard;
 pub mod curve;
 pub mod fans;
+pub mod fog16;
 pub mod map;
 pub mod overlay;
 pub mod scale;
@@ -133,6 +134,9 @@ struct LayerUniform {
     /// scroll, v' = u·m1 + v·m4 + m7 + scroll.
     uv0: [f32; 4],
     uv1: [f32; 4],
+    /// The material's emissive colour, which the light adds to the ambient
+    /// (`VIRaster::UploadPerMaterial`).
+    emissive: [f32; 4],
 }
 
 /// One layer's pass over a batch.
@@ -380,6 +384,13 @@ pub struct Renderer {
     billboards: Option<billboard::Billboards>,
     /// The immediate-mode fans' (`set_fans`), made at the first fan.
     fans: Option<fans::Fans>,
+    /// Whether a fan run marked `ps2` is drawn as the PS2's 16-bit frame
+    /// keeps it (`fog16`): only where the adapter can add up its sums
+    /// (`set_ps2_sums`, `fog16::supported`); off until told.
+    ps2_sums: bool,
+    /// The PS2 runs drawn a fan at a time, the GS's arithmetic exactly
+    /// (`set_ps2_sequential`): the reference the sums are measured against.
+    ps2_sequential: bool,
     /// The characters' blob shadows' (`set_shadows`), made at the first.
     shadows: Option<shadow::Shadows>,
     /// What is drawn over the scene with Z off (`set_overlay`), made at the
@@ -398,7 +409,7 @@ pub struct Renderer {
     /// The last `draw`'s models and draw calls (`EQOA_PERF`).
     pub drawn: std::cell::Cell<(u32, u32)>,
     /// Groups' materials by texture (its key), sampler and uniform bytes.
-    materials: std::collections::HashMap<(u64, usize, [u32; 16]), wgpu::BindGroup>,
+    materials: std::collections::HashMap<(u64, usize, [u32; 20]), wgpu::BindGroup>,
     /// The palette every group's models draw with: theirs is never set.
     identity_palette: wgpu::BindGroup,
     /// The options' Render Scale (`scale`): 1 until set.
@@ -635,6 +646,8 @@ impl Renderer {
             ui: None,
             billboards: None,
             fans: None,
+            ps2_sums: false,
+            ps2_sequential: false,
             shadows: None,
             overlay: None,
             strips: Vec::new(),
@@ -1357,6 +1370,7 @@ const UNTEXTURED: [esf::Layer; 1] = [esf::Layer {
     uv_transform: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
     lod_bias: 0.8,
     uv_rate: [0.0, 0.0],
+    emissive: [0; 4],
 }];
 
 fn layers_of(b: &esf::Batch) -> &[esf::Layer] {
@@ -1376,6 +1390,8 @@ fn layer_state(l: &esf::Layer, textured: bool) -> (usize, LayerUniform, usize) {
         flags: [textured as i32 as f32, (blend != 0) as i32 as f32, gs_lod_k(l.lod_bias), 0.0],
         uv0: [k[0], k[1], k[2], k[3]],
         uv1: [k[4], k[5], l.uv_rate[0], l.uv_rate[1]],
+        // as UploadPerMaterial converts it: c/255
+        emissive: l.emissive.map(|c| c as f32 / 255.0),
     };
     let si = match l.wrap {
         1 | 2 => 1,
@@ -1456,6 +1472,18 @@ pub fn depth_view(device: &wgpu::Device, w: u32, h: u32) -> wgpu::TextureView {
         .create_view(&Default::default())
 }
 
+impl Renderer {
+    /// Before `curve.scene_target`, for a frame drawn into `color`: where the
+    /// fans set read the frame they are drawn over (`fans_read_frame`, the
+    /// ground fog a PS2 frame keeps) and `color` cannot be copied (a page's
+    /// canvas, a GL window), the scene goes through the curve's texture,
+    /// which can (`curve::Curve::set_through`); otherwise as before.
+    pub fn read_frame_through(&mut self, color: &wgpu::TextureView) {
+        let through = self.fans_read_frame() && !color.texture().usage().contains(wgpu::TextureUsages::COPY_SRC);
+        self.curve.set_through(through);
+    }
+}
+
 /// Renders one frame offscreen and returns it as RGBA8 rows (for `--shot`),
 /// with the particles' billboards (view, projection, batches) if any.
 #[allow(clippy::too_many_arguments)]
@@ -1530,13 +1558,14 @@ pub fn capture_around(
     // the frame at the Render Scale's size (the target's own at 1), the scene
     // into the Brightness curve's texture when one is set
     let f = renderer.scale.targets(device, &tv, &depth, (w, h));
+    renderer.read_frame_through(&f.color);
     let scene = renderer.curve.scene_target(device, f.size);
     let st = scene.as_ref().unwrap_or(&f.color);
     renderer.draw(queue, &mut enc, st, &f.depth, view, items);
     if let Some((v, p, batches, textures)) = sky {
         renderer.draw_sky_billboards(device, queue, &mut enc, st, &f.depth, v, p, batches, textures);
     }
-    renderer.draw_fans(queue, &mut enc, st, &f.depth, view);
+    renderer.draw_fans(device, queue, &mut enc, st, &f.depth, view);
     renderer.draw_plates(device, &mut enc, st, &f.depth, f.size);
     if let Some((v, p, batches, textures)) = particles {
         renderer.draw_billboards_and_shadows(device, queue, &mut enc, st, &f.depth, v, p, batches, textures, view);

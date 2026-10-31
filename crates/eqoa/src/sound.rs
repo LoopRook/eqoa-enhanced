@@ -223,10 +223,20 @@ impl Sound {
         self.dev.set_sound_class_volume(1, o.music_volume.0);
     }
 
-    /// The device on a fresh audio output, with AMBTRACK.ESF for the tracks.
+    /// The device on a fresh audio output, with AMBTRACK.ESF for the tracks;
+    /// natively the music's files read whole on a thread of their own
+    /// (`bgm::read_on_a_thread`), so the driver, under the lock the output's
+    /// callback and the game's thread take, never waits on the disc.
     pub fn new(iso_path: &std::path::Path) -> Option<Sound> {
         let disc = iso::Iso::open(iso_path).ok()?;
-        let audio = Audio::open(Box::new(crate::audio::IsoDisc(disc)));
+        #[cfg(not(target_arch = "wasm32"))]
+        let music: Box<dyn snd::Disc> = {
+            let bgm = crate::bgm::Bgm::new(disc.entries());
+            if crate::bgm::read_on_a_thread(&bgm, crate::bgm::image_reader(iso_path.to_path_buf())) { Box::new(bgm) } else { Box::new(crate::audio::IsoDisc(disc)) }
+        };
+        #[cfg(target_arch = "wasm32")]
+        let music: Box<dyn snd::Disc> = Box::new(crate::audio::IsoDisc(disc));
+        let audio = Audio::open(music);
         eprintln!("{}", audio.describe);
         let mut iso = iso::Iso::open(iso_path).ok()?;
         Self::with(&mut |path| iso.read(path).ok(), audio)
@@ -251,8 +261,10 @@ impl Sound {
     /// upload sent (`check_ram`: a sound whose RAM was overwritten plays
     /// garbled until it is let go), the voices playing that no sound of the
     /// device's holds (the BGM's pair aside), the packets and upload steps
-    /// kept back, and the commands a full packet dropped (a busy frame's) and
-    /// the stops it sent with the next one instead.
+    /// kept back, the commands that found the packet full (a busy frame's:
+    /// sent in the packets after it, where the console drops them) and the
+    /// most packets a frame took, the voices a new sound took from a playing
+    /// one (`allocate_channels`), and the sets held between the game's frames.
     pub fn describe(&self) -> String {
         let st = self.audio.status();
         let t = &self.track;
@@ -265,7 +277,7 @@ impl Sound {
         };
         let lasting = |c: usize| (0..24).filter(|&v| self.strays.frames[c * 24 + v] >= STRAY_FRAMES).fold(0u32, |m, v| m | 1 << v);
         format!(
-            "{}; sounds' RAM: {ram}; voices playing on with no sound {:06x} {:06x} ({} times since the start); packets up to {} words of 127, kept back {}, upload steps held {}, commands that found the packet full {}{} (stops sent next {}, volumes and pitches next {}); sets held between the game's frames {}",
+            "{}; sounds' RAM: {ram}; voices playing on with no sound {:06x} {:06x} ({} times since the start); packets up to {} words of 127, kept back {}, upload steps held {}, commands that found the packet full {}{} (sent in the packets after it, up to {} a frame; lost {}); voices taken from playing sounds {}; sets held between the game's frames {}",
             self.describe_play(st, t, free, largest, pool),
             lasting(0),
             lasting(1),
@@ -273,10 +285,11 @@ impl Sound {
             self.dev.most_words,
             self.dev.flushes_refused,
             self.dev.uploads_held,
+            self.dev.cmds_later,
+            dropped_kinds(&self.dev.later_by_id),
+            self.dev.most_packets,
             self.dev.cmds_dropped,
-            dropped_kinds(&self.dev.dropped_by_id),
-            self.dev.stops_dropped,
-            self.dev.sets_kept,
+            self.dev.steals,
             self.dev.held_sets
         )
     }
@@ -853,7 +866,7 @@ impl Sound {
     }
 }
 
-/// The commands a full packet dropped, by kind (`SoundDevice::dropped_by_id`),
+/// The commands that found the packet full, by kind (`SoundDevice::later_by_id`),
 /// as the sound line says them: none, or ": 12 volume, 3 play".
 fn dropped_kinds(by_id: &[u32; 16]) -> String {
     const NAMES: [&str; 16] = ["init", "upload", "play", "frame", "stop", "pitch", "volume", "relocation", "xm play", "xm stop", "xm volume", "xm pitch", "free", "bgm play", "bgm stop", "bgm volume"];

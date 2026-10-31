@@ -12,7 +12,7 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use crate::client_image::Menus;
+use crate::client_image::{Menu, Menus};
 use crate::ui::{Cut, Layout};
 use render::ui::Anchor;
 use vi::ui::{FrameParam, Raster, TextScroll, Vui, Window, wide};
@@ -377,13 +377,29 @@ impl MainMenu {
         let lit = [10.0 / 255.0, 50.0 / 255.0, 70.0 / 255.0, 1.0];
         let black = [0.0, 0.0, 0.0, 1.0];
         let white = [1.0; 4];
-        let word = |id: i32| wide(vui.words.get(id, vui.language));
+        // the live client's words where the table lacks them (Community >
+        // Duel's, `duel::word`)
+        let word = |id: i32| wide(&crate::duel::word(&vui.words, id, vui.language));
+        // a label set at run time (the server's trigger names), fitted to
+        // the bar's width, as the game's own words take it; else the
+        // entry's word
         let mut pos = [18, 56];
         let mut i = 0;
         let mut row = self.top;
         while row < count {
             let sel = self.x34 && row == self.sel;
-            vui.blit_bar3(r, &word(menu.entries[row as usize].word), if sel { lit } else { black }, pos, 141, 142, 150, 140, 0, 1.0, 0, false);
+            let e = &menu.entries[row as usize];
+            let (text, dim) = match menus.labels.get(&(e.msg, e.id)) {
+                Some(l) => (fit_label(vui, r, &l.text, &l.tail, BAR_WIDTH), l.dim),
+                None => (word(e.word), false),
+            };
+            let color = match (sel, dim) {
+                (true, false) => lit,
+                (false, false) => black,
+                (true, true) => DIM_LIT,
+                (false, true) => DIM,
+            };
+            vui.blit_bar3(r, &text, color, pos, 141, 142, 150, BAR_WIDTH, 0, 1.0, 0, false);
             if sel {
                 let (a, b) = (vui.entry(85), vui.entry(150));
                 let p = [pos[0], pos[1] + b.uv1[1] / 2 - a.uv1[1] / 2 - 3];
@@ -599,6 +615,51 @@ impl MainMenu {
         self.lines[0].copy_from_slice(&flat[..32]);
         self.lines[1].copy_from_slice(&flat[32..]);
     }
+}
+
+/// A bar's width (`OnDrawSelf`'s `BlitBar3(..., 140, ...)`).
+const BAR_WIDTH: i32 = 140;
+
+/// A dimmed label's text (`Label::dim`: a choice that does nothing now, a
+/// trigger switched off), not the game's: on the bar's beige stone (about
+/// 160, 150, 130) a grey at about a 2.5:1 contrast, where the game's black
+/// is 8:1 and its selected teal (10, 50, 70) 5:1.
+const DIM: [f32; 4] = [100.0 / 255.0, 100.0 / 255.0, 100.0 / 255.0, 1.0];
+/// A dimmed label's text when its bar is selected: the selected teal
+/// greyed to the same contrast.
+const DIM_LIT: [f32; 4] = [75.0 / 255.0, 95.0 / 255.0, 108.0 / 255.0, 1.0];
+
+/// A run-time label (`Menus::labels`) fitted to `w`, the bar's width: the
+/// text and its tail when they fit; else the text cut short, "..." and the
+/// tail whole. The game draws its own words centred and uncut, and they take
+/// the bar's whole width, caps and all (TEST's "Summon Player" and "Remove 1
+/// Debt" edge to edge, "Remove All Debt" a little past); a name the server
+/// sends gets that room and no more, where drawn whole it could run off the
+/// bar and out of the picture.
+pub fn fit_label(vui: &Vui, r: &dyn Raster, text: &[u16], tail: &[u16], w: i32) -> Vec<u16> {
+    let whole = [text, tail].concat();
+    if vui.string_width(r, &whole) <= w {
+        return whole;
+    }
+    let dots = wide("...");
+    let mut n = text.len();
+    while n > 0 {
+        n -= 1;
+        // never between a surrogate pair's halves
+        if (0xDC00..0xE000).contains(&text[n]) {
+            continue;
+        }
+        // no space before the dots
+        let mut k = n;
+        while k > 0 && text[k - 1] == b' ' as u16 {
+            k -= 1;
+        }
+        let cut = [&text[..k], &dots[..], tail].concat();
+        if vui.string_width(r, &cut) <= w {
+            return cut;
+        }
+    }
+    [&dots[..], tail].concat()
 }
 
 /// `VIFont::DrawString` in the font's colour (here passed).
@@ -850,6 +911,8 @@ pub struct StartData {
     pub buddy_menu: usize,
     pub ignore_menu: usize,
     pub menu: StartMenu,
+    /// the live client's Duel menu (`set_duels`), once made
+    duel_menu: Option<usize>,
 }
 
 impl StartData {
@@ -870,7 +933,33 @@ impl StartData {
         let slot_words = (0..23u32).map(|k| (img.i32_at(0x00CDF6F8 + 8 * k), img.i32_at(0x00CDF6FC + 8 * k) as i64)).collect();
         let buddy_menu = menus.def(img, 0x00CD03B0);
         let ignore_menu = menus.def(img, 0x00CD0340);
-        StartData { menus, tables, tables_test, bounds, world_words, item_counts, attack_words, slot_words, buddy_menu, ignore_menu, menu }
+        StartData { menus, tables, tables_test, bounds, world_words, item_counts, attack_words, slot_words, buddy_menu, ignore_menu, menu, duel_menu: None }
+    }
+
+    /// The live client's Community > Duel (its Community menu, 0x013DFFE8,
+    /// has it sixth, after Chat Modes: word 1864, a menu of Invite (word 86,
+    /// `DoAction` 0xAB000001) and Surrender (1865, 0xAB000002)), put in every
+    /// Community menu (title word 420) or taken out. The disc has none; the
+    /// client shows it while the server lets the player duel (`duelplay`).
+    pub fn set_duels(&mut self, on: bool) {
+        use crate::client_image::MenuEntry;
+        let duel = *self.duel_menu.get_or_insert_with(|| {
+            let entry = |word: i32, msg: u32| MenuEntry { word, msg, id: 0, ..Default::default() };
+            self.menus.push(Menu { x00: -1, x04: 1864, entries: vec![entry(86, crate::duel::MSG_INVITE), entry(1865, crate::duel::MSG_SURRENDER)] })
+        });
+        for m in self.menus.list.iter_mut().filter(|m| m.x04 == 420) {
+            let at = m.entries.iter().position(|e| e.sub == Some(duel));
+            match (on, at) {
+                (true, None) => {
+                    let after = m.entries.iter().position(|e| e.word == 530).map_or(m.entries.len().min(5), |k| k + 1);
+                    m.entries.insert(after, MenuEntry { word: 1864, sub: Some(duel), msg: 0, id: 0, ..Default::default() });
+                }
+                (false, Some(k)) => {
+                    m.entries.remove(k);
+                }
+                _ => {}
+            }
+        }
     }
 
     /// `OpenStartMenu`'s table: the bank's when a banker is in range, the
@@ -1046,6 +1135,130 @@ mod tests {
         let mut whole = Wide(0, Anchor::Frame, Vec::new());
         vui.blit_studded_horz(&mut whole, [-1, BOTTOM_RAIL], 40, 41, 177, 1, 0, 1.0, 0);
         assert!(whole.2.iter().all(|b| b.1[1] + b.2[1] == 331), "the control: the rail's 18 rows reach 331");
+    }
+
+    /// A raster that notes each centred string (where, its colour, what), a
+    /// character 8 pixels wide.
+    #[derive(Default)]
+    struct Texts(Vec<([i32; 2], [f32; 4], String)>);
+
+    impl Raster for Texts {
+        fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+        fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+        fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
+        fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
+        fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) {}
+        fn draw_centered_string(&mut self, at: [i32; 2], c: [f32; 4], s: &[u16], _: u32) {
+            self.0.push((at, c, String::from_utf16_lossy(s)));
+        }
+        fn string_width(&self, s: &[u16]) -> i32 {
+            s.len() as i32 * 8
+        }
+        fn point_size(&self) -> i32 {
+            16
+        }
+        fn viewport(&self) -> [i32; 4] {
+            [0, 0, 639, 447]
+        }
+        fn set_viewport(&mut self, _: [i32; 4]) {}
+    }
+
+    impl Layout for Texts {}
+
+    /// The bars' texts and colours of a TEST-menu-like menu of the eight
+    /// TRIGGER entries (word 507, `Do2`'s message, ids 0 to 7) with `labels`
+    /// (id, text, tail, dim): the seven bars drawn, top to bottom (centred on
+    /// the bar, x 18 + 70), the first selected. The bar's caps (141, 142)
+    /// are `caps` wide.
+    fn trigger_bars(caps: i32, labels: &[(i32, &str, &str, bool)]) -> Vec<(String, [f32; 4])> {
+        let mut atlas = vec![vi::ui::UiTexEntry::default(); 252];
+        for id in [141, 142] {
+            atlas[id] = vi::ui::UiTexEntry { x00: id as i32, row: 1, uv1: [caps, 26], ..Default::default() };
+        }
+        let mut words: Vec<String> = (1..507).map(|n| format!("word {n}")).collect();
+        words.push("TRIGGER".into());
+        let words = vi::strtab::StringTable::parse(words.join("\n").as_bytes()).unwrap();
+        let vui = Vui::new(words, Default::default(), atlas);
+        let mut menus = Menus::default();
+        let entries = (0..8).map(|i| crate::client_image::MenuEntry { word: 507, msg: crate::admin::TRIGGER_ENTRY, id: i, ..Default::default() }).collect();
+        let m = menus.push(Menu { x00: -1, x04: -1, entries });
+        for (id, text, tail, dim) in labels {
+            menus.labels.insert((crate::admin::TRIGGER_ENTRY, *id), crate::client_image::Label { text: wide(text), tail: wide(tail), dim: *dim });
+        }
+        let loc = Location { world: 0, pos: [0.0; 3], cols: 1, rows: 1, cell: 1.0, origin: [0.0; 3], bounds: None };
+        let mut sm = StartMenu::new(m);
+        sm.visible = true;
+        let mut r = Texts::default();
+        sm.show_main(&vui, &r, true, 0, &loc);
+        sm.draw(&vui, &mut r, &menus, 16, &Stats::default(), &mut Vec::new());
+        r.0.into_iter().filter(|(at, ..)| at[0] == 18 + BAR_WIDTH / 2).map(|(_, c, s)| (s, c)).collect()
+    }
+
+    /// The bars' colours as `OnDrawSelf` gives them: the selected teal, and
+    /// black.
+    const LIT: [f32; 4] = [10.0 / 255.0, 50.0 / 255.0, 70.0 / 255.0, 1.0];
+    const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+
+    /// The server's names on the TRIGGER bars (`Menus::labels`): a named
+    /// entry shows its name and tail, an unnamed one the game's word; a name
+    /// too long for the bar is cut, "..." after it and its tail whole, and
+    /// no cut runs past the bar (17 characters here). The control: with no
+    /// labels every bar says TRIGGER, the first selected.
+    #[test]
+    fn a_named_trigger_shows_its_name_on_its_bar() {
+        let bars = trigger_bars(0, &[]);
+        let texts: Vec<_> = bars.iter().map(|b| b.0.as_str()).collect();
+        assert_eq!(texts, vec!["TRIGGER"; 7], "the control: the game's word");
+        let colors: Vec<_> = bars.iter().map(|b| b.1).collect();
+        assert_eq!(colors, [LIT, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK], "the control: the first selected");
+        let bars = trigger_bars(0, &[(0, "Invasion", "", false), (2, "Zombies", " *", false), (3, "Moradhim Earth Elemental Invasion", "", false), (6, "Stop everything now", " *", false)]);
+        let texts: Vec<_> = bars.iter().map(|b| b.0.as_str()).collect();
+        assert_eq!(texts, ["Invasion", "TRIGGER", "Zombies *", "Moradhim Earth...", "TRIGGER", "TRIGGER", "Stop everyth... *"]);
+        assert!(texts.iter().all(|s| s.encode_utf16().count() * 8 <= BAR_WIDTH as usize), "{texts:?}");
+    }
+
+    /// A trigger switched off (`Label::dim`) is drawn in the dim grey, and
+    /// selected in the dim teal; its name is not cut for a tail. The
+    /// controls: the same bars on, in black and in the selected teal; an
+    /// unnamed bar is never dimmed.
+    #[test]
+    fn an_off_trigger_is_drawn_dimmed() {
+        let off = trigger_bars(0, &[(0, "Fireworks", "", true), (1, "Holiday fireworks", "", true), (2, "Fair", "", false)]);
+        assert_eq!(off[0], ("Fireworks".into(), DIM_LIT), "off and selected");
+        assert_eq!(off[1], ("Holiday fireworks".into(), DIM), "off: the whole name, dimmed");
+        assert_eq!(off[2], ("Fair".into(), BLACK), "the control: an on trigger");
+        assert_eq!(off[3], ("TRIGGER".into(), BLACK), "the control: unnamed, never dimmed");
+        let on = trigger_bars(0, &[(0, "Fireworks", "", false), (1, "Holiday fireworks", "", false)]);
+        assert_eq!((on[0].1, on[1].1), (LIT, BLACK), "the control: the same bars on");
+    }
+
+    /// A name takes the bar's whole width, caps and all, as the game's own
+    /// words do: with caps 20 wide each side (the room between them 100, 12
+    /// characters here), a 17-character name and one with the star are drawn
+    /// whole. The control: an 18-character name, past the bar's 140, is cut
+    /// to it.
+    #[test]
+    fn a_name_takes_the_bars_whole_width() {
+        let bars = trigger_bars(20, &[(0, "Holiday fireworks", "", false), (1, "Merchant fair", " *", false), (2, "Holiday fireworks!", "", false)]);
+        let texts: Vec<_> = bars.iter().map(|b| b.0.as_str()).collect();
+        assert_eq!(texts[..3], ["Holiday fireworks", "Merchant fair *", "Holiday firewo..."]);
+        assert!(texts.iter().all(|s| s.encode_utf16().count() * 8 <= BAR_WIDTH as usize), "nothing past the bar: {texts:?}");
+    }
+
+    /// `fit_label`: whole when it fits; else cut on a character before a
+    /// space, never inside a surrogate pair, the tail kept whole; nothing of
+    /// the text when even one character and the tail are too wide.
+    #[test]
+    fn a_label_is_cut_to_its_bar() {
+        let vui = posts::vui();
+        let r = Texts::default();
+        let fit = |t: &str, tail: &str, w| String::from_utf16_lossy(&fit_label(&vui, &r, &wide(t), &wide(tail), w));
+        assert_eq!(fit("Zombies", "", 56), "Zombies", "the control: 7 characters in 56 pixels");
+        assert_eq!(fit("Zombies!", "", 56), "Zomb...");
+        assert_eq!(fit("Big wave", " (off)", 96), "Big... (off)", "no space before the dots");
+        // cut between the pair's halves "ab" and the high half would fit 48
+        assert_eq!(fit("ab\u{1F600}cdef", "", 48), "ab...", "the pair dropped whole");
+        assert_eq!(fit("Zombies", " (running)", 80), "... (running)");
     }
 
     /// A pointer meets the bars at their place in the picture, in a wide

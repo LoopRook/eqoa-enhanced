@@ -11,6 +11,7 @@
 //! (its DRDP source is the player's own entity id), answered with 0x0014,
 //! 0x00C9 and 0x00CA.
 
+use crate::addr::Nat64;
 use crate::stream::{Reader, Writer};
 use drdp::{Addr, ConnId, Drdp, PORT_LEADER, address_to_endpoint};
 use std::net::{SocketAddr, UdpSocket};
@@ -25,20 +26,36 @@ pub trait Datagrams {
     fn recv_from(&mut self) -> Option<(Vec<u8>, [u8; 4], u16)>;
 }
 
-/// A non-blocking UDP socket.
+/// A non-blocking UDP socket: IPv4, or on a network with IPv6 alone an IPv6
+/// one through the network's gateway to IPv4 (`addr::Nat64`).
 pub struct Udp {
     socket: UdpSocket,
     buf: Vec<u8>,
+    nat64: Option<Nat64>,
 }
 
 impl Datagrams for Udp {
     fn send_to(&mut self, data: &[u8], ip: [u8; 4], port: u16) {
-        let _ = self.socket.send_to(data, SocketAddr::from((ip, port)));
+        let to = match &self.nat64 {
+            Some(n) => n.to_v6(ip, port),
+            None => SocketAddr::from((ip, port)),
+        };
+        let _ = self.socket.send_to(data, to);
     }
 
     fn recv_from(&mut self) -> Option<(Vec<u8>, [u8; 4], u16)> {
-        let (n, p) = self.socket.recv_from(&mut self.buf).ok()?;
-        Some((self.buf[..n].to_vec(), ipv4(&p), p.port()))
+        loop {
+            let (n, p) = self.socket.recv_from(&mut self.buf).ok()?;
+            let ip = match &self.nat64 {
+                // one not from under the gateway's prefix is no server's
+                Some(g) => match g.to_v4(&p) {
+                    Some(ip) => ip,
+                    None => continue,
+                },
+                None => ipv4(&p),
+            };
+            return Some((self.buf[..n].to_vec(), ip, p.port()));
+        }
     }
 }
 
@@ -57,6 +74,39 @@ pub const GROUP_CHAT: [f32; 4] = [0.5, 0.5, 1.0, 1.0];
 /// for it (its dispatcher has no default), so a PS2 ignores the offer, and
 /// nothing is sent to a server that made none.
 pub const OP_ENTITY_VIEW: u16 = 0x7E00;
+/// go-eqoa-server's own, no retail message either: the GM's trigger names, a
+/// u32 after the opcode, both ways. The server offers them (1) to a GM's
+/// client beside the GM channel's 0x0700 35; this client answers 1 at once
+/// and is then sent the names (0x7E08, `admin::read_triggers`) whenever they
+/// change. A PS2 ignores the offer, as it ignores [`OP_ENTITY_VIEW`]'s.
+pub const OP_GM_TRIGGERS: u16 = 0x7E07;
+/// go-eqoa-server's own, no retail message either: the live game's duel
+/// messages (0x1501 up, 0x1502 down, the client's `duel` part and its
+/// window), a u32 after the opcode, both ways. The server offers them (1)
+/// once the player is in the world; this client has the window and answers 1
+/// at once, and is then sent 0x1502 where a client without it gets boxes. A
+/// PS2 ignores the offer, as it ignores [`OP_ENTITY_VIEW`]'s.
+pub const OP_DUEL_WINDOW: u16 = 0x7E09;
+/// go-eqoa-server's own, no retail message either: SOE's live game's look, a
+/// u32 after the opcode, both ways. The server offers it (1) after the
+/// session's first character list; this client answers 1 at once: it reads
+/// the live CLIENT's entity channel ([`crate::entity::LIVE_STATE_SIZE`]
+/// bytes, a colour per held item, armour slot and robe) and its 0x002C
+/// record ([`LIVE_GEAR_SIZE`] raw bytes). A PS2 ignores the offer; Sandstorm
+/// never makes one, so its channels and lists stay the disc's.
+pub const OP_LIVE_LOOK: u16 = 0x7E0C;
+/// The server's answer to [`OP_LIVE_LOOK`], a u32: the look in force from it
+/// on (1 the live game's, 0 the disc's). Every character list after it is in
+/// that look (lists are guaranteed messages, in order); a client still
+/// choosing is sent its list again.
+pub const OP_LIVE_LOOK_IN_FORCE: u16 = 0x7E0D;
+/// The raw part of a 0x002C record: the disc's, and the live game's
+/// (`CharacterList`, Corsten's 0x012CC018: no robe tint, six ArmorGroup
+/// variants where the disc's has tints, then the held items', armour slots'
+/// and robe's colours).
+pub const DISC_GEAR_SIZE: usize = 32;
+pub const LIVE_GEAR_SIZE: usize = 71;
+
 /// go-eqoa-server's own, no retail message: others' power, for the bars the
 /// client draws under its group's, its target's and their target's health
 /// (the game shows no one's but the player's own). A u32 after the opcode,
@@ -188,6 +238,7 @@ fn read_quest_marks(r: &mut Reader) -> Option<Vec<QuestMark>> {
     (!r.error).then_some(out)
 }
 
+
 #[derive(Clone, Debug)]
 pub struct Shard {
     pub name: String,
@@ -208,7 +259,9 @@ pub struct Character {
     pub hair_length: i64,
     pub hair_style: i64,
     pub face: i64,
-    /// The 32 raw bytes after the zigzag fields (robe, weapons, armour).
+    /// The raw bytes after the zigzag fields (robe, weapons, armour): the
+    /// disc's [`DISC_GEAR_SIZE`], or the live game's [`LIVE_GEAR_SIZE`] when
+    /// its look is in force.
     pub gear: Vec<u8>,
 }
 
@@ -406,6 +459,11 @@ fn debug_line(s: &str) {
     }
 }
 
+/// VITimer's ticks in `us` microseconds: 983.04 a second (`Session::timer`).
+pub fn ticks(us: i64) -> i64 {
+    us.saturating_mul(98_304) / 100_000_000
+}
+
 pub struct Session {
     pub drdp: Drdp<Ee>,
     socket: Box<dyn Datagrams>,
@@ -418,6 +476,11 @@ pub struct Session {
     /// offered on this connection ([`OP_ENTITY_VIEW`]); none from one that
     /// never does (every retail server, Sandstorm's too).
     pub entity_view_offer: Option<(u32, u32)>,
+    /// The live game's look is in force ([`OP_LIVE_LOOK_IN_FORCE`] said so):
+    /// character lists are read as the live CLIENT's, and the entity channels
+    /// of its length too (`entity::Entities::live_look`). Kept for the
+    /// session, as the server keeps it, through the world's connection.
+    pub live_look: bool,
     /// Whether the server offered others' power on this connection
     /// ([`OP_POWER_BARS`]), what it was last told (none since the offer),
     /// and the set it last sent ([`OP_POWER_BARS_DATA`]: ids and power of
@@ -435,6 +498,7 @@ pub struct Session {
     pub quest_progress_offer: bool,
     quest_progress_asked: Option<bool>,
     pub quest_progress: Vec<TrackedQuest>,
+
     user: String,
     token: [u8; 32],
     start: Instant,
@@ -442,6 +506,11 @@ pub struct Session {
     /// Datagrams sent so far: `usocket_sendto_addr` draws newlib's `rand()`
     /// twice for each, so a client keeping animation in step draws as many.
     pub packets_sent: u64,
+    /// Datagrams read so far, and when `pump` last read one: what a stall's
+    /// line says of the server (the client's `stall`: still sending while
+    /// the client was held, or gone quiet before).
+    pub datagrams_in: u64,
+    pub last_datagram: Option<Instant>,
     /// `EQOA_NET_DEBUG`: every datagram and message on stderr.
     debug: bool,
     /// `m_p382E4`, the chat mode: the last one 0x000E sent (`GroupChanged`
@@ -451,6 +520,13 @@ pub struct Session {
     /// arrived with the world entry, after it (0x1005, 0x03D5), for the
     /// game to read once it is up.
     pub held: Vec<Event>,
+    /// The state channels' updates that came before the world entry, in
+    /// order: CLIENT's connection keeps every channel whatever the screen,
+    /// but the screens before the world read none of ours, and a server
+    /// sends a channel again only when it changes (its own body, compass
+    /// and bars were left out until then). `route` keeps them, and the
+    /// world entry hands them out right after its `WorldEntry`.
+    early_states: Vec<Event>,
     /// `m_clockA`, `m_clockB`: the server's two clocks (0x0013), synced on
     /// the local timer (`timer`); the time of day is clock B's
     pub clock_a: SyncTime,
@@ -515,16 +591,23 @@ fn ipv4(a: &SocketAddr) -> [u8; 4] {
 
 impl Session {
     /// `VIClient::Connect`: a DRDP client on a fresh UDP socket, a connection
-    /// to the login endpoint, the hello and 0x0904.
+    /// to the login endpoint, the hello and 0x0904. A server at an IPv6
+    /// address (a name with no IPv4 one, `addr::resolve`) is reached through
+    /// the network's gateway to IPv4, as is every shard after it.
     pub fn connect(server: SocketAddr, user: &str, token: [u8; 32]) -> std::io::Result<Self> {
-        let socket = UdpSocket::bind("0.0.0.0:0")?;
+        let (nat64, server_ip) = match Nat64::of(&server) {
+            Some((n, ip)) => (Some(n), ip),
+            None => (None, ipv4(&server)),
+        };
+        let any = if nat64.is_some() { "[::]:0" } else { "0.0.0.0:0" };
+        let socket = UdpSocket::bind(any)?;
         // The local address as the server will see it: route a probe.
-        let probe = UdpSocket::bind("0.0.0.0:0")?;
+        let probe = UdpSocket::bind(any)?;
         probe.connect(server)?;
         let local = SocketAddr::new(probe.local_addr()?.ip(), socket.local_addr()?.port());
         socket.set_nonblocking(true)?;
-        let udp = Udp { socket, buf: vec![0u8; 65536] };
-        Self::connect_with(Box::new(udp), (ipv4(&local), local.port()), (ipv4(&server), server.port()), user, token)
+        let udp = Udp { socket, buf: vec![0u8; 65536], nat64 };
+        Self::connect_with(Box::new(udp), (ipv4(&local), local.port()), (server_ip, server.port()), user, token)
             .ok_or_else(|| std::io::Error::other("connection_open failed"))
     }
 
@@ -542,6 +625,7 @@ impl Session {
             self_id: None,
             expansion: 0,
             entity_view_offer: None,
+            live_look: false,
             power_bars_offer: false,
             power_bars_asked: None,
             power_bars: Vec::new(),
@@ -556,9 +640,12 @@ impl Session {
             start: Instant::now(),
             base,
             packets_sent: 0,
+            datagrams_in: 0,
+            last_datagram: None,
             debug: std::env::var_os("EQOA_NET_DEBUG").is_some(),
             chat_mode: 0,
             held: Vec::new(),
+            early_states: Vec::new(),
             clock_a: SyncTime::default(),
             clock_b: SyncTime::default(),
             record: None,
@@ -801,7 +888,22 @@ impl Session {
     /// 983.04 a second (BUSCLK/16 with a compare of 18,750, plus 2), from
     /// the session's start: what the synced clocks are set and read against.
     pub fn timer(&self) -> i64 {
-        (self.start.elapsed().as_micros() as i64).saturating_mul(98_304) / 100_000_000
+        ticks(self.start.elapsed().as_micros() as i64)
+    }
+
+    /// The game connection as a report's trace gives it: the datagrams sent,
+    /// the connection's own counters (`VINetStats`' eleven, those not 0), and
+    /// how far the server has acknowledged the 0x40 (state channel 0x40, sent
+    /// to and acknowledged to): what tells a server that has the player's
+    /// 0x40s but leaves the player out of its world from a link that stopped.
+    pub fn net_line(&self) -> String {
+        let Some(c) = self.conn.filter(|&c| self.drdp.conns.contains(c)) else {
+            return format!("net: {} datagrams sent, no game connection", self.packets_sent);
+        };
+        let k = &self.drdp.conns[c];
+        let counts: Vec<String> = k.cstat.iter().zip(drdp::CSTAT_LABELS).filter(|(n, _)| **n != 0).map(|(n, label)| format!("{n} {label}")).collect();
+        let own = k.channels.as_ref().and_then(|v| v.get(0x40)).map_or("; no 0x40 sent".to_string(), |ch| format!("; the 0x40 sent to {}, acknowledged to {}", ch.tx.wrapping_sub(1), ch.tx_ack));
+        format!("net: {} datagrams sent; the game connection: {}{own}", self.packets_sent, counts.join(", "))
     }
 
     /// `VIClient::UpdateTimeOfDay`: the hour, clock B (0x0013's second
@@ -819,6 +921,8 @@ impl Session {
         let t = self.now();
         self.drdp.set_time(t);
         while let Some((buf, ip, port)) = self.socket.recv_from() {
+            self.datagrams_in += 1;
+            self.last_datagram = Some(Instant::now());
             let n = buf.len();
             let mut d = ip.to_vec();
             d.extend(port.to_le_bytes());
@@ -902,6 +1006,8 @@ impl Session {
                 self.conn = m.connection;
                 self.self_id = None;
                 self.entity_view_offer = None;
+                // the old connection's channels go with it
+                self.early_states.clear();
                 self.power_bars_offer = false;
                 self.power_bars_asked = None;
                 self.power_bars.clear();
@@ -926,7 +1032,18 @@ impl Session {
                 };
                 ev.push(Event::Disconnected(reason));
             }
-            ty if ty < drdp::TYPE_STATE_CHANNELS => ev.push(Event::State { channel: ty, data: m.data }),
+            ty if ty < drdp::TYPE_STATE_CHANNELS => {
+                let e = Event::State { channel: ty, data: m.data };
+                // before the world entry: kept for it (`early_states`)
+                if matches!(self.state, State::World) {
+                    ev.push(e);
+                } else {
+                    if self.debug {
+                        debug_line(&format!("[net] state {ty:#04x} before the world entry: kept for it"));
+                    }
+                    self.early_states.push(e);
+                }
+            }
             // ProcessMessageF8: a datagram outside any connection (drdp
             // port 0xffff) comes as type 0xF8; its 0x0993 answers the probe
             0xF8 => self.process_f8(&m),
@@ -1006,6 +1123,32 @@ impl Session {
                     self.entity_view_offer = Some((slots, view));
                 }
             }
+            // the trigger names offered: taken (the TEST menu shows them)
+            OP_GM_TRIGGERS => {
+                if r.u32() != 0 && !r.error {
+                    self.send_op_int(OP_GM_TRIGGERS, 1);
+                }
+            }
+            // the live duel's messages offered: taken (the client has the
+            // window, `duel`)
+            OP_DUEL_WINDOW => {
+                if r.u32() != 0 && !r.error {
+                    self.send_op_int(OP_DUEL_WINDOW, 1);
+                }
+            }
+            // the live game's look offered: taken (this client reads it),
+            // unless a test's `EQOA_LIVE_LOOK=0` keeps the disc's
+            OP_LIVE_LOOK => {
+                if r.u32() & 1 != 0 && !r.error && wants_live_look() {
+                    self.send_op_int(OP_LIVE_LOOK, 1);
+                }
+            }
+            OP_LIVE_LOOK_IN_FORCE => {
+                let v = r.u32();
+                if !r.error {
+                    self.live_look = v & 1 != 0;
+                }
+            }
             OP_POWER_BARS => {
                 // an offer (again at every world entry): told afresh what
                 // the client wants, the server's player being a new one
@@ -1059,7 +1202,7 @@ impl Session {
             }
             0x002C if matches!(self.state, State::Shard | State::Characters) => {
                 self.state = State::Characters;
-                ev.push(Event::Characters(read_characters(&mut r)));
+                ev.push(Event::Characters(read_characters(&mut r, self.live_look)));
             }
             0x0012 if self.state == State::Characters => ev.push(Event::RandomName(String::from_utf8_lossy(&r.string(24)).into_owned())),
             0x002E if self.state == State::Characters => ev.push(Event::CreateRefused(269)),
@@ -1094,6 +1237,8 @@ impl Session {
                     // GroupChanged(m_p382E4): the chat mode kept
                     self.send_op_byte(0x000E, self.chat_mode);
                     ev.push(Event::WorldEntry { self_id: m.src, player, dump: Box::new(dump) });
+                    // the channels that came before it, in order
+                    ev.append(&mut self.early_states);
                 }
                 // SendOpByteByte(201, !m_p502D4, 0), (202, !m_p502D8, 0): the
                 // options' Faction and Loot Messages OFF bits (m_x93, m_x94),
@@ -1360,7 +1505,17 @@ pub fn new_char_message(c: &NewChar) -> Vec<u8> {
     w.data
 }
 
-fn read_characters(r: &mut Reader) -> Vec<Character> {
+/// Whether to take the live game's look when a server offers it: always, but
+/// for a test's `EQOA_LIVE_LOOK=0`, which keeps the disc's (a PS2's view of
+/// the same server).
+fn wants_live_look() -> bool {
+    std::env::var("EQOA_LIVE_LOOK").map_or(true, |v| v != "0")
+}
+
+/// `CharacterList`: the disc's records, or with `live` the live game's
+/// ([`LIVE_GEAR_SIZE`] raw bytes each).
+fn read_characters(r: &mut Reader, live: bool) -> Vec<Character> {
+    let gear = if live { LIVE_GEAR_SIZE } else { DISC_GEAR_SIZE };
     let n = r.signed().clamp(0, 8) as usize;
     (0..n)
         .map(|_| {
@@ -1369,7 +1524,7 @@ fn read_characters(r: &mut Reader) -> Vec<Character> {
             for v in &mut f {
                 *v = r.signed();
             }
-            let gear = r.bytes(32).to_vec();
+            let gear = r.bytes(gear).to_vec();
             Character {
                 name,
                 server_id: f[0],
@@ -1448,6 +1603,37 @@ pub fn hour_of(clock: &SyncTime, now: i64) -> Option<vi::fpu::F<Ee>> {
 
 #[cfg(test)]
 mod tests {
+
+    /// A session through the gateway to IPv4 (`addr::Nat64`), over real
+    /// sockets on the IPv6 loopback: a server at [::1] is IPv4 0.0.0.1 under
+    /// the prefix ::/96; a datagram to 0.0.0.1 reaches it, and its answer
+    /// comes back as from 0.0.0.1. (Skipped where there is no IPv6 loopback.)
+    #[test]
+    fn a_datagram_goes_through_the_gateway_and_back() {
+        let Ok(server) = UdpSocket::bind("[::1]:0") else { return };
+        let at = server.local_addr().unwrap();
+        let (n, ip) = Nat64::of(&at).unwrap();
+        assert_eq!(ip, [0, 0, 0, 1]);
+        let socket = UdpSocket::bind("[::]:0").unwrap();
+        let port = socket.local_addr().unwrap().port();
+        socket.set_nonblocking(true).unwrap();
+        let mut udp = Udp { socket, buf: vec![0u8; 2048], nat64: Some(n) };
+        udp.send_to(b"hello", ip, at.port());
+        server.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+        let mut b = [0u8; 16];
+        let (k, from) = server.recv_from(&mut b).unwrap();
+        assert_eq!((&b[..k], from.port()), (&b"hello"[..], port));
+        server.send_to(b"answer", from).unwrap();
+        let mut got = None;
+        for _ in 0..200 {
+            if let Some(d) = udp.recv_from() {
+                got = Some(d);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(got, Some((b"answer".to_vec(), [0, 0, 0, 1], at.port())));
+    }
     /// The DRDP clock starts low: the wall clock at 2026-10-28 00:58 UTC,
     /// past 2^31 as a u32, starts it below 2^30, so 12 days of a session
     /// stay below 2^31 and it never wraps, its low 16 bits (the drdp port)
@@ -1663,6 +1849,24 @@ mod tests {
             let ev = deliver(&mut s, drdp::TYPE_DISCONNECT, vec![byte]);
             assert!(matches!(ev[..], [Event::Disconnected(r)] if r == reason), "{byte}: {ev:?}");
         }
+    }
+
+    // A report's net line: the datagrams sent, the game connection's counters
+    // not 0, and the 0x40 channel sent to and acknowledged to (a 0x40 sent and
+    // flushed is sent to 1, acknowledged to 0 until the server's ack; none
+    // before the first). The control: with no game connection, it says so.
+    #[test]
+    fn the_net_line_says_how_far_the_0x40_is_acknowledged() {
+        let mut s = session();
+        let before = s.net_line();
+        assert!(before.ends_with("; no 0x40 sent"), "{before}");
+        s.send_state(0x40, &[1, 2, 3]);
+        s.flush();
+        let line = s.net_line();
+        assert!(line.starts_with(&format!("net: {} datagrams sent; the game connection: ", s.packets_sent)), "{line}");
+        assert!(line.contains(" sent") && line.contains("the 0x40 sent to 1, acknowledged to 0"), "{line}");
+        s.conn = None;
+        assert_eq!(s.net_line(), format!("net: {} datagrams sent, no game connection", s.packets_sent));
     }
 
     // 0x07E0 is answered with 0x07E1: the game connection's eleven counters
@@ -2018,6 +2222,159 @@ mod tests {
         s.agree_quest_progress(false);
         assert_eq!(answers(&mut s), [(251, vec![0x05, 0x7E, 0, 0, 0, 0])], "and stopped");
         assert!(s.quest_progress.is_empty(), "off: forgotten");
+    }
+
+    // go-eqoa-server's offer of the live game's look (0x7E0C) is answered
+    // with 1 at once; the server's answer (0x7E0D) decides how the character
+    // lists after it are read: the disc's 32 raw bytes a record until it says
+    // 1, the live game's 71 after, the disc's again after a 0. It is kept
+    // through the world's connection, as the server keeps it for the
+    // session. The control: a list that comes before the server's answer is
+    // the disc's, though this client asked already.
+    #[test]
+    fn live_look_offer_answer_and_lists() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        let list = |gear: usize| {
+            let mut w = Writer::op(0x002C);
+            w.signed(1).u32(4).bytes(b"Dyed");
+            for v in [17, 0x70D8_98C6, 13, 3, 42, 1, 2, 3, 2] {
+                w.signed(v);
+            }
+            w.bytes(&vec![0xAB; gear]);
+            w.data
+        };
+        let gear_of = |ev: &[Event]| match ev {
+            [Event::Characters(c)] => c.iter().map(|c| c.gear.len()).collect::<Vec<_>>(),
+            other => panic!("{other:?}"),
+        };
+        answers(&mut s);
+        s.state = State::Shard;
+        assert_eq!(gear_of(&deliver(&mut s, drdp::TYPE_GUARANTEED, list(DISC_GEAR_SIZE))), [32], "a first list: the disc's");
+        assert!(deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x0C, 0x7E, 1, 0, 0, 0]).is_empty());
+        assert_eq!(answers(&mut s), [(251, vec![0x0C, 0x7E, 1, 0, 0, 0])], "the offer answered with 1");
+        assert!(!s.live_look, "not in force until the server says so");
+        assert_eq!(gear_of(&deliver(&mut s, drdp::TYPE_GUARANTEED, list(DISC_GEAR_SIZE))), [32], "the control: a list before the server's answer");
+
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x0D, 0x7E, 1, 0, 0, 0]);
+        assert!(s.live_look);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, list(LIVE_GEAR_SIZE));
+        assert_eq!(gear_of(&ev), [71], "the live game's list");
+        if let [Event::Characters(c)] = &ev[..] {
+            assert_eq!((c[0].name.as_str(), c[0].level, c[0].face), ("Dyed", 42, 2));
+        }
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert!(s.live_look, "kept through the world's connection");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x0D, 0x7E, 0, 0, 0, 0]);
+        assert!(!s.live_look, "the server went back to the disc's");
+        assert_eq!(answers(&mut s), [], "nothing answered but the offer");
+    }
+
+    // go-eqoa-server's offer of the GM's trigger names (0x7E07) is answered
+    // with 1 at once, every time it comes, and its names (0x7E08) are passed
+    // on for the TEST menu with nothing answered. The controls: an offer cut
+    // short and an offer of 0 are not answered.
+    #[test]
+    fn the_trigger_names_offer_is_answered() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        answers(&mut s);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x07, 0x7E, 1, 0, 0]);
+        assert!(ev.is_empty(), "{ev:?}");
+        assert_eq!(answers(&mut s), [], "the control: an offer cut short");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x07, 0x7E, 0, 0, 0, 0]);
+        assert_eq!(answers(&mut s), [], "the control: an offer of 0");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x07, 0x7E, 1, 0, 0, 0]);
+        assert!(ev.is_empty(), "the offer is the session's: {ev:?}");
+        assert_eq!(answers(&mut s), [(251, vec![0x07, 0x7E, 1, 0, 0, 0])]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x07, 0x7E, 1, 0, 0, 0]);
+        assert_eq!(answers(&mut s), [(251, vec![0x07, 0x7E, 1, 0, 0, 0])], "again for another offer");
+        let names = vec![0x08, 0x7E, 1, 2, 1, 3, b'O', b'n', b'e'];
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, names);
+        assert!(matches!(&ev[..], [Event::Opcode { op: 0x7E08, data }] if data[..] == [1, 2, 1, 3, b'O', b'n', b'e']), "{ev:?}");
+        assert_eq!(answers(&mut s), [], "the names answered nothing");
+    }
+
+    // go-eqoa-server's offer of the live duel's messages (0x7E09) is answered
+    // with 1 at once, every time it comes, and passed on as nothing. The
+    // controls: an offer cut short and an offer of 0 are not answered.
+    #[test]
+    fn the_duel_window_offer_is_answered() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        answers(&mut s);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x09, 0x7E, 1, 0, 0]);
+        assert!(ev.is_empty(), "{ev:?}");
+        assert_eq!(answers(&mut s), [], "the control: an offer cut short");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x09, 0x7E, 0, 0, 0, 0]);
+        assert_eq!(answers(&mut s), [], "the control: an offer of 0");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x09, 0x7E, 1, 0, 0, 0]);
+        assert!(ev.is_empty(), "the offer is the session's: {ev:?}");
+        assert_eq!(answers(&mut s), [(251, vec![0x09, 0x7E, 1, 0, 0, 0])]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x09, 0x7E, 1, 0, 0, 0]);
+        assert_eq!(answers(&mut s), [(251, vec![0x09, 0x7E, 1, 0, 0, 0])], "again for another offer (each world entry)");
+    }
+
+    // A state channel's update that comes before the world entry (live, a
+    // moment before the dump) is the game's once it is in the world: the
+    // session keeps it and hands it out right after the WorldEntry, in
+    // arrival order. The screens before the world read no channel, and a
+    // server sends one again only when it changes, so a dropped one left the
+    // player's own body, compass and bars out until then (1 playshot in 4 on a
+    // test server). The controls: in the world an update comes out at once,
+    // and a second world entry hands out nothing kept.
+    #[test]
+    fn state_before_the_world_entry_comes_right_after_it() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let states = |ev: &[Event]| -> Vec<(u8, Vec<u8>)> { ev.iter().filter_map(|e| if let Event::State { channel, data } = e { Some((*channel, data.clone())) } else { None }).collect() };
+        let enter = |s: &mut Session| {
+            let mut ev = Vec::new();
+            s.route(drdp::Message { ty: drdp::TYPE_GUARANTEED, data: empty_dump([0.0; 3], 0.0), connection: s.conn, src: 0x1d3d_8fa9, ..Default::default() }, &mut ev);
+            ev
+        };
+        assert!(deliver(&mut s, 0x00, vec![1; 4]).is_empty(), "before the world entry: kept");
+        assert!(deliver(&mut s, 0x42, vec![2; 4]).is_empty());
+        assert!(deliver(&mut s, 0x00, vec![3; 4]).is_empty());
+        let ev = enter(&mut s);
+        assert!(matches!(ev.first(), Some(Event::WorldEntry { self_id: 0x1d3d_8fa9, .. })), "{ev:?}");
+        assert_eq!(ev.len(), 4, "{ev:?}");
+        assert_eq!(states(&ev[1..]), [(0x00, vec![1; 4]), (0x42, vec![2; 4]), (0x00, vec![3; 4])], "right after it, in order");
+        assert_eq!(states(&deliver(&mut s, 0x00, vec![4; 4])), [(0x00, vec![4; 4])], "the control: in the world, at once");
+        let ev = enter(&mut s);
+        assert!(matches!(ev[..], [Event::WorldEntry { .. }]), "the control: a second world entry, nothing kept: {ev:?}");
+    }
+
+    // A new game connection (TYPE_CONNECT: the world resets) forgets the old
+    // one's channels; the control is the test above.
+    #[test]
+    fn a_new_game_connection_forgets_the_kept_states() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        assert!(deliver(&mut s, 0x00, vec![1; 4]).is_empty());
+        let ev = deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert!(matches!(ev[..], [Event::Promoted]), "{ev:?}");
+        let mut ev = Vec::new();
+        s.route(drdp::Message { ty: drdp::TYPE_GUARANTEED, data: empty_dump([0.0; 3], 0.0), connection: s.conn, src: 0x1d3d_8fa9, ..Default::default() }, &mut ev);
+        assert!(matches!(ev[..], [Event::WorldEntry { .. }]), "{ev:?}");
     }
 
     // Msg000D's world entry is ONE datagram, as every PS2 capture's is: 0x0014,

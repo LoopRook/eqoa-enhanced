@@ -35,8 +35,10 @@
 //!   alone, `render::set_mipmaps`), Flora (On, the game's: the plants it
 //!   grows round the camera, `flora`; Off: none), Environment (On, the
 //!   game's: the effect volumes, ground fog, dust, leaves, light shafts and
-//!   flocks, `fx`; Off: none), Shadows (On, the game's: the characters' blob
-//!   shadows, `shadows`; Off: none) and Art (Frontiers' or the 2002 disc's, `era`,
+//!   flocks, `fx`; Off: none), Ground Fog (PS2, the game's look: the effect
+//!   volumes' fog blended as the GS blends it into the PS2's 16-bit frame,
+//!   `render::fog16`; Exact: at eight bits a channel, a brighter cloud) and
+//!   Art (Frontiers' or the 2002 disc's, `era`,
 //!   as F9 swaps it: drawn as it moves, the 2002 disc asked for the first
 //!   time) and Map Markers (On: the map's XP camps and coaches, `map::markers`;
 //!   Off: neither; the map's own X or ○ turns it too);
@@ -73,7 +75,9 @@
 //!   the game's camera could be a name plate is drawn, the game's 22, then
 //!   30 to 200 in tens, `play::PlateView`) and Overlapping Names (Hide, the
 //!   game's: a name whose plate meets a nearer one's is not drawn; Show,
-//!   every one, the nearest over the rest: `play::labels`);
+//!   every one, the nearest over the rest: `play::labels`) and Shadows (On,
+//!   the game's: the characters' blob shadows, `shadows`; Off: none; on
+//!   World until Ground Fog took its row, 2026-10-30);
 //! - Sound: Sound in Background (one setting for every window: off, a window
 //!   not in front is not heard, `audio::set_heard`) and natively Output
 //!   Device (Default, the system's, followed when it changes, or a device
@@ -664,6 +668,9 @@ impl WndOptions {
                     1043 => c.map_markers = !c.map_markers,
                     // Shadows: drawn or not from the next frame (`viewer`, `shadows`)
                     46 => c.shadows = !c.shadows,
+                    // Ground Fog: the fog's fans from the next frame (`fx`,
+                    // `render::fog16`)
+                    47 => c.ps2_fog = !c.ps2_fog,
                     // Output Device: the sound opened there from the next
                     // frame (`audio::retarget`)
                     32 => step_output(&mut c, &crate::audio::outputs().listed.map(|l| l.1).unwrap_or_default(), d),
@@ -1106,7 +1113,7 @@ const CONTROLS: &str = "Controls";
 /// and shown on the page of the category that lists it (`CATEGORIES`).
 // Upstream IDs stay below 1000; enhanced map IDs 1043..1047 avoid future collisions.
 // These are transient UI identities, not persisted settings keys.
-const EXTENDED_ITEMS: [(i32, &str); 35] = [
+const EXTENDED_ITEMS: [(i32, &str); 36] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1137,6 +1144,7 @@ const EXTENDED_ITEMS: [(i32, &str); 35] = [
     (40, "HUD"),
     (42, "Mana Bars"),
     (46, "Shadows"),
+    (47, "Ground Fog"),
     (1043, "Map Markers"),
     (1044, "Minimap"),
     (1045, "Quest Markers"),
@@ -1172,11 +1180,11 @@ struct Category {
 /// Video, UI, Controller, etc."), each a page of `PAGE_MOST` rows at most.
 const CATEGORIES: [Category; 9] = [
     Category { name: "Video", items: VIDEO, note: Note::Scale },
-    Category { name: "World", items: &[20, 35, 36, 37, 46, 25], note: Note::None },
+    Category { name: "World", items: &[20, 35, 36, 37, 47, 25], note: Note::None },
     Category { name: "UI", items: &[22, 31, 42, 1044, 1047, 29], note: Note::None },
     Category { name: "Controller", items: &[16, 19], note: Note::Reads },
     Category { name: "Camera", items: &[15, 17, 18], note: Note::None },
-    Category { name: "Characters", items: &[12, 23, 24, 27, 34], note: Note::Server },
+    Category { name: "Characters", items: &[12, 23, 24, 27, 34, 46], note: Note::Server },
     Category { name: "Sound", items: SOUND, note: Note::Output },
     // the quests' (UI holds its six): the marks a server sends for the map
     // and its tracker for the HUD
@@ -1280,6 +1288,7 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         37 => on_off(c.environment),
         1043 => on_off(c.map_markers),
         46 => on_off(c.shadows),
+        47 => wide(if c.ps2_fog { "PS2" } else { "Exact" }),
         38 => wide(if c.loading_longer { "Longer" } else { "Instant" }),
         39 => wide(&format!("x{}", c.render_scale)),
         40 => wide(match c.hud {
@@ -1606,7 +1615,7 @@ mod tests {
         assert_eq!((w.row, cues.last()), (5, Some(&9)), "Video's last row (six, a page's most)");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.cat, w.cat_sel, w.item), (3, None, 0, -1), "back to the categories, Video still lit");
-        // World: Fog, Mipmaps, Flora, Environment, Shadows, Art
+        // World: Fog, Mipmaps, Flora, Environment, Ground Fog, Art
         press(&mut w, &mut o, key::DOWN, &mut cues);
         press(&mut w, &mut o, key::CROSS, &mut cues);
         assert_eq!((w.cat, w.item), (Some(1), 20), "World, Fog");
@@ -1647,12 +1656,14 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().environment, "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 46, "Shadows");
-        assert!(settings::client().shadows, "on: the game's");
+        assert_eq!(w.item, 47, "Ground Fog");
+        assert!(settings::client().ps2_fog, "PS2: the game's look");
+        assert_eq!(value_text(&vui, 47), Some(wide("PS2")));
         press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().shadows, settings::client().environment, settings::client().flora, cues.last()), (false, true, true, Some(&11)), "off, the others still on");
+        assert_eq!((settings::client().ps2_fog, settings::client().environment, cues.last()), (false, true, Some(&11)), "Exact, Environment still on");
+        assert_eq!(value_text(&vui, 47), Some(wide("Exact")));
         press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert!(settings::client().shadows, "and back: two values");
+        assert!(settings::client().ps2_fog, "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 25, "Art, on World since 2026-10-25");
         assert_eq!(settings::art(), esf::Era::Frontiers, "Frontiers', the disc the game runs off");
@@ -1833,7 +1844,14 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(!settings::overlapping_names(), "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (4, Some(&9)), "Characters' last row");
+        assert_eq!(w.item, 46, "Shadows, on Characters since 2026-10-30");
+        assert!(settings::client().shadows, "on: the game's");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::client().shadows, settings::client().ps2_fog, cues.last()), (false, true, Some(&11)), "off, Ground Fog still PS2");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::client().shadows, "and back: two values");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Characters' last row (six, a page's most)");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         // Sound: Sound in Background
         press(&mut w, &mut o, key::DOWN, &mut cues);
@@ -2235,7 +2253,7 @@ mod tests {
         assert_eq!(w.point([slider + 130.0, y(&w, 0)]), vec![key::RIGHT], "Fog thicker");
         assert_eq!(w.point([frame + 110.0, y(&w, 2)]), down(2, key::RIGHT), "Flora's value");
         assert_eq!(w.point([frame + 20.0, y(&w, 3)]), down(3, key::LEFT), "Environment's value");
-        assert_eq!(w.point([frame + 20.0, y(&w, 4)]), down(4, key::LEFT), "Art's value");
+        assert_eq!(w.point([frame + 20.0, y(&w, 4)]), down(4, key::LEFT), "Ground Fog's value");
         // Characters: NPC/PC Display's knob at its left end (the game's 24),
         // then at 128 near its middle
         w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
