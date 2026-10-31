@@ -11,12 +11,36 @@ live test of 2026-10-30. Earlier versions: `git show 039bbff:docs/FORGE-COMPATIB
 - Branch `forge-compatibility`, worktree `C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility`
   (Paseo workspace `wks_12cecc2d0898f767`). It now contains the Wereoxxs overnight work (fast-forwarded
   from `forge-wereoxxs-overnight-20261030`, which is retired) and is merged into `develop`.
-- `develop` holds the same work. `enhanced` (stable, released 0.1.1) has none of it. Nothing is pushed.
+- `develop` holds the same work. `enhanced` (stable) is released **0.1.2** (built-in NPC catalog, search
+  keeps autorun, program icons) and is merged back into develop. None of the addon work is released.
 - Footprint base: `7912c7393df7d85655d5816980fae1217cc48a32` until a reviewed upstream sync.
 - Unchanged reference packages (never edit them): main checkout `run/forge-compat-reference/`, pinned
   FrontiersForge `4026d5c` (v0.3.2), UiForge `6f2d125`, sol2 bindings `ec6f9ef`. Use the real
   `sol_ImGui.h`/C++ implementations as the reference, not the IDE Lua stubs. ImGui pinned at
   `37b7a7a` (1.92.7 WIP), header in `run/forge-preview-prep/imgui-37b7a7a9.h`.
+
+## Status, 2026-10-31
+
+Owner's live test of `run/forge-test-b57e948` (develop b57e948): **"everything works. perfect from what i
+can tell."** Accepted in live play on Sandstorm:
+
+- Every "hide the game's X" option, including the whole compass (ring, needle, waypoint dot), group panel,
+  and release on disable/re-enable. Hidden elements take no clicks. Pet is untested (no pet).
+- Icons: ability symbols and plates, quick items, effects, casting bar. The root cause of the half-missing
+  symbols: signed 32-bit DictIDs clamped by `.max(0)`. Icons resolve from any library file (including the
+  server's art) by prefetching the ids in the current game state; misses are logged once with a reason;
+  the game log lists `[hotbar] bar/slot -> (bg, fg)` on layout change.
+- Chat: Enter goes to Wereoxxs's input in plain play (it suppresses Enter as in Forge); game pop-ups,
+  menus and client windows get Enter first; keys a mod only claims still reach the game. Tabs do not set
+  channels (neither in Forge); our own mod's idea is in docs/backlog.md.
+- Opening the Addon Manager from Options closes Options properly (it used to leave the game in options
+  mode, which itself hid the ability bars and buffs).
+- Missing optional textures (class_icons) are logged once, not shown on screen.
+
+Still to confirm for the gate (ask the owner; most may already be fine): cooldown display, damage meter,
+settings/profile save and load across restarts, D-pad bar rotation on a controller, pet panel hide.
+Known test failure: `options::tests::the_extended_pages` (expects 5 Mods & Addons rows; the Addon Manager
+added a 6th): a one-line test fix.
 
 ## The goal and its gate
 
@@ -54,7 +78,7 @@ date, pcall; no coroutine/io/debug), Windows MCI sound, queued fonts, and the ov
 `play.chat_line`. Errors are appended to `mods/addons_error.log`. Claimed: 185 addon tests pass; the
 reviews were Gemini Flash reviewing Gemini Flash.
 
-## Owner's live test, 2026-10-30 (after c769a71)
+## History: owner's live test, 2026-10-30 (after c769a71)
 
 | Item | Result |
 |---|---|
@@ -98,7 +122,7 @@ run at 1280x720 and cover every element in the table (`cargo test --locked -p eq
 
 ### Icons
 
-- Ability and effect icons: `Icon.GetTexture` is a stub returning nil. Bridge the game's own icon art
+- (Done 2026-10-31, see Status.) Ability and effect icons: `Icon.GetTexture` was a stub returning nil. Bridge the game's own icon art
   (`vui.blit_ability_icon` / the HUD's texture sheets, `crates/vi/src/ui.rs`, `crates/eqoa/src/ui.rs`)
   into addon texture handles.
 - `gear-icon.png`: exists in the reference (`scripts/resources/`), but the test deployment copied only
@@ -110,12 +134,14 @@ run at 1280x720 and cover every element in the table (`cargo test --locked -p eq
 
 ## Next, in order
 
-1. ~~Hide claims at the draw sites.~~ Done; owner retests all hide options, including group and pet.
-2. Ability/effect icons through `Icon.GetTexture`, and the resources packaging fix.
-3. Remaining live checks: cooldowns, casting bar, D-pad bar rotation on a real controller, damage meter,
-   settings/profile save and load, enable/disable/reload.
-4. Build a preview package from `develop` for the owner (the last delivered preview, in
-   `run/forge-compatibility-preview/21984f39e488/`, predates all of this; never overwrite it).
+1. Confirm the remaining gate items above with the owner; fix what fails.
+2. Fix `options::tests::the_extended_pages`.
+3. Decide with the owner how the first public dev build is published (a versioned pre-release on
+   looprook, or a separate channel). The updater must never move stable players onto it without consent.
+4. Then `avoids_modern_ui` and `arpg_ui`, and the author API support table (docs: Forge's API is the
+   primary modding API; native-only extras under an `eqoa` namespace).
+
+The sections below record how the hide fix was built (2026-10-30), kept for reference.
 
 ## Verifying
 
