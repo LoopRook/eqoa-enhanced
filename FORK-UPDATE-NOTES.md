@@ -4,8 +4,9 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## 2026-10-31 · Enhanced 0.2.0
 
-- Mods: EQOA Enhanced can now run FrontiersForge UI mods natively, no emulator needed. Put a mod's folder in a folder named mods next to eqoa.exe, then turn it on in Options, Extended, Mods & Addons, Addon Manager. Mods are off until you turn them on.
-- Supported: Wereoxxs UI, with its ability bars and icons, cooldowns, casting bar, player, target and group frames, buffs, compass, chat and damage meter. Other Forge mods are experimental for now.
+- Mods: EQOA Enhanced can now run FrontiersForge UI mods natively, no emulator needed. The game creates the mods folder automatically if missing. Turn mods on in Options, Extended, Mods & Addons, Addon Manager. Mods are off until you turn them on.
+- Included: Wereoxxs UI is now bundled directly in the release ZIP inside the mods folder (turn it on in the Addon Manager). It brings customizable ability bars with the game's icons and cooldowns, casting bar, player, target and group frames, buffs, compass, chat and damage meter. Other Forge mods are experimental for now.
+- Upgrading from 0.1.x: Players updating automatically get native mod support, but should download the 0.2.0 ZIP once to get the included Wereoxxs files (or copy the mods folder from the ZIP into their game folder).
 - Mods can hide parts of the game's own HUD (ability bars, buffs, compass, chat window, target, group, pet, health, power and experience bars), and everything comes back when you turn the mod off.
 - Press Enter to type in a mod's chat box; game pop-ups and menus still get Enter first.
 - Mod window positions, sizes and settings are kept between sessions.

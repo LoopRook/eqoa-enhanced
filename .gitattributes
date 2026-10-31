@@ -3,3 +3,6 @@
 CLAUDE.md merge=ours
 # The embedded NPC catalog must keep its exact bytes (pinned SHA-256) on every checkout.
 crates/eqoa/resources/map-data/map-entities.json -text
+
+# The bundled mods vendor tree must keep its exact bytes on every checkout.
+bundled-mods/** -text

@@ -15,11 +15,13 @@ Default map controls (remappable in Controls):
   world map, then choose Track waypoint to follow it.
 
 Mods (FrontiersForge UI mods, run natively):
-  Create a folder named "mods" next to eqoa.exe and put each mod's folder in it.
-  Then turn mods on in Options > Extended > Mods & Addons > Addon Manager.
-  Mods are off until you turn them on. Wereoxxs UI is supported; other Forge
-  mods are experimental. Problems show in the Addon Manager and are written to
-  the file addons_error.log inside the mods folder.
+  Wereoxxs UI is included in the "mods" folder. The game also creates the mods
+  folder automatically if missing. Turn mods on in Options > Extended > Mods &
+  Addons > Addon Manager. Mods are off until you turn them on. Wereoxxs UI is
+  fully supported; other Forge mods are experimental. Problems show in the Addon
+  Manager and are written to addons_error.log inside the mods folder.
+  Players updating from 0.1.x automatically get mod support, but should download
+  the 0.2.0 ZIP once to get the included Wereoxxs files (or copy the mods folder from it).
 
 Release builds check for automatic updates from LoopRook/eqoa-enhanced:
 https://github.com/LoopRook/eqoa-enhanced/releases/latest

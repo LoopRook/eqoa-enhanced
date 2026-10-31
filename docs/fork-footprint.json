@@ -11,6 +11,7 @@
     "docs/**",
     "design/map-parity/**",
     "mods/**",
+    "bundled-mods/**",
     "EQOA-Launcher.pyw",
     "Start-EQOA.bat",
     "Start-EQOA-With-Parser.bat",

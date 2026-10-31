@@ -84,6 +84,7 @@ struct Active {
 }
 impl Runtime {
     pub fn from_env() -> Self {
+        crate::fork_ext::mods::auto_create_mods_dir();
         Self::new(Paths::select(
             crate::fork_ext::mods::mods_dir(),
             std::env::var_os("EQOA_FORGE_MODS").map(PathBuf::from),

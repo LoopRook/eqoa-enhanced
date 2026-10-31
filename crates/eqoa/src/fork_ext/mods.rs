@@ -73,45 +73,51 @@ mod portable_root_tests {
     }
 }
 
+const MODS_README: &str = include_str!("../../../../mods/README.txt");
+
+/// Ensures the `mods/` directory exists natively if missing.
+/// Only when it was just created, writes a starter `README.txt` inside.
+/// Never overwrites an existing `README.txt` or touches existing contents.
+/// Failures (e.g. read-only folder) are logged once and ignored, never fatal.
+pub fn auto_create_mods_dir() {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        static INITIALIZED: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
+        if INITIALIZED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        let dir = mods_dir();
+        auto_create_mods_dir_at(&dir);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn auto_create_mods_dir_at(dir: &Path) {
+    if dir.exists() {
+        return;
+    }
+    match fs::create_dir_all(dir) {
+        Ok(()) => {
+            let readme = dir.join("README.txt");
+            if !readme.exists() {
+                if let Err(e) = fs::write(&readme, MODS_README) {
+                    crate::say(&format!("Could not write mods/README.txt: {e}"));
+                }
+            }
+        }
+        Err(e) => {
+            crate::say(&format!(
+                "Could not create mods directory {}: {e}",
+                dir.display()
+            ));
+        }
+    }
+}
+
 /// Ensures the `mods/` directory exists and creates default starter templates.
 pub fn ensure_mods_dir() {
-    let dir = mods_dir();
-    let _ = fs::create_dir_all(&dir);
-
-    // Create a helpful README explaining drag-and-drop modding.
-    let readme = dir.join("README.txt");
-    if !readme.exists() {
-        let text = "\
-EQOA Native Rust - Mod Directory
-================================
-
-Drop legacy Lua files or complete addon folders into this directory.
-Native addon packages include a mod.json manifest.
-
-Example folder structure:
-  mods/
-    example.lua
-    my_custom_ui/
-      mod.json
-      (textures, resources...)
-    eqoa_parser/
-      mod.json
-
-You can toggle mods on or off directly inside the game from:
-Options -> Mods & Addons -> Addon Manager (native client)
-Unsupported addon APIs and missing resources are shown in the manager.
-";
-        let _ = fs::write(readme, text);
-    }
-
-    // Create starter entry for EQOA Combat Parser companion
-    let parser_dir = dir.join("eqoa_parser");
-    let parser_json = parser_dir.join("mod.json");
-    if !parser_json.exists() {
-        let _ = fs::create_dir_all(&parser_dir);
-        let parser_manifest = include_str!("../../../../mods/eqoa_parser/mod.json");
-        let _ = fs::write(parser_json, parser_manifest);
-    }
+    auto_create_mods_dir();
 }
 
 /// Opens the `mods/` folder in the system file manager.
@@ -513,4 +519,77 @@ fn find_command(command: &str, directory: &Path, search_path: &[PathBuf]) -> Opt
         }
     }
     None
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod auto_create_tests {
+    use super::*;
+
+    #[test]
+    fn forge_mods_auto_create_fresh_dir() {
+        let parent = std::env::temp_dir().join(format!("eqoa-mods-fresh-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&parent);
+        let mods = parent.join("mods");
+        assert!(!mods.exists());
+
+        auto_create_mods_dir_at(&mods);
+        assert!(mods.is_dir(), "mods folder must be created");
+        let readme = mods.join("README.txt");
+        assert!(readme.is_file(), "README.txt must be written in newly created folder");
+        let text = fs::read_to_string(&readme).unwrap();
+        assert!(text.contains("Options -> Extended -> Mods & Addons -> Addon Manager"));
+        assert!(text.contains("addons_error.log"));
+
+        let _ = fs::remove_dir_all(&parent);
+    }
+
+    #[test]
+    fn forge_mods_existing_dir_untouched() {
+        let parent = std::env::temp_dir().join(format!("eqoa-mods-exist-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&parent);
+        let mods = parent.join("mods");
+        fs::create_dir_all(&mods).unwrap();
+        let my_mod = mods.join("my_mod.lua");
+        fs::write(&my_mod, "-- existing mod code").unwrap();
+        let custom_readme = mods.join("README.txt");
+        fs::write(&custom_readme, "custom player readme").unwrap();
+
+        auto_create_mods_dir_at(&mods);
+        assert_eq!(
+            fs::read_to_string(&custom_readme).unwrap(),
+            "custom player readme",
+            "existing README.txt must not be overwritten"
+        );
+        assert_eq!(
+            fs::read_to_string(&my_mod).unwrap(),
+            "-- existing mod code",
+            "existing files in mods folder must remain untouched"
+        );
+
+        // Also verify existing folder without README does NOT have README injected
+        let mods2 = parent.join("mods2");
+        fs::create_dir_all(&mods2).unwrap();
+        auto_create_mods_dir_at(&mods2);
+        assert!(
+            !mods2.join("README.txt").exists(),
+            "pre-existing folder without README must not have README created"
+        );
+
+        let _ = fs::remove_dir_all(&parent);
+    }
+
+    #[test]
+    fn forge_mods_unwritable_location_no_panic() {
+        let parent = std::env::temp_dir().join(format!("eqoa-mods-invalid-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&parent);
+        fs::create_dir_all(&parent).unwrap();
+        let file = parent.join("blocked");
+        fs::write(&file, "blocking file").unwrap();
+        // Creating a directory path through an existing regular file fails in create_dir_all
+        let bad_path = file.join("mods");
+        auto_create_mods_dir_at(&bad_path); // Must log and not panic!
+        assert!(!bad_path.exists());
+
+        let _ = fs::remove_dir_all(&parent);
+    }
 }

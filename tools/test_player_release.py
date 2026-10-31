@@ -13,6 +13,36 @@ import zipfile
 
 MODULE_PATH = Path(__file__).with_name("build_player_release.py")
 
+BUNDLED_MOD_FILES = [
+    "resources/fonts/Cinzel/OFL.txt",
+    "resources/fonts/Cinzel/static/Cinzel-Regular.ttf",
+    "resources/fonts/Libre_Baskerville/OFL.txt",
+    "resources/fonts/Libre_Baskerville/static/LibreBaskerville-Regular.ttf",
+    "resources/fonts/Merriweather_Sans/OFL.txt",
+    "resources/fonts/Merriweather_Sans/static/MerriweatherSans-Regular.ttf",
+    "resources/gear-icon.png",
+    "wereoxxs_ui/README.md",
+    "wereoxxs_ui/modules/ability_bars.lua",
+    "wereoxxs_ui/modules/casting_bar.lua",
+    "wereoxxs_ui/modules/chat_window.lua",
+    "wereoxxs_ui/modules/class_art.lua",
+    "wereoxxs_ui/modules/class_icon.lua",
+    "wereoxxs_ui/modules/damage_meter.lua",
+    "wereoxxs_ui/modules/meter.lua",
+    "wereoxxs_ui/modules/paint.lua",
+    "wereoxxs_ui/modules/party_frames.lua",
+    "wereoxxs_ui/modules/solo_meter.lua",
+    "wereoxxs_ui/modules/tape_compass.lua",
+    "wereoxxs_ui/wereoxxs_ui.lua",
+]
+
+EXPECTED_ZIP_MEMBERS = [
+    "eqoa.exe", "map-entities.json", "LICENSE", "FrontiersForge-MIT.txt",
+    "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt", "README.txt",
+    "release-manifest.json", "mods/README.txt",
+    *(f"mods/{rel}" for rel in BUNDLED_MOD_FILES),
+]
+
 
 def minimal_pe(commit, download_base, machine=0x8664, subsystem=2, stack=8 * 1024 * 1024):
     """Construct PE32+ headers independently of the packager's parser."""
@@ -69,12 +99,27 @@ class PlayerReleaseTests(unittest.TestCase):
             "crates/eqoa/resources/map-ui/OFL.txt": "existing Space Mono OFL\n",
             "docs/PLAYER-README.txt": "EQOA Enhanced {version}\nDouble-click eqoa.exe\n",
             "FORK-UPDATE-NOTES.md": "Enhanced release notes\n",
+            "mods/README.txt": "EQOA Native - Mods & Addons\n",
             ".gitignore": "target/\nrun/\n",
         }
         for name, content in files.items():
             dest = self.root / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(content, encoding="utf-8")
+        source_lines = [
+            "Origin: https://github.com/mmvest/FrontiersForge",
+            "Revision: 4026d5cebcede24943ece8dc34833e584f46cd90 (v0.3.2)",
+            "",
+            "SHA-256 checksums:",
+        ]
+        for rel in BUNDLED_MOD_FILES:
+            mod_bytes = f"content of {rel}\n".encode("utf-8")
+            dest = self.root / "bundled-mods" / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(mod_bytes)
+            digest = hashlib.sha256(mod_bytes).hexdigest()
+            source_lines.append(f"{digest}  {rel}")
+        (self.root / "bundled-mods" / "SOURCE.txt").write_text("\n".join(source_lines) + "\n", encoding="utf-8")
         self.git("init", "-q")
         self.git("-c", "user.name=Release Test", "-c", "user.email=test@example.invalid", "add", ".")
         self.git("-c", "user.name=Release Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture")
@@ -107,9 +152,7 @@ class PlayerReleaseTests(unittest.TestCase):
             "EQOA-Enhanced-0.1.0-Windows-x64.zip", "eqoa-enhanced-windows-x86_64.exe",
             "update.txt", "update-notes.md", "SHA256SUMS"})
         with zipfile.ZipFile(self.output / "EQOA-Enhanced-0.1.0-Windows-x64.zip") as archive:
-            self.assertEqual(archive.namelist(), ["eqoa.exe", "map-entities.json", "LICENSE",
-                "FrontiersForge-MIT.txt", "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt",
-                "README.txt", "release-manifest.json"])
+            self.assertEqual(sorted(archive.namelist()), sorted(EXPECTED_ZIP_MEMBERS))
             manifest = json.loads(archive.read("release-manifest.json"))
             self.assertEqual(manifest["version"], "0.1.0")
             self.assertEqual(manifest["sourceCommit"], self.commit)
@@ -263,6 +306,45 @@ class PlayerReleaseTests(unittest.TestCase):
             self.build(output=self.root)
         with self.assertRaisesRegex(ValueError, "output|Output"):
             self.build(output=self.executable.parent)
+
+
+    def test_tampered_bundled_mod_file_fails(self):
+        tampered = self.root / "bundled-mods" / BUNDLED_MOD_FILES[0]
+        tampered.write_bytes(b"tampered content\n")
+        self.git("add", ".")
+        self.git("-c", "user.name=Release Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "tampered mod")
+        self.commit = self.git("rev-parse", "HEAD").strip()
+        self.executable.write_bytes(minimal_pe(self.commit, self.base))
+        with self.assertRaisesRegex(ValueError, "checksum|tampered|mismatch"):
+            self.build()
+
+    def test_missing_bundled_mod_file_fails(self):
+        missing = self.root / "bundled-mods" / BUNDLED_MOD_FILES[0]
+        missing.unlink()
+        self.git("add", ".")
+        self.git("-c", "user.name=Release Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "missing mod")
+        self.commit = self.git("rev-parse", "HEAD").strip()
+        self.executable.write_bytes(minimal_pe(self.commit, self.base))
+        with self.assertRaisesRegex(ValueError, "missing|Missing"):
+            self.build()
+
+    def test_extra_file_in_zip_fails_verification(self):
+        self.build()
+        archive_path = self.output / "EQOA-Enhanced-0.1.0-Windows-x64.zip"
+        with zipfile.ZipFile(archive_path) as archive:
+            payload = {name: archive.read(name) for name in archive.namelist()}
+        payload["mods/extra_unapproved.lua"] = b"-- unapproved"
+        manifest = json.loads(payload["release-manifest.json"])
+        manifest["files"]["mods/extra_unapproved.lua"] = hashlib.sha256(b"-- unapproved").hexdigest()
+        payload["release-manifest.json"] = json.dumps(manifest).encode()
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            for name, data in payload.items():
+                archive.writestr(name, data)
+        sums = self.output / "SHA256SUMS"
+        names = [row.split("  ")[1] for row in sums.read_text().splitlines()]
+        sums.write_text("".join(f"{hashlib.sha256((self.output / name).read_bytes()).hexdigest()}  {name}\n" for name in names))
+        with self.assertRaisesRegex(ValueError, "allowlist|member"):
+            self.packager.verify_release(self.output)
 
 
 if __name__ == "__main__":

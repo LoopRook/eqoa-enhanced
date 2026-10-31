@@ -31,7 +31,7 @@ These exact budgets cover the inspected hooks, not general gameplay changes.
 The manifest lists explicit ownership patterns for:
 
 - `AGENTS.md`, `FORK.md`, `FORK-UPDATE-NOTES.md`, and the enhanced `README.md`.
-- `docs/`, `design/map-parity/`, `mods/`, the desktop launcher, and the three named
+- `docs/`, `design/map-parity/`, `mods/`, `bundled-mods/`, the desktop launcher, and the three named
   Windows start scripts.
 - Restored app modules `map/`, `questguide/`, `groupmark.rs`, `mapsuggest.rs`,
   `statbox.rs`, and `tracker.rs`; map UI font assets and their OFL notice; map data catalog

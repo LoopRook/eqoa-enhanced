@@ -24,6 +24,58 @@ CATALOG_URL = (
 DOWNLOAD_BASE = "https://github.com/LoopRook/eqoa-enhanced/releases/latest/download/"
 UPDATER_ASSET = "eqoa-enhanced-windows-x86_64.exe"
 VERSION_PATTERN = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", re.ASCII)
+BUNDLED_MOD_FILES = (
+    "resources/fonts/Cinzel/OFL.txt",
+    "resources/fonts/Cinzel/static/Cinzel-Regular.ttf",
+    "resources/fonts/Libre_Baskerville/OFL.txt",
+    "resources/fonts/Libre_Baskerville/static/LibreBaskerville-Regular.ttf",
+    "resources/fonts/Merriweather_Sans/OFL.txt",
+    "resources/fonts/Merriweather_Sans/static/MerriweatherSans-Regular.ttf",
+    "resources/gear-icon.png",
+    "wereoxxs_ui/README.md",
+    "wereoxxs_ui/modules/ability_bars.lua",
+    "wereoxxs_ui/modules/casting_bar.lua",
+    "wereoxxs_ui/modules/chat_window.lua",
+    "wereoxxs_ui/modules/class_art.lua",
+    "wereoxxs_ui/modules/class_icon.lua",
+    "wereoxxs_ui/modules/damage_meter.lua",
+    "wereoxxs_ui/modules/meter.lua",
+    "wereoxxs_ui/modules/paint.lua",
+    "wereoxxs_ui/modules/party_frames.lua",
+    "wereoxxs_ui/modules/solo_meter.lua",
+    "wereoxxs_ui/modules/tape_compass.lua",
+    "wereoxxs_ui/wereoxxs_ui.lua",
+)
+EXPECTED_ZIP_MEMBERS = frozenset({
+    "eqoa.exe", "map-entities.json", "LICENSE", "FrontiersForge-MIT.txt",
+    "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt", "README.txt",
+    "release-manifest.json", "mods/README.txt",
+    *(f"mods/{rel}" for rel in BUNDLED_MOD_FILES),
+})
+
+
+def load_bundled_mod_sources(bundled_mods_dir):
+    source_file = bundled_mods_dir / "SOURCE.txt"
+    if not source_file.is_file():
+        raise ValueError("bundled-mods/SOURCE.txt is missing")
+    expected_hashes = {}
+    in_checksums = False
+    for line in source_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("SHA-256 checksums:"):
+            in_checksums = True
+            continue
+        if in_checksums:
+            parts = line.split("  ", 1)
+            if len(parts) == 2 and re.fullmatch(r"[0-9a-f]{64}", parts[0]):
+                expected_hashes[parts[1]] = parts[0]
+            else:
+                raise ValueError(f"Invalid checksum row in SOURCE.txt: {line}")
+    if set(expected_hashes.keys()) != set(BUNDLED_MOD_FILES):
+        raise ValueError("SOURCE.txt file allowlist mismatch with expected bundled mods")
+    return expected_hashes
 
 
 def sha256(data):
@@ -174,7 +226,12 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
         "README.txt": root / "docs/PLAYER-README.txt",
     }
     notes_path = root / "FORK-UPDATE-NOTES.md"
-    source_paths = [*inputs.values(), notes_path, root / "VERSION"]
+    mods_readme = root / "mods/README.txt"
+    if not mods_readme.is_file():
+        raise ValueError("mods/README.txt is missing")
+    bundled_dir = root / "bundled-mods"
+    expected_mod_hashes = load_bundled_mod_sources(bundled_dir)
+    source_paths = [*inputs.values(), notes_path, root / "VERSION", mods_readme, bundled_dir]
     if catalog is not None:
         catalog = Path(catalog).resolve()
         source_paths.append(catalog)
@@ -192,6 +249,28 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
     payload = {"eqoa.exe": exe, "map-entities.json": catalog_bytes}
     payload.update({name: path.read_bytes() for name, path in inputs.items() if name != "eqoa.exe"})
     payload["README.txt"] = payload["README.txt"].replace(b"{version}", version.encode("ascii"))
+    payload["mods/README.txt"] = mods_readme.read_bytes()
+    for rel_path, expected_hash in expected_mod_hashes.items():
+        file_path = bundled_dir / rel_path
+        if not file_path.is_file():
+            raise ValueError(f"Bundled mod file missing: {rel_path}")
+        file_content = file_path.read_bytes()
+        actual_hash = sha256(file_content)
+        if actual_hash != expected_hash:
+            raise ValueError(
+                f"Bundled mod file checksum mismatch for {rel_path}: {actual_hash} != {expected_hash}"
+            )
+        payload[f"mods/{rel_path}"] = file_content
+    actual_bundled = set()
+    for p in bundled_dir.rglob("*"):
+        if p.is_file():
+            rel = p.relative_to(bundled_dir).as_posix()
+            if rel != "SOURCE.txt":
+                actual_bundled.add(rel)
+    if actual_bundled != set(expected_mod_hashes.keys()):
+        raise ValueError(
+            f"Extra or unexpected files found in bundled-mods: {actual_bundled - set(expected_mod_hashes.keys())}"
+        )
     manifest = {
         "version": version,
         "sourceCommit": source,
@@ -289,15 +368,12 @@ def verify_release(output):
         f"build windows-x86_64 {UPDATER_ASSET} {sha256(exe)} {len(exe)}\n").encode("ascii")
     if update != expected_update:
         raise ValueError("Update manifest is not in canonical format")
-    members = {"eqoa.exe", "map-entities.json", "LICENSE", "FrontiersForge-MIT.txt",
-               "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt", "README.txt",
-               "release-manifest.json"}
     with zipfile.ZipFile(output / zip_name) as archive:
-        if len(archive.infolist()) != len(members) or set(archive.namelist()) != members:
+        if len(archive.infolist()) != len(EXPECTED_ZIP_MEMBERS) or set(archive.namelist()) != EXPECTED_ZIP_MEMBERS:
             raise ValueError("Player ZIP member allowlist mismatch")
         if any(info.is_dir() or (info.external_attr >> 16) & 0o170000 == 0o120000 for info in archive.infolist()):
             raise ValueError("Player ZIP must contain regular files")
-        payload = {name: archive.read(name) for name in members}
+        payload = {name: archive.read(name) for name in EXPECTED_ZIP_MEMBERS}
     try:
         manifest = json.loads(payload["release-manifest.json"])
     except (ValueError, UnicodeDecodeError) as error:
