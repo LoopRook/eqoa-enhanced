@@ -1904,8 +1904,8 @@ mod tests {
         assert_eq!((w.row, w.item), (3, item_named("Open Mods Folder")), "Open Mods Folder");
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.row, w.item), (4, item_named("Combat Parser")), "Combat Parser");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (4, Some(&9)), "Mods & Addons last row");
+        press(&mut w, &mut o, key::DOWN, &mut cues); press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Mods & Addons last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         // Triangle: the menu, then closed with every setting put back
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);

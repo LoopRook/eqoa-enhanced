@@ -163,7 +163,7 @@ fn write_json(path: &Path, value: &Json) -> Result<(), String> {
     }
     atomic_replace(path, &bytes).map_err(|e| e.to_string())
 }
-fn atomic_replace(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(super) fn atomic_replace(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     atomic_replace_with(target, bytes, |from, to| fs::rename(from, to))
 }
 

@@ -87,7 +87,9 @@ impl Runtime {
         Self::new(Paths::select(
             crate::fork_ext::mods::mods_dir(),
             std::env::var_os("EQOA_FORGE_MODS").map(PathBuf::from),
-            crate::settings::config_dir(),
+            std::env::var_os("EQOA_CONFIG")
+                .map(PathBuf::from)
+                .or_else(crate::settings::config_dir),
             std::env::var_os("EQOA_FORGE_SPIKE").map(PathBuf::from),
         ))
     }
@@ -309,6 +311,11 @@ impl Runtime {
             }
             _ => {}
         }
+        if let Some(Graphics::Managed(active)) = self.graphics.as_mut() {
+            if active.context.io().want_save_ini_settings() {
+                save_ini_settings(&mut active.context, self.paths.config.as_deref());
+            }
+        }
         if self.error.is_none() && !self.stopped {
             if let Some(Graphics::Managed(a)) = &self.graphics {
                 let claims = a.manager.hud_claims();
@@ -327,6 +334,7 @@ impl Runtime {
         }
         self.stopped = true;
         if let Some(Graphics::Managed(active)) = self.graphics.as_mut() {
+            save_ini_settings(&mut active.context, self.paths.config.as_deref());
             active.manager.shutdown();
             if let Err(e) = active.platform.detach_window(&mut active.context) {
                 crate::say(&format!("Addons: {e}"));
@@ -336,12 +344,64 @@ impl Runtime {
         self.capture.focus_lost();
         self.want_mouse = false;
     }
+
+    #[cfg(test)]
+    pub(super) fn launch_headless(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Result<(), String> {
+        let active = Active::new_headless(&self.paths, device, queue, format)?;
+        self.graphics = Some(Graphics::Managed(Box::new(active)));
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn step_frame_headless<F: FnOnce(&mut dear_imgui_rs::Ui)>(&mut self, build: F) {
+        if let Some(Graphics::Managed(active)) = self.graphics.as_mut() {
+            active.context.io_mut().set_display_size([800.0, 600.0]);
+            active.context.io_mut().set_delta_time(1.0 / 60.0);
+            let ui = active.context.frame();
+            build(ui);
+            let r = active.renderer.borrow_mut();
+            let _frame = active.context.render(r.renderer_consumer().unwrap());
+        }
+    }
 }
 impl Drop for Runtime {
     fn drop(&mut self) {
         self.shutdown();
     }
 }
+
+pub(super) fn ini_path(config: Option<&std::path::Path>) -> Option<PathBuf> {
+    config.map(|c| c.join("addons").join("imgui.ini"))
+}
+
+pub(super) fn load_ini_settings(context: &mut Context, config: Option<&std::path::Path>) {
+    if let Some(path) = ini_path(config) {
+        if path.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                context.load_ini_settings(&content);
+            }
+        }
+    }
+}
+
+pub(super) fn save_ini_settings(context: &mut Context, config: Option<&std::path::Path>) {
+    unsafe {
+        (*context.as_raw()).IO.WantSaveIniSettings = false;
+    }
+    if let Some(path) = ini_path(config) {
+        let mut buffer = String::new();
+        context.save_ini_settings(&mut buffer);
+        if !buffer.is_empty() {
+            let _ = super::storage::atomic_replace(&path, buffer.as_bytes());
+        }
+    }
+}
+
 impl Active {
     fn new(
         paths: &Paths,
@@ -355,10 +415,47 @@ impl Active {
         context
             .set_ini_filename::<PathBuf>(None)
             .map_err(|e| e.to_string())?;
+        load_ini_settings(&mut context, paths.config.as_deref());
         let mut platform = WinitPlatform::new(&mut context).map_err(|e| e.to_string())?;
         platform
             .attach_window(window.clone(), HiDpiMode::Locked(1.0), &mut context)
             .map_err(|e| e.to_string())?;
+        let renderer = Rc::new(RefCell::new(
+            WgpuRenderer::new(
+                WgpuInitInfo::new(device.clone(), queue.clone(), format),
+                &mut context,
+            )
+            .map_err(|e| e.to_string())?,
+        ));
+        let manager = Manager::new(
+            paths.mods.clone(),
+            paths.config.clone(),
+            device,
+            queue,
+            renderer.clone(),
+        );
+        Ok(Self {
+            manager,
+            renderer,
+            platform,
+            context,
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn new_headless(
+        paths: &Paths,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Result<Self, String> {
+        super::fonts::bump_context_epoch();
+        let mut context = Context::create();
+        context
+            .set_ini_filename::<PathBuf>(None)
+            .map_err(|e| e.to_string())?;
+        load_ini_settings(&mut context, paths.config.as_deref());
+        let platform = WinitPlatform::new(&mut context).map_err(|e| e.to_string())?;
         let renderer = Rc::new(RefCell::new(
             WgpuRenderer::new(
                 WgpuInitInfo::new(device.clone(), queue.clone(), format),
@@ -1093,5 +1190,136 @@ mod tests {
             "overlay center stays at physical x128 after scene x2/x4"
         );
         manager.shutdown();
+    }
+
+    #[test]
+    fn forge_runtime_imgui_ini_window_settings_persistence() {
+        let instance = wgpu::Instance::default();
+        let adapter = match pollster::block_on(instance.request_adapter(&Default::default())) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("SKIP forge_runtime GPU prerequisite: {e}");
+                return;
+            }
+        };
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+
+        let root = Scratch::new();
+        let config = Scratch::new();
+        let ini_file = config.0.join("addons").join("imgui.ini");
+        assert!(!ini_file.exists());
+
+        let paths = Paths::select(
+            root.0.clone(),
+            None,
+            Some(config.0.clone()),
+            None,
+        );
+
+        let mut runtime = Runtime::new(paths.clone());
+        runtime.launch_headless(&device, &queue, format).unwrap();
+        runtime.step_frame_headless(|ui| {
+            ui.window("WereoxxsChat")
+                .position([250.0, 180.0], dear_imgui_rs::Condition::Always)
+                .size([320.0, 240.0], dear_imgui_rs::Condition::Always)
+                .build(|| {});
+        });
+        runtime.shutdown();
+        assert!(ini_file.exists(), "imgui.ini must be written on shutdown");
+        let ini_text = fs::read_to_string(&ini_file).unwrap();
+        assert!(ini_text.contains("[Window][WereoxxsChat]"));
+        assert!(ini_text.contains("Pos=250,180"));
+        assert!(ini_text.contains("Size=320,240"));
+
+        // Recreate runtime with same config dir: window position/size should be restored
+        let mut runtime2 = Runtime::new(paths);
+        runtime2.launch_headless(&device, &queue, format).unwrap();
+        let mut observed_pos = [0.0, 0.0];
+        let mut observed_size = [0.0, 0.0];
+        runtime2.step_frame_headless(|ui2| {
+            ui2.window("WereoxxsChat")
+                .position([10.0, 10.0], dear_imgui_rs::Condition::FirstUseEver)
+                .size([100.0, 100.0], dear_imgui_rs::Condition::FirstUseEver)
+                .build(|| {
+                    observed_pos = ui2.window_pos();
+                    observed_size = ui2.window_size();
+                });
+        });
+        runtime2.shutdown();
+        assert_eq!(observed_pos, [250.0, 180.0], "window position must be restored from imgui.ini");
+        assert_eq!(observed_size, [320.0, 240.0], "window size must be restored from imgui.ini");
+
+        // Tolerating missing ini file
+        let missing_config = Scratch::new();
+        let mut runtime_missing = Runtime::new(Paths::select(
+            root.0.clone(),
+            None,
+            Some(missing_config.0.clone()),
+            None,
+        ));
+        runtime_missing.launch_headless(&device, &queue, format).unwrap();
+        let mut observed_pos = [0.0, 0.0];
+        runtime_missing.step_frame_headless(|ui| {
+            ui.window("MissingTest")
+                .position([15.0, 25.0], dear_imgui_rs::Condition::FirstUseEver)
+                .build(|| {
+                    observed_pos = ui.window_pos();
+                });
+        });
+        runtime_missing.shutdown();
+        assert_eq!(observed_pos, [15.0, 25.0]);
+
+        // Tolerating corrupt ini file
+        let corrupt_config = Scratch::new();
+        let corrupt_ini = corrupt_config.0.join("addons").join("imgui.ini");
+        fs::create_dir_all(corrupt_ini.parent().unwrap()).unwrap();
+        fs::write(&corrupt_ini, b"INVALID GARBAGE ::: [[[ == \x00\xFF\xFE\xFD").unwrap();
+        let mut runtime_corrupt = Runtime::new(Paths::select(
+            root.0.clone(),
+            None,
+            Some(corrupt_config.0.clone()),
+            None,
+        ));
+        runtime_corrupt.launch_headless(&device, &queue, format).unwrap();
+        let mut observed_pos = [0.0, 0.0];
+        runtime_corrupt.step_frame_headless(|ui| {
+            ui.window("CorruptTest")
+                .position([35.0, 45.0], dear_imgui_rs::Condition::FirstUseEver)
+                .build(|| {
+                    observed_pos = ui.window_pos();
+                });
+        });
+        runtime_corrupt.shutdown();
+        assert_eq!(observed_pos, [35.0, 45.0]);
+
+        // EQOA_CONFIG redirection
+        let custom_config = Scratch::new();
+        let custom_ini = custom_config.0.join("addons").join("imgui.ini");
+        let prev_config = std::env::var_os("EQOA_CONFIG");
+        unsafe {
+            std::env::set_var("EQOA_CONFIG", custom_config.0.as_os_str());
+        }
+        let mut runtime_env = Runtime::from_env();
+        runtime_env.launch_headless(&device, &queue, format).unwrap();
+        runtime_env.step_frame_headless(|ui| {
+            ui.window("RedirectionWindow")
+                .position([99.0, 88.0], dear_imgui_rs::Condition::Always)
+                .size([111.0, 222.0], dear_imgui_rs::Condition::Always)
+                .build(|| {});
+        });
+        runtime_env.shutdown();
+        unsafe {
+            match prev_config {
+                Some(val) => std::env::set_var("EQOA_CONFIG", val),
+                None => std::env::remove_var("EQOA_CONFIG"),
+            }
+        }
+        assert!(custom_ini.exists(), "EQOA_CONFIG must redirect imgui.ini persistence");
+        let text = fs::read_to_string(&custom_ini).unwrap();
+        assert!(text.contains("[Window][RedirectionWindow]"));
+        assert!(!std::path::Path::new("imgui.ini").exists(), "Must never write into game working dir");
+        assert!(!root.0.join("imgui.ini").exists(), "Must never write into mods dir");
     }
 }
