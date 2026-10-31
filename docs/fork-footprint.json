@@ -14,6 +14,7 @@
     "Start-EQOA.bat",
     "Start-EQOA-With-Parser.bat",
     "Start-Launcher.bat",
+    "crates/eqoa/resources/map-data/**",
     "crates/eqoa/resources/map-ui/**",
     "crates/eqoa/src/map/**",
     "crates/eqoa/src/questguide/**",
