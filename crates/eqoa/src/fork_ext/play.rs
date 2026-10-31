@@ -24,7 +24,7 @@ enum AtlasKey {
 #[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static CACHED_ATLAS_KEY: std::cell::Cell<AtlasKey> = const { std::cell::Cell::new(AtlasKey::None) };
-    static CACHED_ATLAS: std::cell::RefCell<Option<crate::fork_ext::addons::icons::SafeAtlas>> = const { std::cell::RefCell::new(None) };
+    static CACHED_ATLAS: std::cell::RefCell<Option<std::sync::Arc<crate::fork_ext::addons::icons::SafeAtlas>>> = const { std::cell::RefCell::new(None) };
 }
 
 pub(crate) fn frame_library(_play: &Play, _lib: &esf::Library) {
@@ -48,17 +48,17 @@ pub(crate) fn frame_library(_play: &Play, _lib: &esf::Library) {
                     for i in 0..252 {
                         entries.push(vui.entry(i));
                     }
-                    Some(crate::fork_ext::addons::icons::SafeAtlas {
+                    Some(std::sync::Arc::new(crate::fork_ext::addons::icons::SafeAtlas {
                         entries,
                         textures: vui.textures.clone(),
-                    })
+                    }))
                 }
                 AtlasKey::UiData(_) => {
                     let (entries, textures) = _play.ui_data.as_ref().unwrap();
-                    Some(crate::fork_ext::addons::icons::SafeAtlas {
+                    Some(std::sync::Arc::new(crate::fork_ext::addons::icons::SafeAtlas {
                         entries: entries.clone(),
                         textures: textures.clone(),
-                    })
+                    }))
                 }
                 AtlasKey::None => None,
             };
@@ -66,10 +66,16 @@ pub(crate) fn frame_library(_play: &Play, _lib: &esf::Library) {
             CACHED_ATLAS.with(|ca| *ca.borrow_mut() = built.clone());
             built
         } else {
-            CACHED_ATLAS.with(|ca| ca.borrow().clone())
+            None
         };
 
-        crate::fork_ext::addons::icons::update_live_data(_lib, atlas);
+        let prefetch_ids = crate::fork_ext::addons::icons::get_cached_or_collect_prefetch_ids(
+            &_play.abilities,
+            &_play.hud_menus,
+            &_play.effects,
+            &_play.dump.inventory.items,
+        );
+        crate::fork_ext::addons::icons::update_live_data(_lib, atlas, &prefetch_ids);
     }
 }
 
