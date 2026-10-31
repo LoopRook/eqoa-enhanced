@@ -176,9 +176,7 @@ impl Runtime {
                 }
                 let wants_key_capture = (keyboard
                     || super::input::is_text_capture_active()
-                    || code.is_some_and(|c| {
-                        super::input::is_key_suppressed(c) || super::input::is_key_claimed(c)
-                    }))
+                    || code.is_some_and(super::input::is_key_suppressed))
                     && !is_synthetic;
                 match event.state {
                     ElementState::Pressed => {

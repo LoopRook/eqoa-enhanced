@@ -1038,9 +1038,8 @@ fn forge_claimed_enter_focuses_addon_input_and_say_window_stays_closed() {
     assert_eq!(code, Some(0x0D));
     super::input::record_key_event(code.unwrap(), true);
 
-    let wants_key_capture = super::input::is_text_capture_active()
-        || code
-            .is_some_and(|c| super::input::is_key_suppressed(c) || super::input::is_key_claimed(c));
+    let wants_key_capture =
+        super::input::is_text_capture_active() || code.is_some_and(super::input::is_key_suppressed);
     assert!(wants_key_capture, "claimed Enter must be captured by addon");
 
     // In viewer, when wants_key_capture is true, the event is consumed by Addon
@@ -1143,9 +1142,8 @@ fn forge_unclaimed_enter_opens_say_window_as_before() {
     let code = super::input::logical_key_to_code(&enter_key);
     assert_eq!(code, Some(0x0D));
 
-    let wants_key_capture = super::input::is_text_capture_active()
-        || code
-            .is_some_and(|c| super::input::is_key_suppressed(c) || super::input::is_key_claimed(c));
+    let wants_key_capture =
+        super::input::is_text_capture_active() || code.is_some_and(super::input::is_key_suppressed);
     assert!(
         !wants_key_capture,
         "unclaimed Enter must NOT be captured by addon"
@@ -1267,5 +1265,71 @@ fn forge_addon_focused_typing_does_not_leak_keys_to_game() {
     assert_eq!(
         play.mode, initial_mode,
         "game state must remain untouched while addon chat is focused"
+    );
+}
+
+#[test]
+fn forge_claimed_unsuppressed_key_delivers_to_addon_and_reaches_game() {
+    use winit::keyboard::{Key, SmolStr};
+
+    super::input::reset_input_state();
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!(
+            "SKIP forge_claimed_unsuppressed_key_delivers_to_addon_and_reaches_game: reference scripts root not found"
+        );
+        return;
+    };
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.name == "wereoxxs_ui")
+        .unwrap();
+    let host = Host::for_addon(addon).unwrap();
+    let _bridge = Bridge::install(&host).unwrap();
+
+    let setup = r#"
+        local Input = require('frontiers_forge.input')
+        local ok, err = Input.AcquireKey("tracker", string.byte("w"))
+        assert(ok == true and err == nil)
+        -- Explicitly DO NOT suppress 'w': addon is watching the key, not taking it from the game
+        assert(Input.IsKeySuppressed(string.byte("w")) == false)
+    "#;
+    host.lua.load(setup).exec().unwrap();
+
+    // Verify key is claimed but not suppressed
+    assert!(super::input::is_key_claimed(b'w'));
+    assert!(!super::input::is_key_suppressed(b'w'));
+
+    // W is pressed
+    let w_key = Key::Character(SmolStr::new("w"));
+    let code = super::input::logical_key_to_code(&w_key);
+    assert_eq!(code, Some(b'w'));
+    super::input::record_key_event(code.unwrap(), true);
+
+    // wants_key_capture must be FALSE because the key is not suppressed and text capture is inactive
+    let wants_key_capture =
+        super::input::is_text_capture_active() || code.is_some_and(super::input::is_key_suppressed);
+    assert!(
+        !wants_key_capture,
+        "claimed but unsuppressed key must NOT be captured/swallowed by addon"
+    );
+
+    // PollKeyEvents still delivers W to the claiming addon
+    let poll = r#"
+        local Input = require('frontiers_forge.input')
+        local events = Input.PollKeyEvents("tracker")
+        assert(#events == 1, "owner must receive polled events for claimed key")
+        assert(events[1].key == string.byte("w") and events[1].is_down == true)
+    "#;
+    host.lua.load(poll).exec().unwrap();
+
+    // Because wants_key_capture was false, the key reaches the game (e.g. movement / Play)
+    let mut play = create_test_play();
+    assert_eq!(play.hud_menus.sel, 0);
+    play.hud_key(crate::hudmenu::Key::Right);
+    assert_ne!(
+        play.hud_menus.sel, 0,
+        "game receives unsuppressed hotkey/input normally"
     );
 }
