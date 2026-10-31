@@ -1113,4 +1113,119 @@ mod tests {
             "arrival or pin deletion clears only its guide"
         );
     }
+    struct Nowhere;
+    impl net::session::Datagrams for Nowhere {
+        fn send_to(&mut self, _: &[u8], _: [u8; 4], _: u16) {}
+        fn recv_from(&mut self) -> Option<(Vec<u8>, [u8; 4], u16)> {
+            None
+        }
+    }
+    fn play() -> crate::play::Play {
+        let s = net::session::Session::connect_with(
+            Box::new(Nowhere),
+            ([127, 0, 0, 1], 5000),
+            ([127, 0, 0, 1], 10070),
+            "test",
+            [0; 32],
+        )
+        .unwrap();
+        crate::play::Play::new(s, net::session::Player::default(), Box::default())
+    }
+    struct WalkLog {
+        mode: i32,
+        fwd: Vec<f32>,
+    }
+    impl crate::controls::Walk for WalkLog {
+        fn camera_mode(&self) -> i32 { self.mode }
+        fn heading(&self) -> vi::fpu::F<vi::fpu::Ee> { vi::fpu::F::ZERO }
+        fn pitch(&self) -> vi::fpu::F<vi::fpu::Ee> { vi::fpu::F::ZERO }
+        fn orbit_angle(&self) -> vi::fpu::F<vi::fpu::Ee> { vi::fpu::F::ZERO }
+        fn camera_dir(&self) -> vi::vect::Vect3<vi::fpu::Ee> { vi::vect::Vect3::of(0.0, 0.0, 1.0) }
+        fn under_liquid(&self) -> bool { false }
+        fn at_liquid_surface(&self) -> bool { false }
+        fn move_stick(&mut self, x: vi::fpu::F<vi::fpu::Ee>, _: vi::fpu::F<vi::fpu::Ee>) { self.fwd.push(x.0); }
+        fn walk(&mut self, x: vi::fpu::F<vi::fpu::Ee>, _: vi::fpu::F<vi::fpu::Ee>) { self.fwd.push(x.0); }
+        fn turn_left(&mut self, _: vi::fpu::F<vi::fpu::Ee>) {}
+        fn pitch_down(&mut self, _: vi::fpu::F<vi::fpu::Ee>) {}
+        fn swim_up(&mut self, _: vi::fpu::F<vi::fpu::Ee>) {}
+        fn view_relative_move(&mut self, _: &vi::vect::Vect3<vi::fpu::Ee>, x: vi::fpu::F<vi::fpu::Ee>, _: vi::fpu::F<vi::fpu::Ee>) { self.fwd.push(x.0); }
+        fn view_relative_walk(&mut self, _: &vi::vect::Vect3<vi::fpu::Ee>, x: vi::fpu::F<vi::fpu::Ee>, _: vi::fpu::F<vi::fpu::Ee>) { self.fwd.push(x.0); }
+        fn set_target_heading(&mut self, _: vi::fpu::F<vi::fpu::Ee>) {}
+        fn orbit_in(&mut self, _: vi::fpu::F<vi::fpu::Ee>) {}
+        fn orbit_right(&mut self, _: vi::fpu::F<vi::fpu::Ee>) {}
+        fn manual_terp(&self) -> vi::fpu::F<vi::fpu::Ee> { vi::fpu::F::ZERO }
+        fn manual_hpr(&self) -> vi::vect::Vect3<vi::fpu::Ee> { vi::vect::Vect3::default() }
+        fn set_manual_hpr(&mut self, _: vi::vect::Vect3<vi::fpu::Ee>) {}
+    }
+    #[test]
+    fn autorun_advances_while_map_search_is_open_and_persists_on_close() {
+        let mut p = play();
+        p.autorun = true;
+        p.map.search.open = true;
+
+        let mut walk = WalkLog { mode: 0, fwd: Vec::new() };
+        for _ in 0..5 {
+            let client = p.control_client();
+            assert!(client.move_ok, "autorun keeps move_ok true while search is open");
+            let changed = crate::controls::update_controls(&mut walk, [0.0; 4], &client);
+            p.controls_changed(changed);
+        }
+        assert_eq!(walk.fwd.len(), 5);
+        assert!(walk.fwd.iter().all(|&f| f > 0.0), "character must still advance over N frames");
+        assert!(p.autorun, "autorun state must remain true while search is open");
+
+        p.map.search.open = false;
+        assert!(p.autorun, "closing search leaves autorun as it was");
+    }
+    #[test]
+    fn follow_keeps_character_moving_while_map_search_is_open() {
+        let mut p = play();
+        p.group.in_group = true;
+        p.group.members = vec![
+            crate::group::Member { id: 0x100, name: "Me".into(), ..Default::default() },
+            crate::group::Member { id: 0x200, name: "Bob".into(), ..Default::default() },
+        ];
+        p.target = 0x200;
+        p.do_action(0x0B0E_0007, 0);
+        assert_ne!(p.control_client().follow, crate::controls::Follow::Off);
+
+        p.map.search.open = true;
+        let client = p.control_client();
+        assert!(client.move_ok, "following keeps move_ok true while search is open");
+
+        let c = crate::controls::Client {
+            follow: crate::controls::Follow::At([0.0, 0.0, 10.0], [0.0, 0.0, 0.0]),
+            move_ok: client.move_ok,
+            ..client
+        };
+        let mut walk = WalkLog { mode: 0, fwd: Vec::new() };
+        for _ in 0..5 {
+            let _ = crate::controls::update_controls(&mut walk, [0.0; 4], &c);
+        }
+        assert_eq!(walk.fwd.len(), 5);
+        assert!(walk.fwd.iter().all(|&f| f > 0.0), "following must still advance over N frames");
+        assert_ne!(p.control_client().follow, crate::controls::Follow::Off);
+    }
+    #[test]
+    fn typing_letters_including_wasd_into_search_box_does_not_move_character() {
+        let mut p = play();
+        p.autorun = false;
+        p.map.search.open = true;
+
+        assert!(p.keyboard_typing(), "search box must take keyboard typing focus");
+        assert!(!p.control_client().move_ok, "character at rest must not move while search is open");
+
+        for ch in ["w", "a", "s", "d"] {
+            p.map.search.key(ch, Some(ch));
+        }
+        assert_eq!(p.map.search.query, "wasd");
+
+        let mut walk = WalkLog { mode: 0, fwd: Vec::new() };
+        let client = p.control_client();
+        let changed = crate::controls::update_controls(&mut walk, [0.0; 4], &client);
+        p.controls_changed(changed);
+
+        assert_eq!(walk.fwd, vec![0.0], "typing into search must produce zero movement thrust");
+        assert!(!p.autorun, "typing letters must not trigger autorun");
+    }
 }
