@@ -78,3 +78,12 @@ Conflicted files and resolutions:
   and preserved respective state handlers.
 - fans.rs: adopted upstream `draw_fans` device signature cleanly.
 - lib.rs: exported both `fog16` and fork `map` modules.
+
+Validation:
+- `cargo test --locked -p eqoa --bin eqoa -- --test-threads=1`: 1,356 passed, 0 failures, 2 ignored (`the_discs_patch_s2`, `the_discs_patch_s4` disc skips).
+- `cargo test --locked -p net -p render -p esf -p vi -- --test-threads=1`: all suites passed (net: 49 passed; render: 51 passed, 1 ignored benchmark `ground_fog_cost`; esf: 22 passed; vi: 65 passed; 0 failures).
+- `cargo check --locked -p eqoa --target wasm32-unknown-unknown`: passed.
+- `python tools/check_fork_footprint.py --base ad941f5ca18a9238c5c5e51bdb77b9abb6afd37d`: 19/19 hooks present, all 34 shared files within budget.
+- `python -X utf8 -m unittest discover -s tools -p "test_*.py"`: 46 passed, 0 failures.
+- `cargo build --release --locked -p eqoa`: finished successfully.
+- Note: `forge_texture_early_memory_limit_rejects_before_upload` was GC-timing flaky after the merge and fixed in e16efff (plus the sibling in `forge_texture_memory_early_memory_limit_rejects_before_upload`).
