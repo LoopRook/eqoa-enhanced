@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-10-31 · Enhanced 0.1.2
+
+- NPC search works even if map-entities.json is missing or the game is started from inside the ZIP.
+
 ## 2026-10-28 · Enhanced 0.1.1
 
 - The circular minimap and full world map keep their position, dimensions, backdrop coverage, and UI alignment when Render Scale changes (2x and 4x).
