@@ -34,7 +34,8 @@ The manifest lists explicit ownership patterns for:
 - `docs/`, `design/map-parity/`, `mods/`, the desktop launcher, and the three named
   Windows start scripts.
 - Restored app modules `map/`, `questguide/`, `groupmark.rs`, `mapsuggest.rs`,
-  `statbox.rs`, and `tracker.rs`; map UI font assets and their OFL notice.
+  `statbox.rs`, and `tracker.rs`; map UI font assets and their OFL notice; map data catalog
+  (crates/eqoa/resources/map-data/**) and its FrontiersForge MIT notice.
 - `crates/eqoa/src/fork_ext/` adapters and implementations; reporting policy and
   its transport tests; browser reporting policy and its tests.
 - The restored render map module/shader and map-circle/terrain test modules.

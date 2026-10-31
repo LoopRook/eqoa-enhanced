@@ -1,3 +1,5 @@
 # The fork owns CLAUDE.md; upstream edits to it never conflict (keep ours).
 # Needs the local driver once per clone: git config merge.ours.driver true
 CLAUDE.md merge=ours
+# The embedded NPC catalog must keep its exact bytes (pinned SHA-256) on every checkout.
+crates/eqoa/resources/map-data/map-entities.json -text

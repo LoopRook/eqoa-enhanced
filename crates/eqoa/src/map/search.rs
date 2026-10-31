@@ -83,6 +83,7 @@ pub struct Search {
     live: Vec<Live>,
     group: Vec<Member>,
     loaded: bool,
+    catalog_available: bool,
     world: i32,
     player: [f32; 2],
     selected: usize,
@@ -135,36 +136,112 @@ pub fn imported(s: &str) -> Vec<(String, i32, [f32; 2])> {
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub const CATALOG_SHA256: &str =
+    "37be57d7996fbf7e7ef936c3e6ced1c3a14f611462346bc204eba5929cce11ca";
+
+#[cfg(not(target_arch = "wasm32"))]
+const EMBEDDED_CATALOG: &str = include_str!("../../resources/map-data/map-entities.json");
+
 impl Search {
+    pub fn catalog_available(&self) -> bool {
+        self.catalog_available || !self.known.is_empty()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn load_catalog(
+        &mut self,
+        env_path: Option<std::path::PathBuf>,
+        side_path: Option<std::path::PathBuf>,
+    ) {
+        let mut loaded_spots = None;
+        let mut source_name = String::new();
+
+        // 1. EQOA_MAP_DATABASE (if set and readable)
+        if let Some(env_path) = env_path {
+            match std::fs::read_to_string(&env_path) {
+                Ok(s) => {
+                    let spots = imported(&s);
+                    source_name = format!("EQOA_MAP_DATABASE: {}", env_path.display());
+                    loaded_spots = Some(spots);
+                }
+                Err(e) => {
+                    crate::say(&format!("Map database {}: {e}", env_path.display()));
+                }
+            }
+        }
+
+        // 2. map-entities.json beside the executable (if not already read from env)
+        if loaded_spots.is_none() {
+            if let Some(side_path) = side_path.filter(|p| p.is_file()) {
+                match std::fs::read_to_string(&side_path) {
+                    Ok(s) => {
+                        let spots = imported(&s);
+                        source_name = side_path.display().to_string();
+                        loaded_spots = Some(spots);
+                    }
+                    Err(e) => {
+                        crate::say(&format!("Map database {}: {e}", side_path.display()));
+                    }
+                }
+            }
+        }
+
+        // 3. embedded copy (fallback)
+        if loaded_spots.is_none() {
+            let spots = imported(EMBEDDED_CATALOG);
+            source_name = "built-in".to_string();
+            loaded_spots = Some(spots);
+        }
+
+        if let Some(spots) = loaded_spots.filter(|s| !s.is_empty()) {
+            self.known = spots
+                .into_iter()
+                .map(|(name, world, at)| Spot { name, world, at })
+                .collect();
+            self.catalog_available = true;
+            crate::say(&format!(
+                "Map: {} recorded NPC locations loaded ({source_name})",
+                self.known.len()
+            ));
+        } else {
+            self.known.clear();
+            self.catalog_available = false;
+            crate::say("Map: NPC list unavailable: reinstall from the ZIP");
+        }
+    }
+
     pub fn ensure_loaded(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        let (env_path, side_path) = (
+            std::env::var_os("EQOA_MAP_DATABASE").map(std::path::PathBuf::from),
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.join("map-entities.json"))),
+        );
+        #[cfg(target_arch = "wasm32")]
+        let (env_path, side_path) = (None, None);
+        self.ensure_loaded_from(env_path, side_path);
+    }
+
+    pub fn ensure_loaded_from(
+        &mut self,
+        env_path: Option<std::path::PathBuf>,
+        side_path: Option<std::path::PathBuf>,
+    ) {
         if self.loaded {
             return;
         }
         self.loaded = true;
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let path = std::env::var_os("EQOA_MAP_DATABASE")
-                .map(std::path::PathBuf::from)
-                .or_else(|| {
-                    std::env::current_exe()
-                        .ok()
-                        .and_then(|p| p.parent().map(|p| p.join("map-entities.json")))
-                });
-            if let Some(p) = path.filter(|p| p.is_file()) {
-                match std::fs::read_to_string(&p) {
-                    Ok(s) => {
-                        self.known = imported(&s)
-                            .into_iter()
-                            .map(|(name, world, at)| Spot { name, world, at })
-                            .collect();
-                        crate::say(&format!(
-                            "Map: {} recorded NPC locations loaded",
-                            self.known.len()
-                        ));
-                    }
-                    Err(e) => crate::say(&format!("Map database {}: {e}", p.display())),
-                }
-            }
+            self.load_catalog(env_path, side_path);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (env_path, side_path);
+            self.catalog_available = false;
         }
         for c in super::markers_data::CAMPS {
             self.places.push(Spot {
@@ -727,6 +804,8 @@ impl Search {
                 r,
                 if self.tab == Tab::Group {
                     "No group members"
+                } else if self.tab == Tab::Npcs && !self.catalog_available() {
+                    "NPC list unavailable: reinstall from the ZIP"
                 } else {
                     "No matching locations"
                 },
@@ -1113,6 +1192,195 @@ mod tests {
             "arrival or pin deletion clears only its guide"
         );
     }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn embedded_catalog_sha256_matches_pinned_hash() {
+        use sha2::{Digest, Sha256};
+        let hash = format!("{:x}", Sha256::digest(EMBEDDED_CATALOG.as_bytes()));
+        assert_eq!(hash, CATALOG_SHA256);
+        assert_eq!(
+            CATALOG_SHA256,
+            "37be57d7996fbf7e7ef936c3e6ced1c3a14f611462346bc204eba5929cce11ca"
+        );
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn catalog_with_no_env_or_side_file_finds_known_npc() {
+        let mut s = Search::default();
+        s.ensure_loaded_from(None, None);
+        assert!(s.catalog_available());
+        assert_eq!(s.known.len(), 7180);
+        s.query = "Festering Jack".into();
+        s.update(0, [0.0, 0.0], vec![], vec![]);
+        let results = s.results();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Festering Jack");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn side_file_overrides_embedded_catalog() {
+        let scratch_dir = std::env::temp_dir().join("eqoa_test_side_file");
+        let _ = std::fs::create_dir_all(&scratch_dir);
+        let side_path = scratch_dir.join("map-entities.json");
+        std::fs::write(
+            &side_path,
+            r#"{"SideOnlyNPC":{"world":[0],"pos":[[100,0,200]]}}"#,
+        )
+        .unwrap();
+
+        let mut s = Search::default();
+        s.ensure_loaded_from(None, Some(side_path.clone()));
+        let _ = std::fs::remove_file(&side_path);
+        let _ = std::fs::remove_dir(&scratch_dir);
+
+        assert!(s.catalog_available());
+        assert_eq!(s.known.len(), 1);
+        s.query = "SideOnlyNPC".into();
+        s.update(0, [0.0, 0.0], vec![], vec![]);
+        assert_eq!(s.results().len(), 1);
+        assert_eq!(s.results()[0].name, "SideOnlyNPC");
+
+        s.query = "Festering Jack".into();
+        assert!(s.results().is_empty());
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn env_database_overrides_side_file_and_embedded_catalog() {
+        let scratch_dir = std::env::temp_dir().join("eqoa_test_env_override");
+        let _ = std::fs::create_dir_all(&scratch_dir);
+        let side_path = scratch_dir.join("side.json");
+        let env_path = scratch_dir.join("env.json");
+        std::fs::write(
+            &side_path,
+            r#"{"SideNPC":{"world":[0],"pos":[[100,0,200]]}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &env_path,
+            r#"{"EnvNPC":{"world":[0],"pos":[[300,0,400]]}}"#,
+        )
+        .unwrap();
+
+        let mut s = Search::default();
+        s.ensure_loaded_from(Some(env_path.clone()), Some(side_path.clone()));
+        let _ = std::fs::remove_file(&side_path);
+        let _ = std::fs::remove_file(&env_path);
+        let _ = std::fs::remove_dir(&scratch_dir);
+
+        assert!(s.catalog_available());
+        assert_eq!(s.known.len(), 1);
+        s.query = "EnvNPC".into();
+        s.update(0, [0.0, 0.0], vec![], vec![]);
+        assert_eq!(s.results().len(), 1);
+        assert_eq!(s.results()[0].name, "EnvNPC");
+
+        s.query = "SideNPC".into();
+        assert!(s.results().is_empty());
+        s.query = "Festering Jack".into();
+        assert!(s.results().is_empty());
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn injected_empty_or_invalid_catalog_shows_unavailable_message() {
+        use crate::pointer::testing::vui;
+
+        #[derive(Default)]
+        struct StringCaptureRaster {
+            strings: Vec<String>,
+        }
+        impl Raster for StringCaptureRaster {
+            fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+            fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+            fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
+            fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
+            fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], s: &[u16]) {
+                self.strings.push(String::from_utf16_lossy(s));
+            }
+            fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], s: &[u16], _: u32) {
+                self.strings.push(String::from_utf16_lossy(s));
+            }
+            fn string_width(&self, _: &[u16]) -> i32 { 0 }
+            fn point_size(&self) -> i32 { 16 }
+            fn viewport(&self) -> [i32; 4] { [0, 0, 640, 448] }
+            fn set_viewport(&mut self, _: [i32; 4]) {}
+        }
+
+        let scratch_dir = std::env::temp_dir().join("eqoa_test_invalid_catalog");
+        let _ = std::fs::create_dir_all(&scratch_dir);
+        let bad_path = scratch_dir.join("corrupted.json");
+        std::fs::write(&bad_path, "{broken json").unwrap();
+
+        let mut s = Search::default();
+        s.ensure_loaded_from(Some(bad_path.clone()), None);
+        let _ = std::fs::remove_file(&bad_path);
+        let _ = std::fs::remove_dir(&scratch_dir);
+
+        assert!(!s.catalog_available());
+        assert!(s.known.is_empty());
+
+        s.open = true;
+        s.update(0, [0.0, 0.0], vec![], vec![]);
+        assert!(s.results().is_empty());
+
+        let mut r = StringCaptureRaster::default();
+        s.draw(
+            &mut r,
+            &vui(),
+            [[0.0, 0.0], [640.0, 448.0]],
+            None,
+        );
+
+        assert!(
+            r.strings.iter().any(|s| s.contains("NPC list unavailable: reinstall from the ZIP")),
+            "expected unavailable message in drawn strings, got: {:?}",
+            r.strings
+        );
+        assert!(
+            !r.strings.iter().any(|s| s.contains("No matching locations")),
+            "must not show 'No matching locations' when catalog unavailable"
+        );
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn ensure_loaded_uses_builtin_catalog_when_unconfigured() {
+        let mut s = Search::default();
+        s.ensure_loaded();
+        assert!(s.catalog_available());
+        assert_eq!(s.known.len(), 7180);
+        s.query = "Festering Jack".into();
+        s.update(0, [0.0, 0.0], vec![], vec![]);
+        let results = s.results();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Festering Jack");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn bare_exe_scratch_folder_loads_builtin_catalog() {
+        let scratch_dir = std::env::temp_dir().join("eqoa_scratch_bare_exe");
+        let _ = std::fs::create_dir_all(&scratch_dir);
+        let side_path = scratch_dir.join("map-entities.json");
+        let _ = std::fs::remove_file(&side_path);
+
+        let mut s = Search::default();
+        s.ensure_loaded_from(None, Some(side_path));
+        let _ = std::fs::remove_dir(&scratch_dir);
+
+        assert!(s.catalog_available(), "built-in catalog should load for bare exe");
+        assert_eq!(s.known.len(), 7180);
+        s.query = "Festering Jack".into();
+        s.update(0, [0.0, 0.0], vec![], vec![]);
+        let results = s.results();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Festering Jack");
+    }
+
     struct Nowhere;
     impl net::session::Datagrams for Nowhere {
         fn send_to(&mut self, _: &[u8], _: [u8; 4], _: u16) {}

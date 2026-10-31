@@ -4,7 +4,6 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## 2026-10-30 · Addon manager preview work
 
-- Minimap search now preserves continuous autorun and follow movement while the search query panel is open.
 - Native Mods & Addons gains an Addon Manager with enable/disable, reload,
   rescan, settings and profile controls. Unsupported addon features show failures.
 - Native addons and the parser manifest use the mods folder beside the executable,
@@ -18,12 +17,17 @@ Upstream changes remain in UPDATE-NOTES.md.
   window, ability bars, active effects, and group compass marks) instead of
   using a bounding-box quad filter, and restore cleanly on addon pause, reload,
   or shutdown. Each claim name matches the reference package behavior.
-- Forge addon keyboard input routing: pressing Enter while an addon has claimed
-  or suppressed Enter (such as Wereoxxs chat) routes directly into the addon's
+- Forge addon keyboard input routing: pressing Enter while an addon suppresses
+  Enter (such as Wereoxxs chat) routes directly into the addon's
   input field without opening the client's Say window, and blocks gameplay
   controls while focused.
 - Preview packaging and interactive checks are still pending; full Forge addon
   compatibility is not yet available.
+
+## 2026-10-31 · Enhanced 0.1.2
+
+- NPC search works even if map-entities.json is missing or the game is started from inside the ZIP.
+- Minimap search now preserves continuous autorun and follow movement while the search query panel is open.
 - The program uses the selected EQOA icon on the window, taskbar and eqoa.exe:
   DEV in development builds, STANDARD in official releases. It no longer changes
   to the memory-card save icon after the disc is chosen.

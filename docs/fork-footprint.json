@@ -15,6 +15,7 @@
     "Start-EQOA.bat",
     "Start-EQOA-With-Parser.bat",
     "Start-Launcher.bat",
+    "crates/eqoa/resources/map-data/**",
     "crates/eqoa/resources/app-icon/**",
     "crates/eqoa/resources/map-ui/**",
     "crates/eqoa/src/map/**",
@@ -68,6 +69,11 @@
       "deleted": 3,
       "reason": "One hook into fork_ext/app_icon_ico for the owner-supplied program icon: stage the chosen .ico in OUT_DIR and feed its images to the unchanged SIZES/dib/ico/resources path. Stack and linker behavior unchanged."
     },
+    "crates/eqoa/build.rs": {
+      "added": 11,
+      "deleted": 3,
+      "reason": "One hook into fork_ext/app_icon_ico for the owner-supplied program icon: stage the chosen .ico in OUT_DIR and feed its images to the unchanged SIZES/dib/ico/resources path. Stack and linker behavior unchanged."
+    },
     "crates/eqoa/src/bindpage.rs": {
       "added": 16,
       "deleted": 16,
@@ -92,6 +98,11 @@
       "added": 316,
       "deleted": 15,
       "reason": "Reviewed restored HUD and native addon hide-UI draw-site gates for compass, gauges, group/pet/target panels, and group compass marks; one-line hook calls, fork_ext implementation and tests."
+    },
+    "crates/eqoa/src/icon.rs": {
+      "added": 4,
+      "deleted": 1,
+      "reason": "Two hooks into fork_ext::app_icon: the window/Dock picture comes from the chosen icon, and poll returns before the save-icon switch. Upstream save-icon code remains present and compiled."
     },
     "crates/eqoa/src/icon.rs": {
       "added": 4,
