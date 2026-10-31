@@ -5,6 +5,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 ## 2026-10-31 · Enhanced 0.1.2
 
 - NPC search works even if map-entities.json is missing or the game is started from inside the ZIP.
+- Minimap search now preserves continuous autorun and follow movement while the search query panel is open.
 
 ## 2026-10-28 · Enhanced 0.1.1
 
