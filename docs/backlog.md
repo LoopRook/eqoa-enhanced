@@ -52,3 +52,15 @@ This entry records future work only; no navigation or movement behavior changes 
 - **Requested:** 2026-10-31.
 - **Finding:** in Wereoxxs (reference `modules/chat_window.lua` ~238-260, `wereoxxs_ui.lua` ~855-860) the All/Party/Guild/Say/Shout tabs send text unchanged (no channel prefix); only tell tabs prefix `/tell <name>`. Our native port matches that.
 - **Goal:** in our own chat mod, the selected tab sets the outgoing channel (Party -> group, Guild -> guild, Shout -> shout, Say -> say); decide what "All" does (last channel used, or say) and show the active channel next to the input.
+
+## Mod profiles per character or role, and separate settings per client (multibox)
+
+- **Status:** Requested 2026-10-31; design pending (a scout will first check how Forge/UiForge and Wereoxxs handle profiles on PCSX2).
+- **Problem:** all clients on one PC share one settings/profile file per mod and one window-layout file (imgui.ini), so two clients open for two accounts overwrite each other's settings and layouts.
+- **Goal (owner):** save named profiles per character or role and choose which to load, as players did on PCSX2; each client keeps its own.
+- **Open questions for the owner:** load automatically per character (remember the last profile per character) or always ask; whether a profile includes window positions.
+
+## Release policy for Forge work (owner, 2026-10-31)
+
+- Bug fixes in released features go to stable as patch releases (hotfix branch from enhanced, merged back to develop).
+- New Forge compatibility work stays on develop and ships when parity is reached for the next set of mods.
