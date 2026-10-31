@@ -2,6 +2,8 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Instant;
+use winit::event::KeyEvent;
+use winit::keyboard::{Key, NamedKey};
 
 const KEY_RING_SIZE: usize = 128;
 const TEXT_CAPTURE_LAPSE_SECS: f32 = 1.0;
@@ -109,15 +111,58 @@ pub fn is_dpad_rotated() -> bool {
     INPUT_STATE.with(|s| s.borrow().dpad_rotated)
 }
 
-#[allow(dead_code)]
+pub fn is_key_claimed(key: u8) -> bool {
+    INPUT_STATE.with(|s| s.borrow().key_claims.contains_key(&key))
+}
+
+pub fn is_text_capture_active() -> bool {
+    INPUT_STATE.with(|s| {
+        let mut state = s.borrow_mut();
+        let now = Instant::now();
+        state
+            .text_capture_owners
+            .retain(|_, t| now.duration_since(*t).as_secs_f32() <= TEXT_CAPTURE_LAPSE_SECS);
+        state.text_capture = !state.text_capture_owners.is_empty();
+        state.text_capture
+    })
+}
+
 pub fn is_key_suppressed(key: u8) -> bool {
     INPUT_STATE.with(|s| {
-        let state = s.borrow();
+        let mut state = s.borrow_mut();
+        let now = Instant::now();
+        state
+            .text_capture_owners
+            .retain(|_, t| now.duration_since(*t).as_secs_f32() <= TEXT_CAPTURE_LAPSE_SECS);
+        state.text_capture = !state.text_capture_owners.is_empty();
         if state.text_capture && key < 0x80 {
             return true;
         }
         state.suppress_shadow.get(&key).copied().unwrap_or(false)
     })
+}
+
+pub fn logical_key_to_code(logical_key: &Key) -> Option<u8> {
+    match logical_key {
+        Key::Named(NamedKey::Enter) => Some(0x0D),
+        Key::Named(NamedKey::Backspace) => Some(0x08),
+        Key::Named(NamedKey::Tab) => Some(0x09),
+        Key::Named(NamedKey::Escape) => Some(0x1B),
+        Key::Named(NamedKey::Space) => Some(0x20),
+        Key::Character(s) => {
+            let c = s.chars().next()?;
+            if c.is_ascii() && !c.is_ascii_control() {
+                Some(c as u8)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+pub fn winit_key_to_code(event: &KeyEvent) -> Option<u8> {
+    logical_key_to_code(&event.logical_key)
 }
 
 fn get_key_name(code: u8) -> String {

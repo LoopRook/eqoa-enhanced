@@ -17,6 +17,10 @@ Upstream changes remain in UPDATE-NOTES.md.
   window, ability bars, active effects, and group compass marks) instead of
   using a bounding-box quad filter, and restore cleanly on addon pause, reload,
   or shutdown. Each claim name matches the reference package behavior.
+- Forge addon keyboard input routing: pressing Enter while an addon has claimed
+  or suppressed Enter (such as Wereoxxs chat) routes directly into the addon's
+  input field without opening the client's Say window, and blocks gameplay
+  controls while focused.
 - Preview packaging and interactive checks are still pending; full Forge addon
   compatibility is not yet available.
 - The program uses the selected EQOA icon on the window, taskbar and eqoa.exe:
