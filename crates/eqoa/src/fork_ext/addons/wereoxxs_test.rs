@@ -21,6 +21,147 @@ use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 struct ScratchDir(PathBuf);
 
+fn modern_package(id: &str) {
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!("SKIP {id}: pinned reference folder absent");
+        return;
+    };
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+    let addon = discovery::discover(&root)
+        .addons
+        .into_iter()
+        .find(|a| a.id == id)
+        .unwrap();
+    let host = Host::for_addon(&addon).unwrap();
+    let data = ScratchDir::new();
+    super::file_io::install(&host, &addon, Some(data.0.clone())).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, &addon).unwrap();
+    let fonts = Rc::new(RefCell::new(super::fonts::FontBank::new(
+        0,
+        super::fonts::current_context_epoch(),
+    )));
+    super::fonts::FontBank::install_for_addon(&fonts, &host.lua, &addon).unwrap();
+    let mut snapshot = rich_in_game_snapshot();
+    snapshot.player.available = true;
+    snapshot.effects.count = 2;
+    snapshot.entities.count = 1;
+    for i in 0..5 {
+        snapshot.abilities.bars[0].slots[i].source_type = super::ability::ABILITY_SOURCE_TAG;
+        snapshot.abilities.bars[0].slots[i].source_index = i as u32 + 1;
+        snapshot.abilities.abilities[i].display_index = i as u32;
+    }
+    snapshot.journal = super::quest_log::JournalSnapshot::from_titles(
+        true,
+        &[
+            "Bat Eyes".encode_utf16().collect(),
+            "The Militia".encode_utf16().collect(),
+        ],
+    );
+    host.snapshot.set(snapshot);
+    for _ in 0..4 {
+        gpu.begin();
+        let result = bridge.invoke(|| host.run_addon(&addon));
+        gpu.render();
+        let logs = host.drain_logs().unwrap();
+        assert!(
+            result.is_ok() && logs.is_empty(),
+            "{id}: {result:?}, logs: {logs:?}"
+        );
+    }
+    gpu.begin();
+    let result = bridge.invoke(|| {
+        host.execute("ImGui.Begin('settings')")?;
+        host.callback(0, mlua::Value::Nil)?;
+        if id == "avoids_modern_ui" {
+            host.execute("for key,mod in pairs(ModPack) do if mod.Settings then ImGui.PushID(key);mod.Settings();ImGui.PopID() end end")?;
+        }
+        host.execute("ImGui.End()")
+    });
+    gpu.render();
+    result.unwrap();
+    assert!(
+        host.drain_logs().unwrap().is_empty(),
+        "{id}: swallowed settings error"
+    );
+    let saved = host.callback(2, mlua::Value::Nil).unwrap();
+    host.callback(3, saved).unwrap();
+    host.callback(1, mlua::Value::Nil).unwrap();
+    host.callback(4, mlua::Value::Nil).unwrap();
+    assert!(
+        host.drain_logs().unwrap().is_empty(),
+        "{id}: lifecycle error"
+    );
+    let diags = textures.borrow_mut().drain_diagnostics();
+    assert!(
+        diags.iter().all(|d| !d.contains("unsupported")),
+        "{diags:?}"
+    );
+}
+
+#[test]
+fn forge_modern_arpg_unchanged_package() {
+    modern_package("arpg_ui");
+}
+
+#[test]
+fn forge_modern_avoids_unchanged_package() {
+    modern_package("avoids_modern_ui");
+}
+
+#[test]
+fn forge_modern_quest_log_and_util_surface() {
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!("SKIP quest surface: pinned reference folder absent");
+        return;
+    };
+    let addon = discovery::discover(&root)
+        .addons
+        .into_iter()
+        .find(|a| a.id == "avoids_modern_ui")
+        .unwrap();
+    let host = Host::for_addon(&addon).unwrap();
+    host.execute("local q=require('frontiers_forge.quest_log');assert(q.max_quests==8 and q.GetCount()==0);assert(q.GetQuestByIndex(-1)==nil and q.GetQuestByIndex(0)==nil);assert(q.Quests()()==nil)").unwrap();
+    let mut snap = rich_in_game_snapshot();
+    snap.journal = super::quest_log::JournalSnapshot::from_titles(
+        true,
+        &[
+            "Bat Eyes".encode_utf16().collect(),
+            "Caf\u{e9} \u{1f409}".encode_utf16().collect(),
+            Vec::new(),
+        ],
+    );
+    host.snapshot.set(snap);
+    host.execute("local q=require('frontiers_forge.quest_log');assert(q.GetCount()==3);assert(q.GetQuestByIndex(0):GetName()=='Bat Eyes');assert(q.GetQuestByIndex(1):GetName()=='Caf\u{e9} \u{1f409}');assert(q.GetQuestByIndex(2):GetName()=='');assert(q.GetQuestByIndex(-1)==nil and q.GetQuestByIndex(3)==nil);local n=0;for i,quest in q.Quests() do assert(i==n);assert(quest:GetName()==q.GetQuestByIndex(i):GetName());n=n+1 end;assert(n==3)").unwrap();
+    snap.journal.count = 9;
+    host.snapshot.set(snap);
+    host.execute("assert(require('frontiers_forge.quest_log').GetCount()==0)")
+        .unwrap();
+    snap.in_game = false;
+    snap.journal.count = 3;
+    host.snapshot.set(snap.managed());
+    host.execute("assert(require('frontiers_forge.quest_log').GetCount()==0)")
+        .unwrap();
+}
+
+#[test]
+fn forge_modern_scripts_path_and_file_io_surface() {
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!("SKIP file surface: pinned reference folder absent");
+        return;
+    };
+    let addon = discovery::discover(&root)
+        .addons
+        .into_iter()
+        .find(|a| a.id == "avoids_modern_ui")
+        .unwrap();
+    let host = Host::for_addon(&addon).unwrap();
+    host.execute("assert(type(UiForge.scripts_path)=='string');assert(type(io.open)=='function');assert(type(os.remove)=='function');assert(select('#',require('frontiers_forge.util').LogError('test error'))==0)").unwrap();
+}
+
 impl ScratchDir {
     fn new() -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

@@ -85,6 +85,84 @@ fn scope_end(
 }
 
 pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> Result<()> {
+    for (name, begin) in [("BeginGroup", true), ("EndGroup", false)] {
+        let f = frame.clone();
+        imgui.set(
+            name,
+            lua.create_function(move |_, ()| {
+                let mut state = f.borrow_mut();
+                state.check()?;
+                if begin {
+                    state.room()?;
+                    unsafe { sys::igBeginGroup() };
+                    state.stack.push(Stack::Group);
+                } else {
+                    state.pop(Stack::Group)?;
+                    unsafe { sys::igEndGroup() };
+                }
+                Ok(())
+            })?,
+        )?;
+    }
+    // Indentation is a window layout offset, not an ImGui stack. The native
+    // window resets it on Begin; unlike groups it needs no scope recovery.
+    for (name, indent) in [("Indent", true), ("Unindent", false)] {
+        let f = frame.clone();
+        imgui.set(
+            name,
+            lua.create_function(move |_, width: Option<f32>| {
+                let width = finite(width.unwrap_or(0.0))?;
+                f.borrow_mut().check()?;
+                unsafe {
+                    if indent {
+                        sys::igIndent(width)
+                    } else {
+                        sys::igUnindent(width)
+                    }
+                };
+                Ok(())
+            })?,
+        )?;
+    }
+    let f = frame.clone();
+    imgui.set(
+        "ColorEdit3",
+        lua.create_function(
+            move |lua, (label, color, flags): (String, Table, Option<i32>)| {
+                let label = text(&label)?;
+                let flags = flags.unwrap_or(0);
+                // Public color-edit flags only. Mutually exclusive masks otherwise
+                // reach native assertions when a widget is visible.
+                let allowed = 0x7ffe
+                    | sys::ImGuiColorEditFlags_AlphaBar
+                    | sys::ImGuiColorEditFlags_HDR
+                    | sys::ImGuiColorEditFlags_DisplayMask_
+                    | sys::ImGuiColorEditFlags_DataTypeMask_
+                    | sys::ImGuiColorEditFlags_PickerMask_
+                    | sys::ImGuiColorEditFlags_PickerNoRotate
+                    | sys::ImGuiColorEditFlags_InputMask_;
+                if flags & !allowed != 0
+                    || [
+                        sys::ImGuiColorEditFlags_DisplayMask_,
+                        sys::ImGuiColorEditFlags_DataTypeMask_,
+                        sys::ImGuiColorEditFlags_PickerMask_,
+                        sys::ImGuiColorEditFlags_InputMask_,
+                    ]
+                    .iter()
+                    .any(|mask| (flags & mask).count_ones() > 1)
+                {
+                    return Err(mlua::Error::runtime("invalid color-edit flags"));
+                }
+                let mut rgb = [0.0; 3];
+                for (i, value) in rgb.iter_mut().enumerate() {
+                    *value = finite(color.get::<Option<f32>>(i + 1)?.unwrap_or(0.0))?;
+                }
+                f.borrow_mut().check()?;
+                let changed = unsafe { sys::igColorEdit3(label.as_ptr(), rgb.as_mut_ptr(), flags) };
+                Ok((lua.create_sequence_from(rgb)?, changed))
+            },
+        )?,
+    )?;
     let f = frame.clone();
     imgui.set(
         "Button",

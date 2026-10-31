@@ -272,6 +272,9 @@ impl Manager {
                 }
             }
             if let Some(i) = entry.instance.as_ref() {
+                for message in i.host.drain_logs().unwrap_or_default() {
+                    self.diagnostic(Some(&entry.metadata.id), "lua", message);
+                }
                 let messages = i.textures.borrow_mut().drain_diagnostics();
                 for message in messages {
                     self.diagnostic(Some(&entry.metadata.id), "texture", message);
@@ -344,12 +347,7 @@ impl Manager {
             phase,
             message: message.clone(),
         });
-        let log_line = format!(
-            "[{:?}] [{}] {}\n",
-            phase,
-            id.unwrap_or("general"),
-            message
-        );
+        let log_line = format!("[{:?}] [{}] {}\n", phase, id.unwrap_or("general"), message);
         let log_path = self.root.join("addons_error.log");
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
@@ -363,6 +361,8 @@ impl Manager {
 
     fn prepare(&self, metadata: &DiscoveredAddon) -> Result<Instance, String> {
         let host = Host::for_addon(metadata).map_err(|e| e.to_string())?;
+        super::file_io::install(&host, metadata, self.storage.data_dir(metadata)?)
+            .map_err(|e| e.to_string())?;
         host.snapshot.set(self.snapshot);
         let visibility = super::visibility::VisibilityLease::with_hud_claims(
             self.health_claims.clone(),

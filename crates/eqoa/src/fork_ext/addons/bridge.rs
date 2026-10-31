@@ -88,6 +88,7 @@ enum Stack {
     Combo,
     Popup,
     Id,
+    Group,
 }
 
 #[derive(Default)]
@@ -440,8 +441,8 @@ impl Bridge {
                     Option<String>,
                 )| {
                     let label = text(&label)?;
-                    let format = text(format.as_deref().unwrap_or("%d"))?;
-                    if min > max || !safe_format(format.to_str().unwrap_or(""), false) {
+                    let format = slider_format(format.as_deref().unwrap_or("%d"), false)?;
+                    if min > max {
                         return Err(mlua::Error::runtime("invalid slider range/format"));
                     }
                     f.borrow_mut().check()?;
@@ -465,11 +466,11 @@ impl Bridge {
                     Option<String>,
                 )| {
                     let label = text(&label)?;
-                    let format = text(format.as_deref().unwrap_or("%.3f"))?;
+                    let format = slider_format(format.as_deref().unwrap_or("%.3f"), true)?;
                     finite(value)?;
                     finite(min)?;
                     finite(max)?;
-                    if min >= max || !safe_format(format.to_str().unwrap_or(""), true) {
+                    if min >= max {
                         return Err(mlua::Error::runtime("invalid slider range/format"));
                     }
                     f.borrow_mut().check()?;
@@ -852,6 +853,7 @@ impl Bridge {
                     Stack::Combo => sys::igEndCombo(),
                     Stack::Popup => sys::igEndPopup(),
                     Stack::Id => sys::igPopID(),
+                    Stack::Group => sys::igEndGroup(),
                 }
             }
         }
@@ -864,6 +866,22 @@ impl Bridge {
             Ok(())
         }
     }
+}
+
+// Avoids passes string.format("%d%%", n), i.e. a literal "25%".
+// Escape that trailing literal before printf while still rejecting conversions
+// such as %n/%s that could access memory with the widget's numeric argument.
+fn slider_format(value: &str, float: bool) -> Result<CString> {
+    if value
+        .strip_suffix('%')
+        .is_some_and(|n| n.parse::<f64>().is_ok_and(f64::is_finite))
+    {
+        return text(&value.replace('%', "%%"));
+    }
+    if !safe_format(value, float) {
+        return Err(mlua::Error::runtime("invalid slider range/format"));
+    }
+    text(value)
 }
 
 // ImGui passes formats through printf. Reject arbitrary conversion specifiers

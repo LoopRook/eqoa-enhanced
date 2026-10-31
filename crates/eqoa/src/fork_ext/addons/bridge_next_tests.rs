@@ -1,6 +1,121 @@
 use super::*;
 use dear_imgui_rs::Context;
 
+fn modern_script(source: &str) {
+    let mut context = context();
+    let host = Host::new().unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.lua
+        .globals()
+        .set(
+            "test_tex",
+            mlua::LightUserData(std::ptr::dangling_mut::<std::ffi::c_void>()),
+        )
+        .unwrap();
+    context.frame();
+    let result = bridge.invoke(|| host.execute(source));
+    drop(context.render_legacy());
+    result.unwrap();
+}
+
+#[test]
+fn forge_modern_color_edit3_returns_fresh_rgb_and_changed() {
+    modern_script(
+        "ImGui.Begin('rgb');local input={0.25,0.5,0.75,0.2};local rgb,changed=ImGui.ColorEdit3('color',input);assert(#rgb==3 and rgb~=input and rgb[2]==0.5 and changed==false and input[4]==0.2);local defaults=ImGui.ColorEdit3('defaults',{});assert(#defaults==3 and defaults[1]==0 and defaults[3]==0);ImGui.End()",
+    );
+}
+
+#[test]
+fn forge_modern_util_log_error_never_breaks_lua() {
+    let host = Host::new().unwrap();
+    host.execute("assert(select('#',require('frontiers_forge.util').LogError('test error'))==0)")
+        .unwrap();
+    assert_eq!(
+        host.drain_logs().unwrap(),
+        ["Lua log (level 2): test error"]
+    );
+    host.execute("UiForge.Log=nil;require('frontiers_forge.util').LogError('silently ignored')")
+        .unwrap();
+    assert!(host.drain_logs().unwrap().is_empty());
+}
+
+#[test]
+fn forge_modern_exp_required_matches_pinned_table_including_high_levels() {
+    Host::new().unwrap().execute("local u=require('frontiers_forge.util');assert(u.GetExpRequiredForLevel(1)==424);assert(u.GetExpRequiredForLevel(49)==174625000);assert(u.GetExpRequiredForLevel(50)==189027675);assert(u.GetExpRequiredForLevel(59)==362232000);assert(u.GetExpRequiredForLevel(0)==nil and u.GetExpRequiredForLevel(60)==nil)").unwrap();
+}
+
+#[test]
+fn forge_modern_slider_accepts_avoids_literal_percentage_safely() {
+    modern_script(
+        "ImGui.Begin('percent');local n,changed=ImGui.SliderFloat('threshold',0.25,0.05,0.9,'25%');assert(n==0.25 and changed==false);assert(not pcall(function() ImGui.SliderFloat('unsafe',0.25,0.05,0.9,'%n') end));ImGui.End()",
+    );
+}
+
+#[test]
+fn forge_modern_group_error_recovers_native_stack() {
+    let mut context = context();
+    let host = Host::new().unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    context.frame();
+    assert!(
+        bridge
+            .invoke(|| host.execute("ImGui.Begin('group');ImGui.BeginGroup();error('intentional')"))
+            .is_err()
+    );
+    assert!(bridge.frame.borrow().stack.is_empty());
+    bridge.invoke(|| host.execute("ImGui.Begin('group');ImGui.BeginGroup();ImGui.Text('recovered');ImGui.EndGroup();ImGui.End()")).unwrap();
+    drop(context.render_legacy());
+}
+
+#[test]
+fn forge_modern_rounded_image_geometry_budget_and_epoch() {
+    let mut context = context();
+    let host = Host::new().unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.lua
+        .globals()
+        .set(
+            "test_tex",
+            mlua::LightUserData(std::ptr::dangling_mut::<std::ffi::c_void>()),
+        )
+        .unwrap();
+    context.frame();
+    bridge.invoke(|| host.execute("local a,b=ImVec2.new(0,0),ImVec2.new(40,40);saved=ImGui.GetBackgroundDrawList();saved:AddImageRounded(test_tex,a,b,a,b,-1,20,0)")).unwrap();
+    let charged = bridge.frame.borrow().geometry;
+    assert!(charged > 4 * 24);
+    let native = unsafe { sys::igGetBackgroundDrawList(std::ptr::null_mut()) };
+    assert!(
+        unsafe { (*native).VtxBuffer.Size } > 4,
+        "rounded corners must tessellate"
+    );
+    assert!(bridge.invoke(|| host.execute("local a,b=ImVec2.new(0,0),ImVec2.new(40,40);for i=1,4096 do saved:AddImageRounded(test_tex,a,b,a,b,-1,2000) end")).unwrap_err().to_string().contains("geometry budget"));
+    drop(context.render_legacy());
+    context.frame();
+    assert!(
+        bridge
+            .invoke(|| host
+                .execute("local p=ImVec2.new();saved:AddImageRounded(test_tex,p,p,p,p,-1,5)"))
+            .unwrap_err()
+            .to_string()
+            .contains("expired")
+    );
+    drop(context.render_legacy());
+}
+
+#[test]
+fn forge_modern_group_bounds_and_indent_roundtrip() {
+    modern_script(
+        "ImGui.Begin('layout');local x,y=ImGui.GetCursorPos();ImGui.Indent(17);local ix=ImGui.GetCursorPos();assert(math.abs(ix-x-17)<0.01);ImGui.Unindent(17);local ux=ImGui.GetCursorPos();assert(math.abs(ux-x)<0.01);ImGui.Indent();ImGui.Unindent();ImGui.BeginGroup();ImGui.Dummy(40,20);ImGui.EndGroup();assert(not pcall(ImGui.EndGroup));ImGui.End()",
+    );
+}
+
+#[test]
+fn forge_modern_rounded_image_validates_handle_and_draws() {
+    modern_script(
+        "ImGui.Begin('image');local d=ImGui.GetWindowDrawList();local a,b=ImVec2.new(0,0),ImVec2.new(40,40);assert(not pcall(function() d:AddImageRounded(nil,a,b,a,b,-1,5) end));d:AddImageRounded(test_tex,a,b,ImVec2.new(0,0),ImVec2.new(1,1),-1,5);ImGui.End()",
+    );
+}
+
 fn context() -> Context {
     let mut context = Context::create();
     context

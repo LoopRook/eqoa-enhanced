@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-10-31 · Unreleased
+
+- Adds native support for the unchanged ARPG UI and Avoids Modern UI mods, including rounded health orbs and journal titles with saved quest notes. Live playtesting is pending.
+
 ## 2026-10-31 · Enhanced 0.2.1
 
 - Brings in the latest improvements from the original vanilla client, with all Enhanced features and mods unchanged.
