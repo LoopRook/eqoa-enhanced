@@ -2,16 +2,17 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
-## 2026-10-31 · Upstream updates (unreleased)
+## 2026-10-31 · Enhanced 0.2.1
 
-- Ground Fog option added under Options > Extended > World (PS2 look by default, or Exact) and Shadows moved to Characters.
-- Duels with wagers and an orange compass marker on servers that support them (Community > Duel).
-- Sound commands are no longer dropped in large crowds and busy battles, and distant or blocked creature swings are quieted.
-- Walking while casting is timed to match PlayStation 2 behavior, with legs moving naturally.
-- Glowing weapon blades, crystals, eyes, and particle blend effects restored to their full console brightness.
-- Final live patch features recovered from save states: group search (LFG on and off), stack auctions, and multi-recipient mail.
-- Falling from Sandstorm's boon no longer hangs in midair with a loading screen.
-- Master Class rank upgrades can be purchased again without being rejected as duplicate classes.
+- Brings in the latest improvements from the original vanilla client, with all Enhanced features and mods unchanged.
+- New Ground Fog option under Options, Extended, World (the PS2 look by default, or Exact); Shadows moved to the Characters page.
+- Duels, with an orange marker on the compass, on servers that turn duels on.
+- Sound no longer cuts out in big crowds and busy fights, and far-away or blocked creature swings are quieter.
+- Walking while casting matches the PS2, with natural leg movement.
+- Glowing weapons, crystals, eyes and spell particles shine as brightly as on the console again.
+- Falling from Sandstorm's boon no longer hangs in midair behind a loading screen.
+- Master Class rank upgrades can be bought again.
+- On servers that offer them: group search (LFG), stack auctions and mail to several people at once.
 
 ## 2026-10-31 · Enhanced 0.2.0
 
