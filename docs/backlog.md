@@ -67,3 +67,13 @@ This entry records future work only; no navigation or movement behavior changes 
 
 - Bug fixes in released features go to stable as patch releases (hotfix branch from enhanced, merged back to develop).
 - New Forge compatibility work stays on develop and ships when parity is reached for the next set of mods.
+
+## Creature journal for map search (proposal, awaiting the owner)
+
+- **Status:** Proposed 2026-10-31; not approved yet.
+- **Background (Wereoxx, relayed by the owner):** `map-entities.json`, the catalog our map search uses, is a one-time scrape of the Sandstorm server's entity list from when it was less locked down. It is very incomplete, and there is no other source unless the server devs expose the entity database again. Wereoxx's world_map mod fills the gaps with a journal: every player records the creatures they see and can share the file with others.
+- **Reference:** `world_map/modules/journal.lua` (pinned FrontiersForge reference, MIT). File `journal.json`: `{ "<name>": { "<entity id>": { "world": w, "level": l, "pos": [x, y, z] } } }`. Nameless creatures are recorded under `(unnamed)`. Recording happens in memory, with a flush after a quiet period. A known id is never rewritten. A new id is skipped when the same name at the same level was already recorded nearby. Merging a friend's file adds only missing names and ids; your own data wins. Disposition is not stored in this format.
+- **Proposal:** native recording in our client (fork-owned `map/` code, a hook only where entities are seen). Map search shows catalog results plus journal results. Import/export uses the same `journal.json` format, so files can be swapped with Forge players on PCSX2.
+- **Privacy:** the journal holds only what the player saw. No account, character or path is stored. Sharing is manual (export a file); nothing is sent anywhere.
+- **Open questions for the owner:** record automatically, or only with a setting turned on? Record disposition and con colour as an extra field that Forge's reader would ignore? Bundle a community-merged journal with releases later?
+- **Acceptance (draft):** seeing a creature records it once; walking past the same spawn again adds nothing; a merge adds only new entries; search finds a journal-only creature; a round-trip with a file written by world_map.lua loads unchanged.
