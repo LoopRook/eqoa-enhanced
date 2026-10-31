@@ -74,14 +74,14 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/eqoa/src/options.rs` | 196 | 43 | Existing restored option entries plus one adapter reference per fork option hook. |
 | `crates/eqoa/src/play.rs` | 763 | 53 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, and addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus; implementation in fork_ext. |
 | `crates/eqoa/src/report.rs` | 18 | 9 | Fork reporting policy transport integration. |
-| `crates/eqoa/src/settings.rs` | 338 | 23 | Restored map/quest settings plus one adapter reference per settings hook. |
+| `crates/eqoa/src/settings.rs` | 334 | 22 | Restored map/quest settings plus one adapter reference per settings hook. |
 | `crates/eqoa/src/touch.rs` | 79 | 2 | Restored map and tracker touch input. |
 | `crates/eqoa/src/ui.rs` | 10 | 6 | Map UI state and input integration plus one-line pub(crate) visibility on UiAssets.surfaces for fork-owned HUD tests. |
 | `crates/eqoa/src/update.rs` | 3 | 3 | Fork release routing and fork-owned notes; updater mechanics unchanged. |
 | `crates/eqoa/src/updatewnd.rs` | 3 | 2 | Fork release page link and regression assertions. |
 | `crates/eqoa/src/viewer.rs` | 235 | 12 | Restored map/quest integration plus reviewed native lazy addon Runtime state/init, owned window/raw input routing, pregame/live post-resolve frames and exiting cleanup. |
 | `crates/esf/src/mesh.rs` | 9 | 0 | Terrain mesh lookup for restored map. |
-| `crates/net/src/session.rs` | 421 | 30 | Restored group/map/quest protocol state. |
+| `crates/net/src/session.rs` | 449 | 30 | Restored group/map/quest protocol state. |
 | `crates/render/src/fans.rs` | 0 | 0 | Restored UI render behavior. |
 | `crates/render/src/lib.rs` | 50 | 4 | Restored map rendering pipeline and exports. |
 | `crates/render/src/ui.rs` | 97 | 8 | Map circle clipping and map font rendering. |

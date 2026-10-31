@@ -131,8 +131,8 @@
       "reason": "Fork reporting policy transport integration."
     },
     "crates/eqoa/src/settings.rs": {
-      "added": 338,
-      "deleted": 23,
+      "added": 334,
+      "deleted": 22,
       "reason": "Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31)."
     },
     "crates/eqoa/src/touch.rs": {
@@ -156,9 +156,9 @@
       "reason": "Terrain mesh lookup for restored map."
     },
     "crates/net/src/session.rs": {
-      "added": 421,
+      "added": 449,
       "deleted": 30,
-      "reason": "Restored group/map/quest protocol state (re-baselined at sync 2026-10-31)."
+      "reason": "Restored group/map/quest protocol state and upstream unanswered offers test (re-baselined at sync 2026-10-31)."
     },
     "crates/render/src/fans.rs": {
       "added": 0,

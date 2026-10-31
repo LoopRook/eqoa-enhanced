@@ -943,18 +943,15 @@ impl ClientOptions {
         }
         // Ground Fog only when Exact
         if !self.ps2_fog {
-            s.push_str("ground_fog=exact
-");
+            s.push_str("ground_fog=exact\n");
         }
         // Map Markers only when off
         if !self.map_markers {
-            s.push_str("map_markers=off
-");
+            s.push_str("map_markers=off\n");
         }
         // the map's town names only when off
         if !self.map_towns {
-            s.push_str("map_towns=off
-");
+            s.push_str("map_towns=off\n");
         }
         // Loading Screens only when Instant
         if !self.loading_longer {
