@@ -557,23 +557,96 @@ pub struct SafeSurface {
     pub container_data: Arc<Vec<u8>>,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub struct TrackedFileId {
+    pub file_idx: usize,
+    pub data_len: usize,
+    pub surfaces_len: usize,
+    pub data_ptr: usize,
+}
+
 #[derive(Clone)]
 pub struct SafeLibrary {
     pub surfaces: HashMap<i32, SafeSurface>,
     pub view: esf::Era,
-    pub file_count: usize,
+    pub tracked_files: Vec<TrackedFileId>,
+    #[allow(dead_code)]
+    pub total_bytes: usize,
+}
+
+fn is_icon_container_name(name: &str) -> bool {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    base.eq_ignore_ascii_case("SPELLICON.ESF")
+        || base.eq_ignore_ascii_case("ITEMICON.ESF")
+        || base.eq_ignore_ascii_case("UI.CSF")
+}
+
+fn collect_needed_files(lib: &esf::Library, atlas: Option<&SafeAtlas>) -> Vec<usize> {
+    let mut needed = HashSet::new();
+    let is_2002 = lib.view() == esf::Era::Y2002;
+
+    // 1. By target name: SPELLICON.ESF, ITEMICON.ESF, UI.CSF
+    for (i, (name, _)) in lib.files.iter().enumerate() {
+        if is_icon_container_name(name) {
+            let file_to_use = if is_2002 {
+                lib.stand_in_of(i).unwrap_or(i)
+            } else {
+                i
+            };
+            needed.insert(file_to_use);
+        }
+    }
+
+    // 2. By dict lookup for any HUD atlas icon surfaces
+    if let Some(atlas) = atlas {
+        for entry in &atlas.entries {
+            let name = atlas.textures.get(entry.row, 0);
+            if !name.is_empty() && name != "_null_" {
+                let dict_id = vi::ui::icon_id(name) as i32;
+                if let Some(r) = lib.lookup(dict_id) {
+                    needed.insert(r.file);
+                }
+            }
+        }
+    }
+
+    let mut result: Vec<usize> = needed.into_iter().collect();
+    result.sort_unstable();
+    result
+}
+
+fn compute_tracked_files(lib: &esf::Library, needed: &[usize]) -> Vec<TrackedFileId> {
+    needed
+        .iter()
+        .map(|&f| {
+            let c = &lib.files[f].1;
+            TrackedFileId {
+                file_idx: f,
+                data_len: c.data.len(),
+                surfaces_len: c.surfaces.len(),
+                data_ptr: c.data.as_ptr() as usize,
+            }
+        })
+        .collect()
 }
 
 impl SafeLibrary {
-    pub fn from_library(lib: &esf::Library) -> Self {
+    pub fn from_library(lib: &esf::Library, atlas: Option<&SafeAtlas>) -> Self {
+        let needed_files = collect_needed_files(lib, atlas);
+        let tracked_files = compute_tracked_files(lib, &needed_files);
+
         let mut surfaces = HashMap::new();
-        for (i, (_name, c)) in lib.files.iter().enumerate() {
+        let mut total_bytes = 0usize;
+
+        for &f in &needed_files {
+            let c = &lib.files[f].1;
             if c.surfaces.is_empty() {
                 continue;
             }
+            total_bytes += c.data.len();
             let data = Arc::new(c.data.clone());
             for s in &c.surfaces {
-                if lib.lookup(s.dict_id).is_some_and(|r| r.file == i) || lib.stands_for(i).is_none() {
+                if lib.lookup(s.dict_id).is_some_and(|r| r.file == f) || lib.stands_for(f).is_none() {
                     surfaces.insert(
                         s.dict_id,
                         SafeSurface {
@@ -585,10 +658,12 @@ impl SafeLibrary {
                 }
             }
         }
+
         Self {
             surfaces,
             view: lib.view(),
-            file_count: lib.files.len(),
+            tracked_files,
+            total_bytes,
         }
     }
 
@@ -665,23 +740,40 @@ thread_local! {
     static SAFE_LIBRARY: RefCell<Option<Arc<SafeLibrary>>> = const { RefCell::new(None) };
     static LIVE_ATLAS: RefCell<Option<SafeAtlas>> = const { RefCell::new(None) };
     static ART_GENERATION: Cell<u64> = const { Cell::new(0) };
+    static SNAPSHOT_COUNT: Cell<u64> = const { Cell::new(0) };
 }
 
 pub fn set_custom_icon_provider(provider: Option<Box<dyn IconProvider>>) {
     CUSTOM_PROVIDER.with(|p| *p.borrow_mut() = provider);
 }
 
+#[allow(dead_code)]
+pub fn snapshot_count() -> u64 {
+    SNAPSHOT_COUNT.with(|c| c.get())
+}
+
+#[allow(dead_code)]
+pub fn snapshot_size_bytes() -> usize {
+    SAFE_LIBRARY.with(|sl| sl.borrow().as_ref().map_or(0, |l| l.total_bytes))
+}
+
 pub fn update_live_data(lib: &esf::Library, atlas: Option<SafeAtlas>) {
+    if let Some(a) = atlas {
+        LIVE_ATLAS.with(|la| *la.borrow_mut() = Some(a));
+    }
+    let atlas_ref = LIVE_ATLAS.with(|la| la.borrow().clone());
+
+    let needed_files = collect_needed_files(lib, atlas_ref.as_ref());
+    let current_tracked = compute_tracked_files(lib, &needed_files);
+
     let needs_update = SAFE_LIBRARY.with(|sl| match &*sl.borrow() {
-        Some(existing) => existing.view != lib.view() || existing.file_count != lib.files.len(),
+        Some(existing) => existing.view != lib.view() || existing.tracked_files != current_tracked,
         None => true,
     });
     if needs_update {
-        let safe_lib = Arc::new(SafeLibrary::from_library(lib));
+        let safe_lib = Arc::new(SafeLibrary::from_library(lib, atlas_ref.as_ref()));
         SAFE_LIBRARY.with(|sl| *sl.borrow_mut() = Some(safe_lib));
-    }
-    if let Some(a) = atlas {
-        LIVE_ATLAS.with(|la| *la.borrow_mut() = Some(a));
+        SNAPSHOT_COUNT.with(|c| c.set(c.get().wrapping_add(1)));
     }
 }
 

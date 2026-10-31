@@ -813,8 +813,58 @@ fn forge_icon_real_disc_ability_and_item_icon_pixel_match() {
     assert_eq!(it_w, item_img.width);
     assert_eq!(it_h, item_img.height);
 
+    let snap_size = icons::snapshot_size_bytes();
+    assert!(snap_size > 0, "snapshot size must be greater than zero");
     eprintln!(
-        "SUCCESS forge_icon: real disc ability icon {} ({}x{}) and item icon {} ({}x{}) matched stock HUD decode path",
-        ability_id, ab_w, ab_h, item_id, it_w, it_h
+        "SUCCESS forge_icon: real disc ability icon {} ({}x{}) and item icon {} ({}x{}) matched stock HUD decode path (snapshot: {} bytes / {:.2} MiB)",
+        ability_id, ab_w, ab_h, item_id, it_w, it_h, snap_size, snap_size as f64 / (1024.0 * 1024.0)
+    );
+}
+
+#[test]
+fn forge_icon_zone_streaming_does_not_trigger_resnapshot() {
+    let mut lib = esf::Library::new();
+    let mut ui_c = esf::Container::empty();
+    ui_c.surfaces.push(esf::Surface {
+        dict_id: 100,
+        width: 32,
+        height: 32,
+        depth: 1,
+        mips: 1,
+        pal_off: 0,
+        pal_entries: 0,
+        row_bytes: 128,
+        pix_off: 0,
+        bpp: 32,
+    });
+    ui_c.data = vec![0u8; 1024];
+    lib.add("UI.CSF", ui_c);
+
+    // Initial update snapshots UI.CSF
+    icons::update_live_data(&lib, None);
+    let count1 = icons::snapshot_count();
+    let bytes1 = icons::snapshot_size_bytes();
+    assert_eq!(bytes1, 1024);
+
+    // Simulate zone streaming: add multiple unrelated world/zone containers
+    for i in 1..=10 {
+        let mut zone_c = esf::Container::empty();
+        zone_c.data = vec![0u8; 100_000]; // 100 KB each (1 MB total)
+        lib.add(format!("TUNARIA.ESF#{i}+"), zone_c);
+    }
+
+    // Call update_live_data again as happens per frame
+    icons::update_live_data(&lib, None);
+
+    // Snapshot count must NOT increase, and snapshot size must remain only the icon containers
+    assert_eq!(
+        icons::snapshot_count(),
+        count1,
+        "adding unrelated files (zone streaming) must NOT trigger a re-snapshot or copy"
+    );
+    assert_eq!(
+        icons::snapshot_size_bytes(),
+        bytes1,
+        "snapshot size must not clone streamed zone containers"
     );
 }
