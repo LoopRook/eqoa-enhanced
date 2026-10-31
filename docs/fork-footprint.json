@@ -4,6 +4,7 @@
   "review_state": "Reviewed upstream7912c73 merge plus fork release seams; only updater route/notes/page and assertions differ in new shared files.",
   "fork_owned": [
     "AGENTS.md",
+    ".gitattributes",
     "FORK.md",
     "FORK-UPDATE-NOTES.md",
     "README.md",
