@@ -170,6 +170,7 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
         "LICENSE": root / "LICENSE",
         "FrontiersForge-MIT.txt": root / "docs/licenses/FrontiersForge-MIT.txt",
         "SpaceMono-OFL.txt": root / "crates/eqoa/resources/map-ui/OFL.txt",
+        "Native-Addon-Runtime-NOTICES.txt": root / "docs/licenses/Native-Addon-Runtime-NOTICES.txt",
         "README.txt": root / "docs/PLAYER-README.txt",
     }
     notes_path = root / "FORK-UPDATE-NOTES.md"
@@ -289,7 +290,8 @@ def verify_release(output):
     if update != expected_update:
         raise ValueError("Update manifest is not in canonical format")
     members = {"eqoa.exe", "map-entities.json", "LICENSE", "FrontiersForge-MIT.txt",
-               "SpaceMono-OFL.txt", "README.txt", "release-manifest.json"}
+               "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt", "README.txt",
+               "release-manifest.json"}
     with zipfile.ZipFile(output / zip_name) as archive:
         if len(archive.infolist()) != len(members) or set(archive.namelist()) != members:
             raise ValueError("Player ZIP member allowlist mismatch")

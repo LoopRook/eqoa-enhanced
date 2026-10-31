@@ -14,6 +14,13 @@ Default map controls (remappable in Controls):
   Select a search result to guide toward it. Set a personal waypoint on the
   world map, then choose Track waypoint to follow it.
 
+Mods (FrontiersForge UI mods, run natively):
+  Create a folder named "mods" next to eqoa.exe and put each mod's folder in it.
+  Then turn mods on in Options > Extended > Mods & Addons > Addon Manager.
+  Mods are off until you turn them on. Wereoxxs UI is supported; other Forge
+  mods are experimental. Problems show in the Addon Manager and are written to
+  the file addons_error.log inside the mods folder.
+
 Release builds check for automatic updates from LoopRook/eqoa-enhanced:
 https://github.com/LoopRook/eqoa-enhanced/releases/latest
 Updates use this fork's latest semantic release. Keep the map catalog and notices
@@ -29,4 +36,5 @@ The combat parser is a separate optional companion. It is not included or
 required to play or use the map.
 
 LICENSE covers the client. FrontiersForge-MIT.txt covers the historical catalog.
-SpaceMono-OFL.txt contains the font notice. These existing licenses are retained.
+SpaceMono-OFL.txt contains the font notice. Native-Addon-Runtime-NOTICES.txt covers
+the Lua and Dear ImGui libraries the mod system uses. These existing licenses are retained.

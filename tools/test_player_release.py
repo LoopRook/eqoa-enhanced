@@ -65,6 +65,7 @@ class PlayerReleaseTests(unittest.TestCase):
         files = {
             "VERSION": "0.1.0\n", "LICENSE": "existing MIT notice\n",
             "docs/licenses/FrontiersForge-MIT.txt": "existing Forge MIT\n",
+            "docs/licenses/Native-Addon-Runtime-NOTICES.txt": "existing Lua and ImGui notices\n",
             "crates/eqoa/resources/map-ui/OFL.txt": "existing Space Mono OFL\n",
             "docs/PLAYER-README.txt": "EQOA Enhanced {version}\nDouble-click eqoa.exe\n",
             "FORK-UPDATE-NOTES.md": "Enhanced release notes\n",
@@ -107,7 +108,8 @@ class PlayerReleaseTests(unittest.TestCase):
             "update.txt", "update-notes.md", "SHA256SUMS"})
         with zipfile.ZipFile(self.output / "EQOA-Enhanced-0.1.0-Windows-x64.zip") as archive:
             self.assertEqual(archive.namelist(), ["eqoa.exe", "map-entities.json", "LICENSE",
-                "FrontiersForge-MIT.txt", "SpaceMono-OFL.txt", "README.txt", "release-manifest.json"])
+                "FrontiersForge-MIT.txt", "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt",
+                "README.txt", "release-manifest.json"])
             manifest = json.loads(archive.read("release-manifest.json"))
             self.assertEqual(manifest["version"], "0.1.0")
             self.assertEqual(manifest["sourceCommit"], self.commit)

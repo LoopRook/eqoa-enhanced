@@ -2,27 +2,14 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
-## 2026-10-31 · Addon manager preview work (unreleased)
+## 2026-10-31 · Enhanced 0.2.0
 
-- Native Mods & Addons gains an Addon Manager with enable/disable, reload,
-  rescan, settings and profile controls. Unsupported addon features show failures.
-- Native addons and the parser manifest use the mods folder beside the executable,
-  even when launching from a different working directory.
-- Forge addons can now load and play sounds through the native Windows MCI sound
-  backend (`UiForge.LoadSound`, `PlaySound`, `StopSound`, `IsSoundPlaying`,
-  `SetSoundVolume`, `ReleaseSound`). Non-Windows builds report unsupported and
-  return nil. Handle, file-size, and aggregate budgets are enforced.
-- Forge addon hide-UI claims now gate each stock HUD element at its draw and
-  click sites (compass, target, group, pet, power/main/secondary exp bars, chat
-  window, ability bars, active effects, and group compass marks) instead of
-  using a bounding-box quad filter, and restore cleanly on addon pause, reload,
-  or shutdown. Each claim name matches the reference package behavior.
-- Forge addon keyboard input routing: pressing Enter while an addon suppresses
-  Enter (such as Wereoxxs chat) routes directly into the addon's
-  input field without opening the client's Say window, and blocks gameplay
-  controls while focused.
-- Preview packaging and interactive checks are still pending; full Forge addon
-  compatibility is not yet available.
+- Mods: EQOA Enhanced can now run FrontiersForge UI mods natively, no emulator needed. Put a mod's folder in a folder named mods next to eqoa.exe, then turn it on in Options, Extended, Mods & Addons, Addon Manager. Mods are off until you turn them on.
+- Supported: Wereoxxs UI, with its ability bars and icons, cooldowns, casting bar, player, target and group frames, buffs, compass, chat and damage meter. Other Forge mods are experimental for now.
+- Mods can hide parts of the game's own HUD (ability bars, buffs, compass, chat window, target, group, pet, health, power and experience bars), and everything comes back when you turn the mod off.
+- Press Enter to type in a mod's chat box; game pop-ups and menus still get Enter first.
+- Mod window positions, sizes and settings are kept between sessions.
+- If a mod has a problem, the Addon Manager shows it and mods/addons_error.log records it.
 
 ## 2026-10-31 · Enhanced 0.1.2
 
