@@ -74,8 +74,25 @@ pub fn log_header() -> String {
     )
 }
 
-/// Helper to extract remembered login account and password from settings if present.
-pub fn saved_login_secrets() -> (Option<String>, Option<String>) {
+static SAVED_LOGIN_CACHE: Mutex<Option<(Vec<String>, Vec<String>)>> = Mutex::new(None);
+static SETTINGS_READ_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn settings_read_count() -> usize {
+    SETTINGS_READ_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn reset_settings_read_count() {
+    SETTINGS_READ_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn reset_saved_login_cache_for_test() {
+    let mut guard = SAVED_LOGIN_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    *guard = None;
+}
+
+/// Helper to read saved login credentials from settings/disk, tracking read count for testing.
+pub fn read_saved_login_from_disk() -> (Option<String>, Option<String>) {
+    SETTINGS_READ_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let (saved_user, saved_pass, _) = crate::settings::saved_login();
     let user = if !saved_user.trim().is_empty() {
         Some(saved_user.trim().to_string())
@@ -88,6 +105,67 @@ pub fn saved_login_secrets() -> (Option<String>, Option<String>) {
         None
     };
     (user, pass)
+}
+
+/// Warms the in-memory cache if not already populated.
+/// Must be called outside the LOG lock.
+pub fn warm_saved_login_cache() {
+    let mut guard = SAVED_LOGIN_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        let (user, pass) = read_saved_login_from_disk();
+        let mut accounts = Vec::new();
+        let mut passwords = Vec::new();
+        if let Some(u) = user {
+            accounts.push(u);
+        }
+        if let Some(p) = pass {
+            passwords.push(p);
+        }
+        *guard = Some((accounts, passwords));
+    }
+}
+
+/// Refreshes the in-memory cache from settings/disk (e.g. when report::secret runs).
+/// Must be called outside the LOG lock.
+pub fn refresh_saved_login_cache() {
+    let (user, pass) = read_saved_login_from_disk();
+    let mut accounts = Vec::new();
+    let mut passwords = Vec::new();
+    if let Some(u) = user {
+        accounts.push(u);
+    }
+    if let Some(p) = pass {
+        passwords.push(p);
+    }
+    let mut guard = SAVED_LOGIN_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    *guard = Some((accounts, passwords));
+}
+
+/// Directly updates the in-memory cache with specified credentials without reading disk (e.g. when save_login runs).
+pub fn update_saved_login_cache(user: &str, password: &str, on: bool) {
+    let mut guard = SAVED_LOGIN_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut accounts = Vec::new();
+    let mut passwords = Vec::new();
+    if on && !user.trim().is_empty() {
+        accounts.push(user.trim().to_string());
+    }
+    if on && password.len() >= 4 {
+        passwords.push(password.to_string());
+    }
+    *guard = Some((accounts, passwords));
+}
+
+/// Helper to get remembered login account and password from the in-memory cache.
+pub fn saved_login_secrets() -> (Option<String>, Option<String>) {
+    let guard = SAVED_LOGIN_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((accounts, passwords)) = guard.as_ref() {
+        (accounts.first().cloned(), passwords.first().cloned())
+    } else {
+        drop(guard);
+        warm_saved_login_cache();
+        let guard = SAVED_LOGIN_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        guard.as_ref().map_or((None, None), |(a, p)| (a.first().cloned(), p.first().cloned()))
+    }
 }
 
 /// Returns true if at least one verified account is known to scrub against
@@ -135,8 +213,21 @@ pub fn clean_text_with_homes(text: &str, extra_homes: &[&str]) -> String {
 }
 
 /// Scrub at log-write time: every line pushed into the log file on disk and ring buffer is pre-scrubbed.
+/// CRITICAL: Runs inside push_line while holding LOG lock. Must NEVER touch disk or take LOG.
 pub fn clean_log_line(line: &str) -> String {
-    clean_text(line)
+    // 1. Scrub NOTED secrets and home directories in memory
+    let cleaned = crate::report::clean_noted(line);
+
+    // 2. Scrub cached saved login secrets without touching disk
+    if let Ok(guard) = SAVED_LOGIN_CACHE.try_lock() {
+        if let Some((accounts, passwords)) = guard.as_ref() {
+            if !accounts.is_empty() || !passwords.is_empty() {
+                return crate::report::scrub(&cleaned, accounts, passwords);
+            }
+        }
+    }
+
+    cleaned
 }
 
 /// Formats civil date and time as YYYYMMDD-HHMMSS (Howard Hinnant's algorithm).
@@ -1324,6 +1415,27 @@ mod tests {
             0,
         ).unwrap();
         assert_eq!(status_multi, "Saved 3 reports to C:/path/report.zip. Thank you.");
+    }
+
+    #[test]
+    fn settings_reads_across_1000_log_lines_at_most_one() {
+        crate::fork_ext::report::reset_saved_login_cache_for_test();
+        crate::fork_ext::report::reset_settings_read_count();
+
+        // Warm up once when logging starts (as report::start does outside LOG lock)
+        crate::fork_ext::report::warm_saved_login_cache();
+
+        // 1000 log lines pushed through clean_log_line while holding LOG lock
+        for i in 0..1000 {
+            let line = format!("event {i}: test log line content");
+            let _ = crate::fork_ext::report::clean_log_line(&line);
+        }
+
+        let total_reads = crate::fork_ext::report::settings_read_count();
+        assert_eq!(
+            total_reads, 1,
+            "Expected exactly 1 settings read across warm-up + 1000 log lines, but got {total_reads}"
+        );
     }
 
     #[test]

@@ -35,6 +35,8 @@ pub fn secret(account: &str, password: &str) {
     crate::web::secret(account, password);
     #[cfg(not(target_arch = "wasm32"))]
     native::secret(account, password);
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::fork_ext::report::refresh_saved_login_cache();
 }
 
 /// The client's state for a report, noted once a second at most: `state`
@@ -280,6 +282,7 @@ mod native {
                 lock(&LOG).file = Some(f);
             }
         }
+        crate::fork_ext::report::warm_saved_login_cache();
         let mut l = lock(&LOG);
         let head = format!("[eqoa] run {run}, {} ({}), {} {}, window {window}", version(), channel(), std::env::consts::OS, std::env::consts::ARCH);
         push_line(&mut l, &head);
