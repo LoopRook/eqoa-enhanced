@@ -142,7 +142,7 @@ pub fn fit(text: &str, max: usize) -> String {
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{Key, caught, clean_exit, click, crash, draw, is_open, is_report_key, key, key_of, restore_stderr, set_gpu, set_shot, start, wants_shot};
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use native::{Button, Kind, Sent, Status, clean_now, config_dir, flush_log, lock_result, noted_state, stamp, and_list};
+pub(crate) use native::{Button, Kind, Sent, Status, clean_now, dir, ended_without_closing_for_test, tail};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
@@ -213,7 +213,7 @@ mod native {
     /// This window, from 1 (`multibox`'s place): the files of its own.
     static WINDOW: AtomicUsize = AtomicUsize::new(1);
 
-    fn dir() -> Option<PathBuf> {
+    pub(crate) fn dir() -> Option<PathBuf> {
         lock(&DIR).clone()
     }
 
@@ -253,7 +253,7 @@ mod native {
     /// stderr through a pipe to where it went, `eqoa.log` and the ring; the
     /// run before checked for a crash it left; the panic hook.
     pub fn start() {
-        let dir = std::env::var_os("EQOA_CONFIG").map(PathBuf::from).or_else(crate::settings::config_dir);
+        let dir = crate::settings::config_dir();
         // a window open beside others (multiboxing) has files of its own:
         // its place's, taken now (`multibox`)
         let window = crate::multibox::place() + 1;
@@ -279,9 +279,9 @@ mod native {
             }
         }
         let mut l = lock(&LOG);
-        push_line(&mut l, &crate::fork_ext::report::log_header());
         let head = format!("[eqoa] run {run}, {} ({}), {} {}, window {window}", version(), channel(), std::env::consts::OS, std::env::consts::ARCH);
         push_line(&mut l, &head);
+        push_line(&mut l, &crate::fork_ext::report::log_header());
         drop(l);
         tee();
         // the panic's message written here, not by the hook before (into the
@@ -540,7 +540,7 @@ mod native {
         }
     }
 
-    fn tail(n: usize) -> Vec<String> {
+    pub(crate) fn tail(n: usize) -> Vec<String> {
         let l = lock(&LOG);
         l.ring.iter().skip(l.ring.len().saturating_sub(n)).cloned().collect()
     }
@@ -604,25 +604,7 @@ mod native {
         }
     }
 
-    pub(crate) fn noted_state() -> String {
-        NOTED.try_lock().map(|n| n.state.clone()).unwrap_or_default()
-    }
 
-    pub(crate) fn config_dir() -> Option<PathBuf> {
-        dir()
-    }
-
-    pub(crate) fn flush_log() {
-        if let Ok(mut l) = LOG.try_lock() {
-            if let Some(f) = l.file.as_mut() {
-                let _ = f.flush();
-            }
-        }
-    }
-
-    pub(crate) fn lock_result(result: &std::sync::Arc<Mutex<Option<Sent>>>) -> MutexGuard<'_, Option<Sent>> {
-        lock(result)
-    }
 
     fn version() -> String {
         crate::update::COMMIT.map_or_else(|| "local".to_string(), |c| format!("dev-{}", &c[..c.len().min(7)]))
@@ -653,7 +635,7 @@ mod native {
 
     // ---- crashes ------------------------------------------------------------
 
-    pub(crate) fn stamp(t: SystemTime) -> String {
+    pub(super) fn stamp(t: SystemTime) -> String {
         let s = t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let (days, secs) = (s / 86400, s % 86400);
         // the civil date of a day count (Howard Hinnant's)
@@ -722,7 +704,7 @@ mod native {
     }
 
     #[cfg(test)]
-    pub(super) fn ended_without_closing_for_test(dir: &Path, prev: &Path) {
+    pub(crate) fn ended_without_closing_for_test(dir: &Path, prev: &Path) {
         ended_without_closing(dir, prev);
     }
 
@@ -732,13 +714,13 @@ mod native {
     fn ended_without_closing(dir: &Path, prev: &Path) {
         let Ok(text) = std::fs::read_to_string(prev) else { return };
         let lines: Vec<&str> = text.lines().collect();
+        let Some(first) = lines.first() else { return };
         if lines.contains(&CLOSED) {
             return;
         }
-        let Some(run_line) = lines.iter().find(|l| l.starts_with("[eqoa] run ")) else { return };
-        let Some(run) = run_line.strip_prefix("[eqoa] run ").and_then(|r| r.split(',').next()) else { return };
+        let Some(run) = first.strip_prefix("[eqoa] run ").and_then(|r| r.split(',').next()) else { return };
         // "[eqoa] run <run>, <version> (<channel>), <os> <arch>, window <n>"
-        let of = run_line.split(", ").nth(1).filter(|v| v.ends_with(')'));
+        let of = first.split(", ").nth(1).filter(|v| v.ends_with(')'));
         if dir.join("crashes").join(format!("crash-{run}.txt")).exists() {
             return;
         }
@@ -946,11 +928,23 @@ mod native {
     /// did.
     #[derive(Clone, Debug, Default, PartialEq)]
     pub(crate) struct Sent {
-        pub(crate) sent: Vec<(Option<PathBuf>, String)>,
+        pub(super) sent: Vec<(Option<PathBuf>, String)>,
         /// crash reports gone before their turn (deleted meanwhile): nothing
         /// to send, and not waiting any more
-        pub(crate) gone: Vec<PathBuf>,
-        pub(crate) failed: Option<String>,
+        pub(super) gone: Vec<PathBuf>,
+        pub(super) failed: Option<String>,
+    }
+
+    impl Sent {
+        pub(crate) fn success(sent: Vec<(Option<PathBuf>, String)>) -> Self {
+            Self { sent, gone: Vec::new(), failed: None }
+        }
+        pub(crate) fn failure(e: String) -> Self {
+            Self { sent: Vec::new(), gone: Vec::new(), failed: Some(e) }
+        }
+        pub(crate) fn sent_records(&self) -> &[(Option<PathBuf>, String)] {
+            &self.sent
+        }
     }
 
     pub(super) struct Dialog {
@@ -1458,7 +1452,14 @@ mod native {
             Kind::Crash(files) => files.len(),
             Kind::Problem => 0,
         };
-        let status = crate::fork_ext::report::dialog_status(&dl.status, left);
+        let status = crate::fork_ext::report::dialog_status(&dl.status, left).unwrap_or_else(|| match &dl.status {
+            Status::Editing => String::new(),
+            Status::Sending => "Sending…".to_string(),
+            Status::Sent(ids) if ids.len() > 1 => format!("Sent all {} as {}. Thank you.", ids.len(), and_list(ids)),
+            Status::Sent(ids) => format!("Sent as {}. Thank you.", and_list(ids)),
+            Status::Failed(ids, e) if ids.is_empty() => format!("Not sent: {e}. Try again in a moment."),
+            Status::Failed(ids, e) => format!("Sent {} as {}; {left} not sent: {e}. Try again in a moment.", ids.len(), and_list(ids)),
+        });
         if !status.is_empty() {
             let c = if matches!(dl.status, Status::Failed(..)) { [1.0, 0.45, 0.45, 1.0] } else { [0.55, 1.0, 0.55, 1.0] };
             for l in wrap(r, &status, tw) {
@@ -1468,7 +1469,12 @@ mod native {
         }
         y += 6;
         let sent = matches!(dl.status, Status::Sent(_));
-        let labels = crate::fork_ext::report::dialog_labels(&dl.kind, sent, several);
+        let labels: Vec<(String, Button)> = crate::fork_ext::report::dialog_labels(&dl.kind, sent, several).unwrap_or_else(|| match (&dl.kind, sent) {
+            (_, true) => vec![("Close (Enter)".into(), Button::Send)],
+            (Kind::Problem, false) => vec![("Send (Enter)".into(), Button::Send), ("Close (Esc)".into(), Button::Close)],
+            (Kind::Crash(_), false) if several => vec![("Send all (Enter)".into(), Button::Send), ("Not now (Esc)".into(), Button::Close), ("Delete all (Del)".into(), Button::Delete)],
+            (Kind::Crash(_), false) => vec![("Send (Enter)".into(), Button::Send), ("Not now (Esc)".into(), Button::Close), ("Delete (Del)".into(), Button::Delete)],
+        });
         let buttons_y = y;
         y += h + 10 + 8;
         let fine_y = y;
@@ -1590,7 +1596,7 @@ mod native {
     }
 
     /// "a", "a and b", "a, b and c".
-    pub(crate) fn and_list(items: &[String]) -> String {
+    pub(super) fn and_list(items: &[String]) -> String {
         match items {
             [] => String::new(),
             [one] => one.clone(),

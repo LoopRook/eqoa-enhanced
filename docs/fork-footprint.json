@@ -126,9 +126,9 @@
       "reason": "Reviewed restored state plus native health receipt/reset, cached HUD invalidation, and addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, plus live esf::Library icon provider hook and F9 art_changed icon cache drop; implementation in fork_ext."
     },
     "crates/eqoa/src/report.rs": {
-      "added": 60,
-      "deleted": 39,
-      "reason": "Fork reporting policy transport integration, hooks into fork_ext report save to Desktop, button labels and status, and Enhanced log header."
+      "added": 50,
+      "deleted": 23,
+      "reason": "Local problem and crash report saving to Desktop; wrapped dialog status and label hooks preserving upstream match arms; one-line hooks in send() and start() with fork_ext implementation and minimal crate-level visibility."
     },
     "crates/eqoa/src/settings.rs": {
       "added": 334,
