@@ -280,6 +280,7 @@ mod tests {
             api: None,
             requested_capabilities: Vec::new(),
             initially_enabled: true,
+            mods_root: None,
         };
         Host::for_addon(&addon).unwrap()
     }

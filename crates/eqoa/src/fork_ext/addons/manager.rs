@@ -625,7 +625,12 @@ impl Manager {
                 intent
             });
             let key = match Storage::key(&metadata) {
-                Ok(key) => key,
+                Ok(key) => {
+                    if let Err(e) = self.storage.migrate_addon(&metadata) {
+                        self.diagnostic(Some(&metadata.id), "storage", e);
+                    }
+                    key
+                }
                 Err(e) => {
                     self.diagnostic(Some(&metadata.id), "storage", e);
                     continue;
