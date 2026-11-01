@@ -605,6 +605,7 @@ mod tests {
             api: None,
             requested_capabilities: vec![],
             initially_enabled: false,
+            mods_root: Some(scripts.clone()),
         };
         fs::write(scripts.join("resources/legacy.cfg"), "one\r\ntwo\n").unwrap();
         let host = Host::new().unwrap();

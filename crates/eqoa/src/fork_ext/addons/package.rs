@@ -1085,7 +1085,7 @@ mod tests {
         fs::write(
             pkg.join("modules").join("heavy_worker.lua"),
             r#"
-            for i = 1, 120000 do end
+            for i = 1, 2500000 do end
             return { done = true }
             "#,
         )
@@ -1096,7 +1096,7 @@ mod tests {
             r#"
             completed = false
             local worker = require("heavy_worker")
-            for i = 1, 120000 do end
+            for i = 1, 2500000 do end
             completed = true
             "#,
         )

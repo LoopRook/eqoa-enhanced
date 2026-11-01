@@ -93,7 +93,7 @@ fn forge_drawlist_geometry_budget_is_shared_across_invocations_in_one_frame() {
     let b = Bridge::install(&h).unwrap();
     c.frame();
     // Each 512-segment outlined primitive reserves 12 index units per point.
-    let batch = "local d=ImGui.GetBackgroundDrawList();for i=1,10 do d:AddCircle(ImVec2.new(30,30),20,-1,512,2) end";
+    let batch = "local d=ImGui.GetBackgroundDrawList();for i=1,25 do d:AddCircle(ImVec2.new(30,30),20,-1,512,2) end";
     b.invoke(|| h.execute(batch)).unwrap();
     let err = b.invoke(|| h.execute(batch)).unwrap_err();
     assert!(err.to_string().contains("geometry budget"));

@@ -7772,7 +7772,7 @@ impl Play {
     /// own play (mode 0, the quick chat's 30, the manual camera's 38), no
     /// search, map or loading screen over it, the HUD made.
     fn right_hud_up(&self) -> bool {
-        (self.mode == 0 || self.mode == 30 || self.mode == 38) && !self.search.open && !self.map.open && !self.loading.up() && self.hud.is_some()
+        (self.mode == 0 || self.mode == 30 || self.mode == 38 || (self.mode == 33 && !crate::hud::fork_hud::chat_window_visible())) && !self.search.open && !self.map.open && !self.loading.up() && self.hud.is_some()
     }
 
     /// The Stats Box's rows while it is up (`statbox`): Stats Box on, where

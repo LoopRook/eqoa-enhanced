@@ -258,7 +258,7 @@ impl TestGpu {
         self.context.frame();
     }
 
-    fn render(&mut self) {
+    fn render(&mut self) -> usize {
         let target = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("wereoxxs test target"),
             size: wgpu::Extent3d {
@@ -275,9 +275,11 @@ impl TestGpu {
         });
         let view = target.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        {
+        let total_vtx = {
             let mut renderer = self.renderer.borrow_mut();
             let frame = self.context.render(renderer.renderer_consumer().unwrap());
+            let reconciled = renderer.reconcile_frame(frame).unwrap();
+            let vtx = reconciled.draw_data().total_vtx_count();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -295,17 +297,20 @@ impl TestGpu {
                 multiview_mask: None,
             });
             renderer
-                .render(frame, &mut pass, FramebufferExtent::new(1024, 768))
+                .render_reconciled(reconciled, &mut pass, FramebufferExtent::new(1024, 768))
                 .unwrap();
-        }
+            vtx
+        };
         self.queue.submit([encoder.finish()]);
+        total_vtx
     }
 
-    fn frame(&mut self, manager: &mut Manager, snapshot: Snapshot) {
+    fn frame(&mut self, manager: &mut Manager, snapshot: Snapshot) -> usize {
         self.begin();
         manager.frame(snapshot);
-        self.render();
+        let vtx = self.render();
         manager.after_render();
+        vtx
     }
 }
 
@@ -1542,5 +1547,556 @@ fn forge_dialog_receives_enter_even_when_addon_suppresses_enter() {
     assert!(
         wants_key_capture_plain,
         "Enter MUST be captured by addon during plain play"
+    );
+}
+
+#[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
+fn forge_wereoxxs_pauses_and_hides_in_all_menu_modes() {
+    let root = find_wereoxxs_scripts_root();
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.id == "wereoxxs_ui")
+        .expect("wereoxxs_ui must be discovered");
+
+    let host = Host::for_addon(addon).expect("Host::for_addon must succeed");
+    let bridge = Bridge::install(&host).unwrap();
+
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, addon).unwrap();
+
+    let font_bank = Rc::new(RefCell::new(super::fonts::FontBank::new(
+        0,
+        super::fonts::current_context_epoch(),
+    )));
+    super::fonts::FontBank::install_for_addon(&font_bank, &host.lua, addon).unwrap();
+
+    let mut snap = rich_in_game_snapshot();
+    host.snapshot.set(snap);
+
+    // Frame 1: Initial load
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    // Turn on windows
+    let win_table: Table = host.lua.globals().get("windows").unwrap();
+    win_table.set("bars", true).unwrap();
+    win_table.set("casting", true).unwrap();
+    win_table.set("player", true).unwrap();
+    win_table.set("target", true).unwrap();
+    win_table.set("group", true).unwrap();
+    win_table.set("compass", true).unwrap();
+    win_table.set("meter", true).unwrap();
+    win_table.set("chat", true).unwrap();
+
+    // Warm up frame so ImGui windows are sized and placed
+    gpu.begin();
+    bridge
+        .invoke(|| {
+            host.lua
+                .load("cast_preview_ms = math.floor(ImGui.GetTime() * 1000)")
+                .exec()?;
+            host.run_addon(addon)
+        })
+        .unwrap();
+    gpu.render();
+
+    // Frame A: In normal gameplay (mode 0), Wereoxxs draws its full HUD overlay windows
+    snap.start_menu = false;
+    snap.ui_mode = 0;
+    snap.ui_busy = false;
+    host.snapshot.set(snap);
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let vtx_playing = gpu.render();
+    assert!(
+        vtx_playing > 0,
+        "Wereoxxs must draw windows in normal gameplay, got {vtx_playing} vertices"
+    );
+
+    // Frame B: In spellbook mode (mode 5), Wereoxxs must pause and stop drawing windows
+    snap.start_menu = true;
+    snap.ui_mode = 5;
+    snap.ui_busy = true;
+    host.snapshot.set(snap);
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let vtx_spellbook = gpu.render();
+    assert_eq!(
+        vtx_spellbook, 0,
+        "Wereoxxs must draw 0 window vertices while spellbook is open, got {vtx_spellbook}"
+    );
+
+    // Frame C: In auctions mode (mode 39), Wereoxxs must pause and stop drawing windows
+    snap.start_menu = true;
+    snap.ui_mode = 39;
+    snap.ui_busy = true;
+    host.snapshot.set(snap);
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let vtx_auctions = gpu.render();
+    assert_eq!(
+        vtx_auctions, 0,
+        "Wereoxxs must draw 0 window vertices while auctions is open, got {vtx_auctions}"
+    );
+
+    // Frame D: In trainer mode (mode 12), Wereoxxs must pause
+    snap.start_menu = true;
+    snap.ui_mode = 12;
+    snap.ui_busy = true;
+    host.snapshot.set(snap);
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let vtx_trainer = gpu.render();
+    assert_eq!(
+        vtx_trainer, 0,
+        "Wereoxxs must draw 0 window vertices while trainer is open, got {vtx_trainer}"
+    );
+
+    // Frame E: In options mode (mode 34), Wereoxxs must pause
+    snap.start_menu = true;
+    snap.ui_mode = 34;
+    snap.ui_busy = true;
+    host.snapshot.set(snap);
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let vtx_options = gpu.render();
+    assert_eq!(
+        vtx_options, 0,
+        "Wereoxxs must draw 0 window vertices while options is open, got {vtx_options}"
+    );
+
+    // Frame F: Return to normal gameplay (mode 0), Wereoxxs resumes drawing windows!
+    snap.start_menu = false;
+    snap.ui_mode = 0;
+    snap.ui_busy = false;
+    host.snapshot.set(snap);
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let vtx_resumed = gpu.render();
+    assert!(
+        vtx_resumed > 0,
+        "Wereoxxs must resume drawing windows after menu closes, got {vtx_resumed} vertices"
+    );
+}
+
+#[derive(Default)]
+struct TestBlitRecorder {
+    blits: Vec<(u32, [i32; 2])>,
+    strings: Vec<String>,
+}
+
+impl vi::ui::Raster for TestBlitRecorder {
+    fn blit(
+        &mut self,
+        id: u32,
+        _flags: u32,
+        at: [i32; 2],
+        _a: [i32; 2],
+        _b: [i32; 2],
+        _mode: i32,
+        _alpha: f32,
+    ) {
+        self.blits.push((id, at));
+    }
+    fn stretch_blit(
+        &mut self,
+        id: u32,
+        _flags: u32,
+        at: [i32; 2],
+        _size: [i32; 2],
+        _a: [i32; 2],
+        _b: [i32; 2],
+        _mode: i32,
+        _alpha: f32,
+    ) {
+        self.blits.push((id, at));
+    }
+    fn fill_fan(&mut self, _color: [f32; 4], _corners: [[i32; 2]; 4]) {}
+    fn blit_full(&mut self, id: u32, _flags: u32, at: [i32; 2], _mode: i32, _alpha: f32) {
+        self.blits.push((id, at));
+    }
+    fn draw_string(&mut self, _at: [i32; 2], _color: [f32; 4], s: &[u16]) {
+        self.strings.push(String::from_utf16_lossy(s));
+    }
+    fn draw_centered_string(&mut self, _at: [i32; 2], _color: [f32; 4], s: &[u16], _mode: u32) {
+        self.strings.push(String::from_utf16_lossy(s));
+    }
+    fn string_width(&self, _s: &[u16]) -> i32 {
+        0
+    }
+    fn point_size(&self) -> i32 {
+        12
+    }
+    fn viewport(&self) -> [i32; 4] {
+        [0, 0, 639, 447]
+    }
+    fn set_viewport(&mut self, _v: [i32; 4]) {}
+}
+
+fn test_vui() -> vi::ui::Vui {
+    let atlas = (0..252)
+        .map(|_| vi::ui::UiTexEntry {
+            uv1: [16, 16],
+            ..Default::default()
+        })
+        .collect();
+    vi::ui::Vui::new(Default::default(), Default::default(), atlas)
+}
+
+#[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
+fn forge_escape_and_history_keys_with_chat_claimed_do_not_draw_or_open_game_chat() {
+    use super::storage::Storage;
+
+    super::input::reset_input_state();
+    let root = find_wereoxxs_scripts_root();
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.id == "wereoxxs_ui")
+        .expect("wereoxxs_ui must be discovered");
+
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+
+    let config_dir = ScratchDir::new();
+    let storage = Storage::new(Some(config_dir.0.clone()));
+    let key = Storage::key(addon).expect("Storage::key must succeed");
+
+    let write_profile = |flags: &[(&str, bool)]| {
+        let lua = mlua::Lua::new();
+        let root_tbl = lua.create_table().unwrap();
+        let win_tbl = lua.create_table().unwrap();
+        for &(k, v) in flags {
+            win_tbl.set(k, v).unwrap();
+        }
+        root_tbl.set("windows", win_tbl).unwrap();
+        storage
+            .save_profile(&key, mlua::Value::Table(root_tbl))
+            .expect("save_profile must succeed");
+    };
+
+    // Saved profile has hide_game_chat enabled
+    write_profile(&[("hide_game_chat", true)]);
+
+    let mut manager = Manager::new(
+        root.clone(),
+        Some(config_dir.0.clone()),
+        &gpu.device,
+        &gpu.queue,
+        gpu.renderer.clone(),
+    );
+
+    let mut snap = rich_in_game_snapshot();
+    gpu.frame(&mut manager, snap.clone());
+
+    // Enable wereoxxs_ui
+    manager.queue(Command::Enable("wereoxxs_ui".into(), true));
+    gpu.frame(&mut manager, snap.clone());
+    gpu.frame(&mut manager, snap.clone());
+
+    // Verify chat window is claimed (suppressed) in plain play
+    assert!(
+        !crate::hud::fork_hud::chat_window_visible(),
+        "chat_window must be claimed/hidden in plain play"
+    );
+
+    let vui = test_vui();
+    let mut wnd = crate::chat::WndChat::new();
+    wnd.text.add_text(&[65, 66], [1.0; 4], 0, |_| 10);
+
+    // R2 or C history with chat claimed in plain play:
+    // Even if history mode / scroll is activated, the game chat does not draw.
+    wnd.mode = 33;
+    wnd.set_scroll(1);
+    let mut recorder_history = TestBlitRecorder::default();
+    crate::hud::fork_hud::draw_chat_window(&mut wnd, &vui, &mut recorder_history, 1000, 0.016);
+    assert_eq!(
+        recorder_history.blits.len(),
+        0,
+        "game chat history must NOT draw while chat is claimed in plain play"
+    );
+    assert_eq!(
+        wnd.mode, 0,
+        "history mode must be reset to 0 while chat is claimed"
+    );
+
+    // Escape with chat claimed opens the start menu (mode 13).
+    // Wereoxxs's show_while_paused deliberately calls UI.EnableChatWindow,
+    // so the Enable call is honoured and the game chat may draw in the start menu (parity).
+    snap.start_menu = true;
+    snap.ui_mode = 13;
+    gpu.frame(&mut manager, snap.clone());
+
+    assert!(
+        crate::hud::fork_hud::chat_window_visible(),
+        "Wereoxxs EnableChatWindow during pause/start menu must be honoured"
+    );
+    let mut recorder_menu = TestBlitRecorder::default();
+    crate::hud::fork_hud::draw_chat_window(&mut wnd, &vui, &mut recorder_menu, 1000, 0.016);
+    assert!(
+        !recorder_menu.blits.is_empty(),
+        "game chat may draw in the start menu when Wereoxxs unhides it for pause"
+    );
+
+    // Negative Control: Unclaimed chat (hide_game_chat = false)
+    write_profile(&[("hide_game_chat", false)]);
+    manager.queue(Command::Load("wereoxxs_ui".into()));
+    snap.start_menu = false;
+    snap.ui_mode = 0;
+    gpu.frame(&mut manager, snap.clone());
+    gpu.frame(&mut manager, snap.clone());
+
+    assert!(
+        crate::hud::fork_hud::chat_window_visible(),
+        "chat_window must be visible when unclaimed"
+    );
+
+    // In plain play when unclaimed, history mode and scroll draw normally:
+    wnd.mode = 33;
+    wnd.set_scroll(1);
+    let mut recorder_unclaimed = TestBlitRecorder::default();
+    crate::hud::fork_hud::draw_chat_window(&mut wnd, &vui, &mut recorder_unclaimed, 1000, 0.016);
+    assert!(
+        !recorder_unclaimed.blits.is_empty(),
+        "game chat history MUST draw when unclaimed"
+    );
+}
+
+#[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
+fn forge_wereoxxs_worst_case_scrollback_10000_messages_and_budget_measurements() {
+    super::input::reset_input_state();
+    let root = find_wereoxxs_scripts_root();
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.name == "wereoxxs_ui")
+        .unwrap();
+
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+    let host = Host::for_addon(addon).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, addon).unwrap();
+    let font_bank = Rc::new(RefCell::new(super::fonts::FontBank::new(
+        0,
+        super::fonts::current_context_epoch(),
+    )));
+    super::fonts::FontBank::install_for_addon(&font_bank, &host.lua, addon).unwrap();
+
+    host.snapshot.set(rich_in_game_snapshot());
+
+    // Frame 1: Initial load
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    // Configure Wereoxxs to worst-case maximum settings:
+    // - All windows enabled
+    // - Chat scrollback set to 10,000 messages
+    // - Populate 10,000 messages across all channel types (Say, Group, Guild, Shout, Tell, Combat)
+    let setup_script = r#"
+        local ChatWindow = require("chat_window")
+        windows = {
+            bars = true,
+            casting = true,
+            player = true,
+            target = true,
+            group = true,
+            compass = true,
+            meter = true,
+            chat = true,
+        }
+        chat_config.max_messages = 10000
+        local types = {"Say", "Group", "Guild", "Shout", "Tell", "Combat"}
+        for i = 1, 10000 do
+            local t = types[(i % #types) + 1]
+            local text = "Message " .. i .. " scrollback measurement entry with realistic text line length."
+            if t == "Tell" then
+                text = "Player" .. (i % 5) .. ": " .. text
+            end
+            ChatWindow.Add(chat_state, chat_config, text, t)
+        end
+    "#;
+    host.execute(setup_script).unwrap();
+
+    // 1. Show that at the old ImGui call budget (4096), this worst-case frame FAILS:
+    bridge.set_call_limit(4096);
+    gpu.begin();
+    let err_calls = bridge.invoke(|| host.run_addon(addon)).unwrap_err();
+    gpu.render();
+    assert!(
+        err_calls
+            .to_string()
+            .contains("ImGui call budget exceeded: 4097 calls (limit: 4096)"),
+        "expected call budget exceeded error at 4096, got: {err_calls}"
+    );
+
+    // 2. Show that at the old instruction budget (200,000), this worst-case frame FAILS:
+    bridge.set_call_limit(super::bridge::CALL_BUDGET);
+    let entry_fn = host.compile_addon_entry(addon).unwrap();
+    gpu.begin();
+    let err_instr = bridge
+        .invoke(|| host.run_with_budget(&entry_fn, 200_000))
+        .unwrap_err();
+    gpu.render();
+    assert!(
+        err_instr
+            .to_string()
+            .contains("Forge instruction budget exceeded"),
+        "expected instruction budget exceeded error at 200,000, got: {err_instr}"
+    );
+
+    // 3. At the new limits (CALL_BUDGET = 131,072, INSTRUCTION_BUDGET = 4,000,000), it PASSES:
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let measured_calls = bridge.calls();
+    let measured_instructions =
+        Host::INSTRUCTION_BUDGET.saturating_sub(host.instructions_remaining());
+    let measured_geometry = bridge.geometry();
+    println!(
+        "MEASURED WORST-CASE WEREOXXS: calls = {measured_calls}, instructions = {measured_instructions}, geometry = {measured_geometry}"
+    );
+    assert!(
+        measured_calls > 4096,
+        "measured calls must exceed old 4096 cap: got {measured_calls}"
+    );
+    assert!(
+        measured_instructions > 200_000,
+        "measured instructions must exceed old 200,000 cap: got {measured_instructions}"
+    );
+    assert!(
+        measured_calls * 4 <= super::bridge::CALL_BUDGET,
+        "new call budget (131,072) must have at least 4x margin over measured calls ({measured_calls})"
+    );
+    assert!(
+        measured_instructions as u64 * 4 <= Host::INSTRUCTION_BUDGET as u64,
+        "new instruction budget (4,000,000) must have at least 4x margin over measured instructions ({measured_instructions})"
+    );
+    gpu.render();
+}
+
+#[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
+fn forge_addon_runtime_error_releases_all_claims_and_unhides_game_hud() {
+    use super::storage::Storage;
+    use super::visibility::published_visibility;
+
+    super::input::reset_input_state();
+    let root = find_wereoxxs_scripts_root();
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.id == "wereoxxs_ui")
+        .expect("wereoxxs_ui must be discovered");
+
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+
+    let config_dir = ScratchDir::new();
+    let storage = Storage::new(Some(config_dir.0.clone()));
+    let key = Storage::key(addon).expect("Storage::key must succeed");
+
+    // Profile with all hide options enabled
+    let lua = mlua::Lua::new();
+    let root_tbl = lua.create_table().unwrap();
+    let win_tbl = lua.create_table().unwrap();
+    win_tbl.set("bars", true).unwrap();
+    win_tbl.set("chat", true).unwrap();
+    win_tbl.set("player", true).unwrap();
+    win_tbl.set("hide_ability_bars", true).unwrap();
+    win_tbl.set("hide_player_bars", true).unwrap();
+    win_tbl.set("hide_game_chat", true).unwrap();
+    win_tbl.set("hide_game_compass", true).unwrap();
+    win_tbl.set("hide_target_nameplate", true).unwrap();
+    win_tbl.set("hide_game_group", true).unwrap();
+    win_tbl.set("hide_pet_panel", true).unwrap();
+    win_tbl.set("hide_active_effects", true).unwrap();
+    root_tbl.set("windows", win_tbl).unwrap();
+    storage
+        .save_profile(&key, mlua::Value::Table(root_tbl))
+        .unwrap();
+
+    let mut manager = Manager::new(
+        root.clone(),
+        Some(config_dir.0.clone()),
+        &gpu.device,
+        &gpu.queue,
+        gpu.renderer.clone(),
+    );
+
+    let snap = rich_in_game_snapshot();
+
+    // Enable wereoxxs_ui and run 2 frames to establish claims
+    manager.queue(Command::Enable("wereoxxs_ui".into(), true));
+    gpu.frame(&mut manager, snap.clone());
+    gpu.frame(&mut manager, snap.clone());
+
+    // Verify all hide claims are held while addon is healthy
+    assert!(
+        published_visibility().any_hidden(),
+        "healthy addon with all hide options must hold claims"
+    );
+    assert!(!crate::hud::fork_hud::chat_window_visible());
+    assert!(!crate::hud::fork_hud::ability_bar_visible());
+
+    let entry = manager
+        .entries()
+        .into_iter()
+        .find(|e| e.metadata.id == "wereoxxs_ui")
+        .unwrap();
+    assert_eq!(entry.status, Status::Enabled);
+
+    // Induce fatal runtime error on the next frame (e.g. call budget exceeded)
+    manager.set_call_limit_for_all(5);
+
+    // Run frame where the error occurs
+    gpu.frame(&mut manager, snap.clone());
+
+    // Verify addon entered Status::Failed
+    let failed_entry = manager
+        .entries()
+        .into_iter()
+        .find(|e| e.metadata.id == "wereoxxs_ui")
+        .unwrap();
+    assert_eq!(failed_entry.status, Status::Failed);
+
+    // Verify Addon Manager captured the diagnostic error
+    assert!(
+        manager
+            .diagnostics()
+            .iter()
+            .any(|d| d.message.contains("ImGui call budget exceeded")),
+        "Addon Manager must record the diagnostic error"
+    );
+
+    // Verify ALL hide claims are immediately released, bringing game HUD back
+    assert!(
+        !published_visibility().any_hidden(),
+        "all hide claims must be released when addon hits a runtime error"
+    );
+    assert!(
+        crate::hud::fork_hud::chat_window_visible(),
+        "game chat window must be visible again after addon fault"
+    );
+    assert!(
+        crate::hud::fork_hud::ability_bar_visible(),
+        "game ability bars must be visible again after addon fault"
     );
 }
