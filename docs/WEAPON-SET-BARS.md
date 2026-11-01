@@ -33,3 +33,15 @@ Implementation plan:
 6. Run plain eqoa, reference/include-ignored, wasm, footprint and Python suites.
    Commit all changes; run the release build after the final commit. Report
    exact summaries, skips, commits and source references. No push/merge/tag.
+
+The installer update makes the new Wereoxxs bar reach existing unedited installs.
+A separate versioned update path is therefore no longer needed. Edited scripts
+remain unchanged and are counted once per package in the startup log; players
+with those copies must merge the changes themselves. `bundled.json` retains
+per-folder package deletion records plus `shipped` per-folder/path SHA-256 history.
+The historical manifest bootstraps bundles installed before hash recording.
+Registry reads/writes are capped at 1 MiB, individual files at 16 MiB. Only
+embedded paths are processed; obsolete files are never removed. Save state lives
+in config/addons/profiles/<name>.json (manager_profiles.rs capture/persist and
+named_profiles.rs Store), legacy state in config/addons/<key>.json, and file
+writes in config/addons/<key>-files/files (storage.rs and file_io.rs).

@@ -1,3 +1,5 @@
+\\?\C:\Users\hocka\.paseo\worktrees\1usktejc\release-0-4-0\crates\eqoa\src\fork_ext\bundled.rs:
+
 //! Auto-extracted bundled mod packages and embedded assets.
 //!
 //! Provides compile-time embedded copies of approved bundled mods (wereoxxs_ui,
@@ -7,16 +9,17 @@
 //! - Added once: If a player auto-updates to this client and an included mod is
 //!   missing from their mods folder and not recorded in `bundled.json`, it is
 //!   installed once (disabled by default). If a mod was partially present, any
-//!   missing files are filled in, while existing files keep their bytes.
+//!   missing files are filled in; known shipped files receive safe updates.
 //! - Remembers deletions: Once a package has been installed and recorded in
 //!   `bundled.json`, deleting it again means it stays gone.
-//! - Never overwrites: Existing files are never overwritten.
+//! - Updates only bytes matching a previously shipped hash; player edits stay.
 //! - Fails safe: If the config directory or `bundled.json` is unavailable or unwritable,
 //!   or if the fallback mods folder is used, nothing is installed.
 //! - Symlinks and junctions: Writes through symlinks or reparse points are rejected.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -34,6 +37,8 @@ pub struct InstallResult {
     pub packages_extracted: Vec<String>,
     pub files_extracted: usize,
     pub skipped_existing: usize,
+    pub files_updated: usize,
+    pub kept_edited: BTreeMap<String, usize>,
 }
 
 pub const EMBEDDED_FILES: &[BundledFile] = &[
@@ -50,7 +55,9 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
     BundledFile {
         path: "arpg_ui/resources/52x52 SpellSlotBorder.png",
         package: "arpg_ui",
-        data: include_bytes!("../../../../bundled-mods/arpg_ui/resources/52x52 SpellSlotBorder.png"),
+        data: include_bytes!(
+            "../../../../bundled-mods/arpg_ui/resources/52x52 SpellSlotBorder.png"
+        ),
     },
     BundledFile {
         path: "arpg_ui/resources/64x64 BagSlotBorder.png",
@@ -90,7 +97,9 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
     BundledFile {
         path: "arpg_ui/resources/itsmars_exp_highlight.png",
         package: "arpg_ui",
-        data: include_bytes!("../../../../bundled-mods/arpg_ui/resources/itsmars_exp_highlight.png"),
+        data: include_bytes!(
+            "../../../../bundled-mods/arpg_ui/resources/itsmars_exp_highlight.png"
+        ),
     },
     BundledFile {
         path: "arpg_ui/resources/itsmars_exp_shadow.png",
@@ -120,7 +129,9 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
     BundledFile {
         path: "arpg_ui/resources/itsmars_orb_highlight.png",
         package: "arpg_ui",
-        data: include_bytes!("../../../../bundled-mods/arpg_ui/resources/itsmars_orb_highlight.png"),
+        data: include_bytes!(
+            "../../../../bundled-mods/arpg_ui/resources/itsmars_orb_highlight.png"
+        ),
     },
     BundledFile {
         path: "arpg_ui/resources/itsmars_orb_shadow.png",
@@ -155,12 +166,16 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
     BundledFile {
         path: "avoids_modern_ui/modules/avoids_ability_bar.lua",
         package: "avoids_modern_ui",
-        data: include_bytes!("../../../../bundled-mods/avoids_modern_ui/modules/avoids_ability_bar.lua"),
+        data: include_bytes!(
+            "../../../../bundled-mods/avoids_modern_ui/modules/avoids_ability_bar.lua"
+        ),
     },
     BundledFile {
         path: "avoids_modern_ui/modules/avoids_chat_log.lua",
         package: "avoids_modern_ui",
-        data: include_bytes!("../../../../bundled-mods/avoids_modern_ui/modules/avoids_chat_log.lua"),
+        data: include_bytes!(
+            "../../../../bundled-mods/avoids_modern_ui/modules/avoids_chat_log.lua"
+        ),
     },
     BundledFile {
         path: "avoids_modern_ui/modules/avoids_common.lua",
@@ -170,47 +185,65 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
     BundledFile {
         path: "avoids_modern_ui/modules/avoids_effects.lua",
         package: "avoids_modern_ui",
-        data: include_bytes!("../../../../bundled-mods/avoids_modern_ui/modules/avoids_effects.lua"),
+        data: include_bytes!(
+            "../../../../bundled-mods/avoids_modern_ui/modules/avoids_effects.lua"
+        ),
     },
     BundledFile {
         path: "avoids_modern_ui/modules/avoids_exp_bars.lua",
         package: "avoids_modern_ui",
-        data: include_bytes!("../../../../bundled-mods/avoids_modern_ui/modules/avoids_exp_bars.lua"),
+        data: include_bytes!(
+            "../../../../bundled-mods/avoids_modern_ui/modules/avoids_exp_bars.lua"
+        ),
     },
     BundledFile {
         path: "avoids_modern_ui/modules/avoids_group_frames.lua",
         package: "avoids_modern_ui",
-        data: include_bytes!("../../../../bundled-mods/avoids_modern_ui/modules/avoids_group_frames.lua"),
+        data: include_bytes!(
+            "../../../../bundled-mods/avoids_modern_ui/modules/avoids_group_frames.lua"
+        ),
     },
     BundledFile {
         path: "avoids_modern_ui/modules/avoids_health_bar.lua",
         package: "avoids_modern_ui",
-        data: include_bytes!("../../../../bundled-mods/avoids_modern_ui/modules/avoids_health_bar.lua"),
+        data: include_bytes!(
+            "../../../../bundled-mods/avoids_modern_ui/modules/avoids_health_bar.lua"
+        ),
     },
     BundledFile {
         path: "avoids_modern_ui/modules/avoids_mana_bar.lua",
         package: "avoids_modern_ui",
-        data: include_bytes!("../../../../bundled-mods/avoids_modern_ui/modules/avoids_mana_bar.lua"),
+        data: include_bytes!(
+            "../../../../bundled-mods/avoids_modern_ui/modules/avoids_mana_bar.lua"
+        ),
     },
     BundledFile {
         path: "avoids_modern_ui/modules/avoids_persist.lua",
         package: "avoids_modern_ui",
-        data: include_bytes!("../../../../bundled-mods/avoids_modern_ui/modules/avoids_persist.lua"),
+        data: include_bytes!(
+            "../../../../bundled-mods/avoids_modern_ui/modules/avoids_persist.lua"
+        ),
     },
     BundledFile {
         path: "avoids_modern_ui/modules/avoids_pet_frame.lua",
         package: "avoids_modern_ui",
-        data: include_bytes!("../../../../bundled-mods/avoids_modern_ui/modules/avoids_pet_frame.lua"),
+        data: include_bytes!(
+            "../../../../bundled-mods/avoids_modern_ui/modules/avoids_pet_frame.lua"
+        ),
     },
     BundledFile {
         path: "avoids_modern_ui/modules/avoids_quest_log.lua",
         package: "avoids_modern_ui",
-        data: include_bytes!("../../../../bundled-mods/avoids_modern_ui/modules/avoids_quest_log.lua"),
+        data: include_bytes!(
+            "../../../../bundled-mods/avoids_modern_ui/modules/avoids_quest_log.lua"
+        ),
     },
     BundledFile {
         path: "avoids_modern_ui/modules/avoids_target_level.lua",
         package: "avoids_modern_ui",
-        data: include_bytes!("../../../../bundled-mods/avoids_modern_ui/modules/avoids_target_level.lua"),
+        data: include_bytes!(
+            "../../../../bundled-mods/avoids_modern_ui/modules/avoids_target_level.lua"
+        ),
     },
     BundledFile {
         path: "avoids_modern_ui/README.md",
@@ -225,7 +258,9 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
     BundledFile {
         path: "resources/fonts/Cinzel/static/Cinzel-Regular.ttf",
         package: "resources",
-        data: include_bytes!("../../../../bundled-mods/resources/fonts/Cinzel/static/Cinzel-Regular.ttf"),
+        data: include_bytes!(
+            "../../../../bundled-mods/resources/fonts/Cinzel/static/Cinzel-Regular.ttf"
+        ),
     },
     BundledFile {
         path: "resources/fonts/Libre_Baskerville/OFL.txt",
@@ -235,7 +270,9 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
     BundledFile {
         path: "resources/fonts/Libre_Baskerville/static/LibreBaskerville-Regular.ttf",
         package: "resources",
-        data: include_bytes!("../../../../bundled-mods/resources/fonts/Libre_Baskerville/static/LibreBaskerville-Regular.ttf"),
+        data: include_bytes!(
+            "../../../../bundled-mods/resources/fonts/Libre_Baskerville/static/LibreBaskerville-Regular.ttf"
+        ),
     },
     BundledFile {
         path: "resources/fonts/Merriweather_Sans/OFL.txt",
@@ -245,7 +282,9 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
     BundledFile {
         path: "resources/fonts/Merriweather_Sans/static/MerriweatherSans-Regular.ttf",
         package: "resources",
-        data: include_bytes!("../../../../bundled-mods/resources/fonts/Merriweather_Sans/static/MerriweatherSans-Regular.ttf"),
+        data: include_bytes!(
+            "../../../../bundled-mods/resources/fonts/Merriweather_Sans/static/MerriweatherSans-Regular.ttf"
+        ),
     },
     BundledFile {
         path: "resources/gear-icon.png",
@@ -395,183 +434,251 @@ pub fn parse_bundled_registry(json_str: &str) -> BTreeMap<String, BTreeSet<Strin
     folders
 }
 
+const MAX_REGISTRY_BYTES: usize = 1024 * 1024;
+const MAX_BUNDLE_FILE_BYTES: usize = 16 * 1024 * 1024;
+type ShippedFiles = BTreeMap<String, BTreeSet<String>>;
+
+#[derive(Default)]
+struct Registry {
+    // Preserve the old per-folder package lists, including deletion records.
+    folders: BTreeMap<String, BTreeSet<String>>,
+    shipped: BTreeMap<String, ShippedFiles>,
+}
+
+fn no_links(path: &Path) -> Result<(), String> {
+    for component in path.ancestors() {
+        match fs::symlink_metadata(component) {
+            Ok(meta) => {
+                let mut link = meta.file_type().is_symlink();
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::MetadataExt;
+                    link |= meta.file_attributes() & 0x400 != 0;
+                }
+                if link {
+                    return Err(format!(
+                        "link/reparse point in bundled path: {}",
+                        component.display()
+                    ));
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("cannot inspect bundled path: {e}")),
+        }
+    }
+    Ok(())
+}
+
+fn read_bounded(path: &Path, limit: usize) -> Result<Option<Vec<u8>>, String> {
+    no_links(path)?;
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("cannot read bundle file: {e}")),
+    };
+    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+        return Err("bundle path is not a regular file".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() > limit {
+        return Err("bundled file exceeds size limit".into());
+    }
+    Ok(Some(bytes))
+}
+
+fn read_registry(config_dir: &Path) -> Result<Registry, String> {
+    let Some(bytes) = read_bounded(&bundled_registry_path(config_dir), MAX_REGISTRY_BYTES)? else {
+        return Ok(Registry::default());
+    };
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("cannot read bundled.json: {e}"))?;
+    if !value.is_object() {
+        return Err("bundled.json must be an object".into());
+    }
+    Ok(Registry {
+        folders: serde_json::from_value(
+            value
+                .get("folders")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({})),
+        )
+        .map_err(|e| format!("invalid bundled folder records: {e}"))?,
+        shipped: serde_json::from_value(
+            value
+                .get("shipped")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({})),
+        )
+        .map_err(|e| format!("invalid bundled hash records: {e}"))?,
+    })
+}
+
 pub fn load_bundled_registry_map(config_dir: Option<&Path>) -> BTreeMap<String, BTreeSet<String>> {
-    let Some(config_dir) = config_dir else {
-        return BTreeMap::new();
-    };
-    let path = bundled_registry_path(config_dir);
-    let Ok(data) = fs::read_to_string(&path) else {
-        return BTreeMap::new();
-    };
-    parse_bundled_registry(&data)
+    config_dir
+        .and_then(|cfg| read_registry(cfg).ok())
+        .map(|r| r.folders)
+        .unwrap_or_default()
 }
 
 pub fn load_bundled_registry(config_dir: Option<&Path>, mods_dir: &Path) -> BTreeSet<String> {
     let key = mods_folder_key(mods_dir);
-    let all_folders = load_bundled_registry_map(config_dir);
-    all_folders.get(&key).cloned().unwrap_or_default()
+    load_bundled_registry_map(config_dir)
+        .get(&key)
+        .cloned()
+        .unwrap_or_default()
 }
 
-pub fn save_bundled_registry(
-    config_dir: &Path,
-    folders: &BTreeMap<String, BTreeSet<String>>,
-) -> Result<(), String> {
-    let registry_file = bundled_registry_path(config_dir);
-    let Some(parent) = registry_file.parent() else {
-        return Err("invalid registry parent directory".into());
-    };
-    fs::create_dir_all(parent).map_err(|e| format!("cannot create addons dir: {e}"))?;
-
-    let val = serde_json::json!({
-        "folders": folders
-    });
-    let text = serde_json::to_string_pretty(&val).map_err(|e| format!("cannot serialize registry: {e}"))?;
-
-    let tmp_file = registry_file.with_extension(format!("tmp_{}", std::process::id()));
-    let res = fs::write(&tmp_file, text)
-        .map_err(|e| format!("cannot write tmp registry: {e}"))
-        .and_then(|_| {
-            fs::rename(&tmp_file, &registry_file).map_err(|e| format!("cannot rename registry: {e}"))
-        });
-    if res.is_err() && tmp_file.exists() {
-        let _ = fs::remove_file(&tmp_file);
+fn save_bundled_registry(config_dir: &Path, registry: &Registry) -> Result<(), String> {
+    let path = bundled_registry_path(config_dir);
+    no_links(&path)?;
+    let bytes = serde_json::to_vec_pretty(
+        &serde_json::json!({"folders": registry.folders, "shipped": registry.shipped}),
+    )
+    .map_err(|e| e.to_string())?;
+    if bytes.len() > MAX_REGISTRY_BYTES {
+        return Err("bundled.json exceeds 1 MiB".into());
     }
-    res
+    super::addons::storage::atomic_replace(&path, &bytes)
+        .map_err(|e| format!("cannot write bundled.json: {e}"))
 }
 
-/// Installs bundled packages and shared resources into `mods_dir` if missing and unrecorded.
+fn hash(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn shipped_hashes(file: &BundledFile) -> BTreeSet<String> {
+    let mut hashes = BTreeSet::from([hash(file.data)]);
+    // Bootstrap pre-version-registry installs using actual previously shipped
+    // manifests. Never learn a trusted hash from the player's current bytes.
+    for source in [
+        include_str!("bundled_shipped_hashes.txt"),
+        include_str!("../../../../bundled-mods/SOURCE.txt"),
+    ] {
+        for line in source.lines() {
+            if let Some((sha, path)) = line.split_once("  ") {
+                if path == file.path
+                    && sha.len() == 64
+                    && sha.bytes().all(|b| b.is_ascii_hexdigit())
+                {
+                    hashes.insert(sha.to_ascii_lowercase());
+                }
+            }
+        }
+    }
+    hashes
+}
+
+/// Update installed packages, complete first installs, remember package deletions.
 pub fn install_bundled_mods(
     mods_dir: &Path,
     config_dir: Option<&Path>,
 ) -> Result<InstallResult, String> {
     if mods_dir.file_name().and_then(|n| n.to_str()) == Some("eqoa-mods-unavailable") {
-        let err = "cannot install bundled mods into unavailable mods folder fallback".to_string();
-        crate::say(&format!("Could not install bundled mods: {err}"));
-        return Err(err);
+        return Err("cannot install bundled mods into unavailable mods folder fallback".into());
     }
-
-    let Some(cfg) = config_dir else {
-        let err = "config directory unavailable".to_string();
-        crate::say(&format!("Could not install bundled mods: {err}"));
-        return Err(err);
-    };
-
-    let folder_key = mods_folder_key(mods_dir);
-    let mut all_folders = load_bundled_registry_map(Some(cfg));
-    let mut recorded = all_folders.get(&folder_key).cloned().unwrap_or_default();
-    let mut result = InstallResult::default();
-    let mut packages_to_extract = Vec::new();
-
+    let cfg = config_dir.ok_or("config directory unavailable")?;
+    no_links(mods_dir)?;
+    let mut registry = read_registry(cfg)?;
+    let key = mods_folder_key(mods_dir);
+    let mut recorded = registry.folders.get(&key).cloned().unwrap_or_default();
+    let mut packages = Vec::new();
     for &pkg in PACKAGES {
-        if !recorded.contains(pkg) {
-            packages_to_extract.push(pkg);
+        let path = mods_dir.join(pkg);
+        no_links(&path)?;
+        if !recorded.contains(pkg) || path.is_dir() {
+            packages.push(pkg);
         }
     }
-
-    if packages_to_extract.is_empty() {
-        return Ok(result);
+    if !packages.is_empty() {
+        no_links(&mods_dir.join("resources"))?;
+        packages.push("resources");
     }
-
-    // Verify registry is writable before creating dirs or writing files
-    all_folders.insert(folder_key.clone(), recorded.clone());
-    save_bundled_registry(cfg, &all_folders).map_err(|e| {
-        let err = format!("cannot write bundled.json registry: {e}");
-        crate::say(&format!("Could not install bundled mods: {err}"));
-        err
-    })?;
-
-    if !mods_dir.exists() {
-        fs::create_dir_all(mods_dir).map_err(|e| format!("cannot create mods dir: {e}"))?;
+    let files = EMBEDDED_FILES
+        .iter()
+        .filter(|f| packages.contains(&f.package))
+        .collect::<Vec<_>>();
+    let shipped = registry.shipped.entry(key.clone()).or_default();
+    for file in &files {
+        shipped
+            .entry(file.path.to_string())
+            .or_default()
+            .extend(shipped_hashes(file));
     }
-
-    // Extract selected packages (only missing files added, existing files kept)
-    for &pkg in &packages_to_extract {
-        for file in EMBEDDED_FILES {
-            if file.package == pkg {
-                extract_single_file(mods_dir, file, &mut result)?;
-            }
+    registry.folders.insert(key.clone(), recorded.clone());
+    // Check writable registry before touching package files; preserve histories
+    // on partial failures so a later start can finish safely.
+    save_bundled_registry(cfg, &registry)?;
+    let mut result = InstallResult::default();
+    for &pkg in &packages {
+        for file in files.iter().filter(|f| f.package == pkg) {
+            extract_single_file(
+                mods_dir,
+                file,
+                &registry.shipped[&key][file.path],
+                &mut result,
+            )?;
         }
-        recorded.insert(pkg.to_string());
-        result.packages_extracted.push(pkg.to_string());
-    }
-
-    // Shared resources: add only missing files
-    for file in EMBEDDED_FILES {
-        if file.package == "resources" {
-            extract_single_file(mods_dir, file, &mut result)?;
+        if pkg != "resources" && recorded.insert(pkg.to_string()) {
+            result.packages_extracted.push(pkg.to_string());
         }
     }
-
-    all_folders.insert(folder_key, recorded);
-    save_bundled_registry(cfg, &all_folders).map_err(|e| {
-        let err = format!("cannot save bundled.json registry: {e}");
-        crate::say(&format!("Could not install bundled mods: {err}"));
-        err
-    })?;
-
+    registry.folders.insert(key, recorded);
+    save_bundled_registry(cfg, &registry)?;
+    for (package, count) in &result.kept_edited {
+        crate::say(&format!(
+            "Bundled mods: {package}: kept {count} player-edited file(s)"
+        ));
+    }
     Ok(result)
 }
 
 fn extract_single_file(
     mods_dir: &Path,
     file: &BundledFile,
+    known: &BTreeSet<String>,
     result: &mut InstallResult,
 ) -> Result<(), String> {
-    let dest_path = mods_dir.join(file.path);
-
-    // Security check: ensure normalized path stays inside mods_dir
-    let normalized = normalize_path(&dest_path);
-    let normalized_mods = normalize_path(mods_dir);
-    if !normalized.starts_with(&normalized_mods) {
+    let path = mods_dir.join(file.path);
+    if !normalize_path(&path).starts_with(normalize_path(mods_dir)) {
         return Err(format!("path traversal detected for {}", file.path));
     }
-
-    // Symlink / junction / reparse point check on every component between mods_dir and dest_path
-    for p in dest_path.ancestors() {
-        if p == mods_dir {
-            break;
+    no_links(&path)?;
+    let existing = fs::symlink_metadata(&path).ok();
+    if let Some(meta) = &existing {
+        if !meta.is_file() {
+            return Err(format!("not a regular bundled file: {}", file.path));
         }
-        if let Ok(meta) = fs::symlink_metadata(p) {
-            if meta.file_type().is_symlink() {
-                let msg = format!("symlink in bundled mod path component: {}", p.display());
-                crate::say(&format!("Cannot extract {}: {msg}", file.path));
-                return Err(msg);
-            }
-            #[cfg(windows)]
-            {
-                use std::os::windows::fs::MetadataExt;
-                if meta.file_attributes() & 0x400 != 0 {
-                    let msg = format!("reparse point in bundled mod path component: {}", p.display());
-                    crate::say(&format!("Cannot extract {}: {msg}", file.path));
-                    return Err(msg);
-                }
-            }
+        // Oversized local files cannot be ours. Keep them without reading them.
+        if meta.len() > MAX_BUNDLE_FILE_BYTES as u64 {
+            result.skipped_existing += 1;
+            *result.kept_edited.entry(file.package.into()).or_default() += 1;
+            return Ok(());
         }
     }
-
-    if dest_path.exists() {
+    if let Some(current) = read_bounded(&path, MAX_BUNDLE_FILE_BYTES)? {
         result.skipped_existing += 1;
-        return Ok(());
+        if current == file.data {
+            return Ok(());
+        }
+        if !known.contains(&hash(&current)) {
+            *result.kept_edited.entry(file.package.into()).or_default() += 1;
+            return Ok(());
+        }
     }
-
-    if let Some(parent) = dest_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("cannot create parent dir for {}: {e}", file.path))?;
+    if file.data.len() > MAX_BUNDLE_FILE_BYTES {
+        return Err("embedded bundle file exceeds size limit".into());
     }
-
-    // Write atomically via temporary file, ensuring cleanup on failure
-    let tmp_path = dest_path.with_extension(format!("tmp_{}", std::process::id()));
-    let res = fs::write(&tmp_path, file.data)
-        .map_err(|e| format!("cannot write tmp file for {}: {e}", file.path))
-        .and_then(|_| {
-            fs::rename(&tmp_path, &dest_path)
-                .map_err(|e| format!("cannot rename tmp file to {}: {e}", file.path))
-        });
-    if res.is_err() && tmp_path.exists() {
-        let _ = fs::remove_file(&tmp_path);
+    super::addons::storage::atomic_replace(&path, file.data)
+        .map_err(|e| format!("cannot write {}: {e}", file.path))?;
+    if existing.is_some() {
+        result.files_updated += 1;
+    } else {
+        result.files_extracted += 1;
     }
-    res?;
-
-    result.files_extracted += 1;
     Ok(())
 }
 
@@ -590,6 +697,10 @@ fn normalize_path(path: &Path) -> PathBuf {
 }
 
 static INSTALLED_ONCE: AtomicBool = AtomicBool::new(false);
+
+#[cfg(test)]
+#[path = "bundled_update_tests.rs"]
+mod update_tests;
 
 pub fn install_bundled_mods_if_needed() {
     if INSTALLED_ONCE.swap(true, Ordering::Relaxed) {
@@ -850,7 +961,7 @@ mod tests {
         fs::remove_file(&arpg_lua).unwrap();
         let res2 = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
         assert!(!res2.packages_extracted.contains(&"arpg_ui".to_string()));
-        assert!(!arpg_lua.exists(), "once recorded, deletions are respected");
+        assert!(arpg_lua.is_file(), "missing files inside an installed package are restored");
 
         let _ = fs::remove_dir_all(&temp);
     }

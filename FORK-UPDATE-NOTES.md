@@ -4,6 +4,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## 2026-11-01 · Unreleased
 
+- Included mods now update automatically when their files are unchanged. Your edited files and saved settings are kept, missing files are restored, and mods you removed stay removed.
 - Wereoxxs UI can now show a movable, resizable weapon-set bar. Turn it on or off in its settings; the highlight follows the game's carousel selection, and clicking a set uses it. Available on servers that send weapon sets.
 
 - Avoid's Modern UI now stays enabled at level 60 after a recoverable window error; the Addon Manager shows a warning instead of disabling the mod.
