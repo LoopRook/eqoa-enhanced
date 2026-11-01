@@ -140,6 +140,7 @@ run at 1280x720 and cover every element in the table (`cargo test --locked -p eq
    looprook, or a separate channel). The updater must never move stable players onto it without consent.
 4. Then `avoids_modern_ui` and `arpg_ui`, and the author API support table (docs: Forge's API is the
    primary modding API; native-only extras under an `eqoa` namespace).
+   - API note: Deliberate divergence: `Util.IsStartMenuOpen` / `Window.IsStartMenuOpen` return true for ANY game window (shops, bank, trade, loot, mail, spellbook…), not only the pause menu's pages, because shipped packages use it to hide over game windows.
 
 The sections below record how the hide fix was built (2026-10-30), kept for reference.
 

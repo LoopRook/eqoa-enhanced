@@ -605,7 +605,13 @@ impl Play {
         } else {
             0
         };
-        let ui_busy = in_game && (ui_mode != 0 || start_menu || self.map.open || self.search.open);
+        let ui_busy = in_game
+            && (ui_mode != 0
+                || start_menu
+                || self.map.open
+                || self.map.search.open
+                || self.search.open
+                || self.typing.is_some());
 
         crate::fork_ext::addons::host::Snapshot {
             in_game,
@@ -629,7 +635,7 @@ fn is_menu_mode(mode: i32) -> bool {
     matches!(
         mode,
         1    // Corpse loot window (VIWndLoot)
-        | 4  // Admin menu
+        | 4  // GM Goto window (VIWndGoto, adminplay.rs:7,78,263; not trainer.rs:364 internal sub-mode)
         | 5  // Spellbook / abilities (VIWndSpellBook)
         | 6  // Recipe book (VIWndRecipeBook)
         | 7  // Dialog responses (VIWndResponse)
@@ -643,17 +649,18 @@ fn is_menu_mode(mode: i32) -> bool {
         | 16 // Trade ask
         | 17 // Buddy request
         | 18 // Buddy list (VIWndBuddy)
+        | 19 // Blacksmith (VIWndBlacksmith, support.rs:3,37,121)
         | 20 // Guild invitation
         | 21 // Guild roster (VIWndGuild)
         | 22 // Quest journal (VIWndQuestLog)
         | 23 // Mail compose
         | 24 // Mail inbox
         | 26 // Ignore list (VIWndIgnoreList)
-        | 27 // Admin
+        | 27 // GM Buff PC window (VIWndBuffPC, adminplay.rs:6,78,190)
         | 28 // Mail tell
         | 29 // Mail reply
-        | 31 // CS request form
-        | 32 // CS inbox
+        | 31 // CS request form (support.rs:4,37)
+        | 32 // CS inbox (support.rs:4,37)
         | 34 // Options (VIWndOptions)
         | 35 // Who list (VIWndWhoList)
         | 37 // Tradeskills experiment (VIWndExperiment)
@@ -661,8 +668,8 @@ fn is_menu_mode(mode: i32) -> bool {
         | 40 // Class Mastery (VIWndClassMastery)
         | 41 // Factions (VIWndFaction)
         | 42 // Live group search (VIWndGroupSearch)
-        | 43 // Duel invite
-        | 44 // Duel window (VIWndDuel)
+        | 43 // Duel invite (duelplay.rs:3,31)
+        | 44 // Duel window / wager (VIWndDuel, duelplay.rs:3,31)
     )
 }
 
@@ -1244,10 +1251,27 @@ mod tests {
         assert_eq!(snap.ui_mode, 0); // normal
         assert!(!snap.ui_busy);
 
+        // 1b. Busy states in normal mode (matching play.rs:3950: map, map search, search, typing)
+        p.map.open = true;
+        assert!(p.forge_snapshot(None).ui_busy, "map.open must report ui_busy == true");
+        p.map.open = false;
+
+        p.map.search.open = true;
+        assert!(p.forge_snapshot(None).ui_busy, "map.search.open must report ui_busy == true");
+        p.map.search.open = false;
+
+        p.search.open = true;
+        assert!(p.forge_snapshot(None).ui_busy, "search.open must report ui_busy == true");
+        p.search.open = false;
+
+        p.typing = Some(String::from("test input"));
+        assert!(p.forge_snapshot(None).ui_busy, "typing.is_some() must report ui_busy == true");
+        p.typing = None;
+
         // 2. Start menu and all sub-screen modes (spellbook, auctions, trainer, quests, options, etc.)
         let menu_modes = [
             (1, 1, "loot"),
-            (4, 4, "admin"),
+            (4, 4, "gm_goto"),
             (5, 5, "spellbook"),
             (6, 6, "recipes"),
             (7, 7, "dialog_answers"),
@@ -1261,13 +1285,14 @@ mod tests {
             (16, 16, "trade_ask"),
             (17, 17, "buddy_request"),
             (18, 18, "buddy_list"),
+            (19, 19, "blacksmith"),
             (20, 20, "guild_invite"),
             (21, 21, "guild_roster"),
             (22, 22, "quest_log"),
             (23, 23, "mail_compose"),
             (24, 24, "mail_inbox"),
             (26, 26, "ignore_list"),
-            (27, 27, "admin"),
+            (27, 27, "gm_buff_pc"),
             (28, 28, "mail_tell"),
             (29, 29, "mail_reply"),
             (31, 31, "cs_request"),
@@ -1326,7 +1351,54 @@ mod tests {
             );
         }
 
-        // 5. Out of game: everything defaults to inactive
+        // 5. Independent validation: scan client source files for all mode assignments
+        // and assert that every assigned mode is classified either as a menu mode or as one of the
+        // known non-menu modes (2, 30, 33, 36, 38, or 0 normal). Any newly added mode will fail here.
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let src_dir = manifest_dir.join("src");
+        let mut discovered_modes = std::collections::BTreeSet::new();
+
+        for entry in std::fs::read_dir(&src_dir).expect("src dir must be readable") {
+            let entry = entry.expect("valid dir entry");
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|e| e == "rs") {
+                let content = std::fs::read_to_string(&path).expect("file readable");
+                if content.contains("impl Play") || content.contains("impl super::Play") {
+                    for line in content.lines() {
+                        if let Some(pos) = line.find("self.mode = ") {
+                            let rest = &line[pos + "self.mode = ".len()..];
+                            let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                            if let Ok(m) = num_str.parse::<i32>() {
+                                discovered_modes.insert(m);
+                            }
+                        }
+                        for prefix in &["open_panel(", "open_guild(", "open_support(", "open_mail("] {
+                            let mut cur = line;
+                            while let Some(pos) = cur.find(prefix) {
+                                let rest = &cur[pos + prefix.len()..];
+                                let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                                if let Ok(m) = num_str.parse::<i32>() {
+                                    discovered_modes.insert(m);
+                                }
+                                cur = rest;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let known_non_menu: std::collections::BTreeSet<i32> = [0, 2, 30, 33, 36, 38].into_iter().collect();
+        for mode in discovered_modes {
+            let is_non_menu = known_non_menu.contains(&mode);
+            let is_menu = is_menu_mode(mode);
+            assert!(
+                is_menu || is_non_menu,
+                "Mode {mode} assigned in client is not classified as menu or non-menu mode!"
+            );
+        }
+
+        // 6. Out of game: everything defaults to inactive
         p.session.self_id = None;
         let snap = p.forge_snapshot(None);
         assert!(!snap.in_game);

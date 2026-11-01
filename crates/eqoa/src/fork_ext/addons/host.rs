@@ -112,6 +112,9 @@ fn create_base_host() -> Result<BaseHost> {
         lua.create_function(move |_, ()| Ok(i32::from(state.get().in_game)))?,
     )?;
     let state = snapshot.clone();
+    // Deliberate divergence: Util.IsStartMenuOpen and Window.IsStartMenuOpen return
+    // true for ANY game window (shops, bank, trade, loot, mail, spellbook, etc.),
+    // not only the pause menu's pages, because shipped packages use it to hide over game windows.
     util.set(
         "IsStartMenuOpen",
         lua.create_function(move |_, ()| Ok(i32::from(state.get().start_menu)))?,

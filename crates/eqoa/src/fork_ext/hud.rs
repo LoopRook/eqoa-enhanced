@@ -135,6 +135,12 @@ pub(crate) fn draw_chat_window(
 /// Whether the currently selected HUD menu is visible (all carousel menus
 /// 0 to 5, including items and weapon sets, are suppressed when an addon
 /// claims ability bars).
+///
+/// NOTE: We do NOT gate `hud_key` (pad/keyboard carousel use). The reference shows
+/// that Forge's 3 hotbars include the item bar (`scripts/ff_example.lua:788-840`;
+/// Avoids' "all THREE hotbar windows"), and Wereoxxs draws the item slots itself
+/// (`wereoxxs_ui/modules/ability_bars.lua:51-53`). Game input therefore stays unchanged
+/// and only the game's drawing is hidden.
 pub(crate) fn hud_menu_visible(_menus: &crate::hudmenu::HudMenus) -> bool {
     ability_bar_visible()
 }
