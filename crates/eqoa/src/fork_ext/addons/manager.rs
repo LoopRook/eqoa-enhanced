@@ -610,6 +610,7 @@ impl Manager {
             );
         }
         let mut old = std::mem::take(&mut self.entries);
+        let mut sibling_scanner = super::storage::SiblingScanner::new();
         for metadata in discovery.addons {
             let found = old.iter().position(|e| e.metadata.id == metadata.id);
             if let Some(index) = found
@@ -626,8 +627,19 @@ impl Manager {
             });
             let key = match Storage::key(&metadata) {
                 Ok(key) => {
-                    if let Err(e) = self.storage.migrate_addon(&metadata) {
-                        self.diagnostic(Some(&metadata.id), "storage", e);
+                    match self
+                        .storage
+                        .migrate_addon_with_scanner(&metadata, &mut sibling_scanner)
+                    {
+                        Ok(messages) => {
+                            for msg in messages {
+                                crate::say(&format!("addons: [{}] {}", metadata.id, msg));
+                                self.diagnostic(Some(&metadata.id), "storage", msg);
+                            }
+                        }
+                        Err(e) => {
+                            self.diagnostic(Some(&metadata.id), "storage", e);
+                        }
                     }
                     key
                 }

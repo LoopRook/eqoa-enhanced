@@ -22,6 +22,81 @@ use std::{
 
 const MAX_JSON_BYTES: usize = 1024 * 1024;
 
+/// Reusable scanner to bound sibling directory scanning across addons during a single rescan.
+#[derive(Default, Debug)]
+pub struct SiblingScanner {
+    scanned: bool,
+    sibling_roots: Vec<PathBuf>,
+    pub listing_count: usize,
+}
+
+impl SiblingScanner {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Scans the parent directory of `game_root` for candidate sibling installs,
+    /// running at most once per rescan, examining at most 64 non-hidden, non-system directories.
+    pub fn scan(&mut self, mods_root: &Path) -> &[PathBuf] {
+        if self.scanned {
+            return &self.sibling_roots;
+        }
+        self.scanned = true;
+
+        let Some(game_root) = mods_root.parent() else {
+            return &self.sibling_roots;
+        };
+        let Some(parent) = game_root.parent() else {
+            return &self.sibling_roots;
+        };
+
+        let Ok(entries) = fs::read_dir(parent) else {
+            return &self.sibling_roots;
+        };
+        self.listing_count += 1;
+
+        const MAX_SIBLINGS: usize = 64;
+        let mut count = 0;
+
+        for entry in entries.flatten() {
+            if count >= MAX_SIBLINGS {
+                break;
+            }
+            if is_hidden_or_system(&entry) {
+                continue;
+            }
+            let path = entry.path();
+            if path != game_root && path.is_dir() {
+                self.sibling_roots.push(path);
+                count += 1;
+            }
+        }
+
+        &self.sibling_roots
+    }
+}
+
+fn is_hidden_or_system(entry: &fs::DirEntry) -> bool {
+    let name = entry.file_name();
+    let name_str = name.to_string_lossy();
+    if name_str.starts_with('.') || name_str.starts_with('$') {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if let Ok(meta) = entry.metadata() {
+            let attrs = meta.file_attributes();
+            const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+            const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+            if attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub(super) struct Storage {
     root: Option<PathBuf>,
 }
@@ -44,8 +119,16 @@ impl Storage {
         identity_v1(&addon.entry, &addon.package_root, &addon.id)
     }
 
-    /// Discovers candidate legacy v1 keys for migration.
+    /// Discovers candidate legacy v1 keys for migration without performing directory listings.
     pub fn candidate_v1_keys(addon: &DiscoveredAddon) -> Vec<String> {
+        Self::candidate_v1_keys_with_siblings(addon, &[])
+    }
+
+    /// Discovers candidate legacy v1 keys for migration with explicitly provided sibling roots.
+    pub fn candidate_v1_keys_with_siblings(
+        addon: &DiscoveredAddon,
+        sibling_roots: &[PathBuf],
+    ) -> Vec<String> {
         let mut keys = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
@@ -70,21 +153,12 @@ impl Storage {
         let rel_pkg = relative_to_root(&addon.package_root, &mods_root);
         let rel_entry = relative_to_root(&addon.entry, &mods_root);
 
-        if let Some(game_root) = mods_root.parent() {
-            if let Some(parent) = game_root.parent() {
-                if let Ok(entries) = fs::read_dir(parent) {
-                    for dir_entry in entries.flatten() {
-                        let sibling_game_root = dir_entry.path();
-                        if sibling_game_root != game_root && sibling_game_root.is_dir() {
-                            let sibling_mods = sibling_game_root.join("mods");
-                            let sibling_pkg = sibling_mods.join(&rel_pkg);
-                            let sibling_entry = sibling_mods.join(&rel_entry);
-                            if sibling_pkg.exists() {
-                                add(&sibling_entry, &sibling_pkg);
-                            }
-                        }
-                    }
-                }
+        for sibling_game_root in sibling_roots {
+            let sibling_mods = sibling_game_root.join("mods");
+            let sibling_pkg = sibling_mods.join(&rel_pkg);
+            let sibling_entry = sibling_mods.join(&rel_entry);
+            if sibling_pkg.exists() {
+                add(&sibling_entry, &sibling_pkg);
             }
         }
 
@@ -92,8 +166,33 @@ impl Storage {
     }
 
     /// Migrates legacy v1 profile data and state.json enabled flags to the folder-independent v2 key.
-    pub fn migrate_addon(&self, addon: &DiscoveredAddon) -> Result<(), String> {
+    pub fn migrate_addon(&self, addon: &DiscoveredAddon) -> Result<Vec<String>, String> {
         self.migrate_addon_with_candidates(addon, &[])
+    }
+
+    /// Migrates legacy v1 profile data using a shared `SiblingScanner` to bound parent directory listings.
+    pub fn migrate_addon_with_scanner(
+        &self,
+        addon: &DiscoveredAddon,
+        scanner: &mut SiblingScanner,
+    ) -> Result<Vec<String>, String> {
+        let new_key = Self::key(addon)?;
+        let new_profile = self.profile_path(&new_key)?;
+        let has_v2_profile = new_profile.is_file();
+
+        let current_v1_key = Self::v1_key(addon)?;
+        let current_v1_profile = self.profile_path(&current_v1_key)?;
+        let has_current_v1 = current_v1_profile.is_file();
+
+        let candidates = if !has_v2_profile && !has_current_v1 {
+            // Only search sibling directories if there is NO v2 profile AND NO v1 profile for the current location
+            let siblings = scanner.scan(&addon.mods_root());
+            Self::candidate_v1_keys_with_siblings(addon, siblings)
+        } else {
+            Self::candidate_v1_keys(addon)
+        };
+
+        self.migrate_addon_with_candidate_list(addon, &new_key, &candidates)
     }
 
     /// Migrates legacy v1 profile data with optional explicit candidate keys (useful in tests).
@@ -101,7 +200,7 @@ impl Storage {
         &self,
         addon: &DiscoveredAddon,
         extra_candidates: &[String],
-    ) -> Result<(), String> {
+    ) -> Result<Vec<String>, String> {
         let new_key = Self::key(addon)?;
         let mut candidates = Self::candidate_v1_keys(addon);
         for extra in extra_candidates {
@@ -109,76 +208,120 @@ impl Storage {
                 candidates.push(extra.clone());
             }
         }
+        self.migrate_addon_with_candidate_list(addon, &new_key, &candidates)
+    }
 
-        let new_profile = self.profile_path(&new_key)?;
+    fn migrate_addon_with_candidate_list(
+        &self,
+        addon: &DiscoveredAddon,
+        new_key: &str,
+        candidates: &[String],
+    ) -> Result<Vec<String>, String> {
+        let mut messages = Vec::new();
+        let new_profile = self.profile_path(new_key)?;
+
+        let mut matches: Vec<(String, PathBuf, std::time::SystemTime)> = Vec::new();
+        for cand in candidates {
+            if let Ok(path) = self.profile_path(cand) {
+                if path.is_file() {
+                    let mtime = fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                    matches.push((cand.clone(), path, mtime));
+                }
+            }
+        }
+
+        // Sort by mtime descending (most recently modified first)
+        matches.sort_by(|a, b| b.2.cmp(&a.2));
+
+        let best_candidate = matches.first().map(|(k, p, _)| (k.clone(), p.clone()));
+
         if !new_profile.is_file() {
-            let mut matches: Vec<(String, PathBuf, std::time::SystemTime)> = Vec::new();
-            for cand in &candidates {
-                if let Ok(path) = self.profile_path(cand) {
-                    if path.is_file() {
-                        let mtime = fs::metadata(&path)
-                            .and_then(|m| m.modified())
-                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                        matches.push((cand.clone(), path, mtime));
-                    }
-                }
-            }
-
-            if !matches.is_empty() {
-                // Sort by mtime descending (most recently modified first)
-                matches.sort_by(|a, b| b.2.cmp(&a.2));
-                let (best_key, best_path, best_mtime) = &matches[0];
+            if let Some((best_key, best_path)) = &best_candidate {
                 if matches.len() > 1 {
-                    println!(
-                        "Multiple legacy v1 profiles found for addon '{}'; selected most recently modified key {} (modified {:?}) from candidate files",
-                        addon.id,
-                        best_key,
-                        best_mtime
-                    );
-                } else {
-                    println!(
-                        "Migrated addon '{}' profile from legacy v1 storage key {} ({}) to folder-independent key {}",
-                        addon.id,
-                        best_key,
-                        best_path.display(),
-                        new_key
-                    );
+                    messages.push(format!(
+                        "multiple legacy v1 profiles found for addon '{}'; selected most recently modified key {}",
+                        addon.id, best_key
+                    ));
                 }
-                // Copy without deleting the old target
-                if let Ok(bytes) = fs::read(best_path) {
-                    let _ = atomic_replace(&new_profile, &bytes);
+                messages.push(format!(
+                    "migrated profile from legacy v1 key {} to {}",
+                    best_key, new_key
+                ));
+
+                let bytes = fs::read(best_path)
+                    .map_err(|e| format!("failed to read legacy v1 profile {}: {e}", best_key))?;
+                atomic_replace(&new_profile, &bytes)
+                    .map_err(|e| format!("failed to write migrated profile {}: {e}", new_key))?;
+
+                // Migrate overlay files directory if present
+                if let Ok(from_files) = self.files_dir(best_key) {
+                    if from_files.is_dir() {
+                        let to_files = self.files_dir(new_key)?;
+                        if !to_files.exists() {
+                            let mut file_count = 0;
+                            let mut total_bytes = 0u64;
+                            const MAX_OVERLAY_FILES: usize = 256;
+                            const MAX_OVERLAY_BYTES: u64 = 16 * 1024 * 1024;
+                            copy_dir_bounded(
+                                &from_files,
+                                &to_files,
+                                &mut file_count,
+                                &mut total_bytes,
+                                MAX_OVERLAY_FILES,
+                                MAX_OVERLAY_BYTES,
+                            )?;
+                            messages.push(format!(
+                                "migrated files directory from legacy v1 key {} to {}",
+                                best_key, new_key
+                            ));
+                        }
+                    }
                 }
             }
         }
 
-        // Migrate state.json enabled flags
+        // Migrate state.json enabled flags from the SAME candidate as profile (most recent)
         if let Ok(mut registry) = self.registry() {
-            if !registry.contains_key(&new_key) {
-                let mut chosen = None;
-                for cand in &candidates {
-                    if let Some(val) = registry.get(cand).and_then(Json::as_bool) {
-                        chosen = Some((cand.clone(), val));
-                        break;
+            if !registry.contains_key(new_key) {
+                let chosen = if let Some((best_key, _)) = &best_candidate {
+                    registry
+                        .get(best_key)
+                        .and_then(Json::as_bool)
+                        .map(|v| (best_key.clone(), v))
+                } else {
+                    None
+                };
+
+                // Fallback to other candidates only if best_candidate had no enabled flag or no profile existed
+                let chosen = chosen.or_else(|| {
+                    for cand in candidates {
+                        if let Some(val) = registry.get(cand).and_then(Json::as_bool) {
+                            return Some((cand.clone(), val));
+                        }
                     }
-                }
+                    None
+                });
+
                 if let Some((best_key, val)) = chosen {
-                    println!(
-                        "Migrated addon '{}' enabled flag ({}) from legacy v1 key {} to folder-independent key {}",
-                        addon.id,
-                        val,
-                        best_key,
-                        new_key
-                    );
-                    registry.insert(new_key.clone(), Json::Bool(val));
-                    if let Some(root) = &self.root {
-                        let target = root.join("state.json");
-                        let _ = write_json(&target, &json!({"schemaVersion":1,"enabled":registry}));
-                    }
+                    messages.push(format!(
+                        "migrated enabled flag ({val}) from legacy v1 key {} to {}",
+                        best_key, new_key
+                    ));
+                    registry.insert(new_key.to_string(), Json::Bool(val));
+                    let target = self
+                        .root
+                        .as_ref()
+                        .ok_or("addon configuration directory unavailable")?
+                        .join("state.json");
+                    write_json(&target, &json!({"schemaVersion":1,"enabled":registry}))
+                        .map_err(|e| format!("failed to update state.json during migration: {e}"))?;
                 }
             }
         }
 
-        Ok(())
+        Ok(messages)
     }
 
     pub fn enabled(&self, key: &str) -> Result<Option<bool>, String> {
@@ -209,13 +352,22 @@ impl Storage {
             .transpose()
     }
 
-    fn profile_path(&self, key: &str) -> Result<PathBuf, String> {
+    pub fn profile_path(&self, key: &str) -> Result<PathBuf, String> {
         validate_key(key)?;
         Ok(self
             .root
             .as_ref()
             .ok_or("addon configuration directory unavailable")?
             .join(format!("{key}.json")))
+    }
+
+    pub fn files_dir(&self, key: &str) -> Result<PathBuf, String> {
+        validate_key(key)?;
+        Ok(self
+            .root
+            .as_ref()
+            .ok_or("addon configuration directory unavailable")?
+            .join(format!("{key}-files")))
     }
 
     fn registry(&self) -> Result<serde_json::Map<String, Json>, String> {
@@ -246,6 +398,47 @@ impl Storage {
         }
         Ok(enabled.clone())
     }
+}
+
+fn copy_dir_bounded(
+    from: &Path,
+    to: &Path,
+    file_count: &mut usize,
+    total_bytes: &mut u64,
+    max_files: usize,
+    max_bytes: u64,
+) -> Result<(), String> {
+    fs::create_dir_all(to).map_err(|e| format!("failed to create files directory: {e}"))?;
+    let entries = fs::read_dir(from).map_err(|e| format!("failed to read files directory: {e}"))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let target = to.join(entry.file_name());
+
+        if path.is_dir() {
+            copy_dir_bounded(
+                &path,
+                &target,
+                file_count,
+                total_bytes,
+                max_files,
+                max_bytes,
+            )?;
+        } else if path.is_file() {
+            *file_count += 1;
+            if *file_count > max_files {
+                return Err("addon files directory file count limit exceeded".into());
+            }
+            let meta = fs::metadata(&path).map_err(|e| e.to_string())?;
+            *total_bytes += meta.len();
+            if *total_bytes > max_bytes {
+                return Err("addon files directory size limit exceeded".into());
+            }
+            fs::copy(&path, &target).map_err(|e| format!("failed to copy overlay file: {e}"))?;
+        }
+    }
+    Ok(())
 }
 
 fn relative_to_root(path: &Path, root: &Path) -> PathBuf {
@@ -462,6 +655,19 @@ mod tests {
     }
 
     #[test]
+    fn forge_storage_v1_digest_pinned_to_reference_hash() {
+        let entry = b"main.lua";
+        let package = b"wereoxxs_ui";
+        let id = b"wereoxxs_ui";
+        let hash = digest_fields_v1(entry, package, id);
+        assert_eq!(
+            hash,
+            "d1a2fc6aa4f4754069e2275aff1409f3d8360eb21c862c424a68fda90777bfd0",
+            "v1 storage digest algorithm must remain strictly pinned to protect player migration"
+        );
+    }
+
+    #[test]
     fn forge_storage_same_package_in_different_absolute_folders_gets_same_key() {
         let scratch1 = Scratch::new();
         let scratch2 = Scratch::new();
@@ -530,7 +736,11 @@ mod tests {
         );
 
         // Migrate on first load
-        store.migrate_addon(&addon).unwrap();
+        let messages = store.migrate_addon(&addon).unwrap();
+        assert!(
+            !messages.is_empty(),
+            "migration must report status messages"
+        );
 
         // 1. New key now has the data
         assert!(
@@ -582,6 +792,7 @@ mod tests {
         // Save older profile to old_v1_a
         let val_a = lua.load("return {version=1}").eval().unwrap();
         store.save_profile(old_v1_a, val_a).unwrap();
+        store.set_enabled(old_v1_a, false).unwrap();
         let path_a = store.profile_path(old_v1_a).unwrap();
 
         // Ensure distinct mtime
@@ -590,24 +801,300 @@ mod tests {
         // Save newer profile to old_v1_b
         let val_b = lua.load("return {version=2}").eval().unwrap();
         store.save_profile(old_v1_b, val_b).unwrap();
+        store.set_enabled(old_v1_b, true).unwrap();
         let path_b = store.profile_path(old_v1_b).unwrap();
 
-        store
+        let msgs = store
             .migrate_addon_with_candidates(
                 &addon,
                 &[old_v1_a.to_string(), old_v1_b.to_string()],
             )
             .unwrap();
 
-        // Must have picked the most recently modified (val_b, version 2)
+        // Must report picking the most recently modified key
+        assert!(
+            msgs.iter().any(|m| m.contains("multiple legacy v1 profiles found")),
+            "must log message on multiple matching profiles"
+        );
+
+        // Must have picked the most recently modified profile (val_b, version 2)
         let loaded = store.load_profile(&new_key, &lua).unwrap().unwrap();
         assert_eq!(
             loaded.as_table().unwrap().get::<i32>("version").unwrap(),
             2,
             "must migrate data from the most recently modified v1 file"
         );
+
+        // Enabled flag must be migrated from the SAME candidate (val_b -> true, not val_a -> false)
+        assert_eq!(
+            store.enabled(&new_key).unwrap(),
+            Some(true),
+            "enabled flag must be migrated from the same most recent candidate as the profile"
+        );
+
         assert!(path_a.is_file(), "older v1 file must be preserved");
         assert!(path_b.is_file(), "newer v1 file must be preserved");
+    }
+
+    #[test]
+    fn forge_storage_sibling_search_runs_at_most_once_per_rescan_and_never_when_not_needed() {
+        let scratch = Scratch::new();
+        let store = Storage::new(Some(scratch.0.clone()));
+        let mut scanner = SiblingScanner::new();
+
+        let addon1 = scratch.addon();
+        let new_key1 = Storage::key(&addon1).unwrap();
+
+        // 1. Scenario A: Addon already has a v2 profile -> sibling scan must NOT run
+        store.save_profile(&new_key1, mlua::Value::Nil).unwrap();
+        store
+            .migrate_addon_with_scanner(&addon1, &mut scanner)
+            .unwrap();
+        assert_eq!(
+            scanner.listing_count, 0,
+            "sibling listing must NOT run when v2 profile already exists"
+        );
+
+        // 2. Scenario B: Addon has no v2 profile, but has current location v1 profile -> sibling scan must NOT run
+        let scratch2 = Scratch::new();
+        let store2 = Storage::new(Some(scratch2.0.clone()));
+        let mut scanner2 = SiblingScanner::new();
+        let addon2 = scratch2.addon();
+        let v1_key2 = Storage::v1_key(&addon2).unwrap();
+        store2.save_profile(&v1_key2, mlua::Value::Nil).unwrap();
+        store2
+            .migrate_addon_with_scanner(&addon2, &mut scanner2)
+            .unwrap();
+        assert_eq!(
+            scanner2.listing_count, 0,
+            "sibling listing must NOT run when current location v1 profile exists"
+        );
+
+        // 3. Scenario C: Two addons both need sibling migration during the same rescan -> parent dir listed at most ONCE
+        let root = scratch.0.join("parent_installs");
+        let current_game = root.join("current_game");
+        let mods_dir = current_game.join("mods");
+        let sibling_game = root.join("sibling_game");
+        let sibling_mods = sibling_game.join("mods");
+        fs::create_dir_all(&mods_dir).unwrap();
+        fs::create_dir_all(&sibling_mods).unwrap();
+
+        let entry_a = mods_dir.join("addon_a/main.lua");
+        let entry_b = mods_dir.join("addon_b/main.lua");
+        fs::create_dir_all(entry_a.parent().unwrap()).unwrap();
+        fs::create_dir_all(entry_b.parent().unwrap()).unwrap();
+        fs::write(&entry_a, "").unwrap();
+        fs::write(&entry_b, "").unwrap();
+
+        let a = DiscoveredAddon {
+            id: "addon_a".to_string(),
+            name: "addon_a".to_string(),
+            entry: entry_a,
+            script_root: mods_dir.join("addon_a"),
+            package_root: mods_dir.join("addon_a"),
+            module_dirs: vec![],
+            resource_dirs: vec![],
+            api: None,
+            requested_capabilities: vec![],
+            initially_enabled: true,
+            mods_root: Some(mods_dir.clone()),
+        };
+
+        let b = DiscoveredAddon {
+            id: "addon_b".to_string(),
+            name: "addon_b".to_string(),
+            entry: entry_b,
+            script_root: mods_dir.join("addon_b"),
+            package_root: mods_dir.join("addon_b"),
+            module_dirs: vec![],
+            resource_dirs: vec![],
+            api: None,
+            requested_capabilities: vec![],
+            initially_enabled: true,
+            mods_root: Some(mods_dir.clone()),
+        };
+
+        let mut rescan_scanner = SiblingScanner::new();
+        store.migrate_addon_with_scanner(&a, &mut rescan_scanner).unwrap();
+        store.migrate_addon_with_scanner(&b, &mut rescan_scanner).unwrap();
+
+        assert_eq!(
+            rescan_scanner.listing_count, 1,
+            "sibling directory listing must run at most once per rescan across all addons"
+        );
+    }
+
+    #[test]
+    fn forge_storage_sibling_search_never_picks_another_addon_data() {
+        let scratch = Scratch::new();
+        let store = Storage::new(Some(scratch.0.clone()));
+        let lua = Lua::new();
+
+        let root = scratch.0.join("sibling_test_installs");
+        let sib_a = root.join("game_a");
+        let sib_b = root.join("game_b");
+        let current = root.join("game_current");
+        fs::create_dir_all(sib_a.join("mods/alpha")).unwrap();
+        fs::create_dir_all(sib_b.join("mods/beta")).unwrap();
+        fs::create_dir_all(current.join("mods/alpha")).unwrap();
+        fs::create_dir_all(current.join("mods/beta")).unwrap();
+
+        fs::write(sib_a.join("mods/alpha/main.lua"), "").unwrap();
+        fs::write(sib_b.join("mods/beta/main.lua"), "").unwrap();
+        fs::write(current.join("mods/alpha/main.lua"), "").unwrap();
+        fs::write(current.join("mods/beta/main.lua"), "").unwrap();
+
+        let alpha_old = DiscoveredAddon {
+            id: "alpha".to_string(),
+            name: "alpha".to_string(),
+            entry: sib_a.join("mods/alpha/main.lua"),
+            script_root: sib_a.join("mods/alpha"),
+            package_root: sib_a.join("mods/alpha"),
+            module_dirs: vec![],
+            resource_dirs: vec![],
+            api: None,
+            requested_capabilities: vec![],
+            initially_enabled: true,
+            mods_root: Some(sib_a.join("mods")),
+        };
+
+        let beta_old = DiscoveredAddon {
+            id: "beta".to_string(),
+            name: "beta".to_string(),
+            entry: sib_b.join("mods/beta/main.lua"),
+            script_root: sib_b.join("mods/beta"),
+            package_root: sib_b.join("mods/beta"),
+            module_dirs: vec![],
+            resource_dirs: vec![],
+            api: None,
+            requested_capabilities: vec![],
+            initially_enabled: true,
+            mods_root: Some(sib_b.join("mods")),
+        };
+
+        // Save distinct profiles under their v1 keys
+        let v1_key_alpha = Storage::v1_key(&alpha_old).unwrap();
+        let v1_key_beta = Storage::v1_key(&beta_old).unwrap();
+        store
+            .save_profile(
+                &v1_key_alpha,
+                lua.load("return {addon_name=\"alpha_data\"}").eval().unwrap(),
+            )
+            .unwrap();
+        store
+            .save_profile(
+                &v1_key_beta,
+                lua.load("return {addon_name=\"beta_data\"}").eval().unwrap(),
+            )
+            .unwrap();
+
+        // Current addons in game_current
+        let alpha_cur = DiscoveredAddon {
+            id: "alpha".to_string(),
+            name: "alpha".to_string(),
+            entry: current.join("mods/alpha/main.lua"),
+            script_root: current.join("mods/alpha"),
+            package_root: current.join("mods/alpha"),
+            module_dirs: vec![],
+            resource_dirs: vec![],
+            api: None,
+            requested_capabilities: vec![],
+            initially_enabled: true,
+            mods_root: Some(current.join("mods")),
+        };
+
+        let beta_cur = DiscoveredAddon {
+            id: "beta".to_string(),
+            name: "beta".to_string(),
+            entry: current.join("mods/beta/main.lua"),
+            script_root: current.join("mods/beta"),
+            package_root: current.join("mods/beta"),
+            module_dirs: vec![],
+            resource_dirs: vec![],
+            api: None,
+            requested_capabilities: vec![],
+            initially_enabled: true,
+            mods_root: Some(current.join("mods")),
+        };
+
+        let mut scanner = SiblingScanner::new();
+        store
+            .migrate_addon_with_scanner(&alpha_cur, &mut scanner)
+            .unwrap();
+        store
+            .migrate_addon_with_scanner(&beta_cur, &mut scanner)
+            .unwrap();
+
+        let alpha_new_key = Storage::key(&alpha_cur).unwrap();
+        let beta_new_key = Storage::key(&beta_cur).unwrap();
+
+        let alpha_loaded = store
+            .load_profile(&alpha_new_key, &lua)
+            .unwrap()
+            .expect("alpha profile must be migrated");
+        let beta_loaded = store
+            .load_profile(&beta_new_key, &lua)
+            .unwrap()
+            .expect("beta profile must be migrated");
+
+        assert_eq!(
+            alpha_loaded
+                .as_table()
+                .unwrap()
+                .get::<String>("addon_name")
+                .unwrap(),
+            "alpha_data",
+            "alpha must migrate only its own profile"
+        );
+        assert_eq!(
+            beta_loaded
+                .as_table()
+                .unwrap()
+                .get::<String>("addon_name")
+                .unwrap(),
+            "beta_data",
+            "beta must migrate only its own profile"
+        );
+    }
+
+    #[test]
+    fn forge_storage_migrates_overlay_files_directory_bounded() {
+        let scratch = Scratch::new();
+        let store = Storage::new(Some(scratch.0.clone()));
+        let addon = scratch.addon();
+
+        let v1_key = Storage::v1_key(&addon).unwrap();
+        let new_key = Storage::key(&addon).unwrap();
+
+        // Create overlay files directory under v1 key
+        let v1_files = store.files_dir(&v1_key).unwrap();
+        fs::create_dir_all(v1_files.join("sub")).unwrap();
+        fs::write(v1_files.join("file1.txt"), b"hello").unwrap();
+        fs::write(v1_files.join("sub/file2.txt"), b"world").unwrap();
+
+        // Save v1 profile so migration triggers
+        store.save_profile(&v1_key, Value::Nil).unwrap();
+
+        let to_files = store.files_dir(&new_key).unwrap();
+        assert!(!to_files.exists(), "v2 files dir must not exist before migration");
+
+        store.migrate_addon(&addon).unwrap();
+
+        assert!(to_files.is_dir(), "v2 files dir must exist after migration");
+        assert_eq!(
+            fs::read(to_files.join("file1.txt")).unwrap(),
+            b"hello",
+            "migrated file content must match"
+        );
+        assert_eq!(
+            fs::read(to_files.join("sub/file2.txt")).unwrap(),
+            b"world",
+            "migrated nested file content must match"
+        );
+
+        // v1 files must still exist (copy, not delete)
+        assert!(v1_files.join("file1.txt").is_file());
+        assert!(v1_files.join("sub/file2.txt").is_file());
     }
 
     #[test]
