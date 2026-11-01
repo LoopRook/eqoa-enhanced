@@ -593,9 +593,11 @@ impl Play {
             crate::fork_ext::addons::combat::CombatSnapshot::default()
         };
 
+        // The full-screen map counts as a menu: on the PS2 it is a page of the start menu.
         let start_menu = in_game
             && (is_menu_mode(self.mode)
-                || self.start.as_ref().is_some_and(|s| s.menu.visible));
+                || self.start.as_ref().is_some_and(|s| s.menu.visible)
+                || self.map.open);
         let ui_mode = if !in_game {
             0
         } else if self.mode != 0 {
@@ -1326,6 +1328,7 @@ mod tests {
         // 1b. Busy states in normal mode (matching play.rs:3950: map, map search, search, typing)
         p.map.open = true;
         assert!(p.forge_snapshot(None).ui_busy, "map.open must report ui_busy == true");
+        assert!(p.forge_snapshot(None).start_menu, "the full-screen map must pause addons like a menu");
         p.map.open = false;
 
         p.map.search.open = true;
