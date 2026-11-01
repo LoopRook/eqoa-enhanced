@@ -2,6 +2,15 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-01 · Enhanced 0.2.2
+
+- Mods now step aside for every game window: the spellbook, quest journal, options, merchant, bank, trainer, blacksmith, auctions, trade, mail and more.
+- With a mod hiding the game's ability bars, the game's item bar no longer pops back when you scroll the hotbars.
+- With a mod's chat on, holding C or R2 no longer brings up the game's chat history, and the minimap stays put.
+- Fixed mods stopping (and the whole mod UI vanishing) after a few hours of busy chat.
+- Mod settings now stay with you when you move or re-extract the game folder; existing settings carry over automatically.
+- If a mod ever stops with an error, the game's own HUD comes straight back.
+
 ## 2026-10-31 · Enhanced 0.2.1
 
 - Brings in the latest improvements from the original vanilla client, with all Enhanced features and mods unchanged.
