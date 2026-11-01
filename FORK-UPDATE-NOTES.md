@@ -6,7 +6,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 - Included mods now update automatically when their files are unchanged. Your edited files and saved settings are kept, missing files are restored, and mods you removed stay removed.
 - Wereoxxs UI can now show a movable, resizable weapon-set bar. Turn it on or off in its settings; the highlight follows the game's carousel selection, and clicking a set uses it. Available on servers that send weapon sets.
-
+- Fixed missed cooldown dimming and timers in addon ability bars, including short cooldowns such as Feed.
 - Avoid's Modern UI now stays enabled at level 60 after a recoverable window error; the Addon Manager shows a warning instead of disabling the mod.
 - New characters can use a shared Tank, Healer, Melee or Caster mod profile, or make their own copy. Default is selectable again, and the Addon Manager shows which profile is active.
 - Mod profiles now use one set of Save/Load controls, pause at character select, and load a fresh setup for each character when entering the world.

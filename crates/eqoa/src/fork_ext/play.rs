@@ -1,6 +1,12 @@
 //! The combat indication adapter; service code only receives plain combat data.
 use super::Play;
 
+/// Capture every received 0x00CD before addon frames can coalesce its transitions.
+pub(crate) fn ability_lockout(_index: u8, _lockout: i32) {
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::fork_ext::addons::ability::record_lockout(_index as u32, _lockout.max(0) as u32);
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicU64, Ordering};
 
