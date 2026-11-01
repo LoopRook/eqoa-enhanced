@@ -2,14 +2,11 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
-## 2026-11-01 · Unreleased
+## 2026-11-01 · Enhanced 0.3.0
 
-- Adds native support for the unchanged ARPG UI and Avoids Modern UI mods, including rounded health orbs and journal titles with saved quest notes. Live playtesting is pending.
-- Addon settings use fewer disk writes, and addon quest journals can appear before health data arrives.
-
-## 2026-11-01 · Enhanced 0.2.3
-
+- Two more FrontiersForge mods now run natively, unchanged: ARPG UI (health and power orbs, action tray) and Avoid's Modern UI (player, target, group and quest panels). Like Wereoxxs UI, they step aside for game menus. Turn on one at a time in the Addon Manager.
 - Problem reports: press F3 (or use the crash offer at the next start) and choose Save to Desktop. You get an EQOA-Enhanced-report zip with your note, a screenshot and the logs, ready to send to us. Your account name, password and Windows user folder are removed, and nothing is uploaded anywhere.
+- Mods that save files are safer: writes are batched, and mods can no longer freeze the game through file access.
 
 ## 2026-11-01 · Enhanced 0.2.2
 
