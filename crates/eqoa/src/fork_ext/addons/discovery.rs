@@ -18,6 +18,24 @@ pub(crate) struct DiscoveredAddon {
     pub api: Option<String>,
     pub requested_capabilities: Vec<String>,
     pub initially_enabled: bool,
+    pub mods_root: Option<PathBuf>,
+}
+
+impl DiscoveredAddon {
+    pub fn mods_root(&self) -> PathBuf {
+        if let Some(r) = &self.mods_root {
+            return r.clone();
+        }
+        if self.entry.parent() == Some(&self.package_root) && self.package_root.is_dir() {
+            if let Some(parent) = self.package_root.parent() {
+                return parent.to_path_buf();
+            }
+        }
+        self.package_root
+            .parent()
+            .unwrap_or(&self.package_root)
+            .to_path_buf()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -350,6 +368,7 @@ fn discover_script_root(script_root: &Path, canonical_root: &Path, ctx: &mut Dis
                     api: None,
                     requested_capabilities: Vec::new(),
                     initially_enabled: false,
+                    mods_root: Some(canonical_root.to_path_buf()),
                 });
             }
         }
@@ -700,6 +719,7 @@ fn parse_native_manifest(
         api: Some("eqoa/1".to_string()),
         requested_capabilities,
         initially_enabled,
+        mods_root: Some(canonical_root.to_path_buf()),
     });
 }
 
@@ -797,6 +817,7 @@ fn parse_legacy_package(
         api: None,
         requested_capabilities: Vec::new(),
         initially_enabled: false,
+        mods_root: Some(canonical_root.to_path_buf()),
     });
 }
 

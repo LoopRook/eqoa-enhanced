@@ -297,7 +297,7 @@ impl Runtime {
                     Ok(state) => {
                         self.open = state.open;
                         self.settings = state.settings;
-                        self.want_mouse = active.context.io().want_capture_mouse();
+                        self.want_mouse = !snapshot.start_menu && active.context.io().want_capture_mouse();
                     }
                     Err(e) => {
                         active.manager.after_render();
@@ -545,24 +545,26 @@ pub(super) fn dispatch_frame(
             .iter()
             .any(|e| e.metadata.id == *id && e.enabled_intent)
     });
-    if let Some(id) = selected.as_ref() {
-        let name = manager
-            .entries()
-            .into_iter()
-            .find(|e| e.metadata.id == *id)
-            .unwrap()
-            .metadata
-            .name;
-        let mut open = true;
-        ui.window(format!("Addon settings: {name}"))
-            .opened(&mut open)
-            .build(|| {
-                manager.queue(Command::Settings(id.clone()));
-                manager.frame(snapshot);
-                called = true;
-            });
-        if !open {
-            selected = None;
+    if !snapshot.start_menu {
+        if let Some(id) = selected.as_ref() {
+            let name = manager
+                .entries()
+                .into_iter()
+                .find(|e| e.metadata.id == *id)
+                .unwrap()
+                .metadata
+                .name;
+            let mut open = true;
+            ui.window(format!("Addon settings: {name}"))
+                .opened(&mut open)
+                .build(|| {
+                    manager.queue(Command::Settings(id.clone()));
+                    manager.frame(snapshot);
+                    called = true;
+                });
+            if !open {
+                selected = None;
+            }
         }
     }
     if !called {
@@ -622,7 +624,7 @@ fn render_managed(
         manager.flush_pending_fonts(context);
         let ui = context.try_frame().map_err(|e| e.to_string())?;
         let mut open = plan.controls.unwrap_or(false);
-        if open {
+        if open && !snapshot.start_menu {
             let actions = controls(ui, manager, &mut open, plan.root.as_ref());
             let extra = FramePlan::collect(actions, plan.settings.take());
             plan.commands.extend(extra.commands);
@@ -1190,6 +1192,179 @@ mod tests {
             green(128),
             "overlay center stays at physical x128 after scene x2/x4"
         );
+        manager.shutdown();
+    }
+
+    #[test]
+    fn forge_runtime_windows_hidden_during_menus_and_preserved() {
+        let root = Scratch::new();
+        let config = Scratch::new();
+        root.native(r#"
+            if not registered then
+                registered = true
+                UiForge.RegisterCallback(UiForge.CallbackType.Settings, function()
+                    ImGui.Text("settings body")
+                end)
+            end
+        "#);
+        let instance = wgpu::Instance::default();
+        let adapter = match pollster::block_on(instance.request_adapter(&Default::default())) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("SKIP forge_runtime_windows_hidden_during_menus_and_preserved: {e}");
+                return;
+            }
+        };
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let mut context = Context::create();
+        context.set_ini_filename::<PathBuf>(None).unwrap();
+        let renderer = Rc::new(RefCell::new(
+            WgpuRenderer::new(
+                WgpuInitInfo::new(
+                    device.clone(),
+                    queue.clone(),
+                    wgpu::TextureFormat::Rgba8Unorm,
+                ),
+                &mut context,
+            )
+            .unwrap(),
+        ));
+        let mut manager = Manager::new(
+            root.0.clone(),
+            Some(config.0.clone()),
+            &device,
+            &queue,
+            renderer.clone(),
+        );
+        let descriptor = |width, height| wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        };
+        let target = device.create_texture(&descriptor(256, 192));
+        let view = target.create_view(&Default::default());
+
+        // Frame 0: discover/enable addon "a"
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        let mut encoder = device.create_command_encoder(&Default::default());
+        render_managed(
+            &mut context,
+            &renderer,
+            &mut manager,
+            &mut encoder,
+            &view,
+            Snapshot::default(),
+            FramePlan::collect(Vec::new(), None),
+            None,
+        )
+        .unwrap();
+        queue.submit([encoder.finish()]);
+
+        // Frame 1: Normal gameplay, open controls and select settings for "a"
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let mut plan1 = FramePlan::collect(vec![Action::Settings("a".into())], None);
+        plan1.controls = Some(true);
+        let snap_normal = Snapshot::default();
+        let state1 = render_managed(
+            &mut context,
+            &renderer,
+            &mut manager,
+            &mut encoder,
+            &view,
+            snap_normal,
+            plan1,
+            None,
+        )
+        .unwrap();
+        queue.submit([encoder.finish()]);
+        assert!(state1.open, "controls must be open");
+        assert_eq!(state1.settings, Some("a".into()), "settings 'a' must be selected");
+        let w_settings = unsafe { sys::igFindWindowByName(c"Addon settings: a".as_ptr()) };
+        assert!(!w_settings.is_null());
+        assert!(
+            unsafe { (*w_settings).BeginCount > 0 },
+            "settings window must be drawn in gameplay"
+        );
+        let w_controls = unsafe { sys::igFindWindowByName(c"Addons".as_ptr()) };
+        assert!(!w_controls.is_null());
+        assert!(
+            unsafe { (*w_controls).BeginCount > 0 },
+            "controls window must be drawn in gameplay"
+        );
+
+        // Frame 2: Menu mode active (snapshot.start_menu = true)
+        // Windows should NOT be drawn, but state (open, settings) must be preserved!
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let mut plan2 = FramePlan::collect(Vec::new(), state1.settings.clone());
+        plan2.controls = Some(state1.open);
+        let mut snap_menu = Snapshot::default();
+        snap_menu.start_menu = true;
+        let state2 = render_managed(
+            &mut context,
+            &renderer,
+            &mut manager,
+            &mut encoder,
+            &view,
+            snap_menu,
+            plan2,
+            None,
+        )
+        .unwrap();
+        queue.submit([encoder.finish()]);
+        assert!(state2.open, "open state preserved across menu mode");
+        assert_eq!(state2.settings, Some("a".into()), "selected settings preserved across menu mode");
+        assert_eq!(
+            unsafe { (*w_settings).BeginCount },
+            0,
+            "settings window must NOT be drawn while start_menu is true"
+        );
+        assert_eq!(
+            unsafe { (*w_controls).BeginCount },
+            0,
+            "controls window must NOT be drawn while start_menu is true"
+        );
+
+        // Frame 3: Menu closed, normal gameplay resumes
+        // Windows resume rendering!
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let mut plan3 = FramePlan::collect(Vec::new(), state2.settings.clone());
+        plan3.controls = Some(state2.open);
+        let state3 = render_managed(
+            &mut context,
+            &renderer,
+            &mut manager,
+            &mut encoder,
+            &view,
+            snap_normal,
+            plan3,
+            None,
+        )
+        .unwrap();
+        queue.submit([encoder.finish()]);
+        assert!(state3.open);
+        assert_eq!(state3.settings, Some("a".into()));
+        assert!(
+            unsafe { (*w_settings).BeginCount > 0 },
+            "settings window must resume being drawn"
+        );
+        assert!(
+            unsafe { (*w_controls).BeginCount > 0 },
+            "controls window must resume being drawn"
+        );
+
         manager.shutdown();
     }
 

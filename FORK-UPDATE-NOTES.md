@@ -2,12 +2,24 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
-## 2026-10-31 · Unreleased
+## 2026-11-01 · Unreleased
 
-- Discovered creatures are now recorded in a personal map journal that enriches map search and can be shared or imported from FrontiersForge on the Desktop.
-- Problem reports and crash reports now save directly to your Desktop as a zip file with diagnostics and logs, opening your file manager with the report ready to share.
-- Adds native support for the unchanged ARPG UI and Avoids Modern UI mods, including rounded health orbs and journal titles with saved quest notes. Live playtesting is pending.
-- Addon settings use fewer disk writes, and addon quest journals can appear before health data arrives.
+- The map now learns creatures as you play: every NPC you see is saved to your own creature journal, and map search finds them alongside the built-in list. Only creatures are recorded, never players or pets. Export your journal or import a friend's (also works with Wereoxx's PCSX2 map mod files).
+
+## 2026-11-01 · Enhanced 0.3.0
+
+- Two more FrontiersForge mods now run natively, unchanged: ARPG UI (health and power orbs, action tray) and Avoid's Modern UI (player, target, group and quest panels). Like Wereoxxs UI, they step aside for game menus. Turn on one at a time in the Addon Manager.
+- Problem reports: press F3 (or use the crash offer at the next start) and choose Save to Desktop. You get an EQOA-Enhanced-report zip with your note, a screenshot and the logs, ready to send to us. Your account name, password and Windows user folder are removed, and nothing is uploaded anywhere.
+- Mods that save files are safer: writes are batched, and mods can no longer freeze the game through file access.
+
+## 2026-11-01 · Enhanced 0.2.2
+
+- Mods now step aside for every game window: the spellbook, quest journal, options, merchant, bank, trainer, blacksmith, auctions, trade, mail and more.
+- With a mod hiding the game's ability bars, the game's item bar no longer pops back when you scroll the hotbars.
+- With a mod's chat on, holding C or R2 no longer brings up the game's chat history, and the minimap stays put.
+- Fixed mods stopping (and the whole mod UI vanishing) after a few hours of busy chat.
+- Mod settings now stay with you when you move or re-extract the game folder; existing settings carry over automatically.
+- If a mod ever stops with an error, the game's own HUD comes straight back.
 
 ## 2026-10-31 · Enhanced 0.2.1
 

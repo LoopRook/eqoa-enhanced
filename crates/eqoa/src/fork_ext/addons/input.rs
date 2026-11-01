@@ -842,6 +842,7 @@ mod tests {
             api: Some("eqoa/1".to_string()),
             requested_capabilities: vec![],
             initially_enabled: true,
+            mods_root: Some(root.to_path_buf()),
         }
     }
 

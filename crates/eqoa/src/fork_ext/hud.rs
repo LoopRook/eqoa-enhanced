@@ -127,21 +127,30 @@ pub(crate) fn draw_chat_window(
     if chat_window_visible() {
         wnd.draw(vui, r, now, dt);
     } else {
+        if wnd.mode != 0 {
+            wnd.mode = 0;
+        }
+        wnd.set_scroll(0);
         let mut null = NullRaster;
         wnd.draw(vui, &mut null, now, dt);
     }
 }
 
-/// Whether the currently selected HUD menu is visible (only ability/hotbar
-/// menus 0, 1, 4 and 5 are suppressed when an addon claims ability bars).
-pub(crate) fn hud_menu_visible(menus: &crate::hudmenu::HudMenus) -> bool {
-    let k = menus.sel.clamp(0, crate::hudmenu::MENUS as i32 - 1) as usize;
-    let is_ability_bar = k != 2 && k != 3;
-    ability_bar_visible() || !is_ability_bar
+/// Whether the currently selected HUD menu is visible (all carousel menus
+/// 0 to 5, including items and weapon sets, are suppressed when an addon
+/// claims ability bars).
+///
+/// NOTE: We do NOT gate `hud_key` (pad/keyboard carousel use). The reference shows
+/// that Forge's 3 hotbars include the item bar (`scripts/ff_example.lua:788-840`;
+/// Avoids' "all THREE hotbar windows"), and Wereoxxs draws the item slots itself
+/// (`wereoxxs_ui/modules/ability_bars.lua:51-53`). Game input therefore stays unchanged
+/// and only the game's drawing is hidden.
+pub(crate) fn hud_menu_visible(_menus: &crate::hudmenu::HudMenus) -> bool {
+    ability_bar_visible()
 }
 
-/// Draws the HUD menu carousel, suppressing only the ability/hotbar menus
-/// (indices 0, 1, 4 and 5) when an addon has claimed them.
+/// Draws the HUD menu carousel, suppressing all carousel menus (indices 0 to 5,
+/// including items and weapon sets) when an addon has claimed ability bars.
 pub(crate) fn draw_hud_menus(
     menus: &mut crate::hudmenu::HudMenus,
     vui: &Vui,
@@ -457,11 +466,16 @@ mod tests {
         draw_hud_menus(&mut menus, &vui, &mut r, 0, &|_, _| Vec::new());
         assert_eq!(r.blits.len(), 0, "ability bar menu does not draw when claimed");
 
-        // Items menu (2) must still draw while ability bars are claimed.
+        // Items menu (2) and weapon sets (3) must NOT draw while ability bars are claimed.
         menus.sel = 2;
         let mut r = BlitRecorder::default();
         draw_hud_menus(&mut menus, &vui, &mut r, 0, &|_, _| Vec::new());
-        assert!(r.blits.len() > 0, "items menu still draws while ability bars are claimed");
+        assert_eq!(r.blits.len(), 0, "items menu does not draw while ability bars are claimed");
+
+        menus.sel = 3;
+        let mut r = BlitRecorder::default();
+        draw_hud_menus(&mut menus, &vui, &mut r, 0, &|_, _| Vec::new());
+        assert_eq!(r.blits.len(), 0, "weapon sets menu does not draw while ability bars are claimed");
 
         clear_claims();
         menus.sel = 0;
@@ -1164,4 +1178,51 @@ mod tests {
         unsafe { sys::igSetCurrentContext(original_context) };
         let _ = fs::remove_dir_all(&scratch);
     }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_hud_carousel_item_and_weapon_menus_hide_when_ability_bars_claimed() {
+        let vui = test_vui();
+        let name = |_msg: u32, _id: i64| -> Vec<u16> { Vec::new() };
+
+        for sel in [2, 3] {
+            let mut menus = crate::hudmenu::HudMenus::default();
+            menus.sel = sel;
+
+            // 1. Unclaimed: item menu (2) and weapon-set menu (3) are visible and draw
+            clear_claims();
+            assert!(hud_menu_visible(&menus), "unclaimed menu {sel} must be visible");
+            let mut r = BlitRecorder::default();
+            draw_hud_menus(&mut menus, &vui, &mut r, 0, &name);
+            assert!(
+                !r.blits.is_empty(),
+                "unclaimed menu {sel} must emit draw blits, got 0"
+            );
+
+            // 2. Claimed: item menu (2) and weapon-set menu (3) must be hidden!
+            set_claims(&["hotbar_draw_compact", "hotbar_draw_expanded"]);
+            assert!(
+                !hud_menu_visible(&menus),
+                "claimed menu {sel} must NOT be visible"
+            );
+            let mut r = BlitRecorder::default();
+            draw_hud_menus(&mut menus, &vui, &mut r, 0, &name);
+            assert_eq!(
+                r.blits.len(),
+                0,
+                "claimed menu {sel} must emit 0 draw blits when ability bars are claimed"
+            );
+
+            // 3. Clear claim: restores visibility
+            clear_claims();
+            assert!(hud_menu_visible(&menus), "restoring claim must restore visibility of menu {sel}");
+            let mut r = BlitRecorder::default();
+            draw_hud_menus(&mut menus, &vui, &mut r, 0, &name);
+            assert!(
+                !r.blits.is_empty(),
+                "restoring claim must restore draw blits for menu {sel}"
+            );
+        }
+    }
+
 }

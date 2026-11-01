@@ -642,6 +642,7 @@ mod tests {
             api: None,
             requested_capabilities: vec![],
             initially_enabled: true,
+            mods_root: None,
         })
         .unwrap()
     }
