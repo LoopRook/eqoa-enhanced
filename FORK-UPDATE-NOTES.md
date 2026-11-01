@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-01 · Enhanced 0.4.2
+
+- Fixed: map search listed other players near you by name. It now lists only NPCs and creatures, never players or their pets. Your creature journal never saved players and is unchanged.
+
 ## 2026-11-01 · Enhanced 0.4.1
 
 - Mod profiles: each character loads its own mods, settings and window layout. New characters can use a shared Tank, Healer, Melee or Caster profile (picked from their class) or make their own copy; manage profiles in the Addon Manager.
