@@ -314,7 +314,7 @@ impl TestGpu {
     }
 }
 
-fn rich_in_game_snapshot() -> Snapshot {
+pub(super) fn rich_in_game_snapshot() -> Snapshot {
     let mut snap = Snapshot::default();
     snap.in_game = true;
     snap.start_menu = false;

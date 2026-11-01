@@ -279,6 +279,9 @@ impl Manager {
                 }
             }
             if let Some(i) = entry.instance.as_ref() {
+                for message in i.bridge.drain_diagnostics() {
+                    self.diagnostic(Some(&entry.metadata.id), "imgui", message);
+                }
                 for message in i.host.drain_logs().unwrap_or_default() {
                     self.diagnostic(Some(&entry.metadata.id), "lua", message);
                 }
@@ -788,6 +791,7 @@ impl Manager {
 #[cfg(test)]
 mod tests {
     include!("manager_profiles_tests.rs");
+    include!("manager_scope_recovery_tests.rs");
     use super::*;
     use dear_imgui_rs::Context;
     use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo};

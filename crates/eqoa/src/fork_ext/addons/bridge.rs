@@ -103,9 +103,15 @@ struct Frame {
     geometry: usize,
     geometry_context: usize,
     stack: Vec<Stack>,
+    recovered: Vec<Vec<Stack>>,
+    diagnostics: Vec<String>,
+    recovery_limit_reported: bool,
 }
 
 pub const CALL_BUDGET: usize = 131_072;
+// Per VM, across frame/callback invocations and diagnostic drains. Scripts can
+// vary leak shapes indefinitely, so both history and pending warnings are bounded.
+const MAX_RECOVERY_DIAGNOSTICS: usize = 64;
 
 impl Frame {
     fn check(&mut self) -> Result<()> {
@@ -120,7 +126,11 @@ impl Frame {
             return Err(mlua::Error::runtime("expired ImGui frame"));
         }
         self.calls += 1;
-        let limit = if self.call_limit == 0 { CALL_BUDGET } else { self.call_limit };
+        let limit = if self.call_limit == 0 {
+            CALL_BUDGET
+        } else {
+            self.call_limit
+        };
         if self.calls > limit {
             return Err(mlua::Error::runtime(format!(
                 "ImGui call budget exceeded: {} calls (limit: {})",
@@ -816,6 +826,10 @@ impl Bridge {
         self.frame.borrow().calls
     }
 
+    pub fn drain_diagnostics(&self) -> Vec<String> {
+        std::mem::take(&mut self.frame.borrow_mut().diagnostics)
+    }
+
     pub fn geometry(&self) -> usize {
         self.frame.borrow().geometry
     }
@@ -853,7 +867,11 @@ impl Bridge {
         }
         let result = call();
         let mut state = self.frame.borrow_mut();
-        let unbalanced = !state.stack.is_empty();
+        let unbalanced = if state.stack.is_empty() {
+            None
+        } else {
+            Some(state.stack.clone())
+        };
         // Reverse our own operations, never pop another mod's or the host's stacks.
         while let Some(op) = state.stack.pop() {
             unsafe {
@@ -880,11 +898,26 @@ impl Bridge {
         state.active = false;
         state.context = std::ptr::null_mut();
         result?;
-        if unbalanced {
-            Err(mlua::Error::runtime("unbalanced ImGui stacks recovered"))
-        } else {
-            Ok(())
+        // UiForge recovers after a successful script run (including a Lua
+        // pcall that caught its own error); only an escaping error disables it.
+        // Preserve the real error above, without promoting recovered scopes to
+        // a second, fabricated fatal error.
+        if let Some(signature) = unbalanced {
+            if !state.recovered.contains(&signature) {
+                if state.recovered.len() < MAX_RECOVERY_DIAGNOSTICS {
+                    state.diagnostics.push(format!(
+                        "unbalanced ImGui stacks recovered: {signature:?}; addon kept running"
+                    ));
+                    state.recovered.push(signature);
+                } else if !state.recovery_limit_reported {
+                    state.recovery_limit_reported = true;
+                    state.diagnostics.push(
+                        "Further distinct ImGui recovery warnings suppressed for this addon".into(),
+                    );
+                }
+            }
         }
+        Ok(())
     }
 }
 
