@@ -172,6 +172,12 @@ impl Journal {
     pub fn default_path() -> Option<PathBuf> {
         #[cfg(not(target_arch = "wasm32"))]
         {
+            // Tests never touch a shared on-disk journal: another test may have pointed the
+            // report config dir at a scratch folder holding a journal, which would leak
+            // creatures into unrelated map-search tests (seen on CI, not locally).
+            if cfg!(test) {
+                return None;
+            }
             crate::fork_ext::report::config_dir().map(|d| d.join("journal.json"))
         }
         #[cfg(target_arch = "wasm32")]

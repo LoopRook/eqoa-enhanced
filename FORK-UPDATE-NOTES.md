@@ -2,7 +2,7 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
-## 2026-11-01 · Enhanced 0.4.0
+## 2026-11-01 · Enhanced 0.4.1
 
 - Mod profiles: each character loads its own mods, settings and window layout. New characters can use a shared Tank, Healer, Melee or Caster profile (picked from their class) or make their own copy; manage profiles in the Addon Manager.
 - ARPG UI and Avoid's Modern UI are now included next to Wereoxxs UI, and the game adds any missing included mods to your mods folder, even if you update automatically. They stay off until you turn them on. If you had removed one before, it is added back once (still off); delete it again and it stays gone. Included mods also update themselves, but only files you haven't edited.
