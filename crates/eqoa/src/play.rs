@@ -7716,16 +7716,8 @@ impl Play {
             .slots
             .iter()
             .flatten()
-            .filter(|e| Some(e.id) != me && e.p18 & 2 == 0 && e.p19 != 0 && self.in_scene(e))
-            .filter_map(|e| {
-                let c = e.creature.as_ref()?;
-                (c.p255 == 0 && !c.name.trim().is_empty()).then(|| crate::map::search::Live {
-                    name: c.name.clone(),
-                    world: cx.world,
-                    at: [e.actor_pos[0], e.actor_pos[2]],
-                    level: c.level,
-                })
-            })
+            .filter(|e| Some(e.id) != me && self.in_scene(e))
+            .filter_map(|e| crate::map::search::Live::of(e, cx.world))
             .collect();
         let members = self.group.members[..self.group.count()]
             .iter()

@@ -12,6 +12,23 @@ pub struct Live {
     pub level: u8,
 }
 
+impl Live {
+    /// A seen creature the search may list: alive, targetable, named, and
+    /// not a player character or a player's pet (`m_p256` 2 and 3, the
+    /// journal's privacy rule). `m_p255` alone is no player test: the server
+    /// sends other players with it 0, as it does NPCs.
+    pub fn of(e: &net::entity::Entity, world: i32) -> Option<Live> {
+        let c = e.creature.as_ref()?;
+        (e.p18 & 2 == 0 && e.p19 != 0 && c.p255 == 0 && c.p256 < 2 && !c.name.trim().is_empty())
+            .then(|| Live {
+                name: c.name.clone(),
+                world,
+                at: [e.actor_pos[0], e.actor_pos[2]],
+                level: c.level,
+            })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Member {
     pub id: u32,
@@ -1081,6 +1098,28 @@ mod tests {
             .collect();
         s.guide = Some(Target::Npc("Rat".into()));
         s
+    }
+    #[test]
+    fn live_search_never_lists_other_players_or_their_pets() {
+        // As the server sends them: other players walk with m_p255 0, as NPCs do
+        let seen = |id, name: &str, p256| net::entity::Entity {
+            id,
+            kind: net::entity::TYPE_CREATURE,
+            p19: 255,
+            actor_pos: [10.0, 0.0, 20.0],
+            creature: Some(net::entity::Creature {
+                name: name.into(),
+                level: 30,
+                p256,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(Live::of(&seen(1, "Darkrequiem", 2), 0).is_none(), "a player");
+        assert!(Live::of(&seen(2, "Familiar", 3), 0).is_none(), "a player's pet");
+        let npc = Live::of(&seen(3, "Guard Jahn", 0), 0).expect("an NPC is listed");
+        assert_eq!((npc.name.as_str(), npc.at, npc.level), ("Guard Jahn", [10.0, 20.0], 30));
+        assert!(Live::of(&seen(4, "Merchant Kari", 1), 0).is_some(), "class 1 is an NPC");
     }
     #[test]
     fn map_refinement_minimap_search_uses_a_compact_hit_target() {
