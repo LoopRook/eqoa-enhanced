@@ -5,7 +5,7 @@ use super::*;
 // per path point; 24 reserves join/closing overhead too. Native auto circle
 // tessellation is capped at 512; allow 520 for arc end points. Rounded rectangles
 // reserve that full-circle upper bound, including quarter-arc end points.
-const GEOMETRY_LIMIT: usize = 196_608;
+pub const GEOMETRY_LIMIT: usize = 524_288;
 const AUTO_POINTS: usize = 520;
 
 #[derive(Clone, Copy)]
@@ -128,7 +128,10 @@ impl DrawList {
             .checked_add(cost)
             .ok_or_else(|| mlua::Error::runtime("geometry budget overflow"))?;
         if next > GEOMETRY_LIMIT {
-            return Err(mlua::Error::runtime("ImGui geometry budget exceeded"));
+            return Err(mlua::Error::runtime(format!(
+                "ImGui geometry budget exceeded: {} indices (limit: {})",
+                next, GEOMETRY_LIMIT
+            )));
         }
         // Charge before calling native code, including invisible/transparent
         // primitives. A callback error cannot refund already recorded geometry.

@@ -1744,3 +1744,223 @@ fn forge_escape_and_history_keys_with_chat_claimed_do_not_draw_or_open_game_chat
         "game chat history MUST draw when unclaimed"
     );
 }
+
+
+#[test]
+fn forge_wereoxxs_worst_case_scrollback_10000_messages_and_budget_measurements() {
+    super::input::reset_input_state();
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!(
+            "SKIP forge_wereoxxs_worst_case_scrollback_10000_messages_and_budget_measurements: reference scripts root not found"
+        );
+        return;
+    };
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.name == "wereoxxs_ui")
+        .unwrap();
+
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+    let host = Host::for_addon(addon).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, addon).unwrap();
+    let font_bank = Rc::new(RefCell::new(super::fonts::FontBank::new(
+        0,
+        super::fonts::current_context_epoch(),
+    )));
+    super::fonts::FontBank::install_for_addon(&font_bank, &host.lua, addon).unwrap();
+
+    host.snapshot.set(rich_in_game_snapshot());
+
+    // Frame 1: Initial load
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    // Configure Wereoxxs to worst-case maximum settings:
+    // - All windows enabled
+    // - Chat scrollback set to 10,000 messages
+    // - Populate 10,000 messages across all channel types (Say, Group, Guild, Shout, Tell, Combat)
+    let setup_script = r#"
+        local ChatWindow = require("chat_window")
+        windows = {
+            bars = true,
+            casting = true,
+            player = true,
+            target = true,
+            group = true,
+            compass = true,
+            meter = true,
+            chat = true,
+        }
+        chat_config.max_messages = 10000
+        local types = {"Say", "Group", "Guild", "Shout", "Tell", "Combat"}
+        for i = 1, 10000 do
+            local t = types[(i % #types) + 1]
+            local text = "Message " .. i .. " scrollback measurement entry with realistic text line length."
+            if t == "Tell" then
+                text = "Player" .. (i % 5) .. ": " .. text
+            end
+            ChatWindow.Add(chat_state, chat_config, text, t)
+        end
+    "#;
+    host.execute(setup_script).unwrap();
+
+    // 1. Show that at the old ImGui call budget (4096), this worst-case frame FAILS:
+    bridge.set_call_limit(4096);
+    gpu.begin();
+    let err_calls = bridge.invoke(|| host.run_addon(addon)).unwrap_err();
+    gpu.render();
+    assert!(
+        err_calls.to_string().contains("ImGui call budget exceeded: 4097 calls (limit: 4096)"),
+        "expected call budget exceeded error at 4096, got: {err_calls}"
+    );
+
+    // 2. Show that at the old instruction budget (200,000), this worst-case frame FAILS:
+    bridge.set_call_limit(super::bridge::CALL_BUDGET);
+    let entry_fn = host.compile_addon_entry(addon).unwrap();
+    gpu.begin();
+    let err_instr = bridge.invoke(|| host.run_with_budget(&entry_fn, 200_000)).unwrap_err();
+    gpu.render();
+    assert!(
+        err_instr.to_string().contains("Forge instruction budget exceeded"),
+        "expected instruction budget exceeded error at 200,000, got: {err_instr}"
+    );
+
+    // 3. At the new limits (CALL_BUDGET = 131,072, INSTRUCTION_BUDGET = 4,000,000), it PASSES:
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let measured_calls = bridge.calls();
+    let measured_instructions = Host::INSTRUCTION_BUDGET.saturating_sub(host.instructions_remaining());
+    let measured_geometry = bridge.geometry();
+    println!(
+        "MEASURED WORST-CASE WEREOXXS: calls = {measured_calls}, instructions = {measured_instructions}, geometry = {measured_geometry}"
+    );
+    assert!(
+        measured_calls > 4096,
+        "measured calls must exceed old 4096 cap: got {measured_calls}"
+    );
+    assert!(
+        measured_instructions > 200_000,
+        "measured instructions must exceed old 200,000 cap: got {measured_instructions}"
+    );
+    assert!(
+        measured_calls * 4 <= super::bridge::CALL_BUDGET,
+        "new call budget (131,072) must have at least 4x margin over measured calls ({measured_calls})"
+    );
+    assert!(
+        measured_instructions as u64 * 4 <= Host::INSTRUCTION_BUDGET as u64,
+        "new instruction budget (4,000,000) must have at least 4x margin over measured instructions ({measured_instructions})"
+    );
+    gpu.render();
+}
+
+#[test]
+fn forge_addon_runtime_error_releases_all_claims_and_unhides_game_hud() {
+    use super::storage::Storage;
+    use super::visibility::published_visibility;
+
+    super::input::reset_input_state();
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!(
+            "SKIP forge_addon_runtime_error_releases_all_claims_and_unhides_game_hud: reference scripts root not found"
+        );
+        return;
+    };
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.id == "wereoxxs_ui")
+        .expect("wereoxxs_ui must be discovered");
+
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+
+    let config_dir = ScratchDir::new();
+    let storage = Storage::new(Some(config_dir.0.clone()));
+    let key = Storage::key(addon).expect("Storage::key must succeed");
+
+    // Profile with all hide options enabled
+    let lua = mlua::Lua::new();
+    let root_tbl = lua.create_table().unwrap();
+    let win_tbl = lua.create_table().unwrap();
+    win_tbl.set("bars", true).unwrap();
+    win_tbl.set("chat", true).unwrap();
+    win_tbl.set("player", true).unwrap();
+    win_tbl.set("hide_ability_bars", true).unwrap();
+    win_tbl.set("hide_player_bars", true).unwrap();
+    win_tbl.set("hide_game_chat", true).unwrap();
+    win_tbl.set("hide_game_compass", true).unwrap();
+    win_tbl.set("hide_target_nameplate", true).unwrap();
+    win_tbl.set("hide_game_group", true).unwrap();
+    win_tbl.set("hide_pet_panel", true).unwrap();
+    win_tbl.set("hide_active_effects", true).unwrap();
+    root_tbl.set("windows", win_tbl).unwrap();
+    storage.save_profile(&key, mlua::Value::Table(root_tbl)).unwrap();
+
+    let mut manager = Manager::new(
+        root.clone(),
+        Some(config_dir.0.clone()),
+        &gpu.device,
+        &gpu.queue,
+        gpu.renderer.clone(),
+    );
+
+    let snap = rich_in_game_snapshot();
+
+    // Enable wereoxxs_ui and run 2 frames to establish claims
+    manager.queue(Command::Enable("wereoxxs_ui".into(), true));
+    gpu.frame(&mut manager, snap.clone());
+    gpu.frame(&mut manager, snap.clone());
+
+    // Verify all hide claims are held while addon is healthy
+    assert!(
+        published_visibility().any_hidden(),
+        "healthy addon with all hide options must hold claims"
+    );
+    assert!(!crate::hud::fork_hud::chat_window_visible());
+    assert!(!crate::hud::fork_hud::ability_bar_visible());
+
+    let entry = manager.entries().into_iter().find(|e| e.metadata.id == "wereoxxs_ui").unwrap();
+    assert_eq!(entry.status, Status::Enabled);
+
+    // Induce fatal runtime error on the next frame (e.g. call budget exceeded)
+    manager.set_call_limit_for_all(5);
+
+    // Run frame where the error occurs
+    gpu.frame(&mut manager, snap.clone());
+
+    // Verify addon entered Status::Failed
+    let failed_entry = manager.entries().into_iter().find(|e| e.metadata.id == "wereoxxs_ui").unwrap();
+    assert_eq!(failed_entry.status, Status::Failed);
+
+    // Verify Addon Manager captured the diagnostic error
+    assert!(
+        manager
+            .diagnostics()
+            .iter()
+            .any(|d| d.message.contains("ImGui call budget exceeded")),
+        "Addon Manager must record the diagnostic error"
+    );
+
+    // Verify ALL hide claims are immediately released, bringing game HUD back
+    assert!(
+        !published_visibility().any_hidden(),
+        "all hide claims must be released when addon hits a runtime error"
+    );
+    assert!(
+        crate::hud::fork_hud::chat_window_visible(),
+        "game chat window must be visible again after addon fault"
+    );
+    assert!(
+        crate::hud::fork_hud::ability_bar_visible(),
+        "game ability bars must be visible again after addon fault"
+    );
+}

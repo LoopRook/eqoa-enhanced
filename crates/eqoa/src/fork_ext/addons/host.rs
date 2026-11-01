@@ -1,3 +1,5 @@
+pub const INSTRUCTION_BUDGET: u32 = 4_000_000;
+
 use super::discovery::DiscoveredAddon;
 use mlua::chunk::ChunkMode;
 use mlua::{Function, HookTriggers, Lua, Result, StdLib, Table, Value, VmState};
@@ -224,7 +226,10 @@ fn create_base_host() -> Result<BaseHost> {
         move |_, _| {
             let next = budget.get().checked_sub(1000).ok_or_else(|| {
                 fatal_hook.set(true);
-                mlua::Error::runtime("Forge instruction budget exceeded")
+                mlua::Error::runtime(format!(
+                    "Forge instruction budget exceeded: {} instructions (limit: {})",
+                    INSTRUCTION_BUDGET, INSTRUCTION_BUDGET
+                ))
             })?;
             budget.set(next);
             Ok(VmState::Continue)
@@ -236,7 +241,10 @@ fn create_base_host() -> Result<BaseHost> {
     let pcall_fn = lua.create_function(move |_, args: mlua::MultiValue| {
         let call_res = orig_pcall.call::<mlua::MultiValue>(args);
         if fatal_pcall.get() {
-            return Err(mlua::Error::runtime("Forge instruction budget exceeded"));
+            return Err(mlua::Error::runtime(format!(
+                "Forge instruction budget exceeded: {} instructions (limit: {})",
+                INSTRUCTION_BUDGET, INSTRUCTION_BUDGET
+            )));
         }
         call_res
     })?;
@@ -255,6 +263,8 @@ fn create_base_host() -> Result<BaseHost> {
 }
 
 impl Host {
+    pub const INSTRUCTION_BUDGET: u32 = INSTRUCTION_BUDGET;
+
     pub fn for_addon(addon: &DiscoveredAddon) -> Result<Self> {
         let base = create_base_host()?;
         let host_registry = Rc::new(RefCell::new(HashMap::new()));
@@ -394,12 +404,23 @@ impl Host {
             .into_function()
     }
 
+    pub fn instructions_remaining(&self) -> u32 {
+        self.remaining.get()
+    }
+
     pub fn run(&self, function: &Function) -> Result<()> {
-        self.remaining.set(200_000);
+        self.run_with_budget(function, Self::INSTRUCTION_BUDGET)
+    }
+
+    pub fn run_with_budget(&self, function: &Function, budget: u32) -> Result<()> {
+        self.remaining.set(budget);
         self.fatal.set(false);
         let res = function.call(());
         if self.fatal.get() {
-            return Err(mlua::Error::runtime("Forge instruction budget exceeded"));
+            return Err(mlua::Error::runtime(format!(
+                "Forge instruction budget exceeded: {} instructions (limit: {})",
+                budget, budget
+            )));
         }
         res
     }
@@ -413,7 +434,7 @@ impl Host {
         if !(0..=4).contains(&kind) {
             return Err(mlua::Error::runtime("unknown callback type"));
         }
-        self.remaining.set(200_000);
+        self.remaining.set(Self::INSTRUCTION_BUDGET);
         self.fatal.set(false);
         let res = match self
             .lua
@@ -424,7 +445,10 @@ impl Host {
             None => Ok(Value::Nil),
         };
         if self.fatal.get() {
-            return Err(mlua::Error::runtime("Forge instruction budget exceeded"));
+            return Err(mlua::Error::runtime(format!(
+                "Forge instruction budget exceeded: {} instructions (limit: {})",
+                Self::INSTRUCTION_BUDGET, Self::INSTRUCTION_BUDGET
+            )));
         }
         res
     }
@@ -522,7 +546,7 @@ mod tests {
             inner_marker = false
             pcall(function()
                 pcall(function()
-                    for i = 1, 1000000 do
+                    for i = 1, 10000000 do
                     end
                     inner_marker = true
                 end)
@@ -632,7 +656,7 @@ mod tests {
         host.execute(
             r#"
             UiForge.RegisterCallback(UiForge.CallbackType.Save, function()
-                for i = 1, 1000000 do end
+                for i = 1, 10000000 do end
                 return "finished"
             end)
         "#,

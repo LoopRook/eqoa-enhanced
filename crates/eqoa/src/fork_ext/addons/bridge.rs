@@ -97,11 +97,14 @@ struct Frame {
     context_epoch: u64,
     context: *mut sys::ImGuiContext,
     calls: usize,
+    call_limit: usize,
     invocation: u64,
     geometry: usize,
     geometry_context: usize,
     stack: Vec<Stack>,
 }
+
+pub const CALL_BUDGET: usize = 131_072;
 
 impl Frame {
     fn check(&mut self) -> Result<()> {
@@ -116,8 +119,12 @@ impl Frame {
             return Err(mlua::Error::runtime("expired ImGui frame"));
         }
         self.calls += 1;
-        if self.calls > 4096 {
-            return Err(mlua::Error::runtime("ImGui call budget exceeded"));
+        let limit = if self.call_limit == 0 { CALL_BUDGET } else { self.call_limit };
+        if self.calls > limit {
+            return Err(mlua::Error::runtime(format!(
+                "ImGui call budget exceeded: {} calls (limit: {})",
+                self.calls, limit
+            )));
         }
         Ok(())
     }
@@ -802,6 +809,19 @@ impl Bridge {
         lua.globals().set("ImGuiCond", conds)?;
         widgets::install(lua, &imgui, &frame)?;
         Ok(Self { frame })
+    }
+
+    pub fn calls(&self) -> usize {
+        self.frame.borrow().calls
+    }
+
+    pub fn geometry(&self) -> usize {
+        self.frame.borrow().geometry
+    }
+
+    #[cfg(test)]
+    pub fn set_call_limit(&self, limit: usize) {
+        self.frame.borrow_mut().call_limit = limit;
     }
 
     pub fn invoke(&self, call: impl FnOnce() -> Result<()>) -> Result<()> {

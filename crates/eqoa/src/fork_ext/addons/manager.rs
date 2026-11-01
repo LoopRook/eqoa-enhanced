@@ -708,6 +708,17 @@ impl Drop for Manager {
 }
 
 #[cfg(test)]
+impl Manager {
+    pub fn set_call_limit_for_all(&mut self, limit: usize) {
+        for entry in &mut self.entries {
+            if let Some(instance) = &mut entry.instance {
+                instance.bridge.set_call_limit(limit);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use dear_imgui_rs::Context;
