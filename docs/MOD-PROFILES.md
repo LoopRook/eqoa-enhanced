@@ -4,6 +4,37 @@ The owner-approved contract is in backlog.md, "Mod profiles per character or rol
 
 Implementation choices:
 
+
+Current behavior (automatic-character contract; supersedes the historical manual
+Default fallback described in the earlier verification sections below):
+
+- Default is a template, not an automatic world profile. An absent assignment or
+  legacy assignment to Default creates a separate character-named bundle, seeded
+  from the server's class default if present, otherwise Default. The assignment
+  and clone operation holds characters.lock; profile creation also holds
+  profiles.lock and never replaces a colliding filename.
+- Names capitalize the character's normalized name. A collision adds a sanitized
+  server suffix, then a numeric suffix. Names remain within the existing 48-byte
+  ASCII policy; unsupported names safely use Character. No account input exists.
+- Automatic creation happens even when the character's addons are all disabled,
+  before the lazy renderer launch decision. A damaged template/profile produces
+  a diagnostic and is never overwritten. A healthy profile can still be selected
+  and assigned while an automatic load is failing.
+- Existing characters keep independent copies when a class/default template
+  changes. Explicitly assigning Healer (or another named profile) to several
+  characters deliberately shares it. The header counts total explicit character
+  assignments across servers. Class-default markers use the current server.
+- The manager has a bounded scrollable selectable list with active/character/class
+  markers, Load for this character, Copy current into new profile, class default,
+  Delete and Edit Default template. Copy saves the outgoing bundle, loads a fresh
+  copy and assigns it to the current character. Selecting a row alone changes
+  nothing. Default is writable only during explicit template-edit mode.
+- The active header and help line explain automatic separation and optional
+  sharing. Logout, exit, explicit save and profile switch preserve the selected
+  character's state/layout. Template edits never rewrite existing character files.
+
+Historical implementation/verification notes follow:
+
 - JSON schema 1 bundles v2 addon keys, enabled flags, bounded plain Save values,
   and ImGui ini text. The legacy data files remain read-only migration inputs.
 - Profile names are 1-48 ASCII letters, digits, spaces, hyphens or underscores.
@@ -250,3 +281,46 @@ Both final full runs used fresh temporary roots; no map source was changed.
 Existing disc/assets/privilege/optional-GPU prerequisites still printed skips.
 No profile regression or reference-package fixture skipped. Release build follows
 the final commit; its result is reported in the handoff.
+
+## Automatic per-character follow-up
+
+Requested negative control: 22 passed / 5 failed before implementation. These
+five tests now cover the owner's A/off -> B/template -> A/off sequence, the old
+A -> Default assignment, class seeding by copy, active-profile delete refusal,
+and a rendered visible scrollable list containing all stored profiles:
+
+- mod_profiles_automatic_character_owner_sequence_isolates_enabled_state
+- mod_profiles_automatic_legacy_default_assignment_copies_template
+- mod_profiles_automatic_class_default_seeds_an_independent_character
+- mod_profiles_automatic_active_character_profile_cannot_be_deleted
+- mod_profiles_visible_list_contains_all_profiles_in_a_scrollable_region
+
+Further negative controls caught invalid automatic names/reselect assignment
+(27 passed / 2 failed) and template Revert/pending-load recovery (0 passed / 2
+failed). Additional tests cover simultaneous auto creation and damaged assigned
+files, explicit sharing counts, active/assigned/class catalog markers, template
+editing without changing an existing character, and recovery to a healthy profile.
+The old runtime ini test now explicitly enters template-edit mode before changing
+Default; its cold-close/migration/corrupt-file/restore checks remain intact.
+
+Automatic-character final verification (fresh TMP/TEMP roots, requested shared target):
+
+Plain:
+
+    test result: ok. 1460 passed; 0 failed; 21 ignored; 0 measured; 0 filtered out; finished in 79.26s
+
+Reference:
+
+    test result: ok. 1481 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 87.08s
+
+Wasm:
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.43s
+
+Footprint:
+
+    PASS: fork footprint is within reviewed policy
+
+All 32 profile regressions passed. Existing prerequisite SKIP lines: 106 plain /
+108 reference; no profile or pinned-package fixture skipped. The release build
+is run after the final commit and reported in the handoff. Live owner retest is pending.

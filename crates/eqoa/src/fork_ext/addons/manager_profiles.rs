@@ -9,6 +9,8 @@ const SWITCH_RETRY_DELAY: Duration = Duration::from_secs(2);
 pub(crate) enum ProfileAction {
     Load(String),
     Revert,
+    EditTemplate,
+    SetClassDefault(String),
     Save,
     SaveAs(String),
     BindCharacter,
@@ -29,6 +31,16 @@ pub(super) struct NamedSession {
     waiting_world: bool,
     actions: VecDeque<ProfileAction>,
     name_input: String,
+    selected: Option<String>,
+    editing_template: bool,
+}
+impl NamedSession {
+    fn current_character(&self) -> Option<&Character> {
+        self.retry
+            .as_ref()
+            .map(|(c, _)| c)
+            .or(self.character.as_ref())
+    }
 }
 pub(crate) fn class_display(class: u8) -> String {
     match crate::fork_ext::addons::player::CLASSES
@@ -87,6 +99,8 @@ impl Manager {
             waiting_world: false,
             actions: VecDeque::new(),
             name_input: String::new(),
+            selected: None,
+            editing_template: false,
         });
     }
     pub(super) fn profile_waiting_world(&self) -> bool {
@@ -182,6 +196,10 @@ impl Manager {
         let Some(mut s) = self.named.take() else {
             return;
         };
+        if s.active.eq_ignore_ascii_case(DEFAULT) && !s.editing_template {
+            self.named = Some(s);
+            return;
+        }
         match self.capture_profile_states(&s.data) {
             Ok(data) => {
                 s.data = data;
@@ -203,6 +221,9 @@ impl Manager {
     ) -> Result<(), String> {
         if !s.writable {
             return Err("Original profile settings could not be read; load a valid profile or Save as a new name".into());
+        }
+        if s.active.eq_ignore_ascii_case(DEFAULT) && !s.editing_template {
+            return Err("Default is a template; use Edit Default template to change it".into());
         }
         self.capture_profile(s, context)?;
         s.store.write(&s.active, &s.data)?;
@@ -295,7 +316,9 @@ impl Manager {
         self.commands.clear();
         self.after_render();
         Self::apply_profile_layout(context, &data.layout);
+        s.selected = Some(name.clone());
         s.active = name;
+        s.editing_template = false;
         s.data = data;
         s.dirty = false;
         s.writable = true;
@@ -306,13 +329,35 @@ impl Manager {
         name: String,
         context: &mut Context,
         revert: bool,
+        assign: bool,
     ) -> Result<(), String> {
+        let character = if assign {
+            s.current_character().cloned()
+        } else {
+            None
+        };
         if s.writable && name.eq_ignore_ascii_case(&s.active) && !revert {
+            if let Some(character) = &character {
+                if name.eq_ignore_ascii_case(DEFAULT) {
+                    return Err("Default is a template; use Edit Default template instead".into());
+                }
+                s.store.bind(character, &name, false)?;
+                s.character = Some(character.clone());
+                s.retry = None;
+                s.waiting_world = false;
+            }
             return Ok(());
         }
         // Validate the entire destination before touching the outgoing session.
         let data = s.store.read(&name)?;
-        if s.writable && !s.waiting_world && !name.eq_ignore_ascii_case(&s.active) {
+        if assign && name.eq_ignore_ascii_case(DEFAULT) && character.is_some() {
+            return Err("Default is a template; use Edit Default template instead".into());
+        }
+        if s.writable
+            && !s.waiting_world
+            && !name.eq_ignore_ascii_case(&s.active)
+            && (!s.active.eq_ignore_ascii_case(DEFAULT) || s.editing_template)
+        {
             if let Err(error) = self.persist_profile(s, context) {
                 if s.store.read(&s.active).is_ok() {
                     return Err(error);
@@ -324,7 +369,15 @@ impl Manager {
                 );
             }
         }
+        if let Some(character) = &character {
+            s.store.bind(character, &name, false)?;
+        }
         self.replace_profile(s, name, data, context);
+        if let Some(character) = character {
+            s.character = Some(character);
+            s.retry = None;
+            s.waiting_world = false;
+        }
         Ok(())
     }
     pub fn profile_boundary(
@@ -364,20 +417,23 @@ impl Manager {
                         // characters share Default/the same assigned profile.
                         // Failed loads keep old-character addon frames paused.
                         s.waiting_world = true;
-                        let result = s.store.resolve(character).and_then(|(name, unassigned)| {
-                            self.load_named(&mut s, name, context, true)?;
-                            Ok(unassigned)
-                        });
+                        let result =
+                            s.store
+                                .ensure_character(character)
+                                .and_then(|(name, created)| {
+                                    self.load_named(&mut s, name, context, true, false)?;
+                                    Ok(created)
+                                });
                         match result {
-                            Ok(unassigned) => {
+                            Ok(created) => {
                                 s.character = identity;
-                                s.unassigned = unassigned;
+                                s.unassigned = false;
                                 s.retry = None;
                                 s.waiting_world = false;
                                 Self::log_profile(
                                     &s,
-                                    if unassigned {
-                                        "world entry loaded fresh Default (unassigned)"
+                                    if created {
+                                        "world entry created and loaded character profile"
                                     } else {
                                         "world entry loaded fresh assigned profile"
                                     },
@@ -406,17 +462,33 @@ impl Manager {
         }
         while let Some(action) = s.actions.pop_front() {
             let result = match action {
-                ProfileAction::Load(name) => {
-                    self.load_named(&mut s, name, context, false).map(|()| {
+                ProfileAction::Load(name) => self
+                    .load_named(&mut s, name, context, false, true)
+                    .map(|()| {
                         Self::log_profile(&s, "profile selected");
-                    })
-                }
+                    }),
                 ProfileAction::Revert => {
                     let name = s.active.clone();
-                    self.load_named(&mut s, name, context, true).map(|()| {
-                        Self::log_profile(&s, "profile reverted to saved");
-                    })
+                    let editing_template = s.editing_template;
+                    self.load_named(&mut s, name, context, true, false)
+                        .map(|()| {
+                            s.editing_template = editing_template;
+                            Self::log_profile(&s, "profile reverted to saved");
+                        })
                 }
+                ProfileAction::EditTemplate => self
+                    .load_named(&mut s, DEFAULT.into(), context, true, false)
+                    .map(|()| {
+                        s.editing_template = true;
+                        Self::log_profile(
+                            &s,
+                            "editing Default template; character assignment unchanged",
+                        );
+                    }),
+                ProfileAction::SetClassDefault(name) => match s.current_character() {
+                    Some(character) => s.store.bind(character, &name, true),
+                    None => Err("Enter a character to choose its class default".into()),
+                },
                 ProfileAction::Save => self.persist_profile(&mut s, context).map(|()| {
                     Self::log_profile(&s, "active profile saved");
                 }),
@@ -424,11 +496,24 @@ impl Manager {
                     if !s.writable && name.eq_ignore_ascii_case(DEFAULT) {
                         return Err("Choose a new profile name; Default's original settings could not be read".into());
                     }
-                    self.capture_profile(&mut s, context)?;
+                    if s.writable && (!s.active.eq_ignore_ascii_case(DEFAULT) || s.editing_template)
+                    {
+                        self.persist_profile(&mut s, context)?;
+                    } else {
+                        self.capture_profile(&mut s, context)?;
+                    }
                     s.store.create(&name, &s.data)?;
-                    s.active = name;
-                    s.dirty = false;
-                    s.writable = true;
+                    let character = s.current_character().cloned();
+                    if let Some(character) = &character {
+                        s.store.bind(character, &name, false)?;
+                    }
+                    let data = s.data.clone();
+                    self.replace_profile(&mut s, name, data, context);
+                    if let Some(character) = character {
+                        s.character = Some(character);
+                        s.retry = None;
+                        s.waiting_world = false;
+                    }
                     Self::log_profile(&s, "new profile saved");
                     Ok(())
                 })(),
@@ -468,6 +553,14 @@ impl Manager {
             self.named = Some(s);
             return;
         }
+        if s.active.eq_ignore_ascii_case(DEFAULT) && !s.editing_template {
+            s.dirty = false;
+            unsafe {
+                (*context.as_raw()).IO.WantSaveIniSettings = false;
+            }
+            self.named = Some(s);
+            return;
+        }
         if s.dirty || force || context.io().want_save_ini_settings() {
             if !s.apply_initial {
                 let mut ini = String::new();
@@ -494,63 +587,133 @@ impl Manager {
         let Some(s) = &mut self.named else {
             return;
         };
-        ui.text(format!("Active profile: {}", s.active));
-        ui.text_wrapped(
-            "A profile saves enabled mods, settings and window positions. World entry loads this character's assignment, or shared Default.",
-        );
-        ui.text_wrapped("For a separate setup, Save as new profile, then Use for this character. Save active profile updates the selected setup.");
-        if s.unassigned {
-            ui.text_wrapped("This character has no profile assignment. Pick a profile or save a new one below, then use it for this character.");
+        let rows = match s.store.catalog(&s.active, s.current_character()) {
+            Ok(rows) => rows,
+            Err(error) => {
+                ui.text(format!("Profile: {}", s.active));
+                ui.text_wrapped(error);
+                if ui.button("Edit Default template") {
+                    s.actions.push_back(ProfileAction::EditTemplate);
+                }
+                return;
+            }
+        };
+        let active = rows.iter().find(|r| r.active);
+        let role = if s.active.eq_ignore_ascii_case(DEFAULT) {
+            "template for new characters".into()
+        } else if active.is_some_and(|r| r.characters > 1) {
+            format!("shared with {} characters", active.unwrap().characters)
+        } else if active.is_some_and(|r| r.assigned) {
+            "this character's".into()
+        } else {
+            "not assigned to this character".into()
+        };
+        ui.text(format!("Profile: {} ({role})", s.active));
+        ui.text_wrapped("Each character keeps its own mods, settings and window layout automatically. Pick another profile below to share or copy one.");
+        ui.child_window("Profiles list")
+            .size([0., 128.])
+            .build(ui, || {
+                for row in &rows {
+                    let mut label = row.name.clone();
+                    if row.name.eq_ignore_ascii_case(DEFAULT) {
+                        label.push_str(" [template]");
+                    }
+                    if row.active {
+                        label.push_str(" [active]");
+                    }
+                    if row.assigned {
+                        label.push_str(" [this character's]");
+                    }
+                    if !row.class_defaults.is_empty() {
+                        label.push_str(&format!(
+                            " [default: {}]",
+                            row.class_defaults
+                                .iter()
+                                .map(|c| class_display(*c))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                    }
+                    if ui
+                        .selectable_config(format!("{label}##profile-row-{}", row.name))
+                        .selected(
+                            s.selected
+                                .as_deref()
+                                .is_some_and(|n| n.eq_ignore_ascii_case(&row.name)),
+                        )
+                        .build()
+                    {
+                        s.selected = Some(row.name.clone());
+                    }
+                }
+            });
+        let selected = s.selected.clone();
+        {
+            let _disabled = ui.begin_disabled_with_cond(
+                selected
+                    .as_deref()
+                    .is_none_or(|n| n.eq_ignore_ascii_case(DEFAULT))
+                    || s.current_character().is_none(),
+            );
+            if ui.button("Load for this character")
+                && let Some(name) = selected.clone()
+            {
+                s.actions.push_back(ProfileAction::Load(name));
+            }
         }
-        if let Some(c) = &s.character {
-            ui.text(format!(
-                "Character: {} ({})",
-                c.name,
-                class_display(c.class)
-            ));
+        ui.same_line();
+        {
+            let _disabled =
+                ui.begin_disabled_with_cond(selected.is_none() || s.current_character().is_none());
+            if ui.button(class_default_button_label(s.current_character()))
+                && let Some(name) = selected.clone()
+            {
+                s.actions.push_back(ProfileAction::SetClassDefault(name));
+            }
         }
-        if s.retry.is_some() {
-            ui.text_wrapped("This character's profile could not be loaded. Retrying shortly; see the diagnostic below.");
+        ui.same_line();
+        {
+            let _disabled = ui.begin_disabled_with_cond(selected.as_deref().is_none_or(|n| {
+                n.eq_ignore_ascii_case(&s.active) || n.eq_ignore_ascii_case(DEFAULT)
+            }));
+            if ui.button("Delete")
+                && let Some(name) = selected
+            {
+                s.actions.push_back(ProfileAction::Delete(name));
+                s.selected = None;
+            }
         }
         ui.input_text("New profile name", &mut s.name_input).build();
         if s.name_input.len() > 48 {
             s.name_input = s.name_input.chars().take(48).collect();
         }
-        if ui.button("Save active profile") {
-            s.actions.push_back(ProfileAction::Save);
-        }
-        if ui.button("Revert active profile to saved") {
-            s.actions.push_back(ProfileAction::Revert);
-        }
-        ui.same_line();
-        if ui.button("Save as new profile") {
+        if ui.button("Copy current into new profile...") {
             s.actions
                 .push_back(ProfileAction::SaveAs(s.name_input.clone()));
         }
-        if ui.button("Use for this character") {
-            s.actions.push_back(ProfileAction::BindCharacter);
+        if ui.button("Edit Default template") {
+            s.actions.push_back(ProfileAction::EditTemplate);
         }
         ui.same_line();
-        let class_btn_label = class_default_button_label(s.character.as_ref());
-        if ui.button(format!("{class_btn_label}##class-default")) {
-            s.actions.push_back(ProfileAction::BindClass);
-        }
-        match s.store.names() {
-            Ok(names) => {
-                for name in names {
-                    if ui.button(format!("Switch / load {name}##profile-{name}")) {
-                        s.actions.push_back(ProfileAction::Load(name.clone()));
-                    }
-                    if !name.eq_ignore_ascii_case(&s.active) && !name.eq_ignore_ascii_case(DEFAULT)
-                    {
-                        ui.same_line();
-                        if ui.button(format!("Delete##profile-{name}")) {
-                            s.actions.push_back(ProfileAction::Delete(name));
-                        }
-                    }
-                }
+        {
+            let _disabled = ui.begin_disabled_with_cond(
+                s.active.eq_ignore_ascii_case(DEFAULT) && !s.editing_template,
+            );
+            if ui.button("Save profile") {
+                s.actions.push_back(ProfileAction::Save);
             }
-            Err(_) => ui.text_wrapped("Profile folder is unavailable; see the diagnostics below."),
+            ui.same_line();
+            if ui.button("Revert to saved") {
+                s.actions.push_back(ProfileAction::Revert);
+            }
+        }
+        if s.editing_template {
+            ui.text_wrapped("Editing the template only: these changes seed new characters; existing profiles stay unchanged.");
+        }
+        if s.retry.is_some() {
+            ui.text_wrapped(
+                "Character profile load failed; retrying shortly. See diagnostics below.",
+            );
         }
         ui.separator();
     }

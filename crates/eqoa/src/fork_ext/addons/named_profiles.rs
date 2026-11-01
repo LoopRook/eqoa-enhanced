@@ -210,6 +210,14 @@ impl Bindings {
         Ok(bindings)
     }
 }
+#[derive(Clone, Debug)]
+pub(super) struct ProfileRow {
+    pub name: String,
+    pub active: bool,
+    pub assigned: bool,
+    pub characters: usize,
+    pub class_defaults: Vec<u8>,
+}
 pub(crate) struct Store {
     root: Option<PathBuf>,
 }
@@ -266,6 +274,9 @@ impl Store {
     }
     pub fn create(&self, name: &str, doc: &Document) -> Result<(), String> {
         valid_name(name)?;
+        // All creators share this lock; an automatic clone never replaces a
+        // concurrently-created manual profile with the same name.
+        let _lock = self.lock("profiles.lock", "Profile creation is busy; try again")?;
         if self.names()?.iter().any(|v| v.eq_ignore_ascii_case(name)) {
             return Err("That profile name already exists".into());
         }
@@ -364,6 +375,152 @@ impl Store {
             name.cloned().unwrap_or_else(|| DEFAULT.into()),
             name.is_none(),
         ))
+    }
+    fn lock(&self, filename: &str, busy: &str) -> Result<fs::File, String> {
+        let root = self.root()?;
+        fs::create_dir_all(root).map_err(|_| "Cannot create mod profile directory")?;
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(root.join(filename))
+            .map_err(|_| busy.to_owned())?;
+        lock.try_lock().map_err(|_| busy.to_owned())?;
+        Ok(lock)
+    }
+    fn write_bindings(&self, bindings: &Bindings) -> Result<(), String> {
+        write_json(
+            &self.root()?.join("characters.json"),
+            &json!({"schemaVersion":1,"characters":bindings.characters,"classes":bindings.classes}),
+        )
+    }
+    /// Assign an independent copy for unassigned/legacy-Default characters.
+    /// The assignment lock covers discovery, creation and read-modify-write.
+    pub fn ensure_character(&self, character: &Character) -> Result<(String, bool), String> {
+        let _lock = self.lock(
+            "characters.lock",
+            "Character profile assignments are busy; try again",
+        )?;
+        let mut bindings = self.bindings()?;
+        if let Some(name) = bindings
+            .characters
+            .get(&character.server)
+            .and_then(|m| m.get(&character.name))
+        {
+            if !name.eq_ignore_ascii_case(DEFAULT) && self.path(name)?.exists() {
+                self.read(name)?; // A damaged explicit profile is never replaced.
+                return Ok((name.clone(), false));
+            }
+        }
+        let seed = bindings
+            .classes
+            .get(&character.server)
+            .and_then(|m| m.get(&character.class.to_string()))
+            .filter(|name| self.path(name).is_ok_and(|p| p.exists()))
+            .map(String::as_str)
+            .unwrap_or(DEFAULT);
+        let document = self.read(seed)?;
+        let mut base: String = character
+            .name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    ' '
+                }
+            })
+            .collect();
+        base = base.trim().to_owned();
+        if let Some(first) = base.get_mut(..1) {
+            first.make_ascii_uppercase();
+        }
+        if valid_name(&base).is_err() || base.eq_ignore_ascii_case(DEFAULT) {
+            base = if base.is_empty() {
+                "Character".into()
+            } else {
+                format!("Character {base}")
+            };
+        }
+        base = base
+            .chars()
+            .take(24)
+            .collect::<String>()
+            .trim_end()
+            .to_owned();
+        let server: String = character
+            .server
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .take(18)
+            .collect();
+        let names = self.names()?;
+        let mut name = None;
+        for collision in 0..128 {
+            let candidate = match collision {
+                0 => base.clone(),
+                1 => format!("{base} {server}"),
+                n => format!("{base} {server}-{n}"),
+            };
+            let candidate = candidate.chars().take(48).collect::<String>();
+            valid_name(&candidate)?;
+            if !names.iter().any(|v| v.eq_ignore_ascii_case(&candidate)) {
+                name = Some(candidate);
+                break;
+            }
+        }
+        let name =
+            name.ok_or("Too many profiles with this character name; choose a profile manually")?;
+        self.create(&name, &document)?;
+        bindings
+            .characters
+            .entry(character.server.clone())
+            .or_default()
+            .insert(character.name.clone(), name.clone());
+        self.write_bindings(&bindings)?;
+        Ok((name, true))
+    }
+    pub fn catalog(
+        &self,
+        active: &str,
+        character: Option<&Character>,
+    ) -> Result<Vec<ProfileRow>, String> {
+        let bindings = self.bindings()?;
+        let assigned = character.and_then(|c| {
+            bindings
+                .characters
+                .get(&c.server)
+                .and_then(|m| m.get(&c.name))
+        });
+        self.names()?
+            .into_iter()
+            .map(|name| {
+                let characters = bindings
+                    .characters
+                    .values()
+                    .flat_map(|m| m.values())
+                    .filter(|v| v.eq_ignore_ascii_case(&name))
+                    .count();
+                let mut class_defaults: Vec<u8> = bindings
+                    .classes
+                    .iter()
+                    .filter(|(server, _)| character.is_none_or(|c| c.server == **server))
+                    .flat_map(|(_, m)| m.iter())
+                    .filter(|(_, v)| v.eq_ignore_ascii_case(&name))
+                    .filter_map(|(k, _)| k.parse::<u8>().ok().filter(|v| *v <= 14))
+                    .collect();
+                class_defaults.sort();
+                class_defaults.dedup();
+                Ok(ProfileRow {
+                    active: name.eq_ignore_ascii_case(active),
+                    assigned: assigned.is_some_and(|v| v.eq_ignore_ascii_case(&name)),
+                    name,
+                    characters,
+                    class_defaults,
+                })
+            })
+            .collect()
     }
     pub fn bind(&self, character: &Character, profile: &str, class: bool) -> Result<(), String> {
         self.read(profile)?;
@@ -727,5 +884,71 @@ mod tests {
                 .0,
             "Tank"
         );
+    }
+    #[test]
+    fn mod_profiles_auto_names_handle_devices_unicode_and_server_collisions() {
+        let scratch = Scratch::new();
+        let store = Store::new(Some(scratch.0.clone()));
+        store.create(DEFAULT, &Document::empty()).unwrap();
+        assert_eq!(
+            store
+                .ensure_character(&character("one.example", "Ari", 3))
+                .unwrap()
+                .0,
+            "Ari"
+        );
+        assert_eq!(
+            store
+                .ensure_character(&character("other.example", "Ari", 3))
+                .unwrap()
+                .0,
+            "Ari other-example"
+        );
+        for name in ["CON", "Default", "\u{03b1}"] {
+            let created = store
+                .ensure_character(&character("one.example", name, 3))
+                .unwrap()
+                .0;
+            valid_name(&created).unwrap();
+            assert!(!created.eq_ignore_ascii_case(DEFAULT));
+        }
+    }
+    #[test]
+    fn mod_profiles_concurrent_auto_creation_has_one_character_assignment() {
+        use std::sync::{Arc, Barrier};
+        let scratch = Scratch::new();
+        let store = Store::new(Some(scratch.0.clone()));
+        store.create(DEFAULT, &Document::empty()).unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let threads = [0, 1].map(|_| {
+            let root = scratch.0.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let store = Store::new(Some(root));
+                barrier.wait();
+                for _ in 0..100 {
+                    match store.ensure_character(&character("server.example", "Ari", 3)) {
+                        Ok((name, _)) => return name,
+                        Err(e) if e.contains("busy") => {
+                            std::thread::sleep(std::time::Duration::from_millis(10))
+                        }
+                        Err(e) => panic!("unexpected automatic creation failure: {e}"),
+                    }
+                }
+                panic!("automatic creation stayed busy");
+            })
+        });
+        for thread in threads {
+            assert_eq!(thread.join().unwrap(), "Ari");
+        }
+        assert_eq!(store.names().unwrap(), ["Ari", "Default"]);
+        let path = store.path("Ari").unwrap();
+        fs::write(&path, b"broken").unwrap();
+        assert!(
+            store
+                .ensure_character(&character("server.example", "Ari", 3))
+                .is_err()
+        );
+        assert_eq!(fs::read(path).unwrap(), b"broken");
     }
 }

@@ -278,7 +278,7 @@ impl Runtime {
                 let store = super::named_profiles::Store::new(self.paths.config.clone());
                 if let Ok(identity) = super::named_profiles::Character::new(server, character) {
                     match store
-                        .resolve(&identity)
+                        .ensure_character(&identity)
                         .and_then(|(name, _)| store.read(&name))
                     {
                         Ok(doc) => self.initial_enabled = doc.enabled.values().any(|v| *v),
@@ -1454,6 +1454,10 @@ mod tests {
 
         let mut runtime = Runtime::new(paths.clone());
         runtime.launch_headless(&device, &queue, format).unwrap();
+        // Template changes require the explicit template-edit action.
+        if let Some(Graphics::Managed(active)) = runtime.graphics.as_mut() {
+            active.manager.queue_profile(super::super::manager::ProfileAction::EditTemplate);
+        }
         runtime.step_frame_headless(|ui| {
             ui.window("WereoxxsChat")
                 .position([250.0, 180.0], dear_imgui_rs::Condition::Always)
@@ -1569,6 +1573,9 @@ mod tests {
         runtime_env
             .launch_headless(&device, &queue, format)
             .unwrap();
+        if let Some(Graphics::Managed(active)) = runtime_env.graphics.as_mut() {
+            active.manager.queue_profile(super::super::manager::ProfileAction::EditTemplate);
+        }
         runtime_env.step_frame_headless(|ui| {
             ui.window("RedirectionWindow")
                 .position([99.0, 88.0], dear_imgui_rs::Condition::Always)
