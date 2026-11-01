@@ -538,25 +538,25 @@ pub fn install_bundled_mods_if_needed() {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = std::thread::Builder::new()
-            .name("bundled-mods-install".into())
-            .spawn(move || {
-                let mods_dir = crate::fork_ext::mods::mods_dir();
-                let config_dir = crate::settings::config_dir();
-                match install_bundled_mods(&mods_dir, config_dir.as_deref()) {
-                    Ok(summary) => {
-                        if !summary.packages_extracted.is_empty() {
-                            crate::say(&format!(
-                                "Installed bundled mods: {}",
-                                summary.packages_extracted.join(", ")
-                            ));
-                        }
-                    }
-                    Err(e) => {
-                        crate::say(&format!("Could not install bundled mods: {e}"));
-                    }
+        let mods_dir = std::env::var_os("EQOA_FORGE_MODS")
+            .map(PathBuf::from)
+            .unwrap_or_else(crate::fork_ext::mods::mods_dir);
+        let config_dir = std::env::var_os("EQOA_CONFIG")
+            .map(PathBuf::from)
+            .or_else(crate::settings::config_dir);
+        match install_bundled_mods(&mods_dir, config_dir.as_deref()) {
+            Ok(summary) => {
+                if !summary.packages_extracted.is_empty() {
+                    crate::say(&format!(
+                        "Installed bundled mods: {}",
+                        summary.packages_extracted.join(", ")
+                    ));
                 }
-            });
+            }
+            Err(e) => {
+                crate::say(&format!("Could not install bundled mods: {e}"));
+            }
+        }
     }
 }
 
@@ -881,6 +881,27 @@ mod tests {
         } else {
             eprintln!("SKIP symlink test: neither symlink nor junction could be created");
         }
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+    #[test]
+    fn test_from_env_setup_discovers_all_three_bundled_packages_on_fresh_mods_folder() {
+        let temp = std::env::temp_dir().join(format!("eqoa-fresh-from-env-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp);
+        let mods_dir = temp.join("mods");
+        let config_dir = temp.join("config");
+
+        // Simulate from_env: fresh mods folder, install synchronously before discovery
+        reset_installed_once_for_test();
+        let res = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
+        assert_eq!(res.packages_extracted, vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"]);
+
+        let discovery = crate::fork_ext::addons::discovery::discover(&mods_dir);
+        let ids: BTreeSet<String> = discovery.addons.iter().map(|a| a.id.clone()).collect();
+        assert!(ids.contains("wereoxxs_ui"), "wereoxxs_ui must be discovered on first start");
+        assert!(ids.contains("arpg_ui"), "arpg_ui must be discovered on first start");
+        assert!(ids.contains("avoids_modern_ui"), "avoids_modern_ui must be discovered on first start");
+        assert_eq!(ids.len(), 3);
 
         let _ = fs::remove_dir_all(&temp);
     }
