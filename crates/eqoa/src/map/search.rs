@@ -91,7 +91,7 @@ pub struct Search {
     selected: usize,
     offset: usize,
     hits: Vec<([i32; 4], Action)>,
-    cached: RefCell<Option<(String, Tab, Rc<Vec<ResultRow>>)>>,
+    cached: RefCell<Option<(String, Tab, u64, Rc<Vec<ResultRow>>)>>,
     pub status_msg: Option<(String, std::time::Instant)>,
 }
 
@@ -409,13 +409,14 @@ impl Search {
         })
     }
     pub fn results(&self) -> Rc<Vec<ResultRow>> {
-        if let Some((query, tab, rows)) = self.cached.borrow().as_ref() {
-            if query == &self.query && *tab == self.tab {
+        let rev = super::journal::revision();
+        if let Some((query, tab, cached_rev, rows)) = self.cached.borrow().as_ref() {
+            if query == &self.query && *tab == self.tab && *cached_rev == rev {
                 return Rc::clone(rows);
             }
         }
         let rows = Rc::new(self.build_results());
-        *self.cached.borrow_mut() = Some((self.query.clone(), self.tab, Rc::clone(&rows)));
+        *self.cached.borrow_mut() = Some((self.query.clone(), self.tab, rev, Rc::clone(&rows)));
         rows
     }
 
@@ -909,13 +910,17 @@ impl Search {
         }
         let foot = py + h - 34;
         t::fill(r, [px + 8, foot - 7, px + w - 8, foot - 6], t::BORDER);
-        let status_line = self.status_msg.as_ref().and_then(|(msg, when)| {
-            if when.elapsed().as_secs() < 6 {
-                Some(msg.clone())
-            } else {
-                None
-            }
-        });
+        let status_line = self
+            .status_msg
+            .as_ref()
+            .and_then(|(msg, when)| {
+                if when.elapsed().as_secs() < 6 {
+                    Some(msg.clone())
+                } else {
+                    None
+                }
+            })
+            .or_else(super::journal::status_msg);
         let (j_names, j_spawns) = super::journal::counts();
         let footer_text = status_line.unwrap_or_else(|| {
             if self.tab == Tab::Npcs {
