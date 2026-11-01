@@ -118,6 +118,8 @@ pub(crate) fn auto_create_mods_dir_at(dir: &Path) {
 /// Ensures the `mods/` directory exists and creates default starter templates.
 pub fn ensure_mods_dir() {
     auto_create_mods_dir();
+    #[cfg(not(target_arch = "wasm32"))]
+    super::bundled::install_bundled_mods_if_needed();
 }
 
 /// Opens the `mods/` folder in the system file manager.
