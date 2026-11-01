@@ -593,7 +593,39 @@ impl Play {
             crate::fork_ext::addons::combat::CombatSnapshot::default()
         };
 
-pub fn is_menu_mode(mode: i32) -> bool {
+        let start_menu = in_game
+            && (is_menu_mode(self.mode)
+                || self.start.as_ref().is_some_and(|s| s.menu.visible));
+        let ui_mode = if !in_game {
+            0
+        } else if self.mode != 0 {
+            self.mode as u32
+        } else if self.start.as_ref().is_some_and(|s| s.menu.visible) {
+            0x0D
+        } else {
+            0
+        };
+        let ui_busy = in_game && (ui_mode != 0 || start_menu || self.map.open || self.search.open);
+
+        crate::fork_ext::addons::host::Snapshot {
+            in_game,
+            start_menu,
+            ui_mode,
+            ui_busy,
+            health: self.forge_health.snapshot(connected, hud_ready),
+            player,
+            group,
+            entities,
+            abilities,
+            chat,
+            combat,
+            input: crate::fork_ext::addons::input::InputSnapshot::default(),
+            effects: crate::fork_ext::addons::effects::EffectsSnapshot::default(),
+        }
+    }
+}
+
+fn is_menu_mode(mode: i32) -> bool {
     matches!(
         mode,
         1    // Corpse loot window (VIWndLoot)
@@ -634,37 +666,6 @@ pub fn is_menu_mode(mode: i32) -> bool {
     )
 }
 
-        let start_menu = in_game
-            && (is_menu_mode(self.mode)
-                || self.start.as_ref().is_some_and(|s| s.menu.visible));
-        let ui_mode = if !in_game {
-            0
-        } else if self.mode != 0 {
-            self.mode as u32
-        } else if self.start.as_ref().is_some_and(|s| s.menu.visible) {
-            0x0D
-        } else {
-            0
-        };
-        let ui_busy = in_game && (ui_mode != 0 || start_menu || self.map.open || self.search.open);
-
-        crate::fork_ext::addons::host::Snapshot {
-            in_game,
-            start_menu,
-            ui_mode,
-            ui_busy,
-            health: self.forge_health.snapshot(connected, hud_ready),
-            player,
-            group,
-            entities,
-            abilities,
-            chat,
-            combat,
-            input: crate::fork_ext::addons::input::InputSnapshot::default(),
-            effects: crate::fork_ext::addons::effects::EffectsSnapshot::default(),
-        }
-    }
-}
 pub(super) fn health_hidden(play: &Play) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
