@@ -2,7 +2,8 @@ Origin: https://github.com/mmvest/FrontiersForge
 Revision: 4026d5cebcede24943ece8dc34833e584f46cd90 (v0.3.2)
 License: MIT (see FrontiersForge-MIT.txt in the release archive)
 Fonts: SIL Open Font License 1.1 (see OFL.txt beside each font family)
-Files are unmodified vendor assets from the FrontiersForge reference repository.
+Files are unmodified vendor assets from the FrontiersForge reference repository, except:
+- avoids_modern_ui/modules/avoids_exp_bars.lua the XP bars hide at max level and line 269 gets a nil guard, since Util.GetExpRequiredForLevel returns nil at level 60. MIT permits modification.
 Modern UI: Author Avoids (see avoids_modern_ui/README.md)
 
 SHA-256 checksums:
@@ -34,7 +35,7 @@ d7ad2c6a75d5ccebacec9c65abf45896c07390af5a70ffe7b076574b953eb798  avoids_modern_
 bdd8ef6b84ac4e31434ab289ef72ef6ff7a519b6ea2985f612edf78b7bc63de1  avoids_modern_ui/modules/avoids_chat_log.lua
 8675d7045f65722a9f5644ac3c09196cc841ac186c3fefa127ab56daf33c7c83  avoids_modern_ui/modules/avoids_common.lua
 58e8d9138601836bd0434cda5a47436191d9adb03acdf61f1964e410b6d68af2  avoids_modern_ui/modules/avoids_effects.lua
-ede002be4485b68309c87f648a7ff2e48b73b83d6b77113962c86a0e8a5fcfb0  avoids_modern_ui/modules/avoids_exp_bars.lua
+058304f4c9e0b7e41b1d463ad60480ec6f63f5abf48395b2e3d728bf3eb917a5  avoids_modern_ui/modules/avoids_exp_bars.lua
 a942a5d6e43084eaf20a3a468948b2b70ae5956ea21e2323db2952cf0c4e1a8d  avoids_modern_ui/modules/avoids_group_frames.lua
 2d75fbffde975f67587b02abd5b3449cde51f7e7c737a72d13ed8dbc77701f69  avoids_modern_ui/modules/avoids_health_bar.lua
 9686a711b6ec6a19406c7dfcdba8309dc97201b691edebd216dd4ffe9e56376d  avoids_modern_ui/modules/avoids_mana_bar.lua

@@ -252,6 +252,8 @@ end
 local function Render()
     -- If we are not in game or if the start menu is open, don't display the bars
     if Util.IsInGame() == 0 or Util.IsStartMenuOpen() == 1 then return end
+    -- At max level there is no next level (Util.GetExpRequiredForLevel returns nil): hide the bars (EQOA Enhanced patch)
+    if Util.GetExpRequiredForLevel(Player.GetLevel()) == nil then return end
 
     local state = modern_exp_bars_state
 
@@ -266,7 +268,7 @@ local function Render()
         -- Main (gold) bar: current exp progress toward the next level
         local current_exp = Player.GetExp()
         local required_exp = Util.GetExpRequiredForLevel(Player.GetLevel())
-        if required_exp <= 0 then required_exp = 1 end -- guard against a divide-by-zero
+        if required_exp == nil or required_exp <= 0 then required_exp = 1 end -- guard against a divide-by-zero (nil at max level; EQOA Enhanced patch)
 
         local main_percent = current_exp / required_exp
         if main_percent < 0 then main_percent = 0 end
