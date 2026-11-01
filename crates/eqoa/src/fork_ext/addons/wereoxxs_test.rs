@@ -111,7 +111,7 @@ impl TestGpu {
         self.context.frame();
     }
 
-    fn render(&mut self) {
+    fn render(&mut self) -> usize {
         let target = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("wereoxxs test target"),
             size: wgpu::Extent3d {
@@ -128,9 +128,11 @@ impl TestGpu {
         });
         let view = target.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        {
+        let total_vtx = {
             let mut renderer = self.renderer.borrow_mut();
             let frame = self.context.render(renderer.renderer_consumer().unwrap());
+            let reconciled = renderer.reconcile_frame(frame).unwrap();
+            let vtx = reconciled.draw_data().total_vtx_count();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -148,17 +150,20 @@ impl TestGpu {
                 multiview_mask: None,
             });
             renderer
-                .render(frame, &mut pass, FramebufferExtent::new(1024, 768))
+                .render_reconciled(reconciled, &mut pass, FramebufferExtent::new(1024, 768))
                 .unwrap();
-        }
+            vtx
+        };
         self.queue.submit([encoder.finish()]);
+        total_vtx
     }
 
-    fn frame(&mut self, manager: &mut Manager, snapshot: Snapshot) {
+    fn frame(&mut self, manager: &mut Manager, snapshot: Snapshot) -> usize {
         self.begin();
         manager.frame(snapshot);
-        self.render();
+        let vtx = self.render();
         manager.after_render();
+        vtx
     }
 }
 
@@ -1433,5 +1438,144 @@ fn forge_dialog_receives_enter_even_when_addon_suppresses_enter() {
     assert!(
         wants_key_capture_plain,
         "Enter MUST be captured by addon during plain play"
+    );
+}
+
+#[test]
+fn forge_wereoxxs_pauses_and_hides_in_all_menu_modes() {
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!("SKIP forge_wereoxxs_pauses_and_hides_in_all_menu_modes: reference scripts root not found");
+        return;
+    };
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.id == "wereoxxs_ui")
+        .expect("wereoxxs_ui must be discovered");
+
+    let host = Host::for_addon(addon).expect("Host::for_addon must succeed");
+    let bridge = Bridge::install(&host).unwrap();
+
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, addon).unwrap();
+
+    let font_bank = Rc::new(RefCell::new(super::fonts::FontBank::new(
+        0,
+        super::fonts::current_context_epoch(),
+    )));
+    super::fonts::FontBank::install_for_addon(&font_bank, &host.lua, addon).unwrap();
+
+    let mut snap = rich_in_game_snapshot();
+    host.snapshot.set(snap);
+
+    // Frame 1: Initial load
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    gpu.render();
+
+    // Turn on windows
+    let win_table: Table = host.lua.globals().get("windows").unwrap();
+    win_table.set("bars", true).unwrap();
+    win_table.set("casting", true).unwrap();
+    win_table.set("player", true).unwrap();
+    win_table.set("target", true).unwrap();
+    win_table.set("group", true).unwrap();
+    win_table.set("compass", true).unwrap();
+    win_table.set("meter", true).unwrap();
+    win_table.set("chat", true).unwrap();
+
+    // Warm up frame so ImGui windows are sized and placed
+    gpu.begin();
+    bridge
+        .invoke(|| {
+            host.lua
+                .load("cast_preview_ms = math.floor(ImGui.GetTime() * 1000)")
+                .exec()?;
+            host.run_addon(addon)
+        })
+        .unwrap();
+    gpu.render();
+
+    // Frame A: In normal gameplay (mode 0), Wereoxxs draws its full HUD overlay windows
+    snap.start_menu = false;
+    snap.ui_mode = 0;
+    snap.ui_busy = false;
+    host.snapshot.set(snap);
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let vtx_playing = gpu.render();
+    assert!(
+        vtx_playing > 0,
+        "Wereoxxs must draw windows in normal gameplay, got {vtx_playing} vertices"
+    );
+
+    // Frame B: In spellbook mode (mode 5), Wereoxxs must pause and stop drawing windows
+    snap.start_menu = true;
+    snap.ui_mode = 5;
+    snap.ui_busy = true;
+    host.snapshot.set(snap);
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let vtx_spellbook = gpu.render();
+    assert_eq!(
+        vtx_spellbook, 0,
+        "Wereoxxs must draw 0 window vertices while spellbook is open, got {vtx_spellbook}"
+    );
+
+    // Frame C: In auctions mode (mode 39), Wereoxxs must pause and stop drawing windows
+    snap.start_menu = true;
+    snap.ui_mode = 39;
+    snap.ui_busy = true;
+    host.snapshot.set(snap);
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let vtx_auctions = gpu.render();
+    assert_eq!(
+        vtx_auctions, 0,
+        "Wereoxxs must draw 0 window vertices while auctions is open, got {vtx_auctions}"
+    );
+
+    // Frame D: In trainer mode (mode 12), Wereoxxs must pause
+    snap.start_menu = true;
+    snap.ui_mode = 12;
+    snap.ui_busy = true;
+    host.snapshot.set(snap);
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let vtx_trainer = gpu.render();
+    assert_eq!(
+        vtx_trainer, 0,
+        "Wereoxxs must draw 0 window vertices while trainer is open, got {vtx_trainer}"
+    );
+
+    // Frame E: In options mode (mode 34), Wereoxxs must pause
+    snap.start_menu = true;
+    snap.ui_mode = 34;
+    snap.ui_busy = true;
+    host.snapshot.set(snap);
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let vtx_options = gpu.render();
+    assert_eq!(
+        vtx_options, 0,
+        "Wereoxxs must draw 0 window vertices while options is open, got {vtx_options}"
+    );
+
+    // Frame F: Return to normal gameplay (mode 0), Wereoxxs resumes drawing windows!
+    snap.start_menu = false;
+    snap.ui_mode = 0;
+    snap.ui_busy = false;
+    host.snapshot.set(snap);
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(addon)).unwrap();
+    let vtx_resumed = gpu.render();
+    assert!(
+        vtx_resumed > 0,
+        "Wereoxxs must resume drawing windows after menu closes, got {vtx_resumed} vertices"
     );
 }

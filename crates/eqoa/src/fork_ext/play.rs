@@ -593,9 +593,66 @@ impl Play {
             crate::fork_ext::addons::combat::CombatSnapshot::default()
         };
 
+pub fn is_menu_mode(mode: i32) -> bool {
+    matches!(
+        mode,
+        1    // Corpse loot window (VIWndLoot)
+        | 4  // Admin menu
+        | 5  // Spellbook / abilities (VIWndSpellBook)
+        | 6  // Recipe book (VIWndRecipeBook)
+        | 7  // Dialog responses (VIWndResponse)
+        | 9  // Dialog text / NPC conversation (VIWndPrivChat)
+        | 10 // Merchant (VIWndMerchant)
+        | 11 // Bank (VIWndBank)
+        | 12 // Trainer / Character Summary (VIWndTrainer)
+        | 13 // Start menu (VIWndMainMenu)
+        | 14 // Confirm / message box (VIWndMBox)
+        | 15 // Trade window (VIWndTrade)
+        | 16 // Trade ask
+        | 17 // Buddy request
+        | 18 // Buddy list (VIWndBuddy)
+        | 20 // Guild invitation
+        | 21 // Guild roster (VIWndGuild)
+        | 22 // Quest journal (VIWndQuestLog)
+        | 23 // Mail compose
+        | 24 // Mail inbox
+        | 26 // Ignore list (VIWndIgnoreList)
+        | 27 // Admin
+        | 28 // Mail tell
+        | 29 // Mail reply
+        | 31 // CS request form
+        | 32 // CS inbox
+        | 34 // Options (VIWndOptions)
+        | 35 // Who list (VIWndWhoList)
+        | 37 // Tradeskills experiment (VIWndExperiment)
+        | 39 // Auction search (VIWndAuctionSearch)
+        | 40 // Class Mastery (VIWndClassMastery)
+        | 41 // Factions (VIWndFaction)
+        | 42 // Live group search (VIWndGroupSearch)
+        | 43 // Duel invite
+        | 44 // Duel window (VIWndDuel)
+    )
+}
+
+        let start_menu = in_game
+            && (is_menu_mode(self.mode)
+                || self.start.as_ref().is_some_and(|s| s.menu.visible));
+        let ui_mode = if !in_game {
+            0
+        } else if self.mode != 0 {
+            self.mode as u32
+        } else if self.start.as_ref().is_some_and(|s| s.menu.visible) {
+            0x0D
+        } else {
+            0
+        };
+        let ui_busy = in_game && (ui_mode != 0 || start_menu || self.map.open || self.search.open);
+
         crate::fork_ext::addons::host::Snapshot {
             in_game,
-            start_menu: self.start.as_ref().is_some_and(|s| s.menu.visible),
+            start_menu,
+            ui_mode,
+            ui_busy,
             health: self.forge_health.snapshot(connected, hud_ready),
             player,
             group,
@@ -1162,5 +1219,118 @@ mod tests {
             count2,
             "steady frames must not rebuild the HUD atlas or clone TEXTURES.TXT"
         );
+    }
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_snapshot_menu_mode_semantics_match_reference() {
+        let mut p = play();
+        let _ = p.loading.wait.take();
+        p.hud = Some((
+            crate::ui::Vui::new(Default::default(), Default::default(), vec![]),
+            Default::default(),
+            crate::hud::Hud::new(),
+        ));
+        let mut bytes = vec![0; 233];
+        bytes[28..32].copy_from_slice(&100_i32.to_le_bytes());
+        bytes[32..36].copy_from_slice(&100_i32.to_le_bytes());
+        p.forge_health.receive(&bytes);
+        assert!(p.forge_snapshot(None).in_game);
+
+        // 1. Mode 0: Normal gameplay (nothing open)
+        p.mode = 0;
+        let snap = p.forge_snapshot(None);
+        assert!(!snap.start_menu);
+        assert_eq!(snap.ui_mode, 0); // normal
+        assert!(!snap.ui_busy);
+
+        // 2. Start menu and all sub-screen modes (spellbook, auctions, trainer, quests, options, etc.)
+        let menu_modes = [
+            (1, 1, "loot"),
+            (4, 4, "admin"),
+            (5, 5, "spellbook"),
+            (6, 6, "recipes"),
+            (7, 7, "dialog_answers"),
+            (9, 9, "text_dialog"),
+            (10, 10, "merchant"),
+            (11, 11, "bank"),
+            (12, 12, "trainer"),
+            (13, 13, "start_menu"),
+            (14, 14, "confirm"),
+            (15, 15, "trade"),
+            (16, 16, "trade_ask"),
+            (17, 17, "buddy_request"),
+            (18, 18, "buddy_list"),
+            (20, 20, "guild_invite"),
+            (21, 21, "guild_roster"),
+            (22, 22, "quest_log"),
+            (23, 23, "mail_compose"),
+            (24, 24, "mail_inbox"),
+            (26, 26, "ignore_list"),
+            (27, 27, "admin"),
+            (28, 28, "mail_tell"),
+            (29, 29, "mail_reply"),
+            (31, 31, "cs_request"),
+            (32, 32, "cs_inbox"),
+            (34, 34, "options"),
+            (35, 35, "who_list"),
+            (37, 37, "experiment"),
+            (39, 39, "auction_search"),
+            (40, 40, "class_mastery"),
+            (41, 41, "factions"),
+            (42, 42, "group_search"),
+            (43, 43, "duel_invite"),
+            (44, 44, "duel_window"),
+        ];
+
+        for (mode, expected_ui_mode, name) in menu_modes {
+            p.mode = mode;
+            let snap = p.forge_snapshot(None);
+            assert!(
+                snap.start_menu,
+                "mode {mode} ({name}) must report start_menu == true so addons pause"
+            );
+            assert_eq!(
+                snap.ui_mode, expected_ui_mode,
+                "mode {mode} ({name}) must report exact ui_mode"
+            );
+            assert!(
+                snap.ui_busy,
+                "mode {mode} ({name}) must report ui_busy == true"
+            );
+        }
+
+        // 4. Non-menu modes: input, context menu, r2 chat, fishing, manual camera
+        let non_menu_modes = [
+            (2, 2, "input"),
+            (30, 30, "context_menu"),
+            (33, 33, "r2_chat"),
+            (36, 36, "fishing"),
+            (38, 38, "manual_camera"),
+        ];
+
+        for (mode, expected_ui_mode, name) in non_menu_modes {
+            p.mode = mode;
+            let snap = p.forge_snapshot(None);
+            assert!(
+                !snap.start_menu,
+                "non-menu mode {mode} ({name}) must not report start_menu == true"
+            );
+            assert_eq!(
+                snap.ui_mode, expected_ui_mode,
+                "non-menu mode {mode} ({name}) must report exact ui_mode"
+            );
+            assert!(
+                snap.ui_busy,
+                "non-menu mode {mode} ({name}) owns input, must report ui_busy == true"
+            );
+        }
+
+        // 5. Out of game: everything defaults to inactive
+        p.session.self_id = None;
+        let snap = p.forge_snapshot(None);
+        assert!(!snap.in_game);
+        assert!(!snap.start_menu);
+        assert_eq!(snap.ui_mode, 0);
+        assert!(!snap.ui_busy);
     }
 }

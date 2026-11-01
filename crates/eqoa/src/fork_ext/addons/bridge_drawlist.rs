@@ -198,7 +198,8 @@ fn texture_ref(val: mlua::Value) -> Result<sys::ImTextureRef_c> {
     match val {
         mlua::Value::UserData(ud) => super::super::textures::Textures::raw(&ud),
         mlua::Value::LightUserData(lud) => Ok(sys::ImTextureRef_c {
-            _TexData: lud.0.cast(),
+            // Legacy sol2 void* textures are IDs, never ImTextureData pointers.
+            _TexData: std::ptr::null_mut(),
             _TexID: lud.0 as u64,
         }),
         _ => Err(mlua::Error::runtime("expected texture handle or pointer")),

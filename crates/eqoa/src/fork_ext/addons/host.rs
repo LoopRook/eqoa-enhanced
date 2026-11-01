@@ -12,6 +12,8 @@ use std::{
 pub(crate) struct Snapshot {
     pub in_game: bool,
     pub start_menu: bool,
+    pub ui_mode: u32,
+    pub ui_busy: bool,
     pub health: super::health::HealthSnapshot,
     pub player: super::player::PlayerSnapshot,
     pub group: super::group::GroupSnapshot,
@@ -53,6 +55,7 @@ struct BaseHost {
     lua: Lua,
     snapshot: Rc<Cell<Snapshot>>,
     util: Table,
+    window: Table,
     bit: Table,
     clean_os: Table,
     remaining: Rc<Cell<u32>>,
@@ -116,8 +119,45 @@ fn create_base_host() -> Result<BaseHost> {
     let state = snapshot.clone();
     util.set(
         "IsUiBusy",
+        lua.create_function(move |_, ()| Ok(state.get().ui_busy))?,
+    )?;
+    let state = snapshot.clone();
+    util.set(
+        "GetUiMode",
+        lua.create_function(move |_, ()| Ok(state.get().ui_mode))?,
+    )?;
+
+    let ui_mode = lua.create_table()?;
+    ui_mode.set("normal", 0x00)?;
+    ui_mode.set("loot", 0x01)?;
+    ui_mode.set("input", 0x02)?;
+    ui_mode.set("text_dialog", 0x09)?;
+    ui_mode.set("merchant", 0x0A)?;
+    ui_mode.set("trainer", 0x0C)?;
+    ui_mode.set("start_menu", 0x0D)?;
+    ui_mode.set("confirm", 0x0E)?;
+    ui_mode.set("context_menu", 0x1E)?;
+    ui_mode.set("r2_chat_window", 0x21)?;
+    util.set("UiMode", ui_mode.clone())?;
+
+    let window_mod = lua.create_table()?;
+    let state = snapshot.clone();
+    window_mod.set(
+        "IsStartMenuOpen",
         lua.create_function(move |_, ()| Ok(state.get().start_menu))?,
     )?;
+    let state = snapshot.clone();
+    window_mod.set(
+        "GetMode",
+        lua.create_function(move |_, ()| Ok(state.get().ui_mode))?,
+    )?;
+    let state = snapshot.clone();
+    window_mod.set(
+        "IsBusy",
+        lua.create_function(move |_, ()| Ok(state.get().ui_busy))?,
+    )?;
+    window_mod.set("Mode", ui_mode)?;
+    package_loaded.set("frontiers_forge.window", window_mod.clone())?;
     let state = snapshot.clone();
     util.set(
         "GetCompassDegrees",
@@ -203,6 +243,7 @@ fn create_base_host() -> Result<BaseHost> {
         lua,
         snapshot,
         util,
+        window: window_mod,
         bit: bit_table,
         clean_os,
         remaining,
@@ -231,6 +272,7 @@ impl Host {
             addon: Some(addon.clone()),
             host_registry,
         };
+        host.register_host_module("frontiers_forge.window", Value::Table(base.window))?;
         super::player::install_player_adapter(&host)?;
         super::visibility::install_standalone_ui_adapter(&host)?;
         super::group::install_group_adapter(&host)?;
@@ -250,6 +292,7 @@ impl Host {
     pub fn new() -> Result<Self> {
         let base = create_base_host()?;
         let util_t = base.util.clone();
+        let window_t = base.window.clone();
         let bit_t = base.bit.clone();
         let os_t = base.clean_os.clone();
         base.lua.globals().set(
@@ -257,6 +300,8 @@ impl Host {
             base.lua.create_function(move |lua, name: String| {
                 if name == "frontiers_forge.util" {
                     Ok(Value::Table(util_t.clone()))
+                } else if name == "frontiers_forge.window" {
+                    Ok(Value::Table(window_t.clone()))
                 } else if name == "bit" {
                     Ok(Value::Table(bit_t.clone()))
                 } else if name == "os" {
@@ -608,5 +653,110 @@ mod tests {
         .unwrap();
         let res = host.callback(2, Value::Nil).unwrap();
         assert!(matches!(res, Value::String(ref s) if s.to_str().unwrap() == "recovered"));
+    }
+    #[test]
+    fn forge_host_util_and_window_menu_semantics() {
+        let host = Host::new().unwrap();
+        // 1. Initial / Normal gameplay: start menu closed, ui_mode 0, not busy
+        host.snapshot.set(Snapshot {
+            in_game: true,
+            start_menu: false,
+            ui_mode: 0,
+            ui_busy: false,
+            ..Default::default()
+        });
+
+        host.execute(
+            r#"
+            local Util = require("frontiers_forge.util")
+            local Window = require("frontiers_forge.window")
+
+            assert(Util.IsStartMenuOpen() == 0)
+            assert(Window.IsStartMenuOpen() == false)
+            assert(Util.GetUiMode() == 0)
+            assert(Window.GetMode() == 0)
+            assert(Util.IsUiBusy() == false)
+            assert(Window.IsBusy() == false)
+
+            -- Identified UiMode constants
+            assert(Util.UiMode.normal == 0x00)
+            assert(Util.UiMode.loot == 0x01)
+            assert(Util.UiMode.input == 0x02)
+            assert(Util.UiMode.text_dialog == 0x09)
+            assert(Util.UiMode.merchant == 0x0A)
+            assert(Util.UiMode.trainer == 0x0C)
+            assert(Util.UiMode.start_menu == 0x0D)
+            assert(Util.UiMode.confirm == 0x0E)
+            assert(Util.UiMode.context_menu == 0x1E)
+            assert(Util.UiMode.r2_chat_window == 0x21)
+
+            assert(Window.Mode.normal == 0x00)
+            assert(Window.Mode.start_menu == 0x0D)
+            assert(Window.Mode.trainer == 0x0C)
+        "#,
+        )
+        .unwrap();
+
+        // 2. Spellbook mode (5): start menu open, ui_mode 5, busy
+        host.snapshot.set(Snapshot {
+            in_game: true,
+            start_menu: true,
+            ui_mode: 5,
+            ui_busy: true,
+            ..Default::default()
+        });
+
+        host.execute(
+            r#"
+            local Util = require("frontiers_forge.util")
+            local Window = require("frontiers_forge.window")
+
+            assert(Util.IsStartMenuOpen() == 1)
+            assert(Window.IsStartMenuOpen() == true)
+            assert(Util.GetUiMode() == 5)
+            assert(Window.GetMode() == 5)
+            assert(Util.IsUiBusy() == true)
+            assert(Window.IsBusy() == true)
+        "#,
+        )
+        .unwrap();
+
+        // 3. Auction search mode (39): start menu open, ui_mode 39, busy
+        host.snapshot.set(Snapshot {
+            in_game: true,
+            start_menu: true,
+            ui_mode: 39,
+            ui_busy: true,
+            ..Default::default()
+        });
+
+        host.execute(
+            r#"
+            local Util = require("frontiers_forge.util")
+            assert(Util.IsStartMenuOpen() == 1)
+            assert(Util.GetUiMode() == 39)
+            assert(Util.IsUiBusy() == true)
+        "#,
+        )
+        .unwrap();
+
+        // 4. Chat editbox mode (2): start menu closed, ui_mode 2, busy
+        host.snapshot.set(Snapshot {
+            in_game: true,
+            start_menu: false,
+            ui_mode: 2,
+            ui_busy: true,
+            ..Default::default()
+        });
+
+        host.execute(
+            r#"
+            local Util = require("frontiers_forge.util")
+            assert(Util.IsStartMenuOpen() == 0)
+            assert(Util.GetUiMode() == 2)
+            assert(Util.IsUiBusy() == true)
+        "#,
+        )
+        .unwrap();
     }
 }
