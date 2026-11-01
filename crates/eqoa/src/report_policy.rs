@@ -1,11 +1,11 @@
 //! Enhanced keeps diagnostics locally. Report uploads are disabled except for
-//! an explicitly configured loopback test server; a future fork service belongs here.
+//! an explicitly configured loopback test server; problem reports save to Desktop.
 
 pub fn enabled() -> bool {
     #[cfg(target_arch = "wasm32")]
     return false;
     #[cfg(not(target_arch = "wasm32"))]
-    upload_url(std::env::var("EQOA_REPORTS").ok().as_deref(), "report").is_ok()
+    true
 }
 
 pub fn upload_url(endpoint: Option<&str>, route: &str) -> Result<String, &'static str> {

@@ -97,7 +97,7 @@ fn is_hidden_or_system(entry: &fs::DirEntry) -> bool {
     false
 }
 
-pub(super) struct Storage {
+pub(crate) struct Storage {
     root: Option<PathBuf>,
 }
 

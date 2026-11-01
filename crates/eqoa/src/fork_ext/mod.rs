@@ -5,6 +5,8 @@ pub mod addons;
 pub mod app_icon;
 pub mod mods;
 pub mod release;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod report;
 pub mod telemetry;
 
 /// Returns whether the client is in plain gameplay (mode 0 with no dialog,

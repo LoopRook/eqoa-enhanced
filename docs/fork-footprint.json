@@ -61,9 +61,9 @@
       "reason": "Reviewed native Lua 5.1 and Dear ImGui 0.18 spike dependency resolution, including rustc-hash version disambiguation; license metadata stays unchanged."
     },
     "crates/eqoa/Cargo.toml": {
-      "added": 8,
-      "deleted": 0,
-      "reason": "Reviewed native-only mlua and Dear ImGui spike dependencies plus existing fork/release settings; license metadata stays unchanged."
+      "added": 9,
+      "deleted": 1,
+      "reason": "Reviewed native-only mlua and Dear ImGui spike dependencies, Win32_System_Com for Shell known-folder CoTaskMemFree, plus existing fork/release settings; license metadata stays unchanged."
     },
     "crates/eqoa/build.rs": {
       "added": 11,
@@ -91,8 +91,8 @@
       "reason": "Restored map and tracker visibility."
     },
     "crates/eqoa/src/hud.rs": {
-      "added": 308,
-      "deleted": 12,
+      "added": 307,
+      "deleted": 11,
       "reason": "Reviewed restored HUD and native addon hide-UI draw-site gates for compass, gauges, group/pet/target panels, and group compass marks; one-line hook calls, fork_ext implementation and tests (re-baselined at sync 2026-10-31)."
     },
     "crates/eqoa/src/icon.rs": {
@@ -126,14 +126,14 @@
       "reason": "Reviewed restored state plus native health receipt/reset, cached HUD invalidation, and addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, plus live esf::Library icon provider hook and F9 art_changed icon cache drop; implementation in fork_ext."
     },
     "crates/eqoa/src/report.rs": {
-      "added": 18,
-      "deleted": 9,
-      "reason": "Fork reporting policy transport integration."
+      "added": 64,
+      "deleted": 23,
+      "reason": "Local problem and crash report saving to Desktop; wrapped dialog status, label and fine notice hooks preserving upstream match arms; one-line hooks in push_line(), start(), send(), and secret() for in-memory cache warming/refresh, and minimal crate-level visibility."
     },
     "crates/eqoa/src/settings.rs": {
-      "added": 334,
+      "added": 336,
       "deleted": 22,
-      "reason": "Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31)."
+      "reason": "Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31), and one-line in-memory report cache update on save_login."
     },
     "crates/eqoa/src/touch.rs": {
       "added": 79,

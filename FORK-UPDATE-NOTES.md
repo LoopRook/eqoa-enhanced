@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-01 · Enhanced 0.2.3
+
+- Problem reports: press F3 (or use the crash offer at the next start) and choose Save to Desktop. You get an EQOA-Enhanced-report zip with your note, a screenshot and the logs, ready to send to us. Your account name, password and Windows user folder are removed, and nothing is uploaded anywhere.
+
 ## 2026-11-01 · Enhanced 0.2.2
 
 - Mods now step aside for every game window: the spellbook, quest journal, options, merchant, bank, trainer, blacksmith, auctions, trade, mail and more.
