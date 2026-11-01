@@ -1579,3 +1579,176 @@ fn forge_wereoxxs_pauses_and_hides_in_all_menu_modes() {
         "Wereoxxs must resume drawing windows after menu closes, got {vtx_resumed} vertices"
     );
 }
+
+#[derive(Default)]
+struct TestBlitRecorder {
+    blits: Vec<(u32, [i32; 2])>,
+    strings: Vec<String>,
+}
+
+impl vi::ui::Raster for TestBlitRecorder {
+    fn blit(&mut self, id: u32, _flags: u32, at: [i32; 2], _a: [i32; 2], _b: [i32; 2], _mode: i32, _alpha: f32) {
+        self.blits.push((id, at));
+    }
+    fn stretch_blit(&mut self, id: u32, _flags: u32, at: [i32; 2], _size: [i32; 2], _a: [i32; 2], _b: [i32; 2], _mode: i32, _alpha: f32) {
+        self.blits.push((id, at));
+    }
+    fn fill_fan(&mut self, _color: [f32; 4], _corners: [[i32; 2]; 4]) {}
+    fn blit_full(&mut self, id: u32, _flags: u32, at: [i32; 2], _mode: i32, _alpha: f32) {
+        self.blits.push((id, at));
+    }
+    fn draw_string(&mut self, _at: [i32; 2], _color: [f32; 4], s: &[u16]) {
+        self.strings.push(String::from_utf16_lossy(s));
+    }
+    fn draw_centered_string(&mut self, _at: [i32; 2], _color: [f32; 4], s: &[u16], _mode: u32) {
+        self.strings.push(String::from_utf16_lossy(s));
+    }
+    fn string_width(&self, _s: &[u16]) -> i32 { 0 }
+    fn point_size(&self) -> i32 { 12 }
+    fn viewport(&self) -> [i32; 4] { [0, 0, 639, 447] }
+    fn set_viewport(&mut self, _v: [i32; 4]) {}
+}
+
+fn test_vui() -> vi::ui::Vui {
+    let atlas = (0..252)
+        .map(|_| vi::ui::UiTexEntry {
+            uv1: [16, 16],
+            ..Default::default()
+        })
+        .collect();
+    vi::ui::Vui::new(Default::default(), Default::default(), atlas)
+}
+
+#[test]
+fn forge_escape_and_history_keys_with_chat_claimed_do_not_draw_or_open_game_chat() {
+    use winit::keyboard::Key;
+    use super::storage::Storage;
+
+    super::input::reset_input_state();
+    let Some(root) = find_wereoxxs_scripts_root() else {
+        eprintln!(
+            "SKIP forge_escape_and_history_keys_with_chat_claimed_do_not_draw_or_open_game_chat: reference scripts root not found"
+        );
+        return;
+    };
+    let disc = discovery::discover(&root);
+    let addon = disc
+        .addons
+        .iter()
+        .find(|a| a.id == "wereoxxs_ui")
+        .expect("wereoxxs_ui must be discovered");
+
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+
+    let config_dir = ScratchDir::new();
+    let storage = Storage::new(Some(config_dir.0.clone()));
+    let key = Storage::key(addon).expect("Storage::key must succeed");
+
+    let write_profile = |flags: &[(&str, bool)]| {
+        let lua = mlua::Lua::new();
+        let root_tbl = lua.create_table().unwrap();
+        let win_tbl = lua.create_table().unwrap();
+        for &(k, v) in flags {
+            win_tbl.set(k, v).unwrap();
+        }
+        root_tbl.set("windows", win_tbl).unwrap();
+        storage
+            .save_profile(&key, mlua::Value::Table(root_tbl))
+            .expect("save_profile must succeed");
+    };
+
+    // Saved profile has hide_game_chat enabled
+    write_profile(&[("hide_game_chat", true)]);
+
+    let mut manager = Manager::new(
+        root.clone(),
+        Some(config_dir.0.clone()),
+        &gpu.device,
+        &gpu.queue,
+        gpu.renderer.clone(),
+    );
+
+    let mut snap = rich_in_game_snapshot();
+    gpu.frame(&mut manager, snap.clone());
+
+    // Enable wereoxxs_ui
+    manager.queue(Command::Enable("wereoxxs_ui".into(), true));
+    gpu.frame(&mut manager, snap.clone());
+    gpu.frame(&mut manager, snap.clone());
+
+    // Verify chat window is claimed (suppressed) in plain play
+    assert!(
+        !crate::hud::fork_hud::chat_window_visible(),
+        "chat_window must be claimed/hidden in plain play"
+    );
+
+    // Keyboard 'c' / 'C' check in plain play:
+    let key_c = Key::Character("c".into());
+    let code_c = super::input::logical_key_to_code(&key_c);
+    assert_eq!(code_c, Some(0x63));
+    let wants_c = super::input::wants_key_capture(false, code_c, false, true);
+    assert!(
+        wants_c,
+        "Keyboard C must be captured at hook level when chat is claimed in plain play (fails before fix)"
+    );
+
+    // Frame 3: Simulate Escape in plain play (opens start menu, mode 13)
+    snap.start_menu = true;
+    snap.ui_mode = 13;
+    gpu.frame(&mut manager, snap.clone());
+
+    // Test drawing chat window:
+    let vui = test_vui();
+    let mut wnd = crate::chat::WndChat::new();
+    wnd.text.add_text(&[65, 66], [1.0; 4], 0, |_| 10);
+
+    let mut recorder = TestBlitRecorder::default();
+    crate::hud::fork_hud::draw_chat_window(&mut wnd, &vui, &mut recorder, 1000, 0.016);
+    assert_eq!(
+        recorder.blits.len(),
+        0,
+        "game chat window must NOT be drawn when Escape opens start menu while chat is claimed (fails before fix)"
+    );
+
+    // Mode 33 / Pad R2 scroll check:
+    wnd.set_scroll(1);
+    let mut recorder_scroll = TestBlitRecorder::default();
+    crate::hud::fork_hud::draw_chat_window(&mut wnd, &vui, &mut recorder_scroll, 1000, 0.016);
+    assert_eq!(
+        recorder_scroll.blits.len(),
+        0,
+        "game chat history must NOT be drawn while chat is claimed"
+    );
+
+    // Negative Control: Unclaimed chat (hide_game_chat = false)
+    write_profile(&[("hide_game_chat", false)]);
+    manager.queue(Command::Load("wereoxxs_ui".into()));
+    snap.start_menu = false;
+    snap.ui_mode = 0;
+    gpu.frame(&mut manager, snap.clone());
+    gpu.frame(&mut manager, snap.clone());
+
+    assert!(
+        crate::hud::fork_hud::chat_window_visible(),
+        "chat_window must be visible when unclaimed"
+    );
+    let wants_c_unclaimed = super::input::wants_key_capture(false, code_c, false, true);
+    assert!(
+        !wants_c_unclaimed,
+        "Keyboard C must NOT be captured when chat is unclaimed"
+    );
+
+    // Opening start menu when unclaimed draws chat window as normal:
+    snap.start_menu = true;
+    snap.ui_mode = 13;
+    gpu.frame(&mut manager, snap.clone());
+
+    let mut recorder_unclaimed = TestBlitRecorder::default();
+    crate::hud::fork_hud::draw_chat_window(&mut wnd, &vui, &mut recorder_unclaimed, 1000, 0.016);
+    assert!(
+        recorder_unclaimed.blits.len() > 0,
+        "game chat window MUST be drawn when unclaimed"
+    );
+}

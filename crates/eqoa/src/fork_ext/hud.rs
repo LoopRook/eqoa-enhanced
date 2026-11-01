@@ -127,6 +127,10 @@ pub(crate) fn draw_chat_window(
     if chat_window_visible() {
         wnd.draw(vui, r, now, dt);
     } else {
+        if wnd.mode != 0 {
+            wnd.mode = 0;
+        }
+        wnd.set_scroll(0);
         let mut null = NullRaster;
         wnd.draw(vui, &mut null, now, dt);
     }

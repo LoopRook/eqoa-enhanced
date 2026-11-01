@@ -98,6 +98,7 @@ impl HudClaimsRegistry {
 
 struct Intent {
     desired: HashMap<String, HashSet<String>>,
+    claimed_in_game: HashSet<String>,
     active: bool,
     suspended: bool,
     token: InstanceToken,
@@ -146,6 +147,7 @@ impl VisibilityLease {
             snapshot: Rc::new(Cell::new(HealthSnapshot::unavailable())),
             intent: Rc::new(RefCell::new(Intent {
                 desired: HashMap::new(),
+                claimed_in_game: HashSet::new(),
                 active: false,
                 suspended: false,
                 token: InstanceToken::next()?,
@@ -173,6 +175,7 @@ impl VisibilityLease {
         let mut i = self.intent.borrow_mut();
         i.active = false;
         i.desired.clear();
+        i.claimed_in_game.clear();
         i.project(self.snapshot.get());
     }
 }
@@ -188,6 +191,7 @@ fn disable_element(
     snapshot: HealthSnapshot,
     element: &str,
     owner: Option<String>,
+    in_menu: bool,
 ) -> mlua::Result<bool> {
     let label = owner.as_deref().unwrap_or(health::ANONYMOUS_OWNER);
     if label.len() > health::MAX_OWNER_LABEL_BYTES {
@@ -195,6 +199,9 @@ fn disable_element(
     }
     if !intent.active {
         return Ok(false);
+    }
+    if !in_menu {
+        intent.claimed_in_game.insert(element.to_string());
     }
     let set = intent.desired.entry(element.to_string()).or_default();
     if !set.contains(label) && set.len() >= health::MAX_OWNERS_PER_VM {
@@ -212,8 +219,19 @@ fn enable_element(
     snapshot: HealthSnapshot,
     element: &str,
     owner: Option<String>,
+    in_menu: bool,
 ) -> bool {
     let label = owner.as_deref().unwrap_or(health::ANONYMOUS_OWNER);
+    // If the client is currently in a menu/pause mode (e.g. start menu) and this
+    // element was claimed during gameplay, ignore the temporary pause unhide
+    // (such as wereoxxs_ui's show_while_paused) so that the game's window does
+    // not pop up over menus.
+    if in_menu && intent.claimed_in_game.contains(element) {
+        return false;
+    }
+    if !in_menu {
+        intent.claimed_in_game.remove(element);
+    }
     if let Some(set) = intent.desired.get_mut(element) {
         set.remove(label);
     }
@@ -234,28 +252,33 @@ pub(crate) fn install_managed_health_adapter(
     let ui = host.lua.create_table()?;
     let intent = lease.intent.clone();
     let snapshot = lease.snapshot.clone();
+    let host_snap = host.snapshot.clone();
 
     // 1. Single element functions
     macro_rules! bind_element {
         ($disable_name:literal, $enable_name:literal, $elem_key:literal) => {{
             let intent_d = intent.clone();
             let snapshot_d = snapshot.clone();
+            let host_snap_d = host_snap.clone();
             ui.set(
                 $disable_name,
                 host.lua.create_function(move |_, owner: Option<String>| {
                     let mut i = intent_d.borrow_mut();
                     let s = snapshot_d.get();
-                    disable_element(&mut i, s, $elem_key, owner)
+                    let in_menu = host_snap_d.get().start_menu;
+                    disable_element(&mut i, s, $elem_key, owner, in_menu)
                 })?,
             )?;
             let intent_e = intent.clone();
             let snapshot_e = snapshot.clone();
+            let host_snap_e = host_snap.clone();
             ui.set(
                 $enable_name,
                 host.lua.create_function(move |_, owner: Option<String>| {
                     let mut i = intent_e.borrow_mut();
                     let s = snapshot_e.get();
-                    Ok(enable_element(&mut i, s, $elem_key, owner))
+                    let in_menu = host_snap_e.get().start_menu;
+                    Ok(enable_element(&mut i, s, $elem_key, owner, in_menu))
                 })?,
             )?;
         }};
@@ -296,25 +319,29 @@ pub(crate) fn install_managed_health_adapter(
     // Experience bars
     let intent_d = intent.clone();
     let snapshot_d = snapshot.clone();
+    let host_snap_d = host_snap.clone();
     ui.set(
         "DisableExperienceBars",
         host.lua.create_function(move |_, owner: Option<String>| {
             let mut i = intent_d.borrow_mut();
             let s = snapshot_d.get();
-            let m = disable_element(&mut i, s, "main_exp_bar", owner.clone())?;
-            let sec = disable_element(&mut i, s, "secondary_exp_bar", owner)?;
+            let in_menu = host_snap_d.get().start_menu;
+            let m = disable_element(&mut i, s, "main_exp_bar", owner.clone(), in_menu)?;
+            let sec = disable_element(&mut i, s, "secondary_exp_bar", owner, in_menu)?;
             Ok(m && sec)
         })?,
     )?;
     let intent_e = intent.clone();
     let snapshot_e = snapshot.clone();
+    let host_snap_e = host_snap.clone();
     ui.set(
         "EnableExperienceBars",
         host.lua.create_function(move |_, owner: Option<String>| {
             let mut i = intent_e.borrow_mut();
             let s = snapshot_e.get();
-            let m = enable_element(&mut i, s, "main_exp_bar", owner.clone());
-            let sec = enable_element(&mut i, s, "secondary_exp_bar", owner);
+            let in_menu = host_snap_e.get().start_menu;
+            let m = enable_element(&mut i, s, "main_exp_bar", owner.clone(), in_menu);
+            let sec = enable_element(&mut i, s, "secondary_exp_bar", owner, in_menu);
             Ok(m && sec)
         })?,
     )?;
@@ -322,25 +349,29 @@ pub(crate) fn install_managed_health_adapter(
     // Compass
     let intent_d = intent.clone();
     let snapshot_d = snapshot.clone();
+    let host_snap_d = host_snap.clone();
     ui.set(
         "DisableCompass",
         host.lua.create_function(move |_, owner: Option<String>| {
             let mut i = intent_d.borrow_mut();
             let s = snapshot_d.get();
-            let face = disable_element(&mut i, s, "compass_face", owner.clone())?;
-            let back = disable_element(&mut i, s, "compass_back", owner)?;
+            let in_menu = host_snap_d.get().start_menu;
+            let face = disable_element(&mut i, s, "compass_face", owner.clone(), in_menu)?;
+            let back = disable_element(&mut i, s, "compass_back", owner, in_menu)?;
             Ok(face && back)
         })?,
     )?;
     let intent_e = intent.clone();
     let snapshot_e = snapshot.clone();
+    let host_snap_e = host_snap.clone();
     ui.set(
         "EnableCompass",
         host.lua.create_function(move |_, owner: Option<String>| {
             let mut i = intent_e.borrow_mut();
             let s = snapshot_e.get();
-            let face = enable_element(&mut i, s, "compass_face", owner.clone());
-            let back = enable_element(&mut i, s, "compass_back", owner);
+            let in_menu = host_snap_e.get().start_menu;
+            let face = enable_element(&mut i, s, "compass_face", owner.clone(), in_menu);
+            let back = enable_element(&mut i, s, "compass_back", owner, in_menu);
             Ok(face && back)
         })?,
     )?;
@@ -348,25 +379,29 @@ pub(crate) fn install_managed_health_adapter(
     // Ability Bar
     let intent_d = intent.clone();
     let snapshot_d = snapshot.clone();
+    let host_snap_d = host_snap.clone();
     ui.set(
         "DisableAbilityBar",
         host.lua.create_function(move |_, owner: Option<String>| {
             let mut i = intent_d.borrow_mut();
             let s = snapshot_d.get();
-            let c = disable_element(&mut i, s, "hotbar_draw_compact", owner.clone())?;
-            let e = disable_element(&mut i, s, "hotbar_draw_expanded", owner)?;
+            let in_menu = host_snap_d.get().start_menu;
+            let c = disable_element(&mut i, s, "hotbar_draw_compact", owner.clone(), in_menu)?;
+            let e = disable_element(&mut i, s, "hotbar_draw_expanded", owner, in_menu)?;
             Ok(c && e)
         })?,
     )?;
     let intent_e = intent.clone();
     let snapshot_e = snapshot.clone();
+    let host_snap_e = host_snap.clone();
     ui.set(
         "EnableAbilityBar",
         host.lua.create_function(move |_, owner: Option<String>| {
             let mut i = intent_e.borrow_mut();
             let s = snapshot_e.get();
-            let c = enable_element(&mut i, s, "hotbar_draw_compact", owner.clone());
-            let e = enable_element(&mut i, s, "hotbar_draw_expanded", owner);
+            let in_menu = host_snap_e.get().start_menu;
+            let c = enable_element(&mut i, s, "hotbar_draw_compact", owner.clone(), in_menu);
+            let e = enable_element(&mut i, s, "hotbar_draw_expanded", owner, in_menu);
             Ok(c && e)
         })?,
     )?;
@@ -374,25 +409,29 @@ pub(crate) fn install_managed_health_adapter(
     // Group Display
     let intent_d = intent.clone();
     let snapshot_d = snapshot.clone();
+    let host_snap_d = host_snap.clone();
     ui.set(
         "DisableGroupDisplay",
         host.lua.create_function(move |_, owner: Option<String>| {
             let mut i = intent_d.borrow_mut();
             let s = snapshot_d.get();
-            let p = disable_element(&mut i, s, "group_member_panel", owner.clone())?;
-            let m = disable_element(&mut i, s, "group_compass_marks", owner)?;
+            let in_menu = host_snap_d.get().start_menu;
+            let p = disable_element(&mut i, s, "group_member_panel", owner.clone(), in_menu)?;
+            let m = disable_element(&mut i, s, "group_compass_marks", owner, in_menu)?;
             Ok(p && m)
         })?,
     )?;
     let intent_e = intent.clone();
     let snapshot_e = snapshot.clone();
+    let host_snap_e = host_snap.clone();
     ui.set(
         "EnableGroupDisplay",
         host.lua.create_function(move |_, owner: Option<String>| {
             let mut i = intent_e.borrow_mut();
             let s = snapshot_e.get();
-            let p = enable_element(&mut i, s, "group_member_panel", owner.clone());
-            let m = enable_element(&mut i, s, "group_compass_marks", owner);
+            let in_menu = host_snap_e.get().start_menu;
+            let p = enable_element(&mut i, s, "group_member_panel", owner.clone(), in_menu);
+            let m = enable_element(&mut i, s, "group_compass_marks", owner, in_menu);
             Ok(p && m)
         })?,
     )?;
@@ -400,28 +439,32 @@ pub(crate) fn install_managed_health_adapter(
     // Global UI
     let intent_d = intent.clone();
     let snapshot_d = snapshot.clone();
+    let host_snap_d = host_snap.clone();
     ui.set(
         "DisableUI",
         host.lua.create_function(move |_, owner: Option<String>| {
             let mut i = intent_d.borrow_mut();
             let s = snapshot_d.get();
+            let in_menu = host_snap_d.get().start_menu;
             let mut all = true;
             for el in ALL_UI_ELEMENTS {
-                all = disable_element(&mut i, s, el, owner.clone())? && all;
+                all = disable_element(&mut i, s, el, owner.clone(), in_menu)? && all;
             }
             Ok(all)
         })?,
     )?;
     let intent_e = intent.clone();
     let snapshot_e = snapshot.clone();
+    let host_snap_e = host_snap.clone();
     ui.set(
         "EnableUI",
         host.lua.create_function(move |_, owner: Option<String>| {
             let mut i = intent_e.borrow_mut();
             let s = snapshot_e.get();
+            let in_menu = host_snap_e.get().start_menu;
             let mut all = true;
             for el in ALL_UI_ELEMENTS {
-                all = enable_element(&mut i, s, el, owner.clone()) && all;
+                all = enable_element(&mut i, s, el, owner.clone(), in_menu) && all;
             }
             Ok(all)
         })?,
