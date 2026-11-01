@@ -10,6 +10,34 @@ use std::time::Instant;
 
 pub const UNNAMED_NAME: &str = "(unnamed)";
 pub const SAVE_QUIET_SECONDS: u64 = 30;
+pub const MAX_SAVE_INTERVAL_SECONDS: u64 = 120;
+
+#[derive(Clone, Copy, Debug)]
+pub struct ScanStats {
+    pub seen: usize,
+    pub recorded: usize,
+    pub rejected_known: usize,
+    pub rejected_player_pet: usize,
+    pub rejected_corpse: usize,
+    pub rejected_non_creature: usize,
+    pub rejected_other: usize,
+    pub last_summary_time: Instant,
+}
+
+impl Default for ScanStats {
+    fn default() -> Self {
+        Self {
+            seen: 0,
+            recorded: 0,
+            rejected_known: 0,
+            rejected_player_pet: 0,
+            rejected_corpse: 0,
+            rejected_non_creature: 0,
+            rejected_other: 0,
+            last_summary_time: Instant::now(),
+        }
+    }
+}
 pub const DEDUPE_RANGE: f32 = 30.0;
 pub const DEDUPE_RANGE_SQ: f32 = DEDUPE_RANGE * DEDUPE_RANGE; // 900.0
 pub const MAX_IMPORT_SIZE: u64 = 16 * 1024 * 1024; // 16 MiB load cap
@@ -49,6 +77,8 @@ pub struct Journal {
     disabled: bool,
     revision: u64,
     last_change_time: Option<Instant>,
+    first_dirty_time: Option<Instant>,
+    stats: ScanStats,
     custom_path: Option<PathBuf>,
     name_count: usize,
     id_count: usize,
@@ -71,6 +101,8 @@ impl Journal {
             disabled: false,
             revision: 0,
             last_change_time: None,
+            first_dirty_time: None,
+            stats: ScanStats::default(),
             custom_path: None,
             name_count: 0,
             id_count: 0,
@@ -280,7 +312,10 @@ impl Journal {
         record.ids.insert(id_key, EntityInfo { world, level, pos });
         self.known_ids.insert(id);
         self.id_count += 1;
-        self.dirty = true;
+        if !self.dirty {
+            self.dirty = true;
+            self.first_dirty_time = Some(now);
+        }
         self.revision += 1;
         self.last_change_time = Some(now);
         self.status = format!("{} creatures, {} spawns", self.name_count, self.id_count);
@@ -302,29 +337,37 @@ impl Journal {
         }
         self.ensure_loaded();
         for e in slots.iter().flatten() {
+            self.stats.seen += 1;
             // Fast lookup: skip entities whose id was already recorded
             if self.known_ids.contains(&e.id) {
+                self.stats.rejected_known += 1;
                 continue;
             }
             if Some(e.id) == me || (pet_id != u32::MAX && e.id == pet_id) {
+                self.stats.rejected_player_pet += 1;
                 continue;
             }
             if e.kind != net::entity::TYPE_CREATURE {
+                self.stats.rejected_non_creature += 1;
                 continue;
             }
             let Some(c) = e.creature.as_ref() else {
+                self.stats.rejected_non_creature += 1;
                 continue;
             };
             // Privacy rule: class byte < 2 only (2 = player character, 3 = pet)
             if c.p256 >= 2 {
+                self.stats.rejected_player_pet += 1;
                 continue;
             }
-            // Additional player physics and inviteable flags
-            if c.p255 != 0 || c.p264 != 0 {
+            // Filter corpses (p18 bit 1)
+            if e.p18 & 2 != 0 {
+                self.stats.rejected_corpse += 1;
                 continue;
             }
-            // Filter corpses and inactive slots
-            if e.p18 & 2 != 0 || e.p19 == 0 {
+            // Client search filter parity (play.rs:7722): c.p255 == 0 && !c.name.trim().is_empty()
+            if c.p255 != 0 || c.name.trim().is_empty() {
+                self.stats.rejected_other += 1;
                 continue;
             }
             let pos = if e.actor_pos.iter().all(|x| x.is_finite()) && e.actor_pos.iter().any(|&x| x != 0.0) {
@@ -332,24 +375,53 @@ impl Journal {
             } else if e.pos.iter().all(|x| x.is_finite()) {
                 e.pos
             } else {
+                self.stats.rejected_other += 1;
                 continue;
             };
 
-            self.record(&c.name, e.id, world, c.level, pos, now);
+            if self.record(&c.name, e.id, world, c.level, pos, now) {
+                self.stats.recorded += 1;
+            }
+        }
+
+        // Every 60 s while in game, log one summary line (seen, recorded, rejected by reason)
+        if now.duration_since(self.stats.last_summary_time).as_secs() >= 60 {
+            crate::say(&format!(
+                "journal: seen {}, recorded {}, rejected: {} already known, {} player/pet, {} corpse, {} non-creature, {} other",
+                self.stats.seen,
+                self.stats.recorded,
+                self.stats.rejected_known,
+                self.stats.rejected_player_pet,
+                self.stats.rejected_corpse,
+                self.stats.rejected_non_creature,
+                self.stats.rejected_other,
+            ));
+            self.stats = ScanStats {
+                last_summary_time: now,
+                ..ScanStats::default()
+            };
         }
     }
 
-    /// Prepares a save snapshot if unsaved changes have been quiet for SAVE_QUIET_SECONDS.
+    /// Prepares a save snapshot if unsaved changes have been quiet for SAVE_QUIET_SECONDS,
+    /// or if MAX_SAVE_INTERVAL_SECONDS (2 minutes) has elapsed since initial dirty state.
     pub fn take_save_snapshot_if_due(&mut self, now: Instant) -> Option<(PathBuf, BTreeMap<String, JournalRecord>)> {
         if self.disabled || !self.dirty {
             return None;
         }
-        if let Some(last_change) = self.last_change_time {
-            if now.duration_since(last_change).as_secs() >= SAVE_QUIET_SECONDS {
-                let path = self.resolved_path()?;
-                self.dirty = false;
-                return Some((path, self.records.clone()));
-            }
+        let quiet_due = self.last_change_time.map_or(false, |lc| {
+            now.duration_since(lc).as_secs() >= SAVE_QUIET_SECONDS
+        });
+        let max_due = self.first_dirty_time.map_or(false, |fd| {
+            now.duration_since(fd).as_secs() >= MAX_SAVE_INTERVAL_SECONDS
+        });
+
+        if quiet_due || max_due {
+            let path = self.resolved_path()?;
+            self.dirty = false;
+            self.first_dirty_time = None;
+            self.last_change_time = None;
+            return Some((path, self.records.clone()));
         }
         None
     }
@@ -381,7 +453,12 @@ impl Journal {
             return Err("no journal path available".into());
         };
         save_records_to_path(&path, &self.records)?;
+        let creatures = self.records.len();
+        let spawns = self.records.values().map(|r| r.ids.len()).sum::<usize>();
+        crate::say(&format!("journal: {creatures} creatures, {spawns} spawns saved"));
         self.dirty = false;
+        self.first_dirty_time = None;
+        self.last_change_time = None;
         self.status = format!("{} creatures, {} spawns", self.name_count, self.id_count);
         Ok(())
     }
@@ -621,8 +698,15 @@ fn spawn_save_worker(path: PathBuf, records: BTreeMap<String, JournalRecord>) {
             .name("journal-save".into())
             .spawn(move || {
                 let _guard = SaveInFlightGuard;
-                if let Err(e) = save_records_to_path(&path, &records) {
-                    crate::say(&format!("Failed to save journal: {e}"));
+                match save_records_to_path(&path, &records) {
+                    Ok(()) => {
+                        let creatures = records.len();
+                        let spawns = records.values().map(|r| r.ids.len()).sum::<usize>();
+                        crate::say(&format!("journal: {creatures} creatures, {spawns} spawns saved"));
+                    }
+                    Err(e) => {
+                        crate::say(&format!("Failed to save journal: {e}"));
+                    }
                 }
             })
             .ok();
@@ -885,7 +969,7 @@ mod tests {
             }),
             ..Default::default()
         }));
-        // 3. Remote player character with p264 = 1 (inviteable player)
+        // 3. Remote player character with class 2 (p256: 2)
         slots.push(Some(net::entity::Entity {
             id: 0x102,
             kind: net::entity::TYPE_CREATURE,
@@ -894,6 +978,7 @@ mod tests {
                 name: "InviteablePlayer".into(),
                 level: 30,
                 p255: 0,
+                p256: 2, // class 2 = player character
                 p264: 1,
                 ..Default::default()
             }),
@@ -1275,5 +1360,128 @@ mod tests {
         assert!(res.unwrap_err().contains("16 MiB"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_typical_npcs_with_p19_zero_and_p264_nonzero_are_recorded_while_class_2_and_3_rejected() {
+        let now = Instant::now();
+        let mut j = Journal::new_empty();
+
+        let mut slots = Vec::new();
+        // NPC 1: p19 = 0, p264 = 5 (arbitrary byte sent by server), class = 0
+        slots.push(Some(net::entity::Entity {
+            id: 0x501,
+            kind: net::entity::TYPE_CREATURE,
+            p18: 0,
+            p19: 0, // Not in targeting range
+            actor_pos: [100.0, 0.0, 100.0],
+            creature: Some(net::entity::Creature {
+                name: "Orc Legionnaire".into(),
+                level: 22,
+                p255: 0,
+                p256: 0, // class 0 (< 2)
+                p264: 5, // non-zero p264
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+        // NPC 2: p19 = 0, p264 = 1, class = 1
+        slots.push(Some(net::entity::Entity {
+            id: 0x502,
+            kind: net::entity::TYPE_CREATURE,
+            p18: 0,
+            p19: 0,
+            actor_pos: [110.0, 0.0, 110.0],
+            creature: Some(net::entity::Creature {
+                name: "Skeleton Warrior".into(),
+                level: 18,
+                p255: 0,
+                p256: 1, // class 1 (< 2)
+                p264: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+        // Player: class = 2 (must be rejected even with p19 = 0 or 1)
+        slots.push(Some(net::entity::Entity {
+            id: 0x503,
+            kind: net::entity::TYPE_CREATURE,
+            p18: 0,
+            p19: 0,
+            actor_pos: [120.0, 0.0, 120.0],
+            creature: Some(net::entity::Creature {
+                name: "PassingPlayer".into(),
+                level: 50,
+                p255: 0,
+                p256: 2, // class 2 = player
+                p264: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+        // Pet: class = 3 (must be rejected)
+        slots.push(Some(net::entity::Entity {
+            id: 0x504,
+            kind: net::entity::TYPE_CREATURE,
+            p18: 0,
+            p19: 0,
+            actor_pos: [130.0, 0.0, 130.0],
+            creature: Some(net::entity::Creature {
+                name: "PassingPet".into(),
+                level: 45,
+                p255: 0,
+                p256: 3, // class 3 = pet
+                p264: 0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+        // Corpse: p18 & 2 != 0 (must be rejected)
+        slots.push(Some(net::entity::Entity {
+            id: 0x505,
+            kind: net::entity::TYPE_CREATURE,
+            p18: 2, // corpse
+            p19: 0,
+            actor_pos: [140.0, 0.0, 140.0],
+            creature: Some(net::entity::Creature {
+                name: "Dead Rat".into(),
+                level: 1,
+                p255: 0,
+                p256: 0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+
+        j.record_entities(&slots, None, u32::MAX, 0, now);
+
+        assert_eq!(j.counts(), (2, 2));
+        assert!(j.has_creature("Orc Legionnaire"));
+        assert!(j.has_creature("Skeleton Warrior"));
+        assert!(!j.has_creature("PassingPlayer"));
+        assert!(!j.has_creature("PassingPet"));
+        assert!(!j.has_creature("Dead Rat"));
+    }
+
+    #[test]
+    fn test_flush_occurs_every_2_minutes_without_quiet_period() {
+        let t0 = Instant::now();
+        let temp_path = std::env::temp_dir().join(format!("eqoa-journal-2min-{}.json", std::process::id()));
+        let mut j = Journal::new_at_path(temp_path.clone());
+        j.record("Orc Legionnaire", 0x501, 0, 22, [100.0, 0.0, 100.0], t0);
+        assert!(j.has_unsaved_changes());
+
+        // At 30 seconds, if a new creature is seen, quiet period resets:
+        let t1 = t0 + Duration::from_secs(30);
+        j.record("Skeleton Warrior", 0x502, 0, 18, [110.0, 0.0, 110.0], t1);
+        // With only 10s since last change, 30s quiet period has not elapsed:
+        let t2 = t1 + Duration::from_secs(10);
+        assert!(j.take_save_snapshot_if_due(t2).is_none());
+
+        // At 120 seconds (2 minutes) since initial dirty state, flush occurs even without quiet period:
+        let t3 = t0 + Duration::from_secs(120);
+        let snapshot = j.take_save_snapshot_if_due(t3);
+        assert!(snapshot.is_some(), "must flush after 2 minutes even without quiet period");
+        assert!(!j.has_unsaved_changes());
     }
 }

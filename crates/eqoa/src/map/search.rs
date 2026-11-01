@@ -924,7 +924,7 @@ impl Search {
         let (j_names, j_spawns) = super::journal::counts();
         let footer_text = status_line.unwrap_or_else(|| {
             if self.tab == Tab::Npcs {
-                format!("{} matches · Journal: {j_names} cr, {j_spawns} sp", results.len())
+                format!("{} matches", results.len())
             } else {
                 format!("{} matches / Enter guides", results.len())
             }
@@ -958,6 +958,14 @@ impl Search {
             "Import",
             Action::Import,
             false,
+        );
+        let journal_label = format!("Journal: {j_names} creatures, {j_spawns} spawns");
+        t::text(
+            r,
+            &journal_label,
+            [px + 186, btn_y1 + 4],
+            w - 242,
+            t::MUTED,
         );
         self.button(
             r,
