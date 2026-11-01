@@ -11,6 +11,16 @@ use std::{
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 const MAX_LAYOUT: usize = 1024 * 1024;
 pub(super) const DEFAULT: &str = "Default";
+pub(super) const ROLES: [&str; 4] = ["Tank", "Healer", "Melee", "Caster"];
+pub(super) fn class_role(class: u8) -> &'static str {
+    match class {
+        0 | 2 | 3 => "Tank",
+        7 | 8 | 9 => "Healer",
+        1 | 4 | 5 | 6 => "Melee",
+        10..=14 => "Caster",
+        _ => DEFAULT,
+    }
+}
 
 // Connected character identity survives zone loading and is independent of HP.
 // Its only source is Play.player.name / dump.player.class; never Session.user.
@@ -277,7 +287,7 @@ impl Store {
         // All creators share this lock; an automatic clone never replaces a
         // concurrently-created manual profile with the same name.
         let _lock = self.lock("profiles.lock", "Profile creation is busy; try again")?;
-        if self.names()?.iter().any(|v| v.eq_ignore_ascii_case(name)) {
+        if self.path(name)?.exists() || self.names()?.iter().any(|v| v.eq_ignore_ascii_case(name)) {
             return Err("That profile name already exists".into());
         }
         self.write(name, doc)
@@ -395,32 +405,85 @@ impl Store {
             &json!({"schemaVersion":1,"characters":bindings.characters,"classes":bindings.classes}),
         )
     }
-    /// Assign an independent copy for unassigned/legacy-Default characters.
-    /// The assignment lock covers discovery, creation and read-modify-write.
-    pub fn ensure_character(&self, character: &Character) -> Result<(String, bool), String> {
+    /// Seed roles exactly once. All creators share the same OS lock; a role
+    /// already present (even damaged) is never replaced by the seed operation.
+    pub fn seed_roles(&self) -> Result<(), String> {
+        let marker = self.root()?.join(".roles-v1");
+        if marker.exists() {
+            return Ok(());
+        }
+        let _lock = self.lock("profiles.lock", "Role profile setup is busy; try again")?;
+        if marker.exists() {
+            return Ok(());
+        }
+        let seed = self.read(DEFAULT)?;
+        let names = self.names()?;
+        for name in ROLES {
+            if !self.path(name)?.exists() && !names.iter().any(|n| n.eq_ignore_ascii_case(name)) {
+                self.write(name, &seed)?;
+            }
+        }
+        super::storage::atomic_replace(&marker, b"1")
+            .map_err(|_| "Cannot finish role profile setup".into())
+    }
+    /// Read-only world-entry selection. An existing Default assignment is normal.
+    /// The bool requests setup; previewing a class/role never assigns it silently.
+    pub fn world_choice(&self, character: &Character) -> Result<(String, bool), String> {
+        let bindings = self.bindings()?;
+        let explicit = bindings
+            .characters
+            .get(&character.server)
+            .and_then(|m| m.get(&character.name));
+        if let Some(name) = explicit.filter(|n| self.path(n).is_ok_and(|p| p.exists())) {
+            self.read(name)?;
+            return Ok((name.clone(), false));
+        }
+        let class = bindings
+            .classes
+            .get(&character.server)
+            .and_then(|m| m.get(&character.class.to_string()));
+        let role = class_role(character.class);
+        let seed = class
+            .map(String::as_str)
+            .into_iter()
+            .chain([role, DEFAULT])
+            .find(|n| self.path(n).is_ok_and(|p| p.exists()))
+            .unwrap_or(DEFAULT);
+        self.read(seed)?;
+        Ok((seed.into(), true))
+    }
+    /// A deliberate independent copy, using the saved source rather than a
+    /// previous character's live VM. The binding lock covers creation/assignment.
+    pub fn copy_character(&self, character: &Character, source: &str) -> Result<String, String> {
+        self.copy_character_locked(character, source, false)
+    }
+    pub fn copy_unassigned(&self, character: &Character, source: &str) -> Result<String, String> {
+        self.copy_character_locked(character, source, true)
+    }
+    fn copy_character_locked(
+        &self,
+        character: &Character,
+        source: &str,
+        only_unassigned: bool,
+    ) -> Result<String, String> {
         let _lock = self.lock(
             "characters.lock",
             "Character profile assignments are busy; try again",
         )?;
         let mut bindings = self.bindings()?;
-        if let Some(name) = bindings
-            .characters
-            .get(&character.server)
-            .and_then(|m| m.get(&character.name))
-        {
-            if !name.eq_ignore_ascii_case(DEFAULT) && self.path(name)?.exists() {
-                self.read(name)?; // A damaged explicit profile is never replaced.
-                return Ok((name.clone(), false));
+        if only_unassigned {
+            if let Some(name) = bindings
+                .characters
+                .get(&character.server)
+                .and_then(|m| m.get(&character.name))
+            {
+                if self.path(name)?.exists() {
+                    self.read(name)?;
+                    return Ok(name.clone());
+                }
             }
         }
-        let seed = bindings
-            .classes
-            .get(&character.server)
-            .and_then(|m| m.get(&character.class.to_string()))
-            .filter(|name| self.path(name).is_ok_and(|p| p.exists()))
-            .map(String::as_str)
-            .unwrap_or(DEFAULT);
-        let document = self.read(seed)?;
+        let document = self.read(source)?;
         let mut base: String = character
             .name
             .chars()
@@ -479,7 +542,15 @@ impl Store {
             .or_default()
             .insert(character.name.clone(), name.clone());
         self.write_bindings(&bindings)?;
-        Ok((name, true))
+        Ok(name)
+    }
+    #[cfg(test)]
+    pub fn ensure_character(&self, character: &Character) -> Result<(String, bool), String> {
+        let (name, setup) = self.world_choice(character)?;
+        if !setup {
+            return Ok((name, false));
+        }
+        self.copy_unassigned(character, &name).map(|n| (n, true))
     }
     pub fn catalog(
         &self,
@@ -950,5 +1021,17 @@ mod tests {
                 .is_err()
         );
         assert_eq!(fs::read(path).unwrap(), b"broken");
+    }
+    #[test]
+    fn mod_profiles_role_map_covers_all_native_classes() {
+        let expected = [
+            "Tank", "Melee", "Tank", "Tank", "Melee", "Melee", "Melee", "Healer", "Healer",
+            "Healer", "Caster", "Caster", "Caster", "Caster", "Caster",
+        ];
+        for (class, role) in expected.into_iter().enumerate() {
+            assert_eq!(class_role(class as u8), role);
+        }
+        assert_eq!(super::super::player::CLASSES[14], "Alchemist");
+        assert_eq!(class_role(255), DEFAULT);
     }
 }

@@ -5,33 +5,41 @@ The owner-approved contract is in backlog.md, "Mod profiles per character or rol
 Implementation choices:
 
 
-Current behavior (automatic-character contract; supersedes the historical manual
-Default fallback described in the earlier verification sections below):
+Current behavior (owner-approved role setup; supersedes historical template and
+silent character-copy behavior below):
 
-- Default is a template, not an automatic world profile. An absent assignment or
-  legacy assignment to Default creates a separate character-named bundle, seeded
-  from the server's class default if present, otherwise Default. The assignment
-  and clone operation holds characters.lock; profile creation also holds
-  profiles.lock and never replaces a colliding filename.
-- Names capitalize the character's normalized name. A collision adds a sanitized
-  server suffix, then a numeric suffix. Names remain within the existing 48-byte
-  ASCII policy; unsupported names safely use Character. No account input exists.
-- Automatic creation happens even when the character's addons are all disabled,
-  before the lazy renderer launch decision. A damaged template/profile produces
-  a diagnostic and is never overwritten. A healthy profile can still be selected
-  and assigned while an automatic load is failing.
-- Existing characters keep independent copies when a class/default template
-  changes. Explicitly assigning Healer (or another named profile) to several
-  characters deliberately shares it. The header counts total explicit character
-  assignments across servers. Class-default markers use the current server.
-- The manager has a bounded scrollable selectable list with active/character/class
-  markers, Load for this character, Copy current into new profile, class default,
-  Delete and Edit Default template. Copy saves the outgoing bundle, loads a fresh
-  copy and assigns it to the current character. Selecting a row alone changes
-  nothing. Default is writable only during explicit template-edit mode.
-- The active header and help line explain automatic separation and optional
-  sharing. Logout, exit, explicit save and profile switch preserve the selected
-  character's state/layout. Template edits never rewrite existing character files.
+- Default is an ordinary selectable, editable and shareable profile. Existing
+  assignments, including Default, are unchanged. Default cannot be deleted.
+- First run seeds missing Tank, Healer, Melee and Caster profiles from the saved
+  Default. profiles.lock protects creation and an atomic .roles-v1 marker makes
+  this a one-time operation. Existing roles are never overwritten. Deleting a
+  role later does not recreate it at startup.
+- New unassigned characters preview the saved class default, otherwise their
+  role, and see Set up mods for Name even with the Addon Manager closed/all mods
+  disabled. Use Profile assigns and shares it; Make a separate copy clones the
+  chosen saved bundle into a character-named profile and assigns that copy.
+  Use is the default keyboard action. Closing uses the ORIGINAL preselection;
+  logout/exit before choosing also uses it. Preview changes are not flushed
+  until a choice is made, so merely browsing does not alter a shared profile.
+- Tank: Warrior/Paladin/Shadowknight. Healer: Druid/Shaman/Cleric.
+  Melee: Ranger/Monk/Bard/Rogue. Caster: Magician/Necromancer/Enchanter/Wizard/
+  Alchemist. Native Alchemist is ID 14 (live.rs:22; auctionwnd picker tests),
+  already present in addons/player.rs. Enchanter ID 12 uses Caster per the lead's
+  clarification. A server's explicit class default overrides its role.
+- The manager lists every profile with active, character and class-default
+  markers. Select a row, then Use for this character, Copy into this character's
+  profile, Use as Class default or Delete. Save current as creates a new named
+  profile; existing names are kept and must be loaded before editing/saving.
+- Copy names use the normalized character name, then server/numeric suffixes on
+  collisions. A deliberate repeated copy keeps earlier bundles rather than
+  replacing them. Names remain within the existing bounded ASCII policy.
+- Each world entry starts fresh VMs and loads the destination's enabled set,
+  Save state and layout before its first frame. Logout pauses addon frames.
+  Saves on switch/logout/exit keep the active bundle; deliberate shared profiles
+  retain last-save-wins semantics. Account data is never an input.
+- Atomic writes, corrupt-file protection, OS locks, transactional Save capture,
+  bounded data and two-second failed-load retry remain in force. Busy first-run
+  role creation retries instead of picking a misleading fallback profile.
 
 Historical implementation/verification notes follow:
 
@@ -324,3 +332,38 @@ Footprint:
 All 32 profile regressions passed. Existing prerequisite SKIP lines: 106 plain /
 108 reference; no profile or pinned-package fixture skipped. The release build
 is run after the final commit and reported in the handoff. Live owner retest is pending.
+
+
+## Role setup follow-up (supersedes automatic template copying)
+
+The six requested workflow regressions failed against 26ed0de before production
+changes: 0 passed / 6 failed. They cover Druid -> Healer preselection and Copy,
+Share propagation, a selectable/shareable/writable Default, closing -> Use the
+preselection, one-time role seeding, and fresh Save/enabled/layout/VM state.
+Additional negative controls reproduced busy first-run seeding (6 passed / 1
+failed) and a queued old-world close incorrectly answering the next character's
+prompt (0 passed / 1 failed). Both now pass. Class mapping covers all 15 native
+IDs, including Alchemist 14 and the clarified Enchanter 12 -> Caster.
+
+Final verification (fresh TMP/TEMP roots; requested report-to-desktop target):
+
+Plain:
+
+    test result: ok. 1468 passed; 0 failed; 21 ignored; 0 measured; 0 filtered out; finished in 85.42s
+
+Pinned reference plus --include-ignored:
+
+    test result: ok. 1489 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 97.62s
+
+Wasm:
+
+    cargo :     Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.93s
+
+Footprint:
+
+    PASS: fork footprint is within reviewed policy
+
+All 40 profile regressions ran; no profile/package fixture skipped. Other
+prerequisite SKIP lines: 106 plain / 108 reference (disc/assets, privileges and
+optional GPU prerequisites). Release build runs after the final commit and is
+reported in the handoff. Owner live QA is pending.

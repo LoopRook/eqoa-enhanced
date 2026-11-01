@@ -130,7 +130,7 @@ fn mod_profiles_manager_save_as_bind_class_switch_and_delete_actions() {
     let a = CharacterSnapshot::new(true, "Ari", 3).unwrap();
     let b = CharacterSnapshot::new(true, "Bea", 3).unwrap();
     manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
-    manager.queue_profile(ProfileAction::SaveAs("Healer".into()));
+    manager.queue_profile(ProfileAction::Load("Healer".into()));
     manager.queue_profile(ProfileAction::BindCharacter);
     manager.queue_profile(ProfileAction::BindClass);
     manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
@@ -146,8 +146,8 @@ fn mod_profiles_manager_save_as_bind_class_switch_and_delete_actions() {
     manager.profile_boundary(&mut gpu.context, Some(b), "server.example");
     assert_eq!(
         manager.profile_name(),
-        Some("Bea"),
-        "class default seeds an independent profile on world entry"
+        Some("Healer"),
+        "class default is preselected until the player chooses Use or Copy"
     );
     manager.queue_profile(ProfileAction::SaveAs("Temp".into()));
     manager.profile_boundary(&mut gpu.context, Some(b), "server.example");
@@ -456,7 +456,7 @@ fn mod_profiles_failed_save_keeps_previous_bundle_on_later_autosave() {
     root.package("c", false, "");
     let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
     manager.enable_profiles(Some(config.0.clone()));
-    manager.queue_profile(ProfileAction::EditTemplate);
+    manager.queue_profile(ProfileAction::Load("Default".into()));
     manager.profile_boundary(&mut gpu.context, None, "server.example");
     gpu.begin();
     manager.frame(Snapshot::default());
@@ -498,7 +498,7 @@ fn mod_profiles_shutdown_save_failure_preserves_the_entire_previous_file() {
     root.package("b", true, "UiForge.RegisterCallback(UiForge.CallbackType.Save,function() saves=(saves or 0)+1;error('synthetic shutdown Save failure') end)");
     let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
     manager.enable_profiles(Some(config.0.clone()));
-    manager.queue_profile(ProfileAction::EditTemplate);
+    manager.queue_profile(ProfileAction::Load("Default".into()));
     manager.profile_boundary(&mut gpu.context, None, "server.example");
     gpu.begin();
     manager.frame(Snapshot::default());
@@ -697,7 +697,7 @@ fn test_profiles_ui_class_name_display_and_button_label() {
 }
 
 #[test]
-fn mod_profiles_test_character_logout_unassigned_character_copies_default() {
+fn mod_profiles_logout_then_unassigned_character_previews_saved_role() {
     use super::super::named_profiles::{Character, CharacterSnapshot, Document, Store};
     let Some(mut gpu) = Gpu::new() else {
         return;
@@ -789,7 +789,7 @@ fn mod_profiles_test_character_logout_unassigned_character_copies_default() {
         "old-character addon frames must pause at character select"
     );
     manager.profile_boundary(&mut gpu.context, Some(b), "server.example");
-    assert_eq!(manager.profile_name(), Some("Bea"));
+    assert_eq!(manager.profile_name(), Some("Melee"));
     gpu.begin();
     manager.frame(Snapshot::default());
     gpu.render();
@@ -918,7 +918,7 @@ fn mod_profiles_shared_profile_after_logout_starts_a_fresh_character_vm() {
 }
 
 #[test]
-fn mod_profiles_automatic_character_owner_sequence_isolates_enabled_state() {
+fn mod_profiles_explicit_character_copies_isolate_enabled_state() {
     use super::super::named_profiles::{CharacterSnapshot, Document, Store};
     let Some(mut gpu) = Gpu::new() else {
         return;
@@ -943,6 +943,10 @@ fn mod_profiles_automatic_character_owner_sequence_isolates_enabled_state() {
     let a = CharacterSnapshot::new(true, "A", 3).unwrap();
     let b = CharacterSnapshot::new(true, "B", 1).unwrap();
     manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    if manager.profile_name() != Some("A") {
+        manager.queue_profile(ProfileAction::CopyCharacter("Tank".into()));
+        manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    }
     assert_eq!(manager.profile_name(), Some("A"));
     gpu.begin();
     manager.frame(Snapshot::default());
@@ -954,6 +958,8 @@ fn mod_profiles_automatic_character_owner_sequence_isolates_enabled_state() {
     gpu.render();
     manager.after_render();
     manager.profile_boundary(&mut gpu.context, None, "server.example");
+    manager.profile_boundary(&mut gpu.context, Some(b), "server.example");
+    manager.queue_profile(ProfileAction::CopyCharacter("Melee".into()));
     manager.profile_boundary(&mut gpu.context, Some(b), "server.example");
     assert_eq!(manager.profile_name(), Some("B"));
     assert!(manager.entries[0].enabled_intent);
@@ -971,7 +977,7 @@ fn mod_profiles_automatic_character_owner_sequence_isolates_enabled_state() {
 }
 
 #[test]
-fn mod_profiles_automatic_legacy_default_assignment_copies_template() {
+fn mod_profiles_legacy_default_assignment_stays_normal() {
     use super::super::named_profiles::{Character, CharacterSnapshot, Document, Store};
     let Some(mut gpu) = Gpu::new() else {
         return;
@@ -988,13 +994,13 @@ fn mod_profiles_automatic_legacy_default_assignment_copies_template() {
     let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
     manager.enable_profiles(Some(config.0.clone()));
     manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
-    assert_eq!(manager.profile_name(), Some("A"));
-    assert_eq!(store.read("A").unwrap(), template);
-    assert_eq!(store.resolve(&identity).unwrap().0, "A");
+    assert_eq!(manager.profile_name(), Some("Default"));
+    assert_eq!(store.read("Default").unwrap(), template);
+    assert_eq!(store.resolve(&identity).unwrap().0, "Default");
 }
 
 #[test]
-fn mod_profiles_automatic_class_default_seeds_an_independent_character() {
+fn mod_profiles_class_default_preselection_can_be_copied() {
     use super::super::named_profiles::{Character, CharacterSnapshot, Document, Store};
     let Some(mut gpu) = Gpu::new() else {
         return;
@@ -1017,6 +1023,9 @@ fn mod_profiles_automatic_class_default_seeds_an_independent_character() {
     let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
     manager.enable_profiles(Some(config.0.clone()));
     manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    assert_eq!(manager.profile_name(), Some("Healer"));
+    manager.queue_profile(ProfileAction::CopyCharacter("Healer".into()));
+    manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
     assert_eq!(manager.profile_name(), Some("A"));
     assert_eq!(store.read("A").unwrap(), seed);
     store.write("Healer", &Document::empty()).unwrap();
@@ -1028,7 +1037,7 @@ fn mod_profiles_automatic_class_default_seeds_an_independent_character() {
 }
 
 #[test]
-fn mod_profiles_automatic_active_character_profile_cannot_be_deleted() {
+fn mod_profiles_active_character_copy_cannot_be_deleted() {
     use super::super::named_profiles::CharacterSnapshot;
     let Some(mut gpu) = Gpu::new() else {
         return;
@@ -1037,6 +1046,12 @@ fn mod_profiles_automatic_active_character_profile_cannot_be_deleted() {
     let config = Scratch::new();
     let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
     manager.enable_profiles(Some(config.0.clone()));
+    manager.profile_boundary(
+        &mut gpu.context,
+        CharacterSnapshot::new(true, "A", 3),
+        "server.example",
+    );
+    manager.queue_profile(ProfileAction::CopyCharacter("Tank".into()));
     manager.profile_boundary(
         &mut gpu.context,
         CharacterSnapshot::new(true, "A", 3),
@@ -1097,7 +1112,10 @@ fn mod_profiles_visible_list_contains_all_profiles_in_a_scrollable_region() {
         visible_list,
         "profiles must have a visible bounded list rather than off-screen action buttons"
     );
-    assert_eq!(store.names().unwrap(), ["A", "Default", "Healer", "Tank"]);
+    assert_eq!(
+        store.names().unwrap(),
+        ["A", "Caster", "Default", "Healer", "Melee", "Tank"]
+    );
 }
 
 #[test]
@@ -1114,7 +1132,7 @@ fn mod_profiles_explicit_sharing_catalog_and_reselect_assignment() {
     let a = CharacterSnapshot::new(true, "A", 3).unwrap();
     let b = CharacterSnapshot::new(true, "B", 3).unwrap();
     manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
-    manager.queue_profile(ProfileAction::SaveAs("Healer".into()));
+    manager.queue_profile(ProfileAction::Load("Healer".into()));
     manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
     manager.profile_boundary(&mut gpu.context, None, "server.example");
     manager.profile_boundary(&mut gpu.context, Some(b), "server.example");
@@ -1125,13 +1143,13 @@ fn mod_profiles_explicit_sharing_catalog_and_reselect_assignment() {
     let rows = store.catalog("Healer", Some(&identity)).unwrap();
     assert_eq!(
         rows.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
-        ["A", "B", "Default", "Healer"]
+        ["Caster", "Default", "Healer", "Melee", "Tank"]
     );
     let shared = rows.iter().find(|r| r.name == "Healer").unwrap();
     assert!(shared.active && shared.assigned);
     assert_eq!(shared.characters, 2);
     assert_eq!(shared.class_defaults, [3]);
-    store.bind(&identity, "B", false).unwrap();
+    store.bind(&identity, "Default", false).unwrap();
     manager.queue_profile(ProfileAction::Load("Healer".into()));
     manager.profile_boundary(&mut gpu.context, Some(b), "server.example");
     assert_eq!(
@@ -1142,7 +1160,7 @@ fn mod_profiles_explicit_sharing_catalog_and_reselect_assignment() {
 }
 
 #[test]
-fn mod_profiles_template_revert_keeps_edit_mode_and_existing_character_unchanged() {
+fn mod_profiles_default_revert_remains_writable_and_keeps_separate_copy() {
     use super::super::named_profiles::{CharacterSnapshot, Document, Store};
     let Some(mut gpu) = Gpu::new() else {
         return;
@@ -1160,7 +1178,9 @@ fn mod_profiles_template_revert_keeps_edit_mode_and_existing_character_unchanged
     manager.enable_profiles(Some(config.0.clone()));
     let a = CharacterSnapshot::new(true, "A", 3).unwrap();
     manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
-    manager.queue_profile(ProfileAction::EditTemplate);
+    manager.queue_profile(ProfileAction::CopyCharacter("Tank".into()));
+    manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    manager.queue_profile(ProfileAction::Load("Default".into()));
     manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
     manager.queue_profile(ProfileAction::Revert);
     manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
@@ -1181,7 +1201,7 @@ fn mod_profiles_template_revert_keeps_edit_mode_and_existing_character_unchanged
 }
 
 #[test]
-fn mod_profiles_template_failure_can_load_a_healthy_character_assignment() {
+fn mod_profiles_default_failure_can_load_a_healthy_character_assignment() {
     use super::super::named_profiles::{Character, CharacterSnapshot, Document, Store};
     let Some(mut gpu) = Gpu::new() else {
         return;
@@ -1207,4 +1227,424 @@ fn mod_profiles_template_failure_can_load_a_healthy_character_assignment() {
     );
     assert!(!manager.profile_waiting_world());
     assert_eq!(fs::read(store.path("Default").unwrap()).unwrap(), b"broken");
+}
+
+#[test]
+fn mod_profiles_role_setup_preselects_healer_before_assignment() {
+    use super::super::named_profiles::{CharacterSnapshot, Document, Store};
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    let store = Store::new(Some(config.0.clone()));
+    store.create("Default", &Document::empty()).unwrap();
+    let mut healer = Document::empty();
+    healer.layout = "[Window][Healer]
+Pos=19,29
+
+"
+    .into();
+    store.create("Healer", &healer).unwrap();
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    manager.profile_boundary(
+        &mut gpu.context,
+        CharacterSnapshot::new(true, "Dru", 7),
+        "server.example",
+    );
+    assert_eq!(
+        manager.profile_name(),
+        Some("Healer"),
+        "Druid must preview its role, not silently create a character profile"
+    );
+    let character = super::super::named_profiles::Character::new(
+        "server.example",
+        CharacterSnapshot::new(true, "Dru", 7).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        store.world_choice(&character).unwrap().1,
+        "preview must not assign silently"
+    );
+    gpu.context.io_mut().set_display_size([800., 600.]);
+    gpu.context.io_mut().set_delta_time(1. / 60.);
+    let ui = gpu.context.frame();
+    manager.profile_setup_controls(ui);
+    gpu.render();
+    manager.after_render();
+    let raw = gpu.context.as_raw();
+    let mut visible = false;
+    unsafe {
+        for i in 0..(*raw).Windows.Size {
+            let w = *(*raw).Windows.Data.add(i as usize);
+            if std::ffi::CStr::from_ptr((*w).Name)
+                .to_string_lossy()
+                .contains("Set up mods for Dru")
+            {
+                visible = (*w).Active;
+            }
+        }
+    }
+    assert!(
+        visible,
+        "setup prompt must be visible with the manager closed"
+    );
+    manager.queue_profile(ProfileAction::CopyCharacter("Healer".into()));
+    manager.profile_boundary(
+        &mut gpu.context,
+        CharacterSnapshot::new(true, "Dru", 7),
+        "server.example",
+    );
+    assert_eq!(manager.profile_name(), Some("Dru"));
+    assert_eq!(store.resolve(&character).unwrap().0, "Dru");
+    assert_eq!(store.read("Dru").unwrap(), healer);
+}
+
+#[test]
+fn mod_profiles_role_setup_default_assignment_remains_shared() {
+    use super::super::named_profiles::{Character, CharacterSnapshot, Document, Store};
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    let store = Store::new(Some(config.0.clone()));
+    store.create("Default", &Document::empty()).unwrap();
+    let a = CharacterSnapshot::new(true, "A", 7).unwrap();
+    store
+        .bind(
+            &Character::new("server.example", a).unwrap(),
+            "Default",
+            false,
+        )
+        .unwrap();
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    assert_eq!(manager.profile_name(), Some("Default"));
+    gpu.context
+        .load_ini_settings("[Window][Editable Default]\nPos=71,72\nSize=80,80\n\n");
+    manager.queue_profile(ProfileAction::Save);
+    manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    assert!(
+        store
+            .read("Default")
+            .unwrap()
+            .layout
+            .contains("Editable Default"),
+        "Default must save without template mode"
+    );
+    let b = CharacterSnapshot::new(true, "B", 7).unwrap();
+    manager.profile_boundary(&mut gpu.context, Some(b), "server.example");
+    manager.queue_profile(ProfileAction::Load("Default".into()));
+    manager.profile_boundary(&mut gpu.context, Some(b), "server.example");
+    assert_eq!(
+        store
+            .resolve(&Character::new("server.example", b).unwrap())
+            .unwrap()
+            .0,
+        "Default"
+    );
+    assert_eq!(
+        store
+            .catalog("Default", None)
+            .unwrap()
+            .iter()
+            .find(|r| r.active)
+            .unwrap()
+            .characters,
+        2
+    );
+    assert!(
+        store.read("B").is_err(),
+        "sharing Default must not force a copy"
+    );
+}
+
+#[test]
+fn mod_profiles_role_setup_seeds_missing_roles_without_overwriting() {
+    use super::super::named_profiles::{Document, Store};
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    let store = Store::new(Some(config.0.clone()));
+    let mut default = Document::empty();
+    default.layout = "[Window][Seed]
+Pos=1,2
+
+"
+    .into();
+    store.create("Default", &default).unwrap();
+    let custom = Document::empty();
+    store.create("Tank", &custom).unwrap();
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    for name in ["Healer", "Melee", "Caster"] {
+        assert_eq!(store.read(name).unwrap(), default);
+    }
+    assert_eq!(store.read("Tank").unwrap(), custom);
+    let original = fs::read(store.path("Healer").unwrap()).unwrap();
+    default.layout = "changed later".into();
+    store.write("Default", &default).unwrap();
+    store.delete("Melee", "Default").unwrap();
+    manager.enable_profiles(Some(config.0.clone()));
+    assert_eq!(fs::read(store.path("Healer").unwrap()).unwrap(), original);
+    assert!(
+        store.read("Melee").is_err(),
+        "first-run seeding must not resurrect a deleted role"
+    );
+    assert_eq!(store.read("Tank").unwrap(), custom);
+}
+
+#[test]
+fn mod_profiles_role_setup_close_uses_preselection() {
+    use super::super::named_profiles::{Character, CharacterSnapshot, Document, Store};
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    let store = Store::new(Some(config.0.clone()));
+    for name in ["Default", "Healer"] {
+        store.create(name, &Document::empty()).unwrap();
+    }
+    let a = CharacterSnapshot::new(true, "Dru", 7).unwrap();
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    manager.queue_profile(ProfileAction::SetupClose);
+    manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    assert_eq!(
+        store
+            .resolve(&Character::new("server.example", a).unwrap())
+            .unwrap()
+            .0,
+        "Healer"
+    );
+}
+
+#[test]
+fn mod_profiles_role_setup_share_propagates_to_another_character() {
+    use super::super::named_profiles::{Character, CharacterSnapshot, Document, Store};
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    let store = Store::new(Some(config.0.clone()));
+    root.package("a",true,"value=0; UiForge.RegisterCallback(UiForge.CallbackType.Save,function() return {value=value} end); UiForge.RegisterCallback(UiForge.CallbackType.Load,function(s) value=s.value end)");
+    let addon = super::super::discovery::discover(&root.0).addons.remove(0);
+    let key = Storage::key(&addon).unwrap();
+    let mut doc = Document::empty();
+    doc.enabled.insert(key.clone(), true);
+    let lua = mlua::Lua::new();
+    doc.addons.insert(
+        key,
+        super::super::profile::encode(lua.load("return {value=11}").eval().unwrap()).unwrap(),
+    );
+    for name in ["Default", "Healer"] {
+        store.create(name, &doc).unwrap();
+    }
+    let a = CharacterSnapshot::new(true, "A", 7).unwrap();
+    let b = CharacterSnapshot::new(true, "B", 9).unwrap();
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    assert_eq!(manager.profile_name(), Some("Healer"));
+    manager.queue_profile(ProfileAction::Load("Healer".into()));
+    manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    gpu.begin();
+    manager.frame(Snapshot::default());
+    gpu.render();
+    manager.after_render();
+    manager.entries[0]
+        .instance
+        .as_ref()
+        .unwrap()
+        .host
+        .execute("value=77")
+        .unwrap();
+    manager.queue_profile(ProfileAction::Save);
+    manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    store
+        .bind(
+            &Character::new("server.example", b).unwrap(),
+            "Healer",
+            false,
+        )
+        .unwrap();
+    manager.profile_boundary(&mut gpu.context, None, "server.example");
+    manager.profile_boundary(&mut gpu.context, Some(b), "server.example");
+    gpu.begin();
+    manager.frame(Snapshot::default());
+    gpu.render();
+    manager.after_render();
+    assert_eq!(
+        manager.entries[0]
+            .instance
+            .as_ref()
+            .unwrap()
+            .host
+            .lua
+            .globals()
+            .get::<i32>("value")
+            .unwrap(),
+        77
+    );
+    let rows = store
+        .catalog(
+            "Healer",
+            Some(&Character::new("server.example", b).unwrap()),
+        )
+        .unwrap();
+    assert_eq!(rows.iter().find(|r| r.active).unwrap().characters, 2);
+}
+
+#[test]
+fn mod_profiles_role_setup_new_character_never_inherits_previous_live_state() {
+    use super::super::named_profiles::{Character, CharacterSnapshot, Document, Store};
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    let store = Store::new(Some(config.0.clone()));
+    root.package("a",true,"value=0; transient=(transient or 0)+1; UiForge.RegisterCallback(UiForge.CallbackType.Save,function() return {value=value} end); UiForge.RegisterCallback(UiForge.CallbackType.Load,function(s) value=s.value end); ImGui.Begin('Orb');ImGui.End()");
+    root.package("extra", false, "");
+    let addons = super::super::discovery::discover(&root.0).addons;
+    let key = Storage::key(addons.iter().find(|a| a.id == "a").unwrap()).unwrap();
+    let extra = Storage::key(addons.iter().find(|a| a.id == "extra").unwrap()).unwrap();
+    let lua = mlua::Lua::new();
+    for (name, value, pos, enabled) in [
+        ("Default", 11, "10,20", false),
+        ("Healer", 11, "10,20", false),
+        ("Previous", 77, "110,120", true),
+    ] {
+        let mut doc = Document::empty();
+        doc.enabled.insert(key.clone(), true);
+        doc.enabled.insert(extra.clone(), enabled);
+        doc.addons.insert(
+            key.clone(),
+            super::super::profile::encode(
+                lua.load(format!("return {{value={value}}}"))
+                    .eval()
+                    .unwrap(),
+            )
+            .unwrap(),
+        );
+        doc.layout = format!("[Window][Orb]\nPos={pos}\nSize=80,80\nCollapsed=0\n\n");
+        store.create(name, &doc).unwrap();
+    }
+    let a = CharacterSnapshot::new(true, "A", 0).unwrap();
+    let b = CharacterSnapshot::new(true, "B", 7).unwrap();
+    store
+        .bind(
+            &Character::new("server.example", a).unwrap(),
+            "Previous",
+            false,
+        )
+        .unwrap();
+    let seed = fs::read(store.path("Healer").unwrap()).unwrap();
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    gpu.begin();
+    manager.frame(Snapshot::default());
+    gpu.render();
+    manager.after_render();
+    manager
+        .entries
+        .iter()
+        .find(|e| e.metadata.id == "a")
+        .unwrap()
+        .instance
+        .as_ref()
+        .unwrap()
+        .host
+        .execute("value=999; transient=99")
+        .unwrap();
+    // A click queued on the old world's final frame must not answer B's setup.
+    manager.queue_profile(ProfileAction::SetupClose);
+    manager.profile_boundary(&mut gpu.context, Some(b), "server.example");
+    assert!(
+        store
+            .world_choice(&Character::new("server.example", b).unwrap())
+            .unwrap()
+            .1,
+        "B must still get its setup prompt"
+    );
+    assert_eq!(manager.profile_name(), Some("Healer"));
+    gpu.begin();
+    manager.frame(Snapshot::default());
+    gpu.render();
+    manager.after_render();
+    let host = &manager
+        .entries
+        .iter()
+        .find(|e| e.metadata.id == "a")
+        .unwrap()
+        .instance
+        .as_ref()
+        .unwrap()
+        .host;
+    assert_eq!(host.lua.globals().get::<i32>("value").unwrap(), 11);
+    assert_eq!(host.lua.globals().get::<i32>("transient").unwrap(), 1);
+    assert!(
+        !manager
+            .entries
+            .iter()
+            .find(|e| e.metadata.id == "extra")
+            .unwrap()
+            .enabled_intent
+    );
+    let mut layout = String::new();
+    gpu.context.save_ini_settings(&mut layout);
+    assert!(layout.contains("[Window][Orb]\nPos=10,20"), "{layout}");
+    manager.flush_profile(&mut gpu.context, true);
+    assert_eq!(
+        fs::read(store.path("Healer").unwrap()).unwrap(),
+        seed,
+        "preview must not publish before Use or Copy"
+    );
+}
+
+#[test]
+fn mod_profiles_role_setup_waits_for_concurrent_role_seeding() {
+    use super::super::named_profiles::{CharacterSnapshot, Document, Store};
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    let store = Store::new(Some(config.0.clone()));
+    store.create("Default", &Document::empty()).unwrap();
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(
+            store
+                .path("Default")
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("profiles.lock"),
+        )
+        .unwrap();
+    lock.try_lock().unwrap();
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    let a = CharacterSnapshot::new(true, "Dru", 7).unwrap();
+    manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    assert!(
+        manager.profile_waiting_world(),
+        "a busy first-run seed must retry instead of previewing the wrong profile"
+    );
+    drop(lock);
+    std::thread::sleep(std::time::Duration::from_millis(2100));
+    manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    assert_eq!(manager.profile_name(), Some("Healer"));
+    assert!(!manager.profile_waiting_world());
 }

@@ -278,10 +278,13 @@ impl Runtime {
                 let store = super::named_profiles::Store::new(self.paths.config.clone());
                 if let Ok(identity) = super::named_profiles::Character::new(server, character) {
                     match store
-                        .ensure_character(&identity)
-                        .and_then(|(name, _)| store.read(&name))
+                        .seed_roles()
+                        .and_then(|()| store.world_choice(&identity))
+                        .and_then(|(name, setup)| store.read(&name).map(|doc| (doc, setup)))
                     {
-                        Ok(doc) => self.initial_enabled = doc.enabled.values().any(|v| *v),
+                        Ok((doc, setup)) => {
+                            self.initial_enabled = setup || doc.enabled.values().any(|v| *v)
+                        }
                         Err(_) => self.open = true, // The manager displays the load diagnostic.
                     }
                 }
@@ -660,6 +663,9 @@ fn render_managed(
         manager.profile_boundary(context, snapshot.character, &plan.server);
         manager.flush_pending_fonts(context);
         let ui = context.try_frame().map_err(|e| e.to_string())?;
+        if !snapshot.start_menu {
+            manager.profile_setup_controls(ui);
+        }
         let mut open = plan.controls.unwrap_or(false);
         if open && !snapshot.start_menu {
             let actions = controls(ui, manager, &mut open, plan.root.as_ref());
@@ -1454,9 +1460,11 @@ mod tests {
 
         let mut runtime = Runtime::new(paths.clone());
         runtime.launch_headless(&device, &queue, format).unwrap();
-        // Template changes require the explicit template-edit action.
+        // Default is a normal editable profile.
         if let Some(Graphics::Managed(active)) = runtime.graphics.as_mut() {
-            active.manager.queue_profile(super::super::manager::ProfileAction::EditTemplate);
+            active
+                .manager
+                .queue_profile(super::super::manager::ProfileAction::Load("Default".into()));
         }
         runtime.step_frame_headless(|ui| {
             ui.window("WereoxxsChat")
@@ -1574,7 +1582,9 @@ mod tests {
             .launch_headless(&device, &queue, format)
             .unwrap();
         if let Some(Graphics::Managed(active)) = runtime_env.graphics.as_mut() {
-            active.manager.queue_profile(super::super::manager::ProfileAction::EditTemplate);
+            active
+                .manager
+                .queue_profile(super::super::manager::ProfileAction::Load("Default".into()));
         }
         runtime_env.step_frame_headless(|ui| {
             ui.window("RedirectionWindow")
