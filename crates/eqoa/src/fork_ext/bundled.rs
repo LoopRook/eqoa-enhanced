@@ -1,5 +1,3 @@
-\\?\C:\Users\hocka\.paseo\worktrees\1usktejc\release-0-4-0\crates\eqoa\src\fork_ext\bundled.rs:
-
 //! Auto-extracted bundled mod packages and embedded assets.
 //!
 //! Provides compile-time embedded copies of approved bundled mods (wereoxxs_ui,
