@@ -15,7 +15,7 @@
 //!   or if the fallback mods folder is used, nothing is installed.
 //! - Symlinks and junctions: Writes through symlinks or reparse points are rejected.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -323,44 +323,153 @@ pub fn bundled_registry_path(config_dir: &Path) -> PathBuf {
     config_dir.join("addons").join("bundled.json")
 }
 
-pub fn load_bundled_registry(config_dir: Option<&Path>) -> BTreeSet<String> {
-    let Some(config_dir) = config_dir else {
-        return BTreeSet::new();
-    };
-    let path = bundled_registry_path(config_dir);
-    let Ok(data) = fs::read_to_string(&path) else {
-        return BTreeSet::new();
-    };
-    parse_bundled_registry(&data)
+fn canonicalize_best_effort(path: &Path) -> PathBuf {
+    if let Ok(c) = path.canonicalize() {
+        return c;
+    }
+    let mut tail = Vec::new();
+    let mut cur = path;
+    while let Some(parent) = cur.parent() {
+        if let Some(name) = cur.file_name() {
+            tail.push(name);
+        }
+        if let Ok(c_parent) = parent.canonicalize() {
+            let mut result = c_parent;
+            for component in tail.into_iter().rev() {
+                result.push(component);
+            }
+            return result;
+        }
+        cur = parent;
+    }
+    normalize_path(path)
 }
 
-pub fn parse_bundled_registry(json_str: &str) -> BTreeSet<String> {
-    let mut recorded = BTreeSet::new();
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
-        if let Some(arr) = val.get("installed").and_then(|v| v.as_array()) {
-            for item in arr {
-                if let Some(s) = item.as_str() {
-                    recorded.insert(s.to_string());
-                }
+#[cfg(not(target_arch = "wasm32"))]
+pub fn mods_folder_key(mods_dir: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let canonical = canonicalize_best_effort(mods_dir);
+    let mut s = canonical.to_string_lossy().into_owned();
+    if let Some(stripped) = s.strip_prefix(r"\\?\UNC\") {
+        s = format!(r"\\{stripped}");
+    } else if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        s = stripped.to_string();
+    }
+    #[cfg(windows)]
+    {
+        s = s.replace('/', "\\").to_lowercase();
+    }
+    #[cfg(not(windows))]
+    {
+        s = s.replace('\\', "/");
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(s.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn mods_folder_key(_mods_dir: &Path) -> String {
+    String::new()
+}
+
+pub fn parse_bundled_registry(
+    json_str: &str,
+    current_folder_key: Option<&str>,
+) -> (BTreeMap<String, BTreeSet<String>>, bool) {
+    let mut folders = BTreeMap::new();
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) else {
+        return (folders, false);
+    };
+
+    if let Some(folders_obj) = val.get("folders").and_then(|v| v.as_object()) {
+        for (k, v) in folders_obj {
+            if let Some(arr) = v.as_array() {
+                let pkgs: BTreeSet<String> = arr
+                    .iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect();
+                folders.insert(k.clone(), pkgs);
             }
-        } else if let Some(arr) = val.get("packages").and_then(|v| v.as_array()) {
-            for item in arr {
-                if let Some(s) = item.as_str() {
-                    recorded.insert(s.to_string());
-                }
+        }
+        return (folders, false);
+    }
+
+    // Flat legacy format: {"installed": [...]}, {"packages": [...]}, or [...]
+    let mut flat = BTreeSet::new();
+    let is_flat = if let Some(arr) = val.get("installed").and_then(|v| v.as_array()) {
+        for item in arr {
+            if let Some(s) = item.as_str() {
+                flat.insert(s.to_string());
             }
-        } else if let Some(arr) = val.as_array() {
-            for item in arr {
-                if let Some(s) = item.as_str() {
-                    recorded.insert(s.to_string());
-                }
+        }
+        true
+    } else if let Some(arr) = val.get("packages").and_then(|v| v.as_array()) {
+        for item in arr {
+            if let Some(s) = item.as_str() {
+                flat.insert(s.to_string());
+            }
+        }
+        true
+    } else if let Some(arr) = val.as_array() {
+        for item in arr {
+            if let Some(s) = item.as_str() {
+                flat.insert(s.to_string());
+            }
+        }
+        true
+    } else {
+        false
+    };
+
+    if is_flat {
+        if let Some(key) = current_folder_key {
+            folders.insert(key.to_string(), flat);
+        }
+        return (folders, true);
+    }
+
+    // Map format with direct folder keys at root
+    if let Some(obj) = val.as_object() {
+        for (k, v) in obj {
+            if let Some(arr) = v.as_array() {
+                let pkgs: BTreeSet<String> = arr
+                    .iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect();
+                folders.insert(k.clone(), pkgs);
             }
         }
     }
-    recorded
+
+    (folders, false)
 }
 
-pub fn save_bundled_registry(config_dir: &Path, recorded: &BTreeSet<String>) -> Result<(), String> {
+pub fn load_bundled_registry_map(
+    config_dir: Option<&Path>,
+    current_folder_key: Option<&str>,
+) -> (BTreeMap<String, BTreeSet<String>>, bool) {
+    let Some(config_dir) = config_dir else {
+        return (BTreeMap::new(), false);
+    };
+    let path = bundled_registry_path(config_dir);
+    let Ok(data) = fs::read_to_string(&path) else {
+        return (BTreeMap::new(), false);
+    };
+    parse_bundled_registry(&data, current_folder_key)
+}
+
+pub fn load_bundled_registry(config_dir: Option<&Path>, mods_dir: &Path) -> BTreeSet<String> {
+    let key = mods_folder_key(mods_dir);
+    let (all_folders, _) = load_bundled_registry_map(config_dir, Some(&key));
+    all_folders.get(&key).cloned().unwrap_or_default()
+}
+
+pub fn save_bundled_registry(
+    config_dir: &Path,
+    folders: &BTreeMap<String, BTreeSet<String>>,
+) -> Result<(), String> {
     let registry_file = bundled_registry_path(config_dir);
     let Some(parent) = registry_file.parent() else {
         return Err("invalid registry parent directory".into());
@@ -368,7 +477,7 @@ pub fn save_bundled_registry(config_dir: &Path, recorded: &BTreeSet<String>) -> 
     fs::create_dir_all(parent).map_err(|e| format!("cannot create addons dir: {e}"))?;
 
     let val = serde_json::json!({
-        "installed": recorded.iter().cloned().collect::<Vec<_>>()
+        "folders": folders
     });
     let text = serde_json::to_string_pretty(&val).map_err(|e| format!("cannot serialize registry: {e}"))?;
 
@@ -401,7 +510,9 @@ pub fn install_bundled_mods(
         return Err(err);
     };
 
-    let mut recorded = load_bundled_registry(Some(cfg));
+    let folder_key = mods_folder_key(mods_dir);
+    let (mut all_folders, migrated) = load_bundled_registry_map(Some(cfg), Some(&folder_key));
+    let mut recorded = all_folders.get(&folder_key).cloned().unwrap_or_default();
     let mut result = InstallResult::default();
     let mut packages_to_extract = Vec::new();
 
@@ -412,11 +523,15 @@ pub fn install_bundled_mods(
     }
 
     if packages_to_extract.is_empty() {
+        if migrated {
+            let _ = save_bundled_registry(cfg, &all_folders);
+        }
         return Ok(result);
     }
 
     // Verify registry is writable before creating dirs or writing files
-    save_bundled_registry(cfg, &recorded).map_err(|e| {
+    all_folders.insert(folder_key.clone(), recorded.clone());
+    save_bundled_registry(cfg, &all_folders).map_err(|e| {
         let err = format!("cannot write bundled.json registry: {e}");
         crate::say(&format!("Could not install bundled mods: {err}"));
         err
@@ -444,7 +559,8 @@ pub fn install_bundled_mods(
         }
     }
 
-    save_bundled_registry(cfg, &recorded).map_err(|e| {
+    all_folders.insert(folder_key, recorded);
+    save_bundled_registry(cfg, &all_folders).map_err(|e| {
         let err = format!("cannot save bundled.json registry: {e}");
         crate::say(&format!("Could not install bundled mods: {err}"));
         err
@@ -666,7 +782,7 @@ mod tests {
         assert!(mods_dir.join("avoids_modern_ui/avoids_modern_ui.lua").is_file());
         assert!(mods_dir.join("resources/gear-icon.png").is_file());
 
-        let registry = load_bundled_registry(Some(&config_dir));
+        let registry = load_bundled_registry(Some(&config_dir), &mods_dir);
         assert!(registry.contains("wereoxxs_ui"));
         assert!(registry.contains("arpg_ui"));
         assert!(registry.contains("avoids_modern_ui"));
@@ -692,7 +808,7 @@ mod tests {
         assert_eq!(arpg_content, "CUSTOM ARPG CONTENT", "existing file must be untouched");
 
         // Registry records all 3 so future deletes are remembered
-        let registry = load_bundled_registry(Some(&config_dir));
+        let registry = load_bundled_registry(Some(&config_dir), &mods_dir);
         assert!(registry.contains("arpg_ui"));
         assert!(registry.contains("wereoxxs_ui"));
         assert!(registry.contains("avoids_modern_ui"));
@@ -785,7 +901,7 @@ mod tests {
             "existing file must keep its original bytes"
         );
 
-        let registry = load_bundled_registry(Some(&config_dir));
+        let registry = load_bundled_registry(Some(&config_dir), &mods_dir);
         assert!(registry.contains("arpg_ui"));
 
         fs::remove_file(&arpg_lua).unwrap();
@@ -902,6 +1018,99 @@ mod tests {
         assert!(ids.contains("arpg_ui"), "arpg_ui must be discovered on first start");
         assert!(ids.contains("avoids_modern_ui"), "avoids_modern_ui must be discovered on first start");
         assert_eq!(ids.len(), 3);
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+    #[test]
+    fn test_second_mods_folder_gets_all_packages_when_first_folder_has_records() {
+        let temp = std::env::temp_dir().join(format!("eqoa-multi-folder-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp);
+        let mods_dir_a = temp.join("install_a/mods");
+        let mods_dir_b = temp.join("install_b/mods");
+        let config_dir = temp.join("config");
+
+        // First install into folder A
+        let res_a = install_bundled_mods(&mods_dir_a, Some(&config_dir)).unwrap();
+        assert_eq!(res_a.packages_extracted, vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"]);
+
+        // Now install into folder B (different install location)
+        let res_b = install_bundled_mods(&mods_dir_b, Some(&config_dir)).unwrap();
+        assert_eq!(
+            res_b.packages_extracted,
+            vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"],
+            "second mods folder must get all packages even when first folder has records"
+        );
+        assert!(mods_dir_b.join("wereoxxs_ui/wereoxxs_ui.lua").is_file());
+        assert!(mods_dir_b.join("arpg_ui/arpg_ui.lua").is_file());
+        assert!(mods_dir_b.join("avoids_modern_ui/avoids_modern_ui.lua").is_file());
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_deletion_in_folder_a_still_remembered() {
+        let temp = std::env::temp_dir().join(format!("eqoa-del-folder-a-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp);
+        let mods_dir_a = temp.join("install_a/mods");
+        let mods_dir_b = temp.join("install_b/mods");
+        let config_dir = temp.join("config");
+
+        // Install both
+        install_bundled_mods(&mods_dir_a, Some(&config_dir)).unwrap();
+        install_bundled_mods(&mods_dir_b, Some(&config_dir)).unwrap();
+
+        assert!(mods_dir_a.join("wereoxxs_ui").is_dir());
+        assert!(mods_dir_b.join("wereoxxs_ui").is_dir());
+
+        // Player deletes wereoxxs_ui in folder A
+        fs::remove_dir_all(mods_dir_a.join("wereoxxs_ui")).unwrap();
+        assert!(!mods_dir_a.join("wereoxxs_ui").exists());
+
+        // Second run on folder A respects deletion
+        let res_a2 = install_bundled_mods(&mods_dir_a, Some(&config_dir)).unwrap();
+        assert!(res_a2.packages_extracted.is_empty());
+        assert!(!mods_dir_a.join("wereoxxs_ui").exists(), "deleted package in folder A must not be reinstalled");
+
+        // Folder B still has its copy intact
+        assert!(mods_dir_b.join("wereoxxs_ui").is_dir(), "folder B retains its installed package");
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_old_flat_registry_migrates() {
+        let temp = std::env::temp_dir().join(format!("eqoa-flat-migrate-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp);
+        let mods_dir = temp.join("install_migrated/mods");
+        let config_dir = temp.join("config");
+        let registry_file = bundled_registry_path(&config_dir);
+
+        // Pre-create old flat registry with wereoxxs_ui and arpg_ui recorded
+        fs::create_dir_all(registry_file.parent().unwrap()).unwrap();
+        let flat_json = serde_json::json!({
+            "installed": ["wereoxxs_ui", "arpg_ui"]
+        });
+        fs::write(&registry_file, serde_json::to_string_pretty(&flat_json).unwrap()).unwrap();
+
+        // Run install
+        let res = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
+        // wereoxxs_ui and arpg_ui were recorded in old flat format, so only avoids_modern_ui should be extracted
+        assert_eq!(res.packages_extracted, vec!["avoids_modern_ui"]);
+
+        // Verify registry file has migrated to new structure with folders map
+        let new_registry_data = fs::read_to_string(&registry_file).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&new_registry_data).unwrap();
+        let key = mods_folder_key(&mods_dir);
+        let folders = parsed.get("folders").expect("registry must have 'folders' object");
+        let recorded = folders.get(&key).expect("registry must record current folder under its SHA-256 key");
+        let recorded_arr: Vec<String> = recorded.as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect();
+        assert!(recorded_arr.contains(&"wereoxxs_ui".to_string()));
+        assert!(recorded_arr.contains(&"arpg_ui".to_string()));
+        assert!(recorded_arr.contains(&"avoids_modern_ui".to_string()));
+
+        // Ensure no raw filesystem path is stored anywhere in bundled.json
+        let raw_path = mods_dir.to_string_lossy();
+        assert!(!new_registry_data.contains(raw_path.as_ref()), "bundled.json must never contain raw folder paths");
 
         let _ = fs::remove_dir_all(&temp);
     }
