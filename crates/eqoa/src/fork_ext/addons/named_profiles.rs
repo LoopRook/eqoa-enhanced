@@ -288,6 +288,28 @@ impl Store {
         if path.exists() {
             return self.read(DEFAULT);
         }
+        let root = self.root()?;
+        fs::create_dir_all(root).map_err(|_| "Cannot create mod profile directory")?;
+        // Serialize the complete check/collect/publish operation across clients.
+        // Keep the lock file so contenders always lock the same inode. The OS
+        // releases the lock even if the migrating client exits unexpectedly.
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(root.join("migration.lock"))
+            .map_err(|_| "Cannot lock Default profile migration")?;
+        if lock.try_lock().is_err() {
+            return self.read(DEFAULT).map_err(|_| {
+                "Default profile migration is busy; retry loading Default shortly".into()
+            });
+        }
+        // Another client may have finished migration and saved changes since
+        // our first check. Only the lock winner may create the missing Default.
+        if path.exists() {
+            return self.read(DEFAULT);
+        }
         if self.root()?.join(".migrated").exists() {
             return Err("Default is missing; restore it or save a new profile".into());
         }
@@ -629,6 +651,81 @@ mod tests {
         assert_eq!(
             store.migrate(&legacy, &[addon]).unwrap().enabled.get(&key),
             Some(&true)
+        );
+    }
+    #[test]
+    fn mod_profiles_concurrent_migration_keeps_the_winners_saved_default() {
+        let scratch = Scratch::new();
+        let first = Store::new(Some(scratch.0.clone()));
+        let second = Store::new(Some(scratch.0.clone()));
+        fs::create_dir_all(first.root().unwrap()).unwrap();
+        // Client one is still collecting legacy data. Client two must not publish.
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(first.root().unwrap().join("migration.lock"))
+            .unwrap();
+        lock.try_lock().unwrap();
+        let legacy = Storage::new(Some(scratch.0.clone()));
+        assert!(
+            second.migrate(&legacy, &[]).is_err(),
+            "a second migration must wait for the winner"
+        );
+        assert!(!first.path(DEFAULT).unwrap().exists());
+        let mut saved = Document::empty();
+        saved.layout = "[Window][Changed after migration]\nPos=77,88\n\n".into();
+        first.write(DEFAULT, &saved).unwrap();
+        let bytes = fs::read(first.path(DEFAULT).unwrap()).unwrap();
+        drop(lock);
+        assert_eq!(second.migrate(&legacy, &[]).unwrap(), saved);
+        assert_eq!(fs::read(first.path(DEFAULT).unwrap()).unwrap(), bytes);
+    }
+    #[test]
+    fn mod_profiles_concurrent_character_bindings_keep_both_clients_entries() {
+        use std::sync::{Arc, Barrier};
+        let scratch = Scratch::new();
+        let store = Store::new(Some(scratch.0.clone()));
+        for name in ["Healer", "Tank"] {
+            store.create(name, &Document::empty()).unwrap();
+        }
+        let barrier = Arc::new(Barrier::new(2));
+        let threads = [("Ari", "Healer"), ("Bea", "Tank")].map(|(name, profile)| {
+            let root = scratch.0.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let store = Store::new(Some(root));
+                let identity = character("server.example", name, 3);
+                barrier.wait();
+                for _ in 0..100 {
+                    match store.bind(&identity, profile, false) {
+                        Ok(()) => return,
+                        Err(e) if e.contains("busy") => {
+                            std::thread::sleep(std::time::Duration::from_millis(10))
+                        }
+                        Err(e) => panic!("unexpected binding error: {e}"),
+                    }
+                }
+                panic!("binding stayed busy");
+            })
+        });
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(
+            store
+                .resolve(&character("server.example", "Ari", 3))
+                .unwrap()
+                .0,
+            "Healer"
+        );
+        assert_eq!(
+            store
+                .resolve(&character("server.example", "Bea", 3))
+                .unwrap()
+                .0,
+            "Tank"
         );
     }
 }

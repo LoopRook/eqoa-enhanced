@@ -484,3 +484,178 @@ fn mod_profiles_failed_save_keeps_previous_bundle_on_later_autosave() {
             .is_empty()
     );
 }
+
+#[test]
+fn mod_profiles_shutdown_save_failure_preserves_the_entire_previous_file() {
+    use super::super::named_profiles::Store;
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    root.package("a", true, "UiForge.RegisterCallback(UiForge.CallbackType.Save,function() saves=(saves or 0)+1;return {value=77} end)");
+    root.package("b", true, "UiForge.RegisterCallback(UiForge.CallbackType.Save,function() saves=(saves or 0)+1;error('synthetic shutdown Save failure') end)");
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    manager.profile_boundary(&mut gpu.context, None, "server.example");
+    gpu.begin();
+    manager.frame(Snapshot::default());
+    gpu.render();
+    manager.after_render();
+    manager.flush_profile(&mut gpu.context, true);
+    let store = Store::new(Some(config.0.clone()));
+    let path = store.path("Default").unwrap();
+    let previous = fs::read(&path).unwrap();
+    manager.shutdown();
+    manager.flush_profile(&mut gpu.context, true);
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        previous,
+        "one failed shutdown Save must prevent publication of all new state and layout"
+    );
+    assert!(
+        manager
+            .diagnostics()
+            .iter()
+            .any(|d| d.message.contains("Save") && d.message.contains("not saved"))
+    );
+    for entry in &manager.entries {
+        assert_eq!(
+            entry
+                .instance
+                .as_ref()
+                .unwrap()
+                .host
+                .lua
+                .globals()
+                .get::<i32>("saves")
+                .unwrap(),
+            1
+        );
+    }
+}
+
+#[test]
+fn mod_profiles_active_load_and_default_world_entry_preserve_unsaved_session() {
+    use super::super::named_profiles::CharacterSnapshot;
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    fs::create_dir_all(config.0.join("addons")).unwrap();
+    fs::write(
+        config.0.join("addons/imgui.ini"),
+        "[Window][Orb]\nPos=11,22\nSize=80,80\nCollapsed=0\n\n",
+    )
+    .unwrap();
+    root.package("a", true, "value=value or 0; frames=(frames or 0)+1; UiForge.RegisterCallback(UiForge.CallbackType.Save,function() return {value=value} end); ImGui.Begin('Orb');ImGui.End()");
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    manager.profile_boundary(&mut gpu.context, None, "server.example");
+    gpu.begin();
+    manager.frame(Snapshot::default());
+    gpu.render();
+    manager.after_render();
+    manager.entries[0]
+        .instance
+        .as_ref()
+        .unwrap()
+        .host
+        .execute("value=77")
+        .unwrap();
+    gpu.context
+        .load_ini_settings("[Window][Orb]\nPos=110,120\nSize=180,180\nCollapsed=0\n\n");
+    let mut changed_layout = String::new();
+    gpu.context.save_ini_settings(&mut changed_layout);
+    for identity in [None, CharacterSnapshot::new(true, "Ari", 3)] {
+        manager.queue_profile(ProfileAction::Load("Default".into()));
+        manager.profile_boundary(&mut gpu.context, identity, "server.example");
+        let host = &manager.entries[0]
+            .instance
+            .as_ref()
+            .expect("active profile must keep its VM")
+            .host;
+        assert_eq!(host.lua.globals().get::<i32>("value").unwrap(), 77);
+        assert_eq!(host.lua.globals().get::<i32>("frames").unwrap(), 1);
+        let mut layout = String::new();
+        gpu.context.save_ini_settings(&mut layout);
+        assert_eq!(
+            layout, changed_layout,
+            "active load/world entry must preserve unsaved layout"
+        );
+    }
+    manager.queue_profile(ProfileAction::Revert);
+    manager.profile_boundary(
+        &mut gpu.context,
+        CharacterSnapshot::new(true, "Ari", 3),
+        "server.example",
+    );
+    gpu.begin();
+    manager.frame(Snapshot::default());
+    gpu.render();
+    manager.after_render();
+    let host = &manager.entries[0].instance.as_ref().unwrap().host;
+    assert_eq!(host.lua.globals().get::<i32>("value").unwrap(), 0);
+    assert_eq!(host.lua.globals().get::<i32>("frames").unwrap(), 1);
+    let mut reverted_layout = String::new();
+    gpu.context.save_ini_settings(&mut reverted_layout);
+    assert!(
+        reverted_layout.contains("[Window][Orb]\nPos=11,22"),
+        "explicit revert must restore saved layout: {reverted_layout}"
+    );
+}
+
+#[test]
+fn mod_profiles_failed_world_entry_retries_after_backoff_with_one_diagnostic() {
+    use super::super::named_profiles::{Character, CharacterSnapshot, Document, Store};
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    let store = Store::new(Some(config.0.clone()));
+    store.create("Healer", &Document::empty()).unwrap();
+    let identity = CharacterSnapshot::new(true, "Ari", 3).unwrap();
+    store
+        .bind(
+            &Character::new("server.example", identity).unwrap(),
+            "Healer",
+            false,
+        )
+        .unwrap();
+    let path = store.path("Healer").unwrap();
+    let healthy = fs::read(&path).unwrap();
+    fs::write(&path, b"broken").unwrap();
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    manager.profile_boundary(&mut gpu.context, Some(identity), "server.example");
+    assert_eq!(manager.profile_name(), Some("Default"));
+    std::thread::sleep(std::time::Duration::from_millis(2100));
+    manager.profile_boundary(&mut gpu.context, Some(identity), "server.example");
+    assert_eq!(manager.profile_name(), Some("Default"));
+    fs::write(&path, healthy).unwrap();
+    for _ in 0..10 {
+        manager.profile_boundary(&mut gpu.context, Some(identity), "server.example");
+    }
+    assert_eq!(
+        manager.profile_name(),
+        Some("Default"),
+        "automatic failures must back off instead of retrying every frame"
+    );
+    std::thread::sleep(std::time::Duration::from_millis(2100));
+    manager.profile_boundary(&mut gpu.context, Some(identity), "server.example");
+    assert_eq!(
+        manager.profile_name(),
+        Some("Healer"),
+        "a failed identity must remain retryable after its file is repaired"
+    );
+    assert_eq!(
+        manager
+            .diagnostics()
+            .iter()
+            .filter(|d| d.phase == "profiles" && d.message.contains("Could not switch profile"))
+            .count(),
+        1
+    );
+}
