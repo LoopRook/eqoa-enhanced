@@ -91,3 +91,9 @@ This entry records future work only; no navigation or movement behavior changes 
 
 - **Request:** at level 60, show how much XP is left until the next Class Mastery point, in the HUD/XP readout and for mods (e.g. the Modern UI XP bar, which today shows a full bar at 60).
 - **Status:** not started. Next step: find where the client keeps Class Mastery XP and the per-point cost (decomp/live packets; Forge exposes CM values, see Astra's note on hard-coded CM values), then show 'CM: x / y' in the XP readout and expose it under the eqoa namespace for mods.
+
+## Weapon-set bar (and bars 3/4) inside Wereoxxs UI (owner, 2026-11-01)
+
+- **Request:** Sandstorm added a 4th hotbar for weapon sets. Wereoxxs UI draws only Forge's three hotbars (bars 1-2 and items), so with its ability bars on, our weapon-set page (HUD menu 3, and our extra bars 3/4, menus 4-5) is hidden with nothing in its place. The owner wants them drawn inside Wereoxxs's own bar style. Not unhidden as the game's bars.
+- **Plan:** expose the weapon sets (and extra bars) to Lua under the `eqoa` namespace (slots, icons, current set, use), then patch the bundled Wereoxxs ability_bars.lua (MIT; note it in bundled-mods/SOURCE.txt) to draw a 4th bar, and offer the patch to Wereoxx. Medium: one agent task plus a review.
+- **Status:** not started; next after 0.4.0.
