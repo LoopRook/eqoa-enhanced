@@ -33,6 +33,8 @@ This entry records future work only; no navigation or movement behavior changes 
 - **Later option (owner, 2026-10-30): send to the owner's Discord.** A Discord webhook can post the same zip into a private channel, with no server of our own. Trade-offs to settle first: the webhook URL ships inside the client, so anyone can extract it and spam the channel (rotate it, rate-limit, and keep Save to Desktop as the default); Discord's upload size limit (trim logs); players' logs then sit on Discord (consent text on the button). Build it on top of the same report file, opt-in per report.
 - **Acceptance:** F3 → note → Save produces the zip on the Desktop with all parts and the Enhanced header; a forced crash's next start offers the same; tests prove secrets are absent and that no network request is made.
 
+- **Owner test 2026-11-01 (develop 7a531b8): PASSED.** The zip saved and the folder opened. Lead check of the owner's zip: no home path, and 0 hits for the saved account and password in any text file. Follow-ups: (1) the file name uses UTC (20261101-045745 for local 00:57); use local time. (2) The manifest lists `resources` as an enabled mod (it is the shared resources folder, not an addon).
+
 ## Minimap search button disturbs autorun / follow (bug)
 
 - **Status:** Reported 2026-10-31; read-only diagnosis in progress. Separate from the Wereoxxs gate.
