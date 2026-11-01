@@ -97,3 +97,12 @@ This entry records future work only; no navigation or movement behavior changes 
 - **Request:** Sandstorm added a 4th hotbar for weapon sets. Wereoxxs UI draws only Forge's three hotbars (bars 1-2 and items), so with its ability bars on, our weapon-set page (HUD menu 3, and our extra bars 3/4, menus 4-5) is hidden with nothing in its place. The owner wants them drawn inside Wereoxxs's own bar style. Not unhidden as the game's bars.
 - **Plan:** expose the weapon sets (and extra bars) to Lua under the `eqoa` namespace (slots, icons, current set, use), then patch the bundled Wereoxxs ability_bars.lua (MIT; note it in bundled-mods/SOURCE.txt) to draw a 4th bar, and offer the patch to Wereoxx. Medium: one agent task plus a review.
 - **Status:** not started; next after 0.4.0.
+
+## Live 'mob is up' alerts shared between players (owner idea, 2026-11-01)
+
+- **Idea:** a client can only see a creature when it is within the server's entity range, so the map can't tell whether a far-off mob is up. Instead, players' clients report sightings of creatures as they see them, and anyone searching for that creature gets a pop-up ('<Mob> seen up near <place>, 2 min ago').
+- **Builds on:** the creature-journal sync service (steps 2-3, Railway). A sighting is a tiny message (name, zone, position, time).
+- **Shape:** clients send 'seen alive' (and 'seen dead/despawned', if visible) for creatures as they appear; the service keeps the last sighting per creature; a client polls every 30-60 s only for the names it is watching (a watch list from map search). Polling, not live sockets: simpler and cheap.
+- **Questions:** staleness wording; spoofing (require 2 reporters, or mark single reports as unconfirmed); privacy (a sighting implies some player is near there: send no player info, maybe round the position); opt-out; cost on the Railway hobby plan (likely small at our scale, but measure).
+- **Range:** not adjustable by us. The server decides which creatures it sends (log: 'NPC/PC Display 200, the server's most 64'), so the client already gets everything the server allows.
+- **Status:** idea; after journal steps 2-3. Medium-large.
