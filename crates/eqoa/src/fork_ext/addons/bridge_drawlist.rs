@@ -168,11 +168,18 @@ fn rounding(v: Option<f32>) -> Result<f32> {
 }
 fn flags(v: Option<i32>) -> Result<i32> {
     let v = v.unwrap_or(0);
-    // Only rectangle corner flags; low bits include native assertion traps.
-    if v & !0x1f0 != 0 {
+    // Pinned 1.92.7 Closed=1; native 1.92.8 moved it to bit 9. Passing
+    // legacy bit 0 through would assert in AddImageRounded/PathRect.
+    // Bits 1..3 remain invalid legacy corner flags and are rejected.
+    if v & !0x1f1 != 0 {
         Err(mlua::Error::runtime("unsupported rectangle draw flags"))
     } else {
-        Ok(v)
+        Ok((v & !1)
+            | if v & 1 != 0 {
+                sys::ImDrawFlags_Closed as i32
+            } else {
+                0
+            })
     }
 }
 fn segments(v: Option<i32>, ngon: bool) -> Result<(i32, usize)> {

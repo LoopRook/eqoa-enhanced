@@ -51,6 +51,14 @@ pub(crate) struct Host {
     host_registry: Rc<RefCell<HashMap<String, Value>>>,
 }
 
+impl Drop for Host {
+    fn drop(&mut self) {
+        for error in super::file_io::close_all(&self.lua) {
+            eprintln!("{error}");
+        }
+    }
+}
+
 struct BaseHost {
     lua: Lua,
     snapshot: Rc<Cell<Snapshot>>,
@@ -240,11 +248,12 @@ fn create_base_host() -> Result<BaseHost> {
 impl Host {
     pub fn drain_logs(&self) -> Result<Vec<String>> {
         let messages: Table = self.lua.named_registry_value("forge_log")?;
-        let output = messages
+        let mut output = messages
             .sequence_values::<String>()
             .collect::<Result<Vec<_>>>()?;
         self.lua
             .set_named_registry_value("forge_log", self.lua.create_table()?)?;
+        output.extend(super::file_io::drain_diagnostics(&self.lua));
         Ok(output)
     }
 

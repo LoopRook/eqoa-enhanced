@@ -501,6 +501,9 @@ impl Manager {
         // A callback failure is terminal even during an ordinary transition.
         if disposition == Disposition::Retire || entry.status == Status::Failed {
             if let Some(i) = entry.instance.as_mut() {
+                for error in super::file_io::close_all(&i.host.lua) {
+                    self.diagnostic(Some(&entry.metadata.id), "file", error);
+                }
                 i.sound_bank.borrow_mut().close_all();
             }
             self.retire(entry);

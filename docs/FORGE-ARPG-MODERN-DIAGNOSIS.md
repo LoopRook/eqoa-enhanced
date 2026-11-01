@@ -103,13 +103,14 @@ to _TexData as a pointer. The corrected bridge leaves _TexData null and sets onl
 as the pinned void* texture constructor does. The same ID now emits tessellated geometry
 without dereferencing it. PNG handle validation and frame/window/geometry guards remain.
 
-## Verification record
+## Initial verification record (589ccad)
 
 - Baseline: 8 new tests failed (0 passed), including both unchanged package loads.
 - Additional high-level XP regression failed before the formula correction.
 - Avoids full settings invocation failed on literal percentage format before correction.
-- Corrected focused run: 16 passed, 0 failed; no package fixture skips. Additional iterator
-  budget regression is included in the final full-suite run.
+- Historical local focused run at 589ccad: 16 passed, 0 failed using a developer-path
+  fallback. That was not CI coverage: absent reference files previously printed SKIP
+  and returned success. The review fixes below remove that fallback completely.
 - Independent read-only review found and verified fixes for iterator allocation ownership,
   close quota release and deletion/recreation at the file cap; no important findings remain.
 - Live game acceptance remains pending. The pinned reference returns nil for level 60 XP;
@@ -130,7 +131,8 @@ code or sound tests were changed. All 17 new modern-addon regressions passed.
 Final suite printed 106 prerequisite SKIP notices: 4 symlink-privilege cases,
 2 optional pinned GPU/hearts fixture prerequisites, and 100 disc/module/save-state/
 WORDS data prerequisites. The two ignored cases are fx::bench::fans_cover and
-fx::bench::volumes_cost. Neither new package fixture skipped. WASM check and final
+fx::bench::volumes_cost. Those package checks depended on local reference files;
+this historical run does not prove fixture coverage on CI. WASM check and final
 footprint policy check passed. Initial WASM OS112 disk-full failure was resolved by
 removing only this worktree's rebuildable target/debug cache after saving logs.
 
@@ -144,3 +146,83 @@ target/local-checks (untracked build artifacts). No live-game acceptance claimed
 After restoring the original changelog heading encoding, WASM recheck passed
 (4.66s) and the release executable rebuilt successfully (1m21s). Addon Rust
 source is unchanged from the complete passing native test run.
+
+## Independent review fixes (follow-up to 589ccad)
+
+Seven new negative controls failed on the reviewed code (zero passed): buffered
+writes, reserved device names, Unicode boundary safety, explicit fixture prerequisite,
+journal before HP, color flags and rounded-image flags. See review-red.log under
+target/local-checks for the pre-fix run.
+
+- File writes now update only a bounded 1 MiB memory buffer. Close, explicit file:flush,
+  last-reference GC and VM unload flush dirty data once; clean flush/close do no I/O.
+  Opening w still atomically creates/truncates the file, matching Lua 5.1 open semantics.
+  A per-VM weak registry retains quota ownership for iterator buffers, supports unload,
+  and surfaces flush errors through addon diagnostics. Tests count successful buffer
+  replacements and verify GC/unload persistence. Lua 5.1 liolib.c f_flush/io_gc are
+  the lifecycle reference. Ordinary addon disable retains the VM; retirement closes files.
+- Every resource-path component rejects CON/PRN/AUX/NUL/COM1-9/LPT1-9/CONIN$/CONOUT$,
+  including extensions, ASCII case variations and superscript 1/2/3 suffixes. Rejection
+  returns nil plus an error before OS open. ASCII-only prefix comparison and checked
+  slicing prevent the Unicode lowercasing/byte-boundary panic.
+- All package-fixture callers in wereoxxs_test.rs require EQOA_FORGE_REFERENCE,
+  pointing to the pinned checkout root (which contains scripts/). The 15 fixture-dependent
+  tests carry an explicit ignored prerequisite for plain CI runs. Local opt-in uses
+  EQOA_FORGE_REFERENCE plus --include-ignored; unset/invalid input then fails instead
+  of silently passing or finding a developer path. No packages are vendored.
+- Pinned imgui-37b7a7a9.h:1875 defines NoAlpha as bit 1, not bit 0. ColorEdit3 tolerates
+  unused bits 0/15/16, and translates pinned InputRGB/InputHSV bits 27/28 to native
+  bits 28/29. Mutually exclusive display/data/picker/input combinations and unknown
+  bits remain rejected before native assertions. RoundCornersTop was already accepted;
+  legacy Closed=1 (pinned header:3229) is translated to native Closed=512, so bits 1-3
+  remain rejected as invalid legacy corner flags. Geometry and texture guards remain.
+- Journal availability is recorded in its own snapshot before the existing health gate.
+  Snapshot::managed still resets the journal on a raw out-of-game snapshot, while
+  unknown HP no longer hides known journal titles. Other modules retain their gate.
+
+Menu-mode logic, HUD carousel code and shared upstream files were not changed.
+
+Review regression locations (all names begin forge_review_):
+
+| Finding | Implementation | Regression test |
+| --- | --- | --- |
+| Buffered writes/lifecycle | addons/file_io.rs:35, host.rs:54, manager.rs:504 | writes_stay_buffered_until_close; file_flush_gc_and_unload_persist_once |
+| Device names | addons/file_io.rs:236 | reserved_devices_rejected_before_os_open |
+| Explicit fixture/CI prerequisite | addons/wereoxxs_test.rs:113,191 | reference_requires_explicit_environment; 15 ignored fixture tests |
+| Reference flag masks | addons/bridge_widgets.rs:133; bridge_drawlist.rs:169 | color_flags_accept_legacy_unused_bits; rounded_flags_translate_legacy_closed |
+| Journal before HP | addons/quest_log.rs:41 | journal_available_before_first_hp_packet |
+| Safe Unicode boundary | addons/file_io.rs:195 | non_ascii_root_never_panics_on_case_comparison |
+
+The first post-fix full run caught a stale bounds-test expectation rejecting legacy
+Closed=1. Its invalid-flags control now uses bit 1 (=2), which remains rejected.
+The obsolete queued no-reference run also saw the pre-existing community-map cache
+test a_bad_answer_keeps_the_list fail (one cached mark versus three); it passed in
+the preceding run and in the corrected plain workspace run. Map source is unchanged.
+
+## Final review validation
+
+Both full cargo test --locked --workspace runs exited zero, outside the sandbox
+for Windows audio. Each used --test-threads=1 --nocapture, and waited for other
+cargo/rustc processes to finish.
+
+Plain without EQOA_FORGE_REFERENCE: workspace totals 1640 passed, 0 failed, 18 ignored across 96 harnesses; 199 printed prerequisite SKIP notices.
+
+EQOA summary verbatim:
+
+    test result: ok. 1366 passed; 0 failed; 17 ignored; 0 measured; 0 filtered out; finished in 80.11s
+
+EQOA_FORGE_REFERENCE set, --include-ignored: workspace totals 1658 passed, 0 failed, 0 ignored across 96 harnesses; 201 printed prerequisite SKIP notices.
+
+EQOA summary verbatim:
+
+    test result: ok. 1383 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 71.93s
+
+The 18 plain-run ignores are the 15 explicit package prerequisites, two existing
+EQOA effect benchmarks, and the existing render ground-fog benchmark. The reference
+run executes all ignored tests; the two effect benchmarks report missing disc data.
+No package fixture SKIPs occurred in the reference-enabled run. Both final runs
+passed the community-map cache test. Seven negative controls failed before fixes;
+all eight focused review regressions passed afterward.
+
+Final footprint command: python tools/check_fork_footprint.py --base
+ad941f5ca18a9238c5c5e51bdb77b9abb6afd37d. Result: PASS, within reviewed policy.

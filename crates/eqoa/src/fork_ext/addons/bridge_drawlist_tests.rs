@@ -129,7 +129,7 @@ fn forge_drawlist_argument_bounds_and_signed_packed_colors() {
         "d:AddCircle(v,20,-1,513)",
         "d:AddNgon(v,20,-1,0)",
         "d:AddNgonFilled(v,-1,-1,4)",
-        "d:AddRect(v,v,-1,0,1,1)", // unsupported rectangle flag, before native assertion
+        "d:AddRect(v,v,-1,0,2,1)", // invalid legacy corner flag, before native assertion
         "d:AddRect(v,v,-1,0,0,65)",
         "d:AddRectFilled(v,v,-1,0/0)",
         "d:AddTriangleFilled(v,v,v,4294967296)",

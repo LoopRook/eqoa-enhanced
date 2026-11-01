@@ -130,7 +130,12 @@ pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> R
         lua.create_function(
             move |lua, (label, color, flags): (String, Table, Option<i32>)| {
                 let label = text(&label)?;
-                let flags = flags.unwrap_or(0);
+                let legacy_flags = flags.unwrap_or(0);
+                // Unused bits 0/15/16 are harmless in the pinned header.
+                // NoAlpha is bit 1, not bit 0. InputRGB/HSV moved up one bit
+                // in native 1.92.8 after PickerNoRotate was added at bit 27.
+                let flags = (legacy_flags & !(1 | (1 << 15) | (1 << 16) | (3 << 27)))
+                    | ((legacy_flags & (3 << 27)) << 1);
                 // Public color-edit flags only. Mutually exclusive masks otherwise
                 // reach native assertions when a widget is visible.
                 let allowed = 0x7ffe

@@ -1,6 +1,20 @@
 use super::*;
 use dear_imgui_rs::Context;
 
+#[test]
+fn forge_review_color_flags_accept_legacy_unused_bits() {
+    modern_script(
+        "ImGui.Begin('flags');local rgb=ImGui.ColorEdit3('rgb',{0.1,0.2,0.3},1+32768+65536);assert(#rgb==3);assert(not pcall(function() ImGui.ColorEdit3('bad',{0,0,0},1048576+2097152) end));ImGui.End()",
+    );
+}
+
+#[test]
+fn forge_review_rounded_flags_translate_legacy_closed() {
+    modern_script(
+        "ImGui.Begin('flags');local d=ImGui.GetWindowDrawList();local a,b=ImVec2.new(0,0),ImVec2.new(40,40);d:AddImageRounded(test_tex,a,b,a,b,-1,5,48+1);assert(not pcall(function() d:AddImageRounded(test_tex,a,b,a,b,-1,5,2) end));ImGui.End()",
+    );
+}
+
 fn modern_script(source: &str) {
     let mut context = context();
     let host = Host::new().unwrap();

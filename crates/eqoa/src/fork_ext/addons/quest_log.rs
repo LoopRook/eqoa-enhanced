@@ -7,6 +7,7 @@ pub(crate) const MAX_QUESTS: usize = 8;
 
 #[derive(Clone, Copy)]
 pub(crate) struct JournalSnapshot {
+    pub available: bool,
     pub count: u8,
     pub titles: [[u16; 128]; MAX_QUESTS],
 }
@@ -14,6 +15,7 @@ pub(crate) struct JournalSnapshot {
 impl Default for JournalSnapshot {
     fn default() -> Self {
         Self {
+            available: false,
             count: 0,
             titles: [[0; 128]; MAX_QUESTS],
         }
@@ -27,6 +29,7 @@ impl JournalSnapshot {
             return journal;
         }
         journal.count = titles.len() as u8;
+        journal.available = true;
         for (out, title) in journal.titles.iter_mut().zip(titles) {
             let len = title.len().min(127);
             out[..len].copy_from_slice(&title[..len]);
@@ -36,7 +39,7 @@ impl JournalSnapshot {
 }
 
 fn count(snapshot: Snapshot) -> usize {
-    if snapshot.in_game && snapshot.journal.count as usize <= MAX_QUESTS {
+    if snapshot.journal.available && snapshot.journal.count as usize <= MAX_QUESTS {
         snapshot.journal.count as usize
     } else {
         0
@@ -95,4 +98,33 @@ pub(super) fn install(host: &Host) -> Result<()> {
         })?,
     )?;
     host.register_host_module("frontiers_forge.quest_log", Value::Table(module))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn forge_review_journal_available_before_first_hp_packet() {
+        let raw = Snapshot {
+            in_game: true,
+            journal: JournalSnapshot::from_titles(true, &["Bat Eyes".encode_utf16().collect()]),
+            ..Snapshot::default()
+        };
+        let managed = raw.managed();
+        assert!(
+            !managed.in_game,
+            "other modules retain their existing health gate"
+        );
+        assert_eq!(count(managed), 1, "journal must not require an HP receipt");
+        assert_eq!(
+            count(
+                Snapshot {
+                    in_game: false,
+                    ..raw
+                }
+                .managed()
+            ),
+            0
+        );
+    }
 }

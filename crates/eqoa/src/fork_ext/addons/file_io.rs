@@ -4,7 +4,7 @@
 use super::{discovery::DiscoveredAddon, host::Host};
 use mlua::{Result, UserData, UserDataMethods, Value};
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -13,46 +13,101 @@ use std::{
 
 const MAX_BYTES: usize = 1024 * 1024;
 
-struct TextFile {
-    bytes: Rc<RefCell<Vec<u8>>>,
-    target: Option<PathBuf>,
-    closed: Rc<Cell<bool>>,
-    live: Rc<RefCell<Option<Rc<()>>>>,
-    cursor: Rc<Cell<usize>>,
+#[derive(Default)]
+struct FileRegistry {
+    files: Vec<std::rc::Weak<RefCell<FileState>>>,
+    diagnostics: Vec<String>,
+    #[cfg(test)]
+    replacements: usize,
 }
+struct RegistryHandle(Rc<RefCell<FileRegistry>>);
+impl UserData for RegistryHandle {}
 
+struct FileState {
+    bytes: Vec<u8>,
+    target: Option<PathBuf>,
+    closed: bool,
+    cursor: usize,
+    dirty: bool,
+    registry: Rc<RefCell<FileRegistry>>,
+}
+impl FileState {
+    fn flush(&mut self) -> std::result::Result<(), String> {
+        if self.closed {
+            return Err("file is closed".into());
+        }
+        if !self.dirty {
+            return Ok(());
+        }
+        if let Some(target) = &self.target {
+            no_links(target)?;
+            super::storage::atomic_replace(target, &self.bytes).map_err(|e| e.to_string())?;
+            #[cfg(test)]
+            {
+                self.registry.borrow_mut().replacements += 1;
+            }
+        }
+        self.dirty = false;
+        Ok(())
+    }
+    fn close(&mut self) -> std::result::Result<(), String> {
+        let result = self.flush();
+        self.closed = true;
+        self.bytes = Vec::new();
+        self.target = None;
+        result
+    }
+    fn diagnostic(&self, error: &str) {
+        let message = format!("addon file flush failed: {error}");
+        let mut registry = self.registry.borrow_mut();
+        if registry.diagnostics.len() < 64 && !registry.diagnostics.contains(&message) {
+            registry.diagnostics.push(message);
+        }
+    }
+}
+impl Drop for FileState {
+    fn drop(&mut self) {
+        // Lua 5.1 __gc closes files. Iterators retain this same state, just as
+        // Lua file:lines retains the original file. Last-reference GC and VM
+        // destruction therefore flush each dirty writer once.
+        if !self.closed {
+            if let Err(error) = self.close() {
+                self.diagnostic(&error);
+            }
+        }
+    }
+}
+struct TextFile(Rc<RefCell<FileState>>);
 impl UserData for TextFile {
     fn add_methods<M: UserDataMethods<Self>>(m: &mut M) {
         m.add_method("lines", |lua, file, ()| {
-            if file.closed.get() || file.target.is_some() {
+            let state = file.0.borrow();
+            if state.closed || state.target.is_some() {
                 return Err(mlua::Error::runtime("file is not readable"));
             }
-            let bytes = file.bytes.clone();
-            let closed = file.closed.clone();
-            let cursor = file.cursor.clone();
-            let live = file.live.clone();
+            drop(state);
+            let state = file.0.clone();
             lua.create_function_mut(move |lua, ()| {
-                let _keep_live = &live; // iterator retains the allocation quota through userdata GC
-                if closed.get() {
+                let mut state = state.borrow_mut();
+                if state.closed {
                     return Err(mlua::Error::runtime("file is closed"));
                 }
-                let bytes = bytes.borrow();
-                if cursor.get() >= bytes.len() {
+                if state.cursor >= state.bytes.len() {
                     return Ok(None);
                 }
-                let start = cursor.get();
-                let end = bytes[start..]
+                let start = state.cursor;
+                let end = state.bytes[start..]
                     .iter()
                     .position(|c| *c == b'\n')
                     .map(|n| start + n)
-                    .unwrap_or(bytes.len());
-                cursor.set((end + 1).min(bytes.len()));
-                let end = if end > start && bytes[end - 1] == b'\r' {
+                    .unwrap_or(state.bytes.len());
+                state.cursor = (end + 1).min(state.bytes.len());
+                let end = if end > start && state.bytes[end - 1] == b'\r' {
                     end - 1
                 } else {
                     end
                 };
-                Ok(Some(lua.create_string(&bytes[start..end])?))
+                Ok(Some(lua.create_string(&state.bytes[start..end])?))
             })
         });
         m.add_function(
@@ -60,38 +115,75 @@ impl UserData for TextFile {
             |_, (ud, values): (mlua::AnyUserData, mlua::Variadic<mlua::String>)| {
                 {
                     let file = ud.borrow::<TextFile>()?;
-                    if file.closed.get() || file.target.is_none() {
+                    let mut state = file.0.borrow_mut();
+                    if state.closed || state.target.is_none() {
                         return Err(mlua::Error::runtime("file is not writable"));
                     }
-                    let mut bytes = file.bytes.borrow_mut();
                     let len = values
                         .iter()
-                        .try_fold(bytes.len(), |len, v| len.checked_add(v.as_bytes().len()))
+                        .try_fold(state.bytes.len(), |len, v| {
+                            len.checked_add(v.as_bytes().len())
+                        })
                         .filter(|len| *len <= MAX_BYTES)
                         .ok_or_else(|| mlua::Error::runtime("file exceeds 1 MiB"))?;
-                    let extra = len - bytes.len();
-                    bytes.reserve(extra);
+                    let extra = len - state.bytes.len();
+                    state.bytes.reserve(extra);
                     for v in values {
-                        bytes.extend_from_slice(&v.as_bytes());
+                        state.bytes.extend_from_slice(&v.as_bytes());
                     }
-                    let target = file.target.as_ref().unwrap();
-                    no_links(target).map_err(mlua::Error::runtime)?;
-                    super::storage::atomic_replace(target, &bytes)
-                        .map_err(mlua::Error::external)?;
+                    state.dirty = true;
                 }
                 Ok(ud)
             },
         );
-        m.add_method_mut("close", |_, file, ()| {
-            if file.closed.get() {
-                return Err(mlua::Error::runtime("file is closed"));
-            }
-            file.closed.set(true);
-            *file.bytes.borrow_mut() = Vec::new();
-            file.live.borrow_mut().take();
-            Ok(true)
-        });
+        for (name, close) in [("flush", false), ("close", true)] {
+            m.add_method(name, move |lua, file, ()| {
+                let mut state = file.0.borrow_mut();
+                if state.closed {
+                    return Err(mlua::Error::runtime("file is closed"));
+                }
+                let result = if close { state.close() } else { state.flush() };
+                match result {
+                    Ok(()) => lua.pack_multi(true),
+                    Err(error) => {
+                        state.diagnostic(&error);
+                        lua.pack_multi((Value::Nil, error))
+                    }
+                }
+            });
+        }
     }
+}
+
+fn registry(lua: &mlua::Lua) -> Option<Rc<RefCell<FileRegistry>>> {
+    let handle = lua
+        .named_registry_value::<mlua::AnyUserData>("forge_file_registry")
+        .ok()?;
+    Some(handle.borrow::<RegistryHandle>().ok()?.0.clone())
+}
+pub(super) fn drain_diagnostics(lua: &mlua::Lua) -> Vec<String> {
+    registry(lua)
+        .map(|r| std::mem::take(&mut r.borrow_mut().diagnostics))
+        .unwrap_or_default()
+}
+pub(super) fn close_all(lua: &mlua::Lua) -> Vec<String> {
+    if let Some(registry) = registry(lua) {
+        let files: Vec<_> = registry
+            .borrow()
+            .files
+            .iter()
+            .filter_map(std::rc::Weak::upgrade)
+            .collect();
+        for file in files {
+            let mut state = file.borrow_mut();
+            if !state.closed {
+                if let Err(error) = state.close() {
+                    state.diagnostic(&error);
+                }
+            }
+        }
+    }
+    drain_diagnostics(lua)
 }
 
 fn normalized(path: &Path) -> String {
@@ -110,7 +202,8 @@ fn relative(addon: &DiscoveredAddon, path: &str) -> std::result::Result<PathBuf,
     let root = normalized(&addon.script_root);
     let prefix = format!("{root}/");
     let starts = if cfg!(windows) {
-        path.to_lowercase().starts_with(&prefix.to_lowercase())
+        path.get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(&prefix))
     } else {
         path.starts_with(&prefix)
     };
@@ -120,7 +213,12 @@ fn relative(addon: &DiscoveredAddon, path: &str) -> std::result::Result<PathBuf,
     let tail = &path[prefix.len()..];
     if tail.split('/').count() > 8
         || tail.split('/').any(|s| {
-            s == ".." || s == "." || s.is_empty() || s.contains(':') || s.ends_with([' ', '.'])
+            s == ".."
+                || s == "."
+                || s.is_empty()
+                || s.contains(':')
+                || s.ends_with([' ', '.'])
+                || reserved_device(s)
         })
     {
         return Err("invalid addon resource path".into());
@@ -133,6 +231,30 @@ fn relative(addon: &DiscoveredAddon, path: &str) -> std::result::Result<PathBuf,
         return Err("file path outside addon resources".into());
     }
     Ok(rel)
+}
+
+fn reserved_device(component: &str) -> bool {
+    let stem = component
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(' ')
+        .to_ascii_uppercase();
+    if matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) {
+        return true;
+    }
+    ["COM", "LPT"].iter().any(|prefix| {
+        stem.strip_prefix(prefix).is_some_and(|suffix| {
+            let mut chars = suffix.chars();
+            matches!(
+                (chars.next(), chars.next()),
+                (Some('1'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None)
+            )
+        })
+    })
 }
 
 fn read(path: &Path) -> std::result::Result<Vec<u8>, String> {
@@ -213,20 +335,33 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
     let io = lua.create_table()?;
     let addon_open = addon.clone();
     let data_open = data.clone();
-    // At most 16 live handles and 1 MiB per file; weak references release the
-    // live-handle budget on Lua GC without exposing a native file descriptor.
-    let handles = Rc::new(RefCell::new(Vec::<std::rc::Weak<()>>::new()));
+    // One shared registry spans reinstall, GC and unload. Weak entries do not
+    // keep files alive, while an iterator's strong state reference retains its
+    // 1 MiB allocation and counts against the 16-buffer quota.
+    let registry = match registry(lua) {
+        Some(registry) => registry,
+        None => {
+            let registry = Rc::new(RefCell::new(FileRegistry::default()));
+            lua.set_named_registry_value(
+                "forge_file_registry",
+                lua.create_userdata(RegistryHandle(registry.clone()))?,
+            )?;
+            registry
+        }
+    };
     io.set(
         "open",
         lua.create_function(move |lua, (path, mode): (String, Option<String>)| {
             {
-                let mut handles = handles.borrow_mut();
-                handles.retain(|h| h.strong_count() > 0);
-                if handles.len() >= 16 {
+                let mut registry = registry.borrow_mut();
+                registry
+                    .files
+                    .retain(|f| f.upgrade().is_some_and(|f| !f.borrow().closed));
+                if registry.files.len() >= 16 {
                     return lua.pack_multi((Value::Nil, "file handle limit exceeded"));
                 }
             }
-            let result = (|| -> std::result::Result<TextFile, String> {
+            let result = (|| -> std::result::Result<FileState, String> {
                 let rel = relative(&addon_open, &path)?;
                 let mode = mode.as_deref().unwrap_or("r");
                 if !matches!(mode, "r" | "w") {
@@ -251,12 +386,13 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
                             fs::remove_file(deleted).map_err(|e| e.to_string())?;
                         }
                     }
-                    Ok(TextFile {
-                        bytes: Rc::new(RefCell::new(Vec::new())),
+                    Ok(FileState {
+                        bytes: Vec::new(),
                         target: Some(target),
-                        closed: Rc::new(Cell::new(false)),
-                        live: Rc::new(RefCell::new(None)),
-                        cursor: Rc::new(Cell::new(0)),
+                        closed: false,
+                        cursor: 0,
+                        dirty: false,
+                        registry: registry.clone(),
                     })
                 } else {
                     if deleted.as_ref().is_some_and(|p| p.exists()) {
@@ -266,23 +402,21 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
                         .filter(|p| p.exists())
                         .unwrap_or_else(|| addon_open.script_root.join(rel));
                     no_links(&source)?;
-                    Ok(TextFile {
-                        bytes: Rc::new(RefCell::new(read(&source)?)),
+                    Ok(FileState {
+                        bytes: read(&source)?,
                         target: None,
-                        closed: Rc::new(Cell::new(false)),
-                        live: Rc::new(RefCell::new(None)),
-                        cursor: Rc::new(Cell::new(0)),
+                        closed: false,
+                        cursor: 0,
+                        dirty: false,
+                        registry: registry.clone(),
                     })
                 }
             })();
             match result {
                 Ok(file) => {
-                    let mut handles = handles.borrow_mut();
-                    handles.retain(|h| h.strong_count() > 0);
-                    let token = Rc::new(());
-                    handles.push(Rc::downgrade(&token));
-                    *file.live.borrow_mut() = Some(token);
-                    let ud = lua.create_userdata(file)?;
+                    let state = Rc::new(RefCell::new(file));
+                    registry.borrow_mut().files.push(Rc::downgrade(&state));
+                    let ud = lua.create_userdata(TextFile(state))?;
                     lua.pack_multi(ud)
                 }
                 Err(error) => lua.pack_multi((Value::Nil, error)),
@@ -327,6 +461,123 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn forge_review_writes_stay_buffered_until_close() {
+        let (scratch, host, _addon) = fixture();
+        let registry = registry(&host.lua).unwrap();
+        host.execute("pending=assert(io.open(resource..'/buffer.cfg','w'));for i=1,64 do pending:write('x') end").unwrap();
+        let target = scratch.0.join("config/files/pack/resources/buffer.cfg");
+        assert_eq!(
+            fs::read(&target).unwrap(),
+            b"",
+            "write must not replace the disk file"
+        );
+        assert_eq!(registry.borrow().replacements, 0);
+        host.execute("assert(pending:close());pending=nil").unwrap();
+        assert_eq!(fs::read(target).unwrap(), vec![b'x'; 64]);
+        assert_eq!(registry.borrow().replacements, 1);
+    }
+
+    #[test]
+    fn forge_review_file_flush_gc_and_unload_persist_once() {
+        let (scratch, host, _addon) = fixture();
+        let registry = registry(&host.lua).unwrap();
+        host.execute("f=assert(io.open(resource..'/flush.cfg','w'));f:write('one');assert(f:flush());assert(f:flush());assert(f:close())").unwrap();
+        assert_eq!(
+            registry.borrow().replacements,
+            1,
+            "clean flush and close must not write again"
+        );
+        host.execute("local f=assert(io.open(resource..'/gc.cfg','w'));f:write('gc')")
+            .unwrap();
+        host.lua.gc_collect().unwrap();
+        assert_eq!(registry.borrow().replacements, 2);
+        host.execute(
+            "pending=assert(io.open(resource..'/unload.cfg','w'));pending:write('unload')",
+        )
+        .unwrap();
+        assert!(close_all(&host.lua).is_empty());
+        assert_eq!(registry.borrow().replacements, 3);
+        host.execute("local ok=pcall(function() pending:write('closed') end);assert(not ok)")
+            .unwrap();
+        host.execute("pending=assert(io.open(resource..'/drop.cfg','w'));pending:write('drop')")
+            .unwrap();
+        drop(host);
+        assert_eq!(registry.borrow().replacements, 4);
+        for (name, data) in [
+            ("flush", "one"),
+            ("gc", "gc"),
+            ("unload", "unload"),
+            ("drop", "drop"),
+        ] {
+            assert_eq!(
+                fs::read(
+                    scratch
+                        .0
+                        .join(format!("config/files/pack/resources/{name}.cfg"))
+                )
+                .unwrap(),
+                data.as_bytes()
+            );
+        }
+    }
+
+    #[test]
+    fn forge_review_reserved_devices_rejected_before_os_open() {
+        let (_scratch, host, addon) = fixture();
+        for name in [
+            "CON",
+            "prn.cfg",
+            "Aux",
+            "nul.txt",
+            "COM1",
+            "com9.log",
+            "LPT1",
+            "lpt9.cfg",
+            "CONIN$",
+            "conout$.txt",
+            "COM\u{b9}",
+            "LPT\u{b2}.cfg",
+            "COM\u{b3}",
+        ] {
+            let path = normalized(&addon.script_root.join("resources").join(name));
+            assert!(
+                relative(&addon, &path).is_err(),
+                "reserved device accepted: {name}"
+            );
+            host.lua.globals().set("device_path", path).unwrap();
+            host.execute(
+                "local f,err=io.open(device_path,'r');assert(f==nil and type(err)=='string')",
+            )
+            .unwrap();
+        }
+        assert!(
+            relative(
+                &addon,
+                &normalized(&addon.script_root.join("resources/COM0.cfg"))
+            )
+            .is_ok()
+        );
+        assert!(
+            relative(
+                &addon,
+                &normalized(&addon.script_root.join("resources/CON/child.cfg"))
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn forge_review_non_ascii_root_never_panics_on_case_comparison() {
+        let (_scratch, _host, mut addon) = fixture();
+        addon.script_root = PathBuf::from("C:/\u{130}\u{130}/\u{e9}");
+        addon.package_root = addon.script_root.join("pack");
+        let result = std::panic::catch_unwind(|| {
+            relative(&addon, "C:/i\u{307}i\u{307}/\u{e9}/resources/a.cfg")
+        });
+        assert!(result.is_ok(), "non-ASCII case folding must not panic");
+        assert!(result.unwrap().is_err());
+    }
     struct Fixture(PathBuf);
     impl Drop for Fixture {
         fn drop(&mut self) {
