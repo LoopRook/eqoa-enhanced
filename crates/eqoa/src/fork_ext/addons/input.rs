@@ -169,22 +169,14 @@ pub fn winit_key_to_code(event: &KeyEvent) -> Option<u8> {
 /// Key suppression only replaces what that key does in plain gameplay (opening
 /// the client's Say window), never input to game pop-ups, dialogs, menus, or
 /// native windows (`plain_play` is false). Text capture and focused widgets
-/// take the keyboard regardless. When chat is claimed by an addon, the chat
-/// history key (C, 0x63/0x43) is captured in plain play so the native chat
-/// history window does not open.
+/// take the keyboard regardless.
 pub fn wants_key_capture(
     keyboard: bool,
     code: Option<u8>,
     is_synthetic: bool,
     plain_play: bool,
 ) -> bool {
-    let chat_claimed = !crate::hud::fork_hud::chat_window_visible();
-    let is_chat_history_key = matches!(code, Some(0x43 | 0x63));
-    (keyboard
-        || is_text_capture_active()
-        || (plain_play
-            && (code.is_some_and(is_key_suppressed)
-                || (chat_claimed && is_chat_history_key))))
+    (keyboard || is_text_capture_active() || (plain_play && code.is_some_and(is_key_suppressed)))
         && !is_synthetic
 }
 

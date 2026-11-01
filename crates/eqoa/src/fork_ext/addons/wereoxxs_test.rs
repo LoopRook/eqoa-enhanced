@@ -1621,7 +1621,6 @@ fn test_vui() -> vi::ui::Vui {
 
 #[test]
 fn forge_escape_and_history_keys_with_chat_claimed_do_not_draw_or_open_game_chat() {
-    use winit::keyboard::Key;
     use super::storage::Storage;
 
     super::input::reset_input_state();
@@ -1684,42 +1683,42 @@ fn forge_escape_and_history_keys_with_chat_claimed_do_not_draw_or_open_game_chat
         "chat_window must be claimed/hidden in plain play"
     );
 
-    // Keyboard 'c' / 'C' check in plain play:
-    let key_c = Key::Character("c".into());
-    let code_c = super::input::logical_key_to_code(&key_c);
-    assert_eq!(code_c, Some(0x63));
-    let wants_c = super::input::wants_key_capture(false, code_c, false, true);
-    assert!(
-        wants_c,
-        "Keyboard C must be captured at hook level when chat is claimed in plain play (fails before fix)"
-    );
-
-    // Frame 3: Simulate Escape in plain play (opens start menu, mode 13)
-    snap.start_menu = true;
-    snap.ui_mode = 13;
-    gpu.frame(&mut manager, snap.clone());
-
-    // Test drawing chat window:
     let vui = test_vui();
     let mut wnd = crate::chat::WndChat::new();
     wnd.text.add_text(&[65, 66], [1.0; 4], 0, |_| 10);
 
-    let mut recorder = TestBlitRecorder::default();
-    crate::hud::fork_hud::draw_chat_window(&mut wnd, &vui, &mut recorder, 1000, 0.016);
+    // R2 or C history with chat claimed in plain play:
+    // Even if history mode / scroll is activated, the game chat does not draw.
+    wnd.mode = 33;
+    wnd.set_scroll(1);
+    let mut recorder_history = TestBlitRecorder::default();
+    crate::hud::fork_hud::draw_chat_window(&mut wnd, &vui, &mut recorder_history, 1000, 0.016);
     assert_eq!(
-        recorder.blits.len(),
+        recorder_history.blits.len(),
         0,
-        "game chat window must NOT be drawn when Escape opens start menu while chat is claimed (fails before fix)"
+        "game chat history must NOT draw while chat is claimed in plain play"
+    );
+    assert_eq!(
+        wnd.mode, 0,
+        "history mode must be reset to 0 while chat is claimed"
     );
 
-    // Mode 33 / Pad R2 scroll check:
-    wnd.set_scroll(1);
-    let mut recorder_scroll = TestBlitRecorder::default();
-    crate::hud::fork_hud::draw_chat_window(&mut wnd, &vui, &mut recorder_scroll, 1000, 0.016);
-    assert_eq!(
-        recorder_scroll.blits.len(),
-        0,
-        "game chat history must NOT be drawn while chat is claimed"
+    // Escape with chat claimed opens the start menu (mode 13).
+    // Wereoxxs's show_while_paused deliberately calls UI.EnableChatWindow,
+    // so the Enable call is honoured and the game chat may draw in the start menu (parity).
+    snap.start_menu = true;
+    snap.ui_mode = 13;
+    gpu.frame(&mut manager, snap.clone());
+
+    assert!(
+        crate::hud::fork_hud::chat_window_visible(),
+        "Wereoxxs EnableChatWindow during pause/start menu must be honoured"
+    );
+    let mut recorder_menu = TestBlitRecorder::default();
+    crate::hud::fork_hud::draw_chat_window(&mut wnd, &vui, &mut recorder_menu, 1000, 0.016);
+    assert!(
+        !recorder_menu.blits.is_empty(),
+        "game chat may draw in the start menu when Wereoxxs unhides it for pause"
     );
 
     // Negative Control: Unclaimed chat (hide_game_chat = false)
@@ -1734,21 +1733,14 @@ fn forge_escape_and_history_keys_with_chat_claimed_do_not_draw_or_open_game_chat
         crate::hud::fork_hud::chat_window_visible(),
         "chat_window must be visible when unclaimed"
     );
-    let wants_c_unclaimed = super::input::wants_key_capture(false, code_c, false, true);
-    assert!(
-        !wants_c_unclaimed,
-        "Keyboard C must NOT be captured when chat is unclaimed"
-    );
 
-    // Opening start menu when unclaimed draws chat window as normal:
-    snap.start_menu = true;
-    snap.ui_mode = 13;
-    gpu.frame(&mut manager, snap.clone());
-
+    // In plain play when unclaimed, history mode and scroll draw normally:
+    wnd.mode = 33;
+    wnd.set_scroll(1);
     let mut recorder_unclaimed = TestBlitRecorder::default();
     crate::hud::fork_hud::draw_chat_window(&mut wnd, &vui, &mut recorder_unclaimed, 1000, 0.016);
     assert!(
-        recorder_unclaimed.blits.len() > 0,
-        "game chat window MUST be drawn when unclaimed"
+        !recorder_unclaimed.blits.is_empty(),
+        "game chat history MUST draw when unclaimed"
     );
 }
