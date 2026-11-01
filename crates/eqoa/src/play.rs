@@ -7883,17 +7883,7 @@ impl Play {
                 } else {
                     1
                 };
-                (e.p19 != 0
-                    && !c.name.trim().is_empty()
-                    && e.actor_pos.iter().all(|v| v.is_finite()))
-                .then(|| crate::map::mini::Dot {
-                    id: e.id,
-                    at: [e.actor_pos[0], e.actor_pos[2]],
-                    color: NAME_COLORS[color],
-                    name: c.name.clone(),
-                    level: (c.level > 0).then_some(c.level),
-                    player: c.p255 != 0,
-                })
+                crate::map::mini::Dot::of(e, NAME_COLORS[color])
             })
             .collect();
         let target = self
@@ -8660,7 +8650,7 @@ mod commands {
         player.id = 9006;
         let c = player.creature.as_mut().unwrap();
         c.level = 0;
-        c.p255 = 1;
+        c.p256 = 2;
         p.entities.slots = vec![
             Some(base),
             Some(corpse),
@@ -8675,8 +8665,8 @@ mod commands {
             (&*mv.dots[0].name, mv.dots[0].level, mv.dots[0].at),
             ("A rare mob", Some(17), [10.0, 20.0])
         );
-        assert!(!mv.dots[0].player);
-        assert!(mv.dots[1].player);
+        assert_eq!(mv.dots[0].kind, "NPC");
+        assert_eq!(mv.dots[1].kind, "Player");
         assert_eq!(mv.dots[1].level, None);
     }
 

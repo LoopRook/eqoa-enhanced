@@ -66,7 +66,7 @@ pub fn shot(s: &Shot, out: &str) -> Result<(), Box<dyn std::error::Error>> {
     // Offline visual fixtures only; never injected by the playable client.
     let samples = if std::env::var_os("EQOA_MAP_SAMPLE_NPCS").is_some() {
         vec![super::mini::Dot{id:1,at:[s.at[0]+30.0,s.at[1]+40.0],color:super::theme::KNOWN,
-            name:"Water Rat".into(),level:Some(7),player:false}]
+            name:"Water Rat".into(),level:Some(7),kind:"NPC"}]
     } else { Vec::new() };
     let live=samples.iter().map(|d|super::search::Live{name:d.name.clone(),world,at:d.at,level:d.level.unwrap_or(0)}).collect();
     map.search.update(world, s.at, live, Vec::new());

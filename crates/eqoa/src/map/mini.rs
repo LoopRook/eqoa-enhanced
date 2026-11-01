@@ -182,9 +182,28 @@ pub struct Dot {
     pub color: [f32; 4],
     pub name: String,
     pub level: Option<u8>,
-    pub player: bool,
+    /// What the card calls it: "Player", "Pet" or "NPC".
+    pub kind: &'static str,
 }
 impl Dot {
+    /// A seen, targetable, named creature drawn in `color`. Its kind is
+    /// `m_p256`'s (2 a player character, 3 of a player's side, else an
+    /// NPC); `m_p255` is 0 for other players as for NPCs.
+    pub fn of(e: &net::entity::Entity, color: [f32; 4]) -> Option<Dot> {
+        let c = e.creature.as_ref()?;
+        (e.p19 != 0 && !c.name.trim().is_empty() && e.actor_pos.iter().all(|v| v.is_finite())).then(|| Dot {
+            id: e.id,
+            at: [e.actor_pos[0], e.actor_pos[2]],
+            color,
+            name: c.name.clone(),
+            level: (c.level > 0).then_some(c.level),
+            kind: match c.p256 {
+                2 => "Player",
+                3 => "Pet",
+                _ => "NPC",
+            },
+        })
+    }
     fn card(&self, from: [f32; 2]) -> Vec<(String, [f32; 4])> {
         let level = self
             .level
@@ -193,7 +212,7 @@ impl Dot {
         vec![
             (self.name.clone(), TIP_TITLE),
             (
-                format!("{level} / {}", if self.player { "Player" } else { "NPC" }),
+                format!("{level} / {}", self.kind),
                 TIP_TEXT,
             ),
             (
@@ -759,6 +778,24 @@ mod tests {
     }
 
     #[test]
+    fn minimap_card_calls_other_players_players_and_pets_pets() {
+        // As the server sends them: other players walk with m_p255 0, as NPCs do
+        let seen = |p256| net::entity::Entity {
+            id: 9,
+            kind: net::entity::TYPE_CREATURE,
+            p19: 255,
+            actor_pos: [10.0, 0.0, 20.0],
+            creature: Some(net::entity::Creature { name: "Someone".into(), level: 45, p256, ..Default::default() }),
+            ..Default::default()
+        };
+        let line = |p256| Dot::of(&seen(p256), [1.0; 4]).expect("a dot").card([10.0, 20.0])[1].0.clone();
+        assert_eq!(line(2), "Level 45 / Player");
+        assert_eq!(line(3), "Level 45 / Pet");
+        assert_eq!(line(0), "Level 45 / NPC");
+        assert_eq!(line(1), "Level 45 / NPC");
+    }
+
+    #[test]
     fn map_refinement_hover_chooses_the_nearest_visible_entity_and_keeps_level() {
         let make = |id, at| Dot {
             id,
@@ -766,7 +803,7 @@ mod tests {
             color: [1.0; 4],
             name: "Rat".into(),
             level: Some(7),
-            player: false,
+            kind: "NPC",
         };
         let dots = vec![
             make(2, [52.0, 50.0]),

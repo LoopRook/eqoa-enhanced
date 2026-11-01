@@ -5,6 +5,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 ## 2026-11-01 · Enhanced 0.4.2
 
 - Fixed: map search listed other players near you by name. It now lists only NPCs and creatures, never players or their pets. Your creature journal never saved players and is unchanged.
+- Fixed: hovering over a player on the minimap called them an NPC; it now says Player (or Pet).
 
 ## 2026-11-01 · Enhanced 0.4.1
 
