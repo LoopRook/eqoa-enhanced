@@ -126,9 +126,9 @@
       "reason": "Reviewed restored state plus native health receipt/reset, cached HUD invalidation, and addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, plus live esf::Library icon provider hook and F9 art_changed icon cache drop; implementation in fork_ext."
     },
     "crates/eqoa/src/report.rs": {
-      "added": 64,
+      "added": 66,
       "deleted": 23,
-      "reason": "Local problem and crash report saving to Desktop; wrapped dialog status, label and fine notice hooks preserving upstream match arms; one-line hooks in push_line(), start(), send(), and secret() for in-memory cache warming/refresh, and minimal crate-level visibility."
+      "reason": "Local problem and crash report saving to Desktop; wrapped dialog status, label and fine notice hooks preserving upstream match arms; one-line hooks in push_line(), start(), send(), and secret() for in-memory cache warming/refresh, and minimal crate-level visibility; the test-only re-export is cfg(test)-gated so release builds compile."
     },
     "crates/eqoa/src/settings.rs": {
       "added": 336,
