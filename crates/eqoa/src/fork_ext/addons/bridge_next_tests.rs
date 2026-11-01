@@ -178,13 +178,14 @@ fn forge_bridge_next_begin_overload_open_precedes_draw_and_always_requires_end()
     drop(context.render_legacy());
     context.frame();
     let script = host.compile("ImGui.Begin('missing-End',false)").unwrap();
+    bridge.invoke(|| host.run(&script)).unwrap();
     assert!(
         bridge
-            .invoke(|| host.run(&script))
-            .unwrap_err()
-            .to_string()
-            .contains("unbalanced")
+            .drain_diagnostics()
+            .iter()
+            .any(|d| d.contains("unbalanced ImGui stacks recovered"))
     );
+    assert!(bridge.frame.borrow().stack.is_empty());
     drop(context.render_legacy());
 }
 
@@ -255,10 +256,10 @@ fn forge_bridge_next_mismatched_closed_unclosed_scopes_and_quotas_recover() {
     let bridge = Bridge::install(&host).unwrap();
     let second = Host::new().unwrap();
     let healthy = Bridge::install(&second).unwrap();
+    bridge.set_call_limit(4096);
     for source in [
         "ImGui.End()",
         "ImGui.Begin('parent');ImGui.BeginChild('child',80,30);ImGui.End()",
-        "ImGui.Begin('parent');ImGui.BeginChild('child',80,30)",
         "ImGui.Begin('parent');ImGui.BeginTabItem('orphan')",
         "ImGui.Begin('parent');if ImGui.BeginTabBar('bar') then ImGui.End() end",
         "ImGui.Begin('parent');if ImGui.BeginTabBar('bar') then local o,d=ImGui.BeginTabItem('item',true);if d then ImGui.EndTabBar() end end",
@@ -271,13 +272,32 @@ fn forge_bridge_next_mismatched_closed_unclosed_scopes_and_quotas_recover() {
         "ImGui.Begin('parent');ImGui.Combo('huge',0,{},257)",
         "ImGui.Begin('parent');ImGui.Button('nan',0/0,1)",
         "ImGui.Begin('parent');ImGui.TextUnformatted('text','unrelated-end')",
-        "ImGui.Begin('parent');for i=1,40 do ImGui.PushTextWrapPos() end",
+        "ImGui.Begin('parent');for i=1,80 do ImGui.PushTextWrapPos() end",
         "ImGui.Begin('parent');for i=1,5000 do ImGui.Separator() end",
     ] {
+        if source.contains("BeginTabItem('item'") {
+            // Tabs that disappear for several negative-control frames lose
+            // selection. Warm this item immediately before its mismatched End.
+            for _ in 0..2 {
+                context.frame();
+                bridge.invoke(|| host.execute("ImGui.SetNextWindowSize(400,300,ImGuiCond.Always);ImGui.Begin('parent');if ImGui.BeginTabBar('bar') then local o,d=ImGui.BeginTabItem('item',true,ImGuiTabItemFlags.SetSelected);if d then ImGui.EndTabItem() end;ImGui.EndTabBar() end;ImGui.End()")).unwrap();
+                drop(context.render_legacy());
+            }
+        }
         context.frame();
-        let script = host.compile(source).unwrap();
+        let script = host
+            .compile(&format!(
+                "ImGui.SetNextWindowSize(400,300,ImGuiCond.Always);{source}"
+            ))
+            .unwrap();
         let error = bridge.invoke(|| host.run(&script)).expect_err(source);
         assert!(!error.to_string().is_empty());
+        if source.contains("BeginTabItem('item'") {
+            assert!(
+                error.to_string().contains("unbalanced ImGui scopes"),
+                "the tab-item negative control must reach its incorrect EndTabBar: {error}"
+            );
+        }
         healthy
             .invoke(|| {
                 second.execute("ImGui.Begin('healthy neighbor');ImGui.Text('survived');ImGui.End()")
@@ -287,6 +307,13 @@ fn forge_bridge_next_mismatched_closed_unclosed_scopes_and_quotas_recover() {
         assert!(bridge.frame.borrow().stack.is_empty());
         assert!(bridge.frame.borrow().context.is_null());
     }
+    context.frame();
+    bridge
+        .invoke(|| host.execute("ImGui.Begin('parent');ImGui.BeginChild('child',80,30)"))
+        .unwrap();
+    assert_eq!(bridge.drain_diagnostics().len(), 1);
+    assert!(bridge.frame.borrow().stack.is_empty());
+    drop(context.render_legacy());
     // A collapsed child still owns a mandatory EndChild, unlike a closed tree,
     // menu or tab whose false Begin creates no matching End obligation.
     for _ in 0..2 {
@@ -689,4 +716,51 @@ fn forge_bridge_wereoxxs_widgets_and_stack_unwinding() {
         .unwrap();
     bridge.invoke(|| host.run(&clean)).unwrap();
     drop(context.render_legacy());
+}
+
+#[test]
+fn forge_recovery_warning_history_and_queue_are_bounded() {
+    let mut context = context();
+    let host = Host::new().unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    for variant in 0..=MAX_RECOVERY_DIAGNOSTICS {
+        context.frame();
+        let groups = variant % 32;
+        let pushes = if variant >= 32 {
+            "ImGui.PushTextWrapPos()"
+        } else {
+            ""
+        };
+        let ids = if variant >= 64 {
+            "ImGui.PushID('leak')"
+        } else {
+            ""
+        };
+        bridge
+            .invoke(|| {
+                host.execute(&format!(
+                    "ImGui.Begin('leak')\n{pushes}\n{ids}\nfor i=1,{groups} do ImGui.BeginGroup() end"
+                ))
+            })
+            .unwrap();
+        drop(context.render_legacy());
+    }
+    let warnings = bridge.drain_diagnostics();
+    assert_eq!(warnings.len(), MAX_RECOVERY_DIAGNOSTICS + 1);
+    assert!(warnings.last().unwrap().contains("suppressed"));
+    assert_eq!(
+        bridge.frame.borrow().recovered.len(),
+        MAX_RECOVERY_DIAGNOSTICS
+    );
+    for _ in 0..3 {
+        context.frame();
+        bridge
+            .invoke(|| host.execute("ImGui.Begin('leak')"))
+            .unwrap();
+        drop(context.render_legacy());
+        assert!(
+            bridge.drain_diagnostics().is_empty(),
+            "draining must not re-enable a repeated warning"
+        );
+    }
 }

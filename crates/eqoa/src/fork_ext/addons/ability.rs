@@ -16,8 +16,8 @@
 
 use super::host::Host;
 use mlua::{Lua, Result as LuaResult, Table, Value};
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
 pub const MAX_ABILITIES: usize = 256;
@@ -28,6 +28,43 @@ pub const MAX_ITEM_SLOTS: usize = MAX_ITEM_RECORDS;
 
 pub const ABILITY_SOURCE_TAG: u32 = 0x8060000;
 pub const ITEM_SOURCE_TAG: u32 = 0x2030000;
+
+const LOCKOUT_RING_SIZE: usize = 64;
+
+#[derive(Clone, Copy)]
+struct LockoutUpdate {
+    display_index: u32,
+    lockout_ms: u32,
+    seq: u64,
+}
+
+#[derive(Default)]
+struct LockoutRing {
+    next_seq: u64,
+    updates: VecDeque<LockoutUpdate>,
+}
+
+// Receipt and Lua run on the game thread. Consumers never drain this shared ring:
+// every addon VM owns its own cursor, including when its frames are skipped.
+thread_local! {
+    static LOCKOUT_RING: RefCell<LockoutRing> = RefCell::new(LockoutRing::default());
+}
+
+pub(crate) fn record_lockout(display_index: u32, lockout_ms: u32) {
+    LOCKOUT_RING.with(|ring| {
+        let mut ring = ring.borrow_mut();
+        if ring.updates.len() == LOCKOUT_RING_SIZE {
+            ring.updates.pop_front();
+        }
+        let seq = ring.next_seq;
+        ring.next_seq += 1;
+        ring.updates.push_back(LockoutUpdate {
+            display_index,
+            lockout_ms,
+            seq,
+        });
+    });
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ItemSnapshot {
@@ -330,10 +367,7 @@ pub(crate) fn create_item_object(lua: &Lua, snap: &ItemSnapshot) -> LuaResult<Ta
         lua.create_function(move |_, ()| Ok(icon_ref))?,
     )?;
     let slot_id = snap.slot_id;
-    t.set(
-        "GetSlotId",
-        lua.create_function(move |_, ()| Ok(slot_id))?,
-    )?;
+    t.set("GetSlotId", lua.create_function(move |_, ()| Ok(slot_id))?)?;
     Ok(t)
 }
 
@@ -367,6 +401,35 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
     >::new()));
     let subscriber_errors = Rc::new(RefCell::new(Vec::<Table>::new()));
     let lockout_cache = Rc::new(RefCell::new(HashMap::<u32, u32>::new()));
+    let next_seq = Rc::new(Cell::new(LOCKOUT_RING.with(|r| r.borrow().next_seq)));
+    let dropped = Rc::new(Cell::new(0u64));
+    let seeded = Rc::new(Cell::new(false));
+
+    // As in Forge's InstallHook, an addon loading mid-cooldown starts with
+    // live state. Newly learned abilities are seeded at zero in Update below.
+    let seed_lockouts = {
+        let s = snapshot_cell.clone();
+        let cache = lockout_cache.clone();
+        let cursor = next_seq.clone();
+        let seeded = seeded.clone();
+        move || {
+            if seeded.replace(true) {
+                return;
+            }
+            let snapshot = s.get().abilities;
+            let mut cache = cache.borrow_mut();
+            cache.clear();
+            for a in snapshot
+                .abilities
+                .iter()
+                .take(snapshot.ability_count as usize)
+                .filter(|a| a.valid)
+            {
+                cache.insert(a.display_index, a.cooldown_lockout_ms);
+            }
+            cursor.set(LOCKOUT_RING.with(|r| r.borrow().next_seq));
+        }
+    };
 
     // Events constants table
     let events_tbl = lua.create_table()?;
@@ -477,19 +540,47 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
             lua.create_function(move |_, ()| Ok(!claims.borrow().is_empty() || s.get().in_game))?,
         )?;
     }
-    list_mod.set("InstallHook", lua.create_function(|_, ()| Ok(true))?)?;
-    list_mod.set("UninstallHook", lua.create_function(|_, ()| Ok(true))?)?;
+    let seed = seed_lockouts.clone();
+    let claims = hook_claims.clone();
     list_mod.set(
-        "GetHookInfo",
-        lua.create_function(|lua_ctx, ()| {
-            let t = lua_ctx.create_table()?;
-            t.set("installed", true)?;
-            t.set("dropped", 0)?;
-            t.set("update_count", 0)?;
-            Ok(t)
+        "InstallHook",
+        lua.create_function(move |_, ()| {
+            if claims.borrow().is_empty() {
+                seed();
+            }
+            Ok(true)
         })?,
     )?;
-    list_mod.set("GetDroppedCount", lua.create_function(|_, ()| Ok(0))?)?;
+    list_mod.set(
+        "UninstallHook",
+        lua.create_function({
+            let seeded = seeded.clone();
+            move |_, ()| {
+                seeded.set(false);
+                Ok(true)
+            }
+        })?,
+    )?;
+    list_mod.set(
+        "GetHookInfo",
+        lua.create_function({
+            let dropped = dropped.clone();
+            move |lua_ctx, ()| {
+                let t = lua_ctx.create_table()?;
+                t.set("installed", true)?;
+                t.set("dropped", dropped.get())?;
+                t.set("update_count", LOCKOUT_RING.with(|r| r.borrow().next_seq))?;
+                Ok(t)
+            }
+        })?,
+    )?;
+    list_mod.set(
+        "GetDroppedCount",
+        lua.create_function({
+            let dropped = dropped.clone();
+            move |_, ()| Ok(dropped.get())
+        })?,
+    )?;
 
     // Acquire
     {
@@ -497,6 +588,9 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
         list_mod.set(
             "Acquire",
             lua.create_function(move |_, owner: String| {
+                if claims.borrow().is_empty() {
+                    seed_lockouts();
+                }
                 claims.borrow_mut().insert(owner);
                 Ok(true)
             })?,
@@ -506,10 +600,14 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
     // Release
     {
         let claims = hook_claims.clone();
+        let seeded = seeded.clone();
         list_mod.set(
             "Release",
             lua.create_function(move |_, owner: String| {
                 claims.borrow_mut().remove(&owner);
+                if claims.borrow().is_empty() {
+                    seeded.set(false);
+                }
                 Ok(())
             })?,
         )?;
@@ -604,87 +702,81 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
         list_mod.set(
             "Update",
             lua.create_function(move |lua_ctx, ()| {
-                let snap = s.get().abilities;
-                let mut cache_map = cache.borrow_mut();
-
-                for i in 0..snap.ability_count as usize {
-                    let a = &snap.abilities[i];
-                    if !a.valid {
-                        continue;
+                let snapshot = s.get();
+                if !snapshot.in_game {
+                    cache.borrow_mut().clear();
+                    seeded.set(false);
+                    next_seq.set(LOCKOUT_RING.with(|r| r.borrow().next_seq));
+                    return Ok(());
+                }
+                // Read all retained packets without consuming another VM's events.
+                let updates = LOCKOUT_RING.with(|ring| {
+                    let ring = ring.borrow();
+                    let first = ring.updates.front().map_or(ring.next_seq, |u| u.seq);
+                    if next_seq.get() < first {
+                        dropped.set(dropped.get() + first - next_seq.get());
                     }
-                    let d = a.display_index;
-                    let current = a.cooldown_lockout_ms;
-                    let prev = cache_map.get(&d).copied();
-
-                    match prev {
-                        None => {
-                            cache_map.insert(d, current);
-                        }
-                        Some(0) if current > 0 => {
-                            cache_map.insert(d, current);
-                            // Fire OnLockoutStart
-                            let subs_map = subs.borrow();
-                            if let Some(handlers) = subs_map.get("OnLockoutStart") {
-                                let mut dead_owners = Vec::new();
-                                for (owner, fn_val) in handlers.iter() {
-                                    let payload = lua_ctx.create_table()?;
-                                    payload.set("display_index", d)?;
-                                    payload.set("lockout_ms", current)?;
-                                    payload.set("seq", 0)?;
-                                    if let Err(e) = fn_val.call::<Value>(payload) {
-                                        dead_owners.push(owner.clone());
-                                        let err_tbl = lua_ctx.create_table()?;
-                                        err_tbl.set("owner", owner.as_str())?;
-                                        err_tbl.set("event", "OnLockoutStart")?;
-                                        err_tbl.set("error", e.to_string())?;
-                                        errs.borrow_mut().push(err_tbl);
-                                    }
-                                }
-                                drop(subs_map);
-                                if !dead_owners.is_empty() {
-                                    let mut subs_mut = subs.borrow_mut();
-                                    if let Some(handlers_mut) = subs_mut.get_mut("OnLockoutStart") {
-                                        for dead in dead_owners {
-                                            handlers_mut.remove(&dead);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Some(p) if p > 0 && current == 0 => {
-                            cache_map.insert(d, 0);
-                            // Fire OnLockoutEnd
-                            let subs_map = subs.borrow();
-                            if let Some(handlers) = subs_map.get("OnLockoutEnd") {
-                                let mut dead_owners = Vec::new();
-                                for (owner, fn_val) in handlers.iter() {
-                                    let payload = lua_ctx.create_table()?;
-                                    payload.set("display_index", d)?;
-                                    payload.set("lockout_ms", 0)?;
-                                    payload.set("seq", 0)?;
-                                    if let Err(e) = fn_val.call::<Value>(payload) {
-                                        dead_owners.push(owner.clone());
-                                        let err_tbl = lua_ctx.create_table()?;
-                                        err_tbl.set("owner", owner.as_str())?;
-                                        err_tbl.set("event", "OnLockoutEnd")?;
-                                        err_tbl.set("error", e.to_string())?;
-                                        errs.borrow_mut().push(err_tbl);
-                                    }
-                                }
-                                drop(subs_map);
-                                if !dead_owners.is_empty() {
-                                    let mut subs_mut = subs.borrow_mut();
-                                    if let Some(handlers_mut) = subs_mut.get_mut("OnLockoutEnd") {
-                                        for dead in dead_owners {
-                                            handlers_mut.remove(&dead);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Some(_) => {
-                            if prev != Some(current) {
-                                cache_map.insert(d, current);
+                    let updates: Vec<_> = ring
+                        .updates
+                        .iter()
+                        .filter(|u| u.seq >= next_seq.get())
+                        .copied()
+                        .collect();
+                    next_seq.set(ring.next_seq);
+                    updates
+                });
+                let pending = {
+                    seeded.set(true);
+                    let mut cache = cache.borrow_mut();
+                    for a in snapshot
+                        .abilities
+                        .abilities
+                        .iter()
+                        .take(snapshot.abilities.ability_count as usize)
+                        .filter(|a| a.valid)
+                    {
+                        // Never seed a new spell from the post-packet live value:
+                        // that would swallow its very first Start.
+                        cache.entry(a.display_index).or_insert(0);
+                    }
+                    let mut pending = Vec::new();
+                    for update in updates {
+                        let previous = cache.insert(update.display_index, update.lockout_ms);
+                        let event = match previous {
+                            Some(0) if update.lockout_ms > 0 => "OnLockoutStart",
+                            Some(p) if p > 0 && update.lockout_ms == 0 => "OnLockoutEnd",
+                            _ => continue,
+                        };
+                        pending.push((event, update));
+                    }
+                    pending
+                };
+                for (event, update) in pending {
+                    // Do not hold a RefCell borrow across user Lua: handlers may
+                    // unsubscribe, replace themselves, or call Update again.
+                    let handlers: Vec<_> = subs
+                        .borrow()
+                        .get(event)
+                        .map(|handlers| {
+                            handlers
+                                .iter()
+                                .map(|(o, f)| (o.clone(), f.clone()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    for (owner, callback) in handlers {
+                        let payload = lua_ctx.create_table()?;
+                        payload.set("display_index", update.display_index)?;
+                        payload.set("lockout_ms", update.lockout_ms)?;
+                        payload.set("seq", update.seq)?;
+                        if let Err(e) = callback.call::<Value>(payload) {
+                            let err_tbl = lua_ctx.create_table()?;
+                            err_tbl.set("owner", owner.as_str())?;
+                            err_tbl.set("event", event)?;
+                            err_tbl.set("error", e.to_string())?;
+                            errs.borrow_mut().push(err_tbl);
+                            if let Some(handlers) = subs.borrow_mut().get_mut(event) {
+                                handlers.remove(&owner);
                             }
                         }
                     }
@@ -833,7 +925,9 @@ pub fn install_ability_bar_adapter(host: &Host) -> LuaResult<()> {
             })?,
         )?;
 
-        let item_snap = if source_type == ITEM_SOURCE_TAG && (source_index as usize) < snap_abilities.items.len() {
+        let item_snap = if source_type == ITEM_SOURCE_TAG
+            && (source_index as usize) < snap_abilities.items.len()
+        {
             let it = snap_abilities.items[source_index as usize];
             if it.populated && it.slot_id != 0 {
                 Some(it)
@@ -936,7 +1030,9 @@ pub fn install_ability_bar_adapter(host: &Host) -> LuaResult<()> {
                     return Ok(Value::Nil);
                 }
                 let slot = bar.slots[slot_index];
-                if slot.source_type == ITEM_SOURCE_TAG && (slot.source_index as usize) < snap.abilities.items.len() {
+                if slot.source_type == ITEM_SOURCE_TAG
+                    && (slot.source_index as usize) < snap.abilities.items.len()
+                {
                     let it = &snap.abilities.items[slot.source_index as usize];
                     if it.populated && it.slot_id != 0 {
                         return Ok(Value::Table(create_item_object(lua_ctx, it)?));
@@ -962,6 +1058,212 @@ mod tests {
     use crate::fork_ext::addons::host::Snapshot;
     use std::fs;
     use std::path::{Path, PathBuf};
+
+    fn lockout_host(name: &str) -> Host {
+        let host = Host::for_addon(&test_addon(&temp_test_dir(name))).unwrap();
+        host.lua
+            .load(
+                r#"
+            list = require('frontiers_forge.ability_list')
+            events = {}
+            for _, kind in ipairs({'OnLockoutStart', 'OnLockoutEnd'}) do
+                list.On('test', kind, function(e)
+                    table.insert(events, {kind, e.display_index, e.lockout_ms, e.seq})
+                end)
+            end
+        "#,
+            )
+            .exec()
+            .unwrap();
+        host
+    }
+
+    fn lockout_snapshot(host: &Host, lockout: u32) {
+        let mut snapshot = Snapshot::default();
+        snapshot.in_game = true;
+        snapshot.abilities.ability_count = 1;
+        snapshot.abilities.abilities[0] = AbilitySnapshot {
+            id: 301,
+            display_index: 4,
+            valid: true,
+            cooldown_lockout_ms: lockout,
+            ..Default::default()
+        };
+        host.snapshot.set(snapshot);
+    }
+
+    fn assert_lockout_pair(host: &Host) {
+        host.lua
+            .load(
+                r#"
+            list.Update()
+            assert(#events == 2, 'expected exactly Start then End')
+            assert(events[1][1] == 'OnLockoutStart' and events[1][2] == 4 and events[1][3] == 400)
+            assert(events[2][1] == 'OnLockoutEnd' and events[2][2] == 4 and events[2][3] == 0)
+            assert(events[2][4] > events[1][4], 'packet order must be retained')
+            list.Update()
+            assert(#events == 2, 'repeated Update must not replay events')
+        "#,
+            )
+            .exec()
+            .unwrap();
+    }
+
+    #[test]
+    fn forge_lockout_start_end_between_updates() {
+        let host = lockout_host("between_updates");
+        lockout_snapshot(&host, 0);
+        host.lua.load("list.Update()").exec().unwrap();
+        record_lockout(4, 400);
+        record_lockout(4, 0);
+        assert_lockout_pair(&host);
+    }
+
+    #[test]
+    fn forge_lockout_short_lifecycle_across_frames() {
+        let host = lockout_host("short_lifecycle");
+        lockout_snapshot(&host, 0);
+        host.lua.load("list.Update()").exec().unwrap();
+        record_lockout(4, 400);
+        lockout_snapshot(&host, 400);
+        host.lua
+            .load("list.Update(); assert(#events == 1)")
+            .exec()
+            .unwrap();
+        record_lockout(4, 0);
+        lockout_snapshot(&host, 0);
+        assert_lockout_pair(&host);
+    }
+
+    #[test]
+    fn forge_lockout_new_ability_first_start() {
+        let host = lockout_host("first_start");
+        host.lua.load("list.Update()").exec().unwrap();
+        record_lockout(4, 400);
+        lockout_snapshot(&host, 400);
+        host.lua
+            .load("list.Update(); assert(#events == 1 and events[1][1] == 'OnLockoutStart')")
+            .exec()
+            .unwrap();
+    }
+
+    #[test]
+    fn forge_lockout_two_addons_receive_each_packet_once() {
+        let a = lockout_host("two_addons_a");
+        let b = lockout_host("two_addons_b");
+        for host in [&a, &b] {
+            lockout_snapshot(host, 0);
+            host.lua.load("list.Update()").exec().unwrap();
+        }
+        record_lockout(4, 400);
+        record_lockout(4, 400); // Repeated absolute state is not another Start.
+        record_lockout(4, 0);
+        assert_lockout_pair(&a);
+        assert_lockout_pair(&b);
+    }
+
+    #[test]
+    fn forge_lockout_ring_overflow_is_bounded_and_reported_per_addon() {
+        let a = lockout_host("overflow_a");
+        let b = lockout_host("overflow_b");
+        for host in [&a, &b] {
+            lockout_snapshot(host, 0);
+            host.lua.load("list.Update()").exec().unwrap();
+        }
+        record_lockout(4, 400);
+        record_lockout(4, 0);
+        assert_lockout_pair(&a);
+        for _ in 0..32 {
+            record_lockout(4, 400);
+            record_lockout(4, 0);
+        }
+        assert_eq!(LOCKOUT_RING.with(|r| r.borrow().updates.len()), 64);
+        a.lua
+            .load("list.Update(); assert(#events == 66 and list.GetDroppedCount() == 0)")
+            .exec()
+            .unwrap();
+        b.lua.load("list.Update(); assert(#events == 64 and list.GetDroppedCount() == 2); assert(list.GetHookInfo().dropped == 2)").exec().unwrap();
+        let late = lockout_host("late_subscriber");
+        lockout_snapshot(&late, 0);
+        late.lua
+            .load("list.Update(); assert(#events == 0)")
+            .exec()
+            .unwrap();
+    }
+
+    #[test]
+    fn forge_lockout_loading_mid_cooldown_preserves_end_and_install_is_idempotent() {
+        let host = lockout_host("mid_cooldown");
+        lockout_snapshot(&host, 400);
+        host.lua.load("list.Acquire('test')").exec().unwrap();
+        record_lockout(4, 0);
+        lockout_snapshot(&host, 0);
+        host.lua.load("list.InstallHook(); list.Update(); assert(#events == 1 and events[1][1] == 'OnLockoutEnd')").exec().unwrap();
+    }
+
+    #[test]
+    fn forge_lockout_callbacks_can_unsubscribe_and_errors_are_isolated() {
+        let host = lockout_host("callbacks");
+        lockout_snapshot(&host, 0);
+        host.lua
+            .load(
+                r#"
+            list.Update()
+            list.On('self_removing', 'OnLockoutStart', function()
+                list.Off('self_removing', 'OnLockoutStart')
+                list.Update()
+            end)
+            list.On('broken', 'OnLockoutStart', function() error('broken subscriber') end)
+        "#,
+            )
+            .exec()
+            .unwrap();
+        record_lockout(4, 400);
+        record_lockout(4, 0);
+        assert_lockout_pair(&host);
+        host.lua
+            .load("assert(#list.GetSubscriberErrors() == 1)")
+            .exec()
+            .unwrap();
+    }
+
+    #[test]
+    fn forge_lockout_is_on_cooldown_matches_native_hotbar_dim() {
+        let lua = Lua::new();
+        for lockout in [-1, 0, 1, 400, 3500] {
+            let ability = net::dump::Ability {
+                id: 301,
+                valid: 1,
+                slot: 0,
+                lockout,
+                ..Default::default()
+            };
+            let mut menus = crate::hudmenu::HudMenus::default();
+            menus.build(
+                &[(301, ability)].into(),
+                &Default::default(),
+                &Default::default(),
+                Default::default(),
+            );
+            let object = create_ability_object(
+                &lua,
+                &AbilitySnapshot {
+                    valid: true,
+                    cooldown_lockout_ms: lockout.max(0) as u32,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                object
+                    .get::<mlua::Function>("IsOnCooldown")
+                    .unwrap()
+                    .call::<bool>(())
+                    .unwrap(),
+                menus.defs[0].entries[0].x08 == 61
+            );
+        }
+    }
 
     fn temp_test_dir(name: &str) -> PathBuf {
         let path =
@@ -1384,6 +1686,7 @@ mod tests {
         );
         chunk.exec().unwrap();
 
+        record_lockout(4, 3500);
         // Mutate snapshot: ability goes on cooldown (lockout = 3500 ms)
         let mut snap2 = snap;
         snap2.abilities[0].cooldown_lockout_ms = 3500;
@@ -1405,6 +1708,7 @@ mod tests {
         );
         chunk2.exec().unwrap();
 
+        record_lockout(4, 0);
         // Mutate snapshot: ability comes off cooldown (lockout = 0)
         let mut snap3 = snap2;
         snap3.abilities[0].cooldown_lockout_ms = 0;
@@ -1537,6 +1841,7 @@ mod tests {
         chunk.exec().unwrap();
 
         // Now trigger lockout start
+        record_lockout(snap.abilities[0].display_index, 4000);
         let mut snap2 = snap;
         snap2.abilities[0].cooldown_lockout_ms = 4000;
         host.snapshot.set(Snapshot {

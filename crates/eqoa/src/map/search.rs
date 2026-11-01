@@ -62,6 +62,8 @@ enum Action {
     Next,
     Close,
     TrackWaypoint,
+    Import,
+    Export,
 }
 
 /// Appearance tokens, independent of search, input and navigation state.
@@ -89,7 +91,8 @@ pub struct Search {
     selected: usize,
     offset: usize,
     hits: Vec<([i32; 4], Action)>,
-    cached: RefCell<Option<(String, Tab, Rc<Vec<ResultRow>>)>>,
+    cached: RefCell<Option<(String, Tab, u64, Rc<Vec<ResultRow>>)>>,
+    pub status_msg: Option<(String, std::time::Instant)>,
 }
 
 fn mini_search_rect(m: [f32; 4]) -> [i32; 4] {
@@ -324,11 +327,35 @@ impl Search {
         self.guide = None;
     }
     fn nearest(&self, name: &str) -> Option<[f32; 2]> {
-        self.known
+        let catalog_min = self
+            .known
             .iter()
             .filter(|s| s.world == self.world && s.name.eq_ignore_ascii_case(name))
             .map(|s| s.at)
-            .min_by(|a, b| distance(*a, self.player).total_cmp(&distance(*b, self.player)))
+            .min_by(|a, b| distance(*a, self.player).total_cmp(&distance(*b, self.player)));
+
+        let journal_min = super::journal::with(|j| {
+            j.records().get(name).and_then(|rec| {
+                rec.ids
+                    .values()
+                    .filter(|info| info.world == self.world)
+                    .map(|info| [info.pos[0], info.pos[2]])
+                    .min_by(|a, b| distance(*a, self.player).total_cmp(&distance(*b, self.player)))
+            })
+        });
+
+        match (catalog_min, journal_min) {
+            (Some(c), Some(j)) => {
+                if distance(c, self.player) <= distance(j, self.player) {
+                    Some(c)
+                } else {
+                    Some(j)
+                }
+            }
+            (Some(c), None) => Some(c),
+            (None, Some(j)) => Some(j),
+            (None, None) => None,
+        }
     }
     pub fn destination(&self) -> Option<([f32; 2], bool)> {
         match self.guide.as_ref()? {
@@ -382,13 +409,14 @@ impl Search {
         })
     }
     pub fn results(&self) -> Rc<Vec<ResultRow>> {
-        if let Some((query, tab, rows)) = self.cached.borrow().as_ref() {
-            if query == &self.query && *tab == self.tab {
+        let rev = super::journal::revision();
+        if let Some((query, tab, cached_rev, rows)) = self.cached.borrow().as_ref() {
+            if query == &self.query && *tab == self.tab && *cached_rev == rev {
                 return Rc::clone(rows);
             }
         }
         let rows = Rc::new(self.build_results());
-        *self.cached.borrow_mut() = Some((self.query.clone(), self.tab, Rc::clone(&rows)));
+        *self.cached.borrow_mut() = Some((self.query.clone(), self.tab, rev, Rc::clone(&rows)));
         rows
     }
 
@@ -421,6 +449,50 @@ impl Search {
                         row.1 = Some(s.at);
                     }
                 }
+                super::journal::with(|j| {
+                    j.ensure_loaded();
+                    for (c_name, rec) in j.records() {
+                        let name_lower = c_name.to_lowercase();
+                        let name_match = words.iter().all(|w| name_lower.contains(w));
+                        let mut searchable = name_lower.clone();
+                        for info in rec.ids.values() {
+                            if info.level > 0 {
+                                use std::fmt::Write;
+                                let _ = write!(searchable, " level {} {}", info.level, info.level);
+                            }
+                            let world_str = match info.world {
+                                0 => " tunaria world 0",
+                                1 => " odus world 1",
+                                2 => " plane of sky world 2",
+                                3 => " lavastorm world 3",
+                                _ => " world",
+                            };
+                            searchable.push_str(world_str);
+                            use std::fmt::Write;
+                            let _ = write!(searchable, " {:.0} {:.0}", info.pos[0], info.pos[2]);
+                        }
+                        let journal_match = name_match || (!words.is_empty() && words.iter().all(|w| searchable.contains(w)));
+                        if journal_match {
+                            let row = names
+                                .entry(name_lower)
+                                .or_insert_with(|| (c_name.clone(), None, 0, None));
+                            for info in rec.ids.values() {
+                                if info.world == self.world
+                                    && row.1.is_none_or(|at| {
+                                        distance([info.pos[0], info.pos[2]], self.player) < distance(at, self.player)
+                                    })
+                                {
+                                    row.1 = Some([info.pos[0], info.pos[2]]);
+                                }
+                                if info.level > 0 {
+                                    row.3 = Some(row.3.map_or((info.level, info.level), |(lo, hi)| {
+                                        (lo.min(info.level), hi.max(info.level))
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                });
                 for n in self
                     .live
                     .iter()
@@ -602,6 +674,28 @@ impl Search {
                     self.offset = (self.offset + 6).min(self.results().len().saturating_sub(1));
                     self.selected = self.offset;
                 }
+                Action::Import => {
+                    match super::journal::import_interactive() {
+                        Ok(added) => {
+                            self.status_msg = Some((format!("Imported {added} spawns"), std::time::Instant::now()));
+                            *self.cached.borrow_mut() = None;
+                        }
+                        Err(err) => {
+                            self.status_msg = Some((format!("Import: {err}"), std::time::Instant::now()));
+                        }
+                    }
+                }
+                Action::Export => {
+                    match super::journal::export_to_desktop() {
+                        Ok(path) => {
+                            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("journal");
+                            self.status_msg = Some((format!("Saved to {file_name}"), std::time::Instant::now()));
+                        }
+                        Err(err) => {
+                            self.status_msg = Some((format!("Export: {err}"), std::time::Instant::now()));
+                        }
+                    }
+                }
             }
             return true;
         }
@@ -778,7 +872,7 @@ impl Search {
         let results = self.results();
         self.selected = self.selected.min(results.len().saturating_sub(1));
         self.offset = self.offset.min(self.selected);
-        let rows = ((h - 132) / 28).clamp(1, 6) as usize;
+        let rows = ((h - 146) / 28).clamp(1, 6) as usize;
         for (i, row) in results.iter().enumerate().skip(self.offset).take(rows) {
             let yy = py + 94 + (i - self.offset) as i32 * 28;
             let b = [px + 6, yy - 2, px + w - 6, yy + 25];
@@ -814,25 +908,79 @@ impl Search {
                 t::MUTED,
             );
         }
-        let foot = py + h - 34;
+        let foot = py + h - 48;
         t::fill(r, [px + 8, foot - 7, px + w - 8, foot - 6], t::BORDER);
+        let status_line = self
+            .status_msg
+            .as_ref()
+            .and_then(|(msg, when)| {
+                if when.elapsed().as_secs() < 6 {
+                    Some(msg.clone())
+                } else {
+                    None
+                }
+            })
+            .or_else(super::journal::status_msg);
+        let (j_names, j_spawns) = super::journal::counts();
+        let footer_text = status_line.unwrap_or_else(|| {
+            if self.tab == Tab::Npcs {
+                format!("{} matches", results.len())
+            } else {
+                format!("{} matches / Enter guides", results.len())
+            }
+        });
         t::text(
             r,
-            &format!("{} matches / Enter guides", results.len()),
+            &footer_text,
             [px + 10, foot - 2],
             w - 20,
             t::MUTED,
         );
+        let journal_label = format!("Journal: {j_names} creatures, {j_spawns} spawns");
+        t::text(
+            r,
+            &journal_label,
+            [px + 10, foot + 11],
+            w - 20,
+            t::MUTED,
+        );
+        let btn_y1 = foot + 25;
+        let btn_y2 = py + h - 3;
+        let avail_btn_w = w - 16;
+        let (w_prev, w_exp, w_imp, w_next) = if avail_btn_w < 220 {
+            let bw = ((avail_btn_w - 12) / 4).max(28);
+            (bw, bw, bw, bw)
+        } else {
+            (44, 58, 58, 44)
+        };
+        let bx_prev = px + 8;
+        let bx_exp = bx_prev + w_prev + 4;
+        let bx_imp = bx_exp + w_exp + 4;
+        let bx_next = px + w - 8 - w_next;
         self.button(
             r,
-            [px + 8, foot + 12, px + 61, py + h - 3],
+            [bx_prev, btn_y1, bx_prev + w_prev, btn_y2],
             "Prev",
             Action::Previous,
             false,
         );
         self.button(
             r,
-            [px + w - 61, foot + 12, px + w - 8, py + h - 3],
+            [bx_exp, btn_y1, bx_exp + w_exp, btn_y2],
+            "Export",
+            Action::Export,
+            false,
+        );
+        self.button(
+            r,
+            [bx_imp, btn_y1, bx_imp + w_imp, btn_y2],
+            "Import",
+            Action::Import,
+            false,
+        );
+        self.button(
+            r,
+            [bx_next, btn_y1, bx_next + w_next, btn_y2],
             "Next",
             Action::Next,
             false,
@@ -1495,5 +1643,35 @@ mod tests {
 
         assert_eq!(walk.fwd, vec![0.0], "typing into search must produce zero movement thrust");
         assert!(!p.autorun, "typing letters must not trigger autorun");
+    }
+    #[test]
+    fn test_search_footer_buttons_and_journal_do_not_overlap() {
+        use crate::pointer::testing::{NullRaster, vui};
+        let mut s = known();
+        s.open = true;
+
+        for &width in &[252.0, 220.0, 200.0] {
+            s.draw(
+                &mut NullRaster,
+                &vui(),
+                [[0.0, 0.0], [width + 20.0, 400.0]],
+                None,
+            );
+            // Collect button hits on the footer row (Prev, Export, Import, Next)
+            let mut footer_buttons = Vec::new();
+            for (b, a) in &s.hits {
+                if matches!(a, Action::Previous | Action::Export | Action::Import | Action::Next) {
+                    footer_buttons.push((*b, a));
+                }
+            }
+            assert_eq!(footer_buttons.len(), 4, "all 4 footer buttons must exist at width {width}");
+            // Verify no horizontal overlap between consecutive buttons
+            for i in 0..footer_buttons.len() - 1 {
+                let curr = footer_buttons[i].0;
+                let next = footer_buttons[i + 1].0;
+                assert!(curr[0] < curr[2], "button width must be positive");
+                assert!(curr[2] <= next[0], "button {i} [..{}] overlaps next button [{}..] at width {width}", curr[2], next[0]);
+            }
+        }
     }
 }

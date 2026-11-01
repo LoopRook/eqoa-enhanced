@@ -60,6 +60,8 @@ pub(super) enum Launch {
 }
 
 pub(crate) struct Runtime {
+    default_server: String,
+    profile_probe: Option<(String, super::named_profiles::CharacterSnapshot)>,
     paths: Paths,
     discovery: Discovery,
     initial_enabled: bool,
@@ -85,20 +87,40 @@ struct Active {
 impl Runtime {
     pub fn from_env() -> Self {
         crate::fork_ext::mods::auto_create_mods_dir();
-        Self::new(Paths::select(
+        crate::fork_ext::bundled::install_bundled_mods_if_needed();
+        let mut runtime = Self::new(Paths::select(
             crate::fork_ext::mods::mods_dir(),
             std::env::var_os("EQOA_FORGE_MODS").map(PathBuf::from),
             std::env::var_os("EQOA_CONFIG")
                 .map(PathBuf::from)
                 .or_else(crate::settings::config_dir),
             std::env::var_os("EQOA_FORGE_SPIKE").map(PathBuf::from),
-        ))
+        ));
+        let mut args = std::env::args().skip(1);
+        let play_server = if args.next().as_deref() == Some("play") {
+            args.next()
+        } else {
+            None
+        };
+        runtime.default_server = play_server
+            .or_else(crate::settings::server)
+            .unwrap_or_else(|| "local".into());
+        runtime
     }
     pub(super) fn new(paths: Paths) -> Self {
         super::visibility::publish(false);
         let discovery = super::discovery::discover(&paths.mods);
         let storage = Storage::new(paths.config.clone());
+        let saved_profile = super::named_profiles::Store::new(paths.config.clone())
+            .read(super::named_profiles::DEFAULT)
+            .ok();
         let initial_enabled = discovery.addons.iter().any(|addon| {
+            if let Some(profile) = &saved_profile {
+                return Storage::key(addon)
+                    .ok()
+                    .and_then(|key| profile.enabled.get(&key).copied())
+                    .unwrap_or(false);
+            }
             Storage::key(addon)
                 .and_then(|key| storage.enabled(&key))
                 .ok()
@@ -106,6 +128,8 @@ impl Runtime {
                 .unwrap_or(addon.initially_enabled)
         });
         Self {
+            default_server: "local".into(),
+            profile_probe: None,
             paths,
             discovery,
             initial_enabled,
@@ -232,10 +256,39 @@ impl Runtime {
         encoder: &mut wgpu::CommandEncoder,
         final_target: &wgpu::TextureView,
         snapshot: Snapshot,
+        server: Option<&str>,
     ) {
         if self.stopped {
             super::visibility::publish(false);
             return;
+        }
+        let server_owned = server.unwrap_or(&self.default_server).to_owned();
+        let server = server_owned.as_str();
+        // A character can select an enabled profile even when Default has no
+        // enabled addons, so inspect it before the lazy graphics launch decision.
+        if self.graphics.is_none()
+            && let Some(character) = snapshot.character
+        {
+            if self
+                .profile_probe
+                .as_ref()
+                .is_none_or(|(s, c)| s != server || *c != character)
+            {
+                self.profile_probe = Some((server.to_owned(), character));
+                let store = super::named_profiles::Store::new(self.paths.config.clone());
+                if let Ok(identity) = super::named_profiles::Character::new(server, character) {
+                    match store
+                        .seed_roles()
+                        .and_then(|()| store.world_choice(&identity))
+                        .and_then(|(name, setup)| store.read(&name).map(|doc| (doc, setup)))
+                    {
+                        Ok((doc, setup)) => {
+                            self.initial_enabled = setup || doc.enabled.values().any(|v| *v)
+                        }
+                        Err(_) => self.open = true, // The manager displays the load diagnostic.
+                    }
+                }
+            }
         }
         if super::take_open_request() {
             self.request_open();
@@ -282,6 +335,7 @@ impl Runtime {
                         let mut plan = FramePlan::collect(Vec::new(), self.settings.clone());
                         plan.controls = Some(self.open);
                         plan.root = Some(self.paths.mods.clone());
+                        plan.server = server.to_owned();
                         render_managed(
                             &mut active.context,
                             &active.renderer,
@@ -297,7 +351,8 @@ impl Runtime {
                     Ok(state) => {
                         self.open = state.open;
                         self.settings = state.settings;
-                        self.want_mouse = !snapshot.start_menu && active.context.io().want_capture_mouse();
+                        self.want_mouse =
+                            !snapshot.start_menu && active.context.io().want_capture_mouse();
                     }
                     Err(e) => {
                         active.manager.after_render();
@@ -313,9 +368,7 @@ impl Runtime {
             _ => {}
         }
         if let Some(Graphics::Managed(active)) = self.graphics.as_mut() {
-            if active.context.io().want_save_ini_settings() {
-                save_ini_settings(&mut active.context, self.paths.config.as_deref());
-            }
+            active.manager.flush_profile(&mut active.context, false);
         }
         if self.error.is_none() && !self.stopped {
             if let Some(Graphics::Managed(a)) = &self.graphics {
@@ -335,8 +388,8 @@ impl Runtime {
         }
         self.stopped = true;
         if let Some(Graphics::Managed(active)) = self.graphics.as_mut() {
-            save_ini_settings(&mut active.context, self.paths.config.as_deref());
             active.manager.shutdown();
+            active.manager.flush_profile(&mut active.context, true);
             if let Err(e) = active.platform.detach_window(&mut active.context) {
                 crate::say(&format!("Addons: {e}"));
             }
@@ -361,6 +414,9 @@ impl Runtime {
     #[cfg(test)]
     pub(super) fn step_frame_headless<F: FnOnce(&mut dear_imgui_rs::Ui)>(&mut self, build: F) {
         if let Some(Graphics::Managed(active)) = self.graphics.as_mut() {
+            active
+                .manager
+                .profile_boundary(&mut active.context, None, "local");
             active.context.io_mut().set_display_size([800.0, 600.0]);
             active.context.io_mut().set_delta_time(1.0 / 60.0);
             let ui = active.context.frame();
@@ -373,33 +429,6 @@ impl Runtime {
 impl Drop for Runtime {
     fn drop(&mut self) {
         self.shutdown();
-    }
-}
-
-pub(super) fn ini_path(config: Option<&std::path::Path>) -> Option<PathBuf> {
-    config.map(|c| c.join("addons").join("imgui.ini"))
-}
-
-pub(super) fn load_ini_settings(context: &mut Context, config: Option<&std::path::Path>) {
-    if let Some(path) = ini_path(config) {
-        if path.is_file() {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                context.load_ini_settings(&content);
-            }
-        }
-    }
-}
-
-pub(super) fn save_ini_settings(context: &mut Context, config: Option<&std::path::Path>) {
-    unsafe {
-        (*context.as_raw()).IO.WantSaveIniSettings = false;
-    }
-    if let Some(path) = ini_path(config) {
-        let mut buffer = String::new();
-        context.save_ini_settings(&mut buffer);
-        if !buffer.is_empty() {
-            let _ = super::storage::atomic_replace(&path, buffer.as_bytes());
-        }
     }
 }
 
@@ -416,7 +445,6 @@ impl Active {
         context
             .set_ini_filename::<PathBuf>(None)
             .map_err(|e| e.to_string())?;
-        load_ini_settings(&mut context, paths.config.as_deref());
         let mut platform = WinitPlatform::new(&mut context).map_err(|e| e.to_string())?;
         platform
             .attach_window(window.clone(), HiDpiMode::Locked(1.0), &mut context)
@@ -428,13 +456,14 @@ impl Active {
             )
             .map_err(|e| e.to_string())?,
         ));
-        let manager = Manager::new(
+        let mut manager = Manager::new(
             paths.mods.clone(),
             paths.config.clone(),
             device,
             queue,
             renderer.clone(),
         );
+        manager.enable_profiles(paths.config.clone());
         Ok(Self {
             manager,
             renderer,
@@ -455,7 +484,6 @@ impl Active {
         context
             .set_ini_filename::<PathBuf>(None)
             .map_err(|e| e.to_string())?;
-        load_ini_settings(&mut context, paths.config.as_deref());
         let platform = WinitPlatform::new(&mut context).map_err(|e| e.to_string())?;
         let renderer = Rc::new(RefCell::new(
             WgpuRenderer::new(
@@ -464,13 +492,14 @@ impl Active {
             )
             .map_err(|e| e.to_string())?,
         ));
-        let manager = Manager::new(
+        let mut manager = Manager::new(
             paths.mods.clone(),
             paths.config.clone(),
             device,
             queue,
             renderer.clone(),
         );
+        manager.enable_profiles(paths.config.clone());
         Ok(Self {
             manager,
             renderer,
@@ -490,6 +519,7 @@ pub(super) enum Action {
     CloseSettings,
 }
 pub(super) struct FramePlan {
+    server: String,
     commands: Vec<Command>,
     settings: Option<String>,
     controls: Option<bool>,
@@ -507,6 +537,7 @@ enum RenderFault {
 impl FramePlan {
     pub fn collect(actions: Vec<Action>, previous_settings: Option<String>) -> Self {
         let mut plan = Self {
+            server: "local".into(),
             commands: Vec::new(),
             settings: previous_settings,
             controls: None,
@@ -577,9 +608,15 @@ struct FrameState {
     open: bool,
     settings: Option<String>,
 }
-fn controls(ui: &Ui, manager: &Manager, open: &mut bool, root: Option<&PathBuf>) -> Vec<Action> {
+fn controls(
+    ui: &Ui,
+    manager: &mut Manager,
+    open: &mut bool,
+    root: Option<&PathBuf>,
+) -> Vec<Action> {
     let mut actions = Vec::new();
     ui.window("Addons").opened(open).build(|| {
+        manager.profile_controls(ui);
         if let Some(readiness)=manager.health_readiness() {ui.text_wrapped(readiness);}
         if let Some(root)=root {ui.text_wrapped(root.to_string_lossy());}
         if ui.button("Rescan folder") {actions.push(Action::Rescan);}
@@ -592,8 +629,10 @@ fn controls(ui: &Ui, manager: &Manager, open: &mut bool, root: Option<&PathBuf>)
             if ui.button(format!("{}##enable-{id}",if entry.enabled_intent {"Disable"} else {"Enable"})) {actions.push(Action::Enable(id.clone(),!entry.enabled_intent));}
             ui.same_line();if ui.button(format!("Reload##{id}")) {actions.push(Action::Reload(id.clone()));}
             ui.same_line();if ui.button(format!("Settings##{id}")) {actions.push(Action::Settings(id.clone()));}
-            if ui.button(format!("Save profile##{id}")) {actions.push(Action::Save(id.clone()));}
-            ui.same_line();if ui.button(format!("Load profile##{id}")) {actions.push(Action::Load(id.clone()));}
+            if manager.profile_name().is_none() {
+                if ui.button(format!("Save profile##{id}")) {actions.push(Action::Save(id.clone()));}
+                ui.same_line();if ui.button(format!("Load profile##{id}")) {actions.push(Action::Load(id.clone()));}
+            }
             if !entry.initialized {ui.text("Enable this addon to initialize its settings.");}
         }
         for diagnostic in manager.diagnostics() {
@@ -621,8 +660,12 @@ fn render_managed(
             .io_mut()
             .set_display_size([extent.width() as f32, extent.height() as f32]);
         context.io_mut().set_display_framebuffer_scale([1.0, 1.0]);
+        manager.profile_boundary(context, snapshot.character, &plan.server);
         manager.flush_pending_fonts(context);
         let ui = context.try_frame().map_err(|e| e.to_string())?;
+        if !snapshot.start_menu {
+            manager.profile_setup_controls(ui);
+        }
         let mut open = plan.controls.unwrap_or(false);
         if open && !snapshot.start_menu {
             let actions = controls(ui, manager, &mut open, plan.root.as_ref());
@@ -1199,14 +1242,16 @@ mod tests {
     fn forge_runtime_windows_hidden_during_menus_and_preserved() {
         let root = Scratch::new();
         let config = Scratch::new();
-        root.native(r#"
+        root.native(
+            r#"
             if not registered then
                 registered = true
                 UiForge.RegisterCallback(UiForge.CallbackType.Settings, function()
                     ImGui.Text("settings body")
                 end)
             end
-        "#);
+        "#,
+        );
         let instance = wgpu::Instance::default();
         let adapter = match pollster::block_on(instance.request_adapter(&Default::default())) {
             Ok(a) => a,
@@ -1289,7 +1334,11 @@ mod tests {
         .unwrap();
         queue.submit([encoder.finish()]);
         assert!(state1.open, "controls must be open");
-        assert_eq!(state1.settings, Some("a".into()), "settings 'a' must be selected");
+        assert_eq!(
+            state1.settings,
+            Some("a".into()),
+            "settings 'a' must be selected"
+        );
         let w_settings = unsafe { sys::igFindWindowByName(c"Addon settings: a".as_ptr()) };
         assert!(!w_settings.is_null());
         assert!(
@@ -1324,7 +1373,11 @@ mod tests {
         .unwrap();
         queue.submit([encoder.finish()]);
         assert!(state2.open, "open state preserved across menu mode");
-        assert_eq!(state2.settings, Some("a".into()), "selected settings preserved across menu mode");
+        assert_eq!(
+            state2.settings,
+            Some("a".into()),
+            "selected settings preserved across menu mode"
+        );
         assert_eq!(
             unsafe { (*w_settings).BeginCount },
             0,
@@ -1386,16 +1439,33 @@ mod tests {
         let config = Scratch::new();
         let ini_file = config.0.join("addons").join("imgui.ini");
         assert!(!ini_file.exists());
+        let legacy_ini = "[Window][WereoxxsChat]\nPos=33,44\nSize=80,80\nCollapsed=0\n\n";
+        fs::create_dir_all(ini_file.parent().unwrap()).unwrap();
+        fs::write(&ini_file, legacy_ini).unwrap();
 
-        let paths = Paths::select(
-            root.0.clone(),
-            None,
-            Some(config.0.clone()),
-            None,
+        let paths = Paths::select(root.0.clone(), None, Some(config.0.clone()), None);
+
+        // Closing before NewFrame must not replace a migrated layout with an
+        // empty, never-used Context (e.g. a platform preparation failure).
+        let mut cold = Runtime::new(paths.clone());
+        cold.launch_headless(&device, &queue, format).unwrap();
+        cold.shutdown();
+        assert_eq!(
+            super::super::named_profiles::Store::new(Some(config.0.clone()))
+                .read("Default")
+                .unwrap()
+                .layout,
+            legacy_ini
         );
 
         let mut runtime = Runtime::new(paths.clone());
         runtime.launch_headless(&device, &queue, format).unwrap();
+        // Default is a normal editable profile.
+        if let Some(Graphics::Managed(active)) = runtime.graphics.as_mut() {
+            active
+                .manager
+                .queue_profile(super::super::manager::ProfileAction::Load("Default".into()));
+        }
         runtime.step_frame_headless(|ui| {
             ui.window("WereoxxsChat")
                 .position([250.0, 180.0], dear_imgui_rs::Condition::Always)
@@ -1403,8 +1473,15 @@ mod tests {
                 .build(|| {});
         });
         runtime.shutdown();
-        assert!(ini_file.exists(), "imgui.ini must be written on shutdown");
-        let ini_text = fs::read_to_string(&ini_file).unwrap();
+        assert_eq!(
+            fs::read_to_string(&ini_file).unwrap(),
+            legacy_ini,
+            "legacy ini is a read-only migration input"
+        );
+        let ini_text = super::super::named_profiles::Store::new(Some(config.0.clone()))
+            .read("Default")
+            .unwrap()
+            .layout;
         assert!(ini_text.contains("[Window][WereoxxsChat]"));
         assert!(ini_text.contains("Pos=250,180"));
         assert!(ini_text.contains("Size=320,240"));
@@ -1424,8 +1501,16 @@ mod tests {
                 });
         });
         runtime2.shutdown();
-        assert_eq!(observed_pos, [250.0, 180.0], "window position must be restored from imgui.ini");
-        assert_eq!(observed_size, [320.0, 240.0], "window size must be restored from imgui.ini");
+        assert_eq!(
+            observed_pos,
+            [250.0, 180.0],
+            "window position must be restored from the active bundle"
+        );
+        assert_eq!(
+            observed_size,
+            [320.0, 240.0],
+            "window size must be restored from the active bundle"
+        );
 
         // Tolerating missing ini file
         let missing_config = Scratch::new();
@@ -1435,7 +1520,9 @@ mod tests {
             Some(missing_config.0.clone()),
             None,
         ));
-        runtime_missing.launch_headless(&device, &queue, format).unwrap();
+        runtime_missing
+            .launch_headless(&device, &queue, format)
+            .unwrap();
         let mut observed_pos = [0.0, 0.0];
         runtime_missing.step_frame_headless(|ui| {
             ui.window("MissingTest")
@@ -1458,7 +1545,9 @@ mod tests {
             Some(corrupt_config.0.clone()),
             None,
         ));
-        runtime_corrupt.launch_headless(&device, &queue, format).unwrap();
+        runtime_corrupt
+            .launch_headless(&device, &queue, format)
+            .unwrap();
         let mut observed_pos = [0.0, 0.0];
         runtime_corrupt.step_frame_headless(|ui| {
             ui.window("CorruptTest")
@@ -1469,6 +1558,17 @@ mod tests {
         });
         runtime_corrupt.shutdown();
         assert_eq!(observed_pos, [35.0, 45.0]);
+        assert_eq!(
+            fs::read(&corrupt_ini).unwrap(),
+            b"INVALID GARBAGE ::: [[[ == \x00\xFF\xFE\xFD"
+        );
+        assert!(
+            !corrupt_config
+                .0
+                .join("addons/profiles/Default.json")
+                .exists(),
+            "failed migration must not create an empty Default"
+        );
 
         // EQOA_CONFIG redirection
         let custom_config = Scratch::new();
@@ -1478,7 +1578,14 @@ mod tests {
             std::env::set_var("EQOA_CONFIG", custom_config.0.as_os_str());
         }
         let mut runtime_env = Runtime::from_env();
-        runtime_env.launch_headless(&device, &queue, format).unwrap();
+        runtime_env
+            .launch_headless(&device, &queue, format)
+            .unwrap();
+        if let Some(Graphics::Managed(active)) = runtime_env.graphics.as_mut() {
+            active
+                .manager
+                .queue_profile(super::super::manager::ProfileAction::Load("Default".into()));
+        }
         runtime_env.step_frame_headless(|ui| {
             ui.window("RedirectionWindow")
                 .position([99.0, 88.0], dear_imgui_rs::Condition::Always)
@@ -1492,10 +1599,22 @@ mod tests {
                 None => std::env::remove_var("EQOA_CONFIG"),
             }
         }
-        assert!(custom_ini.exists(), "EQOA_CONFIG must redirect imgui.ini persistence");
-        let text = fs::read_to_string(&custom_ini).unwrap();
+        assert!(
+            !custom_ini.exists(),
+            "named profiles must not create a global imgui.ini"
+        );
+        let text = super::super::named_profiles::Store::new(Some(custom_config.0.clone()))
+            .read("Default")
+            .unwrap()
+            .layout;
         assert!(text.contains("[Window][RedirectionWindow]"));
-        assert!(!std::path::Path::new("imgui.ini").exists(), "Must never write into game working dir");
-        assert!(!root.0.join("imgui.ini").exists(), "Must never write into mods dir");
+        assert!(
+            !std::path::Path::new("imgui.ini").exists(),
+            "Must never write into game working dir"
+        );
+        assert!(
+            !root.0.join("imgui.ini").exists(),
+            "Must never write into mods dir"
+        );
     }
 }

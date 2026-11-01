@@ -545,6 +545,7 @@ mod native {
         if let Some(f) = l.file.as_mut() {
             let _ = f.flush();
         }
+        crate::map::journal::clean_exit();
     }
 
     pub(crate) fn tail(n: usize) -> Vec<String> {

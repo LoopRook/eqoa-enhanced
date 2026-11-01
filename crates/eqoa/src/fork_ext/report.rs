@@ -1183,44 +1183,25 @@ mod tests {
         fs::create_dir_all(&desktop).unwrap();
         fs::create_dir_all(&config).unwrap();
 
-        let stamp_str = stamp(SystemTime::now());
+        // The suffix rule, deterministic: a fixed stamp, so a second boundary cannot flake it.
+        let stamp_str = "20261101-120000";
         let first_file = desktop.join(format!("EQOA-Enhanced-report-{stamp_str}.zip"));
         fs::write(&first_file, "existing report 1").unwrap();
+        let second = unique_report_path(&desktop, stamp_str);
+        assert_eq!(second.file_name().unwrap().to_string_lossy(), format!("EQOA-Enhanced-report-{stamp_str}-2.zip"));
+        fs::write(&second, "existing report 2").unwrap();
+        let third = unique_report_path(&desktop, stamp_str);
+        assert_eq!(third.file_name().unwrap().to_string_lossy(), format!("EQOA-Enhanced-report-{stamp_str}-3.zip"));
 
-        let (saved_2, _) = save_report_to(
-            &Kind::Problem,
-            "second report",
-            "tester",
-            None,
-            Some(&desktop),
-            Some(&config),
-            false,
-        )
-        .unwrap();
-
-        assert_eq!(
-            saved_2.file_name().unwrap().to_string_lossy(),
-            format!("EQOA-Enhanced-report-{stamp_str}-2.zip")
-        );
-        assert!(first_file.exists(), "Original report must not be overwritten");
+        // End to end: saving next to existing reports never overwrites one.
+        let now_stamp = stamp(SystemTime::now());
+        let now_file = desktop.join(format!("EQOA-Enhanced-report-{now_stamp}.zip"));
+        fs::write(&now_file, "existing report now").unwrap();
+        let (saved, _) = save_report_to(&Kind::Problem, "another report", "tester", None, Some(&desktop), Some(&config), false).unwrap();
+        assert_ne!(saved, now_file, "an existing report must never be the save target");
+        assert_eq!(fs::read_to_string(&now_file).unwrap(), "existing report now");
         assert_eq!(fs::read_to_string(&first_file).unwrap(), "existing report 1");
-
-        // Saving a third time with both 1 and 2 present produces -3.zip
-        let (saved_3, _) = save_report_to(
-            &Kind::Problem,
-            "third report",
-            "tester",
-            None,
-            Some(&desktop),
-            Some(&config),
-            false,
-        )
-        .unwrap();
-
-        assert_eq!(
-            saved_3.file_name().unwrap().to_string_lossy(),
-            format!("EQOA-Enhanced-report-{stamp_str}-3.zip")
-        );
+        assert_eq!(fs::read_to_string(&second).unwrap(), "existing report 2");
     }
 
     #[test]

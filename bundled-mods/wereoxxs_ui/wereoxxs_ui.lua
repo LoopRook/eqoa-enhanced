@@ -43,6 +43,9 @@ bar_configs = bar_configs or {
     AbilityBars.DefaultBarConfig(1),
     AbilityBars.DefaultBarConfig(2),
 }
+if eqoa and eqoa.WeaponSets then
+    bar_configs[4] = bar_configs[4] or AbilityBars.DefaultBarConfig(3)
+end
 cast_config = cast_config or CastingBar.DefaultConfig()
 -- The player frame stands alone, so it skips the surrounding grid box.
 frame_config = frame_config or (function()
@@ -473,22 +476,34 @@ local function DrawAbilityBarWindows(now_ms)
     local gcd_fraction = GcdFraction(now_ms)
     local pushed = PushWindowFont("bars")
 
-    for bar = 0, 2 do
+    for bar = 0, 3 do
         local config = bar_configs[bar + 1]
-        if config.enabled then
-            local count = AbilityBar.GetSlotCount(bar) or 0
+        local weapon = bar == 3 and eqoa and eqoa.WeaponSets
+        if config and config.enabled and (bar < 3 or (weapon and weapon.IsAvailable())) then
+            local count = weapon and weapon.GetCount() or AbilityBar.GetSlotCount(bar) or 0
             if count > 0 then
                 local slots = {}
                 for i = 0, count - 1 do
-                    slots[#slots + 1] = BuildSlot(bar, i,
+                    if weapon then
+                        local index = i
+                        local fg, fw, fh = weapon.GetIcon(i)
+                        local bg, bw, bh = weapon.GetBadge(i)
+                        local empty = weapon.IsEmpty(i)
+                        slots[#slots + 1] = { empty = empty, fg = fg, fg_w = fw, fg_h = fh,
+                            bg = bg, bg_w = bw, bg_h = bh, selected = i == weapon.GetSelected(),
+                            name = weapon.GetName(i),
+                            on_click = not empty and function() weapon.Use(index) end or nil }
+                    else
+                        slots[#slots + 1] = BuildSlot(bar, i,
                         bar == selected_bar and i == selected_slot, now_ms, config, range_points,
                         current_pwr, gcd_fraction)
+                    end
                 end
                 local name_x, name_y, name
                 if ImGui.Begin("wereoxxs bar " .. (bar + 1), true, LockFlags(OVERLAY_FLAGS)) then
                     GridEdit(now_ms)
                     ApplyWindowFont("bars")
-                    name_x, name_y, name = AbilityBars.Draw(slots, config, bar == selected_bar)
+                    name_x, name_y, name = AbilityBars.Draw(slots, config, weapon or bar == selected_bar)
                 end
                 ImGui.End()
 
@@ -1062,6 +1077,13 @@ local function Settings()
     end
 
     bars_split = ImGui.Checkbox("Each ability bar keeps its own settings", bars_split)
+    if eqoa and eqoa.WeaponSets then
+        bar_configs[4].enabled = ImGui.Checkbox("Weapon set bar", bar_configs[4].enabled)
+        if ImGui.TreeNode("Weapon set bar settings") then
+            AbilityBars.DrawSettings(bar_configs[4], false, true)
+            ImGui.TreePop()
+        end
+    end
     if bars_split then
         for bar = 1, 3 do
             if ImGui.TreeNode(string.format("Ability bar %d", bar)) then
@@ -1285,7 +1307,7 @@ local function Load(saved)
         local fc = font_configs[entry.key]
         fc.size = math.max(8, math.min(MAX_FONT_SIZE, fc.size or DEFAULT_FONT_SIZE))
     end
-    for bar = 1, 3 do
+    for bar = 1, #bar_configs do
         merge(bar_configs[bar], saved.bar_configs and saved.bar_configs[bar])
     end
     merge(gcd_config, saved.gcd_config)

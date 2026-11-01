@@ -1,6 +1,12 @@
 //! The combat indication adapter; service code only receives plain combat data.
 use super::Play;
 
+/// Capture every received 0x00CD before addon frames can coalesce its transitions.
+pub(crate) fn ability_lockout(_index: u8, _lockout: i32) {
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::fork_ext::addons::ability::record_lockout(_index as u32, _lockout.max(0) as u32);
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -86,6 +92,23 @@ pub(crate) fn art_changed() {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Play {
+    // Same dispatch target as hud_key's gear::MSG arm. Navigation remains native.
+    fn forge_use_weapon_set(&mut self, set: i64) -> bool {
+        if self.session.self_id.is_none()
+            || self.disconnected.is_some()
+            || self.quit
+            || !matches!(self.mode, 0 | 38)
+            || !self.gear.on
+            || !(0..crate::gear::ENTRIES as i64).contains(&set)
+            || (set != crate::gear::BARE_HANDS && self.gear.empty(set))
+        {
+            return false;
+        }
+        self.hud_menus.menus[3].sel = set as i32;
+        self.use_gear_set(set);
+        true
+    }
+
     pub(crate) fn forge_snapshot(
         &self,
         walker: Option<&crate::walker::Walker>,
@@ -593,9 +616,11 @@ impl Play {
             crate::fork_ext::addons::combat::CombatSnapshot::default()
         };
 
+        // The full-screen map counts as a menu: on the PS2 it is a page of the start menu.
         let start_menu = in_game
             && (is_menu_mode(self.mode)
-                || self.start.as_ref().is_some_and(|s| s.menu.visible));
+                || self.start.as_ref().is_some_and(|s| s.menu.visible)
+                || self.map.open);
         let ui_mode = if !in_game {
             0
         } else if self.mode != 0 {
@@ -614,6 +639,11 @@ impl Play {
                 || self.typing.is_some());
 
         crate::fork_ext::addons::host::Snapshot {
+            character: crate::fork_ext::addons::named_profiles::CharacterSnapshot::new(
+                connected,
+                &self.player.name,
+                self.dump.player.class,
+            ),
             in_game,
             start_menu,
             ui_mode,
@@ -623,6 +653,20 @@ impl Play {
             group,
             entities,
             abilities,
+            weapon_sets: self
+                .hud
+                .as_ref()
+                .map(|(vui, _, _)| {
+                    crate::fork_ext::addons::weapon_sets::WeaponSetsSnapshot::from_native(
+                        &self.gear,
+                        &self.dump.inventory,
+                        &self.hud_menus,
+                        in_game,
+                        &vui.words,
+                        vui.language,
+                    )
+                })
+                .unwrap_or_default(),
             chat,
             combat,
             input: crate::fork_ext::addons::input::InputSnapshot::default(),
@@ -642,8 +686,6 @@ fn is_menu_mode(mode: i32) -> bool {
         | 4  // GM Goto window (VIWndGoto, adminplay.rs:7,78,263; not trainer.rs:364 internal sub-mode)
         | 5  // Spellbook / abilities (VIWndSpellBook)
         | 6  // Recipe book (VIWndRecipeBook)
-        | 7  // Dialog responses (VIWndResponse)
-        | 9  // Dialog text / NPC conversation (VIWndPrivChat)
         | 10 // Merchant (VIWndMerchant)
         | 11 // Bank (VIWndBank)
         | 12 // Trainer / Character Summary (VIWndTrainer)
@@ -690,9 +732,20 @@ pub(super) fn health_hidden(play: &Play) -> bool {
         false
     }
 }
+#[cfg(not(target_arch = "wasm32"))]
+fn weapon_sets_requests(play: &mut Play, ready: bool) {
+    let pending = crate::fork_ext::addons::weapon_sets::take_pending();
+    if ready {
+        for set in pending {
+            play.forge_use_weapon_set(set);
+        }
+    }
+}
+
 pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        weapon_sets_requests(play, play.forge_snapshot(None).in_game);
         for msg in crate::fork_ext::addons::chat::take_outgoing_chat() {
             play.chat_line(&msg);
         }
@@ -788,7 +841,59 @@ impl Play {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn weapon_sets_use_matches_native_carousel_and_preserves_input() {
+        let mut native = play();
+        let mut addon = play();
+        for p in [&mut native, &mut addon] {
+            p.gear.set(1, "set".into(), 10, u32::MAX);
+            p.session.record = Some(Vec::new());
+            p.hud_menus
+                .build(&p.abilities, &p.dump.inventory, &p.gear, p.hud_bars());
+        }
+        native.hud_menus.sel = 3;
+        native.hud_menus.menus[3].sel = 1;
+        native.hud_key(crate::hudmenu::Key::Use);
+        let host = crate::fork_ext::addons::host::Host::new().unwrap();
+        let mut snapshot = crate::fork_ext::addons::host::Snapshot::default();
+        snapshot.weapon_sets =
+            crate::fork_ext::addons::weapon_sets::WeaponSetsSnapshot::from_native(
+                &addon.gear,
+                &addon.dump.inventory,
+                &addon.hud_menus,
+                true,
+                &Default::default(),
+                0,
+            );
+        host.snapshot.set(snapshot);
+        host.execute("assert(eqoa.WeaponSets.Use(1))").unwrap();
+        weapon_sets_requests(&mut addon, true);
+        assert_eq!(addon.session.record, native.session.record);
+        assert_eq!(addon.session.record.as_ref().unwrap()[0].1, [0x22, 0, 1]);
+        assert_eq!(addon.hud_menus.menus[3].sel, 1);
+        addon.hud_menus.sel = 3;
+        addon.hud_key(crate::hudmenu::Key::Down);
+        assert_eq!(
+            addon.hud_menus.menus[3].sel, 2,
+            "native navigation still moves empty slots"
+        );
+        for i in [-1, 0, 5] {
+            assert!(!addon.forge_use_weapon_set(i));
+        }
+        addon.mode = 34;
+        assert!(!addon.forge_use_weapon_set(1));
+        addon.mode = 38;
+        assert!(addon.forge_use_weapon_set(4));
+        addon.gear.on = false;
+        assert!(!addon.forge_use_weapon_set(4));
+        assert_eq!(addon.session.record.as_ref().unwrap().len(), 2);
+    }
     fn play() -> Play {
+        play_as("test")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn play_as(account: &str) -> Play {
         struct Nowhere;
         impl net::session::Datagrams for Nowhere {
             fn send_to(&mut self, _: &[u8], _: [u8; 4], _: u16) {}
@@ -800,12 +905,41 @@ mod tests {
             Box::new(Nowhere),
             ([127, 0, 0, 1], 5000),
             ([127, 0, 0, 1], 10070),
-            "test",
+            account,
             [0; 32],
         )
         .unwrap();
         session.self_id = Some(0x100);
         Play::new(session, net::session::Player::default(), Box::default())
+    }
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn mod_profiles_world_entry_uses_character_not_account_and_survives_loading() {
+        use crate::fork_ext::addons::named_profiles::{Character, Document, Store};
+        let account = "ACCOUNT_CANARY_NOT_A_CHARACTER";
+        let mut p = play_as(account);
+        p.player.name = "Ari".into();
+        p.dump.player.class = 3;
+        // The game has a connected character before HUD/HP/loading are ready.
+        let snapshot = p.forge_snapshot(None);
+        assert!(!snapshot.in_game);
+        let identity = Character::new("server.example", snapshot.character.unwrap()).unwrap();
+        assert_eq!(identity.name, "ari");
+        assert_eq!(identity.class, 3);
+        let root =
+            std::env::temp_dir().join(format!("eqoa-profile-identity-{}", std::process::id()));
+        let store = Store::new(Some(root.clone()));
+        // Test reruns may reuse the process id, so a valid existing fixture is fine.
+        if store.read("Healer").is_err() {
+            store.create("Healer", &Document::empty()).unwrap();
+        }
+        store.bind(&identity, "Healer", false).unwrap();
+        let bytes = std::fs::read_to_string(root.join("addons/profiles/characters.json")).unwrap();
+        assert!(!bytes.contains(account));
+        assert!(bytes.contains("ari"));
+        p.session.self_id = None;
+        assert!(p.forge_snapshot(None).character.is_none());
+        let _ = std::fs::remove_dir_all(root);
     }
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
@@ -1290,6 +1424,7 @@ mod tests {
         // 1b. Busy states in normal mode (matching play.rs:3950: map, map search, search, typing)
         p.map.open = true;
         assert!(p.forge_snapshot(None).ui_busy, "map.open must report ui_busy == true");
+        assert!(p.forge_snapshot(None).start_menu, "the full-screen map must pause addons like a menu");
         p.map.open = false;
 
         p.map.search.open = true;
@@ -1310,8 +1445,6 @@ mod tests {
             (4, 4, "gm_goto"),
             (5, 5, "spellbook"),
             (6, 6, "recipes"),
-            (7, 7, "dialog_answers"),
-            (9, 9, "text_dialog"),
             (10, 10, "merchant"),
             (11, 11, "bank"),
             (12, 12, "trainer"),
@@ -1361,9 +1494,11 @@ mod tests {
             );
         }
 
-        // 4. Non-menu modes: input, context menu, r2 chat, fishing, manual camera
+        // 4. Non-menu modes: input, dialog answers (7), text dialog (9), context menu, r2 chat, fishing, manual camera
         let non_menu_modes = [
             (2, 2, "input"),
+            (7, 7, "dialog_answers"),
+            (9, 9, "text_dialog"),
             (30, 30, "context_menu"),
             (33, 33, "r2_chat"),
             (36, 36, "fishing"),
@@ -1424,7 +1559,7 @@ mod tests {
             }
         }
 
-        let known_non_menu: std::collections::BTreeSet<i32> = [0, 2, 30, 33, 36, 38].into_iter().collect();
+        let known_non_menu: std::collections::BTreeSet<i32> = [0, 2, 7, 9, 30, 33, 36, 38].into_iter().collect();
         for mode in discovered_modes {
             let is_non_menu = known_non_menu.contains(&mode);
             let is_menu = is_menu_mode(mode);

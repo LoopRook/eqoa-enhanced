@@ -2,6 +2,16 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-01 · Enhanced 0.4.0
+
+- Mod profiles: each character loads its own mods, settings and window layout. New characters can use a shared Tank, Healer, Melee or Caster profile (picked from their class) or make their own copy; manage profiles in the Addon Manager.
+- ARPG UI and Avoid's Modern UI are now included next to Wereoxxs UI, and the game adds any missing included mods to your mods folder, even if you update automatically. They stay off until you turn them on. If you had removed one before, it is added back once (still off); delete it again and it stays gone. Included mods also update themselves, but only files you haven't edited.
+- Wereoxxs UI has a weapon-set bar: turn it on in its settings; click a set to use it.
+- The map now learns creatures as you play: every NPC you see goes into your own creature journal, and map search finds them alongside the built-in list. Only creatures are recorded, never players or pets. Export your journal or import a friend's (also works with Wereoxx's PCSX2 map mod files).
+- Mods stay visible while you talk to NPCs (coachmen, quest givers) and step aside when the full map is open.
+- Fixed: mod ability bars sometimes missing cooldowns, especially short ones such as Feed.
+- Fixed: Avoid's Modern UI couldn't be turned on at level 60; its XP bars now hide at max level.
+
 ## 2026-11-01 · Enhanced 0.3.0
 
 - Two more FrontiersForge mods now run natively, unchanged: ARPG UI (health and power orbs, action tray) and Avoid's Modern UI (player, target, group and quest panels). Like Wereoxxs UI, they step aside for game menus. Turn on one at a time in the Addon Manager.

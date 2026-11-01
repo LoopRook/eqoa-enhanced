@@ -3,6 +3,8 @@
 pub mod addons;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod app_icon;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod bundled;
 pub mod mods;
 pub mod release;
 #[cfg(not(target_arch = "wasm32"))]

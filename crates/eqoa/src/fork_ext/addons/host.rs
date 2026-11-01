@@ -12,6 +12,7 @@ use std::{
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Snapshot {
+    pub character: Option<super::named_profiles::CharacterSnapshot>,
     pub in_game: bool,
     pub start_menu: bool,
     pub ui_mode: u32,
@@ -26,6 +27,7 @@ pub(crate) struct Snapshot {
     pub input: super::input::InputSnapshot,
     pub effects: super::effects::EffectsSnapshot,
     pub journal: super::quest_log::JournalSnapshot,
+    pub weapon_sets: super::weapon_sets::WeaponSetsSnapshot,
 }
 impl Snapshot {
     pub fn managed(mut self) -> Self {
@@ -40,6 +42,7 @@ impl Snapshot {
             self.input = super::input::InputSnapshot::default();
             self.effects = super::effects::EffectsSnapshot::default();
             self.journal = super::quest_log::JournalSnapshot::default();
+            self.weapon_sets = super::weapon_sets::WeaponSetsSnapshot::default();
         }
         self.in_game &= self.health.is_available();
         self
@@ -345,6 +348,7 @@ impl Host {
         super::input::install_input_adapter(&host)?;
         super::effects::install_effects_adapter(&host)?;
         super::quest_log::install(&host)?;
+        super::weapon_sets::install(&host)?;
         let forge: Table = host.lua.globals().get("UiForge")?;
         forge.set(
             "scripts_path",
@@ -396,14 +400,16 @@ impl Host {
             })?,
         )?;
 
-        Ok(Self {
+        let host = Self {
             lua: base.lua,
             snapshot: base.snapshot,
             remaining: base.remaining,
             fatal: base.fatal,
             addon: None,
             host_registry: Rc::new(RefCell::new(HashMap::new())),
-        })
+        };
+        super::weapon_sets::install(&host)?;
+        Ok(host)
     }
 
     pub fn compile_addon_entry(&self, addon: &DiscoveredAddon) -> Result<Function> {
