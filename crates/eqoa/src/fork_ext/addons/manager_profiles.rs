@@ -26,18 +26,26 @@ pub(super) struct NamedSession {
     retry: Option<(Character, Instant)>,
     unassigned: bool,
     apply_initial: bool,
+    waiting_world: bool,
     actions: VecDeque<ProfileAction>,
     name_input: String,
 }
 pub(crate) fn class_display(class: u8) -> String {
-    match crate::fork_ext::addons::player::CLASSES.get(class as usize).copied() {
+    match crate::fork_ext::addons::player::CLASSES
+        .get(class as usize)
+        .copied()
+    {
         Some(name) => name.to_string(),
         None => format!("class {class}"),
     }
 }
 
 pub(crate) fn class_default_button_label(character: Option<&Character>) -> String {
-    match character.and_then(|c| crate::fork_ext::addons::player::CLASSES.get(c.class as usize).copied()) {
+    match character.and_then(|c| {
+        crate::fork_ext::addons::player::CLASSES
+            .get(c.class as usize)
+            .copied()
+    }) {
         Some(name) => format!("Use as {name} default"),
         None => "Use as class default".to_string(),
     }
@@ -76,9 +84,56 @@ impl Manager {
             retry: None,
             unassigned: false,
             apply_initial: true,
+            waiting_world: false,
             actions: VecDeque::new(),
             name_input: String::new(),
         });
+    }
+    pub(super) fn profile_waiting_world(&self) -> bool {
+        self.named.as_ref().is_some_and(|s| s.waiting_world)
+    }
+    fn log_profile(s: &NamedSession, event: &str) {
+        // Only validated character/server identity reaches this boundary. No
+        // session, account, password, argv, or raw game snapshot is logged.
+        let identity = s.retry.as_ref().map(|(c, _)| c).or(s.character.as_ref());
+        let (server, character) = identity
+            .map(|c| (c.server.as_str(), c.name.as_str()))
+            .unwrap_or(("none", "none"));
+        crate::say(&format!(
+            "Mod profiles: {event}; server={server}; character={character}; active={}; enabled={}/{}",
+            s.active,
+            s.data.enabled.values().filter(|v| **v).count(),
+            s.data.enabled.len()
+        ));
+    }
+    fn leave_profile_world(&mut self, s: &mut NamedSession, context: &mut Context) {
+        // Save while the old world snapshot is still available, before cleanup
+        // can change addon globals. Keep the selected profile at character select.
+        let saved = match self.persist_profile(s, context) {
+            Ok(()) => true,
+            Err(e) => {
+                self.diagnostic(None, "profiles", e);
+                false
+            }
+        };
+        let mut entries = std::mem::take(&mut self.entries);
+        for entry in &mut entries {
+            self.disable(entry, false, false, Disposition::Retain);
+        }
+        self.entries = entries;
+        self.commands.clear();
+        s.waiting_world = true;
+        Self::log_profile(
+            s,
+            if saved {
+                "logout saved; addon frames paused"
+            } else {
+                "logout save failed; addon frames paused"
+            },
+        );
+        s.character = None;
+        s.retry = None;
+        s.unassigned = false;
     }
     pub fn profile_name(&self) -> Option<&str> {
         self.named.as_ref().map(|s| s.active.as_str())
@@ -257,7 +312,7 @@ impl Manager {
         }
         // Validate the entire destination before touching the outgoing session.
         let data = s.store.read(&name)?;
-        if s.writable && !name.eq_ignore_ascii_case(&s.active) {
+        if s.writable && !s.waiting_world && !name.eq_ignore_ascii_case(&s.active) {
             if let Err(error) = self.persist_profile(s, context) {
                 if s.store.read(&s.active).is_ok() {
                     return Err(error);
@@ -302,8 +357,15 @@ impl Manager {
                     let retry = s.retry.as_ref().filter(|(c, _)| c == character);
                     let already_reported = retry.is_some();
                     if retry.is_none_or(|(_, deadline)| now >= *deadline) {
+                        if s.character.is_some() && !s.waiting_world {
+                            self.leave_profile_world(&mut s, context);
+                        }
+                        // A new world is a new addon session even when two
+                        // characters share Default/the same assigned profile.
+                        // Failed loads keep old-character addon frames paused.
+                        s.waiting_world = true;
                         let result = s.store.resolve(character).and_then(|(name, unassigned)| {
-                            self.load_named(&mut s, name, context, false)?;
+                            self.load_named(&mut s, name, context, true)?;
                             Ok(unassigned)
                         });
                         match result {
@@ -311,6 +373,15 @@ impl Manager {
                                 s.character = identity;
                                 s.unassigned = unassigned;
                                 s.retry = None;
+                                s.waiting_world = false;
+                                Self::log_profile(
+                                    &s,
+                                    if unassigned {
+                                        "world entry loaded fresh Default (unassigned)"
+                                    } else {
+                                        "world entry loaded fresh assigned profile"
+                                    },
+                                );
                             }
                             Err(e) => {
                                 if !already_reported {
@@ -321,28 +392,34 @@ impl Manager {
                                     );
                                 }
                                 s.retry = Some((character.clone(), now + SWITCH_RETRY_DELAY));
+                                if !already_reported {
+                                    Self::log_profile(&s, "world entry failed; retry pending");
+                                }
                             }
                         }
                     }
                 } else {
-                    if let Err(e) = self.persist_profile(&mut s, context) {
-                        self.diagnostic(None, "profiles", e);
-                    }
-                    s.unassigned = false;
-                    s.character = None;
-                    s.retry = None;
+                    self.leave_profile_world(&mut s, context);
                 }
             }
             Ok(_) => s.retry = None,
         }
         while let Some(action) = s.actions.pop_front() {
             let result = match action {
-                ProfileAction::Load(name) => self.load_named(&mut s, name, context, false),
+                ProfileAction::Load(name) => {
+                    self.load_named(&mut s, name, context, false).map(|()| {
+                        Self::log_profile(&s, "profile selected");
+                    })
+                }
                 ProfileAction::Revert => {
                     let name = s.active.clone();
-                    self.load_named(&mut s, name, context, true)
+                    self.load_named(&mut s, name, context, true).map(|()| {
+                        Self::log_profile(&s, "profile reverted to saved");
+                    })
                 }
-                ProfileAction::Save => self.persist_profile(&mut s, context),
+                ProfileAction::Save => self.persist_profile(&mut s, context).map(|()| {
+                    Self::log_profile(&s, "active profile saved");
+                }),
                 ProfileAction::SaveAs(name) => (|| {
                     if !s.writable && name.eq_ignore_ascii_case(DEFAULT) {
                         return Err("Choose a new profile name; Default's original settings could not be read".into());
@@ -352,6 +429,7 @@ impl Manager {
                     s.active = name;
                     s.dirty = false;
                     s.writable = true;
+                    Self::log_profile(&s, "new profile saved");
                     Ok(())
                 })(),
                 ProfileAction::BindCharacter | ProfileAction::BindClass => {
@@ -362,6 +440,14 @@ impl Manager {
                         ),
                         Some(c) => s.store.bind(c, &s.active, class).map(|()| {
                             s.unassigned = false;
+                            Self::log_profile(
+                                &s,
+                                if class {
+                                    "class default assigned"
+                                } else {
+                                    "character profile assigned"
+                                },
+                            );
                         }),
                         None => Err("Log in to set a character or class profile".into()),
                     }
@@ -410,13 +496,18 @@ impl Manager {
         };
         ui.text(format!("Active profile: {}", s.active));
         ui.text_wrapped(
-            "Each client uses its own selection. Clients sharing this profile use the last save.",
+            "A profile saves enabled mods, settings and window positions. World entry loads this character's assignment, or shared Default.",
         );
+        ui.text_wrapped("For a separate setup, Save as new profile, then Use for this character. Save active profile updates the selected setup.");
         if s.unassigned {
             ui.text_wrapped("This character has no profile assignment. Pick a profile or save a new one below, then use it for this character.");
         }
         if let Some(c) = &s.character {
-            ui.text(format!("Character: {} ({})", c.name, class_display(c.class)));
+            ui.text(format!(
+                "Character: {} ({})",
+                c.name,
+                class_display(c.class)
+            ));
         }
         if s.retry.is_some() {
             ui.text_wrapped("This character's profile could not be loaded. Retrying shortly; see the diagnostic below.");

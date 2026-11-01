@@ -536,8 +536,7 @@ fn mod_profiles_shutdown_save_failure_preserves_the_entire_previous_file() {
 }
 
 #[test]
-fn mod_profiles_active_load_and_default_world_entry_preserve_unsaved_session() {
-    use super::super::named_profiles::CharacterSnapshot;
+fn mod_profiles_active_load_preserves_unsaved_session_until_explicit_revert() {
     let Some(mut gpu) = Gpu::new() else {
         return;
     };
@@ -568,7 +567,8 @@ fn mod_profiles_active_load_and_default_world_entry_preserve_unsaved_session() {
         .load_ini_settings("[Window][Orb]\nPos=110,120\nSize=180,180\nCollapsed=0\n\n");
     let mut changed_layout = String::new();
     gpu.context.save_ini_settings(&mut changed_layout);
-    for identity in [None, CharacterSnapshot::new(true, "Ari", 3)] {
+    // Manual selection retains unsaved data. World entry is a separate fresh-load boundary.
+    for identity in [None] {
         manager.queue_profile(ProfileAction::Load("Default".into()));
         manager.profile_boundary(&mut gpu.context, identity, "server.example");
         let host = &manager.entries[0]
@@ -582,15 +582,11 @@ fn mod_profiles_active_load_and_default_world_entry_preserve_unsaved_session() {
         gpu.context.save_ini_settings(&mut layout);
         assert_eq!(
             layout, changed_layout,
-            "active load/world entry must preserve unsaved layout"
+            "manual active load must preserve unsaved layout"
         );
     }
     manager.queue_profile(ProfileAction::Revert);
-    manager.profile_boundary(
-        &mut gpu.context,
-        CharacterSnapshot::new(true, "Ari", 3),
-        "server.example",
-    );
+    manager.profile_boundary(&mut gpu.context, None, "server.example");
     gpu.begin();
     manager.frame(Snapshot::default());
     gpu.render();
@@ -662,7 +658,7 @@ fn mod_profiles_failed_world_entry_retries_after_backoff_with_one_diagnostic() {
 
 #[test]
 fn test_profiles_ui_class_name_display_and_button_label() {
-    use super::named::{class_display, class_default_button_label};
+    use super::named::{class_default_button_label, class_display};
     use crate::fork_ext::addons::named_profiles::{Character, CharacterSnapshot};
 
     // In-range classes display proper name
@@ -678,8 +674,12 @@ fn test_profiles_ui_class_name_display_and_button_label() {
     let necromancer = Character::new(
         "server.example",
         CharacterSnapshot::new(true, "zecron", 11).unwrap(),
-    ).unwrap();
-    assert_eq!(class_default_button_label(Some(&necromancer)), "Use as Necromancer default");
+    )
+    .unwrap();
+    assert_eq!(
+        class_default_button_label(Some(&necromancer)),
+        "Use as Necromancer default"
+    );
 
     // Button label falls back to "Use as class default" if out of range or None
     let unknown_class = Character {
@@ -687,6 +687,212 @@ fn test_profiles_ui_class_name_display_and_button_label() {
         name: "unknown".into(),
         class: 99,
     };
-    assert_eq!(class_default_button_label(Some(&unknown_class)), "Use as class default");
+    assert_eq!(
+        class_default_button_label(Some(&unknown_class)),
+        "Use as class default"
+    );
     assert_eq!(class_default_button_label(None), "Use as class default");
+}
+
+#[test]
+fn mod_profiles_test_character_logout_unassigned_character_loads_default() {
+    use super::super::named_profiles::{Character, CharacterSnapshot, Document, Store};
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    root.package(
+        "a",
+        true,
+        r#"
+        value=value or 0; frames=(frames or 0)+1
+        UiForge.RegisterCallback(UiForge.CallbackType.Save,function() return {value=value} end)
+        UiForge.RegisterCallback(UiForge.CallbackType.Load,function(s) value=s.value end)
+        ImGui.Begin('Orb'); ImGui.End()
+    "#,
+    );
+    root.package("extra", false, "");
+    let addons = super::super::discovery::discover(&root.0).addons;
+    let key = Storage::key(addons.iter().find(|a| a.id == "a").unwrap()).unwrap();
+    let extra = Storage::key(addons.iter().find(|a| a.id == "extra").unwrap()).unwrap();
+    let store = Store::new(Some(config.0.clone()));
+    let lua = mlua::Lua::new();
+    for (name, value, pos, enabled) in [
+        ("Default", 11, "10,20", false),
+        ("Test", 77, "110,120", true),
+    ] {
+        let mut doc = Document::empty();
+        doc.enabled.insert(key.clone(), true);
+        doc.enabled.insert(extra.clone(), enabled);
+        doc.addons.insert(
+            key.clone(),
+            super::super::profile::encode(
+                lua.load(format!("return {{value={value}}}"))
+                    .eval()
+                    .unwrap(),
+            )
+            .unwrap(),
+        );
+        doc.layout = format!("[Window][Orb]\nPos={pos}\nSize=80,80\nCollapsed=0\n\n");
+        store.create(name, &doc).unwrap();
+    }
+    let a = CharacterSnapshot::new(true, "Ari", 3).unwrap();
+    let b = CharacterSnapshot::new(true, "Bea", 1).unwrap();
+    store
+        .bind(&Character::new("server.example", a).unwrap(), "Test", false)
+        .unwrap();
+    let default_bytes = fs::read(store.path("Default").unwrap()).unwrap();
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    manager.profile_boundary(&mut gpu.context, Some(a), "server.example");
+    gpu.begin();
+    manager.frame(Snapshot::default());
+    gpu.render();
+    manager.after_render();
+    assert_eq!(manager.profile_name(), Some("Test"));
+    assert!(
+        manager
+            .entries
+            .iter()
+            .find(|e| e.metadata.id == "extra")
+            .unwrap()
+            .enabled_intent
+    );
+    manager.profile_boundary(&mut gpu.context, None, "server.example");
+    assert_eq!(
+        manager.profile_name(),
+        Some("Test"),
+        "character select keeps the selection, not a world HUD"
+    );
+    gpu.begin();
+    manager.frame(Snapshot::default());
+    gpu.render();
+    manager.after_render();
+    assert_eq!(
+        manager
+            .entries
+            .iter()
+            .find(|e| e.metadata.id == "a")
+            .unwrap()
+            .instance
+            .as_ref()
+            .unwrap()
+            .host
+            .lua
+            .globals()
+            .get::<i32>("frames")
+            .unwrap(),
+        1,
+        "old-character addon frames must pause at character select"
+    );
+    manager.profile_boundary(&mut gpu.context, Some(b), "server.example");
+    assert_eq!(manager.profile_name(), Some("Default"));
+    gpu.begin();
+    manager.frame(Snapshot::default());
+    gpu.render();
+    manager.after_render();
+    let entry = manager
+        .entries
+        .iter()
+        .find(|e| e.metadata.id == "a")
+        .unwrap();
+    assert_eq!(
+        entry
+            .instance
+            .as_ref()
+            .unwrap()
+            .host
+            .lua
+            .globals()
+            .get::<i32>("value")
+            .unwrap(),
+        11
+    );
+    assert_eq!(
+        entry
+            .instance
+            .as_ref()
+            .unwrap()
+            .host
+            .lua
+            .globals()
+            .get::<i32>("frames")
+            .unwrap(),
+        1
+    );
+    assert!(
+        !manager
+            .entries
+            .iter()
+            .find(|e| e.metadata.id == "extra")
+            .unwrap()
+            .enabled_intent
+    );
+    let mut layout = String::new();
+    gpu.context.save_ini_settings(&mut layout);
+    assert!(
+        layout.contains("[Window][Orb]\nPos=10,20"),
+        "B must use Default's layout: {layout}"
+    );
+    assert_eq!(
+        fs::read(store.path("Default").unwrap()).unwrap(),
+        default_bytes,
+        "Test must not overwrite Default"
+    );
+}
+
+#[test]
+fn mod_profiles_same_default_after_logout_starts_a_fresh_character_vm() {
+    use super::super::named_profiles::CharacterSnapshot;
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    root.package(
+        "a",
+        true,
+        r#"
+        transient=(transient or 0)+1; value=value or 11
+        UiForge.RegisterCallback(UiForge.CallbackType.Save,function() return {value=value} end)
+        UiForge.RegisterCallback(UiForge.CallbackType.Load,function(s) value=s.value end)
+    "#,
+    );
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    manager.profile_boundary(
+        &mut gpu.context,
+        CharacterSnapshot::new(true, "Ari", 3),
+        "server.example",
+    );
+    gpu.begin();
+    manager.frame(Snapshot::default());
+    gpu.render();
+    manager.after_render();
+    manager.entries[0]
+        .instance
+        .as_ref()
+        .unwrap()
+        .host
+        .execute("transient=99")
+        .unwrap();
+    manager.profile_boundary(&mut gpu.context, None, "server.example");
+    manager.profile_boundary(
+        &mut gpu.context,
+        CharacterSnapshot::new(true, "Bea", 1),
+        "server.example",
+    );
+    gpu.begin();
+    manager.frame(Snapshot::default());
+    gpu.render();
+    manager.after_render();
+    assert_eq!(manager.profile_name(), Some("Default"));
+    let h = &manager.entries[0].instance.as_ref().unwrap().host;
+    assert_eq!(
+        h.lua.globals().get::<i32>("transient").unwrap(),
+        1,
+        "same profile name must not retain the previous character's runtime globals"
+    );
+    assert_eq!(h.lua.globals().get::<i32>("value").unwrap(), 11);
 }

@@ -626,8 +626,10 @@ fn controls(
             if ui.button(format!("{}##enable-{id}",if entry.enabled_intent {"Disable"} else {"Enable"})) {actions.push(Action::Enable(id.clone(),!entry.enabled_intent));}
             ui.same_line();if ui.button(format!("Reload##{id}")) {actions.push(Action::Reload(id.clone()));}
             ui.same_line();if ui.button(format!("Settings##{id}")) {actions.push(Action::Settings(id.clone()));}
-            if ui.button(format!("Save profile##{id}")) {actions.push(Action::Save(id.clone()));}
-            ui.same_line();if ui.button(format!("Load profile##{id}")) {actions.push(Action::Load(id.clone()));}
+            if manager.profile_name().is_none() {
+                if ui.button(format!("Save profile##{id}")) {actions.push(Action::Save(id.clone()));}
+                ui.same_line();if ui.button(format!("Load profile##{id}")) {actions.push(Action::Load(id.clone()));}
+            }
             if !entry.initialized {ui.text("Enable this addon to initialize its settings.");}
         }
         for diagnostic in manager.diagnostics() {

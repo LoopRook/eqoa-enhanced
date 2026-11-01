@@ -12,8 +12,9 @@ Implementation choices:
   Class defaults are scoped to the server. Explicit character bindings win.
 - No global active-profile file. Selection belongs to each Manager/process.
   Sharing a named profile deliberately uses last-save-wins, as the owner specified.
-- Loading the active profile preserves unsaved state and layout. Only the explicit
-  Revert action reloads it from disk. World entry follows the same rule.
+- Manually selecting the active profile preserves unsaved state and layout.
+  Explicit Revert reloads it from disk. Every character world entry instead starts
+  fresh VMs from the assigned profile or shared Default, even for the same name.
 - Failed world-entry loads retain the previous identity, retry every two seconds,
   and emit one diagnostic for that pending character.
 - Profile changes run at the render boundary, before NewFrame. Old VMs are cleaned
@@ -64,12 +65,12 @@ pre-first-frame shutdown layout loss. Build logs are in target/local-checks.
 - fork_ext/play.rs:617 - character: crate::fork_ext::addons::named_profiles
 - viewer.rs:5512 - snapshot, self.booted.as_ref()
 - viewer.rs:3263 - Snapshot::default(), None
-- fork_ext/addons/runtime.rs:657 - manager.profile_boundary(context
+- fork_ext/addons/runtime.rs:660 - manager.profile_boundary(context
 - fork_ext/addons/runtime.rs:387 - active.manager.shutdown()
 - fork_ext/addons/manager.rs:447 - let result = if let Some(s) = &mut self.named
 - fork_ext/addons/manager.rs:574 - let result = if let Some(s) = &mut self.named
-- fork_ext/addons/manager_profiles.rs:261 - pub fn profile_boundary(
-- fork_ext/addons/manager_profiles.rs:392 - pub fn profile_controls(
+- fork_ext/addons/manager_profiles.rs:330 - pub fn profile_boundary(
+- fork_ext/addons/manager_profiles.rs:493 - pub fn profile_controls(
 
 The only shared-file changes extend the two existing viewer draw hooks with the
 configured server. Normal boot uses booted Shared.server; direct play uses the
@@ -144,7 +145,7 @@ New tests:
 
 - mod_profiles_concurrent_migration_keeps_the_winners_saved_default
 - mod_profiles_shutdown_save_failure_preserves_the_entire_previous_file
-- mod_profiles_active_load_and_default_world_entry_preserve_unsaved_session
+- mod_profiles_active_load_preserves_unsaved_session_until_explicit_revert
 - mod_profiles_failed_world_entry_retries_after_backoff_with_one_diagnostic
 - mod_profiles_concurrent_character_bindings_keep_both_clients_entries
 
@@ -171,3 +172,81 @@ Footprint:
     PASS: fork footprint is within reviewed policy
 
 Release is built after the new review-fix commit.
+
+## Owner live-test follow-up (release/0.4.0)
+
+Read-only evidence at b29d982, 2026-11-01:
+
+- The real addons/profiles directory contained only Default.json as a named
+  profile: no Test.json. characters.json had one explicit character assignment
+  to Default and no class defaults. This means those characters share Default.
+- Default enabled Wereoxxs, disabled ARPG/Modern, and held Wereoxxs Save data plus
+  window positions. Its timestamp was 12:15, while legacy files were last changed
+  at 03:57. Default's hide_ability_bars, hide_game_chat and real_item_icons flags
+  differed from the legacy values. Later saves had updated Default.
+  Default explicitly saved chat=true and bars=true, with player/target/group/
+  casting/compass/meter=false: the partial Wereoxxs UI was already in Default.
+- No addon resource-overlay directories existed. The Wereoxxs package's Save/Load
+  callbacks use the bundled settings table. Overlay sharing cannot explain this
+  instance. Neither eqoa.log nor eqoa.prev.log had profile-switch records, so an
+  exact attempted-switch timeline cannot be recovered from these files.
+- The per-addon Save profile/Load profile buttons in runtime.rs:629 called one
+  addon's callbacks and updated the selected named bundle's cached addon state;
+  they did not create or assign a named profile. These obsolete production buttons
+  made two different meanings of profile visible at once.
+- World entry resolved unassigned characters to Default, but load_named treated
+  an already-active Default as a no-op. Logout saved the active bundle yet kept
+  running the retained VMs. Distinct Test-to-Default bundle selection already
+  worked; same-Default runtime state and logout-frame isolation did not.
+
+New contract: one profile section owns all enabled mods, Save state and layout.
+The active name remains selected at character select, while old addon frame
+callbacks pause and release their active HUD claims. World entry loads the
+assignment (or shared Default) with fresh VMs and the saved layout. Settings saved
+into Default are deliberately shared by characters using Default. Save as a new
+profile, then Use for this character, creates a separate setup. Manual selection
+of the currently active profile stays a no-op; explicit Revert still discards
+unsaved changes. This replaces the earlier review's world-entry no-op behavior.
+
+Per-package Save/Load buttons are hidden when named profiles are enabled; the
+legacy standalone-manager test path remains supported. Two short help lines
+explain the single model. World entry, logout, selection, saves and assignments
+now emit Mod profiles log records with validated character/server, active profile
+and enabled counts. No account/password or raw session input enters this logger.
+Real user configuration and packages were read only, never modified or copied.
+
+Regression tests:
+
+- mod_profiles_test_character_logout_unassigned_character_loads_default
+- mod_profiles_same_default_after_logout_starts_a_fresh_character_vm
+- mod_profiles_active_load_preserves_unsaved_session_until_explicit_revert
+
+Before production fixes, the two new tests failed (20 passed, 2 failed). They
+assert logout frame isolation and Default VM freshness, plus the complete
+Test-to-logout-to-unassigned-Default enabled/state/layout sequence.
+
+Live-test follow-up verification (worktree release-0-4-0, shared report-to-desktop target):
+
+Plain:
+
+    test result: ok. 1450 passed; 0 failed; 21 ignored; 0 measured; 0 filtered out; finished in 74.13s
+
+Reference:
+
+    test result: ok. 1471 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 79.36s
+
+Wasm:
+
+        Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.45s
+
+Footprint:
+
+    PASS: fork footprint is within reviewed policy
+
+The first plain run had one unrelated failure: the unchanged map community
+test reused a PID-based cache directory, loaded version 9 with one marker, and
+expected its three-marker fixture. It passed alone with a fresh TMP/TEMP root.
+Both final full runs used fresh temporary roots; no map source was changed.
+Existing disc/assets/privilege/optional-GPU prerequisites still printed skips.
+No profile regression or reference-package fixture skipped. Release build follows
+the final commit; its result is reported in the handoff.

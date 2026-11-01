@@ -229,10 +229,12 @@ impl Manager {
         while let Some(command) = self.commands.pop_front() {
             self.command(command);
         }
+        let waiting_world = self.profile_waiting_world();
         let mut entries = std::mem::take(&mut self.entries);
         let mut count = entries.iter().filter(|e| e.instance.is_some()).count();
         for entry in &mut entries {
-            if entry.enabled_intent
+            if !waiting_world
+                && entry.enabled_intent
                 && entry.status != Status::Failed
                 && entry.not_before <= self.frame_number
             {

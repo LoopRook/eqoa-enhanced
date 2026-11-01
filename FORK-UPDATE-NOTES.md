@@ -5,6 +5,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 ## 2026-11-01 · Unreleased
 
 - Save named mod profiles for each character or class, including window positions, so separate clients can keep their own setups.
+- Mod profiles now use one set of Save/Load controls, pause at character select, and load a fresh setup for each character when entering the world.
 - ARPG UI and Avoid's Modern UI are now included, and the game adds any missing included mods (Wereoxxs UI, ARPG UI, Modern UI) to your mods folder, even if you update automatically. They stay off until you turn them on. If you had removed one of them before, it is added back once (still off); delete it again and it stays gone.
 - The map now learns creatures as you play: every NPC you see is saved to your own creature journal, and map search finds them alongside the built-in list. Only creatures are recorded, never players or pets. Export your journal or import a friend's (also works with Wereoxx's PCSX2 map mod files).
 
