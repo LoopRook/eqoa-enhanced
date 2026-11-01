@@ -456,11 +456,16 @@ mod tests {
         draw_hud_menus(&mut menus, &vui, &mut r, 0, &|_, _| Vec::new());
         assert_eq!(r.blits.len(), 0, "ability bar menu does not draw when claimed");
 
-        // Items menu (2) must still draw while ability bars are claimed.
+        // Items menu (2) and weapon sets (3) must NOT draw while ability bars are claimed.
         menus.sel = 2;
         let mut r = BlitRecorder::default();
         draw_hud_menus(&mut menus, &vui, &mut r, 0, &|_, _| Vec::new());
-        assert!(r.blits.len() > 0, "items menu still draws while ability bars are claimed");
+        assert_eq!(r.blits.len(), 0, "items menu does not draw while ability bars are claimed");
+
+        menus.sel = 3;
+        let mut r = BlitRecorder::default();
+        draw_hud_menus(&mut menus, &vui, &mut r, 0, &|_, _| Vec::new());
+        assert_eq!(r.blits.len(), 0, "weapon sets menu does not draw while ability bars are claimed");
 
         clear_claims();
         menus.sel = 0;
