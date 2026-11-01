@@ -142,7 +142,7 @@ pub fn fit(text: &str, max: usize) -> String {
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{Key, caught, clean_exit, click, crash, draw, is_open, is_report_key, key, key_of, restore_stderr, set_gpu, set_shot, start, wants_shot};
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use native::{Button, Kind, Sent, Status, clean_now, dir, ended_without_closing_for_test, tail};
+pub(crate) use native::{Button, Kind, Sent, Status, clean_noted, dir, ended_without_closing_for_test, has_noted_accounts, tail};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
@@ -232,6 +232,8 @@ mod native {
     }
 
     fn push_line(l: &mut Log, line: &str) {
+        let clean = crate::fork_ext::report::clean_log_line(line);
+        let line = clean.as_str();
         if let Some(f) = l.file.as_mut()
             && l.bytes < LOG_FILE_MAX
             && f.write_all(line.as_bytes()).is_ok()
@@ -557,6 +559,10 @@ mod native {
 
     static NOTED: Mutex<Noted> = Mutex::new(Noted { state: String::new(), at: None, saved: None, accounts: Vec::new(), passwords: Vec::new() });
 
+    pub(crate) fn has_noted_accounts() -> bool {
+        NOTED.try_lock().map_or(false, |n| !n.accounts.is_empty())
+    }
+
     pub(super) fn secret(account: &str, password: &str) {
         let mut n = lock(&NOTED);
         if !account.trim().is_empty() && !n.accounts.iter().any(|a| a == account.trim()) {
@@ -598,6 +604,10 @@ mod native {
     }
 
     pub(crate) fn clean_now(text: &str) -> String {
+        crate::fork_ext::report::clean_text(text)
+    }
+
+    pub(crate) fn clean_noted(text: &str) -> String {
         match NOTED.try_lock() {
             Ok(n) => clean(text, &n),
             Err(_) => clean(text, &Noted { state: String::new(), at: None, saved: None, accounts: Vec::new(), passwords: Vec::new() }),
@@ -1478,6 +1488,7 @@ mod native {
         let buttons_y = y;
         y += h + 10 + 8;
         let fine_y = y;
+        let fine = crate::fork_ext::report::dialog_fine(&dl.kind).unwrap_or(fine);
         let fine = wrap(r, fine, tw);
         y += fine.len() as i32 * h;
         // the panel round it, the frame's middle

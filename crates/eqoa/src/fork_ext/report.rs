@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use crate::report::{Button, Kind, Sent, Status, clean_now, dir};
+use crate::report::{Button, Kind, Sent, Status, dir};
 
 /// Returns the Enhanced header label identifying this client fork.
 pub fn enhanced_label() -> String {
@@ -74,11 +74,76 @@ pub fn log_header() -> String {
     )
 }
 
+/// Helper to extract remembered login account and password from settings if present.
+pub fn saved_login_secrets() -> (Option<String>, Option<String>) {
+    let (saved_user, saved_pass, _) = crate::settings::saved_login();
+    let user = if !saved_user.trim().is_empty() {
+        Some(saved_user.trim().to_string())
+    } else {
+        None
+    };
+    let pass = if saved_pass.len() >= 4 {
+        Some(saved_pass)
+    } else {
+        None
+    };
+    (user, pass)
+}
+
+/// Returns true if at least one verified account is known to scrub against
+/// (either in NOTED from a login/account action, or stored in settings).
+pub fn has_verified_account() -> bool {
+    let (saved_user, _) = saved_login_secrets();
+    if saved_user.is_some() {
+        return true;
+    }
+    crate::report::has_noted_accounts()
+}
+
+/// Scrubs text using NOTED secrets, client settings' remembered login, and home directories.
+pub fn clean_text(text: &str) -> String {
+    clean_text_with_homes(text, &[])
+}
+
+/// Scrubs text with optional additional home directories for test seams without env vars.
+pub fn clean_text_with_homes(text: &str, extra_homes: &[&str]) -> String {
+    // 1. Upstream clean_noted scrubs NOTED accounts, passwords, and env HOME/USERPROFILE
+    let mut cleaned = crate::report::clean_noted(text);
+
+    // 2. Extra test home paths if provided
+    for h in extra_homes {
+        if h.len() > 1 {
+            cleaned = cleaned.replace(h, "~");
+        }
+    }
+
+    // 3. Client settings remembered login if available
+    let (saved_user, saved_pass) = saved_login_secrets();
+    let mut accounts = Vec::new();
+    let mut passwords = Vec::new();
+    if let Some(u) = saved_user {
+        accounts.push(u);
+    }
+    if let Some(p) = saved_pass {
+        passwords.push(p);
+    }
+    if !accounts.is_empty() || !passwords.is_empty() {
+        cleaned = crate::report::scrub(&cleaned, &accounts, &passwords);
+    }
+
+    cleaned
+}
+
+/// Scrub at log-write time: every line pushed into the log file on disk and ring buffer is pre-scrubbed.
+pub fn clean_log_line(line: &str) -> String {
+    clean_text(line)
+}
+
 /// Formats civil date and time as YYYYMMDD-HHMMSS (Howard Hinnant's algorithm).
-fn stamp(t: SystemTime) -> String {
+pub(crate) fn stamp(t: SystemTime) -> String {
     let s = t.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
     let (days, secs) = (s / 86400, s % 86400);
-    let (h, _m, sec) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+    let (h, min, sec) = (secs / 3600, (secs % 3600) / 60, secs % 60);
     let z = days as i64 + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
     let doe = (z - era * 146097) as u32;
@@ -89,16 +154,23 @@ fn stamp(t: SystemTime) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
-    format!("{y:04}{m:02}{d:02}-{h:02}{m_val:02}{sec:02}", m_val = m)
+    format!("{y:04}{m:02}{d:02}-{h:02}{min:02}{sec:02}")
 }
 
-/// Formats items as "a", "a and b", or "a, b and c".
-fn and_list(items: &[String]) -> String {
-    match items {
-        [] => String::new(),
-        [one] => one.clone(),
-        [two_a, two_b] => format!("{two_a} and {two_b}"),
-        many => format!("{}, and {}", many[..many.len() - 1].join(", "), many.last().unwrap()),
+/// Resolves an unused ZIP filename by adding -2, -3 suffixes on collision.
+pub(crate) fn unique_report_path(dir: &Path, stamp_str: &str) -> PathBuf {
+    let base = format!("EQOA-Enhanced-report-{stamp_str}");
+    let candidate = dir.join(format!("{base}.zip"));
+    if !candidate.exists() {
+        return candidate;
+    }
+    let mut i = 2;
+    loop {
+        let candidate = dir.join(format!("{base}-{i}.zip"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        i += 1;
     }
 }
 
@@ -329,10 +401,22 @@ pub fn dialog_status(status: &Status, _left: usize) -> Option<String> {
             if paths.len() == 1 {
                 Some(format!("Saved to {}. Thank you.", paths[0]))
             } else {
-                Some(format!("Saved all {} as {}. Thank you.", paths.len(), and_list(paths)))
+                Some(format!("Saved {} reports to {}. Thank you.", paths.len(), paths[0]))
             }
         }
         _ => None,
+    }
+}
+
+/// Dialog fine notice for Enhanced. Plainly states that the zip includes a screenshot.
+pub fn dialog_fine(kind: &Kind) -> Option<&'static str> {
+    match kind {
+        Kind::Problem => Some(
+            "The saved report zip includes a screenshot (which may show character names), logs, and client state. Nothing is uploaded anywhere.",
+        ),
+        Kind::Crash(_) => Some(
+            "The saved report zip includes crash logs and client state. Nothing is uploaded anywhere.",
+        ),
     }
 }
 
@@ -345,21 +429,41 @@ pub(crate) fn config_dir() -> Option<PathBuf> {
 
 /// Saves the report to the user's Desktop as a ZIP file.
 /// If Desktop is unavailable or unwritable, falls back to the config directory.
+#[allow(dead_code)]
 pub fn save_report(
     kind: &Kind,
     note: &str,
     name: &str,
     shot: Option<&[u8]>,
 ) -> Result<(PathBuf, bool), String> {
-    let cfg_dir = config_dir();
+    save_report_to(
+        kind,
+        note,
+        name,
+        shot,
+        desktop_dir().as_deref(),
+        config_dir().as_deref(),
+        true,
+    )
+}
+
+/// Saves the report with explicit desktop and config directory test seams (no global env needed).
+pub fn save_report_to(
+    kind: &Kind,
+    note: &str,
+    name: &str,
+    shot: Option<&[u8]>,
+    desktop: Option<&Path>,
+    cfg_dir: Option<&Path>,
+    reveal: bool,
+) -> Result<(PathBuf, bool), String> {
     let stamp_str = stamp(SystemTime::now());
-    let zip_name = format!("EQOA-Enhanced-report-{stamp_str}.zip");
 
     let mut entries = Vec::new();
     let mut files_list = Vec::new();
 
     // 1. note.txt
-    let clean_note = clean_now(note);
+    let clean_note = clean_text(note);
     if !clean_note.trim().is_empty() {
         entries.push(ZipEntry {
             name: "note.txt".into(),
@@ -378,29 +482,34 @@ pub fn save_report(
     }
 
     // 3. eqoa.log
-    if let Some(d) = &cfg_dir {
+    if let Some(d) = cfg_dir {
         let log_path = d.join("eqoa.log");
         if log_path.exists() {
             if let Ok(content) = fs::read_to_string(&log_path) {
                 entries.push(ZipEntry {
                     name: "eqoa.log".into(),
-                    data: clean_now(&content).into_bytes(),
+                    data: clean_text(&content).into_bytes(),
                 });
                 files_list.push("eqoa.log");
             }
         }
     }
 
-    // 4. eqoa.prev.log
-    if let Some(d) = &cfg_dir {
+    // 4. eqoa.prev.log (only included if a verified account is known to scrub against;
+    // pre-login/unverified logs are omitted to protect privacy, as documented in manifest)
+    if let Some(d) = cfg_dir {
         let prev_path = d.join("eqoa.prev.log");
         if prev_path.exists() {
-            if let Ok(content) = fs::read_to_string(&prev_path) {
-                entries.push(ZipEntry {
-                    name: "eqoa.prev.log".into(),
-                    data: clean_now(&content).into_bytes(),
-                });
-                files_list.push("eqoa.prev.log");
+            if has_verified_account() {
+                if let Ok(content) = fs::read_to_string(&prev_path) {
+                    entries.push(ZipEntry {
+                        name: "eqoa.prev.log".into(),
+                        data: clean_text(&content).into_bytes(),
+                    });
+                    files_list.push("eqoa.prev.log");
+                }
+            } else {
+                files_list.push("eqoa.prev.log (omitted: pre-login state with no verified account to scrub)");
             }
         }
     }
@@ -411,7 +520,7 @@ pub fn save_report(
         if let Ok(content) = fs::read_to_string(&addons_error_path) {
             entries.push(ZipEntry {
                 name: "addons_error.log".into(),
-                data: clean_now(&content).into_bytes(),
+                data: clean_text(&content).into_bytes(),
             });
             files_list.push("addons_error.log");
         }
@@ -429,14 +538,14 @@ pub fn save_report(
                     let zip_path = format!("crashes/{file_name}");
                     entries.push(ZipEntry {
                         name: zip_path.clone(),
-                        data: clean_now(&content).into_bytes(),
+                        data: clean_text(&content).into_bytes(),
                     });
                     files_list.push("crash report");
                 }
             }
         }
         Kind::Problem => {
-            let crashes_dir = cfg_dir.as_ref().map(|d| d.join("crashes"));
+            let crashes_dir = cfg_dir.map(|d| d.join("crashes"));
             if let Some(crashes_d) = crashes_dir {
                 if let Ok(read_dir) = fs::read_dir(crashes_d) {
                     for entry in read_dir.flatten() {
@@ -449,7 +558,7 @@ pub fn save_report(
                                     .unwrap_or_else(|| "crash.txt".into());
                                 entries.push(ZipEntry {
                                     name: format!("crashes/{file_name}"),
-                                    data: clean_now(&content).into_bytes(),
+                                    data: clean_text(&content).into_bytes(),
                                 });
                                 files_list.push("waiting crash report");
                             }
@@ -462,13 +571,12 @@ pub fn save_report(
 
     // 7. client state
     let state_text = cfg_dir
-        .as_ref()
         .and_then(|d| fs::read_to_string(d.join("state.txt")).ok())
         .unwrap_or_default();
     if !state_text.trim().is_empty() {
         entries.push(ZipEntry {
             name: "client_state.txt".into(),
-            data: clean_now(&state_text).into_bytes(),
+            data: clean_text(&state_text).into_bytes(),
         });
         files_list.push("client_state.txt");
     }
@@ -490,7 +598,7 @@ pub fn save_report(
             files_list.join("\n")
         }
     );
-    let clean_manifest = clean_now(&manifest_text);
+    let clean_manifest = clean_text(&manifest_text);
     entries.insert(
         0,
         ZipEntry {
@@ -502,20 +610,19 @@ pub fn save_report(
     let zip_bytes = write_zip(&entries)
         .map_err(|e| format!("Failed to compress report zip: {e}"))?;
 
-    // Determine target folder: try Desktop, fall back to config directory
-    let desktop = desktop_dir();
+    // Determine target folder: try Desktop, fall back to config directory.
+    // Use collision suffixes (-2, -3) to never overwrite an existing report.
     let mut fell_back = false;
     let final_path = if let Some(d) = desktop {
-        let dest = d.join(&zip_name);
-        match fs::create_dir_all(&d).and_then(|_| fs::write(&dest, &zip_bytes)) {
+        let dest = unique_report_path(d, &stamp_str);
+        match fs::create_dir_all(d).and_then(|_| fs::write(&dest, &zip_bytes)) {
             Ok(()) => dest,
             Err(_) => {
                 fell_back = true;
                 let c = cfg_dir
-                    .as_ref()
                     .ok_or("Both Desktop and config directory are unavailable")?;
                 fs::create_dir_all(c).map_err(|e| e.to_string())?;
-                let dest = c.join(&zip_name);
+                let dest = unique_report_path(c, &stamp_str);
                 fs::write(&dest, &zip_bytes).map_err(|e| e.to_string())?;
                 dest
             }
@@ -523,15 +630,16 @@ pub fn save_report(
     } else {
         fell_back = true;
         let c = cfg_dir
-            .as_ref()
             .ok_or("No Desktop or config directory available")?;
         fs::create_dir_all(c).map_err(|e| e.to_string())?;
-        let dest = c.join(&zip_name);
+        let dest = unique_report_path(c, &stamp_str);
         fs::write(&dest, &zip_bytes).map_err(|e| e.to_string())?;
         dest
     };
 
-    reveal_in_file_manager(&final_path);
+    if reveal {
+        reveal_in_file_manager(&final_path);
+    }
     Ok((final_path, fell_back))
 }
 
@@ -544,16 +652,49 @@ pub fn handle_send(
     shot: Option<&[u8]>,
     result: &Arc<Mutex<Option<Sent>>>,
 ) -> bool {
+    handle_send_to(
+        kind,
+        note,
+        name,
+        shot,
+        result,
+        desktop_dir().as_deref(),
+        config_dir().as_deref(),
+        true,
+    )
+}
+
+/// Save worker with path seams for testability without process-global environment mutation.
+pub fn handle_send_to(
+    kind: &Kind,
+    note: &str,
+    name: &str,
+    shot: Option<&[u8]>,
+    result: &Arc<Mutex<Option<Sent>>>,
+    desktop: Option<&Path>,
+    config: Option<&Path>,
+    reveal: bool,
+) -> bool {
     let kind = kind.clone();
     let note = note.to_string();
     let name = name.to_string();
     let shot = shot.map(|s| s.to_vec());
-    let result = result.clone();
+    let thread_result = result.clone();
+    let desktop = desktop.map(PathBuf::from);
+    let config = config.map(PathBuf::from);
 
-    let _ = std::thread::Builder::new()
+    let spawn_res = std::thread::Builder::new()
         .name("report".into())
         .spawn(move || {
-            let outcome = save_report(&kind, &note, &name, shot.as_deref());
+            let outcome = save_report_to(
+                &kind,
+                &note,
+                &name,
+                shot.as_deref(),
+                desktop.as_deref(),
+                config.as_deref(),
+                reveal,
+            );
             match outcome {
                 Ok((path, fell_back)) => {
                     let path_str = if fell_back {
@@ -570,22 +711,28 @@ pub fn handle_send(
                                 let _ = fs::remove_file(f);
                                 sent_list.push((Some(f.clone()), path_str.clone()));
                             }
-                            *result.lock().unwrap_or_else(|e| e.into_inner()) =
+                            *thread_result.lock().unwrap_or_else(|e| e.into_inner()) =
                                 Some(Sent::success(sent_list));
                         }
                         Kind::Problem => {
-                            *result.lock().unwrap_or_else(|e| e.into_inner()) =
+                            *thread_result.lock().unwrap_or_else(|e| e.into_inner()) =
                                 Some(Sent::success(vec![(None, path_str)]));
                         }
                     }
                 }
                 Err(err) => {
                     crate::say(&format!("report: failed to save: {err}"));
-                    *result.lock().unwrap_or_else(|e| e.into_inner()) =
+                    *thread_result.lock().unwrap_or_else(|e| e.into_inner()) =
                         Some(Sent::failure(err));
                 }
             }
         });
+
+    if let Err(err) = spawn_res {
+        crate::say(&format!("report: failed to spawn worker thread: {err}"));
+        *result.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(Sent::failure(format!("failed to spawn background thread: {err}")));
+    }
 
     true
 }
@@ -661,7 +808,6 @@ mod tests {
 
     #[test]
     fn saving_produces_zip_with_all_parts_and_enhanced_header() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let temp_dir = test_dir("report_all_parts");
         let fake_desktop = temp_dir.path().join("Desktop");
         let fake_config = temp_dir.path().join("Config");
@@ -692,23 +838,23 @@ mod tests {
         )
         .unwrap();
 
-        unsafe {
-            std::env::set_var("EQOA_REPORT_DESKTOP", &fake_desktop);
-            std::env::set_var("EQOA_CONFIG", &fake_config);
-            std::env::set_var("EQOA_NO_EXPLORER", "1");
-        }
+        // Ensure verified account is present so eqoa.prev.log is included
+        crate::report::secret("VerifiedTester", "TesterPass123");
 
         let fake_shot = b"\x89PNG\r\n\x1a\nfake screenshot data";
         let note = "Test problem note describing an issue";
         let name = "Tester";
 
-        let (saved_path, fell_back) = save_report(
+        let (saved_path, fell_back) = save_report_to(
             &Kind::Problem,
             note,
             name,
             Some(fake_shot),
+            Some(&fake_desktop),
+            Some(&fake_config),
+            false,
         )
-        .expect("save_report failed");
+        .expect("save_report_to failed");
 
         assert!(!fell_back, "Report should save to Desktop");
         assert!(saved_path.exists());
@@ -758,7 +904,6 @@ mod tests {
 
     #[test]
     fn secrets_are_scrubbed_from_all_files_in_zip() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let temp_dir = test_dir("report_secrets");
         let fake_desktop = temp_dir.path().join("Desktop");
         let fake_config = temp_dir.path().join("Config");
@@ -769,13 +914,6 @@ mod tests {
         let fake_password = "SecretPassword999";
         let fake_home = "C:\\Users\\SecretHomeDirectory";
 
-        unsafe {
-            std::env::set_var("EQOA_REPORT_DESKTOP", &fake_desktop);
-            std::env::set_var("EQOA_CONFIG", &fake_config);
-            std::env::set_var("EQOA_NO_EXPLORER", "1");
-            std::env::set_var("USERPROFILE", fake_home);
-        }
-
         crate::report::secret(fake_account, fake_password);
 
         fs::write(
@@ -785,11 +923,14 @@ mod tests {
         .unwrap();
 
         let note = format!("I had {fake_account} and {fake_password} in {fake_home}");
-        let (saved_path, _) = save_report(
+        let (saved_path, _) = save_report_to(
             &Kind::Problem,
             &note,
             fake_account,
             None,
+            Some(&fake_desktop),
+            Some(&fake_config),
+            false,
         )
         .unwrap();
 
@@ -806,15 +947,47 @@ mod tests {
                 !text.contains(fake_password),
                 "File {name} contains leaked password"
             );
-            assert!(
-                !text.contains(fake_home),
-                "File {name} contains leaked home path"
-            );
         }
     }
 
+    /// Exercises process-global USERPROFILE environment variable reading for home directory scrubbing.
+    /// Requires --test-threads=1 to prevent race conditions with parallel tests reading USERPROFILE.
     #[test]
-    fn no_network_transport_is_invoked() {
+    fn secrets_scrubbed_with_env_userprofile_needs_test_threads_1() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let temp_dir = test_dir("report_env_userprofile");
+        let fake_desktop = temp_dir.path().join("Desktop");
+        let fake_config = temp_dir.path().join("Config");
+        fs::create_dir_all(&fake_desktop).unwrap();
+        fs::create_dir_all(&fake_config).unwrap();
+
+        let fake_home = "C:\\Users\\EnvScrubbedHome42";
+        unsafe {
+            std::env::set_var("USERPROFILE", fake_home);
+        }
+
+        let note = format!("saved in {fake_home}\\data");
+        let (saved_path, _) = save_report_to(
+            &Kind::Problem,
+            &note,
+            "tester",
+            None,
+            Some(&fake_desktop),
+            Some(&fake_config),
+            false,
+        )
+        .unwrap();
+
+        let zip_bytes = fs::read(&saved_path).unwrap();
+        let entries = extract_zip_entries(&zip_bytes);
+        let note_entry = entries.iter().find(|(n, _)| n == "note.txt").unwrap();
+        let text = String::from_utf8_lossy(&note_entry.1);
+        assert!(!text.contains(fake_home), "Leaked USERPROFILE path in note.txt");
+        assert!(text.contains("~\\data"), "Expected ~ replacement: {text}");
+    }
+
+    #[test]
+    fn upload_url_refuses_remote_endpoints_even_when_report_policy_enabled() {
         assert!(crate::report_policy::enabled());
         let remote_url = crate::report_policy::upload_url(
             Some("https://eqoaclassic.com/eqoa/reports"),
@@ -832,7 +1005,6 @@ mod tests {
 
     #[test]
     fn crash_offer_path_saves_to_desktop() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let temp_dir = test_dir("report_crash_offer");
         let fake_desktop = temp_dir.path().join("Desktop");
         let fake_config = temp_dir.path().join("Config");
@@ -843,16 +1015,19 @@ mod tests {
         fs::create_dir_all(crash_file.parent().unwrap()).unwrap();
         fs::write(&crash_file, "fatal crash log content").unwrap();
 
-        unsafe {
-            std::env::set_var("EQOA_REPORT_DESKTOP", &fake_desktop);
-            std::env::set_var("EQOA_CONFIG", &fake_config);
-            std::env::set_var("EQOA_NO_EXPLORER", "1");
-        }
-
         let kind = Kind::Crash(vec![crash_file.clone()]);
         let result = Arc::new(Mutex::new(None));
-        let handled = handle_send(&kind, "crash note", "crash reporter", None, &result);
-        assert!(handled, "handle_send must return true for crash kind");
+        let handled = handle_send_to(
+            &kind,
+            "crash note",
+            "crash reporter",
+            None,
+            &result,
+            Some(&fake_desktop),
+            Some(&fake_config),
+            false,
+        );
+        assert!(handled, "handle_send_to must return true for crash kind");
 
         let mut attempts = 0;
         let sent_res = loop {
@@ -875,7 +1050,6 @@ mod tests {
 
     #[test]
     fn unwritable_desktop_falls_back_to_config_directory() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let temp_dir = test_dir("report_fallback");
         let config_dir = temp_dir.path().join("Config");
         fs::create_dir_all(&config_dir).unwrap();
@@ -885,17 +1059,182 @@ mod tests {
         fs::write(&blocker, "blocking file").unwrap();
         let invalid_desktop = blocker.join("desktop_sub");
 
-        unsafe {
-            std::env::set_var("EQOA_REPORT_DESKTOP", &invalid_desktop);
-            std::env::set_var("EQOA_CONFIG", &config_dir);
-            std::env::set_var("EQOA_NO_EXPLORER", "1");
-        }
+        let (saved_path, fell_back) = save_report_to(
+            &Kind::Problem,
+            "Test fallback",
+            "",
+            None,
+            Some(&invalid_desktop),
+            Some(&config_dir),
+            false,
+        )
+        .unwrap();
 
-        let (saved_path, fell_back) =
-            save_report(&Kind::Problem, "Test fallback", "", None).unwrap();
         assert!(fell_back, "Expected fallback to config directory");
         assert_eq!(saved_path.parent().unwrap(), config_dir);
         assert!(saved_path.exists());
+    }
+
+    #[test]
+    fn stamp_uses_correct_minutes_not_month() {
+        // 2026-10-31 18:57:45 UTC
+        // days = 20757, secs = 68265 -> 18:57:45
+        let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1793473065);
+        let s = stamp(t);
+        assert_eq!(s, "20261031-185745");
+    }
+
+    #[test]
+    fn save_report_collision_suffixes_existing_zip() {
+        let temp_dir = test_dir("report_collision");
+        let desktop = temp_dir.path().join("Desktop");
+        let config = temp_dir.path().join("Config");
+        fs::create_dir_all(&desktop).unwrap();
+        fs::create_dir_all(&config).unwrap();
+
+        let stamp_str = stamp(SystemTime::now());
+        let first_file = desktop.join(format!("EQOA-Enhanced-report-{stamp_str}.zip"));
+        fs::write(&first_file, "existing report 1").unwrap();
+
+        let (saved_2, _) = save_report_to(
+            &Kind::Problem,
+            "second report",
+            "tester",
+            None,
+            Some(&desktop),
+            Some(&config),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(
+            saved_2.file_name().unwrap().to_string_lossy(),
+            format!("EQOA-Enhanced-report-{stamp_str}-2.zip")
+        );
+        assert!(first_file.exists(), "Original report must not be overwritten");
+        assert_eq!(fs::read_to_string(&first_file).unwrap(), "existing report 1");
+
+        // Saving a third time with both 1 and 2 present produces -3.zip
+        let (saved_3, _) = save_report_to(
+            &Kind::Problem,
+            "third report",
+            "tester",
+            None,
+            Some(&desktop),
+            Some(&config),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(
+            saved_3.file_name().unwrap().to_string_lossy(),
+            format!("EQOA-Enhanced-report-{stamp_str}-3.zip")
+        );
+    }
+
+    #[test]
+    fn regression_noted_empty_with_saved_login_scrubs_account_from_previous_log() {
+        let temp_dir = test_dir("noted_empty_saved_login");
+        let fake_desktop = temp_dir.path().join("Desktop");
+        let fake_config = temp_dir.path().join("Config");
+        fs::create_dir_all(&fake_desktop).unwrap();
+        fs::create_dir_all(&fake_config).unwrap();
+
+        let remembered_account = "RememberedUser99";
+        let remembered_password = "SecretPassWord77";
+        crate::settings::save_login(remembered_account, remembered_password, true);
+
+        fs::write(
+            fake_config.join("eqoa.prev.log"),
+            format!("auth: account {remembered_account} status 1 with pass {remembered_password}\n"),
+        )
+        .unwrap();
+
+        // NOTED is empty (no secret(...) call made in current run)
+        let (saved_path, _) = save_report_to(
+            &Kind::Problem,
+            "note",
+            "reporter",
+            None,
+            Some(&fake_desktop),
+            Some(&fake_config),
+            false,
+        )
+        .unwrap();
+
+        let zip_bytes = fs::read(&saved_path).unwrap();
+        let entries = extract_zip_entries(&zip_bytes);
+        let prev_entry = entries
+            .iter()
+            .find(|(n, _)| n == "eqoa.prev.log")
+            .expect("eqoa.prev.log should be included when saved login is verified");
+        let text = String::from_utf8_lossy(&prev_entry.1);
+
+        assert!(
+            !text.contains(remembered_account),
+            "File eqoa.prev.log contains leaked account {remembered_account}"
+        );
+        assert!(
+            !text.contains(remembered_password),
+            "File eqoa.prev.log contains leaked password"
+        );
+        assert!(text.contains("<account>"), "Expected <account> replacement");
+    }
+
+    #[test]
+    fn regression_noted_empty_without_verified_account_omits_previous_log() {
+        let temp_dir = test_dir("noted_empty_no_account");
+        let fake_desktop = temp_dir.path().join("Desktop");
+        let fake_config = temp_dir.path().join("Config");
+        fs::create_dir_all(&fake_desktop).unwrap();
+        fs::create_dir_all(&fake_config).unwrap();
+
+        // Clear saved login so no verified account exists
+        crate::settings::save_login("", "", false);
+
+        let unverified_account = "UnverifiedSecretAcc";
+        fs::write(
+            fake_config.join("eqoa.prev.log"),
+            format!("login {unverified_account} ok\n"),
+        )
+        .unwrap();
+
+        let (saved_path, _) = save_report_to(
+            &Kind::Problem,
+            "note",
+            "reporter",
+            None,
+            Some(&fake_desktop),
+            Some(&fake_config),
+            false,
+        )
+        .unwrap();
+
+        let zip_bytes = fs::read(&saved_path).unwrap();
+        let entries = extract_zip_entries(&zip_bytes);
+
+        // eqoa.prev.log must NOT be included in the zip
+        assert!(
+            !entries.iter().any(|(n, _)| n == "eqoa.prev.log"),
+            "eqoa.prev.log must be omitted when no verified account exists"
+        );
+
+        // Manifest must document the omission
+        let manifest_bytes = &entries.iter().find(|(n, _)| n == "manifest.txt").unwrap().1;
+        let manifest_str = String::from_utf8_lossy(manifest_bytes);
+        assert!(
+            manifest_str.contains("eqoa.prev.log (omitted: pre-login state with no verified account to scrub)"),
+            "Manifest must state why eqoa.prev.log was omitted: {manifest_str}"
+        );
+
+        // Entire zip must be free of the unverified account
+        for (name, data) in entries {
+            let text = String::from_utf8_lossy(&data);
+            assert!(
+                !text.contains(unverified_account),
+                "File {name} in zip contains unverified account {unverified_account}"
+            );
+        }
     }
 
     #[test]
@@ -970,10 +1309,40 @@ mod tests {
         ).unwrap();
         assert_eq!(labels_crash_multi[0].0, "Save all to Desktop (Enter)");
 
-        let status_sent = dialog_status(
+        let status_single = dialog_status(
             &Status::Sent(vec!["C:/path/report.zip".into()]),
             0,
         ).unwrap();
-        assert_eq!(status_sent, "Saved to C:/path/report.zip. Thank you.");
+        assert_eq!(status_single, "Saved to C:/path/report.zip. Thank you.");
+
+        let status_multi = dialog_status(
+            &Status::Sent(vec![
+                "C:/path/report.zip".into(),
+                "C:/path/report.zip".into(),
+                "C:/path/report.zip".into(),
+            ]),
+            0,
+        ).unwrap();
+        assert_eq!(status_multi, "Saved 3 reports to C:/path/report.zip. Thank you.");
+    }
+
+    #[test]
+    fn dialog_fine_plainly_states_screenshot_included() {
+        let fine_problem = dialog_fine(&Kind::Problem).unwrap();
+        assert!(
+            fine_problem.contains("screenshot"),
+            "Fine text for problem must state screenshot is included"
+        );
+        assert!(
+            fine_problem.contains("character names"),
+            "Fine text must mention character names"
+        );
+        assert!(
+            fine_problem.contains("Nothing is uploaded"),
+            "Fine text must state nothing is uploaded"
+        );
+
+        let fine_crash = dialog_fine(&Kind::Crash(vec!["a".into()])).unwrap();
+        assert!(fine_crash.contains("crash logs"));
     }
 }

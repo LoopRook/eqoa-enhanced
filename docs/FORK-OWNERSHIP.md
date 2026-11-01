@@ -60,7 +60,7 @@ integration seams. No directory-wide shared allowlist exists.
 | --- | ---: | ---: | --- |
 | `.gitignore` | 6 | 0 | Fork-local generated output and scratch configuration exclusions. |
 | `Cargo.lock` | 153 | 3 | Reviewed native Lua/ImGui spike dependencies and rustc-hash version disambiguation; license metadata unchanged. |
-| `crates/eqoa/Cargo.toml` | 8 | 0 | Reviewed native-only Lua/ImGui spike dependencies and existing fork/release settings; license metadata unchanged. |
+| `crates/eqoa/Cargo.toml` | 9 | 1 | Reviewed native-only Lua/ImGui spike dependencies, Win32_System_Com for Shell known-folder CoTaskMemFree, and existing fork/release settings; license metadata unchanged. |
 | `crates/eqoa/build.rs` | 11 | 3 | One app-icon hook into fork_ext/app_icon_ico; upstream drawn-disc helpers retained. |
 | `crates/eqoa/src/bindpage.rs` | 16 | 16 | Restored and map input settings rows. |
 | `crates/eqoa/src/binds.rs` | 93 | 80 | Restored/map controls and saved binding defaults. |
@@ -73,7 +73,7 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/eqoa/src/main.rs` | 30 | 0 | Restored module registration, fork_ext boundary, and report policy module. |
 | `crates/eqoa/src/options.rs` | 196 | 43 | Existing restored option entries plus one adapter reference per fork option hook. |
 | `crates/eqoa/src/play.rs` | 763 | 53 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, and addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus; implementation in fork_ext. |
-| `crates/eqoa/src/report.rs` | 50 | 23 | Local problem and crash report saving to Desktop; wrapped dialog status and label hooks preserving upstream match arms; one-line hooks in send() and start() with fork_ext implementation and minimal crate-level visibility. |
+| `crates/eqoa/src/report.rs` | 61 | 23 | Local problem and crash report saving to Desktop; wrapped dialog status, label and fine notice hooks preserving upstream match arms; one-line hooks in push_line(), send(), and start() with fork_ext implementation and minimal crate-level visibility. |
 | `crates/eqoa/src/settings.rs` | 334 | 22 | Restored map/quest settings plus one adapter reference per settings hook. |
 | `crates/eqoa/src/touch.rs` | 79 | 2 | Restored map and tracker touch input. |
 | `crates/eqoa/src/ui.rs` | 10 | 6 | Map UI state and input integration plus one-line pub(crate) visibility on UiAssets.surfaces for fork-owned HUD tests. |
