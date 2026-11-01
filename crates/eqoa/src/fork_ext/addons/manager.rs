@@ -633,11 +633,11 @@ impl Manager {
                     {
                         Ok(messages) => {
                             for msg in messages {
-                                crate::say(&format!("addons: [{}] {}", metadata.id, msg));
-                                self.diagnostic(Some(&metadata.id), "storage", msg);
+                                eprintln!("addons: [{}] {}", metadata.id, msg);
                             }
                         }
                         Err(e) => {
+                            crate::say(&format!("addons: [{}] migration failed: {}", metadata.id, e));
                             self.diagnostic(Some(&metadata.id), "storage", e);
                         }
                     }
@@ -1958,6 +1958,65 @@ mod tests {
         assert!(
             bank.borrow().is_empty(),
             "old bank must report empty after replacement closes aliases"
+        );
+    }
+
+    #[test]
+    fn forge_manager_successful_migration_is_silent_and_failed_migration_surfaces_diagnostic() {
+        let Some(mut gpu) = Gpu::new() else { return; };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+
+        scripts.package("test_mig", true, "count = (count or 0) + 1");
+        let disc = super::super::discovery::discover(&scripts.0);
+        let addon = &disc.addons[0];
+
+        // 1. Populate a legacy v1 profile
+        let v1_key = Storage::v1_key(addon).unwrap();
+        let storage = Storage::new(Some(config.0.clone()));
+        storage.save_profile(&v1_key, Value::Nil).unwrap();
+        storage.set_enabled(&v1_key, true).unwrap();
+
+        // 2. Launch manager: migration succeeds
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+
+        // Successful migration must NOT record any diagnostics (log-only, no on-screen/manager diagnostics)
+        let diags: Vec<_> = manager
+            .diagnostics()
+            .iter()
+            .filter(|d| d.id.as_deref() == Some("test_mig"))
+            .collect();
+        assert!(
+            diags.is_empty(),
+            "successful migration must NOT appear in manager diagnostics: {diags:?}"
+        );
+
+        // 3. Failed migration surfaces a diagnostic in the manager
+        scripts.package("test_mig_fail", true, "count = 1");
+        let disc2 = super::super::discovery::discover(&scripts.0);
+        let addon2 = disc2
+            .addons
+            .iter()
+            .find(|a| a.id == "test_mig_fail")
+            .unwrap();
+        let v1_key2 = Storage::v1_key(addon2).unwrap();
+        let v2_key2 = Storage::key(addon2).unwrap();
+        storage.save_profile(&v1_key2, Value::Nil).unwrap();
+        let bad_profile_dir = storage.profile_path(&v2_key2).unwrap();
+        std::fs::create_dir_all(&bad_profile_dir).unwrap();
+
+        let mut manager2 = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager2);
+
+        let fail_diags: Vec<_> = manager2
+            .diagnostics()
+            .iter()
+            .filter(|d| d.id.as_deref() == Some("test_mig_fail") && d.phase == "storage")
+            .collect();
+        assert!(
+            fail_diags.iter().any(|d| d.message.contains("failed to write migrated profile")),
+            "failed migration must appear in manager diagnostics: {fail_diags:?}"
         );
     }
 }
