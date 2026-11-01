@@ -220,6 +220,8 @@ pub fn save_login(user: &str, password: &str, on: bool) -> bool {
         }
     }
     card[0x90] = on as u8;
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::fork_ext::report::update_saved_login_cache(user, password, on);
     match write_game(&card) {
         Ok(()) => true,
         Err(e) => {

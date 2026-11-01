@@ -21,7 +21,7 @@ use std::{
 
 const MAX_JSON_BYTES: usize = 1024 * 1024;
 
-pub(super) struct Storage {
+pub(crate) struct Storage {
     root: Option<PathBuf>,
 }
 

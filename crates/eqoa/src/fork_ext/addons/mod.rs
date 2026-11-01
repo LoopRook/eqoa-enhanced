@@ -43,7 +43,7 @@ pub(crate) mod package;
 pub(crate) mod player;
 mod profile;
 mod spike;
-mod storage;
+pub(crate) mod storage;
 mod textures;
 #[cfg(test)]
 mod wereoxxs_test;

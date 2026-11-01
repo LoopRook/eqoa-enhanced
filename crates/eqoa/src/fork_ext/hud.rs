@@ -942,7 +942,8 @@ mod tests {
         let mut hud = Hud::new();
         hud.draw(&vui, &mut assets.raster(&mut ui), &HudState::default());
         let default_quads = ui.quads.len();
-        assert_eq!(default_quads, 14, "stock default HUD quad count at 1280x720 with no addon");
+        let expected_quads = if crate::report_policy::enabled() { 17 } else { 14 };
+        assert_eq!(default_quads, expected_quads, "stock default HUD quad count at 1280x720 with no addon");
 
         let full_state = HudState {
             has_self: true,
@@ -970,7 +971,8 @@ mod tests {
         let mut hud = Hud::new();
         hud.draw(&vui, &mut assets.raster(&mut ui), &full_state);
         let full_quads = ui.quads.len();
-        assert_eq!(full_quads, 38, "stock populated HUD quad count at 1280x720 with no addon");
+        let expected_full = if crate::report_policy::enabled() { 41 } else { 38 };
+        assert_eq!(full_quads, expected_full, "stock populated HUD quad count at 1280x720 with no addon");
 
         set_claims(crate::fork_ext::addons::visibility::ALL_UI_ELEMENTS);
         ui.begin(size);
