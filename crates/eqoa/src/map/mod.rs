@@ -84,6 +84,7 @@ pub mod cells;
 pub mod chrome;
 pub mod community;
 pub mod group_waypoint;
+pub mod journal;
 pub mod markers;
 mod markers_data;
 // the minimap, in play under the quick menus (`mini`)

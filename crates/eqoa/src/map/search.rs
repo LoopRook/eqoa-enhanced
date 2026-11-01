@@ -62,6 +62,8 @@ enum Action {
     Next,
     Close,
     TrackWaypoint,
+    Import,
+    Export,
 }
 
 /// Appearance tokens, independent of search, input and navigation state.
@@ -90,6 +92,7 @@ pub struct Search {
     offset: usize,
     hits: Vec<([i32; 4], Action)>,
     cached: RefCell<Option<(String, Tab, Rc<Vec<ResultRow>>)>>,
+    pub status_msg: Option<(String, std::time::Instant)>,
 }
 
 fn mini_search_rect(m: [f32; 4]) -> [i32; 4] {
@@ -324,11 +327,35 @@ impl Search {
         self.guide = None;
     }
     fn nearest(&self, name: &str) -> Option<[f32; 2]> {
-        self.known
+        let catalog_min = self
+            .known
             .iter()
             .filter(|s| s.world == self.world && s.name.eq_ignore_ascii_case(name))
             .map(|s| s.at)
-            .min_by(|a, b| distance(*a, self.player).total_cmp(&distance(*b, self.player)))
+            .min_by(|a, b| distance(*a, self.player).total_cmp(&distance(*b, self.player)));
+
+        let journal_min = super::journal::with(|j| {
+            j.records().get(name).and_then(|rec| {
+                rec.ids
+                    .values()
+                    .filter(|info| info.world == self.world)
+                    .map(|info| [info.pos[0], info.pos[2]])
+                    .min_by(|a, b| distance(*a, self.player).total_cmp(&distance(*b, self.player)))
+            })
+        });
+
+        match (catalog_min, journal_min) {
+            (Some(c), Some(j)) => {
+                if distance(c, self.player) <= distance(j, self.player) {
+                    Some(c)
+                } else {
+                    Some(j)
+                }
+            }
+            (Some(c), None) => Some(c),
+            (None, Some(j)) => Some(j),
+            (None, None) => None,
+        }
     }
     pub fn destination(&self) -> Option<([f32; 2], bool)> {
         match self.guide.as_ref()? {
@@ -421,6 +448,50 @@ impl Search {
                         row.1 = Some(s.at);
                     }
                 }
+                super::journal::with(|j| {
+                    j.ensure_loaded();
+                    for (c_name, rec) in j.records() {
+                        let name_lower = c_name.to_lowercase();
+                        let name_match = words.iter().all(|w| name_lower.contains(w));
+                        let mut searchable = name_lower.clone();
+                        for info in rec.ids.values() {
+                            if info.level > 0 {
+                                use std::fmt::Write;
+                                let _ = write!(searchable, " level {} {}", info.level, info.level);
+                            }
+                            let world_str = match info.world {
+                                0 => " tunaria world 0",
+                                1 => " odus world 1",
+                                2 => " plane of sky world 2",
+                                3 => " lavastorm world 3",
+                                _ => " world",
+                            };
+                            searchable.push_str(world_str);
+                            use std::fmt::Write;
+                            let _ = write!(searchable, " {:.0} {:.0}", info.pos[0], info.pos[2]);
+                        }
+                        let journal_match = name_match || (!words.is_empty() && words.iter().all(|w| searchable.contains(w)));
+                        if journal_match {
+                            let row = names
+                                .entry(name_lower)
+                                .or_insert_with(|| (c_name.clone(), None, 0, None));
+                            for info in rec.ids.values() {
+                                if info.world == self.world
+                                    && row.1.is_none_or(|at| {
+                                        distance([info.pos[0], info.pos[2]], self.player) < distance(at, self.player)
+                                    })
+                                {
+                                    row.1 = Some([info.pos[0], info.pos[2]]);
+                                }
+                                if info.level > 0 {
+                                    row.3 = Some(row.3.map_or((info.level, info.level), |(lo, hi)| {
+                                        (lo.min(info.level), hi.max(info.level))
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                });
                 for n in self
                     .live
                     .iter()
@@ -601,6 +672,28 @@ impl Search {
                 Action::Next => {
                     self.offset = (self.offset + 6).min(self.results().len().saturating_sub(1));
                     self.selected = self.offset;
+                }
+                Action::Import => {
+                    match super::journal::import_interactive() {
+                        Ok(added) => {
+                            self.status_msg = Some((format!("Imported {added} spawns"), std::time::Instant::now()));
+                            *self.cached.borrow_mut() = None;
+                        }
+                        Err(err) => {
+                            self.status_msg = Some((format!("Import: {err}"), std::time::Instant::now()));
+                        }
+                    }
+                }
+                Action::Export => {
+                    match super::journal::export_to_desktop() {
+                        Ok(path) => {
+                            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("journal");
+                            self.status_msg = Some((format!("Saved to {file_name}"), std::time::Instant::now()));
+                        }
+                        Err(err) => {
+                            self.status_msg = Some((format!("Export: {err}"), std::time::Instant::now()));
+                        }
+                    }
                 }
             }
             return true;
@@ -816,23 +909,54 @@ impl Search {
         }
         let foot = py + h - 34;
         t::fill(r, [px + 8, foot - 7, px + w - 8, foot - 6], t::BORDER);
+        let status_line = self.status_msg.as_ref().and_then(|(msg, when)| {
+            if when.elapsed().as_secs() < 6 {
+                Some(msg.clone())
+            } else {
+                None
+            }
+        });
+        let (j_names, j_spawns) = super::journal::counts();
+        let footer_text = status_line.unwrap_or_else(|| {
+            if self.tab == Tab::Npcs {
+                format!("{} matches · Journal: {j_names} cr, {j_spawns} sp", results.len())
+            } else {
+                format!("{} matches / Enter guides", results.len())
+            }
+        });
         t::text(
             r,
-            &format!("{} matches / Enter guides", results.len()),
+            &footer_text,
             [px + 10, foot - 2],
             w - 20,
             t::MUTED,
         );
+        let btn_y1 = foot + 12;
+        let btn_y2 = py + h - 3;
         self.button(
             r,
-            [px + 8, foot + 12, px + 61, py + h - 3],
+            [px + 8, btn_y1, px + 52, btn_y2],
             "Prev",
             Action::Previous,
             false,
         );
         self.button(
             r,
-            [px + w - 61, foot + 12, px + w - 8, py + h - 3],
+            [px + 56, btn_y1, px + 116, btn_y2],
+            "Export",
+            Action::Export,
+            false,
+        );
+        self.button(
+            r,
+            [px + 120, btn_y1, px + 180, btn_y2],
+            "Import",
+            Action::Import,
+            false,
+        );
+        self.button(
+            r,
+            [px + w - 52, btn_y1, px + w - 8, btn_y2],
             "Next",
             Action::Next,
             false,
