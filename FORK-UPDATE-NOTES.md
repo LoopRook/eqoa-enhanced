@@ -5,6 +5,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 ## 2026-11-01 · Unreleased
 
 - Save named mod profiles for each character or class, including window positions, so separate clients can keep their own setups.
+- Mod profiles keep unsaved changes when entering the world and protect settings when multiple clients start or close.
 
 ## 2026-11-01 · Enhanced 0.3.0
 

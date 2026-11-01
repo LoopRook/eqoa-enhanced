@@ -12,12 +12,20 @@ Implementation choices:
   Class defaults are scoped to the server. Explicit character bindings win.
 - No global active-profile file. Selection belongs to each Manager/process.
   Sharing a named profile deliberately uses last-save-wins, as the owner specified.
+- Loading the active profile preserves unsaved state and layout. Only the explicit
+  Revert action reloads it from disk. World entry follows the same rule.
+- Failed world-entry loads retain the previous identity, retry every two seconds,
+  and emit one diagnostic for that pending character.
 - Profile changes run at the render boundary, before NewFrame. Old VMs are cleaned
   up and retired; replacement VMs initialize and receive Load as on a fresh load.
 - Saving captures all initialized addon Save callbacks and the current layout.
+  Shutdown also stages the complete bundle; one callback failure blocks publication.
   Automatic enabled/layout persistence and shutdown save target the active bundle.
 - Failed reads cannot be overwritten, including external corruption after a load.
   A failed switch leaves the prior active profile intact and shows a diagnostic.
+- A separate nonblocking OS lock serializes Default migration. The winner checks
+  again under the lock and atomically publishes once; contenders read the result
+  or report a busy migration without writing.
 - The legacy resource-file overlay remains keyed by the existing v2 addon key;
   Lua Save values and layouts are profile-specific. Resource files are not part of
   the approved bundle format.
@@ -60,8 +68,8 @@ pre-first-frame shutdown layout loss. Build logs are in target/local-checks.
 - fork_ext/addons/runtime.rs:387 - active.manager.shutdown()
 - fork_ext/addons/manager.rs:447 - let result = if let Some(s) = &mut self.named
 - fork_ext/addons/manager.rs:574 - let result = if let Some(s) = &mut self.named
-- fork_ext/addons/manager_profiles.rs:227 - pub fn profile_boundary(
-- fork_ext/addons/manager_profiles.rs:333 - pub fn profile_controls(
+- fork_ext/addons/manager_profiles.rs:261 - pub fn profile_boundary(
+- fork_ext/addons/manager_profiles.rs:392 - pub fn profile_controls(
 
 The only shared-file changes extend the two existing viewer draw hooks with the
 configured server. Normal boot uses booted Shared.server; direct play uses the
@@ -121,3 +129,45 @@ failed-migration write protection, inherited/disabled-window layouts, transactio
 Save capture, and pre-first-frame shutdown. Each passed after its corresponding fix.
 The release build is required after the final commit; its result is reported in
 the handoff rather than modifying the committed tree after that build.
+
+## Terra review corrections
+
+All four findings at f7ae3b7 reproduced. Negative control:
+
+    test result: FAILED. 16 passed; 4 failed; 0 ignored; 0 measured; 1416 filtered out; finished in 10.54s
+
+After fixes:
+
+    test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 1416 filtered out; finished in 11.53s
+
+New tests:
+
+- mod_profiles_concurrent_migration_keeps_the_winners_saved_default
+- mod_profiles_shutdown_save_failure_preserves_the_entire_previous_file
+- mod_profiles_active_load_and_default_world_entry_preserve_unsaved_session
+- mod_profiles_failed_world_entry_retries_after_backoff_with_one_diagnostic
+- mod_profiles_concurrent_character_bindings_keep_both_clients_entries
+
+The binding test passed before the fixes: characters.json already uses a fresh
+read under the nonblocking OS lock, followed by atomic replacement. Two simultaneous
+clients retrying lock contention retain both assignments.
+
+Review-fix full verification (same commands and prerequisites as above):
+
+Plain:
+
+    test result: ok. 1415 passed; 0 failed; 21 ignored; 0 measured; 0 filtered out; finished in 68.25s
+
+Reference:
+
+    test result: ok. 1436 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 76.71s
+
+Wasm:
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.68s
+
+Footprint:
+
+    PASS: fork footprint is within reviewed policy
+
+Release is built after the new review-fix commit.

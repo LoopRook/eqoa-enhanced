@@ -2,9 +2,13 @@
 use super::super::named_profiles::{Character, CharacterSnapshot, DEFAULT, Document, Store};
 use super::*;
 use dear_imgui_rs::{Context, Ui};
+use std::time::{Duration, Instant};
+
+const SWITCH_RETRY_DELAY: Duration = Duration::from_secs(2);
 
 pub(crate) enum ProfileAction {
     Load(String),
+    Revert,
     Save,
     SaveAs(String),
     BindCharacter,
@@ -16,8 +20,10 @@ pub(super) struct NamedSession {
     pub active: String,
     pub dirty: bool,
     writable: bool,
+    shutdown_save_failed: bool,
     store: Store,
     character: Option<Character>,
+    retry: Option<(Character, Instant)>,
     unassigned: bool,
     apply_initial: bool,
     actions: VecDeque<ProfileAction>,
@@ -50,8 +56,10 @@ impl Manager {
             active: DEFAULT.into(),
             dirty: false,
             writable,
+            shutdown_save_failed: false,
             store,
             character: None,
+            retry: None,
             unassigned: false,
             apply_initial: true,
             actions: VecDeque::new(),
@@ -68,12 +76,8 @@ impl Manager {
             }
         }
     }
-    fn capture_profile(
-        &mut self,
-        s: &mut NamedSession,
-        context: &mut Context,
-    ) -> Result<(), String> {
-        let mut data = s.data.clone();
+    fn capture_profile_states(&self, previous: &Document) -> Result<Document, String> {
+        let mut data = previous.clone();
         for entry in &self.entries {
             data.enabled.insert(entry.key.clone(), entry.enabled_intent);
             if entry.status == Status::Failed {
@@ -90,12 +94,38 @@ impl Manager {
                 );
             }
         }
+        Ok(data)
+    }
+    fn capture_profile(
+        &mut self,
+        s: &mut NamedSession,
+        context: &mut Context,
+    ) -> Result<(), String> {
+        let mut data = self.capture_profile_states(&s.data)?;
         let mut ini = String::new();
         context.save_ini_settings(&mut ini);
         data.layout = ini;
         s.data = data;
         s.dirty = true;
         Ok(())
+    }
+    pub(super) fn capture_shutdown_profile(&mut self) {
+        let Some(mut s) = self.named.take() else {
+            return;
+        };
+        match self.capture_profile_states(&s.data) {
+            Ok(data) => {
+                s.data = data;
+                s.dirty = true;
+            }
+            Err(error) => {
+                // Runtime force-flushes the layout after cleanup. It must not
+                // publish anything, including enabled/layout edits, on failure.
+                s.shutdown_save_failed = true;
+                self.diagnostic(None, "profiles", format!("Shutdown: {error}"));
+            }
+        }
+        self.named = Some(s);
     }
     fn persist_profile(
         &mut self,
@@ -206,7 +236,11 @@ impl Manager {
         s: &mut NamedSession,
         name: String,
         context: &mut Context,
+        revert: bool,
     ) -> Result<(), String> {
+        if s.writable && name.eq_ignore_ascii_case(&s.active) && !revert {
+            return Ok(());
+        }
         // Validate the entire destination before touching the outgoing session.
         let data = s.store.read(&name)?;
         if s.writable && !name.eq_ignore_ascii_case(&s.active) {
@@ -250,32 +284,50 @@ impl Manager {
             Err(e) => self.diagnostic(None, "profiles", e),
             Ok(identity) if identity != s.character => {
                 if let Some(character) = &identity {
-                    match s.store.resolve(character) {
-                        Ok((name, unassigned)) => {
-                            s.unassigned = unassigned;
-                            if let Err(e) = self.load_named(&mut s, name, context) {
-                                self.diagnostic(
-                                    None,
-                                    "profiles",
-                                    format!("Could not switch profile: {e}"),
-                                );
+                    let now = Instant::now();
+                    let retry = s.retry.as_ref().filter(|(c, _)| c == character);
+                    let already_reported = retry.is_some();
+                    if retry.is_none_or(|(_, deadline)| now >= *deadline) {
+                        let result = s.store.resolve(character).and_then(|(name, unassigned)| {
+                            self.load_named(&mut s, name, context, false)?;
+                            Ok(unassigned)
+                        });
+                        match result {
+                            Ok(unassigned) => {
+                                s.character = identity;
+                                s.unassigned = unassigned;
+                                s.retry = None;
+                            }
+                            Err(e) => {
+                                if !already_reported {
+                                    self.diagnostic(
+                                        None,
+                                        "profiles",
+                                        format!("Could not switch profile: {e}. Retrying shortly."),
+                                    );
+                                }
+                                s.retry = Some((character.clone(), now + SWITCH_RETRY_DELAY));
                             }
                         }
-                        Err(e) => self.diagnostic(None, "profiles", e),
                     }
                 } else {
                     if let Err(e) = self.persist_profile(&mut s, context) {
                         self.diagnostic(None, "profiles", e);
                     }
                     s.unassigned = false;
+                    s.character = None;
+                    s.retry = None;
                 }
-                s.character = identity;
             }
-            _ => {}
+            Ok(_) => s.retry = None,
         }
         while let Some(action) = s.actions.pop_front() {
             let result = match action {
-                ProfileAction::Load(name) => self.load_named(&mut s, name, context),
+                ProfileAction::Load(name) => self.load_named(&mut s, name, context, false),
+                ProfileAction::Revert => {
+                    let name = s.active.clone();
+                    self.load_named(&mut s, name, context, true)
+                }
                 ProfileAction::Save => self.persist_profile(&mut s, context),
                 ProfileAction::SaveAs(name) => (|| {
                     if !s.writable && name.eq_ignore_ascii_case(DEFAULT) {
@@ -291,6 +343,9 @@ impl Manager {
                 ProfileAction::BindCharacter | ProfileAction::BindClass => {
                     let class = matches!(action, ProfileAction::BindClass);
                     match &s.character {
+                        _ if s.retry.is_some() => Err(
+                            "Wait for this character's profile to load before assigning it".into(),
+                        ),
                         Some(c) => s.store.bind(c, &s.active, class).map(|()| {
                             s.unassigned = false;
                         }),
@@ -309,6 +364,10 @@ impl Manager {
         let Some(mut s) = self.named.take() else {
             return;
         };
+        if s.shutdown_save_failed {
+            self.named = Some(s);
+            return;
+        }
         if s.dirty || force || context.io().want_save_ini_settings() {
             if !s.apply_initial {
                 let mut ini = String::new();
@@ -344,12 +403,18 @@ impl Manager {
         if let Some(c) = &s.character {
             ui.text(format!("Character: {} (class {})", c.name, c.class));
         }
+        if s.retry.is_some() {
+            ui.text_wrapped("This character's profile could not be loaded. Retrying shortly; see the diagnostic below.");
+        }
         ui.input_text("New profile name", &mut s.name_input).build();
         if s.name_input.len() > 48 {
             s.name_input = s.name_input.chars().take(48).collect();
         }
         if ui.button("Save active profile") {
             s.actions.push_back(ProfileAction::Save);
+        }
+        if ui.button("Revert active profile to saved") {
+            s.actions.push_back(ProfileAction::Revert);
         }
         ui.same_line();
         if ui.button("Save as new profile") {

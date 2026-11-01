@@ -726,9 +726,13 @@ impl Manager {
         }
         self.shut_down = true;
         self.commands.clear();
+        let named_shutdown = self.named.is_some();
+        if named_shutdown {
+            self.capture_shutdown_profile();
+        }
         let mut entries = std::mem::take(&mut self.entries);
         for entry in &mut entries {
-            if entry.status != Status::Failed {
+            if !named_shutdown && entry.status != Status::Failed {
                 self.save(entry, false);
             }
             self.disable(entry, false, false, Disposition::Retire);
