@@ -87,8 +87,8 @@ pub fn auto_create_mods_dir() {
         if INITIALIZED.swap(true, std::sync::atomic::Ordering::Relaxed) {
             return;
         }
-        let dir = mods_dir();
-        auto_create_mods_dir_at(&dir);
+        let _dir = mods_dir();
+        auto_create_mods_dir_at(&_dir);
     }
 }
 
@@ -123,28 +123,27 @@ pub fn ensure_mods_dir() {
 /// Opens the `mods/` folder in the system file manager.
 pub fn open_mods_folder() {
     ensure_mods_dir();
-    let dir = mods_dir();
+    let _dir = mods_dir();
     #[cfg(windows)]
     {
-        let _ = Command::new("explorer.exe").arg(&dir).spawn();
+        let _ = Command::new("explorer.exe").arg(&_dir).spawn();
     }
     #[cfg(target_os = "macos")]
     {
-        let _ = Command::new("open").arg(&dir).spawn();
+        let _ = Command::new("open").arg(&_dir).spawn();
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        let _ = Command::new("xdg-open").arg(&dir).spawn();
+        let _ = Command::new("xdg-open").arg(&_dir).spawn();
     }
 }
 
 /// Discovers all mods located in `mods/`.
 pub fn list_mods() -> Vec<ModManifest> {
-    ensure_mods_dir();
-    let dir = mods_dir();
+    let _dir = mods_dir();
     let mut mods = Vec::new();
 
-    let Ok(entries) = fs::read_dir(&dir) else {
+    let Ok(entries) = fs::read_dir(&_dir) else {
         return mods;
     };
 

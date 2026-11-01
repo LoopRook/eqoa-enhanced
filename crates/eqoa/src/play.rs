@@ -7748,6 +7748,7 @@ impl Play {
                 }
             })
             .collect();
+        crate::map::journal::record_entities(&self.entities.slots, me, self.pet_id, cx.world);
         self.map
             .search
             .update(cx.world, [p.position.x.0, p.position.z.0], live, members);
