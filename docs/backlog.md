@@ -106,3 +106,8 @@ This entry records future work only; no navigation or movement behavior changes 
 - **Questions:** staleness wording; spoofing (require 2 reporters, or mark single reports as unconfirmed); privacy (a sighting implies some player is near there: send no player info, maybe round the position); opt-out; cost on the Railway hobby plan (likely small at our scale, but measure).
 - **Range:** not adjustable by us. The server decides which creatures it sends (log: 'NPC/PC Display 200, the server's most 64'), so the client already gets everything the server allows.
 - **Status:** idea; after journal steps 2-3. Medium-large.
+
+## Click to cast from mod ability bars (owner, 2026-11-01)
+
+- **Request:** in Wereoxxs UI, clicking a weapon-set slot switches set (0.4.0), but clicking an ability slot does nothing; the same goes for the other UI mods. The owner wants click-to-cast on the mods' ability bars.
+- **Plan:** check what Forge exposes for using an ability from Lua (the reference ability/ability_bar modules); if Forge has it, implement it natively through the same path as the game's own hotbar use; if not, add it under the `eqoa` namespace and patch the bundled mods' slot click handlers (as for weapon sets). Together with the Modern UI / ARPG UI weapon-set bars (work in progress, uncommitted in the release-0-4-0 worktree) as the next small patch.
