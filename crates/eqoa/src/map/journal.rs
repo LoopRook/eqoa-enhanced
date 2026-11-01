@@ -642,18 +642,33 @@ pub fn parse_journal_entries(text: &str, cap_entries: usize) -> Result<Vec<Parse
 
 // Global active journal singleton
 static GLOBAL_JOURNAL: Mutex<Option<Journal>> = Mutex::new(None);
+
+/// The process-wide journal. Under test each test thread gets its own, so tests
+/// that record creatures cannot leak into map-search tests running in parallel.
+#[cfg(not(test))]
+fn global() -> &'static Mutex<Option<Journal>> {
+    &GLOBAL_JOURNAL
+}
+#[cfg(test)]
+fn global() -> &'static Mutex<Option<Journal>> {
+    let _ = &GLOBAL_JOURNAL;
+    thread_local! {
+        static PER_TEST: &'static Mutex<Option<Journal>> = Box::leak(Box::new(Mutex::new(None)));
+    }
+    PER_TEST.with(|j| *j)
+}
 static SAVE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 static STATUS_MSG: Mutex<Option<(String, Instant)>> = Mutex::new(None);
 static LAST_SCAN: Mutex<Option<Instant>> = Mutex::new(None);
 
 pub fn with<R>(f: impl FnOnce(&mut Journal) -> R) -> R {
-    let mut lock = GLOBAL_JOURNAL.lock().unwrap();
+    let mut lock = global().lock().unwrap();
     let j = lock.get_or_insert_with(Journal::new);
     f(j)
 }
 
 pub fn reset_for_test() {
-    let mut lock = GLOBAL_JOURNAL.lock().unwrap();
+    let mut lock = global().lock().unwrap();
     *lock = None;
     SAVE_IN_FLIGHT.store(false, Ordering::SeqCst);
     let mut s = STATUS_MSG.lock().unwrap();
