@@ -27,6 +27,9 @@ use std::{cell::RefCell, collections::VecDeque, path::PathBuf, rc::Rc};
 
 const MAX_INSTANCES: usize = 16;
 const MAX_DIAGNOSTICS: usize = 128;
+#[path = "manager_profiles.rs"]
+mod named;
+pub(crate) use named::ProfileAction;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Status {
@@ -90,6 +93,7 @@ struct Entry {
 }
 
 pub(crate) struct Manager {
+    named: Option<named::NamedSession>,
     root: PathBuf,
     storage: Storage,
     device: wgpu::Device,
@@ -117,6 +121,7 @@ impl Manager {
         renderer: Rc<RefCell<WgpuRenderer>>,
     ) -> Self {
         let mut manager = Self {
+            named: None,
             root,
             storage: Storage::new(storage_root),
             device: device.clone(),
@@ -439,7 +444,17 @@ impl Manager {
         i.resources_retired = false;
         match Self::invoke(i, 2, Value::Nil, rendering) {
             Ok(value) => {
-                if let Err(e) = self.storage.save_profile(&entry.key, value) {
+                let result = if let Some(s) = &mut self.named {
+                    super::profile::encode(value)
+                        .map(|value| {
+                            s.data.addons.insert(entry.key.clone(), value);
+                            s.dirty = true;
+                        })
+                        .map_err(|e| e.to_string())
+                } else {
+                    self.storage.save_profile(&entry.key, value)
+                };
+                if let Err(e) = result {
                     self.diagnostic(Some(&entry.metadata.id), "storage", e);
                 }
             }
@@ -458,7 +473,16 @@ impl Manager {
             return;
         };
         i.resources_retired = false;
-        match self.storage.load_profile(&entry.key, &i.host.lua) {
+        let saved = if let Some(s) = &self.named {
+            s.data
+                .addons
+                .get(&entry.key)
+                .map(|value| super::profile::decode(&i.host.lua, value).map_err(|e| e.to_string()))
+                .transpose()
+        } else {
+            self.storage.load_profile(&entry.key, &i.host.lua)
+        };
+        match saved {
             Ok(Some(value)) => {
                 if let Err(e) = Self::invoke(i, 3, value, rendering) {
                     self.fail(entry, "load", e.to_string(), rendering);
@@ -547,7 +571,14 @@ impl Manager {
                     );
                 } else {
                     entry.enabled_intent = enabled;
-                    if let Err(e) = self.storage.set_enabled(&entry.key, enabled) {
+                    let result = if let Some(s) = &mut self.named {
+                        s.data.enabled.insert(entry.key.clone(), enabled);
+                        s.dirty = true;
+                        Ok(())
+                    } else {
+                        self.storage.set_enabled(&entry.key, enabled)
+                    };
+                    if let Err(e) = result {
                         self.diagnostic(Some(&entry.metadata.id), "storage", e);
                     }
                     if !enabled {
@@ -630,18 +661,23 @@ impl Manager {
             });
             let key = match Storage::key(&metadata) {
                 Ok(key) => {
-                    match self
-                        .storage
-                        .migrate_addon_with_scanner(&metadata, &mut sibling_scanner)
-                    {
-                        Ok(messages) => {
-                            for msg in messages {
-                                eprintln!("addons: [{}] {}", metadata.id, msg);
+                    if self.named.is_none() {
+                        match self
+                            .storage
+                            .migrate_addon_with_scanner(&metadata, &mut sibling_scanner)
+                        {
+                            Ok(messages) => {
+                                for msg in messages {
+                                    eprintln!("addons: [{}] {}", metadata.id, msg);
+                                }
                             }
-                        }
-                        Err(e) => {
-                            crate::say(&format!("addons: [{}] migration failed: {}", metadata.id, e));
-                            self.diagnostic(Some(&metadata.id), "storage", e);
+                            Err(e) => {
+                                crate::say(&format!(
+                                    "addons: [{}] migration failed: {}",
+                                    metadata.id, e
+                                ));
+                                self.diagnostic(Some(&metadata.id), "storage", e);
+                            }
                         }
                     }
                     key
@@ -651,7 +687,12 @@ impl Manager {
                     continue;
                 }
             };
-            let persisted = match self.storage.enabled(&key) {
+            let saved_intent = if let Some(s) = &self.named {
+                Ok(Some(s.data.enabled.get(&key).copied().unwrap_or(false)))
+            } else {
+                self.storage.enabled(&key)
+            };
+            let persisted = match saved_intent {
                 Ok(v) => v,
                 Err(e) => {
                     self.diagnostic(Some(&metadata.id), "storage", e);
@@ -740,6 +781,7 @@ impl Manager {
 
 #[cfg(test)]
 mod tests {
+    include!("manager_profiles_tests.rs");
     use super::*;
     use dear_imgui_rs::Context;
     use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo};
@@ -1966,7 +2008,9 @@ mod tests {
 
     #[test]
     fn forge_manager_successful_migration_is_silent_and_failed_migration_surfaces_diagnostic() {
-        let Some(mut gpu) = Gpu::new() else { return; };
+        let Some(mut gpu) = Gpu::new() else {
+            return;
+        };
         let scripts = Scratch::new();
         let config = Scratch::new();
 
@@ -2018,7 +2062,9 @@ mod tests {
             .filter(|d| d.id.as_deref() == Some("test_mig_fail") && d.phase == "storage")
             .collect();
         assert!(
-            fail_diags.iter().any(|d| d.message.contains("failed to write migrated profile")),
+            fail_diags
+                .iter()
+                .any(|d| d.message.contains("failed to write migrated profile")),
             "failed migration must appear in manager diagnostics: {fail_diags:?}"
         );
     }

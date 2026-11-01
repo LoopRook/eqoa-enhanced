@@ -12,6 +12,7 @@ use std::{
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Snapshot {
+    pub character: Option<super::named_profiles::CharacterSnapshot>,
     pub in_game: bool,
     pub start_menu: bool,
     pub ui_mode: u32,

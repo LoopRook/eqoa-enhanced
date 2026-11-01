@@ -43,6 +43,7 @@ pub(crate) mod manager;
 pub(crate) mod package;
 pub(crate) mod player;
 mod profile;
+pub(crate) mod named_profiles;
 pub(crate) mod quest_log;
 mod spike;
 pub(crate) mod storage;

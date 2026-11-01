@@ -614,6 +614,11 @@ impl Play {
                 || self.typing.is_some());
 
         crate::fork_ext::addons::host::Snapshot {
+            character: crate::fork_ext::addons::named_profiles::CharacterSnapshot::new(
+                connected,
+                &self.player.name,
+                self.dump.player.class,
+            ),
             in_game,
             start_menu,
             ui_mode,
@@ -789,6 +794,10 @@ impl Play {
 mod tests {
     use super::*;
     fn play() -> Play {
+        play_as("test")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn play_as(account: &str) -> Play {
         struct Nowhere;
         impl net::session::Datagrams for Nowhere {
             fn send_to(&mut self, _: &[u8], _: [u8; 4], _: u16) {}
@@ -800,12 +809,41 @@ mod tests {
             Box::new(Nowhere),
             ([127, 0, 0, 1], 5000),
             ([127, 0, 0, 1], 10070),
-            "test",
+            account,
             [0; 32],
         )
         .unwrap();
         session.self_id = Some(0x100);
         Play::new(session, net::session::Player::default(), Box::default())
+    }
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn mod_profiles_world_entry_uses_character_not_account_and_survives_loading() {
+        use crate::fork_ext::addons::named_profiles::{Character, Document, Store};
+        let account = "ACCOUNT_CANARY_NOT_A_CHARACTER";
+        let mut p = play_as(account);
+        p.player.name = "Ari".into();
+        p.dump.player.class = 3;
+        // The game has a connected character before HUD/HP/loading are ready.
+        let snapshot = p.forge_snapshot(None);
+        assert!(!snapshot.in_game);
+        let identity = Character::new("server.example", snapshot.character.unwrap()).unwrap();
+        assert_eq!(identity.name, "ari");
+        assert_eq!(identity.class, 3);
+        let root =
+            std::env::temp_dir().join(format!("eqoa-profile-identity-{}", std::process::id()));
+        let store = Store::new(Some(root.clone()));
+        // Test reruns may reuse the process id, so a valid existing fixture is fine.
+        if store.read("Healer").is_err() {
+            store.create("Healer", &Document::empty()).unwrap();
+        }
+        store.bind(&identity, "Healer", false).unwrap();
+        let bytes = std::fs::read_to_string(root.join("addons/profiles/characters.json")).unwrap();
+        assert!(!bytes.contains(account));
+        assert!(bytes.contains("ari"));
+        p.session.self_id = None;
+        assert!(p.forge_snapshot(None).character.is_none());
+        let _ = std::fs::remove_dir_all(root);
     }
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
