@@ -48,5 +48,8 @@ pub(crate) mod quest_log;
 mod spike;
 pub(crate) mod storage;
 mod textures;
+pub(crate) mod weapon_sets;
+#[cfg(test)]
+mod weapon_sets_tests;
 #[cfg(test)]
 mod wereoxxs_test;

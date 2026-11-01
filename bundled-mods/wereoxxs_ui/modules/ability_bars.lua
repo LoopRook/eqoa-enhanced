@@ -193,6 +193,9 @@ local function DrawSlot(draw_list, id, x, y, slot, config)
     if slot.tooltip ~= nil and Paint.HitRegion(id, x, y, size, size) then
         Paint.Tooltip(slot.tooltip)
     end
+    if slot.on_click and Paint.HitButton(id, x, y, size, size) then
+        slot.on_click()
+    end
 end
 
 --- Draws one bar at the current cursor position.
