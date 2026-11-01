@@ -144,7 +144,9 @@ pub fn fit(text: &str, max: usize) -> String {
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{Key, caught, clean_exit, click, crash, draw, is_open, is_report_key, key, key_of, restore_stderr, set_gpu, set_shot, start, wants_shot};
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use native::{Button, Kind, Sent, Status, clean_noted, dir, ended_without_closing_for_test, has_noted_accounts, tail};
+pub(crate) use native::{Button, Kind, Sent, Status, clean_noted, dir, has_noted_accounts, tail};
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use native::ended_without_closing_for_test;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
