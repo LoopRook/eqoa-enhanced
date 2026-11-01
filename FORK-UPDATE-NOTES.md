@@ -4,6 +4,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## 2026-11-01 · Unreleased
 
+- Fixed missed cooldown dimming and timers in addon ability bars, including short cooldowns such as Feed.
 - Avoid's Modern UI now stays enabled at level 60 after a recoverable window error; the Addon Manager shows a warning instead of disabling the mod.
 - New characters can use a shared Tank, Healer, Melee or Caster mod profile, or make their own copy. Default is selectable again, and the Addon Manager shows which profile is active.
 - Mod profiles now use one set of Save/Load controls, pause at character select, and load a fresh setup for each character when entering the world.

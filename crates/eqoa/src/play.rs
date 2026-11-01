@@ -31,7 +31,6 @@ mod duelplay;
 
 #[path = "fork_ext/play.rs"]
 mod fork_hooks;
-
 use crate::walker::{Placing, Spawn, Walker};
 use esf::Library;
 use net::entity::{Entities, MAX_SLOTS, RETAIL_SLOTS};
@@ -2802,6 +2801,7 @@ impl Play {
                 }
                 Event::AbilityLockout { index, token, lockout } => {
                     // Msg00CD
+                    fork_hooks::ability_lockout(index, lockout);
                     self.ability_token = token;
                     if let Some(a) = self.abilities.values_mut().find(|a| a.display_index == index as i64) {
                         a.lockout = lockout as i64;
