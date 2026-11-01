@@ -3260,7 +3260,7 @@ impl App {
         g.renderer.scale.resolve(&mut enc, &target);
         #[cfg(not(target_arch = "wasm32"))]
         g.forge_runtime.draw(&g.window, &g.device, &g.queue, g.config.format, &mut enc, &target,
-            crate::fork_ext::addons::host::Snapshot::default());
+            crate::fork_ext::addons::host::Snapshot::default(), None);
         g.queue.submit([enc.finish()]);
         #[cfg(not(target_arch = "wasm32"))]
         report_shot(g, frame.as_ref());
@@ -5509,7 +5509,7 @@ impl App {
                 {
                     let snapshot = self.play.as_ref().map_or_else(Default::default, |p| p.forge_snapshot(self.walker.as_ref()));
                     g.forge_runtime.draw(&g.window, &g.device, &g.queue, g.config.format, &mut enc, &target,
-                        snapshot);
+                        snapshot, self.booted.as_ref().and_then(|s| s.server.as_deref()));
                 }
                 mark(&mut self.perf, 11);
                 let sent = g.queue.submit([enc.finish()]);

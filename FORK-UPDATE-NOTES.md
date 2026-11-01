@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-01 · Unreleased
+
+- Save named mod profiles for each character or class, including window positions, so separate clients can keep their own setups.
+
 ## 2026-11-01 · Enhanced 0.3.0
 
 - Two more FrontiersForge mods now run natively, unchanged: ARPG UI (health and power orbs, action tray) and Avoid's Modern UI (player, target, group and quest panels). Like Wereoxxs UI, they step aside for game menus. Turn on one at a time in the Addon Manager.
