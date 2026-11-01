@@ -168,11 +168,18 @@ fn rounding(v: Option<f32>) -> Result<f32> {
 }
 fn flags(v: Option<i32>) -> Result<i32> {
     let v = v.unwrap_or(0);
-    // Only rectangle corner flags; low bits include native assertion traps.
-    if v & !0x1f0 != 0 {
+    // Pinned 1.92.7 Closed=1; native 1.92.8 moved it to bit 9. Passing
+    // legacy bit 0 through would assert in AddImageRounded/PathRect.
+    // Bits 1..3 remain invalid legacy corner flags and are rejected.
+    if v & !0x1f1 != 0 {
         Err(mlua::Error::runtime("unsupported rectangle draw flags"))
     } else {
-        Ok(v)
+        Ok((v & !1)
+            | if v & 1 != 0 {
+                sys::ImDrawFlags_Closed as i32
+            } else {
+                0
+            })
     }
 }
 fn segments(v: Option<i32>, ngon: bool) -> Result<(i32, usize)> {
@@ -198,7 +205,8 @@ fn texture_ref(val: mlua::Value) -> Result<sys::ImTextureRef_c> {
     match val {
         mlua::Value::UserData(ud) => super::super::textures::Textures::raw(&ud),
         mlua::Value::LightUserData(lud) => Ok(sys::ImTextureRef_c {
-            _TexData: lud.0.cast(),
+            // Legacy sol2 void* textures are IDs, never ImTextureData pointers.
+            _TexData: std::ptr::null_mut(),
             _TexID: lud.0 as u64,
         }),
         _ => Err(mlua::Error::runtime("expected texture handle or pointer")),
@@ -206,6 +214,35 @@ fn texture_ref(val: mlua::Value) -> Result<sys::ImTextureRef_c> {
 }
 
 pub(super) fn methods<M: UserDataMethods<DrawList>>(m: &mut M) {
+    m.add_method(
+        "AddImageRounded",
+        |_,
+         d,
+         (tex, a, b, uv_a, uv_b, col, r, f): (
+            mlua::Value,
+            AnyUserData,
+            AnyUserData,
+            AnyUserData,
+            AnyUserData,
+            i64,
+            f32,
+            Option<i32>,
+        )| {
+            let (tex, a, b, uv_a, uv_b, col, r, f) = (
+                texture_ref(tex)?,
+                point(a)?,
+                point(b)?,
+                point(uv_a)?,
+                point(uv_b)?,
+                color(col)?,
+                rounding(Some(r))?,
+                flags(f)?,
+            );
+            d.emit_estimate(4, if r > 0.0 { Some(r) } else { None }, |p| unsafe {
+                sys::ImDrawList_AddImageRounded(p, tex, a, b, uv_a, uv_b, col, r, f)
+            })
+        },
+    );
     m.add_method(
         "AddText",
         |_lua, d, args: mlua::MultiValue| {
@@ -393,9 +430,7 @@ pub(super) fn methods<M: UserDataMethods<DrawList>>(m: &mut M) {
     );
 
     m.add_method("PopClipRect", |_, d, ()| {
-        d.emit(0, |p| unsafe {
-            sys::ImDrawList_PopClipRect(p)
-        })
+        d.emit(0, |p| unsafe { sys::ImDrawList_PopClipRect(p) })
     });
 
     m.add_method(

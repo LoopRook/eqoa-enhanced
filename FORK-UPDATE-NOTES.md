@@ -5,6 +5,8 @@ Upstream changes remain in UPDATE-NOTES.md.
 ## 2026-10-31 · Unreleased
 
 - Problem reports and crash reports now save directly to your Desktop as a zip file with diagnostics and logs, opening your file manager with the report ready to share.
+- Adds native support for the unchanged ARPG UI and Avoids Modern UI mods, including rounded health orbs and journal titles with saved quest notes. Live playtesting is pending.
+- Addon settings use fewer disk writes, and addon quest journals can appear before health data arrives.
 
 ## 2026-10-31 · Enhanced 0.2.1
 

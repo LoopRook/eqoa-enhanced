@@ -36,6 +36,14 @@ impl Storage {
         identity(&addon.entry, &addon.package_root, &addon.id)
     }
 
+    pub fn data_dir(&self, addon: &DiscoveredAddon) -> Result<Option<PathBuf>, String> {
+        let key = Self::key(addon)?;
+        Ok(self
+            .root
+            .as_ref()
+            .map(|root| root.join(format!("{key}-files"))))
+    }
+
     pub fn enabled(&self, key: &str) -> Result<Option<bool>, String> {
         validate_key(key)?;
         Ok(self.registry()?.get(key).and_then(Json::as_bool))

@@ -21,6 +21,7 @@ pub(crate) struct Snapshot {
     pub combat: super::combat::CombatSnapshot,
     pub input: super::input::InputSnapshot,
     pub effects: super::effects::EffectsSnapshot,
+    pub journal: super::quest_log::JournalSnapshot,
 }
 impl Snapshot {
     pub fn managed(mut self) -> Self {
@@ -34,6 +35,7 @@ impl Snapshot {
             self.combat = super::combat::CombatSnapshot::default();
             self.input = super::input::InputSnapshot::default();
             self.effects = super::effects::EffectsSnapshot::default();
+            self.journal = super::quest_log::JournalSnapshot::default();
         }
         self.in_game &= self.health.is_available();
         self
@@ -47,6 +49,14 @@ pub(crate) struct Host {
     fatal: Rc<Cell<bool>>,
     addon: Option<DiscoveredAddon>,
     host_registry: Rc<RefCell<HashMap<String, Value>>>,
+}
+
+impl Drop for Host {
+    fn drop(&mut self) {
+        for error in super::file_io::close_all(&self.lua) {
+            eprintln!("{error}");
+        }
+    }
 }
 
 struct BaseHost {
@@ -143,7 +153,10 @@ fn create_base_host() -> Result<BaseHost> {
         "GetExpRequiredForLevel",
         lua.create_function(|_, level: i32| {
             if (1..=59).contains(&level) {
-                Ok(Some(crate::hud::exp_for_level(level + 1)))
+                // Pinned Forge util.lua:59-73 uses the original 28/25
+                // table through 59; the native HUD changes its formula at 51.
+                let next = (level + 1) as u32;
+                Ok(Some(next.pow(3) * (level as u32 * 28 + 25)))
             } else {
                 Ok(None)
             }
@@ -152,6 +165,28 @@ fn create_base_host() -> Result<BaseHost> {
 
     lua.set_named_registry_value("forge_callbacks", lua.create_table()?)?;
     let forge = lua.create_table()?;
+    lua.set_named_registry_value("forge_log", lua.create_table()?)?;
+    forge.set(
+        "Log",
+        lua.create_function(|lua, (level, message): (i32, String)| {
+            let messages: Table = lua.named_registry_value("forge_log")?;
+            if messages.raw_len() < 64 {
+                let bounded: String = message.chars().take(4096).collect();
+                messages.raw_push(format!("Lua log (level {level}): {bounded}"))?;
+            }
+            Ok(())
+        })?,
+    )?;
+    util.set(
+        "LogError",
+        lua.create_function(|lua, message: String| {
+            let forge: Table = lua.globals().get("UiForge")?;
+            if let Some(log) = forge.get::<Option<Function>>("Log")? {
+                log.call::<()>((2, message))?;
+            }
+            Ok(())
+        })?,
+    )?;
     let types = lua.create_table()?;
     for (i, name) in ["Settings", "DisableScript", "Save", "Load", "OnEject"]
         .iter()
@@ -211,6 +246,17 @@ fn create_base_host() -> Result<BaseHost> {
 }
 
 impl Host {
+    pub fn drain_logs(&self) -> Result<Vec<String>> {
+        let messages: Table = self.lua.named_registry_value("forge_log")?;
+        let mut output = messages
+            .sequence_values::<String>()
+            .collect::<Result<Vec<_>>>()?;
+        self.lua
+            .set_named_registry_value("forge_log", self.lua.create_table()?)?;
+        output.extend(super::file_io::drain_diagnostics(&self.lua));
+        Ok(output)
+    }
+
     pub fn for_addon(addon: &DiscoveredAddon) -> Result<Self> {
         let base = create_base_host()?;
         let host_registry = Rc::new(RefCell::new(HashMap::new()));
@@ -244,6 +290,21 @@ impl Host {
         super::combat::install_combat_adapter(&host)?;
         super::input::install_input_adapter(&host)?;
         super::effects::install_effects_adapter(&host)?;
+        super::quest_log::install(&host)?;
+        let forge: Table = host.lua.globals().get("UiForge")?;
+        forge.set(
+            "scripts_path",
+            addon.script_root.to_string_lossy().replace("\\\\?\\", ""),
+        )?;
+        forge.set(
+            "resources_path",
+            addon
+                .script_root
+                .join("resources")
+                .to_string_lossy()
+                .replace("\\\\?\\", ""),
+        )?;
+        super::file_io::install(&host, addon, None)?;
         Ok(host)
     }
 
@@ -262,7 +323,8 @@ impl Host {
                 } else if name == "os" {
                     Ok(Value::Table(os_t.clone()))
                 } else if name == "frontiers_forge.icon" {
-                    if let Ok(icon_t) = lua.named_registry_value::<mlua::Table>("__forge_icon_mod") {
+                    if let Ok(icon_t) = lua.named_registry_value::<mlua::Table>("__forge_icon_mod")
+                    {
                         Ok(Value::Table(icon_t))
                     } else {
                         Err(mlua::Error::runtime("frontiers_forge.icon not attached"))

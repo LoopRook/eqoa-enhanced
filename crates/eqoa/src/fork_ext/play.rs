@@ -605,6 +605,10 @@ impl Play {
             combat,
             input: crate::fork_ext::addons::input::InputSnapshot::default(),
             effects: crate::fork_ext::addons::effects::EffectsSnapshot::default(),
+            journal: crate::fork_ext::addons::quest_log::JournalSnapshot::from_titles(
+                in_game,
+                &self.quests.titles,
+            ),
         }
     }
 }
@@ -737,6 +741,38 @@ mod tests {
         .unwrap();
         session.self_id = Some(0x100);
         Play::new(session, net::session::Player::default(), Box::default())
+    }
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_modern_journal_snapshot_uses_retail_titles_and_clears_on_disconnect() {
+        let mut p = play();
+        p.loading.wait.take();
+        p.hud = Some((
+            crate::ui::Vui::new(Default::default(), Default::default(), vec![]),
+            Default::default(),
+            crate::hud::Hud::new(),
+        ));
+        p.quests.add("Bat Eyes".encode_utf16().collect());
+        p.quests.add("Caf\u{e9}".encode_utf16().collect());
+        p.session.quest_progress.push(net::session::TrackedQuest {
+            name: "Wrong tracker title".into(),
+            goals: vec![],
+        });
+        let journal = p.forge_snapshot(None).journal;
+        assert_eq!(journal.count, 2);
+        assert_eq!(
+            &journal.titles[0][..8],
+            "Bat Eyes".encode_utf16().collect::<Vec<_>>().as_slice()
+        );
+        p.quests.remove(0);
+        let journal = p.forge_snapshot(None).journal;
+        assert_eq!(journal.count, 1);
+        assert_eq!(
+            &journal.titles[0][..4],
+            "Caf\u{e9}".encode_utf16().collect::<Vec<_>>().as_slice()
+        );
+        p.session.self_id = None;
+        assert_eq!(p.forge_snapshot(None).journal.count, 0);
     }
     #[test]
     #[cfg(not(target_arch = "wasm32"))]

@@ -26,6 +26,7 @@ pub(crate) mod combat;
 pub(crate) mod discovery;
 pub(crate) mod effects;
 pub(crate) mod entity;
+mod file_io;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod fonts;
 #[cfg(test)]
@@ -34,14 +35,15 @@ pub(crate) mod group;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod health;
 pub(crate) mod host;
-pub(crate) mod icons;
 #[cfg(test)]
 mod icon_tests;
+pub(crate) mod icons;
 pub(crate) mod input;
 pub(crate) mod manager;
 pub(crate) mod package;
 pub(crate) mod player;
 mod profile;
+pub(crate) mod quest_log;
 mod spike;
 pub(crate) mod storage;
 mod textures;

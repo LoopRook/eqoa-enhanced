@@ -21,6 +21,152 @@ use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 struct ScratchDir(PathBuf);
 
+#[test]
+fn forge_review_reference_requires_explicit_environment() {
+    if std::env::var_os("EQOA_FORGE_REFERENCE").is_none() {
+        assert!(
+            std::panic::catch_unwind(find_wereoxxs_scripts_root).is_err(),
+            "unset reference must fail rather than silently find a developer folder"
+        );
+    }
+}
+
+fn modern_package(id: &str) {
+    let root = find_wereoxxs_scripts_root();
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+    let addon = discovery::discover(&root)
+        .addons
+        .into_iter()
+        .find(|a| a.id == id)
+        .unwrap();
+    let host = Host::for_addon(&addon).unwrap();
+    let data = ScratchDir::new();
+    super::file_io::install(&host, &addon, Some(data.0.clone())).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, &addon).unwrap();
+    let fonts = Rc::new(RefCell::new(super::fonts::FontBank::new(
+        0,
+        super::fonts::current_context_epoch(),
+    )));
+    super::fonts::FontBank::install_for_addon(&fonts, &host.lua, &addon).unwrap();
+    let mut snapshot = rich_in_game_snapshot();
+    snapshot.player.available = true;
+    snapshot.effects.count = 2;
+    snapshot.entities.count = 1;
+    for i in 0..5 {
+        snapshot.abilities.bars[0].slots[i].source_type = super::ability::ABILITY_SOURCE_TAG;
+        snapshot.abilities.bars[0].slots[i].source_index = i as u32 + 1;
+        snapshot.abilities.abilities[i].display_index = i as u32;
+    }
+    snapshot.journal = super::quest_log::JournalSnapshot::from_titles(
+        true,
+        &[
+            "Bat Eyes".encode_utf16().collect(),
+            "The Militia".encode_utf16().collect(),
+        ],
+    );
+    host.snapshot.set(snapshot);
+    for _ in 0..4 {
+        gpu.begin();
+        let result = bridge.invoke(|| host.run_addon(&addon));
+        gpu.render();
+        let logs = host.drain_logs().unwrap();
+        assert!(
+            result.is_ok() && logs.is_empty(),
+            "{id}: {result:?}, logs: {logs:?}"
+        );
+    }
+    gpu.begin();
+    let result = bridge.invoke(|| {
+        host.execute("ImGui.Begin('settings')")?;
+        host.callback(0, mlua::Value::Nil)?;
+        if id == "avoids_modern_ui" {
+            host.execute("for key,mod in pairs(ModPack) do if mod.Settings then ImGui.PushID(key);mod.Settings();ImGui.PopID() end end")?;
+        }
+        host.execute("ImGui.End()")
+    });
+    gpu.render();
+    result.unwrap();
+    assert!(
+        host.drain_logs().unwrap().is_empty(),
+        "{id}: swallowed settings error"
+    );
+    let saved = host.callback(2, mlua::Value::Nil).unwrap();
+    host.callback(3, saved).unwrap();
+    host.callback(1, mlua::Value::Nil).unwrap();
+    host.callback(4, mlua::Value::Nil).unwrap();
+    assert!(
+        host.drain_logs().unwrap().is_empty(),
+        "{id}: lifecycle error"
+    );
+    let diags = textures.borrow_mut().drain_diagnostics();
+    assert!(
+        diags.iter().all(|d| !d.contains("unsupported")),
+        "{diags:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
+fn forge_modern_arpg_unchanged_package() {
+    modern_package("arpg_ui");
+}
+
+#[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
+fn forge_modern_avoids_unchanged_package() {
+    modern_package("avoids_modern_ui");
+}
+
+#[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
+fn forge_modern_quest_log_and_util_surface() {
+    let root = find_wereoxxs_scripts_root();
+    let addon = discovery::discover(&root)
+        .addons
+        .into_iter()
+        .find(|a| a.id == "avoids_modern_ui")
+        .unwrap();
+    let host = Host::for_addon(&addon).unwrap();
+    host.execute("local q=require('frontiers_forge.quest_log');assert(q.max_quests==8 and q.GetCount()==0);assert(q.GetQuestByIndex(-1)==nil and q.GetQuestByIndex(0)==nil);assert(q.Quests()()==nil)").unwrap();
+    let mut snap = rich_in_game_snapshot();
+    snap.journal = super::quest_log::JournalSnapshot::from_titles(
+        true,
+        &[
+            "Bat Eyes".encode_utf16().collect(),
+            "Caf\u{e9} \u{1f409}".encode_utf16().collect(),
+            Vec::new(),
+        ],
+    );
+    host.snapshot.set(snap);
+    host.execute("local q=require('frontiers_forge.quest_log');assert(q.GetCount()==3);assert(q.GetQuestByIndex(0):GetName()=='Bat Eyes');assert(q.GetQuestByIndex(1):GetName()=='Caf\u{e9} \u{1f409}');assert(q.GetQuestByIndex(2):GetName()=='');assert(q.GetQuestByIndex(-1)==nil and q.GetQuestByIndex(3)==nil);local n=0;for i,quest in q.Quests() do assert(i==n);assert(quest:GetName()==q.GetQuestByIndex(i):GetName());n=n+1 end;assert(n==3)").unwrap();
+    snap.journal.count = 9;
+    host.snapshot.set(snap);
+    host.execute("assert(require('frontiers_forge.quest_log').GetCount()==0)")
+        .unwrap();
+    snap.in_game = false;
+    snap.journal.count = 3;
+    host.snapshot.set(snap.managed());
+    host.execute("assert(require('frontiers_forge.quest_log').GetCount()==0)")
+        .unwrap();
+}
+
+#[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
+fn forge_modern_scripts_path_and_file_io_surface() {
+    let root = find_wereoxxs_scripts_root();
+    let addon = discovery::discover(&root)
+        .addons
+        .into_iter()
+        .find(|a| a.id == "avoids_modern_ui")
+        .unwrap();
+    let host = Host::for_addon(&addon).unwrap();
+    host.execute("assert(type(UiForge.scripts_path)=='string');assert(type(io.open)=='function');assert(type(os.remove)=='function');assert(select('#',require('frontiers_forge.util').LogError('test error'))==0)").unwrap();
+}
+
 impl ScratchDir {
     fn new() -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -40,19 +186,20 @@ impl Drop for ScratchDir {
     }
 }
 
-fn find_wereoxxs_scripts_root() -> Option<PathBuf> {
-    for cand in [
-        PathBuf::from("run/forge-compat-reference/scripts"),
-        PathBuf::from(
-            "C:/Users/hocka/Github Projects/EQOA Native Rust/run/forge-compat-reference/scripts",
-        ),
-        PathBuf::from("../../run/forge-compat-reference/scripts"),
-    ] {
-        if cand.join("wereoxxs_ui/wereoxxs_ui.lua").is_file() {
-            return cand.canonicalize().ok();
-        }
-    }
-    None
+// Fixture tests are explicitly ignored in plain CI runs. Opting in with
+// --include-ignored requires a valid pinned checkout; no developer fallback.
+fn find_wereoxxs_scripts_root() -> PathBuf {
+    let reference = std::env::var_os("EQOA_FORGE_REFERENCE")
+        .expect("needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)");
+    let scripts = PathBuf::from(reference).join("scripts");
+    assert!(
+        scripts.join("wereoxxs_ui/wereoxxs_ui.lua").is_file(),
+        "EQOA_FORGE_REFERENCE must contain the pinned scripts tree: {}",
+        scripts.display()
+    );
+    scripts
+        .canonicalize()
+        .expect("canonical pinned reference scripts")
 }
 
 fn copy_str_to_array<const N: usize>(s: &str, arr: &mut [u8; N], len: &mut u8) {
@@ -277,11 +424,9 @@ fn rich_in_game_snapshot() -> Snapshot {
 }
 
 #[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
 fn forge_wereoxxs_discovery_and_manifest() {
-    let Some(root) = find_wereoxxs_scripts_root() else {
-        eprintln!("SKIP forge_wereoxxs_discovery_and_manifest: reference scripts root not found");
-        return;
-    };
+    let root = find_wereoxxs_scripts_root();
 
     let disc = discovery::discover(&root);
     assert!(!disc.addons.is_empty(), "Discovery must locate addons");
@@ -309,11 +454,9 @@ fn forge_wereoxxs_discovery_and_manifest() {
 }
 
 #[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
 fn forge_wereoxxs_in_game_full_execution_and_lifecycle() {
-    let Some(root) = find_wereoxxs_scripts_root() else {
-        eprintln!("SKIP forge_wereoxxs_in_game_full_execution: reference scripts root not found");
-        return;
-    };
+    let root = find_wereoxxs_scripts_root();
 
     let disc = discovery::discover(&root);
     let addon = disc
@@ -463,11 +606,9 @@ fn forge_wereoxxs_in_game_full_execution_and_lifecycle() {
 }
 
 #[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
 fn forge_wereoxxs_headless_gpu_manager_pipeline() {
-    let Some(root) = find_wereoxxs_scripts_root() else {
-        eprintln!("SKIP forge_wereoxxs_gpu_manager: reference scripts root not found");
-        return;
-    };
+    let root = find_wereoxxs_scripts_root();
 
     let Some(mut gpu) = TestGpu::new() else {
         return;
@@ -534,13 +675,9 @@ fn forge_wereoxxs_headless_gpu_manager_pipeline() {
 }
 
 #[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
 fn forge_wereoxxs_complete_symbol_surface_contract() {
-    let Some(root) = find_wereoxxs_scripts_root() else {
-        eprintln!(
-            "SKIP forge_wereoxxs_complete_symbol_surface_contract: reference scripts root not found"
-        );
-        return;
-    };
+    let root = find_wereoxxs_scripts_root();
     let disc = discovery::discover(&root);
     let addon = disc
         .addons
@@ -615,13 +752,9 @@ fn forge_wereoxxs_complete_symbol_surface_contract() {
 }
 
 #[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
 fn forge_wereoxxs_all_windows_rendered_without_drawlist_nil_errors() {
-    let Some(root) = find_wereoxxs_scripts_root() else {
-        eprintln!(
-            "SKIP forge_wereoxxs_all_windows_rendered_without_drawlist_nil_errors: reference scripts root not found"
-        );
-        return;
-    };
+    let root = find_wereoxxs_scripts_root();
     let disc = discovery::discover(&root);
     let addon = disc
         .addons
@@ -688,6 +821,7 @@ fn forge_wereoxxs_all_windows_rendered_without_drawlist_nil_errors() {
 }
 
 #[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
 fn forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_elements() {
     use super::{
         runtime::{Action, FramePlan, dispatch_frame},
@@ -703,12 +837,7 @@ fn forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_el
     let _reset = Reset;
     publish(false);
 
-    let Some(root) = find_wereoxxs_scripts_root() else {
-        eprintln!(
-            "SKIP forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_elements: reference scripts root not found"
-        );
-        return;
-    };
+    let root = find_wereoxxs_scripts_root();
     let Some(mut gpu) = TestGpu::new() else {
         return;
     };
@@ -976,16 +1105,12 @@ fn create_test_play() -> crate::play::Play {
 }
 
 #[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
 fn forge_claimed_enter_focuses_addon_input_and_say_window_stays_closed() {
     use winit::keyboard::{Key, NamedKey};
 
     super::input::reset_input_state();
-    let Some(root) = find_wereoxxs_scripts_root() else {
-        eprintln!(
-            "SKIP forge_claimed_enter_focuses_addon_input_and_say_window_stays_closed: reference scripts root not found"
-        );
-        return;
-    };
+    let root = find_wereoxxs_scripts_root();
     let disc = discovery::discover(&root);
     let addon = disc
         .addons
@@ -1083,16 +1208,12 @@ fn forge_claimed_enter_focuses_addon_input_and_say_window_stays_closed() {
 }
 
 #[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
 fn forge_unclaimed_enter_opens_say_window_as_before() {
     use winit::keyboard::{Key, NamedKey};
 
     super::input::reset_input_state();
-    let Some(root) = find_wereoxxs_scripts_root() else {
-        eprintln!(
-            "SKIP forge_unclaimed_enter_opens_say_window_as_before: reference scripts root not found"
-        );
-        return;
-    };
+    let root = find_wereoxxs_scripts_root();
     let disc = discovery::discover(&root);
     let addon = disc
         .addons
@@ -1158,16 +1279,12 @@ fn forge_unclaimed_enter_opens_say_window_as_before() {
 }
 
 #[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
 fn forge_addon_focused_typing_does_not_leak_keys_to_game() {
     use winit::keyboard::{Key, NamedKey, SmolStr};
 
     super::input::reset_input_state();
-    let Some(root) = find_wereoxxs_scripts_root() else {
-        eprintln!(
-            "SKIP forge_addon_focused_typing_does_not_leak_keys_to_game: reference scripts root not found"
-        );
-        return;
-    };
+    let root = find_wereoxxs_scripts_root();
     let disc = discovery::discover(&root);
     let addon = disc
         .addons
@@ -1267,16 +1384,12 @@ fn forge_addon_focused_typing_does_not_leak_keys_to_game() {
 }
 
 #[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
 fn forge_claimed_unsuppressed_key_delivers_to_addon_and_reaches_game() {
     use winit::keyboard::{Key, SmolStr};
 
     super::input::reset_input_state();
-    let Some(root) = find_wereoxxs_scripts_root() else {
-        eprintln!(
-            "SKIP forge_claimed_unsuppressed_key_delivers_to_addon_and_reaches_game: reference scripts root not found"
-        );
-        return;
-    };
+    let root = find_wereoxxs_scripts_root();
     let disc = discovery::discover(&root);
     let addon = disc
         .addons
@@ -1332,16 +1445,12 @@ fn forge_claimed_unsuppressed_key_delivers_to_addon_and_reaches_game() {
 }
 
 #[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
 fn forge_dialog_receives_enter_even_when_addon_suppresses_enter() {
     use winit::keyboard::{Key, NamedKey};
 
     super::input::reset_input_state();
-    let Some(root) = find_wereoxxs_scripts_root() else {
-        eprintln!(
-            "SKIP forge_dialog_receives_enter_even_when_addon_suppresses_enter: reference scripts root not found"
-        );
-        return;
-    };
+    let root = find_wereoxxs_scripts_root();
     let disc = discovery::discover(&root);
     let addon = disc
         .addons
