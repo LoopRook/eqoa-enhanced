@@ -36,6 +36,8 @@ impl WeaponSetsSnapshot {
         inv: &net::dump::ItemList,
         menus: &crate::hudmenu::HudMenus,
         ready: bool,
+        words: &vi::strtab::StringTable,
+        language: i32,
     ) -> Self {
         if !ready || !gear.on {
             return Self::default();
@@ -45,7 +47,7 @@ impl WeaponSetsSnapshot {
             selected: menus.menus[3].sel,
             slots: std::array::from_fn(|i| {
                 let populated = i == crate::gear::BARE_HANDS as usize || !gear.empty(i as i64);
-                let text = gear.name(i as i64, &Default::default(), 0);
+                let text = gear.name(i as i64, words, language);
                 let mut name = [0; 64];
                 let mut len = text.len().min(name.len());
                 while !text.is_char_boundary(len) {

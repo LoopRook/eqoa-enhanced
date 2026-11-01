@@ -647,12 +647,20 @@ impl Play {
             group,
             entities,
             abilities,
-            weapon_sets: crate::fork_ext::addons::weapon_sets::WeaponSetsSnapshot::from_native(
-                &self.gear,
-                &self.dump.inventory,
-                &self.hud_menus,
-                in_game,
-            ),
+            weapon_sets: self
+                .hud
+                .as_ref()
+                .map(|(vui, _, _)| {
+                    crate::fork_ext::addons::weapon_sets::WeaponSetsSnapshot::from_native(
+                        &self.gear,
+                        &self.dump.inventory,
+                        &self.hud_menus,
+                        in_game,
+                        &vui.words,
+                        vui.language,
+                    )
+                })
+                .unwrap_or_default(),
             chat,
             combat,
             input: crate::fork_ext::addons::input::InputSnapshot::default(),
@@ -849,6 +857,8 @@ mod tests {
                 &addon.dump.inventory,
                 &addon.hud_menus,
                 true,
+                &Default::default(),
+                0,
             );
         host.snapshot.set(snapshot);
         host.execute("assert(eqoa.WeaponSets.Use(1))").unwrap();

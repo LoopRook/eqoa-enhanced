@@ -25,7 +25,7 @@ fn weapon_sets_api_returns_native_icons_selection_and_availability() {
     };
     let mut menus = crate::hudmenu::HudMenus::default();
     menus.menus[3].sel = 4;
-    let native = WeaponSetsSnapshot::from_native(&gear, &inv, &menus, true);
+    let native = WeaponSetsSnapshot::from_native(&gear, &inv, &menus, true, &Default::default(), 0);
     host.snapshot.set(Snapshot {
         weapon_sets: native,
         ..Default::default()
@@ -47,9 +47,15 @@ fn weapon_sets_api_returns_native_icons_selection_and_availability() {
         .unwrap();
     host.execute("local w=eqoa.WeaponSets; assert(w.IsAvailable());assert(w.GetCount()==5);assert(w.GetSelected()==4);assert(w.IsEmpty(0));assert(not w.IsEmpty(2));assert(w.GetIcon(2)==expected);assert(w.GetIcon(0)==nil);assert(w.GetIcon(-1)==nil);assert(w.GetIcon(5)==nil);assert(w.GetName(2)=='Bow');assert(not w.Use(0));assert(not w.Use(5));assert(w.Use(2))").unwrap();
     assert_eq!(super::weapon_sets::take_pending(), vec![2]);
-    assert!(!WeaponSetsSnapshot::from_native(&gear, &inv, &menus, false).available);
+    assert!(
+        !WeaponSetsSnapshot::from_native(&gear, &inv, &menus, false, &Default::default(), 0)
+            .available
+    );
     gear.on = false;
-    assert!(!WeaponSetsSnapshot::from_native(&gear, &inv, &menus, true).available);
+    assert!(
+        !WeaponSetsSnapshot::from_native(&gear, &inv, &menus, true, &Default::default(), 0)
+            .available
+    );
 }
 
 // Execute the actual bundled window function with its real slot renderer. The
@@ -135,4 +141,29 @@ fn weapon_sets_wereoxxs_toggle_off_draws_nothing() {
 #[test]
 fn weapon_sets_wereoxxs_without_eqoa_preserves_original_bars() {
     wereoxxs_bar(true, false);
+}
+
+#[test]
+fn review_regression_weapon_sets_uses_native_bare_hands_word() {
+    use super::{host::Snapshot, weapon_sets::WeaponSetsSnapshot};
+    let host = Host::new().unwrap();
+    let mut gear = crate::gear::Gear::default();
+    gear.on = true;
+    let mut lines = vec!["x"; 159];
+    lines[158] = "server bare hands";
+    let words = vi::strtab::StringTable::parse(lines.join("\n").as_bytes()).unwrap();
+    let native = WeaponSetsSnapshot::from_native(
+        &gear,
+        &Default::default(),
+        &Default::default(),
+        true,
+        &words,
+        0,
+    );
+    host.snapshot.set(Snapshot {
+        weapon_sets: native,
+        ..Default::default()
+    });
+    host.execute("assert(eqoa.WeaponSets.GetName(4)=='server bare hands')")
+        .unwrap();
 }
