@@ -1406,4 +1406,79 @@ mod tests {
         assert_eq!(snap.ui_mode, 0);
         assert!(!snap.ui_busy);
     }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_minimap_stays_up_in_chat_history_mode_when_chat_claimed() {
+        use crate::fork_ext::addons::health::InstanceToken;
+        use crate::fork_ext::addons::visibility::{publish_claims, HudClaimsRegistry};
+
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                publish_claims(&HudClaimsRegistry::new());
+                let _ = crate::settings::set_minimap(true);
+            }
+        }
+        let _reset = Reset;
+        publish_claims(&HudClaimsRegistry::new());
+        let _ = crate::settings::set_minimap(true);
+
+        let mut p = play();
+        let _ = p.loading.wait.take();
+        p.hud = Some((
+            crate::ui::Vui::new(Default::default(), Default::default(), vec![]),
+            Default::default(),
+            crate::hud::Hud::new(),
+        ));
+
+        // 1. In mode 0 (plain play), minimap is up
+        p.mode = 0;
+        assert!(p.minimap_up(), "minimap must be up in mode 0");
+
+        // 2. In mode 33 (chat history / R2) without chat claimed, minimap is hidden
+        p.mode = 33;
+        assert!(crate::hud::fork_hud::chat_window_visible());
+        assert!(!p.minimap_up(), "minimap must hide in mode 33 when chat is unclaimed");
+
+        // 3. Claim the chat window (e.g. Wereoxxs UI or FrontiersForge mod)
+        let mut reg = HudClaimsRegistry::new();
+        let token = InstanceToken::next().unwrap();
+        reg.disable("chat_window", token, "wereoxxs_ui");
+        publish_claims(&reg);
+        assert!(!crate::hud::fork_hud::chat_window_visible());
+
+        // In mode 33 with chat claimed, minimap MUST stay up!
+        assert!(
+            p.minimap_up(),
+            "minimap must stay up in mode 33 when chat window is claimed by an addon"
+        );
+
+        // Negative controls:
+        // Even with chat claimed, opening a menu (mode 1) hides minimap
+        p.mode = 1;
+        assert!(!p.minimap_up(), "menu mode must hide minimap even if chat is claimed");
+
+        // Map open hides minimap
+        p.mode = 33;
+        p.map.open = true;
+        assert!(!p.minimap_up(), "map.open must hide minimap in mode 33");
+        p.map.open = false;
+
+        // Search open hides minimap
+        p.search.open = true;
+        assert!(!p.minimap_up(), "search.open must hide minimap in mode 33");
+        p.search.open = false;
+
+        // Turning minimap off hides minimap
+        let _ = crate::settings::set_minimap(false);
+        assert!(!p.minimap_up(), "minimap setting off must hide minimap in mode 33");
+        let _ = crate::settings::set_minimap(true);
+        assert!(p.minimap_up(), "restoring minimap setting restores minimap in mode 33");
+
+        // 4. Releasing chat claim restores stock behavior (mode 33 hides minimap)
+        publish_claims(&HudClaimsRegistry::new());
+        assert!(crate::hud::fork_hud::chat_window_visible());
+        assert!(!p.minimap_up(), "releasing chat claim must restore stock mode 33 minimap hiding");
+    }
 }
