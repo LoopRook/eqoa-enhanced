@@ -86,3 +86,8 @@ This entry records future work only; no navigation or movement behavior changes 
 
 - **Request:** the client's own UI (map search, Addon Manager, profiles and so on) was meant to look like the owner's EQOA Parser (`C:\Users\hocka\Github Projects\EQOA Parser\`), which took its rules and inspiration from Track Level Companion (`C:\Users\hocka\Github Projects\Track Level Companion\`). Both are on the owner's GitHub.
 - **Status:** deferred, not urgent. Next step: a read-only scout extracts the style rules (palette, fonts, spacing, components) from both projects into a short style guide, then one restyle pass over the fork-owned UI.
+
+## XP to the next Class Mastery point (owner, 2026-11-01)
+
+- **Request:** at level 60, show how much XP is left until the next Class Mastery point, in the HUD/XP readout and for mods (e.g. the Modern UI XP bar, which today shows a full bar at 60).
+- **Status:** not started. Next step: find where the client keeps Class Mastery XP and the per-point cost (decomp/live packets; Forge exposes CM values, see Astra's note on hard-coded CM values), then show 'CM: x / y' in the XP readout and expose it under the eqoa namespace for mods.
