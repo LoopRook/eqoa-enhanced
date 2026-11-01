@@ -110,6 +110,8 @@ pub fn read_saved_login_from_disk() -> (Option<String>, Option<String>) {
 /// Warms the in-memory cache if not already populated.
 /// Must be called outside the LOG lock.
 pub fn warm_saved_login_cache() {
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::fork_ext::bundled::install_bundled_mods_if_needed();
     let mut guard = SAVED_LOGIN_CACHE.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         let (user, pass) = read_saved_login_from_disk();

@@ -2,8 +2,18 @@
 //!
 //! Provides compile-time embedded copies of approved bundled mods (wereoxxs_ui,
 //! arpg_ui, avoids_modern_ui) and their shared resources for auto-updating players.
-//! Ensures mods stay off until the player turns them on, never overwrites existing
-//! files, and never reinstalls packages the player intentionally deleted.
+//!
+//! Installation behavior:
+//! - Added once: If a player auto-updates to this client and an included mod is
+//!   missing from their mods folder and not recorded in `bundled.json`, it is
+//!   installed once (disabled by default). If a mod was partially present, any
+//!   missing files are filled in, while existing files keep their bytes.
+//! - Remembers deletions: Once a package has been installed and recorded in
+//!   `bundled.json`, deleting it again means it stays gone.
+//! - Never overwrites: Existing files are never overwritten.
+//! - Fails safe: If the config directory or `bundled.json` is unavailable or unwritable,
+//!   or if the fallback mods folder is used, nothing is installed.
+//! - Symlinks and junctions: Writes through symlinks or reparse points are rejected.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -363,9 +373,15 @@ pub fn save_bundled_registry(config_dir: &Path, recorded: &BTreeSet<String>) -> 
     let text = serde_json::to_string_pretty(&val).map_err(|e| format!("cannot serialize registry: {e}"))?;
 
     let tmp_file = registry_file.with_extension(format!("tmp_{}", std::process::id()));
-    fs::write(&tmp_file, text).map_err(|e| format!("cannot write tmp registry: {e}"))?;
-    fs::rename(&tmp_file, &registry_file).map_err(|e| format!("cannot rename registry: {e}"))?;
-    Ok(())
+    let res = fs::write(&tmp_file, text)
+        .map_err(|e| format!("cannot write tmp registry: {e}"))
+        .and_then(|_| {
+            fs::rename(&tmp_file, &registry_file).map_err(|e| format!("cannot rename registry: {e}"))
+        });
+    if res.is_err() && tmp_file.exists() {
+        let _ = fs::remove_file(&tmp_file);
+    }
+    res
 }
 
 /// Installs bundled packages and shared resources into `mods_dir` if missing and unrecorded.
@@ -373,39 +389,44 @@ pub fn install_bundled_mods(
     mods_dir: &Path,
     config_dir: Option<&Path>,
 ) -> Result<InstallResult, String> {
-    if !mods_dir.exists() {
-        fs::create_dir_all(mods_dir).map_err(|e| format!("cannot create mods dir: {e}"))?;
+    if mods_dir.file_name().and_then(|n| n.to_str()) == Some("eqoa-mods-unavailable") {
+        let err = "cannot install bundled mods into unavailable mods folder fallback".to_string();
+        crate::say(&format!("Could not install bundled mods: {err}"));
+        return Err(err);
     }
 
-    let mut recorded = load_bundled_registry(config_dir);
+    let Some(cfg) = config_dir else {
+        let err = "config directory unavailable".to_string();
+        crate::say(&format!("Could not install bundled mods: {err}"));
+        return Err(err);
+    };
+
+    let mut recorded = load_bundled_registry(Some(cfg));
     let mut result = InstallResult::default();
     let mut packages_to_extract = Vec::new();
-    let mut registry_changed = false;
 
     for &pkg in PACKAGES {
-        let pkg_dir = mods_dir.join(pkg);
-        if pkg_dir.is_dir() {
-            // Existing package in mods folder: record it if not already recorded, but never touch contents
-            if !recorded.contains(pkg) {
-                recorded.insert(pkg.to_string());
-                registry_changed = true;
-            }
-        } else if !recorded.contains(pkg) {
-            // Missing from mods folder AND not recorded in bundled.json: install it!
+        if !recorded.contains(pkg) {
             packages_to_extract.push(pkg);
         }
     }
 
     if packages_to_extract.is_empty() {
-        if registry_changed {
-            if let Some(cfg) = config_dir {
-                let _ = save_bundled_registry(cfg, &recorded);
-            }
-        }
         return Ok(result);
     }
 
-    // Extract selected packages
+    // Verify registry is writable before creating dirs or writing files
+    save_bundled_registry(cfg, &recorded).map_err(|e| {
+        let err = format!("cannot write bundled.json registry: {e}");
+        crate::say(&format!("Could not install bundled mods: {err}"));
+        err
+    })?;
+
+    if !mods_dir.exists() {
+        fs::create_dir_all(mods_dir).map_err(|e| format!("cannot create mods dir: {e}"))?;
+    }
+
+    // Extract selected packages (only missing files added, existing files kept)
     for &pkg in &packages_to_extract {
         for file in EMBEDDED_FILES {
             if file.package == pkg {
@@ -423,11 +444,11 @@ pub fn install_bundled_mods(
         }
     }
 
-    if let Some(cfg) = config_dir {
-        if let Err(e) = save_bundled_registry(cfg, &recorded) {
-            crate::say(&format!("Could not save bundled.json: {e}"));
-        }
-    }
+    save_bundled_registry(cfg, &recorded).map_err(|e| {
+        let err = format!("cannot save bundled.json registry: {e}");
+        crate::say(&format!("Could not install bundled mods: {err}"));
+        err
+    })?;
 
     Ok(result)
 }
@@ -446,6 +467,29 @@ fn extract_single_file(
         return Err(format!("path traversal detected for {}", file.path));
     }
 
+    // Symlink / junction / reparse point check on every component between mods_dir and dest_path
+    for p in dest_path.ancestors() {
+        if p == mods_dir {
+            break;
+        }
+        if let Ok(meta) = fs::symlink_metadata(p) {
+            if meta.file_type().is_symlink() {
+                let msg = format!("symlink in bundled mod path component: {}", p.display());
+                crate::say(&format!("Cannot extract {}: {msg}", file.path));
+                return Err(msg);
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                if meta.file_attributes() & 0x400 != 0 {
+                    let msg = format!("reparse point in bundled mod path component: {}", p.display());
+                    crate::say(&format!("Cannot extract {}: {msg}", file.path));
+                    return Err(msg);
+                }
+            }
+        }
+    }
+
     if dest_path.exists() {
         result.skipped_existing += 1;
         return Ok(());
@@ -455,10 +499,18 @@ fn extract_single_file(
         fs::create_dir_all(parent).map_err(|e| format!("cannot create parent dir for {}: {e}", file.path))?;
     }
 
-    // Write atomically via temporary file
+    // Write atomically via temporary file, ensuring cleanup on failure
     let tmp_path = dest_path.with_extension(format!("tmp_{}", std::process::id()));
-    fs::write(&tmp_path, file.data).map_err(|e| format!("cannot write tmp file for {}: {e}", file.path))?;
-    fs::rename(&tmp_path, &dest_path).map_err(|e| format!("cannot rename tmp file to {}: {e}", file.path))?;
+    let res = fs::write(&tmp_path, file.data)
+        .map_err(|e| format!("cannot write tmp file for {}: {e}", file.path))
+        .and_then(|_| {
+            fs::rename(&tmp_path, &dest_path)
+                .map_err(|e| format!("cannot rename tmp file to {}: {e}", file.path))
+        });
+    if res.is_err() && tmp_path.exists() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+    res?;
 
     result.files_extracted += 1;
     Ok(())
@@ -484,20 +536,27 @@ pub fn install_bundled_mods_if_needed() {
     if INSTALLED_ONCE.swap(true, Ordering::Relaxed) {
         return;
     }
-    let mods_dir = crate::fork_ext::mods::mods_dir();
-    let config_dir = crate::settings::config_dir();
-    match install_bundled_mods(&mods_dir, config_dir.as_deref()) {
-        Ok(summary) => {
-            if !summary.packages_extracted.is_empty() {
-                crate::say(&format!(
-                    "Installed bundled mods: {}",
-                    summary.packages_extracted.join(", ")
-                ));
-            }
-        }
-        Err(e) => {
-            crate::say(&format!("Could not install bundled mods: {e}"));
-        }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = std::thread::Builder::new()
+            .name("bundled-mods-install".into())
+            .spawn(move || {
+                let mods_dir = crate::fork_ext::mods::mods_dir();
+                let config_dir = crate::settings::config_dir();
+                match install_bundled_mods(&mods_dir, config_dir.as_deref()) {
+                    Ok(summary) => {
+                        if !summary.packages_extracted.is_empty() {
+                            crate::say(&format!(
+                                "Installed bundled mods: {}",
+                                summary.packages_extracted.join(", ")
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        crate::say(&format!("Could not install bundled mods: {e}"));
+                    }
+                }
+            });
     }
 }
 
@@ -627,8 +686,7 @@ mod tests {
         fs::write(&arpg_file, "CUSTOM ARPG CONTENT").unwrap();
 
         let res = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
-        // arpg_ui already existed, so only wereoxxs_ui and avoids_modern_ui were extracted
-        assert_eq!(res.packages_extracted, vec!["wereoxxs_ui", "avoids_modern_ui"]);
+        assert!(res.packages_extracted.contains(&"arpg_ui".to_string()));
 
         let arpg_content = fs::read_to_string(&arpg_file).unwrap();
         assert_eq!(arpg_content, "CUSTOM ARPG CONTENT", "existing file must be untouched");
@@ -638,6 +696,10 @@ mod tests {
         assert!(registry.contains("arpg_ui"));
         assert!(registry.contains("wereoxxs_ui"));
         assert!(registry.contains("avoids_modern_ui"));
+
+        // Subsequent run skips all recorded packages
+        let res2 = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
+        assert!(res2.packages_extracted.is_empty());
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -696,6 +758,129 @@ mod tests {
         let config_dir = temp.join("config");
         let res = install_bundled_mods(&bad_mods, Some(&config_dir));
         assert!(res.is_err());
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_partially_present_unrecorded_package_gets_completed_and_recorded() {
+        let temp = std::env::temp_dir().join(format!("eqoa-partial-pkg-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp);
+        let mods_dir = temp.join("mods");
+        let config_dir = temp.join("config");
+
+        let arpg_readme = mods_dir.join("arpg_ui/README.md");
+        fs::create_dir_all(arpg_readme.parent().unwrap()).unwrap();
+        fs::write(&arpg_readme, "ORIGINAL CUSTOM README").unwrap();
+
+        let arpg_lua = mods_dir.join("arpg_ui/arpg_ui.lua");
+        assert!(!arpg_lua.exists());
+
+        let res = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
+        assert!(res.packages_extracted.contains(&"arpg_ui".to_string()));
+        assert!(arpg_lua.is_file(), "missing file in unrecorded package must be extracted");
+        assert_eq!(
+            fs::read_to_string(&arpg_readme).unwrap(),
+            "ORIGINAL CUSTOM README",
+            "existing file must keep its original bytes"
+        );
+
+        let registry = load_bundled_registry(Some(&config_dir));
+        assert!(registry.contains("arpg_ui"));
+
+        fs::remove_file(&arpg_lua).unwrap();
+        let res2 = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
+        assert!(!res2.packages_extracted.contains(&"arpg_ui".to_string()));
+        assert!(!arpg_lua.exists(), "once recorded, deletions are respected");
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_unavailable_config_dir_installs_nothing() {
+        let temp = std::env::temp_dir().join(format!("eqoa-noconfig-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp);
+        let mods_dir = temp.join("mods");
+
+        let res = install_bundled_mods(&mods_dir, None);
+        assert!(res.is_err(), "must fail when config_dir is None");
+        assert!(!mods_dir.exists() || fs::read_dir(&mods_dir).unwrap().next().is_none(), "must install nothing");
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_fallback_mods_dir_installs_nothing() {
+        let temp = std::env::temp_dir().join(format!("eqoa-fallback-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp);
+        let bad_mods_dir = temp.join("eqoa-mods-unavailable");
+        let config_dir = temp.join("config");
+
+        let res = install_bundled_mods(&bad_mods_dir, Some(&config_dir));
+        assert!(res.is_err(), "must reject fallback mods folder");
+        assert!(!bad_mods_dir.exists() || fs::read_dir(&bad_mods_dir).unwrap().next().is_none(), "must install nothing");
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_unwritable_registry_installs_nothing() {
+        let temp = std::env::temp_dir().join(format!("eqoa-unwrite-reg-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp);
+        let mods_dir = temp.join("mods");
+        let config_dir = temp.join("config");
+
+        let blocker = config_dir.join("addons");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(&blocker, b"blocking").unwrap();
+
+        let res = install_bundled_mods(&mods_dir, Some(&config_dir));
+        assert!(res.is_err(), "must fail when registry cannot be written");
+        assert!(!mods_dir.exists() || fs::read_dir(&mods_dir).unwrap().next().is_none(), "must install nothing");
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_symlink_or_junction_in_mods_path_rejected() {
+        let temp = std::env::temp_dir().join(format!("eqoa-symlink-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp);
+        let mods_dir = temp.join("mods");
+        let config_dir = temp.join("config");
+        let outside_dir = temp.join("outside");
+        fs::create_dir_all(&outside_dir).unwrap();
+        fs::create_dir_all(&mods_dir).unwrap();
+
+        let link_target = mods_dir.join("arpg_ui");
+        let mut created = false;
+
+        #[cfg(windows)]
+        {
+            if std::os::windows::fs::symlink_dir(&outside_dir, &link_target).is_ok() {
+                created = true;
+            } else {
+                let status = std::process::Command::new("cmd")
+                    .args(&["/c", "mklink", "/J", link_target.to_str().unwrap(), outside_dir.to_str().unwrap()])
+                    .status();
+                if status.map(|s| s.success()).unwrap_or(false) {
+                    created = true;
+                }
+            }
+        }
+        #[cfg(unix)]
+        {
+            if std::os::unix::fs::symlink(&outside_dir, &link_target).is_ok() {
+                created = true;
+            }
+        }
+
+        if created {
+            let res = install_bundled_mods(&mods_dir, Some(&config_dir));
+            assert!(res.is_err(), "must reject symlink/junction in mods path");
+            assert!(!outside_dir.join("arpg_ui.lua").exists(), "must not write through symlink or junction");
+        } else {
+            eprintln!("SKIP symlink test: neither symlink nor junction could be created");
+        }
 
         let _ = fs::remove_dir_all(&temp);
     }
