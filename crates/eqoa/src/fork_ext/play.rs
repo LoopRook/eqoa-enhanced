@@ -647,8 +647,6 @@ fn is_menu_mode(mode: i32) -> bool {
         | 4  // GM Goto window (VIWndGoto, adminplay.rs:7,78,263; not trainer.rs:364 internal sub-mode)
         | 5  // Spellbook / abilities (VIWndSpellBook)
         | 6  // Recipe book (VIWndRecipeBook)
-        | 7  // Dialog responses (VIWndResponse)
-        | 9  // Dialog text / NPC conversation (VIWndPrivChat)
         | 10 // Merchant (VIWndMerchant)
         | 11 // Bank (VIWndBank)
         | 12 // Trainer / Character Summary (VIWndTrainer)
@@ -1348,8 +1346,6 @@ mod tests {
             (4, 4, "gm_goto"),
             (5, 5, "spellbook"),
             (6, 6, "recipes"),
-            (7, 7, "dialog_answers"),
-            (9, 9, "text_dialog"),
             (10, 10, "merchant"),
             (11, 11, "bank"),
             (12, 12, "trainer"),
@@ -1399,9 +1395,11 @@ mod tests {
             );
         }
 
-        // 4. Non-menu modes: input, context menu, r2 chat, fishing, manual camera
+        // 4. Non-menu modes: input, dialog answers (7), text dialog (9), context menu, r2 chat, fishing, manual camera
         let non_menu_modes = [
             (2, 2, "input"),
+            (7, 7, "dialog_answers"),
+            (9, 9, "text_dialog"),
             (30, 30, "context_menu"),
             (33, 33, "r2_chat"),
             (36, 36, "fishing"),
@@ -1462,7 +1460,7 @@ mod tests {
             }
         }
 
-        let known_non_menu: std::collections::BTreeSet<i32> = [0, 2, 30, 33, 36, 38].into_iter().collect();
+        let known_non_menu: std::collections::BTreeSet<i32> = [0, 2, 7, 9, 30, 33, 36, 38].into_iter().collect();
         for mode in discovered_modes {
             let is_non_menu = known_non_menu.contains(&mode);
             let is_menu = is_menu_mode(mode);

@@ -29,6 +29,20 @@ pub(super) struct NamedSession {
     actions: VecDeque<ProfileAction>,
     name_input: String,
 }
+pub(crate) fn class_display(class: u8) -> String {
+    match crate::fork_ext::addons::player::CLASSES.get(class as usize).copied() {
+        Some(name) => name.to_string(),
+        None => format!("class {class}"),
+    }
+}
+
+pub(crate) fn class_default_button_label(character: Option<&Character>) -> String {
+    match character.and_then(|c| crate::fork_ext::addons::player::CLASSES.get(c.class as usize).copied()) {
+        Some(name) => format!("Use as {name} default"),
+        None => "Use as class default".to_string(),
+    }
+}
+
 impl Manager {
     pub fn enable_profiles(&mut self, config: Option<PathBuf>) {
         let store = Store::new(config);
@@ -389,6 +403,7 @@ impl Manager {
         }
         self.named = Some(s);
     }
+
     pub fn profile_controls(&mut self, ui: &Ui) {
         let Some(s) = &mut self.named else {
             return;
@@ -401,7 +416,7 @@ impl Manager {
             ui.text_wrapped("This character has no profile assignment. Pick a profile or save a new one below, then use it for this character.");
         }
         if let Some(c) = &s.character {
-            ui.text(format!("Character: {} (class {})", c.name, c.class));
+            ui.text(format!("Character: {} ({})", c.name, class_display(c.class)));
         }
         if s.retry.is_some() {
             ui.text_wrapped("This character's profile could not be loaded. Retrying shortly; see the diagnostic below.");
@@ -425,7 +440,8 @@ impl Manager {
             s.actions.push_back(ProfileAction::BindCharacter);
         }
         ui.same_line();
-        if ui.button("Use as class default") {
+        let class_btn_label = class_default_button_label(s.character.as_ref());
+        if ui.button(format!("{class_btn_label}##class-default")) {
             s.actions.push_back(ProfileAction::BindClass);
         }
         match s.store.names() {

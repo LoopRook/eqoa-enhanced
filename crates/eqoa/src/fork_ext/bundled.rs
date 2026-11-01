@@ -374,13 +374,10 @@ pub fn mods_folder_key(_mods_dir: &Path) -> String {
     String::new()
 }
 
-pub fn parse_bundled_registry(
-    json_str: &str,
-    current_folder_key: Option<&str>,
-) -> (BTreeMap<String, BTreeSet<String>>, bool) {
+pub fn parse_bundled_registry(json_str: &str) -> BTreeMap<String, BTreeSet<String>> {
     let mut folders = BTreeMap::new();
     let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) else {
-        return (folders, false);
+        return folders;
     };
 
     if let Some(folders_obj) = val.get("folders").and_then(|v| v.as_object()) {
@@ -393,76 +390,25 @@ pub fn parse_bundled_registry(
                 folders.insert(k.clone(), pkgs);
             }
         }
-        return (folders, false);
     }
-
-    // Flat legacy format: {"installed": [...]}, {"packages": [...]}, or [...]
-    let mut flat = BTreeSet::new();
-    let is_flat = if let Some(arr) = val.get("installed").and_then(|v| v.as_array()) {
-        for item in arr {
-            if let Some(s) = item.as_str() {
-                flat.insert(s.to_string());
-            }
-        }
-        true
-    } else if let Some(arr) = val.get("packages").and_then(|v| v.as_array()) {
-        for item in arr {
-            if let Some(s) = item.as_str() {
-                flat.insert(s.to_string());
-            }
-        }
-        true
-    } else if let Some(arr) = val.as_array() {
-        for item in arr {
-            if let Some(s) = item.as_str() {
-                flat.insert(s.to_string());
-            }
-        }
-        true
-    } else {
-        false
-    };
-
-    if is_flat {
-        if let Some(key) = current_folder_key {
-            folders.insert(key.to_string(), flat);
-        }
-        return (folders, true);
-    }
-
-    // Map format with direct folder keys at root
-    if let Some(obj) = val.as_object() {
-        for (k, v) in obj {
-            if let Some(arr) = v.as_array() {
-                let pkgs: BTreeSet<String> = arr
-                    .iter()
-                    .filter_map(|x| x.as_str().map(String::from))
-                    .collect();
-                folders.insert(k.clone(), pkgs);
-            }
-        }
-    }
-
-    (folders, false)
+    // Any legacy flat format (without "folders") is ignored and will be rewritten in the new format
+    folders
 }
 
-pub fn load_bundled_registry_map(
-    config_dir: Option<&Path>,
-    current_folder_key: Option<&str>,
-) -> (BTreeMap<String, BTreeSet<String>>, bool) {
+pub fn load_bundled_registry_map(config_dir: Option<&Path>) -> BTreeMap<String, BTreeSet<String>> {
     let Some(config_dir) = config_dir else {
-        return (BTreeMap::new(), false);
+        return BTreeMap::new();
     };
     let path = bundled_registry_path(config_dir);
     let Ok(data) = fs::read_to_string(&path) else {
-        return (BTreeMap::new(), false);
+        return BTreeMap::new();
     };
-    parse_bundled_registry(&data, current_folder_key)
+    parse_bundled_registry(&data)
 }
 
 pub fn load_bundled_registry(config_dir: Option<&Path>, mods_dir: &Path) -> BTreeSet<String> {
     let key = mods_folder_key(mods_dir);
-    let (all_folders, _) = load_bundled_registry_map(config_dir, Some(&key));
+    let all_folders = load_bundled_registry_map(config_dir);
     all_folders.get(&key).cloned().unwrap_or_default()
 }
 
@@ -511,7 +457,7 @@ pub fn install_bundled_mods(
     };
 
     let folder_key = mods_folder_key(mods_dir);
-    let (mut all_folders, migrated) = load_bundled_registry_map(Some(cfg), Some(&folder_key));
+    let mut all_folders = load_bundled_registry_map(Some(cfg));
     let mut recorded = all_folders.get(&folder_key).cloned().unwrap_or_default();
     let mut result = InstallResult::default();
     let mut packages_to_extract = Vec::new();
@@ -523,9 +469,6 @@ pub fn install_bundled_mods(
     }
 
     if packages_to_extract.is_empty() {
-        if migrated {
-            let _ = save_bundled_registry(cfg, &all_folders);
-        }
         return Ok(result);
     }
 
@@ -1078,26 +1021,32 @@ mod tests {
     }
 
     #[test]
-    fn test_old_flat_registry_migrates() {
-        let temp = std::env::temp_dir().join(format!("eqoa-flat-migrate-{}", std::process::id()));
+    fn test_flat_registry_listing_all_three_packages_installs_all_three_on_fresh_mods_folder() {
+        let temp = std::env::temp_dir().join(format!("eqoa-flat-ignored-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp);
-        let mods_dir = temp.join("install_migrated/mods");
+        let mods_dir = temp.join("install_fresh/mods");
         let config_dir = temp.join("config");
         let registry_file = bundled_registry_path(&config_dir);
 
-        // Pre-create old flat registry with wereoxxs_ui and arpg_ui recorded
+        // Pre-create flat registry listing all three packages
         fs::create_dir_all(registry_file.parent().unwrap()).unwrap();
         let flat_json = serde_json::json!({
-            "installed": ["wereoxxs_ui", "arpg_ui"]
+            "installed": ["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"]
         });
         fs::write(&registry_file, serde_json::to_string_pretty(&flat_json).unwrap()).unwrap();
 
-        // Run install
+        // Run install: flat registry must be ignored on fresh folder, installing all three
         let res = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
-        // wereoxxs_ui and arpg_ui were recorded in old flat format, so only avoids_modern_ui should be extracted
-        assert_eq!(res.packages_extracted, vec!["avoids_modern_ui"]);
+        assert_eq!(
+            res.packages_extracted,
+            vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"],
+            "flat registry must be ignored so fresh mods folder gets all packages"
+        );
+        assert!(mods_dir.join("wereoxxs_ui/wereoxxs_ui.lua").is_file());
+        assert!(mods_dir.join("arpg_ui/arpg_ui.lua").is_file());
+        assert!(mods_dir.join("avoids_modern_ui/avoids_modern_ui.lua").is_file());
 
-        // Verify registry file has migrated to new structure with folders map
+        // Verify registry file has been rewritten in the new per-folder format
         let new_registry_data = fs::read_to_string(&registry_file).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&new_registry_data).unwrap();
         let key = mods_folder_key(&mods_dir);

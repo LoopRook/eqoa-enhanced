@@ -659,3 +659,34 @@ fn mod_profiles_failed_world_entry_retries_after_backoff_with_one_diagnostic() {
         1
     );
 }
+
+#[test]
+fn test_profiles_ui_class_name_display_and_button_label() {
+    use super::named::{class_display, class_default_button_label};
+    use crate::fork_ext::addons::named_profiles::{Character, CharacterSnapshot};
+
+    // In-range classes display proper name
+    assert_eq!(class_display(0), "Warrior");
+    assert_eq!(class_display(11), "Necromancer");
+    assert_eq!(class_display(14), "Alchemist");
+
+    // Out-of-range classes show number
+    assert_eq!(class_display(15), "class 15");
+    assert_eq!(class_display(99), "class 99");
+
+    // Button label uses class name if in range
+    let necromancer = Character::new(
+        "server.example",
+        CharacterSnapshot::new(true, "zecron", 11).unwrap(),
+    ).unwrap();
+    assert_eq!(class_default_button_label(Some(&necromancer)), "Use as Necromancer default");
+
+    // Button label falls back to "Use as class default" if out of range or None
+    let unknown_class = Character {
+        server: "server.example".into(),
+        name: "unknown".into(),
+        class: 99,
+    };
+    assert_eq!(class_default_button_label(Some(&unknown_class)), "Use as class default");
+    assert_eq!(class_default_button_label(None), "Use as class default");
+}

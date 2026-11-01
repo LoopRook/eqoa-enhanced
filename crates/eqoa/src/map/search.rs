@@ -872,7 +872,7 @@ impl Search {
         let results = self.results();
         self.selected = self.selected.min(results.len().saturating_sub(1));
         self.offset = self.offset.min(self.selected);
-        let rows = ((h - 132) / 28).clamp(1, 6) as usize;
+        let rows = ((h - 146) / 28).clamp(1, 6) as usize;
         for (i, row) in results.iter().enumerate().skip(self.offset).take(rows) {
             let yy = py + 94 + (i - self.offset) as i32 * 28;
             let b = [px + 6, yy - 2, px + w - 6, yy + 25];
@@ -908,7 +908,7 @@ impl Search {
                 t::MUTED,
             );
         }
-        let foot = py + h - 34;
+        let foot = py + h - 48;
         t::fill(r, [px + 8, foot - 7, px + w - 8, foot - 6], t::BORDER);
         let status_line = self
             .status_msg
@@ -936,40 +936,51 @@ impl Search {
             w - 20,
             t::MUTED,
         );
-        let btn_y1 = foot + 12;
+        let journal_label = format!("Journal: {j_names} creatures, {j_spawns} spawns");
+        t::text(
+            r,
+            &journal_label,
+            [px + 10, foot + 11],
+            w - 20,
+            t::MUTED,
+        );
+        let btn_y1 = foot + 25;
         let btn_y2 = py + h - 3;
+        let avail_btn_w = w - 16;
+        let (w_prev, w_exp, w_imp, w_next) = if avail_btn_w < 220 {
+            let bw = ((avail_btn_w - 12) / 4).max(28);
+            (bw, bw, bw, bw)
+        } else {
+            (44, 58, 58, 44)
+        };
+        let bx_prev = px + 8;
+        let bx_exp = bx_prev + w_prev + 4;
+        let bx_imp = bx_exp + w_exp + 4;
+        let bx_next = px + w - 8 - w_next;
         self.button(
             r,
-            [px + 8, btn_y1, px + 52, btn_y2],
+            [bx_prev, btn_y1, bx_prev + w_prev, btn_y2],
             "Prev",
             Action::Previous,
             false,
         );
         self.button(
             r,
-            [px + 56, btn_y1, px + 116, btn_y2],
+            [bx_exp, btn_y1, bx_exp + w_exp, btn_y2],
             "Export",
             Action::Export,
             false,
         );
         self.button(
             r,
-            [px + 120, btn_y1, px + 180, btn_y2],
+            [bx_imp, btn_y1, bx_imp + w_imp, btn_y2],
             "Import",
             Action::Import,
             false,
         );
-        let journal_label = format!("Journal: {j_names} creatures, {j_spawns} spawns");
-        t::text(
-            r,
-            &journal_label,
-            [px + 186, btn_y1 + 4],
-            w - 242,
-            t::MUTED,
-        );
         self.button(
             r,
-            [px + w - 52, btn_y1, px + w - 8, btn_y2],
+            [bx_next, btn_y1, bx_next + w_next, btn_y2],
             "Next",
             Action::Next,
             false,
@@ -1632,5 +1643,35 @@ mod tests {
 
         assert_eq!(walk.fwd, vec![0.0], "typing into search must produce zero movement thrust");
         assert!(!p.autorun, "typing letters must not trigger autorun");
+    }
+    #[test]
+    fn test_search_footer_buttons_and_journal_do_not_overlap() {
+        use crate::pointer::testing::{NullRaster, vui};
+        let mut s = known();
+        s.open = true;
+
+        for &width in &[252.0, 220.0, 200.0] {
+            s.draw(
+                &mut NullRaster,
+                &vui(),
+                [[0.0, 0.0], [width + 20.0, 400.0]],
+                None,
+            );
+            // Collect button hits on the footer row (Prev, Export, Import, Next)
+            let mut footer_buttons = Vec::new();
+            for (b, a) in &s.hits {
+                if matches!(a, Action::Previous | Action::Export | Action::Import | Action::Next) {
+                    footer_buttons.push((*b, a));
+                }
+            }
+            assert_eq!(footer_buttons.len(), 4, "all 4 footer buttons must exist at width {width}");
+            // Verify no horizontal overlap between consecutive buttons
+            for i in 0..footer_buttons.len() - 1 {
+                let curr = footer_buttons[i].0;
+                let next = footer_buttons[i + 1].0;
+                assert!(curr[0] < curr[2], "button width must be positive");
+                assert!(curr[2] <= next[0], "button {i} [..{}] overlaps next button [{}..] at width {width}", curr[2], next[0]);
+            }
+        }
     }
 }
