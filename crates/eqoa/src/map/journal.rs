@@ -1160,6 +1160,11 @@ mod tests {
                 "2": {{ "world": 0, "level": 0, "pos": [1.0, 2.0, 3.0] }},
                 "3": {{ "world": 0, "level": 61, "pos": [1.0, 2.0, 3.0] }},
                 "4": {{ "world": 0, "level": 257, "pos": [1.0, 2.0, 3.0] }},
+                "5": {{ "world": 0, "level": 255, "pos": [1.0, 2.0, 3.0] }},
+                "6": {{ "world": 0, "level": 256, "pos": [1.0, 2.0, 3.0] }},
+                "7": {{ "world": 0, "level": -1, "pos": [1.0, 2.0, 3.0] }},
+                "8": {{ "world": 0, "level": 3.5, "pos": [1.0, 2.0, 3.0] }},
+                "9": {{ "world": 0, "pos": [1.0, 2.0, 3.0] }},
                 "{long_id}": {{ "world": 0, "level": 15, "pos": [1.0, 2.0, 3.0] }},
                 "abc": {{ "world": 0, "level": 15, "pos": [1.0, 2.0, 3.0] }}
             }},
@@ -1172,11 +1177,14 @@ mod tests {
         }}"#);
 
         let added = j.merge(&bad_json, now).expect("merge completes");
-        assert_eq!(added, 3, "ids 1-3 (levels 10, 0, 61) are kept; 257 is past the level byte");
-        assert_eq!(j.counts(), (1, 3));
+        assert_eq!(added, 4, "levels 10, 0, 61 and 255 are kept; past the level byte, negative, fractional or missing are not");
+        assert_eq!(j.counts(), (1, 4));
         assert!(j.has_creature("ValidNpc"));
         assert_eq!(j.get_spawn("ValidNpc", "3").map(|s| s.level), Some(61));
-        assert!(j.get_spawn("ValidNpc", "4").is_none());
+        assert_eq!(j.get_spawn("ValidNpc", "5").map(|s| s.level), Some(255));
+        for rejected in ["4", "6", "7", "8", "9"] {
+            assert!(j.get_spawn("ValidNpc", rejected).is_none(), "id {rejected}");
+        }
         assert!(!j.has_creature(&long_name));
         assert!(!j.has_creature("Bad\u{0000}Name"));
     }
