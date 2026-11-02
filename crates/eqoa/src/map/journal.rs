@@ -607,14 +607,15 @@ pub fn parse_journal_entries(text: &str, cap_entries: usize) -> Result<Vec<Parse
                 continue;
             };
             let world = info_obj.get("world").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-            // Reject level outside 1-60 without wrapping
-            let Some(level_u64) = info_obj.get("level").and_then(|v| v.as_u64()) else {
+            // Any level the game can send (its byte: 0 unknown, NPCs above 60
+            // exist), as journal.lua keeps any; out of range is rejected, not wrapped
+            let Some(level) = info_obj
+                .get("level")
+                .and_then(|v| v.as_u64())
+                .and_then(|l| u8::try_from(l).ok())
+            else {
                 continue;
             };
-            if !(1..=60).contains(&level_u64) {
-                continue;
-            }
-            let level = level_u64 as u8;
             let Some(pos_arr) = info_obj.get("pos").and_then(|v| v.as_array()) else {
                 continue;
             };
@@ -1171,11 +1172,40 @@ mod tests {
         }}"#);
 
         let added = j.merge(&bad_json, now).expect("merge completes");
-        assert_eq!(added, 1, "only the single valid entry (id 1) should be accepted");
-        assert_eq!(j.counts(), (1, 1));
+        assert_eq!(added, 3, "ids 1-3 (levels 10, 0, 61) are kept; 257 is past the level byte");
+        assert_eq!(j.counts(), (1, 3));
         assert!(j.has_creature("ValidNpc"));
+        assert_eq!(j.get_spawn("ValidNpc", "3").map(|s| s.level), Some(61));
+        assert!(j.get_spawn("ValidNpc", "4").is_none());
         assert!(!j.has_creature(&long_name));
         assert!(!j.has_creature("Bad\u{0000}Name"));
+    }
+
+    #[test]
+    fn test_own_journal_keeps_npcs_above_level_60_and_unknown_levels_across_a_restart() {
+        let dir = std::env::temp_dir().join(format!("eqoa-journal-levels-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("journal.json");
+        let now = Instant::now();
+
+        // As seen in play: "Dr. Killian" 65, "Guard Perinen" 70, "49 Epic Vendor" 80, one level unknown (0)
+        let mut j = Journal::new_at_path(path.clone());
+        assert!(j.record("Dr. Killian", 156804, 0, 65, [1.0, 0.0, 1.0], now));
+        assert!(j.record("Guard Perinen", 156411, 0, 70, [100.0, 0.0, 1.0], now));
+        assert!(j.record("49 Epic Vendor", 20001381, 0, 80, [200.0, 0.0, 1.0], now));
+        assert!(j.record("Grass Snake", 501, 0, 0, [300.0, 0.0, 1.0], now));
+        j.save_sync().expect("saved");
+
+        // The next start loads the file
+        let mut again = Journal::new_at_path(path.clone());
+        again.load_from_path(&path).expect("loads");
+        assert_eq!(again.counts(), (4, 4), "nothing dropped on reload");
+        assert_eq!(again.get_spawn("Dr. Killian", "156804").map(|s| s.level), Some(65));
+        assert_eq!(again.get_spawn("Guard Perinen", "156411").map(|s| s.level), Some(70));
+        assert_eq!(again.get_spawn("49 Epic Vendor", "20001381").map(|s| s.level), Some(80));
+        assert_eq!(again.get_spawn("Grass Snake", "501").map(|s| s.level), Some(0));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
