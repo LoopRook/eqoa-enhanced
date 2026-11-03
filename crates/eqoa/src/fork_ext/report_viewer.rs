@@ -5,10 +5,10 @@ use crate::report;
 pub(super) fn event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) -> bool {
     match event {
         WindowEvent::KeyboardInput { event, .. }
-            if report::is_open() || report::is_report_key(&event.logical_key) =>
+            if report::is_open_local() || report::is_report_key(&event.logical_key) =>
         {
             if event.state == ElementState::Pressed {
-                if report::is_open() {
+                if report::is_open_local() {
                     if let Some(key) = report::key_of(event) {
                         report::key(key);
                     }
@@ -23,7 +23,7 @@ pub(super) fn event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) ->
             }
             true
         }
-        WindowEvent::MouseInput { state, .. } if report::is_open() => {
+        WindowEvent::MouseInput { state, .. } if report::is_open_local() => {
             if *state == ElementState::Pressed
                 && let Some(g) = &app.gfx
             {

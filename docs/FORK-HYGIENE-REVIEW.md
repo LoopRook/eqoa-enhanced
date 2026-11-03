@@ -1,5 +1,9 @@
 # EQOA Enhanced fork hygiene — final independent review
 
+Historical record: the browser reporting policy files and their Node test were removed
+in the 2026-11-03 sync review; commands below describe the earlier revision.
+
+
 Review date: 2026-10-28
 Reviewer scope: read-only source, Git ancestry/scope, policy, documentation and recorded validation. No builds, test suites, source/index/HEAD changes, parser-repository access, or subagent delegation were performed by this reviewer. The only executed check was the read-only footprint checker.
 

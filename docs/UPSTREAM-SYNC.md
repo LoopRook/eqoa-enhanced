@@ -197,3 +197,26 @@ folder: main checkout run/sync-2026-11-03-<merge-shortsha>/, with bundled mods a
 owner checklist. Copy verification requires the EXE SHA256 to match the built
 artifact recorded in SYNC-2026-11-03-VERIFICATION.md. No push/tag/protected branch
 merge; live owner QA and Android/browser runtime checks remain pending.
+
+
+Review follow-up to b5e6310 (2026-11-03): remove the unused client-state feature,
+duplicate logger and settings describer, and orphan browser policy; retain one
+native panic-hook owner (logfile). Restore the HUD Report pick regression, guard
+logger cleanup on test failure, standardize the report-open predicate, register
+HUD/surface seams, and tighten slack budgets. Second-window log selection is
+recorded in backlog.md without changing it in this round. Follow-up checks: sync_* 5 passed; report filter 44 passed; HUD pick 1 passed.
+Locked full workspace: 1,773 passed / 0 failed / 27 ignored over 96
+summaries, with 197 explicit prerequisite SKIP messages. Python tools: 46 passed.
+Footprint PASS with the new seams and tightened budgets. Locked release build
+PASS (1m 40s); x64 GUI / 8 MiB stack validated. Current executable SHA256:
+`6b3272c2509f2fdba83105112c72401f97af5026061ac9ab358eee3ec67f8788`. A new main-checkout preview under
+run/sync-2026-11-03-<follow-up-shortsha>/ is copied after committing; the old
+b5e6310 preview is retained.
+
+The HUD budget changes from +309/-11 to +315/-14 solely for the restored
+nonzero-height fixture, Report pick assertion and misplaced-position negative
+control. Options is tightened to +194/-42, play to +750/-53 and settings to
++322/-17; the remaining shared budgets already match their measured diff.
+Viewer uses the portable is_open_local predicate everywhere, requiring only
+two shared-line changes from the merge. Historical browser-policy test records
+are marked as historical, and their retired files are removed from ownership.

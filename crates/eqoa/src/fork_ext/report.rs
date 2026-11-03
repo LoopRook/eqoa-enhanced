@@ -503,10 +503,10 @@ pub fn dialog_status(status: &Status, _left: usize) -> Option<String> {
 pub fn dialog_fine(kind: &Kind) -> Option<&'static str> {
     match kind {
         Kind::Problem => Some(
-            "The saved report zip includes a screenshot (which may show character names), logs, and client state. Nothing is uploaded anywhere.",
+            "The saved report zip includes any note and screenshot you choose (which may show character names), available logs, and a manifest with the Enhanced version and enabled mods. Nothing is uploaded anywhere.",
         ),
         Kind::Crash(_) => Some(
-            "The saved report zip includes crash logs and client state. Nothing is uploaded anywhere.",
+            "The saved report zip includes any note you enter, available crash logs, and a manifest with the Enhanced version and enabled mods. Nothing is uploaded anywhere.",
         ),
     }
 }
@@ -660,19 +660,7 @@ pub fn save_report_to(
         }
     }
 
-    // 7. client state
-    let state_text = cfg_dir
-        .and_then(|d| fs::read_to_string(d.join("state.txt")).ok())
-        .unwrap_or_default();
-    if !state_text.trim().is_empty() {
-        entries.push(ZipEntry {
-            name: "client_state.txt".into(),
-            data: clean_text(&state_text).into_bytes(),
-        });
-        files_list.push("client_state.txt");
-    }
-
-    // 8. manifest.txt (with the required labelling and header)
+    // 7. manifest.txt (with the required labelling and header)
     let header = enhanced_label();
     let mods_addons = enabled_mods_addons_string();
     let manifest_text = format!(
@@ -977,7 +965,15 @@ mod tests {
         assert!(entry_names.contains(&"screenshot.png"), "Missing screenshot.png");
         assert!(entry_names.contains(&"eqoa.log"), "Missing eqoa.log");
         assert!(entry_names.contains(&"eqoa.prev.log"), "Missing eqoa.prev.log");
-        assert!(entry_names.contains(&"client_state.txt"), "Missing client_state.txt");
+        assert!(!entry_names.contains(&"client_state.txt"), "obsolete state is never exported");
+        let mut expected = vec!["manifest.txt", "note.txt", "screenshot.png", "eqoa.log", "eqoa.prev.log", "crashes/crash-20261026-100000.txt"];
+        if crate::fork_ext::mods::mods_dir().join("addons_error.log").exists() { expected.push("addons_error.log"); }
+        let mut actual = entry_names.clone();
+        actual.sort(); expected.sort();
+        assert_eq!(actual, expected, "ZIP contains exactly the promised note, screenshot, available logs and manifest");
+        let promise = dialog_fine(&Kind::Problem).unwrap();
+        for item in ["note", "screenshot", "logs", "manifest", "Enhanced version", "enabled mods"] { assert!(promise.contains(item), "missing promise: {item}"); }
+        assert!(!promise.contains("client state"));
         assert!(
             entry_names.contains(&"crashes/crash-20261026-100000.txt"),
             "Missing waiting crash file"
@@ -1346,9 +1342,11 @@ mod tests {
     #[test]
     fn logs_begin_with_the_enhanced_line() {
         let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        struct CloseLog;
+        impl Drop for CloseLog { fn drop(&mut self) { crate::logfile::close(); } }
+        let _log = CloseLog;
         crate::logfile::start();
         let tail_lines = crate::report::tail(10);
-        crate::logfile::close();
         let run_idx = tail_lines
             .iter()
             .rposition(|l| l.starts_with("[eqoa] run "))
@@ -1442,6 +1440,7 @@ mod tests {
 
         let fine_crash = dialog_fine(&Kind::Crash(vec!["a".into()])).unwrap();
         assert!(fine_crash.contains("crash logs"));
+        assert!(fine_crash.contains("manifest") && !fine_crash.contains("client state"));
     }
 }
 

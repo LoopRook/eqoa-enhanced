@@ -38,7 +38,7 @@ The manifest lists explicit ownership patterns for:
   (crates/eqoa/resources/map-data/**) and its FrontiersForge MIT notice.
 - `crates/eqoa/src/fork_ext/` adapters and implementations, including the retained
   `report_core.rs`, `report_viewer.rs` and `report_sync_tests.rs`; reporting policy and
-  its transport tests; browser reporting policy and its tests.
+  its native transport fixture tests.
 - The restored render map module/shader and map-circle/terrain test modules.
 - The named map generators, map-bundle helper, parser launcher helper/tests,
   and footprint checker/tests. Ownership does not extend to every `tools/` file.
@@ -67,14 +67,15 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/eqoa/src/binds.rs` | 93 | 80 | Restored/map controls and saved binding defaults. |
 | `crates/eqoa/src/client_image.rs` | 10 | 0 | Map theme font/image resources. |
 | `crates/eqoa/src/hideui.rs` | 3 | 3 | Restored map and tracker visibility. |
-| `crates/eqoa/src/hud.rs` | 309 | 11 | Existing Enhanced HUD plus a local report button rectangle hook and Pick variant; drawing implementation lives in fork_ext/report_core.rs. |
+| `crates/eqoa/src/hud.rs` | 315 | 14 | Existing Enhanced HUD plus a local report button rectangle hook and Pick variant; drawing implementation lives in fork_ext/report_core.rs. Review follow-up adds +6/-3 for the restored Report pick assertion, 28px atlas fixture and displaced-position negative control. |
 | `crates/eqoa/src/icon.rs` | 4 | 1 | Two hooks into fork_ext::app_icon: the window/Dock picture comes from the chosen icon, and poll returns before the save-icon switch. Upstream save-icon code remains present and compiled. |
 | `crates/eqoa/src/input.rs` | 32 | 3 | Map controls and focus/input behavior. |
 | `crates/eqoa/src/lod.rs` | 9 | 8 | Restored map terrain observation. |
 | `crates/eqoa/src/main.rs` | 33 | 0 | Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged. |
-| `crates/eqoa/src/options.rs` | 196 | 43 | Existing restored option entries plus one adapter reference per fork option hook. |
-| `crates/eqoa/src/play.rs` | 764 | 53 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. |
-| `crates/eqoa/src/settings.rs` | 336 | 22 | Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31), and one-line in-memory report cache update on save_login. |
+| `crates/eqoa/src/viewer.rs` | `fork_report::surface(...)`, report input/capture hooks |
+| `crates/eqoa/src/options.rs` | 194 | 42 | Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
+| `crates/eqoa/src/play.rs` | 750 | 53 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
+| `crates/eqoa/src/settings.rs` | 322 | 17 | Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31), and one-line in-memory report cache update on save_login. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
 | `crates/eqoa/src/touch.rs` | 81 | 2 | Reconcile Enhanced long-press release suppression with upstream full-size touch slop; preserve the map behavior and new adjustable pad size. |
 | `crates/eqoa/src/ui.rs` | 10 | 6 | Map UI state and input integration plus one-line pub(crate) visibility on UiAssets.surfaces for fork-owned HUD tests. |
 | `crates/eqoa/src/viewer.rs` | 255 | 15 | Existing fork integration plus native report adapter registration and one-line input, draw, screenshot/surface hooks; preserve upstream resize and Android code. |
@@ -104,17 +105,18 @@ remain intact in the fork-owned resource and documentation trees.
 
 ## Named extension seams
 
-The manifest requires exactly one textual occurrence per named hook in its shared
+The manifest requires each named hook's declared occurrence count in its shared
 parent file. This is a targeted guard, not a Rust parser; normal build/test review
 still verifies execution and placement. Do not add duplicate hook names in comments.
 
 | Shared file | Checked seams |
 | --- | --- |
 | `crates/eqoa/src/main.rs` | `mod fork_ext;`, `mod report_policy;` |
-| `crates/eqoa/src/play.rs` | `self.fork_combat_event(...)` |
-| `crates/eqoa/src/hud.rs` | `fork_hud::draw(...)` |
-| `crates/eqoa/src/options.rs` | `fork_options::{CATEGORY, ITEMS, change, activate, value_text}`, once each |
-| `crates/eqoa/src/settings.rs` | `fork_settings::{write, parse, description}`, once each |
+| `crates/eqoa/src/play.rs` | 750 | 53 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
+| `crates/eqoa/src/hud.rs` | 315 | 14 | Existing Enhanced HUD plus a local report button rectangle hook and Pick variant; drawing implementation lives in fork_ext/report_core.rs. Review follow-up adds +6/-3 for the restored Report pick assertion, 28px atlas fixture and displaced-position negative control. |
+| `crates/eqoa/src/viewer.rs` | `fork_report::surface(...)`, report input/capture hooks |
+| `crates/eqoa/src/options.rs` | 194 | 42 | Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
+| `crates/eqoa/src/settings.rs` | 322 | 17 | Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31), and one-line in-memory report cache update on save_login. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
 | `crates/eqoa/build.rs` | `app_icon_ico::{stage, images}`, once each |
 | `crates/eqoa/src/icon.rs` | `fork_ext::app_icon::{picture, keeps_icon}`, once each |
 
@@ -130,7 +132,7 @@ its notes and release-page link are fork-owned. Released builds require channel
 enhanced; local and unrelated build channels do not start an updater.
 
 The release manifest additionally checks the updater channel resolver, compiled
-fork notes and update-window release page exactly once each (19 named seams total).
+fork notes and update-window release page with the exact counts in fork-footprint.json.
 
 ## Run and review
 
@@ -186,3 +188,11 @@ Settings description hooks disappeared with upstream's unused report describer.
 These are reviewed integration costs for retaining the owner's local-only reports,
 not a general permission to expand shared code. Web deletion is accepted because
 the Enhanced release workflow ships Windows x64 only.
+
+
+Review follow-up: options +194/-42, play +750/-53 and settings +322/-17 are
+trimmed to the measured diff. HUD +315/-14 includes the restored pick test:
+its nonzero-height atlas and Report assertion add six lines/replace three
+relative to the merge budget. The HUD button and capture surface hooks are now
+checked explicitly. The local report core keeps only the report tail, redaction,
+crash files and dialog; logfile alone owns native stderr and the panic hook.

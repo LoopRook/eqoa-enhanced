@@ -24,15 +24,6 @@ pub(super) fn parse(c: &mut ClientOptions, key: &str, value: &str) {
         _ => {}
     }
 }
-pub(super) fn description(c: &ClientOptions) -> String {
-    let on_off = |on| if on { "on" } else { "off" };
-    format!(
-        ", target hp % {}, xp details {}, hud numbers {}",
-        on_off(c.target_hp_percent),
-        on_off(c.xp_details),
-        on_off(c.hud_numbers)
-    )
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -59,10 +50,6 @@ mod tests {
             parse(&mut restored, key, value);
         }
         assert_eq!(restored, c);
-        assert_eq!(
-            description(&c),
-            ", target hp % off, xp details off, hud numbers off"
-        );
         parse(&mut restored, "hud_numbers", "on");
         assert!(restored.hud_numbers);
     }

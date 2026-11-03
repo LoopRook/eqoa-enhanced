@@ -1,5 +1,8 @@
 # 2026-11-03 upstream sync verification
 
+The original merge evidence is retained below. The review-follow-up section at
+the end records the current source and refreshed validation.
+
 Source: sync/2026-11-03, Enhanced e3964ff + upstream b8e02cd781aac6a1b9e9906f09896956c77afcd6.
 Commands ran in this worktree with CARGO_TARGET_DIR=target and scratch
 EQOA_CONFIG=target/sync-test-config. Every cargo invocation acquired the shared
@@ -296,3 +299,39 @@ test shadow_query_on_tunaria ... SKIP: no disc
 test bsp_walk_equals_brute_force ... SKIP: no disc
 test zone_by_zone_equals_whole ... SKIP: no disc
 ```
+
+
+## Independent review follow-up to b5e6310
+
+- Removed unused client-state capture, state-file reads/writes, the ZIP attachment,
+  crash section and dialog promise. A legacy snapshot fixture is ignored; the ZIP
+  contents assertion now checks the exact note/screenshot/log/manifest set and
+  the dialog's matching promises. Enhanced version/mod headers stay intact.
+- Removed the second logger implementation and its duplicate tests. Native stderr,
+  file logging, caught-panic handling and the single native panic-hook install
+  belong to upstream logfile.rs. The report core keeps its bounded tail and hooks.
+- Restored Report pick coverage with the 28px atlas row and misplaced-position
+  negative controls. A drop guard closes the logger on test unwind.
+- Removed the settings describer and orphan web policy files; aligned seam docs,
+  registered HUD-button/surface hooks, trimmed budgets, and standardized the
+  portable open predicate with two shared-line changes.
+- Deferred the pre-existing second-window report log issue to backlog.md.
+
+`cargo test --locked -p eqoa sync_ -- --nocapture --test-threads=1`: **5 passed**.
+`cargo test --locked -p eqoa report -- --nocapture --test-threads=1`: **44 passed**.
+Restored HUD pick regression: **1 passed** (GPU available; no skip).
+`cargo test --locked --workspace -- --nocapture --test-threads=1`: **PASS**,
+**1,773 passed, 0 failed, 27 ignored** over 96 summaries; client
+**1,500 passed / 0 failed / 26 ignored**. Explicit prerequisite SKIP messages:
+**197**. The two removed duplicate logger tests explain the pass-count decrease.
+Python tools: **46 passed**. Footprint: **PASS**, 33 shared files within policy;
+options +194/-42, play +750/-53, settings +322/-17, HUD +315/-14 (restored test).
+The native source audit confirms logfile.rs is the sole native panic-hook owner.
+
+`cargo build --release --locked -p eqoa`: **PASS**, optimized, 1m 40s.
+Current EXE: 32,701,440 bytes; SHA256 `6b3272c2509f2fdba83105112c72401f97af5026061ac9ab358eee3ec67f8788`. PE x64 GUI / 8 MiB stack: PASS.
+The new review preview is copied after the follow-up commit under the main
+checkout's `run/sync-2026-11-03-<follow-up-shortsha>/`, with identical EXE, bundled
+mods, catalog, launcher and checklist. The checklist lists note/screenshot/logs/
+manifest only. The old b5e6310 preview remains unchanged. Live owner QA remains
+pending; the second-window log selection issue is deferred.

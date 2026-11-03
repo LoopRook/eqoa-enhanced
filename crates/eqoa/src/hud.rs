@@ -710,16 +710,19 @@ mod tests {
             eprintln!("SKIP: no graphics adapter");
             return;
         };
-        let vui = crate::ui::Vui::new(Default::default(), Default::default(), vec![vi::ui::UiTexEntry::default(); 27]);
+        let mut atlas = vec![vi::ui::UiTexEntry::default(); 27];
+        atlas[26].uv1 = [16, 28];
+        let vui = crate::ui::Vui::new(Default::default(), Default::default(), atlas);
         let assets = crate::ui::UiAssets::default();
-        let me = [100.0, 40.0];
+        let (me, report) = ([100.0, 40.0], [30.0, 430.0]);
         for (size, side, up) in [((640, 480), 0.0, 0.0), ((1280, 720), 106.0, 0.0), ((798, 828), 0.0, 85.0)] {
             ui.begin(size);
             let mut hud = Hud::new();
             hud.draw(&vui, &mut assets.raster(&mut ui), &HudState::default());
             assert_eq!(hud.pick([me[0] - side, me[1] - up]), Some(Pick::Me), "{size:?}");
+            assert_eq!(hud.pick([report[0] - side, report[1] + up]), Some(Pick::Report), "{size:?}");
             if side + up > 0.0 {
-                assert_eq!(hud.pick(me), None, "{size:?}: the game's place");
+                assert_eq!((hud.pick(me), hud.pick(report)), (None, None), "{size:?}: the game's places");
             }
         }
     }

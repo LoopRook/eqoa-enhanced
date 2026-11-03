@@ -9,6 +9,7 @@ pub mod mods;
 pub mod release;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod report;
+pub mod report_core;
 pub mod telemetry;
 
 /// Returns whether the client is in plain gameplay (mode 0 with no dialog,
@@ -19,5 +20,3 @@ pub fn is_plain_play(play: Option<&mut crate::play::Play>) -> bool {
         None => false,
     }
 }
-
-pub mod report_core;

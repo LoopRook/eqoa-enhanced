@@ -1,5 +1,9 @@
 # Fork hygiene verification — October 28, 2026
 
+Historical record: the browser reporting policy files and their Node test were removed
+in the 2026-11-03 sync review; commands below describe the earlier revision.
+
+
 Upstream pinned and rechecked remotely: 8d9035096a2deb447854d5fcff4ef25225f80fd1.
 Merge checkpoint: 1bfe228, with parents enhanced 8aeaf91 and upstream 8d90350.
 The cleanup follows that merge without rewriting shared history.

@@ -2770,7 +2770,7 @@ impl App {
         use crate::touch::Phase;
         let p = render::ui::frame_from_window(size, at);
         #[cfg(not(target_arch = "wasm32"))]
-        if crate::report::is_open() { crate::report::click(p); return; }
+        if crate::report::is_open_local() { crate::report::click(p); return; }
         let whose = match phase {
             Phase::Started => {
                 let w = self.finger_on(p);
@@ -2843,7 +2843,7 @@ impl App {
     fn tap(&mut self, at: [f32; 2], size: (u32, u32)) {
         let p = render::ui::frame_from_window(size, at);
         #[cfg(not(target_arch = "wasm32"))]
-        if crate::report::is_open() { crate::report::click(p); return; }
+        if crate::report::is_open_local() { crate::report::click(p); return; }
         #[cfg(not(target_arch = "wasm32"))]
         {
             if crate::update::offer_shown()

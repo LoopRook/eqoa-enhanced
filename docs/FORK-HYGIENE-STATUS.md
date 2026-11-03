@@ -1,5 +1,9 @@
 # Fork hygiene execution record
 
+Historical record: the browser reporting policy files and their Node test were removed
+in the 2026-11-03 sync review; commands below describe the earlier revision.
+
+
 Spec: the owner's EQOA Enhanced Fork Hygiene Brief, October 28, 2026.
 
 This records the original hygiene checkpoint. The owner subsequently requested

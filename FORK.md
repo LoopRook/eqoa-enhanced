@@ -43,7 +43,7 @@ features behind a crate or feature flag is a later option requiring its own plan
 fork_ext/mod.rs owns the plain-data mods and telemetry services. The app-private
 adapters fork_ext/{play,hud,options,settings}.rs are children of their shared
 parent modules. Each named hook occurs once: combat event, HUD labels, option
-category/items/change/activate/value_text, and settings write/parse/description.
+category/items/change/activate/value_text, and settings write/parse.
 See the ownership table for exact symbols and call sites.
 
 Put new implementation in fork-owned files. Shared code should only gather app
@@ -54,9 +54,10 @@ with positive and negative controls and update FORK-UPDATE-NOTES.md.
 
 F3 and the HUD report button open the local Save to Desktop dialog; crash reports
 are offered at the next start. Nothing is uploaded. The retained report core is
-fork-owned at fork_ext/report_core.rs; upstream logfile keeps logging through hooks. EQOA_REPORTS accepts only an explicitly selected
-numeric HTTP loopback fixture; it cannot route reports to upstream. Browser
-fixture selection is documented in the report policy tests. Keep map/community
+fork-owned at fork_ext/report_core.rs; upstream logfile keeps logging through hooks.
+Historical HTTP transport exists only in tests against numeric loopback fixtures;
+the production report path only saves locally. The obsolete browser report policy
+was removed after upstream deleted browser reporting. Keep map/community
 suggestions distinct from bug-report uploads.
 
 ## Upstream sync and conflicts

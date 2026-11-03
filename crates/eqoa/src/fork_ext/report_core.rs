@@ -13,17 +13,6 @@ pub fn secret(account: &str, password: &str) {
     crate::fork_ext::report::refresh_saved_login_cache();
 }
 
-/// The client's state for a report, noted once a second at most: `state`
-/// runs only then.
-pub fn note_state(state: impl FnOnce() -> String) {
-    #[cfg(not(target_arch = "wasm32"))]
-    native::note_state(state);
-}
-
-/// A frame is drawn: a page takes its picture now if it asked (natively the
-/// frame's texture is read before it is presented, `native::take_shot`).
-pub fn frame_drawn() {}
-
 /// F3 or the HUD's Report a bug: the report's dialog.
 pub fn open() {
     if !crate::report_policy::enabled() {
@@ -130,31 +119,28 @@ pub(crate) use native::ended_without_closing_for_test;
 pub(crate) use native::{Button, Kind, Sent, Status, clean_noted, dir, has_noted_accounts, tail};
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{
-    Key, caught, clean_exit, click, crash, draw, is_open, is_report_key, key, key_of, log_line,
-    restore_stderr, run_started, set_gpu, set_shot, start, wants_shot,
+    Key, clean_exit, click, crash, draw, is_report_key, key, key_of, log_line, run_started,
+    set_gpu, set_shot, start, wants_shot,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
-    use super::{base64, fit, json_string, scrub};
+    use super::{fit, json_string, scrub};
     use std::collections::VecDeque;
+    #[cfg(test)]
     use std::fs::File;
-    use std::io::{BufRead, Write};
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering};
-    use std::sync::{Mutex, MutexGuard, mpsc};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Mutex, MutexGuard};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     use vi::ui::{Raster, Vui, wide};
 
     /// The log lines a report carries, and how long each may be.
     const LOG_LINES: usize = 200;
     const LOG_LINE_MAX: usize = 400;
-    /// `eqoa.log` stops growing here (the ring goes on).
-    const LOG_FILE_MAX: u64 = 32 << 20;
     const NOTE_MAX: usize = 1000;
     const NAME_MAX: usize = 32;
     /// the server keeps 512 KiB of a report and 256 KiB of a crash
-    const REPORT_MAX: usize = 500 * 1024;
     const CRASH_MAX: usize = 240 * 1024;
     const SHOT_WIDTH: u32 = 1280;
     /// The crash reports kept waiting, at most.
@@ -162,46 +148,13 @@ mod native {
     /// The line a run that closes writes last: a log without it is a run
     /// that did not close.
     const CLOSED: &str = "[eqoa] closed";
-    /// The lines waiting for the terminal's thread (`tee`), at most: past
-    /// them a line reaches the log and the report's ring only.
-    const TERMINAL_QUEUE: usize = 1024;
-
     fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
         m.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     // ---- the log ------------------------------------------------------------
 
-    struct Log {
-        file: Option<File>,
-        bytes: u64,
-        ring: VecDeque<String>,
-        /// the program's stderr before the pipe (`restore_stderr`), and on
-        /// Windows the pipe's end that stands in for it (closed then)
-        #[cfg(unix)]
-        orig: Option<i32>,
-        #[cfg(windows)]
-        orig: Option<(usize, usize)>,
-        #[cfg(not(any(unix, windows)))]
-        orig: Option<()>,
-        /// what the pipe's reader says as it reaches the end
-        drained: Option<mpsc::Receiver<()>>,
-    }
-
-    static LOG: Mutex<Log> = Mutex::new(Log {
-        file: None,
-        bytes: 0,
-        ring: VecDeque::new(),
-        orig: None,
-        drained: None,
-    });
-    /// Where stderr went before the pipe, to write to (a descriptor, a
-    /// handle), -1 without one: what must reach it before the program may end.
-    static TERMINAL: AtomicIsize = AtomicIsize::new(-1);
-    /// Whether the terminal's thread is behind: its queue full, so a write
-    /// to where stderr went blocks (a pipe nothing reads) and the panic
-    /// hook writes there no more (`to_terminal`).
-    pub(super) static TERMINAL_BEHIND: AtomicBool = AtomicBool::new(false);
+    static LOG: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
     /// This run's name: when it started, and which window it is past the
     /// first (`crash-<run>.txt` is its crash).
     static RUN: Mutex<String> = Mutex::new(String::new());
@@ -227,37 +180,25 @@ mod native {
         }
     }
 
-    fn push_line(l: &mut Log, line: &str) {
-        let clean = crate::fork_ext::report::clean_log_line(line);
-        let line = clean.as_str();
-        if let Some(f) = l.file.as_mut()
-            && l.bytes < LOG_FILE_MAX
-            && f.write_all(line.as_bytes()).is_ok()
-            && f.write_all(b"\n").is_ok()
-        {
-            l.bytes += line.len() as u64 + 1;
-        }
-        let mut short: String = line.chars().take(LOG_LINE_MAX).collect();
-        if short.len() < line.len() {
-            short.push('…');
-        }
-        l.ring.push_back(short);
-        while l.ring.len() > LOG_LINES {
-            l.ring.pop_front();
-        }
-    }
-
     pub fn run_started(run: &str) {
         *lock(&RUN) = run.to_string();
     }
 
+    /// Keep only the bounded report tail; logfile owns files, stderr and panics.
     pub fn log_line(line: &str) {
-        push_line(&mut lock(&LOG), line);
+        let clean = crate::fork_ext::report::clean_log_line(line);
+        let mut short: String = clean.chars().take(LOG_LINE_MAX).collect();
+        if short.len() < clean.len() {
+            short.push('…');
+        }
+        let mut ring = lock(&LOG);
+        ring.push_back(short);
+        while ring.len() > LOG_LINES {
+            ring.pop_front();
+        }
     }
 
-    /// The program's log for the game as players start it (main's `boot`):
-    /// stderr through a pipe to where it went, `eqoa.log` and the ring; the
-    /// run before checked for a crash it left; the panic hook.
+    /// Before logfile rotates the previous log, detect interrupted runs.
     pub fn start() {
         let dir = crate::settings::config_dir();
         let window = crate::multibox::place() + 1;
@@ -274,236 +215,13 @@ mod native {
         }
     }
 
-    thread_local! {
-        /// How deep this thread is in `caught`: a panic there is no crash.
-        static CAUGHT: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-    }
-
-    /// `f` with a panic in it caught and handed back as its message, written
-    /// as no crash report and said nowhere: for a library's own fault the game
-    /// can step over (gilrs's lookup of a controller it holds no state for
-    /// yet, `input.rs`).
-    pub fn caught<T>(f: impl FnOnce() -> T) -> Result<T, String> {
-        CAUGHT.with(|c| c.set(c.get() + 1));
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-        CAUGHT.with(|c| c.set(c.get() - 1));
-        r.map_err(|e| {
-            e.downcast_ref::<&str>()
-                .map(|s| s.to_string())
-                .or_else(|| e.downcast_ref::<String>().cloned())
-                .unwrap_or_else(|| "a panic".to_string())
-        })
-    }
-
-    /// `text` to where stderr went before the pipe (stderr itself without
-    /// one).
-    fn to_terminal(text: &str) {
-        let t = TERMINAL.load(Ordering::Relaxed);
-        if t < 0 {
-            eprint!("{text}");
-            return;
-        }
-        // where stderr went reads nothing: a write there would never return
-        if TERMINAL_BEHIND.load(Ordering::Relaxed) {
-            return;
-        }
-        // SAFETY: the copy `tee` made of the old stderr, never closed
-        #[cfg(unix)]
-        let f = unsafe { <File as std::os::fd::FromRawFd>::from_raw_fd(t as i32) };
-        #[cfg(windows)]
-        let f = unsafe { <File as std::os::windows::io::FromRawHandle>::from_raw_handle(t as _) };
-        #[cfg(any(unix, windows))]
-        {
-            let mut f = std::mem::ManuallyDrop::new(f);
-            let _ = f.write_all(text.as_bytes());
-        }
-    }
-
-    /// stderr into a pipe whose other end a thread reads, line by line, into
-    /// the log and back out to where stderr went. The thread never stops
-    /// reading (a full pipe would stop every writer, the game with it), so
-    /// where stderr went is written by a thread of its own, which may block
-    /// there: a launcher's pipe that nothing reads (a Steam Deck in Steam's
-    /// game mode, "seems to hang from steam") once filled stopped the reader
-    /// in its write, then every `eprintln!`, the game's frames with them.
-    fn tee() {
-        let Ok((reader, writer)) = std::io::pipe() else {
-            return;
-        };
-        #[cfg(unix)]
-        let to = {
-            use std::os::fd::{AsRawFd, FromRawFd};
-            // SAFETY: duplicating and replacing the process's own fd 2
-            let orig = unsafe { libc::dup(2) };
-            if orig < 0 || unsafe { libc::dup2(writer.as_raw_fd(), 2) } < 0 {
-                return;
-            }
-            lock(&LOG).orig = Some(orig);
-            drop(writer);
-            // SAFETY: a copy of the old stderr of its own (`orig` stays for
-            // `restore_stderr`), never closed
-            let copy = unsafe { libc::dup(orig) };
-            if copy >= 0 {
-                TERMINAL.store(copy as isize, Ordering::Relaxed);
-            }
-            (copy >= 0).then(|| unsafe { File::from_raw_fd(copy) })
-        };
-        #[cfg(windows)]
-        let to = {
-            use std::os::windows::io::{FromRawHandle, IntoRawHandle};
-            use windows_sys::Win32::System::Console::{
-                GetStdHandle, STD_ERROR_HANDLE, SetStdHandle,
-            };
-            // SAFETY: the process's own standard handles
-            let orig = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
-            let w = writer.into_raw_handle();
-            if unsafe { SetStdHandle(STD_ERROR_HANDLE, w as _) } == 0 {
-                return;
-            }
-            let valid = !orig.is_null() && orig as isize != -1;
-            lock(&LOG).orig = Some((orig as usize, w as usize));
-            if valid {
-                TERMINAL.store(orig as isize, Ordering::Relaxed);
-            }
-            // SAFETY: the old stderr, a console or a file the program was
-            // started with; never closed (ManuallyDrop below)
-            valid.then(|| unsafe { File::from_raw_handle(orig as _) })
-        };
-        #[cfg(not(any(unix, windows)))]
-        let to: Option<File> = {
-            drop(writer);
-            None
-        };
-        let (done, drained) = mpsc::channel();
-        lock(&LOG).drained = Some(drained);
-        let terminal = to.and_then(|t| terminal_thread(Kept(std::mem::ManuallyDrop::new(t))));
-        let _ = std::thread::Builder::new()
-            .name("log".into())
-            .spawn(move || {
-                let (queue, written) = terminal.unzip();
-                read_lines(std::io::BufReader::new(reader), queue, |text| {
-                    push_line(&mut lock(&LOG), text)
-                });
-                // what the terminal's thread still holds, a moment at most
-                if let Some(w) = written {
-                    let _ = w.recv_timeout(Duration::from_millis(300));
-                }
-                let _ = done.send(());
-            });
-    }
-
-    /// Where stderr went, written to and never closed (`restore_stderr` puts
-    /// it back as fd 2).
-    struct Kept(std::mem::ManuallyDrop<File>);
-
-    impl Write for Kept {
-        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-            self.0.write(b)
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            self.0.flush()
-        }
-    }
-
-    /// A thread writing what it is handed to `to` (where stderr went), and
-    /// the queue to hand it lines by; the second channel says it is done
-    /// (the queue let go and emptied, or a write failed).
-    pub(super) fn terminal_thread<W: Write + Send + 'static>(
-        mut to: W,
-    ) -> Option<(mpsc::SyncSender<Vec<u8>>, mpsc::Receiver<()>)> {
-        let (queue, lines) = mpsc::sync_channel::<Vec<u8>>(TERMINAL_QUEUE);
-        let (written, done) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("terminal".into())
-            .spawn(move || {
-                for line in lines {
-                    if to.write_all(&line).is_err() {
-                        break;
-                    }
-                }
-                let _ = written.send(());
-            })
-            .ok()?;
-        Some((queue, done))
-    }
-
-    /// The log's reader: every line of `reader` to `sink` (the log and the
-    /// ring) as it comes, and queued for the terminal's thread, never waited
-    /// for: while its queue is full a line goes to `sink` only, and
-    /// `TERMINAL_BEHIND` says so (the panic hook's message too). Until the
-    /// pipe's end closes.
-    pub(super) fn read_lines(
-        mut r: impl BufRead,
-        mut terminal: Option<mpsc::SyncSender<Vec<u8>>>,
-        mut sink: impl FnMut(&str),
-    ) {
-        let mut line = Vec::new();
-        loop {
-            line.clear();
-            match r.read_until(b'\n', &mut line) {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {}
-            }
-            if let Some(t) = terminal.as_ref() {
-                match t.try_send(line.clone()) {
-                    Ok(()) => TERMINAL_BEHIND.store(false, Ordering::Relaxed),
-                    Err(mpsc::TrySendError::Full(_)) => {
-                        TERMINAL_BEHIND.store(true, Ordering::Relaxed)
-                    }
-                    Err(mpsc::TrySendError::Disconnected(_)) => terminal = None,
-                }
-            }
-            let text = String::from_utf8_lossy(&line);
-            sink(text.trim_end_matches(['\n', '\r']));
-        }
-    }
-
-    /// stderr back where it went before `start` (a program started in this
-    /// one's place inherits it, and would find a pipe nothing reads), and the
-    /// pipe's end closed: its reader reads what is left and stops.
-    pub fn restore_stderr() {
-        let Some(orig) = lock(&LOG).orig.take() else {
-            return;
-        };
-        restore(orig);
-    }
-
-    #[cfg(unix)]
-    type Orig = i32;
-    #[cfg(windows)]
-    type Orig = (usize, usize);
-    #[cfg(not(any(unix, windows)))]
-    type Orig = ();
-
-    fn restore(orig: Orig) {
-        #[cfg(unix)]
-        // SAFETY: the copy of the old stderr `tee` kept; fd 2 was the pipe's
-        // only end to write to
-        unsafe {
-            libc::dup2(orig, 2);
-        }
-        #[cfg(windows)]
-        // SAFETY: the old stderr handle `tee` kept, and the pipe's end it
-        // stood in for, this module's alone
-        unsafe {
-            windows_sys::Win32::System::Console::SetStdHandle(
-                windows_sys::Win32::System::Console::STD_ERROR_HANDLE,
-                orig.0 as _,
-            );
-            windows_sys::Win32::Foundation::CloseHandle(orig.1 as _);
-        }
-        #[cfg(not(any(unix, windows)))]
-        let _ = orig;
-    }
-
     /// A crash report for the next start that no panic wrote: `detail`, with
-    /// the state and the log as they are now.
+    /// the log tail as it is now.
     pub fn crash(detail: &str) {
         write_crash(detail, None, SystemTime::now());
     }
 
-    /// The run closes: stderr to where it went, what the pipe holds read
-    /// into the log (half a second at most), and the log's last line says so.
+    /// Fork cleanup called by logfile before it closes the log.
     pub fn clean_exit() {
         if crate::gpulost::lost() && !crate::gpulost::settled() {
             crash(&format!(
@@ -516,27 +234,17 @@ mod native {
 
     pub(crate) fn tail(n: usize) -> Vec<String> {
         let l = lock(&LOG);
-        l.ring
-            .iter()
-            .skip(l.ring.len().saturating_sub(n))
-            .cloned()
-            .collect()
+        l.iter().skip(l.len().saturating_sub(n)).cloned().collect()
     }
 
-    // ---- the state, the secrets ---------------------------------------------
+    // ---- the secrets ---------------------------------------------
 
     struct Noted {
-        state: String,
-        at: Option<Instant>,
-        saved: Option<Instant>,
         accounts: Vec<String>,
         passwords: Vec<String>,
     }
 
     static NOTED: Mutex<Noted> = Mutex::new(Noted {
-        state: String::new(),
-        at: None,
-        saved: None,
         accounts: Vec::new(),
         passwords: Vec::new(),
     });
@@ -552,25 +260,6 @@ mod native {
         }
         if password.len() >= 4 && !n.passwords.iter().any(|p| p == password) {
             n.passwords.push(password.to_string());
-        }
-    }
-
-    pub(super) fn note_state(state: impl FnOnce() -> String) {
-        let mut n = lock(&NOTED);
-        if n.at.is_some_and(|t| t.elapsed() < Duration::from_secs(1)) {
-            return;
-        }
-        n.state = state();
-        n.at = Some(Instant::now());
-        // kept on disk now and then, scrubbed: what a run that does not
-        // close leaves the next start
-        if n.saved
-            .is_none_or(|t| t.elapsed() >= Duration::from_secs(10))
-            && let Some(d) = dir()
-        {
-            n.saved = Some(Instant::now());
-            let text = clean(&n.state, &n);
-            let _ = std::fs::write(d.join(own("state", "txt")), text);
         }
     }
 
@@ -596,9 +285,6 @@ mod native {
             Err(_) => clean(
                 text,
                 &Noted {
-                    state: String::new(),
-                    at: None,
-                    saved: None,
                     accounts: Vec::new(),
                     passwords: Vec::new(),
                 },
@@ -675,11 +361,11 @@ mod native {
     }
 
     /// A crash report on disk now (`crashes/crash-<run>.txt`): `detail`,
-    /// the state last noted, the log's last lines; scrubbed. `log` stands
+    /// the log's last lines, scrubbed. `log` stands
     /// in for this run's log (a run before's). `at` is when the game
     /// stopped (its `when:`). Locks are only tried: a panic may come while
     /// one is held.
-    fn write_crash(detail: &str, log: Option<(&str, &[String], &str)>, at: SystemTime) {
+    fn write_crash(detail: &str, log: Option<(&str, &[String])>, at: SystemTime) {
         let Some(d) = crashes() else { return };
         write_crash_in(&d, detail, log, at, None);
     }
@@ -690,56 +376,37 @@ mod native {
     fn write_crash_in(
         d: &Path,
         detail: &str,
-        log: Option<(&str, &[String], &str)>,
+        log: Option<(&str, &[String])>,
         at: SystemTime,
         of: Option<&str>,
     ) {
         let _ = std::fs::create_dir_all(d);
         let run = RUN.try_lock().map(|r| r.clone()).unwrap_or_default();
-        let (name, state, lines) = match log {
-            Some((run, lines, state)) => (
-                format!("crash-{run}.txt"),
-                state.to_string(),
-                lines.to_vec(),
-            ),
+        let (name, lines) = match log {
+            Some((run, lines)) => (format!("crash-{run}.txt"), lines.to_vec()),
             None => {
-                let state = NOTED
-                    .try_lock()
-                    .map(|n| n.state.clone())
-                    .unwrap_or_default();
                 let lines = LOG
                     .try_lock()
-                    .map(|l| l.ring.iter().cloned().collect())
+                    .map(|l| l.iter().cloned().collect())
                     .unwrap_or_default();
-                (format!("crash-{run}.txt"), state, lines)
+                (format!("crash-{run}.txt"), lines)
             }
         };
         let text = format!(
-            "EQOA native client crash report\nversion: {}\nwhen: {}\nplatform: {}\n\n--- crash ---\n{}\n\n[client, as last noted]\n{}\n\n[log] last {} lines\n{}\n",
+            "EQOA native client crash report\nversion: {}\nwhen: {}\nplatform: {}\n\n--- crash ---\n{}\n\n[log] last {} lines\n{}\n",
             of.map_or_else(|| format!("{} ({})", version(), channel()), str::to_string),
             stamp(at),
             platform(),
             detail.trim_end(),
-            if state.trim().is_empty() {
-                "-"
-            } else {
-                state.trim_end()
-            },
             lines.len(),
             lines.join("\n")
         );
         let _ = std::fs::write(d.join(name), clean_now(&text));
     }
 
-    /// The run before's leavings, at a start: its crash report if it did not
-    /// close (`ended_without_closing`), then the state it noted put away, so
-    /// a run that stops before noting any (a graphics driver ending the
-    /// program as its device is made) is reported with none, never with an
-    /// earlier run's (F3 crash 20261026-130834: a run that stopped at its
-    /// window came with the state of a two-and-a-half-hour run before it).
+    /// Inspect this window's previous log for a run that did not close.
     pub(super) fn take_last_run(dir: &Path, prev: &Path) {
         ended_without_closing(dir, prev);
-        let _ = std::fs::remove_file(dir.join(own("state", "txt")));
     }
 
     #[cfg(test)]
@@ -749,7 +416,7 @@ mod native {
 
     /// The run before (this window's), if it did not close (no `CLOSED` in
     /// its log) and wrote no crash report of its own: one written for it,
-    /// from the log and the state it left.
+    /// from the log it left.
     fn ended_without_closing(dir: &Path, prev: &Path) {
         let Ok(text) = std::fs::read_to_string(prev) else {
             return;
@@ -774,7 +441,6 @@ mod native {
         {
             return;
         }
-        let state = std::fs::read_to_string(dir.join(own("state", "txt"))).unwrap_or_default();
         let tail: Vec<String> = lines[lines.len().saturating_sub(LOG_LINES)..]
             .iter()
             .map(|l| l.chars().take(LOG_LINE_MAX).collect())
@@ -786,7 +452,7 @@ mod native {
         write_crash_in(
             &dir.join("crashes"),
             &unclosed_detail(run, &lines),
-            Some((run, &tail, &state)),
+            Some((run, &tail)),
             at,
             of,
         );
@@ -795,7 +461,7 @@ mod native {
     /// What a crash report says of a run that did not close: out of memory
     /// when its log ends with Rust's abort for an allocation refused (F3
     /// crash 20261026-220031, eleven hours in: "memory allocation of 229376
-    /// bytes failed"), the memory its state last noted then the one to read.
+    /// bytes failed").
     pub(super) fn unclosed_detail(run: &str, lines: &[&str]) -> String {
         let last = lines
             .iter()
@@ -891,78 +557,12 @@ mod native {
         }
     }
 
-    #[cfg(test)]
-    fn problem_body(note: &str, name: &str, shot: Option<&[u8]>) -> String {
-        let n = lock(&NOTED);
-        let state = n.state.clone();
-        drop(n);
-        let log = tail(LOG_LINES);
-        let report = fit(
-            &clean_now(&format!(
-                "EQOA native client problem report\nversion: {}\nchannel: {}\nname: {}\nnote: {}\n\n--- trace ---\neqoa native client trace {}\nplatform: {}\n{}\n\n[client]\n{}\n\n[controllers]\n{}\n\n[other windows]\n{}\n\n[log] last {} lines\n{}\n",
-                version(),
-                channel(),
-                if name.is_empty() { "-" } else { name },
-                if note.is_empty() {
-                    "-".to_string()
-                } else {
-                    note.replace('\n', " ")
-                },
-                stamp(SystemTime::now()),
-                platform(),
-                crate::fork_ext::report::enhanced_label(),
-                state.trim_end(),
-                controllers(),
-                other_windows(),
-                log.len(),
-                log.join("\n")
-            )),
-            REPORT_MAX,
-        );
-        format!(
-            "{{\"report\":{},\"note\":{},\"name\":{},\"version\":{},\"platform\":{},\"channel\":{},\"screenshot\":{}}}",
-            json_string(&report),
-            json_string(&clean_now(note)),
-            json_string(name),
-            json_string(&version()),
-            json_string(&platform()),
-            json_string(channel()),
-            json_string(&shot.map(base64).unwrap_or_default())
-        )
-    }
-
-    /// The controllers connected and who reads them (`input`): the log says
-    /// what a window reads only as it changes, long gone by a report.
-    #[cfg(test)]
-    fn controllers() -> String {
-        "See eqoa.log".into()
-    }
-
     /// The lines of another window's log a report carries (`other_windows`).
     const OTHER_LINES: usize = 12;
     /// How much of the end of another window's log is read for them.
     const OTHER_TAIL: u64 = 256 * 1024;
 
-    /// The other windows open, each with the last lines of its own log on
-    /// its arrivals at the front, its controllers and its stalls (`focus:`,
-    /// `controllers:`, `gamepad:`, `multibox:`, `stall:`; nothing a player
-    /// typed or was sent): a report carries only its own window's log, and
-    /// the delay of F3 20261026-091519 was the second window's, reported
-    /// from the first; F3 20261029-025532's freezes were both windows' at
-    /// once, and a stall's line says when, in UTC, to read them together.
-    fn other_windows() -> String {
-        let Some(d) = dir() else {
-            return "none read (no config directory)".into();
-        };
-        let me = WINDOW.load(Ordering::Relaxed).max(1);
-        let windows: Vec<usize> = crate::multibox::seat()
-            .others
-            .iter()
-            .map(|o| o.place + 1)
-            .collect();
-        other_windows_in(&d, me, &windows)
-    }
-
+    #[cfg(test)]
     pub(super) fn other_windows_in(dir: &Path, me: usize, windows: &[usize]) -> String {
         use std::io::{Read, Seek, SeekFrom};
         let mut out = Vec::new();
@@ -1832,7 +1432,8 @@ mod native {
                 Some(at) => format!("The game stopped {}", ago(at, now)),
                 None => "The game stopped earlier".to_string(),
             };
-            let then = "It kept a crash report then. Save it locally to share with Enhanced support.";
+            let then =
+                "It kept a crash report then. Save it locally to share with Enhanced support.";
             let intro = match &newest.version {
                 Some(v) if v != this => {
                     format!("That was in an earlier version of the game ({v}). {then}")
@@ -1865,7 +1466,8 @@ mod native {
         } else {
             "an earlier version"
         };
-        let each = "It kept a crash report each time. Save them locally to share with Enhanced support.";
+        let each =
+            "It kept a crash report each time. Save them locally to share with Enhanced support.";
         let intro = match other.len() {
             0 => each.to_string(),
             n if n == all.len() => format!(
@@ -1905,83 +1507,28 @@ mod tests {
 
     include!("../report_policy_transport_tests.rs");
 
-    /// `caught` hands a panic back as its message (gilrs's index panic is a
-    /// formatted String, a literal a &str) and a value through as it is, its
-    /// depth back to none after each, a nested one's too; the control: the
-    /// same panic outside `caught` unwinds to `catch_unwind`, uncaught by it.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// The previous run's crash keeps its own version and log; a clean close
+    /// is the negative control. Client-state snapshots are no longer a feature.
     #[test]
-    fn a_caught_panic_comes_back_as_its_message() {
-        use native::caught;
-        let v: Vec<u8> = vec![1, 2];
-        let i = v.len();
-        assert_eq!(
-            caught(|| v[i]),
-            Err("index out of bounds: the len is 2 but the index is 2".to_string())
-        );
-        assert_eq!(
-            caught(|| -> u8 { panic!("a literal") }),
-            Err("a literal".to_string())
-        );
-        assert_eq!(caught(|| 7), Ok(7));
-        assert_eq!(
-            caught(|| caught(|| -> u8 { panic!("inner") }).map_err(|e| e + " (nested)")),
-            Ok(Err("inner (nested)".to_string()))
-        );
-        assert!(
-            std::panic::catch_unwind(|| v[i]).is_err(),
-            "the control: it panics"
-        );
-        assert_eq!(caught(|| v[0]), Ok(1), "and after all that, a plain call");
-    }
-
-    /// A start takes the run before's leavings: a run that closed leaves no
-    /// crash, and its state is put away; the next run, stopped at its
-    /// window before noting any (F3 crash 20261026-130834), is reported with
-    /// no state and as the version its own log names, not the state of the
-    /// run before it nor the version reading it. The control: the same
-    /// unclosed log with the old state left in place (`ended_without_closing`
-    /// alone, as a start did) reports that state.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn a_crash_carries_its_own_runs_state_and_version() {
-        use native::take_last_run;
+    fn a_crash_carries_its_own_runs_version_and_log() {
         let dir = std::env::temp_dir().join(format!("eqoa-last-run-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let (prev, state) = (dir.join("eqoa.prev.log"), dir.join("state.txt"));
-        let crash = |run: &str| {
-            std::fs::read_to_string(dir.join("crashes").join(format!("crash-{run}.txt")))
-        };
-        std::fs::write(&prev, "[eqoa] run 20261025-180304, dev-da994c8 (dev), windows x86_64, window 1\nplay: in the world\n[eqoa] closed\n").unwrap();
-        std::fs::write(&state, "frames 536108, clock 9020.2 s\n").unwrap();
-        take_last_run(&dir, &prev);
-        assert!(
-            crash("20261025-180304").is_err(),
-            "a run that closed is no crash"
+        let prev = dir.join("eqoa.prev.log");
+        let run = "20261103-234501";
+        let crash = dir.join("crashes").join(format!("crash-{run}.txt"));
+        let closed = format!(
+            "[eqoa] run {run}, dev-review (enhanced), windows x86_64, window 1\n[eqoa] closed\n"
         );
-        assert!(!state.exists(), "its state put away");
-        let stopped = "[eqoa] run 20261025-205606, dev-79f115e (dev), windows x86_64, window 1\nwindow: as kept (at 952,0, 958x991), on \\\\.\\DISPLAY1 of 1 monitor(s)\n";
-        std::fs::write(&prev, stopped).unwrap();
-        take_last_run(&dir, &prev);
-        let text = crash("20261025-205606").unwrap();
-        assert!(text.contains("\nversion: dev-79f115e (dev)\n"), "{text}");
-        assert!(text.contains("[client, as last noted]\n-\n"), "{text}");
-        assert!(
-            text.contains("[log] last 2 lines\n[eqoa] run 20261025-205606"),
-            "{text}"
-        );
-        // the control
-        std::fs::remove_dir_all(dir.join("crashes")).unwrap();
-        std::fs::write(&state, "frames 536108, clock 9020.2 s\n").unwrap();
-        native::ended_without_closing_for_test(&dir, &prev);
-        assert!(
-            crash("20261025-205606")
-                .unwrap()
-                .contains("[client, as last noted]\nframes 536108"),
-            "the old state, left in place, is taken"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::write(&prev, &closed).unwrap();
+        native::take_last_run(&dir, &prev);
+        assert!(!crash.exists(), "clean exit produces no crash");
+        std::fs::write(&prev, closed.replace("[eqoa] closed", "last event")).unwrap();
+        native::take_last_run(&dir, &prev);
+        let text = std::fs::read_to_string(&crash).unwrap();
+        assert!(text.contains("version: dev-review (enhanced)"));
+        assert!(text.contains("[log] last 2 lines") && text.contains("last event"));
+        assert!(!text.contains("[client"), "no empty client-state section");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// A run whose log ends with Rust's abort for an allocation refused is
@@ -2323,7 +1870,8 @@ mod tests {
             crash_words(&none.stopped, "dev-3ff30da", offered),
             (
                 "The game stopped earlier".to_string(),
-                "It kept a crash report then. Save it locally to share with Enhanced support.".to_string()
+                "It kept a crash report then. Save it locally to share with Enhanced support."
+                    .to_string()
             )
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -2558,72 +2106,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A terminal that reads nothing (a launcher's pipe never drained: a
-    /// Steam Deck's game mode) does not stop the log: 20,000 lines, far past
-    /// the terminal's queue, all reach it while the terminal's thread is stuck
-    /// in its first write, and the panic hook is told to keep off it. The
-    /// control: the stuck writer itself, written as the log's reader used to
-    /// write (itself, in the loop), never returns.
-    #[test]
-    fn a_terminal_that_reads_nothing_does_not_stop_the_log() {
-        use native::{TERMINAL_BEHIND, read_lines, terminal_thread};
-        use std::io::Write;
-        use std::sync::atomic::Ordering;
-        use std::sync::mpsc;
-        use std::time::Duration;
-        /// A write that waits until the test lets it go (its sender dropped).
-        struct Stuck(mpsc::Receiver<()>);
-        impl Write for Stuck {
-            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-                let _ = self.0.recv();
-                Err(std::io::ErrorKind::BrokenPipe.into())
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-        let (hold, stuck) = mpsc::channel::<()>();
-        let (queue, written) = terminal_thread(Stuck(stuck)).unwrap();
-        let text: String = (0..20_000).map(|i| format!("line {i}\n")).collect();
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let mut n = 0;
-            let mut last = String::new();
-            read_lines(std::io::Cursor::new(text.into_bytes()), Some(queue), |l| {
-                n += 1;
-                last = l.to_string();
-            });
-            let _ = tx.send((n, last));
-        });
-        assert_eq!(
-            rx.recv_timeout(Duration::from_secs(20)),
-            Ok((20_000, "line 19999".to_string()))
-        );
-        assert!(
-            TERMINAL_BEHIND.load(Ordering::Relaxed),
-            "the panic hook keeps off a terminal that reads nothing"
-        );
-        // let go: the terminal's thread ends and says so
-        drop(hold);
-        assert_eq!(written.recv_timeout(Duration::from_secs(5)), Ok(()));
-        TERMINAL_BEHIND.store(false, Ordering::Relaxed);
-        // the control: writing to it in the loop, as the reader did, stops there
-        let (hold2, stuck2) = mpsc::channel::<()>();
-        let (tx2, rx2) = mpsc::channel();
-        std::thread::spawn(move || {
-            let mut t = Stuck(stuck2);
-            for i in 0..3 {
-                let _ = t.write_all(format!("line {i}\n").as_bytes());
-                let _ = tx2.send(i);
-            }
-        });
-        assert_eq!(
-            rx2.recv_timeout(Duration::from_millis(300)),
-            Err(mpsc::RecvTimeoutError::Timeout)
-        );
-        drop(hold2);
-    }
-
     /// A report too long for the server is cut, at a character, saying so.
     #[test]
     fn a_long_report_is_cut_to_fit() {
@@ -2649,7 +2131,7 @@ pub fn hud_button(vui: &vi::ui::Vui, ui: &mut crate::ui::UiRaster) -> Option<[i3
 
 pub fn is_open_local() -> bool {
     #[cfg(not(target_arch = "wasm32"))]
-    return is_open();
+    return native::is_open();
     #[cfg(target_arch = "wasm32")]
     false
 }
