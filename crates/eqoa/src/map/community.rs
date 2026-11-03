@@ -839,7 +839,16 @@ mod tests {
             "/down/mapmarks" => (500, Vec::new(), String::new()),
             _ => (200, Vec::new(), r#"{"version":"9","marks":[{"id":1,"world":0,"x":5,"z":6,"name":"Well"}]}"#.into()),
         });
-        let mut c = Community { cache: Some(Box::new(store::Dir::new(std::env::temp_dir().join(format!("eqoa-community-bad-{}", std::process::id()))))), ..Default::default() };
+        // A prior test process can have the same Windows PID and leave a good
+        // one-mark cache. This test starts with its own three held markers.
+        let dir = std::env::temp_dir().join(format!("eqoa-community-bad-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir(&dir).unwrap();
+        struct CacheDir(std::path::PathBuf);
+        impl Drop for CacheDir {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        let dir = CacheDir(dir);
+        let mut c = Community { cache: Some(Box::new(store::Dir::new(dir.0.clone()))), ..Default::default() };
         c.take("1".into(), parse(LIST).unwrap().1, None);
         for sub in ["bad/", "down/"] {
             c.set_base(Some(format!("{base}{sub}")));

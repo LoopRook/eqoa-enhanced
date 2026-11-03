@@ -2,9 +2,30 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-03 ? Upstream sync preview
+
+- Holding R2 to read chat history keeps the ability bar and minimap on screen.
+
+- Reports now include a short picture of what the game was doing: mode, target,
+  nearby characters, location, movement flags and addon HUD claims. Crash reports
+  keep the last snapshot. Account credentials and your user folder are redacted;
+  character names stay visible. Snapshot scans and file saves now run in the
+  background so reporting does not pause a frame; loading and location labels
+  match the client.
+
+- Adjust the on-screen controller with Extended ? Controller ? Touch Pad Size.
+- Class Mastery branches follow the live game's rules: ranks on a branch remain
+  part of the same Master Class, and ordinary child abilities stay purchasable.
+- Includes upstream's faster EE math for Apple/Android and supported browsers,
+  Android source-build support, resize fixes and fishing message-box placement.
+- Enhanced keeps F3 / Report a bug, the next-start crash offer, and Save to Desktop.
+  Reports stay on your computer; the ZIP includes the note, screenshot and logs,
+  with known account credentials and the Windows user folder removed.
+
 ## 2026-11-02 · Enhanced 0.4.3
 
 - Fixed: the creature journal forgot NPCs above level 60 (and ones of unknown level) every time you restarted the game, and importing a FrontiersForge journal skipped them. They are now kept.
+- Fixed: with Wereoxxs UI's chat on, holding R2 hid the ability bar and scrolled nothing you could see. R2 now keeps the ability bar up and scrolls the mod's chat history up and down; letting go returns to the newest line. Without mods, R2 opens the game's chat history as before.
 
 ## 2026-11-01 · Enhanced 0.4.2
 

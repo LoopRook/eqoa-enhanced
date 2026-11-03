@@ -41,7 +41,7 @@ This entry records future work only; no navigation or movement behavior changes 
 
 - **Status:** Deferred until the Wereoxxs dev-build gate is met.
 - **Requested:** 2026-10-30.
-- **Goal:** Players who are not technical can hand the owner everything needed to diagnose a problem, with no server. F3 (or the HUD's Report a bug) and the next-start crash offer keep upstream's dialog (screenshot, "what happened" note, log tail, client state), but **Send becomes "Save to Desktop"**: one `EQOA-Enhanced-report-<date>.zip` with the note, screenshot, `eqoa.log`, `eqoa.prev.log`, `mods/addons_error.log`, any waiting crash files and the client state, then open the Desktop with the file selected. The player shares that one file however they like.
+- **Goal:** Players who are not technical can hand the owner everything needed to diagnose a problem, with no server. F3 (or the HUD's Report a bug) and the next-start crash offer keep upstream's dialog (screenshot, "what happened" note, log tail), but **Send becomes "Save to Desktop"**: one `EQOA-Enhanced-report-<date>.zip` with the note, screenshot, `eqoa.log`, `eqoa.prev.log`, `mods/addons_error.log`, any waiting crash files, then open the Desktop with the file selected. The player shares that one file however they like.
 - **Clearly Enhanced, never upstream:** the file name, the report's first lines, and the first line of every log say "EQOA Enhanced <version> (<build commit>), a fork of DabDavis's vanilla client: report to EQOA Enhanced (LoopRook), not to the vanilla client", plus the list of enabled mods/addons and enhanced features. Upload stays disabled (report policy), so a report can never reach upstream's reportd. The owner triages first; a bug goes upstream only if it reproduces in the vanilla client, and only by the owner's decision, labelled as coming from Enhanced.
 - **Privacy:** keep upstream's scrubbing (`report::secret`: account name, password, the home directory's path). Nothing leaves the computer unless the player shares the file.
 - **Implementation notes:** reuse `report.rs`'s gathering and dialog through a fork hook (fork_ext), replacing only the transport; no new server, no telemetry.
@@ -126,3 +126,11 @@ This entry records future work only; no navigation or movement behavior changes 
 
 - **Request:** in Wereoxxs UI, clicking a weapon-set slot switches set (0.4.0), but clicking an ability slot does nothing; the same goes for the other UI mods. The owner wants click-to-cast on the mods' ability bars.
 - **Plan:** check what Forge exposes for using an ability from Lua (the reference ability/ability_bar modules); if Forge has it, implement it natively through the same path as the game's own hotbar use; if not, add it under the `eqoa` namespace and patch the bundled mods' slot click handlers (as for weapon sets). Together with the Modern UI / ARPG UI weapon-set bars (work in progress, uncommitted in the release-0-4-0 worktree) as the next small patch.
+
+- Local reports in a second window currently collect window 1's log; select that window's own log in a future fix (pre-existing; deferred by the 2026-11-03 sync review).
+
+## A small "what the game was doing" section in reports (owner, 2026-11-03)
+
+- Quiet bugs can leave no log clue: mode, target, nearby entities and addon HUD claims help explain them.
+- Implemented on sync/2026-11-03 as a small fork-owned snapshot, through the existing frame adapter, at most once a second. It includes enabled addons, world/zone, position/heading, map/search and autorun/follow. Account/password/home redaction applies; character names stay.
+- `client_state.txt` accompanies local reports when available; crashes carry the last noted snapshot. Upstream's deleted describers remain deleted. Owner live QA pending.

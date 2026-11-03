@@ -8,11 +8,11 @@
 //! place, at its boot, as the update's restart does
 //! (`update::relaunch_if_requested`). A loss found in the middle of a frame
 //! may still reach an upload first: the panic hook starts the game again
-//! then, not a crash report (`report`). A page has its own: `web::start`'s
+//! then (`logfile`). A page has its own: `web::start`'s
 //! callback raises the crash notice.
 //!
 //! Only once a run has lasted `SETTLED`: a device lost again that soon after
-//! a start ends the run with a crash report instead of starting over and over.
+//! a start ends the run, its log saying why, instead of starting over and over.
 //! `EQOA_GPU_LOST_TEST=<ms>[,frame]`: the device destroyed and taken as lost
 //! at that time on the client's clock; `frame` uploads a model after, in the
 //! same frame, as the crash did.
@@ -81,6 +81,11 @@ pub fn settled() -> bool {
 /// and macOS the same process): after the window closed for it (main's
 /// `boot`), or from the panic hook. Returns when it did not start.
 pub fn relaunch() {
+    // an Android app is the system's process, started by its launcher: the
+    // run ends there instead (`android`)
+    if cfg!(target_os = "android") {
+        return;
+    }
     let Some(exe) = START.lock().ok().and_then(|s| s.as_ref().map(|(_, e)| e.clone())) else { return };
     crate::multibox::leave();
     let mut c = std::process::Command::new(&exe);

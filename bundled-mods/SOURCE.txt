@@ -4,6 +4,7 @@ License: MIT (see FrontiersForge-MIT.txt in the release archive)
 Fonts: SIL Open Font License 1.1 (see OFL.txt beside each font family)
 Files are unmodified vendor assets from the FrontiersForge reference repository, except:
 - wereoxxs_ui/wereoxxs_ui.lua and modules/ability_bars.lua add an optional native weapon-set bar using eqoa.WeaponSets; PCSX2 behavior is unchanged without eqoa. MIT permits modification.
+- wereoxxs_ui/modules/chat_window.lua scrolls with the game's chat-history keys (R2 held) through eqoa.ChatHistory when it is there, and snaps back to the newest line on release; without eqoa it keeps the stock stick-to-bottom log. MIT permits modification.
 - avoids_modern_ui/modules/avoids_exp_bars.lua the XP bars hide at max level and line 269 gets a nil guard, since Util.GetExpRequiredForLevel returns nil at level 60. MIT permits modification.
 Modern UI: Author Avoids (see avoids_modern_ui/README.md)
 
@@ -54,7 +55,7 @@ b93dfb2ec674ef59fd9a1b47498a8d1db498bb9e64ed22a96f8071082e3d6add  resources/font
 d49a1bdabdacd5a049501472d35560f475f679a3fea87d1a97ffb49b56734a52  wereoxxs_ui/README.md
 cde1cbee7c7b1e948f158a125b6d7ba80177249012f9ac8213e2763d2489f0b4  wereoxxs_ui/modules/ability_bars.lua
 df0d8dcf22bda5ef6dc4f3966560fad06ae63a89c8d684d2f02248f1f5316c97  wereoxxs_ui/modules/casting_bar.lua
-d87eab664c1114f20f6dfbd49df3b0aaf14d21efc323a6dc444a52cc832095a8  wereoxxs_ui/modules/chat_window.lua
+263ae1d19b1a4badbb88afae8707a97c2c8f20ba1d6e3cd05b9fbeaeafb6ea85  wereoxxs_ui/modules/chat_window.lua
 16898f54a04ef52f2ccac74c3b3577fab83baf5dfa03e9ae4e8c39c63aac3916  wereoxxs_ui/modules/class_art.lua
 c7bbf4fd6063f585cad6aa06e6f2ff5947b05a35b56514ab1d0c3673e93fcea1  wereoxxs_ui/modules/class_icon.lua
 72c365c07afb2aeb7459e383f74c0b3a4c6b97f89c70547fbe1e94bc98b9fb0f  wereoxxs_ui/modules/damage_meter.lua

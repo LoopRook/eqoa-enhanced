@@ -5,10 +5,14 @@ pub mod addons;
 pub mod app_icon;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bundled;
+pub mod chat_history;
 pub mod mods;
 pub mod release;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod report;
+#[cfg(not(target_arch = "wasm32"))]
+mod report_background;
+pub mod report_core;
 pub mod telemetry;
 
 /// Returns whether the client is in plain gameplay (mode 0 with no dialog,

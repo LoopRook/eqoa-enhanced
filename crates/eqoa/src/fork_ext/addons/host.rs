@@ -28,6 +28,7 @@ pub(crate) struct Snapshot {
     pub effects: super::effects::EffectsSnapshot,
     pub journal: super::quest_log::JournalSnapshot,
     pub weapon_sets: super::weapon_sets::WeaponSetsSnapshot,
+    pub chat_history: crate::fork_ext::chat_history::ChatHistorySnapshot,
 }
 impl Snapshot {
     pub fn managed(mut self) -> Self {
@@ -43,6 +44,7 @@ impl Snapshot {
             self.effects = super::effects::EffectsSnapshot::default();
             self.journal = super::quest_log::JournalSnapshot::default();
             self.weapon_sets = super::weapon_sets::WeaponSetsSnapshot::default();
+            self.chat_history = crate::fork_ext::chat_history::snapshot(false);
         }
         self.in_game &= self.health.is_available();
         self
@@ -349,6 +351,7 @@ impl Host {
         super::effects::install_effects_adapter(&host)?;
         super::quest_log::install(&host)?;
         super::weapon_sets::install(&host)?;
+        super::chat_history::install(&host)?;
         let forge: Table = host.lua.globals().get("UiForge")?;
         forge.set(
             "scripts_path",
@@ -409,6 +412,7 @@ impl Host {
             host_registry: Rc::new(RefCell::new(HashMap::new())),
         };
         super::weapon_sets::install(&host)?;
+        super::chat_history::install(&host)?;
         Ok(host)
     }
 

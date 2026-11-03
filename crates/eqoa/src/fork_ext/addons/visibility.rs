@@ -562,6 +562,7 @@ impl PublishedVisibility {
 }
 
 thread_local! {
+    static REPORT_CLAIMS: Cell<u16> = const { Cell::new(0) };
     static PLAY_READY: Cell<bool> = const { Cell::new(true) };
     static PUBLISHED_VIS: Cell<PublishedVisibility> = const { Cell::new(PublishedVisibility {
         health_bar: false,
@@ -580,6 +581,7 @@ thread_local! {
 }
 
 pub(crate) fn publish(hidden: bool) {
+    REPORT_CLAIMS.set(u16::from(hidden));
     PLAY_READY.set(true);
     PUBLISHED_VIS.set(PublishedVisibility {
         health_bar: hidden,
@@ -588,6 +590,14 @@ pub(crate) fn publish(hidden: bool) {
 }
 
 pub(crate) fn publish_claims(claims: &HudClaimsRegistry) {
+    REPORT_CLAIMS.set(
+        ALL_UI_ELEMENTS
+            .iter()
+            .enumerate()
+            .fold(0, |bits, (i, element)| {
+                bits | (u16::from(claims.is_hidden(element)) << i)
+            }),
+    );
     PLAY_READY.set(true);
     PUBLISHED_VIS.set(PublishedVisibility {
         health_bar: claims.is_hidden("health_bar"),
@@ -600,7 +610,8 @@ pub(crate) fn publish_claims(claims: &HudClaimsRegistry) {
         group_compass_marks: claims.is_hidden("group_compass_marks"),
         pet: claims.is_hidden("pet_panel"),
         chat: claims.is_hidden("chat_window"),
-        ability_bar: claims.is_hidden("hotbar_draw_compact") || claims.is_hidden("hotbar_draw_expanded"),
+        ability_bar: claims.is_hidden("hotbar_draw_compact")
+            || claims.is_hidden("hotbar_draw_expanded"),
         active_effects: claims.is_hidden("active_effects"),
     });
 }
@@ -619,6 +630,20 @@ pub(crate) fn effective_visibility() -> PublishedVisibility {
 
 pub(crate) fn published_visibility() -> PublishedVisibility {
     PUBLISHED_VIS.get()
+}
+
+pub(crate) fn report_claims() -> String {
+    let bits = REPORT_CLAIMS.get();
+    let names: Vec<_> = ALL_UI_ELEMENTS
+        .iter()
+        .enumerate()
+        .filter_map(|(i, name)| (bits & (1 << i) != 0).then_some(*name))
+        .collect();
+    if names.is_empty() {
+        "none".into()
+    } else {
+        names.join(", ")
+    }
 }
 
 pub(crate) fn published_health_hidden() -> bool {

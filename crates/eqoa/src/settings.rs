@@ -754,10 +754,26 @@ pub struct ClientOptions {
     pub xp_details: bool,
     /// HUD Numbers: display player HP and Power numerical values on the HUD
     pub hud_numbers: bool,
+    /// Touch Pad Size: the touch screen's pad (`touch`), percent of the
+    /// full pad, which is the most that fits (its rows already meet), down
+    /// to `TOUCH_SIZE_MIN` in `TOUCH_SIZE_STEP`s (a player, 2026-11-02:
+    /// "Is there a way to make the on screen controller size adjustable?").
+    pub touch_size: u8,
 }
 
 /// Render Scale's steps, the first the game's picture as drawn.
 pub const RENDER_SCALES: [u8; 3] = [1, 2, 4];
+
+/// Touch Pad Size's range (percent of the full pad: `touch::layout`)
+/// and its step.
+pub const TOUCH_SIZE_MIN: u8 = (crate::touch::SMALLEST * 100.0) as u8;
+pub const TOUCH_SIZE_MAX: u8 = 100;
+pub const TOUCH_SIZE_STEP: u8 = 5;
+
+/// The touch screen's pad's size now, of the full pad (`touch::layout`).
+pub fn touch_scale() -> f32 {
+    client().touch_size as f32 / 100.0
+}
 
 /// The game's ability bars (with the expansion's second).
 pub const ABILITY_BARS_GAME: u8 = 2;
@@ -837,6 +853,7 @@ impl Default for ClientOptions {
             target_hp_percent: true,
             xp_details: true,
             hud_numbers: true,
+            touch_size: TOUCH_SIZE_MAX,
         }
     }
 }
@@ -849,9 +866,10 @@ impl ClientOptions {
     /// only when off, Ability Bars, NPC/PC Display, NPC/PC Distance and
     /// Name Distance only when not the game's, Overlapping Names only when
     /// Show, Art only when it is the 2002 disc's, VSync, Shouts and Update
-    /// Notices only when off, Target of Target only when on, Mana Bars only
-    /// when off, Stats Box only when on, Text only when Smooth, Render Scale only above
-    /// 1, HUD only when Nearest, and Output Device only when a device is chosen (by its name).
+    /// Notices only when off, Text only when Smooth, Render Scale only above
+    /// 1, HUD only when Nearest, Output Device only when a device is
+    /// chosen (by its name), and Touch Pad Size only when smaller than
+    /// the full pad.
     pub fn to_text(self) -> String {
         let mut s = format!("lod={}\nbrightness={}\ncamera_distance={}\n", if self.lod { "on" } else { "off" }, self.brightness, self.camera_distance);
         if let Some(r) = self.frame_rate {
@@ -970,6 +988,9 @@ impl ClientOptions {
             s.push_str(&format!("output={}\n", d.as_str()));
         }
         fork_settings::write(&self, &mut s);
+        if self.touch_size != TOUCH_SIZE_MAX {
+            s.push_str(&format!("touch_size={}\n", self.touch_size));
+        }
         s
     }
 
@@ -1075,6 +1096,11 @@ impl ClientOptions {
                 ("name_distance", v) => {
                     if let Some(d) = v.parse::<u8>().ok().filter(|d| (NAME_DISTANCE_GAME..=NAME_DISTANCE_MAX).contains(d)) {
                         c.name_distance = d;
+                    }
+                }
+                ("touch_size", v) => {
+                    if let Some(t) = v.parse::<u8>().ok().filter(|t| (TOUCH_SIZE_MIN..=TOUCH_SIZE_MAX).contains(t)) {
+                        c.touch_size = t;
                     }
                 }
                 (k, v) if k.starts_with("controller.") => {
@@ -1210,12 +1236,6 @@ pub fn screen_shake() -> bool {
 /// paces its frames).
 pub fn vsync() -> bool {
     cfg!(target_arch = "wasm32") || client().vsync
-}
-
-/// The display's refresh, in ms (`set_display_refresh`; a page's is taken
-/// as 60 Hz).
-pub fn display_gap() -> f64 {
-    DISPLAY_GAP.with(|g| g.get())
 }
 
 /// The display's refresh as the window's monitor reports it (mHz; 60 Hz when
@@ -1433,88 +1453,6 @@ pub fn curve(step: u8) -> Option<[u8; 256]> {
         *v = ((i as f64 / 255.0).powf(e) * 255.0).round() as u8;
     }
     Some(t)
-}
-
-/// The Extended page's settings in a line, and where they are kept (a
-/// report's).
-pub fn describe() -> String {
-    let c = client();
-    let rate = match frame_rate() {
-        FrameRate::Thirty => "30",
-        FrameRate::Sixty => "60",
-        FrameRate::Display => "the display's",
-    };
-    format!(
-        "level of detail {}, brightness {} of {BRIGHTNESS_STEPS}, fog {} of {}{}, frame rate {rate}{}, vsync {}, render scale x{}{}, camera distance {}, camera turn speed {}%, screen shake {}, controller focus {}, capture controller {}, sound in background {}, output device {}, ability bars {}, npc/pc display {}, npc/pc view distance {}, name distance {}, overlapping names {}, art {}, update notices {}, shouts {}, target of target {}, mana bars {}, minimap {}, stats box {}, quest markers {}, quest tracker {}, text {}, hud {}, mipmaps {}, flora {}, shadows {}, environment {}, ground fog {}, map markers {}, map towns {}, loading screens {}{}; {}",
-        if c.lod { "on" } else { "off" },
-        c.brightness,
-        c.fog,
-        crate::fog::STEPS,
-        if c.fog == crate::fog::GAME { " (the game's)" } else if c.fog == 0 { " (off)" } else { "" },
-        if c.frame_rate.is_none() { " (not chosen)" } else { "" },
-        if cfg!(target_arch = "wasm32") { "the browser's" } else if c.vsync { "on" } else { "off" },
-        c.render_scale,
-        match render::scale::would_draw(c.render_scale as u32) {
-            k if k != c.render_scale as u32 => format!(" (drawn at x{k})"),
-            _ => String::new(),
-        },
-        c.camera_distance,
-        c.camera_turn,
-        if c.screen_shake { "on" } else { "off" },
-        focus().key(),
-        if c.capture { "on" } else { "off" },
-        if c.background_sound { "on" } else { "off" },
-        c.output.map_or("the system default".to_string(), |d| format!("{:?}", d.as_str())),
-        c.ability_bars,
-        c.entity_slots,
-        c.entity_view,
-        c.name_distance,
-        if c.overlapping_names { "show" } else { "hide" },
-        match c.art {
-            esf::Era::Frontiers => "frontiers",
-            esf::Era::Y2002 => "2002",
-        },
-        if c.update_notices { "on" } else { "off" },
-        if c.shouts { "heard" } else { "ignored (kept)" },
-        if c.target_of_target { "on" } else { "off" },
-        if c.mana_bars { "on" } else { "off" },
-        if c.minimap { "on" } else { "off" },
-        if c.stats_box { "on" } else { "off" },
-        if c.quest_markers { "on" } else { "off" },
-        if c.quest_tracker { "on" } else { "off" },
-        match c.text {
-            render::ui::TextFilter::Sharp => "sharp",
-            render::ui::TextFilter::Smooth => "smooth",
-        },
-        match c.hud {
-            render::ui::HudFilter::Nearest => "nearest",
-            render::ui::HudFilter::Sharp => "sharp",
-        },
-        if c.mipmaps { "on" } else { "off" },
-        if c.flora { "on" } else { "off" },
-        if c.shadows { "on" } else { "off" },
-        if c.environment { "on" } else { "off" },
-        if c.ps2_fog { "ps2" } else { "exact" },
-        if c.map_markers { "on" } else { "off" },
-        if c.map_towns { "on" } else { "off" },
-        if c.loading_longer { "longer" } else { "instant" },
-        fork_settings::description(&c),
-        kept_where()
-    )
-}
-
-/// Where the settings are kept, for `describe`: a page's storage, or
-/// natively the config directory (the home directory a report takes out),
-/// and whose they are when this window is not the first.
-fn kept_where() -> String {
-    #[cfg(any(target_arch = "wasm32", test))]
-    let at = (if store::available() { "kept in the page's storage" } else { "the page's storage refused: nothing is kept" }).to_string();
-    #[cfg(all(not(target_arch = "wasm32"), not(test)))]
-    let at = store::dir().map_or_else(|| "not kept: no config directory".to_string(), |d| format!("kept in {}", d.display()));
-    match place() {
-        0 => at,
-        me => format!("{at}, as window {}'s own ({}, {})", me + 1, own_file("game", me), own_file("client", me)),
-    }
 }
 
 // ---- the frame cap ---------------------------------------------------------------
@@ -1978,10 +1916,6 @@ mod tests {
             "Screen Shake only off, Capture Controller only on"
         );
         testing::reset(false);
-        assert_eq!(describe(), "level of detail on, brightness 5 of 10, fog 5 of 10 (the game's), frame rate the display's (not chosen), vsync on, render scale x1, camera distance 11, camera turn speed 100%, screen shake on, controller focus auto, capture controller off, sound in background on, output device the system default, ability bars 2, npc/pc display 24, npc/pc view distance 100, name distance 22, overlapping names hide, art frontiers, update notices on, shouts heard, target of target off, mana bars on, minimap on, stats box off, quest markers on, quest tracker on, text sharp, hud nearest, mipmaps on, flora on, shadows on, environment on, ground fog ps2, map markers on, map towns on, loading screens longer, target hp % on, xp details on, hud numbers on; kept in the page's storage");
-        testing::reset(true);
-        assert!(describe().ends_with("refused: nothing is kept"));
-        testing::reset(false);
         let odd = ClientOptions::from_text("brightness=11\nlod=maybe\nframe_rate=120\ncamera_distance=51\nwhat=ever\nnoise\ncontroller.0=pad1\ncontroller.17=pad1\ncontroller.2=pad5\ncontroller.x=off");
         assert_eq!(odd, ClientOptions::default());
         assert_eq!(ClientOptions::from_text("camera_distance=7").camera_distance, 11);
@@ -2111,6 +2045,22 @@ mod tests {
             assert!(ClientOptions::from_text(bad).ps2_fog, "{bad}: PS2, the default");
         }
         assert!(ClientOptions::from_text("environment=off").ps2_fog);
+    }
+
+    /// Touch Pad Size: the full pad unless chosen, written only when
+    /// smaller, read back in its range; anything else is the full pad.
+    #[test]
+    fn touch_size_kept_only_when_smaller() {
+        let d = ClientOptions::default();
+        assert_eq!((d.touch_size, TOUCH_SIZE_MIN, TOUCH_SIZE_MAX), (100, 50, 100));
+        assert!(!d.to_text().contains("touch_size"), "the default not written");
+        let c = ClientOptions { touch_size: 70, ..Default::default() };
+        assert_eq!(c.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\ntouch_size=70\n");
+        assert!(ClientOptions::from_text(&c.to_text()) == c);
+        assert_eq!(ClientOptions::from_text("touch_size=50").touch_size, 50);
+        for bad in ["touch_size=49", "touch_size=101", "touch_size=", "touch_size=x", "touch_size=-5", "touchsize=70"] {
+            assert_eq!(ClientOptions::from_text(bad).touch_size, 100, "{bad}: the full pad");
+        }
     }
 
     /// Flora and Environment, on by default, each kept only when off;
@@ -2371,7 +2321,6 @@ mod tests {
         set_place(Some(1));
         CLIENT.with(|c| c.set(None));
         assert_eq!((game_options(), client().brightness), (two, 2), "window 2: no sound, its brightness");
-        assert!(describe().ends_with("kept in the page's storage, as window 2's own (game-2.opt, client-2.opt)"));
         testing::reset(false);
     }
 

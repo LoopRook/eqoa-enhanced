@@ -87,3 +87,202 @@ Validation:
 - `python -X utf8 -m unittest discover -s tools -p "test_*.py"`: 46 passed, 0 failures.
 - `cargo build --release --locked -p eqoa`: finished successfully.
 - Note: `forge_texture_early_memory_limit_rejects_before_upload` was GC-timing flaky after the merge and fixed in e16efff (plus the sibling in `forge_texture_memory_early_memory_limit_rejects_before_upload`).
+
+## 2026-11-03 sync
+
+Enhanced start: e3964ff on sync/2026-11-03, branched from develop. Upstream range:
+ad941f5..b8e02cd781aac6a1b9e9906f09896956c77afcd6 (eight commits). Real two-parent merge;
+no squash, push, tag, or protected branch update.
+
+Incoming changes: SSE-compatible EE four-lane NEON and WebAssembly SIMD paths;
+Android APK/source-build support and input plumbing; adjustable Touch Pad Size,
+resize recovery and fishing message-box layout; live Class Mastery branch/rank
+rules. Upstream 42e41f8 removes reports because its report server closed.
+
+Conflicts and resolutions:
+
+- README.md (four hunks): retained Enhanced's landing page/download links.
+- hideui.rs (one): retained upstream wording and Enhanced map visibility; report
+  visibility is consumed through the viewer's local report-open hook.
+- hud.rs (three): retained upstream implementation and existing Enhanced HUD;
+  report button drawing lives in fork_ext/report_core.rs, returning its pick rect.
+- main.rs (two): retained upstream logfile lifecycle and Android registration;
+  alias the fork-owned report core and retain the CLI credential-noting hook.
+- options.rs (four): union Touch Pad Size ID 48 with existing fork rows; Enhanced
+  IDs 1043..1047 and all persisted keys stay unchanged. Text/HUD remain reachable
+  on Map & Quests; Controller gains Touch Pad Size.
+- play.rs (three): retain upstream removal of report-only state/describers and
+  keep Enhanced map/addon initialization; HUD report pick calls the local core.
+- settings.rs (six): union touch_size field/default/serialization with fork
+  settings; keep upstream removal of unused report descriptions and their test.
+- touch.rs (two): keep upstream full-size slop and all pad-size behavior, preserve
+  Enhanced map long-press suppression/tests, initialize fork dpad/holds fields in
+  the upstream Default constructor.
+- viewer.rs (four): union upstream resize fields and touch scale with addon/map
+  state; retain upstream removal of report diagnostics. Minimal hooks invoke
+  fork_ext/report_viewer.rs for native dialog input/capture and fork-owned draw.
+- report.rs (modify/delete): accept deletion of the shared path; move retained
+  local report/crash core to fork_ext/report_core.rs. Production send always uses
+  Save to Desktop; historical HTTP transport is compiled only for loopback tests.
+- web/build.sh (one): take upstream's notices.js copy list.
+- web/report.js (modify/delete): accept deletion. RELEASING.md and
+  enhanced-release.yml ship Windows x64 only; no Enhanced web release is published.
+- CLAUDE.md: ours merge driver retained fork rules automatically. Refresh the
+  verbatim upstream copy and adopt Android's platform-event/signing-key guidance;
+  upstream's report deletion is overridden only for Enhanced's local saves.
+
+Owner's report decision: retain F3, the HUD's Report a bug, the next-start crash
+report offer, and Save to Desktop. ZIPs contain the note, screenshot and logs;
+known accounts/passwords and the Windows home directory are scrubbed. Nothing is
+uploaded. Upstream logfile.rs stays intact around eight added hook lines (startup
+before rotation, exact run identity, redaction/ring, Enhanced header, panic and
+clean exit); Station api.rs retains four credential hooks. The journal helpers
+remain in fork_ext/report.rs and report_core::clean_exit flushes map/journal.
+
+Footprint review: PASS against the complete b8e02cd target with a trial manifest
+before advancing reviewed_base. Shared budget changes from the previous review:
+logfile +8/-0 (new), Station API +4/-0 (new), main +3 additions, HUD +2 additions,
+viewer +20 additions/+3 deletions, touch +2 additions. Reasons: retain local
+reports through hooks and reconcile upstream's new touch constructor. The old
+shared report.rs/web/report.js budgets disappear, as does web/build.sh's policy
+copy override. The settings description hook disappears with upstream's method.
+Detailed maxima and reasons are in FORK-OWNERSHIP.md and fork-footprint.json.
+
+Hook-removal controls (each mutation was compiled/tested, then restored):
+
+- sync_f3_saves_redacted_zip_through_dialog_hook: removing viewer's report event
+  hook fails the headless wiring guard: assertion failed, viewer contains
+  fork_report::event(self, el, &event). With it present the dialog's Enter action
+  saves a ZIP in a temporary Desktop, including screenshot/log/note and redaction.
+- sync_crash_marker_is_offered_on_next_start_hook: removing logfile startup's
+  report::start call fails its wiring guard. The behavior portion checks an
+  interrupted log creates an offer; a cleanly closed log creates none.
+- sync_logger_close_flushes_journal_through_report_hook: removing logfile close's
+  report::clean_exit call fails with "logger close must flush journal", NotFound.
+  With the hook present the temporary journal contains its recorded creature.
+
+The first two tests combine source wiring guards with headless behavior tests;
+they do not claim a live OS keyboard/window/GPU test. Owner playtest remains due.
+
+Additional merge regression fixes:
+
+- Keep EXTENDED_ITEMS in numeric ID order (48 before 1043), as the existing
+  every-row/one-page regression requires; no persisted IDs or keys change.
+- logs_begin_with_the_enhanced_line now starts/closes upstream logfile, the
+  actual owner of the log, and checks the fork header fed through its hook.
+- The fork HUD count fixture has no font: its report button is 28 pixels wide
+  with two 16-pixel caps, leaving a -4-pixel middle. Upstream's new VU1 winding
+  cull drops that middle. Temporarily disabling only culling made the original
+  17/41 quad assertions pass; with upstream restored the correct fixture counts
+  are 16/40. Production raster code is unchanged. The first workspace attempt
+  stopped at 1,499 client passes / three failures / 26 ignored; these findings
+  prompted the fixes and a complete rerun.
+
+The second full attempt passed those three fixes (1,501 client passes / one
+failure / 26 ignored), then exposed the existing community-map test's PID-only
+cache path. Its log explicitly loaded a one-marker version-9 cache left by an
+earlier process before testing a malformed answer against three held markers.
+The fixture now creates a unique, freshly owned directory and cleans it on drop;
+production community-map code is unchanged. The retained report dialog's name,
+picture and crash-offer wording now describes local saving rather than a board.
+
+Final locked workspace suite: 1,775 passed / 0 failed / 27 ignored across 96
+summaries; client 1,502 passed / 0 failed / 26 ignored. Explicit SKIP messages: 197
+(missing disc/oracle/reference prerequisites and symlink privileges, recorded
+separately from ignored). Python tools: 46 passed. Footprint: PASS, 33 shared
+paths in budget, reviewed_base b8e02cd781aac6a1b9e9906f09896956c77afcd6.
+See SYNC-2026-11-03-VERIFICATION.md for commands, controls and all skip messages.
+Locked release build: PASS (4m 26s); PE x64 GUI / 8 MiB stack validated. Preview
+folder: main checkout run/sync-2026-11-03-<merge-shortsha>/, with bundled mods and
+owner checklist. Copy verification requires the EXE SHA256 to match the built
+artifact recorded in SYNC-2026-11-03-VERIFICATION.md. No push/tag/protected branch
+merge; live owner QA and Android/browser runtime checks remain pending.
+
+
+Review follow-up to b5e6310 (2026-11-03): remove the unused client-state feature,
+duplicate logger and settings describer, and orphan browser policy; retain one
+native panic-hook owner (logfile). Restore the HUD Report pick regression, guard
+logger cleanup on test failure, standardize the report-open predicate, register
+HUD/surface seams, and tighten slack budgets. Second-window log selection is
+recorded in backlog.md without changing it in this round. Follow-up checks: sync_* 5 passed; report filter 44 passed; HUD pick 1 passed.
+Locked full workspace: 1,773 passed / 0 failed / 27 ignored over 96
+summaries, with 197 explicit prerequisite SKIP messages. Python tools: 46 passed.
+Footprint PASS with the new seams and tightened budgets. Locked release build
+PASS (1m 40s); x64 GUI / 8 MiB stack validated. Current executable SHA256:
+`6b3272c2509f2fdba83105112c72401f97af5026061ac9ab358eee3ec67f8788`. A new main-checkout preview under
+run/sync-2026-11-03-<follow-up-shortsha>/ is copied after committing; the old
+b5e6310 preview is retained.
+
+The HUD budget changes from +309/-11 to +315/-14 solely for the restored
+nonzero-height fixture, Report pick assertion and misplaced-position negative
+control. Options is tightened to +194/-42, play to +750/-53 and settings to
++322/-17; the remaining shared budgets already match their measured diff.
+Viewer uses the portable is_open_local predicate everywhere, requiring only
+two shared-line changes from the merge. Historical browser-policy test records
+are marked as historical, and their retired files are removed from ownership.
+
+Client state restored as a fork-owned snapshot at the owner's request (2026-11-03).
+`fork_ext/report_state.rs` describes mode/target/nearest eight entities, world/zone,
+position/heading, HUD claims, enabled mods, map/search and autorun/follow. The
+existing frame_library adapter forwards the walker and calls note_state at most
+once per second; snapshot text is scrubbed before state.txt persistence and ZIP
+export. Crash files retain the last noted snapshot, and startup clears the old
+slot after collecting an interrupted run. Upstream describers remain deleted.
+Shared budgets are unchanged (play +750/-53); a named snapshot seam is guarded.
+Snapshot follow-up checks: sync filter 5 passed; report filter 48 passed.
+Locked workspace suite with scratch EQOA_CONFIG and one test thread: 1,777 passed,
+0 failed, 27 ignored, 197 explicit prerequisite SKIP messages. The actual capture
+hook removal made the ZIP test fail with "client_state.txt is empty without the
+per-frame report hook"; restored hook passes. Fake-clock, Play-fixture, HUD-claim,
+redaction, ZIP-content and previous-run crash-state regressions pass. Footprint:
+PASS, 303 owned / 33 shared, budgets unchanged.
+
+Locked release build: PASS, optimized (1m 16s), x64 GUI / 8 MiB stack validated.
+EXE: 32,745,472 bytes; SHA256 `4a7e85dce82a833b992d5da780db030a2ea8b3206f09cc0c898ed00e0335065b`. A new
+main-checkout run/sync-2026-11-03-<snapshot-shortsha>/ preview is copied after the
+follow-up commit; its checklist includes client_state.txt and the crash section,
+with exact EXE and bundled-mod hash comparisons. Earlier preview folders stay.
+
+
+Integration snapshot review fix (base 4840b46, integrate/2026-11-03): the per-frame
+snapshot now reads an in-memory addon cache. A single bounded report-io worker
+refreshes that cache off-thread at most once per 30 seconds and writes state.txt
+only when its text changes. Normal exit flushes pending work; panic capture still
+uses the latest redacted in-memory STATE, and interrupted-start capture still
+reads the last persisted snapshot. Addon/profile changes may take up to 30 seconds
+to appear in this diagnostic cache; report export keeps its fresh manifest scan.
+Canonical Dot::kind is shared with the minimap (p256 only). Zone lookup reuses
+startmenu::zone_name and gWorldInfo bounds with the same committed coordinates as
+the Position line. Loading snapshots omit stale character/world information and
+say Mode: loading. Modes 7, 9, 36 and 42 have names. The sole new shared change is
+zone_name visibility (+1/-1; body unchanged); play remains +752/-54, with the
+in-place frame_library edit recorded in its budget reason.
+
+Negative control: restored the old scanning function in report_state.rs and ran
+report_state_capture_does_not_scan_mods_on_frame_thread. It failed at runtime
+(exit 101, 0 passed / 1 failed): "snapshot performed a filesystem scan on the
+frame thread", scan count 4 versus 1. Restored the exact source bytes; the final
+report filter passes all 53 tests. The worker test also confirms scans/writes
+execute on a different thread, skips unchanged writes, and scans once across
+repeated captures. The existing redaction/ZIP/crash/throttle tests remain passing.
+
+Final integration verification (shared mkdir lock with owned EXIT cleanup,
+`timeout 2400`, scratch EQOA_CONFIG under integration target/, common
+CARGO_TARGET_DIR at sync-2026-11-03/target):
+
+- `cargo test --locked --workspace -- --nocapture --test-threads=1`: PASS,
+  **1,789 passed / 0 failed / 27 ignored**, across 96 summaries; client
+  **1,516 passed / 0 failed / 26 ignored**. **197 explicit prerequisite SKIP
+  messages** (missing disc/oracle/reference resources and symlink privileges).
+- `C:/Python314/python.exe tools/check_fork_footprint.py --base b8e02cd`: PASS,
+  **308 fork-owned / 34 shared**. New startmenu helper visibility budget +1/-1 is
+  justified above; all other budgets unchanged, including play +752/-54.
+- `cargo build --release --locked -p eqoa`: PASS, optimized, 1m 14s.
+  PE x64 GUI / 8 MiB stack validated. EXE 32,794,624 bytes; SHA256
+  `4df0f2907881991a78ad3bb24f3aab149c4dd109b20ba635398426a07edbb5ee`.
+
+A new main-checkout `run/combined-<follow-up-sha>/` preview is copied after the
+commit. It uses the same six-entry layout as combined-4840b46, with identical
+launcher/checklist bytes except the checklist header's new commit. EXE and all
+bundled-mod copies are hash-checked; existing previews are never overwritten.
+Live owner QA remains pending. No push or other-branch changes.
