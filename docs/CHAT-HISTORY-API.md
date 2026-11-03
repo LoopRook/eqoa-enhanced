@@ -5,8 +5,9 @@ native chat-history scroll to a Lua window that draws its own chat log
 (Wereoxxs UI). Without it, a claimed `chat_window` has no way to hear R2, so
 holding R2 scrolls nothing and the native chat scrolls a window nobody sees.
 
-Stock behavior is unchanged: when no addon claims the chat window, R2 opens the
-native `VIWndChat` history and the HUD carousel hides exactly as before.
+Stock behavior is unchanged except for the HUD while reading: when no addon
+claims the chat window, R2 opens the native `VIWndChat` history exactly as
+before, and the ability bar and minimap stay up (see below).
 
 ## Contract
 
@@ -83,19 +84,26 @@ the stock stick-to-bottom behavior when either is absent.
 
 ## Why the ability bar stays up
 
-Mode 33 normally hides the HUD carousel, because the native chat window is the
-only thing that needs the screen. When an addon draws the chat, that reasoning
-does not hold, so `Play` keeps the stock ability bar drawing in mode 33 if and
-only if `chat_window` is claimed. Other modes are untouched.
+The game normally hides the HUD carousel and the right side of the HUD (the
+minimap, quest tracker and Stats Box) in mode 33, because the native chat
+window was the only thing that needed the screen. The owner has asked for them
+to stay up while R2 (or the keyboard's C) reads the history, so `Play` keeps
+both drawing in mode 33 whether or not `chat_window` is claimed. They do not
+overlap: in the HUD's 640x448 frame the native history box sits at about
+y 336..444, under the minimap (y 50..162) and under the ability bar's menus
+(which end by y ~300). Other modes are untouched, R2 still scrolls the native
+chat when no addon claims it, and the d-pad still belongs to the chat while
+R2 is held.
 
 ## Implementation
 
 - `crates/eqoa/src/fork_ext/chat_history.rs`: held key, repeat clock, mode-leave
   clear, running count, snapshot.
 - `crates/eqoa/src/fork_ext/hud.rs`: `chat_history_keeps_ability_bar`,
-  `chat_history_key`, and the `tick` in `draw_chat_window`.
-- `crates/eqoa/src/play.rs`: one tap in `chat_scroll_key` (mode 33's key path)
-  and the ability-bar condition.
+  `chat_history_keeps_right_hud`, `chat_history_key`, and the `tick` in
+  `draw_chat_window`.
+- `crates/eqoa/src/play.rs`: one tap in `chat_scroll_key` (mode 33's key path),
+  the ability-bar condition and the right-HUD condition.
 - `crates/eqoa/src/fork_ext/addons/chat_history.rs`: the `eqoa.ChatHistory`
   table, with a per-host baseline and the per-call cap.
 - `crates/eqoa/src/fork_ext/addons/bridge_widgets.rs`: the real bridge's

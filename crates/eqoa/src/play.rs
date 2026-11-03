@@ -7618,10 +7618,10 @@ impl Play {
     }
 
     /// Whether the HUD's right side under the quick menus is up: the game's
-    /// own play (mode 0, the quick chat's 30, the manual camera's 38), no
-    /// search, map or loading screen over it, the HUD made.
+    /// own play (mode 0, the quick chat's 30, the manual camera's 38, the
+    /// history's 33), no search, map or loading screen over it, the HUD made.
     fn right_hud_up(&self) -> bool {
-        (self.mode == 0 || self.mode == 30 || self.mode == 38 || (self.mode == 33 && !crate::hud::fork_hud::chat_window_visible())) && !self.search.open && !self.map.open && !self.loading.up() && self.hud.is_some()
+        (self.mode == 0 || self.mode == 30 || self.mode == 38 || crate::hud::fork_hud::chat_history_keeps_right_hud(self.mode)) && !self.search.open && !self.map.open && !self.loading.up() && self.hud.is_some()
     }
 
     /// The Stats Box's rows while it is up (`statbox`): Stats Box on, where

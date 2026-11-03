@@ -83,14 +83,23 @@ pub(crate) fn chat_window_visible() -> bool {
 }
 
 /// Whether chat-history mode (33) keeps the stock HUD carousel on screen.
-/// Stock hides it; it stays when an addon owns the chat window and draws the
-/// lines the stock window used to (Wereoxxs UI).
+/// Stock hides it; the fork keeps it while R2 (or the keyboard's C) reads the
+/// history, whether or not an addon owns the chat window. The native history
+/// box sits below the bar's menus, so they do not overlap.
 pub(crate) fn chat_history_keeps_ability_bar(mode: i32) -> bool {
-    mode == 33 && !chat_window_visible()
+    mode == 33
+}
+
+/// Whether chat-history mode (33) keeps the HUD's right side (minimap, quest
+/// tracker, Stats Box) on screen. Stock hides it; the fork keeps it with the
+/// stock chat and with an addon-claimed chat alike.
+pub(crate) fn chat_history_keeps_right_hud(mode: i32) -> bool {
+    mode == 33
 }
 
 /// Whether the stock HUD carousel draws in this mode. `stock_modes` is the
-/// stock mode list; a claimed chat window adds mode 33 to it.
+/// stock mode list; chat-history mode 33 is added regardless of who owns the
+/// chat window.
 pub(crate) fn ability_bar_shown(stock_modes: bool, mode: i32) -> bool {
     stock_modes || chat_history_keeps_ability_bar(mode)
 }

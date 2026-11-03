@@ -4,6 +4,8 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## 2026-11-03 ? Upstream sync preview
 
+- Holding R2 to read chat history keeps the ability bar and minimap on screen.
+
 - Reports now include a short picture of what the game was doing: mode, target,
   nearby characters, location, movement flags and addon HUD claims. Crash reports
   keep the last snapshot. Account credentials and your user folder are redacted;

@@ -958,11 +958,15 @@ mod tests {
         ));
         p.mode = 33;
 
-        // Stock: R2 belongs to the native window, and it hides the carousel.
+        // Stock: R2 belongs to the native window; mode 33 keeps the carousel
+        // up either way.
         publish_claims(&HudClaimsRegistry::new());
         let stock = p.forge_snapshot(None).chat_history;
         assert!(!stock.active, "stock mode 33 scrolls the native chat");
-        assert!(!crate::hud::fork_hud::chat_history_keeps_ability_bar(p.mode));
+        assert!(
+            crate::hud::fork_hud::chat_history_keeps_ability_bar(p.mode),
+            "stock mode 33 keeps the ability bar up"
+        );
 
         // Wereoxxs claims the chat window, so the HUD keeps drawing.
         let mut reg = HudClaimsRegistry::new();
@@ -1016,7 +1020,10 @@ mod tests {
         assert_eq!(p.forge_snapshot(None).chat_history.total, 1, "non-scroll keys pass through");
         publish_claims(&HudClaimsRegistry::new());
         assert!(!p.forge_snapshot(None).chat_history.active);
-        assert!(!crate::hud::fork_hud::chat_history_keeps_ability_bar(p.mode));
+        assert!(
+            crate::hud::fork_hud::chat_history_keeps_ability_bar(p.mode),
+            "mode 33 keeps the carousel without a claim"
+        );
         crate::fork_ext::chat_history::reset();
     }
     fn play() -> Play {
@@ -1797,7 +1804,7 @@ mod tests {
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
-    fn forge_minimap_stays_up_in_chat_history_mode_when_chat_claimed() {
+    fn forge_minimap_stays_up_in_chat_history_mode() {
         use crate::fork_ext::addons::health::InstanceToken;
         use crate::fork_ext::addons::visibility::{HudClaimsRegistry, publish_claims};
 
@@ -1824,12 +1831,14 @@ mod tests {
         p.mode = 0;
         assert!(p.minimap_up(), "minimap must be up in mode 0");
 
-        // 2. In mode 33 (chat history / R2) without chat claimed, minimap is hidden
+        // 2. In mode 33 (chat history / R2) without chat claimed, the minimap
+        // stays up: the native history box (about y 336..444) is below it.
         p.mode = 33;
         assert!(crate::hud::fork_hud::chat_window_visible());
+        assert!(crate::hud::fork_hud::chat_history_keeps_right_hud(33));
         assert!(
-            !p.minimap_up(),
-            "minimap must hide in mode 33 when chat is unclaimed"
+            p.minimap_up(),
+            "minimap must stay up in mode 33 with the stock chat"
         );
 
         // 3. Claim the chat window (e.g. Wereoxxs UI or FrontiersForge mod)
@@ -1839,7 +1848,7 @@ mod tests {
         publish_claims(&reg);
         assert!(!crate::hud::fork_hud::chat_window_visible());
 
-        // In mode 33 with chat claimed, minimap MUST stay up!
+        // In mode 33 with chat claimed, the minimap stays up too.
         assert!(
             p.minimap_up(),
             "minimap must stay up in mode 33 when chat window is claimed by an addon"
@@ -1848,6 +1857,7 @@ mod tests {
         // Negative controls:
         // Even with chat claimed, opening a menu (mode 1) hides minimap
         p.mode = 1;
+        assert!(!crate::hud::fork_hud::chat_history_keeps_right_hud(1));
         assert!(
             !p.minimap_up(),
             "menu mode must hide minimap even if chat is claimed"
@@ -1876,12 +1886,13 @@ mod tests {
             "restoring minimap setting restores minimap in mode 33"
         );
 
-        // 4. Releasing chat claim restores stock behavior (mode 33 hides minimap)
+        // 4. Releasing the chat claim changes nothing: mode 33 keeps the
+        // minimap with the stock chat too.
         publish_claims(&HudClaimsRegistry::new());
         assert!(crate::hud::fork_hud::chat_window_visible());
         assert!(
-            !p.minimap_up(),
-            "releasing chat claim must restore stock mode 33 minimap hiding"
+            p.minimap_up(),
+            "releasing the chat claim keeps the minimap up in mode 33"
         );
     }
 }

@@ -258,11 +258,11 @@ fn clear_claims() {
 }
 
 /// Upstream draws the HUD carousel in modes 0/30/38/43 only. Mode 33 (R2/C
-/// held) must draw it too when an addon owns the chat window, and stay stock
-/// (no bar) when it does not.
+/// held to read the chat history) keeps it too, whether or not an addon owns
+/// the chat window: the native history box sits below the bar.
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
-fn forge_chat_history_keeps_ability_bar_in_mode_33_only_when_chat_claimed() {
+fn forge_chat_history_keeps_ability_bar_in_mode_33_always() {
     use crate::hudmenu::HudMenus;
 
     let vui = test_vui();
@@ -283,17 +283,18 @@ fn forge_chat_history_keeps_ability_bar_in_mode_33_only_when_chat_claimed() {
         r.blits.len()
     };
 
-    // Stock mode 33 is not in the carousel's mode list, so play.rs never
-    // reaches the draw call.
+    // Stock mode 33 is not in upstream's carousel mode list, so the fork adds
+    // it for the native chat too.
     clear_claims();
-    assert!(!crate::hud::fork_hud::chat_history_keeps_ability_bar(33));
-    assert!(!play_condition(33), "stock mode 33 hides the ability bar");
+    assert!(crate::hud::fork_hud::chat_history_keeps_ability_bar(33));
+    assert!(play_condition(33), "stock mode 33 keeps the ability bar");
     assert!(
         draw(&mut menus) > 0,
         "the bar is drawable when nothing hides it"
     );
 
-    // A claimed chat adds mode 33, and the bar's own claim still hides it.
+    // A claimed chat changes nothing here, and the bar's own claim still
+    // hides it.
     set_claims(&["chat_window"]);
     assert!(crate::hud::fork_hud::chat_history_keeps_ability_bar(33));
     assert!(
@@ -308,14 +309,16 @@ fn forge_chat_history_keeps_ability_bar_in_mode_33_only_when_chat_claimed() {
         "a mod owning the bars still suppresses them"
     );
 
-    // Negative controls: other modes are unchanged and releasing the claim
-    // restores stock hiding.
+    // Negative controls: a menu (mode 1) still hides the bar, the other modes
+    // are unchanged, and releasing the chat claim changes nothing.
+    assert!(!crate::hud::fork_hud::chat_history_keeps_ability_bar(1));
+    assert!(!play_condition(1), "a menu (mode 1) still hides the bar");
     assert!(!crate::hud::fork_hud::chat_history_keeps_ability_bar(0));
     assert!(!crate::hud::fork_hud::chat_history_keeps_ability_bar(30));
     clear_claims();
     assert!(
-        !play_condition(33),
-        "releasing the chat claim restores stock hiding"
+        play_condition(33),
+        "releasing the chat claim keeps the bar up"
     );
 }
 
