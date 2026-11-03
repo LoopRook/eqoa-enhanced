@@ -22,6 +22,16 @@ This entry records future work only; no updater behavior changes are included.
 
 This entry records future work only; no navigation or movement behavior changes are included.
 
+## Indoor map: dungeons, caves and buildings on the minimap and M map (owner, 2026-11-03)
+
+- **Status:** Backlog; the plan package is ready: `docs/plans/INDOOR-MAP-PLAN.md` (scout findings, a draft 5-line description, design, steps, risks).
+- **Problem:** indoors the minimap shows grey "not drawn" or a flattened roof. The map is built from outdoor terrain tiles and never reads room geometry. Forge's `mini_map` drew interiors from the live room geometry with a ceiling cut.
+- **Plan:** phase 1 the minimap, phase 2 the M map. The owner approves the 5-line description before the build.
+
+## Second zone in a 2,000-unit cell missing from the map (bug, found 2026-11-03)
+
+- `map/cells.rs` keeps one zone per cell: "A second zone in a cell is left out of the map". Any zone whose middle shares a cell with another is never drawn. Fix separately from the indoor map; first list which zones are affected (all six worlds).
+
 ## Save problem reports to the Desktop
 
 - **Status:** Deferred until the Wereoxxs dev-build gate is met.
