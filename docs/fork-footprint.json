@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "reviewed_base": "b8e02cd781aac6a1b9e9906f09896956c77afcd6",
-  "review_state": "Reviewed b5e6310 follow-up: remove unused report state and duplicate logger; restore HUD pick coverage, add HUD/surface seams, and tighten budgets to actual. Base unchanged.",
+  "review_state": "Reviewed upstream sync plus owner-requested fork-owned report snapshot, through the existing frame-library adapter. Shared budgets unchanged; reviewed base unchanged.",
   "fork_owned": [
     "AGENTS.md",
     ".gitattributes",
@@ -374,6 +374,12 @@
       "path": "crates/eqoa/src/viewer.rs",
       "name": "local report surface capture",
       "pattern": "fork_report::surface\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/fork_ext/play.rs",
+      "name": "throttled local report snapshot",
+      "pattern": "crate::report::note_state\\(",
       "count": 1
     }
   ]

@@ -27,7 +27,7 @@ The complete file ownership map, exact shared-file budgets and hook table are in
 [docs/FORK-OWNERSHIP.md](docs/FORK-OWNERSHIP.md). Its executable policy is
 [docs/fork-footprint.json](docs/fork-footprint.json). Fork-owned code includes
 map/, questguide/, tracker.rs, groupmark.rs, mapsuggest.rs, statbox.rs and
-fork_ext/ (including report_core.rs, report_viewer.rs and report_sync_tests.rs,
+fork_ext/ (including report_core.rs, report_state.rs, report_viewer.rs and report_sync_tests.rs,
 the retained local report/crash core, adapter and regression tests) under crates/eqoa/src; the render map module/shader; mods/, launcher
 scripts, AGENTS.md, the fork README/changelog, design/map-parity/ and docs/.
 
@@ -55,6 +55,10 @@ with positive and negative controls and update FORK-UPDATE-NOTES.md.
 F3 and the HUD report button open the local Save to Desktop dialog; crash reports
 are offered at the next start. Nothing is uploaded. The retained report core is
 fork-owned at fork_ext/report_core.rs; upstream logfile keeps logging through hooks.
+The small fork_ext/report_state.rs snapshot is a child of the Play adapter and is
+noted at most once a second through its existing frame_library hook. Upstream
+state describers remain deleted. Snapshot files are scrubbed before persistence
+and export; character names remain visible.
 Historical HTTP transport exists only in tests against numeric loopback fixtures;
 the production report path only saves locally. The obsolete browser report policy
 was removed after upstream deleted browser reporting. Keep map/community

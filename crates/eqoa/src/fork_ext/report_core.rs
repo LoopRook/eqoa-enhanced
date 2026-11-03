@@ -116,12 +116,17 @@ pub fn fit(text: &str, max: usize) -> String {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) use native::ended_without_closing_for_test;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use native::{Button, Kind, Sent, Status, clean_noted, dir, has_noted_accounts, tail};
+pub(crate) use native::{
+    Button, Kind, Sent, Status, clean_noted, dir, has_noted_accounts, state_file, tail,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{
-    Key, clean_exit, click, crash, draw, is_report_key, key, key_of, log_line, run_started,
-    set_gpu, set_shot, start, wants_shot,
+    Key, clean_exit, click, crash, draw, is_report_key, key, key_of, log_line, note_state,
+    run_started, set_gpu, set_shot, start, wants_shot,
 };
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use native::with_state_test;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
@@ -161,6 +166,93 @@ mod native {
     static DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
     /// This window, from 1 (`multibox`'s place): the files of its own.
     static WINDOW: AtomicUsize = AtomicUsize::new(1);
+
+    // Separate from credentials: a panic can try this lock without blocking on redaction.
+    #[derive(Default)]
+    struct StateSlot {
+        last: Option<Duration>,
+        text: String,
+    }
+    static STATE: Mutex<StateSlot> = Mutex::new(StateSlot {
+        last: None,
+        text: String::new(),
+    });
+    static STATE_CLOCK: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+
+    /// Run the describer at most once per second, before any formatting or filesystem work.
+    fn capture(slot: &mut StateSlot, now: Duration, describe: impl FnOnce() -> String) -> bool {
+        if slot
+            .last
+            .is_some_and(|last| now.saturating_sub(last) < Duration::from_secs(1))
+        {
+            return false;
+        }
+        slot.last = Some(now);
+        slot.text = clean_now(&describe());
+        true
+    }
+
+    #[cfg(test)]
+    pub(super) fn check_state_clock() {
+        let mut slot = StateSlot::default();
+        let mut calls = 0;
+        for millis in [0, 0, 16, 500, 999, 1000, 1001, 1999, 2000] {
+            capture(&mut slot, Duration::from_millis(millis), || {
+                calls += 1;
+                format!("capture {calls}")
+            });
+        }
+        assert_eq!(calls, 3, "formatting must run only at 0, 1000 and 2000 ms");
+        assert_eq!(slot.text, "capture 3");
+    }
+
+    pub fn note_state(describe: impl FnOnce() -> String) {
+        #[cfg(test)]
+        if TEST_STATE.with(|state| state.borrow().is_some()) {
+            TEST_STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                let (slot, dir) = state.as_mut().unwrap();
+                if capture(slot, Duration::ZERO, describe) {
+                    let _ = std::fs::write(dir.join("state.txt"), &slot.text);
+                }
+            });
+            return;
+        }
+        let Ok(mut slot) = STATE.try_lock() else {
+            return;
+        };
+        if capture(
+            &mut slot,
+            STATE_CLOCK.get_or_init(Instant::now).elapsed(),
+            describe,
+        ) {
+            if let Some(dir) = dir() {
+                let _ = std::fs::write(dir.join(own("state", "txt")), &slot.text);
+            }
+        }
+    }
+
+    pub(crate) fn state_file() -> String {
+        own("state", "txt")
+    }
+
+    #[cfg(test)]
+    thread_local! {
+        static TEST_STATE: std::cell::RefCell<Option<(StateSlot, PathBuf)>> = const { std::cell::RefCell::new(None) };
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_state_test(dir: &Path, run: impl FnOnce()) {
+        struct Restore(Option<(StateSlot, PathBuf)>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                TEST_STATE.with(|s| *s.borrow_mut() = self.0.take());
+            }
+        }
+        let _restore =
+            Restore(TEST_STATE.with(|s| s.replace(Some((StateSlot::default(), dir.into())))));
+        run();
+    }
 
     pub(crate) fn dir() -> Option<PathBuf> {
         lock(&DIR).clone()
@@ -367,7 +459,8 @@ mod native {
     /// one is held.
     fn write_crash(detail: &str, log: Option<(&str, &[String])>, at: SystemTime) {
         let Some(d) = crashes() else { return };
-        write_crash_in(&d, detail, log, at, None);
+        let state = STATE.try_lock().map(|s| s.text.clone()).unwrap_or_default();
+        write_crash_in(&d, detail, log, at, None, &state);
     }
 
     /// `write_crash` into the crash directory `d`; `of` the version that
@@ -379,6 +472,7 @@ mod native {
         log: Option<(&str, &[String])>,
         at: SystemTime,
         of: Option<&str>,
+        state: &str,
     ) {
         let _ = std::fs::create_dir_all(d);
         let run = RUN.try_lock().map(|r| r.clone()).unwrap_or_default();
@@ -393,11 +487,16 @@ mod native {
             }
         };
         let text = format!(
-            "EQOA native client crash report\nversion: {}\nwhen: {}\nplatform: {}\n\n--- crash ---\n{}\n\n[log] last {} lines\n{}\n",
+            "EQOA native client crash report\nversion: {}\nwhen: {}\nplatform: {}\n\n--- crash ---\n{}\n\n[client, as last noted]\n{}\n\n[log] last {} lines\n{}\n",
             of.map_or_else(|| format!("{} ({})", version(), channel()), str::to_string),
             stamp(at),
             platform(),
             detail.trim_end(),
+            if state.trim().is_empty() {
+                "-"
+            } else {
+                state.trim_end()
+            },
             lines.len(),
             lines.join("\n")
         );
@@ -407,6 +506,8 @@ mod native {
     /// Inspect this window's previous log for a run that did not close.
     pub(super) fn take_last_run(dir: &Path, prev: &Path) {
         ended_without_closing(dir, prev);
+        let _ = std::fs::remove_file(dir.join(own("state", "txt")));
+        *lock(&STATE) = StateSlot::default();
     }
 
     #[cfg(test)]
@@ -455,6 +556,7 @@ mod native {
             Some((run, &tail)),
             at,
             of,
+            &std::fs::read_to_string(dir.join(own("state", "txt"))).unwrap_or_default(),
         );
     }
 
@@ -1507,8 +1609,7 @@ mod tests {
 
     include!("../report_policy_transport_tests.rs");
 
-    /// The previous run's crash keeps its own version and log; a clean close
-    /// is the negative control. Client-state snapshots are no longer a feature.
+    /// The previous run's crash keeps its own version, log and snapshot.
     #[test]
     fn a_crash_carries_its_own_runs_version_and_log() {
         let dir = std::env::temp_dir().join(format!("eqoa-last-run-{}", std::process::id()));
@@ -1523,12 +1624,22 @@ mod tests {
         native::take_last_run(&dir, &prev);
         assert!(!crash.exists(), "clean exit produces no crash");
         std::fs::write(&prev, closed.replace("[eqoa] closed", "last event")).unwrap();
+        std::fs::write(dir.join(native::state_file()), "Mode: 33 (chat history)\n").unwrap();
         native::take_last_run(&dir, &prev);
         let text = std::fs::read_to_string(&crash).unwrap();
         assert!(text.contains("version: dev-review (enhanced)"));
         assert!(text.contains("[log] last 2 lines") && text.contains("last event"));
-        assert!(!text.contains("[client"), "no empty client-state section");
+        assert!(text.contains("[client, as last noted]\nMode: 33 (chat history)"));
+        assert!(
+            !dir.join(native::state_file()).exists(),
+            "a new run cannot inherit the old snapshot"
+        );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn report_state_fake_clock_limits_describing_to_once_per_second() {
+        native::check_state_clock();
     }
 
     /// A run whose log ends with Rust's abort for an allocation refused is

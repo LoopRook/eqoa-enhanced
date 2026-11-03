@@ -1,6 +1,10 @@
 //! The combat indication adapter; service code only receives plain combat data.
 use super::Play;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "report_state.rs"]
+mod report_state;
+
 /// Capture every received 0x00CD before addon frames can coalesce its transitions.
 pub(crate) fn ability_lockout(_index: u8, _lockout: i32) {
     #[cfg(not(target_arch = "wasm32"))]
@@ -33,9 +37,14 @@ thread_local! {
     static CACHED_ATLAS: std::cell::RefCell<Option<std::sync::Arc<crate::fork_ext::addons::icons::SafeAtlas>>> = const { std::cell::RefCell::new(None) };
 }
 
-pub(crate) fn frame_library(_play: &Play, _lib: &esf::Library) {
+pub(crate) fn frame_library(
+    _play: &Play,
+    _lib: &esf::Library,
+    _walker: Option<&crate::walker::Walker>,
+) {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        crate::report::note_state(|| report_state::describe(_play, _walker));
         let current_key = if let Some((vui, _, _)) = &_play.hud {
             AtlasKey::Hud(&vui.textures as *const _ as usize)
         } else if let Some((_, textures)) = &_play.ui_data {
@@ -54,17 +63,21 @@ pub(crate) fn frame_library(_play: &Play, _lib: &esf::Library) {
                     for i in 0..252 {
                         entries.push(vui.entry(i));
                     }
-                    Some(std::sync::Arc::new(crate::fork_ext::addons::icons::SafeAtlas {
-                        entries,
-                        textures: vui.textures.clone(),
-                    }))
+                    Some(std::sync::Arc::new(
+                        crate::fork_ext::addons::icons::SafeAtlas {
+                            entries,
+                            textures: vui.textures.clone(),
+                        },
+                    ))
                 }
                 AtlasKey::UiData(_) => {
                     let (entries, textures) = _play.ui_data.as_ref().unwrap();
-                    Some(std::sync::Arc::new(crate::fork_ext::addons::icons::SafeAtlas {
-                        entries: entries.clone(),
-                        textures: textures.clone(),
-                    }))
+                    Some(std::sync::Arc::new(
+                        crate::fork_ext::addons::icons::SafeAtlas {
+                            entries: entries.clone(),
+                            textures: textures.clone(),
+                        },
+                    ))
                 }
                 AtlasKey::None => None,
             };
@@ -477,7 +490,14 @@ impl Play {
 
             let mut snap_items = [crate::fork_ext::addons::ability::ItemSnapshot::default();
                 crate::fork_ext::addons::ability::MAX_ITEM_RECORDS];
-            for (k, it) in self.dump.inventory.items.iter().enumerate().take(crate::fork_ext::addons::ability::MAX_ITEM_RECORDS) {
+            for (k, it) in self
+                .dump
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .take(crate::fork_ext::addons::ability::MAX_ITEM_RECORDS)
+            {
                 let mut name_buf = [0u8; 32];
                 let n_bytes = it.item.name.as_bytes();
                 let n_len = n_bytes.len().min(32);
@@ -533,11 +553,12 @@ impl Play {
                         (0x8060000, raw_idx, icon_ref)
                     } else if entry.msg == 0x2030000 {
                         let item_idx = entry.id.max(0) as usize;
-                        let icon_ref = if item_idx < snap_items.len() && snap_items[item_idx].populated {
-                            snap_items[item_idx].icon_ref as i32
-                        } else {
-                            -1
-                        };
+                        let icon_ref =
+                            if item_idx < snap_items.len() && snap_items[item_idx].populated {
+                                snap_items[item_idx].icon_ref as i32
+                            } else {
+                                -1
+                            };
                         (0x2030000, item_idx as u32, icon_ref)
                     } else {
                         (0, 0, -1)
@@ -563,10 +584,20 @@ impl Play {
             for b in 0..3 {
                 for s in 0..5 {
                     let slot = &bars[b].slots[s];
-                    if slot.source_type == 0x8060000 && slot.source_index >= 1 && (slot.source_index as usize) <= ability_count {
+                    if slot.source_type == 0x8060000
+                        && slot.source_index >= 1
+                        && (slot.source_index as usize) <= ability_count
+                    {
                         let ab = &snap_abilities[slot.source_index as usize - 1];
-                        current_slots[b][s] = (ab.icon_background_ref, ab.icon_foreground_ref, ab.name, ab.name_len);
-                    } else if slot.source_type == 0x2030000 && (slot.source_index as usize) < snap_items.len() {
+                        current_slots[b][s] = (
+                            ab.icon_background_ref,
+                            ab.icon_foreground_ref,
+                            ab.name,
+                            ab.name_len,
+                        );
+                    } else if slot.source_type == 0x2030000
+                        && (slot.source_index as usize) < snap_items.len()
+                    {
                         let it = &snap_items[slot.source_index as usize];
                         if it.populated {
                             current_slots[b][s] = (0, it.icon_ref, it.name, it.name_len);
@@ -580,7 +611,8 @@ impl Play {
                         for s in 0..bars[b].slot_count as usize {
                             let (bg, fg, name_bytes, name_len) = current_slots[b][s];
                             let name = if name_len > 0 {
-                                String::from_utf8_lossy(&name_bytes[..name_len as usize]).to_string()
+                                String::from_utf8_lossy(&name_bytes[..name_len as usize])
+                                    .to_string()
                             } else {
                                 "empty".to_string()
                             };
@@ -1090,11 +1122,7 @@ mod tests {
             crate::ui::Vui::new(Default::default(), Default::default(), atlas)
         };
         let vui = make_vui();
-        p.hud = Some((
-            make_vui(),
-            Default::default(),
-            crate::hud::Hud::new(),
-        ));
+        p.hud = Some((make_vui(), Default::default(), crate::hud::Hud::new()));
         p.hud_menus.build(
             &Default::default(),
             &Default::default(),
@@ -1105,18 +1133,46 @@ mod tests {
 
         let mut wnd = crate::chat::WndChat::new();
         wnd.mode = 1;
-        wnd.text.add_text(&crate::ui::wide("hello"), [1.0; 4], 0, |_| 0);
+        wnd.text
+            .add_text(&crate::ui::wide("hello"), [1.0; 4], 0, |_| 0);
         struct DummyRaster;
         impl vi::ui::Raster for DummyRaster {
-            fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
-            fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+            fn blit(
+                &mut self,
+                _: u32,
+                _: u32,
+                _: [i32; 2],
+                _: [i32; 2],
+                _: [i32; 2],
+                _: i32,
+                _: f32,
+            ) {
+            }
+            fn stretch_blit(
+                &mut self,
+                _: u32,
+                _: u32,
+                _: [i32; 2],
+                _: [i32; 2],
+                _: [i32; 2],
+                _: [i32; 2],
+                _: i32,
+                _: f32,
+            ) {
+            }
             fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
             fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
             fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) {}
             fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) {}
-            fn string_width(&self, _: &[u16]) -> i32 { 0 }
-            fn point_size(&self) -> i32 { 12 }
-            fn viewport(&self) -> [i32; 4] { [0, 0, 639, 447] }
+            fn string_width(&self, _: &[u16]) -> i32 {
+                0
+            }
+            fn point_size(&self) -> i32 {
+                12
+            }
+            fn viewport(&self) -> [i32; 4] {
+                [0, 0, 639, 447]
+            }
             fn set_viewport(&mut self, _: [i32; 4]) {}
         }
         wnd.draw(&vui, &mut DummyRaster, 0, 0.0);
@@ -1129,7 +1185,10 @@ mod tests {
         let menu_at = [430, 25];
         let ability_win = render::ui::window_from_frame(
             size,
-            [menu_at[0] as f32 + 10.0 + side, menu_at[1] as f32 + 10.0 - up],
+            [
+                menu_at[0] as f32 + 10.0 + side,
+                menu_at[1] as f32 + 10.0 - up,
+            ],
         );
         let chat_win = render::ui::window_from_frame(size, [422.0 + side, 420.0 + up]);
 
@@ -1148,51 +1207,81 @@ mod tests {
 
         // Clicks on hidden compass, ability bar, and chat window do nothing
         assert!(
-            !p.point(Click::Target(compass_win[0] as f64, compass_win[1] as f64), size, false),
+            !p.point(
+                Click::Target(compass_win[0] as f64, compass_win[1] as f64),
+                size,
+                false
+            ),
             "click on hidden compass must do nothing"
         );
         assert!(!p.map.open);
 
         assert!(
-            !p.point(Click::Target(ability_win[0] as f64, ability_win[1] as f64), size, false),
+            !p.point(
+                Click::Target(ability_win[0] as f64, ability_win[1] as f64),
+                size,
+                false
+            ),
             "click on hidden ability bar must do nothing"
         );
         assert_eq!(p.hud_menus.sel, 0);
 
         assert!(
-            !p.point(Click::Target(chat_win[0] as f64, chat_win[1] as f64), size, false),
+            !p.point(
+                Click::Target(chat_win[0] as f64, chat_win[1] as f64),
+                size,
+                false
+            ),
             "click on hidden chat window must do nothing"
         );
         assert_eq!(p.mode, 0);
 
         // Keyboard/pad hotbar keys and chat typing still work while hidden
         p.hud_key(crate::hudmenu::Key::Right);
-        assert_ne!(p.hud_menus.sel, 0, "pad/keyboard hotbar keys still work while hidden");
+        assert_ne!(
+            p.hud_menus.sel, 0,
+            "pad/keyboard hotbar keys still work while hidden"
+        );
         p.hud_menus.sel = 0;
 
         p.open_edit(0xB0F0000, 128, -1, false);
-        assert_eq!(p.mode, 2, "chat typing still opens while chat window is hidden");
+        assert_eq!(
+            p.mode, 2,
+            "chat typing still opens while chat window is hidden"
+        );
         p.mode = 0;
 
         // Unhidden: clicks on compass, ability bar, and chat window work
         publish(false);
 
         assert!(
-            p.point(Click::Target(compass_win[0] as f64, compass_win[1] as f64), size, false),
+            p.point(
+                Click::Target(compass_win[0] as f64, compass_win[1] as f64),
+                size,
+                false
+            ),
             "click on unhidden compass opens map"
         );
         assert!(p.map.open);
         p.map.open = false;
 
         assert!(
-            p.point(Click::Target(ability_win[0] as f64, ability_win[1] as f64), size, false),
+            p.point(
+                Click::Target(ability_win[0] as f64, ability_win[1] as f64),
+                size,
+                false
+            ),
             "click on unhidden ability bar switches menu"
         );
         assert_ne!(p.hud_menus.sel, 0);
         p.hud_menus.sel = 0;
 
         assert!(
-            p.point(Click::Target(chat_win[0] as f64, chat_win[1] as f64), size, false),
+            p.point(
+                Click::Target(chat_win[0] as f64, chat_win[1] as f64),
+                size,
+                false
+            ),
             "click on unhidden chat window opens chat line"
         );
         assert_eq!(p.mode, 2);
@@ -1200,7 +1289,8 @@ mod tests {
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
-    fn forge_addon_manager_open_from_options_exits_mode_34_and_restores_all_hud_elements_and_connect_gap_cache() {
+    fn forge_addon_manager_open_from_options_exits_mode_34_and_restores_all_hud_elements_and_connect_gap_cache()
+     {
         use crate::fork_ext::addons::{
             health::InstanceToken,
             visibility::{HudClaimsRegistry, publish, publish_claims},
@@ -1244,7 +1334,10 @@ mod tests {
             health_redraw(&mut p, false, false),
             "opening Addon Manager from mode 34 must invalidate HUD cache and exit VIWndOptions"
         );
-        assert_eq!(p.mode, 0, "Addon Manager activation must exit mode 34 to mode 0");
+        assert_eq!(
+            p.mode, 0,
+            "Addon Manager activation must exit mode 34 to mode 0"
+        );
         assert!(p.apply_camera, "exiting mode 34 must restore camera");
         assert!(
             p.sound_ops
@@ -1284,7 +1377,9 @@ mod tests {
 
         let hud_state = crate::hud::HudState::default();
         assert!(!crate::hud::fork_hud::compass_visible(&hud_state));
-        assert!(!crate::hud::fork_hud::group_compass_marks_visible(&hud_state));
+        assert!(!crate::hud::fork_hud::group_compass_marks_visible(
+            &hud_state
+        ));
         assert!(!crate::hud::fork_hud::target_visible(&hud_state));
         assert!(!crate::hud::fork_hud::group_visible(&hud_state));
         assert!(!crate::hud::fork_hud::pet_visible(&hud_state));
@@ -1303,7 +1398,9 @@ mod tests {
             "connect gap must invalidate HUD cache for all elements"
         );
         assert!(crate::hud::fork_hud::compass_visible(&hud_state));
-        assert!(crate::hud::fork_hud::group_compass_marks_visible(&hud_state));
+        assert!(crate::hud::fork_hud::group_compass_marks_visible(
+            &hud_state
+        ));
         assert!(crate::hud::fork_hud::target_visible(&hud_state));
         assert!(crate::hud::fork_hud::group_visible(&hud_state));
         assert!(crate::hud::fork_hud::pet_visible(&hud_state));
@@ -1379,22 +1476,25 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     fn forge_play_steady_frame_does_not_rebuild_atlas() {
         let mut p = play();
-        let vui = crate::ui::Vui::new(Default::default(), Default::default(), vec![vi::ui::UiTexEntry::default(); 252]);
+        let vui = crate::ui::Vui::new(
+            Default::default(),
+            Default::default(),
+            vec![vi::ui::UiTexEntry::default(); 252],
+        );
         p.hud = Some((vui, Default::default(), crate::hud::Hud::new()));
 
         let lib = esf::Library::new();
 
-        frame_library(&p, &lib);
+        frame_library(&p, &lib, None);
         let count1 = atlas_rebuild_count();
 
         for _ in 0..10 {
-            frame_library(&p, &lib);
+            frame_library(&p, &lib, None);
         }
         let count2 = atlas_rebuild_count();
 
         assert_eq!(
-            count1,
-            count2,
+            count1, count2,
             "steady frames must not rebuild the HUD atlas or clone TEXTURES.TXT"
         );
     }
@@ -1423,20 +1523,35 @@ mod tests {
 
         // 1b. Busy states in normal mode (matching play.rs:3950: map, map search, search, typing)
         p.map.open = true;
-        assert!(p.forge_snapshot(None).ui_busy, "map.open must report ui_busy == true");
-        assert!(p.forge_snapshot(None).start_menu, "the full-screen map must pause addons like a menu");
+        assert!(
+            p.forge_snapshot(None).ui_busy,
+            "map.open must report ui_busy == true"
+        );
+        assert!(
+            p.forge_snapshot(None).start_menu,
+            "the full-screen map must pause addons like a menu"
+        );
         p.map.open = false;
 
         p.map.search.open = true;
-        assert!(p.forge_snapshot(None).ui_busy, "map.search.open must report ui_busy == true");
+        assert!(
+            p.forge_snapshot(None).ui_busy,
+            "map.search.open must report ui_busy == true"
+        );
         p.map.search.open = false;
 
         p.search.open = true;
-        assert!(p.forge_snapshot(None).ui_busy, "search.open must report ui_busy == true");
+        assert!(
+            p.forge_snapshot(None).ui_busy,
+            "search.open must report ui_busy == true"
+        );
         p.search.open = false;
 
         p.typing = Some(String::from("test input"));
-        assert!(p.forge_snapshot(None).ui_busy, "typing.is_some() must report ui_busy == true");
+        assert!(
+            p.forge_snapshot(None).ui_busy,
+            "typing.is_some() must report ui_busy == true"
+        );
         p.typing = None;
 
         // 2. Start menu and all sub-screen modes (spellbook, auctions, trainer, quests, options, etc.)
@@ -1538,16 +1653,19 @@ mod tests {
                     for line in content.lines() {
                         if let Some(pos) = line.find("self.mode = ") {
                             let rest = &line[pos + "self.mode = ".len()..];
-                            let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                            let num_str: String =
+                                rest.chars().take_while(|c| c.is_ascii_digit()).collect();
                             if let Ok(m) = num_str.parse::<i32>() {
                                 discovered_modes.insert(m);
                             }
                         }
-                        for prefix in &["open_panel(", "open_guild(", "open_support(", "open_mail("] {
+                        for prefix in &["open_panel(", "open_guild(", "open_support(", "open_mail("]
+                        {
                             let mut cur = line;
                             while let Some(pos) = cur.find(prefix) {
                                 let rest = &cur[pos + prefix.len()..];
-                                let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                                let num_str: String =
+                                    rest.chars().take_while(|c| c.is_ascii_digit()).collect();
                                 if let Ok(m) = num_str.parse::<i32>() {
                                     discovered_modes.insert(m);
                                 }
@@ -1559,7 +1677,8 @@ mod tests {
             }
         }
 
-        let known_non_menu: std::collections::BTreeSet<i32> = [0, 2, 7, 9, 30, 33, 36, 38].into_iter().collect();
+        let known_non_menu: std::collections::BTreeSet<i32> =
+            [0, 2, 7, 9, 30, 33, 36, 38].into_iter().collect();
         for mode in discovered_modes {
             let is_non_menu = known_non_menu.contains(&mode);
             let is_menu = is_menu_mode(mode);
@@ -1582,7 +1701,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     fn forge_minimap_stays_up_in_chat_history_mode_when_chat_claimed() {
         use crate::fork_ext::addons::health::InstanceToken;
-        use crate::fork_ext::addons::visibility::{publish_claims, HudClaimsRegistry};
+        use crate::fork_ext::addons::visibility::{HudClaimsRegistry, publish_claims};
 
         struct Reset;
         impl Drop for Reset {
@@ -1610,7 +1729,10 @@ mod tests {
         // 2. In mode 33 (chat history / R2) without chat claimed, minimap is hidden
         p.mode = 33;
         assert!(crate::hud::fork_hud::chat_window_visible());
-        assert!(!p.minimap_up(), "minimap must hide in mode 33 when chat is unclaimed");
+        assert!(
+            !p.minimap_up(),
+            "minimap must hide in mode 33 when chat is unclaimed"
+        );
 
         // 3. Claim the chat window (e.g. Wereoxxs UI or FrontiersForge mod)
         let mut reg = HudClaimsRegistry::new();
@@ -1628,7 +1750,10 @@ mod tests {
         // Negative controls:
         // Even with chat claimed, opening a menu (mode 1) hides minimap
         p.mode = 1;
-        assert!(!p.minimap_up(), "menu mode must hide minimap even if chat is claimed");
+        assert!(
+            !p.minimap_up(),
+            "menu mode must hide minimap even if chat is claimed"
+        );
 
         // Map open hides minimap
         p.mode = 33;
@@ -1643,13 +1768,22 @@ mod tests {
 
         // Turning minimap off hides minimap
         let _ = crate::settings::set_minimap(false);
-        assert!(!p.minimap_up(), "minimap setting off must hide minimap in mode 33");
+        assert!(
+            !p.minimap_up(),
+            "minimap setting off must hide minimap in mode 33"
+        );
         let _ = crate::settings::set_minimap(true);
-        assert!(p.minimap_up(), "restoring minimap setting restores minimap in mode 33");
+        assert!(
+            p.minimap_up(),
+            "restoring minimap setting restores minimap in mode 33"
+        );
 
         // 4. Releasing chat claim restores stock behavior (mode 33 hides minimap)
         publish_claims(&HudClaimsRegistry::new());
         assert!(crate::hud::fork_hud::chat_window_visible());
-        assert!(!p.minimap_up(), "releasing chat claim must restore stock mode 33 minimap hiding");
+        assert!(
+            !p.minimap_up(),
+            "releasing chat claim must restore stock mode 33 minimap hiding"
+        );
     }
 }

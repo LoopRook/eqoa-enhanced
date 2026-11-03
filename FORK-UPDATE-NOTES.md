@@ -4,8 +4,10 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## 2026-11-03 ? Upstream sync preview
 
-- Local report contents now match the dialog: your note, selected screenshot,
-  available logs and an Enhanced manifest. Empty client-state attachments are removed.
+- Reports now include a short picture of what the game was doing: mode, target,
+  nearby characters, location, movement flags and addon HUD claims. Crash reports
+  keep the last snapshot. Account credentials and your user folder are redacted;
+  character names stay visible.
 
 - Adjust the on-screen controller with Extended ? Controller ? Touch Pad Size.
 - Class Mastery branches follow the live game's rules: ranks on a branch remain

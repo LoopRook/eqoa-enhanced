@@ -113,3 +113,9 @@ This entry records future work only; no navigation or movement behavior changes 
 - **Plan:** check what Forge exposes for using an ability from Lua (the reference ability/ability_bar modules); if Forge has it, implement it natively through the same path as the game's own hotbar use; if not, add it under the `eqoa` namespace and patch the bundled mods' slot click handlers (as for weapon sets). Together with the Modern UI / ARPG UI weapon-set bars (work in progress, uncommitted in the release-0-4-0 worktree) as the next small patch.
 
 - Local reports in a second window currently collect window 1's log; select that window's own log in a future fix (pre-existing; deferred by the 2026-11-03 sync review).
+
+## A small "what the game was doing" section in reports (owner, 2026-11-03)
+
+- Quiet bugs can leave no log clue: mode, target, nearby entities and addon HUD claims help explain them.
+- Implemented on sync/2026-11-03 as a small fork-owned snapshot, through the existing frame adapter, at most once a second. It includes enabled addons, world/zone, position/heading, map/search and autorun/follow. Account/password/home redaction applies; character names stay.
+- `client_state.txt` accompanies local reports when available; crashes carry the last noted snapshot. Upstream's deleted describers remain deleted. Owner live QA pending.

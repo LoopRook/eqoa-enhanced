@@ -220,3 +220,25 @@ control. Options is tightened to +194/-42, play to +750/-53 and settings to
 Viewer uses the portable is_open_local predicate everywhere, requiring only
 two shared-line changes from the merge. Historical browser-policy test records
 are marked as historical, and their retired files are removed from ownership.
+
+Client state restored as a fork-owned snapshot at the owner's request (2026-11-03).
+`fork_ext/report_state.rs` describes mode/target/nearest eight entities, world/zone,
+position/heading, HUD claims, enabled mods, map/search and autorun/follow. The
+existing frame_library adapter forwards the walker and calls note_state at most
+once per second; snapshot text is scrubbed before state.txt persistence and ZIP
+export. Crash files retain the last noted snapshot, and startup clears the old
+slot after collecting an interrupted run. Upstream describers remain deleted.
+Shared budgets are unchanged (play +750/-53); a named snapshot seam is guarded.
+Snapshot follow-up checks: sync filter 5 passed; report filter 48 passed.
+Locked workspace suite with scratch EQOA_CONFIG and one test thread: 1,777 passed,
+0 failed, 27 ignored, 197 explicit prerequisite SKIP messages. The actual capture
+hook removal made the ZIP test fail with "client_state.txt is empty without the
+per-frame report hook"; restored hook passes. Fake-clock, Play-fixture, HUD-claim,
+redaction, ZIP-content and previous-run crash-state regressions pass. Footprint:
+PASS, 303 owned / 33 shared, budgets unchanged.
+
+Locked release build: PASS, optimized (1m 16s), x64 GUI / 8 MiB stack validated.
+EXE: 32,745,472 bytes; SHA256 `4a7e85dce82a833b992d5da780db030a2ea8b3206f09cc0c898ed00e0335065b`. A new
+main-checkout run/sync-2026-11-03-<snapshot-shortsha>/ preview is copied after the
+follow-up commit; its checklist includes client_state.txt and the crash section,
+with exact EXE and bundled-mod hash comparisons. Earlier preview folders stay.

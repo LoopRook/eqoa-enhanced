@@ -37,7 +37,7 @@ The manifest lists explicit ownership patterns for:
   `statbox.rs`, and `tracker.rs`; map UI font assets and their OFL notice; map data catalog
   (crates/eqoa/resources/map-data/**) and its FrontiersForge MIT notice.
 - `crates/eqoa/src/fork_ext/` adapters and implementations, including the retained
-  `report_core.rs`, `report_viewer.rs` and `report_sync_tests.rs`; reporting policy and
+  `report_core.rs`, `report_state.rs`, `report_viewer.rs` and `report_sync_tests.rs`; reporting policy and
   its native transport fixture tests.
 - The restored render map module/shader and map-circle/terrain test modules.
 - The named map generators, map-bundle helper, parser launcher helper/tests,
@@ -196,3 +196,10 @@ its nonzero-height atlas and Report assertion add six lines/replace three
 relative to the merge budget. The HUD button and capture surface hooks are now
 checked explicitly. The local report core keeps only the report tail, redaction,
 crash files and dialog; logfile alone owns native stderr and the panic hook.
+
+Owner-requested report snapshot (2026-11-03): `fork_ext/report_state.rs` is a
+child of the fork Play adapter. Its existing `frame_library` call now forwards
+the walker, with one throttled `crate::report::note_state` call in fork-owned
+code. No new shared hook line or budget increase; play remains +750/-53.
+The visibility adapter publishes an allocation-free bitmask of claimed HUD
+elements; names are formatted only when a snapshot is accepted.

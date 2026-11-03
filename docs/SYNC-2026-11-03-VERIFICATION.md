@@ -335,3 +335,63 @@ checkout's `run/sync-2026-11-03-<follow-up-shortsha>/`, with identical EXE, bund
 mods, catalog, launcher and checklist. The checklist lists note/screenshot/logs/
 manifest only. The old b5e6310 preview remains unchanged. Live owner QA remains
 pending; the second-window log selection issue is deferred.
+
+
+## Owner-requested small client snapshot follow-up
+
+Client state is restored as a fork-owned snapshot at the owner's request. The
+upstream describers remain deleted. `fork_ext/report_state.rs` is a child of the
+Play adapter, fed by its existing frame_library hook (now forwarding the walker).
+One closure is accepted at most once per second before formatting or filesystem
+work; state.txt is scrubbed before writing and client_state.txt before ZIP export.
+The crash section includes the last noted state. Startup collects the old state
+with an interrupted log, then clears it so a new run cannot borrow it.
+
+Coverage and actual negative control:
+
+- `report_state_describes_play_mode_target_and_nearest_entities`: Play fixture
+  covers mode 33, named target with level/distance/id, nearest-eight ordering and
+  cap, remote player and both own/remote pets; character names stay visible.
+- `report_state_includes_claimed_hud_elements_and_movement_flags`: published HUD
+  claims, map/search and autorun/follow are present; releasing claims removes them.
+- `report_state_frame_hook_populates_saved_zip_with_redaction`: invokes the real
+  frame_library adapter, saves to a temporary directory, extracts client_state.txt,
+  and checks account/password/home redaction in both persisted state and ZIP.
+  Temporarily removed the production `crate::report::note_state(...)` line from
+  fork_ext/play.rs, ran this test and observed exit 101 / 0 passed / 1 failed:
+  **"client_state.txt is empty without the per-frame report hook"**. Restored the
+  exact source bytes; the final report filter and full workspace run pass it.
+- `report_state_fake_clock_limits_describing_to_once_per_second`: nine frame
+  timestamps (including repeated and 999/1000 ms boundary values) invoke the
+  describer exactly three times at 0, 1000 and 2000 ms.
+- `a_crash_carries_its_own_runs_version_and_log`: confirms the previous run's
+  snapshot appears under `[client, as last noted]`, and startup removes the old
+  state file. A clean-close log creates no crash report.
+- The ZIP contents test again checks the exact available attachments and the
+  dialog's matching client-state promise. The earlier F3/crash/journal hook
+  removal controls remain recorded above; no shared reporting logic is restored.
+
+Every cargo command uses the shared mkdir lock, an EXIT cleanup trap that is
+installed only after acquisition, `timeout 2400`, this worktree's target directory,
+and scratch EQOA_CONFIG under target/. Test commands use --test-threads=1.
+
+- `cargo test --locked -p eqoa sync_ -- --nocapture --test-threads=1`: 5 passed.
+- `cargo test --locked -p eqoa report -- --nocapture --test-threads=1`: 48 passed.
+- `cargo test --locked --workspace -- --nocapture --test-threads=1`: PASS,
+  **1,777 passed / 0 failed / 27 ignored**, across 96 summaries; client
+  **1,504 passed / 0 failed / 26 ignored**. **197 explicit SKIP messages**, exactly
+  the same prerequisite messages recorded for the previous review run. Missing
+  disc/oracle/reference resources and symlink privileges remain unavailable.
+- `C:/Python314/python.exe tools/check_fork_footprint.py --base b8e02cd`: PASS,
+  303 fork-owned / 33 shared paths. The new named capture seam is guarded once.
+  Shared budgets remain unchanged, including play +750/-53. reviewed_base stays
+  b8e02cd781aac6a1b9e9906f09896956c77afcd6.
+
+Live owner QA is pending. The pre-existing second-window log selection issue
+stays deferred. No other branch is changed; no push, tag or protected merge.
+
+Locked release build: PASS, optimized (1m 16s), x64 GUI / 8 MiB stack validated.
+EXE: 32,745,472 bytes; SHA256 `4a7e85dce82a833b992d5da780db030a2ea8b3206f09cc0c898ed00e0335065b`. A new
+main-checkout run/sync-2026-11-03-<snapshot-shortsha>/ preview is copied after the
+follow-up commit; its checklist includes client_state.txt and the crash section,
+with exact EXE and bundled-mod hash comparisons. Earlier preview folders stay.
