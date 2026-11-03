@@ -72,9 +72,8 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/eqoa/src/input.rs` | 32 | 3 | Map controls and focus/input behavior. |
 | `crates/eqoa/src/lod.rs` | 9 | 8 | Restored map terrain observation. |
 | `crates/eqoa/src/main.rs` | 33 | 0 | Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged. |
-| `crates/eqoa/src/viewer.rs` | `fork_report::surface(...)`, report input/capture hooks |
 | `crates/eqoa/src/options.rs` | 194 | 42 | Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
-| `crates/eqoa/src/play.rs` | 750 | 53 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
+| `crates/eqoa/src/play.rs` | 752 | 54 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. Trimmed to measured upstream diff in the b5e6310 review follow-up. Integration 2026-11-03 adds the R2 chat-history key tap and mode-33 ability-bar exception. |
 | `crates/eqoa/src/settings.rs` | 322 | 17 | Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31), and one-line in-memory report cache update on save_login. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
 | `crates/eqoa/src/touch.rs` | 81 | 2 | Reconcile Enhanced long-press release suppression with upstream full-size touch slop; preserve the map behavior and new adjustable pad size. |
 | `crates/eqoa/src/ui.rs` | 10 | 6 | Map UI state and input integration plus one-line pub(crate) visibility on UiAssets.surfaces for fork-owned HUD tests. |
@@ -112,11 +111,12 @@ still verifies execution and placement. Do not add duplicate hook names in comme
 | Shared file | Checked seams |
 | --- | --- |
 | `crates/eqoa/src/main.rs` | `mod fork_ext;`, `mod report_policy;` |
-| `crates/eqoa/src/play.rs` | 750 | 53 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
-| `crates/eqoa/src/hud.rs` | 315 | 14 | Existing Enhanced HUD plus a local report button rectangle hook and Pick variant; drawing implementation lives in fork_ext/report_core.rs. Review follow-up adds +6/-3 for the restored Report pick assertion, 28px atlas fixture and displaced-position negative control. |
+| `crates/eqoa/src/play.rs` | `self.fork_combat_event(...)`, `fork_hud::chat_history_key(...)`, `fork_hud::ability_bar_shown(...)` |
+| `crates/eqoa/src/hud.rs` | `fork_hud::draw(...)` |
+| `crates/eqoa/src/options.rs` | `fork_options::{CATEGORY, ITEMS, change, activate, value_text}`, once each |
+| `crates/eqoa/src/settings.rs` | `fork_settings::{write, parse}`, once each |
 | `crates/eqoa/src/viewer.rs` | `fork_report::surface(...)`, report input/capture hooks |
-| `crates/eqoa/src/options.rs` | 194 | 42 | Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
-| `crates/eqoa/src/settings.rs` | 322 | 17 | Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31), and one-line in-memory report cache update on save_login. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
+| `crates/eqoa/src/hud.rs` | `crate::fork_ext::report_core::hud_button` |
 | `crates/eqoa/build.rs` | `app_icon_ico::{stage, images}`, once each |
 | `crates/eqoa/src/icon.rs` | `fork_ext::app_icon::{picture, keeps_icon}`, once each |
 

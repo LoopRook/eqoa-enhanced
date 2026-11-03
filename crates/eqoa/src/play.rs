@@ -3447,6 +3447,7 @@ impl Play {
     /// ends the scroll, L3 toggles autorun (33 is a chat mode), and the
     /// attack and the target's details are let go as in play.
     fn chat_scroll_key(&mut self, key: i32, down: bool) {
+        crate::hud::fork_hud::chat_history_key(key, down);
         let took = self.wnd_chat.as_mut().is_some_and(|c| if down { c.key_down(key) } else { c.key_up(key) });
         if took {
             return;
@@ -8112,7 +8113,7 @@ impl Play {
             // UpdateQuickBars, then the menu up (the HUD's, in play; L2's
             // menus open over it without `UpdateMode`, so it stays up there;
             // a server's player search hides them while it is up)
-            if (self.mode == 0 || self.mode == 30 || self.mode == 38 || self.mode == 43) && !self.search.open {
+            if crate::hud::fork_hud::ability_bar_shown(self.mode == 0 || self.mode == 30 || self.mode == 38 || self.mode == 43, self.mode) && !self.search.open {
                 let bars = self.hud_bars();
                 self.hud_menus.build(&self.abilities, &self.dump.inventory, &self.gear, bars);
                 let abilities = &self.abilities;

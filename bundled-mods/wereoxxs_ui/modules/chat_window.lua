@@ -49,6 +49,9 @@ function ChatWindow.new()
         type_order = {},
         input = "",
         stick_to_bottom = true,
+        -- True while the game's chat-history scroll (R2/C held) drives this
+        -- log; set each draw, so a release can jump back to the newest line.
+        chat_history_active = false,
         -- Set by the top layer when Enter is pressed outside the window, so the
         -- next drawn input line grabs the keyboard.
         focus_requested = false,
@@ -139,9 +142,26 @@ local function DrawMessage(message, config, with_prefix)
     ImGui.PopStyleColor(1)
 end
 
+-- The game's chat-history scroll (R2 or C held), when this client is EQOA
+-- Enhanced and a Wereoxxs chat is what the game's chat mode is scrolling.
+-- FrontiersForge on PCSX2 has no eqoa table; the whole thing is then nil and
+-- the window keeps its own stick-to-bottom behavior.
+local function ChatHistory()
+    if eqoa == nil or eqoa.ChatHistory == nil then
+        return nil
+    end
+    local ok, value = pcall(eqoa.ChatHistory)
+    if ok and type(value) == "table" then
+        return value
+    end
+    return nil
+end
+
 -- The scrolling message region for one tab. Sticks to the bottom while the
 -- user is at the bottom, and stays put while they are reading back.
 local function DrawMessageList(state, config, opts, filter, with_prefix, input_h)
+    local history = ChatHistory()
+    local history_active = history ~= nil and history.active == true
     ImGui.BeginChild("messages", 0, -input_h)
     -- A child window keeps its own font scale, so the parent's is reapplied.
     ImGui.SetWindowFontScale(opts.font_scale or 1)
@@ -150,9 +170,27 @@ local function DrawMessageList(state, config, opts, filter, with_prefix, input_h
             DrawMessage(message, config, with_prefix)
         end
     end
-    if ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 4 then
+    if history_active then
+        -- R2/C held: the game reports the lines it scrolled this frame. One
+        -- step is one (wrapped) line; positive is back/up. Older hosts or
+        -- another client's ImGui may lack these two calls, so skip the scroll
+        -- rather than error and lose the whole window.
+        local steps = tonumber(history.steps) or 0
+        if steps ~= 0
+            and type(ImGui.GetTextLineHeightWithSpacing) == "function"
+            and type(ImGui.SetScrollY) == "function" then
+            local y = ImGui.GetScrollY() - steps * ImGui.GetTextLineHeightWithSpacing()
+            local max_y = ImGui.GetScrollMaxY()
+            if y < 0 then y = 0 elseif y > max_y then y = max_y end
+            ImGui.SetScrollY(y)
+        end
+    elseif state.chat_history_active then
+        -- R2/C let go: back to the newest line.
+        ImGui.SetScrollHereY(1.0)
+    elseif ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 4 then
         ImGui.SetScrollHereY(1.0)
     end
+    state.chat_history_active = history_active
     ImGui.EndChild()
 end
 

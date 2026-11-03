@@ -894,6 +894,14 @@ pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> R
     )?;
     let f = frame.clone();
     imgui.set(
+        "GetTextLineHeightWithSpacing",
+        lua.create_function(move |_, ()| {
+            f.borrow_mut().check()?;
+            Ok(unsafe { sys::igGetTextLineHeightWithSpacing() })
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
         "GetScrollY",
         lua.create_function(move |_, ()| {
             f.borrow_mut().check()?;
@@ -906,6 +914,17 @@ pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> R
         lua.create_function(move |_, ()| {
             f.borrow_mut().check()?;
             Ok(unsafe { sys::igGetScrollMaxY() })
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "SetScrollY",
+        lua.create_function(move |_, y: f32| {
+            f.borrow_mut().check()?;
+            unsafe {
+                sys::igSetScrollY_Float(finite(y)?);
+            }
+            Ok(())
         })?,
     )?;
     let f = frame.clone();

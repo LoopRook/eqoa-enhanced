@@ -730,18 +730,19 @@ fn forge_wereoxxs_complete_symbol_surface_contract() {
         assert(type(UiForge.ReleaseTexture) == 'function', 'UiForge.ReleaseTexture missing')
         assert(type(UiForge.resources_path) == 'string', 'UiForge.resources_path missing')
 
-        -- 3. All 62 Dear ImGui functions called across wereoxxs_ui
+        -- 3. All 64 Dear ImGui functions called across wereoxxs_ui
         local imgui_funcs = {
             'Begin', 'BeginChild', 'BeginCombo', 'BeginPopup', 'BeginTabBar', 'BeginTabItem',
             'Button', 'CalcTextSize', 'Checkbox', 'ColorEdit4', 'Dummy', 'End', 'EndChild',
             'EndCombo', 'EndPopup', 'EndTabBar', 'EndTabItem', 'GetColorU32', 'GetContentRegionAvail',
             'GetCursorScreenPos', 'GetFrameHeight', 'GetScrollMaxY', 'GetScrollY', 'GetTextLineHeight',
-            'GetTime', 'GetWindowDrawList', 'GetWindowPos', 'InputTextWithHint', 'InvisibleButton',
-            'IsItemActive', 'IsMouseDragging', 'IsMouseHoveringRect', 'IsWindowFocused', 'IsWindowHovered',
-            'OpenPopup', 'PopFont', 'PopID', 'PopStyleColor', 'PushFont', 'PushID', 'PushStyleColor',
-            'RadioButton', 'SameLine', 'Selectable', 'Separator', 'SetCursorScreenPos',
-            'SetKeyboardFocusHere', 'SetNextItemWidth', 'SetNextWindowPos', 'SetNextWindowSize',
-            'SetScrollHereY', 'SetTooltip', 'SetWindowFontScale', 'SetWindowPos', 'SliderFloat',
+            'GetTextLineHeightWithSpacing', 'GetTime', 'GetWindowDrawList', 'GetWindowPos',
+            'InputTextWithHint', 'InvisibleButton', 'IsItemActive', 'IsMouseDragging',
+            'IsMouseHoveringRect', 'IsWindowFocused', 'IsWindowHovered', 'OpenPopup', 'PopFont',
+            'PopID', 'PopStyleColor', 'PushFont', 'PushID', 'PushStyleColor', 'RadioButton',
+            'SameLine', 'Selectable', 'Separator', 'SetCursorScreenPos', 'SetKeyboardFocusHere',
+            'SetNextItemWidth', 'SetNextWindowPos', 'SetNextWindowSize', 'SetScrollHereY',
+            'SetScrollY', 'SetTooltip', 'SetWindowFontScale', 'SetWindowPos', 'SliderFloat',
             'SliderInt', 'Text', 'TextColored', 'TextDisabled', 'TextWrapped', 'TreeNode', 'TreePop'
         }
         for _, fn_name in ipairs(imgui_funcs) do

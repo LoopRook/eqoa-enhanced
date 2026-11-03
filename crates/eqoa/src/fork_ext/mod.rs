@@ -5,6 +5,7 @@ pub mod addons;
 pub mod app_icon;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bundled;
+pub mod chat_history;
 pub mod mods;
 pub mod release;
 #[cfg(not(target_arch = "wasm32"))]

@@ -707,6 +707,9 @@ impl Play {
                 in_game,
                 &self.quests.titles,
             ),
+            chat_history: crate::fork_ext::chat_history::snapshot(
+                in_game && self.mode == 33 && !crate::hud::fork_hud::chat_window_visible(),
+            ),
         }
     }
 }
@@ -920,6 +923,101 @@ mod tests {
         addon.gear.on = false;
         assert!(!addon.forge_use_weapon_set(4));
         assert_eq!(addon.session.record.as_ref().unwrap().len(), 2);
+    }
+    /// R2 (mode 33) scrolls the chat history for an addon-owned chat window:
+    /// the snapshot reports the lines and the HUD carousel keeps its ability
+    /// bar on screen. Without a claim both stay stock.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_chat_history_r2_scrolls_claimed_chat_and_keeps_ability_bar() {
+        use crate::fork_ext::addons::{
+            health::InstanceToken,
+            visibility::{HudClaimsRegistry, publish_claims},
+        };
+        struct Discard;
+        impl vi::ui::Raster for Discard {
+            fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+            fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+            fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
+            fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
+            fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) {}
+            fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) {}
+            fn string_width(&self, _: &[u16]) -> i32 { 0 }
+            fn point_size(&self) -> i32 { 12 }
+            fn viewport(&self) -> [i32; 4] { [0, 0, 639, 447] }
+            fn set_viewport(&mut self, _: [i32; 4]) {}
+        }
+
+        crate::fork_ext::chat_history::reset();
+        let mut p = play();
+        p.loading.wait.take();
+        p.hud = Some((
+            crate::ui::Vui::new(Default::default(), Default::default(), vec![]),
+            Default::default(),
+            crate::hud::Hud::new(),
+        ));
+        p.mode = 33;
+
+        // Stock: R2 belongs to the native window, and it hides the carousel.
+        publish_claims(&HudClaimsRegistry::new());
+        let stock = p.forge_snapshot(None).chat_history;
+        assert!(!stock.active, "stock mode 33 scrolls the native chat");
+        assert!(!crate::hud::fork_hud::chat_history_keeps_ability_bar(p.mode));
+
+        // Wereoxxs claims the chat window, so the HUD keeps drawing.
+        let mut reg = HudClaimsRegistry::new();
+        reg.disable("chat_window", InstanceToken::next().unwrap(), "wereoxxs_ui");
+        publish_claims(&reg);
+        let claimed = p.forge_snapshot(None).chat_history;
+        assert!(claimed.active, "claimed chat follows R2");
+        assert_eq!(claimed.total, 0, "no invented scroll");
+        assert!(
+            crate::hud::fork_hud::chat_history_keeps_ability_bar(p.mode),
+            "the ability bar stays up while the claimed chat is scrolled"
+        );
+        assert!(
+            crate::hud::fork_hud::ability_bar_shown(false, p.mode),
+            "the carousel's mode list takes the claimed chat too"
+        );
+
+        // The native key path taps the stock scroll: one step, then repeats on
+        // the stock 0.45 s / 0.05 s clock the draw wrapper advances.
+        let atlas = (0..252)
+            .map(|_| vi::ui::UiTexEntry {
+                uv1: [16, 16],
+                ..Default::default()
+            })
+            .collect();
+        let vui = crate::ui::Vui::new(Default::default(), Default::default(), atlas);
+        let mut wnd = crate::chat::WndChat::new();
+        let draw = |wnd: &mut crate::chat::WndChat, dt: f32| {
+            crate::hud::fork_hud::draw_chat_window(wnd, &vui, &mut Discard, 0, dt);
+        };
+        p.chat_history_key(19, true);
+        draw(&mut wnd, 0.44);
+        assert_eq!(p.forge_snapshot(None).chat_history.total, 1, "up steps back once at once");
+        draw(&mut wnd, 0.01);
+        assert_eq!(p.forge_snapshot(None).chat_history.total, 2, "and repeats after 0.45 s");
+        p.chat_history_key(19, false);
+        draw(&mut wnd, 1.0);
+        assert_eq!(p.forge_snapshot(None).chat_history.total, 2, "release stops the repeat");
+        p.chat_history_key(20, true);
+        assert_eq!(p.forge_snapshot(None).chat_history.total, 1, "down steps forward");
+        draw(&mut wnd, 0.40);
+        assert_eq!(p.forge_snapshot(None).chat_history.total, 1, "no repeat before 0.45 s");
+        p.chat_history_key(20, false);
+
+        // Negative controls: another mode ignores the key, and releasing the
+        // claim restores stock hiding and stock-only scrolling.
+        p.mode = 0;
+        assert!(!p.forge_snapshot(None).chat_history.active);
+        p.mode = 33;
+        p.chat_history_key(150, true);
+        assert_eq!(p.forge_snapshot(None).chat_history.total, 1, "non-scroll keys pass through");
+        publish_claims(&HudClaimsRegistry::new());
+        assert!(!p.forge_snapshot(None).chat_history.active);
+        assert!(!crate::hud::fork_hud::chat_history_keeps_ability_bar(p.mode));
+        crate::fork_ext::chat_history::reset();
     }
     fn play() -> Play {
         play_as("test")
