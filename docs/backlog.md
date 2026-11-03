@@ -32,6 +32,11 @@ This entry records future work only; no navigation or movement behavior changes 
 
 - `map/cells.rs` keeps one zone per cell: "A second zone in a cell is left out of the map". Any zone whose middle shares a cell with another is never drawn. Fix separately from the indoor map; first list which zones are affected (all six worlds).
 
+## A small "what the game was doing" section in reports (owner, 2026-11-03)
+
+- **Why:** upstream deleted the client-state describers, and the 2026-11-03 sync dropped our empty client_state.txt. Quiet bugs (wrong target picked, ability bars hidden, as with the R2 / mode 33 bug) leave nothing in the log.
+- **Plan:** a fork-owned snapshot taken when F3 is pressed or a crash is written: the game mode (`Play::mode`), the current target and the nearest few entities (name, level, distance), the HUD elements claimed by addons, enabled addons, zone and position. Redacted like the rest. Add it to the zip as `client_state.txt` with a line in the dialog, through one hook from fork code.
+
 ## Save problem reports to the Desktop
 
 - **Status:** Deferred until the Wereoxxs dev-build gate is met.
