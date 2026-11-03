@@ -106,7 +106,17 @@ This entry records future work only; no navigation or movement behavior changes 
 
 - **Request:** Sandstorm added a 4th hotbar for weapon sets. Wereoxxs UI draws only Forge's three hotbars (bars 1-2 and items), so with its ability bars on, our weapon-set page (HUD menu 3, and our extra bars 3/4, menus 4-5) is hidden with nothing in its place. The owner wants them drawn inside Wereoxxs's own bar style. Not unhidden as the game's bars.
 - **Plan:** expose the weapon sets (and extra bars) to Lua under the `eqoa` namespace (slots, icons, current set, use), then patch the bundled Wereoxxs ability_bars.lua (MIT; note it in bundled-mods/SOURCE.txt) to draw a 4th bar, and offer the patch to Wereoxx. Medium: one agent task plus a review.
-- **Status:** not started; next after 0.4.0.
+- **Status:** shipped in 0.4.1 (Wereoxxs weapon-set bar).
+
+## Wereoxxs weapon-set bar: one selection ring, settings with the other bars (player report, 2026-11-04)
+
+- **Report (a player, via the owner, with a screenshot):**
+  1. The weapon-set bar has its own selection ring. When you move onto it, Wereoxxs's ring stays stuck on the bar/ability you had selected before, so two rings show at once.
+  2. The weapon-set bar's ring ignores the custom colours set for the selection indicator.
+  3. Its options sit apart from the 3 bars in Wereoxxs settings. It would be more intuitive under "Ability bars", with a "Show bar 4" option there.
+- **Likely cause (unverified):** our patch in bundled-mods/wereoxxs_ui (weapon-set bar, 0.4.1) draws its own highlight from the `eqoa` weapon-set selection. Wereoxxs's ring follows the HUD carousel's selected bar/slot, which doesn't move to the weapon-set page.
+- **Fix idea:** treat the weapon-set bar as bar 4 in ability_bars.lua. Then there's one selection model: when the carousel is on the weapon-set page, the ring moves there and uses the configured colour, and the weapon-set bar's own highlight is dropped. Move its settings into the "Ability bars" section as "Show bar 4". Update the bundled file's shipped hash so unedited installs get it.
+- **Status:** owner decision: not now; aim for the next round of Wereoxxs/mod-bar work (with the Modern/ARPG weapon-set bars and click-to-cast).
 
 ## Live 'mob is up' alerts shared between players (owner idea, 2026-11-01)
 
