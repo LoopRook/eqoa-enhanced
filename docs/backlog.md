@@ -32,11 +32,6 @@ This entry records future work only; no navigation or movement behavior changes 
 
 - `map/cells.rs` keeps one zone per cell: "A second zone in a cell is left out of the map". Any zone whose middle shares a cell with another is never drawn. Fix separately from the indoor map; first list which zones are affected (all six worlds).
 
-## A small "what the game was doing" section in reports (owner, 2026-11-03)
-
-- **Why:** upstream deleted the client-state describers, and the 2026-11-03 sync dropped our empty client_state.txt. Quiet bugs (wrong target picked, ability bars hidden, as with the R2 / mode 33 bug) leave nothing in the log.
-- **Plan:** a fork-owned snapshot taken when F3 is pressed or a crash is written: the game mode (`Play::mode`), the current target and the nearest few entities (name, level, distance), the HUD elements claimed by addons, enabled addons, zone and position. Redacted like the rest. Add it to the zip as `client_state.txt` with a line in the dialog, through one hook from fork code.
-
 ## Save problem reports to the Desktop
 
 - **Status:** Deferred until the Wereoxxs dev-build gate is met.
@@ -133,4 +128,8 @@ This entry records future work only; no navigation or movement behavior changes 
 
 - Quiet bugs can leave no log clue: mode, target, nearby entities and addon HUD claims help explain them.
 - Implemented on sync/2026-11-03 as a small fork-owned snapshot, through the existing frame adapter, at most once a second. It includes enabled addons, world/zone, position/heading, map/search and autorun/follow. Account/password/home redaction applies; character names stay.
-- `client_state.txt` accompanies local reports when available; crashes carry the last noted snapshot. Upstream's deleted describers remain deleted. Owner live QA pending.
+- `client_state.txt` accompanies local reports when available; crashes carry the last noted snapshot. Upstream's deleted describers remain deleted. **Done** (develop, 2026-11-04); its I/O runs on a background worker (ca93430).
+
+## Crash offer after a forced close: owner saw no offer (2026-11-04)
+
+- The owner force-closed the combined-da9b159 test build (Task Manager Details, End task) and saw no crash offer. That folder's profile/ held only the killed run's eqoa.log (no `[eqoa] closed`, no eqoa.prev.log), so the game had not yet been started again from the same folder; the offer only appears on that next start. Retest: force-close, start the same folder again; if still nothing, debug `fork_ext/report_core.rs` `ended_without_closing` (reads eqoa.log before logfile renames it).
