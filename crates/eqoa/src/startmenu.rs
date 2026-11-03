@@ -669,7 +669,7 @@ fn draw_plain(vui: &Vui, r: &mut dyn Raster, s: &[u16], at: [i32; 2], c: [f32; 4
 }
 
 /// `ZoneName(world, row, col)`: 641 out of the world's bounds.
-fn zone_name(loc: &Location, row: i32, col: i32) -> u16 {
+pub(crate) fn zone_name(loc: &Location, row: i32, col: i32) -> u16 {
     let Some(b) = loc.bounds else { return 641 };
     if col < b[0] || b[1] < col || row < b[2] || b[3] < row {
         return 641;

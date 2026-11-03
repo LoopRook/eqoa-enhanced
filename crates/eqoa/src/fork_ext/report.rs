@@ -20,8 +20,23 @@ pub fn enhanced_label() -> String {
     )
 }
 
-/// Returns the formatted list of enabled mods and addons, or "none".
+#[cfg(test)]
+thread_local! { static MOD_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+#[cfg(test)]
+pub(crate) fn mod_scans_on_this_thread() -> usize {
+    MOD_SCANS.get()
+}
+
+/// Reads the snapshot's background-refreshed addon cache without touching disk.
+pub(crate) fn enabled_mods_addons_cached() -> String {
+    super::report_background::enabled_mods_addons_cached()
+}
+
+/// Scans the enabled mods/addons for startup, export, or the background cache.
 pub fn enabled_mods_addons_string() -> String {
+    #[cfg(test)]
+    MOD_SCANS.set(MOD_SCANS.get() + 1);
     let mut items = Vec::new();
 
     // Plain companion tools and mods from mods/

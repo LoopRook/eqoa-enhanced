@@ -395,3 +395,60 @@ EXE: 32,745,472 bytes; SHA256 `4a7e85dce82a833b992d5da780db030a2ea8b3206f09cc0c8
 main-checkout run/sync-2026-11-03-<snapshot-shortsha>/ preview is copied after the
 follow-up commit; its checklist includes client_state.txt and the crash section,
 with exact EXE and bundled-mod hash comparisons. Earlier preview folders stay.
+
+
+## Integration snapshot review fixes (after 4840b46)
+
+Work is confined to integrate/2026-11-03; sync/2026-11-03 remains at 911e5e2.
+The bounded report-io worker owns changed-only state writes and an addon cache
+refreshed no more than once per 30 seconds. Capturing/formatting reads cached
+memory and queues a nonblocking write. Latest redacted STATE remains available to
+the existing panic path; disk state remains available to interrupted-start
+capture. The cache can lag an addon/profile change by up to 30 seconds. Normal
+shutdown flushes the writer. Report export retains its fresh manifest scan.
+
+- Canonical entity labels: Dot::kind, shared with Dot::of, uses p256 only.
+- Zone labels: existing startmenu::zone_name with gWorldInfo bounds, 641 outside;
+  Position and Zone use the same committed walker position.
+- Loading omits stale character/world/position and says Mode: loading.
+- Modes 7 dialog response, 9 dialog, 36 fishing and 42 group search are named.
+- startmenu visibility alone adds +1/-1 to the shared budget; helper body stays
+  upstream's. Play remains +752/-54; its reason records frame_library forwarding.
+
+Targeted command (scratch EQOA_CONFIG, --test-threads=1, shared mkdir lock and
+`timeout 2400`, common sync target directory):
+`cargo test --locked -p eqoa report -- --nocapture --test-threads=1`: **53 passed**.
+This includes the worker's thread/write-count regression, capture scan counter,
+canonical class/loading/mode and bounded-zone tests, plus prior report regressions.
+
+Actual negative control: temporarily replaced the two cached getter calls in
+report_state.rs with the previous `enabled_mods_addons_string()` scan. Ran
+`report_state_capture_does_not_scan_mods_on_frame_thread`: **exit 101, 0 passed,
+1 failed**, at **"snapshot performed a filesystem scan on the frame thread"**,
+with counter **4 versus 1**. The counter's positive control invokes the real
+scanner once before the captures. Restored the exact source bytes and re-ran the
+report filter successfully. A failed preliminary control compilation due to line
+ending conversion was discarded; the recorded control is the runtime failure.
+
+Owner live QA remains pending. No push/tag/protected-branch changes are made.
+
+Final integration verification (shared mkdir lock with owned EXIT cleanup,
+`timeout 2400`, scratch EQOA_CONFIG under integration target/, common
+CARGO_TARGET_DIR at sync-2026-11-03/target):
+
+- `cargo test --locked --workspace -- --nocapture --test-threads=1`: PASS,
+  **1,789 passed / 0 failed / 27 ignored**, across 96 summaries; client
+  **1,516 passed / 0 failed / 26 ignored**. **197 explicit prerequisite SKIP
+  messages** (missing disc/oracle/reference resources and symlink privileges).
+- `C:/Python314/python.exe tools/check_fork_footprint.py --base b8e02cd`: PASS,
+  **308 fork-owned / 34 shared**. New startmenu helper visibility budget +1/-1 is
+  justified above; all other budgets unchanged, including play +752/-54.
+- `cargo build --release --locked -p eqoa`: PASS, optimized, 1m 14s.
+  PE x64 GUI / 8 MiB stack validated. EXE 32,794,624 bytes; SHA256
+  `4df0f2907881991a78ad3bb24f3aab149c4dd109b20ba635398426a07edbb5ee`.
+
+A new main-checkout `run/combined-<follow-up-sha>/` preview is copied after the
+commit. It uses the same six-entry layout as combined-4840b46, with identical
+launcher/checklist bytes except the checklist header's new commit. EXE and all
+bundled-mod copies are hash-checked; existing previews are never overwritten.
+Live owner QA remains pending. No push or other-branch changes.

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "reviewed_base": "b8e02cd781aac6a1b9e9906f09896956c77afcd6",
-  "review_state": "Reviewed upstream sync plus owner-requested fork-owned report snapshot, through the existing frame-library adapter. Shared budgets unchanged; reviewed base unchanged.",
+  "review_state": "Integration snapshot review: background cached scans and changed-only writes; canonical entity and bounded zone helpers; loading/mode labels. startmenu visibility seam is +1/-1; other budgets unchanged.",
   "fork_owned": [
     "AGENTS.md",
     ".gitattributes",
@@ -122,7 +122,7 @@
     "crates/eqoa/src/play.rs": {
       "added": 752,
       "deleted": 54,
-      "reason": "Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. Trimmed to measured upstream diff in the b5e6310 review follow-up. Integration 2026-11-03 adds the R2 chat-history key tap and the mode-33 ability-bar exception (one rewritten stock condition line)."
+      "reason": "Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. Trimmed to measured upstream diff in the b5e6310 review follow-up. Integration 2026-11-03 adds the R2 chat-history key tap and the mode-33 ability-bar exception (one rewritten stock condition line). The existing frame_library line forwards the walker in place for the fork-owned report snapshot."
     },
     "crates/eqoa/src/settings.rs": {
       "added": 322,
@@ -218,6 +218,11 @@
       "added": 4,
       "deleted": 0,
       "reason": "Credential-noting hooks at login, account creation and password change preserve local report redaction after upstream removed them."
+    },
+    "crates/eqoa/src/startmenu.rs": {
+      "added": 1,
+      "deleted": 1,
+      "reason": "Expose the existing zone_name helper as pub(crate) so the fork-owned report snapshot reuses the client bounds check; body and gameplay remain unchanged."
     }
   },
   "immutable": [

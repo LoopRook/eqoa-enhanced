@@ -242,3 +242,47 @@ EXE: 32,745,472 bytes; SHA256 `4a7e85dce82a833b992d5da780db030a2ea8b3206f09cc0c8
 main-checkout run/sync-2026-11-03-<snapshot-shortsha>/ preview is copied after the
 follow-up commit; its checklist includes client_state.txt and the crash section,
 with exact EXE and bundled-mod hash comparisons. Earlier preview folders stay.
+
+
+Integration snapshot review fix (base 4840b46, integrate/2026-11-03): the per-frame
+snapshot now reads an in-memory addon cache. A single bounded report-io worker
+refreshes that cache off-thread at most once per 30 seconds and writes state.txt
+only when its text changes. Normal exit flushes pending work; panic capture still
+uses the latest redacted in-memory STATE, and interrupted-start capture still
+reads the last persisted snapshot. Addon/profile changes may take up to 30 seconds
+to appear in this diagnostic cache; report export keeps its fresh manifest scan.
+Canonical Dot::kind is shared with the minimap (p256 only). Zone lookup reuses
+startmenu::zone_name and gWorldInfo bounds with the same committed coordinates as
+the Position line. Loading snapshots omit stale character/world information and
+say Mode: loading. Modes 7, 9, 36 and 42 have names. The sole new shared change is
+zone_name visibility (+1/-1; body unchanged); play remains +752/-54, with the
+in-place frame_library edit recorded in its budget reason.
+
+Negative control: restored the old scanning function in report_state.rs and ran
+report_state_capture_does_not_scan_mods_on_frame_thread. It failed at runtime
+(exit 101, 0 passed / 1 failed): "snapshot performed a filesystem scan on the
+frame thread", scan count 4 versus 1. Restored the exact source bytes; the final
+report filter passes all 53 tests. The worker test also confirms scans/writes
+execute on a different thread, skips unchanged writes, and scans once across
+repeated captures. The existing redaction/ZIP/crash/throttle tests remain passing.
+
+Final integration verification (shared mkdir lock with owned EXIT cleanup,
+`timeout 2400`, scratch EQOA_CONFIG under integration target/, common
+CARGO_TARGET_DIR at sync-2026-11-03/target):
+
+- `cargo test --locked --workspace -- --nocapture --test-threads=1`: PASS,
+  **1,789 passed / 0 failed / 27 ignored**, across 96 summaries; client
+  **1,516 passed / 0 failed / 26 ignored**. **197 explicit prerequisite SKIP
+  messages** (missing disc/oracle/reference resources and symlink privileges).
+- `C:/Python314/python.exe tools/check_fork_footprint.py --base b8e02cd`: PASS,
+  **308 fork-owned / 34 shared**. New startmenu helper visibility budget +1/-1 is
+  justified above; all other budgets unchanged, including play +752/-54.
+- `cargo build --release --locked -p eqoa`: PASS, optimized, 1m 14s.
+  PE x64 GUI / 8 MiB stack validated. EXE 32,794,624 bytes; SHA256
+  `4df0f2907881991a78ad3bb24f3aab149c4dd109b20ba635398426a07edbb5ee`.
+
+A new main-checkout `run/combined-<follow-up-sha>/` preview is copied after the
+commit. It uses the same six-entry layout as combined-4840b46, with identical
+launcher/checklist bytes except the checklist header's new commit. EXE and all
+bundled-mod copies are hash-checked; existing previews are never overwritten.
+Live owner QA remains pending. No push or other-branch changes.

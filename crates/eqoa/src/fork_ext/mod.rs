@@ -10,6 +10,8 @@ pub mod mods;
 pub mod release;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod report;
+#[cfg(not(target_arch = "wasm32"))]
+mod report_background;
 pub mod report_core;
 pub mod telemetry;
 

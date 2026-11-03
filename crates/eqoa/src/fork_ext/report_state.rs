@@ -5,6 +5,13 @@ use crate::walker::Walker;
 use std::fmt::Write;
 
 pub(super) fn describe(play: &Play, walker: Option<&Walker>) -> String {
+    if play.loading_up() {
+        return format!(
+            "{}\nMode: loading\nEnabled mods/addons: {}\n",
+            report::enhanced_label(),
+            report::enabled_mods_addons_cached()
+        );
+    }
     let me = play.self_id32();
     let own = play
         .entities
@@ -13,7 +20,7 @@ pub(super) fn describe(play: &Play, walker: Option<&Walker>) -> String {
         .flatten()
         .find(|e| Some(e.id) == me);
     let position = walker
-        .map(|w| w.cam.walk.phys.position.to_array())
+        .map(|w| w.cam.walk.committed.position.to_array())
         .or_else(|| play.self_at.map(|p| p.0))
         .or_else(|| own.map(|e| e.pos));
     let heading = walker
@@ -26,38 +33,28 @@ pub(super) fn describe(play: &Play, walker: Option<&Walker>) -> String {
         play.player.name
     );
     if let Some(pos) = position {
-        let _ = writeln!(
-            text,
-            "Position: {:.2}, {:.2}, {:.2}",
-            pos[0], pos[1], pos[2]
-        );
+        let g = walker.and_then(|w| w.scene.grid.as_ref());
+        let loc = crate::startmenu::Location {
+            world,
+            pos,
+            cols: g.map_or(1, |g| g.cols),
+            rows: g.map_or(1, |g| g.rows),
+            cell: g.map_or(1.0, |g| g.cell_size.0),
+            origin: g.map_or([0.0; 3], |g| g.origin.to_array()),
+            bounds: play
+                .start
+                .as_ref()
+                .and_then(|start| start.bounds.get(world as usize).copied().flatten()),
+        };
+        write_location(&mut text, &loc, play.words.as_ref());
     } else {
-        text.push_str("Position: unavailable\n");
+        text.push_str("Position: unavailable\nZone: unavailable\n");
     }
     let _ = writeln!(
         text,
         "Heading (radians): {}",
         heading.map_or_else(|| "unavailable".into(), |h| format!("{h:.3}"))
     );
-    if let Some(w) = walker {
-        let (_, loc) = play.start_view(w);
-        if loc.cell > 0.0 && (loc.cols > 1 || loc.rows > 1) {
-            let col = (loc.pos[0] / loc.cell) as i32 - 1;
-            let row = (loc.pos[2] / loc.cell) as i32 - 1;
-            let zone = crate::zones::zone(world, row, col);
-            let name = zone.and_then(|id| play.words.as_ref().map(|words| words.get(id as i32, 0)));
-            let _ = writeln!(
-                text,
-                "Zone: {} (id {}, cell {col}, {row})",
-                name.unwrap_or("unavailable"),
-                zone.map_or_else(|| "unknown".into(), |id| id.to_string())
-            );
-        } else {
-            text.push_str("Zone: unavailable (no outdoor grid)\n");
-        }
-    } else {
-        text.push_str("Zone: unavailable\n");
-    }
     let _ = writeln!(text, "Mode: {} ({})", play.mode, mode_name(play.mode));
     // Host floats here only describe distances; they never feed gameplay or EE state.
     let distance = |e: &net::entity::Entity| {
@@ -70,17 +67,7 @@ pub(super) fn describe(play: &Play, walker: Option<&Walker>) -> String {
         })
     };
     let entity_line = |e: &net::entity::Entity| {
-        let kind = if e.id == play.pet_id || e.creature.as_ref().is_some_and(|c| c.p256 == 3) {
-            "pet"
-        } else if e
-            .creature
-            .as_ref()
-            .is_some_and(|c| c.p256 == 2 || c.p255 != 0)
-        {
-            "player"
-        } else {
-            "NPC"
-        };
+        let kind = crate::map::mini::Dot::kind(e);
         let name = e.creature.as_ref().map_or("unnamed", |c| c.name.as_str());
         let level = e.creature.as_ref().map_or(0, |c| c.level);
         format!(
@@ -128,7 +115,7 @@ pub(super) fn describe(play: &Play, walker: Option<&Walker>) -> String {
     let _ = writeln!(
         text,
         "Enabled mods/addons: {}",
-        report::enabled_mods_addons_string()
+        report::enabled_mods_addons_cached()
     );
     let _ = writeln!(
         text,
@@ -143,17 +130,42 @@ pub(super) fn describe(play: &Play, walker: Option<&Walker>) -> String {
     text
 }
 
+fn write_location(
+    text: &mut String,
+    loc: &crate::startmenu::Location,
+    words: Option<&vi::strtab::StringTable>,
+) {
+    let _ = writeln!(
+        text,
+        "Position: {:.2}, {:.2}, {:.2}",
+        loc.pos[0], loc.pos[1], loc.pos[2]
+    );
+    if loc.cell > 0.0 && (loc.cols > 1 || loc.rows > 1) {
+        let col = (loc.pos[0] / loc.cell) as i32 - 1;
+        let row = (loc.pos[2] / loc.cell) as i32 - 1;
+        let zone = crate::startmenu::zone_name(loc, row, col);
+        let name = words.map_or("unavailable", |words| words.get(zone as i32, 0));
+        let _ = writeln!(text, "Zone: {name} (id {zone}, cell {col}, {row})");
+    } else {
+        text.push_str("Zone: unavailable (no outdoor grid)\n");
+    }
+}
+
 fn mode_name(mode: i32) -> &'static str {
     match mode {
         0 => "play",
         1 => "menu / loot",
         2 => "chat line",
+        7 => "dialog response",
+        9 => "dialog",
         13 => "start menu",
         30 => "quick chat",
         33 => "chat history",
         34 => "options",
+        36 => "fishing",
         38 => "manual camera",
         40 => "class mastery",
+        42 => "group search",
         43 => "duel invite",
         44 => "duel window",
         _ => "other",
@@ -166,6 +178,7 @@ mod tests {
 
     fn fixture() -> Play {
         let mut p = crate::play::commands::play();
+        p.loading = Default::default();
         p.player.name = "CharacterKept".into();
         p.mode = 33;
         p.self_at = Some(([0.0; 3], None));
@@ -181,7 +194,7 @@ mod tests {
                     level: 20 + id as u8,
                     p256: if id == 1 {
                         2
-                    } else if id == 4 {
+                    } else if id == 3 || id == 4 {
                         3
                     } else {
                         0
@@ -202,8 +215,8 @@ mod tests {
             "EQOA Enhanced",
             "Mode: 33 (chat history)",
             "Target: Neighbor2, level 22, distance 2.00, id 0x00000002, NPC",
-            "Neighbor1, level 21, distance 1.00, id 0x00000001, player",
-            "Neighbor3, level 23, distance 3.00, id 0x00000003, pet",
+            "Neighbor1, level 21, distance 1.00, id 0x00000001, Player",
+            "Neighbor3, level 23, distance 3.00, id 0x00000003, Pet",
             "CharacterKept",
             "World:",
             "Heading (radians):",
@@ -221,7 +234,7 @@ mod tests {
         assert!(!text.contains("Neighbor9"));
         assert!(text.find("  Neighbor1").unwrap() < text.find("  Neighbor8").unwrap());
         assert!(
-            text.contains("id 0x00000004, pet"),
+            text.contains("id 0x00000004, Pet"),
             "other players' pets are pets too"
         );
     }
@@ -261,6 +274,95 @@ mod tests {
     }
 
     #[test]
+    fn report_state_capture_does_not_scan_mods_on_frame_thread() {
+        // Positive control: this counter observes the real filesystem scanner.
+        let before = report::mod_scans_on_this_thread();
+        let _ = report::enabled_mods_addons_string();
+        assert_eq!(report::mod_scans_on_this_thread(), before + 1);
+        let scans = report::mod_scans_on_this_thread();
+        let p = fixture();
+        for _ in 0..3 {
+            let _ = describe(&p, None);
+        }
+        assert_eq!(
+            report::mod_scans_on_this_thread(),
+            scans,
+            "snapshot performed a filesystem scan on the frame thread"
+        );
+    }
+
+    #[test]
+    fn report_state_uses_canonical_class_and_loading_and_mode_names() {
+        let mut p = fixture();
+        let e = p.entities.slots[1].as_mut().unwrap();
+        let c = e.creature.as_mut().unwrap();
+        c.p256 = 0;
+        c.p255 = 1;
+        assert!(
+            describe(&p, None).contains("id 0x00000001, NPC"),
+            "m_p255 alone is no player test"
+        );
+        for (mode, name) in [
+            (7, "dialog response"),
+            (9, "dialog"),
+            (36, "fishing"),
+            (42, "group search"),
+        ] {
+            p.mode = mode;
+            assert!(describe(&p, None).contains(&format!("Mode: {mode} ({name})")));
+        }
+        p.loading.begin([0.0; 3], 0.0, true, false, 0);
+        let text = describe(&p, None);
+        assert!(text.contains("Mode: loading"));
+        for stale in ["Character:", "World:", "Position:", "Mode: 42"] {
+            assert!(!text.contains(stale), "loading claimed {stale}");
+        }
+    }
+
+    #[test]
+    fn report_state_zone_respects_client_bounds_and_printed_position() {
+        let (row, col, zone) = (0..100)
+            .flat_map(|row| (0..100).map(move |col| (row, col)))
+            .find_map(|(row, col)| {
+                crate::zones::zone(0, row, col)
+                    .filter(|&z| z != 641)
+                    .map(|z| (row, col, z))
+            })
+            .unwrap();
+        let mut loc = crate::startmenu::Location {
+            world: 0,
+            pos: [
+                (col + 1) as f32 * 1000.0 + 100.0,
+                25.0,
+                (row + 1) as f32 * 1000.0 + 100.0,
+            ],
+            cols: 100,
+            rows: 100,
+            cell: 1000.0,
+            origin: [0.0; 3],
+            bounds: Some([col, col, row, row]),
+        };
+        let mut text = String::new();
+        write_location(&mut text, &loc, None);
+        assert!(text.contains(&format!("(id {zone}, cell {col}, {row})")));
+        assert!(text.contains(&format!(
+            "Position: {:.2}, {:.2}, {:.2}",
+            loc.pos[0], loc.pos[1], loc.pos[2]
+        )));
+        loc.bounds = Some([col + 1, col + 1, row, row]);
+        text.clear();
+        write_location(&mut text, &loc, None);
+        assert!(
+            text.contains("(id 641,"),
+            "outside gWorldInfo must be none even if the zone table has an entry"
+        );
+        loc.bounds = None;
+        text.clear();
+        write_location(&mut text, &loc, None);
+        assert!(text.contains("(id 641,"));
+    }
+
+    #[test]
     fn report_state_frame_hook_populates_saved_zip_with_redaction() {
         let dir = std::env::temp_dir().join(format!("eqoa-state-hook-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -279,6 +381,7 @@ mod tests {
         crate::report::secret("account_canary_snapshot", "password_canary_snapshot");
         crate::report::with_state_test(&dir, || {
             super::super::frame_library(&p, &esf::Library::new(), None);
+            crate::report::flush_state_for_test();
             report::save_report_to(
                 &crate::report::Kind::Problem,
                 "",

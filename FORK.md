@@ -58,7 +58,10 @@ fork-owned at fork_ext/report_core.rs; upstream logfile keeps logging through ho
 The small fork_ext/report_state.rs snapshot is a child of the Play adapter and is
 noted at most once a second through its existing frame_library hook. Upstream
 state describers remain deleted. Snapshot files are scrubbed before persistence
-and export; character names remain visible.
+and export; character names remain visible. A bounded background worker owns
+changed-only state writes and the snapshot's enabled-addon cache (refreshed at
+most once per 30 seconds, off the frame thread). The crash handler can also read
+the latest redacted in-memory snapshot.
 Historical HTTP transport exists only in tests against numeric loopback fixtures;
 the production report path only saves locally. The obsolete browser report policy
 was removed after upstream deleted browser reporting. Keep map/community

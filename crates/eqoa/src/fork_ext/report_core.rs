@@ -126,7 +126,7 @@ pub use native::{
 };
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) use native::with_state_test;
+pub(crate) use native::{flush_state_for_test, with_state_test};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
@@ -211,9 +211,9 @@ mod native {
         if TEST_STATE.with(|state| state.borrow().is_some()) {
             TEST_STATE.with(|state| {
                 let mut state = state.borrow_mut();
-                let (slot, dir) = state.as_mut().unwrap();
+                let (slot, dir, worker) = state.as_mut().unwrap();
                 if capture(slot, Duration::ZERO, describe) {
-                    let _ = std::fs::write(dir.join("state.txt"), &slot.text);
+                    worker.offer(dir.join("state.txt"), slot.text.clone());
                 }
             });
             return;
@@ -227,7 +227,10 @@ mod native {
             describe,
         ) {
             if let Some(dir) = dir() {
-                let _ = std::fs::write(dir.join(own("state", "txt")), &slot.text);
+                crate::fork_ext::report_background::offer(
+                    dir.join(own("state", "txt")),
+                    slot.text.clone(),
+                );
             }
         }
     }
@@ -238,20 +241,42 @@ mod native {
 
     #[cfg(test)]
     thread_local! {
-        static TEST_STATE: std::cell::RefCell<Option<(StateSlot, PathBuf)>> = const { std::cell::RefCell::new(None) };
+        static TEST_STATE: std::cell::RefCell<Option<(StateSlot, PathBuf, crate::fork_ext::report_background::Worker)>> = const { std::cell::RefCell::new(None) };
     }
 
     #[cfg(test)]
     pub(crate) fn with_state_test(dir: &Path, run: impl FnOnce()) {
-        struct Restore(Option<(StateSlot, PathBuf)>);
+        struct Restore(
+            Option<(
+                StateSlot,
+                PathBuf,
+                crate::fork_ext::report_background::Worker,
+            )>,
+        );
         impl Drop for Restore {
             fn drop(&mut self) {
                 TEST_STATE.with(|s| *s.borrow_mut() = self.0.take());
             }
         }
-        let _restore =
-            Restore(TEST_STATE.with(|s| s.replace(Some((StateSlot::default(), dir.into())))));
+        let _restore = Restore(TEST_STATE.with(|s| {
+            s.replace(Some((
+                StateSlot::default(),
+                dir.into(),
+                crate::fork_ext::report_background::Worker::spawn(
+                    || "test addons".into(),
+                    |path, text| std::fs::write(path, text),
+                )
+                .unwrap(),
+            )))
+        }));
         run();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn flush_state_for_test() {
+        TEST_STATE.with(|state| {
+            state.borrow().as_ref().unwrap().2.flush();
+        });
     }
 
     pub(crate) fn dir() -> Option<PathBuf> {
@@ -298,6 +323,7 @@ mod native {
         *lock(&RUN) = stamp(SystemTime::now());
         *lock(&DIR) = dir.clone();
         crate::fork_ext::report::warm_saved_login_cache();
+        crate::fork_ext::report_background::start();
         if let Some(d) = dir {
             take_last_run(&d, &d.join(own("eqoa", "log")));
             let old = waiting();
@@ -315,6 +341,7 @@ mod native {
 
     /// Fork cleanup called by logfile before it closes the log.
     pub fn clean_exit() {
+        crate::fork_ext::report_background::flush();
         if crate::gpulost::lost() && !crate::gpulost::settled() {
             crash(&format!(
                 "Graphics device lost during startup: {}",

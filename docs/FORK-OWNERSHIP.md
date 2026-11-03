@@ -75,6 +75,7 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/eqoa/src/options.rs` | 194 | 42 | Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
 | `crates/eqoa/src/play.rs` | 752 | 54 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. Trimmed to measured upstream diff in the b5e6310 review follow-up. Integration 2026-11-03 adds the R2 chat-history key tap and mode-33 ability-bar exception. |
 | `crates/eqoa/src/settings.rs` | 322 | 17 | Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31), and one-line in-memory report cache update on save_login. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
+| `crates/eqoa/src/startmenu.rs` | 1 | 1 | Expose existing bounded zone_name helper for fork reports; function body unchanged. |
 | `crates/eqoa/src/touch.rs` | 81 | 2 | Reconcile Enhanced long-press release suppression with upstream full-size touch slop; preserve the map behavior and new adjustable pad size. |
 | `crates/eqoa/src/ui.rs` | 10 | 6 | Map UI state and input integration plus one-line pub(crate) visibility on UiAssets.surfaces for fork-owned HUD tests. |
 | `crates/eqoa/src/viewer.rs` | 255 | 15 | Existing fork integration plus native report adapter registration and one-line input, draw, screenshot/surface hooks; preserve upstream resize and Android code. |
@@ -200,6 +201,12 @@ crash files and dialog; logfile alone owns native stderr and the panic hook.
 Owner-requested report snapshot (2026-11-03): `fork_ext/report_state.rs` is a
 child of the fork Play adapter. Its existing `frame_library` call now forwards
 the walker, with one throttled `crate::report::note_state` call in fork-owned
-code. No new shared hook line or budget increase; play remains +750/-53.
+code. No new shared hook line or budget increase; play remains +752/-54.
 The visibility adapter publishes an allocation-free bitmask of claimed HUD
 elements; names are formatted only when a snapshot is accepted.
+
+Integration snapshot review: fork_ext/report_background.rs owns the bounded I/O
+worker and 30-second addon cache. The existing frame_library line forwards the
+walker in place; play remains +752/-54 after the R2 integration. startmenu.rs
+exposes its existing zone_name helper (+1/-1) so reports share the exact bounds
+rule; its body is unchanged. map/mini.rs shares Dot::kind between map and report.

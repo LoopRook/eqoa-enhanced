@@ -186,6 +186,15 @@ pub struct Dot {
     pub kind: &'static str,
 }
 impl Dot {
+    /// Canonical nameplate class; m_p255 alone is no player test.
+    pub(crate) fn kind(e: &net::entity::Entity) -> &'static str {
+        match e.creature.as_ref().map(|c| c.p256) {
+            Some(2) => "Player",
+            Some(3) => "Pet",
+            _ => "NPC",
+        }
+    }
+
     /// A seen, targetable, named creature drawn in `color`. Its kind is
     /// `m_p256`'s (2 a player character, 3 of a player's side, else an
     /// NPC); `m_p255` is 0 for other players as for NPCs.
@@ -197,11 +206,7 @@ impl Dot {
             color,
             name: c.name.clone(),
             level: (c.level > 0).then_some(c.level),
-            kind: match c.p256 {
-                2 => "Player",
-                3 => "Pet",
-                _ => "NPC",
-            },
+            kind: Self::kind(e),
         })
     }
     fn card(&self, from: [f32; 2]) -> Vec<(String, [f32; 4])> {

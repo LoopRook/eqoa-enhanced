@@ -7,7 +7,9 @@ Upstream changes remain in UPDATE-NOTES.md.
 - Reports now include a short picture of what the game was doing: mode, target,
   nearby characters, location, movement flags and addon HUD claims. Crash reports
   keep the last snapshot. Account credentials and your user folder are redacted;
-  character names stay visible.
+  character names stay visible. Snapshot scans and file saves now run in the
+  background so reporting does not pause a frame; loading and location labels
+  match the client.
 
 - Adjust the on-screen controller with Extended ? Controller ? Touch Pad Size.
 - Class Mastery branches follow the live game's rules: ranks on a branch remain
