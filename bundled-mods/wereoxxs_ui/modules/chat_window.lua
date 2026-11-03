@@ -172,11 +172,14 @@ local function DrawMessageList(state, config, opts, filter, with_prefix, input_h
     end
     if history_active then
         -- R2/C held: the game reports the lines it scrolled this frame. One
-        -- step is one line; positive is back/up.
+        -- step is one (wrapped) line; positive is back/up. Older hosts or
+        -- another client's ImGui may lack these two calls, so skip the scroll
+        -- rather than error and lose the whole window.
         local steps = tonumber(history.steps) or 0
-        if steps ~= 0 then
-            local per_line = ImGui.GetTextLineHeightWithSpacing()
-            local y = ImGui.GetScrollY() - steps * per_line
+        if steps ~= 0
+            and type(ImGui.GetTextLineHeightWithSpacing) == "function"
+            and type(ImGui.SetScrollY) == "function" then
+            local y = ImGui.GetScrollY() - steps * ImGui.GetTextLineHeightWithSpacing()
             local max_y = ImGui.GetScrollMaxY()
             if y < 0 then y = 0 elseif y > max_y then y = max_y end
             ImGui.SetScrollY(y)

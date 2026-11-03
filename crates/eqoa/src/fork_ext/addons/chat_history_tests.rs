@@ -1,5 +1,7 @@
 //! `eqoa.ChatHistory()` and the bundled Wereoxxs chat scroller.
 use super::host::{Host, Snapshot};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 fn chat_history(total: i32, active: bool) -> crate::fork_ext::chat_history::ChatHistorySnapshot {
     crate::fork_ext::chat_history::ChatHistorySnapshot { active, total }
@@ -40,7 +42,143 @@ fn forge_chat_history_api_reports_active_and_step_deltas() {
     set(13, true);
     host.execute("local h=eqoa.ChatHistory(); assert(h.steps==1)")
         .unwrap();
+
+    // A host that missed frames gets a bounded jump, not the whole backlog.
+    // The next call sees none of the excess: it was dropped, not replayed.
+    set(100, true);
+    host.execute("local h=eqoa.ChatHistory(); assert(h.steps==8)")
+        .unwrap();
+    set(100, true);
+    host.execute("local h=eqoa.ChatHistory(); assert(h.steps==0)")
+        .unwrap();
     crate::fork_ext::chat_history::reset();
+}
+
+fn lua_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            lua_files(&path, out);
+        } else if path.extension().is_some_and(|e| e == "lua") {
+            out.push(path);
+        }
+    }
+}
+
+/// Lua source without comments or strings, so only real `ImGui.Name(` calls
+/// are seen.
+fn lua_code(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut chars = source.char_indices().peekable();
+    while let Some((_, c)) = chars.next() {
+        if c == '"' || c == '\'' {
+            out.push(c);
+            while let Some((_, d)) = chars.next() {
+                out.push(d);
+                if d == '\\' {
+                    if let Some((_, escaped)) = chars.next() {
+                        out.push(escaped);
+                    }
+                } else if d == c {
+                    break;
+                }
+            }
+            continue;
+        }
+        if c == '-' && matches!(chars.peek(), Some((_, '-'))) {
+            chars.next();
+            if matches!(chars.peek(), Some((_, '['))) {
+                chars.next();
+                let mut level = 0;
+                while matches!(chars.peek(), Some((_, '='))) {
+                    level += 1;
+                    chars.next();
+                }
+                if matches!(chars.peek(), Some((_, '['))) {
+                    chars.next();
+                    while let Some((_, d)) = chars.next() {
+                        if d == ']' {
+                            let mut close = 0;
+                            while matches!(chars.peek(), Some((_, '='))) {
+                                close += 1;
+                                chars.next();
+                            }
+                            if close == level && matches!(chars.peek(), Some((_, ']'))) {
+                                chars.next();
+                                break;
+                            }
+                        }
+                    }
+                    out.push('\n');
+                    continue;
+                }
+            }
+            while let Some((_, d)) = chars.next() {
+                if d == '\n' {
+                    out.push('\n');
+                    break;
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn imgui_calls(source: &str) -> Vec<String> {
+    let code = lua_code(source);
+    let mut names = Vec::new();
+    let mut at = 0;
+    while let Some(pos) = code[at..].find("ImGui.") {
+        let start = at + pos + "ImGui.".len();
+        let rest = &code[start..];
+        let len = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .count();
+        if len > 0 && rest[len..].trim_start().starts_with('(') {
+            names.push(rest[..len].to_string());
+        }
+        at = start;
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// The real bridge table, not a hand-made facade, must expose every ImGui
+/// function the bundled Lua calls. A missing one disables the addon at runtime.
+#[test]
+fn bundled_lua_calls_only_imgui_symbols_the_real_bridge_exposes() {
+    let host = Host::new().unwrap();
+    let _bridge = super::bridge::Bridge::install(&host).unwrap();
+    let imgui: mlua::Table = host.lua.globals().get("ImGui").unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods");
+    let mut files = Vec::new();
+    lua_files(&root, &mut files);
+    files.sort();
+    assert!(!files.is_empty(), "bundled-mods must contain Lua files");
+
+    let mut missing = Vec::new();
+    for file in &files {
+        let text = fs::read_to_string(file).unwrap();
+        for name in imgui_calls(&text) {
+            if imgui
+                .get::<Option<mlua::Value>>(name.as_str())
+                .unwrap()
+                .is_none()
+            {
+                missing.push(format!("{}: ImGui.{}", file.display(), name));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "bundled Lua calls ImGui symbols the bridge lacks:\n{}",
+        missing.join("\n")
+    );
 }
 
 #[derive(Default)]
@@ -270,6 +408,23 @@ fn forge_chat_history_wereoxxs_scrolls_and_snaps_to_bottom() {
     set_history(true, 1000);
     draw();
     assert_eq!(scroll(), 0.0, "clamped at the oldest line");
+
+    // Negative control: an older bridge without these calls skips the scroll
+    // instead of erroring (an error would disable the whole addon).
+    lua.load(
+        "ImGui.SetScrollY = nil; ImGui.GetTextLineHeightWithSpacing = nil; scroll_y = 100",
+    )
+    .exec()
+    .unwrap();
+    set_history(true, 3);
+    draw();
+    assert_eq!(scroll(), 100.0, "without the bridge calls the log stays put");
+    lua.load(
+        "ImGui.SetScrollY = function(y) scroll_y = y end; \
+         ImGui.GetTextLineHeightWithSpacing = function() return 20 end",
+    )
+    .exec()
+    .unwrap();
 
     // Release: jump to the newest line, once.
     set_history(false, 0);

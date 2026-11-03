@@ -72,7 +72,7 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/eqoa/src/lod.rs` | 9 | 8 | Restored map terrain observation. |
 | `crates/eqoa/src/main.rs` | 30 | 0 | Restored module registration, fork_ext boundary, and report policy module. |
 | `crates/eqoa/src/options.rs` | 196 | 43 | Existing restored option entries plus one adapter reference per fork option hook. |
-| `crates/eqoa/src/play.rs` | 763 | 53 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, and addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus; implementation in fork_ext. |
+| `crates/eqoa/src/play.rs` | 764 | 54 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, and the chat-history key tap plus mode-33 ability-bar exception; implementation in fork_ext. |
 | `crates/eqoa/src/report.rs` | 64 | 23 | Local problem and crash report saving to Desktop; wrapped dialog status, label and fine notice hooks preserving upstream match arms; one-line hooks in push_line(), start(), send(), and secret() for in-memory cache warming/refresh, and minimal crate-level visibility. |
 | `crates/eqoa/src/settings.rs` | 336 | 22 | Restored map/quest settings plus one adapter reference per settings hook, and one-line in-memory report cache update on save_login. |
 | `crates/eqoa/src/touch.rs` | 79 | 2 | Restored map and tracker touch input. |
@@ -111,7 +111,7 @@ still verifies execution and placement. Do not add duplicate hook names in comme
 | Shared file | Checked seams |
 | --- | --- |
 | `crates/eqoa/src/main.rs` | `mod fork_ext;`, `mod report_policy;` |
-| `crates/eqoa/src/play.rs` | `self.fork_combat_event(...)` |
+| `crates/eqoa/src/play.rs` | `self.fork_combat_event(...)`, `fork_hud::chat_history_key(...)`, `fork_hud::ability_bar_shown(...)` |
 | `crates/eqoa/src/hud.rs` | `fork_hud::draw(...)` |
 | `crates/eqoa/src/options.rs` | `fork_options::{CATEGORY, ITEMS, change, activate, value_text}`, once each |
 | `crates/eqoa/src/settings.rs` | `fork_settings::{write, parse, description}`, once each |

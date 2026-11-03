@@ -20,6 +20,10 @@ pub struct ChatHistorySnapshot {
     pub total: i32,
 }
 
+/// Most lines one API call reports. A host that missed frames gets a bounded
+/// jump instead of the whole backlog.
+pub(crate) const MAX_STEPS_PER_CALL: i32 = 8;
+
 thread_local! {
     /// The scroll key the stock window is repeating (19, 20, 138 or 139).
     static HELD: Cell<i32> = const { Cell::new(0) };
@@ -77,7 +81,13 @@ pub(crate) fn total() -> i32 {
 }
 
 /// Snapshot for this frame. `active` is mode 33 with an addon-owned chat.
+/// Leaving that mode (dialog, zoning, death, or the claim) may never send a
+/// key-up, so the held repeat is cleared here.
 pub(crate) fn snapshot(active: bool) -> ChatHistorySnapshot {
+    if !active {
+        HELD.with(|h| h.set(0));
+        REPEAT.with(|r| r.set(0.0));
+    }
     ChatHistorySnapshot {
         active,
         total: total(),
@@ -120,6 +130,25 @@ mod tests {
         key(146, true);
         tick(1.0);
         assert_eq!(total(), 2, "a non-scroll key neither steps nor repeats");
+        reset();
+    }
+
+    /// Leaving mode 33 without a key-up (a dialog, zoning, death) clears the
+    /// held repeat. The control holds the same key while active and repeats.
+    #[test]
+    fn chat_history_stops_repeating_when_the_mode_leaves() {
+        reset();
+        key(19, true);
+        assert_eq!(total(), 1, "up steps at once");
+        snapshot(false);
+        tick(1.0);
+        assert_eq!(total(), 1, "no repeat after the mode leaves 33");
+
+        key(19, true);
+        assert_eq!(total(), 2, "control: a held key steps at once while active");
+        tick(1.0);
+        assert_eq!(total(), 3, "control: and keeps repeating while active");
+        key(19, false);
         reset();
     }
 }

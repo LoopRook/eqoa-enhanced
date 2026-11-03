@@ -22,7 +22,10 @@ pub fn install(host: &Host) -> mlua::Result<()> {
             let steps = if snap.active {
                 let steps = snap.total.saturating_sub(last.get());
                 last.set(snap.total);
-                steps
+                steps.clamp(
+                    -crate::fork_ext::chat_history::MAX_STEPS_PER_CALL,
+                    crate::fork_ext::chat_history::MAX_STEPS_PER_CALL,
+                )
             } else {
                 // Stock chat (or no chat mode): keep the baseline current and
                 // report nothing, so a later claim starts from here.

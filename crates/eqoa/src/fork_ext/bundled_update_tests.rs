@@ -109,11 +109,16 @@ fn bundled_update_replaces_unmodified_previous_wereoxxs_chat_window() {
     let i = Install::new();
     let path = "wereoxxs_ui/modules/chat_window.lua";
     let embedded = EMBEDDED_FILES.iter().find(|f| f.path == path).unwrap();
-    assert!(
-        shipped_hashes(embedded)
-            .contains("d87eab664c1114f20f6dfbd49df3b0aaf14d21efc323a6dc444a52cc832095a8"),
-        "the previous chat_window.lua must stay a known shipped hash"
-    );
+    let shipped = shipped_hashes(embedded);
+    for hash in [
+        "d87eab664c1114f20f6dfbd49df3b0aaf14d21efc323a6dc444a52cc832095a8",
+        "a0943e355d787109b44d1f19dccc0beeee61e6731b126f293ccc4bf234f127dc",
+    ] {
+        assert!(
+            shipped.contains(hash),
+            "the previous chat_window.lua must stay a known shipped hash: {hash}"
+        );
+    }
 
     let old = b"-- the scroller as it shipped before the R2 fix\n";
     fs::write(i.mods.join(path), old).unwrap();
