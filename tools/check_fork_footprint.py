@@ -14,7 +14,7 @@ import tomllib
 
 
 def git(root, *args):
-    result = subprocess.run(["git", "-C", str(root), *args], capture_output=True)
+    result = subprocess.run(["git", "-c", "safe.directory=*", "-C", str(root), *args], capture_output=True)
     if result.returncode:
         raise ValueError(result.stderr.decode("utf-8", errors="replace").strip())
     return result.stdout

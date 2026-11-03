@@ -1,38 +1,12 @@
-//! Problem reports and crash reports: what a player sends when something goes
-//! wrong, to the report server (reportd on eqoaclassic, `/report` and `/crash`;
-//! its public board, eqoaclassic.com/eqoa/reports/board, shows a report's note
-//! and picture and never the rest), as eqoa-rs sent them and the Go client
-//! before it (Dab's Mod's F3 and crash reports). Nothing is sent unless the
-//! player says so, and the account name and the password the game sent
-//! Station are taken out of all of it (`secret`), as is the home directory's
-//! path. Enhanced disables the reporting UI and transport by default through
-//! `report_policy`; the log and local crash files below are still kept.
-//!
-//! In a page they are web/report.js's (its dialog, the canvas's picture, the
-//! page's own log and what it catches); the client hands it its state, the
-//! frame drawn, the secrets and the HUD's button through `crate::web`.
-//!
-//! Natively they are this module's (`native`):
-//! - the log: what the program writes to stderr goes through a pipe (`start`)
-//!   to the terminal it had, to `eqoa.log` in the config directory (the run
-//!   before kept as `eqoa.prev.log`; a second window open beside the first,
-//!   multiboxing, keeps `eqoa-2.log`, and so on) and to the last lines a
-//!   report carries;
-//! - F3, or the HUD's Report a bug, takes a picture of the next frame and
-//!   opens a dialog over the game, the pregame's screens too (`Dialog`): what
-//!   happened, a name to be credited by on the board, Send or Close;
-//! - a panic writes a crash report into `crashes/` at once (its message and
-//!   backtrace, the client's state, the log), and a run that ended without
-//!   closing (killed, or stopped by a fault no panic caught) is found by the
-//!   next start in the log it left; the next start offers what is waiting
-//!   (its first window only), every report in one offer, saying how many:
-//!   Send (each its own, newest first), Not now or Delete.
+//! Fork-owned local problem and crash reports retained after upstream removed reports.
+//! F3 and the HUD button save a ZIP to Desktop through fork_ext::report.
+//! logfile owns stderr and the log file; its hooks feed the ring, initialize
+//! crash detection, capture panics and flush the journal. Production has no
+//! report upload path. Historical transport encoders are fixture-test-only.
 
 /// The account name and the password the game sent Station (its API's
 /// logins), taken out of every report.
 pub fn secret(account: &str, password: &str) {
-    #[cfg(target_arch = "wasm32")]
-    crate::web::secret(account, password);
     #[cfg(not(target_arch = "wasm32"))]
     native::secret(account, password);
     #[cfg(not(target_arch = "wasm32"))]
@@ -42,24 +16,19 @@ pub fn secret(account: &str, password: &str) {
 /// The client's state for a report, noted once a second at most: `state`
 /// runs only then.
 pub fn note_state(state: impl FnOnce() -> String) {
-    #[cfg(target_arch = "wasm32")]
-    crate::web::note_state(state);
     #[cfg(not(target_arch = "wasm32"))]
     native::note_state(state);
 }
 
 /// A frame is drawn: a page takes its picture now if it asked (natively the
 /// frame's texture is read before it is presented, `native::take_shot`).
-pub fn frame_drawn() {
-    #[cfg(target_arch = "wasm32")]
-    crate::web::frame_drawn();
-}
+pub fn frame_drawn() {}
 
 /// F3 or the HUD's Report a bug: the report's dialog.
 pub fn open() {
-    if !crate::report_policy::enabled() { return; }
-    #[cfg(target_arch = "wasm32")]
-    crate::web::open_report();
+    if !crate::report_policy::enabled() {
+        return;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     native::open();
 }
@@ -93,11 +62,21 @@ pub fn base64(b: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut o = String::with_capacity(b.len().div_ceil(3) * 4);
     for c in b.chunks(3) {
-        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        let n = (c[0] as u32) << 16
+            | (*c.get(1).unwrap_or(&0) as u32) << 8
+            | *c.get(2).unwrap_or(&0) as u32;
         o.push(T[(n >> 18) as usize & 63] as char);
         o.push(T[(n >> 12) as usize & 63] as char);
-        o.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
-        o.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
+        o.push(if c.len() > 1 {
+            T[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        o.push(if c.len() > 2 {
+            T[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     o
 }
@@ -120,7 +99,11 @@ pub fn scrub(text: &str, accounts: &[String], passwords: &[String]) -> String {
             let after = rest[i + a.len()..].chars().next();
             let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
             out.push_str(&rest[..i]);
-            out.push_str(if word(before) || word(after) { a } else { "<account>" });
+            out.push_str(if word(before) || word(after) {
+                a
+            } else {
+                "<account>"
+            });
             rest = &rest[i + a.len()..];
         }
         out.push_str(rest);
@@ -141,12 +124,15 @@ pub fn fit(text: &str, max: usize) -> String {
     format!("{}\n(cut to fit the report server)\n", &text[..end])
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub use native::{Key, caught, clean_exit, click, crash, draw, is_open, is_report_key, key, key_of, restore_stderr, set_gpu, set_shot, start, wants_shot};
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) use native::{Button, Kind, Sent, Status, clean_noted, dir, has_noted_accounts, tail};
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) use native::ended_without_closing_for_test;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use native::{Button, Kind, Sent, Status, clean_noted, dir, has_noted_accounts, tail};
+#[cfg(not(target_arch = "wasm32"))]
+pub use native::{
+    Key, caught, clean_exit, click, crash, draw, is_open, is_report_key, key, key_of, log_line,
+    restore_stderr, run_started, set_gpu, set_shot, start, wants_shot,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
@@ -202,7 +188,13 @@ mod native {
         drained: Option<mpsc::Receiver<()>>,
     }
 
-    static LOG: Mutex<Log> = Mutex::new(Log { file: None, bytes: 0, ring: VecDeque::new(), orig: None, drained: None });
+    static LOG: Mutex<Log> = Mutex::new(Log {
+        file: None,
+        bytes: 0,
+        ring: VecDeque::new(),
+        orig: None,
+        drained: None,
+    });
     /// Where stderr went before the pipe, to write to (a descriptor, a
     /// handle), -1 without one: what must reach it before the program may end.
     static TERMINAL: AtomicIsize = AtomicIsize::new(-1);
@@ -255,79 +247,31 @@ mod native {
         }
     }
 
+    pub fn run_started(run: &str) {
+        *lock(&RUN) = run.to_string();
+    }
+
+    pub fn log_line(line: &str) {
+        push_line(&mut lock(&LOG), line);
+    }
+
     /// The program's log for the game as players start it (main's `boot`):
     /// stderr through a pipe to where it went, `eqoa.log` and the ring; the
     /// run before checked for a crash it left; the panic hook.
     pub fn start() {
         let dir = crate::settings::config_dir();
-        // a window open beside others (multiboxing) has files of its own:
-        // its place's, taken now (`multibox`)
         let window = crate::multibox::place() + 1;
         WINDOW.store(window, Ordering::Relaxed);
-        let stamp = stamp(SystemTime::now());
-        let run = if window == 1 { stamp } else { format!("{stamp}-w{window}") };
-        *lock(&RUN) = run.clone();
+        *lock(&RUN) = stamp(SystemTime::now());
         *lock(&DIR) = dir.clone();
-        if let Some(d) = &dir {
-            let _ = std::fs::create_dir_all(d);
-            let (log, prev) = (d.join(own("eqoa", "log")), d.join(own("eqoa", "prev.log")));
-            if log.exists() {
-                let _ = std::fs::rename(&log, &prev);
-            }
-            take_last_run(d, &prev);
-            // the newest kept (one is offered a start)
+        crate::fork_ext::report::warm_saved_login_cache();
+        if let Some(d) = dir {
+            take_last_run(&d, &d.join(own("eqoa", "log")));
             let old = waiting();
             for f in &old[..old.len().saturating_sub(CRASHES_KEPT)] {
                 let _ = std::fs::remove_file(f);
             }
-            if let Ok(f) = File::create(&log) {
-                lock(&LOG).file = Some(f);
-            }
         }
-        crate::fork_ext::report::warm_saved_login_cache();
-        let mut l = lock(&LOG);
-        let head = format!("[eqoa] run {run}, {} ({}), {} {}, window {window}", version(), channel(), std::env::consts::OS, std::env::consts::ARCH);
-        push_line(&mut l, &head);
-        push_line(&mut l, &crate::fork_ext::report::log_header());
-        drop(l);
-        tee();
-        // the panic's message written here, not by the hook before (into the
-        // pipe): the pipe's reader is a thread the program does not wait for
-        // as a panic ends it, and the terminal would miss the message
-        std::panic::set_hook(Box::new(move |info| {
-            // one `caught` steps over: no crash, nothing on the terminal
-            if CAUGHT.with(|c| c.get()) > 0 {
-                return;
-            }
-            let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
-            // after the graphics device was lost (an upload in the frame that
-            // lost it): the game starts again in this one's place, its log
-            // closed so the next start offers no crash (`gpulost`)
-            if crate::gpulost::lost() && crate::gpulost::settled() {
-                if let Ok(mut l) = LOG.try_lock() {
-                    push_line(&mut l, &format!("graphics: thread '{thread}' {info}"));
-                    push_line(&mut l, "graphics: the device was lost: the game starts again");
-                    push_line(&mut l, CLOSED);
-                    if let Some(f) = l.file.as_mut() {
-                        let _ = f.flush();
-                    }
-                    if let Some(orig) = l.orig.take() {
-                        restore(orig);
-                    }
-                }
-                crate::gpulost::relaunch();
-            }
-            let bt = std::backtrace::Backtrace::force_capture();
-            write_crash(&format!("A panic on the {thread} thread: {info}\n\nbacktrace:\n{bt}"), None, SystemTime::now());
-            let text = format!("thread '{thread}' {info}");
-            if let Ok(mut l) = LOG.try_lock() {
-                for line in text.lines() {
-                    push_line(&mut l, line);
-                }
-            }
-            let shown = std::env::var("RUST_BACKTRACE").is_ok_and(|v| v != "0");
-            to_terminal(&if shown { format!("{text}\nstack backtrace:\n{bt}\n") } else { format!("{text}\n") });
-        }));
     }
 
     thread_local! {
@@ -343,7 +287,12 @@ mod native {
         CAUGHT.with(|c| c.set(c.get() + 1));
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
         CAUGHT.with(|c| c.set(c.get() - 1));
-        r.map_err(|e| e.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| e.downcast_ref::<String>().cloned()).unwrap_or_else(|| "a panic".to_string()))
+        r.map_err(|e| {
+            e.downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| e.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "a panic".to_string())
+        })
     }
 
     /// `text` to where stderr went before the pipe (stderr itself without
@@ -378,7 +327,9 @@ mod native {
     /// game mode, "seems to hang from steam") once filled stopped the reader
     /// in its write, then every `eprintln!`, the game's frames with them.
     fn tee() {
-        let Ok((reader, writer)) = std::io::pipe() else { return };
+        let Ok((reader, writer)) = std::io::pipe() else {
+            return;
+        };
         #[cfg(unix)]
         let to = {
             use std::os::fd::{AsRawFd, FromRawFd};
@@ -400,7 +351,9 @@ mod native {
         #[cfg(windows)]
         let to = {
             use std::os::windows::io::{FromRawHandle, IntoRawHandle};
-            use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, SetStdHandle};
+            use windows_sys::Win32::System::Console::{
+                GetStdHandle, STD_ERROR_HANDLE, SetStdHandle,
+            };
             // SAFETY: the process's own standard handles
             let orig = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
             let w = writer.into_raw_handle();
@@ -424,15 +377,19 @@ mod native {
         let (done, drained) = mpsc::channel();
         lock(&LOG).drained = Some(drained);
         let terminal = to.and_then(|t| terminal_thread(Kept(std::mem::ManuallyDrop::new(t))));
-        let _ = std::thread::Builder::new().name("log".into()).spawn(move || {
-            let (queue, written) = terminal.unzip();
-            read_lines(std::io::BufReader::new(reader), queue, |text| push_line(&mut lock(&LOG), text));
-            // what the terminal's thread still holds, a moment at most
-            if let Some(w) = written {
-                let _ = w.recv_timeout(Duration::from_millis(300));
-            }
-            let _ = done.send(());
-        });
+        let _ = std::thread::Builder::new()
+            .name("log".into())
+            .spawn(move || {
+                let (queue, written) = terminal.unzip();
+                read_lines(std::io::BufReader::new(reader), queue, |text| {
+                    push_line(&mut lock(&LOG), text)
+                });
+                // what the terminal's thread still holds, a moment at most
+                if let Some(w) = written {
+                    let _ = w.recv_timeout(Duration::from_millis(300));
+                }
+                let _ = done.send(());
+            });
     }
 
     /// Where stderr went, written to and never closed (`restore_stderr` puts
@@ -451,7 +408,9 @@ mod native {
     /// A thread writing what it is handed to `to` (where stderr went), and
     /// the queue to hand it lines by; the second channel says it is done
     /// (the queue let go and emptied, or a write failed).
-    pub(super) fn terminal_thread<W: Write + Send + 'static>(mut to: W) -> Option<(mpsc::SyncSender<Vec<u8>>, mpsc::Receiver<()>)> {
+    pub(super) fn terminal_thread<W: Write + Send + 'static>(
+        mut to: W,
+    ) -> Option<(mpsc::SyncSender<Vec<u8>>, mpsc::Receiver<()>)> {
         let (queue, lines) = mpsc::sync_channel::<Vec<u8>>(TERMINAL_QUEUE);
         let (written, done) = mpsc::channel();
         std::thread::Builder::new()
@@ -473,7 +432,11 @@ mod native {
     /// for: while its queue is full a line goes to `sink` only, and
     /// `TERMINAL_BEHIND` says so (the panic hook's message too). Until the
     /// pipe's end closes.
-    pub(super) fn read_lines(mut r: impl BufRead, mut terminal: Option<mpsc::SyncSender<Vec<u8>>>, mut sink: impl FnMut(&str)) {
+    pub(super) fn read_lines(
+        mut r: impl BufRead,
+        mut terminal: Option<mpsc::SyncSender<Vec<u8>>>,
+        mut sink: impl FnMut(&str),
+    ) {
         let mut line = Vec::new();
         loop {
             line.clear();
@@ -484,7 +447,9 @@ mod native {
             if let Some(t) = terminal.as_ref() {
                 match t.try_send(line.clone()) {
                     Ok(()) => TERMINAL_BEHIND.store(false, Ordering::Relaxed),
-                    Err(mpsc::TrySendError::Full(_)) => TERMINAL_BEHIND.store(true, Ordering::Relaxed),
+                    Err(mpsc::TrySendError::Full(_)) => {
+                        TERMINAL_BEHIND.store(true, Ordering::Relaxed)
+                    }
                     Err(mpsc::TrySendError::Disconnected(_)) => terminal = None,
                 }
             }
@@ -497,7 +462,9 @@ mod native {
     /// one's place inherits it, and would find a pipe nothing reads), and the
     /// pipe's end closed: its reader reads what is left and stops.
     pub fn restore_stderr() {
-        let Some(orig) = lock(&LOG).orig.take() else { return };
+        let Some(orig) = lock(&LOG).orig.take() else {
+            return;
+        };
         restore(orig);
     }
 
@@ -519,7 +486,10 @@ mod native {
         // SAFETY: the old stderr handle `tee` kept, and the pipe's end it
         // stood in for, this module's alone
         unsafe {
-            windows_sys::Win32::System::Console::SetStdHandle(windows_sys::Win32::System::Console::STD_ERROR_HANDLE, orig.0 as _);
+            windows_sys::Win32::System::Console::SetStdHandle(
+                windows_sys::Win32::System::Console::STD_ERROR_HANDLE,
+                orig.0 as _,
+            );
             windows_sys::Win32::Foundation::CloseHandle(orig.1 as _);
         }
         #[cfg(not(any(unix, windows)))]
@@ -535,22 +505,22 @@ mod native {
     /// The run closes: stderr to where it went, what the pipe holds read
     /// into the log (half a second at most), and the log's last line says so.
     pub fn clean_exit() {
-        restore_stderr();
-        let drained = lock(&LOG).drained.take();
-        if let Some(d) = drained {
-            let _ = d.recv_timeout(Duration::from_millis(500));
-        }
-        let mut l = lock(&LOG);
-        push_line(&mut l, CLOSED);
-        if let Some(f) = l.file.as_mut() {
-            let _ = f.flush();
+        if crate::gpulost::lost() && !crate::gpulost::settled() {
+            crash(&format!(
+                "Graphics device lost during startup: {}",
+                crate::gpulost::why()
+            ));
         }
         crate::map::journal::clean_exit();
     }
 
     pub(crate) fn tail(n: usize) -> Vec<String> {
         let l = lock(&LOG);
-        l.ring.iter().skip(l.ring.len().saturating_sub(n)).cloned().collect()
+        l.ring
+            .iter()
+            .skip(l.ring.len().saturating_sub(n))
+            .cloned()
+            .collect()
     }
 
     // ---- the state, the secrets ---------------------------------------------
@@ -563,7 +533,13 @@ mod native {
         passwords: Vec<String>,
     }
 
-    static NOTED: Mutex<Noted> = Mutex::new(Noted { state: String::new(), at: None, saved: None, accounts: Vec::new(), passwords: Vec::new() });
+    static NOTED: Mutex<Noted> = Mutex::new(Noted {
+        state: String::new(),
+        at: None,
+        saved: None,
+        accounts: Vec::new(),
+        passwords: Vec::new(),
+    });
 
     pub(crate) fn has_noted_accounts() -> bool {
         NOTED.try_lock().map_or(false, |n| !n.accounts.is_empty())
@@ -588,7 +564,8 @@ mod native {
         n.at = Some(Instant::now());
         // kept on disk now and then, scrubbed: what a run that does not
         // close leaves the next start
-        if n.saved.is_none_or(|t| t.elapsed() >= Duration::from_secs(10))
+        if n.saved
+            .is_none_or(|t| t.elapsed() >= Duration::from_secs(10))
             && let Some(d) = dir()
         {
             n.saved = Some(Instant::now());
@@ -616,14 +593,24 @@ mod native {
     pub(crate) fn clean_noted(text: &str) -> String {
         match NOTED.try_lock() {
             Ok(n) => clean(text, &n),
-            Err(_) => clean(text, &Noted { state: String::new(), at: None, saved: None, accounts: Vec::new(), passwords: Vec::new() }),
+            Err(_) => clean(
+                text,
+                &Noted {
+                    state: String::new(),
+                    at: None,
+                    saved: None,
+                    accounts: Vec::new(),
+                    passwords: Vec::new(),
+                },
+            ),
         }
     }
 
-
-
     fn version() -> String {
-        crate::update::COMMIT.map_or_else(|| "local".to_string(), |c| format!("dev-{}", &c[..c.len().min(7)]))
+        crate::update::COMMIT.map_or_else(
+            || "local".to_string(),
+            |c| format!("dev-{}", &c[..c.len().min(7)]),
+        )
     }
 
     fn channel() -> &'static str {
@@ -638,7 +625,18 @@ mod native {
             o => o,
         };
         let gpu = lock(&GPU).clone();
-        format!("{os} {}{}", std::env::consts::ARCH, if gpu.is_empty() { String::new() } else { format!(" {gpu}") }).chars().take(64).collect()
+        format!(
+            "{os} {}{}",
+            std::env::consts::ARCH,
+            if gpu.is_empty() {
+                String::new()
+            } else {
+                format!(" {gpu}")
+            }
+        )
+        .chars()
+        .take(64)
+        .collect()
     }
 
     /// The graphics adapter, for a report's platform.
@@ -664,7 +662,12 @@ mod native {
         let d = doy - (153 * mp + 2) / 5 + 1;
         let m = if mp < 10 { mp + 3 } else { mp - 9 };
         let y = yoe + era * 400 + (m <= 2) as i64;
-        format!("{y:04}{m:02}{d:02}-{:02}{:02}{:02}", secs / 3600, secs / 60 % 60, secs % 60)
+        format!(
+            "{y:04}{m:02}{d:02}-{:02}{:02}{:02}",
+            secs / 3600,
+            secs / 60 % 60,
+            secs % 60
+        )
     }
 
     fn crashes() -> Option<PathBuf> {
@@ -684,14 +687,30 @@ mod native {
     /// `write_crash` into the crash directory `d`; `of` the version that
     /// stopped as its log's first line names it ("dev-79f115e (dev)"), this
     /// program's when it is this run's.
-    fn write_crash_in(d: &Path, detail: &str, log: Option<(&str, &[String], &str)>, at: SystemTime, of: Option<&str>) {
+    fn write_crash_in(
+        d: &Path,
+        detail: &str,
+        log: Option<(&str, &[String], &str)>,
+        at: SystemTime,
+        of: Option<&str>,
+    ) {
         let _ = std::fs::create_dir_all(d);
         let run = RUN.try_lock().map(|r| r.clone()).unwrap_or_default();
         let (name, state, lines) = match log {
-            Some((run, lines, state)) => (format!("crash-{run}.txt"), state.to_string(), lines.to_vec()),
+            Some((run, lines, state)) => (
+                format!("crash-{run}.txt"),
+                state.to_string(),
+                lines.to_vec(),
+            ),
             None => {
-                let state = NOTED.try_lock().map(|n| n.state.clone()).unwrap_or_default();
-                let lines = LOG.try_lock().map(|l| l.ring.iter().cloned().collect()).unwrap_or_default();
+                let state = NOTED
+                    .try_lock()
+                    .map(|n| n.state.clone())
+                    .unwrap_or_default();
+                let lines = LOG
+                    .try_lock()
+                    .map(|l| l.ring.iter().cloned().collect())
+                    .unwrap_or_default();
                 (format!("crash-{run}.txt"), state, lines)
             }
         };
@@ -701,7 +720,11 @@ mod native {
             stamp(at),
             platform(),
             detail.trim_end(),
-            if state.trim().is_empty() { "-" } else { state.trim_end() },
+            if state.trim().is_empty() {
+                "-"
+            } else {
+                state.trim_end()
+            },
             lines.len(),
             lines.join("\n")
         );
@@ -728,23 +751,45 @@ mod native {
     /// its log) and wrote no crash report of its own: one written for it,
     /// from the log and the state it left.
     fn ended_without_closing(dir: &Path, prev: &Path) {
-        let Ok(text) = std::fs::read_to_string(prev) else { return };
+        let Ok(text) = std::fs::read_to_string(prev) else {
+            return;
+        };
         let lines: Vec<&str> = text.lines().collect();
         let Some(first) = lines.first() else { return };
         if lines.contains(&CLOSED) {
             return;
         }
-        let Some(run) = first.strip_prefix("[eqoa] run ").and_then(|r| r.split(',').next()) else { return };
+        let Some(run) = first
+            .strip_prefix("[eqoa] run ")
+            .and_then(|r| r.split(',').next())
+        else {
+            return;
+        };
         // "[eqoa] run <run>, <version> (<channel>), <os> <arch>, window <n>"
         let of = first.split(", ").nth(1).filter(|v| v.ends_with(')'));
-        if dir.join("crashes").join(format!("crash-{run}.txt")).exists() {
+        if dir
+            .join("crashes")
+            .join(format!("crash-{run}.txt"))
+            .exists()
+        {
             return;
         }
         let state = std::fs::read_to_string(dir.join(own("state", "txt"))).unwrap_or_default();
-        let tail: Vec<String> = lines[lines.len().saturating_sub(LOG_LINES)..].iter().map(|l| l.chars().take(LOG_LINE_MAX).collect()).collect();
+        let tail: Vec<String> = lines[lines.len().saturating_sub(LOG_LINES)..]
+            .iter()
+            .map(|l| l.chars().take(LOG_LINE_MAX).collect())
+            .collect();
         // it stopped about when its log was last written, not now
-        let at = std::fs::metadata(prev).and_then(|m| m.modified()).unwrap_or_else(|_| SystemTime::now());
-        write_crash_in(&dir.join("crashes"), &unclosed_detail(run, &lines), Some((run, &tail, &state)), at, of);
+        let at = std::fs::metadata(prev)
+            .and_then(|m| m.modified())
+            .unwrap_or_else(|_| SystemTime::now());
+        write_crash_in(
+            &dir.join("crashes"),
+            &unclosed_detail(run, &lines),
+            Some((run, &tail, &state)),
+            at,
+            of,
+        );
     }
 
     /// What a crash report says of a run that did not close: out of memory
@@ -752,11 +797,20 @@ mod native {
     /// crash 20261026-220031, eleven hours in: "memory allocation of 229376
     /// bytes failed"), the memory its state last noted then the one to read.
     pub(super) fn unclosed_detail(run: &str, lines: &[&str]) -> String {
-        let last = lines.iter().rev().map(|l| l.trim()).find(|l| !l.is_empty()).unwrap_or("");
+        let last = lines
+            .iter()
+            .rev()
+            .map(|l| l.trim())
+            .find(|l| !l.is_empty())
+            .unwrap_or("");
         if last.starts_with("memory allocation of ") && last.ends_with(" failed") {
-            return format!("The run of {run} ran out of memory: \"{last}\", Rust's abort when the system refuses an allocation (the machine's memory and page file full, or the program grown past them: the memory below, and over the run, tell which).");
+            return format!(
+                "The run of {run} ran out of memory: \"{last}\", Rust's abort when the system refuses an allocation (the machine's memory and page file full, or the program grown past them: the memory below, and over the run, tell which)."
+            );
         }
-        format!("The run of {run} ended without closing: killed, or stopped by a fault no panic caught (its log's last line is the last it wrote).")
+        format!(
+            "The run of {run} ended without closing: killed, or stopped by a fault no panic caught (its log's last line is the last it wrote)."
+        )
     }
 
     /// The crash reports waiting, oldest first.
@@ -767,7 +821,13 @@ mod native {
     /// The crash reports in the directory `d`, oldest first (their names are
     /// their runs' start times).
     pub(super) fn waiting_in(d: &Path) -> Vec<PathBuf> {
-        let mut v: Vec<PathBuf> = std::fs::read_dir(d).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "txt")).collect();
+        let mut v: Vec<PathBuf> = std::fs::read_dir(d)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "txt"))
+            .collect();
         v.sort();
         v
     }
@@ -775,11 +835,17 @@ mod native {
     // ---- sending ------------------------------------------------------------
 
     /// A POST of `body` (JSON) to the server's `route`: the report's id.
+    #[cfg(test)]
     pub(super) fn post(route: &str, body: String) -> Result<String, String> {
         post_to(std::env::var("EQOA_REPORTS").ok().as_deref(), route, body)
     }
 
-    pub(super) fn post_to(endpoint: Option<&str>, route: &str, body: String) -> Result<String, String> {
+    #[cfg(test)]
+    pub(super) fn post_to(
+        endpoint: Option<&str>,
+        route: &str,
+        body: String,
+    ) -> Result<String, String> {
         let url = crate::report_policy::upload_url(endpoint, route)?;
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_connect(Some(Duration::from_secs(10)))
@@ -789,20 +855,43 @@ mod native {
             .http_status_as_error(false)
             .build()
             .into();
-        let mut r = agent.post(&url).header("Content-Type", "application/json").send(body).map_err(|e| format!("the report server could not be reached ({e})"))?;
+        let mut r = agent
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .send(body)
+            .map_err(|e| format!("the report server could not be reached ({e})"))?;
         let status = r.status().as_u16();
-        let text = r.body_mut().with_config().limit(64 * 1024).read_to_string().unwrap_or_default();
+        let text = r
+            .body_mut()
+            .with_config()
+            .limit(64 * 1024)
+            .read_to_string()
+            .unwrap_or_default();
         let field = |k: &str| -> Option<String> {
             let at = text.find(&format!("\"{k}\""))? + k.len() + 2;
-            let rest = text[at..].trim_start().strip_prefix(':')?.trim_start().strip_prefix('"')?;
+            let rest = text[at..]
+                .trim_start()
+                .strip_prefix(':')?
+                .trim_start()
+                .strip_prefix('"')?;
             Some(rest[..rest.find('"')?].to_string())
         };
         match field("id") {
-            Some(id) if (200..300).contains(&status) && text.contains("\"ok\"") && !text.contains("\"ok\":false") => Ok(id),
-            _ => Err(field("error").unwrap_or_else(|| format!("the report server answered {status}"))),
+            Some(id)
+                if (200..300).contains(&status)
+                    && text.contains("\"ok\"")
+                    && !text.contains("\"ok\":false") =>
+            {
+                Ok(id)
+            }
+            _ => {
+                Err(field("error")
+                    .unwrap_or_else(|| format!("the report server answered {status}")))
+            }
         }
     }
 
+    #[cfg(test)]
     fn problem_body(note: &str, name: &str, shot: Option<&[u8]>) -> String {
         let n = lock(&NOTED);
         let state = n.state.clone();
@@ -814,10 +903,14 @@ mod native {
                 version(),
                 channel(),
                 if name.is_empty() { "-" } else { name },
-                if note.is_empty() { "-".to_string() } else { note.replace('\n', " ") },
+                if note.is_empty() {
+                    "-".to_string()
+                } else {
+                    note.replace('\n', " ")
+                },
                 stamp(SystemTime::now()),
                 platform(),
-                crate::update::describe(),
+                crate::fork_ext::report::enhanced_label(),
                 state.trim_end(),
                 controllers(),
                 other_windows(),
@@ -840,9 +933,9 @@ mod native {
 
     /// The controllers connected and who reads them (`input`): the log says
     /// what a window reads only as it changes, long gone by a report.
+    #[cfg(test)]
     fn controllers() -> String {
-        let l = crate::input::describe_controllers();
-        if l.is_empty() { "not read yet".into() } else { l.join("\n") }
+        "See eqoa.log".into()
     }
 
     /// The lines of another window's log a report carries (`other_windows`).
@@ -858,9 +951,15 @@ mod native {
     /// from the first; F3 20261029-025532's freezes were both windows' at
     /// once, and a stall's line says when, in UTC, to read them together.
     fn other_windows() -> String {
-        let Some(d) = dir() else { return "none read (no config directory)".into() };
+        let Some(d) = dir() else {
+            return "none read (no config directory)".into();
+        };
         let me = WINDOW.load(Ordering::Relaxed).max(1);
-        let windows: Vec<usize> = crate::multibox::seat().others.iter().map(|o| o.place + 1).collect();
+        let windows: Vec<usize> = crate::multibox::seat()
+            .others
+            .iter()
+            .map(|o| o.place + 1)
+            .collect();
         other_windows_in(&d, me, &windows)
     }
 
@@ -882,19 +981,51 @@ mod native {
                 out.push(format!("window {n}: no {name}"));
                 continue;
             }
-            let lines: Vec<&str> = text.lines().filter(|l| ["focus:", "controllers:", "gamepad:", "multibox:", "stall:"].iter().any(|p| l.starts_with(p))).collect();
-            out.push(format!("window {n} ({name}), its last {} of these lines:", lines.len().min(OTHER_LINES)));
-            out.extend(lines.iter().skip(lines.len().saturating_sub(OTHER_LINES)).map(|l| l.chars().take(LOG_LINE_MAX).collect::<String>()));
+            let lines: Vec<&str> = text
+                .lines()
+                .filter(|l| {
+                    ["focus:", "controllers:", "gamepad:", "multibox:", "stall:"]
+                        .iter()
+                        .any(|p| l.starts_with(p))
+                })
+                .collect();
+            out.push(format!(
+                "window {n} ({name}), its last {} of these lines:",
+                lines.len().min(OTHER_LINES)
+            ));
+            out.extend(
+                lines
+                    .iter()
+                    .skip(lines.len().saturating_sub(OTHER_LINES))
+                    .map(|l| l.chars().take(LOG_LINE_MAX).collect::<String>()),
+            );
         }
-        if out.is_empty() { "none open".into() } else { out.join("\n") }
+        if out.is_empty() {
+            "none open".into()
+        } else {
+            out.join("\n")
+        }
     }
 
     /// A crash report as sent: the file the run before wrote, the note, and
     /// the program sending it (its version and updater: the crash may be of a
     /// version long gone, and a player who stays on one says why).
+    #[cfg(test)]
     fn crash_body(text: &str, note: &str) -> String {
-        let sender = format!("[the program sending it]\nversion: {} ({})\n{}", version(), channel(), crate::update::describe());
-        let report = fit(&clean_now(&format!("{}\nnote: {}\n\n{sender}\n", text.trim_end(), if note.is_empty() { "-" } else { note })), CRASH_MAX);
+        let sender = format!(
+            "[the program sending it]\nversion: {} ({})\n{}",
+            version(),
+            channel(),
+            crate::fork_ext::report::enhanced_label()
+        );
+        let report = fit(
+            &clean_now(&format!(
+                "{}\nnote: {}\n\n{sender}\n",
+                text.trim_end(),
+                if note.is_empty() { "-" } else { note }
+            )),
+            CRASH_MAX,
+        );
         format!(
             "{{\"report\":{},\"note\":{},\"version\":{},\"platform\":{},\"channel\":{}}}",
             json_string(&report),
@@ -953,10 +1084,18 @@ mod native {
 
     impl Sent {
         pub(crate) fn success(sent: Vec<(Option<PathBuf>, String)>) -> Self {
-            Self { sent, gone: Vec::new(), failed: None }
+            Self {
+                sent,
+                gone: Vec::new(),
+                failed: None,
+            }
         }
         pub(crate) fn failure(e: String) -> Self {
-            Self { sent: Vec::new(), gone: Vec::new(), failed: Some(e) }
+            Self {
+                sent: Vec::new(),
+                gone: Vec::new(),
+                failed: Some(e),
+            }
         }
         pub(crate) fn sent_records(&self) -> &[(Option<PathBuf>, String)] {
             &self.sent
@@ -996,10 +1135,17 @@ mod native {
 
     pub(super) fn stopped(f: &Path) -> Stopped {
         let text = std::fs::read_to_string(f).unwrap_or_default();
-        let field = |k: &str| text.lines().take(8).find_map(|l| l.strip_prefix(k)).map(str::trim);
+        let field = |k: &str| {
+            text.lines()
+                .take(8)
+                .find_map(|l| l.strip_prefix(k))
+                .map(str::trim)
+        };
         Stopped {
             at: field("when: ").and_then(parse_stamp),
-            version: field("version: ").and_then(|v| v.split_whitespace().next()).map(str::to_string),
+            version: field("version: ")
+                .and_then(|v| v.split_whitespace().next())
+                .map(str::to_string),
         }
     }
 
@@ -1017,7 +1163,10 @@ mod native {
     static OFFERED: Mutex<bool> = Mutex::new(false);
 
     fn name_kept() -> String {
-        dir().and_then(|d| std::fs::read_to_string(d.join("report-name.txt")).ok()).map(|s| s.trim().to_string()).unwrap_or_default()
+        dir()
+            .and_then(|d| std::fs::read_to_string(d.join("report-name.txt")).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
     }
 
     pub(super) fn open() {
@@ -1051,7 +1200,8 @@ mod native {
         }
 
         fn shown(&self) -> bool {
-            self.shot_wanted.is_none_or(|t| t.elapsed() >= Duration::from_secs(1))
+            self.shot_wanted
+                .is_none_or(|t| t.elapsed() >= Duration::from_secs(1))
         }
 
         /// A key: true when it is the dialog's (it is open: every key is).
@@ -1091,7 +1241,11 @@ mod native {
                     Action::Stay
                 }
                 Key::Text(t) => {
-                    let max = if self.field == Field::Note { NOTE_MAX } else { NAME_MAX };
+                    let max = if self.field == Field::Note {
+                        NOTE_MAX
+                    } else {
+                        NAME_MAX
+                    };
                     let field = self.field;
                     let s = self.text();
                     for c in t.chars().filter(|c| !c.is_control()) {
@@ -1121,7 +1275,16 @@ mod native {
         /// A click at frame point `p`, on the buttons as last drawn: what it
         /// does (the picture's row turns the picture on or off at once).
         pub(super) fn click_at(&mut self, p: [f32; 2]) -> Action {
-            let hit = self.buttons.iter().find(|(r, _)| p[0] >= r[0] as f32 && p[0] < r[2] as f32 && p[1] >= r[1] as f32 && p[1] < r[3] as f32).map(|b| b.1);
+            let hit = self
+                .buttons
+                .iter()
+                .find(|(r, _)| {
+                    p[0] >= r[0] as f32
+                        && p[0] < r[2] as f32
+                        && p[1] >= r[1] as f32
+                        && p[1] < r[3] as f32
+                })
+                .map(|b| b.1);
             match (hit, &self.status) {
                 (_, Status::Sending) => Action::Stay,
                 (Some(Button::Close), _) => Action::Close,
@@ -1140,43 +1303,30 @@ mod native {
 
         fn send(&mut self) {
             self.status = Status::Sending;
-            let (note, name) = (self.note.trim().to_string(), self.name.replace(['\r', '\n', '\t'], " ").trim().to_string());
-            if crate::fork_ext::report::handle_send(&self.kind, &note, &name, self.shot_to_send(), &self.result) { return; }
-            let result = self.result.clone();
-            match &self.kind {
-                Kind::Problem => {
-                    if let Some(d) = dir() {
-                        let _ = std::fs::write(d.join("report-name.txt"), &name);
-                    }
-                    let body = problem_body(&note, &name, self.shot_to_send());
-                    let _ = std::thread::Builder::new().name("report".into()).spawn(move || {
-                        let r = post("report", body);
-                        crate::say(&match &r {
-                            Ok(id) => format!("report: sent as {id}"),
-                            Err(e) => format!("report: not sent: {e}"),
-                        });
-                        *lock(&result) = Some(match r {
-                            Ok(id) => Sent { sent: vec![(None, id)], ..Default::default() },
-                            Err(e) => Sent { failed: Some(e), ..Default::default() },
-                        });
-                    });
-                }
-                Kind::Crash(files) => {
-                    let files = files.clone();
-                    let _ = std::thread::Builder::new().name("report".into()).spawn(move || {
-                        *lock(&result) = Some(send_crashes(&files, &note, post));
-                    });
-                }
-            }
+            let (note, name) = (self.note.trim().to_string(), self.name.trim().to_string());
+            crate::fork_ext::report::handle_send(
+                &self.kind,
+                &note,
+                &name,
+                self.shot_to_send(),
+                &self.result,
+            );
         }
 
         /// The send's answer, once it came: the crash reports it sent (or
         /// found gone) no longer waiting, so a Send after a failure sends
         /// only the rest.
         pub(super) fn poll(&mut self) {
-            let Some(s) = lock(&self.result).take() else { return };
+            let Some(s) = lock(&self.result).take() else {
+                return;
+            };
             if let Kind::Crash(files) = &mut self.kind {
-                let done: Vec<&PathBuf> = s.sent.iter().filter_map(|(f, _)| f.as_ref()).chain(&s.gone).collect();
+                let done: Vec<&PathBuf> = s
+                    .sent
+                    .iter()
+                    .filter_map(|(f, _)| f.as_ref())
+                    .chain(&s.gone)
+                    .collect();
                 let mut k = 0;
                 while k < files.len() {
                     if done.contains(&&files[k]) {
@@ -1200,7 +1350,12 @@ mod native {
     /// body, its id back) with the player's `note`, each one sent deleted.
     /// The first that fails stops it: it and those after it are kept, for a
     /// Send again or the next start. One gone before its turn is skipped.
-    pub(super) fn send_crashes(files: &[PathBuf], note: &str, post: impl Fn(&str, String) -> Result<String, String>) -> Sent {
+    #[cfg(test)]
+    pub(super) fn send_crashes(
+        files: &[PathBuf],
+        note: &str,
+        post: impl Fn(&str, String) -> Result<String, String>,
+    ) -> Sent {
         let mut out = Sent::default();
         for f in files {
             let Ok(text) = std::fs::read_to_string(f) else {
@@ -1244,7 +1399,8 @@ mod native {
 
     /// F3, the report's key (`binds::reserved` keeps it from the game).
     pub fn is_report_key(k: &winit::keyboard::Key) -> bool {
-        crate::report_policy::enabled() && *k == winit::keyboard::Key::Named(winit::keyboard::NamedKey::F3)
+        crate::report_policy::enabled()
+            && *k == winit::keyboard::Key::Named(winit::keyboard::NamedKey::F3)
     }
 
     /// A key of the window's as the dialog takes it (the keyboard's own
@@ -1309,14 +1465,21 @@ mod native {
     /// Whether the dialog wants a picture of this frame (read before it is
     /// presented: the viewer's).
     pub fn wants_shot() -> bool {
-        lock(&DIALOG).as_ref().is_some_and(|d| d.shot_wanted.is_some_and(|t| t.elapsed() < Duration::from_secs(1)) && d.shot.is_none())
+        lock(&DIALOG).as_ref().is_some_and(|d| {
+            d.shot_wanted
+                .is_some_and(|t| t.elapsed() < Duration::from_secs(1))
+                && d.shot.is_none()
+        })
     }
 
     /// The frame's picture: RGBA rows, `w` by `h`, made at most `SHOT_WIDTH`
     /// wide and kept as a PNG for the report.
     pub fn set_shot(w: u32, h: u32, rgba: &[u8]) {
         let k = (SHOT_WIDTH as f32 / w as f32).min(1.0);
-        let (ow, oh) = (((w as f32 * k) as u32).max(1), ((h as f32 * k) as u32).max(1));
+        let (ow, oh) = (
+            ((w as f32 * k) as u32).max(1),
+            ((h as f32 * k) as u32).max(1),
+        );
         let mut out = Vec::with_capacity((ow * oh * 4) as usize);
         for y in 0..oh {
             let sy = (y as f32 / k) as u32;
@@ -1360,7 +1523,9 @@ mod native {
     /// offer them on, by the first window: two would offer them twice): the
     /// 2D layer's `r`, the game's `vui`.
     pub fn draw(vui: &Vui, r: &mut dyn Raster) {
-        if !crate::report_policy::enabled() { return; }
+        if !crate::report_policy::enabled() {
+            return;
+        }
         let mut d = lock(&DIALOG);
         if d.is_none() {
             let mut offered = lock(&OFFERED);
@@ -1396,7 +1561,11 @@ mod native {
             for para in s.split('\n') {
                 let mut cur = String::new();
                 for word in para.split(' ') {
-                    let t = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
+                    let t = if cur.is_empty() {
+                        word.to_string()
+                    } else {
+                        format!("{cur} {word}")
+                    };
                     if vui.string_width(r, &wide(&t)) > w && !cur.is_empty() {
                         out.push(std::mem::take(&mut cur));
                         cur = word.to_string();
@@ -1446,20 +1615,43 @@ mod native {
         y += h + 2;
         let rows = 3;
         let note_box = (y, rows * h + 8);
-        let note = wrap(r, &format!("{}{}", dl.note, caret(editing && dl.field == Field::Note)), tw - 12);
-        for (k, l) in note[note.len().saturating_sub(rows as usize)..].iter().enumerate() {
+        let note = wrap(
+            r,
+            &format!("{}{}", dl.note, caret(editing && dl.field == Field::Note)),
+            tw - 12,
+        );
+        for (k, l) in note[note.len().saturating_sub(rows as usize)..]
+            .iter()
+            .enumerate()
+        {
             lines.push((tx + 6, y + 4 + k as i32 * h, l.clone(), white));
         }
         y += note_box.1 + 8;
         // the picture's row, a button: where it was drawn
         let mut pic_y = None;
         if dl.kind == Kind::Problem {
-            let n = format!("Your name on the board (Tab): {}{}", dl.name, caret(editing && dl.field == Field::Name));
+            let n = format!(
+                "Your name (optional, Tab): {}{}",
+                dl.name,
+                caret(editing && dl.field == Field::Name)
+            );
             lines.push((tx, y, n, if dl.field == Field::Name { white } else { dim }));
             y += h + 2;
             if dl.shot.is_some() {
-                let pic = format!("Send the picture of the screen: {} (Tab, Space or click)", if dl.send_shot { "Yes" } else { "No" });
-                lines.push((tx, y, pic, if dl.field == Field::Picture { white } else { dim }));
+                let pic = format!(
+                    "Include the picture of the screen: {} (Tab, Space or click)",
+                    if dl.send_shot { "Yes" } else { "No" }
+                );
+                lines.push((
+                    tx,
+                    y,
+                    pic,
+                    if dl.field == Field::Picture {
+                        white
+                    } else {
+                        dim
+                    },
+                ));
                 pic_y = Some(y);
                 y += h + 2;
             }
@@ -1468,16 +1660,31 @@ mod native {
             Kind::Crash(files) => files.len(),
             Kind::Problem => 0,
         };
-        let status = crate::fork_ext::report::dialog_status(&dl.status, left).unwrap_or_else(|| match &dl.status {
-            Status::Editing => String::new(),
-            Status::Sending => "Sending…".to_string(),
-            Status::Sent(ids) if ids.len() > 1 => format!("Sent all {} as {}. Thank you.", ids.len(), and_list(ids)),
-            Status::Sent(ids) => format!("Sent as {}. Thank you.", and_list(ids)),
-            Status::Failed(ids, e) if ids.is_empty() => format!("Not sent: {e}. Try again in a moment."),
-            Status::Failed(ids, e) => format!("Sent {} as {}; {left} not sent: {e}. Try again in a moment.", ids.len(), and_list(ids)),
-        });
+        let status =
+            crate::fork_ext::report::dialog_status(&dl.status, left).unwrap_or_else(|| {
+                match &dl.status {
+                    Status::Editing => String::new(),
+                    Status::Sending => "Sending…".to_string(),
+                    Status::Sent(ids) if ids.len() > 1 => {
+                        format!("Sent all {} as {}. Thank you.", ids.len(), and_list(ids))
+                    }
+                    Status::Sent(ids) => format!("Sent as {}. Thank you.", and_list(ids)),
+                    Status::Failed(ids, e) if ids.is_empty() => {
+                        format!("Not sent: {e}. Try again in a moment.")
+                    }
+                    Status::Failed(ids, e) => format!(
+                        "Sent {} as {}; {left} not sent: {e}. Try again in a moment.",
+                        ids.len(),
+                        and_list(ids)
+                    ),
+                }
+            });
         if !status.is_empty() {
-            let c = if matches!(dl.status, Status::Failed(..)) { [1.0, 0.45, 0.45, 1.0] } else { [0.55, 1.0, 0.55, 1.0] };
+            let c = if matches!(dl.status, Status::Failed(..)) {
+                [1.0, 0.45, 0.45, 1.0]
+            } else {
+                [0.55, 1.0, 0.55, 1.0]
+            };
             for l in wrap(r, &status, tw) {
                 lines.push((tx, y, l, c));
                 y += h;
@@ -1485,11 +1692,25 @@ mod native {
         }
         y += 6;
         let sent = matches!(dl.status, Status::Sent(_));
-        let labels: Vec<(String, Button)> = crate::fork_ext::report::dialog_labels(&dl.kind, sent, several).unwrap_or_else(|| match (&dl.kind, sent) {
+        let labels: Vec<(String, Button)> = crate::fork_ext::report::dialog_labels(
+            &dl.kind, sent, several,
+        )
+        .unwrap_or_else(|| match (&dl.kind, sent) {
             (_, true) => vec![("Close (Enter)".into(), Button::Send)],
-            (Kind::Problem, false) => vec![("Send (Enter)".into(), Button::Send), ("Close (Esc)".into(), Button::Close)],
-            (Kind::Crash(_), false) if several => vec![("Send all (Enter)".into(), Button::Send), ("Not now (Esc)".into(), Button::Close), ("Delete all (Del)".into(), Button::Delete)],
-            (Kind::Crash(_), false) => vec![("Send (Enter)".into(), Button::Send), ("Not now (Esc)".into(), Button::Close), ("Delete (Del)".into(), Button::Delete)],
+            (Kind::Problem, false) => vec![
+                ("Send (Enter)".into(), Button::Send),
+                ("Close (Esc)".into(), Button::Close),
+            ],
+            (Kind::Crash(_), false) if several => vec![
+                ("Send all (Enter)".into(), Button::Send),
+                ("Not now (Esc)".into(), Button::Close),
+                ("Delete all (Del)".into(), Button::Delete),
+            ],
+            (Kind::Crash(_), false) => vec![
+                ("Send (Enter)".into(), Button::Send),
+                ("Not now (Esc)".into(), Button::Close),
+                ("Delete (Del)".into(), Button::Delete),
+            ],
         });
         let buttons_y = y;
         y += h + 10 + 8;
@@ -1503,25 +1724,48 @@ mod native {
         vui.fill_rectangle(r, [[x0, y0], [x1, y0 + height]], [0.02, 0.02, 0.05, 0.94]);
         vui.fill_rectangle(r, [[x0, y0], [x1, y0 + 2]], gold);
         let top = y0 + 10;
-        vui.fill_rectangle(r, [[tx, top + note_box.0], [x1 - 16, top + note_box.0 + note_box.1]], [0.13, 0.13, 0.17, 1.0]);
+        vui.fill_rectangle(
+            r,
+            [
+                [tx, top + note_box.0],
+                [x1 - 16, top + note_box.0 + note_box.1],
+            ],
+            [0.13, 0.13, 0.17, 1.0],
+        );
         for (x, ly, text, c) in &lines {
             vui.draw_string_ex(r, &wide(text), *x, top + ly, *c, false);
         }
         dl.buttons.clear();
         if let Some(py) = pic_y {
-            dl.buttons.push(([tx, top + py, x1 - 16, top + py + h], Button::Picture));
+            dl.buttons
+                .push(([tx, top + py, x1 - 16, top + py + h], Button::Picture));
         }
         let mut bx = tx;
         for (label, b) in labels {
             let w = vui.string_width(r, &wide(&label)) + 24;
             let rect = [bx, top + buttons_y, bx + w, top + buttons_y + h + 10];
-            vui.fill_rectangle(r, [[rect[0], rect[1]], [rect[2], rect[3]]], if b == Button::Send { [0.4, 0.31, 0.08, 1.0] } else { [0.2, 0.2, 0.25, 1.0] });
+            vui.fill_rectangle(
+                r,
+                [[rect[0], rect[1]], [rect[2], rect[3]]],
+                if b == Button::Send {
+                    [0.4, 0.31, 0.08, 1.0]
+                } else {
+                    [0.2, 0.2, 0.25, 1.0]
+                },
+            );
             vui.draw_string_ex(r, &wide(&label), bx + 12, rect[1] + 5, white, false);
             dl.buttons.push((rect, b));
             bx += w + 12;
         }
         for (k, l) in fine.iter().enumerate() {
-            vui.draw_string_ex(r, &wide(l), tx, top + fine_y + k as i32 * h, [0.55, 0.55, 0.55, 1.0], false);
+            vui.draw_string_ex(
+                r,
+                &wide(l),
+                tx,
+                top + fine_y + k as i32 * h,
+                [0.55, 0.55, 0.55, 1.0],
+                false,
+            );
         }
     }
 
@@ -1556,7 +1800,13 @@ mod native {
     /// How long before `now` the time `at` was, in a player's words.
     pub(super) fn ago(at: SystemTime, now: SystemTime) -> String {
         let s = now.duration_since(at).map_or(0, |d| d.as_secs());
-        let n = |k: u64, one: &str, many: &str| if k == 1 { one.to_string() } else { format!("{k} {many}") };
+        let n = |k: u64, one: &str, many: &str| {
+            if k == 1 {
+                one.to_string()
+            } else {
+                format!("{k} {many}")
+            }
+        };
         match s {
             0..60 => "less than a minute ago".to_string(),
             60..3600 => format!("{} ago", n(s / 60, "a minute", "minutes")),
@@ -1582,34 +1832,61 @@ mod native {
                 Some(at) => format!("The game stopped {}", ago(at, now)),
                 None => "The game stopped earlier".to_string(),
             };
-            let then = "It wrote a crash report then: sending it helps it get fixed.";
+            let then = "It kept a crash report then. Save it locally to share with Enhanced support.";
             let intro = match &newest.version {
-                Some(v) if v != this => format!("That was in an earlier version of the game ({v}). {then}"),
+                Some(v) if v != this => {
+                    format!("That was in an earlier version of the game ({v}). {then}")
+                }
                 _ => then.to_string(),
             };
             return (title, intro);
         }
-        let times = if all.len() == 2 { "twice".to_string() } else { format!("{} times", all.len()) };
+        let times = if all.len() == 2 {
+            "twice".to_string()
+        } else {
+            format!("{} times", all.len())
+        };
         let title = match newest.at {
             Some(at) => format!("The game stopped {times}, the last {}", ago(at, now)),
             None => format!("The game stopped {times}"),
         };
-        let other: Vec<&Stopped> = all.iter().filter(|s| s.version.as_deref().is_some_and(|v| v != this)).collect();
+        let other: Vec<&Stopped> = all
+            .iter()
+            .filter(|s| s.version.as_deref().is_some_and(|v| v != this))
+            .collect();
         let mut versions: Vec<String> = Vec::new();
         for v in other.iter().filter_map(|s| s.version.clone()) {
             if !versions.contains(&v) {
                 versions.push(v);
             }
         }
-        let which = if versions.len() > 1 { "earlier versions" } else { "an earlier version" };
-        let each = "It wrote a crash report each time: sending them helps it get fixed.";
+        let which = if versions.len() > 1 {
+            "earlier versions"
+        } else {
+            "an earlier version"
+        };
+        let each = "It kept a crash report each time. Save them locally to share with Enhanced support.";
         let intro = match other.len() {
             0 => each.to_string(),
-            n if n == all.len() => format!("Those were in {which} of the game ({}). {each}", versions.join(", ")),
-            1 => format!("One of them was in {which} of the game ({}). {each}", versions.join(", ")),
-            n => format!("{n} of them were in {which} of the game ({}). {each}", versions.join(", ")),
+            n if n == all.len() => format!(
+                "Those were in {which} of the game ({}). {each}",
+                versions.join(", ")
+            ),
+            1 => format!(
+                "One of them was in {which} of the game ({}). {each}",
+                versions.join(", ")
+            ),
+            n => format!(
+                "{n} of them were in {which} of the game ({}). {each}",
+                versions.join(", ")
+            ),
         };
         (title, intro)
+    }
+
+    #[cfg(test)]
+    mod sync_tests {
+        include!("report_sync_tests.rs");
     }
 
     /// "a", "a and b", "a, b and c".
@@ -1626,7 +1903,7 @@ mod native {
 mod tests {
     use super::*;
 
-    include!("report_policy_transport_tests.rs");
+    include!("../report_policy_transport_tests.rs");
 
     /// `caught` hands a panic back as its message (gilrs's index panic is a
     /// formatted String, a literal a &str) and a value through as it is, its
@@ -1638,11 +1915,23 @@ mod tests {
         use native::caught;
         let v: Vec<u8> = vec![1, 2];
         let i = v.len();
-        assert_eq!(caught(|| v[i]), Err("index out of bounds: the len is 2 but the index is 2".to_string()));
-        assert_eq!(caught(|| -> u8 { panic!("a literal") }), Err("a literal".to_string()));
+        assert_eq!(
+            caught(|| v[i]),
+            Err("index out of bounds: the len is 2 but the index is 2".to_string())
+        );
+        assert_eq!(
+            caught(|| -> u8 { panic!("a literal") }),
+            Err("a literal".to_string())
+        );
         assert_eq!(caught(|| 7), Ok(7));
-        assert_eq!(caught(|| caught(|| -> u8 { panic!("inner") }).map_err(|e| e + " (nested)")), Ok(Err("inner (nested)".to_string())));
-        assert!(std::panic::catch_unwind(|| v[i]).is_err(), "the control: it panics");
+        assert_eq!(
+            caught(|| caught(|| -> u8 { panic!("inner") }).map_err(|e| e + " (nested)")),
+            Ok(Err("inner (nested)".to_string()))
+        );
+        assert!(
+            std::panic::catch_unwind(|| v[i]).is_err(),
+            "the control: it panics"
+        );
         assert_eq!(caught(|| v[0]), Ok(1), "and after all that, a plain call");
     }
 
@@ -1661,11 +1950,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let (prev, state) = (dir.join("eqoa.prev.log"), dir.join("state.txt"));
-        let crash = |run: &str| std::fs::read_to_string(dir.join("crashes").join(format!("crash-{run}.txt")));
+        let crash = |run: &str| {
+            std::fs::read_to_string(dir.join("crashes").join(format!("crash-{run}.txt")))
+        };
         std::fs::write(&prev, "[eqoa] run 20261025-180304, dev-da994c8 (dev), windows x86_64, window 1\nplay: in the world\n[eqoa] closed\n").unwrap();
         std::fs::write(&state, "frames 536108, clock 9020.2 s\n").unwrap();
         take_last_run(&dir, &prev);
-        assert!(crash("20261025-180304").is_err(), "a run that closed is no crash");
+        assert!(
+            crash("20261025-180304").is_err(),
+            "a run that closed is no crash"
+        );
         assert!(!state.exists(), "its state put away");
         let stopped = "[eqoa] run 20261025-205606, dev-79f115e (dev), windows x86_64, window 1\nwindow: as kept (at 952,0, 958x991), on \\\\.\\DISPLAY1 of 1 monitor(s)\n";
         std::fs::write(&prev, stopped).unwrap();
@@ -1673,12 +1967,20 @@ mod tests {
         let text = crash("20261025-205606").unwrap();
         assert!(text.contains("\nversion: dev-79f115e (dev)\n"), "{text}");
         assert!(text.contains("[client, as last noted]\n-\n"), "{text}");
-        assert!(text.contains("[log] last 2 lines\n[eqoa] run 20261025-205606"), "{text}");
+        assert!(
+            text.contains("[log] last 2 lines\n[eqoa] run 20261025-205606"),
+            "{text}"
+        );
         // the control
         std::fs::remove_dir_all(dir.join("crashes")).unwrap();
         std::fs::write(&state, "frames 536108, clock 9020.2 s\n").unwrap();
         native::ended_without_closing_for_test(&dir, &prev);
-        assert!(crash("20261025-205606").unwrap().contains("[client, as last noted]\nframes 536108"), "the old state, left in place, is taken");
+        assert!(
+            crash("20261025-205606")
+                .unwrap()
+                .contains("[client, as last noted]\nframes 536108"),
+            "the old state, left in place, is taken"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1689,12 +1991,27 @@ mod tests {
     #[test]
     fn a_run_out_of_memory_says_so() {
         use native::unclosed_detail;
-        let oom = ["[eqoa] run 20261026-100442, dev-83bb416 (dev), windows x86_64, window 1", "chat: Mrboojanlezx: lfg", "memory allocation of 229376 bytes failed", ""];
+        let oom = [
+            "[eqoa] run 20261026-100442, dev-83bb416 (dev), windows x86_64, window 1",
+            "chat: Mrboojanlezx: lfg",
+            "memory allocation of 229376 bytes failed",
+            "",
+        ];
         let d = unclosed_detail("20261026-100442", &oom);
         assert!(d.starts_with("The run of 20261026-100442 ran out of memory: \"memory allocation of 229376 bytes failed\""), "{d}");
-        let before = ["[eqoa] run 1", "memory allocation of 229376 bytes failed", "chat: after it"];
-        assert!(unclosed_detail("1", &before).contains("ended without closing"), "the control: not the last line");
-        assert!(unclosed_detail("1", &oom[..2]).contains("ended without closing"), "the control: a log that just stops");
+        let before = [
+            "[eqoa] run 1",
+            "memory allocation of 229376 bytes failed",
+            "chat: after it",
+        ];
+        assert!(
+            unclosed_detail("1", &before).contains("ended without closing"),
+            "the control: not the last line"
+        );
+        assert!(
+            unclosed_detail("1", &oom[..2]).contains("ended without closing"),
+            "the control: a log that just stops"
+        );
     }
 
     /// A report carries the other windows' arrivals, controllers and stalls
@@ -1707,10 +2024,15 @@ mod tests {
         use native::{other_windows_in, window_file};
         let dir = std::env::temp_dir().join(format!("eqoa-other-windows-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!((window_file("eqoa", "log", 1), window_file("eqoa", "log", 2)), ("eqoa.log".to_string(), "eqoa-2.log".to_string()));
+        assert_eq!(
+            (window_file("eqoa", "log", 1), window_file("eqoa", "log", 2)),
+            ("eqoa.log".to_string(), "eqoa-2.log".to_string())
+        );
         let mut two = String::new();
         for k in 0..20 {
-            two += &format!("focus: in front; its last frame {k} ms before, its first frame 412 ms after; the first press 450 ms after: the controller's cross\n");
+            two += &format!(
+                "focus: in front; its last frame {k} ms before, its first frame 412 ms after; the first press 450 ms after: the controller's cross\n"
+            );
         }
         two += "chat: Someone tells the group: my account is hunter2\n";
         two += "stall: 8412 ms from one frame to the next, to 02:41:07 UTC (2:13:05 into the run): the frame itself took 8395 ms (sound 8355 ms)\n";
@@ -1719,14 +2041,30 @@ mod tests {
         std::fs::write(dir.join("eqoa.log"), "focus: this window's own line\n").unwrap();
         let text = other_windows_in(&dir, 1, &[2, 3]);
         let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines[0], "window 2 (eqoa-2.log), its last 12 of these lines:");
+        assert_eq!(
+            lines[0],
+            "window 2 (eqoa-2.log), its last 12 of these lines:"
+        );
         assert_eq!(lines.len(), 1 + 12 + 1, "{text}");
-        assert!(lines[1].contains("its last frame 10 ms before"), "the last twelve, oldest first: {text}");
-        assert!(lines[11].starts_with("stall: 8412 ms from one frame to the next, to 02:41:07 UTC"), "its stalls too: {text}");
+        assert!(
+            lines[1].contains("its last frame 10 ms before"),
+            "the last twelve, oldest first: {text}"
+        );
+        assert!(
+            lines[11].starts_with("stall: 8412 ms from one frame to the next, to 02:41:07 UTC"),
+            "its stalls too: {text}"
+        );
         assert!(lines[12].starts_with("controllers: window 2 of 2"));
         assert_eq!(lines[13], "window 3: no eqoa-3.log");
-        assert!(!text.contains("hunter2") && !text.contains("this window's own line"), "the controls: {text}");
-        assert_eq!(other_windows_in(&dir, 2, &[2]), "none open", "the control: its own window is not another");
+        assert!(
+            !text.contains("hunter2") && !text.contains("this window's own line"),
+            "the controls: {text}"
+        );
+        assert_eq!(
+            other_windows_in(&dir, 2, &[2]),
+            "none open",
+            "the control: its own window is not another"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1734,13 +2072,23 @@ mod tests {
     /// characters escaped, the rest as it is.
     #[test]
     fn strings_go_out_as_json() {
-        assert_eq!(json_string("a \"b\" \\ c\nd\te\u{1}é"), "\"a \\\"b\\\" \\\\ c\\nd\\te\\u0001é\"");
+        assert_eq!(
+            json_string("a \"b\" \\ c\nd\te\u{1}é"),
+            "\"a \\\"b\\\" \\\\ c\\nd\\te\\u0001é\""
+        );
     }
 
     /// Base64 as the standard has it, padding and all.
     #[test]
     fn base64_is_the_standard_one() {
-        for (b, s) in [(&b""[..], ""), (b"f", "Zg=="), (b"fo", "Zm8="), (b"foo", "Zm9v"), (b"foobar", "Zm9vYmFy"), (&[0xff, 0xfe, 0x00][..], "//4A")] {
+        for (b, s) in [
+            (&b""[..], ""),
+            (b"f", "Zg=="),
+            (b"fo", "Zm8="),
+            (b"foo", "Zm9v"),
+            (b"foobar", "Zm9vYmFy"),
+            (&[0xff, 0xfe, 0x00][..], "//4A"),
+        ] {
             assert_eq!(base64(b), s);
         }
     }
@@ -1751,7 +2099,10 @@ mod tests {
     fn secrets_come_out_of_a_report() {
         let t = "login zed with Tulip-7781; character Zedra; zed_x; (zed) said abc";
         let s = scrub(t, &["zed".into()], &["Tulip-7781".into(), "abc".into()]);
-        assert_eq!(s, "login <account> with <password>; character Zedra; zed_x; (<account>) said abc");
+        assert_eq!(
+            s,
+            "login <account> with <password>; character Zedra; zed_x; (<account>) said abc"
+        );
         assert_eq!(scrub(t, &[], &[]), t, "the control: nothing to take out");
     }
 
@@ -1770,7 +2121,11 @@ mod tests {
         d.key(Key::Text("Zed\nra".into()));
         d.key(Key::Backspace);
         assert_eq!((d.note.as_str(), d.name.as_str()), ("it fell over", "Zedr"));
-        assert_eq!(d.key(Key::Delete), Action::Stay, "the control: a problem report has nothing to delete");
+        assert_eq!(
+            d.key(Key::Delete),
+            Action::Stay,
+            "the control: a problem report has nothing to delete"
+        );
         assert_eq!(d.key(Key::Enter), Action::Send);
         let mut c = Dialog::new(Kind::Crash(vec!["crash-20261023-010203.txt".into()]));
         c.key(Key::Tab);
@@ -1780,7 +2135,14 @@ mod tests {
         c.status = Status::Sending;
         assert_eq!(c.key(Key::Escape), Action::Stay, "nothing while it is sent");
         c.status = Status::Sent(vec!["x".into()]);
-        assert_eq!((c.key(Key::Delete), c.key(Key::Text("a".into())), c.key(Key::Enter)), (Action::Stay, Action::Stay, Action::Close));
+        assert_eq!(
+            (
+                c.key(Key::Delete),
+                c.key(Key::Text("a".into())),
+                c.key(Key::Enter)
+            ),
+            (Action::Stay, Action::Stay, Action::Close)
+        );
     }
 
     /// The picture can be left out (F3 20261023-083108): Tab goes from the
@@ -1797,7 +2159,11 @@ mod tests {
         let mut d = Dialog::new(Kind::Problem);
         d.shot_wanted = None;
         d.shot = Some(vec![1, 2, 3]);
-        assert_eq!(d.shot_to_send(), Some(&[1u8, 2, 3][..]), "it goes by default");
+        assert_eq!(
+            d.shot_to_send(),
+            Some(&[1u8, 2, 3][..]),
+            "it goes by default"
+        );
         let name = d.name.clone();
         d.key(Key::Tab);
         d.key(Key::Tab);
@@ -1810,16 +2176,28 @@ mod tests {
         d.key(Key::Tab);
         assert_eq!(d.field, Field::Note, "round to the note");
         draw_dialog(&mut d, &vui, &mut NullRaster);
-        let row = d.buttons.iter().find(|b| b.1 == Button::Picture).map(|b| b.0).expect("the row is a button");
+        let row = d
+            .buttons
+            .iter()
+            .find(|b| b.1 == Button::Picture)
+            .map(|b| b.0)
+            .expect("the row is a button");
         assert_eq!(d.click_at(mid(row)), Action::Stay);
         assert_eq!(d.shot_to_send(), None, "clicked off");
         let mut e = Dialog::new(Kind::Problem);
         e.shot_wanted = None;
         e.key(Key::Tab);
         e.key(Key::Tab);
-        assert_eq!(e.field, Field::Note, "no picture: Tab goes from the name back to the note");
+        assert_eq!(
+            e.field,
+            Field::Note,
+            "no picture: Tab goes from the name back to the note"
+        );
         draw_dialog(&mut e, &vui, &mut NullRaster);
-        assert!(e.buttons.iter().all(|b| b.1 != Button::Picture), "no picture: no row");
+        assert!(
+            e.buttons.iter().all(|b| b.1 != Button::Picture),
+            "no picture: no row"
+        );
     }
 
     /// The strings a raster was asked to draw.
@@ -1828,7 +2206,18 @@ mod tests {
 
     impl vi::ui::Raster for Words {
         fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
-        fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+        fn stretch_blit(
+            &mut self,
+            _: u32,
+            _: u32,
+            _: [i32; 2],
+            _: [i32; 2],
+            _: [i32; 2],
+            _: [i32; 2],
+            _: i32,
+            _: f32,
+        ) {
+        }
         fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
         fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
         fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], s: &[u16]) {
@@ -1869,7 +2258,13 @@ mod tests {
             assert_eq!(parse_stamp(&stamp(at(s))), Some(at(s)), "{}", stamp(at(s)));
         }
         assert_eq!(parse_stamp("20261023-114119"), Some(at(1_792_755_679)));
-        for bad in ["20261023-1141", "2026102x-114119", "20261323-114119", "20261023 114119", ""] {
+        for bad in [
+            "20261023-1141",
+            "2026102x-114119",
+            "20261323-114119",
+            "20261023 114119",
+            "",
+        ] {
             assert_eq!(parse_stamp(bad), None, "{bad:?}");
         }
         let now = at(1_800_000_000);
@@ -1880,7 +2275,11 @@ mod tests {
         assert_eq!(ago(before(3600), now), "an hour ago");
         assert_eq!(ago(before(11 * 3600 + 18 * 60), now), "11 hours ago");
         assert_eq!(ago(before(3 * 86400), now), "3 days ago");
-        assert_eq!(ago(now + Duration::from_secs(5), now), "less than a minute ago", "a clock put back");
+        assert_eq!(
+            ago(now + Duration::from_secs(5), now),
+            "less than a minute ago",
+            "a clock put back"
+        );
         // the report as it waited: written at 11:41 by e768e44, offered at
         // 22:59 by 3ff30da
         let dir = std::env::temp_dir().join(format!("eqoa-crash-words-{}", std::process::id()));
@@ -1888,21 +2287,45 @@ mod tests {
         let f = dir.join("crash-20261023-093148.txt");
         std::fs::write(&f, "EQOA native client crash report\nversion: dev-e768e44 (dev)\nwhen: 20261023-114119\nplatform: Windows x86_64\n\n--- crash ---\nA panic\n").unwrap();
         let mut d = Dialog::new(Kind::Crash(vec![f]));
-        assert_eq!(d.stopped, [Stopped { at: Some(at(1_792_755_679)), version: Some("dev-e768e44".into()) }]);
+        assert_eq!(
+            d.stopped,
+            [Stopped {
+                at: Some(at(1_792_755_679)),
+                version: Some("dev-e768e44".into())
+            }]
+        );
         let offered = at(1_792_755_679 + 11 * 3600 + 18 * 60 + 25);
         let (title, intro) = crash_words(&d.stopped, "dev-3ff30da", offered);
         assert_eq!(title, "The game stopped 11 hours ago");
-        assert_eq!(intro, "That was in an earlier version of the game (dev-e768e44). It wrote a crash report then: sending it helps it get fixed.");
-        assert_eq!(crash_words(&d.stopped, "dev-e768e44", offered).1, "It wrote a crash report then: sending it helps it get fixed.", "the control: this version's own");
+        assert_eq!(
+            intro,
+            "That was in an earlier version of the game (dev-e768e44). It kept a crash report then. Save it locally to share with Enhanced support."
+        );
+        assert_eq!(
+            crash_words(&d.stopped, "dev-e768e44", offered).1,
+            "It kept a crash report then. Save it locally to share with Enhanced support.",
+            "the control: this version's own"
+        );
         // drawn: the dialog asks the clock, so its age is today's
         let mut w = Words::default();
         d.shot_wanted = None;
         draw_dialog(&mut d, &vui(), &mut w);
-        assert!(w.0.iter().any(|l| l.starts_with("The game stopped ") && l.ends_with(" ago")), "{:?}", w.0);
+        assert!(
+            w.0.iter()
+                .any(|l| l.starts_with("The game stopped ") && l.ends_with(" ago")),
+            "{:?}",
+            w.0
+        );
         assert!(w.0.iter().all(|l| !l.contains("last time")), "{:?}", w.0);
         let none = Dialog::new(Kind::Crash(vec![dir.join("crash-missing.txt")]));
         assert_eq!(none.stopped, [Stopped::default()]);
-        assert_eq!(crash_words(&none.stopped, "dev-3ff30da", offered), ("The game stopped earlier".to_string(), "It wrote a crash report then: sending it helps it get fixed.".to_string()));
+        assert_eq!(
+            crash_words(&none.stopped, "dev-3ff30da", offered),
+            (
+                "The game stopped earlier".to_string(),
+                "It kept a crash report then. Save it locally to share with Enhanced support.".to_string()
+            )
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1922,7 +2345,9 @@ mod tests {
     #[test]
     fn every_crash_report_waiting_is_one_offer() {
         use crate::pointer::testing::vui;
-        use native::{Action, Dialog, Kind, Status, act, crash_words, draw_dialog, offer_in, send_crashes};
+        use native::{
+            Action, Dialog, Kind, Status, act, crash_words, draw_dialog, offer_in, send_crashes,
+        };
         use std::cell::RefCell;
         use std::time::{Duration, UNIX_EPOCH};
         let dir = std::env::temp_dir().join(format!("eqoa-crash-offer-{}", std::process::id()));
@@ -1934,28 +2359,60 @@ mod tests {
                 std::fs::write(&f, format!("EQOA native client crash report\nversion: {version} (dev)\nwhen: {when}\nplatform: Windows x86_64\n\n--- crash ---\nA panic in {run}\n")).unwrap();
                 f
             };
-            (crash("20261028-005857", "20261028-005950", "dev-8e8987d"), crash("20261028-063000", "20261028-063205", "dev-8e8987d"), crash("20261028-120000", "20261028-120130", "dev-6504760"))
+            (
+                crash("20261028-005857", "20261028-005950", "dev-8e8987d"),
+                crash("20261028-063000", "20261028-063205", "dev-8e8987d"),
+                crash("20261028-120000", "20261028-120130", "dev-6504760"),
+            )
         };
         let other = dir.join("crash-shot.png");
         std::fs::write(&other, b"not a crash report").unwrap();
         let (a, b, c) = plant();
         let all = |f: &[&std::path::PathBuf]| f.iter().all(|f| f.exists());
         let d = offer_in(&dir).expect("an offer");
-        assert_eq!(d.kind, Kind::Crash(vec![c.clone(), b.clone(), a.clone()]), "all three, newest first");
+        assert_eq!(
+            d.kind,
+            Kind::Crash(vec![c.clone(), b.clone(), a.clone()]),
+            "all three, newest first"
+        );
         // its words: how many, the last one's time, the versions not this one
         let at = |s: u64| UNIX_EPOCH + Duration::from_secs(s);
         let newest = d.stopped[0].at.expect("its time");
-        let (title, intro) = crash_words(&d.stopped, "dev-8e8987d", newest + Duration::from_secs(2 * 3600));
+        let (title, intro) = crash_words(
+            &d.stopped,
+            "dev-8e8987d",
+            newest + Duration::from_secs(2 * 3600),
+        );
         assert_eq!(title, "The game stopped 3 times, the last 2 hours ago");
-        assert_eq!(intro, "One of them was in an earlier version of the game (dev-6504760). It wrote a crash report each time: sending them helps it get fixed.");
+        assert_eq!(
+            intro,
+            "One of them was in an earlier version of the game (dev-6504760). It kept a crash report each time. Save them locally to share with Enhanced support."
+        );
         let (_, intro) = crash_words(&d.stopped, "dev-b5ef31c", at(1_900_000_000));
-        assert_eq!(intro, "Those were in earlier versions of the game (dev-6504760, dev-8e8987d). It wrote a crash report each time: sending them helps it get fixed.");
-        assert_eq!(crash_words(&d.stopped[..2], "dev-6504760", newest).0, "The game stopped twice, the last less than a minute ago");
+        assert_eq!(
+            intro,
+            "Those were in earlier versions of the game (dev-6504760, dev-8e8987d). It kept a crash report each time. Save them locally to share with Enhanced support."
+        );
+        assert_eq!(
+            crash_words(&d.stopped[..2], "dev-6504760", newest).0,
+            "The game stopped twice, the last less than a minute ago"
+        );
         let mut d = d;
         let mut w = Words::default();
         draw_dialog(&mut d, &vui(), &mut w);
-        assert!(w.0.iter().any(|l| l.starts_with("The game stopped 3 times, the last ")), "{:?}", w.0);
-        assert!(w.0.iter().any(|l| l == "Save all to Desktop (Enter)" || l == "Send all (Enter)") && w.0.iter().any(|l| l == "Delete all (Del)"), "{:?}", w.0);
+        assert!(
+            w.0.iter()
+                .any(|l| l.starts_with("The game stopped 3 times, the last ")),
+            "{:?}",
+            w.0
+        );
+        assert!(
+            w.0.iter()
+                .any(|l| l == "Save all to Desktop (Enter)" || l == "Send all (Enter)")
+                && w.0.iter().any(|l| l == "Delete all (Del)"),
+            "{:?}",
+            w.0
+        );
         // Not now: all kept
         act(&mut Some(d), Action::Close);
         assert!(all(&[&a, &b, &c]), "Not now keeps them all");
@@ -1964,57 +2421,140 @@ mod tests {
         let failing = |route: &str, body: String| {
             assert_eq!(route, "crash");
             let mut p = posted.borrow_mut();
-            p.push(["005857", "063000", "120000"].into_iter().find(|r| body.contains(&format!("A panic in 20261028-{r}"))).unwrap_or("?"));
-            assert!(body.contains("note: it stopped as I logged in"), "the note with each");
-            if p.len() == 2 { Err("the report server could not be reached (timed out)".to_string()) } else { Ok(format!("id{}", p.len())) }
+            p.push(
+                ["005857", "063000", "120000"]
+                    .into_iter()
+                    .find(|r| body.contains(&format!("A panic in 20261028-{r}")))
+                    .unwrap_or("?"),
+            );
+            assert!(
+                body.contains("note: it stopped as I logged in"),
+                "the note with each"
+            );
+            if p.len() == 2 {
+                Err("the report server could not be reached (timed out)".to_string())
+            } else {
+                Ok(format!("id{}", p.len()))
+            }
         };
         let mut d = offer_in(&dir).unwrap();
-        let Kind::Crash(files) = d.kind.clone() else { unreachable!() };
+        let Kind::Crash(files) = d.kind.clone() else {
+            unreachable!()
+        };
         let s = send_crashes(&files, "it stopped as I logged in", failing);
-        assert_eq!(*posted.borrow(), ["120000", "063000"], "newest first, stopping at the failure");
-        assert!(!c.exists() && all(&[&b, &a]), "the one sent deleted, the one that failed and the one after it kept");
+        assert_eq!(
+            *posted.borrow(),
+            ["120000", "063000"],
+            "newest first, stopping at the failure"
+        );
+        assert!(
+            !c.exists() && all(&[&b, &a]),
+            "the one sent deleted, the one that failed and the one after it kept"
+        );
         *d.result.lock().unwrap() = Some(s);
         d.poll();
-        assert_eq!(d.kind, Kind::Crash(vec![b.clone(), a.clone()]), "what is left waits for a Send again");
-        assert_eq!((d.stopped.len(), &d.status), (2, &Status::Failed(vec!["id1".into()], "the report server could not be reached (timed out)".into())));
+        assert_eq!(
+            d.kind,
+            Kind::Crash(vec![b.clone(), a.clone()]),
+            "what is left waits for a Send again"
+        );
+        assert_eq!(
+            (d.stopped.len(), &d.status),
+            (
+                2,
+                &Status::Failed(
+                    vec!["id1".into()],
+                    "the report server could not be reached (timed out)".into()
+                )
+            )
+        );
         let mut w = Words::default();
         draw_dialog(&mut d, &vui(), &mut w);
-        assert!(w.0.iter().any(|l| l.starts_with("Sent 1 as id1; 2 not sent: the report server")), "{:?}", w.0);
+        assert!(
+            w.0.iter()
+                .any(|l| l.starts_with("Sent 1 as id1; 2 not sent: the report server")),
+            "{:?}",
+            w.0
+        );
         // Send again: only those, newest first
         posted.borrow_mut().clear();
         let working = |_: &str, body: String| {
             let mut p = posted.borrow_mut();
-            p.push(["005857", "063000", "120000"].into_iter().find(|r| body.contains(&format!("A panic in 20261028-{r}"))).unwrap_or("?"));
+            p.push(
+                ["005857", "063000", "120000"]
+                    .into_iter()
+                    .find(|r| body.contains(&format!("A panic in 20261028-{r}")))
+                    .unwrap_or("?"),
+            );
             Ok(format!("id{}", p.len() + 1))
         };
-        let Kind::Crash(files) = d.kind.clone() else { unreachable!() };
+        let Kind::Crash(files) = d.kind.clone() else {
+            unreachable!()
+        };
         *d.result.lock().unwrap() = Some(send_crashes(&files, "", working));
         d.poll();
         assert_eq!(*posted.borrow(), ["063000", "005857"]);
-        assert_eq!((&d.kind, &d.status), (&Kind::Crash(Vec::new()), &Status::Sent(vec!["id2".into(), "id3".into()])));
-        assert!(!a.exists() && !b.exists() && other.exists(), "all sent and gone; the control kept");
+        assert_eq!(
+            (&d.kind, &d.status),
+            (
+                &Kind::Crash(Vec::new()),
+                &Status::Sent(vec!["id2".into(), "id3".into()])
+            )
+        );
+        assert!(
+            !a.exists() && !b.exists() && other.exists(),
+            "all sent and gone; the control kept"
+        );
         let mut w = Words::default();
         draw_dialog(&mut d, &vui(), &mut w);
-        assert!(w.0.iter().any(|l| l.starts_with("Sent all 2 as id2 and id3.")), "{:?}", w.0);
+        assert!(
+            w.0.iter()
+                .any(|l| l.starts_with("Sent all 2 as id2 and id3.")),
+            "{:?}",
+            w.0
+        );
         // Delete: every one, the planted oldest too
         let (a, b, c) = plant();
         let mut problem = Some(Dialog::new(Kind::Problem));
         act(&mut problem, Action::Delete);
-        assert!(all(&[&a, &b, &c]), "the control: a problem report's dialog deletes nothing");
+        assert!(
+            all(&[&a, &b, &c]),
+            "the control: a problem report's dialog deletes nothing"
+        );
         act(&mut offer_in(&dir), Action::Delete);
-        assert!(!c.exists() && !b.exists(), "the newest and the middle one deleted");
-        assert!(!a.exists(), "the planted control: the oldest, which the offer of one never reached, deleted too");
+        assert!(
+            !c.exists() && !b.exists(),
+            "the newest and the middle one deleted"
+        );
+        assert!(
+            !a.exists(),
+            "the planted control: the oldest, which the offer of one never reached, deleted too"
+        );
         assert!(other.exists(), "the control: no crash report, not deleted");
         assert!(offer_in(&dir).is_none(), "nothing waits: nothing offered");
         // the control: one waiting alone reads and asks as before
         let one = dir.join("crash-20261029-011105.txt");
-        std::fs::write(&one, "EQOA native client crash report\nversion: dev-6504760 (dev)\nwhen: 20261029-011105\n").unwrap();
+        std::fs::write(
+            &one,
+            "EQOA native client crash report\nversion: dev-6504760 (dev)\nwhen: 20261029-011105\n",
+        )
+        .unwrap();
         let mut d = offer_in(&dir).unwrap();
         assert_eq!(d.kind, Kind::Crash(vec![one.clone()]));
         let mut w = Words::default();
         draw_dialog(&mut d, &vui(), &mut w);
-        assert!(w.0.iter().any(|l| l == "Save to Desktop (Enter)" || l == "Send (Enter)") && w.0.iter().any(|l| l == "Delete (Del)") && !w.0.iter().any(|l| l.contains(" times")), "{:?}", w.0);
-        assert_eq!(crash_words(&d.stopped, "dev-6504760", at(1_900_000_000)).1, "It wrote a crash report then: sending it helps it get fixed.");
+        assert!(
+            w.0.iter()
+                .any(|l| l == "Save to Desktop (Enter)" || l == "Send (Enter)")
+                && w.0.iter().any(|l| l == "Delete (Del)")
+                && !w.0.iter().any(|l| l.contains(" times")),
+            "{:?}",
+            w.0
+        );
+        assert_eq!(
+            crash_words(&d.stopped, "dev-6504760", at(1_900_000_000)).1,
+            "It kept a crash report then. Save it locally to share with Enhanced support."
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2055,8 +2595,14 @@ mod tests {
             });
             let _ = tx.send((n, last));
         });
-        assert_eq!(rx.recv_timeout(Duration::from_secs(20)), Ok((20_000, "line 19999".to_string())));
-        assert!(TERMINAL_BEHIND.load(Ordering::Relaxed), "the panic hook keeps off a terminal that reads nothing");
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(20)),
+            Ok((20_000, "line 19999".to_string()))
+        );
+        assert!(
+            TERMINAL_BEHIND.load(Ordering::Relaxed),
+            "the panic hook keeps off a terminal that reads nothing"
+        );
         // let go: the terminal's thread ends and says so
         drop(hold);
         assert_eq!(written.recv_timeout(Duration::from_secs(5)), Ok(()));
@@ -2071,7 +2617,10 @@ mod tests {
                 let _ = tx2.send(i);
             }
         });
-        assert_eq!(rx2.recv_timeout(Duration::from_millis(300)), Err(mpsc::RecvTimeoutError::Timeout));
+        assert_eq!(
+            rx2.recv_timeout(Duration::from_millis(300)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        );
         drop(hold2);
     }
 
@@ -2083,4 +2632,24 @@ mod tests {
         let f = fit(&long, 60);
         assert!(f.len() < 60 && f.ends_with("(cut to fit the report server)\n"));
     }
+}
+
+/// The local report button beneath the target bar.
+pub fn hud_button(vui: &vi::ui::Vui, ui: &mut crate::ui::UiRaster) -> Option<[i32; 4]> {
+    if !crate::report_policy::enabled() {
+        return None;
+    }
+    use vi::ui::wide;
+    let at = [20, 421];
+    let label = wide("F3  Report a bug");
+    let width = vui.string_width(ui, &label) + 28;
+    vui.blit_bar(ui, &label, [1.0; 4], at, 25, 26, width, 3, 1.0, 0, true);
+    Some([at[0], at[1], at[0] + width, at[1] + vui.entry(26).uv1[1]])
+}
+
+pub fn is_open_local() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    return is_open();
+    #[cfg(target_arch = "wasm32")]
+    false
 }

@@ -5,6 +5,60 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
+## 2026-11-03 · Lighter work in the browser
+- In the browser, the game's sums for placing and turning things (characters' bones as they move,
+  collisions, the camera) now work on four numbers at once, as they already do on computers and
+  phones, and take about a third less time. The results are the same to the last bit, so nothing looks
+  or plays any differently.
+- A browser too old for this (Safari before 16.4, so an iPhone or iPad not yet on iOS 16.4, or Firefox
+  before 89) now says so when the page opens, and which browsers run the game.
+
+## 2026-11-03 · Lighter work on Apple silicon Macs and on Android
+- On Macs with Apple's own chip (M1 and later) and on Android phones and tablets, the game's sums for
+  placing and turning things (characters' bones as they move, collisions, the camera) now work on four
+  numbers at once, as they already did on Intel and AMD processors, and take up to a third less time.
+  The results are the same to the last bit, so nothing looks or plays any differently.
+
+## 2026-11-03 · The game on Android
+- The game now runs on Android phones and tablets (Android 8.0 and later) and on Chromebooks:
+  download eqoa-vanilla-android.apk from this page and open it to install it (Android asks you to
+  allow installing apps from your browser or file manager). The first time, it asks for your
+  Frontiers disc image in Android's own file picker, so copy the image to the device first; it keeps
+  it for the next time.
+- The touch screen's controller is there from the start, as in the browser on a phone. A controller
+  (Bluetooth or USB) or a keyboard plays as on a computer, and Back is Escape.
+- Tapping one of the game's text boxes (your account, the server's address, a character's name, a
+  chat line) brings up the device's keyboard, and the game moves into the space above it while you
+  type, so you see what you write.
+- Going to the home screen keeps the game going for a while: come back and you are where you were.
+- The app does not update itself: install the newer APK from this page over the old one, and your
+  settings stay. Not on Android yet: a controller's rumble, and the 2002 art (F9).
+
+## 2026-11-02 · A smaller touch pad, no blank screen while typing, fishing's message
+- Options > Extended > Controller has a new row, Touch Pad Size: the touch screen's controller
+  from 100 (its full size, the largest that fits the screen) down to 50, in steps of 5. Smaller,
+  each half of the pad shrinks toward its own bottom corner, and Select and Start toward the middle,
+  so more of the game shows round it.
+- In the browser on a phone or a tablet, the screen no longer blanks out when the keyboard comes up
+  for a chat line or goes away after it, nor when you turn the device or the page goes full screen.
+- Fishing: the small dark square under the fishing messages ("You cast your line" and the rest) is
+  gone, as it never showed on a PlayStation 2.
+
+## 2026-10-31 · No more problem or crash reports
+- F3 and the HUD's Report a bug button are gone, as is the offer to send a crash report at the next
+  start after the game stopped: the game sends no reports of any kind. In the browser the gate's
+  Report a problem and its link to the reports board are gone too.
+- The game still keeps its log on your computer: eqoa.log in the game's settings folder, the run
+  before as eqoa.prev.log. When the game stops on a fault, the log says why.
+
+## 2026-10-31 · Every branch of your Master Class can be bought
+- Class Mastery: some Master Classes branch into two abilities after the first rank (Spellbinder's
+  Binding Grasp and Mana Flow). Having bought one, the other is no longer refused with "You cannot
+  possess more than one Master Class at a time."
+- On eqoaclassic, once you owned a Master Class, none of its abilities could be bought after the
+  Class Mastery window had been closed and opened again (the same refusal); they can now. Buying a
+  second, different Master Class is still refused.
+
 ## 2026-10-31 · Glowing weapons shine again
 - Many weapons and things in the world give off a light of their own on a PS2, and this client
   had been drawing them only as bright as the light around them. The Sword of Virtue's blade,

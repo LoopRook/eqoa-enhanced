@@ -2,6 +2,17 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-03 ? Upstream sync preview
+
+- Adjust the on-screen controller with Extended ? Controller ? Touch Pad Size.
+- Class Mastery branches follow the live game's rules: ranks on a branch remain
+  part of the same Master Class, and ordinary child abilities stay purchasable.
+- Includes upstream's faster EE math for Apple/Android and supported browsers,
+  Android source-build support, resize fixes and fishing message-box placement.
+- Enhanced keeps F3 / Report a bug, the next-start crash offer, and Save to Desktop.
+  Reports stay on your computer; the ZIP includes the note, screenshot and logs,
+  with known account credentials and the Windows user folder removed.
+
 ## 2026-11-02 · Enhanced 0.4.3
 
 - Fixed: the creature journal forgot NPCs above level 60 (and ones of unknown level) every time you restarted the game, and importing a FrontiersForge journal skipped them. They are now kept.

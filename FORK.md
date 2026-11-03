@@ -27,7 +27,8 @@ The complete file ownership map, exact shared-file budgets and hook table are in
 [docs/FORK-OWNERSHIP.md](docs/FORK-OWNERSHIP.md). Its executable policy is
 [docs/fork-footprint.json](docs/fork-footprint.json). Fork-owned code includes
 map/, questguide/, tracker.rs, groupmark.rs, mapsuggest.rs, statbox.rs and
-fork_ext/ under crates/eqoa/src; the render map module/shader; mods/, launcher
+fork_ext/ (including report_core.rs, report_viewer.rs and report_sync_tests.rs,
+the retained local report/crash core, adapter and regression tests) under crates/eqoa/src; the render map module/shader; mods/, launcher
 scripts, AGENTS.md, the fork README/changelog, design/map-parity/ and docs/.
 
 Existing restored systems still touch hud.rs, play.rs, viewer.rs, settings.rs,
@@ -51,8 +52,9 @@ enhanced-only option IDs use 1000+. Process launch and UDP are native-only. Foll
 docs/COMPANION-LAUNCH.md for the portable manifest contract. Add behavior tests
 with positive and negative controls and update FORK-UPDATE-NOTES.md.
 
-Report submission is disabled by default, including button/F3/API/crash paths.
-Local diagnostics remain usable. EQOA_REPORTS accepts only an explicitly selected
+F3 and the HUD report button open the local Save to Desktop dialog; crash reports
+are offered at the next start. Nothing is uploaded. The retained report core is
+fork-owned at fork_ext/report_core.rs; upstream logfile keeps logging through hooks. EQOA_REPORTS accepts only an explicitly selected
 numeric HTTP loopback fixture; it cannot route reports to upstream. Browser
 fixture selection is documented in the report policy tests. Keep map/community
 suggestions distinct from bug-report uploads.

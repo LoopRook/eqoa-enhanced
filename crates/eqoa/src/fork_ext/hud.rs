@@ -956,7 +956,10 @@ mod tests {
         let mut hud = Hud::new();
         hud.draw(&vui, &mut assets.raster(&mut ui), &HudState::default());
         let default_quads = ui.quads.len();
-        let expected_quads = if crate::report_policy::enabled() { 17 } else { 14 };
+        // The fontless fixture gives the report bar width 28 with two 16px
+        // caps: upstream raster culling correctly drops its -4px middle.
+        // Disabling that cull restores the historical 17/41 counts.
+        let expected_quads = if crate::report_policy::enabled() { 16 } else { 14 };
         assert_eq!(default_quads, expected_quads, "stock default HUD quad count at 1280x720 with no addon");
 
         let full_state = HudState {
@@ -985,7 +988,7 @@ mod tests {
         let mut hud = Hud::new();
         hud.draw(&vui, &mut assets.raster(&mut ui), &full_state);
         let full_quads = ui.quads.len();
-        let expected_full = if crate::report_policy::enabled() { 41 } else { 38 };
+        let expected_full = if crate::report_policy::enabled() { 40 } else { 38 };
         assert_eq!(full_quads, expected_full, "stock populated HUD quad count at 1280x720 with no addon");
 
         set_claims(crate::fork_ext::addons::visibility::ALL_UI_ELEMENTS);

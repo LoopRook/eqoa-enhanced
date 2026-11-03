@@ -83,6 +83,8 @@ section there before changing a ported system (anything under `crates/vi`, `ee`,
 - Port game behaviour from the decomp, line by line. The decomp, eqoa-port's oracle and the 2002
   disc are not on this machine, so oracle tests skip here: say so in the report.
 - What the game counts in frames steps on `frames.rs`'s 30 Hz clock, never once per frame drawn.
+- Android: platform inputs go through android::Event into App::finger/key_input;
+  keep APK signing keys and their folder untracked. Enhanced currently publishes Windows only.
 - Windows: the main thread links an 8 MB stack (`crates/eqoa/build.rs`); the program is a GUI
   subsystem binary.
 - Tests: behaviour tests with a negative control (show the test fails without the fix). A test that
@@ -99,7 +101,8 @@ section there before changing a ported system (anything under `crates/vi`, `ee`,
 - Releases: versioned tags on `enhanced` through `enhanced-release.yml` (`docs/RELEASING.md`);
   upstream's `dev.yml`/`dev` release is not used.
 - Notes: player notes go in `FORK-UPDATE-NOTES.md`; `UPDATE-NOTES.md` stays upstream's.
-- Reports: submission is off by default (`FORK.md`); test against a loopback fixture only.
+- Reports: F3/HUD and crash offers save locally through fork_ext/report_core.rs.
+  No production upload path; historical transport tests use loopback fixtures only.
 
 ## Platform
 

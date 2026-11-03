@@ -21,6 +21,10 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "fork_ext/report_viewer.rs"]
+mod fork_report;
+
 type Error = Box<dyn std::error::Error>;
 
 /// The hour of day: `EQOA_HOUR` if set, else 10:00 (InitTimeOfDay's) moving
@@ -434,6 +438,7 @@ pub fn shot_with(
             }
             touch.window = play.as_ref().is_some_and(|p| p.window_up() || p.map.open || p.map.search.open);
             touch.dpad = play.as_mut().is_some_and(|p| p.quick_dpad());
+            touch.scale = crate::settings::touch_scale();
             for (_, id, phase, at) in touch_script.iter().filter(|e| e.0 == t) {
                 touch.touch(*id, *phase, *at, Instant::now(), (w, h));
             }
@@ -1303,69 +1308,6 @@ fn write_png(path: &str, w: u32, h: u32, rgba: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 
-/// `EQOA_REPORT_TEST=<note>@<ms>` (natively): the report's dialog opened
-/// then (or the crash report it offers, already open), the note typed and
-/// sent two seconds after, the picture taken between (`EQOA_REPORT_NOPIC`:
-/// the picture turned off before it is sent, Tab to its row and Space, as a
-/// player would); `EQOA_CRASH_TEST=<ms>`: a panic then, as a bug would (a
-/// crash report for the next start). `now`: ms on the client's clock.
-#[cfg(not(target_arch = "wasm32"))]
-fn report_test(now: i64) {
-    use std::sync::atomic::{AtomicU8, Ordering};
-    static STEP: AtomicU8 = AtomicU8::new(0);
-    if let Some(at) = std::env::var("EQOA_CRASH_TEST").ok().and_then(|v| v.parse::<i64>().ok())
-        && now >= at
-    {
-        panic!("EQOA_CRASH_TEST: the client stopped on purpose at {now} ms");
-    }
-    let Ok(spec) = std::env::var("EQOA_REPORT_TEST") else { return };
-    let Some((note, at)) = spec.rsplit_once('@') else { return };
-    let Ok(at) = at.parse::<i64>() else { return };
-    match STEP.load(Ordering::Relaxed) {
-        0 if now >= at => {
-            crate::report::open();
-            STEP.store(1, Ordering::Relaxed);
-        }
-        1 if now >= at + 2000 => {
-            crate::report::key(crate::report::Key::Text(note.to_string()));
-            if std::env::var_os("EQOA_REPORT_NOPIC").is_some() {
-                for k in [crate::report::Key::Tab, crate::report::Key::Tab, crate::report::Key::Text(" ".into())] {
-                    crate::report::key(k);
-                }
-            }
-            crate::report::key(crate::report::Key::Enter);
-            STEP.store(2, Ordering::Relaxed);
-        }
-        _ => {}
-    }
-}
-
-/// Whether the report's dialog is open (natively; a page's is its own).
-fn report_open() -> bool {
-    #[cfg(not(target_arch = "wasm32"))]
-    return crate::report::is_open();
-    #[cfg(target_arch = "wasm32")]
-    false
-}
-
-/// The report's picture of this frame, if its dialog wants one: the frame
-/// read back before it is presented (where the surface lets it be copied),
-/// as RGBA.
-#[cfg(not(target_arch = "wasm32"))]
-fn report_shot(g: &Gfx, frame: Option<&wgpu::SurfaceTexture>) {
-    if !crate::report::wants_shot() {
-        return;
-    }
-    let Some(t) = frame.map(|f| &f.texture).or(g.offscreen.as_ref()).filter(|t| t.usage().contains(wgpu::TextureUsages::COPY_SRC)) else { return };
-    let mut rgba = read_back(&g.device, &g.queue, t);
-    if matches!(t.format(), wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb) {
-        for px in rgba.as_chunks_mut::<4>().0 {
-            px.swap(0, 2);
-        }
-    }
-    crate::report::set_shot(t.width(), t.height(), &rgba);
-}
-
 /// The corpse, merchant and trade windows' keys (modes 1, 10, 15, 16) on
 /// the keyboard, as the game's keys and pad buttons: the arrows the d-pad,
 /// Enter or E ✕, Escape or Backspace △, Q □ (a trade's accept, as the
@@ -1397,8 +1339,8 @@ pub(crate) fn npcw_key_of(key: &Key, mode: i32) -> Option<i32> {
 /// A key as the game's keyboard gives it (`VIKeyboard::Read`): 13 Enter,
 /// 27 Escape, 8 Backspace, 9 Tab, 17-20 the cursor keys (left, right, up,
 /// down), 21-24 Page Up, Page Down, End, Home; a character as itself.
-fn pregame_key(event: &KeyEvent) -> Option<i32> {
-    Some(match &event.logical_key {
+fn pregame_key(key: &Key) -> Option<i32> {
+    Some(match key {
         Key::Named(NamedKey::Enter) => 13,
         Key::Named(NamedKey::Escape) => 27,
         Key::Named(NamedKey::Backspace) => 8,
@@ -1429,12 +1371,12 @@ fn pregame_key(event: &KeyEvent) -> Option<i32> {
 fn device_keyboard() -> bool {
     #[cfg(target_arch = "wasm32")]
     return crate::web::device_keyboard();
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(target_os = "android")]
+    return crate::android::device_keyboard();
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
     false
 }
 
-/// Whether the touch screen's pad shows from the start: in a page on a
-/// touch-first device (`window.eqoaTouchFirst`), or with `EQOA_TOUCH=1`.
 /// Whether a key pressed before the world is the art's (`era`): F9, or the
 /// key its row was moved onto on the Controls page (`binds`); F9 moved off
 /// is not.
@@ -1455,12 +1397,15 @@ fn ranges_from_env(var: &str) -> Vec<(i64, i64)> {
         .unwrap_or_default()
 }
 
+/// Whether the touch screen's pad shows from the start: in a page on a
+/// touch-first device (`window.eqoaTouchFirst`), on Android, or with
+/// `EQOA_TOUCH=1`.
 fn touch_first() -> bool {
     #[cfg(target_arch = "wasm32")]
     if crate::web::touch_first() {
         return true;
     }
-    std::env::var("EQOA_TOUCH").is_ok_and(|v| v == "1")
+    cfg!(target_os = "android") || std::env::var("EQOA_TOUCH").is_ok_and(|v| v == "1")
 }
 
 /// A key as the keyboard's dispatch takes it (`App::keyboard`): what it reads
@@ -1576,6 +1521,29 @@ struct Gfx {
     /// The present modes the surface offers (none offscreen or in a page),
     /// for VSync to pick from (`present_mode`).
     present_modes: Vec<wgpu::PresentMode>,
+    /// The window's size changed (`resize`): `config` has the new one, and
+    /// the surface and `depth` take it as the next frame drawn begins
+    /// (`apply_size`).
+    resized: bool,
+    /// The window's whole size while the frame is drawn in its top, less
+    /// than the window (Android: above the device's keyboard,
+    /// `fit_keyboard`); None while the frame is the window's size.
+    whole: Option<(u32, u32)>,
+}
+
+/// Android: the activity's side of the window (`App::android`).
+#[cfg(target_os = "android")]
+#[derive(Default)]
+struct AndroidWindow {
+    /// the instance the window's surface was made on, to make it again
+    /// after the background (`App::android_surface`)
+    instance: Option<wgpu::Instance>,
+    /// the disc was asked for (the activity's picker)
+    disc_asked: bool,
+    /// a disc that is not Frontiers, waiting for the player's answer
+    disc_asking: Option<String>,
+    /// while the activity is hidden, the next frame's time (`App::turn`)
+    next_tick: Option<Instant>,
 }
 
 /// The present mode for VSync (`settings::vsync`) out of what the surface
@@ -1607,6 +1575,75 @@ fn title(name: Option<&str>) -> String {
 }
 
 impl Gfx {
+    /// The window's new size (`Resized`), for the next frame drawn to take
+    /// (`apply_size`) rather than at once: configuring the surface sizes a
+    /// page's canvas, which clears it, and a browser says the canvas was
+    /// resized after the animation frame's drawing and before it paints, so
+    /// a canvas configured there was painted empty until a frame was drawn
+    /// on it, a frame or more later (a phone's keyboard, coming up for a
+    /// chat line and going down after it, resizes the page a step a frame
+    /// as it slides: the screen blanked out each time, a player's report of
+    /// 2026-11-02, "whenever I type a msg it blanks out the screen
+    /// briefly"). Until then the canvas shows the last frame drawn,
+    /// stretched to its new size. Natively the same: one configure a frame
+    /// drawn, however many sizes the system sent since.
+    fn resize(&mut self, width: u32, height: u32) {
+        self.config.width = width;
+        self.config.height = height;
+        self.whole = None;
+        self.renderer.scale.set_into_top(false);
+        self.resized = true;
+        self.window.request_redraw();
+    }
+
+    /// The surface's configuration: the frame's, at the window's whole size
+    /// (`whole`: the frame drawn in its top).
+    fn surface_config(&self) -> wgpu::SurfaceConfiguration {
+        let mut c = self.config.clone();
+        if let Some((w, h)) = self.whole {
+            c.width = w;
+            c.height = h;
+        }
+        c
+    }
+
+    /// Android: the frame drawn above the device's keyboard while it is up
+    /// (`keyboard` pixels of the window's bottom, `android::keyboard_height`),
+    /// as a page's is when its browser shrinks it for the keyboard: the
+    /// frame the window's width and the height above it (never less than a
+    /// quarter of the window), laid into the window's top (`Scale::set_into_top`),
+    /// the rest black under the keyboard.
+    #[cfg(target_os = "android")]
+    fn fit_keyboard(&mut self, keyboard: u32) {
+        if self.surface.is_none() {
+            return;
+        }
+        let s = self.window.inner_size();
+        let (w, h) = (s.width.max(1), s.height.max(1));
+        let fh = h.saturating_sub(keyboard).max(h / 4).max(1);
+        let whole = (fh != h).then_some((w, h));
+        if (self.config.width, self.config.height) != (w, fh) || self.whole != whole {
+            self.config.width = w;
+            self.config.height = fh;
+            self.whole = whole;
+            self.renderer.scale.set_into_top(whole.is_some());
+            self.resized = true;
+            crate::say(&format!("android: the frame {w}x{fh}{}", if whole.is_some() { format!(", above the device's keyboard ({keyboard} high)") } else { String::new() }));
+        }
+    }
+
+    /// A frame about to be drawn: the surface and the depth buffer at the
+    /// window's size, if it changed since the last (`resize`).
+    fn apply_size(&mut self) {
+        if !std::mem::take(&mut self.resized) {
+            return;
+        }
+        if let Some(surface) = &self.surface {
+            surface.configure(&self.device, &self.surface_config());
+        }
+        self.depth = render::depth_view(&self.device, self.config.width, self.config.height);
+    }
+
     /// VSync on the surface as the Extended page has it now: the present mode
     /// picked again and the surface configured when the row moved (a surface
     /// a page or `EQOA_OFFSCREEN` made is left as it is).
@@ -1619,7 +1656,7 @@ impl Gfx {
         let want = present_mode(&self.present_modes, vsync);
         if self.config.present_mode != want {
             self.config.present_mode = want;
-            surface.configure(&self.device, &self.config);
+            surface.configure(&self.device, &self.surface_config());
             crate::settings::set_display_refresh(self.window.current_monitor().and_then(|m| m.refresh_rate_millihertz()));
             eprintln!("present mode {want:?} (vsync {})", if vsync { "on" } else { "off" });
         }
@@ -1659,7 +1696,7 @@ impl Gfx {
         };
         self.queue.submit(std::iter::empty());
         if let Some(surface) = stale {
-            surface.configure(&self.device, &self.config);
+            surface.configure(&self.device, &self.surface_config());
         }
         Err(stale.is_none())
     }
@@ -1677,20 +1714,22 @@ fn hidden_gap() -> Option<Instant> {
     (!page_hidden()).then(|| Instant::now() + HIDDEN_GAP)
 }
 
-/// Whether the window is a page that is hidden (`web::page_hidden`): its
+/// Whether the window is a page that is hidden (`web::page_hidden`), or an
+/// Android activity paused or without its surface (`android::hidden`): its
 /// frames are drawn on nothing, as a covered window's.
 fn page_hidden() -> bool {
     #[cfg(target_arch = "wasm32")]
     return crate::web::page_hidden();
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(target_os = "android")]
+    return crate::android::hidden();
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
     false
 }
 
 /// Each frame's CPU time in the world by phase, summed over five seconds:
 /// printed under `EQOA_PERF=1` (in a page, `?perf`; `EQOA_QUIT=<s>` ends the
-/// run after that many seconds), and always kept for a report, with the
-/// time from one frame to the next (`describe`: a "stuck at 30 fps" report,
-/// F3 20261027-004220, could not say whether the CPU or the GPU was short).
+/// run after that many seconds), and this frame's phases for a stall's line
+/// (`stall`).
 struct Perf {
     /// printed every five seconds
     print: bool,
@@ -1705,78 +1744,9 @@ struct Perf {
     frame: [f64; Perf::NAMES.len()],
     /// the last frame's models and draw calls
     drawn: (u32, u32),
-    /// the frames the Frame Rate skipped since `since` (a page's animation
-    /// frames not drawn)
-    skipped: u32,
-    /// from each frame's start to the next's since `since`, ms
-    gaps: Vec<f32>,
     /// the last frame's start; none after a pause (the pregame, a hidden
     /// window), and the next frame then starts the five seconds again
     last_start: Option<Instant>,
-    /// the last five seconds whole
-    last: Option<PerfSpan>,
-}
-
-/// A span of frames as `Perf` keeps it.
-#[derive(Clone, Debug, Default, PartialEq)]
-struct PerfSpan {
-    /// its length, s
-    span: f64,
-    frames: u32,
-    skipped: u32,
-    /// seconds per phase
-    cpu: [f64; Perf::NAMES.len()],
-    /// the longest frame, s
-    worst: f64,
-    drawn: (u32, u32),
-    /// from one frame's start to the next's, ms, sorted
-    gaps: Vec<f32>,
-    /// the time between frames asked, ms: the Frame Rate's, else the
-    /// display's refresh
-    asked: f64,
-}
-
-impl PerfSpan {
-    /// The line a report carries: the frames a second (and those the Frame
-    /// Rate skipped), the time from one to the next, the share later than a
-    /// frame and a half of the time asked (a refresh missed), and the CPU a
-    /// frame by phase. A frame's CPU over the time asked says the CPU is
-    /// short; under it with frames late, the GPU (or the browser) held them.
-    fn line(&self) -> String {
-        if self.frames == 0 {
-            return "frames in the world: none drawn yet".into();
-        }
-        let n = self.frames as f64;
-        let cpu: f64 = self.cpu.iter().sum();
-        let phases: Vec<String> = Perf::NAMES.iter().zip(&self.cpu).filter(|(_, t)| **t * 1e3 / n >= 0.005).map(|(name, t)| format!("{name} {:.2}", t * 1e3 / n)).collect();
-        let skipped = if self.skipped > 0 { format!(" ({:.1} a second skipped by the Frame Rate)", self.skipped as f64 / self.span) } else { String::new() };
-        let gaps = match self.gaps.len() {
-            0 => String::new(),
-            len => {
-                let q = |p: f64| self.gaps[((len - 1) as f64 * p).round() as usize];
-                let late = self.gaps.iter().filter(|&&g| g as f64 > self.asked * 1.5).count();
-                format!(
-                    "; from one to the next {:.1} ms (median), {:.1} (90%), {:.1} (99%), {:.1} (longest), {:.0}% later than 1.5 times the {:.1} ms asked",
-                    q(0.5),
-                    q(0.9),
-                    q(0.99),
-                    self.gaps[len - 1],
-                    100.0 * late as f64 / len as f64,
-                    self.asked
-                )
-            }
-        };
-        format!(
-            "frames in the world, the last {:.1} s: {:.1} drawn a second{skipped}, {} models in {} draws{gaps}; the cpu {:.2} ms a frame (worst {:.1}): {}",
-            self.span,
-            n / self.span,
-            self.drawn.0,
-            self.drawn.1,
-            cpu * 1e3 / n,
-            self.worst * 1e3,
-            phases.join(", ")
-        )
-    }
 }
 
 impl Perf {
@@ -1796,13 +1766,12 @@ impl Perf {
 
     fn new(print: bool) -> Perf {
         let now = Instant::now();
-        Perf { print, since: now, mark: now, frames: 0, worst: 0.0, total: [0.0; Perf::NAMES.len()], frame: [0.0; Perf::NAMES.len()], drawn: (0, 0), skipped: 0, gaps: Vec::new(), last_start: None, last: None }
+        Perf { print, since: now, mark: now, frames: 0, worst: 0.0, total: [0.0; Perf::NAMES.len()], frame: [0.0; Perf::NAMES.len()], drawn: (0, 0), last_start: None }
     }
 
-    /// Five seconds begun again at `now` (what was kept of the last whole
-    /// five stays).
+    /// Five seconds begun again at `now`.
     fn restart(&mut self, now: Instant) {
-        *self = Perf { since: now, mark: now, last_start: self.last_start, last: self.last.take(), ..Perf::new(self.print) };
+        *self = Perf { since: now, mark: now, last_start: self.last_start, ..Perf::new(self.print) };
     }
 
     fn begin(&mut self) {
@@ -1820,11 +1789,6 @@ impl Perf {
         self.last_start = None;
     }
 
-    /// A frame the Frame Rate skipped.
-    fn skip(&mut self) {
-        self.skipped += 1;
-    }
-
     /// The time since the last mark goes to phase `i`.
     fn mark(&mut self, i: usize) {
         let now = Instant::now();
@@ -1839,28 +1803,14 @@ impl Perf {
         Perf::NAMES.iter().copied().zip(self.frame).collect()
     }
 
-    /// The span so far.
-    fn span(&self) -> PerfSpan {
-        let mut gaps = self.gaps.clone();
-        gaps.sort_unstable_by(f32::total_cmp);
-        let asked = match crate::settings::frame_rate().gap_ms() {
-            0.0 => crate::settings::display_gap(),
-            g => g,
-        };
-        PerfSpan { span: self.since.elapsed().as_secs_f64(), frames: self.frames, skipped: self.skipped, cpu: self.total, worst: self.worst, drawn: self.drawn, gaps, asked }
-    }
-
     fn end(&mut self, frame_start: Instant) {
         self.frames += 1;
         self.worst = self.worst.max(frame_start.elapsed().as_secs_f64());
-        if let Some(prev) = self.last_start.replace(frame_start) {
-            self.gaps.push(frame_start.duration_since(prev).as_secs_f32() * 1000.0);
-        }
+        self.last_start = Some(frame_start);
         let span = self.since.elapsed().as_secs_f64();
         if span < 5.0 {
             return;
         }
-        let s = self.span();
         if self.print {
             let n = self.frames as f64;
             let cpu: f64 = self.total.iter().sum();
@@ -1880,13 +1830,7 @@ impl Perf {
                 phases.join(", ")
             ));
         }
-        self.last = Some(s);
         self.restart(Instant::now());
-    }
-
-    /// The report's line: the last five seconds whole, else those so far.
-    fn describe(&self) -> String {
-        self.last.clone().unwrap_or_else(|| self.span()).line()
     }
 }
 
@@ -1965,9 +1909,6 @@ struct App {
     /// Frames a second or more apart, and where the time went (`stall`).
     stall: crate::stall::Watch,
     pad_down: u16,
-    /// the sticks `UpdateControls` got last frame: the pad's, the keys', the
-    /// mouse's and the touch screen's (for a report)
-    sticks_used: [f32; 4],
     /// The mouse in play (`mouse.rs`), and the last frame's view (what a
     /// click picks through).
     mouse: crate::mouse::Mouse,
@@ -2032,6 +1973,9 @@ struct App {
     /// The window's size and place on the desktop, kept between runs
     /// (`winplace`).
     winplace: crate::winplace::Keeper,
+    /// Android: the activity's side of the window (`android`).
+    #[cfg(target_os = "android")]
+    android: AndroidWindow,
     /// The pregame's keys down (the game's codes), let go of when the window
     /// loses the keys (`let_go_keys`).
     host_keys: Vec<i32>,
@@ -2050,7 +1994,7 @@ struct App {
 
 /// Whose a finger is, from where it came down (`App::finger`): the touch
 /// screen's pad's (in the world and on the game's screens before it), the
-/// pointer's (over the report's dialog, on the update's question), or the
+/// pointer's (on the update's question), or the
 /// update's question's list's, which it drags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Finger {
@@ -2087,6 +2031,16 @@ pub fn run_with_gfx(lib: Library, source: Source, play: Option<crate::play::Play
 }
 
 fn run_app(lib: Library, source: Source, play: Option<crate::play::Play>, pending: Option<PendingGfx>, host: Option<crate::pregame::host::Host>) -> Result<(), Error> {
+    // Android: the loop the activity's app runs (`android`), woken when the
+    // activity hands something over
+    #[cfg(target_os = "android")]
+    let event_loop = {
+        use winit::platform::android::EventLoopBuilderExtAndroid;
+        let el = EventLoop::builder().with_android_app(crate::android::app()).build()?;
+        crate::android::set_waker(el.create_proxy());
+        el
+    };
+    #[cfg(not(target_os = "android"))]
     let event_loop = EventLoop::new()?;
     let display = event_loop.owned_display_handle();
     // what the library shows: a run begun in the other art turns it at the
@@ -2139,7 +2093,6 @@ fn run_app(lib: Library, source: Source, play: Option<crate::play::Play>, pendin
         arrival: Default::default(),
         stall: Default::default(),
         pad_down: 0,
-        sticks_used: [0.0; 4],
         mouse: crate::mouse::Mouse::default(),
         last_view: None,
         touch: crate::touch::TouchPad::new(touch_first()),
@@ -2178,6 +2131,8 @@ fn run_app(lib: Library, source: Source, play: Option<crate::play::Play>, pendin
         art_drawn,
         art_chosen: crate::settings::art(),
         winplace: Default::default(),
+        #[cfg(target_os = "android")]
+        android: Default::default(),
     };
     #[cfg(target_arch = "wasm32")]
     {
@@ -2786,7 +2741,7 @@ impl App {
     /// ends itself on Escape.
     fn grab_pointer(&mut self, frame: bool) {
         let dead = self.play.as_ref().is_some_and(|p| p.is_dead());
-        let free = self.walker.is_some() && !dead && self.play.as_ref().is_none_or(|p| p.look_free() || p.aiming()) && !report_open() && !crate::update::offer_shown();
+        let free = self.walker.is_some() && !dead && self.play.as_ref().is_none_or(|p| p.look_free() || p.aiming()) && !crate::update::offer_shown();
         let Some(g) = &self.gfx else { return };
         #[cfg(target_arch = "wasm32")]
         if frame && self.mouse.lock_seen(crate::web::pointer_locked(), Instant::now()) {
@@ -2807,13 +2762,15 @@ impl App {
     /// window pixels `at`, to whose it is from where it came down: the touch
     /// screen's pad's, in the world and on the game's screens before it (a
     /// tap off its buttons there is a click for the screen, `host_frame`);
-    /// over the report's dialog and on the update's question, the pointer's,
+    /// on the update's question, the pointer's,
     /// as the mouse's is there: a tap is a click where it came down (`tap`),
     /// and a finger put down on the question's list drags it, as a press
     /// there does.
     fn finger(&mut self, id: u64, phase: crate::touch::Phase, at: [f32; 2], size: (u32, u32)) {
         use crate::touch::Phase;
         let p = render::ui::frame_from_window(size, at);
+        #[cfg(not(target_arch = "wasm32"))]
+        if crate::report::is_open() { crate::report::click(p); return; }
         let whose = match phase {
             Phase::Started => {
                 let w = self.finger_on(p);
@@ -2832,6 +2789,8 @@ impl App {
         }
         match whose {
             Finger::Pad => {
+                // at the size the options give it now (Touch Pad Size)
+                self.touch.scale = crate::settings::touch_scale();
                 self.touch.touch(id, phase, at, Instant::now(), size);
                 if let Some(p) = self.play.as_mut() {
                     p.keyboard = false;
@@ -2864,11 +2823,9 @@ impl App {
     /// Whose a finger put down at frame point `p` is now (`Finger`): none's
     /// in the viewer, which has neither a world nor the game's screens.
     fn finger_on(&self, p: [f32; 2]) -> Option<Finger> {
+        if crate::report::is_open_local() { return Some(Finger::Pointer); }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if crate::report::is_open() {
-                return Some(Finger::Pointer);
-            }
             match crate::update::offer_part(p) {
                 Some(crate::update::OfferPart::List) => return Some(Finger::OfferList),
                 Some(crate::update::OfferPart::Window) => return Some(Finger::Pointer),
@@ -2881,17 +2838,14 @@ impl App {
 
     /// A finger's tap where the pointer is taken, at window pixels `at`
     /// (where it came down): the click the mouse's would be there, to the
-    /// first that takes it, in the mouse's order: the report's dialog (every
-    /// click is its), the update's question (its choices), the game's
-    /// screens before the world.
+    /// first that takes it, in the mouse's order: the update's question (its
+    /// choices), the game's screens before the world.
     fn tap(&mut self, at: [f32; 2], size: (u32, u32)) {
         let p = render::ui::frame_from_window(size, at);
         #[cfg(not(target_arch = "wasm32"))]
+        if crate::report::is_open() { crate::report::click(p); return; }
+        #[cfg(not(target_arch = "wasm32"))]
         {
-            if crate::report::is_open() {
-                crate::report::click(p);
-                return;
-            }
             if crate::update::offer_shown()
                 && let Some(cues) = crate::update::offer_click(p, self.clock.elapsed().as_millis() as i64)
             {
@@ -2913,6 +2867,8 @@ impl App {
         if on != std::mem::replace(&mut self.typing, on) {
             #[cfg(target_arch = "wasm32")]
             crate::web::want_text(on);
+            #[cfg(target_os = "android")]
+            crate::android::want_text(on);
         }
     }
 
@@ -2978,105 +2934,6 @@ impl App {
         }
     }
 
-    /// What a report says of the client (web/report.js's in a page, natively
-    /// `report`'s): the frames, the surface, the files in the library and
-    /// play's own.
-    fn report_state(&self) -> String {
-        use std::fmt::Write;
-        let mut o = String::new();
-        let _ = writeln!(o, "frames {}, clock {:.1} s", FRAMES.load(std::sync::atomic::Ordering::Relaxed), self.clock.elapsed().as_secs_f64());
-        // how fast the last seconds in the world went, and the CPU's share
-        if let Some(p) = &self.perf {
-            let _ = writeln!(o, "{}", p.describe());
-        }
-        // the frames a second or more after the last, and the disc's reads
-        // (`stall`)
-        let _ = writeln!(o, "{}", self.stall.describe());
-        let _ = writeln!(o, "{}", crate::stall::disc::describe());
-        if let Some(g) = &self.gfx {
-            let _ = writeln!(o, "surface {}x{} {:?}, {}", g.config.width, g.config.height, g.config.format, if g.window.fullscreen().is_some() { "full screen" } else { "a window" });
-        }
-        // in front or not, and how fast it drew in its last stretch in the
-        // back (`arrival`: a multibox's window in the back drawing slowly)
-        let _ = writeln!(o, "{}", self.arrival.describe(Instant::now()));
-        let _ = writeln!(o, "files: {}", self.lib.files.iter().map(|f| f.0.as_str()).collect::<Vec<_>>().join(", "));
-        let _ = writeln!(o, "options, extended: {}", crate::settings::describe());
-        let _ = writeln!(o, "keys and buttons: {}", crate::settings::with_binds(|b| b.describe()));
-        let _ = writeln!(o, "the server's patch: {}", crate::servers::report_line(self.booted.as_ref().and_then(|s| s.server.as_deref())));
-        // the memory: the process's, the machine's and the graphics device's,
-        // and the run's every 10 minutes (`mem`)
-        let _ = writeln!(o, "{}", crate::mem::describe());
-        // the game's link through the relay (a page's): quiet, or gone
-        #[cfg(target_arch = "wasm32")]
-        let _ = writeln!(o, "{}", crate::web::relay::describe());
-        // the sound: what plays, the ambient track and the terrain profile
-        // it was chosen by, and the two classes' volumes (Fx, Music)
-        if let Some(s) = &self.sound {
-            let _ = writeln!(o, "sound: {}", s.describe());
-            // where it plays, and what the system offers (Output Device)
-            #[cfg(not(target_arch = "wasm32"))]
-            let _ = writeln!(o, "audio: {}", s.audio().report_line());
-        }
-        // the controls: a pad's sticks as they came (before the host's dead
-        // zone), as the game reads them and with the keys, the mouse and the
-        // touch screen's merged in (what `UpdateControls` got), the camera's
-        // mode; each pad as the browser gives it; what else is held
-        let mode = self.walker.as_ref().map_or(-1, |w| w.cam.camera_mode);
-        let _ = writeln!(
-            o,
-            "sticks rx ry lx ly: pad {:.3?} (dead zone {}), the game's {:.4?}, with the keys, mouse and touch {:.4?}; camera mode {mode}",
-            self.pads.raw,
-            self.pads.dead_zone,
-            self.console.sticks(),
-            self.sticks_used
-        );
-        #[cfg(target_arch = "wasm32")]
-        for d in &self.pads.described {
-            let _ = writeln!(o, "  {d}");
-        }
-        let mut keys: Vec<&str> = self.held.iter().map(String::as_str).collect();
-        keys.sort_unstable();
-        let _ = writeln!(o, "keys held [{}]; mouse {}; touch pad {}", keys.join(", "), self.mouse.describe(), if self.touch.used { "in use" } else { "unused" });
-        // the body and the camera, for a report of either moving on its own
-        if let Some(w) = &self.walker {
-            let (p, c) = (&w.cam.walk.phys, &w.cam.cur);
-            let anim = w.sprite.as_ref().map(|s| [s.cur[0].anim, s.cur[1].anim]);
-            let v = p.velocity;
-            let _ = writeln!(
-                o,
-                "body: heading {:.4} (target {:.4}), velocity [{:.3}, {:.3}, {:.3}], flags {:#x}, loco {}, anim {anim:?}; camera: orbit {:.4}, pitch {:.4}, dist {:.2}, flags {:#x}",
-                p.angles.x.0,
-                p.target_heading.0,
-                v.x.0,
-                v.y.0,
-                v.z.0,
-                p.flags,
-                p.loco_state,
-                c.orbit.x.0,
-                c.orbit.y.0,
-                c.dist.0,
-                c.flags
-            );
-            let _ = writeln!(o, "body's last changes (back from now: locomotion, the layers' animations, speed): {}", w.describe_changes());
-            let cam = &w.cam;
-            let _ = writeln!(o, "camera: distance {:.2} of {:.2} (chosen {:.2}), pitch {:.3} (default {:.3})", cam.cur.dist.0, cam.max_orbit_distance.0, w.reach.chosen(cam).0, cam.cur.orbit.y.0, cam.def_orbit_pitch.0);
-        }
-        if let Some(e) = &self.entering {
-            let _ = writeln!(o, "entering {} at {:?}", e.0, e.1.pos);
-        }
-        // the hour the lights and the effect volumes take, and the volumes
-        let _ = writeln!(o, "hour {:.2}{}; {}", game_hour(self.play.as_ref(), self.clock), if self.play.as_ref().is_some_and(|p| p.session.clock_b.ready) { " (the server's)" } else { "" }, self.fx.as_ref().map_or("effect volumes off".into(), |f| f.describe()));
-        // the atmosphere as it is (two windows' reports compared: the same
-        // weather sent should be the same weather shown)
-        if let Some(w) = &self.weather {
-            let _ = writeln!(o, "{}", w.describe());
-        }
-        if let (Some(p), Some(w)) = (&self.play, &self.walker) {
-            o.push_str(&p.report(w.cam.walk.phys.position.to_array()));
-        }
-        o
-    }
-
     /// The renderer on a configured surface (or none: an offscreen target of
     /// the configuration's size), then the scene. `ps2_sums`: the adapter can
     /// add up the ground fog's sums, so the options' Ground Fog at PS2 blends
@@ -3108,7 +2965,7 @@ impl App {
         self.gfx = Some(Gfx {
             #[cfg(not(target_arch = "wasm32"))]
             forge_runtime,
-            window, surface, offscreen, in_flight: None, device, queue, config, depth, renderer, models: Vec::new(), title: "EQOA".into(), present_modes: Vec::new() });
+            window, surface, offscreen, in_flight: None, device, queue, config, depth, renderer, models: Vec::new(), title: "EQOA".into(), present_modes: Vec::new(), resized: false, whole: None });
         // before the world there is nothing to load: the pregame draws
         if self.host.is_some() {
             if let Some(g) = &self.gfx {
@@ -3169,6 +3026,7 @@ impl App {
         // mouse's); its drags scroll nothing (no screen before the world
         // takes the wheel)
         self.touch.window = true;
+        self.touch.scale = crate::settings::touch_scale();
         let taps = self.touch.take_clicks();
         let _ = self.touch.take_look();
         if let (Some(h), Some(g)) = (self.host.as_mut(), self.gfx.as_ref()) {
@@ -3194,15 +3052,12 @@ impl App {
         {
             crate::touch::draw_pad(ui, &g.device, &g.queue, &mut self.touch, size, true, host.ui_parts());
         }
-        // the update's question, then the report's dialog, over the game's
-        // screens (`update`, `report`)
-        #[cfg(not(target_arch = "wasm32"))]
-        report_test(now);
+        // the update's question over the game's screens (`update`)
         #[cfg(not(target_arch = "wasm32"))]
         if let (Some((vui, assets)), Some(ui)) = (host.ui_parts(), g.renderer.ui.as_mut()) {
             let mut r = assets.raster(ui);
             r.ui.anchor = render::ui::Anchor::Middle;
-            let quiet = host.pre.quiet() && !crate::report::is_open();
+            let quiet = host.pre.quiet() && !crate::report::is_open_local();
             crate::update::offer_frame(crate::update::Moment { quiet, plain: quiet, world: false, now });
             crate::update::offer_draw(vui, &mut r, now);
             crate::report::draw(vui, &mut r);
@@ -3263,7 +3118,7 @@ impl App {
             crate::fork_ext::addons::host::Snapshot::default(), None);
         g.queue.submit([enc.finish()]);
         #[cfg(not(target_arch = "wasm32"))]
-        report_shot(g, frame.as_ref());
+        fork_report::shot(g, frame.as_ref());
         shoot(&mut self.shots, g, now, &host.pre.describe());
         match frame {
             Some(f) => g.queue.present(f),
@@ -3271,10 +3126,6 @@ impl App {
                 let _ = g.device.poll(wgpu::PollType::wait_indefinitely());
             }
         }
-        // The page's picture of this frame, if it asked, and the report's
-        // state of the client (`report`): which of the game's screens.
-        crate::report::frame_drawn();
-        crate::report::note_state(|| format!("pregame: {}\nsurface {}x{} {:?}\n{}\noptions, extended: {}\nkeys and buttons: {}\nthe server's patch: {}\n{}", host.pre.describe(), size.0, size.1, g.config.format, self.arrival.describe(Instant::now()), crate::settings::describe(), crate::settings::with_binds(|b| b.describe()), crate::servers::report_line(host.pre.shared.server.as_deref()), crate::mem::describe()));
         match done {
             crate::pregame::host::Done::Stay => {}
             crate::pregame::host::Done::Quit => el.exit(),
@@ -4271,13 +4122,26 @@ impl ApplicationHandler for App {
         // macOS: the Dock's picture (`icon`), winit setting none
         #[cfg(target_os = "macos")]
         crate::icon::dock_now();
+        // Android: back from the background, the window's surface made again
+        #[cfg(target_os = "android")]
+        if self.gfx.is_some() {
+            self.android_surface();
+            return;
+        }
         if self.gfx.is_some() {
             return;
+        }
+        // Android, with no disc image at hand: the activity's picker, over
+        // the window, whose frames wait for it (`android_disc`)
+        #[cfg(target_os = "android")]
+        if self.host.is_some() && crate::discs::unsettled() && !self.android.disc_asked {
+            self.android.disc_asked = true;
+            crate::android::pick_disc(crate::discs::note().as_deref());
         }
         // natively, the game from its boot with no disc image at hand: the
         // player picks it before the window opens (`discs::settle`), and its
         // CLIENT and SUPPORT start coming off it
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
         if self.host.is_some() && crate::discs::unsettled() {
             match crate::discs::settle() {
                 Ok(iso) => {
@@ -4318,8 +4182,6 @@ impl ApplicationHandler for App {
             let adapter = pollster::block_on(instance.request_adapter(&Default::default())).expect("adapter");
             let info = adapter.get_info();
             eprintln!("offscreen {w}x{h} on {:?}", info.name);
-            #[cfg(not(target_arch = "wasm32"))]
-            crate::report::set_gpu(format!("{} ({:?})", info.name, info.backend));
             let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).expect("device");
             let ps2_sums = render::fog16::supported(&adapter);
             let config = wgpu::SurfaceConfiguration {
@@ -4352,6 +4214,10 @@ impl ApplicationHandler for App {
         #[cfg(not(target_arch = "wasm32"))]
         crate::gpustart::step("making the window's surface");
         let surface = instance.create_surface(window.clone()).expect("surface");
+        #[cfg(target_os = "android")]
+        {
+            self.android.instance = Some(instance.clone());
+        }
         #[cfg(not(target_arch = "wasm32"))]
         crate::gpustart::step("asking for an adapter");
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -4372,16 +4238,8 @@ impl ApplicationHandler for App {
         let mut config = surface.get_default_config(&adapter, size.width.max(1), size.height.max(1)).expect("surface config");
         // The bytes go out as the GS's do: no sRGB encode (render::TARGET_FORMAT).
         config.format = config.format.remove_srgb_suffix();
-        // a report's picture is read off the frame before it is presented
-        // (`report_shot`), where the surface lets it be copied
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            if surface.get_capabilities(&adapter).usages.contains(wgpu::TextureUsages::COPY_SRC) {
-                config.usage |= wgpu::TextureUsages::COPY_SRC;
-            }
-            let info = adapter.get_info();
-            crate::report::set_gpu(format!("{} ({:?})", info.name, info.backend));
-        }
+        fork_report::surface(&mut config, &adapter, &surface);
         // VSync (the Extended page): on, Fifo, a frame shown only at the
         // display's refresh; `AutoVsync` took FifoRelaxed where the surface
         // has it, which shows a late frame at once and tore (F3
@@ -4414,6 +4272,25 @@ impl ApplicationHandler for App {
         if let Some(id) = self.gfx.as_ref().map(|g| g.window.id()) {
             self.window_event(el, id, WindowEvent::RedrawRequested);
         }
+    }
+
+    /// Android: the activity handed something over (`android`).
+    #[cfg(target_os = "android")]
+    fn user_event(&mut self, el: &ActiveEventLoop, _: ()) {
+        self.android_input(el);
+    }
+
+    /// Android: the app went into the back, its window's surface with it:
+    /// let go, and the game's frames run on drawing nothing (`turn`) until
+    /// `resumed` makes it again.
+    #[cfg(target_os = "android")]
+    fn suspended(&mut self, _: &ActiveEventLoop) {
+        if let Some(g) = self.gfx.as_mut()
+            && g.surface.take().is_some()
+        {
+            crate::say("android: in the back, the window's surface let go");
+        }
+        crate::android::set_surface(false);
     }
 
     /// The loop ends (the window closed, a Quit, the update's restart): the
@@ -4455,6 +4332,8 @@ impl ApplicationHandler for App {
     /// (`stall`).
     fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         #[cfg(not(target_arch = "wasm32"))]
+        if fork_report::event(self, el, &event) { return; }
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(g) = &mut self.gfx
             && g.forge_runtime.event(&g.window, &event, crate::fork_ext::is_plain_play(self.play.as_mut()))
         {
@@ -4477,6 +4356,27 @@ impl App {
     /// `about_to_wait`: the loop's turn, between its events and its wait.
     fn turn(&mut self, _el: &ActiveEventLoop) {
         self.winplace.flush(false);
+        // Android: what the activity handed over; and while the activity is
+        // paused or has no surface winit asks for no frame, so the game's
+        // come from here, at the covered window's pace (`HIDDEN_GAP`)
+        #[cfg(target_os = "android")]
+        {
+            self.android_input(_el);
+            if crate::android::hidden()
+                && let Some(id) = self.gfx.as_ref().map(|g| g.window.id())
+            {
+                let now = Instant::now();
+                if self.android.next_tick.is_none_or(|t| now >= t) {
+                    self.android.next_tick = Some(now + HIDDEN_GAP);
+                    self.window_event(_el, id, WindowEvent::RedrawRequested);
+                }
+                if let Some(t) = self.android.next_tick {
+                    _el.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(t));
+                }
+                return;
+            }
+            self.android.next_tick = None;
+        }
         // a model viewer draws on input alone, but not while the 2002 disc's
         // files are coming (`poll_era` takes them on a frame) or a test's F9
         // is due
@@ -4506,6 +4406,283 @@ impl App {
         }
     }
 
+    /// Android: the window's surface made again on the window the activity
+    /// has now (`resumed`, back from the background), at its size.
+    #[cfg(target_os = "android")]
+    fn android_surface(&mut self) {
+        let (Some(g), Some(instance)) = (self.gfx.as_mut(), self.android.instance.as_ref()) else { return };
+        if g.surface.is_some() {
+            return;
+        }
+        match instance.create_surface(g.window.clone()) {
+            Ok(surface) => {
+                let size = g.window.inner_size();
+                g.config.width = size.width.max(1);
+                g.config.height = size.height.max(1);
+                g.whole = None;
+                g.renderer.scale.set_into_top(false);
+                surface.configure(&g.device, &g.surface_config());
+                g.surface = Some(surface);
+                // the depth buffer at the size too (`apply_size`)
+                g.resized = true;
+                crate::android::set_surface(true);
+                crate::say(&format!("android: back in front, the window's surface made again ({}x{})", g.config.width, g.config.height));
+                g.window.request_redraw();
+            }
+            Err(e) => crate::say(&format!("android: no surface on the window again: {e}")),
+        }
+    }
+
+    /// Android: what the activity handed over (`android::take`): a finger
+    /// as winit's touch would be (`finger`), a key as winit's would be
+    /// (`key_input`), the disc picked.
+    #[cfg(target_os = "android")]
+    fn android_input(&mut self, el: &ActiveEventLoop) {
+        use crate::android::Event;
+        for e in crate::android::take() {
+            match e {
+                Event::Touch { id, phase, at } => {
+                    let size = self.gfx.as_ref().map_or((1, 1), |g| (g.config.width, g.config.height));
+                    self.finger(id, phase, at, size);
+                }
+                Event::Key { key, text, down, repeat, soft } => {
+                    crate::android::key_taken(soft);
+                    let k = KeyIn { logical_key: key, state: if down { ElementState::Pressed } else { ElementState::Released }, repeat, text: text.map(Into::into) };
+                    self.key_input(el, k, false);
+                }
+                Event::Disc(Some(path)) => self.android_disc(path),
+                // the player would rather not choose one: the game ends
+                Event::Disc(None) => {
+                    crate::say("disc: none was chosen");
+                    el.exit();
+                }
+                Event::DiscAnswer(yes) => match self.android.disc_asking.take() {
+                    Some(path) if yes => self.android_take_disc(path),
+                    Some(_) => crate::android::pick_disc(None),
+                    None => {}
+                },
+            }
+        }
+    }
+
+    /// Android: the disc picked, judged as a desktop's pick is
+    /// (`discs::judge_file`): Frontiers taken; another PlayStation 2 disc
+    /// asked about; anything else refused, and the picker again.
+    #[cfg(target_os = "android")]
+    fn android_disc(&mut self, path: String) {
+        match crate::discs::judge_file(&path) {
+            crate::discs::Verdict::Take(line) => {
+                crate::say(&format!("disc: {line}"));
+                self.android_take_disc(path);
+            }
+            crate::discs::Verdict::Ask(line) => {
+                crate::say(&line);
+                self.android.disc_asking = Some(path);
+                crate::android::confirm_disc(&format!("{line}\n\nPlay with it anyway?"));
+            }
+            crate::discs::Verdict::Refuse(line) => {
+                crate::say(&line);
+                crate::android::pick_disc(Some(&line));
+            }
+        }
+    }
+
+    /// Android: the disc taken (kept by the activity for the next start),
+    /// its CLIENT and SUPPORT coming off it, and the pregame begun again on
+    /// it, as `resumed` does after a desktop's pick.
+    #[cfg(target_os = "android")]
+    fn android_take_disc(&mut self, path: String) {
+        crate::discs::take(&path);
+        crate::android::keep_disc();
+        crate::modules::load(std::path::Path::new(&path));
+        if let Some(h) = self.host.take() {
+            self.host = Some(crate::pregame::host::Host::new(crate::pregame::Pregame::new(h.pre.shared.server), 0));
+        }
+        if let Some(g) = &self.gfx {
+            g.window.request_redraw();
+        }
+    }
+
+    /// Whether play is over: Quit, answered yes in the start menu
+    /// (`m_p2EC28`), or the server ended the connection (`leave_play`).
+    fn leaving(&self) -> bool {
+        self.play.as_ref().is_some_and(|p| p.quit || p.disconnected.is_some())
+    }
+
+    /// Play over (`leaving`): back to the game's own screens when it was
+    /// booted (`Msg0777Done`), else the window closes.
+    fn leave_play(&mut self, el: &ActiveEventLoop) {
+        match self.booted.take() {
+            // the update's restart (`update`): the window closes for the
+            // program in place
+            Some(_) if crate::update::restarting() => el.exit(),
+            Some(shared) => self.back_to_pregame(shared),
+            None => el.exit(),
+        }
+    }
+
+    /// A key, the keyboard's (`WindowEvent::KeyboardInput`) or one the client
+    /// hands over itself (an Android activity's, `android`), through the
+    /// window's keys in order: play over, a key already down as the window
+    /// came to the front, full screen, the update's question, the pregame,
+    /// play.
+    fn key_input(&mut self, el: &ActiveEventLoop, event: KeyIn, is_synthetic: bool) {
+        let pressed = event.state == ElementState::Pressed;
+        // a key pressed: the first since the window came to the front, or
+        // one already down as it came (`arrival`)
+        if pressed && !event.repeat {
+            let name = crate::arrival::key_label(&event.logical_key);
+            if is_synthetic {
+                self.arrival.held_key(Instant::now(), &name);
+            } else if let Some(line) = self.arrival.press(Instant::now(), &name) {
+                crate::say(&line);
+            }
+        }
+        if self.leaving() {
+            self.leave_play(el);
+            return;
+        }
+        // A key already down as the window comes to the front (winit's
+        // synthetic press, on X11 and Windows; Alt+Tab's Tab among them):
+        // nothing until it is pressed here. Its release comes as any.
+        if is_synthetic && pressed {
+            return;
+        }
+        // macOS: ⌘, (the settings' key) when no menu item took it, asking as
+        // Settings… does (`macos`)
+        #[cfg(target_os = "macos")]
+        if self.super_held && pressed && matches!(&event.logical_key, Key::Character(c) if c == ",") {
+            crate::macos::ask();
+            return;
+        }
+        // F11: full screen (borderless, on the window's monitor) and back,
+        // as the Extended page's Display does (`display`); natively
+        // Alt+Enter too, Windows' own key for it, which the game never sees
+        // (its Enter neither pressed nor let go). A page leaves F11 to the
+        // browser (web/main.js), and its Alt+Enter is the game's Enter.
+        if event.logical_key == Key::Named(NamedKey::F11) && pressed && !event.repeat {
+            self.toggle_full_screen();
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if event.logical_key == Key::Named(NamedKey::Enter) && ((pressed && self.alt_held) || (!pressed && self.alt_enter_down)) {
+            self.alt_enter_down = pressed;
+            if crate::display::toggles(false, self.alt_enter_down && !event.repeat, self.alt_held) {
+                self.toggle_full_screen();
+            }
+            return;
+        }
+        // The update's question (`update`): its own keys pressed while it is
+        // up; their releases and the rest go on to the game.
+        #[cfg(not(target_arch = "wasm32"))]
+        if pressed && crate::update::offer_shown() && pregame_key(&event.logical_key).is_some_and(crate::update::Offer::takes) {
+            if !event.repeat
+                && let Some(k) = pregame_key(&event.logical_key)
+            {
+                let cues = crate::update::offer_key(k, self.clock.elapsed().as_millis() as i64);
+                self.ui_cues(cues.unwrap_or_default());
+            }
+            return;
+        }
+        // Before the world: the pregame's keys, the game's codes
+        // (`VIKeyboard::Read`'s).
+        if self.host.is_some() {
+            if !device_keyboard() {
+                self.touch.hide();
+            }
+            // F9 (`era`), as the Controls page has it: the art swapped
+            if event.state == ElementState::Pressed && !event.repeat && is_art_key(&event.logical_key) && self.host.as_ref().is_some_and(|h| h.pre.setup.capturing().is_none()) {
+                self.toggle_era();
+                return;
+            }
+            // the title's Options' Controls page waiting for a key: it is
+            // the page's, as play's is
+            let host = self.host.as_mut().unwrap();
+            if host.pre.setup.capturing().is_some()
+                && event.state == ElementState::Pressed
+                && !event.repeat
+                && let Some(name) = crate::binds::name_of(&event.logical_key)
+            {
+                host.pre.setup.capture_key(&name);
+                self.keys_edge.hold_back(&name);
+                return;
+            }
+            if let Some(k) = pregame_key(&event.logical_key) {
+                let down = event.state == ElementState::Pressed;
+                // a held key repeats only where it types
+                let typing = matches!(k, 8 | 32..=126);
+                if !event.repeat || typing {
+                    self.host.as_mut().unwrap().key(k, down);
+                }
+                self.host_keys.retain(|&h| h != k);
+                if down {
+                    self.host_keys.push(k);
+                }
+            }
+            return;
+        }
+        // Escape while the mouse look holds the pointer: it is let go
+        // (as a browser ends its lock on Escape), and nothing more
+        if event.state == ElementState::Pressed && event.logical_key == Key::Named(NamedKey::Escape) && self.mouse.escape() {
+            self.grab_pointer(false);
+            return;
+        }
+        // a keyboard in use (`gKeyboardAttached`): the edit boxes'
+        // compact face, with the options' Soft Keyboard on; the
+        // touch screen's pad goes
+        if event.state == ElementState::Pressed {
+            if !device_keyboard() {
+                self.touch.hide();
+            }
+            if let Some(p) = self.play.as_mut() {
+                p.keyboard = true;
+            }
+        }
+        // The Controls page waiting for a key (`bindpage`): the key
+        // pressed is its, as it is, and nothing else sees it or its
+        // release.
+        if let Some(p) = self.play.as_mut()
+            && p.capturing().is_some()
+            && event.state == ElementState::Pressed
+            && !event.repeat
+            && let Some(name) = crate::binds::name_of(&event.logical_key)
+        {
+            p.capture_key(&name);
+            self.keys_edge.hold_back(&name);
+            return;
+        }
+        // The player's own keys (`binds`, the client's, at the edge):
+        // a key a row was moved onto is that row's default key to all
+        // below, the row's old key nothing; a key given to △'s row
+        // (which the game has no key for) presses △ as the pad's
+        // does; text typed into an edit box is never remapped; a key
+        // lets go as what it was pressed as.
+        let event = match crate::binds::name_of(&event.logical_key) {
+            Some(name) => {
+                use crate::binds::Sent;
+                let typing = self.play.as_mut().is_some_and(|p| p.keyboard_typing());
+                let down = event.state == ElementState::Pressed;
+                match crate::settings::with_binds(|b| self.keys_edge.key(&name, down, event.repeat, typing, b)) {
+                    Some(Sent::Key(to)) if to == name => event,
+                    Some(Sent::Key(to)) => KeyIn { logical_key: crate::binds::key_of(&to), text: None, ..event },
+                    Some(Sent::Button(b)) => {
+                        let aspect = self.gfx.as_ref().map_or(4.0 / 3.0, |g| g.config.width as f32 / g.config.height as f32);
+                        if !event.repeat
+                            && let (Some(p), Some(w), Some(k)) = (self.play.as_mut(), self.walker.as_mut(), crate::binds::pad_key(b))
+                        {
+                            p.set_key(k, down, w, aspect);
+                            p.keyboard = true;
+                        }
+                        return;
+                    }
+                    None => return,
+                }
+            }
+            None => event,
+        };
+        self.keyboard(el, event);
+    }
+
     fn handle_window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         if let Some(g) = &self.gfx {
             self.winplace.event(&g.window, &event);
@@ -4527,35 +4704,16 @@ impl App {
                 return;
             }
         }
-        // a key pressed: the first since the window came to the front, or
-        // one already down as it came (`arrival`)
-        if let WindowEvent::KeyboardInput { event: e, is_synthetic, .. } = &event
-            && e.state == ElementState::Pressed
-            && !e.repeat
-        {
-            let name = crate::arrival::key_label(&e.logical_key);
-            if *is_synthetic {
-                self.arrival.held_key(Instant::now(), &name);
-            } else if let Some(line) = self.arrival.press(Instant::now(), &name) {
-                crate::say(&line);
-            }
+        // a key: the keyboard's dispatch (`key_input`), which takes the
+        // client's own keys too (an Android activity's, `android`)
+        if let WindowEvent::KeyboardInput { event: e, is_synthetic, .. } = &event {
+            let k = KeyIn::of(e);
+            self.key_input(el, k, *is_synthetic);
+            return;
         }
         match event {
             WindowEvent::CloseRequested => el.exit(),
-            // Quit, answered yes in the start menu (`m_p2EC28`), or the
-            // server ended the connection: back to the game's own screens
-            // when it was booted (`Msg0777Done`), else the window closes.
-            _ if self.play.as_ref().is_some_and(|p| p.quit || p.disconnected.is_some()) => match self.booted.take() {
-                // the update's restart (`update`): the window closes for the
-                // program in place
-                Some(_) if crate::update::restarting() => el.exit(),
-                Some(shared) => self.back_to_pregame(shared),
-                None => el.exit(),
-            },
-            // A key already down as the window comes to the front (winit's
-            // synthetic press, on X11 and Windows; Alt+Tab's Tab among them):
-            // nothing until it is pressed here. Its release comes as any.
-            WindowEvent::KeyboardInput { event, is_synthetic: true, .. } if event.state == ElementState::Pressed => {}
+            _ if self.leaving() => self.leave_play(el),
             // the window on another monitor: its refresh, for VSync off
             WindowEvent::Moved(_) => {
                 if let Some(g) = &self.gfx {
@@ -4565,14 +4723,14 @@ impl App {
             // minimised (Windows sends a size of nothing): no frame comes, and
             // the time until one does is no stall
             WindowEvent::Resized(s) if s.width == 0 || s.height == 0 => self.stall.away(),
+            // the surface takes the new size as the next frame drawn begins
+            // (`Gfx::resize`: in a page, configured here it was painted blank)
             WindowEvent::Resized(s) if s.width > 0 && s.height > 0 => {
                 let Some(g) = &mut self.gfx else { return };
-                let Some(surface) = &g.surface else { return };
-                g.config.width = s.width;
-                g.config.height = s.height;
-                surface.configure(&g.device, &g.config);
-                g.depth = render::depth_view(&g.device, s.width, s.height);
-                g.window.request_redraw();
+                if g.surface.is_none() {
+                    return;
+                }
+                g.resize(s.width, s.height);
             }
             // F11: full screen (borderless, on the window's monitor) and back,
             // as the Extended page's Display does (`display`); natively
@@ -4592,22 +4750,6 @@ impl App {
                     self.super_held = m.state().super_key();
                 }
             }
-            #[cfg(target_os = "macos")]
-            WindowEvent::KeyboardInput { event, .. } if self.super_held && event.state == ElementState::Pressed && matches!(&event.logical_key, Key::Character(c) if c == ",") => {
-                crate::macos::ask();
-            }
-            WindowEvent::KeyboardInput { event: KeyEvent { logical_key: Key::Named(NamedKey::F11), state: ElementState::Pressed, repeat: false, .. }, .. } => {
-                self.toggle_full_screen();
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            WindowEvent::KeyboardInput { event: KeyEvent { logical_key: Key::Named(NamedKey::Enter), state, repeat, .. }, .. }
-                if (state == ElementState::Pressed && self.alt_held) || (state == ElementState::Released && self.alt_enter_down) =>
-            {
-                self.alt_enter_down = state == ElementState::Pressed;
-                if crate::display::toggles(false, self.alt_enter_down && !repeat, self.alt_held) {
-                    self.toggle_full_screen();
-                }
-            }
             WindowEvent::Touch(t) => {
                 use winit::event::TouchPhase as T;
                 let phase = match t.phase {
@@ -4619,46 +4761,9 @@ impl App {
                 let size = self.gfx.as_ref().map_or((1, 1), |g| (g.config.width, g.config.height));
                 self.finger(t.id, phase, [t.location.x as f32, t.location.y as f32], size);
             }
-            // The report's dialog (`report`): F3 opens it, over the game's
-            // screens or the world, once there is a UI to draw it on; while
-            // it is open it has the keyboard and the clicks.
-            #[cfg(not(target_arch = "wasm32"))]
-            WindowEvent::KeyboardInput { event, .. } if crate::report::is_open() || crate::report::is_report_key(&event.logical_key) => {
-                if event.state == ElementState::Pressed {
-                    if crate::report::is_open() {
-                        if let Some(k) = crate::report::key_of(&event) {
-                            crate::report::key(k);
-                        }
-                    } else if !event.repeat && (self.host.as_ref().is_some_and(|h| h.ui_parts().is_some()) || self.play.as_ref().is_some_and(|p| p.ui_parts().is_some())) {
-                        crate::report::open();
-                        // what was held is let go: the dialog takes the
-                        // releases, so the game would not see them go
-                        self.let_go_keys(el);
-                        self.grab_pointer(false);
-                    }
-                }
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            WindowEvent::MouseInput { state, .. } if crate::report::is_open() => {
-                if state == ElementState::Pressed
-                    && let Some(g) = &self.gfx
-                {
-                    let size = (g.config.width, g.config.height);
-                    crate::report::click(render::ui::frame_from_window(size, [self.cursor.0 as f32, self.cursor.1 as f32]));
-                }
-            }
-            // The update's question (`update`): its own keys pressed while it
-            // is up, and a click on its buttons; their releases and the rest
-            // go on to the game.
-            #[cfg(not(target_arch = "wasm32"))]
-            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed && crate::update::offer_shown() && pregame_key(&event).is_some_and(crate::update::Offer::takes) => {
-                if !event.repeat
-                    && let Some(k) = pregame_key(&event)
-                {
-                    let cues = crate::update::offer_key(k, self.clock.elapsed().as_millis() as i64);
-                    self.ui_cues(cues.unwrap_or_default());
-                }
-            }
+            // The update's question (`update`): a click on its buttons (its
+            // keys are `key_input`'s); their releases and the rest go on to
+            // the game.
             #[cfg(not(target_arch = "wasm32"))]
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } if crate::update::offer_shown() && self.offer_click() => {}
             #[cfg(not(target_arch = "wasm32"))]
@@ -4671,115 +4776,18 @@ impl App {
                 };
                 crate::update::offer_wheel(lines, self.clock.elapsed().as_millis() as i64);
             }
-            // Before the world: the pregame's keys, the game's codes
-            // (`VIKeyboard::Read`'s), and its clicks.
-            WindowEvent::KeyboardInput { event, .. } if self.host.is_some() => {
-                if !device_keyboard() {
-                    self.touch.hide();
-                }
-                // F9 (`era`), as the Controls page has it: the art swapped
-                if event.state == ElementState::Pressed && !event.repeat && is_art_key(&event.logical_key) && self.host.as_ref().is_some_and(|h| h.pre.setup.capturing().is_none()) {
-                    self.toggle_era();
-                    return;
-                }
-                // the title's Options' Controls page waiting for a key: it is
-                // the page's, as play's is
-                let host = self.host.as_mut().unwrap();
-                if host.pre.setup.capturing().is_some()
-                    && event.state == ElementState::Pressed
-                    && !event.repeat
-                    && let Some(name) = crate::binds::name_of(&event.logical_key)
-                {
-                    host.pre.setup.capture_key(&name);
-                    self.keys_edge.hold_back(&name);
-                    return;
-                }
-                if let Some(k) = pregame_key(&event) {
-                    let down = event.state == ElementState::Pressed;
-                    // a held key repeats only where it types
-                    let typing = matches!(k, 8 | 32..=126);
-                    if !event.repeat || typing {
-                        self.host.as_mut().unwrap().key(k, down);
-                    }
-                    self.host_keys.retain(|&h| h != k);
-                    if down {
-                        self.host_keys.push(k);
-                    }
-                }
-            }
+            // Before the world: its clicks (its keys are `key_input`'s).
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } if self.host.is_some() => {
                 let Some(g) = &self.gfx else { return };
                 let size = (g.config.width, g.config.height);
                 let p = render::ui::frame_from_window(size, [self.cursor.0 as f32, self.cursor.1 as f32]);
                 self.host.as_mut().unwrap().click(p);
             }
-            WindowEvent::KeyboardInput { event, .. } => {
-                // Escape while the mouse look holds the pointer: it is let go
-                // (as a browser ends its lock on Escape), and nothing more
-                if event.state == ElementState::Pressed && event.logical_key == Key::Named(NamedKey::Escape) && self.mouse.escape() {
-                    self.grab_pointer(false);
-                    return;
-                }
-                // a keyboard in use (`gKeyboardAttached`): the edit boxes'
-                // compact face, with the options' Soft Keyboard on; the
-                // touch screen's pad goes
-                if event.state == ElementState::Pressed {
-                    if !device_keyboard() {
-                        self.touch.hide();
-                    }
-                    if let Some(p) = self.play.as_mut() {
-                        p.keyboard = true;
-                    }
-                }
-                // The Controls page waiting for a key (`bindpage`): the key
-                // pressed is its, as it is, and nothing else sees it or its
-                // release.
-                if let Some(p) = self.play.as_mut()
-                    && p.capturing().is_some()
-                    && event.state == ElementState::Pressed
-                    && !event.repeat
-                    && let Some(name) = crate::binds::name_of(&event.logical_key)
-                {
-                    p.capture_key(&name);
-                    self.keys_edge.hold_back(&name);
-                    return;
-                }
-                // The player's own keys (`binds`, the client's, at the edge):
-                // a key a row was moved onto is that row's default key to all
-                // below, the row's old key nothing; a key given to △'s row
-                // (which the game has no key for) presses △ as the pad's
-                // does; text typed into an edit box is never remapped; a key
-                // lets go as what it was pressed as.
-                let event = match crate::binds::name_of(&event.logical_key) {
-                    Some(name) => {
-                        use crate::binds::Sent;
-                        let typing = self.play.as_mut().is_some_and(|p| p.keyboard_typing());
-                        let down = event.state == ElementState::Pressed;
-                        match crate::settings::with_binds(|b| self.keys_edge.key(&name, down, event.repeat, typing, b)) {
-                            Some(Sent::Key(to)) if to == name => KeyIn::of(&event),
-                            Some(Sent::Key(to)) => KeyIn { logical_key: crate::binds::key_of(&to), text: None, ..KeyIn::of(&event) },
-                            Some(Sent::Button(b)) => {
-                                let aspect = self.gfx.as_ref().map_or(4.0 / 3.0, |g| g.config.width as f32 / g.config.height as f32);
-                                if !event.repeat
-                                    && let (Some(p), Some(w), Some(k)) = (self.play.as_mut(), self.walker.as_mut(), crate::binds::pad_key(b))
-                                {
-                                    p.set_key(k, down, w, aspect);
-                                    p.keyboard = true;
-                                }
-                                return;
-                            }
-                            None => return,
-                        }
-                    }
-                    None => KeyIn::of(&event),
-                };
-                self.keyboard(el, event);
-            }
             // Walking, the mouse is `mouse.rs`'s: a drag looks round, the
             // wheel zooms, a click targets and a double or right click talks.
             // a release that may never come: let go of what is held (a key
-            // let go while the report's dialog or another window has the
-            // keys would walk or turn the player on for good)
+            // let go while another window has the keys would walk or turn
+            // the player on for good)
             // which window is in front: Controller Focus's Window reads the
             // controllers only there
             WindowEvent::Focused(true) => {
@@ -4916,7 +4924,7 @@ impl App {
                 if let Some(g) = &self.gfx {
                     crate::icon::poll(&g.window);
                 }
-                // the memory a report carries, taken when it is due (`mem`)
+                // the memory the log carries, taken when it is due (`mem`)
                 crate::mem::tick(self.gfx.as_ref().map(|g| &g.device));
                 // Sound in Background (the Extended page): off, this window
                 // is heard only while it is the one in front (has the focus:
@@ -4942,9 +4950,6 @@ impl App {
                 // longer frames rather than fewer ticks.
                 #[cfg(target_arch = "wasm32")]
                 if !crate::web::frame_due() {
-                    if let Some(p) = &mut self.perf {
-                        p.skip();
-                    }
                     // the sound is still fed (`Sound::feed`)
                     if let Some(s) = self.sound.as_mut() {
                         s.feed();
@@ -4959,9 +4964,6 @@ impl App {
                 // (`about_to_wait` sleeps until it is due)
                 #[cfg(not(target_arch = "wasm32"))]
                 if !crate::settings::frame_due() {
-                    if let Some(p) = &mut self.perf {
-                        p.skip();
-                    }
                     return;
                 }
                 // and while the window gives nothing to draw on, at
@@ -4969,7 +4971,21 @@ impl App {
                 if self.hidden_until.is_some_and(|at| Instant::now() < at) {
                     return;
                 }
+                // Android: nothing before the disc is picked (the activity's
+                // picker is over the window)
+                #[cfg(target_os = "android")]
+                if self.host.is_some() && crate::discs::unsettled() {
+                    return;
+                }
                 FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                // a new size since the last frame: the surface takes it now,
+                // in the frame that draws on it (`Gfx::resize`); on Android
+                // the frame above the device's keyboard while it is up
+                if let Some(g) = self.gfx.as_mut() {
+                    #[cfg(target_os = "android")]
+                    g.fit_keyboard(crate::android::keyboard_height());
+                    g.apply_size();
+                }
                 // the 2002 disc's files, read since (`era`)
                 self.poll_era();
                 // Display (the Extended page): what the row asked carried
@@ -5077,10 +5093,10 @@ impl App {
                 self.touch.holds = self.play.as_ref().is_some_and(|p| p.map.open);
                 self.touch.window = self.play.as_ref().is_some_and(|p| p.window_up() || p.map.open || p.map.search.open);
                 self.touch.dpad = self.play.as_mut().is_some_and(|p| p.quick_dpad());
+                self.touch.scale = crate::settings::touch_scale();
                 mark(&mut self.perf, 17);
                 self.grab_pointer(true);
                 let sticks = self.sticks();
-                self.sticks_used = sticks;
                 // the mouse steering the body (`controls::Client::steer`)
                 let look_free = !self.play.as_ref().is_some_and(|p| p.is_dead()) && self.play.as_ref().is_none_or(|p| p.look_free());
                 let steer = look_free && self.walker.as_ref().is_some_and(|w| self.mouse.steer(w.cam.camera_mode));
@@ -5371,13 +5387,9 @@ impl App {
                 };
                 self.last_view = Some(view.view_proj);
                 if let (Some(p), Some(w)) = (&mut self.play, &self.walker) {
-                    // Hide UI (`hideui`): a window up, the update's question
-                    // or the report's dialog shows it all again; the loading
-                    // screen is never hidden
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let boxed = crate::update::offer_shown() || crate::report::is_open();
-                    #[cfg(target_arch = "wasm32")]
-                    let boxed = crate::update::offer_shown();
+                    // Hide UI (`hideui`): a window up or the update's question
+                    // shows it all again; the loading screen is never hidden
+                    let boxed = crate::update::offer_shown() || crate::report::is_open_local();
                     let hide = crate::hideui::frame(p.wants_ui() || boxed) && !p.loading_up();
                     if let Some(u) = g.renderer.ui.as_mut() {
                         p.hud(u, w, self.clock.elapsed().as_millis() as i64, view.view_proj, (g.config.width, g.config.height), game_frame);
@@ -5388,14 +5400,11 @@ impl App {
                         }
                         p.draw_touch(u, &g.device, &g.queue, &mut self.touch, (g.config.width, g.config.height));
                         // the update's question (its Yes logs out: the window
-                        // closes) and the report's dialog over the HUD and the
-                        // touch pad (`update`, `report`)
-                        #[cfg(not(target_arch = "wasm32"))]
-                        report_test(self.clock.elapsed().as_millis() as i64);
+                        // closes) over the HUD and the touch pad (`update`)
                         #[cfg(not(target_arch = "wasm32"))]
                         {
                             let now = self.clock.elapsed().as_millis() as i64;
-                            let plain = p.plain() && !crate::report::is_open();
+                            let plain = p.plain() && !crate::report::is_open_local();
                             let still = self.console.sticks().iter().all(|v| v.abs() < 0.05);
                             let quiet = plain && p.quiet() && self.held.is_empty() && still;
                             crate::update::offer_frame(crate::update::Moment { quiet, plain, world: true, now });
@@ -5514,7 +5523,7 @@ impl App {
                 mark(&mut self.perf, 11);
                 let sent = g.queue.submit([enc.finish()]);
                 #[cfg(not(target_arch = "wasm32"))]
-                report_shot(g, frame.as_ref());
+                fork_report::shot(g, frame.as_ref());
                 if !self.shots.is_empty() {
                     let what = self.play.as_ref().map_or_else(|| "viewer".to_string(), |p| format!("play as {}", p.player.name));
                     shoot(&mut self.shots, g, self.clock.elapsed().as_millis() as i64, &what);
@@ -5535,10 +5544,6 @@ impl App {
                     p.end(frame_start);
                     self.stall.end(frame_start, Instant::now(), phases, self.play.as_ref().is_some_and(|p| p.loading()));
                 }
-                // The page's picture of this frame, if it asked, and the
-                // report's state of the client (`report`).
-                crate::report::frame_drawn();
-                crate::report::note_state(|| self.report_state());
             }
             _ => {}
         }
@@ -5549,34 +5554,9 @@ impl App {
 mod tests {
     use super::*;
 
-    /// A report's frames line (F3 20261027-004220: "stuck at 30fps"): 30
-    /// drawn a second, every one 33.3 ms after the last where 16.7 were
-    /// asked, so all late, and 6 ms of CPU a frame by phase: the CPU was not
-    /// what was short. The control: frames on time say none are late.
-
-
-    #[test]
-    fn the_reports_frames_line_says_what_was_short() {
-        let mut cpu = [0.0; Perf::NAMES.len()];
-        cpu[1] = 150.0 * 0.004;
-        cpu[12] = 150.0 * 0.002;
-        let s = PerfSpan { span: 5.0, frames: 150, skipped: 0, cpu, worst: 0.0081, drawn: (900, 1800), gaps: vec![33.3; 149], asked: 1000.0 / 60.0 };
-        let line = s.line();
-        eprintln!("{line}");
-        for want in ["30.0 drawn a second", "900 models in 1800 draws", "33.3 ms (median)", "33.3 (longest)", "100% later than 1.5 times the 16.7 ms asked", "the cpu 6.00 ms a frame (worst 8.1): walk 4.00, submit 2.00"] {
-            assert!(line.contains(want), "{want:?} in {line}");
-        }
-        let on_time = PerfSpan { gaps: vec![16.7; 299], frames: 300, ..s.clone() }.line();
-        assert!(on_time.contains("0% later") && on_time.contains("60.0 drawn a second"), "{on_time}");
-        let skipping = PerfSpan { skipped: 150, ..s }.line();
-        assert!(skipping.contains("(30.0 a second skipped by the Frame Rate)"), "{skipping}");
-        assert_eq!(PerfSpan::default().line(), "frames in the world: none drawn yet");
-    }
-
-    /// The time from one frame to the next counts only frames drawn in the
-    /// world one after another: a pause (the pregame, a hidden window)
-    /// starts the span again, its length no frame's. The control: without
-    /// the pause marked, the two seconds count as a frame's.
+    /// The five seconds count only frames drawn in the world one after
+    /// another: a pause (the pregame, a hidden window) starts them again.
+    /// The control: without the pause marked, every frame counts.
     #[test]
     fn a_pause_starts_the_frames_again() {
         let t0 = Instant::now();
@@ -5594,14 +5574,10 @@ mod tests {
             p.end(ms(2000));
             p.begin();
             p.end(ms(2033));
-            p.span()
+            p.frames
         };
-        let s = frames(true);
-        assert_eq!((s.frames, s.gaps.len()), (2, 1));
-        assert!((s.gaps[0] - 33.0).abs() < 0.5, "{:?}", s.gaps);
-        let s = frames(false);
-        assert_eq!(s.frames, 5);
-        assert!(s.gaps.iter().any(|&g| g > 1900.0), "the control: the pause counted as a frame's: {:?}", s.gaps);
+        assert_eq!(frames(true), 2);
+        assert_eq!(frames(false), 5, "the control: every frame counted");
     }
 
     /// The corpse, merchant and trade windows' keys: Space is ✕ in the

@@ -19,3 +19,5 @@ pub fn is_plain_play(play: Option<&mut crate::play::Play>) -> bool {
         None => false,
     }
 }
+
+pub mod report_core;

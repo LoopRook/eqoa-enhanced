@@ -1,4 +1,4 @@
-// Fork-owned transport regressions, included in report.rs's test module.
+// Fork-owned transport regressions, included in fork_ext/report_core.rs's test module.
 
 /// The transport itself rejects upstream and missing destinations, even if
 /// a caller bypasses the hidden controls. Loopback is the negative control.

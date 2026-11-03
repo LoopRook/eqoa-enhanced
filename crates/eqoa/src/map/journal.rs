@@ -1544,3 +1544,24 @@ mod tests {
         assert!(!j.has_unsaved_changes());
     }
 }
+
+#[cfg(test)]
+mod sync_exit_tests {
+    use super::*;
+
+    #[test]
+    fn sync_logger_close_flushes_journal_through_report_hook() {
+        let root = std::env::temp_dir().join(format!("eqoa-sync-journal-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("journal.json");
+        let mut journal = Journal::new_at_path(path.clone());
+        assert!(journal.record("Sync Exit Creature", 9001, 0, 61, [1.0, 0.0, 2.0], Instant::now()));
+        *global().lock().unwrap() = Some(journal);
+        assert!(!path.exists(), "negative control: no clean exit, no file");
+        crate::logfile::close();
+        let saved = std::fs::read_to_string(&path).expect("logger close must flush journal");
+        assert!(saved.contains("Sync Exit Creature"));
+        *global().lock().unwrap() = None;
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

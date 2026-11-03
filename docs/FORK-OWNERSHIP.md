@@ -6,7 +6,7 @@ explicit override of the original hygiene brief.
 
 The executable policy is [fork-footprint.json](fork-footprint.json), checked by
 [check_fork_footprint.py](../tools/check_fork_footprint.py). Its reviewed upstream
-base is `ad941f5ca18a9238c5c5e51bdb77b9abb6afd37d`.
+base is `b8e02cd781aac6a1b9e9906f09896956c77afcd6`.
 
 **Reviewed budgets:** exact final shared footprints after adapter extraction,
 including the approved animation guards and regressions. Existing restored map
@@ -36,7 +36,8 @@ The manifest lists explicit ownership patterns for:
 - Restored app modules `map/`, `questguide/`, `groupmark.rs`, `mapsuggest.rs`,
   `statbox.rs`, and `tracker.rs`; map UI font assets and their OFL notice; map data catalog
   (crates/eqoa/resources/map-data/**) and its FrontiersForge MIT notice.
-- `crates/eqoa/src/fork_ext/` adapters and implementations; reporting policy and
+- `crates/eqoa/src/fork_ext/` adapters and implementations, including the retained
+  `report_core.rs`, `report_viewer.rs` and `report_sync_tests.rs`; reporting policy and
   its transport tests; browser reporting policy and its tests.
 - The restored render map module/shader and map-circle/terrain test modules.
 - The named map generators, map-bundle helper, parser launcher helper/tests,
@@ -59,30 +60,27 @@ integration seams. No directory-wide shared allowlist exists.
 | Shared upstream path | Added max | Deleted max | Reviewed purpose |
 | --- | ---: | ---: | --- |
 | `.gitignore` | 6 | 0 | Fork-local generated output and scratch configuration exclusions. |
-| `Cargo.lock` | 153 | 3 | Reviewed native Lua/ImGui spike dependencies and rustc-hash version disambiguation; license metadata unchanged. |
-| `crates/eqoa/Cargo.toml` | 9 | 1 | Reviewed native-only Lua/ImGui spike dependencies, Win32_System_Com for Shell known-folder CoTaskMemFree, and existing fork/release settings; license metadata unchanged. |
-| `crates/eqoa/build.rs` | 11 | 3 | One app-icon hook into fork_ext/app_icon_ico; upstream drawn-disc helpers retained. |
+| `Cargo.lock` | 153 | 3 | Reviewed native Lua 5.1 and Dear ImGui 0.18 spike dependency resolution, including rustc-hash version disambiguation; license metadata stays unchanged. |
+| `crates/eqoa/Cargo.toml` | 9 | 1 | Reviewed native-only mlua and Dear ImGui spike dependencies, Win32_System_Com for Shell known-folder CoTaskMemFree, plus existing fork/release settings; license metadata stays unchanged. |
+| `crates/eqoa/build.rs` | 11 | 3 | One hook into fork_ext/app_icon_ico for the owner-supplied program icon: stage the chosen .ico in OUT_DIR and feed its images to the unchanged SIZES/dib/ico/resources path. Stack and linker behavior unchanged. |
 | `crates/eqoa/src/bindpage.rs` | 16 | 16 | Restored and map input settings rows. |
 | `crates/eqoa/src/binds.rs` | 93 | 80 | Restored/map controls and saved binding defaults. |
 | `crates/eqoa/src/client_image.rs` | 10 | 0 | Map theme font/image resources. |
 | `crates/eqoa/src/hideui.rs` | 3 | 3 | Restored map and tracker visibility. |
-| `crates/eqoa/src/hud.rs` | 307 | 11 | Reviewed restored HUD and native addon hide-UI draw-site gates for compass, gauges, group/pet/target panels, and group compass marks; implementation in fork_ext. |
-| `crates/eqoa/src/icon.rs` | 4 | 1 | Two app-icon hooks: chosen picture and no save-icon switch; upstream save-icon code retained. |
+| `crates/eqoa/src/hud.rs` | 309 | 11 | Existing Enhanced HUD plus a local report button rectangle hook and Pick variant; drawing implementation lives in fork_ext/report_core.rs. |
+| `crates/eqoa/src/icon.rs` | 4 | 1 | Two hooks into fork_ext::app_icon: the window/Dock picture comes from the chosen icon, and poll returns before the save-icon switch. Upstream save-icon code remains present and compiled. |
 | `crates/eqoa/src/input.rs` | 32 | 3 | Map controls and focus/input behavior. |
 | `crates/eqoa/src/lod.rs` | 9 | 8 | Restored map terrain observation. |
-| `crates/eqoa/src/main.rs` | 30 | 0 | Restored module registration, fork_ext boundary, and report policy module. |
+| `crates/eqoa/src/main.rs` | 33 | 0 | Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged. |
 | `crates/eqoa/src/options.rs` | 196 | 43 | Existing restored option entries plus one adapter reference per fork option hook. |
-| `crates/eqoa/src/play.rs` | 763 | 53 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, and addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus; implementation in fork_ext. |
-| `crates/eqoa/src/report.rs` | 64 | 23 | Local problem and crash report saving to Desktop; wrapped dialog status, label and fine notice hooks preserving upstream match arms; one-line hooks in push_line(), start(), send(), and secret() for in-memory cache warming/refresh, and minimal crate-level visibility. |
-| `crates/eqoa/src/settings.rs` | 336 | 22 | Restored map/quest settings plus one adapter reference per settings hook, and one-line in-memory report cache update on save_login. |
-| `crates/eqoa/src/touch.rs` | 79 | 2 | Restored map and tracker touch input. |
+| `crates/eqoa/src/play.rs` | 764 | 53 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. |
+| `crates/eqoa/src/settings.rs` | 336 | 22 | Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31), and one-line in-memory report cache update on save_login. |
+| `crates/eqoa/src/touch.rs` | 81 | 2 | Reconcile Enhanced long-press release suppression with upstream full-size touch slop; preserve the map behavior and new adjustable pad size. |
 | `crates/eqoa/src/ui.rs` | 10 | 6 | Map UI state and input integration plus one-line pub(crate) visibility on UiAssets.surfaces for fork-owned HUD tests. |
-| `crates/eqoa/src/update.rs` | 3 | 3 | Fork release routing and fork-owned notes; updater mechanics unchanged. |
-| `crates/eqoa/src/updatewnd.rs` | 3 | 2 | Fork release page link and regression assertions. |
-| `crates/eqoa/src/viewer.rs` | 235 | 12 | Restored map/quest integration plus reviewed native lazy addon Runtime state/init, owned window/raw input routing, pregame/live post-resolve frames and exiting cleanup. |
+| `crates/eqoa/src/viewer.rs` | 255 | 15 | Existing fork integration plus native report adapter registration and one-line input, draw, screenshot/surface hooks; preserve upstream resize and Android code. |
 | `crates/esf/src/mesh.rs` | 9 | 0 | Terrain mesh lookup for restored map. |
-| `crates/net/src/session.rs` | 449 | 30 | Restored group/map/quest protocol state. |
-| `crates/render/src/fans.rs` | 0 | 0 | Restored UI render behavior. |
+| `crates/net/src/session.rs` | 449 | 30 | Restored group/map/quest protocol state and upstream unanswered offers test (re-baselined at sync 2026-10-31). |
+| `crates/render/src/fans.rs` | 0 | 0 | Restored UI render behavior (re-baselined at sync 2026-10-31). |
 | `crates/render/src/lib.rs` | 50 | 4 | Restored map rendering pipeline and exports. |
 | `crates/render/src/ui.rs` | 97 | 8 | Map circle clipping and map font rendering. |
 | `crates/render/src/ui.wgsl` | 16 | 7 | Circle clipping in UI shader. |
@@ -90,9 +88,11 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/vi/src/hsprite.rs` | 69 | 3 | Animation bounds guards and negative-control regression tests. |
 | `crates/vi/src/ui.rs` | 3 | 2 | Restored player-facing UI behavior. |
 | `release/README.txt` | 1 | 1 | Enhanced Windows bundle startup instructions. |
-| `web/build.sh` | 1 | 1 | Include the fork reporting policy module in browser assets. |
 | `web/main.js` | 48 | 0 | Restored browser input/map bindings. |
-| `web/report.js` | 31 | 7 | Fork reporting policy transport integration. |
+| `crates/eqoa/src/update.rs` | 3 | 3 | Fork release routing and fork-owned update notes; upstream updater mechanics unchanged. |
+| `crates/eqoa/src/updatewnd.rs` | 3 | 2 | Fork release page link with fork/vanilla UI regression assertions. |
+| `crates/eqoa/src/logfile.rs` | 8 | 0 | Upstream logger retained around eight hook lines: initialize fork crash capture before rotation, share the exact run ID, redact/feed the ring, add Enhanced header, capture panic, flush journal on close. |
+| `crates/eqoa/src/pregame/station/api.rs` | 4 | 0 | Credential-noting hooks at login, account creation and password change preserve local report redaction after upstream removed them. |
 
 `CLAUDE.md` is fork-owned (since 2026-10-30). Upstream's CLAUDE.md is kept
 verbatim in `docs/upstream/CLAUDE.md`; the checker (`claude_upstream_copy`) fails
@@ -172,3 +172,17 @@ After each upstream merge or intentional integration edit:
 There is no budget refresh or auto-approve switch. Conflicts in shared files should
 retain upstream's implementation and reapply the documented seam; preserve both
 intents where an existing restored system still requires inline integration.
+
+## 2026-11-03 report ownership transition
+
+Upstream deleted report.rs and web/report.js. Enhanced keeps the native core in
+fork_ext/report_core.rs; fork_ext/report_viewer.rs owns event routing and capture.
+Shared logfile.rs gets eight added hook lines and Station api.rs four credential
+hooks. main.rs adds three lines for the alias/CLI secret; HUD adds two lines for
+the retained pick/draw seam. viewer.rs grows by 20 additions/3 replacements for
+input ownership, capture and draw/quiet hooks. touch.rs grows by two default
+initializers to keep Enhanced map holds/d-pad alongside upstream's new constructor.
+Settings description hooks disappeared with upstream's unused report describer.
+These are reviewed integration costs for retaining the owner's local-only reports,
+not a general permission to expand shared code. Web deletion is accepted because
+the Enhanced release workflow ships Windows x64 only.

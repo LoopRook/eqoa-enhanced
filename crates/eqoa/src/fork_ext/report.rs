@@ -743,6 +743,10 @@ pub fn handle_send(
     shot: Option<&[u8]>,
     result: &Arc<Mutex<Option<Sent>>>,
 ) -> bool {
+    #[cfg(test)]
+    if let Some((desktop, config)) = TEST_DESTINATION.with(|d| d.borrow().clone()) {
+        return handle_send_to(kind, note, name, shot, result, Some(&desktop), Some(&config), false);
+    }
     handle_send_to(
         kind,
         note,
@@ -1342,8 +1346,9 @@ mod tests {
     #[test]
     fn logs_begin_with_the_enhanced_line() {
         let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        crate::report::start();
+        crate::logfile::start();
         let tail_lines = crate::report::tail(10);
+        crate::logfile::close();
         let run_idx = tail_lines
             .iter()
             .rposition(|l| l.starts_with("[eqoa] run "))
@@ -1438,4 +1443,9 @@ mod tests {
         let fine_crash = dialog_fine(&Kind::Crash(vec!["a".into()])).unwrap();
         assert!(fine_crash.contains("crash logs"));
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TEST_DESTINATION: std::cell::RefCell<Option<(PathBuf, PathBuf)>> = const { std::cell::RefCell::new(None) };
 }

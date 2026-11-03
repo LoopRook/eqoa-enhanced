@@ -87,3 +87,113 @@ Validation:
 - `python -X utf8 -m unittest discover -s tools -p "test_*.py"`: 46 passed, 0 failures.
 - `cargo build --release --locked -p eqoa`: finished successfully.
 - Note: `forge_texture_early_memory_limit_rejects_before_upload` was GC-timing flaky after the merge and fixed in e16efff (plus the sibling in `forge_texture_memory_early_memory_limit_rejects_before_upload`).
+
+## 2026-11-03 sync
+
+Enhanced start: e3964ff on sync/2026-11-03, branched from develop. Upstream range:
+ad941f5..b8e02cd781aac6a1b9e9906f09896956c77afcd6 (eight commits). Real two-parent merge;
+no squash, push, tag, or protected branch update.
+
+Incoming changes: SSE-compatible EE four-lane NEON and WebAssembly SIMD paths;
+Android APK/source-build support and input plumbing; adjustable Touch Pad Size,
+resize recovery and fishing message-box layout; live Class Mastery branch/rank
+rules. Upstream 42e41f8 removes reports because its report server closed.
+
+Conflicts and resolutions:
+
+- README.md (four hunks): retained Enhanced's landing page/download links.
+- hideui.rs (one): retained upstream wording and Enhanced map visibility; report
+  visibility is consumed through the viewer's local report-open hook.
+- hud.rs (three): retained upstream implementation and existing Enhanced HUD;
+  report button drawing lives in fork_ext/report_core.rs, returning its pick rect.
+- main.rs (two): retained upstream logfile lifecycle and Android registration;
+  alias the fork-owned report core and retain the CLI credential-noting hook.
+- options.rs (four): union Touch Pad Size ID 48 with existing fork rows; Enhanced
+  IDs 1043..1047 and all persisted keys stay unchanged. Text/HUD remain reachable
+  on Map & Quests; Controller gains Touch Pad Size.
+- play.rs (three): retain upstream removal of report-only state/describers and
+  keep Enhanced map/addon initialization; HUD report pick calls the local core.
+- settings.rs (six): union touch_size field/default/serialization with fork
+  settings; keep upstream removal of unused report descriptions and their test.
+- touch.rs (two): keep upstream full-size slop and all pad-size behavior, preserve
+  Enhanced map long-press suppression/tests, initialize fork dpad/holds fields in
+  the upstream Default constructor.
+- viewer.rs (four): union upstream resize fields and touch scale with addon/map
+  state; retain upstream removal of report diagnostics. Minimal hooks invoke
+  fork_ext/report_viewer.rs for native dialog input/capture and fork-owned draw.
+- report.rs (modify/delete): accept deletion of the shared path; move retained
+  local report/crash core to fork_ext/report_core.rs. Production send always uses
+  Save to Desktop; historical HTTP transport is compiled only for loopback tests.
+- web/build.sh (one): take upstream's notices.js copy list.
+- web/report.js (modify/delete): accept deletion. RELEASING.md and
+  enhanced-release.yml ship Windows x64 only; no Enhanced web release is published.
+- CLAUDE.md: ours merge driver retained fork rules automatically. Refresh the
+  verbatim upstream copy and adopt Android's platform-event/signing-key guidance;
+  upstream's report deletion is overridden only for Enhanced's local saves.
+
+Owner's report decision: retain F3, the HUD's Report a bug, the next-start crash
+report offer, and Save to Desktop. ZIPs contain the note, screenshot and logs;
+known accounts/passwords and the Windows home directory are scrubbed. Nothing is
+uploaded. Upstream logfile.rs stays intact around eight added hook lines (startup
+before rotation, exact run identity, redaction/ring, Enhanced header, panic and
+clean exit); Station api.rs retains four credential hooks. The journal helpers
+remain in fork_ext/report.rs and report_core::clean_exit flushes map/journal.
+
+Footprint review: PASS against the complete b8e02cd target with a trial manifest
+before advancing reviewed_base. Shared budget changes from the previous review:
+logfile +8/-0 (new), Station API +4/-0 (new), main +3 additions, HUD +2 additions,
+viewer +20 additions/+3 deletions, touch +2 additions. Reasons: retain local
+reports through hooks and reconcile upstream's new touch constructor. The old
+shared report.rs/web/report.js budgets disappear, as does web/build.sh's policy
+copy override. The settings description hook disappears with upstream's method.
+Detailed maxima and reasons are in FORK-OWNERSHIP.md and fork-footprint.json.
+
+Hook-removal controls (each mutation was compiled/tested, then restored):
+
+- sync_f3_saves_redacted_zip_through_dialog_hook: removing viewer's report event
+  hook fails the headless wiring guard: assertion failed, viewer contains
+  fork_report::event(self, el, &event). With it present the dialog's Enter action
+  saves a ZIP in a temporary Desktop, including screenshot/log/note and redaction.
+- sync_crash_marker_is_offered_on_next_start_hook: removing logfile startup's
+  report::start call fails its wiring guard. The behavior portion checks an
+  interrupted log creates an offer; a cleanly closed log creates none.
+- sync_logger_close_flushes_journal_through_report_hook: removing logfile close's
+  report::clean_exit call fails with "logger close must flush journal", NotFound.
+  With the hook present the temporary journal contains its recorded creature.
+
+The first two tests combine source wiring guards with headless behavior tests;
+they do not claim a live OS keyboard/window/GPU test. Owner playtest remains due.
+
+Additional merge regression fixes:
+
+- Keep EXTENDED_ITEMS in numeric ID order (48 before 1043), as the existing
+  every-row/one-page regression requires; no persisted IDs or keys change.
+- logs_begin_with_the_enhanced_line now starts/closes upstream logfile, the
+  actual owner of the log, and checks the fork header fed through its hook.
+- The fork HUD count fixture has no font: its report button is 28 pixels wide
+  with two 16-pixel caps, leaving a -4-pixel middle. Upstream's new VU1 winding
+  cull drops that middle. Temporarily disabling only culling made the original
+  17/41 quad assertions pass; with upstream restored the correct fixture counts
+  are 16/40. Production raster code is unchanged. The first workspace attempt
+  stopped at 1,499 client passes / three failures / 26 ignored; these findings
+  prompted the fixes and a complete rerun.
+
+The second full attempt passed those three fixes (1,501 client passes / one
+failure / 26 ignored), then exposed the existing community-map test's PID-only
+cache path. Its log explicitly loaded a one-marker version-9 cache left by an
+earlier process before testing a malformed answer against three held markers.
+The fixture now creates a unique, freshly owned directory and cleans it on drop;
+production community-map code is unchanged. The retained report dialog's name,
+picture and crash-offer wording now describes local saving rather than a board.
+
+Final locked workspace suite: 1,775 passed / 0 failed / 27 ignored across 96
+summaries; client 1,502 passed / 0 failed / 26 ignored. Explicit SKIP messages: 197
+(missing disc/oracle/reference prerequisites and symlink privileges, recorded
+separately from ignored). Python tools: 46 passed. Footprint: PASS, 33 shared
+paths in budget, reviewed_base b8e02cd781aac6a1b9e9906f09896956c77afcd6.
+See SYNC-2026-11-03-VERIFICATION.md for commands, controls and all skip messages.
+Locked release build: PASS (4m 26s); PE x64 GUI / 8 MiB stack validated. Preview
+folder: main checkout run/sync-2026-11-03-<merge-shortsha>/, with bundled mods and
+owner checklist. Copy verification requires the EXE SHA256 to match the built
+artifact recorded in SYNC-2026-11-03-VERIFICATION.md. No push/tag/protected branch
+merge; live owner QA and Android/browser runtime checks remain pending.
