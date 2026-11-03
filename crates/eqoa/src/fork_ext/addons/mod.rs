@@ -22,6 +22,9 @@ pub(crate) fn take_close_options_on_open() -> bool {
 pub(crate) mod ability;
 pub(crate) mod bit;
 pub(crate) mod chat;
+pub(crate) mod chat_history;
+#[cfg(test)]
+mod chat_history_tests;
 pub(crate) mod combat;
 pub(crate) mod discovery;
 pub(crate) mod effects;

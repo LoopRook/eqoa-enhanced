@@ -122,8 +122,8 @@
     },
     "crates/eqoa/src/play.rs": {
       "added": 764,
-      "deleted": 53,
-      "reason": "Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map."
+      "deleted": 54,
+      "reason": "Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, creature journal discovery recording hook in map_frame, and the chat-history tap plus the mode-33 ability-bar exception (one rewritten stock condition line); implementation in fork_ext and map."
     },
     "crates/eqoa/src/report.rs": {
       "added": 67,
@@ -248,6 +248,18 @@
       "path": "crates/eqoa/src/play.rs",
       "name": "combat event",
       "pattern": "\\bself\\.fork_combat_event\\s*\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/play.rs",
+      "name": "chat history key tap",
+      "pattern": "\\bfork_hud::chat_history_key\\s*\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/play.rs",
+      "name": "chat history ability bar",
+      "pattern": "\\bfork_hud::ability_bar_shown\\s*\\(",
       "count": 1
     },
     {

@@ -101,6 +101,33 @@ fn bundled_update_legacy_registry_updates_reference_wereoxxs() {
     );
 }
 
+/// The previous, unedited Wereoxxs scroller stays a trusted shipped hash, so
+/// updating from a build that predates this fix replaces it instead of taking
+/// it for a player edit; a hand-edited scroller is still left alone.
+#[test]
+fn bundled_update_replaces_unmodified_previous_wereoxxs_chat_window() {
+    let i = Install::new();
+    let path = "wereoxxs_ui/modules/chat_window.lua";
+    let embedded = EMBEDDED_FILES.iter().find(|f| f.path == path).unwrap();
+    assert!(
+        shipped_hashes(embedded)
+            .contains("d87eab664c1114f20f6dfbd49df3b0aaf14d21efc323a6dc444a52cc832095a8"),
+        "the previous chat_window.lua must stay a known shipped hash"
+    );
+
+    let old = b"-- the scroller as it shipped before the R2 fix\n";
+    fs::write(i.mods.join(path), old).unwrap();
+    i.remember_old(path, old);
+    install_bundled_mods(&i.mods, Some(&i.cfg)).unwrap();
+    assert_eq!(fs::read(i.mods.join(path)).unwrap(), embedded.data);
+
+    let edited = b"-- player edits to the scroller\n";
+    fs::write(i.mods.join(path), edited).unwrap();
+    let result = install_bundled_mods(&i.mods, Some(&i.cfg)).unwrap();
+    assert_eq!(result.kept_edited.get("wereoxxs_ui"), Some(&1));
+    assert_eq!(fs::read(i.mods.join(path)).unwrap(), edited);
+}
+
 #[test]
 fn bundled_update_adds_missing_new_file() {
     let i = Install::new();

@@ -82,6 +82,24 @@ pub(crate) fn chat_window_visible() -> bool {
     published(|v| !v.chat)
 }
 
+/// Whether chat-history mode (33) keeps the stock HUD carousel on screen.
+/// Stock hides it; it stays when an addon owns the chat window and draws the
+/// lines the stock window used to (Wereoxxs UI).
+pub(crate) fn chat_history_keeps_ability_bar(mode: i32) -> bool {
+    mode == 33 && !chat_window_visible()
+}
+
+/// Whether the stock HUD carousel draws in this mode. `stock_modes` is the
+/// stock mode list; a claimed chat window adds mode 33 to it.
+pub(crate) fn ability_bar_shown(stock_modes: bool, mode: i32) -> bool {
+    stock_modes || chat_history_keeps_ability_bar(mode)
+}
+
+/// Taps a chat-history key for addons before the stock window consumes it.
+pub(crate) fn chat_history_key(key: i32, down: bool) {
+    crate::fork_ext::chat_history::key(key, down);
+}
+
 pub(crate) fn ability_bar_visible() -> bool {
     published(|v| !v.ability_bar)
 }
@@ -124,6 +142,8 @@ pub(crate) fn draw_chat_window(
     now: u32,
     dt: f32,
 ) {
+    // Addons scrolling the same history repeat on the stock clock.
+    crate::fork_ext::chat_history::tick(dt);
     if chat_window_visible() {
         wnd.draw(vui, r, now, dt);
     } else {

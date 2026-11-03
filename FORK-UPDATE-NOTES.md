@@ -5,6 +5,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 ## 2026-11-02 · Enhanced 0.4.3
 
 - Fixed: the creature journal forgot NPCs above level 60 (and ones of unknown level) every time you restarted the game, and importing a FrontiersForge journal skipped them. They are now kept.
+- Fixed: with Wereoxxs UI's chat on, holding R2 hid the ability bar and scrolled nothing you could see. R2 now keeps the ability bar up and scrolls the mod's chat history up and down; letting go returns to the newest line. Without mods, R2 opens the game's chat history as before.
 
 ## 2026-11-01 · Enhanced 0.4.2
 
