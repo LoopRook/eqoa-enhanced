@@ -38,7 +38,14 @@ merge the exact public `enhanced` commit that will receive the version tag.
 
 Private to public: create an export branch **from public develop**, apply only
 explicitly reviewed non-private commits with `cherry-pick --no-commit`, inspect
-the complete staged diff, sanitize notes, then commit. A selected commit may
+the complete staged diff, sanitize notes, then commit. Before any approved
+public push, run the private export audit against that local public branch:
+
+```sh
+python tools/private_release.py audit-public --public-root '<public clone>' --public-ref '<export branch>'
+```
+
+Run this command from the private clone; it reads local history without pushing. A selected commit may
 have private parents: the new public commit must not retain those parents.
 Never merge a private branch into public, even if its final tree looks safe;
 the merge would disclose its history. Reverts do not remove disclosed history.
@@ -49,7 +56,7 @@ history. Do not repeatedly cherry-pick the same export back and forth.
 
 ## Workflows and credentials
 
-- Public `.github/workflows/enhanced-release.yml` runs on develop/enhanced
+- Public `.github/workflows/public-source.yml` runs on develop/enhanced
   pushes, version tags, pull requests and manual dispatch. It has `contents:
   read`, tests/builds public source, and uploads no artifacts or release assets.
   These builds have no official updater channel stamp.
@@ -59,23 +66,26 @@ history. Do not repeatedly cherry-pick the same export back and forth.
   manual dispatch with an existing immutable tag. Its default token is
   `contents: read`. Builds run only inside the private repository, pin and
   validate both source commits, and retain runtime artifacts there briefly.
-- Only the private publication job receives `PUBLIC_RELEASE_TOKEN`, through the
-  private `public-release` environment. It publishes to the fixed public repo;
+- Only the private publication job receives `PUBLIC_RELEASE_TOKEN`, from the
+  private repository's Actions secrets. It publishes to the fixed public repo;
   the token is never placed in checkout credentials or the build job.
 
 Use a **fine-grained PAT** owned by the publisher, scoped to **only
 LoopRook/eqoa-enhanced**, with repository **Contents: read and write** and
 mandatory Metadata read. No Actions write, Workflows write, administration or
 private-source access is needed. Store it only as `PUBLIC_RELEASE_TOKEN` in the
-private `public-release` environment, set an expiry, and rotate it before then.
+private repository's Actions secrets, set an expiry, and rotate it before then.
 For an organization-managed publisher, a GitHub App installed only on that
 public repository with Contents write is the alternative; mint its short-lived
 token in the private publication job. The supplied YAML uses the PAT for the
 smallest setup. A deploy key authenticates Git transport and is not a substitute
 for the REST API token used to upload release assets.
 
-Where the account plan permits it, protect the private publication environment
-with owner approval and restrict it to version tags. Protect both repos' version
+Where the account plan permits it, optionally add a protected environment
+on the private publication job and restrict it to version tags. The supplied
+workflow uses a repository secret so it also works on GitHub Free; private
+environment secrets require a paid plan, and private required-reviewer gates
+have further plan restrictions. Protect both repos' version
 tags against update/deletion, and restrict release branches to reviewed merges.
 Do not grant the publisher bypass access to move tags. Environment/ruleset setup
 is an owner action after reviewing this change; no settings were changed here.
@@ -122,14 +132,25 @@ builds predate this migration. Use a new higher version for that migration.
 
 1. Review both prepared feature branches and the private-only handoff. The public
    branch must contain only the defaults, safe notes, CI gates and documentation.
-2. Merge the public feature through develop to enhanced before creating any new
-   release tag. Cancel any in-flight old public publisher runs. Check default
-   branch workflows and the new tag's tree. Old workflows can still be rerun
-   against old refs: do not rerun them to publish; disable obsolete workflow
-   entry points if needed, and restrict who can write releases.
+2. Before the first new tag, disable the retired public workflow IDs for
+   enhanced-release.yml, dev.yml and notes.yml in GitHub Actions, and cancel all
+   their in-flight runs. Disabling prevents historical reruns as well; it does
+   not cancel existing runs. This is required to close the old-definition race.
+   Source CI now uses public-source.yml, so disabling the retired identity does
+   not disable source checks. With owner approval, the CLI commands are:
+
+   ```sh
+   gh workflow disable enhanced-release.yml --repo LoopRook/eqoa-enhanced
+   gh workflow disable dev.yml --repo LoopRook/eqoa-enhanced
+   gh workflow disable notes.yml --repo LoopRook/eqoa-enhanced
+   ```
+
+   Merge the public feature through develop to enhanced before creating any new
+   release tag. Check default branch workflows, retired workflow disabled state
+   and the new tag's tree. Restrict who can write releases.
 3. Merge the prepared private feature into `private-builds`; set the private
    default branch as described above. Merge approved public changes into it.
-4. Configure the private environment credential and tag/branch protection. Check
+4. Configure the private repository credential and tag/branch protection. Check
    that no equivalent publishing token exists in public Actions secrets.
 5. Run public source CI and private tests/builds before the first official tag.
    Review the test matrix below. No live release was created by this preparation.
@@ -165,7 +186,7 @@ for `X.Y.Z`. Never move an existing version tag.
    git push private refs/tags/vX.Y.Z:refs/tags/vX.Y.Z
    ```
 
-   A private tag push starts the private build. For a workflow/environment-only
+   A private tag push starts the private build. For a workflow/credential-only
    retry, use Private official release -> Run workflow on private-builds, with
    the existing tag. The workflow definition can be newer; checked-out source,
    scripts and stamp must remain from the immutable tag. A source/tooling change
@@ -248,6 +269,8 @@ Existing MIT and third-party notices remain in every package.
 ## GitHub references
 
 - [GITHUB_TOKEN is limited to its workflow repository](https://docs.github.com/en/actions/concepts/security/github_token)
+- [Environment secret and protection-rule plan requirements](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
 - [Fine-grained PAT permissions](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 - [Release API permissions and tags](https://docs.github.com/en/rest/releases/releases)
+- [Disabling workflows also prevents historical reruns](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/disable-and-enable-workflows)
 - [Workflow concurrency is repository-scoped](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)

@@ -9,7 +9,7 @@ UPSTREAM = "github.repository == 'DabDavis/eqoa-rust-client-vanilla'"
 
 class PublicWorkflowTests(unittest.TestCase):
     def test_public_source_ci_has_no_publishing_credentials_or_artifacts(self):
-        workflow = (ROOT / ".github/workflows/enhanced-release.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/public-source.yml").read_text(encoding="utf-8")
         self.assertIn("contents: read", workflow)
         self.assertIn("tags: ['v*']", workflow)
         self.assertIn("pull_request:", workflow)
@@ -17,6 +17,12 @@ class PublicWorkflowTests(unittest.TestCase):
         self.assertIn("cargo +1.99.1 build --release --locked -p eqoa", workflow)
         for forbidden in ("contents: write", "secrets.", "gh release", "gh api",
                           "upload-artifact", "EQOA_UPDATE_CHANNEL", "git push"):
+            self.assertNotIn(forbidden, workflow)
+
+    def test_retired_publisher_is_inert(self):
+        workflow = (ROOT / ".github/workflows/enhanced-release.yml").read_text(encoding="utf-8")
+        self.assertIn("if: ${{ false }}", workflow)
+        for forbidden in ("contents: write", "secrets.", "gh release", "upload-artifact", "git push"):
             self.assertNotIn(forbidden, workflow)
 
     def test_every_legacy_job_is_disabled_on_both_enhanced_repositories(self):

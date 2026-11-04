@@ -46,7 +46,8 @@ The manifest lists explicit ownership patterns for:
 A new file outside these patterns requires explicit review. A binary edit in a
 shared file always fails; fork-owned binary map assets remain permitted.
 
-Versioned delivery is fork-owned too: VERSION, .github/workflows/enhanced-release.yml,
+Versioned delivery is fork-owned too: VERSION, .github/workflows/public-source.yml,
+the retired .github/workflows/enhanced-release.yml,
 and the named player package/verifier/remote-release guard tools and tests.
 The Windows ZIP contains runtime files only; release tooling stays in source.
 The private-build migration also owns the explicit repository-identity gates in
@@ -76,7 +77,7 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/eqoa/src/lod.rs` | 9 | 8 | Restored map terrain observation. |
 | `crates/eqoa/src/main.rs` | 33 | 0 | Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged. |
 | `crates/eqoa/src/options.rs` | 202 | 42 | Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
-| `crates/eqoa/src/play.rs` | 752 | 54 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. Trimmed to measured upstream diff in the b5e6310 review follow-up. Integration 2026-11-03 adds the R2 chat-history key tap and mode-33 ability-bar exception. |
+| `crates/eqoa/src/play.rs` | 754 | 55 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. Trimmed to measured upstream diff in the b5e6310 review follow-up. Integration 2026-11-03 adds the R2 chat-history key tap and mode-33 ability-bar exception. |
 | `crates/eqoa/src/settings.rs` | 334 | 23 | Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31), and one-line in-memory report cache update on save_login. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
 | `crates/eqoa/src/startmenu.rs` | 1 | 1 | Expose existing bounded zone_name helper for fork reports; function body unchanged. |
 | `crates/eqoa/src/touch.rs` | 81 | 2 | Reconcile Enhanced long-press release suppression with upstream full-size touch slop; preserve the map behavior and new adjustable pad size. |
@@ -218,4 +219,7 @@ Owner-approved defaults export: options adds eight test assertions/setup lines;
 settings adds two named defaults and changes default/serialization comparisons
 and invalid-input test expectations. Reviewed increments are options +8/-0 and
 settings +12/-6 relative to the previous policy. Retail lower bounds remain.
+The defaults export also makes two existing Play tests select retail slots and
+distance explicitly (+2/-1). They previously inherited old defaults; their
+retail-behavior assertions remain unchanged. Production Play code is unchanged.
 

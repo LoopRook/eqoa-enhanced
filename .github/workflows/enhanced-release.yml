@@ -1,63 +1,16 @@
-name: Enhanced public source checks
+name: Retired Enhanced publisher
 
-# Official player assets are built and published by the private repository.
-# This workflow deliberately has no channel stamp, release writes or artifacts.
+# Keep this workflow disabled in repository settings, including historic runs.
+# Public source checks now have a separate workflow identity (public-source.yml).
 on:
-  push:
-    branches: [develop, enhanced]
-    tags: ['v*']
-  pull_request:
-    branches: [develop, enhanced]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: public-source-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  windows:
-    if: github.repository == 'LoopRook/eqoa-enhanced'
-    runs-on: windows-2022
+  retired:
+    if: ${{ false }}
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - name: Use canonical Windows temporary directory
-        shell: pwsh
-        run: |
-          $canonicalTemp = (python -c "import os; print(os.path.realpath(os.environ['RUNNER_TEMP']))").Trim()
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $canonicalTemp -PathType Container)) { throw 'Cannot resolve runner temporary directory' }
-          foreach ($name in @('TMPDIR', 'TEMP', 'TMP')) { "$name=$canonicalTemp" >> $env:GITHUB_ENV }
-      - name: Fetch the reviewed upstream policy base
-        shell: pwsh
-        run: |
-          $base = (Get-Content docs/fork-footprint.json -Raw | ConvertFrom-Json).reviewed_base
-          git fetch --no-tags https://github.com/DabDavis/eqoa-rust-client-vanilla.git $base
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch reviewed upstream base' }
-          git update-ref refs/remotes/origin/master $base
-      - name: Install toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: enhanced-public-source
-      - name: Check fork integration policy
-        run: python -X utf8 tools/check_fork_footprint.py
-      - name: Test tooling and publishing gates
-        run: python -X utf8 -m unittest discover -s tools -p "test_*.py"
-      - name: Test public source
-        shell: pwsh
-        env:
-          EQOA_CONFIG: ${{ runner.temp }}/eqoa-public-source-config
-        run: |
-          New-Item -ItemType Directory -Force -Path $env:EQOA_CONFIG | Out-Null
-          cargo +1.99.1 test --locked --workspace --target x86_64-pc-windows-msvc -- --test-threads=1
-          if ($LASTEXITCODE -ne 0) { throw 'Workspace tests failed' }
-      - name: Build public source without an official updater stamp
-        run: cargo +1.99.1 build --release --locked -p eqoa --target x86_64-pc-windows-msvc
+      - run: echo "Official assets are published from the private repository."

@@ -1889,6 +1889,7 @@ mod name_plates {
     #[test]
     fn the_walkers_view_of_the_plates() {
         crate::settings::testing::reset(false);
+        crate::settings::set_client(crate::settings::ClientOptions { entity_slots: crate::settings::ENTITY_SLOTS_GAME, ..Default::default() });
         let mut cam = vi::camera::WalkCamera::<Ee> { camera_mode: 3, target_height: F::new(1.68), ..Default::default() };
         cam.walk.phys.position = Vect3::of(1000.0, 50.0, 2000.0);
         let back = |d: f32| Vect3::of(1000.0, 51.68, 2000.0 - d);
@@ -9719,7 +9720,7 @@ mod commands {
             out
         };
         asked(&mut p);
-        crate::settings::set_client(crate::settings::ClientOptions { entity_slots: 128, ..Default::default() });
+        crate::settings::set_client(crate::settings::ClientOptions { entity_slots: 128, entity_view: crate::settings::ENTITY_VIEW_GAME, ..Default::default() });
 
         p.agree_entity_view();
         assert!(asked(&mut p).is_empty(), "the control: no offer, nothing sent");
