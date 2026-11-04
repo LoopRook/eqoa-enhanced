@@ -5,6 +5,30 @@ A native Rust client for **EverQuest Online Adventures: Frontiers**, extending
 search, guidance and quality-of-life features. This fork keeps upstream engine,
 network and gameplay improvements while developing its enhanced features.
 
+## More from LoopRook
+
+<p align="center">
+  <a href="https://github.com/LoopRook">
+    <img src="https://wsrv.nl/?url=github.com%2FLoopRook.png%3Fsize%3D256&amp;w=160&amp;h=160&amp;fit=cover&amp;mask=circle&amp;output=png" alt="LoopRook's GitHub avatar" width="112">
+  </a><br>
+  <strong>Hi, I'm LoopRook.</strong><br>
+  A few more things I've made:
+</p>
+
+<p align="center">
+  <a href="https://looprook.github.io/Multivitamin/"><img src="https://img.shields.io/badge/Multivitamin-6750A4?style=for-the-badge&amp;logo=discord&amp;logoColor=white" alt="Multivitamin - Discord bot"></a>
+  <a href="https://looprook.github.io/tidepool/"><img src="https://img.shields.io/badge/Tidepool-147D82?style=for-the-badge" alt="Tidepool - artificial life simulation"></a>
+  <a href="https://github.com/LoopRook/EQOA-Parser"><img src="https://img.shields.io/badge/EQOA%20Parser-9B5C39?style=for-the-badge" alt="EQOA Parser - combat parser"></a>
+</p>
+
+## License
+
+Upstream code remains under [MIT](LICENSE). LoopRook's additions first published
+in 0.4.6 or later use the [EQOA Enhanced License](LICENSE-ENHANCED). Code
+published through 0.4.5 remains MIT; third-party code retains its own license.
+Anyone can play an unmodified official release. See the
+[license details](docs/LICENSE-OPTIONS.md) for sharing and addon terms.
+
 ## Play on Windows
 
 **[Get the latest Windows release](https://github.com/LoopRook/eqoa-enhanced/releases/latest)**
@@ -58,27 +82,3 @@ The [roadmap](docs/MODDING-AND-PARSER-ROADMAP.md),
 [playtest checks](docs/MAP-PLAYTEST.md), and
 [upstream sync report](docs/UPSTREAM-SYNC.md) cover work in progress.
 Full Forge parity and production companion packaging remain unfinished.
-
-## More from LoopRook
-
-<p align="center">
-  <a href="https://github.com/LoopRook">
-    <img src="https://wsrv.nl/?url=github.com%2FLoopRook.png%3Fsize%3D256&amp;w=160&amp;h=160&amp;fit=cover&amp;mask=circle&amp;output=png" alt="LoopRook's GitHub avatar" width="112">
-  </a><br>
-  <strong>Hi, I'm LoopRook.</strong><br>
-  A few more things I've made:
-</p>
-
-<p align="center">
-  <a href="https://looprook.github.io/Multivitamin/"><img src="https://img.shields.io/badge/Multivitamin-6750A4?style=for-the-badge&amp;logo=discord&amp;logoColor=white" alt="Multivitamin - Discord bot"></a>
-  <a href="https://looprook.github.io/tidepool/"><img src="https://img.shields.io/badge/Tidepool-147D82?style=for-the-badge" alt="Tidepool - artificial life simulation"></a>
-  <a href="https://github.com/LoopRook/EQOA-Parser"><img src="https://img.shields.io/badge/EQOA%20Parser-9B5C39?style=for-the-badge" alt="EQOA Parser - combat parser"></a>
-</p>
-
-## License
-
-Upstream code remains under [MIT](LICENSE). LoopRook's additions first published
-in 0.4.6 or later use the [EQOA Enhanced License](LICENSE-ENHANCED). Code
-published through 0.4.5 remains MIT; third-party code retains its own license.
-Anyone can play an unmodified official release. See the
-[license details](docs/LICENSE-OPTIONS.md) for sharing and addon terms.
