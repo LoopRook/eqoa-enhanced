@@ -61,14 +61,19 @@ Full Forge parity and production companion packaging remain unfinished.
 
 ## More from LoopRook
 
-[![LoopRook's GitHub avatar](https://github.com/LoopRook.png?size=80)](https://github.com/LoopRook)
+<p align="center">
+  <a href="https://github.com/LoopRook">
+    <img src="https://wsrv.nl/?url=github.com%2FLoopRook.png%3Fsize%3D256&amp;w=160&amp;h=160&amp;fit=cover&amp;mask=circle&amp;output=png" alt="LoopRook's GitHub avatar" width="112">
+  </a><br>
+  <strong>Hi, I'm LoopRook.</strong><br>
+  A few more things I've made:
+</p>
 
-- [Multivitamin](https://looprook.github.io/Multivitamin/) - a Discord bot for
-  community quotes and recurring posts.
-- [Tidepool](https://looprook.github.io/tidepool/) - a browser-based artificial
-  life simulation.
-- [EQOA Parser](https://github.com/LoopRook/EQOA-Parser) - a combat parser for
-  EverQuest Online Adventures.
+<p align="center">
+  <a href="https://looprook.github.io/Multivitamin/"><img src="https://img.shields.io/badge/Multivitamin-6750A4?style=for-the-badge&amp;logo=discord&amp;logoColor=white" alt="Multivitamin - Discord bot"></a>
+  <a href="https://looprook.github.io/tidepool/"><img src="https://img.shields.io/badge/Tidepool-147D82?style=for-the-badge" alt="Tidepool - artificial life simulation"></a>
+  <a href="https://github.com/LoopRook/EQOA-Parser"><img src="https://img.shields.io/badge/EQOA%20Parser-9B5C39?style=for-the-badge" alt="EQOA Parser - combat parser"></a>
+</p>
 
 ## License
 
