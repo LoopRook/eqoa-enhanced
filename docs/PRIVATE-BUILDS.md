@@ -102,8 +102,9 @@ Private notes stay outside the public notes and packaged file allowlist.
 Both trees' VERSION and both tags use the same canonical `X.Y.Z`. The executable
 has `EQOA_UPDATE_CHANNEL=enhanced` and `EQOA_BUILD_COMMIT=<full private tag SHA>`.
 The existing packager stamps that **same private SHA** into `update.txt` and
-`release-manifest.json` inside the ZIP. Public release notes identify both the
-public source SHA and private build SHA; hashes disclose identity, not source.
+`release-manifest.json` inside the ZIP. An HTML metadata marker records opaque
+source and build hashes for verification. The visible release description
+contains only the reviewed player notes.
 
 The updater URL remains:
 
