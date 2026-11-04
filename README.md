@@ -10,14 +10,14 @@ network and gameplay improvements while developing its enhanced features.
 **[Get the latest Windows release](https://github.com/LoopRook/eqoa-enhanced/releases/latest)**
 
 1. Under **Assets**, download `EQOA-Enhanced-<version>-Windows-x64.zip`.
-2. Extract the entire ZIP into a folder you can write to. Keep the included
-   map catalog and other files beside the game.
+2. Right-click the ZIP and select **Extract All**, then choose a folder you can
+   write to. Keep `map-entities.json` and the other included files beside the game.
 3. Double-click **eqoa.exe** and select your locally owned EverQuest Online
    Adventures: Frontiers disc image when prompted.
 4. Choose a server and sign in with an account for that server.
 
-The download does not include a disc image or game account. You do not need
-Rust, Python or a terminal to play.
+The download does not include a disc image or game account. Account registration
+depends on the server you choose. You do not need Rust, Python or a terminal to play.
 
 Official releases check for updates automatically. The updater replaces the
 game executable; if release notes say supporting files have changed, download
@@ -43,6 +43,9 @@ report is saved locally and is not uploaded automatically.
 - Upstream fishing, GM windows, character shadows and protocol improvements.
   Features requiring server support depend on the connected server.
 
+Included mods start off. To enable one, open **Options > Extended > Mods &
+Addons > Addon Manager** in game.
+
 ## Developers
 
 See the [developer guide](docs/DEVELOPMENT.md) and
@@ -55,6 +58,17 @@ The [roadmap](docs/MODDING-AND-PARSER-ROADMAP.md),
 [playtest checks](docs/MAP-PLAYTEST.md), and
 [upstream sync report](docs/UPSTREAM-SYNC.md) cover work in progress.
 Full Forge parity and production companion packaging remain unfinished.
+
+## More from LoopRook
+
+[![LoopRook's GitHub avatar](https://github.com/LoopRook.png?size=80)](https://github.com/LoopRook)
+
+- [Multivitamin](https://looprook.github.io/Multivitamin/) - a Discord bot for
+  community quotes and recurring posts.
+- [Tidepool](https://looprook.github.io/tidepool/) - a browser-based artificial
+  life simulation.
+- [EQOA Parser](https://github.com/LoopRook/EQOA-Parser) - a combat parser for
+  EverQuest Online Adventures.
 
 ## License
 
