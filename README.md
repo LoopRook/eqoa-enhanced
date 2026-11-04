@@ -49,6 +49,8 @@ Full Forge parity and production companion packaging remain unfinished.
 
 ## License
 
-The repository currently carries the upstream **MIT** license; copyright and
-third-party notices remain intact. No licensing change has been selected.
-Compare the [license options](docs/LICENSE-OPTIONS.md) before deciding.
+Upstream code remains under [MIT](LICENSE). LoopRook's additions first published
+in 0.4.6 or later use the [EQOA Enhanced License](LICENSE-ENHANCED). Code
+published through 0.4.5 remains MIT; third-party code retains its own license.
+Anyone can play an unmodified official release. See the
+[license details](docs/LICENSE-OPTIONS.md) for sharing and addon terms.

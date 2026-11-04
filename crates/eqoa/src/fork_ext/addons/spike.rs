@@ -1,3 +1,4 @@
+// Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see LICENSE). LoopRook's additions first published in 0.4.6 or later are under LICENSE-ENHANCED; upstream and third-party code stays under its own license.
 //! Explicit opt-in only. No Context, input interception or draw pass by default.
 use super::{
     bridge::Bridge,

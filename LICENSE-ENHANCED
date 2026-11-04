@@ -1,0 +1,76 @@
+EQOA Enhanced License, version 1.0
+
+Copyright (c) 2026 LoopRook
+
+1. What this license covers
+
+   "Enhanced Additions" means the source code, documentation, data and other
+   material written by or for LoopRook for the EQOA Enhanced client and first
+   published in EQOA Enhanced version 0.4.6 or later, together with any
+   compiled program built from them. "You" means any person or organization
+   exercising rights under this license.
+
+   This license does not cover:
+   (a) code from the upstream EQOA client and its contributors, which remains
+       under the MIT License in the file LICENSE;
+   (b) third-party components, fonts, catalogs, addons and libraries, which
+       remain under their own notices (see docs/licenses/ and each component's
+       own files);
+   (c) any version of EQOA Enhanced released before 0.4.6, which
+       remains under the MIT License as it was released.
+
+2. Permission
+
+   Subject to the conditions below, permission is granted, free of charge, to
+   use, copy, modify, merge, publish and distribute the Enhanced Additions, and
+   to permit others to do so on these same terms.
+
+3. Conditions
+
+   (a) Notice. Keep this license and the copyright notice with every copy or
+       substantial portion of the Enhanced Additions.
+
+   (b) Share alike. If you distribute the Enhanced Additions, or any work that
+       contains or is derived from them, in any form (including as a compiled
+       program), you must make the complete corresponding source code of what
+       you distribute available to every recipient, at no charge, under this
+       same license. You may not distribute such a work under more restrictive
+       terms, and you may not keep its source code private.
+
+   (c) Addons are separate. An addon, mod or script that runs on the client
+       through its addon interface, without copying the Enhanced Additions into
+       itself, is not a work derived from the Enhanced Additions. Its author may
+       license it in any way they choose.
+
+4. Excluded Parties
+
+   No rights of any kind are granted under this license to an Excluded Party.
+
+   "Excluded Party" means:
+   (a) any person who, at any time on or after 2026-11-04, is or has been
+       a developer, administrator, operator or staff member of the Sandstorm
+       EverQuest Online Adventures server ("Sandstorm");
+   (b) EQOA.Live, including its development team, website and any organization
+       behind them, and any organization that owns, operates or develops
+       Sandstorm or its server or client software;
+   (c) anyone acting on behalf of, at the direction of, or under contract with
+       a person or organization in (a) or (b).
+
+   Exception: anyone, including an Excluded Party, may download and run an
+   unmodified official release of EQOA Enhanced to play the game.
+
+5. Termination
+
+   If you break any condition of this license, your rights under it end
+   automatically. Rights granted to others who received copies from you are not
+   affected while they comply.
+
+6. No warranty
+
+   THE ENHANCED ADDITIONS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+   EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+   OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+   ARISING FROM, OUT OF OR IN CONNECTION WITH THE ENHANCED ADDITIONS OR THE USE
+   OR OTHER DEALINGS IN THE ENHANCED ADDITIONS.

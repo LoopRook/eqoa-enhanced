@@ -2,8 +2,10 @@
 
 This is the enhanced native game client. README.md is our GitHub landing page;
 useful upstream setup and reference material is linked from docs/DEVELOPMENT.md.
-The existing MIT license and third-party notices remain intact. The owner has
-not selected different licensing terms; compare docs/LICENSE-OPTIONS.md.
+Upstream and previously published code remain MIT. LoopRook's additions first
+published in 0.4.6 or later use LICENSE-ENHANCED; third-party code retains its
+own license. Anyone may play an unmodified official release. See
+docs/LICENSE-OPTIONS.md for the terms and scope.
 
 ## Current freeze
 

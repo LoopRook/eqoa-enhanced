@@ -1,3 +1,4 @@
+// Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see LICENSE). LoopRook's additions first published in 0.4.6 or later are under LICENSE-ENHANCED; upstream and third-party code stays under its own license.
 //! Auto-extracted bundled mod packages and embedded assets.
 //!
 //! Provides compile-time embedded copies of approved bundled mods (wereoxxs_ui,

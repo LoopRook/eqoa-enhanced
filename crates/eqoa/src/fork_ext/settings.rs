@@ -1,3 +1,5 @@
+// Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see LICENSE). LoopRook's additions first published in 0.4.6 or later are under LICENSE-ENHANCED; upstream and third-party code stays under its own license.
+// Upstream portions remain MIT (LICENSE).
 //! The three enhanced HUD-number setting keys and their existing file format.
 use super::ClientOptions;
 pub(super) fn write(c: &ClientOptions, text: &mut String) {

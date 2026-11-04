@@ -1,3 +1,4 @@
+// Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see LICENSE). LoopRook's additions first published in 0.4.6 or later are under LICENSE-ENHANCED; upstream and third-party code stays under its own license.
 // Included in manager::tests: exercise the real lifecycle, Lua and GPU bridge.
 #[test]
 fn forge_recovery_caught_error_keeps_addon_running_and_warns_once() {

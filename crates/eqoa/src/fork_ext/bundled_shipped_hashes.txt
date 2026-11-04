@@ -1,3 +1,4 @@
+# Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see LICENSE). LoopRook's additions first published in 0.4.6 or later are under LICENSE-ENHANCED; upstream and third-party code stays under its own license.
 # Previously shipped bundle (before native weapon-set bars).
 838dfb1e3f1b1521ee03951b4ca1919a822bb84af1b3e35fa0d7844d1f86cdaf  arpg_ui/README.md
 431f6434a8a73b37050d06ff54437af59a828dd38418bf4d1bc4811b83097ef1  arpg_ui/arpg_ui.lua

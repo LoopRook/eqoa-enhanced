@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see LICENSE). LoopRook's additions first published in 0.4.6 or later are under LICENSE-ENHANCED; upstream and third-party code stays under its own license.
 """Package an already built Enhanced Windows client using an explicit allowlist.
 
 Run from a clean checkout after building with EQOA_UPDATE_CHANNEL=enhanced and
@@ -83,7 +84,7 @@ BUNDLED_MOD_FILES = (
     "wereoxxs_ui/wereoxxs_ui.lua",
 )
 EXPECTED_ZIP_MEMBERS = frozenset({
-    "eqoa.exe", "map-entities.json", "LICENSE", "FrontiersForge-MIT.txt",
+    "eqoa.exe", "map-entities.json", "LICENSE", "LICENSE-ENHANCED", "FrontiersForge-MIT.txt",
     "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt", "README.txt",
     "release-manifest.json", "mods/README.txt",
     *(f"mods/{rel}" for rel in BUNDLED_MOD_FILES),
@@ -256,6 +257,7 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
     inputs = {
         "eqoa.exe": executable,
         "LICENSE": root / "LICENSE",
+        "LICENSE-ENHANCED": root / "LICENSE-ENHANCED",
         "FrontiersForge-MIT.txt": root / "docs/licenses/FrontiersForge-MIT.txt",
         "SpaceMono-OFL.txt": root / "crates/eqoa/resources/map-ui/OFL.txt",
         "Native-Addon-Runtime-NOTICES.txt": root / "docs/licenses/Native-Addon-Runtime-NOTICES.txt",

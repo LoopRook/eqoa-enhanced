@@ -1,3 +1,4 @@
+// Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see LICENSE). LoopRook's additions first published in 0.4.6 or later are under LICENSE-ENHANCED; upstream and third-party code stays under its own license.
 //! Small Lua 5.1 text-file subset. Resource paths are a virtual overlay: reads
 //! can import existing resources; all writes/deletions live in addon config.
 //! No source package, other addon, or arbitrary host file is writable.

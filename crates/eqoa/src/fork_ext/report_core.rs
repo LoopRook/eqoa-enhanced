@@ -1,3 +1,5 @@
+// Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see LICENSE). LoopRook's additions first published in 0.4.6 or later are under LICENSE-ENHANCED; upstream and third-party code stays under its own license.
+// Upstream portions remain MIT (LICENSE).
 //! Fork-owned local problem and crash reports retained after upstream removed reports.
 //! F3 and the HUD button save a ZIP to Desktop through fork_ext::report.
 //! logfile owns stderr and the log file; its hooks feed the ring, initialize
