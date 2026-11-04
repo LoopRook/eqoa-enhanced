@@ -21,8 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
-  actions: write
+  contents: read
 
 env:
   # The toolchain the client is checked with locally.
@@ -31,6 +30,7 @@ env:
 
 jobs:
   build:
+    if: github.repository == 'DabDavis/eqoa-rust-client-vanilla'
     strategy:
       fail-fast: true
       matrix:
@@ -177,6 +177,7 @@ jobs:
   # when both carry the same key. It never updates itself (update.rs), so it
   # has no line in update.txt.
   android:
+    if: github.repository == 'DabDavis/eqoa-rust-client-vanilla'
     runs-on: ubuntu-24.04
     env:
       ANDROID_NDK_VERSION: 30.0.16248370
@@ -238,7 +239,9 @@ jobs:
 
   publish:
     needs: [build, android]
-    if: github.ref == 'refs/heads/master'
+    if: github.repository == 'DabDavis/eqoa-rust-client-vanilla' && github.ref == 'refs/heads/master'
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}
@@ -313,7 +316,9 @@ jobs:
   # one: gone once the release has them, or the run failed, or was replaced.
   cleanup:
     needs: [build, android, publish]
-    if: always()
+    if: always() && github.repository == 'DabDavis/eqoa-rust-client-vanilla'
+    permissions:
+      actions: write
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}

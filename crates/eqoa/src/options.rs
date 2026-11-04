@@ -1810,6 +1810,8 @@ mod tests {
         assert_eq!(cues.last(), Some(&11));
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 23, "NPC/PC Display");
+        assert_eq!(settings::entity_slots(), 64, "the first-run 64");
+        settings::set_client(settings::ClientOptions { entity_slots: 24, ..settings::client() });
         assert_eq!(settings::entity_slots(), 24, "the game's 24");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!((settings::entity_slots(), cues.last()), (24, Some(&9)), "no fewer than the game's");
@@ -1832,6 +1834,8 @@ mod tests {
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 24, "NPC/PC Distance");
+        assert_eq!(settings::entity_view(), 650, "the first-run 650");
+        settings::set_client(settings::ClientOptions { entity_view: 100, ..settings::client() });
         assert_eq!(settings::entity_view(), 100, "the game's 100");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!((settings::entity_view(), cues.last()), (100, Some(&9)), "no nearer than the game's");
@@ -2284,6 +2288,8 @@ mod tests {
         w.draw(&vui, &mut r, &o, &mut ups);
         assert_eq!(w.cat, Some(5), "Characters' page");
         assert_eq!(w.point([frame + 110.0, y(&w, 0)]), vec![key::RIGHT], "Level of Detail's value");
+        crate::settings::set_client(ClientOptions { entity_slots: 24, ..crate::settings::client() });
+        w.draw(&vui, &mut r, &o, &mut ups);
         assert_eq!(w.point([slider + 30.0, y(&w, 1)]), down(1, key::RIGHT));
         assert_eq!(w.point([slider - 2.0, y(&w, 1)]), down(1, key::LEFT), "left of the knob at the bar's end");
         crate::settings::set_client(ClientOptions { entity_slots: 128, ..crate::settings::client() });
@@ -2292,6 +2298,8 @@ mod tests {
         assert_eq!(w.point([slider + 110.0, y(&w, 1)]), down(1, key::RIGHT), "right of it");
         // NPC/PC Distance: its knob at the left end (the game's 100),
         // then at 1000 at the right end
+        crate::settings::set_client(ClientOptions { entity_view: 100, ..crate::settings::client() });
+        w.draw(&vui, &mut r, &o, &mut ups);
         assert_eq!(w.point([slider + 30.0, y(&w, 2)]), down(2, key::RIGHT));
         crate::settings::set_client(ClientOptions { entity_view: 1000, ..crate::settings::client() });
         w.draw(&vui, &mut r, &o, &mut ups);

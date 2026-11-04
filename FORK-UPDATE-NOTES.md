@@ -8,6 +8,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 - Holding R2 to read chat history now keeps the ability bar and minimap on screen, with or without mods.
 - Problem reports (F3 or the HUD's Report a bug, and the offer after a crash) still save a ZIP to your Desktop. They now also include a short note of what the game was doing: zone, target, nearby creatures and the game's mode. Your account name, password and Windows user folder are removed; nothing is uploaded.
 - From the vanilla client: Touch Pad Size (Extended > Controller) for the on-screen controller; Class Mastery fixes, so Master Classes that branch (such as Spellbinder's) no longer refuse their second branch, and on eqoaclassic a Master Class's abilities can be bought again after reopening the window; plus speed-ups and fixes.
+- NPC/PC Display now starts at 64 and NPC/PC Distance at 650; both still go down to the game's 24 and 100.
 
 ## 2026-11-02 · Enhanced 0.4.3
 

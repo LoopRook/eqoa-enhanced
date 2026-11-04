@@ -95,9 +95,12 @@ reviewed base. On a sync, keep our CLAUDE.md, refresh the copy and review
 upstream's changes to it for rules worth adopting.
 
 Local builds have no updater channel. Published builds use channel enhanced and
-follow LoopRook/eqoa-enhanced/releases/latest/download/. The versioned release
-workflow runs only for semantic tags matching VERSION, after build/test/package
-checks. It publishes complete verified assets before marking the release latest.
+follow LoopRook/eqoa-enhanced/releases/latest/download/. Public versioned CI only
+tests/builds source and publishes no assets. Official versioned builds come from
+the complete private fork; its publisher validates the pinned public source tag
+and publishes complete verified runtime assets to the public release before
+marking it latest. See docs/PRIVATE-BUILDS.md for the source-export and release
+contracts.
 Never use the upstream dev channel or force-move a published version tag. Read
 docs/RELEASING.md before publishing; the original hygiene pass itself made no release.
 

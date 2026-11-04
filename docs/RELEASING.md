@@ -1,5 +1,12 @@
 # Versioned Enhanced releases
 
+**Publication migration:** [PRIVATE-BUILDS.md](PRIVATE-BUILDS.md) supersedes the
+same-repository build/publish steps below. Official assets are built from the
+complete private fork and uploaded to this public repository. Public CI only
+checks source; public and private version tags identify different commits.
+Follow that document's activation checklist and release runbook. The asset
+contract and immutable-version requirements below remain in effect.
+
 Players download one Windows ZIP and double-click eqoa.exe. Release builds follow
 https://github.com/LoopRook/eqoa-enhanced/releases/latest/download/; plain local
 builds have no channel. Never point enhanced builds at the upstream vanilla release.

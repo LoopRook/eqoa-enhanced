@@ -49,6 +49,9 @@ shared file always fails; fork-owned binary map assets remain permitted.
 Versioned delivery is fork-owned too: VERSION, .github/workflows/enhanced-release.yml,
 and the named player package/verifier/remote-release guard tools and tests.
 The Windows ZIP contains runtime files only; release tooling stays in source.
+The private-build migration also owns the explicit repository-identity gates in
+.github/workflows/{dev,notes}.yml and tools/test_release_workflows.py. These keep
+legacy upstream publication jobs inactive in both Enhanced repositories.
 
 ## Exact shared-file allowlist
 
@@ -72,9 +75,9 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/eqoa/src/input.rs` | 32 | 3 | Map controls and focus/input behavior. |
 | `crates/eqoa/src/lod.rs` | 9 | 8 | Restored map terrain observation. |
 | `crates/eqoa/src/main.rs` | 33 | 0 | Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged. |
-| `crates/eqoa/src/options.rs` | 194 | 42 | Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
+| `crates/eqoa/src/options.rs` | 202 | 42 | Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
 | `crates/eqoa/src/play.rs` | 752 | 54 | Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. Trimmed to measured upstream diff in the b5e6310 review follow-up. Integration 2026-11-03 adds the R2 chat-history key tap and mode-33 ability-bar exception. |
-| `crates/eqoa/src/settings.rs` | 322 | 17 | Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31), and one-line in-memory report cache update on save_login. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
+| `crates/eqoa/src/settings.rs` | 334 | 23 | Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31), and one-line in-memory report cache update on save_login. Trimmed to measured upstream diff in the b5e6310 review follow-up. |
 | `crates/eqoa/src/startmenu.rs` | 1 | 1 | Expose existing bounded zone_name helper for fork reports; function body unchanged. |
 | `crates/eqoa/src/touch.rs` | 81 | 2 | Reconcile Enhanced long-press release suppression with upstream full-size touch slop; preserve the map behavior and new adjustable pad size. |
 | `crates/eqoa/src/ui.rs` | 10 | 6 | Map UI state and input integration plus one-line pub(crate) visibility on UiAssets.surfaces for fork-owned HUD tests. |
@@ -210,3 +213,9 @@ worker and 30-second addon cache. The existing frame_library line forwards the
 walker in place; play remains +752/-54 after the R2 integration. startmenu.rs
 exposes its existing zone_name helper (+1/-1) so reports share the exact bounds
 rule; its body is unchanged. map/mini.rs shares Dot::kind between map and report.
+
+Owner-approved defaults export: options adds eight test assertions/setup lines;
+settings adds two named defaults and changes default/serialization comparisons
+and invalid-input test expectations. Reviewed increments are options +8/-0 and
+settings +12/-6 relative to the previous policy. Retail lower bounds remain.
+
