@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-04 · Enhanced 0.4.7
+
+- Minor update.
+
 ## 2026-11-04 · Enhanced 0.4.6
 
 - LoopRook's additions first published in 0.4.6 or later use the EQOA Enhanced License; earlier code stays MIT, upstream and third-party licenses stay intact, and anyone can still play the official release.
