@@ -437,6 +437,7 @@ impl Renderer {
                 self.say(758);
                 match (self.text_of("StationName"), self.text_of("StationPassword")) {
                     (Some(n), Some(p)) => {
+                        eprintln!("[station] login pressed for {n}");
                         self.dialog.confirm = true;
                         self.api.validate_login(&n, &p, now, &mut self.queue);
                     }
@@ -896,6 +897,7 @@ impl Renderer {
     pub fn on_event(&mut self, e: Event, now: i64) {
         match e {
             Event::Error(_, text) => {
+                eprintln!("[station] error: {text}");
                 // `OnError`: the editor hidden, the keys back here, the dialog
                 self.editor_visible = false;
                 self.focus = Focus::Renderer;
@@ -1137,6 +1139,7 @@ impl Renderer {
 
     /// `OnValidateLogin`: the login's answer.
     fn on_validate_login(&mut self, result: i32, uid: i32, accstat: i32, subtime: i32, gamefeatures: i32) {
+        eprintln!("[station] login reply: result {result}, account {uid}, status {accstat}, features {gamefeatures:#x}");
         let status = self.xe64;
         let mut expansion = false;
         self.login_status = -1;
