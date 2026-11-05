@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-04 · Enhanced 0.4.8
+
+- Minor update.
+
 ## 2026-11-04 · Enhanced 0.4.7
 
 - Minor update.
