@@ -220,9 +220,14 @@
       "reason": "Upstream logger retained around eight hook lines: initialize fork crash capture before rotation, share the exact run ID, redact/feed the ring, add Enhanced header, capture panic, flush journal on close."
     },
     "crates/eqoa/src/pregame/station/api.rs": {
-      "added": 4,
+      "added": 65,
+      "deleted": 3,
+      "reason": "Credential-noting hooks at login, account creation and password change preserve local report redaction; the Station reply is parsed before a close so a refusal is shown, and the login path is logged."
+    },
+    "crates/eqoa/src/pregame/station/renderer.rs": {
+      "added": 3,
       "deleted": 0,
-      "reason": "Credential-noting hooks at login, account creation and password change preserve local report redaction after upstream removed them."
+      "reason": "Log the login press, reply and error so a refused login's reason reaches eqoa.log."
     },
     "crates/eqoa/src/startmenu.rs": {
       "added": 1,
