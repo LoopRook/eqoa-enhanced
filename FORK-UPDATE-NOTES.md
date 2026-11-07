@@ -2,6 +2,16 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-07 · Enhanced 0.4.9
+
+- New from the vanilla client: in a raid group on a server that has them, the group's bars become a raid list of everyone in it. Click a name to target that member. Turn it off in Options > Extended > Map & Quests > Raid List.
+- Copy and paste: Ctrl+V, Ctrl+C and Ctrl+X work in the game's text boxes. Drag over chat lines with the mouse to select them, and Ctrl+C copies them.
+- Controller macros on the Controls page.
+- GMs can fly with /fly on servers that have the command.
+- A server's own races (such as eqoaclassic's Hill Giant) show under their own name, plus other fixes.
+- F3 on a server that takes bug reports now opens the game's Support form. Everywhere else, F3 still saves a problem report to your Desktop, and the HUD's Report button always does.
+- EQOA Enhanced is now under the GNU Affero General Public License v3 or later, like the vanilla client. Nothing changes in how you play. Earlier versions stay under MIT (see NOTICE).
+
 ## 2026-11-04 · Enhanced 0.4.8
 
 - Minor update.
