@@ -74,7 +74,7 @@ BUNDLED_MOD_FILES = [
 ]
 
 EXPECTED_ZIP_MEMBERS = [
-    "eqoa.exe", "map-entities.json", "LICENSE", "FrontiersForge-MIT.txt",
+    "eqoa.exe", "map-entities.json", "LICENSE", "NOTICE", "FrontiersForge-MIT.txt",
     "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt", "README.txt",
     "release-manifest.json", "mods/README.txt",
     *(f"mods/{rel}" for rel in BUNDLED_MOD_FILES),
@@ -131,6 +131,7 @@ class PlayerReleaseTests(unittest.TestCase):
         self.root.mkdir()
         files = {
             "VERSION": "0.1.0\n", "LICENSE": "existing MIT notice\n",
+            "NOTICE": "existing NOTICE text\n",
             "docs/licenses/FrontiersForge-MIT.txt": "existing Forge MIT\n",
             "docs/licenses/Native-Addon-Runtime-NOTICES.txt": "existing Lua and ImGui notices\n",
             "crates/eqoa/resources/map-ui/OFL.txt": "existing Space Mono OFL\n",
@@ -202,6 +203,7 @@ class PlayerReleaseTests(unittest.TestCase):
             self.assertEqual(set(manifest["files"]), set(archive.namelist()) - {"release-manifest.json"})
             self.assertEqual(archive.read("eqoa.exe"), self.executable.read_bytes())
             self.assertEqual(archive.read("LICENSE"), (self.root / "LICENSE").read_bytes())
+            self.assertEqual(archive.read("NOTICE"), (self.root / "NOTICE").read_bytes())
         exe = self.executable.read_bytes()
         self.assertEqual((self.output / "update.txt").read_text(),
             f"version 0.1.0\ncommit {self.commit}\nbuild windows-x86_64 eqoa-enhanced-windows-x86_64.exe {hashlib.sha256(exe).hexdigest()} {len(exe)}\n")
@@ -219,6 +221,15 @@ class PlayerReleaseTests(unittest.TestCase):
         self.commit = self.git("rev-parse", "HEAD").strip()
         self.executable.write_bytes(minimal_pe(self.commit, self.base))
         with self.assertRaisesRegex(FileNotFoundError, "LICENSE"):
+            self.build()
+
+    def test_missing_notice_refuses_packaging(self):
+        (self.root / "NOTICE").unlink()
+        self.git("add", "-u")
+        self.git("-c", "user.name=Release Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "missing notice")
+        self.commit = self.git("rev-parse", "HEAD").strip()
+        self.executable.write_bytes(minimal_pe(self.commit, self.base))
+        with self.assertRaisesRegex(FileNotFoundError, "NOTICE"):
             self.build()
 
     def test_player_readme_uses_the_packaged_version(self):
@@ -241,7 +252,7 @@ class PlayerReleaseTests(unittest.TestCase):
         self.assertTrue(callable(getattr(self.packager, "verify_release", None)),
                         "independent release verification has not been implemented")
         self.build()
-        for mutation in ("raw-exe", "update", "extra-asset", "extra-zip-member", "missing-license", "manifest-version", "catalog"):
+        for mutation in ("raw-exe", "update", "extra-asset", "extra-zip-member", "missing-license", "missing-notice", "manifest-version", "catalog"):
             with self.subTest(mutation=mutation):
                 changed = self.output.parent / mutation
                 shutil.copytree(self.output, changed)
@@ -262,6 +273,11 @@ class PlayerReleaseTests(unittest.TestCase):
                         del payload["LICENSE"]
                         manifest = json.loads(payload["release-manifest.json"])
                         del manifest["files"]["LICENSE"]
+                        payload["release-manifest.json"] = json.dumps(manifest).encode()
+                    elif mutation == "missing-notice":
+                        del payload["NOTICE"]
+                        manifest = json.loads(payload["release-manifest.json"])
+                        del manifest["files"]["NOTICE"]
                         payload["release-manifest.json"] = json.dumps(manifest).encode()
                     elif mutation == "manifest-version":
                         manifest = json.loads(payload["release-manifest.json"])

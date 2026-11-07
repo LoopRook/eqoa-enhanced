@@ -84,7 +84,7 @@ BUNDLED_MOD_FILES = (
     "wereoxxs_ui/wereoxxs_ui.lua",
 )
 EXPECTED_ZIP_MEMBERS = frozenset({
-    "eqoa.exe", "map-entities.json", "LICENSE", "FrontiersForge-MIT.txt",
+    "eqoa.exe", "map-entities.json", "LICENSE", "NOTICE", "FrontiersForge-MIT.txt",
     "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt", "README.txt",
     "release-manifest.json", "mods/README.txt",
     *(f"mods/{rel}" for rel in BUNDLED_MOD_FILES),
@@ -257,6 +257,7 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
     inputs = {
         "eqoa.exe": executable,
         "LICENSE": root / "LICENSE",
+        "NOTICE": root / "NOTICE",
         "FrontiersForge-MIT.txt": root / "docs/licenses/FrontiersForge-MIT.txt",
         "SpaceMono-OFL.txt": root / "crates/eqoa/resources/map-ui/OFL.txt",
         "Native-Addon-Runtime-NOTICES.txt": root / "docs/licenses/Native-Addon-Runtime-NOTICES.txt",
