@@ -1,4 +1,4 @@
-// Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see LICENSE). LoopRook's additions first published in 0.4.6 or later are under LICENSE-ENHANCED; upstream and third-party code stays under its own license.
+// Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see LICENSE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 //! Release routing is fork-owned; shared updater mechanics remain upstream's.
 pub const DOWNLOAD_BASE: &str =
     "https://github.com/LoopRook/eqoa-enhanced/releases/latest/download/";

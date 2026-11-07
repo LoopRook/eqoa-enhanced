@@ -1,4 +1,8 @@
-EQOA client (eqoa-rust-client-vanilla)
+EQOA Enhanced
+https://github.com/LoopRook/eqoa-enhanced
+Copyright (C) 2026 LoopRook
+
+Based on the EQOA client (eqoa-rust-client-vanilla)
 https://github.com/DabDavis/eqoa-rust-client-vanilla
 Copyright (C) 2026 DabDavis and contributors
 
@@ -28,6 +32,7 @@ with its notice, as it requires.
 MIT License
 
 Copyright (c) 2026 DabDavis
+Copyright (c) 2026 LoopRook (EQOA Enhanced additions published through 0.4.5)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
