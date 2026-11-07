@@ -7,7 +7,7 @@ use crate::report;
 /// Whether the local report takes this key: every key while its dialog is
 /// open, and F3, except in the world of a server that offered bug reports
 /// (`Session::bug_reports`), where F3 is Support's request form
-/// (`Play::open_bug_report`, in `key_input`).
+/// (`Play::open_bug_report`, in `keyboard`, which `key_input` reaches).
 fn claims_key(open: bool, key: &Key, play: Option<&crate::play::Play>) -> bool {
     open || (report::is_report_key(key) && !play.is_some_and(|p| p.session.bug_reports))
 }

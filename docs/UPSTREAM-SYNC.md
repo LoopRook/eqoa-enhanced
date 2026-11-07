@@ -286,3 +286,45 @@ commit. It uses the same six-entry layout as combined-4840b46, with identical
 launcher/checklist bytes except the checklist header's new commit. EXE and all
 bundled-mod copies are hash-checked; existing previews are never overwritten.
 Live owner QA remains pending. No push or other-branch changes.
+
+## 2026-11-07 sync (AGPL)
+
+Upstream b8e02cd..eb5916bfd25053dcc047c3a050a2529577842306 (35 commits): raid list,
+GM /fly, copy/paste and chat selection, controller macros, the group invite opcode,
+F3 bug reports to servers that take them, server races, flyer landing/underwater,
+WASM SIMD EE, and upstream's relicence from MIT to AGPL-3.0-or-later (ab32f96,
+eb5916b). Owner decision: take the full range; the fork is AGPL-3.0-or-later and
+LICENSE-ENHANCED is retired. Code published through 0.4.5 and upstream through
+1e23e80 stays MIT; NOTICE carries that text and ships in the player ZIP.
+
+Branch sync/2026-11-07 off develop a4c8748: db1332a merge (8 conflicts, union),
+d1fe4d6 header sweep and NOTICE credit, 4a47fc9 NOTICE in the player ZIP, then a
+review round:
+- F3: the local report claimed F3 before upstream's handler, so Support's
+  bug-report form was unreachable natively. fork_ext/report_viewer.rs now passes
+  F3 on when the server offered bug reports (`Session::bug_reports`); elsewhere,
+  and before the world, F3 saves the local report. The HUD Report button always
+  saves locally. Test `f3_is_supports_form_where_the_server_takes_bug_reports`;
+  negative control: the old predicate fails "an offer: F3 passes on".
+- Options: the merge had raised PAGE_MOST to 7 and narrowed the full-page layout
+  test. PAGE_MOST is 6 again, the test uses PAGE_MOST + 3, and upstream's Raid
+  List row sits in Map & Quests (UI already holds six). Player notes must say
+  "Options > Extended > Map & Quests > Raid List" (upstream's UPDATE-NOTES says UI).
+- Footprint re-based on eb5916b; render/ui.rs takes upstream's text/text_scaled;
+  NOTICE is a shared path; five budgets raised to measured (reasons in the JSON).
+- Per-file headers point the MIT text at NOTICE; upstream doc comments the merge
+  mangled are restored.
+
+A line-level check (every line either side added since b8e02cd is still present)
+found nothing lost except the intended license wording. Reviews: MiniMax M3 on
+a4c8748..d1fe4d6 and on the review round, both MERGEABLE WITH FIXES; findings
+fixed except the open item below.
+
+Verification (scratch EQOA_CONFIG, --test-threads=1): `cargo test --locked -p
+eqoa -p net`: client 1,586 passed / 0 failed / 26 ignored, net 53 / 0. Python
+tools 51 passed. Footprint against eb5916b: PASS. Oracle tests skip here (no
+disc/oracle on this machine).
+
+Open: with Target of Target on, a raid list of 13+ rows (or 10+ rows and a pet)
+reaches y 314 and the fork's Target-of-Target bar (y 300) is drawn over its last
+row or the pet bar. Fix awaits the owner's choice of layout.
