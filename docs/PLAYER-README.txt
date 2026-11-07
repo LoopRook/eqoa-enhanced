@@ -37,6 +37,7 @@ it does not find a walkable route. Full FrontiersForge map parity is unfinished.
 The combat parser is a separate optional companion. It is not included or
 required to play or use the map.
 
-LICENSE covers the client. FrontiersForge-MIT.txt covers the historical catalog.
+LICENSE (GNU AGPL v3 or later) covers the client; NOTICE keeps the MIT license of
+earlier versions. FrontiersForge-MIT.txt covers the historical catalog.
 SpaceMono-OFL.txt contains the font notice. Native-Addon-Runtime-NOTICES.txt covers
 the Lua and Dear ImGui libraries the mod system uses. These existing licenses are retained.

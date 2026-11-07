@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see LICENSE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
+# Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 """Check reviewed fork edits against upstream, including index/worktree/untracked.
 
 Python 3.11+ and Git are required. No command changes Git state or budgets.

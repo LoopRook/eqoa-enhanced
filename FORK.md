@@ -55,7 +55,8 @@ enhanced-only option IDs use 1000+. Process launch and UDP are native-only. Foll
 docs/COMPANION-LAUNCH.md for the portable manifest contract. Add behavior tests
 with positive and negative controls and update FORK-UPDATE-NOTES.md.
 
-F3 and the HUD report button open the local Save to Desktop dialog; crash reports
+F3 and the HUD report button open the local Save to Desktop dialog (F3 opens
+upstream's Support bug-report form instead on a server that takes bug reports); crash reports
 are offered at the next start. Nothing is uploaded. The retained report core is
 fork-owned at fork_ext/report_core.rs; upstream logfile keeps logging through hooks.
 The small fork_ext/report_state.rs snapshot is a child of the Play adapter and is

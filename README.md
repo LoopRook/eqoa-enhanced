@@ -56,7 +56,9 @@ Need help getting started or using the client? Join the
 **[LoopRook Support Server on Discord](https://discord.gg/K7wJUYGYj)**.
 
 You can also use **F3** in game to save a problem report to your Desktop. The
-report is saved locally and is not uploaded automatically.
+report is saved locally and is not uploaded automatically. On servers that take
+bug reports, F3 opens the game's Support form instead, and the HUD's Report
+button still saves a report to your Desktop.
 
 ## Features
 

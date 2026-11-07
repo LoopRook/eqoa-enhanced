@@ -868,7 +868,27 @@ impl Ui {
     /// pixel apart, alpha-blended in `color` (`'?'` for a character the
     /// font lacks; nothing when it lacks that too).
     pub fn text(&mut self, font: usize, x: i32, y: i32, color: [f32; 4], s: &[u16]) {
-        self.text_scaled(font, x as f32, y as f32, 1.0, color, s);
+        let f = &self.fonts[font];
+        let (tex, h) = (f.tex, f.height as f32);
+        let mut x0 = x as f32;
+        let y0 = y as f32;
+        let mut quads = Vec::new();
+        for &c in s {
+            let Some(&(w, uv)) = f.find(c) else { return };
+            let x1 = x0 + w as f32;
+            quads.push(Quad {
+                tex,
+                blend: 3,
+                pos: [[x0, y0], [x1, y0], [x1, y0 + h], [x0, y0 + h]],
+                uv: [[uv[0], uv[1]], [uv[2], uv[1]], [uv[2], uv[3]], [uv[0], uv[3]]],
+                color,
+                clip: None,
+            });
+            x0 = x1 + 1.0;
+        }
+        for q in quads {
+            self.push(q);
+        }
     }
 
     /// `text` drawn `scale` times its size from (x, y): its glyphs, their
@@ -877,7 +897,6 @@ impl Ui {
         let f = &self.fonts[font];
         let (tex, h) = (f.tex, f.height as f32 * scale);
         let mut x0 = x;
-        let y0 = y;
         let mut quads = Vec::new();
         for &c in s {
             let Some(&(w, uv)) = f.find(c) else { return };
@@ -885,7 +904,7 @@ impl Ui {
             quads.push(Quad {
                 tex,
                 blend: 3,
-                pos: [[x0, y0], [x1, y0], [x1, y0 + h], [x0, y0 + h]],
+                pos: [[x0, y], [x1, y], [x1, y + h], [x0, y + h]],
                 uv: [[uv[0], uv[1]], [uv[2], uv[1]], [uv[2], uv[3]], [uv[0], uv[3]]],
                 color,
                 clip: None,

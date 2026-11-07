@@ -911,6 +911,7 @@ impl Session {
         self.power_bars.iter().find(|&&(i, _)| i == id).map(|&(_, p)| p)
     }
 
+    /// `SendOpcodeByte(op, v)`.
     pub fn send_op_byte(&mut self, op: u16, v: u8) {
         if op == 0x000E {
             self.chat_mode = v;

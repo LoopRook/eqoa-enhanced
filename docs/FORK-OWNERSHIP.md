@@ -6,7 +6,9 @@ explicit override of the original hygiene brief.
 
 The executable policy is [fork-footprint.json](fork-footprint.json), checked by
 [check_fork_footprint.py](../tools/check_fork_footprint.py). Its reviewed upstream
-base is `b8e02cd781aac6a1b9e9906f09896956c77afcd6`.
+base is `eb5916bfd25053dcc047c3a050a2529577842306` (sync 2026-11-07, upstream's
+AGPL relicence); the per-file budgets and their reasons live in the JSON. The
+reviews below were measured against earlier bases.
 
 **Reviewed budgets:** exact final shared footprints after adapter extraction,
 including the approved animation guards and regressions. Existing restored map

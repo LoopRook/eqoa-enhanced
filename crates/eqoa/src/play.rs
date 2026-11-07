@@ -10582,9 +10582,11 @@ mod commands {
     }
 
     /// What shows the UI again (`Play::wants_ui`): a mode of the game's but
-    // The info window's race line: the race list's word for the target's name,
-    // else the game's; the title (0x0010's) stands where the class would, as sent.
-    // The controls: a name not on the list, and no list.
+    /// the manual camera's, the target's details, a line typed; and a world
+    /// entry. The control: play alone wants none.
+    /// The info window's race line: the race list's word for the target's name,
+    /// else the game's; the title (0x0010's) stands where the class would, as sent.
+    /// The controls: a name not on the list, and no list.
     #[test]
     fn the_info_window_says_a_race_label() {
         let mut p = play();
