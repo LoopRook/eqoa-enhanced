@@ -180,6 +180,46 @@ pub fn want_text(on: bool) {
     call_page("eqoaWantText", &JsValue::from_bool(on));
 }
 
+/// An edit box is on the screen: the page's clipboard keys are its (main.js).
+#[wasm_bindgen]
+pub fn field_up() -> bool {
+    crate::editbox::field_up()
+}
+
+/// What the edit box on the screen holds, for Copy and Cut; none for a password.
+#[wasm_bindgen]
+pub fn field_text() -> Option<String> {
+    crate::editbox::field_text()
+}
+
+/// Cut's second half: the edit box on the screen emptied.
+#[wasm_bindgen]
+pub fn field_cut() {
+    crate::editbox::ask_cut();
+}
+
+/// Paste: the browser's `paste` event's text into the edit box on the screen, as
+/// `editbox::paste_chars` lets it.
+#[wasm_bindgen]
+pub fn field_paste(text: String) {
+    if crate::editbox::field_up() {
+        crate::editbox::ask_paste(text);
+    }
+}
+
+/// What the Copy key takes with no edit box up: the chat lines selected, or the
+/// newest (`chat::copy_text`).
+#[wasm_bindgen]
+pub fn chat_copy_text() -> Option<String> {
+    crate::chat::copy_text()
+}
+
+/// That text has gone to the clipboard (`chat::copied`).
+#[wasm_bindgen]
+pub fn chat_copied() {
+    crate::chat::copied();
+}
+
 /// The keys coming now are the device's own keyboard's, not a keyboard's:
 /// the page's input for the game's edit boxes has the focus (`want_text`).
 pub fn device_keyboard() -> bool {
@@ -448,6 +488,10 @@ async fn gfx(canvas: web_sys::HtmlCanvasElement) -> Result<viewer::PendingGfx, S
         .map_err(|e| format!("no graphics adapter: {e}"))?;
     let info = adapter.get_info();
     status(&format!("graphics: {} ({:?})", info.name, info.backend));
+    crate::bugnote::set_graphics(&info.name, &format!("{:?}", info.backend));
+    if let Some(ua) = web_sys::window().and_then(|w| w.navigator().user_agent().ok()) {
+        crate::bugnote::set_browser(&ua);
+    }
     if info.backend == wgpu::Backend::Gl && !page_flag("uncapped") {
         crate::settings::set_platform_rate(crate::settings::FrameRate::Thirty);
     }

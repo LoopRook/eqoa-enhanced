@@ -80,7 +80,7 @@ use vi::walk::flags;
 use web_time::{Duration, Instant};
 
 /// A press moves this far (window pixels) before it is a drag.
-const SLOP: f64 = 5.0;
+pub const SLOP: f64 = 5.0;
 /// Two clicks this close in time and place are a double click.
 const DOUBLE: Duration = Duration::from_millis(400);
 /// A page's lock not granted this long after it was asked for: refused.
@@ -220,10 +220,13 @@ fn carried(v: Vect3<Ee>, from: (Vect3<Ee>, Vect3<Ee>), to: (Vect3<Ee>, Vect3<Ee>
 /// The body's pitch moved by `d` at once (down positive), within the walk's
 /// range for the camera (`SetPitchRange`: first person's stops at
 /// `PITCH_LIMIT`, 89.4 degrees, never straight up or down), the client's
-/// own as `set_heading` is.
+/// own as `set_heading` is. In a GM's flight (gravity off, nothing else turns it
+/// off) the whole of `PITCH_LIMIT` in every camera, as the walk's own pitch has
+/// under liquid: the follow camera's range stops 45 degrees up.
 pub fn pitch_body(cam: &mut WalkCamera<Ee>, d: F<Ee>) {
     let w = &mut cam.walk;
-    let p = vi::fpu::clamp(w.phys.angles.y + d, w.min_pitch, w.max_pitch);
+    let (lo, hi) = if w.parm60 == 0 { (F::new(-1.5607964), F::new(1.5607964)) } else { (w.min_pitch, w.max_pitch) };
+    let p = vi::fpu::clamp(w.phys.angles.y + d, lo, hi);
     for s in [&mut w.phys, &mut w.committed] {
         s.angles.y = p;
         s.angular_vel.y = F::ZERO;
@@ -394,6 +397,11 @@ impl Mouse {
     #[cfg(test)]
     pub fn dragging(&self) -> bool {
         self.press.is_some_and(|p| p.dragged)
+    }
+
+    /// No button held and no gesture going on.
+    pub fn idle(&self) -> bool {
+        self.press.is_none() && !self.held[0] && !self.held[1]
     }
 
     /// A button pressed or let go; a click when the gesture ends (no button

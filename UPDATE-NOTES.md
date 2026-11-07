@@ -5,6 +5,124 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
+## 2026-11-07 · The licence
+- The client's source goes under the GNU Affero General Public License (version 3 or later) in place of
+  MIT, from the next build on. Nothing changes in playing it. If you hand out a changed copy or host a
+  changed page, players have to be offered its source. Earlier versions stay under MIT.
+
+## 2026-11-07 · GMs can fly
+- For GMs, on a server that has the command: `/fly` turns flying on, and `/fly` again turns it off (or
+  `/fly on` and `/fly off`). Nothing changes for anyone else.
+- While flying, moving forward at the camera's usual angle goes straight along and holds your height. Look
+  up from there to climb and down to dive, at your ordinary run speed whichever way you go. In first person,
+  looking level is level. Let go and you stay where you are in the air. Your character runs and stands as it
+  does on the ground, and walls and the ground still stop you.
+- With a mouse, look up or down as usual. With a controller or the keyboard in the follow and orbit cameras,
+  the right stick's up and down (Page Up and Page Down) look up and down while you fly, instead of zooming;
+  the wheel still zooms. Your camera goes back as it was when you stop.
+- Turned off, you fall and walk as normal from where you are.
+
+## 2026-11-07 · The raid list
+- In a raid group, on a server that has them, the group's bars become a list of everyone in it: each
+  name over a thin health bar, in more columns as the raid grows, and past four columns the mouse wheel
+  over it steps through the rest. It sits where the bars do, with your pet's bar under it.
+- Click a name to target that member, when they are near enough for you to see. Someone out of sight is
+  greyed, your target's name is gold, your own is blue and the dead are red. L1's cycle reaches
+  everyone you can see too.
+- Options > Extended > UI > Raid List turns it off, and you get the game's bars, as on any other server.
+
+## 2026-11-07 · A server's own races
+- A server can have races of its own (eqoaclassic's Hill Giant). Such a character now reads as its own race wherever
+  the game shows a character's race: a target's details, your Stats page, the who list, the guild roster, the buddy
+  list, the group search and a duel's invitation say Hill Giant, or HGT where the column is short, and not the race it
+  plays as (Ogre, OGR). The who list and the roster sort by the word they show.
+- On those same characters the title in a target's details no longer repeats the race: Titan, not Hill Giant Titan.
+- Its camera, what it may wear and how it looks are as before. A server with no such race looks just as it did.
+
+## 2026-11-07 · Picking the disc on a phone
+- In a browser on an Android phone or any touch device, the disc image's picker now shows every file, as it
+  already did on an iPhone. It could grey out an .iso before, so there was nothing to pick. The page still checks
+  the disc you choose.
+
+## 2026-11-07 · Copy and paste, and chat lines
+- Any text box in the game (the chat line, Support and F3, mail, a tell, names) takes Ctrl+V to paste
+  at the caret, Ctrl+C to copy what it holds and Ctrl+X to cut it (Cmd on a Mac), in the program and
+  in a browser.
+- Text you paste is kept to what the game's own keyboard can type: letters, digits, a space and
+  ! " % ' ( ) * + , - . / : ; = ? @ _ ~. Other characters are left out, tabs become spaces, and curly
+  quotes and long dashes become plain ones. Line ends stay in a mail's body and a Support message, and
+  become spaces everywhere else. It stops at the box's own length.
+- A password's box can be pasted into, but not copied or cut.
+- Chat lines can be copied, in the program and in a browser, with a mouse. Press on a line in the chat
+  box and drag over the lines you want: they light up. Drag past the top or bottom of the box to go on
+  through the lines it has kept. Ctrl+C (Cmd+C on a Mac) copies them as plain text, a line for each
+  row. Esc or a click anywhere else clears them.
+- With nothing selected and no text box up, Ctrl+C copies the newest chat line.
+- While the chat history is up (C or R2 held, or lines selected), the mouse wheel over the box steps
+  through it. A plain click on a chat line still opens the chat line.
+
+## 2026-11-06 · Macros
+- The Controls page (Options > Controls, or F1 while you play) has sixteen macros after its keys. A
+  macro presses a set of the game's buttons for you, all at once as a controller would, when you
+  press its key or its controller button.
+- On "Macro 1" (and 2 to 16), pick the key that does it, a controller button, or both. A controller
+  button you put there does the macro and no longer what it did in the game. A key that a row of the
+  page already uses is refused: move that row first.
+- On "Macro 1: presses", choose ✕ and then press the buttons it should press, the controller's or the
+  keys for them, together or one after another: a second after the last one they are kept.
+  Backspace leaves it pressing nothing.
+- Beside them, how it presses (✕ steps through the choices): Hold (while you hold its key or
+  button), Toggle (on at one press, off at the next), or Turbo, pressing and letting go over and
+  over, from 15 presses a second (Turbo 1) down to one a second (Turbo 15), as fast at any frame
+  rate. A toggled turbo keeps going until your next press.
+- Macros are kept with your keys when you Save Changes, and Defaults clears them. A server sees
+  only the button presses, the same as from a controller.
+
+## 2026-11-06 · Any group member can invite
+- On a server that allows it (eqoaclassic does), anyone in a group can invite another player into it,
+  not only the leader: from the target's menu or the who list, as the leader always could. The leader
+  stays the leader. Elsewhere only the leader invites, as before.
+
+## 2026-11-05 · Report a bug with F3
+- On a server that takes bug reports (it tells you so when you log in), F3 opens Support's request
+  form, the game's own, with Bug Report already picked and its topics open: choose what the bug is about
+  (a quest, a creature, an item, a spell, combat, the game client or something else), say what
+  happened, and send it. Send it from where it happened: the server keeps where you were, what you
+  had targeted and what you had just been told, so the GMs can see what you saw.
+- Typing /bug and what went wrong in the chat line sends one on the spot, the same way.
+- A GM answers in Support's inbox in the start menu, and you are told in chat when one has.
+- With the report goes a short note of this program's own: its build, your system and graphics card,
+  the frame rate, and where it showed you and your target. Nothing else, and no account name. A
+  server that does not take bug reports (Sandstorm, eqoa.live) is sent nothing, and F3 does nothing
+  there.
+
+## 2026-11-04 · 8BitDo controllers in the browser
+- In Chrome and Edge on Windows and Mac, an 8BitDo controller in its D-input mode (an 8BitDo Pro 2
+  with its switch on D, an SN30 Pro, a Lite 2 and their kin) now has every button where it belongs:
+  B, the bottom button, is ✕, A is ○, Y is □ and X is △, L and R are L1 and R1, ZL and ZR are L2 and
+  R2, − and + are Select and Start, and the d-pad works. Before, the buttons came mixed up (✕ on A,
+  Start on ZR), the d-pad did nothing (so the Options window could not be stepped down to Save
+  Changes without the keyboard or the mouse), and the right stick's up and down were read from the
+  wrong place.
+- Any other controller those browsers have no layout for now has its d-pad and right stick read
+  where such controllers keep them, and no longer changes layout partway through a session: pushing
+  its right stick up and to the left used to leave L2 and R2 held from then on.
+
+## 2026-11-03 · A slow walk keeps walking
+- Walking slowly with a controller no longer makes your character's legs switch between walking and
+  running every moment when you head in some directions (on the way to Warlord Jurglash, for one).
+  Your character now takes its steps on the same clock as a PS2, which also makes walking and running
+  a little slower than before (about 2% when running), as fast as on a PS2.
+
+## 2026-11-03 · Dying shows your body again; no stutter step on a light push
+- When you die, the camera now starts where it was and swings round and down onto your body as on a
+  PS2. It used to start pointing nowhere: the screen broke up into garbage (stripes, a smear of
+  ground) for the first moments, longer the further out you had the camera zoomed, then jumped to
+  looking straight down.
+- Pushing the left stick partway, at the point between walking and running, no longer makes your
+  character switch between a walk and a run several times a second. Once you push past that point you
+  run until you ease off a little further back; held still, the stick walks or runs where it did.
+
 ## 2026-11-03 · Lighter work in the browser
 - In the browser, the game's sums for placing and turning things (characters' bones as they move,
   collisions, the camera) now work on four numbers at once, as they already do on computers and

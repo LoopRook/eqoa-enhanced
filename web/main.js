@@ -5,7 +5,7 @@
 // override the defaults: ?relay=ws://127.0.0.1:8790&server=203.0.113.10 for a
 // local server. Notices and what goes wrong are notices.js's
 // (window.eqoaNotices).
-import init, { boot, view, disc_id, disc_2002, update_notices, hidden_tick } from './eqoa.js';
+import init, { boot, view, disc_id, disc_2002, update_notices, hidden_tick, field_up, field_text, chat_copy_text, chat_copied, field_cut, field_paste } from './eqoa.js';
 import { canRemember, keptHandle, keepHandle, forgetHandle } from './discstore.js';
 
 const $ = (id) => document.getElementById(id);
@@ -331,6 +331,79 @@ const typeHere = () => {
   typedRest();
   typed.focus({ preventScroll: true });
 };
+
+// The clipboard for the game's edit boxes: Ctrl+V, Ctrl+C, Ctrl+X (Cmd on a Mac),
+// while one is on the screen. They stop here, before the canvas: winit would keep
+// the browser from its paste, and the paste event is the one way to read the
+// clipboard that asks the player nothing. For it the focus goes to the hidden
+// input, as every browser fires it there, and the text goes to the client whole,
+// which keeps only what a console's keyboard can type (`editbox::paste_chars`). A
+// phone's paste into that input comes the same way. With no edit box up, Copy takes
+// the chat lines selected, or the newest (`chat::copy_text`); its release stops here
+// too, as the game never saw the press (a C let go ends R2's history).
+let copyKey = null;
+let pasteBack = null;
+const pasteDone = () => {
+  if (pasteBack) pasteBack.focus({ preventScroll: true });
+  pasteBack = null;
+};
+addEventListener('keydown', (e) => {
+  // its repeats are the copy's too, Ctrl let go first or not
+  if (e.repeat && e.code === copyKey) {
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    return;
+  }
+  // (a Mac's browsers send no keyup for a key let go under Cmd: the next key clears it)
+  if (!e.repeat) copyKey = null;
+  if (!clientReady || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+  // by the letter, or where it is on a keyboard with no Latin letters
+  const which = /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() : { KeyV: 'v', KeyC: 'c', KeyX: 'x' }[e.code];
+  if (!['v', 'c', 'x'].includes(which)) return;
+  if (!field_up()) {
+    // (text picked on the page itself is the browser's to copy; a page not served
+    // over https has no clipboard to write to)
+    const free = navigator.clipboard && document.getSelection().isCollapsed;
+    const lines = which === 'c' && free ? chat_copy_text() : null;
+    if (lines === undefined || lines === null) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    if (e.repeat) return;
+    copyKey = e.code;
+    navigator.clipboard.writeText(lines).catch((err) => console.log(`copy: ${err && err.message}`));
+    chat_copied();
+    return;
+  }
+  e.stopImmediatePropagation();
+  if (e.repeat) return;
+  if (which === 'v') {
+    if (document.activeElement !== typed) {
+      pasteBack = document.activeElement;
+      typedRest();
+      typed.focus({ preventScroll: true });
+      // nothing to paste fires no event: the keys go back to where they were
+      setTimeout(pasteDone, 100);
+    }
+    return;
+  }
+  const text = field_text();
+  if (text === undefined || text === null) return;
+  e.preventDefault();
+  if (navigator.clipboard) navigator.clipboard.writeText(text).catch((err) => console.log(`copy: ${err && err.message ? err.message : err}`));
+  if (which === 'x') field_cut();
+}, true);
+addEventListener('keyup', (e) => {
+  if (e.code !== copyKey) return;
+  copyKey = null;
+  e.stopImmediatePropagation();
+}, true);
+typed.addEventListener('paste', (e) => {
+  const text = e.clipboardData && e.clipboardData.getData('text/plain');
+  if (text === undefined || text === null || !clientReady) return;
+  e.preventDefault();
+  field_paste(text);
+  pasteDone();
+});
 let lastTouch = false;
 window.eqoaWantText = (on) => {
   wantText = !!on;
@@ -621,13 +694,16 @@ $('iso').addEventListener('change', async () => {
   }
 });
 
-// iOS turns an input's `accept` into file types and knows none for a disc
-// image's .iso, .bin or .img, so its picker greys the image out in every
-// browser there (all of them WebKit; Chrome on an iPhone, 2026-10-27: "it
-// doesn't let you select the ISO"). The disc is judged here anyway (SYSTEM.CNF,
-// `disc_id`), so on iOS the inputs take any file.
+// A phone's picker turns an input's `accept` into file types, and knows none for
+// a disc image's .iso, .bin or .img or knows another than the one its files are
+// given, so it greys the image out: iOS in every browser there (all of them
+// WebKit; Chrome on an iPhone, 2026-10-27: "it doesn't let you select the ISO"),
+// and Android and any touch device the same (2026-11-07: "for mobile players cant
+// select iso"). The disc is judged here anyway (SYSTEM.CNF, `disc_id`), so on those
+// the inputs take any file, and the picker that can be remembered names no types.
 const onIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-if (onIOS) for (const id of ['iso', 'iso2002']) $(id).removeAttribute('accept');
+const anyFile = onIOS || /Android/.test(navigator.userAgent) || window.eqoaTouchFirst();
+if (anyFile) for (const id of ['iso', 'iso2002']) $(id).removeAttribute('accept');
 
 // ---- the 2002 disc: EverQuest Online Adventures (USA), SLUS-20470, whose
 // art F9 swaps in (crates/eqoa/src/era.rs). Optional, judged by the client's
@@ -773,7 +849,7 @@ function offerKeep(name) {
 // `id`); a start it cannot open in is tried once more without.
 function pickRemembered(name) {
   const d = discInputs[name];
-  const opts = { id: d.id, types: [{ description: 'Disc image', accept: { 'application/octet-stream': ['.iso', '.bin', '.img'] } }] };
+  const opts = anyFile ? { id: d.id } : { id: d.id, types: [{ description: 'Disc image', accept: { 'application/octet-stream': ['.iso', '.bin', '.img'] } }] };
   const start = remembered[d.key] ? remembered[d.key].handle : null;
   const open = (o) => window.showOpenFilePicker(o).then(async ([handle]) => {
     const file = await handle.getFile();

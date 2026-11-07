@@ -645,6 +645,9 @@ impl WndOptions {
                     // Overlapping Names: the plates kept from the next
                     // frame (`play::labels`)
                     34 => c.overlapping_names = !c.overlapping_names,
+                    // Raid List: the server told from the next frame
+                    // (`Session::agree_raid_roster`)
+                    49 => c.raid_list = !c.raid_list,
                     // Text: every font drawn from the next frame (`viewer`)
                     30 => c.text = c.text.other(),
                     // Loading Screens: the next long trip's (`loading`)
@@ -1118,7 +1121,7 @@ const CONTROLS: &str = "Controls";
 /// and shown on the page of the category that lists it (`CATEGORIES`).
 // Upstream IDs stay below 1000; enhanced map IDs 1043..1047 avoid future collisions.
 // These are transient UI identities, not persisted settings keys.
-const EXTENDED_ITEMS: [(i32, &str); 37] = [
+const EXTENDED_ITEMS: [(i32, &str); 38] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1151,6 +1154,7 @@ const EXTENDED_ITEMS: [(i32, &str); 37] = [
     (46, "Shadows"),
     (47, "Ground Fog"),
     (48, "Touch Pad Size"),
+    (49, "Raid List"),
     (1043, "Map Markers"),
     (1044, "Minimap"),
     (1045, "Quest Markers"),
@@ -1187,7 +1191,7 @@ struct Category {
 const CATEGORIES: [Category; 9] = [
     Category { name: "Video", items: VIDEO, note: Note::Scale },
     Category { name: "World", items: &[20, 35, 36, 37, 47, 25], note: Note::None },
-    Category { name: "UI", items: &[22, 31, 42, 1044, 1047, 29], note: Note::None },
+    Category { name: "UI", items: &[22, 31, 42, 1044, 1047, 29, 49], note: Note::None },
     Category { name: "Controller", items: &[16, 19, 48], note: Note::Reads },
     Category { name: "Camera", items: &[15, 17, 18], note: Note::None },
     Category { name: "Characters", items: &[12, 23, 24, 27, 34, 46], note: Note::Server },
@@ -1222,10 +1226,10 @@ const SOUND: &[i32] = &[21];
 const CATEGORY_LEGEND: i32 = CATEGORIES.len() as i32 + 2;
 const CATEGORY_ROWS: i32 = CATEGORY_LEGEND + 1;
 
-/// The most rows a category's page holds: six and the legend are as tall as
-/// nine rows, the most the options window has room for (`page_window`), so
+/// The most rows a category's page holds: seven and the legend are as tall as
+/// ten rows, the most the options window has room for (`page_window`), so
 /// no page scrolls.
-const PAGE_MOST: usize = 6;
+const PAGE_MOST: usize = 7;
 
 /// Whether every category's page holds its rows (`PAGE_MOST`).
 const fn fits(cats: &[Category]) -> bool {
@@ -1289,6 +1293,7 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         1045 => on_off(c.quest_markers),
         1046 => on_off(c.quest_tracker),
         34 => wide(if c.overlapping_names { "Show" } else { "Hide" }),
+        49 => on_off(c.raid_list),
         35 => on_off(c.mipmaps),
         36 => on_off(c.flora),
         37 => on_off(c.environment),
@@ -1682,7 +1687,7 @@ mod tests {
         assert_eq!((w.row, cues.last()), (5, Some(&9)), "World's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.cat, w.cat_sel, w.item), (3, None, 1, -1), "back to the categories, World still lit");
-        // UI: Ability Bars
+        // UI: Ability Bars, Target of Target, Mana Bars, Minimap, Stats Box, Update Notices, Raid List
         press(&mut w, &mut o, key::DOWN, &mut cues);
         press(&mut w, &mut o, key::CROSS, &mut cues);
         assert_eq!((w.cat, w.item), (Some(2), 22), "UI, Ability Bars");
@@ -1733,7 +1738,15 @@ mod tests {
         assert!(settings::update_notices(), "and back: two values");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (5, Some(&9)), "UI's last row (six, a page's most)");
+        assert_eq!(w.item, 49, "Raid List");
+        assert!(settings::raid_list(), "on: a raid group's every name and health");
+        assert_eq!(value_text(&vui, 49), Some(wide(vui.words.get(551, vui.language))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::raid_list(), cues.last()), (false, Some(&11)), "off: the game's bars");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::raid_list(), "and back: two values");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (6, Some(&9)), "UI's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         // Controller: Controller Focus, Capture Controller, Touch Pad Size
         press(&mut w, &mut o, key::DOWN, &mut cues);
@@ -2116,8 +2129,8 @@ mod tests {
         assert!(extended_items().all(|&(i, l)| !l.is_empty() && label_of(i) == l));
         let short = [Category { name: "Video", items: &[13, 20], note: Note::None }];
         assert_ne!(listed(&short), all, "the control: rows left out");
-        let seven = [Category { name: "Video", items: &[13, 20, 14, 26, 25, 12, 15], note: Note::None }];
-        assert!(!fits(&seven), "the control: a page that would scroll");
+        let eight = [Category { name: "Video", items: &[13, 20, 14, 26, 25, 12, 15, 33], note: Note::None }];
+        assert!(!fits(&eight), "the control: a page that would scroll");
     }
 
     /// A category's page of `PAGE_MOST` rows, a row more than the game's
@@ -2139,7 +2152,7 @@ mod tests {
         w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
         let (top8, h8) = (w.window2.top_left()[1], w.window2.size[1]);
         assert_eq!(w.window2.rows, 8, "Interface: eight rows (Vibration)");
-        w.page_window(&vui, &r, PAGE_MOST as i32 + 3);
+        w.page_window(&vui, &r, 9);
         let (top9, h9) = (w.window2.top_left()[1], w.window2.size[1]);
         assert_eq!((w.window2.rows, w.window2.title_h), (9, 18), "a row more, no title bar");
         assert_eq!(top9, top8, "the top where an eight-row page's is");

@@ -9,15 +9,19 @@ current.
 
 - Vanilla: nothing that changes the game's picture or play beyond what README "Vanilla" keeps
   (widescreen, the untethered frame rate, the mouse and the touch screen, the keyboard with WASD and
-  the Controls page, 1,000 lines of chat, no green backdrop behind the start menu's windows, the
+  the Controls page, copy and paste in the edit boxes (the user's of 2026-11-07, held to what a
+  console's keyboard can type: `editbox::typable`), chat lines selected with a mouse and copied (the
+  same day; `chat`, drawn over the game's chat, not in it), 1,000 lines of chat, no green backdrop behind the start menu's windows, the
   Extended options, the updater, the 2002 disc's art on F9, Hide UI
   on H, names from farther and smaller zoomed out (and every one in a crowd, Overlapping Names Show),
+  the raid list on a server that has raid groups (the user's of 2026-11-07: `raidlist`, an Extended row, on by default),
   Ignore Shouts kept, Update Notices, Text Sharp or Smooth, Loading Screens Longer or Instant, Render
   Scale x1, x2 or x4 (off unless chosen), HUD Nearest or Sharp (Nearest, the game's, by default: the
   user's of 2026-10-28, "make nearest the default ... since there is a cost"; Sharp was the default
   on 2026-10-27), and the live game's duel window on a server that turns duels on (the user's of
   2026-10-29, "port the duel window to vanilla too": `duel.rs`, `duelwnd.rs`, `duelplay.rs`, read off SOE's
-  final CLIENT in the Corsten save state, README "duels")).
+  final CLIENT in the Corsten save state, README "duels"), and a GM's flight on a server that turns it on (the
+  user's of 2026-11-07, "lets add a gm fly command": `walker.rs`, never in `vi`)).
   A new client-side addition is the user's call: ask first. Sharp filtering is for the 2D layer and
   the text only: the world's textures are drawn smooth, as the game filters them (the user,
   2026-10-27, after a Crisp row for them: "world textures cant render proper without smooth. so
@@ -168,6 +172,9 @@ current.
   goes there, with a test at 30 and 165 Hz. What moves by the clock runs every frame drawn, but
   the walk: its integrator's speed grows as its step shrinks, so it keeps the console's own frames
   (33.37 ms) and is drawn on its way to the next (`walker.rs`, `Kept`); never step it a frame drawn.
+  Each console frame steps it by the game clock's step, VITimer's (983.04 a second, every count even:
+  32 or 34 a frame, `console_step`), not by milliseconds: the gait is read off `Process`'s last
+  sub-step, and a 1 ms one flipped a slow walk toward a lower coordinate to a run every other frame.
   Anything that writes the walk as a control between frames (the mouse's `set_heading`) calls
   `Walker::rewind` first, or it reads as a place given and no console frame is stepped; a place it
   gives the follow orbit's camera then (`set_orbit_angle`, round the console frame put back) is moved
@@ -237,9 +244,16 @@ current.
   the click's activation up: ask for it after anything else that click needs (asked first, it broke
   Start with a remembered disc the browser had to ask for).
   It installs as an app (`web/manifest.json`, the icons `tools/webicons` draws off `icon_art.rs`).
-- No problem or crash reports (taken out 2026-10-31, the user: "lets also remove the F3 report and
-  crash report system from vanilla"; the report server on eqoaclassic was shut down the same day):
-  the client sends no reports of any kind, and no telemetry. The log stays on the player's
+- No problem or crash reports to a report server (taken out 2026-10-31, the user: "lets also remove
+  the F3 report and crash report system from vanilla"; the report server on eqoaclassic was shut down
+  the same day), and no telemetry. Bug reports go to the server the player plays on, as petitions
+  over the game's own connection (the user, 2026-11-05), so a server hears only its own players: on
+  a server that offers them (go-eqoa-server's 0x7E0E, `net::session::OP_BUG_REPORTS`) F3 opens
+  Support's request form on Bug Report (`Play::open_bug_report`), and each petition the player files
+  (the form, a typed `/bug` or `#bug`) goes after the client's note (0x7E0F, `bugnote.rs`: build,
+  platform, graphics, frame rate, where it shows the player and its target; one message, at most
+  1,000 bytes; never an account name, an address or a path). Nothing goes unless the player files
+  one, and nothing to a server that made no offer. The log stays on the player's
   machine, theirs to hand on: never log a credential. Natively stderr goes through the log's pipe
   (`logfile::start`, `eqoa boot` only): anything that starts another program in this one's place
   puts it back first (`logfile::restore_stderr`), or the new one inherits a pipe nothing reads, and

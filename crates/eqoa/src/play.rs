@@ -133,6 +133,9 @@ pub struct Play {
     /// `m_p07570`: when the last 0x40 went, on the game's clock
     /// (`Session::timer`); -1 none yet (`Connect`'s).
     last_send: i64,
+    /// Where the walk last put the player, as the last 0x40 said (a bug
+    /// report's note: `bug_note`).
+    last_pos: [f32; 3],
     /// `m_p07578`: the 0x40's interval in the game's clock's ticks (983.04
     /// a second): 100 (101.7 ms), or what 0x07B2 sets. The PS2 keeps it for
     /// the program's run; here a login starts at 100 again (no server we
@@ -2223,9 +2226,11 @@ impl Play {
         crate::hideui::show();
         // no server's feature word yet (`live`): the disc's until a 0x07F5
         crate::live::set_features(Default::default());
+        // no race words from this server yet (`racelabel`): the game's
+        crate::racelabel::clear();
         // Msg000D reads `m_speed` out of the dump
         let speed = dump.speed;
-        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), actors: vec![None; MAX_SLOTS], self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, rumbles: Vec::new(), glyphs: Default::default(), wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default() };
+        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, last_pos: [0.0; 3], send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), actors: vec![None; MAX_SLOTS], self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, rumbles: Vec::new(), glyphs: Default::default(), wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default() };
         p.take_abilities();
         p.npcw_world_entry();
         // world entry: LoadModels and StreamFillCache under the loading screen
@@ -2347,6 +2352,7 @@ impl Play {
                     let me = self.self_id32();
                     self.group.roster(&ids, &names, me);
                 }
+                Event::RaidRoster { total, first, rows } => self.group.raid_page(total, first, rows),
                 Event::GroupInvite { id, name, .. } => {
                     // Msg0773: refused at once while in a group
                     if self.group.in_group {
@@ -2435,6 +2441,8 @@ impl Play {
                     self.cues.push(crate::sound::Cue::Ui(1));
                 }
                 Event::Opcode { op: 0x0E02, data } => self.who.recv(&data),
+                // a race the game does not have, by its own words (`racelabel`)
+                Event::Opcode { op: net::session::OP_RACE_LABELS_DATA, data } => crate::racelabel::take(&data),
                 // the live client's feature word and group search, and the
                 // server's offer of the live auction form (`liveplay`); the
                 // word goes to the duel part's copy too (`duelplay`)
@@ -2841,6 +2849,7 @@ impl Play {
             }
         }
         self.agree_entity_view();
+        self.agree_raid_roster();
         // Mana Bars: a server that offers others' power told whether to send it
         self.session.agree_power_bars(crate::settings::client().mana_bars);
         // Quest Markers: a server that offers quest marks told whether to send them
@@ -3494,7 +3503,13 @@ impl Play {
     /// a narrower one draws it at the game's (Vert+).
     pub fn cycle_target(&mut self, group: bool, eye: glam::Vec3, dir: glam::Vec3, game: glam::Mat4, view_proj: glam::Mat4) {
         let me = self.self_id32();
-        let members: Vec<u32> = self.group.members[..self.group.count()].iter().map(|m| m.id).collect();
+        let mut members: Vec<u32> = self.group.members[..self.group.count()].iter().map(|m| m.id).collect();
+        // a raid group's others the client can see (the Raid List)
+        for m in &self.group.raid {
+            if !members.contains(&m.id) && self.entities.slots.iter().flatten().any(|e| e.id == m.id) {
+                members.push(m.id);
+            }
+        }
         let mut cand: Vec<(f32, u32)> = Vec::new();
         if group {
             cand.extend(me.map(|id| (0.0, id)));
@@ -3961,6 +3976,7 @@ impl Play {
     /// the target.
     fn send_position(&mut self, walk: &vi::walk::WalkPhysics<Ee>, now: i64) {
         self.last_send = now;
+        self.last_pos = walk.position.to_array();
         if watching(&self.player.name) {
             eprintln!("[sent] {now} pos {:.2?} vel {:.2?} heading {:.3} loco {} flags {:#x} mode {}", walk.position.to_array(), walk.velocity.to_array(), walk.angles.x.0, walk.loco_state, walk.flags, self.mode);
         }
@@ -4292,6 +4308,9 @@ impl Play {
                 }
                 Some(crate::hud::Pick::Me) => self.self_id32(),
                 Some(crate::hud::Pick::Member(id)) => Some(id),
+                // the raid list's: only one the client can see (out of sight its
+                // id is a stand-in, nothing to target)
+                Some(crate::hud::Pick::Raid(id)) => Some(id).filter(|&id| self.sees_entity(id)),
                 Some(crate::hud::Pick::Pet) => (self.pet_id != u32::MAX).then_some(self.pet_id),
                 None => return false,
             };
@@ -4310,6 +4329,71 @@ impl Play {
         };
         self.press(&keys);
         true
+    }
+
+    /// The chat box's point for a pointer at window pixels `at` (as `point`
+    /// takes it, before a wide window's move and a tall one's).
+    fn chat_point(at: (f64, f64), size: (u32, u32)) -> [f32; 2] {
+        let f = render::ui::frame_from_window(size, [at.0 as f32, at.1 as f32]);
+        [f[0] - render::ui::side(size), f[1] - render::ui::top(size)]
+    }
+
+    /// A mouse button down in the world at window pixels `at` (`left`: the left
+    /// one, with no other held). True when it is the chat box's (`chat`), on one of
+    /// its lines in play or in its history, and so none of the mouse's gesture;
+    /// anywhere else any selection clears, and the press goes on as ever.
+    pub fn chat_press(&mut self, at: (f64, f64), size: (u32, u32), left: bool) -> bool {
+        let lines = ((self.mode == 0 && !self.search.open) || self.mode == 33) && !crate::hideui::hidden();
+        let scrolling = self.mode == 33;
+        let Some(c) = self.wnd_chat.as_mut() else { return false };
+        if c.dragging() {
+            return true;
+        }
+        if left && lines && c.press(Self::chat_point(at, size), at) {
+            return true;
+        }
+        c.clear_selection(scrolling);
+        false
+    }
+
+    /// The pointer moved in the world: a drag of the chat box's goes with it.
+    pub fn chat_moved(&mut self, at: (f64, f64), size: (u32, u32)) {
+        if let Some(c) = self.wnd_chat.as_mut() {
+            c.moved(Self::chat_point(at, size), at);
+        }
+    }
+
+    /// The left button let go (`chat::Let`).
+    pub fn chat_release(&mut self) -> crate::chat::Let {
+        let scrolling = self.mode == 33;
+        self.wnd_chat.as_mut().map_or(crate::chat::Let::NotHeld, |c| c.release(scrolling))
+    }
+
+    /// A press of the chat box's that is down (the other button's are nothing
+    /// while it is).
+    pub fn chat_dragging(&self) -> bool {
+        self.wnd_chat.as_ref().is_some_and(|c| c.dragging())
+    }
+
+    /// The pointer gone from the window or the keys to another: a drag's release
+    /// may never come, so it ends here, what it selected kept.
+    pub fn chat_let_go(&mut self) {
+        if let Some(c) = self.wnd_chat.as_mut() {
+            c.let_go();
+        }
+    }
+
+    /// Esc: a selection cleared takes it, and it is nothing more.
+    pub fn chat_escape(&mut self) -> bool {
+        let scrolling = self.mode == 33;
+        let Some(c) = self.wnd_chat.as_mut().filter(|c| c.selecting()) else { return false };
+        c.clear_selection(scrolling);
+        true
+    }
+
+    /// The wheel's `lines` over the chat box's history (`WndChat::wheel`).
+    pub fn chat_wheel(&mut self, at: (f64, f64), size: (u32, u32), lines: f32) -> bool {
+        self.wnd_chat.as_mut().is_some_and(|c| c.wheel(Self::chat_point(at, size), lines))
     }
 
     /// The wheel's `lines` (up positive; a finger's drag down) on the window
@@ -4505,6 +4589,10 @@ impl Play {
         }
         let target = self.target;
         if wide.first() != Some(&(b'/' as u16)) {
+            // a PS2's spelling of /bug: the note goes first (`send_bug_note`)
+            if text.split(' ').next().is_some_and(|w| w.eq_ignore_ascii_case("#bug")) {
+                self.send_bug_note();
+            }
             match self.channel {
                 4 => self.session.send_op_sub_wide(0x0578, 12, text),
                 3 => self.session.send_op_sub_wide(0x0C01, 2, text),
@@ -4571,8 +4659,45 @@ impl Play {
                     self.session.say(&line, target);
                 }
             }
+            // go-eqoa-server's bug report on the spot: the note first
+            "/bug" => {
+                self.send_bug_note();
+                self.session.say(text, target);
+            }
             _ => self.session.say(text, target),
         }
+    }
+
+    /// The note for a bug report (`bugnote`), to a server that offered them
+    /// (`Session::bug_reports`), else nothing: sent just before the petition.
+    pub(crate) fn send_bug_note(&mut self) {
+        if self.session.bug_reports {
+            let note = self.bug_note();
+            self.session.send_bug_note(&note);
+        }
+    }
+
+    /// What this client shows of the player and its target, after
+    /// `bugnote`'s own facts: where the walk last put the player, the target
+    /// (its name and place as shown, how far), how many entities are shown,
+    /// the window up.
+    pub(crate) fn bug_note(&self) -> String {
+        let p = self.last_pos;
+        let mut lines = vec![("place", format!("world {} ({:.1}, {:.1}, {:.1})", self.player.world, p[0], p[1], p[2]))];
+        if self.target != u32::MAX && self.target != 0 {
+            let t = match self.entities.slots.iter().flatten().find(|e| e.id == self.target) {
+                Some(e) => {
+                    let name = e.creature.as_ref().map(|c| c.name.trim().to_string()).unwrap_or_default();
+                    let d = ((e.pos[0] - p[0]).powi(2) + (e.pos[1] - p[1]).powi(2) + (e.pos[2] - p[2]).powi(2)).sqrt();
+                    format!("{name} (id {}) at ({:.1}, {:.1}, {:.1}), {d:.1} away", e.id, e.pos[0], e.pos[1], e.pos[2])
+                }
+                None => format!("id {}, not shown", self.target),
+            };
+            lines.push(("target", t));
+        }
+        lines.push(("entities shown", self.entities.slots.iter().flatten().count().to_string()));
+        lines.push(("window", self.mode.to_string()));
+        crate::bugnote::compose(&lines)
     }
 
     /// The art swapped (F9, `era`): each creature is made anew in it as it is
@@ -4656,8 +4781,17 @@ impl Play {
             crate::camstyle::set_style(&mut walker.cam, 2, rc, &mut walker.scene);
             walker.eye = walker.cam.process(&mut walker.scene);
         }
+        // `m_camDir = m_camera.m_dir`: unit, as VICamera::CalcAxes keeps
+        // it. The eye's direction is what the camera is handed (`set_camera`:
+        // in the orbits the body less the eye, as long as the camera is far),
+        // and the death camera's ease reads its y as the pitch's sine: from
+        // a follow orbit's eye `1 - y * y` was below 0 and the look NaN until
+        // the ease brought y under 1 (the screen garbage, longer the farther
+        // the camera), then all but straight down, where the look had been.
+        let mut dir = walker.eye.direction;
+        dir.normalize();
         let body = walker.cam.walk.phys.smooth_location().to_array();
-        self.death = Some(crate::death::DeathCam::new(walker.eye.position.to_array(), walker.eye.direction.to_array(), body));
+        self.death = Some(crate::death::DeathCam::new(walker.eye.position.to_array(), dir.to_array(), body));
         self.death_eye = None;
     }
 
@@ -4904,6 +5038,8 @@ impl Play {
             steer: false,
             // `IsModal`: the manual camera
             modal: self.mode == 38,
+            // the server's word (`Session::flying`, `walker`)
+            flying: self.session.flying,
             // a frame of the game's: the walker's (`frame_with`)
             step: true,
         }
@@ -6046,13 +6182,20 @@ impl Play {
         }
     }
 
+    /// Whether this player may invite into its group: CLIENT's rule, not in
+    /// one or its leader (`InviteEntity`, `InviteToGroup`: else word 640), or
+    /// any member on a server that offered it (`Session::member_invites`).
+    fn may_invite(&self) -> bool {
+        !self.group.in_group || self.group.leader || self.session.member_invites
+    }
+
     /// `InviteToGroup(rec)`: as `InviteEntity`, by the record's id and name.
     fn invite_to_group(&mut self, id: u32, name: &str) {
         if Some(id) == self.self_id32() {
             self.show_word(679);
             return;
         }
-        if self.group.in_group && !self.group.leader {
+        if !self.may_invite() {
             self.show_word(640);
             return;
         }
@@ -6542,7 +6685,7 @@ impl Play {
             self.show_word(679);
             return;
         }
-        if self.group.in_group && !self.group.leader {
+        if !self.may_invite() {
             self.show_word(640);
             return;
         }
@@ -7905,6 +8048,12 @@ impl Play {
                     crate::hud::MemberState { id: m.id, name: m.name.clone(), is_target: m.id == self.target, hp: (m.hp_known != 0).then_some((m.hp, flags & 4 != 0, flags & 8 != 0)), power: self.bar_power(m.id) }
                 })
                 .collect(),
+            raid: self
+                .group
+                .raid
+                .iter()
+                .map(|m| crate::raidlist::Row { id: m.id, name: m.name.clone(), hp: m.hp, is_target: m.id == self.target, seen: self.sees_entity(m.id), me: Some(m.id) == me })
+                .collect(),
             patches: self.group.members[..self.group.count()]
                 .iter()
                 .enumerate()
@@ -7999,12 +8148,18 @@ impl Play {
             }
             r.ui.anchor = Anchor::Right;
             r.ui.vertical = Vertical::Bottom;
+            let in_play = matches!(self.mode, 0 | 33);
             if let Some(c) = self.wnd_chat.as_mut() {
+                // a selection is play's: a window up ends it
+                if !in_play {
+                    c.clear_selection(false);
+                }
                 for (text, color, at) in self.chat_pending.drain(..) {
                     let rr = &r;
                     c.text.add_text(&crate::ui::wide(&text), color, at, |s| vi::ui::Raster::string_width(rr, s));
                 }
                 crate::hud::fork_hud::draw_chat_window(c, vui, &mut r, now, dt);
+                c.draw_selection(&mut r);
                 self.cues.extend(c.cues.drain(..).map(crate::sound::Cue::Ui));
             }
             r.ui.anchor = Anchor::Middle;
@@ -8195,6 +8350,27 @@ impl Play {
     /// its next pass; what was past a lowered number is dropped here at once,
     /// and its puppets with it). The view distance draws farther on any
     /// server (`lod::view_dist`); only one that offered sends from farther.
+    /// The Raid List: the server told what the Extended row says, and off, what it
+    /// sent forgotten (`group.bars` are drawn again).
+    fn agree_raid_roster(&mut self) {
+        let want = crate::settings::raid_list();
+        self.session.agree_raid_roster(want);
+        if !want {
+            self.group.raid_page(0, 0, Vec::new());
+        }
+    }
+
+    /// The wheel's `lines` over the raid list (`Hud::raid_wheel`).
+    pub fn raid_wheel(&mut self, at: (f64, f64), size: (u32, u32), lines: f32) -> bool {
+        let f = render::ui::frame_from_window(size, [at.0 as f32, at.1 as f32]);
+        self.mode == 0 && self.hud.as_mut().is_some_and(|h| h.2.raid_wheel(f, lines))
+    }
+
+    /// Whether the client can see `id`: an entity's on a slot, or its own.
+    fn sees_entity(&self, id: u32) -> bool {
+        Some(id) == self.self_id32() || self.entities.slots.iter().flatten().any(|e| e.id == id)
+    }
+
     fn agree_entity_view(&mut self) {
         let offer = self.session.entity_view_offer;
         let n = offer.map_or(RETAIL_SLOTS, |(most, _)| crate::settings::entity_slots().min(most as usize)).clamp(RETAIL_SLOTS, MAX_SLOTS);
@@ -8245,7 +8421,8 @@ impl Play {
         // GetRace / GetClass: out of range is entry 0; races 10-20 are empty
         const RACE_WORDS: [i32; 10] = [183, 185, 186, 187, 188, 189, 191, 192, 193, 190];
         let race = if (c.race as usize) < 21 { RACE_WORDS.get(c.race as usize).copied().unwrap_or(-1) } else { 183 };
-        let race = word(race);
+        // a race the game does not have, by the server's word for this name
+        let race = crate::racelabel::long(&c.name).unwrap_or_else(|| word(race));
         let class = word(if c.class < 15 { 165 + c.class as i32 } else { 165 });
         let level = format!("{} {}", word(503), c.level);
         match c.p256 {
@@ -8452,6 +8629,28 @@ mod commands {
         let mut s = Session::connect_with(Box::new(Nowhere), ([127, 0, 0, 1], 5000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
         s.self_id = Some(0x100);
         Play::new(s, Player::default(), dump)
+    }
+
+    /// A member who does not lead its group invites only on a server that
+    /// offered it (`OP_MEMBER_INVITES`): else CLIENT's word 640 and nothing
+    /// sent; offered, the invite goes (word 637 with the name), as the
+    /// leader's always does. The control: the leader invites unoffered.
+    #[test]
+    fn a_member_invites_where_the_server_offers_it() {
+        let said = |p: &Play, w: &str| p.chat.back().is_some_and(|(t, _)| t.starts_with(w));
+        let mut p = play();
+        p.group.in_group = true;
+        p.group.leader = true;
+        p.invite_to_group(0x200, "Bren");
+        assert!(said(&p, "(word 637) Bren"), "the control: the leader invites: {:?}", p.chat.back());
+        p.group.leader = false;
+        p.invite_to_group(0x201, "Cael");
+        assert!(said(&p, "(word 640)"), "a member, unoffered: {:?}", p.chat.back());
+        assert!(!p.may_invite());
+        p.session.member_invites = true;
+        p.invite_to_group(0x201, "Cael");
+        assert!(said(&p, "(word 637) Cael"), "a member, offered: {:?}", p.chat.back());
+        assert!(p.may_invite(), "InviteEntity's rule too");
     }
 
     /// The plain human body is drawn only for a walk with no server: in play
@@ -9038,6 +9237,52 @@ mod commands {
         });
     }
 
+    /// A death in the follow orbit: the death camera starts from where the
+    /// camera looked (`ResetCamera`'s `m_camDir`, `m_camera.m_dir`, which
+    /// `VICamera::CalcAxes` keeps unit) and looks somewhere every frame, a
+    /// unit direction eased onto the body. The eye's direction is the body
+    /// less the eye (`set_camera`), as long as the camera is far, and the
+    /// ease reads its y as the pitch's sine. The control: a death camera
+    /// started on the direction as the eye has it looks nowhere (NaN) in its
+    /// first frames (2026-11-03: "when you die the screen glitches").
+    #[test]
+    fn a_death_in_the_follow_orbit_looks_from_the_camera_onto_the_body() {
+        let iso = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        if !iso.exists() {
+            eprintln!("SKIP: no run/eqoa.iso");
+            return;
+        }
+        let (x, z) = (25275.115f32, 15766.627f32);
+        let mut lib = Library::new();
+        let w = lib.add("TUNARIA.ESF", crate::stream::open_file(&iso, "TUNARIA.ESF").unwrap());
+        let mut src = crate::stream::FileZones::open(&iso, "TUNARIA.ESF").unwrap();
+        crate::stream::fill(&mut lib, w, x, z, &mut src);
+        let mut walker = Walker::arrive(vi::world::World::load(&lib, w).unwrap(), Spawn::ground(x, z, 0.5));
+        let mut p = play();
+        // the follow orbit (the first entry's `ToggleCameraStyle`), 8 out
+        p.cam_saved = crate::camstyle::toggle(&mut walker.cam, false, None, &mut walker.scene);
+        p.cam_entered = true;
+        walker.cam.set_orbit_distance(F::new(8.0));
+        walker.eye = walker.cam.process(&mut walker.scene);
+        assert_eq!(walker.cam.camera_mode, 3);
+        let given = walker.eye.direction;
+        let mut unit = given;
+        unit.normalize();
+        let body = walker.cam.walk.phys.smooth_location().to_array();
+        assert!(given.magnitude().0 > 4.0 && unit.y.0 < 0.0, "the eye looks down at the body from 8 out: {:?}", given.to_array());
+        let frames = |mut d: crate::death::DeathCam| (0..240).map(|_| d.step(body, 1.0 / 30.0).1.to_array()).collect::<Vec<_>>();
+        let raw = frames(crate::death::DeathCam::new(walker.eye.position.to_array(), given.to_array(), body));
+        assert!(raw[..30].iter().any(|d| d.iter().any(|v| v.is_nan())), "the control: on the eye's direction it looks nowhere");
+        p.msg_005e(&mut walker);
+        let looks = frames(p.death.expect("dead"));
+        for (k, d) in looks.iter().enumerate() {
+            let m = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            assert!(d.iter().all(|v| v.is_finite()) && (m - 1.0).abs() < 1e-3, "frame {k}: {d:?}");
+        }
+        let u = unit.to_array();
+        assert!(looks[0].iter().zip(u).all(|(a, b)| (a - b).abs() < 1e-3), "it starts where the camera looked: {:?} against {u:?}", looks[0]);
+    }
+
     /// A coach taken with the start menu's inventory up (F3 20261028-021802,
     /// Liav's: "your camera becomes detached from your character"):
     /// `Msg00B2`'s `SetMode(0)` closes the start menu before `Respawn`
@@ -9317,6 +9562,55 @@ mod commands {
         assert_eq!(order(&mut p, game, wide), [a, b, c, a], "measured by the game's camera, in view as drawn");
         assert_eq!(order(&mut p, game, tall), [a, b, a, b], "narrower than 4:3: C out of view");
         assert_eq!(order(&mut p, wide, wide), [b, a, c, b], "the control: measured as drawn, B first");
+    }
+
+    /// The raid list's: the wholeness of the roster, what a click may target, L1's
+    /// cycle over those the client can see and Tab past them; off, the server told
+    /// and what it sent forgotten. The controls: one out of sight, a player no one's
+    /// group holds, and the roster's own four as ever.
+    #[test]
+    fn a_raid_group_reaches_past_the_roster_for_those_it_sees() {
+        use net::entity::{Entity, TYPE_CREATURE};
+        use net::session::RaidMember;
+        let mut p = play();
+        crate::settings::set_client(crate::settings::ClientOptions::default());
+        let me = 0x1DCD_6501;
+        p.session.self_id = Some(u64::from(me));
+        grouped(&mut p, &[0x100, me, 0x101, 0x102]);
+        let at = |id: u32, x: f32| {
+            Some(Entity { id, kind: TYPE_CREATURE, creature: Some(net::entity::Creature { name: format!("{id:x}"), ..Default::default() }), p18: 1, actor_pos: [x, 0.0, -12.0], ..Default::default() })
+        };
+        p.entities.slots[0] = at(0x100, 0.0);
+        p.entities.slots[1] = at(0x103, 3.0); // a raid member past the roster, in sight
+        p.entities.slots[2] = at(0x200, -3.0); // a stranger
+        let row = |id: u32| RaidMember { id, name: format!("m{id}"), ..Default::default() };
+        p.group.raid_page(5, 0, vec![row(0x100), row(me), row(0x101), row(0x103), row(0x7F00_0104)]);
+        assert!(p.sees_entity(0x103) && p.sees_entity(me), "in sight, and itself");
+        assert!(!p.sees_entity(0x7F00_0104), "out of sight: its id is a stand-in");
+        let cycle = |p: &mut Play, group: bool| -> Vec<u32> {
+            let view = glam::camera::rh::view::look_to_mat4(glam::Vec3::ZERO, glam::Vec3::NEG_Z, glam::Vec3::Y);
+            let m = crate::walker::projection_to(4.0 / 3.0, 6000.0) * view;
+            (0..7)
+                .map(|_| {
+                    p.cycle_target(group, glam::Vec3::ZERO, glam::Vec3::NEG_Z, m, m);
+                    p.target
+                })
+                .collect()
+        };
+        let group = cycle(&mut p, true);
+        assert!(group.contains(&0x103), "L1 reaches the raid member it sees: {group:x?}");
+        assert!(!group.contains(&0x7F00_0104), "not one out of sight: {group:x?}");
+        assert!(!group.contains(&0x200), "not a stranger: {group:x?}");
+        let tab = cycle(&mut p, false);
+        assert!(tab.contains(&0x200), "Tab finds the stranger: {tab:x?}");
+        assert!(!tab.contains(&0x103), "and passes the raid member: {tab:x?}");
+        // off: the server told, what it sent forgotten, L1 back to the roster
+        p.session.raid_roster_offer = true;
+        crate::settings::set_client(crate::settings::ClientOptions { raid_list: false, ..Default::default() });
+        p.agree_raid_roster();
+        assert!(p.group.raid.is_empty());
+        assert!(!cycle(&mut p, true).contains(&0x103), "the control: the roster's own");
+        crate::settings::set_client(crate::settings::ClientOptions::default());
     }
 
     fn grouped(p: &mut Play, ids: &[u32]) {
@@ -10285,6 +10579,43 @@ mod commands {
         crate::hideui::toggle();
         assert!(p.point(compass, (640, 448), false), "the control: shown, the HUD's");
         assert!(p.map.open, "and the compass opens the map");
+    }
+
+    /// What shows the UI again (`Play::wants_ui`): a mode of the game's but
+    // The info window's race line: the race list's word for the target's name,
+    // else the game's; the title (0x0010's) stands where the class would, as sent.
+    // The controls: a name not on the list, and no list.
+    #[test]
+    fn the_info_window_says_a_race_label() {
+        let mut p = play();
+        p.words = Some(crate::groupsearch::tests::numbered());
+        let target = |id: u32, name: &str| net::entity::Entity {
+            id,
+            creature: Some(net::entity::Creature { name: name.into(), race: 9, class: 9, level: 60, p256: 2, ..Default::default() }),
+            ..Default::default()
+        };
+        p.entities.slots[0] = Some(target(0x10, "Lagerbottoms"));
+        p.entities.slots[1] = Some(target(0x11, "Plainogre"));
+        p.target = 0x10;
+        p.target_info = Some(1);
+        p.target_title = "Titan".into();
+        assert_eq!(p.target_info_text().as_deref(), Some("Lagerbottoms\nw190\nTitan\nw503 60"), "no list");
+        crate::racelabel::tests::given(&[("Hill Giant", "HGT", &["Lagerbottoms"])]);
+        assert_eq!(p.target_info_text().as_deref(), Some("Lagerbottoms\nHill Giant\nTitan\nw503 60"));
+        p.target_title.clear();
+        assert_eq!(p.target_info_text().as_deref(), Some("Lagerbottoms\nHill Giant\nw174\nw503 60"), "no title: the class");
+        p.target = 0x11;
+        assert_eq!(p.target_info_text().as_deref(), Some("Plainogre\nw190\nw174\nw503 60"), "a name not on the list");
+        crate::racelabel::clear();
+    }
+
+    /// 0x7E1D reaches the list through the frame's events, and a world entry starts
+    /// with none.
+    #[test]
+    fn a_world_entry_starts_with_no_race_labels() {
+        crate::racelabel::tests::given(&[("Hill Giant", "HGT", &["Lagerbottoms"])]);
+        let _ = play();
+        assert_eq!(crate::racelabel::long("Lagerbottoms"), None);
     }
 
     /// What shows the UI again (`Play::wants_ui`): a mode of the game's but

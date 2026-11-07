@@ -74,7 +74,7 @@ BUNDLED_MOD_FILES = [
 ]
 
 EXPECTED_ZIP_MEMBERS = [
-    "eqoa.exe", "map-entities.json", "LICENSE", "LICENSE-ENHANCED", "FrontiersForge-MIT.txt",
+    "eqoa.exe", "map-entities.json", "LICENSE", "FrontiersForge-MIT.txt",
     "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt", "README.txt",
     "release-manifest.json", "mods/README.txt",
     *(f"mods/{rel}" for rel in BUNDLED_MOD_FILES),
@@ -131,7 +131,6 @@ class PlayerReleaseTests(unittest.TestCase):
         self.root.mkdir()
         files = {
             "VERSION": "0.1.0\n", "LICENSE": "existing MIT notice\n",
-            "LICENSE-ENHANCED": "EQOA Enhanced License fixture\n",
             "docs/licenses/FrontiersForge-MIT.txt": "existing Forge MIT\n",
             "docs/licenses/Native-Addon-Runtime-NOTICES.txt": "existing Lua and ImGui notices\n",
             "crates/eqoa/resources/map-ui/OFL.txt": "existing Space Mono OFL\n",
@@ -202,8 +201,7 @@ class PlayerReleaseTests(unittest.TestCase):
                 self.assertEqual(hashlib.sha256(archive.read(name)).hexdigest(), digest)
             self.assertEqual(set(manifest["files"]), set(archive.namelist()) - {"release-manifest.json"})
             self.assertEqual(archive.read("eqoa.exe"), self.executable.read_bytes())
-            for notice in ("LICENSE", "LICENSE-ENHANCED"):
-                self.assertEqual(archive.read(notice), (self.root / notice).read_bytes())
+            self.assertEqual(archive.read("LICENSE"), (self.root / "LICENSE").read_bytes())
         exe = self.executable.read_bytes()
         self.assertEqual((self.output / "update.txt").read_text(),
             f"version 0.1.0\ncommit {self.commit}\nbuild windows-x86_64 eqoa-enhanced-windows-x86_64.exe {hashlib.sha256(exe).hexdigest()} {len(exe)}\n")
@@ -214,13 +212,13 @@ class PlayerReleaseTests(unittest.TestCase):
             digest, name = row.split("  ")
             self.assertEqual(hashlib.sha256((self.output / name).read_bytes()).hexdigest(), digest)
 
-    def test_missing_enhanced_license_refuses_packaging(self):
-        (self.root / "LICENSE-ENHANCED").unlink()
+    def test_missing_license_refuses_packaging(self):
+        (self.root / "LICENSE").unlink()
         self.git("add", "-u")
         self.git("-c", "user.name=Release Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "missing license")
         self.commit = self.git("rev-parse", "HEAD").strip()
         self.executable.write_bytes(minimal_pe(self.commit, self.base))
-        with self.assertRaisesRegex(FileNotFoundError, "LICENSE-ENHANCED"):
+        with self.assertRaisesRegex(FileNotFoundError, "LICENSE"):
             self.build()
 
     def test_player_readme_uses_the_packaged_version(self):
@@ -261,9 +259,9 @@ class PlayerReleaseTests(unittest.TestCase):
                     if mutation == "extra-zip-member":
                         payload["profile/accounts.txt"] = b"PRIVATE"
                     elif mutation == "missing-license":
-                        del payload["LICENSE-ENHANCED"]
+                        del payload["LICENSE"]
                         manifest = json.loads(payload["release-manifest.json"])
-                        del manifest["files"]["LICENSE-ENHANCED"]
+                        del manifest["files"]["LICENSE"]
                         payload["release-manifest.json"] = json.dumps(manifest).encode()
                     elif mutation == "manifest-version":
                         manifest = json.loads(payload["release-manifest.json"])

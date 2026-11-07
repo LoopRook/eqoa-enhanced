@@ -23,11 +23,14 @@ network and gameplay improvements while developing its enhanced features.
 
 ## License
 
-Upstream code remains under [MIT](LICENSE). LoopRook's additions first published
-in 0.4.6 or later use the [EQOA Enhanced License](LICENSE-ENHANCED). Code
-published through 0.4.5 remains MIT; third-party code retains its own license.
-Anyone can play an unmodified official release. See the
-[license details](docs/LICENSE-OPTIONS.md) for sharing and addon terms.
+GNU Affero General Public License, version 3 or later ([LICENSE](LICENSE)). If
+you distribute a modified copy or host a modified version, players must be
+offered its complete source. Code published through 0.4.5 and up to upstream
+commit 1e23e80 was released under MIT and remains available under MIT at those
+commits; `NOTICE` keeps that record. Third-party code retains its own license.
+Independent addons using the addon interface keep their authors' own licenses.
+The license grants no rights in EverQuest Online Adventures itself; the game and
+its data belong to their owners, and the client reads a disc you own.
 
 ## Play on Windows
 

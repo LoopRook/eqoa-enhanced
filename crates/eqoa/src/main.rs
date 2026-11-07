@@ -76,6 +76,7 @@ mod icon_art;
 #[cfg(not(target_arch = "wasm32"))]
 mod saveicon;
 mod editbox;
+mod clipboard;
 mod fog;
 mod frames;
 mod group;
@@ -86,16 +87,19 @@ mod bgm;
 mod bindpage;
 mod binds;
 mod blacksmith;
+mod bugnote;
 mod gear;
 mod gram;
 mod hideui;
 mod livewords;
 mod hud;
+mod raidlist;
 mod damage;
 mod display;
 mod hudmenu;
 mod influence;
 mod input;
+mod macros;
 // the page's gamepads (the browser build), checked natively by its tests
 #[cfg(any(test, target_arch = "wasm32"))]
 mod padmap;
@@ -128,6 +132,7 @@ mod questlog;
 mod statbox;
 mod tracker;
 mod quickchat;
+mod racelabel;
 mod alarm;
 mod startmenu;
 mod textlist;

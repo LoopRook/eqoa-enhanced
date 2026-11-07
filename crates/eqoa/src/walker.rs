@@ -8,15 +8,34 @@
 //! The scene it collides with is the game's own: `vi::world::World`, the
 //! world and zone BSPs, rooms, collision buffers and placed actors, loaded
 //! from the world file (`VIScene::Collide` and `GetEnvFlags`, ported).
+//!
+//! A GM's flight (`Client::flying`: go-eqoa-server's `#fly`; the client's own,
+//! no such thing in the game; the user, 2026-11-07: "its like swimming you can
+//! look up/down to go in that direction, but running, standing like normal") is
+//! CLIENT's swim path, untouched in `vi`, with its answers changed at the seam:
+//! gravity off (`m_parm60`, the walk's own switch), and each console frame stepped
+//! in a world of water with no surface (`Aloft`), so that `Run` and `Walk` push
+//! along the body's pitch (`m_facing`) at the same speed as on the ground (the
+//! swim's damping and the ground's are both 0.02), the walls stop it as they stop a
+//! swimmer, and nothing lets it fall. In the orbits the body takes its pitch from
+//! the camera's tilt, the game's default for the camera counting as level (the
+//! user, of the 15 degrees the follow orbit looks down: "yes make default level";
+//! `fly_pitch`, `fly_view`); first person's and the follow camera's is the body's
+//! own, which looks level at 0 and has no tilt to take off. What the rest of the
+//! client and the server are shown is the walk as a body in the air is, drawn each
+//! frame: the gait a land
+//! walk's, never a swim's (`fly_gait`), and the flags the world's at its place
+//! (`flags_at`), so its 0x40 runs no breath down but under real water. Off, the
+//! flags are the world's again and the walk goes on from where it is.
 
 use glam::{Mat4, Vec3};
 use vi::camera::{Eye, WalkCamera};
-use vi::coll::CollSphere;
-use vi::fpu::{Ee, F};
-use vi::scene::{Filter, FilterKind};
+use vi::coll::{CollSphere, EnvRay};
+use vi::fpu::{Ee, F, vimax, vimin};
+use vi::scene::{Filter, FilterKind, Scene};
 use vi::vect::Vect3;
-use vi::walk::WalkPhysics;
-use vi::walk::flags::{NO_TURN, ON_FLOOR, SUBMERGED};
+use vi::walk::{WalkControl, WalkPhysics};
+use vi::walk::flags::{self, NO_TURN, ON_FLOOR, SUBMERGED};
 use vi::character::{AnimCache, load_csprite};
 use vi::csprite::{CSprite, Rand};
 use vi::geom::Matrix44;
@@ -106,11 +125,47 @@ pub struct Walker {
     /// server). The body is drawn at it; the walk's collision is the walk
     /// control's own (`InitParms`' constants, which nothing in CLIENT scales).
     pub scale: F<Ee>,
+    /// A GM's flight is on (the module's doc), and the orbit's pitch and its
+    /// camera mode when it came on, its look put back when it ends.
+    flying: bool,
+    fly_tilt: Option<(i32, F<Ee>)>,
+    /// This frame's length (s), as the camera's `Process` is told it.
+    frame_s: f32,
 }
 
 /// The console's frame: two fields of NTSC video (59.94 Hz), 33.37 ms. The
 /// walk keeps only these, at any display rate (`Kept`).
 const CONSOLE_FRAME_MS: f64 = 2.0 * 1001.0 / 60.0;
+
+/// The game's clock, which the walk steps by (`VIScene::GetTime`: `Tick`
+/// journals `VITimer::GetTime()` and sets the scene's time to it): SUPPORT's
+/// VITimer, the EE's timer 0 at the bus clock over 16 (9.216 MHz)
+/// interrupting every 18,750 counts, 491.52 times a second, and adding 2
+/// each time. So it counts 983.04 a second, every count even, and a console
+/// frame is 32.80 of them: the walk steps 32 or 34 (`console_step`).
+const VITIMER_IRQ_PER_MS: f64 = 0.49152;
+
+/// The game clock's step into console frame `n` of a walk's frames: VITimer's
+/// count as the frame begins less its count as the frame before began, 32 or
+/// 34, three frames in five 32. `Process` steps a 32 tick and then the rest,
+/// and takes the gait from the last of those (`UpdateLocomotion`), so on
+/// three frames in five the console reads the gait off the whole tick and on
+/// the others off a 2 tick rest. Counted in milliseconds (33 or 34) every
+/// frame had a rest of 1 or 2, and the gait was read off that alone: a
+/// float step or two of way, which the EE's chopped add rounds toward zero,
+/// up for a walk toward a lower coordinate. Walking toward -z at Tunaria's
+/// z 31570 (one step 1.95 mm) the 1 rest read 3.9 a second, a run, and the 2
+/// rest 2.9, a walk, and the body changed its gait two frames in three
+/// (2026-11-03, Mesh walking toward Warlord Jurglash: "when walking slow
+/// with controller it is still rapidly jitters animation"). On VITimer's
+/// counts it walks throughout, and walks and runs at a PS2's pace on the
+/// wall clock, whose game clock runs 1.7% slower than milliseconds (east on
+/// Tunaria's open ground a run 8.62 a second where it was 8.81, a walk 2.88
+/// where it was 2.91).
+fn console_step(n: i64) -> i64 {
+    let count = |n: i64| ((n as f64 * CONSOLE_FRAME_MS * VITIMER_IRQ_PER_MS) as i64) * 2;
+    count(n) - count(n - 1)
+}
 
 /// The walk on the console's frames. `VIWalkControl::Process` steps 32 ms
 /// ticks and then the rest of the frame, with its accelerations set for the
@@ -122,9 +177,12 @@ const CONSOLE_FRAME_MS: f64 = 2.0 * 1001.0 / 60.0;
 /// floats' step as well, the run changed again with the rate and the
 /// heading (east at x 22000: 9.06 m/s at 60, 8.80 at 165, 8.83 at 240). So
 /// each frame drawn puts the walk back where the last console frame left it,
-/// steps every console frame come since as the console steps one (a tick
-/// and the rest) and keeps that: the walk keeps what a console at 30 frames
-/// a second keeps.
+/// steps every console frame come since as the console steps one (the game
+/// clock's step, `console_step`: a tick, and on some frames a rest) and keeps
+/// that: the walk keeps what a console at 30 frames a second keeps. Each
+/// console frame is at its own place on the wall clock (the scene's time,
+/// which the camera, the animation and the drawing go by) and steps the
+/// walk by VITimer's count.
 ///
 /// Each frame drawn shows the kept frame on its way to the next (`ahead`:
 /// Process on a copy, on this frame's controls, so a press shows at once):
@@ -155,11 +213,164 @@ struct Kept {
 }
 
 impl Kept {
-    /// Console frame `n`'s time: 33 or 34 ms apart, as the console's clock
-    /// counts them.
+    /// Console frame `n`'s time on the wall clock: 33 or 34 ms apart.
     fn time(&self, n: i64) -> i64 {
         self.origin + (n as f64 * CONSOLE_FRAME_MS) as i64
     }
+
+    /// The walk at console frame `n - 1` (its committed state) made to be
+    /// stepped into frame `n` at `scene_time` (frame `n`'s `time`) by the
+    /// game clock's step (`console_step`): `Process` steps the time since the
+    /// committed state's.
+    fn ready(w: &mut WalkPhysics<Ee>, n: i64, scene_time: i64) {
+        w.time = scene_time - console_step(n);
+    }
+}
+
+/// The world as the walk meets it in flight (the module's doc): its collision
+/// the world's, and water everywhere with no surface, so `Process` takes the swim
+/// path whatever is really there, and past a real surface freely.
+struct Aloft<'a>(&'a mut World<Ee>);
+
+impl Scene<Ee> for Aloft<'_> {
+    fn time(&self) -> i64 {
+        self.0.time
+    }
+    fn collide_sphere(&mut self, s: &mut CollSphere<Ee>, filter: &mut Filter) -> bool {
+        self.0.collide_sphere(s, filter)
+    }
+    fn collide_env(&mut self, _: &mut EnvRay<Ee>) -> bool {
+        false
+    }
+    fn env_flags(&self, _: &Vect3<Ee>) -> u32 {
+        1
+    }
+}
+
+/// `p`'s flags as a body in the air has them: what `Move` works out of the world
+/// at its place in place of `Aloft`'s water (a place in no zone is dry here, where
+/// `GetEnvFlags` says every liquid: a flyer may go past the world's edge), and the
+/// floor as it stands (`stands`), the bump on a wall (B1) only with it (a wall
+/// holds no one up).
+fn flags_at(world: &World<Ee>, w: &WalkControl<Ee>, p: &WalkPhysics<Ee>) -> u32 {
+    let liquids = |at: Vect3<Ee>| match world.env_flags(&at) {
+        u32::MAX => 0,
+        e => e,
+    };
+    let mut at = p.position;
+    at.y += w.parm38;
+    let (above, below) = (Vect3::new(at.x, at.y + w.parm54, at.z), Vect3::new(at.x, at.y - w.parm54, at.z));
+    let (mid, up, dn) = (liquids(at), liquids(above), liquids(below));
+    let mut fl = p.flags & !(flags::LIQUID | flags::SLOW_RUN | ON_FLOOR | flags::B1);
+    let mut set = |on: bool, bit: u32| {
+        if on {
+            fl |= bit;
+        }
+    };
+    set(mid & 1 != 0, flags::IN_WATER);
+    set(mid & 4 != 0, flags::IN_LAVA);
+    set(mid & 2 != 0, flags::IN_SLIME);
+    set(mid & 8 != 0, flags::IN_MUD);
+    set(up & 1 == 0 && dn & 1 != 0, flags::AT_WATER_SURFACE);
+    set(up & 4 == 0 && dn & 4 != 0, flags::AT_LAVA_SURFACE);
+    set(up & 2 == 0 && dn & 2 != 0, flags::AT_SLIME_SURFACE);
+    set(up & 8 == 0 && dn & 8 != 0, flags::AT_MUD_SURFACE);
+    set(liquids(p.position) & 8 != 0, flags::SLOW_RUN);
+    if stands(p) {
+        fl |= ON_FLOOR | (p.flags & flags::B1);
+    }
+    fl
+}
+
+/// A body in flight stands on a floor: it just met one (the swim path clears
+/// ON_FLOOR the frame after, level on it), or it is still at the height the last
+/// floor put it at with a floor within the probe's reach under it.
+fn stands(p: &WalkPhysics<Ee>) -> bool {
+    p.flags & ON_FLOOR != 0 || (p.landscape_normal.y != F::ZERO && (p.position.y - p.floor).abs() < F::new(0.01))
+}
+
+/// `UpdateLocomotion` for a console frame in flight: its land chain, whatever the
+/// frame's flags, on the way the frame went from `from` over `ms`, the way along
+/// the body's axes taken whole (up and down are forward here: a body run straight
+/// up is running) and backward only when it went back across the ground. So a
+/// body moving runs (walks, sidesteps, backs up) and one still stands or turns.
+/// `was` is the gait before it (the swim path's own left the frame's 12 or 13).
+fn fly_gait(w: &mut WalkControl<Ee>, from: &Vect3<Ee>, was: i32, ms: i64) {
+    let f = F::<Ee>::new;
+    let mut d = w.committed.position;
+    d -= *from;
+    let dt = f(ms.max(1) as i32 as f32) * f(0.001);
+    let across = d.dot(&w.right);
+    let along = vimax(d.dot(&d) - across * across, F::ZERO).sqrt() / dt;
+    let v_f = if d.dot(&w.forward) < F::ZERO { -along } else { along };
+    let v_r = across / dt;
+    let st = w.speed_threshold;
+    let spin = w.committed.angular_vel.x;
+    let not_walking = was != 1 && was != 2;
+    let gait = if w.walk_speed + (w.run_speed - w.walk_speed) * f(0.1) < v_f {
+        3
+    } else if st < v_r && v_r.abs() > v_f.abs() && not_walking {
+        11
+    } else if v_r < -st && v_r.abs() > v_f.abs() && not_walking {
+        10
+    } else if st < v_r && v_f.abs() * f(1.5) < v_r.abs() {
+        11
+    } else if v_r < -st && v_f.abs() * f(1.5) < v_r.abs() {
+        10
+    } else if st < v_f {
+        1
+    } else if v_f < -st {
+        2
+    } else if w.turn_rate * f(0.5) < spin {
+        4
+    } else if spin < -(w.turn_rate * f(0.5)) {
+        5
+    } else {
+        0
+    };
+    w.phys.loco_state = gait;
+    w.committed.loco_state = gait;
+}
+
+/// How slow a flyer let go is when it stops, squared (0.05 units a second): the
+/// walk's damping alone never quite brings a body to rest (`process_aloft`).
+const FLY_STOPPED_SQ: f32 = 0.0025;
+
+/// `Process` in the world of water. A body let go comes to rest there and holds
+/// its place to the bit, and one going level holds its height: `Move` adds the
+/// body's height to the place and takes it off again, and the EE's chopped adds
+/// lose a float step of height a frame or gain one (a millimetre a second at 300
+/// up, nothing a floor does not put back on the ground), so a body in the air
+/// would creep for good, and a 0x40 go out for each step of it where one standing
+/// still sends none. A floor or anything else met keeps the height it gave.
+fn process_aloft(w: &mut WalkControl<Ee>, scene: &mut World<Ee>) {
+    let (from, pushed) = (w.committed.position, w.phys.force);
+    w.process(0, &mut Aloft(scene));
+    let (zero, stopped) = (F::<Ee>::ZERO, F::<Ee>::new(FLY_STOPPED_SQ));
+    let v = w.phys.velocity;
+    if pushed.x == zero && pushed.y == zero && pushed.z == zero && v.dot(&v) < stopped {
+        for p in [&mut w.phys, &mut w.committed] {
+            p.position = from;
+            p.velocity = Vect3::default();
+        }
+    } else if pushed.y == zero && v.y * v.y < stopped && w.phys.flags & (ON_FLOOR | flags::B1) == 0 {
+        for p in [&mut w.phys, &mut w.committed] {
+            p.position.y = from.y;
+            p.velocity.y = zero;
+        }
+    }
+}
+
+/// A console frame of the walk: `Process`, in flight in the world of water, the
+/// gait then the land's.
+fn step_frame(w: &mut WalkControl<Ee>, scene: &mut World<Ee>, flying: bool) {
+    if !flying {
+        w.process(0, scene);
+        return;
+    }
+    let (from, was, ms) = (w.committed.position, w.committed.loco_state, scene.time - w.committed.time);
+    process_aloft(w, scene);
+    fly_gait(w, &from, was, ms.min(w.tick_alt_ms as i64));
 }
 
 /// The same state, bit for bit.
@@ -214,7 +425,7 @@ impl Walker {
         cam.set_orbit_distance(dist);
         cam.set_orbit_angle_behind();
         let eye = cam.process(&mut scene);
-        Walker { cam, scene, eye, sprite: None, anims: AnimScene::default(), rand: Rand(1), shake: 0, reach: Default::default(), kept: None, rewound: false, given: None, scale: F::ONE }
+        Walker { cam, scene, eye, sprite: None, anims: AnimScene::default(), rand: Rand(1), shake: 0, reach: Default::default(), kept: None, rewound: false, given: None, scale: F::ONE, flying: false, fly_tilt: None, frame_s: 0.0 }
     }
 
     /// `Respawn`'s placing: the character stood at `pos` (on the ground
@@ -293,7 +504,15 @@ impl Walker {
         let actor = self.actor();
         let Some(cs) = self.sprite.as_mut() else { return (actor.to_cols(), Vec::new()) };
         self.anims.time = self.scene.time;
-        self.cam.walk.update_sprite(cs, &self.anims, &mut self.rand);
+        if self.flying {
+            // standing like normal, under real water too: `UpdateSprite` pitches
+            // a body under liquid with the walk, and sinks one at a surface
+            let mut w = self.cam.walk;
+            w.phys.flags &= !flags::LIQUID;
+            w.update_sprite(cs, &self.anims, &mut self.rand);
+        } else {
+            self.cam.walk.update_sprite(cs, &self.anims, &mut self.rand);
+        }
         if sound.is_some() {
             let at = self.cam.walk.phys.smooth_location();
             cs.process_sounds(&self.eye.position, &self.eye.direction, &at, sound);
@@ -330,6 +549,9 @@ impl Walker {
     /// back is moved onto the walk as last drawn (`camera_as_drawn`).
     pub fn frame_with(&mut self, keys: [f32; 4], now_ms: i64, c: &crate::controls::Client, game_frame: bool) -> crate::controls::Changed {
         self.rewind();
+        if c.flying != self.flying {
+            self.set_flying(c.flying);
+        }
         // UpdateGame sets the run speed and calls InitIntermediate every
         // frame (SetSpeed the walk speed, when one comes); with the speeds
         // unchanged that changes nothing the next `Process` reads, so it is
@@ -341,8 +563,15 @@ impl Walker {
             self.cam.walk.init_intermediate();
         }
         let c = crate::controls::Client { step: game_frame, ..*c };
-        let changed = crate::controls::update_controls(self, keys, &c);
         let dt_s = (now_ms - self.scene.time).clamp(0, 100) as f32 / 1000.0;
+        self.frame_s = dt_s;
+        if self.flying {
+            self.fly_pitch();
+        }
+        let changed = crate::controls::update_controls(self, keys, &c);
+        if self.flying {
+            self.fly_on_the_floor();
+        }
         self.step_kept(now_ms);
         let ahead = self.ahead();
         self.scene.time = now_ms;
@@ -405,13 +634,14 @@ impl Walker {
     /// frame, as the console takes a long one: Process steps its last 200 ms
     /// and skips the rest, and the console frames begin again there.
     fn step_kept(&mut self, now: i64) {
-        let Walker { cam, scene, kept, .. } = self;
+        let Walker { cam, scene, kept, flying, .. } = self;
+        let flying = *flying;
         let Some(k) = kept.as_mut() else { return };
         let w = &mut cam.walk;
         let (force, torque) = (w.phys.force, w.phys.torque);
         if now - k.time(k.frames) > w.tick_alt_ms as i64 {
             scene.time = now;
-            w.process(0, scene);
+            step_frame(w, scene, flying);
             (k.origin, k.frames, k.ahead) = (now, 0, None);
         }
         while k.time(k.frames + 1) <= now {
@@ -419,7 +649,8 @@ impl Walker {
             w.phys.force = force;
             w.phys.torque = torque;
             scene.time = k.time(k.frames);
-            w.process(0, scene);
+            Kept::ready(&mut w.committed, k.frames, scene.time);
+            step_frame(w, scene, flying);
         }
         let mut at = w.phys;
         at.force = Vect3::default();
@@ -434,7 +665,8 @@ impl Walker {
     /// controls hold: `Process` on a copy, stepped again only when the frame
     /// kept or the controls (all the walk they write) have changed.
     fn ahead(&mut self) -> WalkPhysics<Ee> {
-        let Walker { cam, scene, kept, .. } = self;
+        let Walker { cam, scene, kept, flying, .. } = self;
+        let flying = *flying;
         let Some(k) = kept.as_mut() else { return cam.walk.phys };
         if let Some((n, from, next)) = &k.ahead
             && *n == k.frames
@@ -445,7 +677,12 @@ impl Walker {
         let mut w = cam.walk;
         let now = scene.time;
         scene.time = k.time(k.frames + 1);
-        w.process(0, scene);
+        Kept::ready(&mut w.committed, k.frames + 1, scene.time);
+        if flying {
+            process_aloft(&mut w, scene);
+        } else {
+            w.process(0, scene);
+        }
         scene.time = now;
         k.ahead = Some((k.frames, cam.walk.phys, w.phys));
         w.phys
@@ -471,8 +708,128 @@ impl Walker {
         let turn = (to.angles.x.0 as f64 - from.angles.x.0 as f64 + std::f64::consts::PI).rem_euclid(tau) - std::f64::consts::PI;
         p.angles.x = F::new(((from.angles.x.0 as f64 + turn * a) % tau) as f32);
         p.angles.y = on(from.angles.y, to.angles.y);
+        if self.flying {
+            p.flags = flags_at(&self.scene, &self.cam.walk, &p);
+        }
         let w = &mut self.cam.walk;
         (w.phys, w.committed) = (p, p);
+    }
+
+    /// A GM's flight on or off (the module's doc). Off, on the walk put back: the
+    /// body goes on from where it is, as a body in the air or on the floor there
+    /// (the world's flags, its pitch level again in the orbits, where it was the
+    /// camera's; no way up left in it, as nothing lifts a body in the air), and the
+    /// orbit's look as it was before the flight.
+    fn set_flying(&mut self, on: bool) {
+        eprintln!("walker: flying {on} at {:?}", self.cam.walk.phys.position.to_array());
+        self.flying = on;
+        let cam = &mut self.cam;
+        cam.walk.parm60 = if on { 0 } else { 1 };
+        if on {
+            self.fly_tilt = Some((cam.camera_mode, if cam.camera_mode == 3 { cam.def_orbit_pitch } else { cam.cur.orbit.y }));
+            return;
+        }
+        let orbit = matches!(cam.camera_mode, 1 | 3);
+        let w = &mut cam.walk;
+        let (mut phys, mut committed) = (w.phys, w.committed);
+        for p in [&mut phys, &mut committed] {
+            p.flags = flags_at(&self.scene, w, p);
+            if orbit {
+                p.angles.y = F::ZERO;
+            }
+            p.velocity.y = vimin(p.velocity.y, F::ZERO);
+        }
+        (w.phys, w.committed) = (phys, committed);
+        w.update_directions();
+        match self.fly_tilt.take() {
+            Some((3, pitch)) if cam.camera_mode == 3 => cam.def_orbit_pitch = pitch,
+            Some((1, pitch)) if cam.camera_mode == 1 => {
+                cam.set_orbit_pitch_angle(pitch);
+            }
+            _ => {}
+        }
+    }
+
+    /// In flight, in the orbits: the body's pitch the tilt the player chose less
+    /// the game's own for the camera (the module's doc), which `Run` and `Walk` then
+    /// push along (`m_facing`, on the body's own axes: the orbit of mode 1, mode 3
+    /// steered) and `fly_view` too. So a camera at its default flies level, tilted
+    /// up from there climbs and down dives, at any frame rate, the eye's own
+    /// direction left out: it looks down by the tilt, and by a race's look-at
+    /// height with the zoom; and in mode 3 the tilt read is the default the
+    /// player's look moves (`mouse::tilt`), not the pitch the camera's own snaps
+    /// swing it to when it meets a wall. Before `UpdateControls`, on the walk put
+    /// back; the body is drawn upright whatever its pitch (`pose_sounding`).
+    fn fly_pitch(&mut self) {
+        let cam = &mut self.cam;
+        let pitch = match cam.camera_mode {
+            3 => cam.def_orbit_pitch - F::new(crate::camreach::GAME_PITCH),
+            1 => cam.cur.orbit.y - F::new(crate::camstyle::ORBIT_PITCH),
+            _ => return,
+        };
+        let w = &mut cam.walk;
+        w.phys.angles.y = pitch;
+        w.committed.angles.y = pitch;
+        w.update_directions();
+    }
+
+    /// In flight, `ViewRelativeMove` and `ViewRelativeWalk` (`walking`) go up and
+    /// down too: the stick's forward along the camera's way `r` across the ground at
+    /// the body's pitch (`fly_pitch`), its sideways level, both at the walk's own
+    /// push (so the speed is the ground's in any direction), the body turned to the
+    /// way the stick points across the ground, as ever. `NO_TURN` and the rest as the
+    /// walk's: the game's body axes.
+    fn fly_view(&mut self, r: &Vect3<Ee>, x: F<Ee>, y: F<Ee>, walking: bool) {
+        let w = &mut self.cam.walk;
+        if w.phys.flags & NO_TURN != 0 {
+            if walking {
+                w.walk(x, F::ZERO);
+            } else {
+                w.move_stick(x, F::ZERO);
+            }
+            return;
+        }
+        let mut v = vi::vect::Vect2::new(x, y);
+        let mag = v.magnitude();
+        v.normalize();
+        let mut level = Vect3::new(r.x, F::ZERO, r.z);
+        level.normalize();
+        let mut side = Vect3::cross(&level, &Vect3::of(0.0, 1.0, 0.0));
+        side.normalize();
+        let h = if w.move_deadzone < mag {
+            let a = if !walking && w.run_threshold < mag { w.run_accel } else { w.walk_accel };
+            let pitch = w.phys.angles.y;
+            let mut look = level;
+            look *= pitch.cosf();
+            look.y = -pitch.sinf();
+            w.phys.force.add_scaled(&look, a * v.x);
+            w.phys.force.add_scaled(&side, a * v.y);
+            let mut way = level;
+            way *= v.x;
+            way.add_scaled(&side, v.y);
+            way.get_hpr().0
+        } else {
+            w.phys.target_heading
+        };
+        w.set_target_heading(h);
+    }
+
+    /// In flight on a floor: a push down into it goes across it, its whole
+    /// strength, so a run along the ground is the run's speed with the camera
+    /// looking down at it (the game's 15 degrees is a look down). Its way up, as
+    /// it was: that is how a body takes off.
+    fn fly_on_the_floor(&mut self) {
+        let p = &mut self.cam.walk.phys;
+        if !stands(p) || F::ZERO <= p.force.y {
+            return;
+        }
+        let across = (p.force.x * p.force.x + p.force.z * p.force.z).sqrt();
+        if F::ZERO < across {
+            let k = p.force.magnitude() / across;
+            p.force.x *= k;
+            p.force.z *= k;
+            p.force.y = F::ZERO;
+        }
     }
 
     /// A place given the follow orbit's camera on the walk put back
@@ -518,7 +875,7 @@ impl Walker {
         let w = &mut self.cam.walk;
         k.at.0.flags = (k.at.0.flags & !NO_TURN) | (w.phys.flags & NO_TURN);
         let (old, new) = (k.left.0.flags, w.phys.flags);
-        let landed = old & ON_FLOOR == 0 && new & ON_FLOOR != 0 && new & SUBMERGED == 0 && old & SUBMERGED == 0;
+        let landed = !self.flying && old & ON_FLOOR == 0 && new & ON_FLOOR != 0 && new & SUBMERGED == 0 && old & SUBMERGED == 0;
         w.parm118 = if landed { 16 } else { 0 };
         k.left = (w.phys, w.committed);
         self.rewound = false;
@@ -677,10 +1034,10 @@ impl crate::controls::Walk for Walker {
         self.eye.direction
     }
     fn under_liquid(&self) -> bool {
-        self.cam.walk.is_under_liquid()
+        !self.flying && self.cam.walk.is_under_liquid()
     }
     fn at_liquid_surface(&self) -> bool {
-        self.cam.walk.is_at_liquid_surface()
+        !self.flying && self.cam.walk.is_at_liquid_surface()
     }
     fn move_stick(&mut self, x: F<Ee>, y: F<Ee>) {
         self.cam.walk.move_stick(x, y);
@@ -698,10 +1055,18 @@ impl crate::controls::Walk for Walker {
         self.cam.walk.swim_up(t);
     }
     fn view_relative_move(&mut self, r: &Vect3<Ee>, x: F<Ee>, y: F<Ee>) {
-        self.cam.walk.view_relative_move(r, x, y);
+        if self.flying {
+            self.fly_view(r, x, y, false);
+        } else {
+            self.cam.walk.view_relative_move(r, x, y);
+        }
     }
     fn view_relative_walk(&mut self, r: &Vect3<Ee>, x: F<Ee>, y: F<Ee>) {
-        self.cam.walk.view_relative_walk(r, x, y);
+        if self.flying {
+            self.fly_view(r, x, y, true);
+        } else {
+            self.cam.walk.view_relative_walk(r, x, y);
+        }
     }
     fn set_target_heading(&mut self, h: F<Ee>) {
         self.cam.walk.set_target_heading(h);
@@ -720,6 +1085,13 @@ impl crate::controls::Walk for Walker {
     }
     fn set_manual_hpr(&mut self, v: Vect3<Ee>) {
         self.cam.effect.manual_hpr = v;
+    }
+    /// The orbit's look by the stick: the mouse's tilt (`mouse::tilt`: the camera
+    /// higher looks down) at the rate the body pitches in the other cameras
+    /// (`m_pitchRate`, a quarter turn in two seconds), by the clock.
+    fn fly_look(&mut self, t: F<Ee>) {
+        let rate = self.cam.walk.pitch_rate;
+        crate::mouse::tilt(&mut self.cam, t * rate * F::new(self.frame_s));
     }
 }
 
@@ -1105,6 +1477,18 @@ pub(crate) mod tests {
         w.eye = w.cam.process(&mut w.scene);
     }
 
+    /// The console's frame `n` from `t0` (`t0` the walk's own time when it
+    /// began): `UpdateControls`, then the camera's `Process` with the walk
+    /// stepped by the game clock's step (`console_step`), at the frame's
+    /// place on the wall clock: one `Process` a frame, as the PS2 runs it.
+    fn console_frame(w: &mut Walker, c: Controls, t0: i64, n: i64) {
+        crate::controls::update_controls(w, c.axes(), &crate::controls::Client::default());
+        let now = t0 + (n as f64 * CONSOLE_FRAME_MS) as i64;
+        w.cam.walk.committed.time = now - console_step(n);
+        w.scene.time = now;
+        w.eye = w.cam.process(&mut w.scene);
+    }
+
     /// Frame `k`'s time at `hz` from `t0`, up to `jitter` ms early or late
     /// (a display's frames are not exact).
     fn drawn_at(t0: i64, hz: f64, jitter: f64, k: u64) -> i64 {
@@ -1121,10 +1505,12 @@ pub(crate) mod tests {
     /// The walk keeps the console's frames at any display rate: a run with a
     /// turn drawn at 60, 165 and 240 frames a second, and at 144 with each
     /// frame up to 1.5 ms early or late, keeps bit for bit the states a
-    /// console at 29.97 frames a second keeps (one `Process` a frame), so it
-    /// runs and turns as fast at every rate, and the run drawn at 165 goes as
-    /// fast as the console's. The control: stepped once a frame drawn, as
-    /// until now, it is the console's at the console's rate and 4% faster at
+    /// console at 29.97 frames a second keeps (one `Process` a frame, the walk
+    /// stepped by VITimer's 32 or 34: `console_frame`), so it runs and turns
+    /// as fast at every rate, and the run drawn at 165 goes as fast as the
+    /// console's. The controls: one `Process` a frame on the milliseconds
+    /// (33 or 34, the walk's frames until 2026-11-03) is not the console's;
+    /// stepped once a frame drawn, as until 2026-10-27, it is 4% faster at
     /// 165.
     #[test]
     fn the_walk_keeps_the_consoles_frames_at_any_display_rate() {
@@ -1168,12 +1554,18 @@ pub(crate) mod tests {
             eprintln!("{hz} Hz (jitter {jitter}): {drawn:.4} m/s drawn, the console's {console_speed:.4}");
             assert!((drawn / console_speed - 1.0).abs() < 0.003, "{hz} Hz: drawn at {drawn}, the console's {console_speed}");
         }
-        // the control
+        // the console's own frames, one Process each
         let mut a = open_ground().unwrap();
         for n in 1..=want.len() as i64 {
-            frame_drawn(&mut a, go, console(n));
+            console_frame(&mut a, go, t0, n);
         }
-        assert!(same(&a.cam.walk.phys, want.last().unwrap()), "the control: once a frame at the console's rate is the console's");
+        assert!(same(&a.cam.walk.phys, want.last().unwrap()), "one Process a console frame, on VITimer's steps, is the console's");
+        // the control: the same frames stepped on the milliseconds
+        let mut m = open_ground().unwrap();
+        for n in 1..=want.len() as i64 {
+            frame_drawn(&mut m, go, console(n));
+        }
+        assert!(!same(&m.cam.walk.phys, want.last().unwrap()), "the control: one Process a frame on the milliseconds is not the console's");
         let mut b = open_ground().unwrap();
         let mut path = vec![(t0, b.cam.walk.phys.position)];
         for k in 1.. {
@@ -1187,6 +1579,57 @@ pub(crate) mod tests {
         let fast = speed(&path);
         eprintln!("the control at 165 Hz: {fast:.4} m/s");
         assert!(fast > console_speed * 1.03, "the control: once a frame drawn at 165 runs {fast}, the console {console_speed}");
+    }
+
+    /// The game clock's step into each console frame is VITimer's: 32 or
+    /// 34, three in five 32, an even count summing to 983.04 a second.
+    #[test]
+    fn a_console_frame_steps_the_walk_by_vitimers_count() {
+        let steps: Vec<i64> = (1..=3000).map(console_step).collect();
+        assert!(steps.iter().all(|&s| s == 32 || s == 34), "{:?}", &steps[..10]);
+        let short = steps.iter().filter(|&&s| s == 32).count() as f64 / steps.len() as f64;
+        assert!((short - 0.6).abs() < 0.01, "{short}");
+        let total: i64 = steps.iter().sum();
+        let wall = 3000.0 * CONSOLE_FRAME_MS;
+        assert!((total as f64 / wall - 0.98304).abs() < 1e-4, "{total} counts in {wall} ms");
+    }
+
+    /// Walking slowly where a walk's way rounds up: toward -z from Mesh's
+    /// place at Tunaria's z 31573 (one float step 1.95 mm) toward Warlord
+    /// Jurglash, on a stick held at a walk (2026-11-03: "when walking slow
+    /// with controller it is still rapidly jitters animation"). Drawn at 165
+    /// frames a second, the body walks on every frame once it is under way.
+    /// The control: the console's frames stepped on the milliseconds (33 or
+    /// 34, the walk's until then), whose 1 ms rest reads a walk's float step
+    /// or two of way, rounded up by the EE's chopped add, as a run (3.9 a
+    /// second): the body ran one frame and walked the next.
+    #[test]
+    fn walking_slowly_toward_a_lower_coordinate_keeps_its_gait() {
+        let (x, z, heading) = (25393.32f32, 31573.49f32, 3.0929f32);
+        let walk = Controls { fwd: 0.42, ..Default::default() };
+        let start = || {
+            let mut w = Walker::arrive(tunaria_round(x, z)?, Spawn::ground(x, z, heading));
+            w.cam.set_camera_mode(2);
+            Some(w)
+        };
+        let Some(mut w) = start() else { return };
+        let t0 = w.scene.time;
+        let mut gaits = Vec::new();
+        for k in 1..=(165 * 6) {
+            w.frame(walk, drawn_at(t0, 165.0, 0.0, k));
+            if k > 165 {
+                gaits.push(w.cam.walk.committed.loco_state);
+            }
+        }
+        assert!(w.cam.walk.phys.position.z.0 < z - 10.0, "it walked toward -z: {:?}", w.cam.walk.phys.position);
+        assert!(gaits.iter().all(|&g| g == 1), "a walk on every frame drawn: {} not", gaits.iter().filter(|&&g| g != 1).count());
+        let mut m = start().unwrap();
+        let mut ran = 0;
+        for n in 1..=180 {
+            frame_drawn(&mut m, walk, t0 + (n as f64 * CONSOLE_FRAME_MS) as i64);
+            ran += (n > 30 && m.cam.walk.committed.loco_state == 3) as usize;
+        }
+        assert!(ran > 50, "the control: on the milliseconds it reads a run on {ran} of 150 frames");
     }
 
     /// The farthest and the root mean square (mm) the places drawn are off
@@ -1657,5 +2100,603 @@ pub(crate) mod tests {
             }
         }
     }
-}
 
+    // A GM's flight (the module's doc). Open air over Tunaria's flat at
+    // (22000, 18000): the ground at 54.1, nothing over it.
+
+    fn flying() -> crate::controls::Client {
+        crate::controls::Client { flying: true, ..Default::default() }
+    }
+
+    /// `secs` of the frames drawn at `hz` from the walk's clock on, at `client`
+    /// and the sticks `c`; the time it ends at.
+    fn hold(w: &mut Walker, c: Controls, client: &crate::controls::Client, hz: f64, secs: f64) -> i64 {
+        let t0 = w.scene.time;
+        let mut now = t0;
+        for k in 1..=(hz * secs) as u64 {
+            now = drawn_at(t0, hz, 0.0, k);
+            w.frame_with(c.axes(), now, client, true);
+        }
+        now
+    }
+
+    /// The way covered between frames, over the time they span: up and down too.
+    fn speed3(a: &[(i64, Vect3<Ee>)]) -> f32 {
+        let d: f32 = a
+            .windows(2)
+            .map(|p| ((p[1].1.x.0 - p[0].1.x.0).powi(2) + (p[1].1.y.0 - p[0].1.y.0).powi(2) + (p[1].1.z.0 - p[0].1.z.0).powi(2)).sqrt())
+            .sum();
+        d / ((a[a.len() - 1].0 - a[0].0) as f32 / 1000.0)
+    }
+
+    /// A run of `secs` at `hz` with the walk under way, its place each frame.
+    fn track(w: &mut Walker, c: Controls, client: &crate::controls::Client, hz: f64, secs: f64) -> Vec<(i64, Vect3<Ee>)> {
+        hold(w, c, client, hz, 1.0);
+        let t0 = w.scene.time;
+        let mut at = vec![(t0, w.cam.walk.phys.position)];
+        for k in 1..=(hz * secs) as u64 {
+            let now = drawn_at(t0, hz, 0.0, k);
+            w.frame_with(c.axes(), now, client, true);
+            at.push((now, w.cam.walk.phys.position));
+        }
+        at
+    }
+
+    /// In the follow orbit (the game's default) W goes where the camera looks, its
+    /// default tilt counting as level. At the default it goes across at the height
+    /// it stands at; tilted up from there it climbs along the tilt, level again it
+    /// holds the height it reached, tilted down from there it comes down along the
+    /// tilt, each at the ground's run, up and down counted. It then runs along the
+    /// ground at the run's whole speed with the camera still looking down. The
+    /// controls: on the ground with no flight the same tilt runs across at that
+    /// speed and rises not at all.
+    #[test]
+    fn in_flight_the_body_goes_where_the_camera_looks() {
+        let (x, z) = (22000.0f32, 18000.0f32);
+        let start = || {
+            let mut w = Walker::arrive(tunaria_round(x, z)?, Spawn::ground(x, z, std::f32::consts::FRAC_PI_2));
+            // the game's own camera: its 15 degrees, a look down at the head
+            crate::camstyle::set_style(&mut w.cam, 3, None, &mut w.scene);
+            Some(w)
+        };
+        let up_by = |w: &mut Walker, d: f32| crate::mouse::tilt(&mut w.cam, F::new(-d));
+        let Some(mut ground) = start() else { return };
+        let go = Controls { fwd: 1.0, ..Default::default() };
+        let plain = crate::controls::Client::default();
+        let on_foot = speed(&track(&mut ground, go, &plain, 60.0, 2.0));
+        eprintln!("on the ground: {on_foot:.3} a second");
+        let floor = ground.cam.walk.phys.position.y.0;
+        assert!((floor - 54.1).abs() < 0.2, "the flat: {floor}");
+
+        let mut w = start().unwrap();
+        // at the game's own camera, which looks down 15 degrees, it goes straight
+        // along: a run on the flat at the run's speed
+        let at = track(&mut w, go, &flying(), 60.0, 1.0);
+        assert!((at[at.len() - 1].1.y.0 - at[0].1.y.0).abs() < 0.3 && (speed(&at) / on_foot - 1.0).abs() < 0.01, "the game's camera: {} a second, height {} to {}", speed(&at), at[0].1.y.0, at[at.len() - 1].1.y.0);
+
+        up_by(&mut w, 0.5); // 0.5 up from the default
+        hold(&mut w, go, &flying(), 60.0, 0.2);
+        let eye = w.eye.direction.get_hpr().1.0;
+        assert!((eye - (crate::camreach::GAME_PITCH - 0.5)).abs() < 0.03, "the eye looks up by what is left of its 15 degrees: {eye}");
+        let at = track(&mut w, go, &flying(), 60.0, 3.0);
+        let (a, b) = (at[0].1, at[at.len() - 1].1);
+        let (up, across) = (b.y.0 - a.y.0, ((b.x.0 - a.x.0).powi(2) + (b.z.0 - a.z.0).powi(2)).sqrt());
+        eprintln!("0.5 up from the default: {up:.2} up and {across:.2} across in 3 s, {:.3} a second", speed3(&at));
+        assert!((up / across - 0.5f32.tan()).abs() < 0.03, "climbs along its tilt: {up} up, {across} across");
+        assert!((speed3(&at) / on_foot - 1.0).abs() < 0.01, "at the run's speed: {} against {on_foot}", speed3(&at));
+        assert!(w.cam.walk.phys.position.y.0 > floor + 15.0);
+
+        // back at the default, level at the height it reached
+        up_by(&mut w, -0.5);
+        hold(&mut w, go, &flying(), 60.0, 1.0);
+        let at = track(&mut w, go, &flying(), 60.0, 1.0);
+        let (a, b) = (at[0].1, at[at.len() - 1].1);
+        assert!((b.y.0 - a.y.0).abs() < 0.5, "level: {} to {}", a.y.0, b.y.0);
+        assert!((speed3(&at) / on_foot - 1.0).abs() < 0.01, "level at the run's speed: {}", speed3(&at));
+
+        // down along a look down, to the ground, and on along it at the run
+        up_by(&mut w, -0.5);
+        let top = w.cam.walk.phys.position.y.0;
+        hold(&mut w, go, &flying(), 60.0, 1.0);
+        assert!(w.cam.walk.phys.position.y.0 < top - 2.0, "comes down: {top} to {}", w.cam.walk.phys.position.y.0);
+        hold(&mut w, go, &flying(), 60.0, 12.0);
+        let at = track(&mut w, go, &flying(), 60.0, 1.0);
+        let y = at[at.len() - 1].1.y.0;
+        assert!((y - crate::walker::ground(&mut w.scene, at[at.len() - 1].1.x.0, at[at.len() - 1].1.z.0).unwrap()).abs() < 0.3, "on the ground: {y}");
+        assert!((speed(&at) / on_foot - 1.0).abs() < 0.01, "along the ground, looking down at it: {} against {on_foot}", speed(&at));
+
+        // the control: the same tilt, no flight
+        let mut g = start().unwrap();
+        up_by(&mut g, 0.5);
+        hold(&mut g, go, &plain, 60.0, 0.2);
+        let at = track(&mut g, go, &plain, 60.0, 2.0);
+        assert!((at[at.len() - 1].1.y.0 - at[0].1.y.0).abs() < 0.3, "the control rose: {} to {}", at[0].1.y.0, at[at.len() - 1].1.y.0);
+        assert!((speed(&at) / on_foot - 1.0).abs() < 0.01);
+    }
+
+    /// A camera at its default flies level, whichever it is and at any rate: W
+    /// for 6 s high over Tunaria (at 300.5, where `Move`'s add of the body's height
+    /// and back loses a float step a tick: `process_aloft`) holds the height to the
+    /// bit, at the run's speed across the ground, in the follow orbit (the eye looking
+    /// down its 15 degrees: the control, a look taken literally would sink at 2.2 a
+    /// second), the orbit (its
+    /// 25) and first person and the follow camera (no tilt of theirs: their pitch 0
+    /// looks level). So does the follow orbit with a race's look-at height and
+    /// zoomed, which turn the eye and not the tilt, and with its pitch swung by a
+    /// snap, as near a wall. The other controls: a small tilt from the default climbs
+    /// and dives by its sine, in each orbit.
+    #[test]
+    fn a_camera_at_its_default_flies_level_in_every_camera_at_any_rate() {
+        let (x, z) = (22000.0f32, 18000.0f32);
+        let y0 = 300.5f32;
+        let start = |style: i32, rc: Option<crate::camstyle::RaceCamera>| {
+            let mut w = Walker::arrive(tunaria_round(x, z)?, Spawn { pos: [x, y0, z], heading: std::f32::consts::FRAC_PI_2, placing: Placing::AsGiven });
+            crate::camstyle::set_style(&mut w.cam, style, rc, &mut w.scene);
+            Some(w)
+        };
+        let Some(mut ground) = tunaria_round(x, z).map(|s| Walker::arrive(s, Spawn::ground(x, z, std::f32::consts::FRAC_PI_2))) else { return };
+        let go = Controls { fwd: 1.0, ..Default::default() };
+        let on_foot = speed(&track(&mut ground, go, &crate::controls::Client::default(), 60.0, 2.0));
+        // W for 6 s at `hz`: the height each frame drawn held to the bit
+        let level = |w: &mut Walker, hz: f64, jitter: f64, what: &str| {
+            hold(w, go, &flying(), hz, 0.5);
+            let t0 = w.scene.time;
+            let mut at = vec![(t0, w.cam.walk.phys.position)];
+            for k in 1..=(hz * 6.0) as u64 {
+                let now = drawn_at(t0, hz, jitter, k);
+                w.frame_with(go.axes(), now, &flying(), true);
+                let p = w.cam.walk.phys.position;
+                assert_eq!(p.y.0, y0, "{what} at {hz} Hz: frame {k}");
+                assert_eq!(vi::selfstate::encode(0, &w.cam.walk.committed, 0, 0)[35], 3, "{what} at {hz} Hz: frame {k} runs");
+                at.push((now, p));
+            }
+            speed(&at)
+        };
+        for (style, name) in [(3, "the follow orbit"), (1, "the orbit"), (0, "first person"), (2, "the follow camera")] {
+            for (hz, jitter) in [(30.0, 0.0), (60.0, 0.0), (165.0, 0.0), (240.0, 0.0), (144.0, 1.5)] {
+                let mut w = start(style, None).unwrap();
+                let v = level(&mut w, hz, jitter, name);
+                if hz == 60.0 {
+                    eprintln!("{name}: the eye's pitch {:.4}, {v:.3} a second across, the ground's {on_foot:.3}", w.eye.direction.get_hpr().1.0);
+                }
+                assert!((v / on_foot - 1.0).abs() < 0.01, "{name} at {hz} Hz: {v} a second, the ground's {on_foot}");
+                let eye = w.eye.direction.get_hpr().1.0;
+                match style {
+                    3 => assert!((eye - crate::camreach::GAME_PITCH).abs() < 0.02, "the control: the eye looks down its 15 degrees: {eye}"),
+                    1 => assert!(eye > 0.3, "the control: the eye looks down its 25 degrees: {eye}"),
+                    _ => assert!(eye.abs() < 0.001, "{name}: its eye looks level: {eye}"),
+                }
+            }
+        }
+        // a race's look-at height, a zoom: the eye turns, the flight does not
+        let short = crate::camstyle::RaceCamera { race: 3, target_height: 1.1, look_at_height_above: 1.1, pitch: 0.2, distance: 3.0, p34: 0.9, review: [0.0; 4], cust: [0.0; 4] };
+        let mut w = start(3, Some(short)).unwrap();
+        w.cam.set_orbit_distance(F::new(2.0));
+        hold(&mut w, go, &flying(), 60.0, 0.5);
+        let eye = w.eye.direction.get_hpr().1.0;
+        assert!(eye > crate::camreach::GAME_PITCH + 0.05, "the control: the race's look-at height turns the eye: {eye}");
+        level(&mut w, 60.0, 0.0, "a short race zoomed in");
+        // the pitch swung by a snap, as near a wall: the tilt chosen is unchanged
+        let mut w = start(3, None).unwrap();
+        hold(&mut w, go, &flying(), 60.0, 0.5);
+        let t0 = w.scene.time;
+        w.cam.set_orbit_pitch_angle(w.cam.alt_orbit_pitch);
+        for k in 1..=6 {
+            w.frame_with(go.axes(), t0 + k * 16, &flying(), true);
+            assert_eq!(w.cam.walk.phys.position.y.0, y0, "swung to its alternate pitch: frame {k}");
+        }
+        // a small tilt from the default, up and down, each orbit its own default
+        for style in [3, 1] {
+            for tilt in [0.1f32, -0.1] {
+                let mut w = start(style, None).unwrap();
+                crate::mouse::tilt(&mut w.cam, F::new(tilt));
+                hold(&mut w, go, &flying(), 60.0, 1.0);
+                let a = w.cam.walk.phys.position.y.0;
+                hold(&mut w, go, &flying(), 60.0, 3.0);
+                let climbed = (w.cam.walk.phys.position.y.0 - a) / 3.0;
+                let want = -tilt.sin() * on_foot;
+                assert!((climbed - want).abs() < 0.1, "style {style}, {tilt} from the default: {climbed} a second up, want {want}");
+            }
+        }
+    }
+
+    /// The tilts' limits: the follow orbit's 45 degrees under the head climbs at
+    /// 60 degrees from its default (and the orbit at 70), all the run's speed along
+    /// it, more of it up than the eye's own look gave. Its 75 overhead dives at 60.
+    #[test]
+    fn at_the_tilts_limits_the_flight_goes_at_the_run() {
+        let (x, z) = (22000.0f32, 18000.0f32);
+        let y0 = 400.0f32;
+        let go = Controls { fwd: 1.0, ..Default::default() };
+        let Some(mut ground) = tunaria_round(x, z).map(|s| Walker::arrive(s, Spawn::ground(x, z, std::f32::consts::FRAC_PI_2))) else { return };
+        let on_foot = speed(&track(&mut ground, go, &crate::controls::Client::default(), 60.0, 2.0));
+        for (style, name, limit, want) in [
+            (3, "the follow orbit", crate::mouse::MIN_TILT, -60.0f32),
+            (3, "the follow orbit", crate::mouse::MAX_TILT, 60.0),
+            (1, "the orbit", crate::mouse::MIN_TILT, -70.0),
+            (1, "the orbit", crate::mouse::MAX_TILT, 50.0),
+        ] {
+            let mut w = Walker::arrive(tunaria_round(x, z).unwrap(), Spawn { pos: [x, y0, z], heading: std::f32::consts::FRAC_PI_2, placing: Placing::AsGiven });
+            crate::camstyle::set_style(&mut w.cam, style, None, &mut w.scene);
+            crate::mouse::tilt(&mut w.cam, F::new(limit * 3.0));
+            let at = track(&mut w, go, &flying(), 60.0, 2.0);
+            let (a, b) = (at[0].1, at[at.len() - 1].1);
+            let (up, all) = ((b.y.0 - a.y.0) / 2.0, speed3(&at));
+            eprintln!("{name} at its tilt limit {limit:.3}: {up:.3} a second up, {all:.3} in all (the ground's {on_foot:.3})");
+            assert!((up / all + want.to_radians().sin()).abs() < 0.02, "{name}: {up} up of {all}, want {want} degrees");
+            assert!((all / on_foot - 1.0).abs() < 0.015, "{name}: {all} a second, the ground's {on_foot}");
+        }
+    }
+
+    /// First person is the swim's own way: the stick pitches the body (past the
+    /// walk's range for a body on land, as under liquid) and W goes along it.
+    /// Near straight up (`PITCH_LIMIT`, 89.4 degrees) nearly all the run goes
+    /// up. The control: looking up on the ground runs across.
+    #[test]
+    fn looking_straight_up_in_first_person_goes_up_at_the_run() {
+        let (x, z) = (22000.0f32, 18000.0f32);
+        let start = || {
+            let mut w = Walker::arrive(tunaria_round(x, z)?, Spawn::ground(x, z, std::f32::consts::FRAC_PI_2));
+            w.cam.set_camera_mode(0);
+            Some(w)
+        };
+        let Some(mut w) = start() else { return };
+        let plain = crate::controls::Client::default();
+        let go = Controls { fwd: 1.0, ..Default::default() };
+        hold(&mut w, Controls { pitch: -1.0, ..Default::default() }, &flying(), 60.0, 3.0);
+        assert!(w.cam.walk.phys.angles.y.0 < -1.5, "the stick pitched it up: {:?}", w.cam.walk.phys.angles.y);
+        crate::mouse::pitch_body(&mut w.cam, F::new(-2.0));
+        assert!((w.cam.walk.phys.angles.y.0 + 1.5607964).abs() < 1e-5, "the mouse's to the limit: {:?}", w.cam.walk.phys.angles.y);
+        let at = track(&mut w, go, &flying(), 60.0, 3.0);
+        let (a, b) = (at[0].1, at[at.len() - 1].1);
+        let up = (b.y.0 - a.y.0) / 3.0;
+        eprintln!("looking straight up: {up:.3} a second up, {:.3} a second in all", speed3(&at));
+        assert!(up > 8.0, "up at the run's speed: {up}");
+
+        let mut g = start().unwrap();
+        crate::mouse::pitch_body(&mut g.cam, F::new(-2.0));
+        assert!(g.cam.walk.phys.angles.y.0 >= g.cam.walk.min_pitch.0, "the control's mouse keeps to the walk's range");
+        let at = track(&mut g, go, &plain, 60.0, 2.0);
+        assert!((at[at.len() - 1].1.y.0 - at[0].1.y.0).abs() < 0.3, "the control ran across: {:?}", at[at.len() - 1].1);
+    }
+
+    /// The flight keeps the console's frames at any rate, as the walk does: a
+    /// climb and a turn on the sticks drawn at 60, 165 and 240 frames a second,
+    /// and at 144 up to 1.5 ms off, keeps bit for bit what one console frame a
+    /// frame keeps, and goes as fast.
+    #[test]
+    fn the_flight_keeps_the_consoles_frames_at_any_display_rate() {
+        let go = Controls { fwd: 1.0, orbit: -0.25, pitch: -0.15, ..Default::default() };
+        let Some(mut c) = open_ground() else { return };
+        let t0 = c.scene.time;
+        let end = t0 + 5000;
+        let console = |n: i64| t0 + (n as f64 * CONSOLE_FRAME_MS) as i64;
+        let (mut want, mut path) = (Vec::new(), vec![(t0, c.cam.walk.phys.position)]);
+        let mut n = 1;
+        while console(n) <= end {
+            c.frame_with(go.axes(), console(n), &flying(), true);
+            let k = c.kept.unwrap();
+            assert_eq!(k.frames, n, "one console frame a frame drawn");
+            want.push(k.at.0);
+            path.push((console(n), c.cam.walk.phys.position));
+            n += 1;
+        }
+        let console_speed = speed3(&path);
+        assert!(c.cam.walk.phys.position.y.0 > 60.0, "it climbed: {:?}", c.cam.walk.phys.position);
+        for (hz, jitter) in [(60.0, 0.0), (165.0, 0.0), (240.0, 0.0), (144.0, 1.5)] {
+            let mut w = open_ground().unwrap();
+            let (mut seen, mut path) = (0, vec![(t0, w.cam.walk.phys.position)]);
+            for k in 1.. {
+                let now = drawn_at(t0, hz, jitter, k);
+                if now > end {
+                    break;
+                }
+                w.frame_with(go.axes(), now, &flying(), true);
+                path.push((now, w.cam.walk.phys.position));
+                let kept = w.kept.unwrap();
+                if kept.frames > seen {
+                    seen = kept.frames;
+                    let (a, b) = (kept.at.0, want[seen as usize - 1]);
+                    assert!(same(&a, &b), "{hz} Hz: console frame {seen} kept at {:?}, the console's at {:?}", a.position, b.position);
+                }
+            }
+            assert_eq!(seen as usize, want.len(), "{hz} Hz: every console frame kept");
+            let drawn = speed3(&path);
+            eprintln!("in flight at {hz} Hz (jitter {jitter}): {drawn:.4} a second drawn, the console's {console_speed:.4}");
+            assert!((drawn / console_speed - 1.0).abs() < 0.003, "{hz} Hz: drawn at {drawn}, the console's {console_speed}");
+        }
+    }
+
+    /// Let go, it holds where it is: no gravity, no drift, in the follow orbit
+    /// and first person, standing (the gait 0). Off, it falls from there and
+    /// lands, the fall's own gait (6) on the way down and the ground's after, and
+    /// a walk from there is the walk. The control: the gravity back at once, the
+    /// fall begun within a console frame or two.
+    #[test]
+    fn let_go_it_holds_and_off_it_falls_from_where_it_is() {
+        let (x, z) = (22000.0f32, 18000.0f32);
+        for mode in [3, 0, 2, 1] {
+            let Some(mut w) = tunaria_round(x, z).map(|s| Walker::arrive(s, Spawn::ground(x, z, std::f32::consts::FRAC_PI_2))) else { return };
+            w.cam.set_camera_mode(mode);
+            let floor = w.cam.walk.phys.position.y.0;
+            if mode == 3 || mode == 1 {
+                crate::mouse::tilt(&mut w.cam, F::new(-0.5235988 - 0.5));
+                hold(&mut w, Controls::default(), &flying(), 30.0, 0.2);
+            } else {
+                crate::mouse::pitch_body(&mut w.cam, F::new(-0.6));
+            }
+            let go = Controls { fwd: 1.0, ..Default::default() };
+            hold(&mut w, go, &flying(), 30.0, 4.0);
+            let y = w.cam.walk.phys.position.y.0;
+            assert!(y > floor + 10.0, "mode {mode}: it climbed from {floor} to {y}");
+            hold(&mut w, Controls::default(), &flying(), 30.0, 2.0);
+            let (still, p) = (w.cam.walk.phys.position, w.cam.walk.committed.loco_state);
+            hold(&mut w, Controls::default(), &flying(), 30.0, 4.0);
+            let held = w.cam.walk.phys.position;
+            assert!(held.y == still.y && held.x == still.x && held.z == still.z, "mode {mode}: {still:?} to {held:?} with nothing held");
+            assert_eq!(p, 0, "mode {mode}: stands");
+            assert_eq!(w.cam.walk.committed.loco_state, 0, "mode {mode}: stands");
+
+            // off
+            let plain = crate::controls::Client::default();
+            let top = held.y.0;
+            hold(&mut w, Controls::default(), &plain, 30.0, 0.5);
+            assert!(w.cam.walk.phys.position.y.0 < top - 0.5, "mode {mode}: no fall: {top} to {:?}", w.cam.walk.phys.position.y);
+            assert_eq!(w.cam.walk.parm60, 1);
+            assert_eq!(w.cam.walk.committed.loco_state, 6, "mode {mode}: the fall's own gait");
+            let mut landed = false;
+            for _ in 0..12 {
+                hold(&mut w, Controls::default(), &plain, 30.0, 0.5);
+                landed = (w.cam.walk.phys.position.y.0 - crate::walker::ground(&mut w.scene, held.x.0, held.z.0).unwrap()).abs() < 0.2;
+                if landed {
+                    break;
+                }
+            }
+            assert!(landed, "mode {mode}: still falling at {:?}", w.cam.walk.phys.position.y);
+            hold(&mut w, Controls::default(), &plain, 30.0, 1.0);
+            assert_eq!(w.cam.walk.committed.loco_state, 0, "mode {mode}: stands on the ground");
+            assert!(w.cam.walk.phys.flags & ON_FLOOR != 0, "mode {mode}: on the floor");
+        }
+    }
+
+    /// The gaits are the land's: a run wherever it runs (up and down too), a walk
+    /// on a stick held low, the sidesteps and a back-up on the body's own axes,
+    /// a stand when still, and never a swim's. The control: the walk's own gait
+    /// in the world of water is a swim's, so the land's is what `fly_gait` gives.
+    #[test]
+    fn in_flight_the_gaits_are_the_lands() {
+        let Some(mut w) = open_ground() else { return };
+        let gait = |w: &Walker| w.cam.walk.committed.loco_state;
+        let mut all = Vec::new();
+        let mut watch = |w: &mut Walker, c: Controls, secs: f64, want: i32, why: &str| {
+            hold(w, c, &flying(), 60.0, 1.0); // the walk's own time to change its speed
+            let t0 = w.scene.time;
+            for k in 1..=(60.0 * secs) as u64 {
+                w.frame_with(c.axes(), t0 + (k as f64 * 1000.0 / 60.0) as i64, &flying(), true);
+                let (loco, wire) = (gait(w), vi::selfstate::encode(0, &w.cam.walk.committed, 0, 0)[35] as i32);
+                assert_eq!(loco, wire, "{why}: the 0x40 says the gait");
+                all.push(loco);
+                assert_eq!(loco, want, "{why}: frame {k}");
+            }
+        };
+        // (mode 2: the body's own axes)
+        watch(&mut w, Controls { fwd: 1.0, ..Default::default() }, 1.0, 3, "a level run");
+        watch(&mut w, Controls::default(), 1.0, 0, "let go");
+        watch(&mut w, Controls { fwd: 1.0, pitch: -0.8, ..Default::default() }, 1.0, 3, "a climb");
+        watch(&mut w, Controls { fwd: 1.0, pitch: 0.8, ..Default::default() }, 1.0, 3, "a dive");
+        watch(&mut w, Controls { fwd: 0.4, ..Default::default() }, 1.0, 1, "a walk");
+        watch(&mut w, Controls { strafe: 1.0, ..Default::default() }, 1.0, 11, "a sidestep");
+        watch(&mut w, Controls { strafe: -1.0, ..Default::default() }, 1.0, 10, "the other way");
+        watch(&mut w, Controls { fwd: -1.0, ..Default::default() }, 1.0, 2, "backing up");
+        watch(&mut w, Controls::default(), 1.0, 0, "let go again");
+        assert!(all.iter().all(|&g| g != 12 && g != 13));
+        // the control
+        let mut copy = w.cam.walk;
+        copy.committed.time = w.scene.time - 33;
+        copy.process(0, &mut Aloft(&mut w.scene));
+        assert!(matches!(copy.committed.loco_state, 12 | 13), "the control: {}", copy.committed.loco_state);
+    }
+
+    /// What the 0x40 says of a flyer is what is really there: no liquid in the
+    /// air, though the walk it stepped is in its world of water (the control: its
+    /// kept frame is); over the bay in the air none; under the bay's surface it
+    /// is in the water, as anyone, and the breath gauge's test says so; past the
+    /// surface it went freely. The body is drawn upright under it all the same.
+    #[test]
+    fn a_flyers_walk_flags_are_the_places() {
+        let (x, z) = (25390.0f32, 15860.0f32);
+        let Some(world) = tunaria_round(x, z) else { return };
+        let surface = 51.32f32;
+        assert_eq!(world.env_flags(&Vect3::of(x, surface - 3.0, z)) & 1, 1, "the bay's water");
+        assert_eq!(world.env_flags(&Vect3::of(x, surface + 3.0, z)) & 1, 0, "the air over it");
+        let mut w = Walker::arrive(world, Spawn { pos: [x, surface + 20.0, z], heading: 0.0, placing: Placing::AsGiven });
+        w.cam.set_camera_mode(0);
+        hold(&mut w, Controls::default(), &flying(), 30.0, 0.5);
+        let wire = |w: &Walker| {
+            let b = vi::selfstate::encode(0, &w.cam.walk.committed, 0, 0);
+            u32::from_le_bytes([b[31], b[32], b[33], b[34]])
+        };
+        assert_eq!(wire(&w) & flags::LIQUID, 0, "in the air: {:#x}", wire(&w));
+        assert!(!w.cam.walk.is_under_liquid());
+        assert_ne!(w.kept.unwrap().at.0.flags & flags::IN_WATER, 0, "the control: the frame kept is in the world of water");
+        assert_eq!(w.cam.walk.parm60, 0);
+        // straight down, through the surface, 10 under it
+        crate::mouse::pitch_body(&mut w.cam, F::new(1.5));
+        let go = Controls { fwd: 1.0, ..Default::default() };
+        let t0 = w.scene.time;
+        let mut k = 0;
+        while w.cam.walk.phys.position.y.0 > surface - 12.0 {
+            k += 1;
+            assert!(k < 60 * 8, "stuck at {:?}", w.cam.walk.phys.position);
+            w.frame_with(go.axes(), t0 + (k as f64 * 1000.0 / 60.0) as i64, &flying(), true);
+        }
+        hold(&mut w, Controls::default(), &flying(), 30.0, 2.0); // the run dies away
+        assert_ne!(wire(&w) & flags::IN_WATER, 0, "under the bay: {:#x}", wire(&w));
+        assert_eq!(wire(&w) & flags::AT_SURFACE, 0, "under the bay: {:#x}", wire(&w));
+        assert!(w.cam.walk.is_under_liquid(), "the gauge's test");
+        let y = w.cam.walk.phys.position.y.0;
+        hold(&mut w, Controls::default(), &flying(), 30.0, 2.0);
+        assert_eq!(w.cam.walk.phys.position.y.0, y, "no sinking");
+        assert!(!matches!(w.cam.walk.committed.loco_state, 12 | 13), "no swim");
+    }
+
+    /// Collision is the swimmer's: a flyer stops under a roof (Gilgash's stall's,
+    /// at 70) with its body's height to spare and slides no way through it, and
+    /// rises past the height a step aside in the open. The control is that step.
+    #[test]
+    fn a_flyer_stops_under_a_roof() {
+        let (x, y, z) = (25476.0f32, 54.398438f32, 15707.797f32);
+        let Some(world) = tunaria_round(x, z) else { return };
+        let roof = ground(&mut tunaria_round(x, z).unwrap(), x, z).unwrap();
+        let mut w = Walker::arrive(world, Spawn { pos: [x, y, z], heading: 0.0, placing: Placing::AsGiven });
+        w.cam.set_camera_mode(0);
+        let up = Controls { fwd: 1.0, ..Default::default() };
+        hold(&mut w, Controls::default(), &flying(), 30.0, 0.2);
+        crate::mouse::pitch_body(&mut w.cam, F::new(-2.0));
+        hold(&mut w, up, &flying(), 30.0, 5.0);
+        let top = w.cam.walk.phys.position.y.0;
+        eprintln!("under the roof at {roof}: stopped at {top}");
+        assert!(top < roof - 1.0, "through the roof at {roof}: {top}");
+        assert!(top > y + 1.0, "it rose: {y} to {top}");
+    }
+
+    /// A dump (a respawn, a restart of the server's) puts the body where it
+    /// says, with no floor looked for, and it goes on flying there: no fall, with
+    /// the same client's word. A walker made anew (a world change) flies from
+    /// its first frame. The control: no flight, the same place falls.
+    #[test]
+    fn a_dump_and_a_new_world_leave_it_flying() {
+        let (x, z) = (22000.0f32, 18000.0f32);
+        let Some(mut w) = tunaria_round(x, z).map(|s| Walker::arrive(s, Spawn::ground(x, z, 1.5))) else { return };
+        hold(&mut w, Controls::default(), &flying(), 30.0, 0.2);
+        let high = [x + 5.0, 300.5, z];
+        w.place(high, 1.5);
+        hold(&mut w, Controls::default(), &flying(), 30.0, 2.0);
+        assert_eq!(w.cam.walk.phys.position.to_array(), high, "the dump's place, held");
+        assert_eq!(w.cam.walk.parm60, 0);
+
+        let Some(mut n) = tunaria_round(x, z).map(|s| Walker::arrive(s, Spawn { pos: high, heading: 1.5, placing: Placing::AsGiven })) else { return };
+        assert_eq!(n.cam.walk.parm60, 1, "a new walker's gravity is the walk's own");
+        hold(&mut n, Controls::default(), &flying(), 30.0, 2.0);
+        assert_eq!(n.cam.walk.parm60, 0);
+        assert_eq!(n.cam.walk.phys.position.to_array(), high, "a new world's first frames");
+
+        let Some(mut f) = tunaria_round(x, z).map(|s| Walker::arrive(s, Spawn { pos: high, heading: 1.5, placing: Placing::AsGiven })) else { return };
+        hold(&mut f, Controls::default(), &crate::controls::Client::default(), 30.0, 2.0);
+        assert!(f.cam.walk.phys.position.y.0 < high[1] - 5.0, "the control falls: {:?}", f.cam.walk.phys.position.y);
+    }
+
+    /// Turned on and off with no time flown, the walk goes on bit for bit as one
+    /// that never flew (with fly off nothing changes); on in a fall, the fall
+    /// stops within a second. The control: a fall with no flight goes on.
+    #[test]
+    fn a_flight_of_no_length_changes_nothing_and_one_begun_in_a_fall_stops_it() {
+        let go = Controls { fwd: 1.0, orbit: -0.25, ..Default::default() };
+        let plain = crate::controls::Client::default();
+        let (Some(mut a), Some(mut b)) = (open_ground(), open_ground()) else { return };
+        let t0 = a.scene.time;
+        let console = |n: i64| t0 + (n as f64 * CONSOLE_FRAME_MS) as i64;
+        b.frame_with(Controls::default().axes(), t0, &flying(), true);
+        b.frame_with(Controls::default().axes(), t0, &plain, true);
+        a.frame_with(Controls::default().axes(), t0, &plain, true);
+        for n in 1..=90 {
+            a.frame_with(go.axes(), console(n), &plain, true);
+            b.frame_with(go.axes(), console(n), &plain, true);
+            assert!(same(&a.cam.walk.phys, &b.cam.walk.phys), "console frame {n}: {:?}, {:?}", a.cam.walk.phys.position, b.cam.walk.phys.position);
+        }
+
+        let (x, z) = (22000.0f32, 18000.0f32);
+        let high = Spawn { pos: [x, 400.0, z], heading: 1.5, placing: Placing::AsGiven };
+        let Some(mut f) = tunaria_round(x, z).map(|s| Walker::arrive(s, high)) else { return };
+        hold(&mut f, Controls::default(), &plain, 30.0, 2.0);
+        let v = f.cam.walk.phys.velocity.y.0;
+        assert!(v < -15.0, "falling: {v}");
+        hold(&mut f, Controls::default(), &flying(), 30.0, 1.0);
+        assert!(f.cam.walk.phys.velocity.y.0.abs() < 1.0, "the fall stopped: {:?}", f.cam.walk.phys.velocity.y);
+        let y = f.cam.walk.phys.position.y.0;
+        hold(&mut f, Controls::default(), &flying(), 30.0, 2.0);
+        assert!((f.cam.walk.phys.position.y.0 - y).abs() < 0.2, "and holds: {y} to {:?}", f.cam.walk.phys.position.y);
+    }
+
+    /// Flown down onto the ground a body runs on with no landing's gait (the
+    /// game's locomotion 7, told from the walk's own flags): it did not fall. Off
+    /// in the air, it falls and is told the landing, once. The body is drawn
+    /// upright under real water, its pitch left out of its centre (`UpdateSprite`
+    /// pitches a swimmer). The control: the same place and pitch with no flight is
+    /// pitched.
+    #[test]
+    fn a_flyer_lands_with_no_landing_and_is_drawn_upright_under_water() {
+        let (x, z) = (22000.0f32, 18000.0f32);
+        let Some(mut w) = tunaria_round(x, z).map(|s| Walker::arrive(s, Spawn { pos: [x, 60.0, z], heading: 1.5, placing: Placing::AsGiven })) else { return };
+        w.cam.set_camera_mode(0);
+        hold(&mut w, Controls::default(), &flying(), 30.0, 0.2);
+        crate::mouse::pitch_body(&mut w.cam, F::new(1.0));
+        let t0 = w.scene.time;
+        let go = Controls { fwd: 1.0, ..Default::default() };
+        for k in 1..=(60 * 4) {
+            w.frame_with(go.axes(), t0 + (k as f64 * 1000.0 / 60.0) as i64, &flying(), true);
+            assert_eq!(w.cam.walk.parm118, 0, "frame {k}: a landing told in flight at {:?}", w.cam.walk.phys.position);
+        }
+        assert!((w.cam.walk.phys.position.y.0 - 54.1).abs() < 0.2, "on the ground: {:?}", w.cam.walk.phys.position.y);
+
+        let plain = crate::controls::Client::default();
+        let mut told = 0;
+        let mut f = Walker::arrive(tunaria_round(x, z).unwrap(), Spawn { pos: [x, 60.0, z], heading: 1.5, placing: Placing::AsGiven });
+        hold(&mut f, Controls::default(), &flying(), 30.0, 0.5);
+        let t0 = f.scene.time;
+        for k in 1..=(60 * 4) {
+            f.frame_with(Controls::default().axes(), t0 + (k as f64 * 1000.0 / 60.0) as i64, &plain, true);
+            told += (f.cam.walk.parm118 == 16) as usize;
+        }
+        assert!(told >= 1, "the control: off in the air, no landing told");
+
+        // under the bay, pitched
+        let (x, z) = (25390.0f32, 15860.0f32);
+        let Some((lib, file)) = tunaria_and_chars(x, z) else { return };
+        let human = lib.lookup(0x70D898C6).unwrap();
+        let at = Spawn { pos: [x, 40.0, z], heading: 0.0, placing: Placing::AsGiven };
+        let rot = |client: &crate::controls::Client| {
+            let mut w = Walker::arrive(World::load(&lib, file).unwrap(), at);
+            w.set_character(&lib, human);
+            w.cam.set_camera_mode(0);
+            hold(&mut w, Controls::default(), client, 30.0, 0.1);
+            let t0 = w.scene.time;
+            for k in 1..=30 {
+                crate::mouse::pitch_body(&mut w.cam, F::new(0.05));
+                w.frame_with(Controls::default().axes(), t0 + k * 33, client, true);
+                w.pose();
+            }
+            let cs = w.sprite.as_ref().unwrap();
+            assert!(w.cam.walk.is_under_liquid(), "under the bay: {:#x}", w.cam.walk.phys.flags);
+            let q = cs.h.transform[1].rot;
+            [q.x.0, q.y.0, q.z.0, q.w.0]
+        };
+        let upright = vi::quat::Quat::<Ee>::from_hpr(&Vect3::default());
+        assert_eq!(rot(&flying()), [upright.x.0, upright.y.0, upright.z.0, upright.w.0], "drawn upright in flight");
+        assert_ne!(rot(&plain), [upright.x.0, upright.y.0, upright.z.0, upright.w.0], "the control: a swimmer is pitched");
+    }
+
+    /// The right stick's look in the follow orbit, at the body's pitching rate
+    /// at any frame rate, up, then back: the camera's tilt, as the mouse's, and it
+    /// goes back to what it was when the flight ends. The control: not flying, it
+    /// zooms and the tilt is the same.
+    #[test]
+    fn the_right_stick_tilts_the_orbit_in_flight_and_the_tilt_goes_back() {
+        let (x, z) = (22000.0f32, 18000.0f32);
+        for hz in [30.0, 165.0] {
+            let Some(mut w) = tunaria_round(x, z).map(|s| Walker::arrive(s, Spawn::ground(x, z, 1.5))) else { return };
+            let was = w.cam.def_orbit_pitch.0;
+            hold(&mut w, Controls { pitch: -1.0, ..Default::default() }, &flying(), hz, 1.0);
+            let tilted = w.cam.def_orbit_pitch.0;
+            eprintln!("{hz} Hz: from {was} to {tilted} in a second of the stick");
+            assert!((was - tilted - std::f32::consts::FRAC_PI_4).abs() < 0.03, "{hz} Hz: tilted {was} to {tilted}");
+            hold(&mut w, Controls::default(), &crate::controls::Client::default(), hz, 0.1);
+            assert_eq!(w.cam.def_orbit_pitch.0, was, "{hz} Hz: back as the flight ends");
+
+            let dist = w.cam.cur.dist.0;
+            hold(&mut w, Controls { pitch: -1.0, ..Default::default() }, &crate::controls::Client::default(), hz, 0.5);
+            assert_eq!(w.cam.def_orbit_pitch.0, was, "{hz} Hz: the control keeps the tilt");
+            assert!((w.cam.cur.dist.0 - dist).abs() > 0.1, "{hz} Hz: the control zooms: {dist} to {:?}", w.cam.cur.dist);
+        }
+    }
+}
