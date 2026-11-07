@@ -143,3 +143,14 @@ This entry records future work only; no navigation or movement behavior changes 
 ## Crash offer after a forced close: owner saw no offer (2026-11-04)
 
 - The owner force-closed the combined-da9b159 test build (Task Manager Details, End task) and saw no crash offer. That folder's profile/ held only the killed run's eqoa.log (no `[eqoa] closed`, no eqoa.prev.log), so the game had not yet been started again from the same folder; the offer only appears on that next start. Retest: force-close, start the same folder again; if still nothing, debug `fork_ext/report_core.rs` `ended_without_closing` (reads eqoa.log before logfile renames it).
+
+## Target of Target overlaps a big raid list (2026-11-07)
+
+- **Status:** Deferred by the owner (no UI work now). Ours: the raid list is upstream's,
+  the Target of Target bar (hud.rs `TOT_AT` [20, 300]) is Enhanced's.
+- **When:** a server with raid groups, Raid List on, Target of Target on, and a raid list
+  of 13+ rows (no pet) or 10+ rows with a pet. The list (and the pet bar under it) reaches
+  y 314, and the ToT bar is drawn over the last raid row or the pet bar; its click area
+  shadows theirs.
+- **Smallest fix:** hide the ToT bar while it would overlap (one guard in hud.rs); moving it
+  needs layout work. Leave upstream's raidlist.rs untouched.
