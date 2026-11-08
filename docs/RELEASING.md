@@ -15,9 +15,11 @@ from the commit compiled into the running build.
 
 ## Publish
 
-1. Integrate on `develop`; run the footprint checker,
-   `cargo test --locked --workspace -- --test-threads=1` and
-   `cargo build --release --locked -p eqoa`; record fixture skips.
+1. Integrate on `develop` after its own checks pass (a sync's are the sync
+   script's). Official release's `windows` job is the release gate: it runs the
+   footprint check, the workspace tests and the release build, and nothing is
+   published unless they pass, so a release needs no second local suite or
+   build (the owner, 2026-11-08). Run them locally only to debug a failed job.
 2. Bump VERSION using MAJOR.MINOR.PATCH. Add docs/releases/<version>.md and a
    FORK-UPDATE-NOTES.md entry. Patch increments for fixes, minor for substantial
    additions; major 0 is early development.

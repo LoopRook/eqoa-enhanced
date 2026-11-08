@@ -19,7 +19,12 @@ It stops for a person at a real conflict (exit 2: resolve, `git add`, then
 fix, or raise the budget with a reason, then `--continue`). Each hand resolution is
 recorded by rerere, so the same conflict resolves itself next time. Still by hand: read
 upstream's CLAUDE.md diff for rules worth adopting, the sync's entry below, the
-independent review, the owner's play-test, and the merge into develop.
+owner's play-test, and the merge into develop. An independent review is needed only
+when a person resolved a conflict or raised a budget, and then only of those files;
+a sync the script finished alone (rerere and the literal merge only, tests and
+footprint passing) merges without one (the owner, 2026-11-08). Always run the tests
+through the script (`--continue --tests-only`): it uses one thread and a scratch
+EQOA_CONFIG, and a parallel run's GPU/addon tests collide and hang.
 
 ## Initial integration
 
