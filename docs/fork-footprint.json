@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "reviewed_base": "eb5916bfd25053dcc047c3a050a2529577842306",
-  "review_state": "Upstream sync 2026-11-07 through eb5916b (AGPL relicence). Re-based from b8e02cd; render/ui.rs takes upstream's text/text_scaled (+86/-3); NOTICE added as a shared path; bindpage/binds/hud/options/play raised to measured for the union with upstream's raid list, chat selection, macro keys and bug-report offer. Cargo manifests now carry upstream's AGPL-3.0-or-later. 2026-11-07 private repo retired: the live shard compatibility code (session.rs client check, s2.rs device-block signature, net sha2) is now public source. Official releases build and publish from this repository's tags (official-release.yml).",
+  "reviewed_base": "72a7d487a5667dc0d6cd0dfd0949ef66cdf6f97e",
+  "review_state": "Upstream sync 2026-11-07 through eb5916b (AGPL relicence). Re-based from b8e02cd; render/ui.rs takes upstream's text/text_scaled (+86/-3); NOTICE added as a shared path; bindpage/binds/hud/options/play raised to measured for the union with upstream's raid list, chat selection, macro keys and bug-report offer. Cargo manifests now carry upstream's AGPL-3.0-or-later. 2026-11-07 private repo retired: the live shard compatibility code (session.rs client check, s2.rs device-block signature, net sha2) is now public source. Official releases build and publish from this repository's tags (official-release.yml). 2026-11-08 sync to 72a7d48 (17 commits: combat record, server races at creation, /bug form, raid power, spell book scrolling): budgets unchanged, footprint PASS.",
   "fork_owned": [
     "AGENTS.md",
     ".gitattributes",

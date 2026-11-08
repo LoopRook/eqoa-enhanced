@@ -328,3 +328,27 @@ disc/oracle on this machine).
 Open: with Target of Target on, a raid list of 13+ rows (or 10+ rows and a pet)
 reaches y 314 and the fork's Target-of-Target bar (y 300) is drawn over its last
 row or the pet bar. Fix awaits the owner's choice of layout.
+
+## 2026-11-08 sync
+
+Upstream eb5916b..72a7d487a5667dc0d6cd0dfd0949ef66cdf6f97e (17 commits): Character >
+Combat Record (0x7E20/0x7E21), a server's own races and classes at creation
+(0x7E1E/0x7E1F), three-letter names, /bug opening the bug form, power on raid
+frames, the spell book's Unmemorize and scrolling description, Auto Attack on from
+the start. Branch sync/2026-11-08 off develop 429431c; merge d59c0ae. No new opcode
+collides with the fork's (0x7E01-0x7E06 remain the fork's power/quest offers).
+
+Conflicts (3): README.md kept ours (fork landing page); play.rs's one-line `Play`
+literal gains upstream's `record` beside the fork's fields, and `record_menu()` runs
+beside the fork's power-bar/quest agreements; session.rs, both sides' tests kept
+(the fork's other-offers test and upstream's combat-record test).
+docs/upstream/CLAUDE.md refreshed: only the combat record's mention, nothing to adopt.
+
+Verification (scratch EQOA_CONFIG, --test-threads=1): `cargo test --locked -p eqoa
+-p net`: client 1,600 passed / 0 failed / 26 ignored, net 51 / 0, integration tests
+8 / 0. Python tools 63 passed. Footprint against 72a7d48: PASS, budgets unchanged.
+Every test name on develop and upstream is present after the merge, except three
+upstream tests develop had already dropped before this sync
+(a_group_line_is_a_blue_chat_line, a_layout_with_the_maps_rows_still_loads,
+options_with_the_lines_of_rows_gone_still_load). Oracle/disc tests skip here (run
+without --nocapture, so SKIP lines were not counted). Owner play-test pending.
