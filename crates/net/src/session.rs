@@ -13,6 +13,7 @@
 
 use crate::addr::Nat64;
 use crate::stream::{Reader, Writer};
+use sha2::{Digest, Sha256};
 use drdp::{Addr, ConnId, Drdp, PORT_LEADER, address_to_endpoint};
 use std::net::{SocketAddr, UdpSocket};
 use vi::fpu::Ee;
@@ -530,6 +531,24 @@ fn debug_line(s: &str) {
 /// VITimer's ticks in `us` microseconds: 983.04 a second (`Session::timer`).
 pub fn ticks(us: i64) -> i64 {
     us.saturating_mul(98_304) / 100_000_000
+}
+
+/// HMAC-SHA256 (RFC 2104), for the live shard's 0x7F53/0x7F54 client check.
+fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    let mut ipad = [0x36u8; 64];
+    let mut opad = [0x5cu8; 64];
+    for (i, &b) in key.iter().take(64).enumerate() {
+        ipad[i] ^= b;
+        opad[i] ^= b;
+    }
+    let mut inner = Sha256::new();
+    inner.update(ipad);
+    inner.update(msg);
+    let inner = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(opad);
+    outer.update(inner);
+    outer.finalize().into()
 }
 
 pub struct Session {
@@ -1192,12 +1211,40 @@ impl Session {
         self.send(&w.data);
     }
 
+    /// The live shard's client check: 0x7F53 carries a per-session nonce and a
+    /// client answers 0x7F54 with HMAC-SHA256 over `CDSS`, the nonce and
+    /// `01 02 0c 00` (version 12; 0.4.6 and earlier sent version 10). The key
+    /// is the one the live client uses (its ipad block at `.rdata`
+    /// 0x140b84860, XOR 0x36). A PS2 and our client answered nothing, so the
+    /// server withheld its `0x7E00` offer and said "Your client is
+    /// outdated".
+    fn answer_7f53(&mut self, nonce: &[u8]) {
+        if nonce.len() != 16 {
+            return;
+        }
+        let key: [u8; 32] = [
+            0x4e, 0x65, 0xc9, 0xfa, 0x23, 0x21, 0x67, 0xb6, 0x98, 0x5f, 0xa9, 0xe5, 0x1a, 0x7b, 0x7d, 0x2a,
+            0x18, 0x4b, 0x33, 0xe0, 0x1f, 0x77, 0xaf, 0xb3, 0xea, 0xa2, 0xef, 0xe2, 0x8e, 0xe6, 0x94, 0xb4,
+        ];
+        let mut msg = Vec::with_capacity(4 + nonce.len() + 4);
+        msg.extend_from_slice(b"CDSS");
+        msg.extend_from_slice(nonce);
+        msg.extend_from_slice(&[0x01, 0x02, 0x0c, 0x00]);
+        let tag = hmac_sha256(&key, &msg);
+        let mut w = Writer::op(0x7F54);
+        w.bytes(&tag);
+        self.send(&w.data);
+    }
+
     /// `ProcessMessage`: one opcode.
     fn dispatch(&mut self, m: &drdp::Message, ev: &mut Vec<Event>) {
         let mut r = Reader::new(&m.data);
         let op = r.u16();
         match op {
             0x0000 => ev.push(Event::Version(r.u32())),
+            // the live shard's client check: 0x7F53's nonce answered with
+            // 0x7F54, HMAC-SHA256 over `CDSS` + the nonce + 01 02 0c 00.
+            0x7F53 => self.answer_7f53(&m.data[2.min(m.data.len())..]),
             0x07E0 => self.msg_07e0(&m.data[2.min(m.data.len())..]),
             0x0790 => {
                 // Msg0790: the probe, sent at once if due
@@ -2207,6 +2254,36 @@ mod tests {
 
         deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
         assert_eq!(s.entity_view_offer, None, "a new connection, no offer yet");
+    }
+
+    // The live shard's 0x7F53 nonce is answered with 0x7F54, HMAC-SHA256 over
+    // `CDSS`, the nonce and 01 02 0c 00. The nonce is the native client's own
+    // from the 2026-11-03 capture; the key still reproduces that capture's
+    // response under the old 01 02 0a 00 tail. The control: a short nonce is
+    // not answered.
+    #[test]
+    fn the_client_check_is_answered() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        s.flush();
+        sent.borrow_mut().clear();
+        let nonce = [0x9f, 0x7a, 0x2a, 0xd6, 0x74, 0x97, 0xae, 0x21, 0xf7, 0x38, 0x4b, 0x6c, 0x5d, 0x09, 0x4d, 0x5d];
+        let mut ask = vec![0x53, 0x7f];
+        ask.extend_from_slice(&nonce);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, ask);
+        s.flush();
+        let m: Vec<_> = sent.borrow().iter().flat_map(|d| messages(d)).collect();
+        let want = [
+            0x54, 0x7f, 0x3d, 0xf2, 0x2f, 0xfa, 0xe1, 0x85, 0xb0, 0xa3, 0xfa, 0x58, 0xf8, 0xf1, 0xbf, 0x43,
+            0x80, 0x69, 0x84, 0x51, 0xfd, 0x80, 0xd6, 0x97, 0x84, 0x16, 0x92, 0x8b, 0x52, 0xa8, 0x2d, 0xa0,
+            0x05, 0xc4,
+        ];
+        assert_eq!(m, [(251, want.to_vec())]);
+
+        sent.borrow_mut().clear();
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x53, 0x7f, 1, 2, 3]);
+        s.flush();
+        assert!(sent.borrow().is_empty(), "a short nonce is not answered");
     }
 
     // Bug reports: the offer taken (answered 1, kept), a short one not; the

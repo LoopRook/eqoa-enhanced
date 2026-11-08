@@ -11,3 +11,4 @@ vi.workspace = true
 des = "0.8"
 web-time.workspace = true
 aes = "0.8"
+sha2 = "0.10"

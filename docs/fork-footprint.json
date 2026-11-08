@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "reviewed_base": "eb5916bfd25053dcc047c3a050a2529577842306",
-  "review_state": "Upstream sync 2026-11-07 through eb5916b (AGPL relicence). Re-based from b8e02cd; render/ui.rs takes upstream's text/text_scaled (+86/-3); NOTICE added as a shared path; bindpage/binds/hud/options/play raised to measured for the union with upstream's raid list, chat selection, macro keys and bug-report offer. Cargo manifests now carry upstream's AGPL-3.0-or-later.",
+  "review_state": "Upstream sync 2026-11-07 through eb5916b (AGPL relicence). Re-based from b8e02cd; render/ui.rs takes upstream's text/text_scaled (+86/-3); NOTICE added as a shared path; bindpage/binds/hud/options/play raised to measured for the union with upstream's raid list, chat selection, macro keys and bug-report offer. Cargo manifests now carry upstream's AGPL-3.0-or-later. 2026-11-07 private repo retired: the live shard compatibility code (session.rs client check, s2.rs device-block signature, net sha2) is now public source.",
   "fork_owned": [
     "AGENTS.md",
     ".gitattributes",
@@ -59,9 +59,9 @@
       "reason": "Fork-local generated output and scratch configuration exclusions."
     },
     "Cargo.lock": {
-      "added": 153,
+      "added": 154,
       "deleted": 3,
-      "reason": "Reviewed native Lua 5.1 and Dear ImGui 0.18 spike dependency resolution, including rustc-hash version disambiguation; license metadata follows upstream (AGPL-3.0-or-later since ab32f96)."
+      "reason": "Reviewed native Lua 5.1 and Dear ImGui 0.18 spike dependency resolution, including rustc-hash version disambiguation; license metadata follows upstream (AGPL-3.0-or-later since ab32f96). sha2 for the live shard client check (formerly private-only, published 2026-11-07)."
     },
     "crates/eqoa/Cargo.toml": {
       "added": 9,
@@ -154,9 +154,9 @@
       "reason": "Terrain mesh lookup for restored map."
     },
     "crates/net/src/session.rs": {
-      "added": 449,
+      "added": 524,
       "deleted": 30,
-      "reason": "Restored group/map/quest protocol state and upstream unanswered offers test (re-baselined at sync 2026-10-31)."
+      "reason": "Restored group/map/quest protocol state and upstream unanswered offers test (re-baselined at sync 2026-10-31). Live shard 0x7F53/0x7F54 client check and its test (docs/LIVE-CLIENT-COMPATIBILITY.md)."
     },
     "crates/render/src/fans.rs": {
       "added": 0,
@@ -237,6 +237,16 @@
       "added": 10,
       "deleted": 4,
       "reason": "Sync 2026-11-07: upstream's AGPL notice names EQOA Enhanced and LoopRook beside DabDavis; the MIT text for code through 0.4.5 and upstream through 1e23e80 is kept."
+    },
+    "crates/net/Cargo.toml": {
+      "added": 1,
+      "deleted": 0,
+      "reason": "sha2 dependency for the live shard client check."
+    },
+    "crates/eqoa/src/s2.rs": {
+      "added": 13,
+      "deleted": 4,
+      "reason": "Live client signature (CDSS 01 02 0c 00) in the S2 device block and its test assertions (docs/LIVE-CLIENT-COMPATIBILITY.md)."
     }
   },
   "immutable": [

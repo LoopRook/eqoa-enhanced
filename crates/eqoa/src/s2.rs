@@ -509,9 +509,13 @@ impl Hello {
 /// folder as S2 makes it once a boot (0x000FC630). S2 asks the network
 /// interfaces for a hardware address (`sceInetInterfaceControl` code 13)
 /// and, for the first with one, code 9's twelve bytes and an interface byte
-/// (0x00157880); this client has no PS2 network adapter to name, so they
-/// are the zeros S2 sends when it finds none, and the status byte's bit 1
-/// (an address found) is clear. The install id (bytes 8 to 16) comes out of
+/// (0x00157880); this client has no PS2 network adapter to name, so the
+/// hardware address is the zeros S2 sends when it finds none, and the status
+/// byte's bit 1 (an address found) is clear. Code 9's twelve bytes (16 to 28)
+/// are the live client's signature, `CDSS` then `01 02 0c 00` and zeros:
+/// the live client sends them, and its server withholds the 0x7E00 entity
+/// offer (and says "Your client is outdated") from a S2 hello whose tail is
+/// all zeros. The install id (bytes 8 to 16) comes out of
 /// the folder's `id_file` as S2 reads it off the card
 /// (`VIMemCardReadFile(name, block + 8, 8)`), its result in the status
 /// byte's bits 2 to 4; a short read mints one as S2 mints it (0x000FC760:
@@ -520,6 +524,10 @@ impl Hello {
 /// count) and writes it there, the write's result in bits 5 to 7.
 fn make_device_block(dir: &Path, id_file: &str, clock: u32) -> [u8; 28] {
     let mut b = [0u8; 28];
+    // `sceInetInterfaceControl` code 9's twelve bytes as the live client
+    // sends them: `CDSS`, the version 01 02 0c, and zeros.
+    b[16..20].copy_from_slice(b"CDSS");
+    b[20..24].copy_from_slice(&[0x01, 0x02, 0x0c, 0x00]);
     // VIMemCardReadFile: the bytes read, -2 for no file, -1 a failure
     let n: i32 = match folder_read(dir, id_file) {
         Ok(d) => {
@@ -1474,7 +1482,7 @@ mod tests {
         assert_eq!((first[6], first[7]), (0x30, 0));
         assert_eq!(first[8..12], 0x1234_5678u32.to_le_bytes());
         assert_eq!(first[12..16], CLIENT_BASE.wrapping_add(0x1234_5678 << 13).to_le_bytes());
-        assert_eq!(first[16..], [0; 12]);
+        assert_eq!(first[16..], [b'C', b'D', b'S', b'S', 0x01, 0x02, 0x0c, 0, 0, 0, 0, 0], "the signature");
         assert_eq!(std::fs::read(dir.join("ii")).unwrap(), first[8..16]);
         let again = make_device_block(&dir, "ii", 0x9999);
         assert_eq!(again[6], 0x04, "read back");
@@ -1490,6 +1498,7 @@ mod tests {
         assert_eq!(h.len(), 12 + 28);
         assert_eq!(h[12 + 6], 0x04, "the folder's id");
         assert_eq!(h[12 + 8..12 + 16], std::fs::read(dir.join("ii")).unwrap()[..]);
+        assert_eq!(h[12 + 16..], [b'C', b'D', b'S', b'S', 0x01, 0x02, 0x0c, 0, 0, 0, 0, 0], "the signature");
         assert_eq!(r.shard_hello(), Some(h), "made once a run");
         assert!(Rules::retail().shard_hello().is_none());
         let odd = Rules { hello: Some(Hello { more: vec![HelloPart::Word(0x0015_7204)], ..live.clone() }), dir: Some(dir.clone()), ..Rules::retail() };
