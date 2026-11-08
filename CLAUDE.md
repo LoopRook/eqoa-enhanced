@@ -42,8 +42,9 @@ Report results in a player's terms, with what was tested and what was not.
 - A feature merges into `develop` after its tests pass, the footprint check passes and an independent
   review is done. `develop` merges into `enhanced` only for a release the owner approved, after the
   owner's live test.
-- Upstream sync: branch `sync/<date>` from `develop`, merge `origin/master` (procedure:
-  `docs/UPSTREAM-SYNC.md`), test, merge into `develop`. A CLAUDE.md conflict always resolves to this
+- Upstream sync: run `python tools/sync_upstream.py` (procedure: `docs/UPSTREAM-SYNC.md`). It makes
+  `sync/<date>` from `develop`, merges `origin/master`, resolves the routine conflicts, tests, and
+  stops for anything that needs judgment; then review and merge into `develop`. A CLAUDE.md conflict always resolves to this
   file automatically (`.gitattributes` `merge=ours`; each clone needs `git config merge.ours.driver
   true` once). Refresh `docs/upstream/CLAUDE.md` from the new upstream, read upstream's diff for rules
   worth adopting here, and move `reviewed_base` in `docs/fork-footprint.json` deliberately.
