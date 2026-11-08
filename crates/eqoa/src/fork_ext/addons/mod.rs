@@ -50,6 +50,8 @@ mod profile;
 pub(crate) mod named_profiles;
 pub(crate) mod quest_log;
 mod spike;
+#[cfg(test)]
+mod native_tests;
 pub(crate) mod storage;
 mod textures;
 pub(crate) mod weapon_sets;
