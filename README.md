@@ -5,6 +5,18 @@ A native Rust client for **EverQuest Online Adventures: Frontiers**, extending
 search, guidance and quality-of-life features. This fork keeps upstream engine,
 network and gameplay improvements while developing its enhanced features.
 
+## Download
+
+<p align="center">
+  <a href="https://github.com/LoopRook/eqoa-enhanced/releases/latest"><img src="https://img.shields.io/github/v/release/LoopRook/eqoa-enhanced?style=for-the-badge&amp;label=Stable&amp;color=2ea44f&amp;logo=windows&amp;logoColor=white" alt="Download Stable"></a>
+  <a href="https://github.com/LoopRook/eqoa-enhanced/releases/tag/dev"><img src="https://img.shields.io/badge/Nightly-latest-8250df?style=for-the-badge&amp;logo=windows&amp;logoColor=white" alt="Download Nightly"></a>
+</p>
+
+**Stable** is the tested release. **Nightly** gets new changes first and updates
+itself whenever one lands. Both can be installed side by side, each in its own
+folder, and share your settings and addons. See [Play on Windows](#play-on-windows)
+to get started.
+
 ## More from LoopRook
 
 <p align="center">
@@ -34,13 +46,13 @@ its data belong to their owners, and the client reads a disc you own.
 
 ## Play on Windows
 
-**[Get the latest Windows release](https://github.com/LoopRook/eqoa-enhanced/releases/latest)**
-
-1. Under **Assets**, download `EQOA-Enhanced-<version>-Windows-x64.zip`.
+1. Open [Stable](https://github.com/LoopRook/eqoa-enhanced/releases/latest) or
+   [Nightly](https://github.com/LoopRook/eqoa-enhanced/releases/tag/dev) and, under
+   **Assets**, download the `EQOA-Enhanced-...-Windows-x64.zip`.
 2. Right-click the ZIP and select **Extract All**, then choose a folder you can
    write to. Keep `map-entities.json` and the other included files beside the game.
-3. Double-click **eqoa.exe** and select your locally owned EverQuest Online
-   Adventures: Frontiers disc image when prompted.
+3. Double-click **EQOA Enhanced** (**eqoa.exe** in 0.4.14 and earlier) and select
+   your locally owned EverQuest Online Adventures: Frontiers disc image when prompted.
 4. Choose a server and sign in with an account for that server.
 
 The download does not include a disc image or game account. Account registration
