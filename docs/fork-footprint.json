@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_base": "72a7d487a5667dc0d6cd0dfd0949ef66cdf6f97e",
+  "reviewed_base": "8435f2c8a00c631d716771f8189fa0011a1fbf50",
   "review_state": "Upstream sync 2026-11-07 through eb5916b (AGPL relicence). Re-based from b8e02cd; render/ui.rs takes upstream's text/text_scaled (+86/-3); NOTICE added as a shared path; bindpage/binds/hud/options/play raised to measured for the union with upstream's raid list, chat selection, macro keys and bug-report offer. Cargo manifests now carry upstream's AGPL-3.0-or-later. 2026-11-07 private repo retired: the live shard compatibility code (session.rs client check, s2.rs device-block signature, net sha2) is now public source. Official releases build and publish from this repository's tags (official-release.yml). 2026-11-08 sync to 72a7d48 (17 commits: combat record, server races at creation, /bug form, raid power, spell book scrolling): budgets unchanged, footprint PASS.",
   "fork_owned": [
     "AGENTS.md",
@@ -124,9 +124,9 @@
       "reason": "Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged."
     },
     "crates/eqoa/src/options.rs": {
-      "added": 207,
-      "deleted": 47,
-      "reason": "Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. Owner-approved defaults export adds eight regression setup/assertion lines for the 64/650 defaults and retail-minimum controls. Sync 2026-11-07: upstream's Raid List row sits in Map & Quests (UI already holds six, PAGE_MOST stays 6); its walk-test lines move with it (+5/-5)."
+      "added": 212,
+      "deleted": 52,
+      "reason": "Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. Owner-approved defaults export adds eight regression setup/assertion lines for the 64/650 defaults and retail-minimum controls. Sync 2026-11-07: upstream's Raid List row sits in Map & Quests (UI already holds six, PAGE_MOST stays 6); its walk-test lines move with it (+5/-5). Sync 2026-11-08: upstream's Textures page goes after Map & Quests and Mods & Addons (index 9, so the web build's split_at keeps the fork pages); its row-doc, array lengths, split_at and walk-test page numbers move with it (+5/-5)."
     },
     "crates/eqoa/src/play.rs": {
       "added": 755,
