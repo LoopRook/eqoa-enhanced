@@ -39,6 +39,15 @@ class DevelopmentReleaseTests(unittest.TestCase):
         self.assertIn("--channel enhanced-dev", build)
         self.assertIn("tools/dev_release.py publish --assets", publish)
 
+    def test_nightly_names_its_zip_and_shows_only_unreleased_notes(self):
+        self.assertIn("EQOA-Enhanced-Nightly-Windows-x64.zip", release.asset_names(VERSION))
+        self.assertNotIn(f"EQOA-Enhanced-{VERSION}-Windows-x64.zip", release.asset_names(VERSION))
+        notes = "# Notes\n\n## Unreleased\n\n- New thing.\n\n## 2026-11-08 · Enhanced 0.4.14\n\n- Old thing.\n"
+        body = release.release_body(COMMIT, notes)
+        self.assertIn("- New thing.", body)
+        self.assertNotIn("Old thing", body)
+        self.assertIn("Same as Stable.", release.release_body(COMMIT, "# Notes\n\n## 2026-11-08 · Enhanced 0.4.14\n\n- Old thing.\n"))
+
     def test_history_accepts_the_rolling_dev_tag_beside_versioned_releases(self):
         check_history([{"tagName": "dev", "isDraft": False},
                        {"tagName": "v0.4.13", "isDraft": False}], VERSION)
@@ -62,7 +71,8 @@ class DevelopmentReleaseTests(unittest.TestCase):
             release_body = release.release_body(COMMIT, "notes")
             state = {"exists": scenario != "create", "body": release_body,
                      "prerelease": True, "latest": False, "draft": False,
-                     "assets": (sorted(release.asset_names("0.4.13"))
+                     # the first nightly's ZIP carried the version in its name
+                     "assets": (sorted(release.asset_names("0.4.13") | {OLD_ZIP})
                                 if scenario == "stale" else [])}
 
             def fake_gh(*args):

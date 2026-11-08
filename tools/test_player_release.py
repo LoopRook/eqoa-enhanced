@@ -74,7 +74,7 @@ BUNDLED_MOD_FILES = [
 ]
 
 EXPECTED_ZIP_MEMBERS = [
-    "eqoa.exe", "map-entities.json", "LICENSE", "NOTICE", "FrontiersForge-MIT.txt",
+    "EQOA Enhanced.exe", "map-entities.json", "LICENSE", "NOTICE", "FrontiersForge-MIT.txt",
     "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt", "README.txt",
     "release-manifest.json", "mods/README.txt",
     *(f"mods/{rel}" for rel in BUNDLED_MOD_FILES),
@@ -201,7 +201,7 @@ class PlayerReleaseTests(unittest.TestCase):
             for name, digest in manifest["files"].items():
                 self.assertEqual(hashlib.sha256(archive.read(name)).hexdigest(), digest)
             self.assertEqual(set(manifest["files"]), set(archive.namelist()) - {"release-manifest.json"})
-            self.assertEqual(archive.read("eqoa.exe"), self.executable.read_bytes())
+            self.assertEqual(archive.read("EQOA Enhanced.exe"), self.executable.read_bytes())
             self.assertEqual(archive.read("LICENSE"), (self.root / "LICENSE").read_bytes())
             self.assertEqual(archive.read("NOTICE"), (self.root / "NOTICE").read_bytes())
         exe = self.executable.read_bytes()
@@ -254,6 +254,12 @@ class PlayerReleaseTests(unittest.TestCase):
         manifest = self.packager.verify_release(self.output, channel="enhanced-dev")
         self.assertEqual(manifest["updaterChannel"], "enhanced-dev")
         self.assertEqual(manifest["downloadBase"], self.packager.DEV_DOWNLOAD_BASE)
+        self.assertTrue((self.output / "EQOA-Enhanced-Nightly-Windows-x64.zip").is_file())
+        with zipfile.ZipFile(self.output / "EQOA-Enhanced-Nightly-Windows-x64.zip") as archive:
+            names = set(archive.namelist())
+            self.assertIn("EQOA Enhanced - Nightly.exe", names)
+            self.assertNotIn("EQOA Enhanced.exe", names)
+            self.assertEqual(archive.read("EQOA Enhanced - Nightly.exe"), self.executable.read_bytes())
         with self.assertRaises(ValueError):
             self.packager.verify_release(self.output)
 

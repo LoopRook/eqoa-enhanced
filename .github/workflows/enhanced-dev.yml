@@ -1,4 +1,4 @@
-name: Development build
+name: Nightly build
 
 # Builds and tests every push to develop, then refreshes the rolling prerelease
 # tag dev. Stable players follow releases/latest/download/ and never see it.

@@ -1,7 +1,7 @@
 EQOA Enhanced {version} - Windows x64
 
 Extract the entire ZIP into a folder you can write to. Keep map-entities.json
-beside eqoa.exe. Double-click eqoa.exe and select your locally owned EverQuest
+beside {exe}. Double-click {exe} and select your locally owned EverQuest
 Online Adventures: Frontiers disc image when prompted. Disc data is not included.
 
 Choose your server and enter your account details in the client. Server access

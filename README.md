@@ -34,12 +34,12 @@ its data belong to their owners, and the client reads a disc you own.
 
 ## Play on Windows
 
-**[Get the latest Windows release](https://github.com/LoopRook/eqoa-enhanced/releases/latest)**
+**[Stable](https://github.com/LoopRook/eqoa-enhanced/releases/latest)** · **[Nightly](https://github.com/LoopRook/eqoa-enhanced/releases/tag/dev)**
 
-1. Under **Assets**, download `EQOA-Enhanced-<version>-Windows-x64.zip`.
+1. Under **Assets**, download the `EQOA-Enhanced-...-Windows-x64.zip`.
 2. Right-click the ZIP and select **Extract All**, then choose a folder you can
    write to. Keep `map-entities.json` and the other included files beside the game.
-3. Double-click **eqoa.exe** and select your locally owned EverQuest Online
+3. Double-click **EQOA Enhanced** and select your locally owned EverQuest Online
    Adventures: Frontiers disc image when prompted.
 4. Choose a server and sign in with an account for that server.
 
@@ -49,10 +49,6 @@ depends on the server you choose. You do not need Rust, Python or a terminal to 
 Official releases check for updates automatically. The updater replaces the
 game executable; if release notes say supporting files have changed, download
 and extract the latest ZIP as well.
-
-Want the newest changes early? The [development build](https://github.com/LoopRook/eqoa-enhanced/releases/tag/dev)
-updates itself whenever we change something. It may be rough. Install it in its
-own folder; it shares your settings and addons with stable.
 
 ## Support
 

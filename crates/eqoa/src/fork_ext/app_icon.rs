@@ -130,6 +130,7 @@ mod tests {
     #[test]
     fn the_release_channel_chooses_the_standard_icon() {
         assert_eq!(choose(Some("enhanced")), Set::Standard);
+        assert_eq!(choose(Some("enhanced-dev")), Set::Dev, "Nightly carries its own icon");
         assert_eq!(choose(Some("dev")), Set::Standard);
         assert_eq!(choose(None), Set::Dev);
         assert_eq!(choose(Some("")), Set::Dev);

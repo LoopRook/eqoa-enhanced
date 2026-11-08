@@ -16,10 +16,12 @@ pub enum Set {
 }
 
 /// A build with `EQOA_UPDATE_CHANNEL` set to a non-empty value is an official
-/// release and carries the STANDARD icon; every other build carries DEV.
+/// release and carries the STANDARD icon; Nightly (`enhanced-dev`) and every
+/// other build carry DEV.
 #[allow(dead_code)] // build.rs's included copy is the only caller
 pub fn choose(channel: Option<&str>) -> Set {
     match channel {
+        Some("enhanced-dev") => Set::Dev,
         Some(channel) if !channel.is_empty() => Set::Standard,
         _ => Set::Dev,
     }
