@@ -1173,13 +1173,13 @@ const EXTENDED_ITEMS: [(i32, &str); 40] = [
     (47, "Ground Fog"),
     (48, "Touch Pad Size"),
     (49, "Raid List"),
+    (50, "Texture Packs"),
+    (51, "Dump Textures"),
     (1043, "Map Markers"),
     (1044, "Minimap"),
     (1045, "Quest Markers"),
     (1046, "Quest Tracker"),
     (1047, "Stats Box"),
-    (50, "Texture Packs"),
-    (51, "Dump Textures"),
 ];
 
 /// What a category's page says beside its Back legend.
