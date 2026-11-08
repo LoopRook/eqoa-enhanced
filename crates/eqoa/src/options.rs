@@ -12,8 +12,8 @@
 //! The client's own, beside the game's: an Extended row between Sound and
 //! Save Changes (the menu a row longer), its words the client's (no
 //! WORDS.TXT entry). It opens a menu of its own over the options menu, drawn
-//! as that one is: Video, World, UI, Controller, Camera, Characters and
-//! Sound (`CATEGORIES`), each of which opens a page laid out and driven as
+//! as that one is: Video, World, UI, Controller, Camera, Characters, Sound
+//! and natively Textures (`CATEGORIES`), each of which opens a page laid out and driven as
 //! the game's pages are, short enough that none scrolls (`PAGE_MOST`):
 //! - Video: Display (natively: Window or Full Screen, the window's own as
 //!   F11 and Alt+Enter toggle it, `display`: it changes at once and stays,
@@ -90,7 +90,14 @@
 //!   client's own guide, `questguide`, `map::quests`; Off: the server is asked
 //!   for none; the map's own J or R3 turns it too) and Quest Tracker (On: the
 //!   HUD's list of the quests under way, each step counted, under the
-//!   minimap, `tracker`, the server's or the guide's; Off: none).
+//!   minimap, `tracker`, the server's or the guide's; Off: none);
+//! - Textures, natively (2026-11-08): Texture Packs (Off, the game's: every
+//!   texture its own; On: one a PCSX2 replacement pack in the config
+//!   directory's `textures/SLUS-20744/replacements` names drawn as the pack
+//!   has it, `texpack`; its page says how many the packs hold) and Dump
+//!   Textures (Off; On: each texture made written to `textures/SLUS-20744/
+//!   dumps` under the names PCSX2 gives it, and how many beside Back), each
+//!   making every texture again as it moves.
 //! Triangle goes back a step: a page to the categories, the categories to
 //! the options menu. They change as they are moved, Triangle on the options
 //! menu puts them back, and Save Changes keeps them with the game's
@@ -563,7 +570,8 @@ impl WndOptions {
     /// game's 22 to 200 (`step_name_distance`); Touch Pad Size (48) by
     /// fives from 50 to 100 as a slider; Text (30) goes between Sharp and
     /// Smooth; Target of Target (31), Mana Bars (42), Minimap (1044), Stats Box (1047), Quest Markers (1045), Quest Tracker (1046), Update Notices (29), Overlapping Names (34, Hide and Show),
-    /// Mipmaps (35) and Loading Screens (38, Longer and Instant) turn over;
+    /// Mipmaps (35), Loading Screens (38, Longer and Instant), Texture Packs
+    /// (50) and Dump Textures (51) turn over;
     /// Output Device (32) goes round the system default and the devices
     /// listed (`step_output`); Display (33) turns the window over (`display`). A
     /// slider (`slider_at`) makes its own
@@ -652,6 +660,11 @@ impl WndOptions {
                     // Raid List: the server told from the next frame
                     // (`Session::agree_raid_roster`)
                     49 => c.raid_list = !c.raid_list,
+                    // Texture Packs and Dump Textures: set from the next
+                    // frame, every texture made again (`texpack::sync`,
+                    // `viewer`'s `retexture`)
+                    50 => c.texture_packs = !c.texture_packs,
+                    51 => c.dump_textures = !c.dump_textures,
                     // Text: every font drawn from the next frame (`viewer`)
                     30 => c.text = c.text.other(),
                     // Loading Screens: the next long trip's (`loading`)
@@ -1104,7 +1117,8 @@ impl WndOptions {
                 let asked = crate::settings::client().render_scale as u32;
                 scale_note(asked, render::scale::would_draw(asked)).filter(|_| self.item == 39)
             }
-            Note::Output if cfg!(target_arch = "wasm32") => None,
+            Note::Output | Note::Textures if cfg!(target_arch = "wasm32") => None,
+            Note::Textures => crate::texpack::note(self.item == 51),
             Note::Output => Some(match crate::audio::playing() {
                 Some(d) => format!("Plays on {d}"),
                 None => "No output now".to_string(),
@@ -1125,7 +1139,7 @@ const CONTROLS: &str = "Controls";
 /// and shown on the page of the category that lists it (`CATEGORIES`).
 // Upstream IDs stay below 1000; enhanced map IDs 1043..1047 avoid future collisions.
 // These are transient UI identities, not persisted settings keys.
-const EXTENDED_ITEMS: [(i32, &str); 38] = [
+const EXTENDED_ITEMS: [(i32, &str); 40] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1164,6 +1178,8 @@ const EXTENDED_ITEMS: [(i32, &str); 38] = [
     (1045, "Quest Markers"),
     (1046, "Quest Tracker"),
     (1047, "Stats Box"),
+    (50, "Texture Packs"),
+    (51, "Dump Textures"),
 ];
 
 /// What a category's page says beside its Back legend.
@@ -1180,6 +1196,9 @@ enum Note {
     Scale,
     /// where the sound plays now (`audio::playing`), natively
     Output,
+    /// how many replacements the packs hold, or how many textures have been
+    /// dumped while Dump Textures is chosen (`texpack::note`), natively
+    Textures,
 }
 
 /// One of Extended's categories: its name, its rows (their items, in the
@@ -1191,8 +1210,10 @@ struct Category {
 }
 
 /// Extended's categories, in its menu's order (the user's: "Extended, then
-/// Video, UI, Controller, etc."), each a page of `PAGE_MOST` rows at most.
-const CATEGORIES: [Category; 9] = [
+/// Video, UI, Controller, etc."), each a page of `PAGE_MOST` rows at most;
+/// natively Textures last (2026-11-08: Texture Packs and Dump Textures, a
+/// folder's files a page cannot reach).
+const ALL_CATEGORIES: [Category; 10] = [
     Category { name: "Video", items: VIDEO, note: Note::Scale },
     Category { name: "World", items: &[20, 35, 36, 37, 47, 25], note: Note::None },
     Category { name: "UI", items: &[22, 31, 42, 1044, 1047, 29], note: Note::None },
@@ -1204,7 +1225,12 @@ const CATEGORIES: [Category; 9] = [
     // and its tracker for the HUD
     Category { name: "Map & Quests", items: &[1045, 1046, 1043, 30, 40, 49], note: Note::None },
     fork_options::CATEGORY,
+    Category { name: "Textures", items: &[50, 51], note: Note::Textures },
 ];
+#[cfg(not(target_arch = "wasm32"))]
+const CATEGORIES: &[Category] = &ALL_CATEGORIES;
+#[cfg(target_arch = "wasm32")]
+const CATEGORIES: &[Category] = ALL_CATEGORIES.split_at(9).0;
 
 /// Video's rows: natively Display first (F3 20261024-201507: full screen was
 /// F11's alone); a page's full screen is the browser's. Fog and Mipmaps went
@@ -1247,7 +1273,7 @@ const fn fits(cats: &[Category]) -> bool {
     true
 }
 
-const _: () = assert!(fits(&CATEGORIES), "a category's page would scroll: give its rows another category");
+const _: () = assert!(fits(CATEGORIES), "a category's page would scroll: give its rows another category");
 
 /// The registered rows, including the fork's own page.
 fn extended_items() -> impl Iterator<Item = &'static (i32, &'static str)> {
@@ -1298,6 +1324,8 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         1046 => on_off(c.quest_tracker),
         34 => wide(if c.overlapping_names { "Show" } else { "Hide" }),
         49 => on_off(c.raid_list),
+        50 => on_off(c.texture_packs),
+        51 => on_off(c.dump_textures),
         35 => on_off(c.mipmaps),
         36 => on_off(c.flora),
         37 => on_off(c.environment),
@@ -1962,8 +1990,6 @@ mod tests {
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.cat_sel, cues.last()), (8, Some(&11)), "Mods & Addons, the new category");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.cat_sel, cues.last()), (8, Some(&9)), "Mods & Addons, the last category");
         press(&mut w, &mut o, key::CROSS, &mut cues);
         assert_eq!((w.cat, w.row, w.item), (Some(8), 0, item_named("Target HP %")), "Mods & Addons page: Target HP % first");
         press(&mut w, &mut o, key::DOWN, &mut cues);
@@ -1977,6 +2003,28 @@ mod tests {
         press(&mut w, &mut o, key::DOWN, &mut cues); press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.row, cues.last()), (5, Some(&9)), "Mods & Addons last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        // Textures (natively): Texture Packs and Dump Textures, each Off
+        // then On; a test keeps no folder, so the note says there is none
+        assert_eq!((w.cat_sel, cues.last()), (9, Some(&11)), "Textures, after Mods & Addons");
+        press(&mut w, &mut o, key::CROSS, &mut cues);
+        assert_eq!((w.cat, w.item), (Some(9), 50), "Textures, Texture Packs");
+        assert_eq!(value_text(&vui, 50), Some(wide(vui.words.get(552, vui.language))), "Off, the game's own textures");
+        assert_eq!(w.page_note(9), None, "off: no note");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert!(settings::client().texture_packs);
+        assert_eq!((value_text(&vui, 50), cues.last()), (Some(wide(vui.words.get(551, vui.language))), Some(&11)));
+        assert_eq!(w.page_note(9).as_deref(), Some("No folder here"));
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.item, 51, "Dump Textures");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::client().dump_textures, "either way turns it over");
+        assert_eq!(w.page_note(9).as_deref(), Some("0 dumped"), "how many dumped, beside Back");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (1, Some(&9)), "Textures' last row");
+        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.cat_sel, cues.last()), (9, Some(&9)), "Textures, the last category");
         // Triangle: the menu, then closed with every setting put back
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.sel), (-1, 3), "the menu, on Extended");
@@ -2119,7 +2167,7 @@ mod tests {
             assert_eq!((w.page, w.cat, w.cat_sel), (3, None, k as i32), "{}: back to the categories, it still lit", c.name);
             w.key(&vui, &mut r, &mut o, key::DOWN, 0, &mut cues, &mut ups);
         }
-        assert_eq!(cues.last(), Some(&9), "no category past Sound");
+        assert_eq!(cues.last(), Some(&9), "no category past the last");
         assert!(!w.back(&mut cues), "the categories go back to the menu");
         assert_eq!((w.page, w.sel), (-1, 3));
         assert!(w.back(&mut cues), "and the menu closes");
@@ -2137,8 +2185,8 @@ mod tests {
             v
         };
         let all: Vec<i32> = extended_items().map(|&(i, _)| i).collect();
-        assert_eq!(listed(&CATEGORIES), all);
-        assert!(fits(&CATEGORIES));
+        assert_eq!(listed(CATEGORIES), all);
+        assert!(fits(CATEGORIES));
         assert!(extended_items().all(|&(i, l)| !l.is_empty() && label_of(i) == l));
         let short = [Category { name: "Video", items: &[13, 20], note: Note::None }];
         assert_ne!(listed(&short), all, "the control: rows left out");
@@ -2370,7 +2418,18 @@ mod tests {
         assert_eq!(CATEGORIES[by_name("Characters")].note, Note::Server);
         assert_eq!(CATEGORIES[by_name("Sound")].note, Note::Output);
         assert_eq!(CATEGORIES[by_name("Video")].note, Note::Scale);
-        assert!(CATEGORIES.iter().filter(|c| c.note != Note::None).count() == 4, "the four notes only");
+        assert!(CATEGORIES.iter().filter(|c| c.note != Note::None).count() == if cfg!(target_arch = "wasm32") { 4 } else { 5 }, "the notes only");
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Textures: nothing to say while both are off (a test keeps no
+            // folder, so with Texture Packs on there is none to read)
+            assert_eq!(CATEGORIES[by_name("Textures")].note, Note::Textures);
+            assert_eq!(CATEGORIES[by_name("Textures")].items, &[50, 51]);
+            assert_eq!(note(&w, by_name("Textures")), None, "both off: no note");
+            crate::settings::set_client(crate::settings::ClientOptions { texture_packs: true, ..crate::settings::client() });
+            assert_eq!(note(&w, by_name("Textures")).as_deref(), Some("No folder here"), "on, with no folder to read");
+            crate::settings::set_client(crate::settings::ClientOptions { texture_packs: false, ..crate::settings::client() });
+        }
         w.cat_sel = by_name("Characters") as i32;
         w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
         w.draw(&vui, &mut r, &o, &mut ups);

@@ -143,6 +143,7 @@ mod trails;
 mod options;
 mod settings;
 mod fork_ext;
+mod texpack;
 mod social;
 mod wholist;
 mod zones;
