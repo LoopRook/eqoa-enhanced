@@ -40,21 +40,17 @@
 //!   `render::fog16`; Exact: at eight bits a channel, a brighter cloud) and
 //!   Art (Frontiers' or the 2002 disc's, `era`,
 //!   as F9 swaps it: drawn as it moves, the 2002 disc asked for the first
-//!   time) and Map Markers (On: the map's XP camps and coaches, `map::markers`;
-//!   Off: neither; the map's own X or ○ turns it too);
+//!   time);
 //! - UI: Ability Bars (the game's 2, or 3 or 4: the HUD's quick menus and
-//!   the spell book's slots, `hudmenu`), Target of Target (Off by default:
-//!   the target's bar shows whom the target targets, `Play::target_of_target`),
-//!   Mana Bars (On by default: a power gauge under each group member's, the
-//!   target's and the target of target's health, from a server that sends
-//!   others' power, `net::session::OP_POWER_BARS`; none from one that does
-//!   not, Sandstorm), Minimap (On by default: the map round the player under
-//!   the quick menus, `map::mini`; N turns it too), Stats Box (Off by default:
-//!   the player's stats in a box under the effects' icons, an effect's raise
-//!   blue and its cut red, `statbox`; B turns it too) and Update Notices (one
-//!   setting for every window: off, the game never asks to restart into a
-//!   newer build, which starts the next time the game does; `update::asks`,
-//!   and a page's Reload notice, `web/main.js`);
+//!   the spell book's slots, `hudmenu`), Update Notices (one setting for
+//!   every window: off, the game never asks to restart into a newer build,
+//!   which starts the next time the game does; `update::asks`, and a page's
+//!   Reload notice, `web/main.js`), Text (Sharp or Smooth: the game's font
+//!   scaled to the window with even strokes, or filtered as the PS2 filters
+//!   it, `render::ui::TextFilter`) and HUD (Nearest, the game's and the
+//!   default; or Sharp: the 2D layer's other textures scaled with every texel
+//!   as wide as every other, as Text's Sharp draws a font, at a cost,
+//!   `render::ui::HudFilter`);
 //! - Controller: Controller Focus (which controllers this window reads:
 //!   Auto, Window, Pad 1 to 4 or Off, `input::pick`, kept for each window of
 //!   the client open, `multibox`; what it reads now is said beside Back),
@@ -85,12 +81,6 @@
 //!   Device (Default, the system's, followed when it changes, or a device
 //!   the system lists, the default while it is not connected: `audio`'s
 //!   `retarget`; its page says where the sound plays now);
-//! - Quests: Quest Markers (On: the map's marks of the quests the player may
-//!   take and the steps it has to do, from a server that sends them, else the
-//!   client's own guide, `questguide`, `map::quests`; Off: the server is asked
-//!   for none; the map's own J or R3 turns it too) and Quest Tracker (On: the
-//!   HUD's list of the quests under way, each step counted, under the
-//!   minimap, `tracker`, the server's or the guide's; Off: none);
 //! - Textures, natively (2026-11-08): Texture Packs (Off, the game's: every
 //!   texture its own; On: one a PCSX2 replacement pack in the config
 //!   directory's `textures/SLUS-20744/replacements` names drawn as the pack
@@ -569,7 +559,7 @@ impl WndOptions {
     /// sound 9: the browser paces it); Name Distance (27) by tens from the
     /// game's 22 to 200 (`step_name_distance`); Touch Pad Size (48) by
     /// fives from 50 to 100 as a slider; Text (30) goes between Sharp and
-    /// Smooth; Target of Target (31), Mana Bars (42), Minimap (1044), Stats Box (1047), Quest Markers (1045), Quest Tracker (1046), Update Notices (29), Overlapping Names (34, Hide and Show),
+    /// Smooth; Update Notices (29), Overlapping Names (34, Hide and Show),
     /// Mipmaps (35), Loading Screens (38, Longer and Instant), Texture Packs
     /// (50) and Dump Textures (51) turn over;
     /// Output Device (32) goes round the system default and the devices
@@ -639,21 +629,6 @@ impl WndOptions {
                     26 => c.vsync = !c.vsync,
                     // Update Notices (`update::asks`)
                     29 => c.update_notices = !c.update_notices,
-                    // Target of Target (`Play::target_of_target`)
-                    31 => c.target_of_target = !c.target_of_target,
-                    // Mana Bars: the server told from the next frame
-                    // (`Play::agree_power_bars`)
-                    42 => c.mana_bars = !c.mana_bars,
-                    // Minimap: drawn or not from the next frame (`map::mini`)
-                    1044 => c.minimap = !c.minimap,
-                    // Stats Box: drawn or not from the next frame (`statbox`)
-                    1047 => c.stats_box = !c.stats_box,
-                    // Quest Markers: the server told from the next frame
-                    // (`Play::agree_quest_marks`), the map's marks drawn or not
-                    1045 => c.quest_markers = !c.quest_markers,
-                    // Quest Tracker: the server told from the next frame
-                    // (`Play::agree_quest_progress`), the HUD's list drawn or not
-                    1046 => c.quest_tracker = !c.quest_tracker,
                     // Overlapping Names: the plates kept from the next
                     // frame (`play::labels`)
                     34 => c.overlapping_names = !c.overlapping_names,
@@ -686,8 +661,6 @@ impl WndOptions {
                     36 => c.flora = !c.flora,
                     // Environment: the effect volumes from the next frame (`viewer`, `fx`)
                     37 => c.environment = !c.environment,
-                    // Map Markers: the map's camps and coaches from its next frame (`map::markers`)
-                    1043 => c.map_markers = !c.map_markers,
                     // Shadows: drawn or not from the next frame (`viewer`, `shadows`)
                     46 => c.shadows = !c.shadows,
                     // Ground Fog: the fog's fans from the next frame (`fx`,
@@ -1137,9 +1110,7 @@ const CONTROLS: &str = "Controls";
 /// Extended's rows, by the item each changes (`change`), and their labels.
 /// A row is drawn by its item (`value_text`, or `slider_at` for a slider)
 /// and shown on the page of the category that lists it (`CATEGORIES`).
-// Upstream IDs stay below 1000; enhanced map IDs 1043..1047 avoid future collisions.
-// These are transient UI identities, not persisted settings keys.
-const EXTENDED_ITEMS: [(i32, &str); 40] = [
+const EXTENDED_ITEMS: [(i32, &str); 33] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1158,7 +1129,6 @@ const EXTENDED_ITEMS: [(i32, &str); 40] = [
     (27, "Name Distance"),
     (29, "Update Notices"),
     (30, "Text"),
-    (31, "Target of Target"),
     (32, "Output Device"),
     (33, "Display"),
     (34, "Overlapping Names"),
@@ -1168,18 +1138,12 @@ const EXTENDED_ITEMS: [(i32, &str); 40] = [
     (38, "Loading Screens"),
     (39, "Render Scale"),
     (40, "HUD"),
-    (42, "Mana Bars"),
     (46, "Shadows"),
     (47, "Ground Fog"),
     (48, "Touch Pad Size"),
     (49, "Raid List"),
     (50, "Texture Packs"),
     (51, "Dump Textures"),
-    (1043, "Map Markers"),
-    (1044, "Minimap"),
-    (1045, "Quest Markers"),
-    (1046, "Quest Tracker"),
-    (1047, "Stats Box"),
 ];
 
 /// What a category's page says beside its Back legend.
@@ -1216,14 +1180,12 @@ struct Category {
 const ALL_CATEGORIES: [Category; 10] = [
     Category { name: "Video", items: VIDEO, note: Note::Scale },
     Category { name: "World", items: &[20, 35, 36, 37, 47, 25], note: Note::None },
-    Category { name: "UI", items: &[22, 31, 42, 1044, 1047, 29], note: Note::None },
+    Category { name: "UI", items: fork_options::UI, note: Note::None },
     Category { name: "Controller", items: &[16, 19, 48], note: Note::Reads },
     Category { name: "Camera", items: &[15, 17, 18], note: Note::None },
     Category { name: "Characters", items: &[12, 23, 24, 27, 34, 46], note: Note::Server },
     Category { name: "Sound", items: SOUND, note: Note::Output },
-    // the quests' (UI holds its six): the marks a server sends for the map
-    // and its tracker for the HUD
-    Category { name: "Map & Quests", items: &[1045, 1046, 1043, 30, 40, 49], note: Note::None },
+    fork_options::QUESTS_CATEGORY,
     fork_options::CATEGORY,
     Category { name: "Textures", items: &[50, 51], note: Note::Textures },
 ];
@@ -1234,8 +1196,8 @@ const CATEGORIES: &[Category] = ALL_CATEGORIES.split_at(9).0;
 
 /// Video's rows: natively Display first (F3 20261024-201507: full screen was
 /// F11's alone); a page's full screen is the browser's. Fog and Mipmaps went
-/// to World with Art (the user's, 2026-10-25); Loading Screens and Render
-/// Scale came to Video, and Text and HUD went to Quests.
+/// to World with Art (the user's, 2026-10-25); Loading Screens came from UI,
+/// and Text went back to UI beside HUD when Render Scale came (2026-10-27).
 #[cfg(not(target_arch = "wasm32"))]
 const VIDEO: &[i32] = &[33, 13, 14, 26, 39, 38];
 #[cfg(target_arch = "wasm32")]
@@ -1250,9 +1212,8 @@ const SOUND: &[i32] = &[21];
 
 /// Extended's menu (`draw_categories`): the categories from its first row,
 /// the legend two under the last, as the options menu's six and its legend
-/// on its eighth row of nine (`draw_menu`). The window was the menu's nine
-/// rows until an eighth category came, drawn on the legend's row (F3
-/// 20261026-135758: "Quests" over "Select" and "Back").
+/// on its eighth row of nine (`draw_menu`), the window as tall as they are
+/// (F3 20261026-135758: a category drawn on the menu's legend row).
 const CATEGORY_LEGEND: i32 = CATEGORIES.len() as i32 + 2;
 const CATEGORY_ROWS: i32 = CATEGORY_LEGEND + 1;
 
@@ -1275,19 +1236,14 @@ const fn fits(cats: &[Category]) -> bool {
 
 const _: () = assert!(fits(CATEGORIES), "a category's page would scroll: give its rows another category");
 
-/// The registered rows, including the fork's own page.
-fn extended_items() -> impl Iterator<Item = &'static (i32, &'static str)> {
-    EXTENDED_ITEMS.iter().chain(fork_options::ITEMS.iter())
-}
-
 /// Whether `item` is one of Extended's rows.
 fn extended(item: i32) -> bool {
-    extended_items().any(|&(i, _)| i == item)
+    fork_options::items().any(|&(i, _)| i == item)
 }
 
 /// An Extended row's label.
 fn label_of(item: i32) -> &'static str {
-    extended_items().find(|&&(i, _)| i == item).map_or("", |&(_, l)| l)
+    fork_options::items().find(|&&(i, _)| i == item).map_or("", |&(_, l)| l)
 }
 
 /// An Extended row's value as its frame shows it; none for a slider
@@ -1316,12 +1272,6 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         }),
         26 => on_off(crate::settings::vsync()),
         29 => on_off(c.update_notices),
-        31 => on_off(c.target_of_target),
-        42 => on_off(c.mana_bars),
-        1044 => on_off(c.minimap),
-        1047 => on_off(c.stats_box),
-        1045 => on_off(c.quest_markers),
-        1046 => on_off(c.quest_tracker),
         34 => wide(if c.overlapping_names { "Show" } else { "Hide" }),
         49 => on_off(c.raid_list),
         50 => on_off(c.texture_packs),
@@ -1329,7 +1279,6 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         35 => on_off(c.mipmaps),
         36 => on_off(c.flora),
         37 => on_off(c.environment),
-        1043 => on_off(c.map_markers),
         46 => on_off(c.shadows),
         47 => wide(if c.ps2_fog { "PS2" } else { "Exact" }),
         38 => wide(if c.loading_longer { "Longer" } else { "Instant" }),
@@ -1436,25 +1385,6 @@ mod tests {
     }
 
     /// once; Triangle on the menu puts the live ones back.
-    #[test]
-    fn upstream_shadows_and_enhanced_quest_tracker_toggle_independently() {
-        use crate::settings;
-        settings::testing::reset(true);
-        let (mut w,mut o,mut cues,mut ups)=(WndOptions::default(),GameOptions::default(),Vec::new(),Vec::new());
-        assert!(settings::client().shadows && settings::client().quest_tracker);
-        w.item=46;w.change(&mut o,1,&mut cues,&mut ups);
-        assert!(!settings::client().shadows && settings::client().quest_tracker);
-        w.item=1046;w.change(&mut o,1,&mut cues,&mut ups);
-        assert!(!settings::client().shadows && !settings::client().quest_tracker);
-        let text=settings::client().to_text();
-        let restored=ClientOptions::from_text(&text);
-        assert!(!restored.shadows && !restored.quest_tracker);
-        assert!(text.contains("shadows=off") && text.contains("quest_tracker=off"));
-        w.item=46;w.change(&mut o,1,&mut cues,&mut ups);
-        assert!(settings::client().shadows && !settings::client().quest_tracker);
-        settings::testing::reset(true);
-    }
-
     #[test]
     fn held_settings_wait_for_save() {
         let mut w = WndOptions::default();
@@ -1582,7 +1512,6 @@ mod tests {
     /// control).
     #[test]
     fn the_extended_pages() {
-        let item_named = |label| extended_items().find(|&&(_, name)| name == label).unwrap().0;
         use crate::pointer::testing::{NullRaster, vui};
         use crate::settings::{self, testing};
         testing::reset(false);
@@ -1664,7 +1593,6 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::loading_longer(), "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-
         assert_eq!((w.row, cues.last()), (5, Some(&9)), "Video's last row (six, a page's most)");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.cat, w.cat_sel, w.item), (3, None, 0, -1), "back to the categories, Video still lit");
@@ -1728,7 +1656,7 @@ mod tests {
         assert_eq!((w.row, cues.last()), (5, Some(&9)), "World's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.cat, w.cat_sel, w.item), (3, None, 1, -1), "back to the categories, World still lit");
-        // UI: Ability Bars
+        // UI: Ability Bars, Target of Target, Mana Bars, Minimap, Stats Box, Update Notices
         press(&mut w, &mut o, key::DOWN, &mut cues);
         press(&mut w, &mut o, key::CROSS, &mut cues);
         assert_eq!((w.cat, w.item), (Some(2), 22), "UI, Ability Bars");
@@ -1740,37 +1668,9 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::ability_bars(), 4, "and the other way");
         assert_eq!(cues.last(), Some(&11));
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 31, "Target of Target");
-        assert!(!settings::client().target_of_target, "off: the game's target bar alone");
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().target_of_target, cues.last()), (true, Some(&11)), "on");
-        press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert!(!settings::client().target_of_target, "and back: two values");
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 42, "Mana Bars");
-        assert!(settings::client().mana_bars, "on: the power gauges where the server sends power");
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().mana_bars, cues.last()), (false, Some(&11)), "off");
-        press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert!(settings::client().mana_bars, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 1044, "Minimap");
-        assert!(settings::client().minimap, "on: the map round the player under the quick menus");
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().minimap, cues.last()), (false, Some(&11)), "off");
-        press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert!(settings::client().minimap, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 1047, "Stats Box");
-        assert!(!settings::client().stats_box, "off: no box, the default");
-        assert_eq!(value_text(&vui, 1047), Some(wide(vui.words.get(552, vui.language))), "Off, the game's word");
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().stats_box, cues.last()), (true, Some(&11)), "on");
-        press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert!(!settings::client().stats_box, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        for _ in 0..5 {
+            press(&mut w, &mut o, key::DOWN, &mut cues);
+        }
         assert_eq!(w.item, 29, "Update Notices");
         assert!(settings::update_notices(), "on: the game asks to restart into a newer build");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
@@ -1940,73 +1840,12 @@ mod tests {
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.row, cues.last()), (1, Some(&9)), "Sound's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        // Quests: Quest Markers
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(7), 1045), "Quests, Quest Markers");
-        assert!(settings::client().quest_markers, "on: the map's marks where the server sends them");
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().quest_markers, cues.last()), (false, Some(&11)), "off");
-        press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert!(settings::client().quest_markers, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 1046, "Quest Tracker");
-        assert!(settings::client().quest_tracker, "on: the HUD's list where the server sends it");
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().quest_tracker, cues.last()), (false, Some(&11)), "off");
-        press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert!(settings::client().quest_tracker, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 1043, "Map Markers, in Map & Quests");
-        let was=settings::client().map_markers;
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!(settings::client().map_markers,!was);
-        press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert_eq!(settings::client().map_markers,was);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 30, "Text");
-        assert_eq!(settings::client().text, render::ui::TextFilter::Sharp, "Sharp, the default");
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().text, cues.last()), (render::ui::TextFilter::Smooth, Some(&11)), "Smooth");
-        press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert_eq!(settings::client().text, render::ui::TextFilter::Sharp, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 40, "HUD");
-        assert_eq!((settings::client().hud, value_text(&vui, 40)), (render::ui::HudFilter::Nearest, Some(wide("Nearest"))), "Nearest, the game's and the default");
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().hud, value_text(&vui, 40), cues.last()), (render::ui::HudFilter::Sharp, Some(wide("Sharp")), Some(&11)), "Sharp");
-        press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert_eq!(settings::client().hud, render::ui::HudFilter::Nearest, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 49, "Raid List");
-        assert!(settings::raid_list(), "on: a raid group's every name and health");
-        assert_eq!(value_text(&vui, 49), Some(wide(vui.words.get(551, vui.language))));
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::raid_list(), cues.last()), (false, Some(&11)), "off: the game's bars");
-        press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert!(settings::raid_list(), "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Map & Quests' last row");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.cat_sel, cues.last()), (8, Some(&11)), "Mods & Addons, the new category");
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.row, w.item), (Some(8), 0, item_named("Target HP %")), "Mods & Addons page: Target HP % first");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, w.item), (1, item_named("XP Details")), "XP Details");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, w.item), (2, item_named("HUD Numbers")), "HUD Numbers");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, w.item), (3, item_named("Open Mods Folder")), "Open Mods Folder");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, w.item), (4, item_named("Combat Parser")), "Combat Parser");
-        press(&mut w, &mut o, key::DOWN, &mut cues); press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Mods & Addons last row");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        for _ in 0..3 {
+            press(&mut w, &mut o, key::DOWN, &mut cues);
+        }
         // Textures (natively): Texture Packs and Dump Textures, each Off
         // then On; a test keeps no folder, so the note says there is none
-        assert_eq!((w.cat_sel, cues.last()), (9, Some(&11)), "Textures, after Mods & Addons");
+        assert_eq!((w.cat_sel, cues.last()), (9, Some(&11)), "Textures, after Sound");
         press(&mut w, &mut o, key::CROSS, &mut cues);
         assert_eq!((w.cat, w.item), (Some(9), 50), "Textures, Texture Packs");
         assert_eq!(value_text(&vui, 50), Some(wide(vui.words.get(552, vui.language))), "Off, the game's own textures");
@@ -2184,10 +2023,11 @@ mod tests {
             v.sort();
             v
         };
-        let all: Vec<i32> = extended_items().map(|&(i, _)| i).collect();
+        let mut all: Vec<i32> = fork_options::items().map(|&(i, _)| i).collect();
+        all.sort();
         assert_eq!(listed(CATEGORIES), all);
         assert!(fits(CATEGORIES));
-        assert!(extended_items().all(|&(i, l)| !l.is_empty() && label_of(i) == l));
+        assert!(fork_options::items().all(|&(i, l)| !l.is_empty() && label_of(i) == l));
         let short = [Category { name: "Video", items: &[13, 20], note: Note::None }];
         assert_ne!(listed(&short), all, "the control: rows left out");
         let seven = [Category { name: "Video", items: &[13, 20, 14, 26, 25, 12, 15], note: Note::None }];
@@ -2340,8 +2180,8 @@ mod tests {
         assert_eq!(w.point([slider + 10.0, y(&w, 1)]), down(1, key::LEFT), "Brightness down");
         assert_eq!(w.point([slider + 130.0, y(&w, 1)]), down(1, key::RIGHT), "Brightness up");
         assert_eq!(w.point([frame + 110.0, y(&w, 2)]), down(2, key::RIGHT), "Frame Rate's value");
-        assert_eq!(w.point([frame + 110.0, y(&w, 4)]), down(4, key::RIGHT), "Loading Screens' value, under VSync since Minimap took its place on UI");
-        assert_eq!(w.point([frame + 110.0, y(&w, 5)]), down(5, key::RIGHT), "Text's value, under Loading Screens since the Stats Box took its place on UI");
+        assert_eq!(w.point([frame + 110.0, y(&w, 4)]), down(4, key::RIGHT), "Loading Screens' value, under VSync");
+        assert_eq!(w.point([frame + 110.0, y(&w, 5)]), down(5, key::RIGHT), "Text's value, under Loading Screens");
         assert!(w.point([frame + 110.0, y(&w, 6)]).is_empty(), "the row under Text: nothing");
         // World: Fog at 5 of 10 (its knob mid-bar), Flora's and Art's values
         w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);

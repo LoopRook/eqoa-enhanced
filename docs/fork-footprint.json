@@ -124,9 +124,9 @@
       "reason": "Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged."
     },
     "crates/eqoa/src/options.rs": {
-      "added": 212,
-      "deleted": 52,
-      "reason": "Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. Owner-approved defaults export adds eight regression setup/assertion lines for the 64/650 defaults and retail-minimum controls. Sync 2026-11-07: upstream's Raid List row sits in Map & Quests (UI already holds six, PAGE_MOST stays 6); its walk-test lines move with it (+5/-5). Sync 2026-11-08: upstream's Textures page goes after Map & Quests and Mods & Addons (index 9, so the web build's split_at keeps the fork pages); its row-doc, array lengths, split_at and walk-test page numbers move with it (+5/-5)."
+      "added": 41,
+      "deleted": 41,
+      "reason": "Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. Owner-approved defaults export adds eight regression setup/assertion lines for the 64/650 defaults and retail-minimum controls. Sync 2026-11-07: upstream's Raid List row sits in Map & Quests (UI already holds six, PAGE_MOST stays 6); its walk-test lines move with it (+5/-5). Sync 2026-11-08: upstream's Textures page goes after Map & Quests and Mods & Addons (index 9, so the web build's split_at keeps the fork pages); its row-doc, array lengths, split_at and walk-test page numbers move with it (+5/-5). Refactor/fork-options-rows: the fork's rows, category, change/value_text arms and walk-test steps moved into fork-owned fork_ext/options.rs, leaving only hook calls and page references here (+41/-41)."
     },
     "crates/eqoa/src/play.rs": {
       "added": 755,
@@ -304,9 +304,21 @@
     },
     {
       "path": "crates/eqoa/src/options.rs",
-      "name": "options ITEMS",
-      "pattern": "\\bfork_options::ITEMS\\b",
+      "name": "options QUESTS_CATEGORY",
+      "pattern": "\\bfork_options::QUESTS_CATEGORY\\b",
       "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/options.rs",
+      "name": "options UI rows",
+      "pattern": "\\bfork_options::UI\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/options.rs",
+      "name": "options items",
+      "pattern": "\\bfork_options::items\\b",
+      "count": 4
     },
     {
       "path": "crates/eqoa/src/options.rs",
