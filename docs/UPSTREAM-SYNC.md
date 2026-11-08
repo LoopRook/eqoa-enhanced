@@ -373,3 +373,29 @@ upstream tests develop had already dropped before this sync
 (a_group_line_is_a_blue_chat_line, a_layout_with_the_maps_rows_still_loads,
 options_with_the_lines_of_rows_gone_still_load). Oracle/disc tests skip here (run
 without --nocapture, so SKIP lines were not counted). Owner play-test pending.
+
+## 2026-11-08 sync (second)
+
+Upstream 72a7d48..8435f2c (5 commits): PCSX2 texture packs and texture dumps on a new
+Extended > Textures page (rows 50/51, `texpack.rs`, `esf::pcsx2`, a renderer pack hook),
+and every class for a server's race past the game's twenty. Branch sync/2026-11-08 off
+develop 9301c3d; merge 4c27535, fix 6510561.
+
+Conflicts (4, by hand; rerere recorded): main.rs, both modules (`fork_ext`, `texpack`);
+settings.rs, both sides' tests; render/ui.rs, the fork's `add_font_at_height` with
+upstream's new `add_texture_as` size argument; options.rs, Textures goes last (index 9,
+after Map & Quests and Mods & Addons) so the web build's `split_at(9)` drops only it, as
+upstream's `split_at(7)` did; the walk test follows it there. 6510561 keeps
+EXTENDED_ITEMS in item order (50/51 before 1043+), which
+`every_row_on_one_page_and_no_page_scrolls` requires (it failed before the fix).
+options.rs budget +5/-5 with its reason. docs/upstream/CLAUDE.md: only texture packs'
+description, nothing to adopt.
+
+Verification (sync script: scratch EQOA_CONFIG, --test-threads=1): `cargo test --locked
+-p eqoa -p net` 1,667 passed / 0 failed / 26 ignored, 127 SKIP messages (disc/oracle
+absent here). Python tools 80 passed. `cargo check -p eqoa --target
+wasm32-unknown-unknown` passes. Footprint against 8435f2c: PASS. Light review (Codex
+Terra) of the four resolutions: no findings; it noted upstream's row-coverage test
+would fail if run on wasm (upstream's, tests run natively). Not tested: texture packs
+with a real PCSX2 pack, and their interplay with Forge addon textures in game. Owner
+play-test pending.
