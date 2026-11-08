@@ -36,7 +36,9 @@ allows, built correctly on the native client. Cheap to sync with upstream.
 ## What exists (0.4.14, develop e48f0a6)
 
 - Runtime: `crates/eqoa/src/fork_ext/addons/` (about 38k lines, all fork-owned). Upstream's files
-  carry 4 hook lines (play.rs 1, viewer.rs 3). Keep it that way.
+  carry 4 hook lines (play.rs 1, viewer.rs 3). The owner approved more hooks as needed (2026-11-08):
+  the spec's §10 lists them (about 10 call lines, plus read-only dialog accessors in round 4). Each
+  stays a neutral seam, measured by the footprint check; nothing beyond §10 without lead review.
 - Native core: `host::Snapshot`, filled each frame by `fork_ext/play.rs` (`forge_snapshot`, :127),
   plus event queues for chat, combat and cooldowns. The Forge modules are adapters over this core.
 - Forge modules registered: ability, ability_bar, ability_list, chat, combat, effects, entity,
@@ -153,3 +155,12 @@ and out of future sync conflicts.
 ## Results
 
 (One short entry per round: date, branch and merge commit, verdict, owner test result.)
+
+- **Round 1 (design), 2026-11-08.** Branch `feat/eqoa-api-r1`. Scouts (DeepSeek Go; the free tier hit
+  its limit at once) wrote `docs/plans/eqoa-api/data-sources.md`; Sol high wrote
+  `docs/modding/EQOA-API-SPEC.md`, the owner summary and the report. MiniMax review: APPROVE WITH
+  CHANGES (4 HIGH, 10 MEDIUM, 11 LOW; lead verified H1-H3); Sol fixed all 25 (71b80a6). Owner
+  approved the design and the §10 hooks. Owner decision on files: every mod may read the shared,
+  bundled `mods/resources` tree read-only; all writes go to the mod's own private area (overlay with
+  tombstones, spec §9); other mods' files stay unreachable. Next: round 2 under a Sonnet lead, working
+  from spec §§1-5, 9-12 and the §9 bundled-UI regression cases.
