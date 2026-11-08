@@ -10,14 +10,14 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: enhanced-dev
-  cancel-in-progress: true
-
 jobs:
   windows:
     if: github.repository == 'LoopRook/eqoa-enhanced'
     runs-on: windows-2022
+    # A newer push cancels an older build, never a publication in progress.
+    concurrency:
+      group: enhanced-dev-build
+      cancel-in-progress: true
     outputs:
       commit: ${{ steps.source.outputs.commit }}
     env:
@@ -88,6 +88,11 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    # Never cancelled: a half-replaced release would leave dev updates failing
+    # until the next publication. A stale run stops at the superseded check.
+    concurrency:
+      group: enhanced-dev-publish
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v5
         with:

@@ -138,9 +138,11 @@ def publish(commit, output, notes):
         gh("release", "upload", TAG, output / "update.txt", "--repo", REPO, "--clobber")
         gh("release", "edit", TAG, "--repo", REPO, "--prerelease", "--latest=false",
            "--title", TITLE, "--notes-file", note_file)
-        validate_release(json.loads(gh("release", "view", TAG, "--repo", REPO,
-                                       "--json", "isDraft,isPrerelease,isLatest,body,assets")),
-                         body, names)
+        view = json.loads(gh("release", "view", TAG, "--repo", REPO,
+                             "--json", "isDraft,isPrerelease,body,assets"))
+        # `gh release view` has no isLatest field; ask which release is latest.
+        view["isLatest"] = gh("api", f"repos/{REPO}/releases/latest", "--jq", ".tag_name") == TAG
+        validate_release(view, body, names)
         remote = temp / "complete"
         remote.mkdir()
         gh("release", "download", TAG, "--repo", REPO, "--dir", remote, "--clobber")

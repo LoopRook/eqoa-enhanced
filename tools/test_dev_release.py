@@ -73,6 +73,8 @@ class DevelopmentReleaseTests(unittest.TestCase):
                                          "prerelease": state["prerelease"],
                                          "assets": [{"name": name} for name in state["assets"]]}]
                                        if state["exists"] else []])
+                if args[:2] == ("api", f"repos/{release.REPO}/releases/latest"):
+                    return "dev" if state["latest"] else "v0.4.14"
                 if args[0] == "api":
                     return ""
                 if args[:2] == ("release", "create"):
@@ -89,8 +91,10 @@ class DevelopmentReleaseTests(unittest.TestCase):
                 elif args[:2] == ("release", "edit"):
                     state["body"] = Path(args[args.index("--notes-file") + 1]).read_text(encoding="utf-8")
                 elif args[:2] == ("release", "view"):
+                    # the real `gh release view` has no isLatest field
+                    assert "isLatest" not in args[args.index("--json") + 1]
                     return json.dumps({"isDraft": state["draft"], "isPrerelease": state["prerelease"],
-                                       "isLatest": state["latest"], "body": state["body"],
+                                       "body": state["body"],
                                        "assets": [{"name": name} for name in state["assets"]]})
                 elif args[:2] == ("release", "download"):
                     destination = Path(args[args.index("--dir") + 1])
