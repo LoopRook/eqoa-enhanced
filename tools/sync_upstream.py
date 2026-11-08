@@ -13,11 +13,12 @@ moves reviewed_base only if every shared budget still passes, commits the merge,
 the client/net tests and the Python tool tests. Nothing is pushed or merged into develop.
 
 Exit codes: 0 done (or nothing to sync), 1 tests failed, 2 conflicts need a person,
-3 footprint budgets need review, 4 setup error.
+3 footprint budgets need review, 4 setup error, 5 merged but tests not run (another build).
 """
 import argparse
 import datetime
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -99,12 +100,16 @@ def field_key(field):
 LITERAL = re.compile(r"^(?P<head>.*?\b[A-Z]\w*\s*\{\s*)(?P<body>.*?)(?P<tail>\s*\}\s*;?\s*)$", re.S)
 
 
+UNSUPPORTED = re.compile(r'\br#*"|//|/\*')
+
+
 def parse_literal(line):
     m = LITERAL.match(line)
-    if not m:
+    if not m or UNSUPPORTED.search(m.group("body")):
         return None
     fields = split_top_level(m.group("body"))
-    if not fields or len(fields) < 2:
+    # The merge rejoins fields with ", ": refuse a body that would not come back byte for byte.
+    if not fields or len(fields) < 2 or ", ".join(fields) != m.group("body").strip():
         return None
     keyed = []
     for f in fields:
@@ -135,6 +140,10 @@ def merge_struct_literal(base, ours, theirs):
     if to != tb and tt != tb and to != tt:
         return None
     B, O, T = dict(b), dict(o), dict(t)
+    # Upstream's order wins below, which would silently undo a reordering (evaluation
+    # order) on our side: refuse when ours reordered fields it shares with the base.
+    if [k for k, _ in o if k in B] != [k for k, _ in b if k in O]:
+        return None
     result = []
     for k, tv in t:
         if k in B and k not in O:
@@ -224,17 +233,31 @@ def unmerged(root):
     return sorted(set(line.split("\t", 1)[1] for line in git(root, "ls-files", "-u").splitlines() if "\t" in line))
 
 
-def auto_resolve(root, notes):
-    """Stage files rerere already resolved, merge struct literals; return the rest."""
+REPLAYED = re.compile(r"^Resolved '(.+)' using previous resolution\.$", re.M)
+
+
+def stages(root, rel):
+    return {line.split()[2] for line in git(root, "ls-files", "-u", "--", rel).splitlines()}
+
+
+def auto_resolve(root, notes, replayed=()):
+    """Stage files rerere reported resolving, merge struct literals; return the rest.
+
+    A conflicted file without markers is staged only when rerere said it replayed it:
+    binary and modify/delete conflicts carry no markers either, and are a person's call.
+    """
     left = []
     for rel in unmerged(root):
         path = root / rel
-        if not path.exists():
-            left.append(f"{rel} (modify/delete)")
+        if stages(root, rel) != {"1", "2", "3"} or not path.is_file():
+            left.append(f"{rel} (added or deleted on one side)")
             continue
         if not has_markers(path):
-            git(root, "add", "--", rel)
-            notes.append(f"{rel}: replayed an earlier sync's resolution (rerere); read its diff")
+            if rel in replayed:
+                git(root, "add", "--", rel)
+                notes.append(f"{rel}: replayed an earlier sync's resolution (rerere); read its diff")
+            else:
+                left.append(f"{rel} (binary, or no conflict markers)")
             continue
         raw = path.read_bytes().decode("utf-8")
         new, done, remaining = resolve_text(raw)
@@ -257,18 +280,18 @@ def refresh_claude_copy(root, upstream):
 
 
 def move_reviewed_base(root, sha):
+    """Point reviewed_base at sha; returns (old base, original bytes to restore on failure)."""
     path = root / MANIFEST
-    raw = path.read_text(encoding="utf-8")
+    original = path.read_bytes()
+    raw = original.decode("utf-8")
     old = json.loads(raw)["reviewed_base"]
-    if old == sha:
-        return old
-    path.write_text(raw.replace(f'"reviewed_base": "{old}"', f'"reviewed_base": "{sha}"', 1),
-                    encoding="utf-8", newline="")
-    return old
+    if old != sha:
+        path.write_bytes(raw.replace(f'"reviewed_base": "{old}"', f'"reviewed_base": "{sha}"', 1).encode("utf-8"))
+    return old, original
 
 
-def footprint(root, upstream):
-    r = subprocess.run([PYTHON, "tools/check_fork_footprint.py", "--base", upstream],
+def footprint(root, sha):
+    r = subprocess.run([PYTHON, "tools/check_fork_footprint.py", "--base", sha],
                        cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.returncode == 0, r.stdout + r.stderr
 
@@ -281,7 +304,6 @@ def other_cargo_running():
 
 
 def run_tests(root):
-    import os
     target = root / "target"
     config = target / "sync-config"
     config.mkdir(parents=True, exist_ok=True)
@@ -307,6 +329,15 @@ def run_tests(root):
     return ok, summary
 
 
+def test_step(root):
+    """(exit code, summary); 5 when another cargo build is running, as one runs at a time."""
+    if other_cargo_running():
+        return 5, ("Not run: another cargo build is running (one build at a time). Rerun "
+                   "`python tools/sync_upstream.py --continue --tests-only` in this worktree when it finishes.")
+    ok, summary = run_tests(root)
+    return (0 if ok else 1), summary
+
+
 def write_report(root, sections):
     path = root / REPORT
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -316,29 +347,45 @@ def write_report(root, sections):
     print(f"\nReport: {path}")
 
 
-def finish(root, upstream, sections, notes, tests):
-    """Footprint, CLAUDE copy, commit, tests: everything after the conflicts are gone."""
-    sha = git(root, "rev-parse", upstream).strip()
-    merging = (root / git(root, "rev-parse", "--git-path", "MERGE_HEAD").strip()).exists()
-    if git(root, "diff", "--name-only", "--diff-filter=U").strip():
+def merge_target(root):
+    """The upstream commit being merged, pinned: MERGE_HEAD while merging, else HEAD's second parent."""
+    head = git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).strip()
+    if head:
+        return head, True
+    parents = git(root, "log", "-1", "--format=%P").split()
+    if len(parents) == 2:
+        return parents[1], False
+    raise SyncError("no merge in progress and HEAD is not a merge: nothing to finish")
+
+
+def finish(root, sections, notes, tests):
+    """CLAUDE copy, footprint, commit, tests: everything after the conflicts are gone."""
+    sha, merging = merge_target(root)
+    if unmerged(root):
         raise SyncError("conflicts remain; resolve and `git add` them, then rerun with --continue")
-    changed = refresh_claude_copy(root, upstream)
+    # The checks read the working tree and the commit takes the index: they must agree.
+    loose = git(root, "diff", "--name-only").split() + git(root, "ls-files", "--others", "--exclude-standard").split()
+    if loose:
+        raise SyncError("unstaged or untracked changes; `git add` or remove them, then --continue: " + ", ".join(loose[:10]))
+    changed = refresh_claude_copy(root, sha)
     sections.append(("Upstream CLAUDE.md", "Changed: read the new rules in `git diff HEAD -- docs/upstream/CLAUDE.md`"
                      " and adopt any worth having in our CLAUDE.md." if changed else "Unchanged."))
-    old = move_reviewed_base(root, sha)
-    ok, out = footprint(root, upstream)
+    old, original = move_reviewed_base(root, sha)
+    ok, out = footprint(root, sha)
     shared = "\n".join(line for line in out.splitlines() if not line.startswith("HOOK"))
     sections.append(("Footprint", f"reviewed_base {old[:7]} -> {sha[:7]}\n\n```\n{shared.strip()}\n```"))
     if not ok:
-        sections.append(("Stopped", "A shared budget or hook failed with the new base. Fix the merge, or raise "
-                         "the budget in docs/fork-footprint.json with a reason, then rerun with --continue."))
+        (root / MANIFEST).write_bytes(original)
+        sections.append(("Stopped", f"A shared budget or hook failed with the new base; reviewed_base stays {old[:7]}. "
+                         "Fix the merge, or raise the budget in docs/fork-footprint.json with a reason, "
+                         "`git add` it, then rerun with --continue."))
         return 3
     git(root, "add", "--", MANIFEST)
     if merging:
-        log = git(root, "log", "--oneline", "--no-merges", f"HEAD..{upstream}")
-        msg = (f"Merge upstream {upstream} {sha[:7]} into {git(root, 'branch', '--show-current').strip()}\n\n"
+        log = git(root, "log", "--oneline", "--no-merges", f"HEAD..{sha}")
+        msg = (f"Merge upstream {UPSTREAM} {sha[:7]} into {git(root, 'branch', '--show-current').strip()}\n\n"
                f"Upstream commits:\n{log}\n" + ("Resolutions:\n" + "\n".join(f"- {n}" for n in notes) + "\n" if notes else "")
-               + "docs/upstream/CLAUDE.md refreshed; reviewed_base moved (budgets unchanged, footprint PASS).\n")
+               + "docs/upstream/CLAUDE.md refreshed; reviewed_base moved (footprint PASS).\n")
         subprocess.run(["git", "-c", "safe.directory=*", "-C", str(root), "commit", "-q", "-F", "-"],
                        input=msg, text=True, encoding="utf-8", check=True)
     elif git(root, "diff", "--cached", "--name-only").strip():
@@ -347,13 +394,9 @@ def finish(root, upstream, sections, notes, tests):
     if not tests:
         sections.append(("Tests", "Skipped (--no-tests)."))
         return 0
-    if other_cargo_running():
-        sections.append(("Tests", "Not run: another cargo build is running (one build at a time). "
-                         "Rerun with --continue --tests-only when it finishes."))
-        return 0
-    ok, summary = run_tests(root)
+    code, summary = test_step(root)
     sections.append(("Tests", summary))
-    return 0 if ok else 1
+    return code
 
 
 def start(args):
@@ -362,7 +405,8 @@ def start(args):
         git(main_root, "config", "merge.ours.driver", "true")
     git(main_root, "config", "rerere.enabled", "true")
     git(main_root, "fetch", "origin")
-    count = int(git(main_root, "rev-list", "--count", f"{args.develop}..{UPSTREAM}").strip())
+    sha = git(main_root, "rev-parse", UPSTREAM + "^{commit}").strip()  # pinned: a later fetch cannot move it
+    count = int(git(main_root, "rev-list", "--count", f"{args.develop}..{sha}").strip())
     if count == 0:
         print(f"Nothing to sync: {args.develop} already contains {UPSTREAM}.")
         return 0
@@ -372,11 +416,16 @@ def start(args):
     if worktree.exists() or git(main_root, "branch", "--list", branch).strip():
         raise SyncError(f"{branch} or {worktree} already exists; pass --date or remove it")
     git(main_root, "worktree", "add", "-q", "-b", branch, str(worktree), args.develop)
-    print(f"Worktree {worktree} on {branch}; merging {count} upstream commit(s).")
-    git(worktree, "-c", "merge.conflictStyle=diff3", "merge", "--no-ff", "--no-commit", UPSTREAM, check=False)
-    notes, sections = [], [("Branch", f"{branch} in {worktree}\n{count} upstream commit(s):\n\n```\n"
-                                       f"{git(worktree, 'log', '--oneline', '--no-merges', f'{args.develop}..{UPSTREAM}')}```")]
-    left = auto_resolve(worktree, notes)
+    print(f"Worktree {worktree} on {branch}; merging {count} upstream commit(s) to {sha[:7]}.")
+    merged = subprocess.run(["git", "-c", "safe.directory=*", "-c", "merge.conflictStyle=diff3", "-C", str(worktree),
+                             "merge", "--no-ff", "--no-commit", sha],
+                            capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if not git(worktree, "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).strip():
+        raise SyncError(f"the merge did not start: {merged.stderr.strip() or merged.stdout.strip()}")
+    replayed = set(REPLAYED.findall(merged.stdout + merged.stderr))
+    notes, sections = [], [("Branch", f"{branch} in {worktree}\n{count} upstream commit(s) to {sha[:7]}:\n\n```\n"
+                                       f"{git(worktree, 'log', '--oneline', '--no-merges', f'{args.develop}..{sha}')}```")]
+    left = auto_resolve(worktree, notes, replayed)
     sections.append(("Automatic resolutions", "\n".join(f"- {n}" for n in notes) or "None needed."))
     if left:
         sections.append(("Needs a person", "\n".join(f"- {f}" for f in left) +
@@ -385,7 +434,7 @@ def start(args):
                          "(rerere) so the same conflict resolves itself next time."))
         write_report(worktree, sections)
         return 2
-    code = finish(worktree, UPSTREAM, sections, notes, not args.no_tests)
+    code = finish(worktree, sections, notes, not args.no_tests)
     write_report(worktree, sections)
     return code
 
@@ -394,18 +443,18 @@ def resume(args):
     root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     if not git(root, "branch", "--show-current").startswith("sync/"):
         raise SyncError("--continue runs inside a sync/<date> worktree")
-    sections, notes = [], []
     if args.tests_only:
-        ok, summary = run_tests(root)
+        code, summary = test_step(root)
         write_report(root, [("Tests", summary)])
-        return 0 if ok else 1
+        return code
+    sections, notes = [], []
     if unmerged(root):
         left = auto_resolve(root, notes)
         if left:
             write_report(root, [("Needs a person", "\n".join(f"- {f}" for f in left))])
             return 2
     notes.append("conflicts resolved by hand (recorded by rerere for next time)")
-    code = finish(root, UPSTREAM, sections, notes, not args.no_tests)
+    code = finish(root, sections, notes, not args.no_tests)
     write_report(root, sections)
     return code
 

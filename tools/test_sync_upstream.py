@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 TOOLS = Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS))
@@ -55,6 +56,24 @@ class StructLiteralMerge(unittest.TestCase):
         self.assertIsNone(sync.merge_struct_literal("foo(a, b);", "foo(a, b, c);", "foo(a, d, b);"))
         # The struct renamed differently on each side.
         self.assertIsNone(sync.merge_struct_literal(self.BASE, self.BASE.replace("Play", "Game"), self.BASE.replace("Play", "Thing")))
+
+    def test_refuses_what_it_cannot_rejoin_exactly(self):
+        # A raw string holding commas and quotes: splitting it would change the string.
+        raw = 'X { s: r#"a",fake:0,text:"b"#, d: 0 };'
+        self.assertIsNone(sync.merge_struct_literal(raw, raw.replace("d: 0", "d: 0, f: 1"), raw.replace("d: 0", "d: 0, g: 2")))
+        # Separators other than ", " would be rewritten.
+        tight = "X { a: 1,b: 2 };"
+        self.assertIsNone(sync.merge_struct_literal(tight, "X { a: 1,b: 2, f: 0 };", "X { a: 1,b: 2, g: 0 };"))
+        # A comment inside the literal.
+        commented = "X { a: 1, /* note */ b: 2 };"
+        self.assertIsNone(sync.merge_struct_literal(commented, commented.replace("b: 2", "b: 2, f: 0"), commented.replace("b: 2", "b: 2, g: 0")))
+
+    def test_refuses_to_undo_our_reordering(self):
+        base = "X { a: next(), b: next(), c: 0 };"
+        ours = "X { b: next(), a: next(), c: 0 };"
+        theirs = "X { a: next(), b: next(), c: 0, d: 1 };"
+        self.assertIsNone(sync.merge_struct_literal(base, ours, theirs))
+        self.assertEqual(sync.merge_struct_literal(base, base, theirs), theirs, "the control: no reordering merges")
 
     def test_resolve_text_merges_only_struct_literal_hunks(self):
         text = ("fn a() {\r\n<<<<<<< ours\r\n" + self.BASE.replace("a: 1", "a: 1, f: 0") + "\r\n||||||| base\r\n"
@@ -182,14 +201,85 @@ class WholeSync(unittest.TestCase):
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
         self.assertIn("unreviewed shared path: other.rs", r.stdout)
         wt = self.top / "eqoa-sync-2026-01-01"
-        self.assertTrue((Path(git(wt, "rev-parse", "--absolute-git-dir").strip()) / "MERGE_HEAD").exists(),
-                        "not committed")
+        self.assertTrue(git(wt, "rev-parse", "-q", "--verify", "MERGE_HEAD").strip(), "not committed")
+        self.assertEqual(json.loads((wt / "docs/fork-footprint.json").read_text())["reviewed_base"],
+                         self.manifest["reviewed_base"], "reviewed_base not moved on a failed check")
+
+    def test_markerless_conflicts_are_left_for_a_person(self):
+        self.write(self.fork, "other.rs", "fn x() { 2 }\n")
+        self.write(self.fork, "art.bin", "")
+        (self.fork / "art.bin").write_bytes(b"\0fork")
+        git(self.fork, "add", ".")
+        git(self.fork, "commit", "-qm", "fork edits other.rs, adds art")
+        (self.up / "art.bin").write_bytes(b"\0upstream")
+        git(self.up, "rm", "-q", "other.rs")
+        self.upstream_commit({})
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("other.rs (added or deleted on one side)", r.stdout)
+        self.assertIn("art.bin (added or deleted on one side)", r.stdout)
+        wt = self.top / "eqoa-sync-2026-01-01"
+        self.assertEqual(sorted(sync.unmerged(wt)), ["art.bin", "other.rs"], "neither staged")
+
+    def test_a_binary_conflict_is_left_for_a_person(self):
+        (self.up / "art.bin").write_bytes(b"\0base")
+        self.upstream_commit({})
+        git(self.fork, "fetch", "-q", "origin")
+        git(self.fork, "merge", "-q", "--no-edit", "origin/master")
+        self.manifest["reviewed_base"] = git(self.fork, "rev-parse", "origin/master").strip()
+        self.write(self.fork, "docs/fork-footprint.json", json.dumps(self.manifest, indent=2) + "\n")
+        (self.fork / "art.bin").write_bytes(b"\0fork")
+        git(self.fork, "commit", "-qam", "fork art")
+        (self.up / "art.bin").write_bytes(b"\0upstream")
+        self.upstream_commit({})
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("art.bin (binary, or no conflict markers)", r.stdout)
+
+    def test_continue_refuses_unstaged_edits_and_keeps_the_pinned_upstream(self):
+        self.write(self.fork, "other.rs", "fn x() { 2 }\n")
+        git(self.fork, "commit", "-qam", "fork edits other.rs")
+        self.manifest["shared"]["other.rs"] = {"added": 1, "deleted": 1, "reason": "fork change"}
+        self.upstream_commit({"other.rs": "fn x() { 3 }\n"})
+        pinned = git(self.up, "rev-parse", "HEAD").strip()
+        self.assertEqual(self.run_sync().returncode, 2)
+        wt = self.top / "eqoa-sync-2026-01-01"
+        self.upstream_commit({"CLAUDE.md": "a later upstream\n"})
+        git(self.fork, "fetch", "-q", "origin")
+        self.write(wt, "other.rs", "fn x() { 2 + 3 }\n")
+        self.write(wt, "docs/fork-footprint.json", json.dumps(self.manifest, indent=2) + "\n")
+        git(wt, "add", ".")
+        self.write(wt, "other.rs", "fn x() { broken\n")
+        r = self.run_sync("--continue", cwd=wt)
+        self.assertEqual(r.returncode, 4, r.stdout + r.stderr)
+        self.assertIn("unstaged or untracked changes", r.stderr)
+        self.assertTrue(git(wt, "rev-parse", "-q", "--verify", "MERGE_HEAD").strip(), "not committed")
+        git(wt, "add", ".")
+        self.write(wt, "other.rs", "fn x() { 2 + 3 }\n")
+        git(wt, "add", ".")
+        r = self.run_sync("--continue", cwd=wt)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(git(wt, "rev-parse", "HEAD^2").strip(), pinned)
+        self.assertEqual(json.loads((wt / "docs/fork-footprint.json").read_text())["reviewed_base"], pinned)
+        self.assertEqual((wt / "docs/upstream/CLAUDE.md").read_text(), "upstream rules\n", "the later upstream's not copied")
 
     def test_nothing_to_sync(self):
         r = self.run_sync()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("Nothing to sync", r.stdout)
         self.assertFalse((self.top / "eqoa-sync-2026-01-01").exists())
+
+
+class TestStep(unittest.TestCase):
+    def test_another_build_running_is_not_success(self):
+        with mock.patch.object(sync, "other_cargo_running", return_value=True), \
+             mock.patch.object(sync, "run_tests", side_effect=AssertionError("must not build")):
+            code, summary = sync.test_step(Path("."))
+        self.assertEqual(code, 5)
+        self.assertIn("--tests-only", summary)
+        with mock.patch.object(sync, "other_cargo_running", return_value=False), \
+             mock.patch.object(sync, "run_tests", return_value=(False, "failed")):
+            self.assertEqual(sync.test_step(Path("."))[0], 1, "the control: a run that fails is 1")
 
 
 class RepositorySetup(unittest.TestCase):
