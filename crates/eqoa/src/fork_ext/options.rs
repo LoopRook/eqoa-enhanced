@@ -188,6 +188,8 @@ mod tests {
 
     /// The fork's rows on upstream's pages and its own two pages, walked as
     /// upstream's test walks them.
+    // Native only: the web build has no Addon Manager row and no Textures page.
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_fork_pages_and_rows() {
         let item_named = |label| ITEMS.iter().find(|&&(_, name)| name == label).unwrap().0;
