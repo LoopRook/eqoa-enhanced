@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-08 · Enhanced 0.4.14
+
+- Nothing changes in how you play. Behind the scenes, Enhanced's own options are kept apart from the vanilla client's, so new vanilla options arrive sooner and with fewer surprises.
+
 ## 2026-11-08 · Enhanced 0.4.13
 
 - New from the vanilla client: texture packs made for PCSX2 work here as they are. Put the pack's files in `%APPDATA%\eqoa-rs\textures\SLUS-20744\replacements` (made for you the first time), then turn on Options > Extended > Textures > Texture Packs.
