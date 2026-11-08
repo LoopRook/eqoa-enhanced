@@ -1,0 +1,108 @@
+name: Development build
+
+# Builds and tests every push to develop, then refreshes the rolling prerelease
+# tag dev. Stable players follow releases/latest/download/ and never see it.
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: enhanced-dev
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    if: github.repository == 'LoopRook/eqoa-enhanced'
+    runs-on: windows-2022
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    env:
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch develop for the ancestry check
+        shell: pwsh
+        run: |
+          git fetch --no-tags origin +refs/heads/develop:refs/remotes/origin/develop
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch develop' }
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Canonical Windows scratch directories
+        shell: pwsh
+        run: |
+          $canonicalTemp = (python -c "import os; print(os.path.realpath(os.environ['RUNNER_TEMP']))").Trim()
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $canonicalTemp -PathType Container)) { throw 'Cannot resolve runner temporary directory' }
+          foreach ($name in @('TMPDIR', 'TEMP', 'TMP')) { "$name=$canonicalTemp" >> $env:GITHUB_ENV }
+      - name: Validate the development commit
+        id: source
+        shell: pwsh
+        run: |
+          python -X utf8 tools/dev_release.py preflight
+          if ($LASTEXITCODE -ne 0) { throw 'Development preflight failed' }
+          "EQOA_UPDATE_CHANNEL=enhanced-dev" >> $env:GITHUB_ENV
+          "EQOA_BUILD_COMMIT=$((git rev-parse HEAD).Trim())" >> $env:GITHUB_ENV
+      - name: Fetch reviewed upstream policy base
+        shell: pwsh
+        run: |
+          $base = (Get-Content docs/fork-footprint.json -Raw | ConvertFrom-Json).reviewed_base
+          git fetch --no-tags https://github.com/DabDavis/eqoa-rust-client-vanilla.git $base
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch reviewed upstream base' }
+          git update-ref refs/remotes/origin/master $base
+      - name: Install toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Check fork integration policy
+        run: python -X utf8 tools/check_fork_footprint.py
+      - name: Test release tooling
+        run: python -X utf8 -m unittest discover -s tools -p "test_*.py"
+      - name: Test workspace
+        shell: pwsh
+        env:
+          EQOA_CONFIG: ${{ runner.temp }}/eqoa-dev-config
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:EQOA_CONFIG | Out-Null
+          cargo +1.99.1 test --locked --workspace --target x86_64-pc-windows-msvc -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'Workspace tests failed' }
+      - name: Build development Windows client
+        run: cargo +1.99.1 build --release --locked -p eqoa --target x86_64-pc-windows-msvc
+      - name: Package exact runtime allowlist
+        run: python -X utf8 tools/build_player_release.py --executable target/x86_64-pc-windows-msvc/release/eqoa.exe --output run/player-release --channel enhanced-dev
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dev-runtime
+          path: run/player-release/*
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: windows
+    if: github.repository == 'LoopRook/eqoa-enhanced'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.windows.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch develop for the superseded check
+        run: git fetch --no-tags origin +refs/heads/develop:refs/remotes/origin/develop
+      - uses: actions/download-artifact@v4
+        with:
+          name: dev-runtime
+          path: ${{ runner.temp }}/dev-runtime
+      - name: Publish the rolling development release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 -X utf8 tools/dev_release.py publish --assets "$RUNNER_TEMP/dev-runtime"

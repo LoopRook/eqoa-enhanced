@@ -54,6 +54,9 @@
     ".github/workflows/official-release.yml",
     "tools/official_release.py",
     "tools/test_official_release.py",
+    "tools/dev_release.py",
+    "tools/test_dev_release.py",
+    ".github/workflows/enhanced-dev.yml",
     "tools/sync_upstream.py",
     "tools/test_sync_upstream.py"
   ],
