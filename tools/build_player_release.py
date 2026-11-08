@@ -86,8 +86,11 @@ BUNDLED_MOD_FILES = (
     "wereoxxs_ui/modules/tape_compass.lua",
     "wereoxxs_ui/wereoxxs_ui.lua",
 )
-EXPECTED_ZIP_MEMBERS = frozenset({
-    "eqoa.exe", "map-entities.json", "LICENSE", "NOTICE", "FrontiersForge-MIT.txt",
+# The player's program: "EQOA Enhanced.exe" for Stable, "EQOA Enhanced -
+# Nightly.exe" for Nightly. The updater replaces whichever file is running.
+EXE_NAMES = {"enhanced": "EQOA Enhanced.exe", "enhanced-dev": "EQOA Enhanced - Nightly.exe"}
+SHARED_ZIP_MEMBERS = frozenset({
+    "map-entities.json", "LICENSE", "NOTICE", "FrontiersForge-MIT.txt",
     "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt", "README.txt",
     "release-manifest.json", "mods/README.txt",
     *(f"mods/{rel}" for rel in BUNDLED_MOD_FILES),
@@ -99,6 +102,25 @@ def download_base(channel):
         return DOWNLOAD_BASES[channel]
     except KeyError as error:
         raise ValueError(f"Unsupported update channel: {channel!r}") from error
+
+
+def exe_name(channel="enhanced"):
+    download_base(channel)
+    return EXE_NAMES[channel]
+
+
+def zip_members(channel="enhanced"):
+    return SHARED_ZIP_MEMBERS | {exe_name(channel)}
+
+
+EXPECTED_ZIP_MEMBERS = zip_members()
+
+
+def zip_name(version, channel="enhanced"):
+    """The player ZIP's name: the version for Stable, "Nightly" for the dev channel."""
+    download_base(channel)
+    label = "Nightly" if channel == "enhanced-dev" else version
+    return f"EQOA-Enhanced-{label}-Windows-x64.zip"
 
 
 def load_bundled_mod_sources(bundled_mods_dir):
@@ -266,7 +288,6 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
         raise ValueError("Requested version must match canonical VERSION")
     version = recorded_version
     inputs = {
-        "eqoa.exe": executable,
         "LICENSE": root / "LICENSE",
         "NOTICE": root / "NOTICE",
         "FrontiersForge-MIT.txt": root / "docs/licenses/FrontiersForge-MIT.txt",
@@ -280,7 +301,7 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
         raise ValueError("mods/README.txt is missing")
     bundled_dir = root / "bundled-mods"
     expected_mod_hashes = load_bundled_mod_sources(bundled_dir)
-    source_paths = [*inputs.values(), notes_path, root / "VERSION", mods_readme, bundled_dir]
+    source_paths = [executable, *inputs.values(), notes_path, root / "VERSION", mods_readme, bundled_dir]
     if catalog is not None:
         catalog = Path(catalog).resolve()
         source_paths.append(catalog)
@@ -296,9 +317,12 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
         catalog_bytes = catalog.read_bytes()
     if sha256(catalog_bytes) != CATALOG_SHA256:
         raise ValueError("Catalog does not match the pinned FrontiersForge SHA256")
-    payload = {"eqoa.exe": exe, "map-entities.json": catalog_bytes}
-    payload.update({name: path.read_bytes() for name, path in inputs.items() if name != "eqoa.exe"})
-    payload["README.txt"] = payload["README.txt"].replace(b"{version}", version.encode("ascii"))
+    program = exe_name(channel)
+    payload = {program: exe, "map-entities.json": catalog_bytes}
+    payload.update({name: path.read_bytes() for name, path in inputs.items()})
+    label = "Nightly" if channel == "enhanced-dev" else version
+    payload["README.txt"] = (payload["README.txt"].replace(b"{version}", label.encode("ascii"))
+                             .replace(b"{exe}", program.encode("ascii")))
     payload["mods/README.txt"] = mods_readme.read_bytes()
     for rel_path, expected_hash in expected_mod_hashes.items():
         file_path = bundled_dir / rel_path
@@ -339,8 +363,8 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".eqoa-release-", dir=output.parent) as temporary:
         stage = Path(temporary)
-        zip_name = f"EQOA-Enhanced-{version}-Windows-x64.zip"
-        with zipfile.ZipFile(stage / zip_name, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        player_zip = zip_name(version, channel)
+        with zipfile.ZipFile(stage / player_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
             for name, data in payload.items():
                 entry = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
                 entry.compress_type = zipfile.ZIP_DEFLATED
@@ -353,7 +377,7 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
             f"build windows-x86_64 {UPDATER_ASSET} {sha256(exe)} {len(exe)}\n"
         ).encode("ascii"))
         (stage / "update-notes.md").write_bytes(notes)
-        assets = [zip_name, UPDATER_ASSET, "update.txt", "update-notes.md"]
+        assets = [player_zip, UPDATER_ASSET, "update.txt", "update-notes.md"]
         (stage / "SHA256SUMS").write_bytes("".join(
             f"{sha256((stage / name).read_bytes())}  {name}\n" for name in assets
         ).encode("ascii"))
@@ -363,7 +387,7 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
             raise ValueError("Output directory must remain empty while packaging")
         for name in [*assets, "SHA256SUMS"]:
             (stage / name).replace(output / name)
-    return output / zip_name
+    return output / player_zip
 
 
 def verify_release(output, channel="enhanced"):
@@ -395,8 +419,8 @@ def verify_release(output, channel="enhanced"):
             or not re.fullmatch(r"[1-9][0-9]*", build_row[4])):
         raise ValueError("Update manifest has an invalid Windows build row")
     version, commit = version_row[1], commit_row[1]
-    zip_name = f"EQOA-Enhanced-{version}-Windows-x64.zip"
-    asset_names = {zip_name, UPDATER_ASSET, "update.txt", "update-notes.md"}
+    player_zip = zip_name(version, channel)
+    asset_names = {player_zip, UPDATER_ASSET, "update.txt", "update-notes.md"}
     if {path.name for path in output.iterdir()} != asset_names | {"SHA256SUMS"}:
         raise ValueError("Release output asset allowlist mismatch")
     checksums = {}
@@ -419,12 +443,13 @@ def verify_release(output, channel="enhanced"):
         f"build windows-x86_64 {UPDATER_ASSET} {sha256(exe)} {len(exe)}\n").encode("ascii")
     if update != expected_update:
         raise ValueError("Update manifest is not in canonical format")
-    with zipfile.ZipFile(output / zip_name) as archive:
-        if len(archive.infolist()) != len(EXPECTED_ZIP_MEMBERS) or set(archive.namelist()) != EXPECTED_ZIP_MEMBERS:
+    with zipfile.ZipFile(output / player_zip) as archive:
+        members = zip_members(channel)
+        if len(archive.infolist()) != len(members) or set(archive.namelist()) != members:
             raise ValueError("Player ZIP member allowlist mismatch")
         if any(info.is_dir() or (info.external_attr >> 16) & 0o170000 == 0o120000 for info in archive.infolist()):
             raise ValueError("Player ZIP must contain regular files")
-        payload = {name: archive.read(name) for name in EXPECTED_ZIP_MEMBERS}
+        payload = {name: archive.read(name) for name in members}
     try:
         manifest = json.loads(payload["release-manifest.json"])
     except (ValueError, UnicodeDecodeError) as error:
@@ -440,7 +465,7 @@ def verify_release(output, channel="enhanced"):
     file_hashes = {name: sha256(data) for name, data in payload.items() if name != "release-manifest.json"}
     if manifest.get("files") != file_hashes:
         raise ValueError("Release manifest file hashes mismatch")
-    if payload["eqoa.exe"] != exe:
+    if payload[exe_name(channel)] != exe:
         raise ValueError("Player ZIP executable does not match updater executable")
     if sha256(payload["map-entities.json"]) != CATALOG_SHA256:
         raise ValueError("Player ZIP catalog does not match pinned SHA256")

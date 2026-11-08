@@ -8,15 +8,14 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from build_player_release import UPDATER_ASSET, source_commit, verify_release
+from build_player_release import UPDATER_ASSET, source_commit, verify_release, zip_name
 
 REPO = "LoopRook/eqoa-enhanced"
 REPO_URL = f"https://github.com/{REPO}.git"
 TAG = "dev"
-TITLE = "EQOA Enhanced (development build)"
+TITLE = "EQOA Enhanced Nightly"
 CHANNEL = "enhanced-dev"
-BODY_PREFIX = ("Development build of develop at {commit}. May be rough; "
-               "stable players should use the Latest release.")
+UNRELEASED = "## Unreleased"
 
 
 def command(*args, cwd=None):
@@ -56,12 +55,25 @@ def preflight(root):
 
 
 def asset_names(version):
-    return {f"EQOA-Enhanced-{version}-Windows-x64.zip", UPDATER_ASSET,
+    return {zip_name(version, CHANNEL), UPDATER_ASSET,
             "update.txt", "update-notes.md", "SHA256SUMS"}
 
 
+def unreleased(notes):
+    """FORK-UPDATE-NOTES.md's "## Unreleased" section: what Nightly has that Stable lacks."""
+    lines = notes.splitlines()
+    if UNRELEASED not in lines:
+        return ""
+    section = []
+    for line in lines[lines.index(UNRELEASED) + 1:]:
+        if line.startswith("## "):
+            break
+        section.append(line)
+    return "\n".join(section).strip()
+
+
 def release_body(commit, notes):
-    return f"{BODY_PREFIX.format(commit=commit)}\n\n{notes.strip()}\n"
+    return f"<!-- eqoa-build commit={commit} -->\n\n{unreleased(notes) or 'Same as Stable.'}\n"
 
 
 def tag_exists():
