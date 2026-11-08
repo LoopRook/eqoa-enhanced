@@ -55,6 +55,26 @@ the updater manifest. Upstream master/dev workflows must not publish this fork;
 `enhanced-release.yml` stays inert. `public-source.yml` checks every push, pull
 request and tag without publishing anything.
 
+## Development channel
+
+Every push to `develop` starts `.github/workflows/enhanced-dev.yml`. It runs the
+same footprint, tooling, workspace-test and release-build gate as the official
+workflow, then refreshes one rolling GitHub release whose tag is `dev`. That
+release is always a prerelease and is never marked latest, so
+`releases/latest/download/` keeps pointing at the newest stable version. The
+development build is stamped with update channel `enhanced-dev` and updates
+itself from `releases/download/dev/`.
+
+The release keeps the same asset set as a versioned one, with `update.txt`
+uploaded last. Assets left over from an older development build are removed.
+If `develop` has moved on while the job was running, the publisher exits
+without touching the release; the newer run publishes instead.
+
+To rebuild the current `develop` head without pushing, run Development build
+manually with **Run workflow** (`workflow_dispatch`). A versioned release still
+comes only from the tag path above; publishing `dev` never changes `VERSION`,
+FORK-UPDATE-NOTES.md or the stable channel.
+
 ## Retry an existing tag after a CI environment fix
 
 Never move the tag. Commit the workflow-only fix to `enhanced`, then run

@@ -2,8 +2,9 @@
 # Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 """Package an already built Enhanced Windows client using an explicit allowlist.
 
-Run from a clean checkout after building with EQOA_UPDATE_CHANNEL=enhanced and
-EQOA_BUILD_COMMIT set to its full Git HEAD. No build or source copying occurs.
+Run from a clean checkout after building with EQOA_UPDATE_CHANNEL set to the
+same channel passed here (enhanced by default) and EQOA_BUILD_COMMIT set to its
+full Git HEAD. No build or source copying occurs.
 """
 import argparse
 import hashlib
@@ -23,6 +24,8 @@ CATALOG_URL = (
     f"{CATALOG_REVISION}/scripts/resources/entity_database.json"
 )
 DOWNLOAD_BASE = "https://github.com/LoopRook/eqoa-enhanced/releases/latest/download/"
+DEV_DOWNLOAD_BASE = "https://github.com/LoopRook/eqoa-enhanced/releases/download/dev/"
+DOWNLOAD_BASES = {"enhanced": DOWNLOAD_BASE, "enhanced-dev": DEV_DOWNLOAD_BASE}
 UPDATER_ASSET = "eqoa-enhanced-windows-x86_64.exe"
 VERSION_PATTERN = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", re.ASCII)
 BUNDLED_MOD_FILES = (
@@ -89,6 +92,13 @@ EXPECTED_ZIP_MEMBERS = frozenset({
     "release-manifest.json", "mods/README.txt",
     *(f"mods/{rel}" for rel in BUNDLED_MOD_FILES),
 })
+
+
+def download_base(channel):
+    try:
+        return DOWNLOAD_BASES[channel]
+    except KeyError as error:
+        raise ValueError(f"Unsupported update channel: {channel!r}") from error
 
 
 def load_bundled_mod_sources(bundled_mods_dir):
@@ -207,7 +217,7 @@ def imported_dlls(data, pe_offset, optional_size):
     return imports
 
 
-def validate_executable(data, commit):
+def validate_executable(data, commit, base=DOWNLOAD_BASE):
     """Inspect PE32+ headers without depending on platform-specific PE tooling."""
     if len(data) < 64 or data[:2] != b"MZ":
         raise ValueError("Executable is not a Windows PE file")
@@ -235,11 +245,12 @@ def validate_executable(data, commit):
             raise ValueError(f"Executable imports an unbundled Visual C++ runtime: {dll}; build with +crt-static")
     if commit.encode("ascii") not in data:
         raise ValueError("Executable does not contain the full source commit")
-    if DOWNLOAD_BASE.encode("ascii") not in data:
+    if base.encode("ascii") not in data:
         raise ValueError("Executable does not contain the Enhanced updater download base")
 
 
-def build_release(*, root, executable, output, catalog=None, commit=None, version=None):
+def build_release(*, root, executable, output, catalog=None, commit=None, version=None,
+                  channel="enhanced"):
     root = Path(root).resolve()
     executable = Path(executable).resolve()
     output = Path(output).resolve()
@@ -275,8 +286,9 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
         source_paths.append(catalog)
     if any(path.resolve().is_relative_to(output) for path in source_paths):
         raise ValueError("Output directory must not contain a release input")
+    base = download_base(channel)
     exe = executable.read_bytes()
-    validate_executable(exe, source)
+    validate_executable(exe, source, base)
     if catalog is None:
         with urllib.request.urlopen(CATALOG_URL, timeout=60) as response:
             catalog_bytes = response.read()
@@ -314,8 +326,8 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
         "sourceCommit": source,
         "sourceModified": False,
         "platform": "windows-x86_64",
-        "updaterChannel": "enhanced",
-        "downloadBase": DOWNLOAD_BASE,
+        "updaterChannel": channel,
+        "downloadBase": base,
         "catalog": {"revision": CATALOG_REVISION, "url": CATALOG_URL, "sha256": CATALOG_SHA256},
         # The manifest cannot include its own hash; the ZIP is covered by SHA256SUMS.
         "files": {name: sha256(data) for name, data in payload.items()},
@@ -345,7 +357,7 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
         (stage / "SHA256SUMS").write_bytes("".join(
             f"{sha256((stage / name).read_bytes())}  {name}\n" for name in assets
         ).encode("ascii"))
-        verify_release(stage)
+        verify_release(stage, channel)
         output.mkdir(exist_ok=True)
         if any(output.iterdir()):
             raise ValueError("Output directory must remain empty while packaging")
@@ -354,12 +366,13 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
     return output / zip_name
 
 
-def verify_release(output):
+def verify_release(output, channel="enhanced"):
     """Independently verify finished assets, returning the verified manifest dict.
 
     No Git checkout or build inputs are required. The caller can verify the exact
     directory downloaded from CI before allowing publication.
     """
+    base = download_base(channel)
     output = Path(output)
     if not output.is_dir() or any(not path.is_file() or path.is_symlink() for path in output.iterdir()):
         raise ValueError("Release output must contain only regular asset files")
@@ -399,7 +412,7 @@ def verify_release(output):
         if sha256((output / name).read_bytes()) != digest:
             raise ValueError(f"Release checksum mismatch: {name}")
     exe = (output / UPDATER_ASSET).read_bytes()
-    validate_executable(exe, commit)
+    validate_executable(exe, commit, base)
     if build_row[3] != sha256(exe) or int(build_row[4]) != len(exe):
         raise ValueError("Update manifest executable hash or size mismatch")
     expected_update = (f"version {version}\ncommit {commit}\n"
@@ -419,7 +432,7 @@ def verify_release(output):
     if not isinstance(manifest, dict):
         raise ValueError("Release manifest must be a JSON object")
     expected_fields = {"version": version, "sourceCommit": commit, "sourceModified": False,
-                       "platform": "windows-x86_64", "updaterChannel": "enhanced", "downloadBase": DOWNLOAD_BASE}
+                       "platform": "windows-x86_64", "updaterChannel": channel, "downloadBase": base}
     if any(manifest.get(key) != value for key, value in expected_fields.items()):
         raise ValueError("Release manifest provenance or version mismatch")
     if manifest.get("catalog") != {"revision": CATALOG_REVISION, "url": CATALOG_URL, "sha256": CATALOG_SHA256}:
@@ -442,6 +455,8 @@ def main():
     parser.add_argument("--catalog", type=Path, help="local catalog matching the pinned SHA256; otherwise downloaded")
     parser.add_argument("--commit", help="optional full commit assertion; must match clean Git HEAD")
     parser.add_argument("--version", help="optional version assertion; must match VERSION")
+    parser.add_argument("--channel", choices=sorted(DOWNLOAD_BASES), default="enhanced",
+                        help="updater channel compiled into the executable (default: enhanced)")
     args = parser.parse_args()
     try:
         archive = build_release(**vars(args))

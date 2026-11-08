@@ -248,6 +248,15 @@ class PlayerReleaseTests(unittest.TestCase):
         self.build()
         self.assertEqual(self.packager.verify_release(self.output)["sourceCommit"], self.commit)
 
+    def test_development_channel_packages_and_verifies_only_for_the_dev_updater(self):
+        self.executable.write_bytes(minimal_pe(self.commit, self.packager.DEV_DOWNLOAD_BASE))
+        self.build(channel="enhanced-dev")
+        manifest = self.packager.verify_release(self.output, channel="enhanced-dev")
+        self.assertEqual(manifest["updaterChannel"], "enhanced-dev")
+        self.assertEqual(manifest["downloadBase"], self.packager.DEV_DOWNLOAD_BASE)
+        with self.assertRaises(ValueError):
+            self.packager.verify_release(self.output)
+
     def test_independent_verifier_rejects_tampering_even_with_recomputed_outer_hashes(self):
         self.assertTrue(callable(getattr(self.packager, "verify_release", None)),
                         "independent release verification has not been implemented")

@@ -50,6 +50,10 @@ Official releases check for updates automatically. The updater replaces the
 game executable; if release notes say supporting files have changed, download
 and extract the latest ZIP as well.
 
+Want the newest changes early? The [development build](https://github.com/LoopRook/eqoa-enhanced/releases/tag/dev)
+updates itself whenever we change something. It may be rough. Install it in its
+own folder; it shares your settings and addons with stable.
+
 ## Support
 
 Need help getting started or using the client? Join the
