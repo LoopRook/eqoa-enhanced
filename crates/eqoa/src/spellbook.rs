@@ -2,7 +2,8 @@
 //! start menu's "Ability" entry (0x8010000, `VIWndGame` mode 5). A tab per
 //! ten levels, six rows of the abilities shown on the tab (by display
 //! index), the selected one's stats and description, a popup per ability
-//! (Memorize, Arrange, Unmemorize All, Exit) and the hot-bar slots it is
+//! (Memorize, Arrange, Unmemorize, Unmemorize All, Exit: Unmemorize is
+//! vanilla's, the selected ability alone off its slot) and the hot-bar slots it is
 //! put on (five, ten with the expansion's bit 1, and five more a bar of the
 //! client's with the Extended page's Ability Bars: slots 10-19, the list's
 //! ten rows showing them ten at a time, `draw_slots10`).
@@ -46,14 +47,21 @@ const TARGET_WORDS: [(i32, i64); 5] = [(144, 0), (145, 1), (79, 2), (469, 3), (4
 /// `gWeaponTypeWords` (`FindWeaponTypeWord`): an equip-mask bit's word.
 const WEAPON_WORDS: [(i32, i32); 8] = [(342, 0), (343, 1), (344, 2), (345, 3), (346, 4), (348, 5), (347, 6), (339, 7)];
 
-/// The popup's four entries (`Init`): word and message.
-const POPUP: [(i32, u32); 4] = [(1016, 0x0804_0000), (200, 0x0808_0000), (1800, 0x0809_0000), (161, 0x0802_0000)];
+/// The popup's entries (`Init`'s four, and vanilla's Unmemorize before
+/// Unmemorize All): word and message.
+const POPUP: [(i32, u32); 5] =
+    [(1016, 0x0804_0000), (200, 0x0808_0000), (crate::wndlist::WORD_UNMEMORIZE, UNMEMORIZE_ONE), (1800, 0x0809_0000), (161, 0x0802_0000)];
+
+/// Unmemorize's message (ours; the game's popup has none).
+const UNMEMORIZE_ONE: u32 = 0x080A_0000;
 
 /// What the book notes where it is drawn, for a pointer: the rows by
 /// index, a tab by its place from the left (`TAB` + place), a slot (`SLOT`
 /// + slot).
 const TAB: i32 = 1000;
 const SLOT: i32 = 2000;
+/// The description's box, for the wheel (`wheel`): no row, tab or slot.
+const DESC: i32 = -2;
 
 /// `VIRec32_C97888`: a row.
 #[derive(Clone, Copy, Debug, Default)]
@@ -112,6 +120,12 @@ pub struct SpellBook {
     slots: Vec<(i64, i64, i64)>,
     text: Vec<u16>,
     desc: Vec<u16>,
+    /// The description's first line shown, and the ability it is of: R1 and R2
+    /// scroll a description longer than its four rows (the GM Jibrish's petition
+    /// 1250: "R1 moved the text up and r2 moved the text down on live"), back to
+    /// its top when another ability is selected
+    desc_top: i32,
+    desc_of: i64,
     window: Window,
     flash: KeyFlash,
     popup: MiniMenu,
@@ -141,6 +155,8 @@ impl Default for SpellBook {
             slots: Vec::new(),
             text: Vec::new(),
             desc: Vec::new(),
+            desc_top: 0,
+            desc_of: -1,
             window: Window::default(),
             flash: KeyFlash::default(),
             popup: MiniMenu::fixed(&POPUP.map(|(w, m)| (w, m, 0))),
@@ -167,6 +183,7 @@ impl SpellBook {
             };
         }
         match self.hits.at(p) {
+            Some(DESC) => Vec::new(), // the wheel's (`wheel`), not a click's
             Some(h) if h >= SLOT => {
                 let j = h - SLOT;
                 if self.mode != 2 {
@@ -342,6 +359,9 @@ impl SpellBook {
                     _ => {}
                 }
             }
+            // R1 and R2: the description up and down a line (`desc_top`)
+            142 if self.mode == 0 => self.desc_top = (self.desc_top - 1).max(0),
+            143 if self.mode == 0 => self.desc_top += 1,
             17 | 136 if self.mode == 0 => self.tab_by(-1, now, &mut out),
             18 | 137 if self.mode == 0 => self.tab_by(1, now, &mut out),
             19 | 138 => match self.mode {
@@ -416,6 +436,18 @@ impl SpellBook {
                     self.refocus(now);
                 }
             }
+            UNMEMORIZE_ONE => {
+                // Unmemorize (vanilla's; the user, 2026-11-08: "lets allow players
+                // unmemorize one spell not just all"): the selected ability off its
+                // slot, as 0x0033 at the slot it is on, which the server and CLIENT's
+                // Msg00B4 both take as its toggle off; one not memorized, nothing
+                self.popup.visible = false;
+                if let Some(a) = row.and_then(|r| abilities.get(&r.id)).filter(|a| a.valid != 0 && a.slot >= 0) {
+                    out.push(Out::Send0033(a.display_index, a.slot));
+                    out.push(Out::Sound(13));
+                }
+                self.refocus(now);
+            }
             0x0809_0000 => {
                 // Unmemorize All
                 if row.is_some() {
@@ -426,6 +458,19 @@ impl SpellBook {
             }
             _ => self.refocus(now),
         }
+    }
+
+    /// The wheel's `lines` (up positive) at frame point `p`: over the
+    /// description's box, it a line up or down for each whole line (a
+    /// player's report: only a pad's R1/R2 reached it; the keyboard has
+    /// PageUp/PageDown), held within its text as it is drawn. False off the
+    /// box (the wheel then the list's up and down).
+    pub fn wheel(&mut self, p: [f32; 2], lines: f32) -> bool {
+        if self.mode != 0 || self.popup.visible || self.hits.at(p) != Some(DESC) {
+            return false;
+        }
+        self.desc_top = (self.desc_top - lines.round() as i32).max(0);
+        true
     }
 
     /// `Pick`: the popup beside the selected row.
@@ -611,7 +656,17 @@ impl SpellBook {
         self.window.init(vui, r, [300, 270], 280, 4, 0);
         if self.mode == 0 {
             let desc = self.desc.clone();
-            self.window.text_box(vui, r, &desc, 0, 0, 280, 4, black, 2);
+            // from `desc_top` (R1/R2), held within the text: its lines counted
+            // by the same wrap undrawn (flags all set), four rows shown
+            let of = self.rows.get(self.sel.max(0) as usize).filter(|_| self.sel >= 0).map_or(-1, |row| row.id);
+            if of != self.desc_of {
+                (self.desc_of, self.desc_top) = (of, 0);
+            }
+            let (tl, br) = (self.window.top_left(), self.window.bottom_right());
+            self.hits.push([tl[0], tl[1], br[0], br[1]], DESC);
+            let lines = self.window.text_box(vui, r, &desc, 0, 0, 280, 1000, black, 0xFFFF_FFFF);
+            self.desc_top = self.desc_top.clamp(0, (lines - 4).max(0));
+            self.window.text_box(vui, r, &desc, 0, 0, 280, 4, black, 2 | ((self.desc_top as u32) << 24));
         } else if self.mode == 2 {
             let s = wide(&format!("|x {}", vui.words.get(268, vui.language)));
             self.window.text_box(vui, r, &s, 0, 0, 280, 4, black, 2);
@@ -932,6 +987,77 @@ mod tests {
         let out = b.key(&map, 1, 134, true, 0);
         assert_eq!(out, vec![Out::Word(912)]);
         assert_ne!(b.mode, 2);
+    }
+
+    /// Unmemorize (the popup's third, vanilla's): a memorized ability off its
+    /// own slot alone, as 0x0033 with its display index and that slot (the
+    /// toggle the server answers with 0x00B4); on one not memorized, nothing
+    /// (the control).
+    #[test]
+    fn unmemorize_sends_0033_for_its_own_slot() {
+        let (mut b, map) = book(&[ability(1, 7, 1, false, -1), ability(2, 9, 2, true, 3)]);
+        let unmemorize = |b: &mut SpellBook| {
+            b.key(&map, 2, 134, true, 0);
+            assert!(b.popup.visible);
+            for _ in 0..2 {
+                b.key(&map, 2, 139, true, 0);
+                if b.popup.list.flash.pulse(139) {
+                    b.popup.list.scroll(1, 0, &mut Vec::new());
+                }
+            }
+            assert_eq!(b.popup.list.sel, 2, "the popup down to Unmemorize");
+            b.key(&map, 2, 134, true, 0)
+        };
+        b.sel = 1; // the memorized one, on slot 3
+        assert_eq!(unmemorize(&mut b), vec![Out::Send0033(9, 3), Out::Sound(13)]);
+        b.sel = 0;
+        assert_eq!(unmemorize(&mut b), vec![], "not memorized: nothing");
+    }
+
+    /// R1 and R2 scroll a long description a line at a time (petition 1250),
+    /// held within its lines (ten lines, four rows: six down at most) and back
+    /// to its top on another ability; the control: a short one does not move.
+    #[test]
+    fn r1_and_r2_scroll_a_long_description() {
+        use crate::pointer::testing::{NullRaster, vui};
+        let (vui, mut r) = (vui(), NullRaster);
+        let long = (1..=10).map(|n| format!("line {n}")).collect::<Vec<_>>().join("\n");
+        let mut a = ability(1, 7, 1, false, -1);
+        a.desc = long;
+        let mut b2 = ability(2, 8, 1, false, -1);
+        b2.desc = "short".into();
+        let (mut b, map) = book(&[a, b2]);
+        b.sel = 0;
+        b.draw(&vui, &mut r, &map, 0, 1, 0);
+        for _ in 0..3 {
+            b.key(&map, 1, 143, true, 0);
+        }
+        b.draw(&vui, &mut r, &map, 0, 1, 0);
+        assert_eq!(b.desc_top, 3, "three down");
+        b.key(&map, 1, 142, true, 0);
+        b.draw(&vui, &mut r, &map, 0, 1, 0);
+        assert_eq!(b.desc_top, 2, "one up");
+        for _ in 0..20 {
+            b.key(&map, 1, 143, true, 0);
+        }
+        b.draw(&vui, &mut r, &map, 0, 1, 0);
+        assert_eq!(b.desc_top, 6, "held to its last four lines");
+        // the wheel over the box: down a line (up negative), back up; off it, nothing
+        b.desc_top = 0;
+        b.draw(&vui, &mut r, &map, 0, 1, 0);
+        assert!(b.wheel([300.0, 270.0], -2.0), "the wheel over the description");
+        b.draw(&vui, &mut r, &map, 0, 1, 0);
+        assert_eq!(b.desc_top, 2, "two down on the wheel");
+        assert!(b.wheel([300.0, 270.0], 1.0));
+        b.draw(&vui, &mut r, &map, 0, 1, 0);
+        assert_eq!(b.desc_top, 1, "one up on the wheel");
+        assert!(!b.wheel([60.0, 70.0], -1.0), "off the box the wheel is the list's");
+        b.sel = 1;
+        b.draw(&vui, &mut r, &map, 0, 1, 0);
+        assert_eq!(b.desc_top, 0, "another ability: its top");
+        b.key(&map, 1, 143, true, 0);
+        b.draw(&vui, &mut r, &map, 0, 1, 0);
+        assert_eq!(b.desc_top, 0, "the control: a short one stays");
     }
 
     /// Arrange: hold one, move, X sends 0x003A (held index, target index);

@@ -5,6 +5,51 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
+
+## 2026-11-08 · Scroll a spell description with the mouse or the keyboard
+- A spell description too long for its box now scrolls on the mouse wheel over the box, and on PageUp
+  and PageDown, as well as on a controller's R1 and R2. Over the list, the wheel still moves the
+  selection as before.
+
+## 2026-11-08 · Scroll a long spell description
+- In the spell book, R1 and R2 scroll a description too long for its box, a line at a time (R1 up, R2
+  down), as the live game did. It goes back to the top when you pick another ability.
+
+## 2026-11-08 · /bug opens the bug report, raid frames show power, unmemorize one ability
+- Typing /bug in chat now opens the bug report form (as F3 does), already set on Bug Report. Anything you
+  type after /bug is put in the form's text, so you can finish it there and send it. On a server without
+  bug reports, /bug goes to the server as before.
+- The raid list shows each member's power as a thin blue bar under their health. Each row is a little taller,
+  so a column holds 12 members (13 before) before the list starts another.
+- The spell book's menu has Unmemorize: it takes the selected ability off its bar slot and leaves the rest,
+  where Unmemorize All clears them all.
+
+## 2026-11-07 · Your combat record
+- On a server that keeps one, the start menu's Character has a new entry, Combat Record: your PvP kills,
+  deaths and assists, your kill streak and your best, the highest-level player you have killed, your last
+  kill and who last killed you, and your duels won, lost, surrendered and drawn, with the tunar your wagers
+  won and lost. Triangle (or Esc) goes back to the start menu.
+- It counts from when the server started keeping it, for each of your characters on that server. In chat,
+  /record shows yours and /record with a name anyone's.
+
+## 2026-11-07 · More races to make
+- On a server that has them (the Heirloom Test Server), character creation offers more races: the froglok,
+  hill giant, kerran, goblin, aviak, lizardman and kappa, each in the list in its alphabetical place with
+  its own description, bonuses, body and starting city. Your character stands in the arena in its own body
+  while you choose, and at character select too.
+- Such a server can also open every class to every race: every class is then lit on the class page,
+  whatever the race.
+- Nothing changes on other servers, or on a server that doesn't offer them.
+
+## 2026-11-07 · Three-letter names
+- A new character's name may be three letters long (it was four). It is still letters only, A to Z.
+  A PS2 keeps asking for four.
+
+## 2026-11-07 · Auto Attack on from the start
+- New players now start with Auto Attack on (Options, Game). With it off, the attack button
+  has to be held down to keep fighting: a tap swings once and stops, which made a first fight
+  look like a laggy server. If you already saved your options, your own choice stays; you
+  can turn it either way there as before.
 ## 2026-11-07 · The licence
 - The client's source goes under the GNU Affero General Public License (version 3 or later) in place of
   MIT, from the next build on. Nothing changes in playing it. If you hand out a changed copy or host a

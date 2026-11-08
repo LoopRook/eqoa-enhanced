@@ -133,6 +133,7 @@ mod statbox;
 mod tracker;
 mod quickchat;
 mod racelabel;
+mod record;
 mod alarm;
 mod startmenu;
 mod textlist;
