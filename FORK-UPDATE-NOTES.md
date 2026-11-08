@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-07 · Enhanced 0.4.11
+
+- Nothing changes in how you play. This release is built entirely from the public source code, including the live server connection code that earlier releases kept private. Downloads and auto-updates work as before.
+
 ## 2026-11-07 · Enhanced 0.4.10
 
 - Fixed: mod target boxes (Avoid's Modern UI Target Level, ARPG UI, Wereoxxs UI) showed "(none)" or nothing for some targets on servers that show more than 24 people and creatures, such as eqoaclassic. They now show whatever you target, and your pet and group are found the same way.
