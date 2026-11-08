@@ -238,4 +238,184 @@ None (the module is read-only). Invite/accept/leave live in `play.rs:2367-2402` 
 
 ---
 
+## effects
+
+Forge file: `effects.lua` (76 lines; singleton `0x1FAF730`, count at `+0x2C170`, 8 entries).
+
+### Surface
+
+`max_effects` (= 8), `GetCount()`, `GetIconRef(index)`, `GetName(index)`, `GetEffect(index)`
+({index, icon_ref, name}), `All()` iterator. 6 public entries.
+
+### Where the data is
+
+The native store is `net::dump::Effects` (`crates/net/src/dump.rs:201-206`: `count`, `icon: [u32; 8]`,
+`name: [Vec<u16>; 8]`), filled by `read_effects` (`dump.rs:213-240`, which mirrors
+`VIClient::Channel43` and clamps the count to 8, `dump.rs:218`).
+
+| Forge | Native source | Adapter today | Availability | Event source | Status |
+|---|---|---|---|---|---|
+| `max_effects` | clamp of 8 (`dump.rs:218`, `effects.lua:10`) | `effects.rs:43` | n/a | n/a | REAL |
+| `GetCount` | `self.effects.count` (`dump.rs:203`) | `effects.rs:46-56` over `snap.effects`, which `play.rs:733` sets to `EffectsSnapshot::default()` | in world, but always empty | state channel 0x43 (`play.rs:2713`) | PLACEHOLDER: 0 always, even with buffs up |
+| `GetIconRef` | `self.effects.icon[i]` (`dump.rs:204`) | `effects.rs:58-73` | as above | channel 0x43 | PLACEHOLDER (nil) |
+| `GetName` | `self.effects.name[i]` UTF-16 (`dump.rs:205`) | `effects.rs:75-90` | as above | channel 0x43 | PLACEHOLDER (nil) |
+| `GetEffect` | both of the above | `effects.rs:92-112` | as above | channel 0x43 | PLACEHOLDER (nil) |
+| `All` | iteration over the count | `effects.rs:114-140` | as above | channel 0x43 | PLACEHOLDER (empty) |
+
+The native client does use the data: the HUD's effect bar is drawn from `self.effects` at
+`play.rs:8196` (`fork_hud::draw_active_effects`), and the start menu's status page lists the names at
+`play.rs:5439` (`startmenu.rs:502-503`). So this is a wiring gap only: `forge_snapshot` never copies
+`self.effects` into `EffectsSnapshot`, although `fork_ext/play.rs:93-98` already hands `self.effects`
+to the icon prefetcher.
+
+### Actions
+
+None.
+
+### Notes
+
+- The module's own tests pass because they inject `EffectsSnapshot` by hand
+  (`effects.rs:191-243`, `wereoxxs_test.rs:58`), which is exactly the kind of fake the plan forbids
+  for round 5. Compare the audit line "effects from real data" in `docs/plans/EQOA-MOD-API-PLAN.md:116`.
+- `EffectsSnapshot::name` is 32 bytes (`effects.rs:12`) where the game's field is up to 31 wide
+  characters (`dump.rs:208-209`), so the copy will need truncation, not truncation-by-bytes.
+
+---
+
+## ability
+
+Forge file: `ability.lua` (181 lines; `Ability` record stride `0x1D8`, index 0 a sentinel).
+
+### Surface
+
+Module: `Scope` {SELF, TARGET, GROUP, PET, CORPSE, UNKNOWN}, `size` (0x1D8), `Ability.new(address)`, and
+18 instance methods: `IsValid`, `GetId`, `GetDisplayIndex`, `GetSpellbookSlot`, `GetLevel`,
+`GetRange`, `GetCastTime`, `GetPwrCost`, `GetIconBackgroundRef`, `GetIconForegroundRef`, `GetScope`,
+`GetCooldown`, `GetEquipRequirements`, `IsOnCooldown`, `GetCooldownLockoutMs`, `IsInRange(a, b)`,
+`GetName`, `GetDescription`. 21 public entries.
+
+### Where the data is
+
+Native record: `net::dump::Ability` (`crates/net/src/dump.rs:150-171`), read by `read_ability`
+(`dump.rs:451`) from 0x00B3 (`session.rs:1639-1643`), stored by id in `self.abilities`
+(`play.rs:2597`).
+
+| Forge | Native source | Adapter today | Availability | Event source | Status |
+|---|---|---|---|---|---|
+| `Scope`, `size` | enum values, record stride | `ability.rs:379-387` | n/a | n/a | REAL |
+| `Ability.new` | — | not defined | — | — | MISSING: `require("frontiers_forge.ability").new` is nil; objects come from `ability_list`/`ability_bar` |
+| the 18 methods | `Ability` fields (`dump.rs:152-171`) | `create_ability_object` (`ability.rs:197-343`); `IsInRange` at `:273-320` | only on objects produced by ability_list / ability_bar | 0x00B3, 0x00CD | REAL — but each object is a **copy frozen at creation** (`ability.rs:200-341` capture values by value), so `IsOnCooldown` does not update; Forge's object re-reads memory every call |
+| `IsInRange` | scope + range (`dump.rs:160`, `165`) | `ability.rs:273-320` (tolerates the method-call extra argument) | objects | n/a | REAL |
+| icons | `icon_back` / `icon_front` (`dump.rs:163-164`) | `ability.rs:235-245` | in world | 0x00B3 | REAL |
+
+### Actions
+
+None. The use-an-ability action is `Play::hud_key` -> `send_0032` (`play.rs:7053`, `6785-6794`,
+sends 0x0032 with the slot) and `Play::ability_slot` (`play.rs:6764`) for placing one. No mod path
+today; that is the round-4 actions API.
+
+### Notes
+
+- `GetCooldown` is the recast in seconds, `GetCooldownLockoutMs` the live lockout, both straight from
+  `dump.rs:157`/`dump.rs:166`. Forge's doc comment (that lockout is a constant, not a countdown) holds
+  here too: the native field is only written by 0x00CD (`play.rs:2684-2691`).
+- A Forge mod that held an `Ability` object across a cooldown will now see a stale one; document
+  "re-fetch by id/display index" in the spec.
+
+---
+
+## ability_list
+
+Forge file: `ability_list.lua` (791 lines; records in the client singleton at `[0x4E37F0]+0x2BB30`,
+count at `+0x2BB28`, tree root `+0x2BB34`).
+
+### Surface
+
+Queries: `GetCount`, `GetAbilityByIndex`, `Abilities()` (in-order tree = id-sorted), `GetAbilityById`,
+`GetAbilityByDisplayIndex`.
+Hook lifecycle: `IsHookInstalled`, `InstallHook`, `UninstallHook`, `GetHookInfo`, `GetDroppedCount`,
+`Acquire(owner)`, `Release(owner)`, `GetOwnerCount`, `HasClaim(owner)`.
+Events: `Events` {OnLockoutStart, OnLockoutEnd}, `On(owner, event, fn)`, `Off`, `GetSubscriberErrors`,
+`Update()`. 19 public entries.
+
+### Where the data is
+
+`self.abilities: BTreeMap<i64, Ability>` keyed by ability id (`play.rs:2597` insert, `play.rs:154`
+comment), snapshot built at `play.rs:467-665`.
+
+| Forge | Native source | Adapter today | Availability | Event source | Status |
+|---|---|---|---|---|---|
+| `GetCount` | `self.abilities.len()` (all valid records) | `ability.rs:441-451` | in world | 0x00B3 / 0x00B8 / 0x00FF | REAL |
+| `GetAbilityByIndex` | snapshot array | `ability.rs:453-469` (1-based, nil when invalid) | in world | above | REAL, with a divergence: the index is the snapshot's position, not the game's raw array/tree index |
+| `Abilities` | snapshot order | `ability.rs:507-533` | in world | above | REAL but **not id-sorted**: the snapshot keeps `BTreeMap` id order (`play.rs:471`), so it happens to be id order, unlike Forge's tree walk; do not promise "tree order" in the spec |
+| `GetAbilityById` | map key | `ability.rs:471-487` | in world | above | REAL |
+| `GetAbilityByDisplayIndex` | `Ability::display_index` (`dump.rs:154`) | `ability.rs:489-505` | in world | 0x00B6 reindexes (`play.rs:2636-2657`) | REAL |
+| lockout fields | `Ability::lockout` (`dump.rs:157`) | `play.rs:508`, `ability.rs:262-271` | in world | 0x00CD (`play.rs:2684-2691`) | REAL |
+| `OnLockoutStart` / `OnLockoutEnd` | `record_lockout` fed unconditionally from the 0x00CD arm (`play.rs:11-14`, `2686`) into a thread-local ring (`ability.rs:33-68`) | `Update` drains it per VM (`ability.rs:698-788`) | in world | 0x00CD | REAL (the one event stream in this part that is complete) |
+| `Acquire`, `Release`, `GetOwnerCount`, `HasClaim` | claim set only | `ability.rs:586-633` | any time | n/a | REAL (bookkeeping only; the capture does not depend on it) |
+| `IsHookInstalled` | capture is always live | `ability.rs:536-543`: true when in game or claimed | in world | n/a | PLACEHOLDER (reports a hook that does not exist; semantically harmless) |
+| `InstallHook` | n/a | `ability.rs:544-554`: seeds the cache, returns true | any time | n/a | PLACEHOLDER (no-op success; "seed" is real work) |
+| `UninstallHook` | n/a | `ability.rs:555-564`: clears seeded, returns true | any time | n/a | PLACEHOLDER (no-op success; the stream keeps flowing) |
+| `GetHookInfo` | n/a | `ability.rs:565-577`: `installed = true` | any time | n/a | PLACEHOLDER (`installed` invented) |
+| `GetDroppedCount` | ring overrun counter | `ability.rs:578-584` | any time | n/a | REAL (a real count, though only a lagging VM can raise it, `ability.rs:717-719`) |
+
+### Actions
+
+None. Casting is `send_0032` (see above).
+
+### Notes
+
+- The engine's own 0xCD handler updates the record *and* calls the fork hook in the same arm
+  (`play.rs:2684-2691`), so the lockout edge is never lost to a frame boundary. That is a genuine
+  improvement over Forge's code cave and the model `eqoa.cooldowns` should copy.
+- `IsHookSuspended` is a native extra (not in Forge): `ability.rs:635-643`.
+
+---
+
+## ability_bar
+
+Forge file: `ability_bar.lua` (273 lines; 3 bars, 5 slots per bar, slot stride `0x20`).
+
+### Surface
+
+Bar: `num_bars` (3), `slot_size` (0x20), `GetSelectedBarIndex`, `GetSelectedSlotIndex(bar)`,
+`GetSlotUITexId(slot)`, `GetSlotCount(bar)`, `GetAbilitySlot(bar, slot)`, `GetAbility(bar, slot)`,
+`GetItem(bar, slot)`.
+Slot object: `IsEmpty`, `GetAbilityIndex`, `GetAbility`, `GetItemIndex`, `GetItem`, `GetIconRef`.
+15 public entries.
+
+### Where the data is
+
+Native: `crate::hudmenu` — `Entry` (`crates/eqoa/src/hudmenu.rs:32-46`: `msg` source tag, `id`),
+`MenuDef` (`hudmenu.rs:48-53`: `count`, `entries`), `HudMenus` (`hudmenu.rs:286-287`: `sel`, `menus`,
+`defs`). The snapshot is built at `play.rs:557-606`.
+
+| Forge | Native source | Adapter today | Availability | Event source | Status |
+|---|---|---|---|---|---|
+| `num_bars`, `slot_size` | 3 bars, 5 slots (`play.rs:561-569`) | `ability.rs:798-799` | n/a | n/a | REAL |
+| `GetSelectedBarIndex` | `self.hud_menus.sel` (`hudmenu.rs:287`), snapshot clamps to 0..2 (`play.rs:559`) | `ability.rs:803-817` (nil out of game) | in world | HUD key path (`play.rs:7062`) | REAL for bars 1-3; when the carousel is on the items or the weapon sets the value is clamped, so it can name a bar that is not the one up |
+| `GetSelectedSlotIndex` | `self.hud_menus.menus[b].sel` (`hudmenu.rs:126`), `play.rs:564` | `ability.rs:819-839` | in world | key path | REAL |
+| `GetSlotCount` | `defs[b].count` (`hudmenu.rs:51`), `play.rs:563` | `ability.rs:841-859` | in world | `hudmenu::build` (`hudmenu.rs:314`) | REAL |
+| `GetSlotUITexId` | the disc's `sSlotIcons` table (`hudmenu.rs:57-58`, `[5,5,3,2]`) | `ability.rs:861-874` hardcodes `[5,5,3,2,0]` | in world | n/a | PLACEHOLDER for slot 4 (0) and a duplicated constant; slots 0-3 match (`hudmenu.rs:57`) |
+| `GetAbilitySlot`, `GetAbility` | entry source tag 0x8060000 + raw index (`play.rs:570-581`) | `ability.rs:961-1017` | in world | `hudmenu::build` | REAL |
+| `GetItem`, slot `GetItem` | tag 0x2030000 + item record index (`play.rs:582-590`) over `dump.inventory.items` (`play.rs:519-555`) | `ability.rs:1019-1045`, `929-950` | in world, item slots only | inventory events (`play.rs:2415-2452`) | REAL |
+| `IsEmpty`, `GetAbilityIndex`, `GetItemIndex`, `GetIconRef` | `Entry::msg`/`id` and the slot's icon | `ability.rs:877-958` | in world | `hudmenu::build` | REAL |
+
+### Actions
+
+None in the module, but the slot is the handle a mod would use: the native use path is
+`hud_key` -> `send_0032(id)` for an ability and `use_item(id, 1)` for an item (`play.rs:7065-7067`,
+`5485-5490`). Both are one call away from the snapshot data and should be the round-4 action surface.
+
+### Notes
+
+- `ItemSnapshot::slot_id` is filled as `k + 1` and `populated` is true for every inventory entry
+  (`play.rs:546-554`), so `GetSlotId()` is an index, not the item's own slot field; a mod comparing it
+  to a Forge slot id will be off. The Forge slot object only exposes `GetName`, `GetDescription`,
+  `GetIconRef`, so this is invisible to existing mods.
+- Bars 3 and 4 (menus 4 and 5, `hudmenu.rs:69-76`) exist natively but not in this module's 3.
+
+---
+
 <!-- continued in the next section -->
+
