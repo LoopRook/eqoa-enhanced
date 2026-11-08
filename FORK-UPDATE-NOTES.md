@@ -2,6 +2,13 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-08 · Enhanced 0.4.13
+
+- New from the vanilla client: texture packs made for PCSX2 work here as they are. Put the pack's files in `%APPDATA%\eqoa-rs\textures\SLUS-20744\replacements` (made for you the first time), then turn on Options > Extended > Textures > Texture Packs.
+- Dump Textures, on the same page, saves each texture the game draws to `textures\SLUS-20744\dumps` under PCSX2's names, so a pack you make from them works in PCSX2 too.
+- Both are off until you turn them on, and the game looks exactly as before.
+- On servers with their own races, the races past the game's original twenty (such as Orc, Kobold or Gargoyle on the Heirloom server) now offer every class the server allows at character creation; before, they showed no class to pick.
+
 ## 2026-11-08 · Enhanced 0.4.12
 
 - New from the vanilla client, on servers that have them: a Combat Record under Start > Character (your PvP kills, deaths, streaks and duels; /record in chat), and more races to make at character creation, with every class open to every race where the server allows it.
