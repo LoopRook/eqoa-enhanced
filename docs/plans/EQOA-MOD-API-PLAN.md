@@ -142,6 +142,14 @@ do not overlap.
   to point here.
 - The owner approves the release that freezes `eqoa/1`.
 
+### Optional: offer the hooks upstream (owner's call)
+
+After round 2, when the core hooks have settled: a worker makes a branch from `origin/master` with
+only the hooks (no Lua, no mods) and their tests. It writes a short PR description that gives each
+hook's use inside the vanilla client, then runs the vanilla test suite. The owner decides whether to
+open the PR (it goes out under their name). Each hook upstream accepts drops out of our footprint
+and out of future sync conflicts.
+
 ## Results
 
 (One short entry per round: date, branch and merge commit, verdict, owner test result.)
