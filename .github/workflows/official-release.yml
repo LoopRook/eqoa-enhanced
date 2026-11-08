@@ -1,0 +1,113 @@
+name: Official release
+
+# Builds, tests and publishes the official Windows release from an immutable
+# vX.Y.Z tag on enhanced. Players follow releases/latest/download/ (update.txt).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing immutable version tag (vX.Y.Z)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: official-build-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    if: github.repository == 'LoopRook/eqoa-enhanced'
+    runs-on: windows-2022
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      commit: ${{ steps.source.outputs.commit }}
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Canonical Windows scratch directories
+        shell: pwsh
+        run: |
+          $canonicalTemp = (python -c "import os; print(os.path.realpath(os.environ['RUNNER_TEMP']))").Trim()
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $canonicalTemp -PathType Container)) { throw 'Cannot resolve runner temporary directory' }
+          foreach ($name in @('TMPDIR', 'TEMP', 'TMP')) { "$name=$canonicalTemp" >> $env:GITHUB_ENV }
+      - name: Validate the immutable version tag
+        id: source
+        shell: pwsh
+        run: |
+          python -X utf8 tools/official_release.py preflight --tag $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { throw 'Release preflight failed' }
+          "EQOA_UPDATE_CHANNEL=enhanced" >> $env:GITHUB_ENV
+          "EQOA_BUILD_COMMIT=$((git rev-parse HEAD).Trim())" >> $env:GITHUB_ENV
+      - name: Fetch reviewed upstream policy base
+        shell: pwsh
+        run: |
+          $base = (Get-Content docs/fork-footprint.json -Raw | ConvertFrom-Json).reviewed_base
+          git fetch --no-tags https://github.com/DabDavis/eqoa-rust-client-vanilla.git $base
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch reviewed upstream base' }
+          git update-ref refs/remotes/origin/master $base
+      - name: Install toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Check fork integration policy
+        run: python -X utf8 tools/check_fork_footprint.py
+      - name: Test release tooling
+        run: python -X utf8 -m unittest discover -s tools -p "test_*.py"
+      - name: Test workspace
+        shell: pwsh
+        env:
+          EQOA_CONFIG: ${{ runner.temp }}/eqoa-release-config
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:EQOA_CONFIG | Out-Null
+          cargo +1.99.1 test --locked --workspace --target x86_64-pc-windows-msvc -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'Workspace tests failed' }
+      - name: Build official Windows client
+        run: cargo +1.99.1 build --release --locked -p eqoa --target x86_64-pc-windows-msvc
+      - name: Package exact runtime allowlist
+        run: python -X utf8 tools/build_player_release.py --executable target/x86_64-pc-windows-msvc/release/eqoa.exe --output run/player-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: official-runtime
+          path: run/player-release/*
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: windows
+    if: github.repository == 'LoopRook/eqoa-enhanced'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: official-release-publication
+      cancel-in-progress: false
+    env:
+      RELEASE_TAG: ${{ needs.windows.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.windows.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: official-runtime
+          path: ${{ runner.temp }}/official-runtime
+      - name: Verify and publish the complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 tools/official_release.py publish --tag "$RELEASE_TAG" --assets "$RUNNER_TEMP/official-runtime"

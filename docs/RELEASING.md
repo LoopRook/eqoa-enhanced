@@ -1,32 +1,39 @@
 # Versioned Enhanced releases
 
-**Publication migration:** [PRIVATE-BUILDS.md](PRIVATE-BUILDS.md) supersedes the
-same-repository build/publish steps below. Official assets are built from the
-complete private fork and uploaded to this public repository. Public CI only
-checks source; public and private version tags identify different commits.
-Follow that document's activation checklist and release runbook. The asset
-contract and immutable-version requirements below remain in effect.
+Official releases are built and published by this repository's
+`.github/workflows/official-release.yml` from an immutable `vX.Y.Z` tag on
+`enhanced`, with the repository's own `GITHUB_TOKEN`. Version tags exist only in
+this repository. Until 0.4.10 official builds came from the retired private
+repository (see [PRIVATE-BUILDS.md](PRIVATE-BUILDS.md)); 0.4.11 is the first
+built from public source.
 
 Players download one Windows ZIP and double-click eqoa.exe. Release builds follow
 https://github.com/LoopRook/eqoa-enhanced/releases/latest/download/; plain local
 builds have no channel. Never point enhanced builds at the upstream vanilla release.
+The updater reads `update.txt` there and offers an update when its commit differs
+from the commit compiled into the running build.
 
 ## Publish
 
-1. Merge reviewed upstream work into enhanced, preserving fork features. Run the
-   footprint checker, relevant tests and native/browser builds; record fixture skips.
-2. Bump VERSION using MAJOR.MINOR.PATCH. Update the player download link and add
-   docs/releases/<version>.md plus FORK-UPDATE-NOTES.md entries. Use patch increments
-   for fixes and minor increments for substantial additions; major0 is early development.
-3. Commit and push tested enhanced. Create and push the matching immutable v<version>
-   tag. The Enhanced versioned release workflow builds Windows x64, runs tests,
-   stamps channel enhanced/exact commit, and packages only the allowed runtime files.
-4. CI verifies the source, PE x64 GUI/8MiB stack, embedded commit/fork URL, catalog,
-   complete ZIP, hashes and update.txt before publishing. A draft becomes latest
-   only after all assets are uploaded. Published versions cannot be overwritten;
-   subsequent versions must increase numerically. A failed draft can be retried.
-5. Check the public ZIP download, checksums, update.txt and notes. Test direct EXE
-   launch/catalog loading and the local updater fixture. Record CI/source hashes.
+1. Integrate on `develop`; run the footprint checker,
+   `cargo test --locked --workspace -- --test-threads=1` and
+   `cargo build --release --locked -p eqoa`; record fixture skips.
+2. Bump VERSION using MAJOR.MINOR.PATCH. Add docs/releases/<version>.md and a
+   FORK-UPDATE-NOTES.md entry. Patch increments for fixes, minor for substantial
+   additions; major 0 is early development.
+3. With the owner's go-ahead, merge `develop` into `enhanced`, push it, then
+   create and push the matching `v<version>` tag on that `enhanced` commit.
+4. The tag starts Official release. The `windows` job (read-only) checks that
+   the tag matches VERSION, is on `enhanced` and has release notes, runs the
+   footprint check, tooling and workspace tests, builds Windows x64 with channel
+   `enhanced` and the exact commit stamped in, and packages only the allowed
+   runtime files. The `publish` job (the only one with `contents: write`)
+   verifies the assets, creates a draft, uploads, downloads and re-verifies every
+   byte, re-checks the tag, and only then marks the release latest. Published
+   versions cannot be overwritten and each version must exceed every published
+   one. A failed draft can be retried.
+5. Check the public ZIP download, SHA256SUMS, update.txt and notes anonymously,
+   and an update from the previous release in game.
 
 ## Assets
 
@@ -34,25 +41,22 @@ builds have no channel. Never point enhanced builds at the upstream vanilla rele
   required license notices, short README and provenance manifest. No BAT, source,
   developer tools, profile/account files or game disc data.
 - eqoa-enhanced-windows-x86_64.exe: raw updater payload, identical to the ZIP's EXE.
-- update.txt: semantic version, source commit, payload SHA256 and byte length.
+- update.txt: three lines: semantic version, source commit, and the payload's
+  platform, name, SHA256 and byte length.
 - update-notes.md: FORK-UPDATE-NOTES.md, matching the notes compiled into this build.
 - SHA256SUMS: checksums for the four assets above.
 
-The platform currently published by this workflow is Windows x64. Other platforms
-still build from source but need their own verified runtime packages before being
-added to the updater manifest. Upstream master/dev workflows remain unchanged and
-must not be used to publish this fork. The companion parser is optional/separate.
-Existing license terms/notices remain unchanged; no alternative license was chosen.
+The platform currently published is Windows x64. Other platforms still build
+from source but need their own verified runtime packages before being added to
+the updater manifest. Upstream master/dev workflows must not publish this fork;
+`dev.yml` and `notes.yml` run only in the upstream repository, and the old
+`enhanced-release.yml` stays inert. `public-source.yml` checks every push, pull
+request and tag without publishing anything.
 
 ## Retry an existing tag after a CI environment fix
 
-Never move the tag. Commit the workflow-only fix to enhanced, then use Enhanced
-versioned release's Run workflow with the existing tag (for example, v0.1.0).
-The workflow definition comes from the selected branch, but source checkout,
-version/ancestry verification, build metadata and publication all use the actual
-immutable tag commit. A game-code change requires a new release version instead.
-
-The initial0.1.0tag run exposed a Windows short-path/long-path fixture mismatch.
-Canonical runner temporary directories allow its unchanged test to run correctly;
-future test code also compares directory identity rather than spelling. Both the
-original failure and the successful recovery run remain part of the audit trail.
+Never move the tag. Commit the workflow-only fix to `enhanced`, then run
+Official release manually with the existing tag (for example, v0.4.11). The
+workflow definition comes from the selected branch, but the checkout, version
+and ancestry checks, build stamp and publication all use the tag's commit. A
+game-code change needs a new version instead.

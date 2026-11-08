@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "reviewed_base": "eb5916bfd25053dcc047c3a050a2529577842306",
-  "review_state": "Upstream sync 2026-11-07 through eb5916b (AGPL relicence). Re-based from b8e02cd; render/ui.rs takes upstream's text/text_scaled (+86/-3); NOTICE added as a shared path; bindpage/binds/hud/options/play raised to measured for the union with upstream's raid list, chat selection, macro keys and bug-report offer. Cargo manifests now carry upstream's AGPL-3.0-or-later. 2026-11-07 private repo retired: the live shard compatibility code (session.rs client check, s2.rs device-block signature, net sha2) is now public source.",
+  "review_state": "Upstream sync 2026-11-07 through eb5916b (AGPL relicence). Re-based from b8e02cd; render/ui.rs takes upstream's text/text_scaled (+86/-3); NOTICE added as a shared path; bindpage/binds/hud/options/play raised to measured for the union with upstream's raid list, chat selection, macro keys and bug-report offer. Cargo manifests now carry upstream's AGPL-3.0-or-later. 2026-11-07 private repo retired: the live shard compatibility code (session.rs client check, s2.rs device-block signature, net sha2) is now public source. Official releases build and publish from this repository's tags (official-release.yml).",
   "fork_owned": [
     "AGENTS.md",
     ".gitattributes",
@@ -50,7 +50,10 @@
     "tools/test_release_workflows.py",
     ".github/workflows/dev.yml",
     ".github/workflows/notes.yml",
-    ".github/workflows/public-source.yml"
+    ".github/workflows/public-source.yml",
+    ".github/workflows/official-release.yml",
+    "tools/official_release.py",
+    "tools/test_official_release.py"
   ],
   "shared": {
     ".gitignore": {

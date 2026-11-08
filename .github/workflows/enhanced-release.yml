@@ -13,4 +13,4 @@ jobs:
     if: ${{ false }}
     runs-on: ubuntu-24.04
     steps:
-      - run: echo "Official assets are published from the private repository."
+      - run: echo "Official assets are published by official-release.yml."

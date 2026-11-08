@@ -1,6 +1,6 @@
 name: Enhanced public source checks
 
-# Official player assets are built and published by the private repository.
+# Official player assets are built and published by official-release.yml.
 # This workflow deliberately has no channel stamp, release writes or artifacts.
 on:
   push:

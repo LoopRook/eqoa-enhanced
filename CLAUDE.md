@@ -98,7 +98,7 @@ section there before changing a ported system (anything under `crates/vi`, `ee`,
 
 - Scope: `FORK.md` and the owner's decisions replace the "Vanilla" rule.
 - Identity: commits are LoopRook's.
-- Releases: versioned tags on `enhanced` through `enhanced-release.yml` (`docs/RELEASING.md`);
+- Releases: versioned tags on `enhanced` through `official-release.yml` (`docs/RELEASING.md`);
   upstream's `dev.yml`/`dev` release is not used.
 - Notes: player notes go in `FORK-UPDATE-NOTES.md`; `UPDATE-NOTES.md` stays upstream's.
 - Reports: F3/HUD and crash offers save locally through fork_ext/report_core.rs.

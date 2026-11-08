@@ -1,5 +1,5 @@
 # Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
-"""The public fork validates source but never publishes official client bytes."""
+"""Source CI never publishes; only official-release.yml publishes official client bytes."""
 from pathlib import Path
 import re
 import unittest
