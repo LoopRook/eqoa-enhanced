@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-07 · Enhanced 0.4.10
+
+- Fixed: mod target boxes (Avoid's Modern UI Target Level, ARPG UI, Wereoxxs UI) showed "(none)" or nothing for some targets on servers that show more than 24 people and creatures, such as eqoaclassic. They now show whatever you target, and your pet and group are found the same way.
+
 ## 2026-11-07 · Enhanced 0.4.9
 
 - New from the vanilla client: in a raid group on a server that has them, the group's bars become a raid list of everyone in it. Click a name to target that member. Turn it off in Options > Extended > Map & Quests > Raid List.
