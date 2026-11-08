@@ -32,6 +32,7 @@ struct Subscription {
     callback: Function,
     once: bool,
     deadline: Option<Instant>,
+    not_before: u64,
 }
 pub(crate) struct Bus {
     pub vm: u64,
@@ -41,9 +42,13 @@ pub(crate) struct Bus {
     pub once_mode: bool,
     pub initialized: bool,
     last_render: Option<Instant>,
+    last_settings: Option<Instant>,
     pub received: u64,
     pub dropped: u64,
     combat_total: u64,
+    stream_counts: std::collections::BTreeMap<String, u64>,
+    resources: Vec<(Event, mlua::Table)>,
+    boundary: u64,
 }
 type Shared = Rc<RefCell<Bus>>;
 pub(crate) fn bus(lua: &mlua::Lua) -> Shared {
@@ -96,6 +101,72 @@ const EVENTS: &[&str] = &[
     "resource.ready",
     "resource.failed",
 ];
+fn install_event_fields(lua: &mlua::Lua) {
+    for (name, fields) in [
+        ("render", "dt"),
+        ("settings.render", "dt"),
+        ("timer", "token"),
+        ("world.leaving", "reason world_id"),
+        ("world.entered", "world_id initial"),
+        ("state.reset", "in_world initial"),
+        ("player.changed", "before after changed"),
+        ("target.changed", "before after"),
+        ("entity.added", "ref before after changed"),
+        ("entity.changed", "ref before after changed"),
+        ("entity.removed", "ref before after changed"),
+        ("group.changed", "before after changed"),
+        ("abilities.changed", "before after changed"),
+        ("hotbar.changed", "before after changed"),
+        ("effects.changed", "before after changed"),
+        ("cooldown.started", "ability ability_id display_key lockout"),
+        ("cooldown.updated", "ability ability_id display_key lockout"),
+        ("cooldown.ended", "ability ability_id display_key lockout"),
+        (
+            "chat.message",
+            "seq time text color channel channel_code sender outgoing",
+        ),
+        ("chat.history_scroll", "active steps"),
+        (
+            "combat.hit",
+            "attacker_id defender_id amount kind color outgoing incoming from_pet to_pet",
+        ),
+        ("input.key", "key down repeat synthetic"),
+        ("input.pad", "before after"),
+        ("resource.ready", "kind handle error"),
+        ("resource.failed", "kind handle error"),
+        ("events.dropped", "first_seq last_seq count streams"),
+    ] {
+        for field in fields.split_whitespace() {
+            super::native::describe(
+                lua,
+                &format!("eqoa.events.{name}.data.{field}"),
+                "supported",
+                Some(2),
+                "",
+            );
+        }
+    }
+    for (round, names) in [
+        (
+            3,
+            "inventory.changed bank.changed loot.changed merchant.changed",
+        ),
+        (
+            4,
+            "quests.changed camera.changed windows.changed map.changed mastery.changed action.result",
+        ),
+    ] {
+        for name in names.split_whitespace() {
+            super::native::describe(
+                lua,
+                &format!("eqoa.events.{name}"),
+                "not_yet",
+                Some(round),
+                "scheduled for a later round",
+            );
+        }
+    }
+}
 pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
     let lua = &host.lua;
     let vm = NEXT_VM.with(|id| {
@@ -115,9 +186,13 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
         once_mode,
         initialized: false,
         last_render: None,
+        last_settings: None,
         received: 0,
         dropped: 0,
         combat_total,
+        stream_counts: CORE.with(|c| c.borrow().stream_counts.clone()),
+        resources: Vec::new(),
+        boundary: 0,
     })));
     for name in EVENTS {
         super::native::describe(
@@ -129,6 +204,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
         );
     }
     for (name, once) in [("on", false), ("once", true)] {
+        install_event_fields(lua);
         bind(
             lua,
             "events",
@@ -136,7 +212,12 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
             lua.create_function(move |lua, (name, callback): (String, Function)| {
                 let symbol = format!("eqoa.events.{name}");
                 if !EVENTS.contains(&name.as_str()) {
-                    return error(lua, &symbol, "not_yet", "event source is not implemented");
+                    return error(
+                        lua,
+                        &symbol,
+                        super::native::status(lua, &symbol).unwrap_or("unknown_symbol"),
+                        "event source is not implemented",
+                    );
                 }
                 if name == "render" && !bus(lua).borrow().once_mode {
                     return error(
@@ -156,6 +237,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
                     callback,
                     once,
                     deadline: None,
+                    not_before: 0,
                 });
                 lua.pack_multi((lua.create_userdata(t)?, Value::Nil))
             })?,
@@ -208,12 +290,14 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
                 return error(lua, "eqoa.events.after", "quota", "128 subscription limit");
             }
             let t = token(lua, "event");
+            let not_before = bus(lua).borrow().boundary + 1;
             bus(lua).borrow_mut().subscriptions.push(Subscription {
                 token: t.clone(),
                 name: "timer".into(),
                 callback,
                 once: true,
                 deadline: Some(deadline),
+                not_before,
             });
             lua.pack_multi((lua.create_userdata(t)?, Value::Nil))
         })?,
@@ -238,7 +322,8 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
     let lua = &host.lua;
     let shared = bus(lua);
     let cursor = shared.borrow().cursor;
-    let (events, last, total) = CORE.with(|c| {
+    shared.borrow_mut().boundary += 1;
+    let (mut events, last, total, counts) = CORE.with(|c| {
         let c = c.borrow();
         (
             c.events
@@ -248,8 +333,53 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
                 .collect::<Vec<_>>(),
             c.seq,
             c.combat_total,
+            c.stream_counts.clone(),
         )
     });
+    if events.len() > 256 {
+        events.drain(..events.len() - 256);
+    }
+    let delivered = events.iter().fold(
+        std::collections::BTreeMap::<String, u64>::new(),
+        |mut counts, e| {
+            *counts.entry(e.name.clone()).or_default() += 1;
+            counts
+        },
+    );
+    let mut lost = 0;
+    let mut streams = Vec::new();
+    for (stream, total) in &counts {
+        let previous = shared
+            .borrow()
+            .stream_counts
+            .get(stream)
+            .copied()
+            .unwrap_or(0);
+        let count = total
+            .saturating_sub(previous)
+            .saturating_sub(delivered.get(stream).copied().unwrap_or(0));
+        if count > 0 {
+            lost += count;
+            streams.push(stream.clone());
+        }
+    }
+    shared.borrow_mut().stream_counts = counts;
+    if lost > 0 {
+        deliver(
+            lua,
+            &local(
+                "events.dropped",
+                json!({"first_seq":cursor+1,"last_seq":events.first().map_or(last,|e|e.seq.saturating_sub(1)),"count":lost,"streams":streams}),
+            ),
+            None,
+        )?;
+        let world = CORE.with(|c| c.borrow().view.in_world);
+        deliver(
+            lua,
+            &local("state.reset", json!({"in_world":world,"initial":false})),
+            None,
+        )?;
+    }
     {
         let mut b = shared.borrow_mut();
         b.cursor = last;
@@ -258,14 +388,24 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
         b.dropped += total.saturating_sub(b.combat_total).saturating_sub(hits);
         b.combat_total = total;
     }
-    for e in events {
-        deliver(lua, &e, None)?;
+    let mut merged = events.into_iter().map(|e| (e, None)).collect::<Vec<_>>();
+    merged.extend(
+        std::mem::take(&mut shared.borrow_mut().resources)
+            .into_iter()
+            .map(|(e, data)| (e, Some(data))),
+    );
+    merged.sort_by_key(|(e, _)| e.seq);
+    for (e, data) in merged {
+        deliver_data(lua, &e, None, data)?;
     }
     let due = shared
         .borrow()
         .subscriptions
         .iter()
-        .filter(|s| s.deadline.is_some_and(|d| Instant::now() >= d))
+        .filter(|s| {
+            s.deadline.is_some_and(|d| Instant::now() >= d)
+                && s.not_before <= shared.borrow().boundary
+        })
         .map(|s| s.token.clone())
         .collect::<Vec<_>>();
     for t in due {
@@ -279,10 +419,12 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
 }
 fn local(name: &str, data: serde_json::Value) -> Event {
     CORE.with(|c| {
-        let c = c.borrow();
+        let mut c = c.borrow_mut();
+        c.seq += 1;
         Event {
             name: name.into(),
             data,
+            bytes: 0,
             seq: c.seq,
             time: super::native_core::time_unborrowed(&c),
             tick: c.tick,
@@ -306,6 +448,14 @@ fn envelope(lua: &mlua::Lua, e: &Event) -> Result<mlua::Table> {
     Ok(table)
 }
 fn deliver(lua: &mlua::Lua, e: &Event, only: Option<&Token>) -> Result<()> {
+    deliver_data(lua, e, only, None)
+}
+fn deliver_data(
+    lua: &mlua::Lua,
+    e: &Event,
+    only: Option<&Token>,
+    data: Option<mlua::Table>,
+) -> Result<()> {
     let shared = bus(lua);
     let candidates = shared
         .borrow()
@@ -327,7 +477,11 @@ fn deliver(lua: &mlua::Lua, e: &Event, only: Option<&Token>) -> Result<()> {
             }
             callback
         };
-        if let Err(err) = call.call::<()>(envelope(lua, e)?) {
+        let event = envelope(lua, e)?;
+        if let Some(data) = &data {
+            event.set("data", data.clone())?;
+        }
+        if let Err(err) = call.call::<()>(event) {
             super::native::diagnose(
                 lua,
                 &format!("eqoa.events.{}", e.name),
@@ -359,6 +513,16 @@ fn deliver_timer(lua: &mlua::Lua, e: &Event, t: &Token, data: mlua::Table) -> Re
 }
 pub(crate) fn lifecycle(host: &Host, name: &str) -> Result<()> {
     deliver(&host.lua, &local(name, json!({})), None)
+}
+pub(crate) fn settings_render(host: &Host) -> Result<()> {
+    let b = bus(&host.lua);
+    let now = Instant::now();
+    let dt = b
+        .borrow_mut()
+        .last_settings
+        .replace(now)
+        .map_or(0.0, |last| now.duration_since(last).as_secs_f64());
+    deliver(&host.lua, &local("settings.render", json!({"dt":dt})), None)
 }
 pub(crate) fn initial(host: &Host) -> Result<()> {
     let (world, id) = CORE.with(|c| {
@@ -393,11 +557,57 @@ pub(crate) fn render(host: &Host) -> Result<()> {
     deliver(&host.lua, &local("render", json!({"dt":dt})), None)
 }
 pub(crate) fn clear(host: &Host) {
+    if host.lua.app_data_ref::<Shared>().is_none() {
+        return;
+    }
     super::input::native::release_vm(&host.lua);
     let b = bus(&host.lua);
     let mut b = b.borrow_mut();
     b.subscriptions.clear();
+    b.resources.clear();
     b.initialized = false;
     b.last_render = None;
     b.cursor = CORE.with(|c| c.borrow().seq);
+}
+pub(crate) fn resource(
+    lua: &mlua::Lua,
+    kind: &str,
+    handle: Value,
+    failure: Option<&str>,
+) -> Result<()> {
+    if lua.app_data_ref::<Shared>().is_none() {
+        return Ok(());
+    }
+    let b = bus(lua);
+    if b.borrow().resources.len() >= 256 {
+        super::native::diagnose(
+            lua,
+            "eqoa.events.resource",
+            "quota",
+            "resource completion queue exceeded 256 events",
+        );
+        return Ok(());
+    }
+    let data = lua.create_table()?;
+    data.set("kind", kind)?;
+    data.set("handle", handle)?;
+    if let Some(message) = failure {
+        data.set(
+            "error",
+            record(
+                lua,
+                "eqoa.Error",
+                &json!({"code":"failed","message":message}),
+            )?,
+        )?;
+    }
+    let name = if failure.is_some() {
+        "resource.failed"
+    } else {
+        "resource.ready"
+    };
+    b.borrow_mut()
+        .resources
+        .push((local(name, json!({})), data));
+    Ok(())
 }

@@ -308,6 +308,7 @@ pub(super) fn methods<M: UserDataMethods<DrawList>>(m: &mut M) {
                     let font = font_ud.borrow::<super::super::fonts::LuaImFont>()?;
                     let raw_font = match &*font.state.borrow() {
                         super::super::fonts::FontHandleState::Ready { raw_font, .. } => *raw_font,
+                        super::super::fonts::FontHandleState::Released=>return Err(mlua::Error::runtime("stale font handle")),
                         _ => std::ptr::null_mut(),
                     };
                     let c_text = text(&text_str)?;

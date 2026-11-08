@@ -102,7 +102,13 @@ impl Mounts {
     }
     pub fn remove(&self, path: &str) -> Result<bool, String> {
         let key = self.key(path)?;
-        if self.read_path(&key).ok().is_none_or(|p| !p.is_file()) {
+        let source = match self.read_path(&key) {
+            Ok(p) => p,
+            Err(e) if e.starts_with("file not found") => return Ok(false),
+            Err(e) => return Err(e),
+        };
+        super::file_io::no_links(&source)?;
+        if !source.is_file() {
             return Ok(false);
         }
         let root = self

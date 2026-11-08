@@ -218,6 +218,19 @@ impl Manager {
             return;
         }
         self.frame_number = self.frame_number.saturating_add(1);
+        if !snapshot.in_game && self.snapshot.in_game {
+            super::native_core::CORE.with(|c| {
+                c.borrow_mut()
+                    .publish(super::native_core::View::default(), false)
+            });
+            for entry in &self.entries {
+                if let Some(i) = &entry.instance {
+                    i.visibility.clear();
+                    i.sound_bank.borrow_mut().set_active(false);
+                    super::input::native::release_vm(&i.host.lua);
+                }
+            }
+        }
         self.health_waiting = snapshot.in_game && !snapshot.health.is_available();
         let snapshot = snapshot.managed();
         self.snapshot = snapshot;
@@ -326,6 +339,13 @@ impl Manager {
                     for diag in bank.drain_diagnostics() {
                         diags.push((entry.metadata.id.clone(), diag));
                     }
+                    drop(bank);
+                    if let Err(e) = super::fonts::FontBank::publish_outcomes(
+                        &instance.host.lua,
+                        &instance.font_bank,
+                    ) {
+                        diags.push((entry.metadata.id.clone(), e.to_string()));
+                    }
                 }
             }
             for (id, diag) in diags {
@@ -365,7 +385,11 @@ impl Manager {
                 v["count"].as_u64().unwrap_or(1)
             )
         });
-        let message: String = message.chars().take(2048).collect();
+        let message: String = if details.is_some() {
+            message
+        } else {
+            message.chars().take(2048).collect()
+        };
         let mut updated = false;
         if let Some(v) = &details {
             if let Some(existing) = self.diagnostics.iter_mut().find(|d| {

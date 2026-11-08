@@ -12,8 +12,8 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
@@ -46,7 +46,7 @@ pub trait IconProvider {
 pub struct TrimOptions {
     pub trim_transparent: bool,
     pub trim_color: bool,
-    pub color:Option<[u8;4]>,
+    pub color: Option<[u8; 4]>,
 }
 
 impl TrimOptions {
@@ -59,13 +59,13 @@ impl TrimOptions {
                 Self {
                     trim_transparent,
                     trim_color,
-                    color:None,
+                    color: None,
                 }
             }
             None => Self {
                 trim_transparent: false,
                 trim_color: false,
-                color:None,
+                color: None,
             },
         }
     }
@@ -123,20 +123,17 @@ pub fn detect_padding_color(rgba: &[u8], w: u32, h: u32) -> Option<[u8; 4]> {
     }
 }
 
-pub fn trim_rgba(
-    rgba: &[u8],
-    w: u32,
-    h: u32,
-    opts: TrimOptions,
-) -> Option<(Vec<u8>, u32, u32)> {
+pub fn trim_rgba(rgba: &[u8], w: u32, h: u32, opts: TrimOptions) -> Option<(Vec<u8>, u32, u32)> {
     if w == 0 || h == 0 || rgba.len() < (w * h * 4) as usize {
         return None;
     }
 
-    let pad_color = opts.color.or_else(||if opts.trim_color {
-        detect_padding_color(rgba, w, h)
-    } else {
-        None
+    let pad_color = opts.color.or_else(|| {
+        if opts.trim_color {
+            detect_padding_color(rgba, w, h)
+        } else {
+            None
+        }
     });
 
     let is_padded = |x: u32, y: u32| -> bool {
@@ -322,7 +319,8 @@ impl IconCache {
                 }
             });
             self.lru_order.retain(|k| self.icons.contains_key(k));
-            self.ui_lru_order.retain(|id| self.ui_textures.contains_key(id));
+            self.ui_lru_order
+                .retain(|id| self.ui_textures.contains_key(id));
             self.stale_textures.retain(|entry| {
                 if !entry.is_live() {
                     textures.mark_dead(entry.handle_id);
@@ -366,7 +364,8 @@ impl IconCache {
             }
         });
         self.lru_order.retain(|k| self.icons.contains_key(k));
-        self.ui_lru_order.retain(|id| self.ui_textures.contains_key(id));
+        self.ui_lru_order
+            .retain(|id| self.ui_textures.contains_key(id));
         self.stale_textures.retain(|entry| {
             if !entry.is_live() {
                 textures.mark_dead(entry.handle_id);
@@ -417,7 +416,12 @@ impl IconCache {
             if !entry.stale {
                 self.lru_order.retain(|k| k != &key);
                 self.lru_order.push_back(key);
-                return Some((entry.handle_id, entry.width, entry.height, entry.token.clone()));
+                return Some((
+                    entry.handle_id,
+                    entry.width,
+                    entry.height,
+                    entry.token.clone(),
+                ));
             } else {
                 let old = self.icons.remove(&key).unwrap();
                 self.lru_order.retain(|k| k != &key);
@@ -513,7 +517,12 @@ impl IconCache {
             if !entry.stale {
                 self.ui_lru_order.retain(|&id| id != tex_id);
                 self.ui_lru_order.push_back(tex_id);
-                return Some((entry.handle_id, entry.width, entry.height, entry.token.clone()));
+                return Some((
+                    entry.handle_id,
+                    entry.width,
+                    entry.height,
+                    entry.token.clone(),
+                ));
             } else {
                 let old = self.ui_textures.remove(&tex_id).unwrap();
                 self.stale_textures.push(old);
@@ -525,7 +534,9 @@ impl IconCache {
             None => {
                 if !self.ui_tex_diag_logged {
                     self.ui_tex_diag_logged = true;
-                    eprintln!("frontiers_forge.icon: GetUITexture: HUD atlas or UI surface is unavailable");
+                    eprintln!(
+                        "frontiers_forge.icon: GetUITexture: HUD atlas or UI surface is unavailable"
+                    );
                 }
                 return None;
             }
@@ -551,7 +562,9 @@ impl IconCache {
             } else {
                 if !self.ui_tex_budget_diag_logged {
                     self.ui_tex_budget_diag_logged = true;
-                    eprintln!("frontiers_forge.icon: UI texture budget exceeded (64/64 live handles held)");
+                    eprintln!(
+                        "frontiers_forge.icon: UI texture budget exceeded (64/64 live handles held)"
+                    );
                 }
                 return None;
             }
@@ -560,7 +573,13 @@ impl IconCache {
         let handle = self
             .textures
             .borrow_mut()
-            .upload_rgba8(&self.textures, "ui_icon", icon.width, icon.height, &icon.rgba)
+            .upload_rgba8(
+                &self.textures,
+                "ui_icon",
+                icon.width,
+                icon.height,
+                &icon.rgba,
+            )
             .ok()?;
         let handle_id = handle.id;
         let token = Arc::new(());
@@ -756,7 +775,9 @@ pub fn queue_pending_lookup(id: u32) {
 
 pub fn drain_pending_lookups() -> Vec<u32> {
     PENDING_LOOKUPS.with(|p| {
-        p.borrow_mut().take().map_or(Vec::new(), |s| s.into_iter().collect())
+        p.borrow_mut()
+            .take()
+            .map_or(Vec::new(), |s| s.into_iter().collect())
     })
 }
 
@@ -850,8 +871,11 @@ pub fn log_icon_error(hash: u32, reason: &str) {
     let log_dir = crate::fork_ext::mods::mods_dir();
     let _ = std::fs::create_dir_all(&log_dir);
     let log_path = log_dir.join("addons_error.log");
-    let line = format!("[icon] 0x{:08X} ({}) {}
-", hash, hash, reason);
+    let line = format!(
+        "[icon] 0x{:08X} ({}) {}
+",
+        hash, hash, reason
+    );
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -1239,9 +1263,7 @@ pub fn attach_icon_cache(
         let cache_ref = cache.clone();
         icon_mod.set(
             "HasClaim",
-            lua.create_function(move |_, owner: String| {
-                Ok(cache_ref.borrow().has_claim(&owner))
-            })?,
+            lua.create_function(move |_, owner: String| Ok(cache_ref.borrow().has_claim(&owner)))?,
         )?;
     }
 
@@ -1260,9 +1282,20 @@ pub fn attach_icon_cache(
                     let info = lua.create_table()?;
                     info.set("width", icon.width)?;
                     info.set("height", icon.height)?;
-                    info.set("format", 2)?;
-                    info.set("palette_count", 0)?;
-                    info.set("palette_format", 0)?;
+                    let mt = lua.create_table()?;
+                    mt.set(
+                        "__index",
+                        lua.create_function(|lua, (_, field): (Table, String)| {
+                            super::native::diagnose(
+                                lua,
+                                &format!("frontiers_forge.icon.SurfaceInfo.{field}"),
+                                "unsupported",
+                                "the native decoder does not retain this metadata",
+                            );
+                            Ok(Value::Nil)
+                        })?,
+                    )?;
+                    info.set_metatable(Some(mt))?;
                     Ok(Value::Table(info))
                 } else {
                     Ok(Value::Nil)
@@ -1346,29 +1379,162 @@ pub fn attach_icon_cache(
         )?;
     }
 
-    if lua.named_registry_value::<Table>("eqoa_modules").is_ok(){install_native(lua,&cache,&textures)?;}
+    if lua.named_registry_value::<Table>("eqoa_modules").is_ok() {
+        install_native(lua, &cache, &textures)?;
+    }
     Ok(cache)
 }
 
-fn install_native(lua:&Lua,cache:&Rc<RefCell<IconCache>>,textures:&Rc<RefCell<Textures>>)->LuaResult<()> {
-    use super::native::{bind,error,record};
-    for name in ["resource","ui"]{let cache=cache.clone();let textures=textures.clone();
-        bind(lua,"icons",name,lua.create_function(move |lua,(hash,options):(Value,Option<Table>)|{
-            if !super::native_core::CORE.with(|c|c.borrow().view.in_world){return error(lua,&format!("eqoa.icons.{name}"),"not_in_world","enter a loaded world first");}
-            let Some(hash)=super::native_state::uint(&hash,u32::MAX as u64) else{return error(lua,&format!("eqoa.icons.{name}"),"invalid_argument","icon id must be a u32 integer");};
-            let mut trim=TrimOptions{trim_transparent:false,trim_color:false,color:None};
-            if let Some(options)=options {
-                for key in ["trim","trim_transparent"] {match options.get::<Value>(key)? {Value::Nil=>{},Value::Boolean(v)=>trim.trim_transparent|=v,_=>return error(lua,"eqoa.icons.resource","invalid_argument","trim flags must be bool")}}
-                match options.get::<Value>("trim_color")? {Value::Nil=>{},Value::Table(color)=>{let mut rgba=[0;4];for (i,key) in ["r","g","b","a"].into_iter().enumerate(){let Some(v)=super::native_state::number(&color.get::<Value>(key)?).filter(|v|(0.0..=1.0).contains(v)) else{return error(lua,"eqoa.icons.resource","invalid_argument","trim_color must have finite r,g,b,a in 0..1");};rgba[i]=(v*255.0).round() as u8;}trim.color=Some(rgba);},_=>return error(lua,"eqoa.icons.resource","invalid_argument","trim_color must be Color")}
-            }
-            let result=with_active_provider(|p|{let mut cache=cache.borrow_mut();if name=="ui"{cache.get_or_load_ui_texture(hash as u32,p)}else{cache.get_or_load(hash as u32,trim,p)}});
-            match result{Some((id,width,height,token))=>{let t=lua.create_table()?;t.set("texture",lua.create_userdata(Handle{owner:textures.clone(),id,token:Some(token)})?)?;t.set("width",width)?;t.set("height",height)?;lua.pack_multi((t,Value::Nil))},None=>error(lua,&format!("eqoa.icons.{name}"),"not_found","icon is not available in the current art cache")}
-        })?)?;
+fn install_native(
+    lua: &Lua,
+    cache: &Rc<RefCell<IconCache>>,
+    textures: &Rc<RefCell<Textures>>,
+) -> LuaResult<()> {
+    use super::native::{bind, error, record};
+    for name in ["resource", "ui"] {
+        let cache = cache.clone();
+        let textures = textures.clone();
+        bind(
+            lua,
+            "icons",
+            name,
+            lua.create_function(move |lua, (hash, options): (Value, Option<Table>)| {
+                if !super::native_core::CORE.with(|c| c.borrow().view.in_world) {
+                    return error(
+                        lua,
+                        &format!("eqoa.icons.{name}"),
+                        "not_in_world",
+                        "enter a loaded world first",
+                    );
+                }
+                let Some(hash) = super::native_state::uint(&hash, u32::MAX as u64) else {
+                    return error(
+                        lua,
+                        &format!("eqoa.icons.{name}"),
+                        "invalid_argument",
+                        "icon id must be a u32 integer",
+                    );
+                };
+                let mut trim = TrimOptions {
+                    trim_transparent: false,
+                    trim_color: false,
+                    color: None,
+                };
+                if let Some(options) = options {
+                    for key in ["trim", "trim_transparent"] {
+                        match options.get::<Value>(key)? {
+                            Value::Nil => {}
+                            Value::Boolean(v) => trim.trim_transparent |= v,
+                            _ => {
+                                return error(
+                                    lua,
+                                    "eqoa.icons.resource",
+                                    "invalid_argument",
+                                    "trim flags must be bool",
+                                );
+                            }
+                        }
+                    }
+                    match options.get::<Value>("trim_color")? {
+                        Value::Nil => {}
+                        Value::Table(color) => {
+                            let mut rgba = [0; 4];
+                            for (i, key) in ["r", "g", "b", "a"].into_iter().enumerate() {
+                                let Some(v) =
+                                    super::native_state::number(&color.get::<Value>(key)?)
+                                        .filter(|v| (0.0..=1.0).contains(v))
+                                else {
+                                    return error(
+                                        lua,
+                                        "eqoa.icons.resource",
+                                        "invalid_argument",
+                                        "trim_color must have finite r,g,b,a in 0..1",
+                                    );
+                                };
+                                rgba[i] = (v * 255.0).round() as u8;
+                            }
+                            trim.color = Some(rgba);
+                        }
+                        _ => {
+                            return error(
+                                lua,
+                                "eqoa.icons.resource",
+                                "invalid_argument",
+                                "trim_color must be Color",
+                            );
+                        }
+                    }
+                }
+                let result = with_active_provider(|p| {
+                    let mut cache = cache.borrow_mut();
+                    if name == "ui" {
+                        cache.get_or_load_ui_texture(hash as u32, p)
+                    } else {
+                        cache.get_or_load(hash as u32, trim, p)
+                    }
+                });
+                match result {
+                    Some((id, width, height, token)) => {
+                        let t = lua.create_table()?;
+                        t.set(
+                            "texture",
+                            lua.create_userdata(Handle {
+                                owner: textures.clone(),
+                                id,
+                                token: Some(token),
+                            })?,
+                        )?;
+                        t.set("width", width)?;
+                        t.set("height", height)?;
+                        lua.pack_multi((t, Value::Nil))
+                    }
+                    None => error(
+                        lua,
+                        &format!("eqoa.icons.{name}"),
+                        "not_found",
+                        "icon is not available in the current art cache",
+                    ),
+                }
+            })?,
+        )?;
     }
-    bind(lua,"icons","info",lua.create_function(|lua,hash:Value|{
-        let Some(hash)=super::native_state::uint(&hash,u32::MAX as u64) else{return error(lua,"eqoa.icons.info","invalid_argument","hash must be a u32 integer");};
-        let info=with_active_provider(|p|p.decode_icon(hash as u32).map(|i|serde_json::json!({"width":i.width,"height":i.height,"source_format":null})));
-        match info{Some(info)=>lua.pack_multi((record(lua,"eqoa.icons.SurfaceInfo",&info)?,Value::Nil)),None=>error(lua,"eqoa.icons.info","not_found","icon surface not available")}
-    })?)?;
-    super::native::describe(lua,"eqoa.icons.IconOptions.trim_color","supported",Some(2),"");Ok(())
+    bind(
+        lua,
+        "icons",
+        "info",
+        lua.create_function(|lua, hash: Value| {
+            let Some(hash) = super::native_state::uint(&hash, u32::MAX as u64) else {
+                return error(
+                    lua,
+                    "eqoa.icons.info",
+                    "invalid_argument",
+                    "hash must be a u32 integer",
+                );
+            };
+            let info = with_active_provider(|p| {
+                p.decode_icon(hash as u32).map(
+                    |i| serde_json::json!({"width":i.width,"height":i.height,"source_format":null}),
+                )
+            });
+            match info {
+                Some(info) => {
+                    lua.pack_multi((record(lua, "eqoa.icons.SurfaceInfo", &info)?, Value::Nil))
+                }
+                None => error(
+                    lua,
+                    "eqoa.icons.info",
+                    "not_found",
+                    "icon surface not available",
+                ),
+            }
+        })?,
+    )?;
+    super::native::describe(
+        lua,
+        "eqoa.icons.IconOptions.trim_color",
+        "supported",
+        Some(2),
+        "",
+    );
+    Ok(())
 }

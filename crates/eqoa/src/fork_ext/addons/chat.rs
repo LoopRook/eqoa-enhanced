@@ -386,12 +386,17 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
         )?;
     }
 
+    let send_installed = Rc::new(Cell::new(true));
     // SendChatText(text, mode)
     {
         let s = snapshot_cell.clone();
+        let installed = send_installed.clone();
         chat_mod.set(
             "SendChatText",
             lua.create_function(move |lua, (text, mode): (Option<String>, Option<String>)| {
+                if !installed.get() {
+                    return Ok((false, Some("send hook is not installed".to_string())));
+                }
                 if !s.get().in_game {
                     return Ok((false, Some("not in game".to_string())));
                 }
@@ -428,18 +433,36 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
         )?;
     }
 
-    // Send hook management stubs (in native engine these are always operational)
+    // A consumer lease controls this VM's queue submission.
+    let installed = send_installed.clone();
     chat_mod.set(
         "IsSendHookInstalled",
-        lua.create_function(|_, ()| Ok(true))?,
+        lua.create_function(move |_, ()| Ok(installed.get()))?,
     )?;
     chat_mod.set(
         "IsSendHookSuspended",
         lua.create_function(|_, ()| Ok(false))?,
     )?;
-    chat_mod.set("InstallSendHook", lua.create_function(|_, ()| Ok(true))?)?;
-    chat_mod.set("UninstallSendHook", lua.create_function(|_, ()| Ok(true))?)?;
-    chat_mod.set("IsSendPending", lua.create_function(|_, ()| Ok(false))?)?;
+    let installed = send_installed.clone();
+    chat_mod.set(
+        "InstallSendHook",
+        lua.create_function(move |_, ()| {
+            installed.set(true);
+            Ok(true)
+        })?,
+    )?;
+    let installed = send_installed;
+    chat_mod.set(
+        "UninstallSendHook",
+        lua.create_function(move |_, ()| {
+            installed.set(false);
+            Ok(true)
+        })?,
+    )?;
+    chat_mod.set(
+        "IsSendPending",
+        lua.create_function(|_, ()| Ok(OUTGOING_CHAT.with(|q| !q.borrow().is_empty())))?,
+    )?;
 
     // Focus & window channel inspection helpers
     chat_mod.set(

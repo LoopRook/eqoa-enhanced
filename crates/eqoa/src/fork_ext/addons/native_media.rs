@@ -29,6 +29,66 @@ pub(crate) fn imgui(lua: &Lua, imgui: &Table) -> Result<()> {
         Some(2),
         "bounded native bridge; unbound members are unsupported",
     );
+    for name in [
+        "BeginTooltip",
+        "EndTooltip",
+        "BeginItemTooltip",
+        "GetMousePos",
+        "GetMousePosOnOpeningCurrentPopup",
+        "GetMouseWheel",
+        "GetMouseDragDelta",
+        "ResetMouseDragDelta",
+        "IsMouseDown",
+        "IsMouseClicked",
+        "IsMouseReleased",
+        "IsMouseDoubleClicked",
+        "IsMousePosValid",
+        "SetMousePos",
+        "SetMouseCursor",
+        "PushStyleVar",
+        "PopStyleVar",
+        "PushItemWidth",
+        "PopItemWidth",
+        "SetNextWindowFocus",
+        "SetWindowFocus",
+        "GetForegroundDrawList",
+    ] {
+        if imgui.raw_get::<Value>(name)?.is_nil() {
+            let path = format!("ImGui.{name}");
+            describe(lua, &path, "not_yet", Some(4), "scheduled for round 4");
+            describe(
+                lua,
+                &format!("eqoa.imgui.{name}"),
+                "not_yet",
+                Some(4),
+                "scheduled for round 4",
+            );
+            imgui.set(
+                name,
+                lua.create_function(move |lua, _: mlua::MultiValue| {
+                    error(lua, &path, "not_yet", "scheduled for round 4")
+                })?,
+            )?;
+        }
+    }
+    let mt = lua.create_table()?;
+    mt.set(
+        "__index",
+        lua.create_function(|lua, (_, key): (Table, String)| {
+            super::native::diagnose(
+                lua,
+                &format!("ImGui.{key}"),
+                "unknown_symbol",
+                "unbound ImGui member",
+            );
+            Ok(Value::Nil)
+        })?,
+    )?;
+    imgui.set_metatable(Some(mt))?;
+    let package: Table = lua.globals().get("package")?;
+    package
+        .get::<Table>("loaded")?
+        .set("eqoa.imgui", imgui.clone())?;
     bind(lua,"client","display",lua.create_function(|lua,()| {
         unsafe {if dear_imgui_rs::sys::igGetCurrentContext().is_null(){return error(lua,"eqoa.client.display","unavailable","no ImGui display context");}
             let io=dear_imgui_rs::sys::igGetIO_Nil();lua.pack_multi((super::native::record(lua,"eqoa.client.DisplayMetrics",&serde_json::json!({"width":(*io).DisplaySize.x as u32,"height":(*io).DisplaySize.y as u32,"render_scale":crate::settings::client().render_scale}))?,Value::Nil))}
@@ -184,6 +244,14 @@ pub(crate) fn sound(lua: &Lua, owner: &Rc<RefCell<super::sound::SoundBank>>) -> 
         "sound",
         "load",
         lua.create_function(move |lua, path: Value| {
+            if !cfg!(windows) {
+                return error(
+                    lua,
+                    "eqoa.sound.load",
+                    "unsupported",
+                    "no native sound backend on this platform",
+                );
+            }
             let Some(path) = path
                 .as_string()
                 .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
@@ -232,6 +300,14 @@ pub(crate) fn sound(lua: &Lua, owner: &Rc<RefCell<super::sound::SoundBank>>) -> 
             name,
             lua.create_function(move |lua, (value, option): (Value, Option<Value>)| {
                 let symbol = format!("eqoa.sound.{name}");
+                if !cfg!(windows) {
+                    return error(
+                        lua,
+                        &symbol,
+                        "unsupported",
+                        "no native sound backend on this platform",
+                    );
+                }
                 if value.is_nil() && matches!(name, "stop" | "release" | "is_playing") {
                     return lua.pack_multi((name != "is_playing", Value::Nil));
                 }

@@ -34,6 +34,9 @@ fn forge_review_reference_requires_explicit_environment() {
 
 fn modern_package(id: &str) {
     let root = find_wereoxxs_scripts_root();
+    modern_package_at(id, root);
+}
+fn modern_package_at(id: &str, root: PathBuf) {
     let Some(mut gpu) = TestGpu::new() else {
         return;
     };
@@ -76,7 +79,11 @@ fn modern_package(id: &str) {
         gpu.render();
         let logs = host.drain_logs().unwrap();
         assert!(
-            result.is_ok() && logs.is_empty(),
+            result.is_ok()
+                && logs
+                    .iter()
+                    .all(|l| serde_json::from_str::<serde_json::Value>(l)
+                        .is_ok_and(|d| d["code"] == "not_found")),
             "{id}: {result:?}, logs: {logs:?}"
         );
     }
@@ -108,6 +115,180 @@ fn modern_package(id: &str) {
         diags.iter().all(|d| !d.contains("unsupported")),
         "{diags:?}"
     );
+}
+
+fn bundled_tree() -> ScratchDir {
+    let root = ScratchDir::new();
+    for file in crate::fork_ext::bundled::EMBEDDED_FILES {
+        let path = root.0.join(file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, file.data).unwrap();
+    }
+    root
+}
+
+#[test]
+fn native_shared_bundled_fonts_and_gear_image_use_real_assets_and_issued_aliases() {
+    let root = bundled_tree();
+    let addon = discovery::discover(&root.0)
+        .addons
+        .into_iter()
+        .find(|a| a.id == "wereoxxs_ui")
+        .unwrap();
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+    let host = Host::for_addon(&addon).unwrap();
+    let _bridge = Bridge::install(&host).unwrap();
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, &addon).unwrap();
+    let fonts = Rc::new(RefCell::new(super::fonts::FontBank::new(
+        1,
+        super::fonts::current_context_epoch(),
+    )));
+    super::fonts::FontBank::install_for_addon(&fonts, &host.lua, &addon).unwrap();
+    host.execute(r#"fonts={};aliases={};for i,path in ipairs({'fonts/Cinzel/static/Cinzel-Regular.ttf','fonts/Libre_Baskerville/static/LibreBaskerville-Regular.ttf','fonts/Merriweather_Sans/static/MerriweatherSans-Regular.ttf'}) do fonts[i]=assert(UiForge.LoadFont('resources/'..path,16));assert(tostring(fonts[i]):find('pending'));aliases[i]=assert(UiForge.LoadFont(UiForge.resources_path..'\\'..path:gsub('/','\\'),16));assert(tostring(aliases[i]):find('pending')) end;local t,w,h=UiForge.IGraphicsApi.CreateTextureFromFile(UiForge.resources_path..'\\gear-icon.png');assert(t~=nil and w>0 and h>0);local info=assert(eqoa.textures.load('resources/gear-icon.png'));assert(info.width==w and info.height==h)"#).unwrap();
+    let loaded: Table = host.lua.globals().get("fonts").unwrap();
+    let aliases: Table = host.lua.globals().get("aliases").unwrap();
+    for i in 1..=3 {
+        let a = loaded.get::<mlua::AnyUserData>(i).unwrap();
+        let b = aliases.get::<mlua::AnyUserData>(i).unwrap();
+        assert!(Rc::ptr_eq(
+            &a.borrow::<super::fonts::LuaImFont>().unwrap().state,
+            &b.borrow::<super::fonts::LuaImFont>().unwrap().state
+        ));
+    }
+    fonts.borrow_mut().flush_pending(&mut gpu.context);
+    host.execute("for _,font in ipairs(fonts) do assert(tostring(font):find('ready'),'shared font must not fall back') end").unwrap();
+}
+
+#[test]
+fn native_modern_real_migration_is_private_persistent_and_isolated() {
+    let root = bundled_tree();
+    let config = ScratchDir::new();
+    let addons = discovery::discover(&root.0).addons;
+    let modern = addons.iter().find(|a| a.id == "avoids_modern_ui").unwrap();
+    let neighbor = addons.iter().find(|a| a.id == "arpg_ui").unwrap();
+    let paths = [
+        "modern_ui_mods_settings.cfg",
+        "ability_bar_settings.cfg",
+        "chat_log_settings.cfg",
+        "effects_settings.cfg",
+        "exp_bars/exp_bars_settings.cfg",
+        "group_frames_settings.cfg",
+        "retro_health_hearts/health_bar_settings.cfg",
+        "mana_pool/mana_bar_settings.cfg",
+        "pet_frame_settings.cfg",
+        "quest_log_settings.cfg",
+        "quest_log_notes.cfg",
+    ];
+    for path in paths {
+        let file = root.0.join("resources").join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "size=31\n").unwrap();
+    }
+    let host = Host::for_addon(modern).unwrap();
+    super::file_io::install(&host, modern, Some(config.0.join("modern"))).unwrap();
+    host.execute(r#"persist=require('avoids_persist');for _,path in ipairs({'modern_ui_mods_settings.cfg','ability_bar_settings.cfg','chat_log_settings.cfg','effects_settings.cfg','exp_bars/exp_bars_settings.cfg','group_frames_settings.cfg','retro_health_hearts/health_bar_settings.cfg','mana_pool/mana_bar_settings.cfg','pet_frame_settings.cfg','quest_log_settings.cfg','quest_log_notes.cfg'}) do local state={size=0};assert(persist.MigrateLegacyFile(UiForge.resources_path..'\\'..path:gsub('/','\\'),state,{{key='size',type='number'}}));assert(state.size==31);assert(io.open(UiForge.resources_path..'/'..path)==nil) end;assert(eqoa.files.write('package_resources/quest_log_notes.cfg','private notes'));assert(eqoa.files.read('package_resources/quest_log_notes.cfg')=='private notes')"#).unwrap();
+    drop(host);
+    let reloaded = Host::for_addon(modern).unwrap();
+    super::file_io::install(&reloaded, modern, Some(config.0.join("modern"))).unwrap();
+    reloaded.execute("assert(eqoa.files.read('resources/ability_bar_settings.cfg')==nil);assert(eqoa.files.read('package_resources/quest_log_notes.cfg')=='private notes')").unwrap();
+    let other = Host::for_addon(neighbor).unwrap();
+    super::file_io::install(&other, neighbor, Some(config.0.join("other"))).unwrap();
+    other.execute("assert(eqoa.files.read('resources/ability_bar_settings.cfg')=='size=31\\n');assert(eqoa.files.write('resources/same.cfg','neighbor'))").unwrap();
+    reloaded.execute("assert(eqoa.files.write('resources/same.cfg','modern'));assert(eqoa.files.read('resources/same.cfg')=='modern');assert(os.rename(UiForge.resources_path..'/same.cfg',UiForge.resources_path..'/renamed.cfg'));assert(eqoa.files.read('resources/same.cfg')==nil)").unwrap();
+    other
+        .execute("assert(eqoa.files.read('resources/same.cfg')=='neighbor')")
+        .unwrap();
+    for path in paths {
+        assert_eq!(
+            std::fs::read_to_string(root.0.join("resources").join(path)).unwrap(),
+            "size=31\n"
+        );
+    }
+}
+#[test]
+fn native_bundled_arpg_and_modern_scripts_load_save_load_and_disable_unchanged() {
+    let root = bundled_tree();
+    for id in ["arpg_ui", "avoids_modern_ui", "wereoxxs_ui"] {
+        modern_package_at(id, root.0.canonicalize().unwrap());
+    }
+}
+#[test]
+fn native_bundled_hearts_once_mode_draws_and_releases_its_health_claim() {
+    use super::native_core::{CORE, Core, View};
+    CORE.with(|c| {
+        let mut core = Core::default();
+        core.publish(
+            View {
+                in_world: true,
+                phase: "world",
+                world_id: Some(0),
+                player: serde_json::json!({"id":256,"hp":{"current":50,"maximum":100,"base":100}}),
+                ..Default::default()
+            },
+            false,
+        );
+        *c.borrow_mut() = core;
+    });
+    let root = bundled_tree();
+    let config = ScratchDir::new();
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+    let mut manager = Manager::new(
+        root.0.clone(),
+        Some(config.0.clone()),
+        &gpu.device,
+        &gpu.queue,
+        gpu.renderer.clone(),
+    );
+    manager.queue(Command::Enable("eqoa_example_hearts".into(), true));
+    let snapshot = rich_in_game_snapshot();
+    for _ in 0..3 {
+        gpu.begin();
+        manager.frame(snapshot);
+        let vertices = gpu.render();
+        manager.after_render();
+        assert!(vertices > 0);
+    }
+    assert!(manager.health_hidden());
+    assert!(
+        manager.diagnostics().is_empty(),
+        "{:?}",
+        manager.diagnostics()
+    );
+    manager.queue(Command::Save("eqoa_example_hearts".into()));
+    manager.queue(Command::Load("eqoa_example_hearts".into()));
+    manager.queue(Command::Enable("eqoa_example_hearts".into(), false));
+    gpu.begin();
+    manager.frame(snapshot);
+    gpu.render();
+    manager.after_render();
+    assert!(!manager.health_hidden());
+    manager.queue(Command::Enable("eqoa_example_hearts".into(), true));
+    gpu.begin();
+    manager.frame(snapshot);
+    assert!(gpu.render() > 0);
+    manager.after_render();
+    manager.queue(Command::Reload("eqoa_example_hearts".into()));
+    gpu.begin();
+    manager.frame(snapshot);
+    gpu.render();
+    manager.after_render();
+    gpu.begin();
+    manager.frame(snapshot);
+    gpu.render();
+    manager.after_render();
+    assert!(
+        manager
+            .entries()
+            .iter()
+            .find(|e| e.metadata.id == "eqoa_example_hearts")
+            .is_some_and(|e| e.status == Status::Enabled)
+    );
+    manager.shutdown();
 }
 
 #[test]

@@ -188,3 +188,165 @@ pub(crate) fn install(host: &Host) -> mlua::Result<()> {
     )?;
     Ok(())
 }
+pub(crate) fn scope_forge(lua: &mlua::Lua, module: &mlua::Table) -> mlua::Result<()> {
+    for name in [
+        "AcquireKeyHook",
+        "ReleaseKeyHook",
+        "AcquireKey",
+        "ReleaseKey",
+        "SetTextCaptureActive",
+        "SetKeySuppressed",
+        "ClearAllSuppressedKeys",
+        "PollKeyEvents",
+        "AcquireDpadRotation",
+        "ReleaseDpadRotation",
+        "SetDpadRotated",
+    ] {
+        let inner: mlua::Function = module.get(name)?;
+        module.set(
+            name,
+            lua.create_function(move |lua, mut args: mlua::MultiValue| {
+                let prefix = format!("\u{1f}{}:forge:", bus(lua).borrow().vm);
+                let owner = if name == "SetKeySuppressed" && args.len() == 2 {
+                    let key = args
+                        .front()
+                        .and_then(|v| super::super::native_state::uint(v, 255))
+                        .unwrap_or(0) as u8;
+                    INPUT_STATE
+                        .with(|s| {
+                            s.borrow()
+                                .key_claims
+                                .get(&key)
+                                .filter(|o| o.starts_with(&prefix))
+                                .cloned()
+                        })
+                        .unwrap_or_else(|| format!("{prefix}__default"))
+                } else {
+                    let owner = args.pop_front().unwrap_or(Value::Nil);
+                    let owner = owner
+                        .as_string()
+                        .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+                        .unwrap_or_else(|| "__default".into());
+                    format!("{prefix}{owner}")
+                };
+                if name == "ClearAllSuppressedKeys" && owner.ends_with(":__default") {
+                    INPUT_STATE.with(|s| {
+                        let mut s = s.borrow_mut();
+                        let keys = s
+                            .key_claims
+                            .iter()
+                            .filter_map(|(k, o)| o.starts_with(&prefix).then_some(*k))
+                            .collect::<Vec<_>>();
+                        for k in keys {
+                            s.suppress_shadow.remove(&k);
+                        }
+                    });
+                    return lua.pack_multi(true);
+                }
+                args.push_front(Value::String(lua.create_string(&owner)?));
+                {
+                    let mut result = inner.call::<mlua::MultiValue>(args)?;
+                    if name == "AcquireKey" {
+                        if let Some(Value::String(message)) = result.get(1) {
+                            let text = message.to_str()?.to_string();
+                            if let Some(start) = text.find('\u{1f}') {
+                                if let Some((_, tail)) = text[start..].split_once(":forge:") {
+                                    result[1] = Value::String(lua.create_string(format!(
+                                        "{}{}",
+                                        &text[..start],
+                                        tail
+                                    ))?);
+                                }
+                            }
+                        }
+                        if let Some(Value::String(owner)) = result.get(2) {
+                            let owner = owner.to_str()?.to_string();
+                            if let Some((_, label)) = owner.split_once(":forge:") {
+                                result[2] = Value::String(lua.create_string(label)?);
+                            }
+                        }
+                    }
+                    Ok(result)
+                }
+            })?,
+        )?;
+    }
+    for (name, install, dpad) in [
+        ("InstallKeyHook", true, false),
+        ("UninstallKeyHook", false, false),
+        ("InstallDpadHook", true, true),
+        ("UninstallDpadHook", false, true),
+    ] {
+        module.set(
+            name,
+            lua.create_function(move |lua, ()| {
+                let prefix = format!("\u{1f}{}:forge:", bus(lua).borrow().vm);
+                let label = format!("{prefix}__hook");
+                INPUT_STATE.with(|s| {
+                    let mut s = s.borrow_mut();
+                    if dpad {
+                        if install {
+                            s.dpad_claims.insert(label);
+                        } else {
+                            s.dpad_claims.retain(|o| !o.starts_with(&prefix));
+                            s.dpad_requests.retain(|o, _| !o.starts_with(&prefix));
+                        }
+                        s.dpad_desired = !s.dpad_claims.is_empty();
+                        s.dpad_installed = s.dpad_desired;
+                        s.dpad_rotated = s.dpad_requests.values().any(|v| *v);
+                    } else {
+                        if install {
+                            s.hook_claims.insert(label);
+                        } else {
+                            let keys = s
+                                .key_claims
+                                .iter()
+                                .filter_map(|(k, o)| o.starts_with(&prefix).then_some(*k))
+                                .collect::<Vec<_>>();
+                            for key in keys {
+                                s.key_claims.remove(&key);
+                                s.suppress_shadow.remove(&key);
+                            }
+                            s.hook_claims.retain(|o| !o.starts_with(&prefix));
+                            s.text_capture_owners.retain(|o, _| !o.starts_with(&prefix));
+                        }
+                        s.key_hook_desired = !s.hook_claims.is_empty();
+                        s.key_hook_installed = s.key_hook_desired;
+                    }
+                });
+                Ok(true)
+            })?,
+        )?;
+    }
+    let get: mlua::Function = module.get("GetKeyOwner")?;
+    module.set(
+        "GetKeyOwner",
+        lua.create_function(move |_, key: u32| {
+            let owner = get.call::<Option<String>>(key)?;
+            Ok(owner.map(|owner| {
+                owner
+                    .split_once(":forge:")
+                    .map_or(owner.clone(), |(_, label)| label.to_string())
+            }))
+        })?,
+    )?;
+    let get: mlua::Function = module.get("GetKeyOwners")?;
+    module.set(
+        "GetKeyOwners",
+        lua.create_function(move |lua, ()| {
+            let owners: mlua::Table = get.call(())?;
+            let t = lua.create_table()?;
+            for pair in owners.pairs::<Value, String>() {
+                let (key, owner) = pair?;
+                t.set(
+                    key,
+                    owner
+                        .split_once(":forge:")
+                        .map_or(owner.clone(), |(_, label)| label.to_string()),
+                )?;
+            }
+            Ok(t)
+        })?,
+    )?;
+    Ok(())
+}

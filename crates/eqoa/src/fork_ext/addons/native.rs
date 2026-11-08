@@ -169,10 +169,19 @@ impl Session {
         let key = (symbol.to_string(), code.to_string());
         self.tokens = (self.tokens + (time - self.token_time) * 16.0).min(32.0);
         self.token_time = time;
-        if !self.diagnostics.contains_key(&key) && self.tokens < 1.0 {
+        let overflow = symbol == "eqoa.diagnostics.overflow";
+        if !overflow
+            && !self.diagnostics.contains_key(&key)
+            && (self.tokens < 1.0 || self.diagnostics.len() >= 255)
+        {
+            self.diagnostic(
+                "eqoa.diagnostics.overflow",
+                "quota",
+                "new diagnostic keys exceeded the per-VM rate/cache budget",
+            );
             return;
         }
-        if !self.diagnostics.contains_key(&key) {
+        if !overflow && !self.diagnostics.contains_key(&key) {
             self.tokens -= 1.0;
         }
         if !self.diagnostics.contains_key(&key) && self.diagnostics.len() >= 256 {
@@ -221,6 +230,91 @@ pub(crate) fn describe(
     session(lua)
         .borrow_mut()
         .describe(path, status, round, reason);
+}
+pub(crate) fn status(lua: &Lua, path: &str) -> Option<&'static str> {
+    session(lua)
+        .borrow()
+        .descriptors
+        .get(path)
+        .map(|d| d.status)
+}
+pub(crate) fn annotate_host(host: &Host) -> Result<()> {
+    let lua = &host.lua;
+    let root: Table = lua.named_registry_value("eqoa_root")?;
+    for name in ["WeaponSets", "ChatHistory"] {
+        let value: Value = root.raw_get(name)?;
+        if !value.is_nil() {
+            describe(
+                lua,
+                &format!("eqoa.{name}"),
+                "supported",
+                Some(2),
+                "permanent Enhanced compatibility alias",
+            );
+            if let Value::Table(table) = value {
+                for pair in table.pairs::<String, Value>() {
+                    let (key, _) = pair?;
+                    describe(
+                        lua,
+                        &format!("eqoa.{name}.{key}"),
+                        "supported",
+                        Some(2),
+                        "permanent Enhanced compatibility alias",
+                    );
+                }
+            }
+        }
+    }
+    for (name, value) in host.registered_modules() {
+        if name.starts_with("frontiers_forge.") {
+            describe(
+                lua,
+                &name,
+                "partial",
+                Some(2),
+                "native Forge compatibility adapter",
+            );
+            if let Value::Table(t) = value {
+                for pair in t.pairs::<String, Value>() {
+                    let (key, _) = pair?;
+                    describe(lua, &format!("{name}.{key}"), "supported", Some(2), "");
+                }
+            }
+        }
+    }
+    for path in [
+        "frontiers_forge.chat.CaptureChannelTypeFromGameWindow",
+        "frontiers_forge.chat.GetChannelTableInfo",
+        "frontiers_forge.chat.DebugDumpFocusChain",
+        "frontiers_forge.combat.ReadForeignCave",
+        "frontiers_forge.util.utf8_to_utf16",
+        "frontiers_forge.util.utf16_to_utf8",
+    ] {
+        describe(
+            lua,
+            path,
+            "unsupported",
+            None,
+            "the native client has no matching pointer/config payload",
+        );
+    }
+    for path in [
+        "frontiers_forge.player.GetCMs",
+        "frontiers_forge.player.GetCMsSpent",
+        "frontiers_forge.player.GetCMPct",
+        "frontiers_forge.ui.GetClassIconTexture",
+        "frontiers_forge.ui.GetDispositionIconTexture",
+        "frontiers_forge.ui.DrawClassIcon",
+        "frontiers_forge.ui.DrawDispositionIcon",
+    ] {
+        describe(lua, path, "not_yet", Some(4), "scheduled for round 4");
+    }
+    let forge: Table = lua.globals().get("UiForge")?;
+    for pair in forge.pairs::<String, Value>() {
+        let (name, _) = pair?;
+        describe(lua, &format!("UiForge.{name}"), "supported", Some(2), "");
+    }
+    Ok(())
 }
 
 pub(crate) fn drain(lua: &Lua) -> Vec<String> {
@@ -532,6 +626,38 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_events::install(host, host.once_mode())?;
     install_fields(lua);
     super::native_state::install(host)?;
+    let modules: Table = lua.named_registry_value("eqoa_modules")?;
+    let scope = lua.create_table()?;
+    for (id, name) in ["self", "target", "group", "pet", "corpse", "unknown"]
+        .into_iter()
+        .enumerate()
+    {
+        scope.set(name, id)?;
+        describe(
+            lua,
+            &format!("eqoa.abilities.scope.{name}"),
+            "supported",
+            Some(2),
+            "",
+        );
+    }
+    modules
+        .get::<Table>("abilities")?
+        .set("scope", guard(lua, scope, "eqoa.abilities.scope", None)?)?;
+    let status = lua.create_table()?;
+    for (name, id) in [("nameplate_hidden", 1), ("poisoned", 4), ("diseased", 8)] {
+        status.set(name, id)?;
+        describe(
+            lua,
+            &format!("eqoa.entities.status.{name}"),
+            "supported",
+            Some(2),
+            "",
+        );
+    }
+    modules
+        .get::<Table>("entities")?
+        .set("status", guard(lua, status, "eqoa.entities.status", None)?)?;
     super::file_io::install_native(host)?;
     super::native_settings::install(host)?;
     bind(
@@ -571,6 +697,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             lua.pack_multi((true, Value::Nil))
         })?,
     )?;
+    annotate_host(host)?;
     Ok(())
 }
 

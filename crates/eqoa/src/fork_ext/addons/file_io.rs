@@ -43,6 +43,14 @@ impl FileState {
         if let Some(target) = &self.target {
             let _guard = super::sandbox::lock_parents(target, true)?;
             no_links(target)?;
+            if let Some(files) = target
+                .ancestors()
+                .find(|p| p.file_name().is_some_and(|n| n == "files"))
+            {
+                if let Some(root) = files.parent() {
+                    super::sandbox::check_quota(root, target, self.bytes.len())?;
+                }
+            }
             super::storage::atomic_replace(target, &self.bytes).map_err(|e| e.to_string())?;
             #[cfg(test)]
             {
@@ -199,6 +207,9 @@ pub(super) fn relative(
     path: &str,
 ) -> std::result::Result<PathBuf, String> {
     let path = path.replace("\\\\?\\", "").replace('\\', "/");
+    if path.split('/').any(|part| part == "..") {
+        return Err("parent traversal in addon resource path".into());
+    }
     if path.len() > 4096 || path.chars().any(char::is_control) {
         return Err("invalid addon resource path".into());
     }
@@ -334,7 +345,7 @@ fn overlay_room(
             no_links(&entry.path())?;
             if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
                 pending.push(entry.path());
-            } else {
+            } else if !entry.path().starts_with(root.join("removed")) {
                 files += 1;
                 if files >= 64 {
                     return Err("addon file count limit exceeded".into());
@@ -440,7 +451,15 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
                     lua.pack_multi(ud)
                 }
                 Err(error) => {
-                    super::native::diagnose(lua, "io.open", "io_error", &error);
+                    let code = if error.contains("not found")
+                        || error.contains("os error 2")
+                        || error.contains("os error 3")
+                    {
+                        "not_found"
+                    } else {
+                        "io_error"
+                    };
+                    super::native::diagnose(lua, "io.open", code, &error);
                     lua.pack_multi((Value::Nil, error))
                 }
             }
@@ -448,32 +467,16 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
     )?;
     lua.globals().set("io", io)?;
     let os: mlua::Table = lua.globals().get("os")?;
-    let addon = addon.clone();
     os.set(
         "remove",
-        lua.create_function(move |lua, path: String| {
-            let result = (|| -> std::result::Result<(), String> {
-                let rel = relative(&addon, &path)?;
-                let root = data.as_ref().ok_or("addon data directory unavailable")?;
-                let target = root.join("files").join(&rel);
-                let deleted = root.join("removed").join(&rel);
-                no_links(&target)?;
-                no_links(&deleted)?;
-                if deleted.exists() || (!target.exists() && !addon.script_root.join(&rel).is_file())
-                {
-                    return Err("file not found".into());
-                }
-                if addon.script_root.join(&rel).is_file() {
-                    overlay_room(root, &deleted, Some(&target))?;
-                    super::storage::atomic_replace(&deleted, &[]).map_err(|e| e.to_string())?;
-                }
-                if target.exists() {
-                    fs::remove_file(target).map_err(|e| e.to_string())?;
-                }
-                Ok(())
-            })();
-            match result {
-                Ok(()) => lua.pack_multi(true),
+        lua.create_function(|lua, path: String| {
+            let mounts = lua
+                .app_data_ref::<super::sandbox::Mounts>()
+                .ok_or_else(|| mlua::Error::runtime("file mounts unavailable"))?
+                .clone();
+            match mounts.remove(&path) {
+                Ok(true) => lua.pack_multi(true),
+                Ok(false) => lua.pack_multi((Value::Nil, "file not found")),
                 Err(e) => {
                     super::native::diagnose(lua, "os.remove", "io_error", &e);
                     lua.pack_multi((Value::Nil, e))

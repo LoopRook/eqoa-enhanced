@@ -862,6 +862,7 @@ pub(crate) fn create_module(
 
 pub fn install_input_adapter(host: &super::host::Host) -> mlua::Result<()> {
     let input_mod = create_module(&host.lua, &host.snapshot)?;
+    native::scope_forge(&host.lua, &input_mod)?;
     host.register_host_module("frontiers_forge.input", mlua::Value::Table(input_mod))?;
     Ok(())
 }

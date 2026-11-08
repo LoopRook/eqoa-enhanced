@@ -47,6 +47,7 @@ pub(crate) struct Event {
     pub frame: u64,
     pub generation: u64,
     pub data: Json,
+    pub bytes: usize,
 }
 
 pub(crate) struct Core {
@@ -58,11 +59,16 @@ pub(crate) struct Core {
     pub combat_total: u64,
     pub words: Option<vi::strtab::StringTable>,
     pub events: VecDeque<Event>,
+    pub stream_counts: BTreeMap<String, u64>,
+    event_bytes: usize,
+    motion_tick: u64,
     pub chat: VecDeque<Json>,
     pub stats_received: bool,
     pub effects_received: bool,
     pub entity_versions: BTreeMap<u32, u64>,
     pub ability_versions: BTreeMap<String, u64>,
+    pub disposition_target: Option<u32>,
+    pub selected_target: Option<u32>,
     next_version: u64,
     started: Instant,
 }
@@ -77,11 +83,16 @@ impl Default for Core {
             combat_total: 0,
             words: None,
             events: VecDeque::new(),
+            stream_counts: BTreeMap::new(),
+            event_bytes: 0,
+            motion_tick: u64::MAX,
             chat: VecDeque::new(),
             stats_received: false,
             effects_received: false,
             entity_versions: BTreeMap::new(),
             ability_versions: BTreeMap::new(),
+            disposition_target: None,
+            selected_target: None,
             next_version: 0,
             started: Instant::now(),
         }
@@ -107,13 +118,22 @@ pub(crate) fn emit(name: &str, data: Json) {
 
 impl Core {
     pub fn emit(&mut self, name: &str, data: Json) {
+        *self.stream_counts.entry(name.into()).or_default() += 1;
         if name == "combat.hit" {
             self.combat_total += 1;
         }
         self.seq += 1;
-        if self.events.len() == 2048 {
-            self.events.pop_front();
+        let bytes = serde_json::to_vec(&data).map_or(1024 * 1024 + 1, |v| v.len()) + 128;
+        while self.events.len() >= 2048 || self.event_bytes.saturating_add(bytes) > 1024 * 1024 {
+            let Some(old) = self.events.pop_front() else {
+                break;
+            };
+            self.event_bytes = self.event_bytes.saturating_sub(old.bytes);
         }
+        if bytes > 1024 * 1024 {
+            return;
+        }
+        self.event_bytes += bytes;
         self.events.push_back(Event {
             name: name.into(),
             seq: self.seq,
@@ -122,6 +142,7 @@ impl Core {
             frame: self.frame,
             generation: self.generation,
             data,
+            bytes,
         });
     }
     pub fn reset(&mut self, reason: &str) {
@@ -135,13 +156,25 @@ impl Core {
         self.generation += 1;
         self.entity_versions.clear();
         self.ability_versions.clear();
+        self.disposition_target = None;
+        self.selected_target = None;
         self.stats_received = false;
         self.effects_received = false;
+        self.words = None;
         self.chat.clear();
         self.view = View::default();
         self.emit("state.reset", json!({"in_world":false,"initial":false}));
     }
     pub fn publish(&mut self, mut view: View, events: bool) {
+        let target = view.player["target_id"].as_u64().map(|id| id as u32);
+        if target != self.selected_target {
+            self.disposition_target = None;
+            self.selected_target = target;
+            for e in &mut view.entities {
+                e["disposition"] = Json::Null;
+                e["disposition_name"] = Json::Null;
+            }
+        }
         let entered = view.in_world && !self.view.in_world;
         if !view.in_world && self.view.in_world {
             self.reset(if view.phase == "disconnected" {
@@ -274,6 +307,30 @@ impl Core {
                 if before != Some(after) {
                     self.emit(if before.is_some() {"entity.changed"} else {"entity.added"},json!({"ref":after["ref"],"before":before,"after":after,"changed":changed_fields(before.unwrap_or(&Json::Null),after)}));
                 }
+            }
+        }
+        if !events && view.in_world {
+            if self.view.player != view.player && self.tick != self.motion_tick {
+                self.motion_tick = self.tick;
+                let changed = changed_fields(&self.view.player, &view.player);
+                self.emit(
+                    "player.changed",
+                    json!({"before":self.view.player,"after":view.player,"changed":changed}),
+                );
+            }
+            if self.view.player["target_id"] != view.player["target_id"] {
+                let before = self
+                    .view
+                    .entities
+                    .iter()
+                    .find(|e| e["id"] == self.view.player["target_id"])
+                    .map(|e| e["ref"].clone());
+                let after = view
+                    .entities
+                    .iter()
+                    .find(|e| e["id"] == view.player["target_id"])
+                    .map(|e| e["ref"].clone());
+                self.emit("target.changed", json!({"before":before,"after":after}));
             }
         }
         self.view = view;

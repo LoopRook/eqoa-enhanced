@@ -126,7 +126,7 @@ impl Play {
         };
         let entities=self.entities.slots.iter().flatten().map(|e|{
             let c=e.creature.as_ref();let code=c.map(|c|c.p256);
-            let disposition=(e.id==self.target).then_some(self.target_info).flatten();
+            let disposition=(e.id==self.target && CORE.with(|c|c.borrow().disposition_target==Some(self.target))).then_some(self.target_info).flatten();
             json!({"id":e.id,"name":c.map_or("",|c|c.name.as_str()),"level":c.map(|c|c.level),"position":vec3(e.pos),"hp_fraction":(e.p19!=0).then(||ee::div(e.p19 as f32,255.0)),"kind":match code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":code,"target_id":c.and_then(|c|valid_id(c.target)),"status_flags":c.map(|c|c.flags262),"poisoned":c.map(|c|c.flags262&4!=0),"diseased":c.map(|c|c.flags262&8!=0),"disposition":disposition,"disposition_name":disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
         }).collect::<Vec<_>>();
         let fighting = id
@@ -193,6 +193,14 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
     CORE.with(|c| {
         let mut c = c.borrow_mut();
         match event {
+            Event::TargetInfo { .. } => {
+                c.selected_target = valid_id(play.target);
+                c.disposition_target = c.selected_target;
+            }
+            Event::Teleport { .. } => c.reset("zone"),
+            Event::AbilityAdd { ability, .. } => {
+                c.ability_versions.remove(&ability.id.to_string());
+            }
             Event::WorldEntry { player, .. } => c.reset(if player.world == play.player.world {
                 "respawn"
             } else {

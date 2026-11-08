@@ -105,6 +105,7 @@ struct Intent {
     token: InstanceToken,
     registry: Rc<RefCell<HealthBarClaimsRegistry>>,
     hud_claims: Rc<RefCell<HudClaimsRegistry>>,
+    native_generation: u64,
 }
 
 impl Intent {
@@ -153,6 +154,7 @@ impl VisibilityLease {
                 token: InstanceToken::next()?,
                 registry,
                 hud_claims,
+                native_generation: 0,
             })),
         })
     }
@@ -160,6 +162,16 @@ impl VisibilityLease {
     pub fn update(&self, health: HealthSnapshot, active: bool) {
         self.snapshot.set(health);
         let mut intent = self.intent.borrow_mut();
+        let (world, generation) = super::native_core::CORE.with(|c| {
+            let c = c.borrow();
+            (c.view.in_world, c.generation)
+        });
+        if !world || generation != intent.native_generation {
+            for labels in intent.desired.values_mut() {
+                labels.retain(|label| !label.starts_with("eqoa:"));
+            }
+            intent.native_generation = generation;
+        }
         intent.active = active;
         intent.suspended = false;
         intent.project(health);
@@ -512,18 +524,39 @@ pub(crate) fn install_managed_health_adapter(
 
     ui.set(
         "GetClassIconTexture",
-        host.lua
-            .create_function(|_, _: Option<u32>| Ok((Value::Nil, Value::Nil, Value::Nil)))?,
+        host.lua.create_function(|lua, _: Option<u32>| {
+            super::native::diagnose(
+                lua,
+                "frontiers_forge.ui.GetClassIconTexture",
+                "not_yet",
+                "class icon textures arrive in round 4",
+            );
+            Ok((Value::Nil, Value::Nil, Value::Nil))
+        })?,
     )?;
     ui.set(
         "DrawDispositionIcon",
-        host.lua
-            .create_function(|_, _: mlua::MultiValue| Ok(false))?,
+        host.lua.create_function(|lua, _: mlua::MultiValue| {
+            super::native::diagnose(
+                lua,
+                "frontiers_forge.ui.DrawDispositionIcon",
+                "not_yet",
+                "disposition drawing arrives in round 4",
+            );
+            Ok(false)
+        })?,
     )?;
     ui.set(
         "DrawClassIcon",
-        host.lua
-            .create_function(|_, _: mlua::MultiValue| Ok(false))?,
+        host.lua.create_function(|lua, _: mlua::MultiValue| {
+            super::native::diagnose(
+                lua,
+                "frontiers_forge.ui.DrawClassIcon",
+                "not_yet",
+                "class icon drawing arrives in round 4",
+            );
+            Ok(false)
+        })?,
     )?;
 
     host.register_host_module("frontiers_forge.ui", Value::Table(ui))
@@ -602,6 +635,23 @@ fn install_native(host: &Host, lease: &VisibilityLease) -> mlua::Result<()> {
             }
             let t = token(lua, "hud");
             let label = format!("eqoa:{}", t.id);
+            if !intent.borrow().active {
+                return error(
+                    lua,
+                    "eqoa.hud.hide",
+                    "unavailable",
+                    "HUD claim consumer is inactive",
+                );
+            }
+            if leaves.iter().any(|leaf| {
+                intent
+                    .borrow()
+                    .desired
+                    .get(*leaf)
+                    .is_some_and(|labels| labels.len() >= health::MAX_OWNERS_PER_VM)
+            }) {
+                return error(lua, "eqoa.hud.hide", "quota", "HUD claim limit reached");
+            }
             for leaf in &leaves {
                 disable_element(
                     &mut intent.borrow_mut(),
@@ -633,6 +683,13 @@ fn install_native(host: &Host, lease: &VisibilityLease) -> mlua::Result<()> {
             let claim = active.borrow_mut().remove(&t.id);
             let generation = super::native_core::CORE.with(|c| c.borrow().generation);
             if let Some((old, leaves)) = claim {
+                let alive = leaves.iter().any(|leaf| {
+                    intent
+                        .borrow()
+                        .desired
+                        .get(*leaf)
+                        .is_some_and(|labels| labels.contains(&format!("eqoa:{}", t.id)))
+                });
                 for leaf in leaves {
                     enable_element(
                         &mut intent.borrow_mut(),
@@ -641,7 +698,7 @@ fn install_native(host: &Host, lease: &VisibilityLease) -> mlua::Result<()> {
                         Some(format!("eqoa:{}", t.id)),
                     );
                 }
-                return lua.pack_multi((old == generation, mlua::Value::Nil));
+                return lua.pack_multi((old == generation && alive, mlua::Value::Nil));
             }
             lua.pack_multi((false, mlua::Value::Nil))
         })?,

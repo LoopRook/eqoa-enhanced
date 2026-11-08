@@ -394,6 +394,17 @@ impl Textures {
             }
         })?;
 
+        let inner = load_texture;
+        let load_texture = lua.create_function(move |lua, args: mlua::MultiValue| {
+            let value = inner.call::<Value>(args)?;
+            super::native_events::resource(
+                lua,
+                "texture",
+                value.clone(),
+                value.is_nil().then_some("texture could not be loaded"),
+            )?;
+            Ok(value)
+        })?;
         forge.set("LoadTexture", load_texture.clone())?;
 
         let igraphics: Table = match forge.get("IGraphicsApi") {
@@ -404,7 +415,18 @@ impl Textures {
                 t
             }
         };
-        igraphics.set("CreateTextureFromFile", load_texture)?;
+        igraphics.set(
+            "CreateTextureFromFile",
+            lua.create_function(move |lua, path: String| {
+                match load_texture.call::<Value>(path)? {
+                    Value::UserData(ud) => {
+                        let (w, h) = dimensions(&*ud.borrow::<Handle>()?)?;
+                        lua.pack_multi((ud, w, h))
+                    }
+                    _ => lua.pack_multi((Value::Nil, Value::Nil, Value::Nil)),
+                }
+            })?,
+        )?;
         super::native_media::textures(lua, owner)?;
 
         Ok(())

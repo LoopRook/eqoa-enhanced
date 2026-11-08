@@ -63,6 +63,7 @@ pub(crate) struct Host {
 
 impl Drop for Host {
     fn drop(&mut self) {
+        super::native_events::clear(self);
         for error in super::file_io::close_all(&self.lua) {
             eprintln!("{error}");
         }
@@ -213,6 +214,23 @@ fn create_base_host() -> Result<BaseHost> {
             }
         })?,
     )?;
+    util.set(
+        "IsBattleMusicPlaying",
+        lua.create_function(|_, ()| {
+            Ok(super::native_core::CORE.with(|c| {
+                c.borrow().view.player["fighting"]
+                    .as_bool()
+                    .unwrap_or(false)
+            }))
+        })?,
+    )?;
+    util.set(
+        "IsBitZero",
+        lua.create_function(|_, (value, mask): (u32, u32)| Ok(value & mask == 0))?,
+    )?;
+    for name in ["utf8_to_utf16", "utf16_to_utf8"] {
+        util.set(name,lua.create_function(move |lua,_:Value|{let reason="unsupported: pointer-based UTF conversion is unavailable; native API strings are UTF-8";super::native::diagnose(lua,&format!("frontiers_forge.util.{name}"),"unsupported",reason);Ok((Value::Nil,reason))})?)?;
+    }
 
     lua.set_named_registry_value("forge_callbacks", lua.create_table()?)?;
     let forge = lua.create_table()?;
@@ -468,6 +486,9 @@ impl Host {
     pub fn has_host_module(&self, name: &str) -> bool {
         self.host_registry.borrow().contains_key(name)
     }
+    pub(crate) fn registered_modules(&self) -> HashMap<String, Value> {
+        self.host_registry.borrow().clone()
+    }
 
     pub fn resolve_resource(
         &self,
@@ -554,6 +575,9 @@ impl Host {
         self.fatal.set(false);
         if let Some(result) = super::native_settings::callback(&self.lua, kind, &value) {
             return result;
+        }
+        if kind == 0 {
+            super::native_events::settings_render(self)?;
         }
         let res = match self
             .lua

@@ -164,7 +164,9 @@ fn validate(v: &Value, depth: usize, parents: &mut Vec<usize>) -> std::result::R
                         integers.push(n as u64)
                     }
                     _ => {
-                        return Err("settings keys must be strings or dense positive indexes".into());
+                        return Err(
+                            "settings keys must be strings or dense positive indexes".into()
+                        );
                     }
                 };
                 validate(&v, depth + 1, parents)?;

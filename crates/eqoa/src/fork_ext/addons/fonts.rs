@@ -52,6 +52,7 @@ pub enum FontHandleState {
         file_size: u64,
     },
     Fallback,
+    Released,
 }
 
 #[derive(Clone)]
@@ -72,6 +73,7 @@ impl UserData for LuaImFont {
                     format!("ImFont(ready, size={size_pixels})")
                 }
                 FontHandleState::Fallback => "ImFont(fallback)".to_string(),
+                FontHandleState::Released => "ImFont(released)".to_string(),
             };
             Ok(desc)
         });
@@ -131,6 +133,38 @@ pub struct FontBank {
 }
 
 impl FontBank {
+    pub(crate) fn publish_outcomes(lua: &Lua, bank: &Rc<RefCell<Self>>) -> LuaResult<()> {
+        #[derive(Default)]
+        struct Published(std::collections::HashSet<u32>);
+        if lua.app_data_ref::<Published>().is_none() {
+            lua.set_app_data(Published::default());
+        }
+        let handles = bank.borrow().handles.values().cloned().collect::<Vec<_>>();
+        for font in handles {
+            let status = match &*font.state.borrow() {
+                FontHandleState::Ready { .. } => Some(false),
+                FontHandleState::Fallback => Some(true),
+                _ => None,
+            };
+            if let Some(failed) = status {
+                let first = lua
+                    .app_data_mut::<Published>()
+                    .unwrap()
+                    .0
+                    .insert(font.handle_id);
+                if first {
+                    let handle = mlua::Value::UserData(lua.create_userdata(font)?);
+                    super::native_events::resource(
+                        lua,
+                        "font",
+                        handle,
+                        failed.then_some("font could not be loaded; using default font"),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
     pub fn new(owner_id: u64, context_epoch: u64) -> Self {
         Self {
             _owner_id: owner_id,
@@ -210,7 +244,11 @@ impl FontBank {
             self.record_diagnostic(FontDiagnostic::HandleLimitExceeded {
                 limit: MAX_FONT_HANDLES,
             });
-            return Some(fallback_handle(self, cache_key));
+            return Some(LuaImFont {
+                handle_id: 0,
+                state: Rc::new(RefCell::new(FontHandleState::Fallback)),
+                context_epoch: self.context_epoch,
+            });
         }
 
         let canonical_path =
@@ -280,7 +318,12 @@ impl FontBank {
                 file_size,
             } = &*state
             {
-                let data = match StbTrueTypeFontData::from_file(canonical_path) {
+                let data = match super::sandbox::read_bounded(
+                    canonical_path,
+                    MAX_FONT_FILE_BYTES as usize,
+                )
+                .and_then(|bytes| StbTrueTypeFontData::from_bytes(bytes).map_err(|e| e.to_string()))
+                {
                     Ok(d) => d,
                     Err(e) => {
                         self.record_diagnostic(FontDiagnostic::ValidationFailed(format!(
@@ -421,6 +464,7 @@ impl FontBank {
                         FontHandleState::Pending { .. } => "pending",
                         FontHandleState::Ready { .. } => "ready",
                         FontHandleState::Fallback => "fallback",
+                        FontHandleState::Released => "fallback",
                     };
                     let t = lua.create_table()?;
                     t.set("status", status)?;
@@ -482,7 +526,14 @@ impl FontBank {
                         "font belongs to another VM",
                     );
                 }
-                // Atlas fonts remain allocated until context retirement; release this VM's use.
+                if font.handle_id != 0 {
+                    let mut bank = bank.borrow_mut();
+                    bank.handles.remove(&font.handle_id);
+                    bank.cache_by_key
+                        .retain(|_, f| !Rc::ptr_eq(&f.state, &font.state));
+                    *font.state.borrow_mut() = FontHandleState::Released;
+                }
+                // Atlas allocation retires with its context; the VM handle is revoked now.
                 lua.pack_multi((true, mlua::Value::Nil))
             })?,
         )?;

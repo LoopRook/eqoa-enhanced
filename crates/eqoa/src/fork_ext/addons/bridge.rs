@@ -677,6 +677,9 @@ impl Bridge {
                             super::fonts::FontHandleState::Ready { raw_font, .. } => *raw_font,
                             super::fonts::FontHandleState::Pending { .. }
                             | super::fonts::FontHandleState::Fallback => std::ptr::null_mut(),
+                            super::fonts::FontHandleState::Released => {
+                                return Err(mlua::Error::runtime("stale font handle"));
+                            }
                         }
                     }
                     _ => return Err(mlua::Error::runtime("expected ImFont or nil for PushFont")),
@@ -748,7 +751,6 @@ impl Bridge {
             })?,
         )?;
         lua.globals().set("ImGui", imgui.clone())?;
-        super::native_media::imgui(lua, &imgui)?;
         let flags = lua.create_table()?;
         flags.set("NoTitleBar", sys::ImGuiWindowFlags_NoTitleBar)?;
         flags.set("AlwaysAutoResize", sys::ImGuiWindowFlags_AlwaysAutoResize)?;
@@ -821,6 +823,7 @@ impl Bridge {
         }
         lua.globals().set("ImGuiCond", conds)?;
         widgets::install(lua, &imgui, &frame)?;
+        super::native_media::imgui(lua, &imgui)?;
         Ok(Self { frame })
     }
 
