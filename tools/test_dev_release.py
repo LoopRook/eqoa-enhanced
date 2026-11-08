@@ -22,6 +22,10 @@ class DevelopmentReleaseTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/enhanced-dev.yml").read_text(encoding="utf-8")
         build, publish = workflow.split("\n  publish:", 1)
         self.assertIn("branches: [develop]", workflow)
+        ignored = workflow.split("paths-ignore:", 1)[1].split("workflow_dispatch:", 1)[0]
+        self.assertEqual([line.strip() for line in ignored.splitlines() if line.strip().startswith("-")],
+                         ["- '*.md'", "- 'docs/**'", "- '.github/**'"],
+                         "only documentation skips a nightly; bundled mods and code never do")
         self.assertIn("workflow_dispatch:", workflow)
         self.assertNotIn("pull_request", workflow)
         self.assertNotIn("secrets.", workflow)

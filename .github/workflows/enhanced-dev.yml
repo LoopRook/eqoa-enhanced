@@ -5,6 +5,12 @@ name: Nightly build
 on:
   push:
     branches: [develop]
+    # Documentation alone changes nothing a player runs, so it offers no update.
+    # Top-level *.md only: bundled-mods/**/README.md is built into the game.
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - '.github/**'
   workflow_dispatch:
 
 permissions:

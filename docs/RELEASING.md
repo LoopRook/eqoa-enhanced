@@ -73,7 +73,9 @@ uploaded last. Assets left over from an older development build are removed.
 If `develop` has moved on while the job was running, the publisher exits
 without touching the release; the newer run publishes instead.
 
-To rebuild the current `develop` head without pushing, run Nightly build
+Pushes that change only top-level `*.md` files, `docs/` or `.github/` build no
+Nightly (no update offer for documentation). To rebuild the current `develop`
+head without pushing, run Nightly build
 manually with **Run workflow** (`workflow_dispatch`). A versioned release still
 comes only from the tag path above; publishing `dev` never changes `VERSION`,
 FORK-UPDATE-NOTES.md or the stable channel.
