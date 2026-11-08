@@ -69,6 +69,16 @@ impl Default for EntitiesSnapshot {
     }
 }
 
+/// The game's entity list: records 0-23, what index and list lookups see.
+pub const RETAIL_RECORDS: usize = 24;
+
+/// Whether an id or name lookup sees record `i`: the game's 24 always, and
+/// past them (the target, pet and group a server keeps past the game's 24
+/// slots) only a record holding someone.
+fn searchable(snap: &EntitiesSnapshot, i: usize) -> bool {
+    i < RETAIL_RECORDS || snap.entities[i].id != 0
+}
+
 fn get_disposition_name_str(disposition: Option<u8>) -> &'static str {
     match disposition {
         Some(0..=1) => "Hostile",
@@ -752,8 +762,8 @@ pub fn install_entity_list_adapter(host: &Host) -> LuaResult<()> {
             "GetEntityById",
             lua.create_function(move |lua_ctx, target_id: u32| {
                 let snap = s.get().entities;
-                for i in 0..24 {
-                    if i < snap.entities.len() && snap.entities[i].id == target_id {
+                for i in 0..snap.entities.len() {
+                    if searchable(&snap, i) && snap.entities[i].id == target_id {
                         let entity_mod: Table = lua_ctx
                             .load("return require('frontiers_forge.entity')")
                             .eval()?;
@@ -780,8 +790,8 @@ pub fn install_entity_list_adapter(host: &Host) -> LuaResult<()> {
                     .eval()?;
                 let new_fn: Function = entity_mod.get("new")?;
 
-                for i in 0..24 {
-                    if i < snap.entities.len() {
+                for i in 0..snap.entities.len() {
+                    if searchable(&snap, i) {
                         let e = &snap.entities[i];
                         let len = (e.name_len as usize).min(e.name.len());
                         let name_str = std::str::from_utf8(&e.name[..len]).unwrap_or("");
@@ -814,8 +824,8 @@ pub fn install_entity_list_adapter(host: &Host) -> LuaResult<()> {
                     .eval()?;
                 let new_fn: Function = entity_mod.get("new")?;
 
-                for i in 0..24 {
-                    if i < snap.entities.len() {
+                for i in 0..snap.entities.len() {
+                    if searchable(&snap, i) {
                         let e = &snap.entities[i];
                         let len = (e.name_len as usize).min(e.name.len());
                         let name_str = std::str::from_utf8(&e.name[..len]).unwrap_or("");
@@ -1113,6 +1123,58 @@ mod tests {
             "#,
         );
         let ok: bool = chunk.eval().unwrap();
+        assert!(ok);
+    }
+
+    /// Records 24 and up hold the target, pet and group when the server keeps
+    /// them past the game's 24 slots: id and name lookups find them, the
+    /// index and list lookups stay the game's 24, and an empty record there
+    /// answers no id or name.
+    #[test]
+    fn forge_entity_list_finds_records_past_the_games_24() {
+        let dir = temp_test_dir("entity_past_24");
+        let addon = test_addon(&dir);
+        let host = Host::for_addon(&addon).unwrap();
+
+        let mut snap = Snapshot::default();
+        snap.in_game = true;
+        for i in 0..24 {
+            snap.entities.entities[i].id = 1000 + i as u32;
+            snap.entities.entities[i].level = 1;
+            snap.entities.entities[i].is_populated = true;
+        }
+        let mut far = EntitySnapshot::default();
+        far.id = 0x18ade;
+        let n = b"desert madman";
+        far.name[..n.len()].copy_from_slice(n);
+        far.name_len = n.len() as u8;
+        far.level = 18;
+        far.disposition = Some(0);
+        far.is_populated = true;
+        snap.entities.entities[24] = far;
+        host.snapshot.set(snap);
+
+        let ok: bool = host
+            .lua
+            .load(
+                r#"
+            local EntityList = require("frontiers_forge.entity_list")
+            local t = EntityList.GetEntityById(0x18ade)
+            assert(t ~= nil, "the far target is found by id")
+            assert(t.name == "desert madman" and t.level == 18 and t.disposition_name == "Hostile")
+            assert(EntityList.GetFirstEntityWithName("desert madman"):GetId() == 0x18ade)
+            assert(#EntityList.GetAllEntitiesWithName("desert madman") == 1)
+            -- the empty records past it answer nothing
+            assert(EntityList.GetEntityById(0) == nil)
+            assert(#EntityList.GetAllEntitiesWithName("") == 24, "the game's 24 unnamed, not the empty past them")
+            -- the game's 24 by index and list
+            assert(#EntityList.GetAllEntities() == 24)
+            assert(pcall(EntityList.GetEntityByIndex, 24) == false)
+            return true
+            "#,
+            )
+            .eval()
+            .unwrap();
         assert!(ok);
     }
 

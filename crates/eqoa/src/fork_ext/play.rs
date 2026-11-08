@@ -368,40 +368,43 @@ impl Play {
         let entities = if in_game {
             let mut snap_entities = [crate::fork_ext::addons::entity::EntitySnapshot::default();
                 crate::fork_ext::addons::entity::MAX_ENTITIES];
-            for i in 0..24 {
+            let record_of = |e: &net::entity::Entity| {
+                let mut name_buf = [0u8; 24];
+                let mut name_len = 0u8;
+                let mut level = 0u8;
+                let mut target_id = 0u32;
+                let mut class_byte = 0u8;
+                let mut status_flags = 0u8;
+                if let Some(c) = &e.creature {
+                    let bytes = c.name.as_bytes();
+                    let copy_len = bytes.len().min(24);
+                    name_buf[..copy_len].copy_from_slice(&bytes[..copy_len]);
+                    name_len = copy_len as u8;
+                    level = c.level;
+                    target_id = c.target;
+                    class_byte = c.p256;
+                    status_flags = c.flags262;
+                }
+                let is_target =
+                    self.target != u32::MAX && self.target != 0 && e.id == self.target;
+                let disposition = if is_target { self.target_info } else { None };
+                crate::fork_ext::addons::entity::EntitySnapshot {
+                    id: e.id,
+                    level,
+                    health_percent_255: e.p19,
+                    position: e.pos,
+                    name: name_buf,
+                    name_len,
+                    target_id,
+                    class_byte,
+                    status_flags,
+                    disposition,
+                    is_populated: e.id != 0 && level > 0,
+                }
+            };
+            for i in 0..crate::fork_ext::addons::entity::RETAIL_RECORDS {
                 if let Some(Some(e)) = self.entities.slots.get(i) {
-                    let mut name_buf = [0u8; 24];
-                    let mut name_len = 0u8;
-                    let mut level = 0u8;
-                    let mut target_id = 0u32;
-                    let mut class_byte = 0u8;
-                    let mut status_flags = 0u8;
-                    if let Some(c) = &e.creature {
-                        let bytes = c.name.as_bytes();
-                        let copy_len = bytes.len().min(24);
-                        name_buf[..copy_len].copy_from_slice(&bytes[..copy_len]);
-                        name_len = copy_len as u8;
-                        level = c.level;
-                        target_id = c.target;
-                        class_byte = c.p256;
-                        status_flags = c.flags262;
-                    }
-                    let is_target =
-                        self.target != u32::MAX && self.target != 0 && e.id == self.target;
-                    let disposition = if is_target { self.target_info } else { None };
-                    snap_entities[i] = crate::fork_ext::addons::entity::EntitySnapshot {
-                        id: e.id,
-                        level,
-                        health_percent_255: e.p19,
-                        position: e.pos,
-                        name: name_buf,
-                        name_len,
-                        target_id,
-                        class_byte,
-                        status_flags,
-                        disposition,
-                        is_populated: e.id != 0 && level > 0,
-                    };
+                    snap_entities[i] = record_of(e);
                 }
             }
             // Slot 0 invariant: 0th index is always the player in FrontiersForge.
@@ -429,6 +432,29 @@ impl Play {
                     disposition,
                     is_populated: player_id != 0 && player.level > 0,
                 };
+            }
+            // A server keeping more than the game's 24 slots (NPC/PC Display)
+            // can put whom the HUD follows past them, where the game's list
+            // never reaches: the records after the 24 hold those, the target
+            // first, so a mod's target box, pet or group frame finds them by id.
+            let mut next = crate::fork_ext::addons::entity::RETAIL_RECORDS;
+            let group = self.group.members[..self.group.count()].iter().map(|m| m.id);
+            let followed = [Some(self.target), Some(self.pet_id), self.self_id32()]
+                .into_iter()
+                .flatten()
+                .chain(group)
+                .chain(self.target_of_target_id());
+            for id in followed {
+                if next == snap_entities.len() {
+                    break;
+                }
+                if id == 0 || id == u32::MAX || snap_entities[..next].iter().any(|r| r.id == id) {
+                    continue;
+                }
+                if let Some(e) = self.entities.slots.iter().flatten().find(|e| e.id == id) {
+                    snap_entities[next] = record_of(e);
+                    next += 1;
+                }
             }
             crate::fork_ext::addons::entity::EntitiesSnapshot {
                 count: 24,
@@ -1605,6 +1631,55 @@ mod tests {
             "steady frames must not rebuild the HUD atlas or clone TEXTURES.TXT"
         );
     }
+    /// A server keeping more than the game's 24 slots (NPC/PC Display) puts
+    /// the target and the pet past them: the addons' records 24 and up hold
+    /// them, so a mod's target box finds what the player targeted; anyone
+    /// else past slot 23 stays out, and one already in the 24 is not repeated.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forge_snapshot_keeps_the_target_past_the_games_24_slots() {
+        let mut p = play();
+        let _ = p.loading.wait.take();
+        p.hud = Some((
+            crate::ui::Vui::new(Default::default(), Default::default(), vec![]),
+            Default::default(),
+            crate::hud::Hud::new(),
+        ));
+        let mut bytes = vec![0; 233];
+        bytes[28..32].copy_from_slice(&100_i32.to_le_bytes());
+        bytes[32..36].copy_from_slice(&100_i32.to_le_bytes());
+        p.forge_health.receive(&bytes);
+        let creature = |id: u32, name: &str| net::entity::Entity {
+            id,
+            creature: Some(net::entity::Creature { name: name.into(), level: 18, ..Default::default() }),
+            ..Default::default()
+        };
+        p.entities.slots = vec![None; 40];
+        p.entities.slots[0] = Some(creature(0x100, "Zaptir"));
+        for i in 1..24 {
+            p.entities.slots[i] = Some(creature(0x200 + i as u32, "near"));
+        }
+        p.entities.slots[30] = Some(creature(0x18ade, "desert madman"));
+        p.entities.slots[33] = Some(creature(0x18da0, "Primal Spirit"));
+        p.entities.slots[35] = Some(creature(0x18bf9, "Gharj"));
+        p.target = 0x18ade;
+        p.pet_id = 0x18da0;
+        let snap = p.forge_snapshot(None);
+        assert!(snap.in_game);
+        let ids: Vec<u32> = snap.entities.entities.iter().map(|e| e.id).collect();
+        let at = |id: u32| ids.iter().position(|&i| i == id);
+        let t = at(0x18ade).expect("the target past slot 23 is in the addons' records");
+        let e = snap.entities.entities[t];
+        assert_eq!(&e.name[..e.name_len as usize], b"desert madman");
+        assert!(at(0x18da0).is_some(), "the pet too");
+        assert_eq!(at(0x18bf9), None, "no one the HUD does not follow");
+        // control: a target inside the 24 keeps its slot and is not repeated
+        p.target = 0x205;
+        let snap = p.forge_snapshot(None);
+        assert_eq!(snap.entities.entities.iter().filter(|e| e.id == 0x205).count(), 1);
+        assert_eq!(snap.entities.entities[5].id, 0x205);
+    }
+
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn forge_snapshot_menu_mode_semantics_match_reference() {
