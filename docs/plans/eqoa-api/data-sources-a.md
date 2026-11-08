@@ -31,12 +31,12 @@ Two facts hold for nearly every row and are not repeated:
 | group | 11 / 0 / 0 | `IsSelfLeader` never goes false except on leaving; 8-member cap; member position units unverified |
 | effects | 1 / 5 / 0 | snapshot is `EffectsSnapshot::default()` (`play.rs:733`), so `GetCount()` is always 0 in game |
 | ability | 20 / 0 / 1 | no `Ability.new`; ability objects are frozen copies, not live records |
-| ability_list | 14 / 5 / 0 | hook lifecycle (`InstallHook`, `UninstallHook`, `IsHookInstalled`, `GetHookInfo`) are no-op successes |
+| ability_list | 15 / 4 / 0 | hook lifecycle (`InstallHook`, `UninstallHook`, `IsHookInstalled`, `GetHookInfo`) are no-op successes |
 | ability_bar | 14 / 1 / 0 | `GetSlotUITexId` is a hardcoded 5-entry table, slot 4 -> 0 |
 | combat | 10 / 7 / 0 | packet colour trailer is dropped (`combat.rs:44`); `ReadForeignCave` nil; hook info faked |
 | chat | 9 / 8 / 0 | channel-type capture, focus dump, channel table are stubs; adapter keeps the last 8 lines only |
 | cave | 0 / 0 / 7 | whole module is a MIPS code-cave allocator: raw-memory only, no native counterpart |
-| util | 9 / 0 / 37 | `Log`/`LogDebug`, `GetWorldId`, the dialog readers, `ListFiles`, all raw-memory helpers |
+| util | 9 / 0 / 37 | `Log`/`LogDebug`, `GetWorldId`, the dialog readers, `ListFiles`, all raw-memory helpers; `GetCompassDegrees` returns the body's heading, not the camera's |
 | icon | 6 / 1 / 0 | works only after the addon claims textures (`textures.rs:313`); previews are a stub before that |
 
 ---
@@ -413,9 +413,289 @@ None in the module, but the slot is the handle a mod would use: the native use p
   (`play.rs:546-554`), so `GetSlotId()` is an index, not the item's own slot field; a mod comparing it
   to a Forge slot id will be off. The Forge slot object only exposes `GetName`, `GetDescription`,
   `GetIconRef`, so this is invisible to existing mods.
-- Bars 3 and 4 (menus 4 and 5, `hudmenu.rs:69-76`) exist natively but not in this module's 3.
+- Bars 3 and 4 (menus 4 and 5, `hudmenu.rs:69-77`) exist natively but not in this module's 3.
 
 ---
 
-<!-- continued in the next section -->
+## combat
+
+Forge file: `combat.lua` (760 lines: a code cave on the 0x00DB dispatcher case, ring of 64 events).
+
+### Surface
+
+`IsHookInstalled`, `InstallHook`, `UninstallHook`, `GetHookInfo`, `ReadForeignCave(max_words)`,
+`GetEventCount`, `GetDroppedCount`, `Acquire(owner)`, `Release(owner)`, `GetOwnerCount`,
+`HasClaim(owner)`, `IsHookSuspended`, `Events` {OnDamageDealt, OnDamageReceived, OnHealingDealt,
+OnHealingReceived}, `On`, `Off`, `GetSubscriberErrors`, `Update()`. 17 public entries.
+
+### Where the data is
+
+The packet is 0x00DB (`Event::Opcode`, `net/src/session.rs:1690`), handled by
+`Play::damage_indication` (`play.rs:5821-5854`), which calls `fork_combat_event`
+(`crates/eqoa/src/fork_ext/play.rs:889-902`) -> `record_combat_event`
+(`crates/eqoa/src/fork_ext/addons/combat.rs:28-47`), drained by `snapshot_combat_events`
+(`combat.rs:49-62`) into the frame snapshot (`play.rs:673-677`).
+
+| Forge | Native source | Adapter today | Availability | Event source | Status |
+|---|---|---|---|---|---|
+| `Events`, `On`, `Off`, `GetSubscriberErrors`, `Update` | ring above | `combat.rs:104-110`, `219-383` | in world | 0x00DB (`play.rs:2780-2781`) | REAL |
+| event payload `attacker_id`, `defender_id`, `amount`, `seq` | `damage_indication` parses all three (`play.rs:5823`), `fork_combat_event` passes them (`fork_ext/play.rs:891`) | `combat.rs:295-325` | in world | 0x00DB | REAL |
+| `color` (the patch trailer) | parsed at `play.rs:5829-5830` but **not passed on** at `play.rs:5843`; `record_combat_event` hardcodes `color: 0` (`combat.rs:44`) | `combat.rs:302`, set only when non-zero (`:317-319`) | — | 0x00DB | PLACEHOLDER (always nil) |
+| `outgoing` / `incoming` / `is_heal` / `to_pet` | player and pet ids (`combat.rs:289-290`), sign of `amount` (`play.rs:5840`, `damage.rs:8-9`: positive is a heal) | `combat.rs:304-310` | in world | 0x00DB | REAL |
+| `from_pet` | Forge's heuristic is the colour trailer (`combat.lua:456-460`) | `combat.rs:307-308`: pet id, or player id with a colour — the second half can never fire | in world | 0x00DB | PLACEHOLDER (half the test is dead) |
+| `GetEventCount` | monotonic seq (`combat.rs:25`, `34-38`) | `combat.rs:202-211` | any time | n/a | REAL (counts since process start, not since install) |
+| `GetDroppedCount` | — | `combat.rs:213` always 0 | — | — | PLACEHOLDER (ring silently drops at 64, `combat.rs:31-33`) |
+| `Acquire` / `Release` / `GetOwnerCount` / `HasClaim` | claim set | `combat.rs:121-158` | any time | n/a | REAL (bookkeeping) |
+| `IsHookInstalled` | capture is unconditional | `combat.rs:160-167`: true when in game or claimed | in world | n/a | PLACEHOLDER (reports a hook that does not exist) |
+| `InstallHook` / `UninstallHook` | n/a | `combat.rs:169-170`: true | any time | n/a | PLACEHOLDER (no-op success) |
+| `IsHookSuspended` | n/a | `combat.rs:172-179` | any time | n/a | REAL bookkeeping over a fake "hook" |
+| `GetHookInfo` | n/a | `combat.rs:181-200`: `installed = true`, `dropped = 0` invented | any time | n/a | PLACEHOLDER |
+| `ReadForeignCave` | n/a (PCSX2 patch inspection) | `combat.rs:214-217`: nil | — | n/a | PLACEHOLDER (audit line `EQOA-MOD-API-PLAN.md:49`) |
+
+### Actions
+
+None.
+
+### Notes
+
+- The native handler is better than Forge's cave in one way and worse in another: it sees every 0x00DB
+  without patching (`play.rs:2780`), but it throws away the S2 colour trailer that the game itself
+  keeps for the damage numbers (`play.rs:5829-5830`, `damage.rs:36-39`). Passing it into
+  `fork_combat_event` is a two-line fix and restores `from_pet`.
+- Forge's doc says the hook also sees heals; the native path does too (`amount > 0` is the green
+  number, `damage.rs:8-9`). A self-heal is attacker == defender == player, which fires both Dealt and
+  Received in both implementations (`combat.rs:326-341`, `combat.lua:736-744`).
+
+---
+
+## chat
+
+Forge file: `chat.lua` (798 lines: a 32-slot drawn-line ring, publish/subscribe, a send cave,
+channel-type discovery).
+
+### Surface
+
+Receive: `MsgType` {Say, Shout, Party, Tell, Guild}, `GetMessageTypeString`, `Events`
+{OnChatMessage}, `On`, `Off`, `GetSubscriberErrors`, `Update()`.
+Send: `ChatMode` {Default, Say, Group, Guild, Shout}, `SendChatText(text, mode)`, `IsSendPending`,
+`IsSendHookInstalled`, `InstallSendHook`, `UninstallSendHook`, `IsSendHookSuspended`.
+PCSX2-only inspection: `CaptureChannelTypeFromGameWindow`, `DebugDumpFocusChain`, `GetChannelTableInfo`.
+17 public entries.
+
+### Where the data is
+
+Incoming: the server's chat opcodes in `net/src/session.rs:1626-1638` (0x0A7A white, 0x0A7B with the
+server's RGB, 0x069E group, 0x0758 narrow, 0x00CE error red) -> `Play::server_line`/`group_line`
+(`play.rs:2773-2775`) -> `add_chat` (`play.rs:4779-4788`, a `VecDeque` capped at 8) plus
+`chat_pending` for the window. The client's real line store is `chat::ChatText`
+(`crates/eqoa/src/chat.rs:68-140`: 1,001 lines, `ChatLine { text, color, kind, time, seq }` at
+`chat.rs:26-36`), fed at draw time (`play.rs:8206-8209`) into `WndChat` (`chat.rs:316-359`).
+Outgoing: `Play::chat_line` (`play.rs:4602-4690`: slash commands, `/tell`, `/reply`, channel sends),
+reached from the edit box's `edit_done` (`play.rs:6385`, chat purpose at `:6402-6403`) and from the
+quick-chat menus (`play.rs:6912-6915`).
+
+| Forge | Native source | Adapter today | Availability | Event source | Status |
+|---|---|---|---|---|---|
+| `MsgType`, `GetMessageTypeString` | the red byte of the line's colour: `[f32;4]` from `session.rs:1626-1632`, and the constants are exactly 128/255, 63/255, 0.5, 0.25, 1.0 | `chat.rs:23-27`, `142-151`, `176-179` | in world | 0x0A7A/0x0A7B/0x0758/0x00CE/0x069E | REAL (same red-channel-only identity Forge has) |
+| `Events`, `On`, `Off`, `GetSubscriberErrors`, `Update` | `snapshot_chat` (`chat.rs:43-104`) diffs `self.chat` by prefix and assigns a monotonic `seq` | `chat.rs:181-319` | in world | per frame (`play.rs:668`) | REAL |
+| message payload `text`, `msg_type`, `type_name`, `committed_ms` | native line text/colour/`ChatLine::time` | `chat.rs:278-283` (`start_index` is the snapshot index, `committed_ms` is `session.now()`, not the line's commit time) | in world | above | REAL with caveats: the diff sees only the **last 8 lines** (`play.rs:4784-4787`), so a burst of more than 8 lines between two addon frames loses the earliest; `committed_ms` is set at snapshot time (`chat.rs:94`) |
+| `ChatMode` | channel word: `Play::channel` (`play.rs:4613`), set by `group_changed` (`play.rs:5377-5383`) and the slash commands (`play.rs:4639-4657`) | `chat.rs:166-173` (strings) | in world | 0x000E sends | REAL (constants) |
+| `SendChatText` | `Play::chat_line` | `chat.rs:321-349` queues -> `fork_ext/play.rs:812-814` -> `chat_line` | in world only (`chat.rs:327-329`) | per frame | REAL, including slash commands, because it goes through the game's own line handler |
+| `IsSendPending` | nothing is queued beyond the frame | `chat.rs:362`: false | — | — | PLACEHOLDER |
+| `IsSendHookInstalled`, `InstallSendHook`, `UninstallSendHook`, `IsSendHookSuspended` | the native client needs no hook to send | `chat.rs:351-361` | — | — | PLACEHOLDER (all return a fixed success/false) |
+| `CaptureChannelTypeFromGameWindow` | the live byte is `Play::channel`; no window walk needed | `chat.rs:365-368`: `(0, nil, 0)` | — | n/a | PLACEHOLDER (raw-memory only in Forge, `chat.lua:665-738`) |
+| `DebugDumpFocusChain`, `GetChannelTableInfo` | n/a | `chat.rs:369-376`: empty tables | — | n/a | PLACEHOLDER (raw-memory only in Forge, `chat.lua:740-796`) |
+
+### Actions
+
+`SendChatText` is the one real action here, and its native path is complete: the adapter hands the
+line to `Play::chat_line` (`fork_ext/play.rs:813`), which is the same function the keyboard's edit box
+calls (`play.rs:6402-6403`). Behaviour lives at `play.rs:4638-4689` (says, group, guild, shout, tell,
+reply, `/alarm`, `/time`, `/follow`, `/bug`, GM commands); plain text goes to the current channel at
+`play.rs:4613-4617`.
+
+### Notes
+
+- The 32-slot ring Forge read is `VIChatText`; our `ChatText` is the same object rebuilt with 1,001
+  lines (`chat.rs:20-24`). The adapter bypasses it and diffs the 8-line `self.chat` queue, because the
+  lines reach `ChatText` only when the HUD draws (`play.rs:8201-8209`). Round 2 should publish from
+  `ChatText` (which already has a per-line `seq`, `chat.rs:26-36`) or give `add_chat` a seq of its own;
+  either removes the 8-line hole.
+- 0x069E arrives as its own event (`session.rs:1634-1636`, `play.rs:2775`) but is folded into the same
+  "line" stream, so a mod cannot tell group chat from say by `msg_type` (Forge could not either: group
+  lines are coloured like party, `play.rs:2775` -> `group_line`).
+- `ChatLine.kind` (fresh for 20 s, `chat.rs:30-31`) and the game's own wrapping (`chat.rs:126-140`) are
+  the closest native equivalent of Forge's "continuation slot starts with a space" test
+  (`chat.lua:55-60`).
+
+---
+
+## cave
+
+Forge file: `cave.lua` (246 lines: a best-fit allocator for MIPS code caves in EE RAM).
+
+### Surface
+
+`IsRegionZero(base, size)`, `Alloc(size, id)`, `Reserve(base, size, id)`, `Get(id)`, `Free(id)`,
+`Release(id)`, `Info()`. 7 public entries.
+
+### Where the data is
+
+Nowhere: this module exists only to place and free executable memory in the emulator
+(`cave.lua:5-40`, safe tiers at `0x000F1000-0x000F8000`). Our client runs its own code, has no code
+caves and no patched call sites. **Raw-memory only.**
+
+| Forge | Native source | Adapter today | Status |
+|---|---|---|---|
+| `Alloc`, `Reserve`, `Get`, `Free`, `Release`, `Info`, `IsRegionZero` | none | not registered as a module (`host.rs:339-355` installs no cave table) | MISSING (all 7), by design |
+
+What cave was *for* is already native and needs no replacement:
+
+- the cooldown hook: the engine's 0x00CD arm calls `fork_hooks::ability_lockout` directly
+  (`play.rs:2684-2691`, `play.rs:11-14`);
+- the combat capture: 0x00DB is a normal event (`play.rs:2780-2781`);
+- the chat send hook: `Play::chat_line` is directly callable from Rust (`fork_ext/play.rs:813`).
+
+### Actions
+
+None.
+
+### Notes
+
+- A mod that calls `Cave.*` today gets `attempt to index a nil value` (the module is not even in
+  `package.loaded`). Round 2 should either omit it from the Forge compat surface with a diagnostic, or
+  ship a table whose functions all report "not supported: the native client needs no code caves" —
+  the plan's no-fake-success rule (`EQOA-MOD-API-PLAN.md:23-25`).
+
+---
+
+## util
+
+Forge file: `util.lua` (677 lines). Most of it is raw EE-memory plumbing and Windows file APIs.
+
+### Surface
+
+Memory (raw): `EEmem`, `EE_RAM_SIZE`, `IsValidEEPointer`, `ReadFromOffset`, `WriteToOffset`,
+`FillRange`, `WriteWords`, `GetOffsetFromPointerChain`, `ReadFromPointerChain`.
+Text: `utf16_to_utf8`, `utf8_to_utf16`, `GetLocalizedString`.
+Math/game: `GetExpRequiredForLevel`, `GetDistanceBetween`, `IsBitZero`, `RadiansToDegrees`,
+`GetCompassRadians`, `GetCompassDegrees`, `NormalizeDegrees`, `SignedDegreesBetween`,
+`GetBearingToPoint`, `IsFacingPoint`.
+State: `IsInGame`, `GetWorldId`, `IsBattleMusicPlaying`, `IsStartMenuOpen`, `GetUiMode`, `IsUiBusy`,
+`UiMode`, `IsTextDialogOpen`, `GetTextDialogText`, `IsConfirmDialogOpen`, `GetConfirmDialogText`,
+`GetConfirmDialogStyle`, `GetConfirmDialogSelection`, `IsInputDialogOpen`, `GetInputDialogTag`,
+`GetInputDialogText`, `IsChatKeyboardOpen`, `InputDialogTag`, `ConfirmDialogStyle`.
+Log: `Log(level, msg)`, `LogDebug`, `LogError`.
+Files: `ListFiles(pattern, options)`, `ListFilesInDir(dir, glob, options)`.
+46 public entries.
+
+### What our host provides
+
+The native `frontiers_forge.util` table is built in `create_base_host` (`host.rs:126-240`) and any
+`util.lua` on disk is ignored (`package.rs:215-253`, test at `package.rs:695-699`). It sets exactly:
+`IsInGame` (`host.rs:128`), `IsStartMenuOpen` (`:136`), `IsUiBusy` (`:141`), `GetUiMode` (`:146`),
+`UiMode` (`:151-162`), `GetCompassDegrees` (`:183`), `GetBearingToPoint` (`:190`),
+`GetExpRequiredForLevel` (`:203`), `LogError` (`:231`). 9 of 46.
+
+| Forge | Native source | Adapter today | Status |
+|---|---|---|---|
+| `IsInGame` | `connected && hud_ready` (`play.rs:131-133`) | `host.rs:128-131` | REAL |
+| `IsStartMenuOpen` | any menu mode, start menu, or map (`play.rs:680-683`) | `host.rs:133-139`: deliberately true for **any** game window, not only the pause menu | REAL, documented divergence (`host.rs:133-135`) |
+| `IsUiBusy`, `GetUiMode`, `UiMode` | `play.rs:684-699`, mode table `play.rs:745-783` | `host.rs:141-162` | REAL |
+| `GetCompassDegrees` | the camera's facing: `walker.eye.direction` (`play.rs:3609`) | `host.rs:183-188` returns **the body's** `player.heading_rad`, not the camera's | REAL but wrong value; Forge's `GetCompassRadians` reads the compass heading (`util.lua:558-566`) |
+| `GetBearingToPoint` | pure math, same formula as `util.lua:597-601` | `host.rs:190-202` | REAL |
+| `GetExpRequiredForLevel` | `hud::exp_for_level` (`crates/eqoa/src/hud.rs:124-131`) | `host.rs:203-215` uses the `< 51` branch only; the native formula changes at 51 (`hud.rs:126-130`) | REAL below 51, PLACEHOLDER above (`host.rs:207-208` says so) |
+| `LogError` | `UiForge.Log` sink (`host.rs:220-230`) | `host.rs:231-240` | REAL |
+| `Log`, `LogDebug` | same sink | not set; `UiForge.Log` itself works | MISSING (a mod calling `Util.Log(5, ...)` errors) |
+| `GetWorldId` | `Play::world_id` (`play.rs:5423-5425`, from `self.player.world`) | not set | MISSING (plan already lists it, `EQOA-MOD-API-PLAN.md:45`) |
+| `IsBattleMusicPlaying` | `Play::self_fighting` (`play.rs:8504-8507`, the player's `Creature::p263`, `net/src/entity.rs:104`) | not set | MISSING |
+| `GetLocalizedString` | `self.words: Option<vi::strtab::StringTable>` (`play.rs:267`), read as `w.get(id, 0)` (`play.rs:222-226`) | not set | MISSING |
+| `GetTextDialogText`, `IsTextDialogOpen` | `self.dialogs: VecDeque<Vec<u16>>` (`play.rs:311`) shown in mode 9 (`play.rs:749`) | not set | MISSING |
+| `IsConfirmDialogOpen`, `GetConfirmDialogText`, `GetConfirmDialogStyle`, `GetConfirmDialogSelection`, `ConfirmDialogStyle` | `dialog::MBox` (`crates/eqoa/src/dialog.rs:241-256`: `kind` 0/1/2 exactly Forge's style enum, `text`, `sel`; mode 14) | not set | MISSING |
+| `IsInputDialogOpen`, `GetInputDialogTag`, `GetInputDialogText`, `IsChatKeyboardOpen`, `InputDialogTag` | `self.edit: editbox::EditBox` (`play.rs:479`, `editbox.rs:156-168`: `text`, `title`, `purpose` = the tag, read at `play.rs:6373`, tags dispatched at `play.rs:6400-6439`) | not set | MISSING (the native client has every field) |
+| `GetDistanceBetween`, `IsBitZero`, `RadiansToDegrees`, `NormalizeDegrees`, `SignedDegreesBetween`, `IsFacingPoint` | trivial math | not set | MISSING (pure helpers, cheap to add) |
+| `GetCompassRadians` | as `GetCompassDegrees` | not set | MISSING |
+| `EMem`, `EE_RAM_SIZE`, `IsValidEEPointer`, `ReadFromOffset`, `WriteToOffset`, `FillRange`, `WriteWords`, `GetOffsetFromPointerChain`, `ReadFromPointerChain`, `utf16_to_utf8`, `utf8_to_utf16` | none | not set | MISSING, and must stay missing: raw-memory only. Text conversion has no mod use (the host converts) |
+| `ListFiles`, `ListFilesInDir` | discovery's own `read_dir` (`discovery.rs:172`, `270`); an addon gets only `io.open` rooted at its own folder (`file_io.rs:334-355`) | not set | MISSING; if wanted, add a rooted directory listing to `io`, never a raw Windows wildcard |
+
+### Actions
+
+None (the dialog/window readers are reads).
+
+### Notes
+
+- The `GetCompassDegrees` bug matters: every compass/heading mod (Wereoxxs' compass face) gets the
+  body's facing, so it is wrong whenever the camera is not behind the player. The camera's own angle is
+  in hand as `walker.eye.direction` (`play.rs:3609`).
+- `Util.Log` is the most likely silent breakage: it is a plain Lua function in Forge
+  (`util.lua:103-107`) but a missing field here, and bundled mods call it for diagnostics.
+- The dialog trio (text/confirm/input) is the whole "windows/dialogs" part of round 4
+  (`EQOA-MOD-API-PLAN.md:129-130`) and every field already exists natively.
+
+---
+
+## icon
+
+Forge file: `icon.lua` (569 lines: decodes PS2 `VISurface` pixels out of emulated memory).
+
+### Surface
+
+`GetTexture(hash, options)` -> texture, w, h; `GetUITexture(tex_id)` -> texture, w, h;
+`GetSurfaceInfo(hash)` -> {width, height, format, palette_count, palette_format};
+`Acquire(owner)`, `Release(owner)`, `GetOwnerCount`, `HasClaim(owner)`. 7 public entries.
+
+### Where the data is
+
+The client's icon art is the disc's ESF surface library, keyed by the game's resource hash:
+
+- hash of a UI texture name: `vi::ui::icon_id` (`crates/vi/src/ui.rs:67`), the native
+  equivalent of Forge's `HashResourceID` (`icon.lua:390-397`);
+- surface lookup: `esf::Library::surface(dict_id)` (`crates/esf/src/library.rs:487`,
+  `crates/esf/src/lib.rs:495`); the client's own `crate::ui::Vui::surface`
+  (`crates/eqoa/src/ui.rs:228`);
+- the HUD's built-in texture atlas: `Vui::entry` (`vi/src/ui.rs:131`), from `play.hud` or
+  `play.ui_data` (`fork_ext/play.rs:50-83`);
+- per-frame feed: `fork_hooks::frame_library` -> `icons::update_live_data`
+  (`crates/eqoa/src/fork_ext/play.rs:42-100`), invalidated by `art_changed` (`:103-106`);
+- decode and crop: `LiveLibraryProvider` (`icons.rs:667-733`), `ui_texture` cropping
+  (`icons.rs:683-724`), trim (`icons.rs:123`), `IconCache` (`icons.rs:255`).
+
+| Forge | Native source | Adapter today | Availability | Status |
+|---|---|---|---|---|
+| `GetTexture`, `GetUITexture` | atlas + library above | stub in the base table (`icons.rs:1130-1145`: nil, one diagnostic line for `GetUITexture`); replaced with the real cache by `attach_icon_cache` (`icons.rs:1271-1344`), installed from `Textures::install_for_addon` (`textures.rs:298-313`) | in world, after the addon's textures are installed | PLACEHOLDER before, REAL after |
+| `GetSurfaceInfo` | decoded `DecodedIcon` (`icons.rs:25-44`) | `icons.rs:1147-1170`, `1245-1269`: width/height are real, `format = 2`, `palette_count = 0`, `palette_format = 0` are synthesized | in world | PLACEHOLDER (the fields exist because Forge reported them, not because the client has them) |
+| `Acquire`, `Release`, `GetOwnerCount`, `HasClaim` | `IconCache` owners (`icons.rs:255`, `403`), freeing on the last release | base table records claims (`icons.rs:1090-1128`); the real cache refcounts at `icons.rs:1202-1243` | any time | REAL |
+| options `trim`, `trim_transparent`, `trim_color` | `TrimOptions` (`icons.rs:46-69`) + `trim_rgba` (`icons.rs:123-233`) + padding-colour detection (`:71-121`) | `icons.rs:1284-1287` | in world | REAL |
+
+### Actions
+
+None.
+
+### Notes
+
+- The base table is what an addon sees when it never installs textures (no `UiForge.*` texture use):
+  `GetTexture` then returns nil forever with no log line, which is the "silent nil" the plan calls out.
+  Add the diagnostic that `GetUITexture` has (`icons.rs:1140-1142`) to `GetTexture` too.
+- Forge's options are decoded against live PS2 surfaces (CLUT4/CLUT8/RGBA32/RGB16, palette swizzle
+  `icon.lua:78-181`). Our ESF decoder already returns RGBA8, so the palette formats `GetSurfaceInfo`
+  reports cannot exist natively — return only what the library knows (a source format if `esf::Surface`
+  exposes it) or omit the field.
+- This is Forge's only path to game art besides `UiForge.CreateTextureFromFile`; with ESF decoding it
+  is strictly better (no dictionary scan, no 64 MB of emulated RAM), so `eqoa.icons` should be the
+  supported surface and the Forge shim stays a shape adapter.
+
+---
+
+## Coverage notes
+
+- All 13 modules assigned to part A are covered; none was skipped.
+- The 5 native event queues that feed these modules exist and are complete: chat (per frame,
+  `play.rs:668`), combat (0x00DB, `play.rs:2780`), cooldown edges (0x00CD, `play.rs:2684`), target
+  info (0x0010, `play.rs:2329`), entity channels (`play.rs:2716`). Everything else in this part is
+  polled from `Snapshot`.
+- Verified-not-guessed open items, for the spec author: (1) the `CMs/CMSpent/CMPct` mapping to
+  `Mastery.x0c/x10/x08`; (2) the scale of group-member s16 coordinates against Forge's float cache;
+  (3) whether `Ability.display_index`-as-server-key stays stable across a zone (it is reindexed only
+  by 0x00B6, `play.rs:2636-2657`).
+
 
