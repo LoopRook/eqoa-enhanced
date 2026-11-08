@@ -34,6 +34,23 @@ pub struct EffectsSnapshot {
     pub count: u8,
     pub effects: [EffectSnapshot; MAX_EFFECTS],
 }
+impl EffectsSnapshot {
+    pub(crate) fn from_native(native: &net::dump::Effects) -> Self {
+        let mut result = Self::default();
+        result.count = native.count.clamp(0, 8) as u8;
+        for i in 0..result.count as usize {
+            let name = String::from_utf16_lossy(&native.name[i]);
+            let mut len = name.len().min(32);
+            while !name.is_char_boundary(len) {
+                len -= 1;
+            }
+            result.effects[i].icon_ref = native.icon[i];
+            result.effects[i].name[..len].copy_from_slice(&name.as_bytes()[..len]);
+            result.effects[i].name_len = len as u8;
+        }
+        result
+    }
+}
 
 pub(crate) fn create_module(
     lua: &mlua::Lua,

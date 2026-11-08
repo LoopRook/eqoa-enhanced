@@ -5,7 +5,7 @@ use serde_json::{Value as Json, json};
 
 pub(super) fn encode(value: Value) -> Result<Json> {
     fn visit(value: Value, depth: usize, left: &mut usize) -> Result<Json> {
-        if depth > 16 || *left == 0 {
+        if depth > 32 || *left == 0 {
             return Err(mlua::Error::runtime("profile depth/entry limit exceeded"));
         }
         *left -= 1;
@@ -14,7 +14,7 @@ pub(super) fn encode(value: Value) -> Result<Json> {
             Value::Boolean(v) => json!(v),
             Value::Integer(v) => json!(v),
             Value::Number(v) if v.is_finite() => json!(v),
-            Value::String(v) if v.as_bytes().len() <= 16384 => json!(v.to_str()?.as_ref()),
+            Value::String(v) if v.as_bytes().len() <= 1048576 => json!(v.to_str()?.as_ref()),
             Value::Table(t) => {
                 let mut entries = Vec::new();
                 for pair in t.pairs::<Value, Value>() {
@@ -34,12 +34,12 @@ pub(super) fn encode(value: Value) -> Result<Json> {
             _ => return Err(mlua::Error::runtime("profile contains unsupported value")),
         })
     }
-    visit(value, 0, &mut 4096)
+    visit(value, 0, &mut 131072)
 }
 
 pub(super) fn decode(lua: &Lua, value: &Json) -> Result<Value> {
     fn visit(lua: &Lua, value: &Json, depth: usize, left: &mut usize) -> Result<Value> {
-        if depth > 16 || *left == 0 {
+        if depth > 32 || *left == 0 {
             return Err(mlua::Error::runtime("profile depth/entry limit exceeded"));
         }
         *left -= 1;
@@ -50,7 +50,7 @@ pub(super) fn decode(lua: &Lua, value: &Json) -> Result<Value> {
                 v.as_f64()
                     .ok_or_else(|| mlua::Error::runtime("invalid number"))?,
             ),
-            Json::String(v) if v.len() <= 16384 => Value::String(lua.create_string(v)?),
+            Json::String(v) if v.len() <= 1048576 => Value::String(lua.create_string(v)?),
             Json::Object(o) if o.len() == 1 && o.contains_key("table") => {
                 let entries = o["table"]
                     .as_array()
@@ -72,7 +72,7 @@ pub(super) fn decode(lua: &Lua, value: &Json) -> Result<Value> {
             _ => return Err(mlua::Error::runtime("invalid profile value")),
         })
     }
-    visit(lua, value, 0, &mut 4096)
+    visit(lua, value, 0, &mut 131072)
 }
 
 #[cfg(test)]

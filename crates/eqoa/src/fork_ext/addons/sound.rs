@@ -228,7 +228,9 @@ pub(crate) fn skip_without_audio_output(test: &str) -> bool {
         return false;
     }
     let msg = format!("SKIP {test}: no audio output device (MCI wave-out) present");
-    if std::env::var_os("EQOA_SOUND_NATIVE_REQUIRED").is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true")) {
+    if std::env::var_os("EQOA_SOUND_NATIVE_REQUIRED")
+        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    {
         panic!("EQOA_SOUND_NATIVE_REQUIRED: {msg}");
     }
     eprintln!("{msg}");
@@ -931,13 +933,40 @@ impl SoundBank {
         let bank = owner.clone();
         forge.set(
             "LoadSound",
-            lua.create_function(move |_, path: String| {
+            lua.create_function(move |lua, path: String| {
                 let mut bank = bank.borrow_mut();
-                let id = bank.load_sound(&path, &script_root, &resource_dirs);
+                let mounts = lua
+                    .app_data_ref::<super::sandbox::Mounts>()
+                    .map(|m| m.clone());
+                let resolved = mounts.as_ref().map(|m| m.media(&path));
+                let id = match resolved {
+                    Some(Ok(p)) => {
+                        let _guard = match super::sandbox::lock_parents(&p, false) {
+                            Ok(g) => g,
+                            Err(e) => {
+                                super::native::diagnose(
+                                    lua,
+                                    "UiForge.LoadSound",
+                                    "permission_denied",
+                                    &e,
+                                );
+                                return Ok(None);
+                            }
+                        };
+                        let parent = p.parent().unwrap();
+                        bank.load_sound(&p.to_string_lossy(), parent, &[parent.to_path_buf()])
+                    }
+                    Some(Err(e)) => {
+                        super::native::diagnose(lua, "UiForge.LoadSound", "io_error", &e);
+                        None
+                    }
+                    None => bank.load_sound(&path, &script_root, &resource_dirs),
+                };
                 Ok(id.map(|id| id.as_u32()))
             })?,
         )?;
 
+        super::native_media::sound(lua, owner)?;
         let bank = owner.clone();
         forge.set(
             "PlaySound",

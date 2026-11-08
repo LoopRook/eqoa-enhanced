@@ -12,7 +12,7 @@
 
 use super::discovery::DiscoveredAddon;
 use mlua::{Lua, Value};
-use serde_json::{json, Value as Json};
+use serde_json::{Value as Json, json};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
@@ -98,6 +98,7 @@ fn is_hidden_or_system(entry: &fs::DirEntry) -> bool {
     false
 }
 
+#[derive(Clone)]
 pub(crate) struct Storage {
     root: Option<PathBuf>,
 }
@@ -316,8 +317,9 @@ impl Storage {
                         .as_ref()
                         .ok_or("addon configuration directory unavailable")?
                         .join("state.json");
-                    write_json(&target, &json!({"schemaVersion":1,"enabled":registry}))
-                        .map_err(|e| format!("failed to update state.json during migration: {e}"))?;
+                    write_json(&target, &json!({"schemaVersion":1,"enabled":registry})).map_err(
+                        |e| format!("failed to update state.json during migration: {e}"),
+                    )?;
                 }
             }
         }
@@ -353,6 +355,9 @@ impl Storage {
     pub fn save_profile(&self, key: &str, value: Value) -> Result<(), String> {
         let data = super::profile::encode(value).map_err(|e| e.to_string())?;
         write_json(&self.profile_path(key)?, &data)
+    }
+    pub(crate) fn save_encoded(&self, key: &str, value: &Json) -> Result<(), String> {
+        write_json(&self.profile_path(key)?, value)
     }
 
     pub fn load_profile(&self, key: &str, lua: &Lua) -> Result<Option<Value>, String> {
@@ -490,7 +495,11 @@ fn identity_relative(
     let rel_package = relative_to_root(package, mods_root);
     let entry_bytes = normalize_components(&rel_entry);
     let package_bytes = normalize_components(&rel_package);
-    Ok(digest_fields_v2(&entry_bytes, &package_bytes, id.as_bytes()))
+    Ok(digest_fields_v2(
+        &entry_bytes,
+        &package_bytes,
+        id.as_bytes(),
+    ))
 }
 
 fn digest_fields_v2(entry: &[u8], package: &[u8], id: &[u8]) -> String {
@@ -670,8 +679,7 @@ mod tests {
         let id = b"wereoxxs_ui";
         let hash = digest_fields_v1(entry, package, id);
         assert_eq!(
-            hash,
-            "d1a2fc6aa4f4754069e2275aff1409f3d8360eb21c862c424a68fda90777bfd0",
+            hash, "d1a2fc6aa4f4754069e2275aff1409f3d8360eb21c862c424a68fda90777bfd0",
             "v1 storage digest algorithm must remain strictly pinned to protect player migration"
         );
     }
@@ -814,15 +822,13 @@ mod tests {
         let path_b = store.profile_path(old_v1_b).unwrap();
 
         let msgs = store
-            .migrate_addon_with_candidates(
-                &addon,
-                &[old_v1_a.to_string(), old_v1_b.to_string()],
-            )
+            .migrate_addon_with_candidates(&addon, &[old_v1_a.to_string(), old_v1_b.to_string()])
             .unwrap();
 
         // Must report picking the most recently modified key
         assert!(
-            msgs.iter().any(|m| m.contains("multiple legacy v1 profiles found")),
+            msgs.iter()
+                .any(|m| m.contains("multiple legacy v1 profiles found")),
             "must log message on multiple matching profiles"
         );
 
@@ -924,8 +930,12 @@ mod tests {
         };
 
         let mut rescan_scanner = SiblingScanner::new();
-        store.migrate_addon_with_scanner(&a, &mut rescan_scanner).unwrap();
-        store.migrate_addon_with_scanner(&b, &mut rescan_scanner).unwrap();
+        store
+            .migrate_addon_with_scanner(&a, &mut rescan_scanner)
+            .unwrap();
+        store
+            .migrate_addon_with_scanner(&b, &mut rescan_scanner)
+            .unwrap();
 
         assert_eq!(
             rescan_scanner.listing_count, 1,
@@ -987,13 +997,17 @@ mod tests {
         store
             .save_profile(
                 &v1_key_alpha,
-                lua.load("return {addon_name=\"alpha_data\"}").eval().unwrap(),
+                lua.load("return {addon_name=\"alpha_data\"}")
+                    .eval()
+                    .unwrap(),
             )
             .unwrap();
         store
             .save_profile(
                 &v1_key_beta,
-                lua.load("return {addon_name=\"beta_data\"}").eval().unwrap(),
+                lua.load("return {addon_name=\"beta_data\"}")
+                    .eval()
+                    .unwrap(),
             )
             .unwrap();
 
@@ -1085,7 +1099,10 @@ mod tests {
         store.save_profile(&v1_key, Value::Nil).unwrap();
 
         let to_files = store.files_dir(&new_key).unwrap();
-        assert!(!to_files.exists(), "v2 files dir must not exist before migration");
+        assert!(
+            !to_files.exists(),
+            "v2 files dir must not exist before migration"
+        );
 
         store.migrate_addon(&addon).unwrap();
 

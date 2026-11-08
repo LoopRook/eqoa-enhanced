@@ -5,14 +5,7 @@ use dear_imgui_rs::sys;
 use dear_imgui_wgpu::{ExternalTextureId, WgpuRenderer};
 use mlua::{AnyUserData, Lua, Result, Table, UserData, Value};
 use render::wgpu;
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    fs,
-    io::Read,
-    path::PathBuf,
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, fs, io::Read, path::PathBuf, rc::Rc};
 
 #[derive(Clone, Copy, Debug)]
 pub struct TexturesBudget {
@@ -43,6 +36,15 @@ struct TextureEntry {
     texture: wgpu::Texture,
     alive: bool,
     byte_size: usize,
+}
+pub(crate) fn dimensions(handle: &Handle) -> Result<(u32, u32)> {
+    let bank = handle.owner.borrow();
+    let e = bank
+        .entries
+        .get(&handle.id)
+        .filter(|e| e.alive)
+        .ok_or_else(|| mlua::Error::runtime("expired texture handle"))?;
+    Ok((e.texture.width(), e.texture.height()))
 }
 
 pub(crate) struct Textures {
@@ -125,7 +127,11 @@ impl Textures {
                 let log_line = format!(
                     "[\"texture\"] [{id}] failed to resolve relative texture '{path}': {detail}\n"
                 );
-                if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(log_path) {
+                if let Ok(mut f) = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(log_path)
+                {
                     use std::io::Write;
                     let _ = f.write_all(log_line.as_bytes());
                 }
@@ -332,106 +338,34 @@ impl Textures {
                 return Ok(Value::Nil);
             }
 
-            // 1. Reject parent traversal including both separators
-            let normalized = path_str.replace('\\', "/");
-            for seg in normalized.split('/') {
-                if seg == ".." {
-                    bank.borrow_mut().add_diagnostic(format!(
-                        "parent traversal '..' rejected in texture path: {path_str}"
-                    ));
-                    return Ok(Value::Nil);
-                }
-            }
-
-            // 2. Determine relative vs absolute
-            let is_relative = !path_str.starts_with('/')
-                && !path_str.starts_with('\\')
-                && !path_str.contains(':');
-
-            let canon_file = if is_relative {
-                match super::package::resolve_resource(&addon_data, &path_str) {
-                    Ok(p) => p,
-                    Err(super::package::ResourceError::NotFound(err)) => {
-                        bank.borrow_mut().add_missing_texture(&addon_data.id, path_str.clone(), err);
-                        return Ok(Value::Nil);
-                    }
-                    Err(err) => {
-                        bank.borrow_mut().add_diagnostic(format!(
-                            "failed to resolve relative texture '{path_str}': {err}"
-                        ));
-                        return Ok(Value::Nil);
-                    }
-                }
-            } else {
-                let pb = normalize_texture_path_for_platform(&path_str);
-                let canon = match pb.canonicalize() {
-                    Ok(p) => p,
-                    Err(e) => {
-                        if e.kind() == std::io::ErrorKind::NotFound || !pb.exists() {
-                            bank.borrow_mut().add_missing_texture(&addon_data.id, path_str.clone(), e.to_string());
-                        } else {
-                            bank.borrow_mut()
-                                .add_diagnostic(format!("texture file unresolvable '{path_str}': {e}"));
-                        }
-                        return Ok(Value::Nil);
-                    }
-                };
-                if !canon.starts_with(&addon_data.script_root) {
-                    bank.borrow_mut().add_diagnostic(format!(
-                        "texture path '{path_str}' escapes script root: {}",
-                        canon.display()
-                    ));
-                    return Ok(Value::Nil);
-                }
-                let in_res_dir = addon_data
-                    .resource_dirs
-                    .iter()
-                    .any(|d| canon.starts_with(d));
-                if !in_res_dir {
-                    bank.borrow_mut().add_diagnostic(format!(
-                        "texture path '{path_str}' is outside discovered resource directories"
-                    ));
-                    return Ok(Value::Nil);
-                }
-                if !canon.is_file() {
-                    bank.borrow_mut().add_diagnostic(format!(
-                        "texture path '{path_str}' is not a file: {}",
-                        canon.display()
-                    ));
-                    return Ok(Value::Nil);
-                }
-                canon
-            };
-
-            // 3. Read bounded to 16 MiB
-            let mut file = match fs::File::open(&canon_file) {
-                Ok(f) => f,
+            let mounts = lua
+                .app_data_ref::<super::sandbox::Mounts>()
+                .map(|m| m.clone())
+                .unwrap_or(super::sandbox::Mounts {
+                    addon: addon_data.clone(),
+                    data: None,
+                });
+            let canon_file = match mounts.media(&path_str) {
+                Ok(p) => p,
                 Err(e) => {
-                    bank.borrow_mut().add_diagnostic(format!(
-                        "failed to open texture '{}': {e}",
-                        canon_file.display()
-                    ));
+                    if e.contains("not found") {
+                        bank.borrow_mut()
+                            .add_missing_texture(&addon_data.id, path_str, e);
+                    } else {
+                        bank.borrow_mut()
+                            .add_diagnostic(format!("texture path '{path_str}' rejected: {e}"));
+                    }
                     return Ok(Value::Nil);
                 }
             };
-            let mut buf = Vec::new();
-            let bytes_read = match (&mut file).take(16 * 1024 * 1024 + 1).read_to_end(&mut buf) {
+            let buf = match super::sandbox::read_bounded(&canon_file, 16 * 1024 * 1024) {
                 Ok(b) => b,
                 Err(e) => {
-                    bank.borrow_mut().add_diagnostic(format!(
-                        "failed to read texture '{}': {e}",
-                        canon_file.display()
-                    ));
+                    bank.borrow_mut()
+                        .add_diagnostic(format!("texture read failed: {e}"));
                     return Ok(Value::Nil);
                 }
             };
-            if bytes_read > 16 * 1024 * 1024 {
-                bank.borrow_mut().add_diagnostic(format!(
-                    "texture file '{}' exceeds 16 MiB limit",
-                    canon_file.display()
-                ));
-                return Ok(Value::Nil);
-            }
 
             // 4. Decode PNG
             let max_dim = bank.borrow().budget.max_dimension;
@@ -471,6 +405,7 @@ impl Textures {
             }
         };
         igraphics.set("CreateTextureFromFile", load_texture)?;
+        super::native_media::textures(lua, owner)?;
 
         Ok(())
     }
@@ -649,12 +584,12 @@ pub(crate) fn decode_png_to_rgba8(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
     use crate::fork_ext::addons::bridge::Bridge;
     use crate::fork_ext::addons::discovery::discover;
     use crate::fork_ext::addons::host::Host;
     use dear_imgui_rs::Context;
     use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo};
+    use std::path::Path;
 
     struct TempDir(PathBuf);
     impl TempDir {
@@ -1060,18 +995,29 @@ mod tests {
             log_content.contains("nonexistent.png"),
             "missing optional texture logged to addons_error.log: {log_content}"
         );
-        let lines_before = log_content.lines().filter(|l| l.contains("nonexistent.png")).count();
+        let lines_before = log_content
+            .lines()
+            .filter(|l| l.contains("nonexistent.png"))
+            .count();
         assert_eq!(lines_before, 1, "logged once for missing path");
         // Repeating probe must not write another line
-        let missing_again: Value = host.lua.load("return UiForge.LoadTexture('nonexistent.png')").eval().unwrap();
+        let missing_again: Value = host
+            .lua
+            .load("return UiForge.LoadTexture('nonexistent.png')")
+            .eval()
+            .unwrap();
         assert_eq!(missing_again, Value::Nil);
         let log_content2 = fs::read_to_string(root.join("addons_error.log")).unwrap_or_default();
-        let lines_after = log_content2.lines().filter(|l| l.contains("nonexistent.png")).count();
+        let lines_after = log_content2
+            .lines()
+            .filter(|l| l.contains("nonexistent.png"))
+            .count();
         assert_eq!(lines_after, 1, "at most once per missing path");
     }
 
     #[test]
-    fn forge_texture_missing_optional_returns_nil_without_visible_diagnostic_corrupt_png_stays_visible() {
+    fn forge_texture_missing_optional_returns_nil_without_visible_diagnostic_corrupt_png_stays_visible()
+     {
         let Some(gpu) = TestGpu::try_new() else {
             eprintln!("SKIP forge_texture: no GPU adapter");
             return;
@@ -1095,7 +1041,11 @@ mod tests {
             .load("return UiForge.LoadTexture('class_icons/bard.png')")
             .eval()
             .unwrap();
-        assert_eq!(missing, Value::Nil, "missing optional texture must return nil");
+        assert_eq!(
+            missing,
+            Value::Nil,
+            "missing optional texture must return nil"
+        );
         let diags = textures.borrow_mut().drain_diagnostics();
         assert!(
             diags.is_empty(),
@@ -1118,10 +1068,16 @@ mod tests {
             assert_eq!(m, Value::Nil);
         }
         let diags_repeat = textures.borrow_mut().drain_diagnostics();
-        assert!(diags_repeat.is_empty(), "repeated misses still raise no visible diagnostics");
+        assert!(
+            diags_repeat.is_empty(),
+            "repeated misses still raise no visible diagnostics"
+        );
         let log_repeat = fs::read_to_string(root.join("addons_error.log")).unwrap_or_default();
         assert_eq!(
-            log_repeat.lines().filter(|l| l.contains("class_icons/bard.png")).count(),
+            log_repeat
+                .lines()
+                .filter(|l| l.contains("class_icons/bard.png"))
+                .count(),
             1,
             "missing path logged at most once in addons_error.log"
         );
@@ -1135,7 +1091,9 @@ mod tests {
         assert_eq!(corrupt, Value::Nil, "corrupt PNG returns nil");
         let corrupt_diags = textures.borrow_mut().drain_diagnostics();
         assert!(
-            corrupt_diags.iter().any(|d| d.contains("failed to decode PNG")),
+            corrupt_diags
+                .iter()
+                .any(|d| d.contains("failed to decode PNG")),
             "corrupt PNG must raise a visible diagnostic, got: {corrupt_diags:?}"
         );
     }

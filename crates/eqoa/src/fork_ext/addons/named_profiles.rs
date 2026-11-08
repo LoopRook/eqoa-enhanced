@@ -229,6 +229,7 @@ pub(super) struct ProfileRow {
     pub characters: usize,
     pub class_defaults: Vec<u8>,
 }
+#[derive(Clone)]
 pub(crate) struct Store {
     root: Option<PathBuf>,
 }

@@ -46,6 +46,7 @@ pub trait IconProvider {
 pub struct TrimOptions {
     pub trim_transparent: bool,
     pub trim_color: bool,
+    pub color:Option<[u8;4]>,
 }
 
 impl TrimOptions {
@@ -58,11 +59,13 @@ impl TrimOptions {
                 Self {
                     trim_transparent,
                     trim_color,
+                    color:None,
                 }
             }
             None => Self {
                 trim_transparent: false,
                 trim_color: false,
+                color:None,
             },
         }
     }
@@ -130,11 +133,11 @@ pub fn trim_rgba(
         return None;
     }
 
-    let pad_color = if opts.trim_color {
+    let pad_color = opts.color.or_else(||if opts.trim_color {
         detect_padding_color(rgba, w, h)
     } else {
         None
-    };
+    });
 
     let is_padded = |x: u32, y: u32| -> bool {
         let o = ((y * w + x) * 4) as usize;
@@ -1308,7 +1311,7 @@ pub fn attach_icon_cache(
     // GetUITexture
     {
         let cache_ref = cache.clone();
-        let textures_ref = textures;
+        let textures_ref = textures.clone();
         icon_mod.set(
             "GetUITexture",
             lua.create_function(move |lua, tex_id: Value| {
@@ -1343,5 +1346,29 @@ pub fn attach_icon_cache(
         )?;
     }
 
+    if lua.named_registry_value::<Table>("eqoa_modules").is_ok(){install_native(lua,&cache,&textures)?;}
     Ok(cache)
+}
+
+fn install_native(lua:&Lua,cache:&Rc<RefCell<IconCache>>,textures:&Rc<RefCell<Textures>>)->LuaResult<()> {
+    use super::native::{bind,error,record};
+    for name in ["resource","ui"]{let cache=cache.clone();let textures=textures.clone();
+        bind(lua,"icons",name,lua.create_function(move |lua,(hash,options):(Value,Option<Table>)|{
+            if !super::native_core::CORE.with(|c|c.borrow().view.in_world){return error(lua,&format!("eqoa.icons.{name}"),"not_in_world","enter a loaded world first");}
+            let Some(hash)=super::native_state::uint(&hash,u32::MAX as u64) else{return error(lua,&format!("eqoa.icons.{name}"),"invalid_argument","icon id must be a u32 integer");};
+            let mut trim=TrimOptions{trim_transparent:false,trim_color:false,color:None};
+            if let Some(options)=options {
+                for key in ["trim","trim_transparent"] {match options.get::<Value>(key)? {Value::Nil=>{},Value::Boolean(v)=>trim.trim_transparent|=v,_=>return error(lua,"eqoa.icons.resource","invalid_argument","trim flags must be bool")}}
+                match options.get::<Value>("trim_color")? {Value::Nil=>{},Value::Table(color)=>{let mut rgba=[0;4];for (i,key) in ["r","g","b","a"].into_iter().enumerate(){let Some(v)=super::native_state::number(&color.get::<Value>(key)?).filter(|v|(0.0..=1.0).contains(v)) else{return error(lua,"eqoa.icons.resource","invalid_argument","trim_color must have finite r,g,b,a in 0..1");};rgba[i]=(v*255.0).round() as u8;}trim.color=Some(rgba);},_=>return error(lua,"eqoa.icons.resource","invalid_argument","trim_color must be Color")}
+            }
+            let result=with_active_provider(|p|{let mut cache=cache.borrow_mut();if name=="ui"{cache.get_or_load_ui_texture(hash as u32,p)}else{cache.get_or_load(hash as u32,trim,p)}});
+            match result{Some((id,width,height,token))=>{let t=lua.create_table()?;t.set("texture",lua.create_userdata(Handle{owner:textures.clone(),id,token:Some(token)})?)?;t.set("width",width)?;t.set("height",height)?;lua.pack_multi((t,Value::Nil))},None=>error(lua,&format!("eqoa.icons.{name}"),"not_found","icon is not available in the current art cache")}
+        })?)?;
+    }
+    bind(lua,"icons","info",lua.create_function(|lua,hash:Value|{
+        let Some(hash)=super::native_state::uint(&hash,u32::MAX as u64) else{return error(lua,"eqoa.icons.info","invalid_argument","hash must be a u32 integer");};
+        let info=with_active_provider(|p|p.decode_icon(hash as u32).map(|i|serde_json::json!({"width":i.width,"height":i.height,"source_format":null})));
+        match info{Some(info)=>lua.pack_multi((record(lua,"eqoa.icons.SurfaceInfo",&info)?,Value::Nil)),None=>error(lua,"eqoa.icons.info","not_found","icon surface not available")}
+    })?)?;
+    super::native::describe(lua,"eqoa.icons.IconOptions.trim_color","supported",Some(2),"");Ok(())
 }

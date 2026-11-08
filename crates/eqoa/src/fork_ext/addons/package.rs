@@ -165,6 +165,7 @@ pub(crate) fn find_module_file(
         let cand2 = dir.join(format!("{rel_slash}/init.lua"));
         for cand in [cand1, cand2] {
             if cand.exists() || cand.is_symlink() {
+                super::file_io::no_links(&cand)?;
                 let canon = match cand.canonicalize() {
                     Ok(p) => p,
                     Err(e) => {
@@ -174,7 +175,9 @@ pub(crate) fn find_module_file(
                         ));
                     }
                 };
-                if !canon.starts_with(&addon.script_root) {
+                if !canon.starts_with(&addon.package_root)
+                    && !canon.starts_with(addon.script_root.join("modules"))
+                {
                     return Err(format!(
                         "module '{name}' at '{}' escapes active script root",
                         canon.display()
@@ -356,7 +359,18 @@ pub(crate) fn install_package_loader(
         }
     })?;
 
-    lua.globals().set("require", require_fn)?;
+    lua.globals().set(
+        "require",
+        lua.create_function(move |lua, args: mlua::MultiValue| {
+            match require_fn.call::<Value>(args) {
+                Ok(value) => Ok(value),
+                Err(e) => {
+                    super::native::diagnose(lua, "require", "failed", &e.to_string());
+                    Err(e)
+                }
+            }
+        })?,
+    )?;
     Ok(())
 }
 

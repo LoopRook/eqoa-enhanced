@@ -116,7 +116,10 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
         std::collections::HashMap<String, mlua::Function>,
     >::new()));
     let subscriber_errors = Rc::new(RefCell::new(Vec::<Table>::new()));
-    let last_seq = Rc::new(RefCell::new(0u32));
+    let last_seq = Rc::new(RefCell::new(super::native_core::CORE.with(|c| {
+        let c = c.borrow();
+        if c.view.in_world { c.seq as u32 } else { 0 }
+    })));
 
     // Hook claims
     {
@@ -210,10 +213,21 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
         )?;
     }
 
-    combat_mod.set("GetDroppedCount", lua.create_function(|_, ()| Ok(0))?)?;
+    combat_mod.set(
+        "GetDroppedCount",
+        lua.create_function(|lua, ()| Ok(super::native_events::bus(lua).borrow().dropped))?,
+    )?;
     combat_mod.set(
         "ReadForeignCave",
-        lua.create_function(|_, _max: Option<u32>| Ok(Value::Nil))?,
+        lua.create_function(|lua, _max: Option<u32>| {
+            super::native::diagnose(
+                lua,
+                "frontiers_forge.combat.ReadForeignCave",
+                "unsupported",
+                "native client has no foreign code cave",
+            );
+            Ok(Value::Nil)
+        })?,
     )?;
 
     // On(owner, event_name, fn)
@@ -286,14 +300,45 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
             lua.create_function(move |lua_ctx, ()| {
                 let snap = s.get();
                 let combat_snap = snap.combat;
+                let native = super::native_core::CORE.with(|c| {
+                    let c = c.borrow();
+                    c.view.in_world.then(|| {
+                        c.events
+                            .iter()
+                            .filter(|e| e.name == "combat.hit")
+                            .map(|e| {
+                                let d = &e.data;
+                                let color = d["color"].as_array().map_or(0, |rgb| {
+                                    0x01000000
+                                        + (rgb[2].as_u64().unwrap_or(0) as u32) * 65536
+                                        + (rgb[1].as_u64().unwrap_or(0) as u32) * 256
+                                        + rgb[0].as_u64().unwrap_or(0) as u32
+                                });
+                                let amount = d["amount"].as_u64().unwrap_or(0) as i32;
+                                CombatEventSnapshot {
+                                    attacker_id: d["attacker_id"].as_u64().unwrap_or(0) as u32,
+                                    defender_id: d["defender_id"].as_u64().unwrap_or(0) as u32,
+                                    amount: if d["kind"] == "heal" {
+                                        amount
+                                    } else {
+                                        amount.saturating_neg()
+                                    },
+                                    seq: e.seq as u32,
+                                    color,
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                });
+                let records = native
+                    .unwrap_or_else(|| combat_snap.events[..combat_snap.count as usize].to_vec());
                 let player_id = snap.player.entity_id;
                 let pet_id = snap.player.pet_entity_id.unwrap_or(0);
 
                 let mut current_last = *last_seq_ref.borrow();
                 let mut dead_subscribers: Vec<(String, String)> = Vec::new();
 
-                for i in 0..combat_snap.count as usize {
-                    let ev = &combat_snap.events[i];
+                for ev in &records {
                     if ev.seq > current_last {
                         let attacker = ev.attacker_id;
                         let defender = ev.defender_id;

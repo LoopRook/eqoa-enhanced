@@ -304,6 +304,19 @@ fn create_base_host() -> Result<BaseHost> {
 }
 
 impl Host {
+    pub(crate) fn addon_id(&self) -> String {
+        self.addon
+            .as_ref()
+            .map_or("test", |a| a.id.as_str())
+            .to_string()
+    }
+    pub(crate) fn once_mode(&self) -> bool {
+        self.addon
+            .as_ref()
+            .and_then(|a| std::fs::read(a.package_root.join("mod.json")).ok())
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .is_some_and(|v| v["entryMode"] == "once")
+    }
     pub fn drain_logs(&self) -> Result<Vec<String>> {
         let messages: Table = self.lua.named_registry_value("forge_log")?;
         let mut output = messages
@@ -312,6 +325,7 @@ impl Host {
         self.lua
             .set_named_registry_value("forge_log", self.lua.create_table()?)?;
         output.extend(super::file_io::drain_diagnostics(&self.lua));
+        output.extend(super::native::drain(&self.lua));
         Ok(output)
     }
     pub const INSTRUCTION_BUDGET: u32 = INSTRUCTION_BUDGET;
@@ -367,6 +381,7 @@ impl Host {
                 .replace("\\\\?\\", ""),
         )?;
         super::file_io::install(&host, addon, None)?;
+        super::native::install(&host)?;
         Ok(host)
     }
 
@@ -414,6 +429,7 @@ impl Host {
         };
         super::weapon_sets::install(&host)?;
         super::chat_history::install(&host)?;
+        super::native::install(&host)?;
         Ok(host)
     }
 
@@ -483,6 +499,34 @@ impl Host {
     pub fn run(&self, function: &Function) -> Result<()> {
         self.run_with_budget(function, Self::INSTRUCTION_BUDGET)
     }
+    pub(crate) fn frame_entry(&self, function: &Function) -> Result<()> {
+        self.remaining.set(Self::INSTRUCTION_BUDGET);
+        self.fatal.set(false);
+        let bus = super::native_events::bus(&self.lua);
+        let initialized = bus.borrow().initialized;
+        let once = bus.borrow().once_mode;
+        if initialized {
+            super::native_events::dispatch(self)?;
+        }
+        if !once || !initialized {
+            function.call::<()>(())?;
+        }
+        bus.borrow_mut().initialized = true;
+        Ok(())
+    }
+    pub(crate) fn finish_frame(&self, first: bool) -> Result<()> {
+        if first {
+            super::native_events::lifecycle(self, "enabled")?;
+            super::native_events::initial(self)?;
+        }
+        super::native_events::render(self)?;
+        if self.fatal.get() {
+            return Err(mlua::Error::runtime(
+                "eqoa iteration instruction budget exceeded",
+            ));
+        }
+        Ok(())
+    }
 
     pub fn run_with_budget(&self, function: &Function, budget: u32) -> Result<()> {
         self.remaining.set(budget);
@@ -508,6 +552,9 @@ impl Host {
         }
         self.remaining.set(Self::INSTRUCTION_BUDGET);
         self.fatal.set(false);
+        if let Some(result) = super::native_settings::callback(&self.lua, kind, &value) {
+            return result;
+        }
         let res = match self
             .lua
             .named_registry_value::<Table>("forge_callbacks")?

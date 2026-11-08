@@ -44,14 +44,22 @@ mod icon_tests;
 pub(crate) mod icons;
 pub(crate) mod input;
 pub(crate) mod manager;
+pub(crate) mod named_profiles;
+pub(crate) mod native;
+pub(crate) mod native_core;
+pub(crate) mod native_events;
+mod native_media;
+pub(crate) mod native_projection;
+pub(crate) mod native_settings;
+mod native_state;
+#[cfg(test)]
+mod native_tests;
 pub(crate) mod package;
 pub(crate) mod player;
 mod profile;
-pub(crate) mod named_profiles;
 pub(crate) mod quest_log;
+mod sandbox;
 mod spike;
-#[cfg(test)]
-mod native_tests;
 pub(crate) mod storage;
 mod textures;
 pub(crate) mod weapon_sets;

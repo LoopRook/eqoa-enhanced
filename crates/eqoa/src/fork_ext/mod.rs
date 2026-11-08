@@ -24,3 +24,11 @@ pub fn is_plain_play(play: Option<&mut crate::play::Play>) -> bool {
         None => false,
     }
 }
+pub(crate) fn prepare_controls(
+    _report: &mut crate::input::Report,
+    _connected: bool,
+    _gameplay: bool,
+) {
+    #[cfg(not(target_arch = "wasm32"))]
+    addons::input::observe_report(_report, _connected, _gameplay);
+}

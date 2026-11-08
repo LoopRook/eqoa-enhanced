@@ -1100,6 +1100,7 @@ fn forge_icon_real_disc_enumerated_ability_icons_resolve() {
     let opts = icons::TrimOptions {
         trim_transparent: true,
         trim_color: true,
+                color:None,
     };
 
     let mut matched = 0;

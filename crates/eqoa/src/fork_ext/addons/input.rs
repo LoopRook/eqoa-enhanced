@@ -8,6 +8,8 @@ use winit::keyboard::{Key, NamedKey};
 
 const KEY_RING_SIZE: usize = 128;
 const TEXT_CAPTURE_LAPSE_SECS: f32 = 1.0;
+#[path = "native_input.rs"]
+pub(crate) mod native;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RawKeyEvent {
@@ -85,6 +87,54 @@ impl Default for InputState {
 
 thread_local! {
     static INPUT_STATE: RefCell<InputState> = RefCell::new(InputState::default());
+    static LIVE_REPORT: std::cell::Cell<Option<crate::input::Report>> = const {std::cell::Cell::new(None)};
+    static FOCUSED: std::cell::Cell<bool> = const {std::cell::Cell::new(false)};
+}
+
+pub(crate) fn observe_report(report: &mut crate::input::Report, connected: bool, gameplay: bool) {
+    let before = LIVE_REPORT.with(|r| r.replace(connected.then_some(*report)));
+    let after = connected.then_some(*report);
+    if before != after {
+        super::native_core::emit(
+            "input.pad",
+            serde_json::json!({"before":before.map(native::pad_value),"after":after.map(native::pad_value)}),
+        );
+    }
+    if gameplay && is_dpad_rotated() {
+        let b = report.buttons;
+        let d = b & 0x00f0;
+        report.buttons = (b & !0x00f0) | ((d << 1) & 0x00e0) | ((d >> 3) & 0x0010);
+    }
+}
+pub(crate) fn live_snapshot() -> InputSnapshot {
+    LIVE_REPORT.with(|r| {
+        r.get()
+            .map(|r| {
+                let d = r.data();
+                InputSnapshot {
+                    button_bitfield: !r.buttons,
+                    right_analog: (d[4], d[5]),
+                    left_analog: (d[6], d[7]),
+                }
+            })
+            .unwrap_or_default()
+    })
+}
+pub(crate) fn focus(focused: bool) {
+    FOCUSED.with(|f| f.set(focused));
+    if !focused {
+        reset_input_state();
+    }
+}
+pub(crate) fn native_get(lua: &mlua::Lua) -> mlua::Result<mlua::Value> {
+    let pad=LIVE_REPORT.with(|r|r.get().map(|r|{let d=r.data();let names=["select","l3","r3","start","up","right","down","left","l2","r2","l1","r1","triangle","circle","cross","square"];
+        serde_json::json!({"buttons":names.iter().enumerate().filter_map(|(i,n)|(r.buttons&(1<<i)!=0).then_some(n)).collect::<Vec<_>>(),"left":{"x":r.sticks[2],"y":r.sticks[3]},"right":{"x":r.sticks[0],"y":r.sticks[1]},"raw_left":{"x":d[6],"y":d[7]},"raw_right":{"x":d[4],"y":d[5]}})
+    }));
+    super::native::record(
+        lua,
+        "eqoa.input.InputState",
+        &serde_json::json!({"focused":FOCUSED.with(|f|f.get()),"pad":pad,"text_capture":is_text_capture_active()}),
+    )
 }
 
 pub fn reset_input_state() {
@@ -94,6 +144,10 @@ pub fn reset_input_state() {
 }
 
 pub fn record_key_event(key: u8, is_down: bool) {
+    super::native_core::emit(
+        "input.key",
+        serde_json::json!({"key":get_key_name(key),"down":is_down,"repeat":false,"synthetic":false}),
+    );
     INPUT_STATE.with(|s| {
         let mut state = s.borrow_mut();
         let seq = state.event_seq;

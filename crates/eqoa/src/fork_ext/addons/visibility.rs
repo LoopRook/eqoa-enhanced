@@ -33,6 +33,7 @@ pub const ALL_UI_ELEMENTS: &[&str] = &[
 pub struct HudClaimsRegistry {
     // element_name -> (InstanceToken -> HashSet<owner_label>)
     claims: HashMap<String, HashMap<InstanceToken, HashSet<String>>>,
+    identities: HashMap<InstanceToken, String>,
 }
 
 impl HudClaimsRegistry {
@@ -226,6 +227,13 @@ pub(crate) fn install_managed_health_adapter(
     host: &Host,
     lease: &VisibilityLease,
 ) -> mlua::Result<()> {
+    if host
+        .lua
+        .named_registry_value::<mlua::Table>("eqoa_modules")
+        .is_ok()
+    {
+        install_native(host, lease)?;
+    }
     let token = lease.intent.borrow().token;
     let registry = lease.intent.borrow().registry.clone();
     if !host.has_host_module("frontiers_forge.player") {
@@ -519,6 +527,160 @@ pub(crate) fn install_managed_health_adapter(
     )?;
 
     host.register_host_module("frontiers_forge.ui", Value::Table(ui))
+}
+
+fn native_leaves(element: &str) -> Option<Vec<&'static str>> {
+    Some(match element {
+        "health" => vec!["health_bar"],
+        "power" => vec!["power_bar"],
+        "experience_main" => vec!["main_exp_bar"],
+        "experience_secondary" => vec!["secondary_exp_bar"],
+        "compass" => vec!["compass_face", "compass_back"],
+        "target" => vec!["target_nameplate"],
+        "group_panel" => vec!["group_member_panel"],
+        "group_markers" => vec!["group_compass_marks"],
+        "pet" => vec!["pet_panel"],
+        "effects" => vec!["active_effects"],
+        "hotbar" => vec!["hotbar_draw_compact", "hotbar_draw_expanded"],
+        "chat" => vec!["chat_window"],
+        "all" => ALL_UI_ELEMENTS.to_vec(),
+        _ => return None,
+    })
+}
+fn install_native(host: &Host, lease: &VisibilityLease) -> mlua::Result<()> {
+    use super::{
+        native::{bind, error},
+        native_events::{token, valid_token},
+    };
+    let lua = &host.lua;
+    lease
+        .intent
+        .borrow()
+        .hud_claims
+        .borrow_mut()
+        .identities
+        .insert(lease.intent.borrow().token, host.addon_id());
+    let claims = Rc::new(RefCell::new(HashMap::<u64, (u64, Vec<&'static str>)>::new()));
+    let active = claims.clone();
+    let intent = lease.intent.clone();
+    let snapshot = lease.snapshot.clone();
+    bind(
+        lua,
+        "hud",
+        "hide",
+        lua.create_function(move |lua, element: mlua::Value| {
+            let Some(element) = element
+                .as_string()
+                .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+            else {
+                return error(
+                    lua,
+                    "eqoa.hud.hide",
+                    "invalid_argument",
+                    "element must be a string",
+                );
+            };
+            let Some(leaves) = native_leaves(&element) else {
+                return error(
+                    lua,
+                    "eqoa.hud.hide",
+                    "invalid_argument",
+                    "unknown HUD element",
+                );
+            };
+            let (world, generation) = super::native_core::CORE.with(|c| {
+                let c = c.borrow();
+                (c.view.in_world, c.generation)
+            });
+            if !world {
+                return error(
+                    lua,
+                    "eqoa.hud.hide",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            let t = token(lua, "hud");
+            let label = format!("eqoa:{}", t.id);
+            for leaf in &leaves {
+                disable_element(
+                    &mut intent.borrow_mut(),
+                    snapshot.get(),
+                    leaf,
+                    Some(label.clone()),
+                )?;
+            }
+            active.borrow_mut().insert(t.id, (generation, leaves));
+            lua.pack_multi((lua.create_userdata(t)?, mlua::Value::Nil))
+        })?,
+    )?;
+    let active = claims;
+    let intent = lease.intent.clone();
+    let snapshot = lease.snapshot.clone();
+    bind(
+        lua,
+        "hud",
+        "show",
+        lua.create_function(move |lua, value: mlua::Value| {
+            let Some(t) = valid_token(lua, &value, "hud") else {
+                return error(
+                    lua,
+                    "eqoa.hud.show",
+                    "stale_handle",
+                    "token belongs to another VM or service",
+                );
+            };
+            let claim = active.borrow_mut().remove(&t.id);
+            let generation = super::native_core::CORE.with(|c| c.borrow().generation);
+            if let Some((old, leaves)) = claim {
+                for leaf in leaves {
+                    enable_element(
+                        &mut intent.borrow_mut(),
+                        snapshot.get(),
+                        leaf,
+                        Some(format!("eqoa:{}", t.id)),
+                    );
+                }
+                return lua.pack_multi((old == generation, mlua::Value::Nil));
+            }
+            lua.pack_multi((false, mlua::Value::Nil))
+        })?,
+    )?;
+    let registry = lease.intent.borrow().hud_claims.clone();
+    bind(
+        lua,
+        "hud",
+        "hidden_by",
+        lua.create_function(move |lua, element: String| {
+            let Some(leaves) = native_leaves(&element) else {
+                return error(
+                    lua,
+                    "eqoa.hud.hidden_by",
+                    "invalid_argument",
+                    "unknown HUD element",
+                );
+            };
+            let registry = registry.borrow();
+            let mut ids = std::collections::BTreeSet::new();
+            for leaf in leaves {
+                if let Some(instances) = registry.claims.get(leaf) {
+                    for (token, claims) in instances {
+                        if !claims.is_empty() {
+                            if let Some(id) = registry.identities.get(token) {
+                                ids.insert(id.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            let t = lua.create_table()?;
+            for id in ids {
+                t.raw_push(id)?;
+            }
+            lua.pack_multi((t, mlua::Value::Nil))
+        })?,
+    )?;
+    Ok(())
 }
 
 pub(crate) fn install_standalone_ui_adapter(host: &Host) -> mlua::Result<()> {

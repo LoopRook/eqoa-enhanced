@@ -748,6 +748,7 @@ impl Bridge {
             })?,
         )?;
         lua.globals().set("ImGui", imgui.clone())?;
+        super::native_media::imgui(lua, &imgui)?;
         let flags = lua.create_table()?;
         flags.set("NoTitleBar", sys::ImGuiWindowFlags_NoTitleBar)?;
         flags.set("AlwaysAutoResize", sys::ImGuiWindowFlags_AlwaysAutoResize)?;

@@ -189,6 +189,9 @@ impl Runtime {
         if self.error.is_some() {
             self.pause_health();
         }
+        if let WindowEvent::Focused(focused) = event {
+            super::input::focus(*focused);
+        }
         let consumed = match event {
             WindowEvent::KeyboardInput {
                 event,
