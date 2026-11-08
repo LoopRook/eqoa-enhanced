@@ -61,6 +61,11 @@ class StructLiteralMerge(unittest.TestCase):
         # A raw string holding commas and quotes: splitting it would change the string.
         raw = 'X { s: r#"a",fake:0,text:"b"#, d: 0 };'
         self.assertIsNone(sync.merge_struct_literal(raw, raw.replace("d: 0", "d: 0, f: 1"), raw.replace("d: 0", "d: 0, g: 2")))
+        # Raw byte and C strings too: both sides edit "fields" that are really the one field s.
+        for prefix in ("br", "cr"):
+            lit = "X { s: " + prefix + '#"a", fake:0, text:"b"#, n: 0 };'
+            self.assertIsNone(sync.merge_struct_literal(
+                lit, lit.replace("fake:0", "fake:1"), lit.replace('text:"b"', 'text:"c"')), prefix)
         # Separators other than ", " would be rewritten.
         tight = "X { a: 1,b: 2 };"
         self.assertIsNone(sync.merge_struct_literal(tight, "X { a: 1,b: 2, f: 0 };", "X { a: 1,b: 2, g: 0 };"))

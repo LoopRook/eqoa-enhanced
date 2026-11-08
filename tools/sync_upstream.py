@@ -100,7 +100,8 @@ def field_key(field):
 LITERAL = re.compile(r"^(?P<head>.*?\b[A-Z]\w*\s*\{\s*)(?P<body>.*?)(?P<tail>\s*\}\s*;?\s*)$", re.S)
 
 
-UNSUPPORTED = re.compile(r'\br#*"|//|/\*')
+# Raw strings (r, br, cr) hold unescaped quotes and commas; comments can hold anything.
+UNSUPPORTED = re.compile(r'(?<![A-Za-z0-9_])[bc]?r#*"|//|/\*')
 
 
 def parse_literal(line):
