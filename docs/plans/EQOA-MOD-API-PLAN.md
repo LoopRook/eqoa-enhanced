@@ -24,9 +24,13 @@ allows, built correctly on the native client. Cheap to sync with upstream.
   shows a visible diagnostic in the Addon Manager and `mods/addons_error.log`, never a fake success.
 - **Out of scope:** raw memory, FFI, EEmem, code caves, Forge's `mini_map` rasterizer. Where a mod
   needs what those gave Forge, add a proper feature instead (for example zone map data).
-- **Actions** (owner decision in round 1; recommended): mods may read everything, draw, hide HUD
-  parts, send chat, and perform game actions only from a player's click or key press (click to cast,
-  use an item). No automation: nothing that targets, casts, moves or loots by itself.
+- **Actions (owner, 2026-11-08):** mods may perform game actions, including automation: auto loot,
+  targeting, casting, movement, up to full botting. Upstream is fine with this too. The limits are
+  only there to protect the player who installs a mod: files only in the mod's own folder, no
+  network, no launching programs.
+- **Hooks may go upstream; mods never will.** Design each hook in an upstream file as a neutral,
+  general seam (game state and events out, actions in) that upstream could accept on its own merits,
+  with nothing Lua- or mod-specific in it. The owner decides when to offer one upstream.
 - **Not doing:** outreach to Forge's author, and the PCSX2 profile converter.
 
 ## What exists (0.4.14, develop e48f0a6)
@@ -69,13 +73,14 @@ Paste these into each brief (they come from CLAUDE.md):
 
 ## Rounds
 
-Each round runs on its own branch `feat/eqoa-api-rN`. It merges into `develop` after tests,
+The owner starts each round in a new session with the model in the Lead column. A Sonnet lead is a
+top-level Sonnet session, not a helper under Opus. Each round runs on its own branch `feat/eqoa-api-rN`. It merges into `develop` after tests,
 footprint and review; the develop push publishes Nightly, which is the owner's test build. Reviewer:
 a different model family from the builder (the roster's "who reviews whom").
 
 | Round | Work | Lead | Builder | Owner's part |
 |---|---|---|---|---|
-| 1 Design | The `eqoa/1` spec | Opus | Scout (free) for data sources, then Sol high | Approve the one-page summary and the actions rule |
+| 1 Design | The `eqoa/1` spec | Opus | Scout (free) for data sources, then Sol high | Approve the one-page summary |
 | 2 Core | `eqoa` over the existing core, Forge rewired onto it | Sonnet | Sol high | Live test: three bundled UIs unchanged, plus the example mod |
 | 3 Items | inventory, item, bank, loot, merchant, gems | Sonnet | Sol medium (DeepSeek Pro trial) | Live test of a small bag/loot example mod |
 | 4 The rest | quests, camera, windows/dialogs, map data, CM, icons, player-initiated actions | Sonnet | DeepSeek Go (small), Sol (coupled) | Live test of the examples |
@@ -91,8 +96,9 @@ a different model family from the builder (the roster's "who reviews whom").
    - every module, function, field and event, with argument and return types, units, index base,
      the nil/error cases, and the native data source;
    - the event model, the capability query (`eqoa.capabilities`), the diagnostic rules, versioning,
-     and what mods may and may not do (files only in their own folder, no network or processes,
-     actions only from player input);
+     and the actions API (every game action a player can take, usable by mods without player input;
+     files only in the mod's own folder, no network or processes);
+   - each hook needed in upstream files, written as a neutral seam (see Goal);
    - a mapping table from each Forge module to its `eqoa` source, with Forge-only quirks noted;
    - a list of what the client cannot provide, and why.
 
@@ -122,8 +128,8 @@ where a Forge module exists. Add an example mod: a bag viewer with a loot log.
 
 Quest log and quest objects, camera, windows/dialogs (busy state), map data for map mods (zone, world
 id, map images, waypoint to the native map), Class Mastery values, class and disposition icons, the
-tooltip and mouse ImGui APIs and `AddImageQuad`, and the player-initiated actions approved in round 1
-(click to cast from mod bars, use an item). Split it into independent worker tasks where the files
+tooltip and mouse ImGui APIs and `AddImageQuad`, and the actions API from the spec (cast, use an
+item, target, loot, move, follow), callable from a click or from the mod's own logic. Split it into independent worker tasks where the files
 do not overlap.
 
 ### Round 5: finish
