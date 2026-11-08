@@ -2,6 +2,15 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-08 · Enhanced 0.4.12
+
+- New from the vanilla client, on servers that have them: a Combat Record under Start > Character (your PvP kills, deaths, streaks and duels; /record in chat), and more races to make at character creation, with every class open to every race where the server allows it.
+- New characters' names may be three letters long.
+- /bug opens the bug report form, as F3 does, on servers that take bug reports.
+- The raid list shows each member's power as a thin blue bar under their health.
+- The spell book has Unmemorize for one ability, and a long spell description scrolls with R1/R2, the mouse wheel, or PageUp/PageDown.
+- New players start with Auto Attack on. If you already saved your options, your choice stays.
+
 ## 2026-11-07 · Enhanced 0.4.11
 
 - Nothing changes in how you play. This release is built entirely from the public source code, including the live server connection code that earlier releases kept private. Downloads and auto-updates work as before.
