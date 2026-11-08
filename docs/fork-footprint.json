@@ -53,7 +53,9 @@
     ".github/workflows/public-source.yml",
     ".github/workflows/official-release.yml",
     "tools/official_release.py",
-    "tools/test_official_release.py"
+    "tools/test_official_release.py",
+    "tools/sync_upstream.py",
+    "tools/test_sync_upstream.py"
   ],
   "shared": {
     ".gitignore": {

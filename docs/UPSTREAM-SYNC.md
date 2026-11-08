@@ -1,5 +1,26 @@
 # Upstream synchronization record
 
+## How to sync
+
+From the main checkout (on develop, nothing building):
+
+    python tools/sync_upstream.py
+
+It fetches origin, makes `sync/<date>` in `../eqoa-sync-<date>`, merges origin/master and
+does the routine parts itself: README.md and CLAUDE.md keep ours (`.gitattributes`),
+Git's rerere replays any resolution recorded in an earlier sync, and a conflict inside a
+one-line struct literal (play.rs's `Play { ... }`) is merged field by field. A clean merge
+then refreshes docs/upstream/CLAUDE.md, moves `reviewed_base` only if every shared budget
+still passes, commits the merge, and runs the client/net and Python tool tests. The
+report is `target/sync-report.md` in the sync worktree.
+
+It stops for a person at a real conflict (exit 2: resolve, `git add`, then
+`python tools/sync_upstream.py --continue` in the worktree) or a budget overrun (exit 3:
+fix, or raise the budget with a reason, then `--continue`). Each hand resolution is
+recorded by rerere, so the same conflict resolves itself next time. Still by hand: read
+upstream's CLAUDE.md diff for rules worth adopting, the sync's entry below, the
+independent review, the owner's play-test, and the merge into develop.
+
 ## Initial integration
 
 Enhanced baseline: 8aeaf91. Upstream merge target: 8d90350. Common upstream
