@@ -186,3 +186,7 @@ This entry records future work only; no navigation or movement behavior changes 
   wording; whether the Nightly build label shows the commit; then show the build's commit and its own
   unreleased notes section instead of repeating Stable's.
 - **Status:** deferred; not investigated.
+
+- **Tab/chat, scout result (2026-11-09):** likely Wereoxxs plus ImGui Tab navigation with one-frame-late
+  key capture (`runtime.rs`); predates round 2. Details and the smallest fix: `docs/plans/eqoa-api/tab-chat-scout.md`.
+  Queued as a fix on a branch after round 2's slowdown fix merges (same input code).
