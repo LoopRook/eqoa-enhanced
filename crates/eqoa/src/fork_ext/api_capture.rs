@@ -203,6 +203,7 @@ impl Play {
 
 pub(crate) struct ChangeCapture {
     pub cooldown_before: Option<(i64, f64)>,
+    pub unknown_lockout: Option<(u8, f64)>,
     pub interested: bool,
     pub kind: updates::Kind,
     pub before: u64,
@@ -238,6 +239,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
                     c.entity_versions.clear();
                     c.ability_versions.clear();
                     c.cooldown_edges.clear();
+                    c.unknown_lockouts.clear();
                     c.entity_worlds.clear();
                     c.view.in_world = false;
                     c.words = None;
@@ -253,6 +255,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
             kind: updates::Kind::Other,
             before: 0,
             cooldown_before: None,
+            unknown_lockout: None,
             previous_channel: "system",
         };
     }
@@ -298,6 +301,17 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
             };
             old
         }),
+        unknown_lockout: match event {
+            Event::AbilityLockout { index, lockout, .. }
+                if !play
+                    .abilities
+                    .values()
+                    .any(|a| a.display_index == *index as i64) =>
+            {
+                Some((*index, ee::div((*lockout).max(0) as f32, 1000.) as f64))
+            }
+            _ => None,
+        },
         cooldown_before: match event {
             Event::AbilityAdd { ability, .. } => Some((
                 ability.id,
@@ -317,6 +331,9 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
 pub(crate) fn end_game_event(play: &Play, capture: ChangeCapture) {
     if !capture.interested {
         return;
+    }
+    if let Some((key, lockout)) = capture.unknown_lockout {
+        crate::fork_ext::addons::native_core::unknown_lockout(key, lockout);
     }
     if matches!(capture.kind, updates::Kind::Legacy) {
         updates::dirty();

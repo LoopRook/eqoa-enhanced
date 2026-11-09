@@ -4,6 +4,8 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Mod UIs keep receiving combat and cooldown events when another mod listens to player movement; waiting or disabled mods keep native state capture idle.
+
 - Fixed severe in-world slowdown from addon state capture, including with every addon disabled.
 - Nightly builds now say they are Nightly and name the build commit, so they no longer look like the Stable version. Stable is unchanged.
 - Added the experimental native `eqoa/1` mod API and an EQOA Example Hearts mod. Enable it from the Addon Manager after installing bundled mods. The API remains under review until the Round 5 audit.

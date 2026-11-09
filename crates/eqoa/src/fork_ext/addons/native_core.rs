@@ -50,6 +50,35 @@ pub(crate) struct Event {
     pub bytes: usize,
 }
 
+/// Forge consumers retain only their own source stream, with a local cursor.
+#[derive(Default)]
+pub(crate) struct RetainedStream {
+    pub entries: VecDeque<(u64, Event)>,
+    pub next: u64,
+    bytes: usize,
+}
+impl RetainedStream {
+    fn push(&mut self, event: &Event) {
+        let index = self.next;
+        self.next += 1;
+        while self.entries.len() >= 1024 || self.bytes.saturating_add(event.bytes) > 2 * 1024 * 1024
+        {
+            let Some((_, old)) = self.entries.pop_front() else {
+                break;
+            };
+            self.bytes = self.bytes.saturating_sub(old.bytes);
+        }
+        if event.bytes <= 2 * 1024 * 1024 {
+            self.bytes += event.bytes;
+            self.entries.push_back((index, event.clone()));
+        }
+    }
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.bytes = 0;
+    }
+}
+
 pub(crate) struct Core {
     pub view: View,
     pub generation: u64,
@@ -62,6 +91,9 @@ pub(crate) struct Core {
     pub stream_counts: BTreeMap<String, u64>,
     event_bytes: usize,
     motion_tick: u64,
+    pending_player_before: Option<Json>,
+    pub forge_cooldowns: RetainedStream,
+    pub forge_combat: RetainedStream,
     pub chat: VecDeque<Json>,
     pub stats_received: bool,
     pub effects_received: bool,
@@ -69,6 +101,7 @@ pub(crate) struct Core {
     pub entity_versions: BTreeMap<u32, u64>,
     pub ability_versions: BTreeMap<String, u64>,
     pub cooldown_edges: BTreeMap<String, (f64, f64, f64)>,
+    pub unknown_lockouts: BTreeMap<u8, (f64, f64, f64)>,
     pub disposition_target: Option<u32>,
     pub selected_target: Option<u32>,
     pub text_channel: &'static str,
@@ -90,6 +123,9 @@ impl Default for Core {
             stream_counts: BTreeMap::new(),
             event_bytes: 0,
             motion_tick: u64::MAX,
+            pending_player_before: None,
+            forge_cooldowns: RetainedStream::default(),
+            forge_combat: RetainedStream::default(),
             chat: VecDeque::new(),
             stats_received: false,
             effects_received: false,
@@ -97,6 +133,7 @@ impl Default for Core {
             entity_versions: BTreeMap::new(),
             ability_versions: BTreeMap::new(),
             cooldown_edges: BTreeMap::new(),
+            unknown_lockouts: BTreeMap::new(),
             disposition_target: None,
             selected_target: None,
             text_channel: "system",
@@ -114,7 +151,11 @@ pub(crate) fn time_unborrowed(c: &Core) -> f64 {
     c.started.elapsed().as_secs_f64()
 }
 pub(crate) fn presentation() {
-    CORE.with(|c| c.borrow_mut().frame += 1);
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.frame += 1;
+        PRESENTATION_COUNT.with(|f| f.set(c.frame));
+    });
 }
 pub(crate) fn iteration(game_step: bool) {
     CORE.with(|c| {
@@ -166,8 +207,63 @@ impl Core {
             data,
             bytes,
         };
+        if event.name.starts_with("cooldown.") {
+            self.forge_cooldowns.push(&event);
+        }
+        if event.name == "combat.hit" {
+            self.forge_combat.push(&event);
+        }
         super::native_events::publish(&event);
         self.events.push_back(event);
+    }
+    pub(crate) fn player_changed(&mut self, before: Json) {
+        if !super::native_events::interested("player.changed") {
+            self.pending_player_before = None;
+            return;
+        }
+        let motion = [
+            "position",
+            "velocity",
+            "heading",
+            "speed",
+            "horizontal_speed",
+            "location",
+        ];
+        let non_motion = before
+            .as_object()
+            .into_iter()
+            .flat_map(|v| v.keys())
+            .chain(
+                self.view
+                    .player
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|v| v.keys()),
+            )
+            .any(|key| !motion.contains(&key.as_str()) && before[key] != self.view.player[key]);
+        if non_motion || self.motion_tick != self.tick {
+            let before = self.pending_player_before.take().unwrap_or(before);
+            self.emit_player_change(before);
+        } else if self.pending_player_before.is_none() {
+            self.pending_player_before = Some(before);
+        }
+    }
+    fn emit_player_change(&mut self, before: Json) {
+        self.motion_tick = self.tick;
+        let changed = changed_fields(&before, &self.view.player);
+        self.emit(
+            "player.changed",
+            json!({"before":before,"after":self.view.player,"changed":changed}),
+        );
+    }
+    pub(crate) fn flush_player_motion(&mut self) {
+        if !super::native_events::interested("player.changed") {
+            self.pending_player_before = None;
+        } else if self.motion_tick != self.tick {
+            if let Some(before) = self.pending_player_before.take() {
+                self.emit_player_change(before);
+            }
+        }
     }
     pub fn reset(&mut self, reason: &str) {
         super::input::reset_input_state();
@@ -178,10 +274,15 @@ impl Core {
             );
         }
         self.generation += 1;
+        self.pending_player_before = None;
+        self.motion_tick = u64::MAX;
+        self.forge_cooldowns.clear();
+        self.forge_combat.clear();
         self.entity_worlds.clear();
         self.entity_versions.clear();
         self.ability_versions.clear();
         self.cooldown_edges.clear();
+        self.unknown_lockouts.clear();
         self.disposition_target = None;
         self.selected_target = None;
         self.stats_received = false;
@@ -191,7 +292,7 @@ impl Core {
         self.view = View::default();
         self.emit("state.reset", json!({"in_world":false,"initial":false}));
     }
-    pub fn publish(&mut self, mut view: View, events: bool) {
+    pub fn publish(&mut self, mut view: View) {
         let target = view.player["target_id"].as_u64().map(|id| id as u32);
         if target != self.selected_target {
             self.disposition_target = None;
@@ -278,91 +379,27 @@ impl Core {
                 json!({"world_id":view.world_id,"initial":false}),
             );
             self.emit("state.reset", json!({"in_world":true,"initial":false}));
-        } else if events && view.in_world {
-            for (name, before, after) in [
-                (
-                    "player.changed",
-                    self.view.player.clone(),
-                    view.player.clone(),
-                ),
-                ("group.changed", self.view.group.clone(), view.group.clone()),
-                (
-                    "abilities.changed",
-                    json!(self.view.abilities),
-                    json!(view.abilities),
-                ),
-                (
-                    "hotbar.changed",
-                    json!(self.view.hotbar),
-                    json!(view.hotbar),
-                ),
-                (
-                    "effects.changed",
-                    json!(self.view.effects),
-                    json!(view.effects),
-                ),
-            ] {
-                if before != after {
-                    let changed = changed_fields(&before, &after);
-                    self.emit(
-                        name,
-                        json!({"before":before,"after":after,"changed":changed}),
-                    );
-                }
-            }
-            if self.view.player["target_id"] != view.player["target_id"] {
-                let before = self
-                    .view
+        }
+        let previous = std::mem::replace(&mut self.view, view);
+        if !entered && self.view.in_world {
+            if previous.player["target_id"] != self.view.player["target_id"] {
+                let before = previous
                     .entities
                     .iter()
-                    .find(|r| r["id"] == self.view.player["target_id"])
-                    .map(|r| r["ref"].clone());
-                self.emit(
-                    "target.changed",
-                    json!({"before":before,"after":entity_ref(&view.player["target_id"])}),
-                );
-            }
-            let old = self.view.entities.clone();
-            for before in &old {
-                if !view.entities.iter().any(|r| r["ref"] == before["ref"]) {
-                    self.emit(
-                        "entity.removed",
-                        json!({"ref":before["ref"],"before":before,"after":null,"changed":[]}),
-                    );
-                }
-            }
-            for after in &view.entities {
-                let before = old.iter().find(|r| r["ref"] == after["ref"]);
-                if before != Some(after) {
-                    self.emit(if before.is_some() {"entity.changed"} else {"entity.added"},json!({"ref":after["ref"],"before":before,"after":after,"changed":changed_fields(before.unwrap_or(&Json::Null),after)}));
-                }
-            }
-        }
-        if !events && view.in_world {
-            if self.view.player != view.player && self.tick != self.motion_tick {
-                self.motion_tick = self.tick;
-                let changed = changed_fields(&self.view.player, &view.player);
-                self.emit(
-                    "player.changed",
-                    json!({"before":self.view.player,"after":view.player,"changed":changed}),
-                );
-            }
-            if self.view.player["target_id"] != view.player["target_id"] {
-                let before = self
+                    .find(|e| e["id"] == previous.player["target_id"])
+                    .map(|e| e["ref"].clone());
+                let after = self
                     .view
                     .entities
                     .iter()
                     .find(|e| e["id"] == self.view.player["target_id"])
                     .map(|e| e["ref"].clone());
-                let after = view
-                    .entities
-                    .iter()
-                    .find(|e| e["id"] == view.player["target_id"])
-                    .map(|e| e["ref"].clone());
                 self.emit("target.changed", json!({"before":before,"after":after}));
             }
+            if previous.player != self.view.player {
+                self.player_changed(previous.player);
+            }
         }
-        self.view = view;
     }
 }
 pub(crate) fn changed_fields(before: &Json, after: &Json) -> Vec<String> {
@@ -406,12 +443,14 @@ pub(crate) fn observe_hit(attacker: u32, defender: u32, amount: i32, color: Opti
 }
 
 thread_local! {
-    static MANAGER_DEMAND: std::cell::Cell<bool> = const {std::cell::Cell::new(false)};
+    static MANAGER_DEMAND: std::cell::Cell<Option<u64>> = const {std::cell::Cell::new(None)};
+    static PRESENTATION_COUNT: std::cell::Cell<u64> = const {std::cell::Cell::new(0)};
     #[cfg(test)]
     static FIXTURE_DEMAND: std::cell::Cell<bool> = const {std::cell::Cell::new(false)};
 }
 pub(crate) fn manager_demand(wanted: bool) {
-    MANAGER_DEMAND.with(|d| d.set(wanted));
+    MANAGER_DEMAND
+        .with(|d| d.set(wanted.then(|| PRESENTATION_COUNT.with(|f| f.get().saturating_add(1)))));
 }
 #[cfg(test)]
 pub(crate) fn fixture_demand(wanted: bool) {
@@ -422,7 +461,15 @@ pub(crate) fn capture_requested() -> bool {
     if FIXTURE_DEMAND.with(|d| d.get()) {
         return true;
     }
-    MANAGER_DEMAND.with(|d| d.get()) || super::native_events::has_consumers()
+    MANAGER_DEMAND.with(|d| {
+        let wanted = d
+            .get()
+            .is_some_and(|until| PRESENTATION_COUNT.with(|f| f.get() <= until));
+        if !wanted {
+            d.set(None);
+        }
+        wanted
+    }) || super::native_events::has_consumers()
 }
 
 // Source sites enqueue only compact owned Rust values. Serialization runs at Lua boundaries.
@@ -451,8 +498,9 @@ pub(crate) fn defer(bytes: usize, apply: impl FnOnce(&mut Core) + 'static) {
         let c = c.borrow();
         (time_unborrowed(&c), c.tick, c.frame, c.generation)
     });
-    DEFERRED.with(|d| {
+    let dropped = DEFERRED.with(|d| {
         let mut d = d.borrow_mut();
+        let before = d.lost;
         while d.queue.len() >= 8192 || d.bytes.saturating_add(bytes) > 32 * 1024 * 1024 {
             let Some(old) = d.queue.pop_front() else {
                 break;
@@ -463,7 +511,8 @@ pub(crate) fn defer(bytes: usize, apply: impl FnOnce(&mut Core) + 'static) {
         }
         if bytes > 32 * 1024 * 1024 {
             d.lost += 1;
-            return;
+            CAPTURE_EPOCH.with(|e| e.set(e.get().wrapping_add(1)));
+            return d.lost - before;
         }
         d.bytes += bytes;
         d.queue.push_back(Pending {
@@ -474,7 +523,39 @@ pub(crate) fn defer(bytes: usize, apply: impl FnOnce(&mut Core) + 'static) {
             frame,
             bytes,
         });
+        d.lost - before
     });
+    if dropped != 0 {
+        super::native_events::capture_diagnostic(
+            "quota",
+            &format!(
+                "source.capture overflow discarded {dropped} pending deltas in this batch; current-state bootstrap required"
+            ),
+        );
+    }
+}
+
+fn source_loss(c: &mut Core, count: u64, stream: &str) {
+    if count == 0 {
+        return;
+    }
+    let first = c.seq + 1;
+    let last = c.seq + count;
+    c.emit(
+        "events.dropped",
+        json!({"count":count,"streams":[stream],"first_seq":first,"last_seq":last}),
+    );
+}
+fn generation_loss(c: &mut Core, count: u64) {
+    if count != 0 {
+        super::native_events::capture_diagnostic(
+            "cancelled",
+            &format!(
+                "source.generation discarded {count} pending deltas after the world generation changed"
+            ),
+        );
+        source_loss(c, count, "source.generation");
+    }
 }
 pub(crate) fn flush_deferred() {
     let batch = DEFERRED.with(|d| {
@@ -486,23 +567,56 @@ pub(crate) fn flush_deferred() {
         d.bytes = 0;
         Some((std::mem::take(&mut d.queue), std::mem::take(&mut d.lost)))
     });
-    let Some((batch, lost)) = batch else {
-        return;
-    };
-    CORE.with(|c|{let mut c=c.borrow_mut();let saved=(c.tick,c.frame,c.source_time);
-        if lost!=0 {let first=c.seq+1;let last=c.seq+lost;let world=c.view.in_world;c.emit("events.dropped",json!({"count":lost,"streams":["source.capture"],"first_seq":first,"last_seq":last}));c.emit("state.reset",json!({"in_world":world,"initial":false}));}
-        for pending in batch {if pending.generation!=c.generation{continue;}c.tick=pending.tick;c.frame=pending.frame;c.source_time=Some(pending.time);(pending.apply)(&mut c);}
-        (c.tick,c.frame,c.source_time)=saved;
+    let Some((batch, lost)) = batch else { return };
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        let saved = (c.tick, c.frame, c.source_time);
+        if lost != 0 {
+            source_loss(&mut c, lost, "source.capture");
+            let world = c.view.in_world;
+            c.emit("state.reset", json!({"in_world":world,"initial":false}));
+        }
+        let stale = batch
+            .iter()
+            .filter(|p| p.generation != c.generation)
+            .count() as u64;
+        generation_loss(&mut c, stale);
+        for pending in batch {
+            if pending.generation != c.generation {
+                continue;
+            }
+            c.tick = pending.tick;
+            c.frame = pending.frame;
+            c.source_time = Some(pending.time);
+            (pending.apply)(&mut c);
+        }
+        (c.tick, c.frame, c.source_time) = saved;
     });
     DEFERRED.with(|d| d.borrow_mut().flushing = false);
 }
 pub(crate) fn discard_deferred() {
+    let has_queue = DEFERRED.with(|d| !d.borrow().queue.is_empty());
+    let stale = if has_queue {
+        let generation = CORE.with(|c| c.borrow().generation);
+        DEFERRED.with(|d| {
+            d.borrow()
+                .queue
+                .iter()
+                .filter(|p| p.generation != generation)
+                .count() as u64
+        })
+    } else {
+        0
+    };
     DEFERRED.with(|d| {
         let mut d = d.borrow_mut();
         d.queue.clear();
         d.bytes = 0;
         d.lost = 0;
     });
+    if stale != 0 {
+        CORE.with(|c| generation_loss(&mut c.borrow_mut(), stale));
+    }
 }
 
 #[cfg(test)]
@@ -517,4 +631,37 @@ pub(crate) fn capture_epoch() -> u64 {
 pub(crate) fn invalidate_capture() {
     CAPTURE_EPOCH.with(|e| e.set(e.get().wrapping_add(1)));
     discard_deferred();
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.pending_player_before = None;
+        c.motion_tick = u64::MAX;
+        c.unknown_lockouts.clear();
+    });
+}
+
+pub(crate) fn unknown_lockout(key: u8, lockout: f64) {
+    defer(256, move |c| {
+        let previous = c.unknown_lockouts.get(&key).copied();
+        let old = previous.map_or(0., |v| v.2);
+        if old == lockout {
+            return;
+        }
+        let now = c.receipt_time();
+        if lockout == 0. {
+            c.unknown_lockouts.remove(&key);
+        } else {
+            c.unknown_lockouts
+                .insert(key, (previous.map_or(now, |v| v.0), now, lockout));
+        }
+        c.emit(
+            if lockout == 0. {
+                "cooldown.ended"
+            } else if old == 0. {
+                "cooldown.started"
+            } else {
+                "cooldown.updated"
+            },
+            json!({"ability":null,"ability_id":null,"display_key":key,"lockout":lockout}),
+        );
+    });
 }

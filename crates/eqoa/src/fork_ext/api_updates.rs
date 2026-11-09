@@ -134,14 +134,7 @@ fn patch_player(c: &mut Core, mut after: Json) {
             c.emit("target.changed",json!({"before":ref_for(c,&before["target_id"]),"after":ref_for(c,&c.view.player["target_id"])}));
         }
     }
-    if interested("player.changed") {
-        let after = c.view.player.clone();
-        let changed = crate::fork_ext::addons::native_core::changed_fields(&before, &after);
-        c.emit(
-            "player.changed",
-            json!({"before":before,"after":after,"changed":changed}),
-        );
-    }
+    c.player_changed(before);
 }
 fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
     while c.view.entity_slots.len() <= slot {
@@ -351,7 +344,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     if first || manual || CORE.with(|c| c.borrow().view.in_world != play.in_world_now()) {
         native_core::flush_deferred();
         let view = play.native_view(walker);
-        CORE.with(|c| c.borrow_mut().publish(view, false));
+        CORE.with(|c| c.borrow_mut().publish(view));
         CORE.with(|c| {
             c.borrow_mut().entity_worlds = play
                 .entities
@@ -370,6 +363,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         return;
     }
     native_core::flush_deferred();
+    CORE.with(|c| c.borrow_mut().flush_player_motion());
     let now = key(play, walker);
     let previous = KEY.with(|k| k.replace(Some(now)));
     if previous != Some(now) {
@@ -558,33 +552,43 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
         if let Some(a) = play.abilities.get(&id) {
             let lockout = ee::div(a.lockout as f32, 1000.) as f64;
             let key = a.display_index;
-            if old != lockout {
-                native_core::defer(256, move |c| {
-                    let id = id.to_string();
-                    if let Some(value) = c
-                        .view
-                        .abilities
-                        .iter_mut()
-                        .find(|a| a["id"].as_str() == Some(&id))
-                    {
-                        value["lockout"] = json!(lockout);
-                    }
-                    let now = c.receipt_time();
-                    if lockout == 0. {
-                        c.cooldown_edges.remove(&id);
-                    } else {
-                        let start = c.cooldown_edges.get(&id).map_or(now, |e| e.0);
-                        c.cooldown_edges.insert(id.clone(), (start, now, lockout));
-                    }
+            native_core::defer(256, move |c| {
+                let unresolved = u8::try_from(key)
+                    .ok()
+                    .and_then(|k| c.unknown_lockouts.remove(&k));
+                let old = unresolved.map_or(old, |v| v.2);
+                let id = id.to_string();
+                if let Some(value) = c
+                    .view
+                    .abilities
+                    .iter_mut()
+                    .find(|a| a["id"].as_str() == Some(&id))
+                {
+                    value["lockout"] = json!(lockout);
+                }
+                let now = c.receipt_time();
+                if lockout == 0. {
+                    c.cooldown_edges.remove(&id);
+                } else {
+                    let start = c
+                        .cooldown_edges
+                        .get(&id)
+                        .map(|v| v.0)
+                        .or_else(|| unresolved.map(|v| v.0))
+                        .unwrap_or(now);
+                    c.cooldown_edges.insert(id.clone(), (start, now, lockout));
+                }
+                if old != lockout {
                     let ability = c
                         .view
                         .abilities
                         .iter()
                         .find(|a| a["id"].as_str() == Some(&id))
                         .map(|a| a["ref"].clone());
-                    c.emit(if lockout==0.{"cooldown.ended"}else if old==0.{"cooldown.started"}else{"cooldown.updated"},json!({"ability":ability,"ability_id":id,"display_key":key,"lockout":lockout}));
-                });
-            }
+                    c.emit(if lockout==0.{"cooldown.ended"}else if old==0.{"cooldown.started"}else{"cooldown.updated"},
+                        json!({"ability":ability,"ability_id":id,"display_key":key,"lockout":lockout}));
+                }
+            });
         }
     }
 }

@@ -36,6 +36,7 @@ struct Subscription {
 }
 pub(crate) struct Bus {
     pub vm: u64,
+    diagnostics: super::native::DiagnosticSink,
     next: u64,
     subscriptions: Vec<Subscription>,
     active: bool,
@@ -180,6 +181,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
     });
     let shared = Rc::new(RefCell::new(Bus {
         vm,
+        diagnostics: super::native::diagnostic_sink(lua),
         next: 0,
         subscriptions: Vec::new(),
         active: true,
@@ -739,4 +741,17 @@ pub(crate) fn interested(name: &str) -> bool {
                 b.active && b.subscriptions.iter().any(|s| s.name == name)
             })
     })
+}
+
+// Source-capture failures remain visible through retained VMs even after disable.
+// This records diagnostics only: no Lua executes, and the manager drains the sink.
+pub(crate) fn capture_diagnostic(code: &str, reason: &str) {
+    REGISTRY.with(|registry| {
+        for shared in registry.borrow().iter().filter_map(std::rc::Weak::upgrade) {
+            shared
+                .borrow()
+                .diagnostics
+                .record("eqoa.events", code, reason);
+        }
+    });
 }

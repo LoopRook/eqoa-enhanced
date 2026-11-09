@@ -219,10 +219,8 @@ impl Manager {
         }
         self.frame_number = self.frame_number.saturating_add(1);
         if !snapshot.in_game && self.snapshot.in_game {
-            super::native_core::CORE.with(|c| {
-                c.borrow_mut()
-                    .publish(super::native_core::View::default(), false)
-            });
+            super::native_core::CORE
+                .with(|c| c.borrow_mut().publish(super::native_core::View::default()));
             for entry in &self.entries {
                 if let Some(i) = &entry.instance {
                     i.visibility.clear();
@@ -238,20 +236,40 @@ impl Manager {
         for e in &self.entries {
             if let Some(i) = &e.instance {
                 i.host.begin_iteration();
-                i.host.snapshot.set(snapshot);
+                if !snapshot.capture_pending || i.active {
+                    i.host.snapshot.set(snapshot);
+                }
                 i.visibility.update(snapshot.health, i.active);
             }
         }
         while let Some(command) = self.commands.pop_front() {
             self.command(command);
         }
-        super::native_core::manager_demand(self.entries.iter().any(|e|e.enabled_intent && e.status != Status::Failed));
         let waiting_world = self.profile_waiting_world();
+        let retained = self.entries.iter().filter(|e| e.instance.is_some()).count();
+        // Only an eligible enable needs one presentation-frame bootstrap window.
+        // Running VMs register their own native bus demand.
+        super::native_core::manager_demand(
+            !waiting_world
+                && self.entries.iter().any(|e| {
+                    let inactive = e.instance.as_ref().is_none_or(|i| !i.active);
+                    let bootstrap_due =
+                        snapshot.capture_pending && e.not_before <= self.frame_number;
+                    let staged_next =
+                        e.instance.is_some() && e.not_before == self.frame_number.saturating_add(1);
+                    e.enabled_intent
+                        && e.status != Status::Failed
+                        && inactive
+                        && (e.instance.is_some() || retained < MAX_INSTANCES)
+                        && (bootstrap_due || staged_next)
+                }),
+        );
         let mut entries = std::mem::take(&mut self.entries);
         let mut count = entries.iter().filter(|e| e.instance.is_some()).count();
         for entry in &mut entries {
             if !waiting_world
-                && !snapshot.capture_pending
+                && (!snapshot.capture_pending
+                    || (entry.instance.is_none() && count >= MAX_INSTANCES))
                 && entry.enabled_intent
                 && entry.status != Status::Failed
                 && entry.not_before <= self.frame_number
@@ -494,6 +512,9 @@ impl Manager {
         )));
         super::fonts::FontBank::install_for_addon(&font_bank, &host.lua, metadata)
             .map_err(|e| e.to_string())?;
+        // Compilation/reload staging is not a running native consumer.
+        // frame_entry primes the bus immediately before the first Lua entry.
+        super::native_events::clear(&host);
         Ok(Instance {
             host,
             function,
@@ -636,6 +657,11 @@ impl Manager {
         if let Some(i) = &entry.instance {
             i.visibility.clear();
             super::native_events::clear(&i.host);
+            // Clearing the last bus can diagnose revoked-generation source deltas.
+            // Drain again before reload/shutdown can retire this VM.
+            for message in super::native::finish(&i.host.lua) {
+                self.diagnostic(Some(&entry.metadata.id), "disable", message);
+            }
         }
         // A callback failure is terminal even during an ordinary transition.
         if disposition == Disposition::Retire || entry.status == Status::Failed {
@@ -1950,6 +1976,156 @@ mod tests {
             "duplicate invalidation must preserve the neighbor VM"
         );
         manager.shutdown();
+    }
+
+    #[test]
+    fn perf_review_m5_shutdown_persists_capture_loss_diagnostics() {
+        use super::super::native_core;
+        native_core::fixture_demand(false);
+        native_core::CORE.with(|c| *c.borrow_mut() = native_core::Core::default());
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("loss", true, "count=(count or 0)+1");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        for _ in 0..8193 {
+            native_core::defer(1, |_| {});
+        }
+        native_core::observe_text("private-old-world-line", [1.; 4]);
+        native_core::CORE.with(|c| c.borrow_mut().reset("zone"));
+        manager.shutdown();
+        assert!(
+            manager
+                .diagnostics()
+                .iter()
+                .any(|d| d.message.contains("source.generation")),
+            "retirement must drain post-clear diagnostics"
+        );
+        let log = fs::read_to_string(scripts.0.join("addons_error.log")).unwrap();
+        assert!(log.contains("source.capture") && log.contains("source.generation"));
+        assert!(!log.contains("private-old-world-line"));
+    }
+
+    #[test]
+    fn perf_review_l3_disabled_host_keeps_last_real_snapshot() {
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("retained", true, "count=(count or 0)+1");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        let mut full = Snapshot {
+            in_game: true,
+            health: super::super::health::HealthSnapshot::new(true, 1, 1),
+            ..Default::default()
+        };
+        full.player.level = 77;
+        for disabled in [false, true] {
+            if disabled {
+                manager.queue(Command::Enable(
+                    manager.entries[0].metadata.id.clone(),
+                    false,
+                ));
+            }
+            gpu.begin();
+            manager.frame(full);
+            gpu.render();
+            manager.after_render();
+        }
+        assert!(!manager.entries[0].instance.as_ref().unwrap().active);
+        gpu.begin();
+        manager.frame(Snapshot {
+            capture_pending: true,
+            ..Default::default()
+        });
+        gpu.render();
+        manager.after_render();
+        assert_eq!(
+            manager.entries[0]
+                .instance
+                .as_ref()
+                .unwrap()
+                .host
+                .snapshot
+                .get()
+                .player
+                .level,
+            77
+        );
+    }
+
+    #[test]
+    fn perf_review_m2_disabled_reload_does_not_activate_capture() {
+        use super::super::native_core;
+        native_core::fixture_demand(false);
+        native_core::manager_demand(false);
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("staged", false, "count=(count or 0)+1");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        manager.queue(Command::Reload("staged".into()));
+        gpu.frame(&mut manager);
+        assert!(!manager.entries[0].instance.as_ref().unwrap().active);
+        assert!(
+            !native_core::capture_requested(),
+            "a compiled, disabled VM is not a live consumer"
+        );
+        manager.queue(Command::Enable("staged".into(), true));
+        gpu.begin();
+        manager.frame(Snapshot {
+            capture_pending: true,
+            ..Default::default()
+        });
+        gpu.render();
+        manager.after_render();
+        assert!(native_core::capture_requested());
+        gpu.frame(&mut manager);
+        assert!(manager.entries[0].instance.as_ref().unwrap().active);
+    }
+
+    #[test]
+    fn perf_review_m2_waiting_profile_has_no_capture_demand() {
+        use super::super::native_core;
+        native_core::fixture_demand(false);
+        native_core::manager_demand(false);
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("pending", true, "count=(count or 0)+1");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        manager.enable_profiles(Some(config.0.clone()));
+        manager.set_waiting_world_for_test(true);
+        manager.entries[0].enabled_intent = true;
+        gpu.frame(&mut manager);
+        assert!(manager.entries[0].instance.is_none());
+        assert!(
+            !native_core::capture_requested(),
+            "intent without a live or eligible consumer must stay quiescent"
+        );
+        manager.set_waiting_world_for_test(false);
+        gpu.begin();
+        manager.frame(Snapshot {
+            capture_pending: true,
+            ..Default::default()
+        });
+        gpu.render();
+        manager.after_render();
+        assert!(
+            native_core::capture_requested(),
+            "eligible enable must request its bootstrap window"
+        );
+        assert!(manager.entries[0].instance.is_none());
+        native_core::presentation();
+        native_core::presentation();
+        assert!(
+            !native_core::capture_requested(),
+            "bootstrap demand must expire without a VM"
+        );
+        gpu.frame(&mut manager);
+        assert!(manager.entries[0].instance.as_ref().unwrap().active);
+        manager.shutdown();
+        assert!(!native_core::capture_requested());
     }
 
     #[test]

@@ -110,6 +110,10 @@ impl Manager {
             setup: None,
         });
     }
+    #[cfg(test)]
+    pub(super) fn set_waiting_world_for_test(&mut self, waiting: bool) {
+        self.named.as_mut().unwrap().waiting_world = waiting;
+    }
     pub(super) fn profile_waiting_world(&self) -> bool {
         self.named.as_ref().is_some_and(|s| s.waiting_world)
     }
