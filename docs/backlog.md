@@ -211,3 +211,18 @@ This entry records future work only; no navigation or movement behavior changes 
   `develop` pushes rely on the Nightly's own gate? Check what else depends on the public check (branch
   rules, release gating in `official-release.yml`) before cutting anything.
 - **Status:** deferred; release pipeline, so the Opus lead decides.
+
+## Final task before merging develop into stable (owner, 2026-11-09)
+
+Do this last, before the release that carries round 2 and the sync into `enhanced`:
+
+- **The Stable program must be named "EQOA Enhanced.exe".** The owner's 0.4.14 download is not (the ZIP's
+  program carries the old updater-style name). `tools/build_player_release.py` already maps
+  `EXE_NAMES["enhanced"] = "EQOA Enhanced.exe" (37dce3a, develop only so far). Verify on the release
+  candidate: the ZIP lists `EQOA Enhanced.exe`; a player on 0.4.14 who updates gets a working program
+  (the updater replaces whichever file is running: check what happens to the old name, the shortcut,
+  the folder's other files); Nightly stays "EQOA Enhanced - Nightly.exe"; the update asset
+  (`eqoa-enhanced-windows-x86_64.exe`) still works. Owner checks the downloaded Stable.
+- Also in that release: move `## Unreleased` in FORK-UPDATE-NOTES.md to the version's dated entry
+  (docs/RELEASING.md), and re-run the live test of Wereoxxs, Avoids Modern UI and the hearts example on
+  the release candidate.
