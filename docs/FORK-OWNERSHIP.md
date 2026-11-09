@@ -65,7 +65,7 @@ integration seams. No directory-wide shared allowlist exists.
 
 | Shared upstream path | Added max | Deleted max | Reviewed purpose |
 | --- | ---: | ---: | --- |
-| `.gitignore` | 6 | 0 | Fork-local generated output and scratch configuration exclusions. |
+| `.gitignore` | 7 | 0 | Fork-local generated output and scratch configuration exclusions, plus `*.stackdump` (Git Bash crash notes). |
 | `Cargo.lock` | 153 | 3 | Reviewed native Lua 5.1 and Dear ImGui 0.18 spike dependency resolution, including rustc-hash version disambiguation; license metadata stays unchanged. |
 | `crates/eqoa/Cargo.toml` | 9 | 1 | Reviewed native-only mlua and Dear ImGui spike dependencies, Win32_System_Com for Shell known-folder CoTaskMemFree, plus existing fork/release settings; license metadata stays unchanged. |
 | `crates/eqoa/build.rs` | 11 | 3 | One hook into fork_ext/app_icon_ico for the owner-supplied program icon: stage the chosen .ico in OUT_DIR and feed its images to the unchanged SIZES/dib/ico/resources path. Stack and linker behavior unchanged. |

@@ -62,9 +62,9 @@
   ],
   "shared": {
     ".gitignore": {
-      "added": 6,
+      "added": 7,
       "deleted": 0,
-      "reason": "Fork-local generated output and scratch configuration exclusions."
+      "reason": "Fork-local generated output and scratch configuration exclusions. 2026-11-09 (owner-approved +1): *.stackdump, so a Git Bash tool's crash note in a checkout cannot fail the footprint check."
     },
     "Cargo.lock": {
       "added": 154,
