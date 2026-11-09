@@ -158,3 +158,10 @@ Validation uses rustc 1.99.1 (the installed stable alias resolves to 1.99.1), is
 | Required-base footprint | PASS against 8435f2c8a00c631d716771f8189fa0011a1fbf50; performance changes add no shared hook lines or budget increases. play.rs remains +759/-53; viewer.rs +255/-15. |
 
 Reported Rust pass totals include early-returning SKIP cases. The workspace's explicit SKIPs comprise 53 oracle, four symlink privilege, two GPU opt-in and 160 other missing data/disc/capture prerequisites. The two GPU opt-ins subsequently ran without SKIP; the four privilege-blocked symlink branches and unavailable disc/decomp/oracle checks remain unverified. Ignored tests are distinct from SKIP output; pinned opt-ins exercise the 24 Forge/installer ignored cases. No live gameplay, physical controller, audio listening, native Linux or owner acceptance is claimed.
+
+
+After the final actor/self-removal refinements, the whole eqoa package was repeated with the CI static-CRT target: **1,654 reported passed, 0 failed, 26 ignored, 125 explicit SKIP lines**. No other workspace crate changed after the complete workspace run. The final source-hook suite also passed 38/38 with no SKIP, including actor removal, absent-self fighting state, group links and both incremental/bootstrap hotbar references.
+
+The static-CRT optimized build passed at code checkpoint 1ba8b63 in 3m 07s (56 warnings): cargo build --release --locked -p eqoa --target x86_64-pc-windows-msvc, with RUSTFLAGS=-C target-feature=+crt-static. CI runtime packaging passed its exact allowlist, executable/provenance, catalog and checksum verification using the pinned public catalog download. A first attempt with the local reference catalog was correctly rejected for a SHA256 mismatch; the exact CI download path succeeded. Package outputs stay in the scratch directory, outside run/ and the source tree.
+
+A final release build and package repeat follows this documentation commit to embed the final commit; its result is returned with the worker's final message. No code changes remain. The owner still needs to live-test the resulting build in the world and with in-game menus open.
