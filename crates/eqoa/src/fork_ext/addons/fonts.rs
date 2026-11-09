@@ -710,6 +710,7 @@ mod tests {
             module_dirs: vec![root.to_path_buf()],
             resource_dirs: vec![res_dir],
             api: Some("eqoa/1".to_string()),
+            entry_mode: Default::default(),
             requested_capabilities: vec![],
             initially_enabled: true,
             mods_root: Some(root.to_path_buf()),

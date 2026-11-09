@@ -444,6 +444,41 @@ pub(crate) fn guard(
     Ok(proxy)
 }
 
+fn call_error_code(error: &mlua::Error) -> &'static str {
+    use mlua::Error;
+    match error {
+        Error::CallbackError { cause, .. } | Error::WithContext { cause, .. } => {
+            call_error_code(cause)
+        }
+        Error::BadArgument { .. } | Error::FromLuaConversionError { .. } => "invalid_argument",
+        Error::UserDataDestructed | Error::UserDataTypeMismatch => "stale_handle",
+        Error::ExternalError(error) => {
+            error
+                .downcast_ref::<std::io::Error>()
+                .map_or("failed", |error| match error.kind() {
+                    std::io::ErrorKind::NotFound => "not_found",
+                    std::io::ErrorKind::PermissionDenied => "permission_denied",
+                    _ => "io_error",
+                })
+        }
+        _ => "failed",
+    }
+}
+
+/// An owned diagnostic route that native consumers can use without evaluating Lua.
+#[derive(Clone)]
+pub(crate) struct DiagnosticSink(std::rc::Weak<RefCell<Session>>);
+impl DiagnosticSink {
+    pub(crate) fn record(&self, symbol: &str, code: &str, reason: &str) {
+        if let Some(session) = self.0.upgrade() {
+            session.borrow_mut().diagnostic(symbol, code, reason);
+        }
+    }
+}
+pub(crate) fn diagnostic_sink(lua: &Lua) -> DiagnosticSink {
+    DiagnosticSink(Rc::downgrade(&session(lua)))
+}
+
 pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> Result<()> {
     let modules: Table = lua.named_registry_value("eqoa_modules")?;
     let table: Table = modules.get(module)?;
@@ -492,7 +527,7 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
             match function.call::<MultiValue>(args) {
                 Ok(value) => Ok(value),
                 Err(e) if fatal_memory(&e) => Err(e),
-                Err(e) => error(lua, &symbol, "invalid_argument", &e.to_string()),
+                Err(e) => error(lua, &symbol, call_error_code(&e), &e.to_string()),
             }
         })?,
     )?;
@@ -610,7 +645,12 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             let s = s.borrow();
             let prefix = prefix.unwrap_or_default();
             let t = lua.create_table()?;
-            for p in s.descriptors.keys().filter(|p| p.starts_with(&prefix)) {
+            for p in s.descriptors.keys().filter(|p| {
+                prefix.is_empty()
+                    || p.as_str() == prefix
+                    || p.strip_prefix(&prefix)
+                        .is_some_and(|tail| tail.starts_with('.'))
+            }) {
                 t.raw_push(record(
                     lua,
                     "eqoa.capabilities.Capability",

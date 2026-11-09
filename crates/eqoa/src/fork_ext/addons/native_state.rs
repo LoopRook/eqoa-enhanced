@@ -324,7 +324,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 );
             };
             lua.pack_multi(if (1..=59).contains(&level) {
-                Some(crate::hud::exp_for_level(level as i32 + 1))
+                Some(crate::hud::exp_for_level(level as i32))
             } else {
                 None
             })

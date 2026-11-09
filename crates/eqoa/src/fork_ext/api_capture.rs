@@ -13,6 +13,13 @@ fn valid_id(id: u32) -> Option<u32> {
     (!matches!(id, 0 | u32::MAX)).then_some(id)
 }
 
+#[cfg(test)]
+thread_local! {static VIEW_BUILDS: std::cell::Cell<usize> = const {std::cell::Cell::new(0)};}
+#[cfg(test)]
+pub(super) fn take_view_builds() -> usize {
+    VIEW_BUILDS.with(|n| n.replace(0))
+}
+
 impl Play {
     fn native_location(&self, walker: Option<&crate::walker::Walker>) -> Json {
         let Some(w) = walker else {
@@ -76,9 +83,19 @@ impl Play {
         json!({"world_id":world,"place_id":place,"compass_id":compass,"name":name,"cell_x":col,"cell_z":row})
     }
 
+    pub(crate) fn in_world_now(&self) -> bool {
+        self.session.self_id.is_some()
+            && self.disconnected.is_none()
+            && !self.quit
+            && self.hud_ready()
+            && !self.loading_up()
+    }
+
     pub(crate) fn native_view(&self, walker: Option<&crate::walker::Walker>) -> View {
+        #[cfg(test)]
+        VIEW_BUILDS.with(|n| n.set(n.get() + 1));
         let connected = self.session.self_id.is_some() && self.disconnected.is_none() && !self.quit;
-        let ready = connected && self.hud_ready() && !self.loading_up();
+        let ready = self.in_world_now();
         let phase = if self.disconnected.is_some() || self.quit {
             "disconnected"
         } else if ready {

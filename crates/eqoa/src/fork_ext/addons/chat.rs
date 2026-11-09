@@ -27,15 +27,19 @@ pub const MSG_TYPE_TELL: u32 = 0x3F008081;
 pub const MSG_TYPE_GUILD: u32 = 0x3E800000;
 
 thread_local! {
-    static OUTGOING_CHAT: RefCell<Vec<(Option<u64>, String)>> = const { RefCell::new(Vec::new()) };
+    static OUTGOING_CHAT: RefCell<Vec<(Option<u64>, String, Option<super::native::DiagnosticSink>)>> = const { RefCell::new(Vec::new()) };
     static CHAT_MONOTONIC_SEQ: Cell<u32> = const { Cell::new(1) };
     static CHAT_HISTORY: RefCell<VecDeque<(String, u32, u32)>> = const { RefCell::new(VecDeque::new()) };
 }
 
 pub(crate) fn queue_outgoing_chat(msg: String) {
-    queue_owned(None, msg);
+    queue_owned(None, msg, None);
 }
-fn queue_owned(owner: Option<u64>, msg: String) -> bool {
+fn queue_owned(
+    owner: Option<u64>,
+    msg: String,
+    diagnostics: Option<super::native::DiagnosticSink>,
+) -> bool {
     if report_route(&msg) {
         return false;
     }
@@ -44,12 +48,12 @@ fn queue_owned(owner: Option<u64>, msg: String) -> bool {
         if q.len() >= 32 {
             return false;
         }
-        q.push((owner, msg));
+        q.push((owner, msg, diagnostics));
         true
     })
 }
 pub(crate) fn cancel_vm(vm: u64) {
-    OUTGOING_CHAT.with(|q| q.borrow_mut().retain(|(owner, _)| *owner != Some(vm)));
+    OUTGOING_CHAT.with(|q| q.borrow_mut().retain(|(owner, _, _)| *owner != Some(vm)));
 }
 pub(crate) fn report_route(text: &str) -> bool {
     let mut text = text.trim_start();
@@ -93,9 +97,19 @@ pub(crate) fn take_outgoing_chat() -> Vec<String> {
     OUTGOING_CHAT.with(|q| {
         std::mem::take(&mut *q.borrow_mut())
             .into_iter()
-            .map(|(_, line)| line)
+            .map(|(_, line, _)| line)
             .collect()
     })
+}
+
+pub(crate) fn cancel_outgoing_chat(reason: &str) {
+    OUTGOING_CHAT.with(|q| {
+        for (_, _, sink) in q.borrow_mut().drain(..) {
+            if let Some(sink) = sink {
+                sink.record("frontiers_forge.chat.SendChatText", "cancelled", reason);
+            }
+        }
+    });
 }
 
 pub(crate) fn snapshot_chat(raw_chat: &VecDeque<(String, [f32; 4])>, now_ms: u32) -> ChatSnapshot {
@@ -474,7 +488,11 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
                         Some("message too long (127 character max)".to_string()),
                     ));
                 }
-                if !queue_owned(Some(super::native_events::bus(lua).borrow().vm), line) {
+                if !queue_owned(
+                    Some(super::native_events::bus(lua).borrow().vm),
+                    line,
+                    Some(super::native::diagnostic_sink(lua)),
+                ) {
                     return Ok((false, Some("chat queue is full".into())));
                 }
                 Ok((true, None::<String>))
@@ -515,7 +533,7 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
         "IsSendPending",
         lua.create_function(|lua, ()| {
             let vm = super::native_events::bus(lua).borrow().vm;
-            Ok(OUTGOING_CHAT.with(|q| q.borrow().iter().any(|(owner, _)| *owner == Some(vm))))
+            Ok(OUTGOING_CHAT.with(|q| q.borrow().iter().any(|(owner, _, _)| *owner == Some(vm))))
         })?,
     )?;
 
@@ -570,6 +588,7 @@ mod tests {
             module_dirs: vec![root.to_path_buf()],
             resource_dirs: vec![],
             api: Some("eqoa/1".to_string()),
+            entry_mode: Default::default(),
             requested_capabilities: vec![],
             initially_enabled: true,
             mods_root: Some(root.to_path_buf()),

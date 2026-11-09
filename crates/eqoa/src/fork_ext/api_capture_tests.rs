@@ -346,3 +346,55 @@ fn review_fix_h3_entity_names_match_case_insensitive_literal_utf8_and_optional_s
     )
     .unwrap();
 }
+
+#[test]
+fn review_fix_m1_accepted_chat_retries_modal_and_diagnoses_world_loss() {
+    use crate::fork_ext::addons::chat;
+    let mut p = ready();
+    chat::take_outgoing_chat();
+    let host = Host::new().unwrap();
+    chat::install_chat_adapter(&host).unwrap();
+    host.snapshot.set(p.forge_snapshot(None));
+    host.lua
+        .globals()
+        .set(
+            "chat",
+            host.registered_modules()["frontiers_forge.chat"].clone(),
+        )
+        .unwrap();
+    host.execute("assert(chat.SendChatText('hello'));assert(chat.IsSendPending())")
+        .unwrap();
+    p.mode = 60;
+    begin_iteration(&mut p, true);
+    host.execute("assert(chat.IsSendPending(),'accepted modal send must remain queued')")
+        .unwrap();
+    p.mode = 0;
+    begin_iteration(&mut p, true);
+    host.execute("assert(not chat.IsSendPending());assert(chat.SendChatText('world gap'))")
+        .unwrap();
+    p.session.self_id = None;
+    begin_iteration(&mut p, true);
+    host.execute("assert(not chat.IsSendPending())").unwrap();
+    let logs = host.drain_logs().unwrap();
+    assert!(
+        logs.iter()
+            .any(|line| line.contains("frontiers_forge.chat.SendChatText")
+                && line.contains("cancelled")),
+        "world-loss cancellation must be visible: {logs:?}"
+    );
+}
+
+#[test]
+fn review_fix_m6_iteration_readiness_does_not_build_a_native_view() {
+    let mut p = ready();
+    super::api_capture::take_view_builds();
+    begin_iteration(&mut p, true);
+    assert_eq!(
+        super::api_capture::take_view_builds(),
+        0,
+        "readiness must not serialize state"
+    );
+    p.session.self_id = None;
+    begin_iteration(&mut p, true);
+    assert_eq!(super::api_capture::take_view_builds(), 0);
+}

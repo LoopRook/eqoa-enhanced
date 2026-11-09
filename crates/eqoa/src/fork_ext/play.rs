@@ -20,11 +20,17 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     {
         crate::fork_ext::addons::native_core::iteration(_game_step);
         if _game_step {
-            let ready = _play.native_view(None).in_world;
+            let ready = _play.in_world_now();
             weapon_sets_requests(_play, ready);
-            for msg in crate::fork_ext::addons::chat::take_outgoing_chat() {
-                if ready && _play.mode != 60 && !crate::fork_ext::addons::chat::report_route(&msg) {
-                    _play.chat_line(&msg);
+            if !ready {
+                crate::fork_ext::addons::chat::cancel_outgoing_chat(
+                    "world became unavailable before queued chat could be sent",
+                );
+            } else if _play.mode != 60 {
+                for msg in crate::fork_ext::addons::chat::take_outgoing_chat() {
+                    if !crate::fork_ext::addons::chat::report_route(&msg) {
+                        _play.chat_line(&msg);
+                    }
                 }
             }
         }

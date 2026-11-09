@@ -551,6 +551,9 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
                             "file mounts unavailable",
                         );
                     };
+                    if let Err(reason) = mounts.key(&path) {
+                        return super::native::error(lua, &symbol, "permission_denied", &reason);
+                    }
                     let result = match name {
                         "read" => mounts.read(&path).and_then(|b| {
                             lua.create_string(&b)
@@ -579,7 +582,12 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
                             &symbol,
                             if e.contains("not found") {
                                 "not_found"
-                            } else if e.contains("invalid") || e.contains("outside") {
+                            } else if matches!(
+                                e.as_str(),
+                                "reparse point in addon path"
+                                    | "reparse point in addon resource"
+                                    | "reparse point in addon file"
+                            ) {
                                 "permission_denied"
                             } else if e.contains("quota") || e.contains("exceeds") {
                                 "quota"
@@ -740,6 +748,7 @@ mod tests {
             module_dirs: vec![],
             resource_dirs: vec![],
             api: None,
+            entry_mode: Default::default(),
             requested_capabilities: vec![],
             initially_enabled: false,
             mods_root: Some(scripts.clone()),
@@ -839,5 +848,17 @@ mod tests {
         host.execute("assert(io.open(legacy)==nil);assert(iters[1]()=='one');assert(iters[1]()=='two');iters=nil").unwrap();
         host.lua.gc_collect().unwrap();
         host.execute("local f=assert(io.open(legacy));local next=f:lines();assert(next()=='one');local other=f:lines();assert(other()=='two');f:close();assert(not pcall(next));local reopened=assert(io.open(legacy));reopened:close()").unwrap();
+    }
+    #[test]
+    fn review_fix_m3_native_files_report_boundary_denials_separately_from_io() {
+        let (_scratch, host, _addon) = fixture();
+        host.execute(r#"for _,path in ipairs({'../neighbor/secret.cfg','resources/../secret.cfg','..\\secret.cfg','CON','data/./bad'}) do
+            for _,op in ipairs({'read','remove','write'}) do
+                local value,err=eqoa.files[op](path,'bytes')
+                assert(value==nil and err.code=='permission_denied',path..' '..op..' '..tostring(err and err.code))
+            end
+        end
+        local value,err=eqoa.files.read('absent.cfg');assert(value==nil and err.code=='not_found')
+        "#).unwrap();
     }
 }

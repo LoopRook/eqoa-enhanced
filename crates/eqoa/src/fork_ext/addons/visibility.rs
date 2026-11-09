@@ -885,6 +885,7 @@ mod tests {
             module_dirs: vec![],
             resource_dirs: vec![],
             api: None,
+            entry_mode: Default::default(),
             requested_capabilities: vec![],
             initially_enabled: true,
             mods_root: None,
@@ -1196,5 +1197,24 @@ mod tests {
             assert(UI.DrawClassIcon(0) == false)
         "#;
         host.execute(script).unwrap();
+    }
+    #[test]
+    fn review_fix_m5_native_hidden_by_includes_forge_claims_from_managed_vms() {
+        let health = Rc::new(RefCell::new(HealthBarClaimsRegistry::new()));
+        let hud = Rc::new(RefCell::new(HudClaimsRegistry::new()));
+        let forge = host();
+        let native = Host::new().unwrap();
+        let a = VisibilityLease::with_hud_claims(health.clone(), hud.clone()).unwrap();
+        let b = VisibilityLease::with_hud_claims(health, hud).unwrap();
+        install_managed_health_adapter(&forge, &a).unwrap();
+        install_managed_health_adapter(&native, &b).unwrap();
+        a.update(HealthSnapshot::new(true, 50, 100), true);
+        b.update(HealthSnapshot::new(true, 50, 100), true);
+        forge.execute("ui=require('frontiers_forge.ui');assert(ui.DisableUI('arbitrary label'));assert(ui.DisableHealthBar('another label'))").unwrap();
+        native.execute("for _,element in ipairs({'health','compass','hotbar','all'}) do local ids=eqoa.hud.hidden_by(element);assert(#ids==1 and ids[1]=='visibility') end").unwrap();
+        a.clear();
+        native
+            .execute("assert(#eqoa.hud.hidden_by('all')==0)")
+            .unwrap();
     }
 }

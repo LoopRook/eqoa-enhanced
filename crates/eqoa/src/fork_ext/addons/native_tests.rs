@@ -269,3 +269,86 @@ fn native_forge_input_defaults_use_raw_neutral_byte_128() {
     assert_eq!(snapshot.left_analog, (128, 128));
     assert_eq!(snapshot.button_bitfield, 0xffff);
 }
+
+#[test]
+fn review_fix_m4_native_binding_preserves_runtime_io_and_argument_error_taxonomy() {
+    let h = Host::new().unwrap();
+    super::native::bind(
+        &h.lua,
+        "text",
+        "localized",
+        h.lua
+            .create_function(|_, (): ()| -> mlua::Result<()> {
+                Err(mlua::Error::runtime("backend upload failed"))
+            })
+            .unwrap(),
+    )
+    .unwrap();
+    h.execute("local v,e=eqoa.text.localized();assert(v==nil and e.code=='failed')")
+        .unwrap();
+    for (kind, expected) in [
+        (std::io::ErrorKind::PermissionDenied, "permission_denied"),
+        (std::io::ErrorKind::NotFound, "not_found"),
+        (std::io::ErrorKind::Other, "io_error"),
+    ] {
+        super::native::bind(
+            &h.lua,
+            "text",
+            "localized",
+            h.lua
+                .create_function(move |_, (): ()| -> mlua::Result<()> {
+                    Err(mlua::Error::external(std::io::Error::new(
+                        kind,
+                        "backend IO failure",
+                    )))
+                })
+                .unwrap(),
+        )
+        .unwrap();
+        h.execute(&format!(
+            "local v,e=eqoa.text.localized();assert(v==nil and e.code=='{expected}')"
+        ))
+        .unwrap();
+    }
+    super::native::bind(
+        &h.lua,
+        "text",
+        "localized",
+        h.lua.create_function(|_, _: mlua::Table| Ok(())).unwrap(),
+    )
+    .unwrap();
+    h.execute("local v,e=eqoa.text.localized(false);assert(v==nil and e.code=='invalid_argument')")
+        .unwrap();
+    assert!(
+        h.drain_logs()
+            .unwrap()
+            .iter()
+            .any(|line| line.contains("backend upload failed") && line.contains("failed"))
+    );
+}
+
+#[test]
+fn review_fix_l2_experience_threshold_is_for_the_requested_level() {
+    let h = Host::new().unwrap();
+    for level in [1, 2, 50, 51, 59] {
+        h.execute(&format!(
+            "assert(eqoa.player.experience_for_level({level})=={})",
+            crate::hud::exp_for_level(level)
+        ))
+        .unwrap();
+    }
+    h.execute("assert(eqoa.player.experience_for_level(0)==nil);assert(eqoa.player.experience_for_level(60)==nil);local v,e=eqoa.player.experience_for_level('2');assert(v==nil and e.code=='invalid_argument')").unwrap();
+}
+
+#[test]
+fn review_fix_l3_capability_prefixes_match_complete_dotted_segments() {
+    let h = Host::new().unwrap();
+    h.execute(r#"
+        assert(#eqoa.capabilities.list('eqoa.play')==0)
+        local subtree=eqoa.capabilities.list('eqoa.player')
+        assert(#subtree>=3)
+        for _,descriptor in ipairs(subtree) do assert(descriptor.path=='eqoa.player' or descriptor.path:sub(1,12)=='eqoa.player.') end
+        assert(#eqoa.capabilities.list('eqoa.player.get')==1)
+        assert(#eqoa.capabilities.list()==#eqoa.capabilities.list(''))
+    "#).unwrap();
+}

@@ -79,3 +79,5 @@ links/junctions, networking, raw memory and process launching are excluded.
 Start with [the bundled hearts example](../../bundled-mods/eqoa_example_hearts/main.lua).
 Its ten hearts use ImGui draw lists, real player health, lifecycle cleanup and
 profile settings, with no Forge dependency. Live-game testing is still required.
+
+`eqoa.player.experience_for_level(level)` returns the native experience threshold for the requested level (1?59), including the native formula change at level 51. It does not add one to the argument. To query the next level's threshold, pass `player.level + 1`; arguments outside 1?59 return `nil, nil`. Forge keeps its pinned experience formula.

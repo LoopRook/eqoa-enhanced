@@ -344,9 +344,7 @@ impl Host {
     pub(crate) fn once_mode(&self) -> bool {
         self.addon
             .as_ref()
-            .and_then(|a| std::fs::read(a.package_root.join("mod.json")).ok())
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .is_some_and(|v| v["entryMode"] == "once")
+            .is_some_and(|a| a.entry_mode == super::discovery::EntryMode::Once)
     }
     pub fn drain_logs(&self) -> Result<Vec<String>> {
         let messages: Table = self.lua.named_registry_value("forge_log")?;
