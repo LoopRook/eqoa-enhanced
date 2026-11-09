@@ -96,11 +96,11 @@ pub(crate) fn apply(s: &mut Snapshot, v: &View) {
             .clamp(0.0, 255.0) as u8;
         s.position = vector(&e["position"]);
         (s.name, s.name_len) = text(&e["name"]);
-        s.target_id = u(&e["target_id"]) & 0xffff;
+        s.target_id = u(&e["target_id"]) & 0xff;
         s.class_byte = u(&e["class_code"]) as u8;
         s.status_flags = u(&e["status_flags"]) as u8;
         s.disposition = e["disposition"].as_u64().map(|d| d as u8);
-        s.is_populated = s.id != 0;
+        s.is_populated = s.id != 0 && s.level > 0;
     };
     for i in 0..24 {
         if let Some(Some(id)) = v.entity_slots.get(i) {
@@ -129,7 +129,7 @@ pub(crate) fn apply(s: &mut Snapshot, v: &View) {
             e.level = s.player.level as u8;
             e.position = s.player.position;
             e.class_byte = 2;
-            e.is_populated = me != 0;
+            e.is_populated = me != 0 && e.level > 0;
         }
     }
     let mut next = 24;

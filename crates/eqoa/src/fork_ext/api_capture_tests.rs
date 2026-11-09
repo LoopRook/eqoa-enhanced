@@ -254,3 +254,95 @@ fn native_presentation_counter_includes_pregame_without_counting_extra_game_step
         assert_eq!(c.tick, 1);
     });
 }
+
+#[test]
+fn review_fix_h1_forge_projection_requires_a_positive_creature_level() {
+    let mut p = ready();
+    p.entities.slots = vec![None; 4];
+    for (slot, creature) in [
+        (1, None),
+        (
+            2,
+            Some(net::entity::Creature {
+                level: 0,
+                ..Default::default()
+            }),
+        ),
+        (
+            3,
+            Some(net::entity::Creature {
+                level: 7,
+                ..Default::default()
+            }),
+        ),
+    ] {
+        p.entities.slots[slot] = Some(net::entity::Entity {
+            id: 0x100 + slot as u32,
+            creature,
+            ..Default::default()
+        });
+    }
+    let snapshot = p.forge_snapshot(None);
+    assert!(
+        !snapshot.entities.entities[1].is_populated,
+        "ID alone is not a populated Forge record"
+    );
+    assert!(!snapshot.entities.entities[2].is_populated);
+    assert!(snapshot.entities.entities[3].is_populated);
+}
+
+#[test]
+fn review_fix_h2_forge_target_is_low_byte_while_native_target_is_full_u32() {
+    let mut p = ready();
+    p.entities.slots = vec![
+        None,
+        Some(net::entity::Entity {
+            id: 0x1234,
+            creature: Some(net::entity::Creature {
+                level: 8,
+                target: 0xfeed_beef,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+    ];
+    let snapshot = p.forge_snapshot(None);
+    assert_eq!(snapshot.entities.entities[1].target_id, 0xef);
+    let host = Host::new().unwrap();
+    host.execute("assert(eqoa.entities.find(0x1234).target_id==0xfeedbeef)")
+        .unwrap();
+}
+
+#[test]
+fn review_fix_h3_entity_names_match_case_insensitive_literal_utf8_and_optional_substrings() {
+    let mut p = ready();
+    p.entities.slots = ["Assistant Recruiter", "?LITE Wolf", "Wolf.*"]
+        .into_iter()
+        .enumerate()
+        .map(|(i, name)| {
+            Some(net::entity::Entity {
+                id: 0x100 + i as u32,
+                creature: Some(net::entity::Creature {
+                    name: name.into(),
+                    level: 1,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+        })
+        .collect();
+    p.forge_snapshot(None);
+    let h = Host::new().unwrap();
+    h.execute(
+        r#"
+        assert(#eqoa.entities.named('assistant recruiter')==1)
+        assert(#eqoa.entities.named('?Lite wolf',true)==1)
+        assert(#eqoa.entities.named('wolf')==0)
+        assert(#eqoa.entities.named('wOlF',false)==2)
+        assert(#eqoa.entities.named('.*',false)==1)
+        local value,err=eqoa.entities.named('wolf',1)
+        assert(value==nil and err.code=='invalid_argument')
+    "#,
+    )
+    .unwrap();
+}

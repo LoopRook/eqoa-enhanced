@@ -67,3 +67,11 @@ The following require explicit review before calling Round 2 spec-complete:
 - The monotonic clock is initialized when the addon runtime is constructed at client startup. Presentation frames now advance through the existing live and pregame controls seam; game ticks advance only through the game-step seam.
 
 These are reported limitations, not accepted design changes. The API stays experimental until independent review, fixes and the Round 5 audit. No stability or live-game parity promise is made here.
+
+## Fix round
+
+Review: [round-2-review.md](round-2-review.md), supplied by the lead. The approved play.rs +759 budget is unchanged. Review fixes are recorded below; the original verification above remains historical evidence for the pre-review checkpoint.
+
+- H1/H2: restored pinned Forge populated semantics (nonzero ID and positive level) and low-byte target IDs (`& 0xff`); native IDs retain all 32 bits. Tests enter through the actual Play projection, including missing creature records.
+- H3: `entities.named` accepts the optional boolean exact flag, defaults to exact, compares Unicode lowercase strings and performs literal substring matching when false. Wrong flag types fail `invalid_argument`.
+- H1-H3 negative control: 0 passed / 3 expected failures before the fixes; 3 passed after, no ignored tests or SKIP lines.

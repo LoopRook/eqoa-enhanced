@@ -134,7 +134,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua,
         "entities",
         "named",
-        lua.create_function(|lua, name: Value| {
+        lua.create_function(|lua, (name, exact): (Value, Value)| {
             let Some(name) = name
                 .as_string()
                 .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
@@ -146,11 +146,31 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     "name must be a string",
                 );
             };
+            let exact = match exact {
+                Value::Nil => true,
+                Value::Boolean(exact) => exact,
+                _ => {
+                    return error(
+                        lua,
+                        "eqoa.entities.named",
+                        "invalid_argument",
+                        "exact must be a boolean",
+                    );
+                }
+            };
+            let name = name.to_lowercase();
             read(lua, "eqoa.entities.named", "eqoa.entities.Entity", |v| {
                 json!(
                     v.entities
                         .iter()
-                        .filter(|e| e["name"].as_str() == Some(&name))
+                        .filter(|e| e["name"].as_str().is_some_and(|candidate| {
+                            let candidate = candidate.to_lowercase();
+                            if exact {
+                                candidate == name
+                            } else {
+                                candidate.contains(&name)
+                            }
+                        }))
                         .collect::<Vec<_>>()
                 )
             })
