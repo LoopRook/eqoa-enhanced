@@ -236,3 +236,12 @@ Do this last, before the release that carries round 2 and the sync into `enhance
   entry, so range-based UI states (out-of-range tints) could flicker or read wrong briefly.
 - **To check:** at world entry and after a zone change, watch an ability bar with a target in range;
   and add a test with no walker and a known self position. Low priority until seen in play.
+
+## Upstream AO tests fail on GPUs and on the CI runner (2026-11-09)
+
+- `crates/render/tests/ao.rs`: `the_foot_of_a_wall_darkened_and_open_ground_not` fails on untouched upstream
+  91f9e72 on the owner's RTX 3070 Ti (Vulkan and dx12) and on GitHub's Windows runner;
+  `the_same_at_freeport_as_at_the_origin` fails on the RTX but passes on the runner. All three
+  workflows now `--skip` the first (owner agreed, 2026-11-09). A worker should find out whether the
+  assertions assume a particular GPU (plain grey 127 versus 128, a factor difference of 54 against
+  a maximum of 6) and, if so, report it to upstream; then drop the skip.
