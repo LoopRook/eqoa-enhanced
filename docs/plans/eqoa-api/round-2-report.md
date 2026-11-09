@@ -1,6 +1,6 @@
 # Round 2 implementation report
 
-Branch: `feat/eqoa-api-r2`, from `develop` at `413d1ee`. Implementation is committed in stages; no push, merge, tag, release or owner acceptance is claimed. The approved `EQOA-API-SPEC.md` remains authoritative. This report distinguishes automated evidence from live-game acceptance.
+Branch: `feat/eqoa-api-r2`, from `develop` at `413d1ee`. Implementation is committed in stages; no push, merge, tag, published release or owner acceptance is claimed. The approved `EQOA-API-SPEC.md` remains authoritative. This report distinguishes automated evidence from live-game acceptance.
 
 ## Changes by module
 
@@ -33,12 +33,12 @@ All Cargo commands use `C:/Users/hocka/Paseo/targets/eqoa-api-r2`, the shared mk
 | Gate | Result |
 |---|---|
 | Initial native registration negative control | Both initial tests failed before registration and passed after it. |
-| Focused native behavior final gate | 40 passed, 0 failed, 0 ignored; no SKIP lines. Includes Play-owned source fixtures and actual live controls adapter, not just synthetic Lua records. |
-| Combat/retention negative control | 32 passed, 2 expected failures before implementation. The combat case is valid. The original retention assertion confused the dispatch cap with retention; it was corrected to the normative 1,024 events/2 MiB buffer and 256 dispatch budget. Corrected backlog/overflow/byte-cap cases pass. |
-| Final contract controls | 32 passed, 6 expected failures: disabling the corrected retention/byte cap and presentation hook fails three broker cases and the clock case; before their fixes, disabled Forge delivery and saved hearts layout also fail. Mutated production files restored automatically. The restored source/lifecycle suite passed 38/38, and the addon gate passed 314/314 selected nonignored tests. |
-| Heap/context negative control | 34 passed, 2 expected failures before implementation: nested pcall swallowed heap exhaustion, and a revoked packet capture leaked group-chat context. Both pass after the fixes. |
-| Additional quota/Forge source negative control | 30 passed, 2 expected failures before implementation. The restored/fixed native suite passed 32/32. Settings/file quota aggregation and Forge delivery of native whole-record cooldown edges now pass. |
-| Deliberate negative controls | 23 passed, **8 expected failures**, 0 ignored, no SKIP lines, Cargo exit 101. Restored all five production files automatically. Removing real effect projection, logical chat capture, live report capture, tick gating, VM queue cancellation, whole-record cooldown edges, shared instruction budgeting and fatal heap propagation each failed its corresponding behavior test. |
+| Focused native behavior final gate | 40 reported passed, 0 failed, 0 ignored; 1 SKIP line from an unrelated disc-reader test selected by the broad `native` filter (39 exercised tests). Includes Play-owned source fixtures and actual live controls adapter, not just synthetic Lua records. |
+| Combat/retention negative control | 32 reported passed, 2 expected failures, 1 unrelated disc-reader SKIP before implementation. The combat case is valid. The original retention assertion confused the dispatch cap with retention; it was corrected to the normative 1,024 events/2 MiB buffer and 256 dispatch budget. Corrected backlog/overflow/byte-cap cases pass. |
+| Final contract controls | 32 reported passed, 6 expected failures, 1 unrelated disc-reader SKIP: disabling the corrected retention/byte cap and presentation hook fails three broker cases and the clock case; before their fixes, disabled Forge delivery and saved hearts layout also fail. Mutated production files restored automatically. The restored source/lifecycle suite passed 38/38, and the addon gate passed 314/314 selected nonignored tests. |
+| Heap/context negative control | 34 reported passed, 2 expected failures, 1 unrelated disc-reader SKIP before implementation: nested pcall swallowed heap exhaustion, and a revoked packet capture leaked group-chat context. Both pass after the fixes. |
+| Additional quota/Forge source negative control | 30 reported passed, 2 expected failures, 1 unrelated disc-reader SKIP before implementation. The restored/fixed native suite passed 32/32. Settings/file quota aggregation and Forge delivery of native whole-record cooldown edges now pass. |
+| Deliberate negative controls | 23 reported passed, **8 expected failures**, 0 ignored, 1 unrelated disc-reader SKIP, Cargo exit 101. Restored all five production files automatically. Removing real effect projection, logical chat capture, live report capture, tick gating, VM queue cancellation, whole-record cooldown edges, shared instruction budgeting and fatal heap propagation each failed its corresponding behavior test. |
 | Required addon suite | 316 passed, 0 failed, 23 ignored; 6 SKIP lines (four symlink privilege branches, screen-grid opt-in and pinned-hearts opt-in). |
 | Pinned Forge reference opt-in | 24 passed, 0 failed, 0 ignored, no SKIP lines (`fork_ext:: --ignored`, including the legacy bundled update test). Uses the local approved reference tree. |
 | Bundled installer | 23 passed, 0 failed, 1 ignored; no SKIP lines. The four old three-package assertions were updated to require the new fourth package; installation itself was correct. |
@@ -47,11 +47,11 @@ All Cargo commands use `C:/Users/hocka/Paseo/targets/eqoa-api-r2`, the shared mk
 | Pinned GPU opt-ins | Grid 1/1 and unchanged hearts 1/1 passed, no SKIP lines. Their old hard-coded `target/` screenshot paths initially failed after rendering; test output now honors `CARGO_TARGET_DIR`. Full/partial/death hearts pixels: 1,395 / 690 / 0. |
 | Neutral fallback negative control | The new default-byte test failed at 127 before the fix; both Forge raw axis defaults now use 128, matching real reports and the approved convention. |
 | Sound failure/retry | Negative control 0 passed / 1 expected failure; fixed sound suite 24 passed, 0 failed, no SKIP lines. Native release returns failed when backend close fails and permits a successful idempotent retry. |
-| Release build after final commit | Pending. |
+| Release build after final commit | PASS: `cargo build --release --locked -p eqoa`. Initial isolated optimized build completed in 4m 12s with 56 warnings; the same command is rerun after the final report commit. |
 
 The unchanged bundled Wereoxxs, ARPG and Modern UI scripts pass load, frame, Save/Load and disable fixtures. Tests exercise actual embedded Lua bytes, real fonts and the gear image, private migration of Modern UI's legacy files, tombstone persistence across VMs, slash aliases and neighbor isolation. The native hearts example draws through the managed GPU fixture and releases its health claim on disable/reload.
 
-A passing test that prints SKIP proves no behavior for its skipped branch. The six SKIP lines in the plain required addon command are distinct from its 23 ignored tests. The two GPU opt-ins subsequently ran without SKIPs; four symlink branches remain unverified because Windows denied symlink privilege. Oracle/decomp parity tests cannot run on this machine. No live game, server play, audio listening, physical controller interaction or visual owner acceptance is claimed; the owner must live-test all three bundled UIs and the native example.
+A passing test that prints SKIP proves no behavior for its skipped branch. Every broad `native` run, including its negative controls, selected the unrelated BGM disc-reader test and printed one `SKIP: no run/eqoa.iso`; the reported pass total includes that early return. Counts above were checked across stdout and stderr. The six SKIP lines in the plain required addon command are distinct from its 23 ignored tests. The two GPU opt-ins subsequently ran without SKIPs; four symlink branches remain unverified because Windows denied symlink privilege. Oracle/decomp parity tests cannot run on this machine. No live game, server play, audio listening, physical controller interaction or visual owner acceptance is claimed; the owner must live-test all three bundled UIs and the native example.
 
 ## Deferred scope and contract limits
 
