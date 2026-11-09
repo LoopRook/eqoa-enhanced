@@ -546,7 +546,9 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
         let installed = installed.clone();
         list_mod.set(
             "IsHookInstalled",
-            lua.create_function(move |_, ()| Ok(installed.get()))?,
+            lua.create_function(move |lua, ()| {
+                Ok(installed.get() && super::native_events::active(lua))
+            })?,
         )?;
     }
     {
@@ -581,7 +583,11 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
             let installed = installed.clone();
             move |lua_ctx, ()| {
                 let t = lua_ctx.create_table()?;
-                t.set("installed", installed.get())?;
+                t.set("backend", "native")?;
+                t.set(
+                    "installed",
+                    installed.get() && super::native_events::active(lua_ctx),
+                )?;
                 t.set("dropped", dropped.get())?;
                 let count = super::native_core::CORE.with(|c| {
                     let c = c.borrow();
@@ -731,7 +737,7 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
             "Update",
             lua.create_function(move |lua_ctx, ()| {
                 let snapshot = s.get();
-                if !snapshot.in_game || !installed.get() {
+                if !snapshot.in_game || !installed.get() || !super::native_events::active(lua_ctx) {
                     cache.borrow_mut().clear();
                     seeded.set(false);
                     native_next_seq.set(super::native_core::CORE.with(|c| c.borrow().seq));

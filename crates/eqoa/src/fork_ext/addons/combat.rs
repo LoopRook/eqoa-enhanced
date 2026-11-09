@@ -192,7 +192,9 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
         let installed = installed.clone();
         combat_mod.set(
             "IsHookInstalled",
-            lua.create_function(move |_, ()| Ok(installed.get()))?,
+            lua.create_function(move |lua, ()| {
+                Ok(installed.get() && super::native_events::active(lua))
+            })?,
         )?;
     }
     for (name, active) in [("InstallHook", true), ("UninstallHook", false)] {
@@ -232,7 +234,15 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
             lua.create_function(move |lua_ctx, ()| {
                 let snap = s.get();
                 let tbl = lua_ctx.create_table()?;
-                tbl.set("installed", installed.get())?;
+                tbl.set("backend", "native")?;
+                tbl.set(
+                    "installed",
+                    installed.get() && super::native_events::active(lua_ctx),
+                )?;
+                tbl.set(
+                    "suspended",
+                    !snap.in_game || !super::native_events::active(lua_ctx),
+                )?;
                 let total_events = event_count();
                 tbl.set("event_count", total_events)?;
                 tbl.set(
@@ -343,7 +353,7 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
         combat_mod.set(
             "Update",
             lua.create_function(move |lua_ctx, ()| {
-                if !installed.get() {
+                if !installed.get() || !super::native_events::active(lua_ctx) {
                     return Ok(());
                 }
                 let snap = s.get();

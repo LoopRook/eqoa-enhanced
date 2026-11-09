@@ -208,6 +208,10 @@ fn native_combat_and_forge_share_signed_amount_rgb_snapshot_and_consumer_lifecyc
     p.fork_combat_event(0x100, -1, 0x200, None);
     h.snapshot.set(p.forge_snapshot(None));
     h.execute("forge_combat.Update();assert(#hits==1);assert(forge_combat.InstallHook());assert(forge_combat.IsHookInstalled());forge_combat.Update();assert(#hits==1)").unwrap();
+    native_events::clear(&h);
+    p.fork_combat_event(0x100, -2, 0x200, None);
+    h.snapshot.set(p.forge_snapshot(None));
+    h.execute("forge_combat.Update();assert(#hits==1);assert(not forge_combat.IsHookInstalled());assert(not forge_combat.GetHookInfo().installed)").unwrap();
 }
 
 #[test]

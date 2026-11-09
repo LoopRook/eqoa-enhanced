@@ -707,3 +707,8 @@ pub(crate) fn start_iteration(lua: &mlua::Lua) {
         b.borrow_mut().delivered = 0;
     }
 }
+
+pub(crate) fn active(lua: &mlua::Lua) -> bool {
+    lua.app_data_ref::<Shared>()
+        .is_some_and(|b| b.borrow().active)
+}

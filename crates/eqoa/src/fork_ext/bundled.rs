@@ -858,11 +858,17 @@ mod tests {
         let res = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
         assert_eq!(
             res.packages_extracted,
-            vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"]
+            vec![
+                "wereoxxs_ui",
+                "arpg_ui",
+                "avoids_modern_ui",
+                "eqoa_example_hearts"
+            ]
         );
         assert!(res.files_extracted >= 50);
 
         assert!(mods_dir.join("wereoxxs_ui/wereoxxs_ui.lua").is_file());
+        assert!(mods_dir.join("eqoa_example_hearts/main.lua").is_file());
         assert!(mods_dir.join("arpg_ui/arpg_ui.lua").is_file());
         assert!(
             mods_dir
@@ -899,7 +905,7 @@ mod tests {
             "existing file must be untouched"
         );
 
-        // Registry records all 3 so future deletes are remembered
+        // Registry records all 4 so future deletes are remembered
         let registry = load_bundled_registry(Some(&config_dir), &mods_dir);
         assert!(registry.contains("arpg_ui"));
         assert!(registry.contains("wereoxxs_ui"));
@@ -1126,7 +1132,7 @@ mod tests {
         let _ = fs::remove_dir_all(&temp);
     }
     #[test]
-    fn test_from_env_setup_discovers_all_three_bundled_packages_on_fresh_mods_folder() {
+    fn test_from_env_setup_discovers_all_bundled_packages_on_fresh_mods_folder() {
         let temp = std::env::temp_dir().join(format!("eqoa-fresh-from-env-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp);
         let mods_dir = temp.join("mods");
@@ -1137,7 +1143,12 @@ mod tests {
         let res = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
         assert_eq!(
             res.packages_extracted,
-            vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"]
+            vec![
+                "wereoxxs_ui",
+                "arpg_ui",
+                "avoids_modern_ui",
+                "eqoa_example_hearts"
+            ]
         );
 
         let discovery = crate::fork_ext::addons::discovery::discover(&mods_dir);
@@ -1170,14 +1181,24 @@ mod tests {
         let res_a = install_bundled_mods(&mods_dir_a, Some(&config_dir)).unwrap();
         assert_eq!(
             res_a.packages_extracted,
-            vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"]
+            vec![
+                "wereoxxs_ui",
+                "arpg_ui",
+                "avoids_modern_ui",
+                "eqoa_example_hearts"
+            ]
         );
 
         // Now install into folder B (different install location)
         let res_b = install_bundled_mods(&mods_dir_b, Some(&config_dir)).unwrap();
         assert_eq!(
             res_b.packages_extracted,
-            vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"],
+            vec![
+                "wereoxxs_ui",
+                "arpg_ui",
+                "avoids_modern_ui",
+                "eqoa_example_hearts"
+            ],
             "second mods folder must get all packages even when first folder has records"
         );
         assert!(mods_dir_b.join("wereoxxs_ui/wereoxxs_ui.lua").is_file());
@@ -1246,11 +1267,16 @@ mod tests {
         )
         .unwrap();
 
-        // Run install: flat registry must be ignored on fresh folder, installing all three
+        // Run install: the old flat registry must not suppress any current package.
         let res = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
         assert_eq!(
             res.packages_extracted,
-            vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"],
+            vec![
+                "wereoxxs_ui",
+                "arpg_ui",
+                "avoids_modern_ui",
+                "eqoa_example_hearts"
+            ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );
         assert!(mods_dir.join("wereoxxs_ui/wereoxxs_ui.lua").is_file());

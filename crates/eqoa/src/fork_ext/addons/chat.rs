@@ -338,6 +338,9 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
         chat_mod.set(
             "Update",
             lua.create_function(move |lua_ctx, ()| {
+                if !super::native_events::active(lua_ctx) {
+                    return Ok(());
+                }
                 let snap = s.get().chat;
                 let native = super::native_core::CORE.with(|c| {
                     let c = c.borrow();
@@ -438,7 +441,7 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
         chat_mod.set(
             "SendChatText",
             lua.create_function(move |lua, (text, mode): (Option<String>, Option<String>)| {
-                if !installed.get() {
+                if !installed.get() || !super::native_events::active(lua) {
                     return Ok((false, Some("send hook is not installed".to_string())));
                 }
                 if !s.get().in_game {
@@ -483,7 +486,9 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
     let installed = send_installed.clone();
     chat_mod.set(
         "IsSendHookInstalled",
-        lua.create_function(move |_, ()| Ok(installed.get()))?,
+        lua.create_function(move |lua, ()| {
+            Ok(installed.get() && super::native_events::active(lua))
+        })?,
     )?;
     chat_mod.set(
         "IsSendHookSuspended",

@@ -234,6 +234,24 @@ fn native_bundled_hearts_once_mode_draws_and_releases_its_health_claim() {
     });
     let root = bundled_tree();
     let config = ScratchDir::new();
+    let addon = discovery::discover(&root.0)
+        .addons
+        .into_iter()
+        .find(|a| a.id == "eqoa_example_hearts")
+        .unwrap();
+    let store = super::storage::Storage::new(Some(config.0.clone()));
+    let key = super::storage::Storage::key(&addon).unwrap();
+    let profile_host = Host::new().unwrap();
+    store
+        .save_profile(
+            &key,
+            profile_host
+                .lua
+                .load("return {x=180,y=100,size=18}")
+                .eval()
+                .unwrap(),
+        )
+        .unwrap();
     let Some(mut gpu) = TestGpu::new() else {
         return;
     };
@@ -287,6 +305,15 @@ fn native_bundled_hearts_once_mode_draws_and_releases_its_health_claim() {
             .iter()
             .find(|e| e.metadata.id == "eqoa_example_hearts")
             .is_some_and(|e| e.status == Status::Enabled)
+    );
+    let saved = store
+        .load_profile(&key, &profile_host.lua)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        saved.as_table().unwrap().get::<i32>("x").unwrap(),
+        180,
+        "disable/re-enable/reload must preserve the example's saved layout"
     );
     manager.shutdown();
 }

@@ -1,6 +1,7 @@
 -- Native eqoa/1 example. All coordinates are physical output pixels.
 local ui = eqoa.imgui
-local settings = { x = 40, y = 100, size = 18 }
+hearts_state = hearts_state or { x = 40, y = 100, size = 18 }
+local settings = hearts_state
 local claim
 
 local function release()
