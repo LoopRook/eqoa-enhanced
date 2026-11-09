@@ -122,7 +122,22 @@ pub(crate) fn live_snapshot() -> InputSnapshot {
 pub(crate) fn focus(focused: bool) {
     FOCUSED.with(|f| f.set(focused));
     if !focused {
-        reset_input_state();
+        INPUT_STATE.with(|s| {
+            let mut state = s.borrow_mut();
+            // Claims describe live VM intent, not a held physical key. The
+            // unchanged Forge VM caches AcquireKey success across focus changes.
+            // Keep those leases; only revoke pending input and editor capture.
+            // Capture::focus_lost separately releases physical press ownership.
+            state.key_events.clear();
+            let seq = state.event_seq;
+            state
+                .key_cursors
+                .values_mut()
+                .for_each(|cursor| *cursor = seq);
+            state.unowned_cursor = seq;
+            state.text_capture_owners.clear();
+            state.text_capture = false;
+        });
     }
 }
 pub(crate) fn native_get(lua: &mlua::Lua) -> mlua::Result<mlua::Value> {

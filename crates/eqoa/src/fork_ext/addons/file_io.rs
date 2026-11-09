@@ -459,7 +459,12 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
                     } else {
                         "io_error"
                     };
-                    super::native::diagnose(lua, "io.open", code, &error);
+                    // Forge scripts probe optional legacy settings with io.open.
+                    // A missing file is a normal nil,error result, not an addon
+                    // failure. Native eqoa.files keeps its explicit diagnostics.
+                    if code != "not_found" {
+                        super::native::diagnose(lua, "io.open", code, &error);
+                    }
                     lua.pack_multi((Value::Nil, error))
                 }
             }
@@ -606,6 +611,25 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn live_regression_optional_forge_file_probe_is_not_a_visible_error() {
+        let (_scratch, host, _addon) = fixture();
+        host.execute("local f,err=io.open(resource..'/optional-missing.cfg','r');assert(f==nil and type(err)=='string')").unwrap();
+        let diagnostics = super::super::native::finish(&host.lua);
+        assert!(
+            diagnostics.is_empty(),
+            "normal missing-file probe must be quiet: {diagnostics:?}"
+        );
+        host.execute(
+            "local f,err=io.open(resource..'/bad.cfg','a');assert(f==nil and type(err)=='string')",
+        )
+        .unwrap();
+        assert!(
+            !super::super::native::finish(&host.lua).is_empty(),
+            "unsupported modes must stay visible"
+        );
+    }
+
     #[test]
     fn forge_review_writes_stay_buffered_until_close() {
         let (scratch, host, _addon) = fixture();
