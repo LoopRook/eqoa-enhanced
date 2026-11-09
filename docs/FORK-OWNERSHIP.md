@@ -96,9 +96,9 @@ integration seams. No directory-wide shared allowlist exists.
 | `crates/vi/src/ui.rs` | 3 | 2 | Restored player-facing UI behavior. |
 | `release/README.txt` | 1 | 1 | Enhanced Windows bundle startup instructions. |
 | `web/main.js` | 48 | 0 | Restored browser input/map bindings. |
-| `crates/eqoa/src/update.rs` | 3 | 3 | Fork release routing and fork-owned update notes; upstream updater mechanics unchanged. |
+| `crates/eqoa/src/update.rs` | 4 | 4 | Fork release routing and fork-owned update notes; upstream updater mechanics unchanged. One test line skips Nightly's non-dated `## Unreleased` section; whats_new stays upstream's exactly. |
 | `crates/eqoa/src/updatewnd.rs` | 3 | 2 | Fork release page link with fork/vanilla UI regression assertions. |
-| `crates/eqoa/src/logfile.rs` | 8 | 0 | Upstream logger retained around eight hook lines: initialize fork crash capture before rotation, share the exact run ID, redact/feed the ring, add Enhanced header, capture panic, flush journal on close. |
+| `crates/eqoa/src/logfile.rs` | 9 | 1 | Upstream logger retained around eight hook lines: initialize fork crash capture before rotation, share the exact run ID, redact/feed the ring, add Enhanced header, capture panic, flush journal on close. One one-line swap replaces upstream's dev-commit log label with fork_ext::version's player-facing label: Nightly names its build commit, while Stable and local builds show VERSION. Its +1 added and +1 deleted over the previous eight-line budget is the minimum for that swap. |
 | `crates/eqoa/src/pregame/station/api.rs` | 4 | 0 | Credential-noting hooks at login, account creation and password change preserve local report redaction after upstream removed them. |
 
 `CLAUDE.md` is fork-owned (since 2026-10-30). Upstream's CLAUDE.md is kept

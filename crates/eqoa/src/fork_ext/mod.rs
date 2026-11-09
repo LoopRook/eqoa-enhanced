@@ -15,6 +15,7 @@ pub mod report;
 mod report_background;
 pub mod report_core;
 pub mod telemetry;
+pub mod version;
 
 /// Returns whether the client is in plain gameplay (mode 0 with no dialog,
 /// menu, map, editor, or search claiming keyboard input).
