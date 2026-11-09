@@ -7,6 +7,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 - Added the experimental native `eqoa/1` mod API and an EQOA Example Hearts mod. Enable it from the Addon Manager after installing bundled mods. The API remains under review until the Round 5 audit.
 - Mods share bundled resources read-only and keep file changes in private overlays. Unsupported calls appear in the Addon Manager and its error log.
 - Effects and controller reads use native game state; existing Forge UI mods keep their compatibility interface.
+- Mod chat queued while Combat Record is open waits until it closes. World changes cancel unsent mod chat with a visible Addon Manager diagnostic.
 
 ## 2026-11-08 · Enhanced 0.4.14
 

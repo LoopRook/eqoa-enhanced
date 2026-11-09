@@ -93,3 +93,18 @@ Findings left unchanged after checking evidence:
 Review controls: H1-H3 were 0 pass / 3 expected failures before their fixes, then 3/3 passed. M2/M3/M4 and the readiness counter failed before their fixes; the M1 initial setup error was corrected and is not counted as behavior evidence. The corrected modal-send control, readiness control, removed HUD identity registration and unfixed L2/L3 yielded 6 passed / 5 expected failures, 0 ignored and no SKIP lines. Both temporarily mutated production files were restored automatically. All six MEDIUM cases passed before that mutation run; final combined gates follow below.
 
 The restored combined review suite passed 11/11, 0 failed, 0 ignored and no SKIP lines. Footprint and diff whitespace checks pass; the play.rs/viewer.rs measured budgets remain +759/-53 and +255/-15.
+
+Final fix-round gates (same isolated target, scratch configuration and timeout-protected shared lock):
+
+| Gate | Result |
+|---|---|
+| Review behavior suite (`review_fix_`) | 11 passed, 0 failed, 0 ignored, 0 SKIP lines. Includes Play-owned H1/H2/H3, modal chat and readiness tests. |
+| Required addon suite | 322 reported passed, 0 failed, 23 ignored; 6 SKIP lines across stdout/stderr (four symlink privilege branches and two opt-ins). |
+| Bundled installer | 23 passed, 0 failed, 1 ignored; no SKIP lines. |
+| Pinned Forge opt-in (`fork_ext:: --ignored`) | 24 passed, 0 failed, 0 ignored, no SKIP lines; includes the installer's ignored reference-update test. The original three bundled UIs remain unchanged. |
+| GPU opt-ins | Grid 1/1 and unchanged pinned hearts 1/1 passed, no SKIP lines. Full/partial/death heart pixels remain 1,395 / 690 / 0. |
+| wasm32 check | PASS, two existing unused-variable warnings. The wrapper initially rejected its empty optional Filter argument before starting Cargo; the direct invocation passed. |
+| Footprint | PASS; no shared-file changes in this fix round, no new hook or budget increase. |
+| Release | PASS: `cargo build --release --locked -p eqoa`, optimized rebuild in 1m 41s with 56 warnings; repeated after the final report/update-note commit. |
+
+The four privilege-blocked symlink branches remain unverified. No live game, physical-controller, audio-listening, native Linux or owner acceptance test was performed. Oracle/decomp prerequisites remain unavailable; these gates do not claim their parity. The remaining descriptor, event-recovery sequencing and post-event copy-cost review items above are unchanged. Update notes now describe modal chat retry and visible world-loss cancellation.
