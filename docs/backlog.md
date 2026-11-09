@@ -226,3 +226,13 @@ Do this last, before the release that carries round 2 and the sync into `enhance
 - Also in that release: move `## Unreleased` in FORK-UPDATE-NOTES.md to the version's dated entry
   (docs/RELEASING.md), and re-run the live test of Wereoxxs, Avoids Modern UI and the hearts example on
   the release candidate.
+
+## Native capture lacks Stable's player-position fallback (Sol observation, 2026-11-09; untested)
+
+- Found while checking the ability-icon colours (those were only out of range; no regression). In the
+  eqoa native capture path (`api_capture.rs` / `native_projection.rs`), the player's position has no
+  equivalent of Stable's `self_at` fallback when no walker exists (for example before the walker is
+  ready, or in the offline fixtures). Possible effects: position reads as zero for a frame or two at world
+  entry, so range-based UI states (out-of-range tints) could flicker or read wrong briefly.
+- **To check:** at world entry and after a zone change, watch an ability bar with a target in range;
+  and add a test with no walker and a known self position. Low priority until seen in play.
