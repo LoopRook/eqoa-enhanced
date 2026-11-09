@@ -99,6 +99,36 @@ pub(crate) fn take_outgoing_chat() -> Vec<String> {
 }
 
 pub(crate) fn snapshot_chat(raw_chat: &VecDeque<(String, [f32; 4])>, now_ms: u32) -> ChatSnapshot {
+    if let Some(snapshot) = super::native_core::CORE.with(|core| {
+        let c = core.borrow();
+        c.view.in_world.then(|| {
+            let mut out = ChatSnapshot::default();
+            let records = c
+                .chat
+                .iter()
+                .rev()
+                .take(MAX_CHAT_MESSAGES)
+                .collect::<Vec<_>>();
+            out.count = records.len() as u8;
+            for (i, m) in records.into_iter().rev().enumerate() {
+                let text = m["text"].as_str().unwrap_or("");
+                let mut end = text.len().min(128);
+                while !text.is_char_boundary(end) {
+                    end -= 1;
+                }
+                out.messages[i].text[..end].copy_from_slice(&text.as_bytes()[..end]);
+                out.messages[i].text_len = end as u8;
+                out.messages[i].msg_type =
+                    (m["color"]["r"].as_f64().unwrap_or(0.0) as f32).to_bits();
+                out.messages[i].timestamp_ms = (m["time"].as_f64().unwrap_or(0.0) * 1000.0) as u32;
+                out.messages[i].seq = m["seq"].as_u64().unwrap_or(0) as u32;
+            }
+            out
+        })
+    }) {
+        return snapshot;
+    }
+
     CHAT_HISTORY.with(|hist_cell| {
         let mut hist = hist_cell.borrow_mut();
         let raw_len = raw_chat.len();

@@ -190,3 +190,30 @@ fn native_storage_quota_combines_private_files_default_settings_and_named_profil
     );
     std::fs::remove_dir_all(config).unwrap();
 }
+
+#[test]
+fn native_events_share_one_retention_limit_for_sources_and_resource_completions() {
+    use super::{
+        native_core::{CORE, Core},
+        native_events,
+    };
+    CORE.with(|c| *c.borrow_mut() = Core::default());
+    let h = Host::new().unwrap();
+    h.execute("seen=0;resources=0;dropped=0;eqoa.events.on('chat.message',function() seen=seen+1 end);eqoa.events.on('resource.ready',function() seen=seen+1;resources=resources+1 end);eqoa.events.on('events.dropped',function(e) dropped=dropped+e.data.count end)").unwrap();
+    for _ in 0..200 {
+        super::native_core::observe_text("queued", [1.0; 4]);
+    }
+    for _ in 0..100 {
+        native_events::resource(&h.lua, "texture", mlua::Value::Nil, None).unwrap();
+    }
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(seen==256 and resources==100 and dropped==44)")
+        .unwrap();
+    h.execute("seen=0;resources=0;dropped=0").unwrap();
+    for _ in 0..300 {
+        native_events::resource(&h.lua, "texture", mlua::Value::Nil, None).unwrap();
+    }
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(seen==256 and resources==256 and dropped==44)")
+        .unwrap();
+}

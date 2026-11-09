@@ -539,6 +539,8 @@ impl Host {
         let once = bus.borrow().once_mode;
         if initialized {
             super::native_events::dispatch(self)?;
+        } else {
+            super::native_events::prime(self);
         }
         if !once || !initialized {
             let _phase = super::native::phase(&self.lua, "entry");

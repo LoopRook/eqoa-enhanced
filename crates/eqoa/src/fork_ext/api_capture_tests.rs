@@ -182,3 +182,30 @@ fn native_cooldowns_capture_whole_record_and_lockout_edges_with_stable_ids() {
     native_events::dispatch(&h).unwrap();
     h.execute("assert(#edges==3);assert(edges[1].name=='cooldown.started' and edges[1].id=='9223372036854775807' and edges[1].key==17 and edges[1].lockout==5);assert(edges[2].name=='cooldown.updated' and edges[2].lockout==2.5);assert(edges[3].name=='cooldown.ended' and edges[3].lockout==0);assert(eqoa.abilities.get(edges[1].ref).display_key==22)").unwrap();
 }
+
+#[test]
+fn native_combat_and_forge_share_signed_amount_rgb_snapshot_and_consumer_lifecycle() {
+    let mut p = ready();
+    p.forge_snapshot(None);
+    let h = Host::new().unwrap();
+    crate::fork_ext::addons::combat::install_combat_adapter(&h).unwrap();
+    h.lua
+        .globals()
+        .set(
+            "forge_combat",
+            h.registered_modules()["frontiers_forge.combat"].clone(),
+        )
+        .unwrap();
+    h.snapshot.set(p.forge_snapshot(None));
+    h.execute("hits={};forge_combat.Acquire('source');forge_combat.On('source','OnDamageDealt',function(e) hits[#hits+1]=e end)").unwrap();
+    p.fork_combat_event(0x100, i32::MIN, 0x200, Some([0, 0, 0]));
+    let snapshot = p.forge_snapshot(None);
+    assert_eq!(snapshot.combat.count, 1);
+    assert_eq!(snapshot.combat.events[0].color, 0x01000000);
+    assert_eq!(snapshot.combat.events[0].amount, i32::MIN);
+    h.snapshot.set(snapshot);
+    h.execute("forge_combat.Update();assert(#hits==1 and hits[1].amount==-2147483648 and hits[1].color==0x01000000 and not hits[1].is_heal);assert(forge_combat.UninstallHook());assert(not forge_combat.IsHookInstalled());assert(not forge_combat.GetHookInfo().installed)").unwrap();
+    p.fork_combat_event(0x100, -1, 0x200, None);
+    h.snapshot.set(p.forge_snapshot(None));
+    h.execute("forge_combat.Update();assert(#hits==1);assert(forge_combat.InstallHook());assert(forge_combat.IsHookInstalled());forge_combat.Update();assert(#hits==1)").unwrap();
+}

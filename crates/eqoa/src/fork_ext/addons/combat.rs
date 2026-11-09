@@ -26,6 +26,9 @@ thread_local! {
 }
 
 pub(crate) fn record_combat_event(attacker: u32, amount: i32, defender: u32) {
+    if super::native_core::CORE.with(|c| c.borrow().view.in_world) {
+        return;
+    }
     COMBAT_RING.with(|ring| {
         let mut r = ring.borrow_mut();
         if r.len() >= 64 {
@@ -47,6 +50,28 @@ pub(crate) fn record_combat_event(attacker: u32, amount: i32, defender: u32) {
 }
 
 pub(crate) fn snapshot_combat_events() -> CombatSnapshot {
+    if let Some(snapshot) = super::native_core::CORE.with(|core| {
+        let c = core.borrow();
+        c.view.in_world.then(|| {
+            let records = c
+                .events
+                .iter()
+                .filter(|e| e.name == "combat.hit")
+                .rev()
+                .take(MAX_COMBAT_EVENTS)
+                .map(native_record)
+                .collect::<Vec<_>>();
+            let mut snapshot = CombatSnapshot::default();
+            snapshot.count = records.len() as u8;
+            for (i, record) in records.into_iter().rev().enumerate() {
+                snapshot.events[i] = record;
+            }
+            snapshot
+        })
+    }) {
+        return snapshot;
+    }
+
     COMBAT_RING.with(|ring| {
         let r = ring.borrow();
         let mut events = [CombatEventSnapshot::default(); MAX_COMBAT_EVENTS];
@@ -208,8 +233,7 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
                 let snap = s.get();
                 let tbl = lua_ctx.create_table()?;
                 tbl.set("installed", installed.get())?;
-                let total_events =
-                    COMBAT_MONOTONIC_SEQ.with(|seq_cell| seq_cell.get().saturating_sub(1));
+                let total_events = event_count();
                 tbl.set("event_count", total_events)?;
                 tbl.set(
                     "dropped",
@@ -228,8 +252,7 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
         combat_mod.set(
             "GetEventCount",
             lua.create_function(|_, ()| {
-                let total_events =
-                    COMBAT_MONOTONIC_SEQ.with(|seq_cell| seq_cell.get().saturating_sub(1));
+                let total_events = event_count();
                 Ok(total_events)
             })?,
         )?;
@@ -331,27 +354,7 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
                         c.events
                             .iter()
                             .filter(|e| e.name == "combat.hit")
-                            .map(|e| {
-                                let d = &e.data;
-                                let color = d["color"].as_array().map_or(0, |rgb| {
-                                    0x01000000
-                                        + (rgb[2].as_u64().unwrap_or(0) as u32) * 65536
-                                        + (rgb[1].as_u64().unwrap_or(0) as u32) * 256
-                                        + rgb[0].as_u64().unwrap_or(0) as u32
-                                });
-                                let amount = d["amount"].as_u64().unwrap_or(0) as i64;
-                                CombatEventSnapshot {
-                                    attacker_id: d["attacker_id"].as_u64().unwrap_or(0) as u32,
-                                    defender_id: d["defender_id"].as_u64().unwrap_or(0) as u32,
-                                    amount: if d["kind"] == "heal" {
-                                        amount as i32
-                                    } else {
-                                        (-amount) as i32
-                                    },
-                                    seq: e.seq as u32,
-                                    color,
-                                }
-                            })
+                            .map(native_record)
                             .collect::<Vec<_>>()
                     })
                 });
@@ -687,5 +690,37 @@ mod tests {
             "#,
         );
         chunk.exec().unwrap();
+    }
+}
+
+fn event_count() -> u32 {
+    super::native_core::CORE.with(|core| {
+        let c = core.borrow();
+        if c.view.in_world {
+            c.combat_total.min(u32::MAX as u64) as u32
+        } else {
+            COMBAT_MONOTONIC_SEQ.with(|v| v.get().saturating_sub(1))
+        }
+    })
+}
+fn native_record(e: &super::native_core::Event) -> CombatEventSnapshot {
+    let d = &e.data;
+    let amount = d["amount"].as_u64().unwrap_or(0) as i64;
+    let color = d["color"].as_array().map_or(0, |rgb| {
+        0x01000000
+            + (rgb[2].as_u64().unwrap_or(0) as u32) * 65536
+            + (rgb[1].as_u64().unwrap_or(0) as u32) * 256
+            + rgb[0].as_u64().unwrap_or(0) as u32
+    });
+    CombatEventSnapshot {
+        attacker_id: d["attacker_id"].as_u64().unwrap_or(0) as u32,
+        defender_id: d["defender_id"].as_u64().unwrap_or(0) as u32,
+        amount: if d["kind"] == "heal" {
+            amount as i32
+        } else {
+            (-amount) as i32
+        },
+        seq: e.seq as u32,
+        color,
     }
 }

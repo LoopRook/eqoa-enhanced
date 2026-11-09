@@ -419,6 +419,7 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
         let s = snapshot_cell.clone();
         let cache = lockout_cache.clone();
         let cursor = next_seq.clone();
+        let native_cursor = native_next_seq.clone();
         let seeded = seeded.clone();
         move || {
             if seeded.replace(true) {
@@ -436,6 +437,7 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
                 cache.insert(a.display_index, a.cooldown_lockout_ms);
             }
             cursor.set(LOCKOUT_RING.with(|r| r.borrow().next_seq));
+            native_cursor.set(super::native_core::CORE.with(|c| c.borrow().seq));
         }
     };
 
@@ -581,7 +583,19 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
                 let t = lua_ctx.create_table()?;
                 t.set("installed", installed.get())?;
                 t.set("dropped", dropped.get())?;
-                t.set("update_count", LOCKOUT_RING.with(|r| r.borrow().next_seq))?;
+                let count = super::native_core::CORE.with(|c| {
+                    let c = c.borrow();
+                    if c.view.in_world {
+                        c.stream_counts
+                            .iter()
+                            .filter(|(name, _)| name.starts_with("cooldown."))
+                            .map(|(_, count)| *count)
+                            .sum()
+                    } else {
+                        LOCKOUT_RING.with(|r| r.borrow().next_seq)
+                    }
+                });
+                t.set("update_count", count)?;
                 Ok(t)
             }
         })?,

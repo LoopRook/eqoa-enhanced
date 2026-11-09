@@ -448,9 +448,21 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
     let modules: Table = lua.named_registry_value("eqoa_modules")?;
     let table: Table = modules.get(module)?;
     let symbol = format!("eqoa.{module}.{name}");
+    let blocked = !cfg!(windows)
+        && (module == "files"
+            || module == "sound"
+            || matches!((module, name), ("textures", "load") | ("fonts", "load")));
     table.set(
         name,
         lua.create_function(move |lua, args: MultiValue| {
+            if blocked {
+                return error(
+                    lua,
+                    &symbol,
+                    "unsupported",
+                    "secure file or sound backend is not implemented on this platform",
+                );
+            }
             if matches!(
                 symbol.as_str(),
                 "eqoa.client.get"
@@ -489,9 +501,13 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
     s.insert(
         path,
         Descriptor {
-            status: "supported",
+            status: if blocked { "unsupported" } else { "supported" },
             round: Some(2),
-            reason: String::new(),
+            reason: if blocked {
+                "secure file or sound backend is not implemented on this platform".into()
+            } else {
+                String::new()
+            },
         },
     );
     let children = s
@@ -501,7 +517,9 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
         })
         .map(|(_, d)| d.status)
         .collect::<Vec<_>>();
-    let status = if children.iter().all(|s| *s == "supported") {
+    let status = if children.iter().all(|s| *s == "unsupported") {
+        "unsupported"
+    } else if children.iter().all(|s| *s == "supported") {
         "supported"
     } else {
         "partial"

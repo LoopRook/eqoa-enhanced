@@ -75,7 +75,18 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 );
             };
             if let Err(e) = writer(&encoded) {
-                return error(lua, "eqoa.settings.save", "io_error", &e);
+                return error(
+                    lua,
+                    "eqoa.settings.save",
+                    if e.contains("quota") || e.contains("exceeds") {
+                        "quota"
+                    } else if e.contains("read-only") {
+                        "permission_denied"
+                    } else {
+                        "io_error"
+                    },
+                    &e,
+                );
             }
             let shared = slot(lua);
             let mut s = shared.borrow_mut();

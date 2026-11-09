@@ -33,7 +33,8 @@ All Cargo commands use `C:/Users/hocka/Paseo/targets/eqoa-api-r2`, the shared mk
 | Gate | Result |
 |---|---|
 | Initial native registration negative control | Both initial tests failed before registration and passed after it. |
-| Focused native behavior checkpoint | 32 passed, 0 failed, 0 ignored; no SKIP lines. Includes Play-owned source fixtures and actual live controls adapter, not just synthetic Lua records. |
+| Focused native behavior checkpoint | 34 passed, 0 failed, 0 ignored; no SKIP lines. Includes Play-owned source fixtures and actual live controls adapter, not just synthetic Lua records. |
+| Combat/retention negative control | 32 passed, 2 expected failures before implementation. Both pass in the fixed 34/34 native suite: signed minimum damage/black RGB in the Forge snapshot, and mixed/completion-only event overflow. |
 | Additional quota/Forge source negative control | 30 passed, 2 expected failures before implementation. The restored/fixed native suite passed 32/32. Settings/file quota aggregation and Forge delivery of native whole-record cooldown edges now pass. |
 | Deliberate negative controls | 23 passed, **8 expected failures**, 0 ignored, no SKIP lines, Cargo exit 101. Restored all five production files automatically. Removing real effect projection, logical chat capture, live report capture, tick gating, VM queue cancellation, whole-record cooldown edges, shared instruction budgeting and fatal heap propagation each failed its corresponding behavior test. |
 | Required addon suite | Committed checkpoint verified: 310 passed, 0 failed, 23 ignored; 6 SKIP lines. A final run after subsequent fixes remains pending. |
@@ -54,7 +55,7 @@ Items, inventory, bank, loot, merchant, gems, quests, camera, map, mastery, dial
 The following require explicit review before calling Round 2 spec-complete:
 
 - The descriptor inventory is implementation-driven for many Forge members and ImGui methods. A full per-object/constant/field conformance audit remains Round 5 work; no claim of exhaustive descriptor parity is made.
-- Event loss markers and reset envelopes are allocated at delivery time, while retained source envelopes retain their source sequence. Source order is preserved, but the synthetic marker's sequence can exceed the following retained event's sequence. Resource completions have a separate bounded staging queue, so the combined source/resource boundary needs the spec's single 256-event retention audit.
+- Event loss markers and reset envelopes are allocated at delivery time, while retained source envelopes retain their source sequence. Source order is preserved, but the synthetic marker's sequence can exceed the following retained event's sequence. Source and resource completions now share the 256-event/1 MiB retention limit and report losses, including completion-only overflow.
 - Secure rooted file operations are implemented for Windows; equivalent non-Windows rooted operations are not implemented. Their failure must be reported as unsupported; a native Linux run was not performed. wasm is a compilation gate, not a browser mod-runtime acceptance test.
 - The native monotonic clock begins with first core initialization, and the presentation frame count advances at Play iteration. Pregame-to-world elapsed/frame continuity needs owner/reviewer confirmation against the client-lifetime wording.
 

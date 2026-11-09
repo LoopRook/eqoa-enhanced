@@ -48,6 +48,7 @@ pub(crate) struct Bus {
     combat_total: u64,
     stream_counts: std::collections::BTreeMap<String, u64>,
     resources: Vec<(Event, mlua::Table)>,
+    resource_lost: std::collections::BTreeMap<String, u64>,
     boundary: u64,
 }
 type Shared = Rc<RefCell<Bus>>;
@@ -192,6 +193,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
         combat_total,
         stream_counts: CORE.with(|c| c.borrow().stream_counts.clone()),
         resources: Vec::new(),
+        resource_lost: Default::default(),
         boundary: 0,
     })));
     for name in EVENTS {
@@ -336,18 +338,36 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
             c.stream_counts.clone(),
         )
     });
-    if events.len() > 256 {
-        events.drain(..events.len() - 256);
+    let mut merged = events.drain(..).map(|e| (e, None)).collect::<Vec<_>>();
+    let mut resource_lost = std::mem::take(&mut shared.borrow_mut().resource_lost);
+    merged.extend(
+        std::mem::take(&mut shared.borrow_mut().resources)
+            .into_iter()
+            .map(|(e, data)| (e, Some(data))),
+    );
+    merged.sort_by_key(|(e, _)| e.seq);
+    let mut bytes = merged.iter().map(|(e, _)| e.bytes).sum::<usize>();
+    let mut remove = 0;
+    while merged.len().saturating_sub(remove) > 256 || bytes > 1024 * 1024 {
+        let Some((event, data)) = merged.get(remove) else {
+            break;
+        };
+        bytes = bytes.saturating_sub(event.bytes);
+        if data.is_some() {
+            *resource_lost.entry(event.name.clone()).or_default() += 1;
+        }
+        remove += 1;
     }
-    let delivered = events.iter().fold(
+    merged.drain(..remove);
+    let delivered = merged.iter().filter(|(_, data)| data.is_none()).fold(
         std::collections::BTreeMap::<String, u64>::new(),
-        |mut counts, e| {
-            *counts.entry(e.name.clone()).or_default() += 1;
+        |mut counts, (event, _)| {
+            *counts.entry(event.name.clone()).or_default() += 1;
             counts
         },
     );
-    let mut lost = 0;
-    let mut streams = Vec::new();
+    let mut lost = resource_lost.values().sum::<u64>();
+    let mut streams = resource_lost.keys().cloned().collect::<Vec<_>>();
     for (stream, total) in &counts {
         let previous = shared
             .borrow()
@@ -363,13 +383,15 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
             streams.push(stream.clone());
         }
     }
+    streams.sort();
+    streams.dedup();
     shared.borrow_mut().stream_counts = counts;
     if lost > 0 {
         deliver(
             lua,
             &local(
                 "events.dropped",
-                json!({"first_seq":cursor+1,"last_seq":events.first().map_or(last,|e|e.seq.saturating_sub(1)),"count":lost,"streams":streams}),
+                json!({"first_seq":cursor+1,"last_seq":merged.first().map_or(last,|(e,_)|e.seq.saturating_sub(1)),"count":lost,"streams":streams}),
             ),
             None,
         )?;
@@ -383,20 +405,16 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
     {
         let mut b = shared.borrow_mut();
         b.cursor = last;
-        let hits = events.iter().filter(|e| e.name == "combat.hit").count() as u64;
+        let hits = merged
+            .iter()
+            .filter(|(e, _)| e.name == "combat.hit")
+            .count() as u64;
         b.received += hits;
         b.dropped += total.saturating_sub(b.combat_total).saturating_sub(hits);
         b.combat_total = total;
     }
-    let mut merged = events.into_iter().map(|e| (e, None)).collect::<Vec<_>>();
-    merged.extend(
-        std::mem::take(&mut shared.borrow_mut().resources)
-            .into_iter()
-            .map(|(e, data)| (e, Some(data))),
-    );
-    merged.sort_by_key(|(e, _)| e.seq);
-    for (e, data) in merged {
-        deliver_data(lua, &e, None, data)?;
+    for (event, data) in merged {
+        deliver_data(lua, &event, None, data)?;
     }
     let due = shared
         .borrow()
@@ -579,6 +597,7 @@ pub(crate) fn clear(host: &Host) {
     let mut b = b.borrow_mut();
     b.subscriptions.clear();
     b.resources.clear();
+    b.resource_lost.clear();
     b.initialized = false;
     b.last_render = None;
     b.cursor = CORE.with(|c| c.borrow().seq);
@@ -594,18 +613,14 @@ pub(crate) fn resource(
     }
     let b = bus(lua);
     if b.borrow().resources.len() >= 256 {
-        super::native::diagnose(
-            lua,
-            "eqoa.events.resource",
-            "quota",
-            "resource completion queue exceeded 256 events",
-        );
-        return Ok(());
+        let (old, _) = b.borrow_mut().resources.remove(0);
+        *b.borrow_mut().resource_lost.entry(old.name).or_default() += 1;
     }
     let data = lua.create_table()?;
     data.set("kind", kind)?;
     data.set("handle", handle)?;
     if let Some(message) = failure {
+        let message = message.chars().take(2048).collect::<String>();
         data.set(
             "error",
             record(
@@ -620,9 +635,9 @@ pub(crate) fn resource(
     } else {
         "resource.ready"
     };
-    b.borrow_mut()
-        .resources
-        .push((local(name, json!({})), data));
+    let mut event = local(name, json!({}));
+    event.bytes = 256 + failure.map_or(0, |s| s.len().min(8192));
+    b.borrow_mut().resources.push((event, data));
     Ok(())
 }
 
@@ -659,4 +674,15 @@ fn readonly_envelope(lua: &mlua::Lua, event: mlua::Table) -> Result<mlua::Table>
                 .collect(),
         ),
     )
+}
+
+pub(crate) fn prime(host: &Host) {
+    let shared = bus(&host.lua);
+    let mut b = shared.borrow_mut();
+    CORE.with(|c| {
+        let c = c.borrow();
+        b.cursor = c.seq;
+        b.stream_counts = c.stream_counts.clone();
+        b.combat_total = c.combat_total;
+    });
 }
