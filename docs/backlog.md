@@ -154,3 +154,13 @@ This entry records future work only; no navigation or movement behavior changes 
   shadows theirs.
 - **Smallest fix:** hide the ToT bar while it would overlap (one guard in hud.rs); moving it
   needs layout work. Leave upstream's raidlist.rs untouched.
+
+## Tab opens chat (owner, 2026-11-09)
+
+- **Report:** pressing Tab seems to open chat. Not yet known whether the cause is ours (the client's key
+  handling, or the new `eqoa` input claims from round 2) or Wereoxxs UI's own key handling.
+- **To find out:** reproduce with no mods enabled (in the upstream client Tab may already be the
+  chat/target key; check the key binds), then with only Wereoxxs, then the round 2 dev build versus
+  0.4.14. If it only happens with Wereoxxs, look at its Tab handling (input claims and text capture); if
+  it also happens with no mods, it is client behaviour and a binds question.
+- **Status:** deferred; not investigated. Note it in the round 2 live test if it shows up there.
