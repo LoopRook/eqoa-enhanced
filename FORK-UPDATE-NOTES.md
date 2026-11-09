@@ -2,8 +2,9 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
-## 2026-11-09 · Enhanced dev build
+## Unreleased
 
+- Nightly builds now say they are Nightly and name the build commit, so they no longer look like the Stable version. Stable is unchanged.
 - Added the experimental native `eqoa/1` mod API and an EQOA Example Hearts mod. Enable it from the Addon Manager after installing bundled mods. The API remains under review until the Round 5 audit.
 - Mods share bundled resources read-only and keep file changes in private overlays. Unsupported calls appear in the Addon Manager and its error log.
 - Effects and controller reads use native game state; existing Forge UI mods keep their compatibility interface.

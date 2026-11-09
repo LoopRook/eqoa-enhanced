@@ -1599,7 +1599,7 @@ mod tests {
     /// sections, newest first, each with bullets and no markdown left.
     #[test]
     fn this_builds_own_notes_read() {
-        let s = sections(OWN_NOTES);
+        let s: Vec<_> = sections(OWN_NOTES).into_iter().filter(|s| s.title != "Unreleased").collect();
         assert!(s.len() >= 5, "{}", s.len());
         assert!(s.iter().all(|s| !s.bullets.is_empty() && s.title.starts_with("20")));
         assert!(s.windows(2).all(|w| w[0].title[..10] >= w[1].title[..10]), "newest first");

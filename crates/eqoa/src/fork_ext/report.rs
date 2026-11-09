@@ -13,11 +13,16 @@ use crate::report::{Button, Kind, Sent, Status, dir};
 
 /// Returns the Enhanced header label identifying this client fork.
 pub fn enhanced_label() -> String {
-    let version = include_str!("../../../../VERSION").trim();
+    let version = crate::fork_ext::version::current();
     let commit =
         crate::update::COMMIT.map_or("local build", |c| if c.len() > 7 { &c[..7] } else { c });
+    let build = if crate::update::CHANNEL == Some("enhanced-dev") {
+        version
+    } else {
+        format!("{version} ({commit})")
+    };
     format!(
-        "EQOA Enhanced {version} ({commit}), a fork of DabDavis's vanilla client: report to EQOA Enhanced (LoopRook), not to the vanilla client"
+        "EQOA Enhanced {build}, a fork of DabDavis's vanilla client: report to EQOA Enhanced (LoopRook), not to the vanilla client"
     )
 }
 

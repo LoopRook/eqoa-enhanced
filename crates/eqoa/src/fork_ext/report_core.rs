@@ -415,10 +415,7 @@ mod native {
     }
 
     fn version() -> String {
-        crate::update::COMMIT.map_or_else(
-            || "local".to_string(),
-            |c| format!("dev-{}", &c[..c.len().min(7)]),
-        )
+        crate::fork_ext::version::current()
     }
 
     fn channel() -> &'static str {
