@@ -352,3 +352,75 @@ fn review_fix_l3_capability_prefixes_match_complete_dotted_segments() {
         assert(#eqoa.capabilities.list()==#eqoa.capabilities.list(''))
     "#).unwrap();
 }
+
+#[test]
+fn perf_review_m4_overflow_diagnostic_survives_discard() {
+    use super::{native_core, native_events};
+    native_core::CORE.with(|c| *c.borrow_mut() = native_core::Core::default());
+    native_core::discard_deferred();
+    let h = Host::new().unwrap();
+    for _ in 0..8193 {
+        native_core::defer(1, |_| {});
+    }
+    native_events::clear(&h);
+    native_core::discard_deferred();
+    let logs = h.drain_logs().unwrap();
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("source.capture") && l.contains("overflow")),
+        "overflow loss vanished: {logs:?}"
+    );
+}
+#[test]
+fn perf_review_m5_generation_drop_is_diagnosed_and_marked() {
+    use super::native_core;
+    native_core::CORE.with(|c| *c.borrow_mut() = native_core::Core::default());
+    native_core::discard_deferred();
+    let h = Host::new().unwrap();
+    native_core::observe_text("old-world secret", [1.; 4]);
+    native_core::CORE.with(|c| c.borrow_mut().reset("zone"));
+    native_core::flush_deferred();
+    let logs = h.drain_logs().unwrap();
+    assert!(
+        logs.iter().any(|l| l.contains("source.generation")),
+        "generation loss vanished: {logs:?}"
+    );
+    native_core::CORE.with(|c| {
+        let c = c.borrow();
+        assert!(c.events.iter().any(|e| e.name == "events.dropped"
+            && e.data["streams"][0] == "source.generation"
+            && e.data["count"] == 1));
+        assert!(!c.events.iter().any(|e| e.name == "chat.message"));
+    });
+    assert!(!logs.iter().any(|l| l.contains("old-world secret")));
+}
+#[test]
+fn perf_review_l1_chat_scroll_preserves_source_order() {
+    use super::native_core;
+    native_core::CORE.with(|c| *c.borrow_mut() = native_core::Core::default());
+    native_core::discard_deferred();
+    let _h = Host::new().unwrap();
+    native_core::observe_text("preceding line", [1.; 4]);
+    crate::fork_ext::chat_history::key(19, true);
+    native_core::flush_deferred();
+    native_core::CORE.with(|c| {
+        let c = c.borrow();
+        let names = c.events.iter().map(|e| e.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(names, ["chat.message", "chat.history_scroll"]);
+    });
+    crate::fork_ext::chat_history::key(19, false);
+}
+
+#[test]
+fn perf_review_m5_generation_drop_is_visible_when_discarded_without_flush() {
+    use super::{native_core, native_events};
+    native_core::CORE.with(|c| *c.borrow_mut() = native_core::Core::default());
+    native_core::discard_deferred();
+    let h = Host::new().unwrap();
+    native_core::observe_text("old-world secret", [1.; 4]);
+    native_core::CORE.with(|c| c.borrow_mut().reset("zone"));
+    native_events::clear(&h);
+    let logs = h.drain_logs().unwrap();
+    assert!(logs.iter().any(|l| l.contains("source.generation")));
+    assert!(!logs.iter().any(|l| l.contains("old-world secret")));
+}

@@ -41,10 +41,12 @@ fn step(back: bool) {
     {
         let active = crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow().view.in_world)
             && !crate::hud::fork_hud::chat_window_visible();
-        crate::fork_ext::addons::native_core::emit(
-            "chat.history_scroll",
-            serde_json::json!({"active":active,"steps":if active{if back{1}else{-1}}else{0}}),
-        );
+        crate::fork_ext::addons::native_core::defer(256, move |c| {
+            c.emit(
+                "chat.history_scroll",
+                serde_json::json!({"active":active,"steps":if active{if back{1}else{-1}}else{0}}),
+            );
+        });
     }
 }
 

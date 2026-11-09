@@ -495,8 +495,9 @@ pub(crate) fn defer(bytes: usize, apply: impl FnOnce(&mut Core) + 'static) {
         let c = c.borrow();
         (time_unborrowed(&c), c.tick, c.frame, c.generation)
     });
-    DEFERRED.with(|d| {
+    let dropped = DEFERRED.with(|d| {
         let mut d = d.borrow_mut();
+        let before = d.lost;
         while d.queue.len() >= 8192 || d.bytes.saturating_add(bytes) > 32 * 1024 * 1024 {
             let Some(old) = d.queue.pop_front() else {
                 break;
@@ -507,7 +508,8 @@ pub(crate) fn defer(bytes: usize, apply: impl FnOnce(&mut Core) + 'static) {
         }
         if bytes > 32 * 1024 * 1024 {
             d.lost += 1;
-            return;
+            CAPTURE_EPOCH.with(|e| e.set(e.get().wrapping_add(1)));
+            return d.lost - before;
         }
         d.bytes += bytes;
         d.queue.push_back(Pending {
@@ -518,7 +520,39 @@ pub(crate) fn defer(bytes: usize, apply: impl FnOnce(&mut Core) + 'static) {
             frame,
             bytes,
         });
+        d.lost - before
     });
+    if dropped != 0 {
+        super::native_events::capture_diagnostic(
+            "quota",
+            &format!(
+                "source.capture overflow discarded {dropped} pending deltas in this batch; current-state bootstrap required"
+            ),
+        );
+    }
+}
+
+fn source_loss(c: &mut Core, count: u64, stream: &str) {
+    if count == 0 {
+        return;
+    }
+    let first = c.seq + 1;
+    let last = c.seq + count;
+    c.emit(
+        "events.dropped",
+        json!({"count":count,"streams":[stream],"first_seq":first,"last_seq":last}),
+    );
+}
+fn generation_loss(c: &mut Core, count: u64) {
+    if count != 0 {
+        super::native_events::capture_diagnostic(
+            "cancelled",
+            &format!(
+                "source.generation discarded {count} pending deltas after the world generation changed"
+            ),
+        );
+        source_loss(c, count, "source.generation");
+    }
 }
 pub(crate) fn flush_deferred() {
     let batch = DEFERRED.with(|d| {
@@ -530,23 +564,56 @@ pub(crate) fn flush_deferred() {
         d.bytes = 0;
         Some((std::mem::take(&mut d.queue), std::mem::take(&mut d.lost)))
     });
-    let Some((batch, lost)) = batch else {
-        return;
-    };
-    CORE.with(|c|{let mut c=c.borrow_mut();let saved=(c.tick,c.frame,c.source_time);
-        if lost!=0 {let first=c.seq+1;let last=c.seq+lost;let world=c.view.in_world;c.emit("events.dropped",json!({"count":lost,"streams":["source.capture"],"first_seq":first,"last_seq":last}));c.emit("state.reset",json!({"in_world":world,"initial":false}));}
-        for pending in batch {if pending.generation!=c.generation{continue;}c.tick=pending.tick;c.frame=pending.frame;c.source_time=Some(pending.time);(pending.apply)(&mut c);}
-        (c.tick,c.frame,c.source_time)=saved;
+    let Some((batch, lost)) = batch else { return };
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        let saved = (c.tick, c.frame, c.source_time);
+        if lost != 0 {
+            source_loss(&mut c, lost, "source.capture");
+            let world = c.view.in_world;
+            c.emit("state.reset", json!({"in_world":world,"initial":false}));
+        }
+        let stale = batch
+            .iter()
+            .filter(|p| p.generation != c.generation)
+            .count() as u64;
+        generation_loss(&mut c, stale);
+        for pending in batch {
+            if pending.generation != c.generation {
+                continue;
+            }
+            c.tick = pending.tick;
+            c.frame = pending.frame;
+            c.source_time = Some(pending.time);
+            (pending.apply)(&mut c);
+        }
+        (c.tick, c.frame, c.source_time) = saved;
     });
     DEFERRED.with(|d| d.borrow_mut().flushing = false);
 }
 pub(crate) fn discard_deferred() {
+    let has_queue = DEFERRED.with(|d| !d.borrow().queue.is_empty());
+    let stale = if has_queue {
+        let generation = CORE.with(|c| c.borrow().generation);
+        DEFERRED.with(|d| {
+            d.borrow()
+                .queue
+                .iter()
+                .filter(|p| p.generation != generation)
+                .count() as u64
+        })
+    } else {
+        0
+    };
     DEFERRED.with(|d| {
         let mut d = d.borrow_mut();
         d.queue.clear();
         d.bytes = 0;
         d.lost = 0;
     });
+    if stale != 0 {
+        CORE.with(|c| generation_loss(&mut c.borrow_mut(), stale));
+    }
 }
 
 #[cfg(test)]
