@@ -953,6 +953,15 @@ fn perf_review_m1_other_vm_events_do_not_evict_forge_edges_or_hits() {
         );
     }
     forge.execute("abilities.Update();combat.Update();assert(edges==1 and hits==1);assert(abilities.GetDroppedCount()==0)").unwrap();
+    for _ in 0..1030 {
+        native_core::emit(
+            "cooldown.updated",
+            serde_json::json!({"display_key":17,"lockout":1}),
+        );
+    }
+    forge
+        .execute("abilities.Update();assert(abilities.GetDroppedCount()==6)")
+        .unwrap();
 }
 
 #[test]
@@ -995,6 +1004,14 @@ fn performance_busy_world_perf_review_m3_moving_player_bound() {
         })
         .collect();
     let h = Host::new().unwrap();
+    crate::fork_ext::addons::player::install_player_adapter(&h).unwrap();
+    h.lua
+        .globals()
+        .set(
+            "forge_player",
+            h.registered_modules()["frontiers_forge.player"].clone(),
+        )
+        .unwrap();
     let mut w = perf_review_walker();
     p.forge_snapshot(Some(&w));
     h.execute("eqoa.events.on('player.changed',function() end)")
@@ -1017,7 +1034,67 @@ fn performance_busy_world_perf_review_m3_moving_player_bound() {
         bytes as f64 / 300.
     );
     assert_eq!(super::api_capture::take_view_builds(), 0);
-    assert!(allocs <= 300 * 1000, "moving path allocated {allocs}");
-    h.execute("assert(eqoa.player.get().position.x==150)")
+    assert!(allocs <= 300 * 256, "moving path allocated {allocs}");
+    assert!(
+        bytes <= 300 * 32 * 1024,
+        "moving path allocated {bytes} bytes"
+    );
+    h.execute(
+        "assert(eqoa.player.get().position.x==150);assert(forge_player.GetCoordinates().x==150)",
+    )
+    .unwrap();
+}
+
+#[test]
+fn perf_review_l5_target_knowledge_survives_a_missing_roster_record() {
+    use crate::fork_ext::addons::native_core;
+    let mut p = ready();
+    native_core::fixture_demand(false);
+    let h = Host::new().unwrap();
+    p.forge_snapshot(None);
+    let event = net::session::Event::AbilityLockout {
+        index: 17,
+        token: 0,
+        lockout: 1000,
+    };
+    let capture = begin_game_event(&p, &event);
+    end_game_event(&p, capture);
+    h.execute("assert(#eqoa.abilities.list()==0)").unwrap();
+    CORE.with(|c| {
+        assert!(
+            !c.borrow()
+                .events
+                .iter()
+                .any(|e| e.name.starts_with("cooldown."))
+        )
+    });
+    p.target = 0x7777;
+    let event = net::session::Event::TargetInfo {
+        disposition: 4,
+        b: 0,
+        c: 0,
+        title: String::new(),
+        guild: String::new(),
+    };
+    let capture = begin_game_event(&p, &event);
+    p.target_info = Some(4);
+    end_game_event(&p, capture);
+    p.forge_snapshot(None);
+    h.execute("assert(eqoa.target.get()==nil)").unwrap();
+    let event = net::session::Event::State {
+        channel: 0,
+        data: vec![],
+    };
+    let capture = begin_game_event(&p, &event);
+    p.entities.slots = vec![Some(net::entity::Entity {
+        id: 0x7777,
+        creature: Some(net::entity::Creature {
+            level: 20,
+            ..Default::default()
+        }),
+        ..Default::default()
+    })];
+    end_game_event(&p, capture);
+    h.execute("assert(eqoa.target.get().disposition==4)")
         .unwrap();
 }
