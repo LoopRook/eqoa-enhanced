@@ -66,8 +66,11 @@ workers. Read `list_profiles` and pick by each profile's notes. Defaults:
   branch, tell it to commit only there (no push, merge, tag, or other folders), and review its diff
   before anything merges.
 
-One cargo build at a time across all agents: builds are slow and share the CPU. Keep each worktree on
-its own `CARGO_TARGET_DIR` unless the handoff names a shared one.
+One cargo build at a time across all agents: builds are slow and share the CPU. All agents share ONE `CARGO_TARGET_DIR`, `C:/Users/hocka/Paseo/targets/shared` (the builds are serial
+behind the lock anyway, so one cache serves every branch; separate folders cost about 10-15 GB each and
+filled the owner's SSD on 2026-11-09). Never create a per-worktree or per-task target folder. Before you
+finish, delete any `target` folder you made inside a worktree, and the lead deletes a retired worktree's
+folder when its branch merges.
 
 ## Engineering rules kept from upstream
 

@@ -62,7 +62,7 @@ Paste these into each brief (they come from CLAUDE.md):
   files get hook calls only. `python tools/check_fork_footprint.py --base <reviewed_base from
   docs/fork-footprint.json>` must PASS; report any budget change with its reason.
 - Game-logic floats go through `ee::*`; game counters step on `frames.rs`'s 30 Hz clock.
-- Use your own `CARGO_TARGET_DIR`. Take the shared lock `C:/Users/hocka/Paseo/cargo-build.lock` (mkdir)
+- Use the shared `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared` (never a per-task folder; see CLAUDE.md). Take the shared lock `C:/Users/hocka/Paseo/cargo-build.lock` (mkdir)
   for every cargo build or test, with a `timeout`, and remove it when done. One build at a time.
 - Tests: `cargo test --locked -p eqoa --bin eqoa fork_ext::addons:: -- --test-threads=1` with a scratch
   `EQOA_CONFIG`. Write behaviour tests with a negative control (show the test fails without the
