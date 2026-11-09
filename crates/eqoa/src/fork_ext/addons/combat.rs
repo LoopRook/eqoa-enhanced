@@ -54,12 +54,12 @@ pub(crate) fn snapshot_combat_events() -> CombatSnapshot {
         let c = core.borrow();
         c.view.in_world.then(|| {
             let records = c
-                .events
+                .forge_combat
+                .entries
                 .iter()
-                .filter(|e| e.name == "combat.hit")
                 .rev()
                 .take(MAX_COMBAT_EVENTS)
-                .map(native_record)
+                .map(|(_, e)| native_record(e))
                 .collect::<Vec<_>>();
             let mut snapshot = CombatSnapshot::default();
             snapshot.count = records.len() as u8;

@@ -101,6 +101,7 @@ pub(crate) struct Core {
     pub entity_versions: BTreeMap<u32, u64>,
     pub ability_versions: BTreeMap<String, u64>,
     pub cooldown_edges: BTreeMap<String, (f64, f64, f64)>,
+    pub unknown_lockouts: BTreeMap<u8, (f64, f64, f64)>,
     pub disposition_target: Option<u32>,
     pub selected_target: Option<u32>,
     pub text_channel: &'static str,
@@ -132,6 +133,7 @@ impl Default for Core {
             entity_versions: BTreeMap::new(),
             ability_versions: BTreeMap::new(),
             cooldown_edges: BTreeMap::new(),
+            unknown_lockouts: BTreeMap::new(),
             disposition_target: None,
             selected_target: None,
             text_channel: "system",
@@ -280,6 +282,7 @@ impl Core {
         self.entity_versions.clear();
         self.ability_versions.clear();
         self.cooldown_edges.clear();
+        self.unknown_lockouts.clear();
         self.disposition_target = None;
         self.selected_target = None;
         self.stats_received = false;
@@ -628,4 +631,37 @@ pub(crate) fn capture_epoch() -> u64 {
 pub(crate) fn invalidate_capture() {
     CAPTURE_EPOCH.with(|e| e.set(e.get().wrapping_add(1)));
     discard_deferred();
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.pending_player_before = None;
+        c.motion_tick = u64::MAX;
+        c.unknown_lockouts.clear();
+    });
+}
+
+pub(crate) fn unknown_lockout(key: u8, lockout: f64) {
+    defer(256, move |c| {
+        let previous = c.unknown_lockouts.get(&key).copied();
+        let old = previous.map_or(0., |v| v.2);
+        if old == lockout {
+            return;
+        }
+        let now = c.receipt_time();
+        if lockout == 0. {
+            c.unknown_lockouts.remove(&key);
+        } else {
+            c.unknown_lockouts
+                .insert(key, (previous.map_or(now, |v| v.0), now, lockout));
+        }
+        c.emit(
+            if lockout == 0. {
+                "cooldown.ended"
+            } else if old == 0. {
+                "cooldown.started"
+            } else {
+                "cooldown.updated"
+            },
+            json!({"ability":null,"ability_id":null,"display_key":key,"lockout":lockout}),
+        );
+    });
 }

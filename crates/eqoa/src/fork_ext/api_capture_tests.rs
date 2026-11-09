@@ -952,6 +952,7 @@ fn perf_review_m1_other_vm_events_do_not_evict_forge_edges_or_hits() {
             serde_json::json!({"before":{"name":"x".repeat(2048)},"after":{"name":"y".repeat(2048)}}),
         );
     }
+    assert_eq!(combat::snapshot_combat_events().count, 1);
     forge.execute("abilities.Update();combat.Update();assert(edges==1 and hits==1);assert(abilities.GetDroppedCount()==0)").unwrap();
     for _ in 0..1030 {
         native_core::emit(
@@ -1051,7 +1052,16 @@ fn perf_review_l5_target_knowledge_survives_a_missing_roster_record() {
     let mut p = ready();
     native_core::fixture_demand(false);
     let h = Host::new().unwrap();
-    p.forge_snapshot(None);
+    h.snapshot.set(p.forge_snapshot(None));
+    crate::fork_ext::addons::ability::install_ability_list_adapter(&h).unwrap();
+    h.lua
+        .globals()
+        .set(
+            "forge_abilities",
+            h.registered_modules()["frontiers_forge.ability_list"].clone(),
+        )
+        .unwrap();
+    h.execute("edges=0;seen=0;forge_abilities.Acquire('unknown');for _,name in ipairs({'OnLockoutStart','OnLockoutEnd'}) do forge_abilities.On('unknown',name,function(e) assert(e.display_index==17);edges=edges+1 end) end;eqoa.events.on('cooldown.started',function(e) assert(e.data.ability==nil and e.data.ability_id==nil and e.data.display_key==17);seen=seen+1 end)").unwrap();
     let event = net::session::Event::AbilityLockout {
         index: 17,
         token: 0,
@@ -1061,13 +1071,100 @@ fn perf_review_l5_target_knowledge_survives_a_missing_roster_record() {
     end_game_event(&p, capture);
     h.execute("assert(#eqoa.abilities.list()==0)").unwrap();
     CORE.with(|c| {
-        assert!(
-            !c.borrow()
+        let c = c.borrow();
+        let edge = c
+            .events
+            .iter()
+            .find(|e| e.name == "cooldown.started")
+            .expect("unknown ability retains the observed key");
+        assert_eq!(edge.data["display_key"], 17);
+        assert_eq!(edge.data["lockout"], 1.);
+        assert!(edge.data["ability"].is_null() && edge.data["ability_id"].is_null());
+    });
+
+    for lockout in [1000, 2500, 0, 0] {
+        let event = net::session::Event::AbilityLockout {
+            index: 17,
+            token: 0,
+            lockout,
+        };
+        let capture = begin_game_event(&p, &event);
+        end_game_event(&p, capture);
+    }
+    h.snapshot.set(p.forge_snapshot(None));
+    CORE.with(|c| {
+        let c = c.borrow();
+        let names = c
+            .forge_cooldowns
+            .entries
+            .iter()
+            .map(|(_, e)| e.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            ["cooldown.started", "cooldown.updated", "cooldown.ended"]
+        );
+    });
+    h.execute("forge_abilities.Update();assert(edges==2,'edges='..tostring(edges)..';hook='..tostring(forge_abilities.IsHookInstalled())..';errors='..tostring(#forge_abilities.GetSubscriberErrors()))")
+        .unwrap();
+    CORE.with(|c| {
+        assert_eq!(
+            c.borrow()
                 .events
                 .iter()
-                .any(|e| e.name.starts_with("cooldown."))
+                .filter(|e| e.name.starts_with("cooldown."))
+                .count(),
+            3
         )
     });
+    let event = net::session::Event::AbilityLockout {
+        index: 17,
+        token: 0,
+        lockout: 5000,
+    };
+    let capture = begin_game_event(&p, &event);
+    end_game_event(&p, capture);
+    let ability = net::dump::Ability {
+        id: 987,
+        display_index: 17,
+        lockout: 5000,
+        valid: 1,
+        ..Default::default()
+    };
+    let event = net::session::Event::AbilityAdd {
+        token: 0,
+        flag: 0,
+        ability: Box::new(ability.clone()),
+    };
+    let capture = begin_game_event(&p, &event);
+    p.abilities.insert(987, ability);
+    end_game_event(&p, capture);
+    h.execute("assert(eqoa.abilities.find('987')~=nil)")
+        .unwrap();
+    CORE.with(|c| {
+        assert_eq!(
+            c.borrow()
+                .events
+                .iter()
+                .filter(|e| e.name.starts_with("cooldown."))
+                .count(),
+            4,
+            "resolving the ability must not duplicate its key-only edge"
+        )
+    });
+    let event = net::session::Event::AbilityLockout {
+        index: 17,
+        token: 0,
+        lockout: 0,
+    };
+    let capture = begin_game_event(&p, &event);
+    p.abilities.get_mut(&987).unwrap().lockout = 0;
+    end_game_event(&p, capture);
+    h.snapshot.set(p.forge_snapshot(None));
+    h.execute("forge_abilities.Update();assert(edges==4)")
+        .unwrap();
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(seen==2)").unwrap();
     p.target = 0x7777;
     let event = net::session::Event::TargetInfo {
         disposition: 4,

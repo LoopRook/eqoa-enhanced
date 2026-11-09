@@ -552,33 +552,43 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
         if let Some(a) = play.abilities.get(&id) {
             let lockout = ee::div(a.lockout as f32, 1000.) as f64;
             let key = a.display_index;
-            if old != lockout {
-                native_core::defer(256, move |c| {
-                    let id = id.to_string();
-                    if let Some(value) = c
-                        .view
-                        .abilities
-                        .iter_mut()
-                        .find(|a| a["id"].as_str() == Some(&id))
-                    {
-                        value["lockout"] = json!(lockout);
-                    }
-                    let now = c.receipt_time();
-                    if lockout == 0. {
-                        c.cooldown_edges.remove(&id);
-                    } else {
-                        let start = c.cooldown_edges.get(&id).map_or(now, |e| e.0);
-                        c.cooldown_edges.insert(id.clone(), (start, now, lockout));
-                    }
+            native_core::defer(256, move |c| {
+                let unresolved = u8::try_from(key)
+                    .ok()
+                    .and_then(|k| c.unknown_lockouts.remove(&k));
+                let old = unresolved.map_or(old, |v| v.2);
+                let id = id.to_string();
+                if let Some(value) = c
+                    .view
+                    .abilities
+                    .iter_mut()
+                    .find(|a| a["id"].as_str() == Some(&id))
+                {
+                    value["lockout"] = json!(lockout);
+                }
+                let now = c.receipt_time();
+                if lockout == 0. {
+                    c.cooldown_edges.remove(&id);
+                } else {
+                    let start = c
+                        .cooldown_edges
+                        .get(&id)
+                        .map(|v| v.0)
+                        .or_else(|| unresolved.map(|v| v.0))
+                        .unwrap_or(now);
+                    c.cooldown_edges.insert(id.clone(), (start, now, lockout));
+                }
+                if old != lockout {
                     let ability = c
                         .view
                         .abilities
                         .iter()
                         .find(|a| a["id"].as_str() == Some(&id))
                         .map(|a| a["ref"].clone());
-                    c.emit(if lockout==0.{"cooldown.ended"}else if old==0.{"cooldown.started"}else{"cooldown.updated"},json!({"ability":ability,"ability_id":id,"display_key":key,"lockout":lockout}));
-                });
-            }
+                    c.emit(if lockout==0.{"cooldown.ended"}else if old==0.{"cooldown.started"}else{"cooldown.updated"},
+                        json!({"ability":ability,"ability_id":id,"display_key":key,"lockout":lockout}));
+                }
+            });
         }
     }
 }
