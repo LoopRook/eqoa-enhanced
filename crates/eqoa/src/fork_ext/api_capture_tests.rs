@@ -699,6 +699,7 @@ fn native_incremental_packets_preserve_group_target_and_hotbar_records() {
         names: vec!["Recruiter".into()],
     };
     let capture = begin_game_event(&p, &event);
+    p.group.in_group = true;
     p.group
         .roster(&[0x101], &["Recruiter".into()], p.self_id32());
     end_game_event(&p, capture);
@@ -759,8 +760,34 @@ fn native_incremental_packets_preserve_group_target_and_hotbar_records() {
         .build(&p.abilities, &p.dump.inventory, &p.gear, p.hud_bars());
     end_game_event(&p, capture);
     h.execute("assert(eqoa.abilities.find('4660').ref==ability.ref);assert(eqoa.hotbar.list()[1].slots[2].ability==ability.ref)").unwrap();
+    native_core::fixture_demand(true);
+    p.forge_snapshot(None);
+    native_core::fixture_demand(false);
+    h.execute("assert(eqoa.hotbar.list()[1].slots[2].ability==ability.ref)")
+        .unwrap();
     native_events::dispatch(&h).unwrap();
     h.execute("assert(groups==2)").unwrap();
+    p.entities.slots.push(Some(net::entity::Entity {
+        id: p.self_id32().unwrap(),
+        creature: Some(net::entity::Creature::default()),
+        ..Default::default()
+    }));
+    p.forge_snapshot(None);
+    let event = net::session::Event::State {
+        channel: 1,
+        data: vec![],
+    };
+    let capture = begin_game_event(&p, &event);
+    p.entities.slots[1]
+        .as_mut()
+        .unwrap()
+        .creature
+        .as_mut()
+        .unwrap()
+        .p263 = 1;
+    end_game_event(&p, capture);
+    h.execute("assert(eqoa.player.get().fighting==true)")
+        .unwrap();
 }
 
 #[test]

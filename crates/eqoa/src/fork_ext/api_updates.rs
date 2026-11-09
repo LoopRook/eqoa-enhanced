@@ -152,6 +152,7 @@ fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
     if old_id != new_id {
         if let Some(old) = old_id {
             c.entity_versions.remove(&old);
+            c.entity_worlds.remove(&old);
             if let Some(index) = c
                 .view
                 .entities
@@ -417,10 +418,20 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
                 .get(slot)
                 .and_then(|e| e.as_ref())
                 .map(|e| EntityData::read(play, e));
+            let player = entity
+                .as_ref()
+                .filter(|e| Some(e.id) == play.self_id32())
+                .map(|_| PlayerData::read(play));
             native_core::defer(
                 512 + entity.as_ref().map_or(0, |e| e.name.len()),
                 move |c| patch_entity(c, slot, entity),
             );
+            if let Some(player) = player {
+                native_core::defer(2048 + player.name.len(), move |c| {
+                    let value = player.value(c);
+                    patch_player(c, value);
+                });
+            }
         }
         Kind::Player => {
             let player = PlayerData::read(play);
@@ -629,7 +640,8 @@ pub(crate) fn fingerprint(play: &Play, kind: Kind) -> u64 {
     match kind {
         Kind::Entity(slot) => {
             if let Some(Some(e)) = play.entities.slots.get(slot) {
-                e.id.hash(&mut h);e.world.hash(&mut h);
+                e.id.hash(&mut h);
+                e.world.hash(&mut h);
                 e.pos.map(f32::to_bits).hash(&mut h);
                 e.p19.hash(&mut h);
                 if let Some(c) = &e.creature {
@@ -661,7 +673,8 @@ pub(crate) fn fingerprint(play: &Play, kind: Kind) -> u64 {
                 m.name.hash(&mut h);
                 m.active.hash(&mut h);
                 m.hp_known.hash(&mut h);
-                m.hp.hash(&mut h);m.x.hash(&mut h);
+                m.hp.hash(&mut h);
+                m.x.hash(&mut h);
                 m.pos.map(f32::to_bits).hash(&mut h);
             }
             for m in &play.group.raid {
@@ -738,9 +751,7 @@ fn hotbars(p: &Play) -> Vec<Bar> {
                         (
                             *e,
                             (e.msg == 0x8060000)
-                                .then(|| {
-                                    p.abilities.values().find(|a| a.slot == e.id).map(|a| a.id)
-                                })
+                                .then(|| p.abilities.get(&e.id).map(|a| a.id))
                                 .flatten(),
                         )
                     })

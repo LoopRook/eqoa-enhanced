@@ -62,7 +62,7 @@ The former ImGui-budget deviation is resolved by the lead-approved section 9 ame
 - The descriptor inventory is implementation-driven for many Forge members and ImGui methods. A full per-object/constant/field conformance audit remains Round 5 work; no claim of exhaustive descriptor parity is made.
 - Event loss markers and reset envelopes are allocated at delivery time, while retained source envelopes retain their source sequence. Source order is preserved, but the synthetic marker's sequence can exceed the following retained event's sequence. Source and resource completions now share the specified 1,024-event/2 MiB per-VM retention limit; a boundary delivers at most 256 envelopes and preserves its backlog. Tests cover mixed/completion-only overflow and the byte cap.
 - Secure rooted file operations are implemented for Windows; equivalent non-Windows rooted operations are not implemented. Their failure must be reported as unsupported; a native Linux run was not performed. wasm is a compilation gate, not a browser mod-runtime acceptance test.
-- Post-event comparison still assembles a complete R2 view for coherent state publication. The unnecessary full pre-event view was removed. Throughput at high entity/packet rates is not live-profiled; the section 10 copy-cost target needs review before performance parity is claimed.
+- The post-event full-view copy limitation was resolved in the performance regression fix below. Live-game throughput still requires owner validation; fixture timings do not establish live FPS.
 - The monotonic clock is initialized when the addon runtime is constructed at client startup. Presentation frames now advance through the existing live and pregame controls seam; game ticks advance only through the game-step seam.
 
 These are reported limitations, not accepted design changes. The API stays experimental until independent review, fixes and the Round 5 audit. No stability or live-game parity promise is made here.
@@ -107,7 +107,7 @@ Final fix-round gates (same isolated target, scratch configuration and timeout-p
 | Footprint | PASS; no shared-file changes in this fix round, no new hook or budget increase. |
 | Release | PASS: `cargo build --release --locked -p eqoa`, optimized rebuild in 1m 41s with 56 warnings; repeated after the final report/update-note commit. |
 
-The four privilege-blocked symlink branches remain unverified. No live game, physical-controller, audio-listening, native Linux or owner acceptance test was performed. Oracle/decomp prerequisites remain unavailable; these gates do not claim their parity. The remaining descriptor, event-recovery sequencing and post-event copy-cost review items above are unchanged. Update notes now describe modal chat retry and visible world-loss cancellation.
+The four privilege-blocked symlink branches remain unverified. No live game, physical-controller, audio-listening, native Linux or owner acceptance test was performed. Oracle/decomp prerequisites remain unavailable; these gates do not claim their parity. The remaining descriptor and event-recovery sequencing review items above are unchanged. The historical post-event copy-cost limitation is addressed below. Update notes now describe modal chat retry and visible world-loss cancellation.
 
 ## Performance regression
 
@@ -115,15 +115,26 @@ Owner report: Nightly `develop` `1db5c2d` fell below one FPS after entering the 
 
 An optimized test fixture runs the round-2 in-world frame seams with 200 entities, six group members and 200 abilities with long descriptions: 300 ordinary frames, 300 mode-13 menu frames, 600 entity packet mutations and 600 logical chat lines. It measures current-thread heap allocations and elapsed time around the hooks, excluding fixture construction, graphics rendering, network transport and ImGui. These are hook costs, not a claim of measured live-game FPS. The allocation meter is test-only and disabled outside measurement scopes.
 
-| Zero enabled addons | Before, optimized | Initial fast-path fix, optimized |
+| Zero enabled addons | Before, optimized | Final fix, optimized |
 |---|---:|---:|
-| Round-2 ordinary frame seams | 14,727.981 ?s; 80,480 allocations; 10,018,852 bytes/frame | 4.810 ?s; one 1,024-byte input initialization allocation over all 300 frames |
-| Same seams with in-game menu open | 17,076.672 ?s; 80,480 allocations; 10,018,824 bytes/frame | 4.643 ?s; 0 allocations |
-| Entity packet event | 13,725.320 ?s; 39,049 allocations; 5,152,946 bytes/event | 0.042 ?s; 0 allocations |
-| Logical chat line | 1.715 ?s; 29 allocations; 2,887 bytes/line | 0.017 ?s; 0 allocations |
+| Round-2 ordinary frame seams | 14,727.981 us; 80,480 allocations; 10,018,852 bytes/frame | 5.152 us; one 1,024-byte input initialization allocation over all 300 frames |
+| Same seams with in-game menu open | 17,076.672 us; 80,480 allocations; 10,018,824 bytes/frame | 4.676 us; 0 allocations |
+| Entity packet event | 13,725.320 us; 39,049 allocations; 5,152,946 bytes/event | 0.028 us; 0 allocations |
+| Logical chat line | 1.715 us; 29 allocations; 2,887 bytes/line | 0.007 us; 0 allocations |
 
-The first baseline repeat measured 13,080.002 ?s/frame and 10,037.397 ?s/event with identical allocation counts, showing timing variation but the same allocation mechanism. The old implementation failed the allocation regression bound with 24,144,000 allocations over 300 menu frames. At 100 packet events/second, the measured eager packet projection alone can consume more than one second of CPU time per second.
+The first baseline repeat measured 13,080.002 us/frame and 10,037.397 us/event with identical allocation counts, showing timing variation but the same allocation mechanism. The old implementation failed the allocation regression bound with 24,144,000 allocations over 300 menu frames. At 100 packet events/second, the measured eager packet projection alone can consume more than one second of CPU time per second.
 
 Root causes: the HUD readiness/visibility path called the full Forge snapshot repeatedly; every snapshot assembled a full JSON-style native view and published it even with no enabled consumer; every packet then rebuilt/published another full view, including entity/ability list cloning and comparisons. Chat/input journaling was also unconditional. Input `live_snapshot` itself is a fixed-size copy, not the heavy part. Runtime filesystem discovery and profile loading are boundary/command work; no round-2 disk scan or log persistence was found in the zero-addon source hooks.
 
-Implementation and final gates are being validated below. Full native bootstrap is limited to activation/world transitions; ordinary source changes use typed owned deltas and consumer-boundary conversion. Unchanged records are detected before copying. HUD readiness uses scalar native predicates, and zero-addon snapshots retain only the character/profile/readiness metadata the manager needs. Existing shared hook call sites are unchanged.
+The implementation and final validation are recorded below. Full native bootstrap is limited to activation/world transitions; ordinary source changes use typed owned deltas and consumer-boundary conversion. Unchanged records are detected before copying. HUD readiness uses scalar native predicates, and zero-addon snapshots retain only the character/profile/readiness metadata the manager needs. Existing shared hook call sites are unchanged.
+
+The producer now captures only typed affected records after a field fingerprint changes; unchanged packets copy nothing. A bounded deferred queue (8,192 deltas / 32 MiB) converts records at addon boundaries, retaining source time/tick/frame/generation. Generation changes discard old-world deltas. Overflow reports lost source capture, resets and forces a current-state bootstrap. Public per-VM retention remains 1,024 events / 2 MiB with 256 deliveries per boundary. Resource completion boundaries first flush pending source deltas so mixed events retain source order.
+
+The enabled path caches fixed frame keys and Forge snapshot metadata; repeated frames do not scan or clone all entities/abilities. Entity packets copy one exposed entity record, group packets copy the visible roster, and ability packets copy one added record or scalar slot/lockout edits. Movement refreshes player data only. The first enabled consumer and world transitions still perform a full bootstrap. Disabled retained VMs do not count as consumers. File/profile/settings/log persistence remains outside these source loops.
+
+Regression coverage also checks 16 retained disabled VMs with alternating world/menu frames, input changes, two packets and chat per frame; enabled unchanged frames; 600 delivered entity changes; and duplicate-packet zero allocation. A new typed-source behavior fixture verifies group positions, target disposition and stable ability references after hotbar edits. It exposed an existing native hotbar lookup error: menu entries hold ability IDs, not spellbook slots. Both bootstrap and incremental lookup now use IDs. The initial group fixture lacked its in-group prerequisite and was corrected; that setup failure is not counted as a negative control.
+
+
+Final optimized measurements: the three performance cases passed with no SKIP lines. The 16-disabled-VM combined frame measured 4.934 us with zero allocations. Enabled unchanged frames measured 4.398 us with zero allocations; a changed entity packet measured 0.452 us with 2.015 allocations / 277.8 bytes per event amortized (including deferred-queue growth); duplicate packets measured 0.244 us and zero allocations. The source-boundary conversion and delivery of all 600 entity events is verified separately from producer timing. No wall-clock threshold is enforced: deterministic allocation/full-view-build bounds avoid machine-load timing failures. The baseline negative control above fails those bounds.
+
+The final ordinary zero-addon measurement has one 1,024-byte input initialization allocation across 300 frames; subsequent menu frames, packet events and chat lines allocate nothing. That replaces roughly 10 MB and 80,480 allocations per ordinary frame. This identifies and removes the measured mechanism; it does not prove live-game FPS recovery. The owner must retest world entry, sustained busy-world play and in-game menus in a built Nightly.
