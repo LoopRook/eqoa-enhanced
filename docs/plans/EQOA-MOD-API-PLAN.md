@@ -144,6 +144,27 @@ do not overlap.
   to point here.
 - The owner approves the release that freezes `eqoa/1`.
 
+### Map as a mod (owner idea, 2026-11-09): decide after round 4
+
+Background: upstream's map is the same map our fork restored on 28 Oct, then extended (comparison:
+`docs/plans/upstream-map-comparison.md`). Task A, done first and separately: the 2026-11-09 upstream
+sync resolves as "combine" (keep our map files, port upstream's five small additions). The owner's longer
+idea: take upstream's map as the base and rebuild our additions (search and guidance, creature journal,
+circular minimap, theme) as a mod on `eqoa/1`. It cannot start before round 4, which provides the map
+data, waypoint-to-native-map and the missing ImGui pieces. After round 4 a lead writes a one-page design
+and the owner decides. Points to settle:
+
+1. What stays in the client (the GPU-drawn minimap may have to) and what becomes a mod (search, guidance,
+   journal, theme).
+2. The data the mod needs (zone, entity and quest data, the shipped map-data files) and how a mod ships
+   large data in its own folder.
+3. Default experience: bundled and on by default, so players lose nothing; without it, upstream's plain map.
+4. Ownership after the split: upstream's map as the base keeps syncs cheap; each upstream map change is
+   checked against the add-on.
+5. API stability: it would be the largest real user of `eqoa/1`; the freeze is at round 5.
+6. Performance: measure a Lua map drawn every frame before committing (see the round 2 slowdown).
+First step: test whether the API already lets us build the journal as a mod; what is missing sets round 4's scope.
+
 ### Optional: offer the hooks upstream (owner's call)
 
 After round 2, when the core hooks have settled: a worker makes a branch from `origin/master` with
