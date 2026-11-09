@@ -279,6 +279,7 @@ mod tests {
             module_dirs: Vec::new(),
             resource_dirs: Vec::new(),
             api: None,
+            entry_mode: Default::default(),
             requested_capabilities: Vec::new(),
             initially_enabled: true,
             mods_root: None,

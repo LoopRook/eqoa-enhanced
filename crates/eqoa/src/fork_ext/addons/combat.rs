@@ -26,6 +26,9 @@ thread_local! {
 }
 
 pub(crate) fn record_combat_event(attacker: u32, amount: i32, defender: u32) {
+    if super::native_core::CORE.with(|c| c.borrow().view.in_world) {
+        return;
+    }
     COMBAT_RING.with(|ring| {
         let mut r = ring.borrow_mut();
         if r.len() >= 64 {
@@ -47,6 +50,28 @@ pub(crate) fn record_combat_event(attacker: u32, amount: i32, defender: u32) {
 }
 
 pub(crate) fn snapshot_combat_events() -> CombatSnapshot {
+    if let Some(snapshot) = super::native_core::CORE.with(|core| {
+        let c = core.borrow();
+        c.view.in_world.then(|| {
+            let records = c
+                .events
+                .iter()
+                .filter(|e| e.name == "combat.hit")
+                .rev()
+                .take(MAX_COMBAT_EVENTS)
+                .map(native_record)
+                .collect::<Vec<_>>();
+            let mut snapshot = CombatSnapshot::default();
+            snapshot.count = records.len() as u8;
+            for (i, record) in records.into_iter().rev().enumerate() {
+                snapshot.events[i] = record;
+            }
+            snapshot
+        })
+    }) {
+        return snapshot;
+    }
+
     COMBAT_RING.with(|ring| {
         let r = ring.borrow();
         let mut events = [CombatEventSnapshot::default(); MAX_COMBAT_EVENTS];
@@ -111,19 +136,25 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
 
     let snapshot_cell = host.snapshot.clone();
     let hook_claims = Rc::new(RefCell::new(HashSet::<String>::new()));
+    let installed = Rc::new(std::cell::Cell::new(true));
     let subscribers = Rc::new(RefCell::new(std::collections::HashMap::<
         String,
         std::collections::HashMap<String, mlua::Function>,
     >::new()));
     let subscriber_errors = Rc::new(RefCell::new(Vec::<Table>::new()));
-    let last_seq = Rc::new(RefCell::new(0u32));
+    let last_seq = Rc::new(RefCell::new(super::native_core::CORE.with(|c| {
+        let c = c.borrow();
+        if c.view.in_world { c.seq as u32 } else { 0 }
+    })));
 
     // Hook claims
     {
         let claims = hook_claims.clone();
+        let installed = installed.clone();
         combat_mod.set(
             "Acquire",
             lua.create_function(move |_, owner: String| {
+                installed.set(true);
                 claims.borrow_mut().insert(owner);
                 Ok(true)
             })?,
@@ -158,16 +189,33 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
     }
 
     {
-        let claims = hook_claims.clone();
-        let s = snapshot_cell.clone();
+        let installed = installed.clone();
         combat_mod.set(
             "IsHookInstalled",
-            lua.create_function(move |_, ()| Ok(!claims.borrow().is_empty() || s.get().in_game))?,
+            lua.create_function(move |lua, ()| {
+                Ok(installed.get() && super::native_events::active(lua))
+            })?,
         )?;
     }
-
-    combat_mod.set("InstallHook", lua.create_function(|_, ()| Ok(true))?)?;
-    combat_mod.set("UninstallHook", lua.create_function(|_, ()| Ok(true))?)?;
+    for (name, active) in [("InstallHook", true), ("UninstallHook", false)] {
+        let installed = installed.clone();
+        let cursor = last_seq.clone();
+        combat_mod.set(
+            name,
+            lua.create_function(move |_, ()| {
+                installed.set(active);
+                *cursor.borrow_mut() = super::native_core::CORE.with(|c| {
+                    let c = c.borrow();
+                    if c.view.in_world {
+                        c.seq as u32
+                    } else {
+                        COMBAT_MONOTONIC_SEQ.with(|s| s.get().saturating_sub(1))
+                    }
+                });
+                Ok(true)
+            })?,
+        )?;
+    }
 
     {
         let claims = hook_claims.clone();
@@ -180,16 +228,27 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
 
     {
         let s = snapshot_cell.clone();
+        let installed = installed.clone();
         combat_mod.set(
             "GetHookInfo",
             lua.create_function(move |lua_ctx, ()| {
                 let snap = s.get();
                 let tbl = lua_ctx.create_table()?;
-                tbl.set("installed", true)?;
-                let total_events =
-                    COMBAT_MONOTONIC_SEQ.with(|seq_cell| seq_cell.get().saturating_sub(1));
+                tbl.set("backend", "native")?;
+                tbl.set(
+                    "installed",
+                    installed.get() && super::native_events::active(lua_ctx),
+                )?;
+                tbl.set(
+                    "suspended",
+                    !snap.in_game || !super::native_events::active(lua_ctx),
+                )?;
+                let total_events = event_count();
                 tbl.set("event_count", total_events)?;
-                tbl.set("dropped", 0)?;
+                tbl.set(
+                    "dropped",
+                    super::native_events::bus(lua_ctx).borrow().dropped,
+                )?;
                 tbl.set("player_id", snap.player.entity_id)?;
                 if let Some(pet) = snap.player.pet_entity_id {
                     tbl.set("pet_id", pet)?;
@@ -203,17 +262,27 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
         combat_mod.set(
             "GetEventCount",
             lua.create_function(|_, ()| {
-                let total_events =
-                    COMBAT_MONOTONIC_SEQ.with(|seq_cell| seq_cell.get().saturating_sub(1));
+                let total_events = event_count();
                 Ok(total_events)
             })?,
         )?;
     }
 
-    combat_mod.set("GetDroppedCount", lua.create_function(|_, ()| Ok(0))?)?;
+    combat_mod.set(
+        "GetDroppedCount",
+        lua.create_function(|lua, ()| Ok(super::native_events::bus(lua).borrow().dropped))?,
+    )?;
     combat_mod.set(
         "ReadForeignCave",
-        lua.create_function(|_, _max: Option<u32>| Ok(Value::Nil))?,
+        lua.create_function(|lua, _max: Option<u32>| {
+            super::native::diagnose(
+                lua,
+                "frontiers_forge.combat.ReadForeignCave",
+                "unsupported",
+                "native client has no foreign code cave",
+            );
+            Ok(Value::Nil)
+        })?,
     )?;
 
     // On(owner, event_name, fn)
@@ -284,16 +353,30 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
         combat_mod.set(
             "Update",
             lua.create_function(move |lua_ctx, ()| {
+                if !installed.get() || !super::native_events::active(lua_ctx) {
+                    return Ok(());
+                }
                 let snap = s.get();
                 let combat_snap = snap.combat;
+                let native = super::native_core::CORE.with(|c| {
+                    let c = c.borrow();
+                    c.view.in_world.then(|| {
+                        c.events
+                            .iter()
+                            .filter(|e| e.name == "combat.hit")
+                            .map(native_record)
+                            .collect::<Vec<_>>()
+                    })
+                });
+                let records = native
+                    .unwrap_or_else(|| combat_snap.events[..combat_snap.count as usize].to_vec());
                 let player_id = snap.player.entity_id;
                 let pet_id = snap.player.pet_entity_id.unwrap_or(0);
 
                 let mut current_last = *last_seq_ref.borrow();
                 let mut dead_subscribers: Vec<(String, String)> = Vec::new();
 
-                for i in 0..combat_snap.count as usize {
-                    let ev = &combat_snap.events[i];
+                for ev in &records {
                     if ev.seq > current_last {
                         let attacker = ev.attacker_id;
                         let defender = ev.defender_id;
@@ -414,6 +497,7 @@ mod tests {
             module_dirs: vec![root.to_path_buf()],
             resource_dirs: vec![],
             api: Some("eqoa/1".to_string()),
+            entry_mode: Default::default(),
             requested_capabilities: vec![],
             initially_enabled: true,
             mods_root: Some(root.to_path_buf()),
@@ -617,5 +701,37 @@ mod tests {
             "#,
         );
         chunk.exec().unwrap();
+    }
+}
+
+fn event_count() -> u32 {
+    super::native_core::CORE.with(|core| {
+        let c = core.borrow();
+        if c.view.in_world {
+            c.combat_total.min(u32::MAX as u64) as u32
+        } else {
+            COMBAT_MONOTONIC_SEQ.with(|v| v.get().saturating_sub(1))
+        }
+    })
+}
+fn native_record(e: &super::native_core::Event) -> CombatEventSnapshot {
+    let d = &e.data;
+    let amount = d["amount"].as_u64().unwrap_or(0) as i64;
+    let color = d["color"].as_array().map_or(0, |rgb| {
+        0x01000000
+            + (rgb[2].as_u64().unwrap_or(0) as u32) * 65536
+            + (rgb[1].as_u64().unwrap_or(0) as u32) * 256
+            + rgb[0].as_u64().unwrap_or(0) as u32
+    });
+    CombatEventSnapshot {
+        attacker_id: d["attacker_id"].as_u64().unwrap_or(0) as u32,
+        defender_id: d["defender_id"].as_u64().unwrap_or(0) as u32,
+        amount: if d["kind"] == "heal" {
+            amount as i32
+        } else {
+            (-amount) as i32
+        },
+        seq: e.seq as u32,
+        color,
     }
 }

@@ -37,6 +37,7 @@ struct LockoutUpdate {
     display_index: u32,
     lockout_ms: u32,
     seq: u64,
+    source_event: Option<&'static str>,
 }
 
 #[derive(Default)]
@@ -52,6 +53,9 @@ thread_local! {
 }
 
 pub(crate) fn record_lockout(display_index: u32, lockout_ms: u32) {
+    if super::native_core::CORE.with(|c| c.borrow().view.in_world) {
+        return;
+    }
     LOCKOUT_RING.with(|ring| {
         let mut ring = ring.borrow_mut();
         if ring.updates.len() == LOCKOUT_RING_SIZE {
@@ -63,6 +67,7 @@ pub(crate) fn record_lockout(display_index: u32, lockout_ms: u32) {
             display_index,
             lockout_ms,
             seq,
+            source_event: None,
         });
     });
 }
@@ -402,6 +407,8 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
     >::new()));
     let subscriber_errors = Rc::new(RefCell::new(Vec::<Table>::new()));
     let lockout_cache = Rc::new(RefCell::new(HashMap::<u32, u32>::new()));
+    let installed = Rc::new(Cell::new(true));
+    let native_next_seq = Rc::new(Cell::new(super::native_core::CORE.with(|c| c.borrow().seq)));
     let next_seq = Rc::new(Cell::new(LOCKOUT_RING.with(|r| r.borrow().next_seq)));
     let dropped = Rc::new(Cell::new(0u64));
     let seeded = Rc::new(Cell::new(false));
@@ -412,6 +419,7 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
         let s = snapshot_cell.clone();
         let cache = lockout_cache.clone();
         let cursor = next_seq.clone();
+        let native_cursor = native_next_seq.clone();
         let seeded = seeded.clone();
         move || {
             if seeded.replace(true) {
@@ -429,6 +437,7 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
                 cache.insert(a.display_index, a.cooldown_lockout_ms);
             }
             cursor.set(LOCKOUT_RING.with(|r| r.borrow().next_seq));
+            native_cursor.set(super::native_core::CORE.with(|c| c.borrow().seq));
         }
     };
 
@@ -532,45 +541,67 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
         )?;
     }
 
-    // Hook lifecycle and ownership
+    // Hook names are compatibility leases on the actual journal consumer.
     {
-        let claims = hook_claims.clone();
-        let s = snapshot_cell.clone();
+        let installed = installed.clone();
         list_mod.set(
             "IsHookInstalled",
-            lua.create_function(move |_, ()| Ok(!claims.borrow().is_empty() || s.get().in_game))?,
+            lua.create_function(move |lua, ()| {
+                Ok(installed.get() && super::native_events::active(lua))
+            })?,
         )?;
     }
-    let seed = seed_lockouts.clone();
-    let claims = hook_claims.clone();
-    list_mod.set(
-        "InstallHook",
-        lua.create_function(move |_, ()| {
-            if claims.borrow().is_empty() {
-                seed();
-            }
-            Ok(true)
-        })?,
-    )?;
-    list_mod.set(
-        "UninstallHook",
-        lua.create_function({
-            let seeded = seeded.clone();
-            move |_, ()| {
+    {
+        let installed = installed.clone();
+        let seed = seed_lockouts.clone();
+        list_mod.set(
+            "InstallHook",
+            lua.create_function(move |_, ()| {
+                if !installed.replace(true) {
+                    seed();
+                }
+                Ok(true)
+            })?,
+        )?;
+    }
+    {
+        let installed = installed.clone();
+        let seeded = seeded.clone();
+        list_mod.set(
+            "UninstallHook",
+            lua.create_function(move |_, ()| {
+                installed.set(false);
                 seeded.set(false);
                 Ok(true)
-            }
-        })?,
-    )?;
+            })?,
+        )?;
+    }
     list_mod.set(
         "GetHookInfo",
         lua.create_function({
             let dropped = dropped.clone();
+            let installed = installed.clone();
             move |lua_ctx, ()| {
                 let t = lua_ctx.create_table()?;
-                t.set("installed", true)?;
+                t.set("backend", "native")?;
+                t.set(
+                    "installed",
+                    installed.get() && super::native_events::active(lua_ctx),
+                )?;
                 t.set("dropped", dropped.get())?;
-                t.set("update_count", LOCKOUT_RING.with(|r| r.borrow().next_seq))?;
+                let count = super::native_core::CORE.with(|c| {
+                    let c = c.borrow();
+                    if c.view.in_world {
+                        c.stream_counts
+                            .iter()
+                            .filter(|(name, _)| name.starts_with("cooldown."))
+                            .map(|(_, count)| *count)
+                            .sum()
+                    } else {
+                        LOCKOUT_RING.with(|r| r.borrow().next_seq)
+                    }
+                });
+                t.set("update_count", count)?;
                 Ok(t)
             }
         })?,
@@ -586,9 +617,11 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
     // Acquire
     {
         let claims = hook_claims.clone();
+        let installed = installed.clone();
         list_mod.set(
             "Acquire",
             lua.create_function(move |_, owner: String| {
+                installed.set(true);
                 if claims.borrow().is_empty() {
                     seed_lockouts();
                 }
@@ -704,27 +737,62 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
             "Update",
             lua.create_function(move |lua_ctx, ()| {
                 let snapshot = s.get();
-                if !snapshot.in_game {
+                if !snapshot.in_game || !installed.get() || !super::native_events::active(lua_ctx) {
                     cache.borrow_mut().clear();
                     seeded.set(false);
+                    native_next_seq.set(super::native_core::CORE.with(|c| c.borrow().seq));
                     next_seq.set(LOCKOUT_RING.with(|r| r.borrow().next_seq));
                     return Ok(());
                 }
                 // Read all retained packets without consuming another VM's events.
-                let updates = LOCKOUT_RING.with(|ring| {
-                    let ring = ring.borrow();
-                    let first = ring.updates.front().map_or(ring.next_seq, |u| u.seq);
-                    if next_seq.get() < first {
-                        dropped.set(dropped.get() + first - next_seq.get());
-                    }
-                    let updates: Vec<_> = ring
-                        .updates
-                        .iter()
-                        .filter(|u| u.seq >= next_seq.get())
-                        .copied()
-                        .collect();
-                    next_seq.set(ring.next_seq);
-                    updates
+                let native = super::native_core::CORE.with(|core| {
+                    let c = core.borrow();
+                    c.view.in_world.then(|| {
+                        let first = c.events.front().map_or(c.seq, |e| e.seq);
+                        if native_next_seq.get().saturating_add(1) < first {
+                            dropped.set(dropped.get() + first - native_next_seq.get() - 1);
+                        }
+                        let updates = c
+                            .events
+                            .iter()
+                            .filter(|e| {
+                                e.seq > native_next_seq.get() && e.name.starts_with("cooldown.")
+                            })
+                            .map(|e| LockoutUpdate {
+                                display_index: e.data["display_key"].as_u64().unwrap_or(0) as u32,
+                                lockout_ms: ee::mul(
+                                    e.data["lockout"].as_f64().unwrap_or(0.0) as f32,
+                                    1000.0,
+                                )
+                                .round() as u32,
+                                seq: e.seq,
+                                source_event: Some(match e.name.as_str() {
+                                    "cooldown.started" => "OnLockoutStart",
+                                    "cooldown.ended" => "OnLockoutEnd",
+                                    _ => "",
+                                }),
+                            })
+                            .collect::<Vec<_>>();
+                        native_next_seq.set(c.seq);
+                        updates
+                    })
+                });
+                let updates = native.unwrap_or_else(|| {
+                    LOCKOUT_RING.with(|ring| {
+                        let ring = ring.borrow();
+                        let first = ring.updates.front().map_or(ring.next_seq, |u| u.seq);
+                        if next_seq.get() < first {
+                            dropped.set(dropped.get() + first - next_seq.get());
+                        }
+                        let updates: Vec<_> = ring
+                            .updates
+                            .iter()
+                            .filter(|u| u.seq >= next_seq.get())
+                            .copied()
+                            .collect();
+                        next_seq.set(ring.next_seq);
+                        updates
+                    })
                 });
                 let pending = {
                     seeded.set(true);
@@ -743,9 +811,11 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
                     let mut pending = Vec::new();
                     for update in updates {
                         let previous = cache.insert(update.display_index, update.lockout_ms);
-                        let event = match previous {
-                            Some(0) if update.lockout_ms > 0 => "OnLockoutStart",
-                            Some(p) if p > 0 && update.lockout_ms == 0 => "OnLockoutEnd",
+                        let event = match (update.source_event, previous) {
+                            (Some(""), _) => continue,
+                            (Some(name), _) => name,
+                            (None, Some(0)) if update.lockout_ms > 0 => "OnLockoutStart",
+                            (None, Some(p)) if p > 0 && update.lockout_ms == 0 => "OnLockoutEnd",
                             _ => continue,
                         };
                         pending.push((event, update));
@@ -1286,6 +1356,7 @@ mod tests {
             module_dirs: vec![root.to_path_buf()],
             resource_dirs: vec![],
             api: Some("eqoa/1".to_string()),
+            entry_mode: Default::default(),
             requested_capabilities: vec![],
             initially_enabled: true,
             mods_root: Some(root.to_path_buf()),

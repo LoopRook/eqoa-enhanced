@@ -2317,6 +2317,7 @@ impl Play {
     /// steps on.
     pub fn frame(&mut self, walker: &mut Walker, lib: &Library, mut g: Gpu, game_ms: i64, game_frame: bool, mut sound: Option<&mut crate::sound::Sound>) -> Option<u32> {
         self.take_modules(sound.as_deref_mut());
+        fork_hooks::begin_iteration(self, game_frame);
         fork_hooks::frame_library(self, lib, Some(walker));
         self.drawn = self.drawn.wrapping_add(1);
         let now = self.session.now();
@@ -2325,6 +2326,7 @@ impl Play {
         let mut new_model = None;
         self.actors_scene(walker);
         for e in self.session.pump() {
+            let change = fork_hooks::begin_game_event(self, &e);
             match e {
                 Event::TargetInfo { disposition, b, title, guild, .. } => {
                     self.target_info = Some(disposition);
@@ -2860,6 +2862,7 @@ impl Play {
                 }
                 _ => {}
             }
+            fork_hooks::end_game_event(self, change);
         }
         self.agree_entity_view();
         self.agree_raid_roster();
@@ -4777,6 +4780,7 @@ impl Play {
     /// until the box, which measures with the font, takes it), and for the
     /// plain log shown when there is no HUD.
     fn add_chat(&mut self, text: String, color: [f32; 4]) {
+        fork_hooks::observe_text(&text, color);
         if std::env::var_os("EQOA_CHAT_LOG").is_some() {
             eprintln!("chat: {text}");
         }
@@ -5840,7 +5844,7 @@ impl Play {
         if amount > 0 && (Some(attacker) == me || (attacker == self.pet_id && self.pet_id != u32::MAX)) {
             self.guide.hit(defender, now);
         }
-        self.fork_combat_event(attacker, amount, defender);
+        self.fork_combat_event(attacker, amount, defender, rgb);
         if self.options.no_damage != 0 {
             return;
         }

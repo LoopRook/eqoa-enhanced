@@ -37,6 +37,15 @@ thread_local! {
 
 fn step(back: bool) {
     TOTAL.with(|t| t.set(t.get().saturating_add(if back { 1 } else { -1 })));
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let active = crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow().view.in_world)
+            && !crate::hud::fork_hud::chat_window_visible();
+        crate::fork_ext::addons::native_core::emit(
+            "chat.history_scroll",
+            serde_json::json!({"active":active,"steps":if active{if back{1}else{-1}}else{0}}),
+        );
+    }
 }
 
 /// Taps the stock chat's scroll key press or release (`WndChat::key_down` and

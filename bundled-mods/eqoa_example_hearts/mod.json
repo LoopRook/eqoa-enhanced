@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_example_hearts",
+  "name": "EQOA Example Hearts",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "capabilities": ["eqoa.player.get", "eqoa.hud.hide", "eqoa.events.on", "eqoa.imgui"]
+}

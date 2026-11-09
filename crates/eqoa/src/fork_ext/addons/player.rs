@@ -482,21 +482,48 @@ pub fn install_player_adapter(host: &Host) -> LuaResult<()> {
         let s = snapshot_cell.clone();
         player.set(
             "GetCMs",
-            lua.create_function(move |_, ()| Ok(s.get().player.cms))?,
+            lua.create_function(move |lua, ()| {
+                let _ = &s;
+                super::native::diagnose(
+                    lua,
+                    "frontiers_forge.player.GetCMs",
+                    "not_yet",
+                    "Class Mastery arrives in round 4",
+                );
+                Ok(Value::Nil)
+            })?,
         )?;
     }
     {
         let s = snapshot_cell.clone();
         player.set(
             "GetCMsSpent",
-            lua.create_function(move |_, ()| Ok(s.get().player.cms_spent))?,
+            lua.create_function(move |lua, ()| {
+                let _ = &s;
+                super::native::diagnose(
+                    lua,
+                    "frontiers_forge.player.GetCMsSpent",
+                    "not_yet",
+                    "Class Mastery arrives in round 4",
+                );
+                Ok(Value::Nil)
+            })?,
         )?;
     }
     {
         let s = snapshot_cell.clone();
         player.set(
             "GetCMPct",
-            lua.create_function(move |_, ()| Ok(s.get().player.cm_pct))?,
+            lua.create_function(move |lua, ()| {
+                let _ = &s;
+                super::native::diagnose(
+                    lua,
+                    "frontiers_forge.player.GetCMPct",
+                    "not_yet",
+                    "Class Mastery arrives in round 4",
+                );
+                Ok(Value::Nil)
+            })?,
         )?;
     }
 
@@ -791,6 +818,7 @@ mod tests {
             module_dirs: vec![root.to_path_buf()],
             resource_dirs: vec![],
             api: Some("eqoa/1".to_string()),
+            entry_mode: Default::default(),
             requested_capabilities: vec![],
             initially_enabled: true,
             mods_root: Some(root.to_path_buf()),
@@ -942,9 +970,9 @@ mod tests {
             assert(P.GetColdResistBuff() == 40)
             assert(P.GetLightningResistBuff() == 45)
             assert(P.GetArcaneResistBuff() == 50)
-            assert(P.GetCMs() == 15)
-            assert(P.GetCMsSpent() == 10)
-            assert(P.GetCMPct() == 75)
+            assert(P.GetCMs() == nil)
+            assert(P.GetCMsSpent() == nil)
+            assert(P.GetCMPct() == nil)
             assert(P.GetEntityId() == 1001)
             assert(P.GetTargetEntityId() == 2002)
             assert(P.GetPetEntityId() == 3003)

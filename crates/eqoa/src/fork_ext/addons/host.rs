@@ -57,12 +57,14 @@ pub(crate) struct Host {
     pub snapshot: Rc<Cell<Snapshot>>,
     remaining: Rc<Cell<u32>>,
     fatal: Rc<Cell<bool>>,
+    iteration_active: Cell<bool>,
     addon: Option<DiscoveredAddon>,
     host_registry: Rc<RefCell<HashMap<String, Value>>>,
 }
 
 impl Drop for Host {
     fn drop(&mut self) {
+        super::native_events::clear(self);
         for error in super::file_io::close_all(&self.lua) {
             eprintln!("{error}");
         }
@@ -213,6 +215,23 @@ fn create_base_host() -> Result<BaseHost> {
             }
         })?,
     )?;
+    util.set(
+        "IsBattleMusicPlaying",
+        lua.create_function(|_, ()| {
+            Ok(super::native_core::CORE.with(|c| {
+                c.borrow().view.player["fighting"]
+                    .as_bool()
+                    .unwrap_or(false)
+            }))
+        })?,
+    )?;
+    util.set(
+        "IsBitZero",
+        lua.create_function(|_, (value, mask): (u32, u32)| Ok(value & mask == 0))?,
+    )?;
+    for name in ["utf8_to_utf16", "utf16_to_utf8"] {
+        util.set(name,lua.create_function(move |lua,_:Value|{let reason="unsupported: pointer-based UTF conversion is unavailable; native API strings are UTF-8";super::native::diagnose(lua,&format!("frontiers_forge.util.{name}"),"unsupported",reason);Ok((Value::Nil,reason))})?)?;
+    }
 
     lua.set_named_registry_value("forge_callbacks", lua.create_table()?)?;
     let forge = lua.create_table()?;
@@ -281,6 +300,18 @@ fn create_base_host() -> Result<BaseHost> {
     let fatal_pcall = fatal.clone();
     let pcall_fn = lua.create_function(move |_, args: mlua::MultiValue| {
         let call_res = orig_pcall.call::<mlua::MultiValue>(args);
+        if let Ok(values) = &call_res {
+            if values.front() == Some(&Value::Boolean(false))
+                && values.get(1).is_some_and(|v| match v {
+                    Value::Error(e) => super::native::fatal_memory(e),
+                    Value::String(s) => s.to_str().is_ok_and(|s| s.as_ref() == "not enough memory"),
+                    _ => false,
+                })
+            {
+                return Err(mlua::Error::MemoryError("not enough memory".into()));
+            }
+        }
+
         if fatal_pcall.get() {
             return Err(mlua::Error::runtime(format!(
                 "Forge instruction budget exceeded: {} instructions (limit: {})",
@@ -304,6 +335,17 @@ fn create_base_host() -> Result<BaseHost> {
 }
 
 impl Host {
+    pub(crate) fn addon_id(&self) -> String {
+        self.addon
+            .as_ref()
+            .map_or("test", |a| a.id.as_str())
+            .to_string()
+    }
+    pub(crate) fn once_mode(&self) -> bool {
+        self.addon
+            .as_ref()
+            .is_some_and(|a| a.entry_mode == super::discovery::EntryMode::Once)
+    }
     pub fn drain_logs(&self) -> Result<Vec<String>> {
         let messages: Table = self.lua.named_registry_value("forge_log")?;
         let mut output = messages
@@ -312,6 +354,7 @@ impl Host {
         self.lua
             .set_named_registry_value("forge_log", self.lua.create_table()?)?;
         output.extend(super::file_io::drain_diagnostics(&self.lua));
+        output.extend(super::native::drain(&self.lua));
         Ok(output)
     }
     pub const INSTRUCTION_BUDGET: u32 = INSTRUCTION_BUDGET;
@@ -333,6 +376,7 @@ impl Host {
             snapshot: base.snapshot,
             remaining: base.remaining,
             fatal: base.fatal,
+            iteration_active: Cell::new(false),
             addon: Some(addon.clone()),
             host_registry,
         };
@@ -367,6 +411,7 @@ impl Host {
                 .replace("\\\\?\\", ""),
         )?;
         super::file_io::install(&host, addon, None)?;
+        super::native::install(&host)?;
         Ok(host)
     }
 
@@ -409,11 +454,13 @@ impl Host {
             snapshot: base.snapshot,
             remaining: base.remaining,
             fatal: base.fatal,
+            iteration_active: Cell::new(false),
             addon: None,
             host_registry: Rc::new(RefCell::new(HashMap::new())),
         };
         super::weapon_sets::install(&host)?;
         super::chat_history::install(&host)?;
+        super::native::install(&host)?;
         Ok(host)
     }
 
@@ -452,6 +499,9 @@ impl Host {
     pub fn has_host_module(&self, name: &str) -> bool {
         self.host_registry.borrow().contains_key(name)
     }
+    pub(crate) fn registered_modules(&self) -> HashMap<String, Value> {
+        self.host_registry.borrow().clone()
+    }
 
     pub fn resolve_resource(
         &self,
@@ -483,6 +533,50 @@ impl Host {
     pub fn run(&self, function: &Function) -> Result<()> {
         self.run_with_budget(function, Self::INSTRUCTION_BUDGET)
     }
+    pub(crate) fn begin_iteration(&self) {
+        if !self.iteration_active.replace(true) {
+            super::native_events::start_iteration(&self.lua);
+            self.remaining.set(Self::INSTRUCTION_BUDGET);
+            self.fatal.set(false);
+        }
+    }
+    pub(crate) fn iteration_in_progress(&self) -> bool {
+        self.iteration_active.get()
+    }
+    pub(crate) fn end_iteration(&self) {
+        self.iteration_active.set(false);
+    }
+    pub(crate) fn frame_entry(&self, function: &Function) -> Result<()> {
+        self.begin_iteration();
+        let bus = super::native_events::bus(&self.lua);
+        let initialized = bus.borrow().initialized;
+        let once = bus.borrow().once_mode;
+        if initialized {
+            super::native_events::dispatch(self)?;
+        } else {
+            super::native_events::prime(self);
+        }
+        if !once || !initialized {
+            let _phase = super::native::phase(&self.lua, "entry");
+            let _drawing = super::bridge::drawing(!once);
+            function.call::<()>(())?;
+        }
+        bus.borrow_mut().initialized = true;
+        Ok(())
+    }
+    pub(crate) fn finish_frame(&self, first: bool) -> Result<()> {
+        if first {
+            super::native_events::lifecycle(self, "enabled")?;
+            super::native_events::initial(self)?;
+        }
+        super::native_events::render(self)?;
+        if self.fatal.get() {
+            return Err(mlua::Error::runtime(
+                "eqoa iteration instruction budget exceeded",
+            ));
+        }
+        Ok(())
+    }
 
     pub fn run_with_budget(&self, function: &Function, budget: u32) -> Result<()> {
         self.remaining.set(budget);
@@ -506,8 +600,17 @@ impl Host {
         if !(0..=4).contains(&kind) {
             return Err(mlua::Error::runtime("unknown callback type"));
         }
-        self.remaining.set(Self::INSTRUCTION_BUDGET);
-        self.fatal.set(false);
+        if !self.iteration_active.get() {
+            self.remaining.set(Self::INSTRUCTION_BUDGET);
+            self.fatal.set(false);
+        }
+        let _phase = super::native::phase(&self.lua, &format!("callback.{kind}"));
+        if let Some(result) = super::native_settings::callback(&self.lua, kind, &value) {
+            return result;
+        }
+        if kind == 0 {
+            super::native_events::settings_render(self)?;
+        }
         let res = match self
             .lua
             .named_registry_value::<Table>("forge_callbacks")?

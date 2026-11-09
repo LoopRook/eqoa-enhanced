@@ -52,6 +52,7 @@ pub(crate) struct Diagnostic {
     pub id: Option<String>,
     pub phase: &'static str,
     pub message: String,
+    pub details: Option<serde_json::Value>,
 }
 
 pub(crate) enum Command {
@@ -217,12 +218,26 @@ impl Manager {
             return;
         }
         self.frame_number = self.frame_number.saturating_add(1);
+        if !snapshot.in_game && self.snapshot.in_game {
+            super::native_core::CORE.with(|c| {
+                c.borrow_mut()
+                    .publish(super::native_core::View::default(), false)
+            });
+            for entry in &self.entries {
+                if let Some(i) = &entry.instance {
+                    i.visibility.clear();
+                    i.sound_bank.borrow_mut().set_active(false);
+                    super::input::native::release_vm(&i.host.lua);
+                }
+            }
+        }
         self.health_waiting = snapshot.in_game && !snapshot.health.is_available();
         let snapshot = snapshot.managed();
         self.snapshot = snapshot;
         self.awaiting_render = true;
         for e in &self.entries {
             if let Some(i) = &e.instance {
+                i.host.begin_iteration();
                 i.host.snapshot.set(snapshot);
                 i.visibility.update(snapshot.health, i.active);
             }
@@ -257,27 +272,37 @@ impl Manager {
                         }
                     }
                 }
+                self.configure_native_settings(entry);
                 let instance = entry.instance.as_mut().unwrap();
                 instance.host.snapshot.set(snapshot);
                 instance.active = true;
                 instance.sound_bank.borrow_mut().set_active(true);
                 instance.visibility.update(snapshot.health, true);
                 instance.resources_retired = false;
+                let enabling = !super::native_events::bus(&instance.host.lua)
+                    .borrow()
+                    .initialized;
                 let first = !instance.initialized;
                 // An entry that throws can still have registered cleanup callbacks.
                 instance.initialized = true;
                 match instance
                     .bridge
-                    .invoke(|| instance.host.run(&instance.function))
+                    .invoke(|| instance.host.frame_entry(&instance.function))
                 {
                     Ok(()) => {
                         entry.status = Status::Enabled;
                         if first {
                             self.load(entry, true);
                         }
+                        if let Some(i) = entry.instance.as_ref() {
+                            if let Err(e) = i.bridge.invoke(|| i.host.finish_frame(enabling)) {
+                                self.fail(entry, "events", e.to_string(), true);
+                            }
+                        }
                     }
                     Err(e) => self.fail(entry, "frame", e.to_string(), true),
                 }
+                self.collect_native_settings(entry);
             }
             if let Some(i) = entry.instance.as_ref() {
                 for message in i.bridge.drain_diagnostics() {
@@ -315,6 +340,13 @@ impl Manager {
                     for diag in bank.drain_diagnostics() {
                         diags.push((entry.metadata.id.clone(), diag));
                     }
+                    drop(bank);
+                    if let Err(e) = super::fonts::FontBank::publish_outcomes(
+                        &instance.host.lua,
+                        &instance.font_bank,
+                    ) {
+                        diags.push((entry.metadata.id.clone(), e.to_string()));
+                    }
                 }
             }
             for (id, diag) in diags {
@@ -330,6 +362,7 @@ impl Manager {
         }
         for entry in &self.entries {
             if let Some(instance) = &entry.instance {
+                instance.host.end_iteration();
                 instance.textures.borrow_mut().collect(false);
             }
         }
@@ -342,7 +375,35 @@ impl Manager {
     }
 
     fn diagnostic(&mut self, id: Option<&str>, phase: &'static str, message: String) {
-        let message: String = message.chars().take(2048).collect();
+        let details = serde_json::from_str::<serde_json::Value>(&message)
+            .ok()
+            .filter(|v| v["api"] == "eqoa/1");
+        let display = details.as_ref().map(|v| {
+            format!(
+                "{} [{}]: {} ({} occurrences)",
+                v["symbol"].as_str().unwrap_or("eqoa"),
+                v["code"].as_str().unwrap_or("failed"),
+                v["message"].as_str().unwrap_or(""),
+                v["count"].as_u64().unwrap_or(1)
+            )
+        });
+        let message: String = if details.is_some() {
+            message
+        } else {
+            message.chars().take(2048).collect()
+        };
+        let mut updated = false;
+        if let Some(v) = &details {
+            if let Some(existing) = self.diagnostics.iter_mut().find(|d| {
+                d.details.as_ref().is_some_and(|old| {
+                    old["vm"] == v["vm"] && old["symbol"] == v["symbol"] && old["code"] == v["code"]
+                })
+            }) {
+                existing.details = details.clone();
+                existing.message = display.clone().unwrap_or_else(|| message.clone());
+                updated = true;
+            }
+        }
         if self
             .diagnostics
             .iter()
@@ -350,23 +411,54 @@ impl Manager {
         {
             return;
         }
-        if self.diagnostics.len() == MAX_DIAGNOSTICS {
+        if !updated && self.diagnostics.len() == MAX_DIAGNOSTICS {
             self.diagnostics.remove(0);
         }
-        self.diagnostics.push(Diagnostic {
-            id: id.map(str::to_owned),
-            phase,
-            message: message.clone(),
-        });
+        if !updated {
+            self.diagnostics.push(Diagnostic {
+                id: id.map(str::to_owned),
+                phase,
+                message: display.unwrap_or_else(|| message.clone()),
+                details,
+            });
+        }
         let log_line = format!("[{:?}] [{}] {}\n", phase, id.unwrap_or("general"), message);
         let log_path = self.root.join("addons_error.log");
-        if let Ok(mut f) = std::fs::OpenOptions::new()
+        let rotated = (|| -> std::io::Result<()> {
+            if std::fs::metadata(&log_path).is_ok_and(|m| m.len() >= 5 * 1024 * 1024) {
+                let previous = self.root.join("addons_error.log.1");
+                if previous.exists() {
+                    std::fs::remove_file(&previous)?;
+                }
+                std::fs::rename(&log_path, previous)?;
+            }
+            Ok(())
+        })();
+        if let Err(e) = rotated {
+            eprintln!("Addon log rotation failed: {e}");
+        }
+        let write = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&log_path)
-        {
-            use std::io::Write;
-            let _ = f.write_all(log_line.as_bytes());
+            .and_then(|mut f| {
+                use std::io::Write;
+                f.write_all(log_line.as_bytes())
+            });
+        if let Err(e) = write {
+            let message = format!("Addon diagnostic log could not be written: {e}");
+            eprintln!("{message}");
+            if !self.diagnostics.iter().any(|d| d.phase == "log_io") {
+                if self.diagnostics.len() == MAX_DIAGNOSTICS {
+                    self.diagnostics.remove(0);
+                }
+                self.diagnostics.push(Diagnostic {
+                    id: None,
+                    phase: "log_io",
+                    message,
+                    details: None,
+                });
+            }
         }
     }
 
@@ -494,7 +586,9 @@ impl Manager {
                     self.fail(entry, "load", e.to_string(), rendering);
                 }
             }
-            Ok(None) => {}
+            Ok(None) => {
+                let _ = super::native_settings::callback(&i.host.lua, 3, &Value::Nil);
+            }
             Err(e) => self.diagnostic(Some(&entry.metadata.id), "storage", e),
         }
         if let Some(i) = entry.instance.as_ref().filter(|i| !i.active) {
@@ -510,6 +604,17 @@ impl Manager {
         disposition: Disposition,
     ) {
         let active = entry.instance.as_ref().is_some_and(|i| i.active);
+        if active {
+            if let Some(i) = entry.instance.as_ref() {
+                let _ = super::native_events::lifecycle(&i.host, "disabling");
+            }
+        }
+        if let Some(i) = entry.instance.as_ref() {
+            let messages = super::native::finish(&i.host.lua);
+            for message in messages {
+                self.diagnostic(Some(&entry.metadata.id), "disable", message);
+            }
+        }
         if active && save {
             self.save(entry, rendering);
         }
@@ -527,6 +632,7 @@ impl Manager {
         // Ordinary disable retains the environment and all live cached handles.
         if let Some(i) = &entry.instance {
             i.visibility.clear();
+            super::native_events::clear(&i.host);
         }
         // A callback failure is terminal even during an ordinary transition.
         if disposition == Disposition::Retire || entry.status == Status::Failed {
@@ -547,6 +653,54 @@ impl Manager {
         self.diagnostic(Some(&entry.metadata.id), phase, error);
         entry.status = Status::Failed;
         self.disable(entry, rendering, false, Disposition::Retire);
+    }
+    fn configure_native_settings(&self, entry: &Entry) {
+        let Some(i) = &entry.instance else {
+            return;
+        };
+        let key = entry.key.clone();
+        let (value, writer): (Option<serde_json::Value>, super::native_settings::Writer) =
+            if let Some(s) = &self.named {
+                let value = s.data.addons.get(&key).cloned();
+                let mut document = s.data.clone();
+                let active = s.active.clone();
+                let store = s.store.clone();
+                let writable = s.writable;
+                (
+                    value,
+                    Rc::new(move |value| {
+                        if !writable {
+                            return Err("active profile is read-only".into());
+                        }
+                        let mut document = document.clone();
+                        document.addons.insert(key.clone(), value.clone());
+                        store.write(&active, &document)
+                    }),
+                )
+            } else {
+                let value = self
+                    .storage
+                    .load_profile(&key, &i.host.lua)
+                    .ok()
+                    .flatten()
+                    .and_then(|v| super::profile::encode(v).ok());
+                let store = self.storage.clone();
+                (value, Rc::new(move |value| store.save_encoded(&key, value)))
+            };
+        super::native_settings::configure(&i.host, value, writer);
+    }
+    fn collect_native_settings(&mut self, entry: &Entry) {
+        let Some(i) = &entry.instance else {
+            return;
+        };
+        let value = super::native_settings::slot(&i.host.lua)
+            .borrow_mut()
+            .committed
+            .take();
+        if let (Some(value), Some(s)) = (value, self.named.as_mut()) {
+            s.data.addons.insert(entry.key.clone(), value);
+            s.dirty = true;
+        }
     }
 
     fn command(&mut self, command: Command) {
@@ -1384,8 +1538,11 @@ mod tests {
                     0 => "death",
                     _ => "other",
                 };
-                let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join(format!("../../target/forge-hearts-{name}.png"));
+                let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"));
+                fs::create_dir_all(&target_dir).unwrap();
+                let path = target_dir.join(format!("forge-hearts-{name}.png"));
                 let mut encoder = png::Encoder::new(fs::File::create(path).unwrap(), 256, 192);
                 encoder.set_color(png::ColorType::Rgba);
                 encoder.set_depth(png::BitDepth::Eight);

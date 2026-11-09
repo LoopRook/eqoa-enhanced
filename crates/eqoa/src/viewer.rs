@@ -2751,6 +2751,7 @@ impl App {
             connected = true;
         }
         let dead = self.play.as_ref().is_some_and(|p| p.is_dead());
+        crate::fork_ext::prepare_controls(&mut report, connected, true);
         let keys = self.console.poll(report, connected, motors, dead);
         #[cfg(not(target_arch = "wasm32"))]
         let keys = self.offer_pad(keys);
@@ -3159,6 +3160,7 @@ impl App {
             report.merge(&self.touch.report());
             connected = true;
         }
+        crate::fork_ext::prepare_controls(&mut report, connected, false);
         let keys = self.console.poll(report, connected, motors, false);
         #[cfg(not(target_arch = "wasm32"))]
         let keys = self.offer_pad(keys);
