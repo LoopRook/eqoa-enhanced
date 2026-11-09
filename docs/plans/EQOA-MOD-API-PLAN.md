@@ -164,3 +164,10 @@ and out of future sync conflicts.
   bundled `mods/resources` tree read-only; all writes go to the mod's own private area (overlay with
   tombstones, spec §9); other mods' files stay unreachable. Next: round 2 under a Sonnet lead, working
   from spec §§1-5, 9-12 and the §9 bundled-UI regression cases.
+- **Round 2 (core), 2026-11-08.** Branch `feat/eqoa-api-r2`, merged into `develop` 3794d3c. Sol high built
+  (stopped once at the Codex limit, resumed); play.rs budget raised 755 to 759 (owner-approved hooks).
+  MiniMax review: APPROVE WITH CHANGES (3 HIGH, 6 MEDIUM, 8 LOW); lead verified H1/H2; Sol fixed H1-H3,
+  M1-M4, M6, L2-L3, and showed M5, L1, L4, L5 not defects. Spec §9 now states the 131,072 ImGui call
+  budget. Gates: addon suite, installer, pinned Forge, GPU opt-ins, wasm, footprint, release build.
+  Not verified: four symlink branches, oracle tests, live game. Owner live test pending: the three
+  bundled UIs unchanged plus `eqoa_example_hearts`. Next: round 3 (items), Sonnet lead.
