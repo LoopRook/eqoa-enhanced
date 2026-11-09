@@ -1,6 +1,6 @@
 # Upstream sync 2026-11-09
 
-Status: merge committed as `3307f50` (LoopRook); validation follow-ups in progress. Branch `sync/2026-11-09`; original fork HEAD `4ebe0f7`; pinned merge target `91f9e72dd6d111e20a37b73cea461444a18ad79c` (134 upstream commits). No push, tag or protected-branch merge.
+Status: complete (sync finishing work and verification recorded; the full workspace gate retains two confirmed upstream AO failures). Merge `3307f50` (LoopRook), validation checkpoint `ee7ffa6`. Branch `sync/2026-11-09`; original fork HEAD `4ebe0f7`; pinned merge target `91f9e72dd6d111e20a37b73cea461444a18ad79c` (134 upstream commits). No push, tag or protected-branch merge.
 
 ## Hand resolutions
 
@@ -70,7 +70,7 @@ Corrections driven by that failing run:
 
 API hook audit: exactly one call each of `fork_hooks::begin_iteration`, `begin_game_event`, `end_game_event`, `observe_text` in Play. Begin/end still surround the native event match. Viewer retains `prepare_controls` in the gameplay and modal input branches; the owned adapter forwards `observe_report`. API capture/performance/input tests passed in the client suite.
 
-Pending addon/bundled UI explicit suite, workspace CI test, wasm check and release build.
+Remaining-gate results and the upstream AO exception are recorded below.
 
 The first full CI-target workspace build stopped before tests because C: had zero free bytes (`rustc-LLVM ERROR: no space on device`), not a code/test failure. Only this worktree's ignored generated build directories are relocated to `D:/eqoa-sync-2026-11-09-build-cache`; junctions preserve the original `target` paths and Cargo fingerprints. No source, game data, other checkout or user folder is removed. The owner then required one shared target (`C:/Users/hocka/Paseo/targets/shared`): the own retry was stopped, all remaining gates use that target, and the legacy worktree target and temporary D: cache are removed after gates. `C:/Users/hocka/Paseo/targets/eqoa-api-r2` is untouched.
 
@@ -83,3 +83,42 @@ The first complete shared-target workspace run reached renderer tests and found 
 ## Unverified
 
 Live owner play, a real GM server travel, Android device behavior, browser runtime and disc/oracle prerequisites not present in this environment. No claim of live acceptance.
+
+## Final verification (2026-11-09)
+
+Checkpoint: `ee7ffa6` (`sync: follow-up fixes from validation`), after reviewing all 17 follow-up files and `git diff --check`. No conflict resolution was redone and no follow-up hunk was discarded. Rust/shader source is unchanged after that checkpoint.
+
+All Cargo gates used `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`, the shared `C:/Users/hocka/Paseo/cargo-build.lock` mkdir lock with retry/timeout, scratch `EQOA_CONFIG`, one test thread and a 3600-second process timeout. C: free space was checked before every invocation (minimum observed about 70 GiB, above the required 10 GiB). Windows gates used Rust 1.99.1, target `x86_64-pc-windows-msvc`, and `RUSTFLAGS=-C target-feature=+crt-static`, matching enhanced-dev CI. The Forge reference was `4026d5cebcede24943ece8dc34833e584f46cd90`, UiForge `6f2d125cc686cbc882f8098a939cc03cc23a59a1`; both explicit reference and spike environment variables were supplied.
+
+| Gate | Result | Ignored / explicit SKIP messages |
+| --- | --- | --- |
+| Addon suite (`--bin eqoa fork_ext::addons::`) | 332 passed, 0 failed | 23 ignored opt-ins; 4 symlink privilege SKIPs |
+| Forge opt-ins (`--bin eqoa fork_ext:: -- --ignored`) | 24 passed, 0 failed | 0 ignored, 0 SKIPs |
+| Bundled installation/update suite (`--bin eqoa fork_ext::bundled`) | 23 passed, 0 failed | 1 ignored, separately passed in the opt-in run; 0 SKIPs |
+| CI-equivalent full Windows workspace, with `--no-fail-fast` to collect every target | 2,152 passed, **2 failed** across 101 summaries | 31 ignored; 266 SKIP lines |
+| wasm (`cargo +1.99.1 check --locked -p eqoa --target wasm32-unknown-unknown`) | PASS | Initial prerequisite failure: wasm standard library absent; installed for 1.99.1, then reran successfully |
+| Explicit Python tools discovery (`python -X utf8 -m unittest discover -s tools -p "test_*.py"`) | 96 passed | 0 SKIPs |
+| Fresh sync script rerun (`python -X utf8 tools/sync_upstream.py --continue --tests-only`) | 1,869 Rust tests passed, 0 failed; 96 Python tests passed | 29 ignored; 174 SKIP messages |
+| Pinned footprint (`python -X utf8 tools/check_fork_footprint.py --base 91f9e72`) | PASS: 353 fork-owned / 31 shared; all named hooks intact | All budgets pass; no further increase |
+
+The sync-script result above was rerun after the usage-limit interruption; the unattended run was not used as final evidence. Aggregate Cargo pass totals include tests that return after logging SKIP; they do not establish disc/oracle coverage. Workspace SKIPs cover absent disc images, decomp/oracle executables, live captures/save states/decrypted assets, and Windows symlink privilege. Its 31 ignored tests comprise 24 Forge opt-ins (all passed separately), 2 FX benchmarks, 3 cape/light/helmet surveys, and AO/ground-fog cost measurements.
+
+### Confirmed upstream workspace failure
+
+The full Windows workspace gate is **not green**: `render --test ao` fails `the_foot_of_a_wall_darkened_and_open_ground_not` (plain grey `[127; 3]` versus asserted `[128; 3]`) and `the_same_at_freeport_as_at_the_origin` (factor difference 54 versus maximum 6) on this machine's NVIDIA GeForce RTX 3070 Ti / Vulkan. The other 2,152 workspace tests report passes. Repeating the unchanged AO tests with `WGPU_BACKEND=dx12` reproduces both failures (factor difference 58).
+
+Negative control: extracted untouched pinned upstream `91f9e72` with `git archive` into an ignored scratch tree, then ran `cargo +1.99.1 test --locked --manifest-path target/upstream-baseline/Cargo.toml -p render --test ao -- --nocapture --test-threads=1` with the same shared target/lock/static CRT. It reproduces the identical two Vulkan failures (1 passed / 2 failed / 1 ignored, zero SKIPs). `git diff 91f9e72 -- crates/render` confirms all AO tests, AO code and scene shaders are unchanged; fork differences are map/UI paths. This is a verified upstream failure on this host, retained visibly rather than weakening assertions or changing unrelated renderer behavior. A green CI-equivalent workspace gate remains outstanding.
+
+### API and bundled UI preservation
+
+Rechecked exactly one call each of `fork_hooks::begin_iteration`, `begin_game_event`, `end_game_event`, and `observe_text` in `play.rs`; begin/end bracket the native event match. Both `prepare_controls` calls remain in `viewer.rs` before console polling. API capture, controller/input and performance regressions pass in the client suite. Wereoxxs lifecycle, render pipeline, symbol surface, input capture and worst-case chat tests pass; unchanged ARPG and Avoids packages pass the opt-ins, with bundled native resource/lifecycle coverage also passing.
+
+The pinned `reviewed_base` was already `91f9e72dd6d111e20a37b73cea461444a18ad79c` in the merge/checkpoint. Retained deliberately after rechecking every budget; no move to the later `origin/master`, and no additional budget or hook-count changes in this finishing session. Earlier reviewed budget reasons remain above and in `docs/fork-footprint.json` / `docs/FORK-OWNERSHIP.md`.
+
+### Release build and generated-file cleanup
+
+`cargo +1.99.1 build --release --locked -p eqoa --target x86_64-pc-windows-msvc` passed with static CRT in 4m 38s. The same command is the final post-commit verification; its evidence is archived as `run/sync-2026-11-09-validation/finish-release-final.log`. The executable is `C:/Users/hocka/Paseo/targets/shared/x86_64-pc-windows-msvc/release/eqoa.exe`; this is a local build, not a published release.
+
+Archived the sync/validation logs and API audit under ignored `run/sync-2026-11-09-validation/` before cleanup. Verified the absolute cleanup targets and that `target/` contains no tracked files. Detached the four `target/{debug,release,wasm32-unknown-unknown,x86_64-pc-windows-msvc}` junctions themselves without traversing them, then removed this worktree's generated `target/` folder and `D:/eqoa-sync-2026-11-09-build-cache`. Both paths are absent. The shared cache remains the only build target. `C:/Users/hocka/Paseo/targets/eqoa-api-r2` still exists and was untouched. The final build uses scratch configuration/logs in the ignored archive, so it does not recreate a worktree target.
+
+No push, tag, merge into develop/enhanced, live play acceptance, or release publication was performed. The known upstream AO failures, missing fixture/privilege coverage, live owner/GM-server checks, Android device behavior and browser runtime remain outstanding; successful compilation and addon tests do not establish those results.
