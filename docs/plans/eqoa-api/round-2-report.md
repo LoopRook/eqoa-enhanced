@@ -108,3 +108,22 @@ Final fix-round gates (same isolated target, scratch configuration and timeout-p
 | Release | PASS: `cargo build --release --locked -p eqoa`, optimized rebuild in 1m 41s with 56 warnings; repeated after the final report/update-note commit. |
 
 The four privilege-blocked symlink branches remain unverified. No live game, physical-controller, audio-listening, native Linux or owner acceptance test was performed. Oracle/decomp prerequisites remain unavailable; these gates do not claim their parity. The remaining descriptor, event-recovery sequencing and post-event copy-cost review items above are unchanged. Update notes now describe modal chat retry and visible world-loss cancellation.
+
+## Performance regression
+
+Owner report: Nightly `develop` `1db5c2d` fell below one FPS after entering the world even with all addons disabled, including in-game menus. Merged `develop` into the worker branch before investigating (fast-forward). This was an unconditional native capture regression, not evidence of a slow Lua mod.
+
+An optimized test fixture runs the round-2 in-world frame seams with 200 entities, six group members and 200 abilities with long descriptions: 300 ordinary frames, 300 mode-13 menu frames, 600 entity packet mutations and 600 logical chat lines. It measures current-thread heap allocations and elapsed time around the hooks, excluding fixture construction, graphics rendering, network transport and ImGui. These are hook costs, not a claim of measured live-game FPS. The allocation meter is test-only and disabled outside measurement scopes.
+
+| Zero enabled addons | Before, optimized | Initial fast-path fix, optimized |
+|---|---:|---:|
+| Round-2 ordinary frame seams | 14,727.981 ?s; 80,480 allocations; 10,018,852 bytes/frame | 4.810 ?s; one 1,024-byte input initialization allocation over all 300 frames |
+| Same seams with in-game menu open | 17,076.672 ?s; 80,480 allocations; 10,018,824 bytes/frame | 4.643 ?s; 0 allocations |
+| Entity packet event | 13,725.320 ?s; 39,049 allocations; 5,152,946 bytes/event | 0.042 ?s; 0 allocations |
+| Logical chat line | 1.715 ?s; 29 allocations; 2,887 bytes/line | 0.017 ?s; 0 allocations |
+
+The first baseline repeat measured 13,080.002 ?s/frame and 10,037.397 ?s/event with identical allocation counts, showing timing variation but the same allocation mechanism. The old implementation failed the allocation regression bound with 24,144,000 allocations over 300 menu frames. At 100 packet events/second, the measured eager packet projection alone can consume more than one second of CPU time per second.
+
+Root causes: the HUD readiness/visibility path called the full Forge snapshot repeatedly; every snapshot assembled a full JSON-style native view and published it even with no enabled consumer; every packet then rebuilt/published another full view, including entity/ability list cloning and comparisons. Chat/input journaling was also unconditional. Input `live_snapshot` itself is a fixed-size copy, not the heavy part. Runtime filesystem discovery and profile loading are boundary/command work; no round-2 disk scan or log persistence was found in the zero-addon source hooks.
+
+Implementation and final gates are being validated below. Full native bootstrap is limited to activation/world transitions; ordinary source changes use typed owned deltas and consumer-boundary conversion. Unchanged records are detected before copying. HUD readiness uses scalar native predicates, and zero-addon snapshots retain only the character/profile/readiness metadata the manager needs. Existing shared hook call sites are unchanged.

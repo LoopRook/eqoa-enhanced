@@ -94,11 +94,10 @@ thread_local! {
 pub(crate) fn observe_report(report: &mut crate::input::Report, connected: bool, gameplay: bool) {
     let before = LIVE_REPORT.with(|r| r.replace(connected.then_some(*report)));
     let after = connected.then_some(*report);
-    if before != after {
-        super::native_core::emit(
-            "input.pad",
-            serde_json::json!({"before":before.map(native::pad_value),"after":after.map(native::pad_value)}),
-        );
+    if before != after && super::native_core::capture_requested() {
+        super::native_core::defer(512, move |c| {
+            c.emit("input.pad",serde_json::json!({"before":before.map(native::pad_value),"after":after.map(native::pad_value)}))
+        });
     }
     if gameplay && is_dpad_rotated() {
         let b = report.buttons;
@@ -144,10 +143,9 @@ pub fn reset_input_state() {
 }
 
 pub fn record_key_event(key: u8, is_down: bool) {
-    super::native_core::emit(
-        "input.key",
-        serde_json::json!({"key":get_key_name(key),"down":is_down,"repeat":false,"synthetic":false}),
-    );
+    super::native_core::defer(256, move |c| {
+        c.emit("input.key",serde_json::json!({"key":get_key_name(key),"down":is_down,"repeat":false,"synthetic":false}))
+    });
     INPUT_STATE.with(|s| {
         let mut state = s.borrow_mut();
         let seq = state.event_seq;

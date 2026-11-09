@@ -398,3 +398,391 @@ fn review_fix_m6_iteration_readiness_does_not_build_a_native_view() {
     begin_iteration(&mut p, true);
     assert_eq!(super::api_capture::take_view_builds(), 0);
 }
+
+#[test]
+fn performance_busy_world_zero_addons_frame_and_packet_allocation_bound() {
+    use crate::fork_ext::addons::{input, perf_alloc::measure};
+    let mut p = ready();
+    crate::fork_ext::addons::native_core::fixture_demand(false);
+    p.entities.slots = (0..200)
+        .map(|i| {
+            Some(net::entity::Entity {
+                id: 0x100 + i,
+                pos: [i as f32, 0., 1.],
+                p19: 255,
+                creature: Some(net::entity::Creature {
+                    name: format!("Busy creature {i}"),
+                    level: 20,
+                    target: 0x1234,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+        })
+        .collect();
+    p.group.in_group = true;
+    p.group.members = (0..6)
+        .map(|i| crate::group::Member {
+            id: 0x100 + i,
+            name: format!("Group {i}"),
+            active: true,
+            ..Default::default()
+        })
+        .collect();
+    p.abilities = (0..200)
+        .map(|i| {
+            (
+                i,
+                net::dump::Ability {
+                    id: i,
+                    name: format!("Ability {i}"),
+                    desc: "Long description. ".repeat(100),
+                    display_index: i,
+                    slot: -1,
+                    ..Default::default()
+                },
+            )
+        })
+        .collect();
+    p.forge_snapshot(None);
+    let mut report = crate::input::Report::default();
+    let (_, frame_time, frame_allocs, frame_bytes) = measure(|| {
+        for _ in 0..300 {
+            begin_iteration(&mut p, true);
+            health_redraw(&mut p, true, false);
+            std::hint::black_box(health_hidden(&p));
+            std::hint::black_box(p.forge_snapshot(None));
+            input::observe_report(&mut report, true, true);
+            std::hint::black_box(input::live_snapshot());
+        }
+    });
+    p.mode = 13;
+    let (_, menu_time, menu_allocs, menu_bytes) = measure(|| {
+        for _ in 0..300 {
+            begin_iteration(&mut p, true);
+            health_redraw(&mut p, true, false);
+            std::hint::black_box(health_hidden(&p));
+            std::hint::black_box(p.forge_snapshot(None));
+            input::observe_report(&mut report, true, true);
+        }
+    });
+    eprintln!(
+        "PERF zero-addons menu_frame_us={:.3} allocs/menu_frame={:.1} bytes/menu_frame={:.1}",
+        menu_time.as_secs_f64() * 1e6 / 300.,
+        menu_allocs as f64 / 300.,
+        menu_bytes as f64 / 300.
+    );
+    let event = net::session::Event::State {
+        channel: 1,
+        data: vec![],
+    };
+    let (_, event_time, event_allocs, event_bytes) = measure(|| {
+        for i in 0..600 {
+            let change = begin_game_event(&p, &event);
+            p.entities.slots[1].as_mut().unwrap().pos[0] = i as f32;
+            end_game_event(&p, change);
+        }
+    });
+    let (_, chat_time, chat_allocs, chat_bytes) = measure(|| {
+        for _ in 0..600 {
+            observe_text("busy server line", [1.; 4]);
+        }
+    });
+    eprintln!(
+        "PERF zero-addons frame_us={:.3} allocs/frame={:.1} bytes/frame={:.1}; event_us={:.3} allocs/event={:.1} bytes/event={:.1}; chat_us={:.3} allocs/chat={:.1} bytes/chat={:.1}",
+        frame_time.as_secs_f64() * 1e6 / 300.,
+        frame_allocs as f64 / 300.,
+        frame_bytes as f64 / 300.,
+        event_time.as_secs_f64() * 1e6 / 600.,
+        event_allocs as f64 / 600.,
+        event_bytes as f64 / 600.,
+        chat_time.as_secs_f64() * 1e6 / 600.,
+        chat_allocs as f64 / 600.,
+        chat_bytes as f64 / 600.
+    );
+    assert!(
+        menu_allocs <= 300,
+        "zero-addon menus must not allocate snapshots: {menu_allocs}"
+    );
+    assert!(
+        frame_allocs <= 300,
+        "zero enabled addons must not allocate per-frame state: {frame_allocs}"
+    );
+    assert!(
+        event_allocs <= 600,
+        "zero enabled addons must not allocate packet state: {event_allocs}"
+    );
+    assert_eq!(
+        chat_allocs, 0,
+        "zero enabled addons must not allocate a chat journal"
+    );
+}
+
+#[test]
+fn performance_busy_world_enabled_uses_incremental_typed_packet_updates() {
+    use crate::fork_ext::addons::{native_core, perf_alloc::measure};
+    let mut p = ready();
+    native_core::fixture_demand(false);
+    p.entities.slots = (0..200)
+        .map(|i| {
+            Some(net::entity::Entity {
+                id: 0x100 + i,
+                pos: [i as f32, 0., 1.],
+                p19: 255,
+                creature: Some(net::entity::Creature {
+                    name: format!("Busy creature {i}"),
+                    level: 20,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+        })
+        .collect();
+    p.abilities = (0..200)
+        .map(|i| {
+            (
+                i,
+                net::dump::Ability {
+                    id: i,
+                    name: format!("Ability {i}"),
+                    desc: "Long description. ".repeat(100),
+                    display_index: i,
+                    slot: -1,
+                    ..Default::default()
+                },
+            )
+        })
+        .collect();
+    p.group.in_group = true;
+    p.group.members = (0..6)
+        .map(|i| crate::group::Member {
+            id: 0x100 + i,
+            name: format!("Group {i}"),
+            active: true,
+            ..Default::default()
+        })
+        .collect();
+    let h = Host::new().unwrap();
+    p.forge_snapshot(None);
+    h.execute("seen=0;last=-1;eqoa.events.on('entity.changed',function(e) seen=seen+1;last=e.data.after.position.x end)").unwrap();
+    super::api_capture::take_view_builds();
+    let (_, frames, allocs, bytes) = measure(|| {
+        for _ in 0..300 {
+            std::hint::black_box(p.forge_snapshot(None));
+        }
+    });
+    let event = net::session::Event::State {
+        channel: 1,
+        data: vec![],
+    };
+    let (_, events, event_allocs, event_bytes) = measure(|| {
+        for i in 0..600 {
+            let change = begin_game_event(&p, &event);
+            p.entities.slots[1].as_mut().unwrap().pos[0] = i as f32 + 1000.;
+            end_game_event(&p, change);
+        }
+    });
+    assert_eq!(
+        super::api_capture::take_view_builds(),
+        0,
+        "unchanged frames and packet updates must never rebuild a complete view"
+    );
+    assert!(allocs <= 300, "unchanged enabled frames allocated {allocs}");
+    assert!(
+        event_allocs <= 600 * 10,
+        "typed source deltas must stay bounded: {event_allocs}"
+    );
+    for _ in 0..3 {
+        native_events::dispatch(&h).unwrap();
+    }
+    h.execute(
+        "assert(seen==600 and last==1599);assert(eqoa.entities.find(0x101).position.x==1599)",
+    )
+    .unwrap();
+    let (_, duplicates, duplicate_allocs, _) = measure(|| {
+        for _ in 0..600 {
+            let change = begin_game_event(&p, &event);
+            end_game_event(&p, change);
+        }
+    });
+    assert_eq!(
+        duplicate_allocs, 0,
+        "unchanged packet data must not be copied"
+    );
+    eprintln!(
+        "PERF enabled frame_us={:.3} allocations/frame={:.3} bytes/frame={:.1}; changed_event_us={:.3} allocations/event={:.3} bytes/event={:.1}; duplicate_event_us={:.3} duplicate_allocations={}",
+        frames.as_secs_f64() * 1e6 / 300.,
+        allocs as f64 / 300.,
+        bytes as f64 / 300.,
+        events.as_secs_f64() * 1e6 / 600.,
+        event_allocs as f64 / 600.,
+        event_bytes as f64 / 600.,
+        duplicates.as_secs_f64() * 1e6 / 600.,
+        duplicate_allocs
+    );
+}
+
+#[test]
+fn performance_busy_world_disabled_vms_leave_packet_and_frame_capture_quiescent() {
+    use crate::fork_ext::addons::{native_core, perf_alloc::measure};
+    let mut p = ready();
+    native_core::fixture_demand(false);
+    native_core::manager_demand(false);
+    p.entities.slots = (0..200)
+        .map(|i| {
+            Some(net::entity::Entity {
+                id: 0x100 + i,
+                ..Default::default()
+            })
+        })
+        .collect();
+    let hosts = (0..16).map(|_| Host::new().unwrap()).collect::<Vec<_>>();
+    for host in &hosts {
+        native_events::clear(host);
+    }
+    assert!(!native_core::capture_requested());
+    p.forge_snapshot(None);
+    let event = net::session::Event::State {
+        channel: 1,
+        data: vec![],
+    };
+    let mut report = crate::input::Report::default();
+    crate::fork_ext::prepare_controls(&mut report, true, true);
+    let (_, elapsed, allocs, bytes) = measure(|| {
+        for frame in 0..300 {
+            p.mode = if frame % 2 == 0 { 0 } else { 13 };
+            begin_iteration(&mut p, true);
+            health_redraw(&mut p, true, false);
+            std::hint::black_box(p.forge_snapshot(None));
+            report.buttons = frame as u16;
+            crate::fork_ext::prepare_controls(&mut report, true, true);
+            for _ in 0..2 {
+                let capture = begin_game_event(&p, &event);
+                end_game_event(&p, capture);
+            }
+            observe_text("ignored while disabled", [1.; 4]);
+        }
+    });
+    assert_eq!(
+        allocs, 0,
+        "retained disabled VMs must not allocate producer work"
+    );
+    eprintln!(
+        "PERF 16-disabled-VMs combined_frame_us={:.3} allocations={} bytes={}",
+        elapsed.as_secs_f64() * 1e6 / 300.,
+        allocs,
+        bytes
+    );
+}
+
+#[test]
+fn native_incremental_packets_preserve_group_target_and_hotbar_records() {
+    use crate::fork_ext::addons::native_core;
+    let mut p = ready();
+    native_core::fixture_demand(false);
+    p.entities.slots = vec![Some(net::entity::Entity {
+        id: 0x101,
+        pos: [10., 20., 30.],
+        creature: Some(net::entity::Creature {
+            name: "Recruiter".into(),
+            level: 20,
+            ..Default::default()
+        }),
+        ..Default::default()
+    })];
+    let h = Host::new().unwrap();
+    p.forge_snapshot(None);
+    h.execute("groups=0;eqoa.events.on('group.changed',function() groups=groups+1 end)")
+        .unwrap();
+    let event = net::session::Event::GroupRoster {
+        ids: vec![0x101],
+        names: vec!["Recruiter".into()],
+    };
+    let capture = begin_game_event(&p, &event);
+    p.group
+        .roster(&[0x101], &["Recruiter".into()], p.self_id32());
+    end_game_event(&p, capture);
+    h.execute(
+        "local g=eqoa.group.get();assert(g.members[1].position.x==10 and g.members[1].world_id==0)",
+    )
+    .unwrap();
+    let event = net::session::Event::State {
+        channel: 0,
+        data: vec![],
+    };
+    let capture = begin_game_event(&p, &event);
+    p.entities.slots[0].as_mut().unwrap().pos[0] = 55.;
+    end_game_event(&p, capture);
+    h.execute("assert(eqoa.group.get().members[1].position.x==55)")
+        .unwrap();
+    p.target = 0x101;
+    let event = net::session::Event::TargetInfo {
+        disposition: 4,
+        b: 0,
+        c: 0,
+        title: String::new(),
+        guild: String::new(),
+    };
+    let capture = begin_game_event(&p, &event);
+    p.target_info = Some(4);
+    end_game_event(&p, capture);
+    p.forge_snapshot(None);
+    h.execute("assert(eqoa.target.get().disposition==4)")
+        .unwrap();
+    let a = net::dump::Ability {
+        id: 0x1234,
+        display_index: 12,
+        slot: 0,
+        valid: 1,
+        name: "A real ability".into(),
+        ..Default::default()
+    };
+    let event = net::session::Event::AbilityAdd {
+        token: 0,
+        flag: 0,
+        ability: Box::new(a.clone()),
+    };
+    let capture = begin_game_event(&p, &event);
+    p.abilities.insert(a.id, a);
+    p.hud_menus
+        .build(&p.abilities, &p.dump.inventory, &p.gear, p.hud_bars());
+    end_game_event(&p, capture);
+    h.execute("ability=eqoa.abilities.find('4660');assert(eqoa.hotbar.list()[1].slots[1].ability==ability.ref)").unwrap();
+    let event = net::session::Event::AbilitySlot {
+        token: 0,
+        index: 12,
+        slot: 1,
+    };
+    let capture = begin_game_event(&p, &event);
+    p.abilities.get_mut(&0x1234).unwrap().slot = 1;
+    p.hud_menus
+        .build(&p.abilities, &p.dump.inventory, &p.gear, p.hud_bars());
+    end_game_event(&p, capture);
+    h.execute("assert(eqoa.abilities.find('4660').ref==ability.ref);assert(eqoa.hotbar.list()[1].slots[2].ability==ability.ref)").unwrap();
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(groups==2)").unwrap();
+}
+
+#[test]
+fn native_quiescent_metadata_matches_requested_snapshots_in_all_menu_modes() {
+    use crate::fork_ext::addons::native_core;
+    let mut p = ready();
+    native_core::manager_demand(false);
+    for mode in [0, 1, 7, 13, 30, 33, 34, 36, 60] {
+        p.mode = mode;
+        native_core::fixture_demand(true);
+        let full = p.forge_snapshot(None);
+        native_core::fixture_demand(false);
+        let minimal = p.forge_snapshot(None);
+        assert_eq!(
+            (
+                minimal.in_game,
+                minimal.start_menu,
+                minimal.ui_mode,
+                minimal.ui_busy
+            ),
+            (full.in_game, full.start_menu, full.ui_mode, full.ui_busy),
+            "mode {mode}"
+        );
+    }
+}

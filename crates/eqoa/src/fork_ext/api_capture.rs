@@ -203,15 +203,61 @@ impl Play {
 
 pub(crate) struct ChangeCapture {
     pub cooldown_before: Option<(i64, f64)>,
+    pub interested: bool,
+    pub kind: updates::Kind,
+    pub before: u64,
     pub previous_channel: &'static str,
 }
 impl Drop for ChangeCapture {
     fn drop(&mut self) {
-        CORE.with(|c| c.borrow_mut().text_channel = self.previous_channel);
+        if self.interested {
+            CORE.with(|c| c.borrow_mut().text_channel = self.previous_channel);
+        }
     }
 }
 pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> ChangeCapture {
     use net::session::Event;
+    let interested = crate::fork_ext::addons::native_core::capture_requested();
+    if !interested {
+        updates::inactive();
+        CORE.with(|c| {
+            let mut c = c.borrow_mut();
+            match event {
+                Event::State {
+                    channel: 0x42,
+                    data,
+                } if data.len() >= 233 => c.stats_received = true,
+                Event::State {
+                    channel: 0x43,
+                    data,
+                } if data.len() >= 4 => c.effects_received = true,
+                Event::WorldEntry { .. } | Event::Teleport { .. } | Event::Disconnected(_) => {
+                    c.stats_received = false;
+                    c.effects_received = false;
+                    c.generation += 1;
+                    c.entity_versions.clear();
+                    c.ability_versions.clear();
+                    c.cooldown_edges.clear();
+                    c.entity_worlds.clear();
+                    c.view.in_world = false;
+                    c.words = None;
+                    c.chat.clear();
+                    c.selected_target = None;
+                    c.disposition_target = None;
+                }
+                _ => {}
+            }
+        });
+        return ChangeCapture {
+            interested: false,
+            kind: updates::Kind::Other,
+            before: 0,
+            cooldown_before: None,
+            previous_channel: "system",
+        };
+    }
+    let kind = updates::kind(play, event);
+    let before = updates::fingerprint(play, kind);
     CORE.with(|c| {
         let mut c = c.borrow_mut();
         match event {
@@ -220,9 +266,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
                 c.disposition_target = c.selected_target;
             }
             Event::Teleport { .. } => c.reset("zone"),
-            Event::AbilityAdd { ability, .. } => {
-                c.ability_versions.remove(&ability.id.to_string());
-            }
+
             Event::WorldEntry { player, .. } => c.reset(if player.world == play.player.world {
                 "respawn"
             } else {
@@ -241,6 +285,9 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
         }
     });
     ChangeCapture {
+        interested,
+        kind,
+        before,
         previous_channel: CORE.with(|c| {
             let mut c = c.borrow_mut();
             let old = c.text_channel;
@@ -268,58 +315,23 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
     }
 }
 pub(crate) fn end_game_event(play: &Play, capture: ChangeCapture) {
-    let view = play.native_view(None);
-    CORE.with(|core| {
-        let mut c = core.borrow_mut();
-        let edges = if let Some((id, old)) = capture.cooldown_before {
-            let id = id.to_string();
-            view.abilities
-                .iter()
-                .find(|a| a["id"].as_str() == Some(id.as_str()))
-                .and_then(|after| {
-                    let lockout = after["lockout"].as_f64().unwrap_or(0.0).max(0.0);
-                    (old != lockout).then(|| {
-                        (
-                            after["id"].clone(),
-                            after["display_key"].clone(),
-                            old,
-                            lockout,
-                        )
-                    })
-                })
-                .into_iter()
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-        c.text_channel = capture.previous_channel;
-        c.publish(view, true);
-        for (id, key, old, lockout) in edges {
-            let name = if lockout == 0.0 {
-                "cooldown.ended"
-            } else if old == 0.0 {
-                "cooldown.started"
-            } else {
-                "cooldown.updated"
-            };
-            let now = crate::fork_ext::addons::native_core::time_unborrowed(&c);
-            let id_text = id.as_str().unwrap_or_default().to_string();
-            if lockout == 0.0 {
-                c.cooldown_edges.remove(&id_text);
-            } else {
-                let started = c.cooldown_edges.get(&id_text).map_or(now, |e| e.0);
-                c.cooldown_edges.insert(id_text, (started, now, lockout));
-            }
-            let ability = c
-                .view
-                .abilities
-                .iter()
-                .find(|a| a["id"] == id)
-                .map(|a| a["ref"].clone());
-            c.emit(
-                name,
-                json!({"ability":ability,"ability_id":id,"display_key":key,"lockout":lockout}),
-            );
-        }
-    });
+    if !capture.interested {
+        return;
+    }
+    if matches!(capture.kind, updates::Kind::Legacy) {
+        updates::dirty();
+    }
+    if updates::fingerprint(play, capture.kind) != capture.before
+        || matches!(capture.kind, updates::Kind::Ability(_))
+        || capture.cooldown_before.is_some_and(|(id, old)| {
+            play.abilities
+                .get(&id)
+                .is_some_and(|a| ee::div(a.lockout as f32, 1000.) as f64 != old)
+        })
+    {
+        updates::capture(play, &capture.kind, capture.cooldown_before);
+    }
 }
+
+#[path = "api_updates.rs"]
+pub(super) mod updates;

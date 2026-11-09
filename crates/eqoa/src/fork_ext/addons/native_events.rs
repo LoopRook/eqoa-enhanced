@@ -329,6 +329,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
     Ok(())
 }
 pub(crate) fn dispatch(host: &Host) -> Result<()> {
+    super::native_core::flush_deferred();
     let lua = &host.lua;
     let shared = bus(lua);
     if !host.iteration_in_progress() {
@@ -585,6 +586,10 @@ pub(crate) fn clear(host: &Host) {
     b.active = false;
     b.initialized = false;
     b.last_render = None;
+    drop(b);
+    if !has_consumers() {
+        super::native_core::invalidate_capture();
+    }
 }
 pub(crate) fn resource(
     lua: &mlua::Lua,
@@ -595,6 +600,7 @@ pub(crate) fn resource(
     if lua.app_data_ref::<Shared>().is_none() {
         return Ok(());
     }
+    super::native_core::flush_deferred();
     let b = bus(lua);
     b.borrow_mut().retired.clear();
     let data = lua.create_table()?;
@@ -711,4 +717,26 @@ pub(crate) fn start_iteration(lua: &mlua::Lua) {
 pub(crate) fn active(lua: &mlua::Lua) -> bool {
     lua.app_data_ref::<Shared>()
         .is_some_and(|b| b.borrow().active)
+}
+
+/// Native producers have no work when all instantiated VMs are inactive.
+pub(crate) fn has_consumers() -> bool {
+    REGISTRY.with(|r| {
+        r.borrow()
+            .iter()
+            .filter_map(std::rc::Weak::upgrade)
+            .any(|b| b.borrow().active)
+    })
+}
+
+pub(crate) fn interested(name: &str) -> bool {
+    REGISTRY.with(|r| {
+        r.borrow()
+            .iter()
+            .filter_map(std::rc::Weak::upgrade)
+            .any(|b| {
+                let b = b.borrow();
+                b.active && b.subscriptions.iter().any(|s| s.name == name)
+            })
+    })
 }

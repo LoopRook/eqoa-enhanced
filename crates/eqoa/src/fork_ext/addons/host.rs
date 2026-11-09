@@ -13,6 +13,7 @@ use std::{
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Snapshot {
+    pub capture_pending: bool,
     pub character: Option<super::named_profiles::CharacterSnapshot>,
     pub in_game: bool,
     pub start_menu: bool,
@@ -547,6 +548,7 @@ impl Host {
         self.iteration_active.set(false);
     }
     pub(crate) fn frame_entry(&self, function: &Function) -> Result<()> {
+        super::native_core::flush_deferred();
         self.begin_iteration();
         let bus = super::native_events::bus(&self.lua);
         let initialized = bus.borrow().initialized;

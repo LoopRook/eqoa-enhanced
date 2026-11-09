@@ -245,11 +245,13 @@ impl Manager {
         while let Some(command) = self.commands.pop_front() {
             self.command(command);
         }
+        super::native_core::manager_demand(self.entries.iter().any(|e|e.enabled_intent && e.status != Status::Failed));
         let waiting_world = self.profile_waiting_world();
         let mut entries = std::mem::take(&mut self.entries);
         let mut count = entries.iter().filter(|e| e.instance.is_some()).count();
         for entry in &mut entries {
             if !waiting_world
+                && !snapshot.capture_pending
                 && entry.enabled_intent
                 && entry.status != Status::Failed
                 && entry.not_before <= self.frame_number
@@ -370,6 +372,7 @@ impl Manager {
         super::visibility::publish_claims(&self.hud_claims.borrow());
     }
     pub fn shutdown(&mut self) {
+        super::native_core::manager_demand(false);
         super::visibility::publish(false);
         self.shutdown_inner(true);
     }
