@@ -18,6 +18,7 @@ pub(super) const QUESTS_CATEGORY: Category = Category {
     items: &[1045, 1046, 1043, 30, 40, 49],
     note: Note::None,
 };
+pub(super) const MAP_CATEGORY: Category = Category { name: "Map", items: &[1054, 1055], note: Note::None };
 pub(super) const ITEMS: &[(i32, &str)] = &[
     (31, "Target of Target"),
     (42, "Mana Bars"),
@@ -33,6 +34,8 @@ pub(super) const ITEMS: &[(i32, &str)] = &[
     (1052, "Combat Parser"),
     #[cfg(not(target_arch = "wasm32"))]
     (1053, "Addon Manager"),
+    (1054, "Map"),
+    (1055, "Quest Helper"),
 ];
 pub(super) const CATEGORY: Category = Category {
     name: "Mods & Addons",
@@ -73,6 +76,8 @@ pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
         1046 => c.quest_tracker = !c.quest_tracker,
         // Stats Box: drawn or not from the next frame (`statbox`)
         1047 => c.stats_box = !c.stats_box,
+        1054 => c.map = !c.map,
+        1055 => c.quest_helper = !c.quest_helper,
         1048 => c.target_hp_percent = !c.target_hp_percent,
         1049 => c.xp_details = !c.xp_details,
         1050 => c.hud_numbers = !c.hud_numbers,
@@ -104,6 +109,8 @@ pub(super) fn value_text(vui: &Vui, item: i32, c: &ClientOptions) -> Option<Vec<
         1045 => on_off(c.quest_markers),
         1046 => on_off(c.quest_tracker),
         1047 => on_off(c.stats_box),
+        1054 => on_off(c.map),
+        1055 => on_off(c.quest_helper),
         1048 => on_off(c.target_hp_percent),
         1049 => on_off(c.xp_details),
         1050 => on_off(c.hud_numbers),
@@ -213,9 +220,9 @@ mod tests {
         assert_eq!((w.page, w.cat), (3, None), "Extended's categories");
         // UI: Ability Bars, Target of Target, Mana Bars, Minimap, Stats Box,
         // Update Notices
-        w.cat_sel = 2;
+        w.cat_sel = crate::options::CATEGORIES.iter().position(|c| c.name == "UI").unwrap() as i32;
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(2), 22), "UI, Ability Bars");
+        assert_eq!((w.cat, w.item), (Some(3), 22), "UI, Ability Bars");
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 31, "Target of Target");
         assert!(!settings::client().target_of_target, "off: the game's target bar alone");
@@ -250,9 +257,9 @@ mod tests {
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         // Map & Quests: Quest Markers, Quest Tracker, Map Markers, Text, HUD,
         // Raid List
-        w.cat_sel = 7;
+        w.cat_sel = crate::options::CATEGORIES.iter().position(|c| c.name == "Map & Quests").unwrap() as i32;
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(7), 1045), "Map & Quests, Quest Markers");
+        assert_eq!((w.cat, w.item), (Some(8), 1045), "Map & Quests, Quest Markers");
         assert!(settings::client().quest_markers, "on: the map's marks where the server sends them");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().quest_markers, cues.last()), (false, Some(&11)), "off");
@@ -295,12 +302,12 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::raid_list(), "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Map & Quests' last row");
+        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Map & Quests last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         // Mods & Addons, in its registered order
-        w.cat_sel = 8;
+        w.cat_sel = crate::options::CATEGORIES.iter().position(|c| c.name == "Mods & Addons").unwrap() as i32;
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.row, w.item), (Some(8), 0, item_named("Target HP %")), "Mods & Addons page: Target HP % first");
+        assert_eq!((w.cat, w.row, w.item), (Some(10), 0, item_named("Target HP %")), "Mods & Addons page: Target HP % first");
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.row, w.item), (1, item_named("XP Details")), "XP Details");
         press(&mut w, &mut o, key::DOWN, &mut cues);
@@ -314,7 +321,7 @@ mod tests {
         assert_eq!((w.row, cues.last()), (5, Some(&9)), "Mods & Addons last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.cat_sel, cues.last()), (9, Some(&11)), "Textures, after Mods & Addons");
+        assert_eq!((w.cat_sel, cues.last()), (11, Some(&11)), "Textures, after Mods & Addons");
         testing::reset(false);
     }
 
@@ -339,5 +346,17 @@ mod tests {
         w.change(&mut o, 1, &mut cues, &mut ups);
         assert!(settings::client().shadows && !settings::client().quest_tracker);
         settings::testing::reset(true);
+    }
+
+    #[test]
+    fn map_masters_toggle_independently_of_each_other_and_existing_parts() {
+        let mut c = ClientOptions::default();
+        assert!(change(&mut c, 1054));
+        assert!(!c.map && c.quest_helper && c.minimap && c.quest_markers);
+        assert!(change(&mut c, 1055));
+        assert!(!c.map && !c.quest_helper && c.quest_tracker);
+        assert_eq!(ClientOptions::from_text(&c.to_text()), c);
+        assert!(change(&mut c, 1054));
+        assert!(c.map && !c.quest_helper);
     }
 }

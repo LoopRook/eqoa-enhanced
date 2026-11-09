@@ -6,6 +6,308 @@ in the same push as the changes it describes. The dev release's page shows them
 is put on the page by `.github/workflows/notes.yml`.
 
 
+## 2026-11-09 · Light Shadows: no square under lamps, steady weapon glows
+- With Light Shadows on, the ground under a street lamp is lit again. The lamp's light sits inside its little
+  housing, and the housing's floor was darkening a square of ground under every lamp.
+- A glowing weapon (an epic sword's glow) or a spell's light no longer makes the shadows of the person or weapon
+  carrying it flicker on and off. Those lights still cast the shadows of walls and everything else that stands
+  still, steadily; torches, braziers and your lantern still cast everyone's shadows as before.
+
+## 2026-11-09 · Torches, lamps and spells cast shadows
+- A new option, Extended > Lighting > Light Shadows (off unless you turn it on; like Sun Shadows it needs Dynamic
+  Lighting on): the light of torches, braziers, candles, lamps, your lantern and spells now stops at whatever stands
+  in its way. A character standing by a brazier casts a shadow away from it, a stool by a torch casts its own, and a
+  torch's light no longer comes through the wall it hangs on into the room behind.
+- Each moment the brightest and nearest lights cast shadows (eight on a computer, four in a browser and on a
+  phone). When another light takes one's place, the old shadow fades out and the new one fades in over a quarter of
+  a second, so no shadow pops in or out.
+- Your own lantern does not shadow the ground round your feet; the people and things near you cast shadows away
+  from you as you walk.
+- Shadow Distance, a slider beside them: how far out shadows reach. At its left, where it starts, they reach as far
+  as before; to the right the sun's shadows reach up to four times as far (1000) and more of the nearby lights cast
+  at once, up to every lit torch and lamp you can see (sixteen on a computer, eight in a browser and on a phone).
+  Farther costs more of your graphics card.
+- With it off, the game looks exactly as it did.
+
+## 2026-11-09 · Texture packs load without freezing the game
+- A texture pack's pictures are now read in the background. Until a texture's replacement is ready the game draws
+  its own texture there, then puts the replacement in its place a moment later, so the game no longer stops while a
+  pack is read. With a large HD pack the game used to freeze for seconds on arriving in a city like Freeport; now
+  it keeps moving.
+- Dump Textures only ever writes the game's own textures, as the disc has them, whether a pack is loaded or not:
+  never a pack's picture and never an enlarged one.
+
+## 2026-11-09 · Texture packs in a folder beside the game
+- Texture packs and texture dumps now go in a `textures` folder next to the game itself (beside `eqoa.exe` on
+  Windows, beside `eqoa` on Linux and on a Mac), where they are easy to find: put a pack's files in
+  `textures/SLUS-20744/replacements`, and Dump Textures writes to `textures/SLUS-20744/dumps`. Inside it the folders
+  are PCSX2's, so a pack made for PCSX2 still goes in as it is.
+- Options > Extended > Textures has a new row, Texture Folder: Open shows the folder in your file manager
+  (Explorer, the Finder or your desktop's). Beside Back the page says where the folder is, and how many textures
+  the packs in it replace. A pack you add while the game runs is read when you turn Texture Packs off and on.
+- The packs and dumps you kept in the settings folder (`eqoa-rs`) are moved there the first time the game uses
+  them. If they are on another disk from the game they stay where they are, and are still read.
+- Where the game cannot write in its own folder (in Program Files, say), it keeps them in the settings folder as
+  before, and the Textures page says so.
+- An update replaces only the game's program: the `textures` folder beside it is never touched.
+- In a browser and on Android nothing changes.
+
+## 2026-11-09 · The map and the quest helper are back
+- M opens the map again: the whole world drawn from your own disc, with the towns' names, the coach routes and
+  stops, the XP camps and the places players suggested and a GM accepted. Click (or tap) to put a waypoint, which
+  shows on the compass's rim wherever you are; in a group, O (or Q held, or Shift and a click) tells your group
+  where to meet, and their map and compass show it. G stays the attack.
+- The minimap is back under the quick menus (N shows or hides it), with your group, the creatures and players
+  near you, your target and your waypoint. Click it to open the map; the mouse wheel over it zooms.
+- The quest helper is back: a gold "!" on the map and the minimap at each quest giver you can take a quest from
+  now, a "?" where a step of a quest you have is to be done, each with a card of the quest, and the quest tracker
+  under the minimap ("slashed pawn belt: 0/2"); click the tracker to open your quest journal. On a server that
+  does not send quest marks (Sandstorm), the client works them out itself, marked "(guide)".
+- Both are in Options > Extended > Map, on by default: Map (the map, the minimap and the waypoints), Minimap,
+  Map Markers, Quest Helper (the quest marks, the tracker and the guide) and Quest Tracker. Turn the Map and the
+  Quest Helper off and the game is as it was without them.
+- The Stats Box, other players' mana bars and Target of Target are not coming back.
+- A macro you put on M, N, O, =, +, - or _ (free keys until now) keeps its key: that map key is then
+  left without one, and you can give it another on the Controls page (F1). A key you moved there keeps it too.
+
+## 2026-11-09 · A crash in the browser comes with your next bug report
+- If the game stops in the browser ("The client stopped" or "The graphics stopped"), the next bug report you send
+  (F3, or /bug in chat) carries the message it stopped with, once, so the GMs can see what went wrong without you
+  copying anything. Nothing is sent until you send a report yourself.
+- A bug report from the browser now says which build of the page you were on.
+- When chat lines can't go out (the server reset your connection in the world and hasn't sent the world again), the
+  game still sends nothing for them, as the PS2 does, but your next bug report says how many were held back.
+- A crash that could come when the server's connection broke in a particular way (the game stopped the moment
+  you moved) can't happen any more: the game carries on without that connection and says so in its log.
+
+## 2026-11-09 · Posts no longer pull the camera in
+- Turning the camera with something thin close by, like the posts holding up the roof of the well by the Freeport
+  coach, a lamp post or a pole, the camera no longer jumps in each time one passes behind you: it stays where you
+  had it, zoomed out as far as you like, and the post simply passes across the view. Walls, roofs and anything broad
+  still stop the camera as before.
+
+## 2026-11-09 · Every body of the new races
+- The new races' Customize Character page now offers every other body of their creature on the disc, the named
+  ones' too: goblin kings, overseers, priests and bandits; grey, black-and-tan and risen gnolls; Deathfist and
+  hatebone orcs (three of them women's); two more lizardmen, a ratman trickster, three aviaks no one in the world
+  wears, the fire giant reaver and King Daran, the great skeletons, a brown minotaur, and the dryad's erych and
+  haliai kin. Each stands as tall as its race.
+- Hair colour where the body has hair: goblins, orcs, kappas and the dryad's kin, and a kerran's mane.
+- A body you choose waves, bows, points and cheers as its race does, and a great skeleton wears armour round
+  its bones as a skeleton does.
+- Character select shows a character you just made in the body you chose (it showed the race's usual body
+  until you looked at another character).
+- Characters made before keep their look.
+
+## 2026-11-09 · A Skeleton's helm covers its skull
+- With the 2002 disc's art on (F9), a Skeleton's helm no longer shows the back of its skull poking out
+  through it. The helm now sits a little wider and deeper over the skull, as the Frontiers art's helm
+  always has, so the whole skull stays inside it from every side and in every move.
+- The old, mossy and frost bone skeletons a Skeleton can choose wear their helms a touch further forward
+  in the Frontiers art too, so their cheekbones stay inside the helm's sides, and so do the great skeletons,
+  with either art.
+- Every other race's helm, and a skeleton creature's, is exactly as before.
+
+## 2026-11-09 · Capes sit clear of armour
+- A cape now sits off what you wear: plate, broad shoulders and a robe's skirt show through it far less as you
+  stand, walk and run. Over the back and shoulders it moves with the body under it, and under a robe its lower
+  part swings with the robe's hem.
+- Wherever your race's walk or run would still bring the body through it (a broad back, an arm swung back), it
+  hangs a little further off, only there and never by much; where nothing comes near it, it rests where it did.
+
+## 2026-11-09 · The camera at posts and low roofs
+- Steering with the right mouse button (or with the camera tilted low), the camera no longer jumps all the way in
+  to your character when something close behind you is in its way, like the posts and roof of the well by the
+  Freeport coach. It comes in only as far as it must, just in front of what is in the way, and goes back out to
+  where you had it once the way is clear.
+
+## 2026-11-09 · Jump on Space, and a fall from the top
+- Space jumps now, on a server that has jumps (the Heirloom Test Server), and V still does. The attack (hold to
+  attack, Auto Attack's toggle, a corpse's loot) is on G.
+- Wherever Space makes no jump it still does what it always did: on a server without jumps (the Live Server,
+  Sandstorm, eqoa.live) Space attacks, and with a window up it takes from a corpse, opens a trade's chat line and
+  casts a fishing line, as before.
+- Keys you moved on the Controls page (F1) stay where you put them. A macro you had put on G keeps G; the attack
+  then has no key until you give it one there.
+- Other players using this client now see your jump as you do: from the top of the arc you fall, and you land with
+  your landing when you come down. Before, they saw the rise and the top standing or running, and no landing.
+- The new races whose bodies had no fall of their own (froglok, giants, kerran, goblin, aviak, lizardman, kappa,
+  gnoll, kobold, minotaur, ratman, satyr and gargoyle) now fall and land as a human does, fitted to their size;
+  pixies, fairies and fungusmen use the nearest moves of their own, as their emotes do. Before, they stood in the
+  air. That is on a server with jumps, in a jump or a fall off a ledge, for you and for others using this client;
+  a PlayStation 2 still shows them standing.
+
+## 2026-11-09 · Spells' lights no longer flash
+- With Dynamic Lighting on, the light a spell throws on the ground and the walls round it now changes smoothly.
+  Some spells' light flickered many times a second, jumping in brightness and in colour (white to blue and
+  back) over a wide circle, which could be hard on the eyes and a risk for anyone sensitive to flashing light.
+  A spell's light now swells in as the spell starts, holds steady while it plays and fades out as it ends: it
+  never flashes more than three times a second, the limit photosensitivity guidance sets.
+- Spells still light their surroundings in their own colours; only a lightning bolt's light, which turned
+  everything round it full white, is toned down a little. The glow of an epic weapon and the light of a fiery
+  creature are steadied the same way.
+- Where more lights are about than the game draws at once (a town's torches at night when a spell goes off), a
+  torch that gives up its place to the spell's light now dims out over a moment instead of going dark at once,
+  and comes back the same way.
+- Torches, braziers and lamps look as they did. With Dynamic Lighting off nothing changes.
+
+## 2026-11-09 · A pack and a bank of 100
+- On a server that has them (the Heirloom Test Server), your inventory holds 100 items and your bank 100, where the
+  game holds 40 of each. What you wear counts among the 100, as it counts among the game's 40.
+- Every window shows them all: the inventory's tabs, the bank, a merchant's list when you sell, a trade, a corpse,
+  the forge and the auction's bank list. They scroll as they always have: hold up or down, or turn the mouse wheel;
+  up from the first row goes to the last.
+- On a server without them nothing changes. A character carrying more than 40 who logs in on a PS2 sees its first 40
+  (what it wears first), and the server keeps the rest safe; they come back when you log in here again.
+
+## 2026-11-09 · Jump
+- On a server that has jumps (eqoaclassic can turn them on), V jumps: about half your height, straight up when you
+  stand and on along your way when you run. You come down as a fall comes down and land where you came down, and
+  others playing this client see you rise and land.
+- The jump is on the Controls page (F1), where you can move it to another key. Every button of a controller is
+  already one of the game's, so a controller has no jump button until you give it one there.
+- No jump in the water, in the air, while casting, frozen or rooted, or with a window up. A server without jumps
+  (Sandstorm, eqoa.live) never offers one, and there V does nothing. A PlayStation 2 cannot jump: it shows a
+  jumping player on the ground, playing the fall for a moment.
+
+## 2026-11-09 · Customise the new races
+- On a server with races of its own, the Customize Character page now offers each new race its own choices
+  instead of faces and hair it cannot wear: another kind of the same creature (hill, ice, sand and fire giants and
+  cyclopes; grey, green, ice and fire goblins; hawk, raven, vulture and owl aviaks; tiger and lion kerran; red and
+  pale fungusmen, and more), a satyr's face and hair, a brownie's hair, and colours for a fungusman's skin, cap,
+  growths and bag, a pixie's or fairy's wings and dress, a minotaur's hide and horns, a dryad's bark and leaves and
+  a giant's whole tone. Left and right step through them on the model, as with faces and hair.
+- What you choose shows at character select and in the world, to every player using this client. The kind of body
+  shows on every client, a PS2 included; the colours, faces and hair show on this client.
+- Characters made before keep their look, and every other race looks exactly as it did.
+
+## 2026-11-09 · Capes
+- On a server that has capes (the Heirloom Test Server), your character can wear one: a cape goes in its own
+  slot, so it is worn with everything else. Equip it from the Equipment tab like any other piece; its
+  description says Slot: Cape.
+- Capes are drawn on you, on the other players around you and at character select. They hang from the
+  shoulders and move with the body: they sway as you walk and run, and fold when you swing.
+- Five looks, borrowed from capes the game's own characters wear: a knight's long blue silk cape, a
+  vampire's black cape with a high red-lined collar, a long pleated violet cape, Dread's maroon cape with
+  its tall collar, and the same with Dread's fur mantle over the shoulders. Some come in other colours.
+- Every race can wear one, the server's own races too, but those with wings (pixies, fairies and gargoyles).
+  On a server without capes nothing changes.
+
+## 2026-11-09 · A Skeleton's helm shows in the 2002 art
+- With the 2002 disc's art on (F9), a Skeleton now wears its helm in the world, as character select
+  already showed it. The 2002 disc's own skeleton has no place on its head for a helm, so the helm
+  went unseen in the world; it now sits on the skeleton's skull, where a human wears it.
+- In the 2002 art, character select and character creation now show a race's body the way the world
+  shows it: the 2002 disc's own Skeleton, Goblin, Lizardman, Brownie, Gnoll, Orc and Minotaur, where
+  they showed the Frontiers bodies before. A Goblin's or an Orc's helm, which their 2002 bodies wear
+  in the world, now shows in character select too. With the Frontiers art nothing changes.
+
+## 2026-11-09 · A Skeleton's armour is solid from every side
+- The armour a Skeleton wears round its bones no longer lets you see through it. Looking down at its
+  collar, or in through the gaps of chain and cloth, you now see the inside of the armour, not the
+  ground behind it.
+
+## 2026-11-09 · Sun Shadows move smoothly
+- Shadows now move with the sun a little every frame as the day goes on. Until now they stood still for a second or
+  so and then jumped to their new place, which showed most on the long shadows of the morning and the evening.
+- The shadows of characters walking or running some way off keep up with them now. Farther than about 40 from the
+  camera they were redrawn only every other frame, so they trailed a step behind and flickered over the character's
+  own sunlit side.
+- Sun Shadows ask a little more of the graphics card for it: about a third of a millisecond a frame on a Radeon RX 580,
+  at 1080p and at 4K alike.
+
+## 2026-11-09 · The new races wave, bow, point and cheer
+- On a server with races of its own, every new race now does the four emotes. Most do them the way a human
+  does, in their own size and shape: a Hill Giant raises its huge arm over its head to wave and bends right
+  over to bow, a Kerran points, a Gnoll cheers with a fist in the air.
+- Pixies, Fairies and Fungusmen, built too differently for that, use moves of their own: a Pixie raises a hand
+  high to wave and dives forward to bow, a Fairy opens its wings, a Fungusman swings an arm out and tips its
+  cap.
+- Other players see your emote as you do. Until now a new race's emote did nothing at all (it started its
+  standing animation over), which is still what a PS2 shows.
+- Brownies and Skeletons, which always had the human's emotes, and everyone else, creatures included, are
+  unchanged.
+
+## 2026-11-09 · Longer bug reports
+- A bug report or petition now holds up to 2,047 characters on a server that takes them: Support's request form,
+  the one F3 and /bug open, and a reply from Support's inbox. That is four times as much room to say what happened,
+  where, and how to make it happen again. The box scrolls as you type, and Up and Down move through its lines.
+- On a server that does not take them it holds 511 characters, as on a PS2.
+- Typing in a text box and pressing Up or Down straight after could close the game. It no longer does, and a long
+  text no longer slows the game down while its box is open.
+
+## 2026-11-08 · The mastery window can't hang
+- If the server's answer to a mastery request (buying a mastery, opening one, your share of experience) is lost on the
+  way, the window's "please wait" box now lets go after ten seconds instead of staying up for good with no way out.
+
+## 2026-11-08 · Sun Shadows
+- A new option, Options > Extended > Lighting > Sun Shadows, lets the sun cast shadows. Buildings, walls, roofs,
+  trees and their leaves, rocks, hills and every character block the sunlight, and their shadows fall across the
+  ground, the walls and each other. They follow the sun through the day: short at noon, long in the morning and
+  the evening. Step under a roof, an awning or a tree and you stand in its shade.
+- It works with Dynamic Lighting on (the page tells you when it is off). The shadows reach a good way from the
+  camera and fade out beyond it. At night there are none: the game's night light comes from under the horizon.
+- It is off unless you turn it on, and off the game looks exactly as before.
+
+## 2026-11-08 · eqoaclassic.com is the server out of the box
+- A new install (on a phone too) connects to eqoaclassic.com without being told: the title's Network Setup shows it, and
+  logging in works at once. Until now a client that had never been given a server had none, so a phone's first login
+  could not reach anyone.
+- A server you typed in Network Setup is kept as it is, and so is a blank one (none). The browser page is unchanged: it
+  is told its own server.
+
+## 2026-11-08 · Fungusmen keep their bag and fungus, skeletons wear real armour
+- A Fungusman in armour keeps its own bag and strap, and its glowing fungus: the growths on its
+  shoulders, wrists and shins, its claws and its cap look as they always did, and the armour covers
+  the rest of its body. Its upper arms now show the armour's sleeve, shoulder plate and all, instead
+  of a stretched, smeared piece of chest plate.
+- A Skeleton now wears its armour the way a human does, round its bones, instead of armour painted
+  thinly onto each bone. Only what it wears is shown: a chest piece alone leaves its bony legs, hands
+  and feet bare.
+- As before, only players' characters are dressed this way, and every body that already showed
+  armour looks exactly as it did.
+
+## 2026-11-08 · Ambient Occlusion
+- A new option, Options > Extended > Lighting > Ambient Occlusion, shades the places the light reaches least: where a
+  wall meets the ground, the corners of a room, under a ledge or the edge of a roof, round a barrel, a post or a tree
+  standing on the ground, and under the feet of everyone standing about. The world looks more solid and its objects
+  sit on the ground instead of floating over it.
+- Water, glows, fog, spell effects, shadows, names and the HUD are drawn over it as they always were, and it fades out
+  in the distance and into the fog. It works with Dynamic Lighting, Render Scale and both Ground Fog settings, in a
+  browser too.
+- It is off unless you turn it on, and off the game looks exactly as it did on a PS2. On, it asks a little more of
+  the graphics card: under a millisecond a frame at 1080p on a Radeon RX 580, and about one and a half at 1440p or
+  4K.
+
+## 2026-11-08 · Gargoyles hold their weapons
+- On a server with races of its own, a Gargoyle now shows what it holds: its weapons in its claws and its
+  shield on its left arm, at character select and in the world. The gargoyles' body was made for creatures
+  that carry nothing, so a PS2 draws no weapon on it either; now a player's Gargoyle carries its gear as the
+  other races do, and a bow in hand shoots its arrows. Its swings are still its own claw attacks.
+- Only players' characters change: gargoyle creatures look as they always have, and so does a player
+  turned into a creature by a form or an illusion. Every race that already showed its weapons looks
+  exactly as before.
+
+## 2026-11-08 · Dynamic Lighting
+- A new option, Options > Extended > Lighting > Dynamic Lighting, lights the world as a PC game would: the light of
+  the sky and of your lantern is worked out for every pixel instead of only at the corners of each surface, so it
+  falls smoothly across the ground and the walls.
+- With it on, the world's own fires light what is round them: torches, braziers, candles and street lamps throw a
+  warm pool of light onto the ground and onto the characters walking past, flickering a little as a flame does.
+  Spells light up their caster and the walls near them in their own colour while they play, and so do glowing
+  weapons and fiery creatures.
+- It is off unless you turn it on, and off the game looks exactly as it did on a PS2.
+
+## 2026-11-08 · Armour shows on the races with creature bodies
+- On a server with races of its own, the Kappa, Brownie, Pixie, Fairy, Minotaur, Dryad, Skeleton,
+  Fungusman and Gargoyle (and the Hill Giant's own body) now show the armour and robes they wear. Their
+  bodies were never made for armour, so nothing they wore was drawn; the armour is now laid over their
+  torso, arms, hands, legs and feet the way it sits on a human, in its own colour and dye. Heads, wings,
+  tails and the like keep their own look.
+- Only players' characters are dressed this way: creatures and other NPCs look as they always have.
+  Every body that already showed armour (the game's races, Kerrans, Goblins, Frogloks and the rest)
+  looks exactly as before.
+
 ## 2026-11-08 · Texture packs and texture dumps, as PCSX2 makes them
 - Texture packs made for PCSX2 now work here as they are: put the pack's files in the `textures/SLUS-20744/replacements`
   folder of the client's settings folder (`eqoa-rs`: in `~/.config` on Linux, `~/Library/Application Support` on a Mac,

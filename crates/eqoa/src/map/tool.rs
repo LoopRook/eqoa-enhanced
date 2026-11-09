@@ -200,8 +200,8 @@ pub fn capture(map: &Map, device: &wgpu::Device, queue: &wgpu::Queue, size: (u32
             multiview_mask: None,
         });
     }
-    map.draw(device, &mut enc, &tv, &depth);
-    map.draw_mini(device, &mut enc, &tv, &depth);
+    map.draw(device, &mut enc, &tv, &depth, size, size);
+    map.draw_mini(device, &mut enc, &tv, &depth, size, size);
     enc.copy_texture_to_buffer(
         target.as_image_copy(),
         wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },

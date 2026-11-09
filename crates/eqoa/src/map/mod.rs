@@ -44,9 +44,9 @@
 //!
 //! The group's waypoint (`group_waypoint`, F3 20261026-212034, a player's
 //! "Long-press square on map to set a group waypoint"; the user's choice:
-//! over the group's chat): □ held `HOLD` (Q held), G, a click with Shift held
+//! over the group's chat): □ held `HOLD` (Q held), O, a click with Shift held
 //! or a finger held still on the map asks Play to tell the group
-//! (`take_group_ask`): □ held and G at □'s spot (the middle once panned, else
+//! (`take_group_ask`): □ held and O at □'s spot (the middle once panned, else
 //! the target, else the player's own place: come to me), a click or a finger
 //! at the spot under it (a marker's own spot on one). It is drawn orange under
 //! the personal one with its sender's name, on the minimap and the compass
@@ -317,6 +317,12 @@ pub struct Map {
     square_hold: Option<(f32, bool)>,
     /// Shift is held (the viewer's): a click puts the group's waypoint
     pub shift: bool,
+    /// Ctrl (or ⌘) is held (the viewer's), and the server offered a GM's
+    /// travel by the map (`net::session::Session::map_travel`, Play's every
+    /// frame): together, a click asks to travel to its spot (`take_travel_ask`)
+    pub ctrl: bool,
+    pub travel: bool,
+    travel_ask: Option<community::Spot>,
     /// the group's waypoint, and the spot the player asked the group to be
     /// told of (`take_group_ask`)
     group_mark: Option<group_waypoint::GroupMark>,
@@ -330,7 +336,7 @@ pub struct Map {
     group_told: Option<u32>,
 }
 
-/// G on a keyboard while the map is up (`keyboard`): the group's waypoint at
+/// O on a keyboard while the map is up (`keyboard`): the group's waypoint at
 /// □'s spot at once. No pad key has it; □ held is the pad's.
 pub const KEY_GROUP: i32 = 0x7E31_0001;
 
@@ -338,8 +344,11 @@ impl Map {
     /// Opens the map on the player's area (the view it was last left at, or
     /// the opening one, centred on the player). The mouse points at nothing
     /// until it moves over the map, and no waypoint is this time's yet
-    /// (Suggest's spot, `suggest`).
+    /// (Suggest's spot, `suggest`). Nothing with Extended's Map off.
     pub fn show(&mut self) {
+        if !crate::settings::map() {
+            return;
+        }
         self.open = true;
         self.follow = true;
         self.held = [false; 6];
@@ -364,6 +373,25 @@ impl Map {
                 l.map.free(t);
             }
         }
+    }
+
+    /// Extended's Map off (`Play::map_frame`, every frame it is): closed, and
+    /// what it made let go of (the world's build, its pictures on the GPU,
+    /// the minimap's), as a map never made; made again once it is on, out of
+    /// the cache (`store`). The waypoints, the group's waypoint and the
+    /// worlds' names stay.
+    pub fn off(&mut self) {
+        self.close();
+        self.travel_ask = None;
+        self.group_ask = None;
+        self.mini_off();
+        if self.layers.is_some() || self.world.is_some() {
+            crate::say("map: off, its pictures let go");
+        }
+        self.layers = None;
+        self.world = None;
+        self.icon.tex = None;
+        self.reported = None;
     }
 
     /// A key (the pad's codes, `SetKey`'s: 128 + the field) while the map is
@@ -516,10 +544,17 @@ impl Map {
     /// `view::waypoint_reach`, a finger's miss more) it takes it away, else
     /// on the group's it takes that away, else it puts this world's waypoint
     /// there, on the world's ground. With Shift held it asks the group to be
-    /// told of the spot under it instead (`spot_under`). Whether it did any.
+    /// told of the spot under it instead (`spot_under`), and a GM's with Ctrl
+    /// (or ⌘) held, while the server offers it (`travel`), asks to travel
+    /// there (`take_travel_ask`). Whether it did any.
     pub fn click(&mut self, s: [f32; 2], finger: bool) -> bool {
         let (true, Some(v), Some(w)) = (self.open, self.view, self.world.as_ref()) else { return false };
         let (world, extent, size) = (w.index, w.builder.cells.extent(), self.size);
+        if self.ctrl && self.travel && !finger {
+            let Some(at) = self.spot_under(s, finger) else { return false };
+            self.travel_ask = Some(community::Spot { world, at });
+            return true;
+        }
         if self.shift && !finger {
             let Some(at) = self.spot_under(s, finger) else { return false };
             self.ask_group(world, at);
@@ -637,6 +672,12 @@ impl Map {
         self.group_ask.take()
     }
 
+    /// The spot a GM's Ctrl+click asked to travel to, once: Play asks the
+    /// server (`Play::take_map_travel`).
+    pub fn take_travel_ask(&mut self) -> Option<community::Spot> {
+        self.travel_ask.take()
+    }
+
     /// A line under the map's title for a few seconds (the community list's
     /// answers' place).
     pub fn notice(&mut self, line: &str) {
@@ -737,9 +778,13 @@ impl Map {
     }
 
     /// R3 (J on a keyboard, the Quests button): the quest marks shown or
-    /// hidden, kept (Extended's Quest Markers); hidden, the server is told to
-    /// send none (`Play`'s `agree_quest_marks`).
+    /// hidden, kept (the Quest Helper's own Quest Markers); hidden, the server
+    /// is told to send none (`Play`'s `agree_quests`). Nothing with the Quest
+    /// Helper off (no marks, no button).
     fn toggle_quests(&mut self) {
+        if !crate::settings::quest_helper() {
+            return;
+        }
         let on = !crate::settings::quest_markers();
         if let Err(e) = crate::settings::set_quest_markers(on) {
             crate::say(&format!("map: quest marks {}, not kept: {e}", if on { "shown" } else { "hidden" }));
@@ -1044,7 +1089,7 @@ impl Map {
         }
     }
 
-    /// □ held (`hold`) or G: the group asked to be told of □'s spot (Play's,
+    /// □ held (`hold`) or O: the group asked to be told of □'s spot (Play's,
     /// `take_group_ask`): the map's middle once it is panned, else the
     /// target's spot, else the player's own place (the middle while the map
     /// follows the player: come to me).
@@ -1479,6 +1524,7 @@ impl Map {
             pointer,
             notice: self.community.notice_now().map(str::to_string),
             group: cx.in_group,
+            travel: self.travel,
         };
         let fallback;
         let vui = match cx.vui {
@@ -1600,15 +1646,17 @@ impl Map {
             community::draw_names(ui, white, fo, &placed, &names, t, pad);
         }
         // the quest marks (`quests`) over the markers and the towns' names,
-        // under the group and the player
+        // under the group and the player; the quests to take first, so a step
+        // of the player's own ("?") is drawn over a "!" beside it
         let (lo, hi) = ([-40.0, -40.0], [size.0 as f32 + 40.0, size.1 as f32 + 40.0]);
-        let marks: Vec<(u8, [f32; 2])> = self
+        let mut marks: Vec<(u8, [f32; 2])> = self
             .quests
             .of_world(w.index)
             .map(|(_, m)| (m.kind, v.to_window(size, [m.x, m.z])))
             .filter(|(_, p)| p[0] >= lo[0] && p[1] >= lo[1] && p[0] <= hi[0] && p[1] <= hi[1])
             .map(|(kind, p)| (kind, f(p)))
             .collect();
+        marks.sort_by_key(|&(kind, _)| kind != 1);
         let (r, o) = view::quest_radius(size);
         quests::draw_marks(ui, &l.assets, vui, white, &marks, r * k, o * k);
         // the group's members, their compass colours (1 green, 2 blue, 3 cyan, the rest yellow)
@@ -1702,10 +1750,10 @@ impl Map {
     }
 
     /// The map over the frame, while it is up: its own pass into `target`
-    /// (`depth` its depth buffer).
-    pub fn draw(&self, device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, depth: &wgpu::TextureView) {
+    /// (`depth` its depth buffer), laid out on a `window` window and drawn
+    /// into a `size` target (the window's, or the Render Scale's frame).
+    pub fn draw(&self, device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, depth: &wgpu::TextureView, window: (u32, u32), size: (u32, u32)) {
         let (true, Some(l)) = (self.open, self.layers.as_ref()) else { return };
-        let size = (target.texture().width(), target.texture().height());
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("map"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: target, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })],
@@ -1714,10 +1762,6 @@ impl Map {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        // Terrain and the backdrop use window pixels; the render target
-        // may be larger when supersampling. UI quads use frame coordinates
-        // and normalize against the target.
-        let window = self.size;
         l.map.draw(device, &mut pass, window);
         l.ui.draw(device, &mut pass, size);
     }
@@ -1792,8 +1836,9 @@ pub fn keyboard(name: &str) -> Option<(i32, Hold)> {
         // Q is the keyboard's □ (`binds`' "talk" row): the waypoint, held
         // the group's (its release counts, `Map::square_key`)
         "q" => (key::SQUARE, Hold::Held),
-        // G: the group's waypoint at once (`binds`' "map_group_waypoint" row)
-        "g" => (KEY_GROUP, Hold::Once),
+        // O: the group's waypoint at once (`binds`' "map_group_waypoint" row;
+        // G was its key till the attack took G, 2026-11-09)
+        "o" => (KEY_GROUP, Hold::Once),
         // J (the journal's letter) is R3: the quest marks shown or hidden
         "j" => (key::R3, Hold::Once),
         // N is L3: a community marker suggested (`community`)

@@ -307,7 +307,6 @@ impl Default for TouchPad {
             fingers: Vec::new(),
             scale: 1.0,
             dpad: false,
-            holds: false,
             shown: false,
             used: false,
             look: [0.0; 2],
@@ -317,6 +316,7 @@ impl Default for TouchPad {
             size: (0, 0),
             tex: None,
             window: false,
+            holds: false,
         }
     }
 }
@@ -742,36 +742,6 @@ mod tests {
         assert_eq!(t.touch(9, Phase::Ended, [10.0, 20.0], SIZE), Some([10.0, 20.0]));
     }
 
-    /// Window shapes: phones and tablets either way up, desktop windows, a
-    /// square and the shapes either side of it, an ultrawide, a small one.
-    const SHAPES: [(u32, u32); 20] = [
-        (2400, 1080),
-        (1080, 2400),
-        (2532, 1170),
-        (1170, 2532),
-        (844, 390),
-        (390, 844),
-        (2360, 1640),
-        (1640, 2360),
-        (1180, 820),
-        (1920, 1080),
-        (1280, 720),
-        (1440, 900),
-        (1024, 768),
-        (768, 1024),
-        (1000, 1000),
-        (1000, 1001),
-        (1001, 1000),
-        (3440, 1440),
-        (320, 240),
-        (240, 320),
-    ];
-
-    /// The Touch Pad Size's steps (`settings`): 50% to 100% in fives.
-    fn sizes() -> impl Iterator<Item = f32> {
-        (10..=20).map(|k| k as f32 / 20.0)
-    }
-
     /// With long presses wanted (the map up), a finger held still past the
     /// hold is one, once, where it came down, and its lift no tap; a finger
     /// lifted sooner is a tap, one that moved a drag, two at once a pinch.
@@ -814,6 +784,42 @@ mod tests {
         p.touch(6, Phase::Ended, at, ms(8800), SIZE);
         assert_eq!(p.take_clicks().len(), 1, "the control: a tap");
     }
+
+    /// Window shapes: phones and tablets either way up, desktop windows, a
+    /// square and the shapes either side of it, an ultrawide, a small one.
+    const SHAPES: [(u32, u32); 20] = [
+        (2400, 1080),
+        (1080, 2400),
+        (2532, 1170),
+        (1170, 2532),
+        (844, 390),
+        (390, 844),
+        (2360, 1640),
+        (1640, 2360),
+        (1180, 820),
+        (1920, 1080),
+        (1280, 720),
+        (1440, 900),
+        (1024, 768),
+        (768, 1024),
+        (1000, 1000),
+        (1000, 1001),
+        (1001, 1000),
+        (3440, 1440),
+        (320, 240),
+        (240, 320),
+    ];
+
+    /// The Touch Pad Size's steps (`settings`): 50% to 100% in fives.
+    fn sizes() -> impl Iterator<Item = f32> {
+        (10..=20).map(|k| k as f32 / 20.0)
+    }
+
+    /// With long presses wanted (the map up), a finger held still past the
+    /// hold is one, once, where it came down, and its lift no tap; a finger
+    /// lifted sooner is a tap, one that moved a drag, two at once a pinch.
+    /// The control: not wanted, the same long hold is a tap at its lift.
+
 
     /// Every shape keeps the whole controller on the screen with nothing
     /// overlapping, at every size: the sixteen buttons and both sticks'

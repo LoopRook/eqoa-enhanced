@@ -4,6 +4,12 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Added Map and Quest Helper master switches while keeping map search, guidance, the creature journal and circular minimap.
+- Group waypoints now use O; G attacks, and Space jumps on servers that offer jumps. Saved custom bindings remain supported.
+- GMs can Ctrl-click the map to travel when their server offers it. Distant quest offers no longer crowd the minimap rim.
+- Integrated upstream lighting, shadows, camera, character and input updates.
+
+
 - Pressing Tab no longer reopens the mod chat input after closing it with an empty Enter. Tab targets once, and the game keeps the key.
 - Mod UIs keep receiving combat and cooldown events when another mod listens to player movement; waiting or disabled mods keep native state capture idle.
 

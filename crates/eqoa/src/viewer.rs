@@ -92,6 +92,7 @@ pub fn lit(
         point: None,
         clear: Vec3::new(0.18, 0.2, 0.24),
         sky_view_proj: None,
+        lights: None,
     };
     let mut sky = None;
     if let Some((b, at, w)) = &blend {
@@ -163,16 +164,17 @@ impl Source {
     /// a streamer for the zones to read and draw.
     pub fn walker(&self, lib: &mut Library, s: &Scene) -> Option<(Walker, esf::Model, Streamer)> {
         let Source::Walk { file, character, spawn: given, .. } = self else { return None };
-        // `EQOA_SPAWN=x,z[,heading[,y]]` picks the spot; else the server's
-        // place, else near the middle. With a height the character stands
-        // there as `Respawn` places it (on the floor within 3 of it, not the
-        // first floor a probe from above meets: Neriak's plaza is under a
-        // roof).
+        // `EQOA_SPAWN=x,z[,heading[,y]]` (in a page, `?spawn=`) picks the
+        // spot; else the server's place, else near the middle. With a height
+        // the character stands there as `Respawn` places it (on the floor
+        // within 3 of it, not the first floor a probe from above meets:
+        // Neriak's plaza is under a roof).
         let c = (s.bounds.0 + s.bounds.1) * 0.5;
-        let spawn: Vec<f32> = std::env::var("EQOA_SPAWN")
-            .ok()
-            .map(|v| v.split(',').filter_map(|t| t.trim().parse().ok()).collect())
-            .unwrap_or_default();
+        #[cfg(target_arch = "wasm32")]
+        let spawn = crate::web::page_value("spawn");
+        #[cfg(not(target_arch = "wasm32"))]
+        let spawn = std::env::var("EQOA_SPAWN").ok();
+        let spawn: Vec<f32> = spawn.map(|v| v.split(',').filter_map(|t| t.trim().parse().ok()).collect()).unwrap_or_default();
         let spawn = match (spawn.as_slice(), given) {
             ([x, z], _) => Spawn::ground(*x, *z, 0.0),
             ([x, z, h], _) => Spawn::ground(*x, *z, *h),
@@ -261,9 +263,11 @@ fn upload(renderer: &mut Renderer, device: &wgpu::Device, queue: &wgpu::Queue, l
     s.parts
         .iter()
         .zip(&s.statics)
-        .map(|((m, mats), st)| {
-            let gm = renderer.upload(device, queue, m, mats, &textures);
+        .zip(&s.baked)
+        .map(|(((m, mats), st), &baked)| {
+            let mut gm = renderer.upload(device, queue, m, mats, &textures);
             renderer.set_static_lights(queue, &gm, st);
+            gm.baked = baked;
             gm
         })
         .collect()
@@ -339,12 +343,19 @@ pub fn shot_with(
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
     let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))?;
     let mut renderer = Renderer::new(&device, &queue, render::TARGET_FORMAT);
+    // Dynamic Lighting (kept only under `$EQOA_CONFIG` for a shot), before
+    // a zone is uploaded
+    renderer.set_dynamic_lighting(&device, crate::settings::client().dynamic_lighting);
+    renderer.set_sun_shadows(&device, crate::settings::client().sun_shadows);
+    renderer.set_light_shadows(&device, crate::settings::client().light_shadows);
+    renderer.set_shadow_distance(crate::settings::shadow_scale());
     renderer.set_ps2_sums(render::fog16::supported(&adapter));
     renderer.set_ps2_sequential(fog_sequential());
     renderer.scroll_time = Some(script.as_ref().map_or(0, |s| s.ms) as f32 / 1000.0);
     // the options' Texture Packs and Dump Textures (kept only under
-    // `$EQOA_CONFIG` for a shot), before a texture is made
-    crate::texpack::sync();
+    // `$EQOA_CONFIG` for a shot), before a texture is made, every stand-in
+    // read as it is asked for (a shot's one frame waits for its textures)
+    crate::texpack::sync_now();
     if let Some(f) = arial(lib) {
         renderer.set_font(&device, &queue, &f);
     }
@@ -366,6 +377,13 @@ pub fn shot_with(
     let aspect = w as f32 / h as f32;
     let mut view = cam.view(s.bounds, aspect);
     if let Some((mut walker, body, mut streamer)) = source.walker(lib, &s) {
+        // a race's body jumping as on a server with jumps (`EQOA_JUMP`): the
+        // fall and the landing the race table gives it
+        if std::env::var_os("EQOA_JUMP").is_some()
+            && let Some(cs) = walker.sprite.as_mut()
+        {
+            crate::raceemote::grant_air(lib, cs, &mut walker.anims, shot_body(), true, true);
+        }
         // 60 frames a second of game time, the controls held throughout.
         let script = script.unwrap_or(Script { ms: 0, controls: Controls::default() });
         let mut t = 0;
@@ -376,6 +394,9 @@ pub fn shot_with(
         let mut held_fx: Option<crate::particles::Held> = None;
         // the last frame's spell bolts and weapon trails, drawn by the shot
         let mut shot_bolts: Vec<render::billboard::Strips> = Vec::new();
+        // and Dynamic Lighting's lights of the moment, held through the
+        // walk's frames as the window's frames hold them (`lights::Moment`)
+        let mut moment_lights: Vec<(u64, render::PointLight)> = Vec::new();
         let mut shot_trails: Vec<render::billboard::Strips> = Vec::new();
         fx = crate::fx::enabled().then(crate::fx::Fx::new);
         // `EQOA_SPELL=n`: SPELLFX's n-th effect, cast by the character at a
@@ -406,6 +427,9 @@ pub fn shot_with(
         let at: i64 = std::env::var("EQOA_AT").ok().and_then(|v| v.parse().ok()).map_or(2000, |v: i64| v / 16 * 16);
         let attack = std::env::var_os("EQOA_ATTACK").is_some();
         let trace_walk: Option<i64> = std::env::var("EQOA_TRACE_WALK").ok().and_then(|v| v.parse::<i64>().ok()).map(|v| (v / 16 * 16).max(16));
+        // `EQOA_JUMP=<ms>[;<ms>...]`: the jump key then (`Walker::ask_jump`); with
+        // no server, as though one had offered it and the walk stood
+        let jump_at: Vec<i64> = std::env::var("EQOA_JUMP").map(|s| s.split(';').filter_map(|ms| ms.trim().parse().ok()).collect()).unwrap_or_default();
         let walk = walk_script();
         // `EQOA_FRAME_MS=n`: frames of n ms instead of 16 (a display's rate:
         // 6 is about 165 a second, 33 the console's 30)
@@ -510,6 +534,15 @@ pub fn shot_with(
                 }
             }
             for (_, step) in mouse_script.iter().filter(|s| s.0 == t) {
+                // `ctrl down|up`: Ctrl held or let go, as the window's modifiers
+                // say it (the map's: a GM's click then travels)
+                if let Some(how) = step.strip_prefix("ctrl ") {
+                    if let Some(p) = play.as_mut() {
+                        p.map.ctrl = how.trim() == "down";
+                        eprintln!("mouse {step}: the map's Ctrl {}", if p.map.ctrl { "held" } else { "let go" });
+                    }
+                    continue;
+                }
                 // `click @<name>`: at the creature called that, where it is drawn
                 let mut step = step.clone();
                 if let Some((verb, name)) = step.split_once(" @")
@@ -601,6 +634,12 @@ pub fn shot_with(
             }
             let mut client = play.as_ref().filter(|p| !p.is_dead()).map(|p| p.control_client()).unwrap_or_default();
             client.steer = look_free && mouse.steer(walker.cam.camera_mode);
+            if play.is_none() && !jump_at.is_empty() {
+                (client.jumps, client.stood_sent) = (true, true);
+            }
+            if jump_at.iter().any(|&ms| t - frame_ms < ms && ms <= t) {
+                walker.ask_jump();
+            }
             // a stick that ran runs until it comes back well under the
             // threshold (`input::RunHold`), as the window's
             run_hold.apply(&mut sticks);
@@ -866,6 +905,19 @@ pub fn shot_with(
                         }
                     }
                 }
+                // `EQOA_USE=<item name>@<ms>[;...]`: the inventory's item of that
+                // name used then, as the item menu's Use or Equip sends it
+                // (0x003E; worn, the same takes it off)
+                if let Ok(spec) = std::env::var("EQOA_USE") {
+                    for part in spec.split(';') {
+                        if let Some((name, ms)) = part.rsplit_once('@')
+                            && let Ok(ms) = ms.trim().parse::<i64>()
+                            && t == ms / 16 * 16
+                        {
+                            eprintln!("use {name}: {}", p.use_item_named(name));
+                        }
+                    }
+                }
                 // `EQOA_GROUP_ACTION=<hex>@<ms>`: a start-menu group action then.
                 if let Ok(spec) = std::env::var("EQOA_GROUP_ACTION")
                     && let Some((a, ms)) = spec.split_once('@')
@@ -964,6 +1016,9 @@ pub fn shot_with(
             let (self_m, _) = walker.pose();
             let (proj, v) = walker.view(aspect);
             batches = parts.frame(&walker.scene, lib, walker.eye_position(), proj * v, t);
+            // where the world's particles end (the spells', the held items'
+            // after them: Dynamic Lighting's lights of the moment)
+            let world_end = batches.len();
             if let Some((sp, n, rand)) = trial.as_mut() {
                 use crate::spells::{Body, Cast, SELF};
                 use vi::fpu::{Ee, F};
@@ -1006,6 +1061,13 @@ pub fn shot_with(
             if let Some(p) = play.as_mut() {
                 shot_trails = std::mem::take(&mut p.trail_strips);
             }
+            if renderer.dynamic_lighting() {
+                let mut raw = Vec::new();
+                crate::lights::from_batches(&batches[world_end.min(batches.len())..], &mut raw);
+                crate::lights::from_strips(&shot_bolts, &mut raw);
+                moment_lights.clear();
+                parts.lighting.moment.frame(&raw, t, &mut moment_lights);
+            }
             // the atmosphere every frame; the last frame's lights and render
             // are the shot's
             weather.frame(&mut walker.scene, None, &walker.eye, t, game_hour(play.as_ref(), Instant::now()));
@@ -1037,6 +1099,10 @@ pub fn shot_with(
         }
         if let Some(h) = &held_fx {
             eprintln!("{}", h.describe());
+        }
+        // `EQOA_INV`: the inventory as the client holds it at the end
+        if let Some(p) = play.as_ref().filter(|_| std::env::var_os("EQOA_INV").is_some()) {
+            eprintln!("{}", p.describe());
         }
         let body = match play.as_ref().and_then(|p| p.self_model).and_then(|m| lib.lookup(m as i32)).and_then(|r| lib.build_model(r)) {
             Some(m) => m,
@@ -1115,6 +1181,27 @@ pub fn shot_with(
         eprintln!("hour {shot_hour:.2}{}", if server { " (the server's)" } else { "" });
         let mut frame = lit(proj, v, shot_hour, Some((shot_eye, &walker.scene)), Some(&mut weather));
         frame.0.point = point;
+        // `EQOA_LANTERN`: with no server's session (whose `Play` steps it),
+        // the personal light as it is by night, 3 over the walker at its
+        // full 20 (`vi::tod::PersonalLight`'s), for looking at what it lights
+        if frame.0.point.is_none() && std::env::var_os("EQOA_LANTERN").is_some() {
+            let p = walker.cam.walk.phys.position;
+            frame.0.point = Some((Vec3::new(p.x.0, p.y.0 + 3.0, p.z.0), 20.0, Vec3::new(1.0, 0.69, 0.36)));
+        }
+        // Dynamic Lighting's, as the window's frame has them
+        if renderer.dynamic_lighting() {
+            let mut found = Vec::new();
+            parts.fixed.lights(&walker.scene, lib, shot_eye, t, &mut found);
+            found.extend(moment_lights.iter().map(|&(_, l)| l));
+            frame.0.lights = Some(crate::lights::choose(&found, shot_eye, frame.0.view_proj));
+            eprintln!("dynamic lighting: {} fixed lights made, {} found, {} drawn", parts.fixed.len(), found.len(), frame.0.lights.map_or(0, |l| l.len()));
+            if std::env::var_os("EQOA_LIGHTS_TRACE").is_some() {
+                eprintln!("  eye {shot_eye:?}");
+                for l in frame.0.lights.map(|l| l.as_slice().to_vec()).unwrap_or_default() {
+                    eprintln!("  light at {:?} range {:.1} colour {:?} fixed {} ({:.1} from the eye)", l.at, l.range, l.color, l.fixed, (l.at - shot_eye).length());
+                }
+            }
+        }
         let (sky_bb, world_bb) = weather.render(&walker.eye);
         renderer.particles_end = batches.len();
         batches.extend(world_bb);
@@ -1228,11 +1315,14 @@ pub fn shot_with(
     render::ui::set_text_filter(crate::settings::client().text);
     render::ui::set_hud_filter(crate::settings::client().hud);
     render::set_mipmaps(crate::settings::client().mipmaps);
-    // the minimap between the names and the HUD, as the window's frame has it
+    // and its Ambient Occlusion, over the world (not the loading screen's gears)
+    renderer.ao.set(if loading.is_none() { ambient_occlusion() } else { render::ao::Settings::OFF });
+    // the minimap between the names and the HUD, as the window's frame has
+    // it: laid out on the window, drawn into the frame at its Render Scale
     let mini = play.as_ref();
-    let mut rgba = render::capture_around(&device, &queue, &mut renderer, w, h, loading.as_ref().map_or(&view, |l| &l.0), &refs, particles, sky, |enc, tv, depth| {
+    let mut rgba = render::capture_around(&device, &queue, &mut renderer, w, h, loading.as_ref().map_or(&view, |l| &l.0), &refs, particles, sky, |enc, tv, depth, size| {
         if let Some(p) = mini {
-            p.map.draw_mini(&device, enc, tv, depth);
+            p.map.draw_mini(&device, enc, tv, depth, (w, h), size);
         }
     });
     // the map up covers the frame: the picture is the map's
@@ -1319,14 +1409,16 @@ fn write_png(path: &str, w: u32, h: u32, rgba: &[u8]) -> Result<(), Error> {
 /// The corpse, merchant and trade windows' keys (modes 1, 10, 15, 16) on
 /// the keyboard, as the game's keys and pad buttons: the arrows the d-pad,
 /// Enter or E ✕, Escape or Backspace △, Q □ (a trade's accept, as the
-/// game's 81/113), Space the game's 32 (a trade's chat line, as R3) but in
-/// the corpse's window, where it is ✕: on the pad the attack (✕, Space on
-/// the keyboard) opens a corpse and in its window takes the row chosen
-/// (`VIWndList::OnKeyDown`: LEAVE ALL closes it, an item takes it, TAKE ALL
-/// takes everything), while 32 there is nothing to the game
-/// (`VIWndLoot::OnKeyDown` takes 27, 132 and 134), so the key that opened
-/// it did nothing in it (F3 20261029-024647: "spacebar can open loot, it
-/// should also allow you to close or loot the items as well").
+/// game's 81/113), the attack's key (G; Space too while the jump's row has
+/// it, `binds::KeyEdge::space_attacks`, which hands it here as G) the game's
+/// 32 (a trade's chat line, as R3, Space's in the game's keyboard table) but
+/// in the corpse's window, where it is ✕: on the pad the attack (✕) opens a
+/// corpse and in its window takes the row chosen (`VIWndList::OnKeyDown`:
+/// LEAVE ALL closes it, an item takes it, TAKE ALL takes everything), while
+/// 32 there is nothing to the game (`VIWndLoot::OnKeyDown` takes 27, 132 and
+/// 134), so the key that opened it did nothing in it (F3 20261029-024647:
+/// "spacebar can open loot, it should also allow you to close or loot the
+/// items as well").
 pub(crate) fn npcw_key_of(key: &Key, mode: i32) -> Option<i32> {
     use crate::startmenu::keys as K;
     match key {
@@ -1337,8 +1429,8 @@ pub(crate) fn npcw_key_of(key: &Key, mode: i32) -> Option<i32> {
         Key::Named(NamedKey::Enter) => Some(K::CROSS),
         Key::Character(c) if c.eq_ignore_ascii_case("e") => Some(K::CROSS),
         Key::Character(c) if c.eq_ignore_ascii_case("q") => Some(113),
-        Key::Named(NamedKey::Space) if mode == 1 => Some(K::CROSS),
-        Key::Named(NamedKey::Space) => Some(32),
+        Key::Character(c) if c.eq_ignore_ascii_case("g") && mode == 1 => Some(K::CROSS),
+        Key::Character(c) if c.eq_ignore_ascii_case("g") => Some(32),
         Key::Named(NamedKey::Escape) | Key::Named(NamedKey::Backspace) => Some(K::ESCAPE),
         _ => None,
     }
@@ -1457,6 +1549,14 @@ fn held_name(k: &Key) -> Option<String> {
     })
 }
 
+/// `EQOA_BODY=<DictID>` (hex, 0x optional): the body a walk shot plays,
+/// the human's (`HUMAN`) unless said. With `EQOA_JUMP`, as on a server with
+/// jumps: a body the race table lists falls and lands as it has it
+/// (`raceemote::grant_air`).
+pub fn shot_body() -> u32 {
+    std::env::var("EQOA_BODY").ok().and_then(|v| u32::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok()).unwrap_or(HUMAN as u32)
+}
+
 /// `EQOA_WALK=fwd,strafe,orbit,ms[;...]`: each set of controls held for its
 /// ms, one after another, then none (`shot`'s script, in the window too).
 fn walk_script() -> Option<Vec<(Controls, i64)>> {
@@ -1492,6 +1592,26 @@ fn fog_sequential() -> bool {
     return std::env::var("EQOA_FOG16").is_ok_and(|v| v == "sequential");
     #[cfg(target_arch = "wasm32")]
     false
+}
+
+/// The options' Ambient Occlusion, unless `EQOA_AO` (in a page, `?ao=`)
+/// names a mode instead: on, off, factor (the factor alone), depth or
+/// normals (`render::ao::Mode`). `EQOA_AO_RADIUS` and `EQOA_AO_INTENSITY`
+/// (`?ao_radius=`, `?ao_intensity=`) change those two, for tuning.
+fn ambient_occlusion() -> render::ao::Settings {
+    use render::ao::{Mode, Settings};
+    static GIVEN: std::sync::OnceLock<(Option<Mode>, Settings)> = std::sync::OnceLock::new();
+    let (mode, s) = *GIVEN.get_or_init(|| {
+        #[cfg(target_arch = "wasm32")]
+        let value = |name: &str| crate::web::page_value(name);
+        #[cfg(not(target_arch = "wasm32"))]
+        let value = |name: &str| std::env::var(format!("EQOA_{}", name.to_uppercase())).ok();
+        let number = |name: &str, default: f32| value(name).and_then(|v| v.parse().ok()).unwrap_or(default);
+        let s = Settings { radius: number("ao_radius", Settings::RADIUS), intensity: number("ao_intensity", Settings::INTENSITY), ..Settings::OFF };
+        (value("ao").and_then(|v| Mode::named(&v)), s)
+    });
+    let chosen = if crate::settings::client().ambient_occlusion { Mode::On } else { Mode::Off };
+    Settings { mode: mode.unwrap_or(chosen), ..s }
 }
 
 /// A surface and device made before the event loop: a browser's, where the
@@ -1745,6 +1865,10 @@ struct Perf {
     mark: Instant,
     frames: u32,
     worst: f64,
+    /// frames of 50 ms or more, and of 100 ms or more, since `since` (a
+    /// texture pack's stand-ins read as they are first drawn stalled them:
+    /// `texpack`)
+    slow: (u32, u32),
     /// seconds per phase since `since`
     total: [f64; Perf::NAMES.len()],
     /// this frame's seconds per phase (from `begin`), for a stall's line
@@ -1774,7 +1898,7 @@ impl Perf {
 
     fn new(print: bool) -> Perf {
         let now = Instant::now();
-        Perf { print, since: now, mark: now, frames: 0, worst: 0.0, total: [0.0; Perf::NAMES.len()], frame: [0.0; Perf::NAMES.len()], drawn: (0, 0), last_start: None }
+        Perf { print, since: now, mark: now, frames: 0, worst: 0.0, slow: (0, 0), total: [0.0; Perf::NAMES.len()], frame: [0.0; Perf::NAMES.len()], drawn: (0, 0), last_start: None }
     }
 
     /// Five seconds begun again at `now`.
@@ -1813,7 +1937,10 @@ impl Perf {
 
     fn end(&mut self, frame_start: Instant) {
         self.frames += 1;
-        self.worst = self.worst.max(frame_start.elapsed().as_secs_f64());
+        let took = frame_start.elapsed().as_secs_f64();
+        self.worst = self.worst.max(took);
+        self.slow.0 += (took >= 0.05) as u32;
+        self.slow.1 += (took >= 0.1) as u32;
         self.last_start = Some(frame_start);
         let span = self.since.elapsed().as_secs_f64();
         if span < 5.0 {
@@ -1829,10 +1956,12 @@ impl Perf {
                 .map(|(name, t)| format!("{name} {:.2}", t * 1e3 / n))
                 .collect();
             crate::say(&format!(
-                "perf: {:.1} fps, cpu {:.2} ms/frame (worst {:.1}), {} models in {} draws: {}",
+                "perf: {:.1} fps, cpu {:.2} ms/frame (worst {:.1}, {} of 50 ms or more, {} of 100), {} models in {} draws: {}",
                 n / span,
                 cpu * 1e3 / n,
                 self.worst * 1e3,
+                self.slow.0,
+                self.slow.1,
                 self.drawn.0,
                 self.drawn.1,
                 phases.join(", ")
@@ -2381,6 +2510,11 @@ impl App {
     /// changed, everything drawn made again with it (`retexture`).
     fn poll_textures(&mut self) {
         crate::texpack::sync();
+        // the stand-ins read since, written over their placeholders at this
+        // frame's start (`render::standin`)
+        if let Some(g) = self.gfx.as_mut() {
+            g.renderer.take_stand_ins(&g.queue);
+        }
         let g = crate::texpack::generation();
         if g != self.textures_drawn {
             self.textures_drawn = g;
@@ -2638,6 +2772,9 @@ impl App {
         self.taps.forget();
         if let Some(p) = self.play.as_mut() {
             p.map.let_go();
+            // Ctrl's release may never come (Wayland's): no click travels
+            // until it is pressed again
+            p.map.ctrl = false;
         }
     }
 
@@ -2647,8 +2784,9 @@ impl App {
     /// none while a dialog of the client's has them). So a hold would hold
     /// on for good (F3 20261024-085139: the aim, Tab held as the window
     /// went, still up when it came back): the aim or its wait (Tab, `), the
-    /// chat box's history (C), the target's window (Q), the attack (Space), a
-    /// walk or a turn, a key moved onto a button's row, and the pregame's.
+    /// chat box's history (C), the target's window (Q), the attack (G, or
+    /// Space as it), a walk or a turn, a key moved onto a button's row, and
+    /// the pregame's.
     fn let_go_keys(&mut self, el: &ActiveEventLoop) {
         use crate::binds::Sent;
         let aspect = self.gfx.as_ref().map_or(4.0 / 3.0, |g| g.config.width as f32 / g.config.height as f32);
@@ -3483,7 +3621,7 @@ impl App {
             if let Some(p) = self.play.as_mut() {
                 if p.mode == 0 && !p.keyboard_typing() {
                     match event.logical_key {
-                        Key::Named(NamedKey::F2) => {
+                        Key::Named(NamedKey::F2) if crate::settings::map() => {
                             if !p.minimap_up() && !p.map.open {
                                 p.map.show();
                             }
@@ -3529,6 +3667,20 @@ impl App {
         {
             if event.state == ElementState::Pressed && !event.repeat {
                 p.open_bug_report();
+            }
+            return;
+        }
+        // The map (`map.rs`), while it is up, takes every key.
+        if let Some(p) = self.play.as_mut().filter(|p| p.map.open) {
+            let name = match &event.logical_key {
+                Key::Named(NamedKey::Escape) => Some("escape".to_string()),
+                Key::Named(NamedKey::Backspace) => Some("backspace".to_string()),
+                Key::Named(NamedKey::Enter) => Some("enter".to_string()),
+                Key::Named(NamedKey::Space) => Some("space".to_string()),
+                k => held_name(k),
+            };
+            if let Some(n) = name {
+                p.map.keyboard_key(&n, event.state == ElementState::Pressed, event.repeat);
             }
             return;
         }
@@ -3738,8 +3890,8 @@ impl App {
         // The corpse, merchant and trade windows (modes 1, 10, 15,
         // 16), and the duel's invitation and wager (43, 44, the trade's
         // copy): `npcw_key_of`'s keys; the trade's and the wager's chat
-        // line, once Space has opened it, takes the keyboard as the edit box
-        // does.
+        // line, once the attack's key (G, or Space) has opened it, takes the
+        // keyboard as the edit box does.
         if let Some(p) = self.play.as_mut()
             && p.typing.is_none()
             && (p.npcw_owns() || p.duel_owns())
@@ -3871,7 +4023,8 @@ impl App {
             }
             return;
         }
-        // The fishing window (mode 36): Space casts and throws (X),
+        // The fishing window (mode 36): the attack's key casts and throws (X;
+        // G, or Space as it: Space's 32 in the game's keyboard table),
         // Escape leaves (triangle), Enter its chat line, C held the chat
         // box's history with the arrows' up and down, the codes the game's
         // keyboard gives `VIWndFishing::OnKeyDown` (32, 27, 13, 67, 19, 20);
@@ -3901,7 +4054,7 @@ impl App {
                 return;
             }
             let k = match &event.logical_key {
-                Key::Named(NamedKey::Space) => Some(32),
+                Key::Character(c) if c.eq_ignore_ascii_case("g") => Some(32),
                 Key::Named(NamedKey::Escape) => Some(27),
                 Key::Named(NamedKey::Enter) => Some(13),
                 Key::Named(NamedKey::ArrowUp) => Some(19),
@@ -4139,8 +4292,9 @@ impl App {
                     return;
                 }
                 // M: the map (the client's own; free in the game's
-                // keyboard table, `map.rs`; dead, it closes again).
-                (None, Key::Character(c)) if p.mode == 0 && c.eq_ignore_ascii_case("m") && !event.repeat => {
+                // keyboard table, `map.rs`; dead, it closes again), with
+                // Extended's Map on (off, M is nothing, as in the game)
+                (None, Key::Character(c)) if p.mode == 0 && c.eq_ignore_ascii_case("m") && !event.repeat && crate::settings::map() => {
                     p.map.show();
                     return;
                 }
@@ -4153,7 +4307,7 @@ impl App {
                 // N and B: Extended's Minimap and Stats Box turned, kept (the
                 // client's own, `map::mini`, `statbox`; free in the game's
                 // keyboard table), in play and the manual camera
-                (None, Key::Character(c)) if (p.mode == 0 || p.mode == 38) && c.eq_ignore_ascii_case("n") && !event.repeat => {
+                (None, Key::Character(c)) if (p.mode == 0 || p.mode == 38) && c.eq_ignore_ascii_case("n") && !event.repeat && crate::settings::map() => {
                     crate::map::mini::toggle();
                     return;
                 }
@@ -4171,6 +4325,26 @@ impl App {
                 // X (88, 120): autorun (`ToggleP74`), as L3.
                 (None, Key::Character(c)) if p.mode == 0 && c.eq_ignore_ascii_case("x") => {
                     p.toggle_autorun();
+                    return;
+                }
+                // Space (and V, its key before): a jump (the client's own,
+                // `jump`), in play, on a server that offers it. Where Space
+                // makes no jump it comes here as the attack's G
+                // (`binds::KeyEdge::space_attacks`); a key moved onto the
+                // jump's row, or a button on it, comes as Space everywhere,
+                // and is nothing where there is no jump.
+                (None, Key::Named(NamedKey::Space)) if p.mode == 0 => {
+                    if !event.repeat
+                        && let Some(w) = self.walker.as_mut()
+                    {
+                        p.jump_key(w);
+                    }
+                    return;
+                }
+                (None, Key::Character(c)) if p.mode == 0 && c.eq_ignore_ascii_case("v") && !event.repeat => {
+                    if let Some(w) = self.walker.as_mut() {
+                        p.jump_key(w);
+                    }
                     return;
                 }
                 // 1 to 6: `SelectTarget`, the player, the group's
@@ -4259,13 +4433,21 @@ impl App {
             p.info_up = false;
             return;
         }
-        // Space: attack, held (`ToggleAutoAttack` / `MaybeStopAutoAttack`).
-        if let (Some(p), Key::Named(NamedKey::Space)) = (self.play.as_mut(), &event.logical_key) {
+        // G: attack, held (`ToggleAutoAttack` / `MaybeStopAutoAttack`), the
+        // game's Space (32): Space too, as G, wherever it makes no jump
+        // (`binds::KeyEdge::space_attacks`).
+        if let (Some(p), Key::Character(c)) = (self.play.as_mut(), &event.logical_key)
+            && c.eq_ignore_ascii_case("g")
+        {
             if event.state == ElementState::Pressed && !event.repeat && p.mode == 0 {
                 p.attack_press();
             } else if event.state == ElementState::Released {
                 p.attack_release();
             }
+            return;
+        }
+        // Space let go (its press a jump, or nothing): no more
+        if self.play.is_some() && event.logical_key == Key::Named(NamedKey::Space) && event.state == ElementState::Released {
             return;
         }
         // The HUD's quick menus in play on the arrows, the d-pad
@@ -4918,6 +5100,11 @@ impl App {
                 use crate::binds::Sent;
                 let typing = self.play.as_mut().is_some_and(|p| p.keyboard_typing());
                 let down = event.state == ElementState::Pressed;
+                // Space, the jump's, is the attack's wherever it makes no
+                // jump: in the world but not in play on a server that offered
+                // jumps (a window up, any other server); with the map up it is
+                // the map's (its Center), whatever the server
+                self.keys_edge.space_attacks = self.play.as_ref().is_some_and(|p| !(p.mode == 0 && p.session.jumps) && !p.map.open);
                 match crate::settings::with_binds(|b| self.keys_edge.key(&name, down, event.repeat, typing, b)) {
                     Some(Sent::Key(to)) if to == name => event,
                     Some(Sent::Key(to)) => KeyIn { logical_key: crate::binds::key_of(&to), text: None, ..event },
@@ -5012,13 +5199,16 @@ impl App {
             // item took it, asking as Settings… does (`macos`)
             WindowEvent::ModifiersChanged(m) => {
                 self.alt_held = m.state().alt_key();
-                // Shift and a click on the map: the group's waypoint (`map`)
-                if let Some(p) = self.play.as_mut() {
-                    p.map.shift = m.state().shift_key();
-                }
                 #[cfg(any(target_os = "linux", windows))]
                 {
                     self.ctrl_held = m.state().control_key();
+                }
+                // Shift and a click on the map: the group's waypoint; a GM's
+                // Ctrl (or ⌘, a Mac's and a page's on one) and a click: travel
+                // there (`map`)
+                if let Some(p) = self.play.as_mut() {
+                    p.map.shift = m.state().shift_key();
+                    p.map.ctrl = m.state().control_key() || m.state().super_key();
                 }
                 #[cfg(target_os = "macos")]
                 {
@@ -5077,6 +5267,8 @@ impl App {
                     p.map.let_go();
                     p.map.mini_hover(None);
                     p.chat_let_go();
+                    p.map.let_go();
+                    p.map.mini_hover(None);
                 }
             }
             WindowEvent::MouseInput { state, button, .. } if matches!(button, MouseButton::Left | MouseButton::Right) => {
@@ -5537,6 +5729,23 @@ impl App {
                     }
                     mark(perf, 3);
                     let loading = play.as_ref().is_some_and(|p| p.loading());
+                    // Dynamic Lighting as the options have it: its pipelines,
+                    // and the zones in recorded for it (`render::lit`)
+                    let dynamic = crate::settings::client().dynamic_lighting;
+                    // and Sun Shadows (`render::sunshadow`) and Light Shadows
+                    // (`render::lightshadow`), with it
+                    let sun_shadows = crate::settings::client().sun_shadows;
+                    let light_shadows = crate::settings::client().light_shadows;
+                    // and how far they reach (the options' Shadow Distance)
+                    g.renderer.set_shadow_distance(crate::settings::shadow_scale());
+                    if g.renderer.dynamic_lighting() != dynamic || g.renderer.sun_shadows() != sun_shadows || g.renderer.light_shadows() != light_shadows {
+                        g.renderer.set_sun_shadows(&g.device, sun_shadows);
+                        g.renderer.set_light_shadows(&g.device, light_shadows);
+                        g.renderer.set_dynamic_lighting(&g.device, dynamic);
+                        if let Some(s) = streamer.as_mut() {
+                            s.relight(&g.renderer, &g.device);
+                        }
+                    }
                     if let Some(s) = streamer.as_mut() {
                         // One zone a frame, as the game's loader takes them;
                         // under the loading screen all at once.
@@ -5578,6 +5787,7 @@ impl App {
                         *batches = ps.frame(&w.scene, lib, w.eye_position(), proj * v, now);
                         bb_view = Some((v, proj));
                     }
+                    let world_end = batches.len();
                     // the spell effects' particles after the world's, their lightning before
                     let mut bolts = Vec::new();
                     if let Some(sp) = play.as_mut().and_then(|p| p.spells.as_mut()) {
@@ -5594,6 +5804,29 @@ impl App {
                     let mut lights = lit(proj, v, hour_now, Some((w.eye_position(), &w.scene)), weather.as_mut());
                     if let Some(p) = play.as_mut() {
                         lights.0.point = p.point_light(w, now, hour_now, weather.as_ref());
+                    }
+                    // Dynamic Lighting's (`lights`): the zones' fires and placed
+                    // lights, and this frame's spells', held items' and
+                    // creatures' emitters (the batches after the world's) and
+                    // the spells' bolts, held from frame to frame
+                    // (`lights::Lighting`): none comes, goes or changes in a frame
+                    if dynamic && !loading {
+                        let eye = w.eye_position();
+                        let moment = &batches[world_end.min(batches.len())..];
+                        lights.0.lights = Some(match particles.as_mut() {
+                            Some(ps) => {
+                                let mut fixed = Vec::new();
+                                ps.fixed.keyed(&w.scene, lib, eye, now, &mut fixed);
+                                ps.lighting.frame(fixed, moment, &bolts, eye, proj * v, now)
+                            }
+                            // (no world's particles: none walks there)
+                            None => {
+                                let mut found = Vec::new();
+                                crate::lights::from_batches(moment, &mut found);
+                                crate::lights::from_strips(&bolts, &mut found);
+                                crate::lights::choose(&found, eye, proj * v)
+                            }
+                        });
                     }
                     // the bolts lit by the scene's lights (`spells::light_bolts`),
                     // the weapon trails (VITrailFxRender) after them unlit
@@ -5795,6 +6028,12 @@ impl App {
                 }
                 let scene = g.renderer.curve.scene_target(&g.device, f.size);
                 let st = scene.as_ref().unwrap_or(&f.color);
+                // the options' Ambient Occlusion: its passes over the world's
+                // opaque half (`render::ao`), not the loading screen's gears
+                g.renderer.ao.set(ambient_occlusion());
+                if loading.is_none() {
+                    g.renderer.ao.prepare(&g.device, &f);
+                }
                 g.renderer.draw(&g.queue, &mut enc, st, &f.depth, loading.as_ref().map_or(&view, |l| &l.0), &refs);
                 let textures = render::library_textures(&self.lib);
                 // under the loading screen no sky, volumes or particles
@@ -5817,15 +6056,19 @@ impl App {
                 }
                 g.renderer.curve.apply(&g.queue, &mut enc, &f.color);
                 // the names, then the minimap (`map::mini`: over the names,
-                // under the HUD and its windows), then the HUD
+                // under the HUD and its windows; laid out on the window, drawn
+                // into the frame at its Render Scale), then the HUD
+                let window = (g.config.width, g.config.height);
                 let play = self.play.as_ref();
                 g.renderer.draw_text_around(&g.device, &mut enc, &f.color, &f.depth, f.size, |enc| {
                     if let Some(p) = play {
-                        p.map.draw_mini(&g.device, enc, &f.color, &f.depth);
+                        p.map.draw_mini(&g.device, enc, &f.color, &f.depth, window, f.size);
                     }
                 });
+                // the map up, over the whole frame (laid out on the window
+                // as the minimap is)
                 if let Some(p) = &self.play {
-                    p.map.draw(&g.device, &mut enc, &f.color, &f.depth);
+                    p.map.draw(&g.device, &mut enc, &f.color, &f.depth, window, f.size);
                 }
                 g.renderer.scale.resolve(&mut enc, &target);
                 #[cfg(not(target_arch = "wasm32"))]
@@ -5894,18 +6137,30 @@ mod tests {
         assert_eq!(frames(false), 5, "the control: every frame counted");
     }
 
-    /// The corpse, merchant and trade windows' keys: Space is ✕ in the
-    /// corpse's window (mode 1), the key that opened it (the attack: ✕ on the
-    /// pad, whose ✕ takes the row there), and the game's 32 in the merchant's
-    /// and the trade's (a trade's chat line, as R3); the rest the same in all
+    /// The corpse, merchant and trade windows' keys: the attack's key (G,
+    /// and Space as G, `binds::KeyEdge::space_attacks`) is ✕ in the corpse's
+    /// window (mode 1), the key that opened it (the attack: ✕ on the pad,
+    /// whose ✕ takes the row there), and the game's 32 in the merchant's and
+    /// the trade's (a trade's chat line, as R3); the rest the same in all
     /// four: Enter and E ✕, Escape and Backspace △ (27), Q □ (113), the
-    /// arrows the d-pad. The control: Space was 32 in all four.
+    /// arrows the d-pad. The controls: the attack's key was 32 in all four
+    /// before 2026-10-29; Space itself (the jump's, a moved key's or a
+    /// button's on its row) is nothing in a window.
     #[test]
-    fn space_is_cross_in_the_corpses_window_alone() {
-        let space = Key::Named(NamedKey::Space);
-        assert_eq!(npcw_key_of(&space, 1), Some(134));
-        for mode in [10, 15, 16] {
-            assert_eq!(npcw_key_of(&space, mode), Some(32), "mode {mode}: the game's 32");
+    fn the_attacks_key_is_cross_in_the_corpses_window_alone() {
+        for g in [Key::Character("g".into()), Key::Character("G".into())] {
+            assert_eq!(npcw_key_of(&g, 1), Some(134));
+            for mode in [10, 15, 16] {
+                assert_eq!(npcw_key_of(&g, mode), Some(32), "mode {mode}: the game's 32");
+            }
+        }
+        // Space as the edge hands it over where it makes no jump: G
+        let mut edge = crate::binds::KeyEdge::default();
+        edge.space_attacks = true;
+        let sent = edge.key("space", true, false, false, &crate::binds::Binds::default());
+        assert_eq!(sent, Some(crate::binds::Sent::Key("g".into())));
+        for mode in [1, 10, 15, 16] {
+            assert_eq!(npcw_key_of(&Key::Named(NamedKey::Space), mode), None, "mode {mode}: Space itself");
         }
         for mode in [1, 10, 15, 16] {
             let k = |key: Key| npcw_key_of(&key, mode);
