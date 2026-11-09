@@ -2,7 +2,8 @@
 
 Start here for the mod API work. Written 2026-11-08 by the Opus lead from the owner's decisions. Each
 round below is one task for a fresh lead and fresh workers (`~/Paseo/Agent_Learning_Instructions.md`).
-Record each round's result at the bottom of this file and keep it under about 150 lines.
+Record each round's result at the bottom of this file and keep it under about 350 lines.
+Rounds from 2.5 on were reordered on 2026-11-09 (owner-approved; see "Goal update" below).
 
 ## Goal (owner, 2026-11-08)
 
@@ -12,7 +13,8 @@ allows, built correctly on the native client. Cheap to sync with upstream.
 - **The API is `eqoa`**: the Lua global `eqoa`, the modules `eqoa.<area>`, and `"api": "eqoa/1"` in
   mod.json, which discovery already requires. Upstream has no Lua or mod system, so the name does not
   conflict.
-- **`eqoa/1` is a stability promise, made at round 5:** nothing under `eqoa/1` is renamed, removed or
+- **`eqoa/1` is a stability promise, made at the finish round (round 7; it was round 5 before the
+  2026-11-09 reorder):** nothing under `eqoa/1` is renamed, removed or
   changed incompatibly. A breaking change goes to `eqoa/2` and `eqoa/1` keeps working.
 - **Forge becomes a compatibility layer.** `frontiers_forge.*`/UiForge stay so that the bundled
   Wereoxxs UI, ARPG UI and Modern UI (and other Forge mods) keep running unchanged. They are rebuilt
@@ -32,6 +34,51 @@ allows, built correctly on the native client. Cheap to sync with upstream.
   general seam (game state and events out, actions in) that upstream could accept on its own merits,
   with nothing Lua- or mod-specific in it. The owner decides when to offer one upstream.
 - **Not doing:** outreach to Forge's author, and the PCSX2 profile converter.
+
+## Goal update and owner decisions (2026-11-09)
+
+Source: `docs/plans/2026-11-09-direction-review-fable.md` (the evidence, the table of every fork
+change in upstream's files, and the three pull-request descriptions). The owner agreed with the
+report and approved all ten recommendations on 2026-11-09.
+
+The fork should become upstream plus mods. Neutral hooks are offered upstream; the fork's own
+features (Stats Box, Target of Target, Mana Bars, HUD numbers, map search, journal, round minimap,
+theme) move out of upstream's files into mods; mods never go upstream. A round is judged by two
+numbers as well as its tests: lines of fork code left in upstream's files, and conflicts in a dry-run
+merge of origin/master (`git merge-tree --write-tree --name-only develop origin/master`).
+
+Owner decisions, approved 2026-11-09:
+
+1. **Working goal.** "Upstream plus mods" comes ahead of FrontiersForge parity. Forge compatibility
+   stays; it no longer sets the order of the rounds.
+2. **HUD extras become mods.** Stats Box, Target of Target, Mana Bars and HUD numbers become bundled
+   mods that are on by default (round 3).
+3. **Round minimap and the fork's map look.** The owner asks Winfro, as a question and not a pull
+   request, whether vanilla would take them as options (Minimap: Square/Round). If not, they become
+   an alternative mod in round 4.
+4. **Fix pull requests go out now**, the animation crash fix first. The owner opens each one under
+   their own name.
+5. **First-run defaults (NPC display 64, distance 650) are kept**, applied from the fork's own
+   settings at first run. Upstream's constants and tests stay untouched.
+6. **Live-server client check.** The owner asks Winfro directly whether vanilla wants it. It does
+   not go into a pull request unasked; until he answers it stays fork-only.
+7. **Take upstream's version where the two are now the same:** group waypoint, quest toggles, the
+   map suggestion form (upstream's edit-box flow), and upstream's new touch controls.
+8. **Branch build before Nightly.** A round that changes the per-frame or per-packet path is played
+   by the owner from a branch build before it merges into `develop`.
+9. **The fork's own mods get their own repository** once round 3 has produced the first four. Until
+   then they live in `bundled-mods/`.
+10. **Full automation (botting) stays in the API, but last** (round 6). Small player-style actions
+    come early, in round 3.
+
+Clarified the same day: vanilla has the Assist Target key (F) but not the Target of Target bar.
+Upstream's notes of 2026-11-09 say the Stats Box, other players' mana bars and Target of Target
+"are not coming back". The bar is therefore a mod, and it uses upstream's existing assist action.
+
+Old and new round numbers: the spec (`docs/modding/EQOA-API-SPEC.md`), `GETTING-STARTED.md` and the
+running client's capability `round` values still use the numbering of 2026-11-08. Old round 3
+(items) is now round 5. Old round 4 (the rest) is split across rounds 3, 4 and 6. Old round 5
+(finish) is now round 7. Those documents are renumbered at round 7, not before.
 
 ## What exists (0.4.14, develop e48f0a6)
 
@@ -84,9 +131,8 @@ a different model family from the builder (the roster's "who reviews whom").
 |---|---|---|---|---|
 | 1 Design | The `eqoa/1` spec | Opus | Scout (free) for data sources, then Sol high | Approve the one-page summary |
 | 2 Core | `eqoa` over the existing core, Forge rewired onto it | Sonnet | Sol high | Live test: three bundled UIs unchanged, plus the example mod |
-| 3 Items | inventory, item, bank, loot, merchant, gems | Sonnet | Sol medium (DeepSeek Pro trial) | Live test of a small bag/loot example mod |
-| 4 The rest | quests, camera, windows/dialogs, map data, CM, icons, player-initiated actions | Sonnet | DeepSeek Go (small), Sol (coupled) | Live test of the examples |
-| 5 Finish | Audit, docs, support table, freeze `eqoa/1` | Opus | Terra/DeepSeek Go for docs | Approve the release |
+
+Rounds 1 and 2 are done. The rounds from 2.5 on are in the second table, after round 2.
 
 ### Round 1: design (no game code)
 
@@ -120,58 +166,139 @@ or report them through capabilities. Add the example mod `bundled-mods/eqoa_exam
 written against `eqoa`) and `docs/modding/GETTING-STARTED.md`. The risk is breaking the bundled UIs:
 the existing addon tests are the regression gate, and the owner's live test decides.
 
-### Round 3: items
+### Gates for every round from 2.5 on
+
+1. **No-mods speed gate.** The optimized zero-addon tests (frame, menu frame, entity packet, chat
+   line) allocate nothing and build no full view. This runs in CI on every develop push.
+2. **Game-shaped tests.** Every new API value has a test that starts from Play/protocol-shaped data,
+   not a hand-built mod snapshot. Each bundled UI has one picture-comparison test.
+3. **Owner check before develop** for any round that changes the per-frame or per-packet path: the
+   owner plays a branch build first. Develop publishes Nightly to players (decision 8).
+4. **Footprint goes down or stays level.** A round that raises a shared budget names what it removes
+   later, or it is the upstream-seam round.
+5. **Never reformat or reorder upstream's lines.**
+
+| Round | Work | Ends with |
+|---|---|---|
+| 2.5 Harden and tidy | Gates 1-2 built; options pages back to upstream's layout; footprint records corrected; fix PRs prepared for upstream | Owner live test of round 2 passes; dry-run merge conflicts counted |
+| 3 HUD extras as mods | Small API additions; Stats Box, Target of Target, Mana Bars, HUD numbers as bundled mods; inline code removed | The four mods on by default; nothing lost for players |
+| 3u Upstream seams | Branches from origin/master for PR 1-3, each with a vanilla use and tests | Owner sends them |
+| 4 Map API and map mods | Map data API; journal mod, then search and guidance, then round minimap and skin; fork map code removed from upstream's map files | Upstream's map files unchanged or behind one seam |
+| 5 Items | inventory, item, bank, loot, merchant, gems | A bag viewer with a loot log |
+| 6 Actions and the rest | Full automation, quests, camera, dialogs | Owner approves the new seams first |
+| 7 Finish | Audit, generated reference, support table, freeze eqoa/1 | Owner approves the release |
+
+Leads and builders are chosen per round from the roster (`~/Paseo/Agent_Learning_Instructions.md`);
+the reviewer is a different model family from the builder.
+
+### Round 2.5: harden and tidy (no new API)
+
+1. Make the zero-addon allocation tests a required CI gate. Add a Play-shaped fixture helper and move
+   the three bundled-UI fixtures onto it (round 2 review item L6). Add one picture comparison per
+   bundled UI.
+2. Options: restore upstream's Extended pages exactly (UI, Map, Textures and the rest: rows, order,
+   ids 41-45). Fork rows live only on fork pages placed after upstream's last page. Keep every saved
+   key. Upstream's walk tests return to upstream's text; fork pages get their own walk test in
+   fork_ext/options.rs. Target: options.rs differs from upstream by hook lines only.
+3. Footprint records: list the map family (map/**, tracker.rs, groupmark.rs, mapsuggest.rs,
+   render/map.rs, render/map.wgsl) as shared with measured budgets; remove budgets for files that
+   no longer differ; tighten every budget to its measured value.
+4. Restore upstream's order and formatting where the fork only moved things (the Pick list in hud.rs,
+   mini_view in play.rs, the reflowed lines in binds.rs).
+5. Take upstream's version where the two are now the same (decision 7): group waypoint, quest
+   toggles, the map suggestion form, and upstream's new touch controls. Re-test the D-pad in quick
+   chat and the map's long press on upstream's touch code; report anything still missing.
+6. First-run defaults (decision 5): apply NPC display 64 and distance 650 from the fork's own
+   settings at first run. Restore upstream's default constants and the upstream tests that name them.
+7. Prepare the fix PRs from origin/master, one branch each: animation guards; refused login shows
+   its reason; no phantom controller; texpack test path on Windows; .gitattributes LF for shaders.
+   Write the note about the two AO tests on NVIDIA. The owner sends them (decision 4).
+8. Report the before and after of both numbers: fork lines in upstream files, dry-run conflicts.
+
+### Round 3: the HUD extras become mods
+
+API additions (small; each tested from game-shaped data):
+- `eqoa.player.stats()`: each stat's base and current value and the effect change on it; armour and
+  resists as the Summary window shows them; Class Mastery bonuses when received.
+- `power` on group members and entities when the server sends it (nil otherwise); `target_id` on
+  entities.
+- `eqoa.actions.assist()` and `eqoa.windows.open("summary")`: player-style actions only, through the
+  same path as the key or click (assist is upstream's own Assist Target action).
+- `eqoa.input.bind{id, label, default_key}`: a key the mod owns, shown on the Controls page.
+
+Mods (bundled, on by default, each in its own folder, no client build needed to change them):
+`eqoa_stats_box`, `eqoa_target_of_target`, `eqoa_mana_bars`, `eqoa_hud_numbers`.
+
+Then remove from upstream's files: the Stats Box, Target of Target and Mana Bars drawing, their
+HudState and Play fields, their option rows, settings and key rows. Saved settings migrate into each
+mod's settings once. The network reader for others' power stays (offered upstream separately).
+Owner approves each mod's five-line description first (UI rule). Acceptance: the owner sees the same
+four features; hud.rs, play.rs, settings.rs and binds.rs lose the matching lines. After this round
+the four mods move to their own repository (decision 9).
+
+### Round 3u: offer the seams upstream
+
+One branch from origin/master per PR, no Lua, no mod names, each with a use inside vanilla, tests
+with a negative control, and the vanilla test suite passing:
+1. Option rows declared in one table; ids 1000+ reserved for other builds.
+2. Each HUD part can be switched off by itself (one question at the draw and at the click).
+3. Game-event observer and a layer over the finished frame (chat log and creature watch moved onto
+   it as first users).
+Descriptions the owner can send are in the direction review, section 3. The owner opens each PR
+under their own name. When one is accepted, the next sync deletes the matching fork lines and
+lowers the budget. Two questions go to Winfro directly, not as PRs: the round minimap as an option
+(decision 3) and the live-server client check (decision 6).
+
+### Round 4: map API and map mods
+
+Upstream's map is the base. Add to the API:
+- `eqoa.map.markers(world_id)`: camps, coaches, towns, quest marks, community pins, personal and
+  group waypoints.
+- `eqoa.map.view{center, zoom, size}`: the client renders the current map view to a texture; the mod
+  places it, round or square. No per-frame map drawing in Lua.
+- `eqoa.hud.hide("minimap")`, and hide switches for parts of the map's frame.
+- `eqoa.map.set_guide(point or entity)`: a guide the mod owns that can follow a moving creature.
+- Packaged read-only data above 1 MiB (the creature catalogue), read through the client.
+Mods, in this order, each with the owner's five-line approval: the creature journal; search and
+guidance (F2/F4); the round minimap with hover cards; the map skin (only if a theme seam exists).
+The round minimap and skin are built as mods only if Winfro declines them as vanilla options
+(decision 3). Then take upstream's map files unchanged. Anything that can't move behind the API is
+listed for the owner with its sync cost. Measure frame time with the map mods on before deciding
+(gate 1 covers them off).
+
+### Round 5: items
 
 Inventory and item objects (with tabs, selection and change events), bank, loot window, merchant,
 and gem helpers. Each one has empty, closed and zoning cases tested. Add a matching Forge adapter
-where a Forge module exists. Add an example mod: a bag viewer with a loot log.
+where a Forge module exists. Add an example mod: a bag viewer with a loot log. Start only when a
+bundled mod needs it.
 
-### Round 4: the rest
+### Round 6: actions and the rest
 
-Quest log and quest objects, camera, windows/dialogs (busy state), map data for map mods (zone, world
-id, map images, waypoint to the native map), Class Mastery values, class and disposition icons, the
-tooltip and mouse ImGui APIs and `AddImageQuad`, and the actions API from the spec (cast, use an
-item, target, loot, move, follow), callable from a click or from the mod's own logic. Split it into independent worker tasks where the files
-do not overlap.
+Quest log and quest objects, camera, windows/dialogs (busy state), Class Mastery values not already
+done, class and disposition icons, the remaining ImGui pieces, and the full actions API from the
+spec (cast, use an item, target, loot, move, follow), callable from a click or from the mod's own
+logic. The map and the small actions are already done in rounds 3 and 4. Full automation needs new
+seams in controls, dialogs, bank and merchant code: the lead shows the owner the exact lines before
+building (decision 10).
 
-### Round 5: finish
+### Round 7: finish
 
 - Audit every Forge and `eqoa` function against the spec. Each is real, or gives a visible
   "unsupported" diagnostic; nothing reports a fake success.
-- Write `docs/modding/SUPPORT-TABLE.md` from that audit.
+- Generate the reference and `docs/modding/SUPPORT-TABLE.md` from the running client
+  (`eqoa.capabilities`) instead of writing them by hand. Renumber the spec's and the capabilities'
+  round labels to this plan.
 - Finish the author docs: spec, getting started, examples, versioning promise.
 - Retire the `docs/mod-author-api` branch (with the owner's OK) and update FORGE-COMPATIBILITY-HANDOFF
   to point here.
-- The owner approves the release that freezes `eqoa/1`.
+- Freeze `eqoa/1` only after the round 4 mods have shipped on it. The owner approves the release.
 
-### Map as a mod (owner idea, 2026-11-09): decide after round 4
+### Tools for mod authors (can run beside any round; no API change)
 
-Background: upstream's map is the same map our fork restored on 28 Oct, then extended (comparison:
-`docs/plans/upstream-map-comparison.md`). Task A, done first and separately: the 2026-11-09 upstream
-sync resolves as "combine" (keep our map files, port upstream's five small additions). The owner's longer
-idea: take upstream's map as the base and rebuild our additions (search and guidance, creature journal,
-circular minimap, theme) as a mod on `eqoa/1`. It cannot start before round 4, which provides the map
-data, waypoint-to-native-map and the missing ImGui pieces. After round 4 a lead writes a one-page design
-and the owner decides. Points to settle:
-
-1. What stays in the client (the GPU-drawn minimap may have to) and what becomes a mod (search, guidance,
-   journal, theme).
-2. The data the mod needs (zone, entity and quest data, the shipped map-data files) and how a mod ships
-   large data in its own folder.
-3. Default experience: bundled and on by default, so players lose nothing; without it, upstream's plain map.
-4. Ownership after the split: upstream's map as the base keeps syncs cheap; each upstream map change is
-   checked against the add-on.
-5. API stability: it would be the largest real user of `eqoa/1`; the freeze is at round 5.
-6. Performance: measure a Lua map drawn every frame before committing (see the round 2 slowdown).
-First step: test whether the API already lets us build the journal as a mod; what is missing sets round 4's scope.
-
-### Optional: offer the hooks upstream (owner's call)
-
-After round 2, when the core hooks have settled: a worker makes a branch from `origin/master` with
-only the hooks (no Lua, no mods) and their tests. It writes a short PR description that gives each
-hook's use inside the vanilla client, then runs the vanilla test suite. The owner decides whether to
-open the PR (it goes out under their name). Each hook upstream accepts drops out of our footprint
-and out of future sync conflicts.
+`eqoa mod-test <folder>` (run a mod against a saved snapshot: errors and a screenshot, no login);
+`eqoa mod-api` (print the reference from the capability list); a starter template; reload on save;
+docs/modding/AGENT-GUIDE.md (one page for agents building mods from an owner brief).
 
 ## Results
 
@@ -192,3 +319,7 @@ and out of future sync conflicts.
   budget. Gates: addon suite, installer, pinned Forge, GPU opt-ins, wasm, footprint, release build.
   Not verified: four symlink branches, oracle tests, live game. Owner live test pending: the three
   bundled UIs unchanged plus `eqoa_example_hearts`. Next: round 3 (items), Sonnet lead.
+- **Direction review, 2026-11-09.** Fable, read-only: `docs/plans/2026-11-09-direction-review-fable.md`
+  (develop 23d6469). The owner approved all ten recommendations the same day; this plan was
+  reordered to match (rounds 2.5 to 7 above). No code changed. Still pending from round 2: the
+  owner's live test. Next: round 2.5, when the owner starts it.

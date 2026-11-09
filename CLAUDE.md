@@ -20,7 +20,9 @@ Report results in a player's terms, with what was tested and what was not.
 1. Read `FORK.md`. It is the source of truth for scope, file ownership and merge policy.
 2. Read the current handoff for the work at hand. Handoffs live in `docs/` on the branch that holds
    the work (Forge/addons: `docs/FORGE-COMPATIBILITY-HANDOFF.md`). `docs/backlog.md` holds deferred
-   requests.
+   requests. Direction and the order of work (owner, 2026-11-09): `docs/plans/EQOA-MOD-API-PLAN.md`.
+   The fork is heading for "upstream plus mods": neutral hooks are offered upstream, the fork's own
+   features move into mods, and each round runs in the order that plan gives (2.5, 3, 3u, 4 to 7).
 3. Read `C:\Users\hocka\Paseo\Agent_Learning_Instructions.md` and the experience log beside it. Add an
    entry there after each meaningful task, and update the existing entry when the owner's test
    results arrive.

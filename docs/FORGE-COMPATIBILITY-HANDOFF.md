@@ -6,6 +6,11 @@ live test of 2026-10-30. Earlier versions: `git show 039bbff:docs/FORGE-COMPATIB
 (stages up to sound) and `docs/WEREOXXS-{FINAL-HANDOFF,MORNING-HANDOFF,OVERNIGHT-STATUS}.md`
 (history of the overnight run; their stage-by-stage detail stays there).
 
+**Direction since 2026-11-09:** the order of work is set by `docs/plans/EQOA-MOD-API-PLAN.md`
+(owner-approved "upstream plus mods": rounds 2.5, 3, 3u, 4 to 7), not by Forge parity. Forge
+compatibility stays, and this file remains the record of the addon runtime; read the plan first for
+what to do next.
+
 ## Where the work is
 
 - Branch `forge-compatibility`, worktree `C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility`
