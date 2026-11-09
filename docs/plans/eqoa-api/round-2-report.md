@@ -233,3 +233,29 @@ The whole Forge ability_bar adapter function is unchanged from 413d1ee (SHA256 9
 **Extra bars, deferred separately:** native HudMenus has six menus in carousel order 0,1,4,5,2,3; expansion bit 1 plus the Extended setting permits four ability bars of five regular slots each. The first menu additionally accepts four special slots (252-255), for nine entries. Native eqoa.hotbar.list already exposes configured bars with one-based indices and native slot counts. Pinned Forge, 413d1ee and current Forge expose three zero-based bars: two ability bars (five slots each) and items (four). Wereoxxs loops stock bars 0..2 with bar 3 reserved for its weapon-set extension; Avoids loops num_bars and treats bar 2 as items. The existing selected-bar clamp can also highlight items for an extra native bar; it predates this patch. The new extended-carousel fixture checks native four-bar references and nine first-menu slots while confirming stock Forge bounds and no extra record aliasing. Full extended UI support is recorded in docs/backlog.md; no bundled UI rewrite or new extended API is attempted here.
 
 Focused result: **6 passed, 0 failed, 0 SKIP lines** across the five ordinary tests and the explicitly enabled pinned Enter test. The three product negative controls were each run red before their corresponding fix. Full gates follow below.
+
+
+Final live-regression gates use rustc 1.99.1, the isolated target, scratch EQOA_CONFIG and timeout-protected shared cargo lock. Workspace/release use CI's explicit Windows target and static CRT flag. No implementation changed after the full workspace run began.
+
+| Live-regression gate | Result |
+|---|---|
+| New behavior checks | 6 passed, 0 failed, no SKIP lines; five ordinary cases plus the pinned Enter opt-in. |
+| CI-style full workspace | 1,963 reported passed, 0 failed, 28 ignored; 219 explicit SKIP lines. |
+| Required addon suite | 335 reported passed, 0 failed, 24 ignored; 6 SKIP lines (four symlink privilege branches and two opt-ins). |
+| Pinned Forge/UI opt-ins | 25 passed, 0 failed, 0 ignored, no SKIP lines; includes the new real-Wereoxxs Enter replay. Bundled scripts remain unchanged. |
+| Bundled installer | 23 passed, 0 failed, 1 ignored, no SKIP lines; the reference update is separately exercised by the pinned opt-ins. |
+| Update notes | 21 passed, 0 failed, 0 ignored, no SKIP lines. |
+| Optimized performance/allocation probes | 4 passed, 0 failed, 0 ignored, no SKIP lines. Moving subscriber: 238.554 us/frame, unchanged 143.473 allocations / 14,975.2 bytes per frame. Zero addons: 4.707 us/frame including one input initialization allocation over 300 frames; menu frames 4.935 us with zero allocations. |
+| GPU opt-ins | Grid 1/1 and pinned hearts 1/1 passed, no SKIP lines; hearts pixels remain full/partial/death 1,395 / 690 / 0. |
+| Python tools | 94 passed, 0 failed; 151.658 seconds, no SKIP lines. |
+| wasm32 check | PASS; two existing unused-variable warnings. |
+| Footprint and whitespace | PASS at required base 8435f2c8a00c631d716771f8189fa0011a1fbf50. No shared hook changes or budget increase; play.rs +759/-53, viewer.rs +255/-15 remain within policy. |
+| CI static-CRT release | PASS at source checkpoint 836a429, 1m 41s, 57 warnings. |
+| Exact CI runtime packaging | PASS at 836a429, including clean-source provenance, embedded commit, executable/allowlist/catalog/checksum verification with the pinned public catalog. Outputs are in scratch, outside run/. |
+| Development publication preflight | Attempted on the clean feature checkpoint; refused with exit 128 because origin/develop is absent. This ancestry/publication gate still requires lead integration and CI fetch. No refs were rewritten and nothing was published. |
+
+The 219 workspace SKIP lines are unchanged in number: unavailable disc/decomp/oracle fixtures and four privilege-blocked symlink branches are not proven by a returning-Ok test. The pinned UI and GPU opt-ins were explicitly exercised as listed. The new geometry probes use real bundled Lua/ImGui/icon-cache paths with synthetic decoded art, not the owner's actual disc or saved profile. No live-game, physical-controller, audio-listening or native-Linux acceptance is claimed. Owner retesting remains necessary for Enter after focus switches and the Avoids icons in the world.
+
+Stable's legacy slot builder also already maps menu ability IDs to record positions, exactly as the current Forge snapshot does; that suspected index regression was ruled out by source comparison. Preserving the signed icon words is the behavioral difference demonstrated by the failing geometry control. Starting tests at native Play/protocol-shaped fields and exercising cached Lua state across cleanup prevents the post-projection-only fixtures from hiding these regressions.
+
+This final report commit is followed by another static-CRT Windows release build and exact runtime-package verification to embed its final SHA. The worker's final response reports that repeat; no push, tag, publication or integration merge is performed.
