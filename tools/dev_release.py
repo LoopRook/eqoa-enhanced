@@ -47,6 +47,10 @@ def preflight(root):
     root = root.resolve()
     if os.environ.get("GITHUB_REPOSITORY", REPO) != REPO:
         raise ValueError(f"Development builds run only in {REPO}")
+    notes = (root / "FORK-UPDATE-NOTES.md").read_text(encoding="utf-8")
+    problem = unreleased_heading_problem(notes)
+    if problem:
+        raise ValueError(problem)
     commit = source_commit(root)
     # A push to develop builds that commit; a manual run may build an older one,
     # but never a commit that is not on develop.
@@ -70,6 +74,17 @@ def unreleased(notes):
             break
         section.append(line)
     return "\n".join(section).strip()
+
+
+def unreleased_heading_problem(notes):
+    """The malformed Unreleased heading in the notes, or None."""
+    headings = [line for line in notes.splitlines() if line.lstrip().startswith("#")]
+    found = [heading for heading in headings if "unreleased" in heading.lower()]
+    if len(found) > 1:
+        return "FORK-UPDATE-NOTES.md has more than one Unreleased heading"
+    if found and found[0] != UNRELEASED:
+        return f"FORK-UPDATE-NOTES.md's Unreleased heading must be exactly {UNRELEASED!r}: {found[0]!r}"
+    return None
 
 
 def release_body(commit, notes):

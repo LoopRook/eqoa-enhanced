@@ -52,6 +52,23 @@ class DevelopmentReleaseTests(unittest.TestCase):
         self.assertNotIn("Old thing", body)
         self.assertIn("Same as Stable.", release.release_body(COMMIT, "# Notes\n\n## 2026-11-08 · Enhanced 0.4.14\n\n- Old thing.\n"))
 
+    def test_real_notes_publish_the_unreleased_bullets(self):
+        notes = (ROOT / "FORK-UPDATE-NOTES.md").read_text(encoding="utf-8")
+        body = release.release_body(COMMIT, notes)
+        self.assertNotIn("Same as Stable.", body)
+        self.assertIn("- Added the experimental native", body)
+        self.assertNotIn("Enhanced 0.4.14", body)
+        renamed = notes.replace("## Unreleased", "## 2026-11-09 · Enhanced dev build", 1)
+        self.assertIn("Same as Stable.", release.release_body(COMMIT, renamed),
+                      "a renamed heading no longer publishes the Nightly notes")
+
+    def test_unreleased_heading_must_keep_the_published_format(self):
+        for heading in ("## Unreleased Notes", "### Unreleased", "## unreleased", "## Unreleased "):
+            with self.subTest(heading=heading):
+                self.assertIsNotNone(release.unreleased_heading_problem(f"# Notes\n\n{heading}\n\n- a\n"))
+        self.assertIsNone(release.unreleased_heading_problem("# Notes\n\n## Unreleased\n\n- a\n"))
+        self.assertIsNotNone(release.unreleased_heading_problem("## Unreleased\n- a\n\n## Unreleased\n- b\n"))
+
     def test_history_accepts_the_rolling_dev_tag_beside_versioned_releases(self):
         check_history([{"tagName": "dev", "isDraft": False},
                        {"tagName": "v0.4.13", "isDraft": False}], VERSION)
@@ -202,6 +219,16 @@ class DevelopmentReleaseTests(unittest.TestCase):
             root = self.make_source(directory)
             state = release.preflight(root)
             self.assertEqual(state, {"commit": self.git(root, "rev-parse", "HEAD")})
+
+    def test_actual_preflight_refuses_a_malformed_unreleased_heading(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict(os.environ, {"GITHUB_REPOSITORY": release.REPO}):
+            root = self.make_source(directory)
+            (root / "FORK-UPDATE-NOTES.md").write_text("## Unreleased notes\n- a\n", encoding="utf-8")
+            self.git(root, "commit", "--quiet", "-am", "Malformed notes")
+            self.git(root, "update-ref", "refs/remotes/origin/develop", "HEAD")
+            with self.assertRaises(ValueError):
+                release.preflight(root)
 
     def test_actual_preflight_refuses_commits_not_on_develop(self):
         for scenario in ("not-on-develop", "dirty", "fork", "missing-develop"):

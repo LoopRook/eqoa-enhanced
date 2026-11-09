@@ -20,9 +20,13 @@ from the commit compiled into the running build.
    footprint check, the workspace tests and the release build, and nothing is
    published unless they pass, so a release needs no second local suite or
    build (the owner, 2026-11-08). Run them locally only to debug a failed job.
-2. Bump VERSION using MAJOR.MINOR.PATCH. Add docs/releases/<version>.md and a
-   FORK-UPDATE-NOTES.md entry. Patch increments for fixes, minor for substantial
-   additions; major 0 is early development.
+2. Bump VERSION using MAJOR.MINOR.PATCH. Add docs/releases/<version>.md. In
+   FORK-UPDATE-NOTES.md, rename the `## Unreleased` heading to that version's
+   dated entry, `## <YYYY-MM-DD> · Enhanced <version>`, and keep its bullets (or
+   add a new entry above it). Nightly publishes exactly that `## Unreleased`
+   section, so the release converts it in place; `tools/dev_release.py` refuses a
+   differently written Unreleased heading. Patch increments for fixes, minor for
+   substantial additions; major 0 is early development.
 3. With the owner's go-ahead, merge `develop` into `enhanced`, push it, then
    create and push the matching `v<version>` tag on that `enhanced` commit.
 4. The tag starts Official release. The `windows` job (read-only) checks that

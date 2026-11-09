@@ -285,8 +285,8 @@ pub fn sections(md: &str) -> Vec<Section> {
 /// The release's sections whose heading this build's notes do not have, in
 /// the release's order (newest first).
 pub fn whats_new(release: &str, own: &str) -> WhatsNew {
-    let had: std::collections::HashSet<String> = sections(own).into_iter().map(|s| s.title).collect();
-    let new: Vec<Section> = sections(release).into_iter().filter(|s| !had.contains(&s.title)).collect();
+    let had: std::collections::HashMap<String, Vec<String>> = sections(own).into_iter().map(|s| (s.title, s.bullets)).collect();
+    let new: Vec<Section> = sections(release).into_iter().filter(|s| had.get(&s.title).is_none_or(|b| s.title == "Unreleased" && b != &s.bullets)).collect();
     if new.is_empty() { WhatsNew::Nothing } else { WhatsNew::Sections(new) }
 }
 
@@ -1591,6 +1591,9 @@ mod tests {
         let v2 = "## 2026-10-24 · Second\n- b1\n\n## 2026-10-23 · First\n- a1\n";
         let WhatsNew::Sections(s) = whats_new(NOTES_V3, v2) else { panic!("sections") };
         assert_eq!(s.len(), 1, "one build behind: the newest alone");
+        let WhatsNew::Sections(s) = whats_new("## Unreleased\n- n1\n", "## Unreleased\n- old\n") else { panic!("sections") };
+        assert_eq!((s.len(), s[0].title.as_str(), s[0].bullets.clone()), (1, "Unreleased", vec!["n1".to_string()]), "Nightly's changed section");
+        assert_eq!(whats_new("## Unreleased\n- n1\n", "## Unreleased\n- n1\n"), WhatsNew::Nothing, "unchanged: nothing");
         assert_eq!(whats_new(NOTES_V1, NOTES_V1), WhatsNew::Nothing, "the control: nothing new");
         assert_eq!(whats_new("", NOTES_V1), WhatsNew::Nothing, "an empty file: nothing");
     }
@@ -1599,7 +1602,7 @@ mod tests {
     /// sections, newest first, each with bullets and no markdown left.
     #[test]
     fn this_builds_own_notes_read() {
-        let s = sections(OWN_NOTES);
+        let s: Vec<_> = sections(OWN_NOTES).into_iter().filter(|s| s.title != "Unreleased").collect();
         assert!(s.len() >= 5, "{}", s.len());
         assert!(s.iter().all(|s| !s.bullets.is_empty() && s.title.starts_with("20")));
         assert!(s.windows(2).all(|w| w[0].title[..10] >= w[1].title[..10]), "newest first");
