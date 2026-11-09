@@ -1027,3 +1027,25 @@ fn world_map_stays_in_window_coordinates_at_render_scales() {
         }
     }
 }
+
+#[test]
+fn master_off_releases_world_and_closes_search_without_losing_saved_waypoints() {
+    crate::settings::testing::reset(false);
+    let mut m = up((1280, 720));
+    m.set_waypoint(0, Some(FREEPORT));
+    m.open = false;
+    m.search.open = true;
+    m.mini.up = true;
+    m.travel_ask = Some(community::Spot {
+        world: 0,
+        at: FREEPORT,
+    });
+    m.group_ask = m.travel_ask;
+    assert!(m.world.is_some() && m.search.open && m.mini.up);
+    m.off();
+    assert!(!m.open && !m.search.open && !m.mini.up);
+    assert!(m.world.is_none() && m.layers.is_none());
+    assert!(m.take_travel_ask().is_none() && m.take_group_ask().is_none());
+    assert_eq!(m.waypoint(0), Some(FREEPORT));
+    crate::settings::testing::reset(false);
+}

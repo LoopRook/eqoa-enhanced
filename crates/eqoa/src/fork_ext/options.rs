@@ -7,7 +7,8 @@
 //! (1045), Quest Tracker (1046), Map Markers (1043), and upstream's Text
 //! (30), HUD (40) and Raid List (49); Mods & Addons holds the addon rows.
 //! Upstream IDs stay below 1000, so the fork's map IDs 1043 and up avoid
-//! future collisions. They are transient UI identities, not saved keys.
+//! future collisions. The Map page owns masters Map (1054) and Quest Helper
+//! (1055). They are transient UI identities, not saved keys.
 use super::{Category, Note};
 use crate::settings::ClientOptions;
 use vi::ui::{Vui, wide};
@@ -18,7 +19,11 @@ pub(super) const QUESTS_CATEGORY: Category = Category {
     items: &[1045, 1046, 1043, 30, 40, 49],
     note: Note::None,
 };
-pub(super) const MAP_CATEGORY: Category = Category { name: "Map", items: &[1054, 1055], note: Note::None };
+pub(super) const MAP_CATEGORY: Category = Category {
+    name: "Map",
+    items: &[1054, 1055],
+    note: Note::None,
+};
 pub(super) const ITEMS: &[(i32, &str)] = &[
     (31, "Target of Target"),
     (42, "Mana Bars"),

@@ -1607,8 +1607,8 @@ mod tests {
         assert!(space_is_jumps(&b));
         assert_eq!((default_row("space"), default_row("v"), default_row("g")), (Some(jump), Some(jump), Some(attack)));
         let mut moved = Binds::default();
-        assert_eq!(moved.bind_key(jump, "b"), Moved::Freed(Some("space".into())));
-        assert_eq!((moved.alias("b"), moved.alias("space"), moved.alias("v")), (Alias::To("space"), Alias::Nothing, Alias::Nothing));
+        assert_eq!(moved.bind_key(jump, "y"), Moved::Freed(Some("space".into())));
+        assert_eq!((moved.alias("y"), moved.alias("space"), moved.alias("v")), (Alias::To("space"), Alias::Nothing, Alias::Nothing));
         assert!(!space_is_jumps(&moved), "Space left with nothing");
         let mut taken = Binds::default();
         assert_eq!(taken.bind_key(row_named("talk").unwrap(), "space"), Moved::Swapped(jump));
@@ -1652,9 +1652,9 @@ mod tests {
         }
         // the jump's row moved onto B: B is the jump's everywhere, Space nothing
         let mut moved = Binds::default();
-        moved.bind_key(row_named("jump").unwrap(), "b");
-        assert_eq!(e.key("b", true, false, false, &moved), key("space"));
-        e.key("b", false, false, false, &moved);
+        moved.bind_key(row_named("jump").unwrap(), "y");
+        assert_eq!(e.key("y", true, false, false, &moved), key("space"));
+        e.key("y", false, false, false, &moved);
         assert_eq!(e.key("space", true, false, false, &moved), None);
         e.key("space", false, false, false, &moved);
         // Talk on Space: Talk's
@@ -1679,8 +1679,8 @@ mod tests {
         assert_eq!((b.key(attack), b.key(talk), b.key(jump)), (Some("q"), Some("space"), Some("g")));
         let b = Binds::from_text("key.hide_ui=g\n");
         assert_eq!((b.key(hide), b.key(attack), b.key(jump)), (Some("g"), Some("h"), Some("space")));
-        let b = Binds::from_text("key.jump=b\n");
-        assert_eq!((b.key(jump), b.alias("space"), b.alias("v"), b.alias("b")), (Some("b"), Alias::Nothing, Alias::Nothing, Alias::To("space")));
+        let b = Binds::from_text("key.jump=y\n");
+        assert_eq!((b.key(jump), b.alias("space"), b.alias("v"), b.alias("y")), (Some("y"), Alias::Nothing, Alias::Nothing, Alias::To("space")));
         let b = Binds::from_text("macro.3.key=g\nmacro.3.buttons=cross+circle\n");
         assert_eq!((b.macros[2].key.as_deref(), b.alias("g"), b.key(attack)), (Some("g"), Alias::Macro(2), Some("")));
         assert_eq!(b.alias("space"), Alias::Same, "Space still the jump's");

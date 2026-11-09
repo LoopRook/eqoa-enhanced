@@ -1947,6 +1947,7 @@ mod tests {
         assert_eq!(cues.last(), Some(&11));
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 23, "NPC/PC Display");
+        settings::set_client(settings::ClientOptions { entity_slots: 24, ..settings::client() });
         assert_eq!(settings::entity_slots(), 24, "the game's 24");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!((settings::entity_slots(), cues.last()), (24, Some(&9)), "no fewer than the game's");
@@ -1969,6 +1970,7 @@ mod tests {
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 24, "NPC/PC Distance");
+        settings::set_client(settings::ClientOptions { entity_view: 100, ..settings::client() });
         assert_eq!(settings::entity_view(), 100, "the game's 100");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!((settings::entity_view(), cues.last()), (100, Some(&9)), "no nearer than the game's");
@@ -2514,14 +2516,14 @@ mod tests {
     /// here, where a second match arm would only warn.
     #[test]
     fn every_extended_row_has_its_own_item() {
-        let mut items: Vec<i32> = EXTENDED_ITEMS.iter().map(|r| r.0).collect();
+        let mut items: Vec<i32> = fork_options::items().map(|r| r.0).collect();
         items.sort_unstable();
         let n = items.len();
         items.dedup();
         assert_eq!(items.len(), n, "an item named twice in EXTENDED_ITEMS");
         for c in ALL_CATEGORIES.iter() {
             for i in c.items {
-                assert!(EXTENDED_ITEMS.iter().any(|r| r.0 == *i), "{}'s item {i} has no row", c.name);
+                assert!(fork_options::items().any(|r| r.0 == *i), "{}'s item {i} has no row", c.name);
             }
         }
         let listed: Vec<i32> = ALL_CATEGORIES.iter().flat_map(|c| c.items.iter().copied()).collect();

@@ -127,9 +127,9 @@
       "reason": "Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged."
     },
     "crates/eqoa/src/options.rs": {
-      "added": 42,
-      "deleted": 140,
-      "reason": "Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. Owner-approved defaults export adds eight regression setup/assertion lines for the 64/650 defaults and retail-minimum controls. Sync 2026-11-07: upstream's Raid List row sits in Map & Quests (UI already holds six, PAGE_MOST stays 6); its walk-test lines move with it (+5/-5). Sync 2026-11-08: upstream's Textures page goes after Map & Quests and Mods & Addons (index 9, so the web build's split_at keeps the fork pages); its row-doc, array lengths, split_at and walk-test page numbers move with it (+5/-5). Refactor/fork-options-rows: the fork's rows, category, change/value_text arms and walk-test steps moved into fork-owned fork_ext/options.rs, leaving only hook calls and page references here (+41/-41). Sync 2026-11-09: Upstream restored IDs 41?45 overlap existing Mana Bars 42. Route map parts and masters through owned rows (existing IDs retained; new 1054/1055), retain six-row pages and put Textures last on web. Stock map/UI walk assertions move to the owned fork walk, retaining Lighting/Texture Folder tests in place. +1 for the new owned master-category reference; deletions remove the conflicting stock rows/arms and relocated assertions."
+      "added": 46,
+      "deleted": 142,
+      "reason": "Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. Owner-approved defaults export adds eight regression setup/assertion lines for the 64/650 defaults and retail-minimum controls. Sync 2026-11-07: upstream's Raid List row sits in Map & Quests (UI already holds six, PAGE_MOST stays 6); its walk-test lines move with it (+5/-5). Sync 2026-11-08: upstream's Textures page goes after Map & Quests and Mods & Addons (index 9, so the web build's split_at keeps the fork pages); its row-doc, array lengths, split_at and walk-test page numbers move with it (+5/-5). Refactor/fork-options-rows: the fork's rows, category, change/value_text arms and walk-test steps moved into fork-owned fork_ext/options.rs, leaving only hook calls and page references here (+41/-41). Sync 2026-11-09: Upstream restored IDs 41?45 overlap existing Mana Bars 42. Route map parts and masters through owned rows (existing IDs retained; new 1054/1055), retain six-row pages and put Textures last on web. Stock map/UI walk assertions move to the owned fork walk, retaining Lighting/Texture Folder tests in place. +1 for the new owned master-category reference; deletions remove the conflicting stock rows/arms and relocated assertions. New upstream unique-ID test uses the combined registry, and its retail-boundary fixture explicitly selects 24/100 rather than Enhanced defaults."
     },
     "crates/eqoa/src/play.rs": {
       "added": 759,
@@ -255,6 +255,11 @@
       "added": 13,
       "deleted": 4,
       "reason": "Live client signature (CDSS 01 02 0c 00) in the S2 device block and its test assertions (docs/LIVE-CLIENT-COMPATIBILITY.md)."
+    },
+    "crates/eqoa/src/texpack.rs": {
+      "added": 1,
+      "deleted": 1,
+      "reason": "Sync 2026-11-09 Windows CI fixture correction only: synthesize drive-qualified absolute fixture paths on Windows so upstream AppImage absolute-path and negative controls run there; production code is unchanged."
     }
   },
   "immutable": [
@@ -321,7 +326,7 @@
       "path": "crates/eqoa/src/options.rs",
       "name": "options items",
       "pattern": "\\bfork_options::items\\b",
-      "count": 4
+      "count": 6
     },
     {
       "path": "crates/eqoa/src/options.rs",

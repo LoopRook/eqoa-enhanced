@@ -66,8 +66,12 @@ workers. Read `list_profiles` and pick by each profile's notes. Defaults:
   branch, tell it to commit only there (no push, merge, tag, or other folders), and review its diff
   before anything merges.
 
-One cargo build at a time across all agents: builds are slow and share the CPU. Keep each worktree on
-its own `CARGO_TARGET_DIR` unless the handoff names a shared one.
+One cargo build at a time across all agents: builds are slow and share the CPU. The owner
+requires ONE `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared` for every cargo
+build and test (2026-11-09, disk-space rule). Keep using the shared mkdir lock
+`C:/Users/hocka/Paseo/cargo-build.lock` with a timeout. Do not create per-worktree
+or other-drive target caches; remove a legacy worktree target after its gates pass.
+Do not remove `C:/Users/hocka/Paseo/targets/eqoa-api-r2` while its agent moves off it.
 
 ## Engineering rules kept from upstream
 

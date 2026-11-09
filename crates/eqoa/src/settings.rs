@@ -1050,20 +1050,9 @@ impl ClientOptions {
         if !self.mana_bars {
             s.push_str("mana_bars=off\n");
         }
-        // Minimap only when off
-        if !self.minimap {
-            s.push_str("minimap=off\n");
-        }
         // Stats Box only when on
         if self.stats_box {
             s.push_str("stats_box=on\n");
-        }
-        // Quest Markers and Quest Tracker only when off
-        if !self.quest_markers {
-            s.push_str("quest_markers=off\n");
-        }
-        if !self.quest_tracker {
-            s.push_str("quest_tracker=off\n");
         }
         if self.text == render::ui::TextFilter::Smooth {
             s.push_str("text=smooth\n");
@@ -1086,14 +1075,6 @@ impl ClientOptions {
         // Ground Fog only when Exact
         if !self.ps2_fog {
             s.push_str("ground_fog=exact\n");
-        }
-        // Map Markers only when off
-        if !self.map_markers {
-            s.push_str("map_markers=off\n");
-        }
-        // the map's town names only when off
-        if !self.map_towns {
-            s.push_str("map_towns=off\n");
         }
         // Ambient Occlusion only when on
         if self.ambient_occlusion {

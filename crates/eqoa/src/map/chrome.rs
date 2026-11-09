@@ -85,7 +85,7 @@ fn keyboard_legend(b: &crate::binds::Binds, group: bool, quests: bool) -> Vec<St
     };
     let mut labels: Vec<String> = KEY_LEGEND.iter().map(|s| s.to_string()).collect();
     labels[0] = format!("{} Close", key("map", "M"));
-    labels[1] = format!("{} Center", key("attack", "Space"));
+    labels[1] = format!("{} Center", key("jump", "Space"));
     labels[2] = format!(
         "{} {} or wheel Zoom",
         key("map_in", "+"),
@@ -131,10 +131,10 @@ fn keyboard_legend(b: &crate::binds::Binds, group: bool, quests: bool) -> Vec<St
         labels.insert(7, format!("{} Quests", key("look_left", "J")));
     }
     if group {
-        let (g, q) = (key("map_group_waypoint", "G"), key("talk", "Q"));
+        let (g, q) = (key("map_group_waypoint", "O"), key("talk", "Q"));
         labels.insert(
             5,
-            if g == "G" && q == "Q" {
+            if g == "O" && q == "Q" {
                 KEY_LEGEND_GROUP.into()
             } else {
                 format!("{g}, {q} held or Shift+click Group waypoint")
@@ -449,6 +449,27 @@ mod tests {
             keyboard_legend(&b, false, false)
                 .iter()
                 .any(|s| s == "Unbound Close")
+        );
+    }
+
+    #[test]
+    fn center_legend_follows_the_space_row_after_attack_moves_to_g() {
+        use crate::binds::{Binds, KeyEdge, Sent};
+        let mut binds = Binds::default();
+        let stock = keyboard_legend(&binds, true, false);
+        assert!(stock.iter().any(|s| s == "Space Center"));
+        assert!(stock.iter().any(|s| s == KEY_LEGEND_GROUP));
+        assert_eq!(super::super::keyboard("g"), None);
+        binds.bind_key(crate::binds::row_named("jump").unwrap(), "y");
+        let rebound = keyboard_legend(&binds, true, false);
+        assert!(rebound.iter().any(|s| s == "Y Center"));
+        let mut edge = KeyEdge::default();
+        let Some(Sent::Key(name)) = edge.key("y", true, false, false, &binds) else {
+            panic!("the rebound center key must reach the map");
+        };
+        assert_eq!(
+            super::super::keyboard(&name),
+            Some((key::CROSS, super::super::Hold::Once))
         );
     }
 

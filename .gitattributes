@@ -8,3 +8,6 @@ crates/eqoa/resources/map-data/map-entities.json -text
 
 # The bundled mods vendor tree must keep its exact bytes on every checkout.
 bundled-mods/** -text
+
+# Shadow shader assembly matches LF-terminated source lines on every host.
+crates/render/src/*.wgsl text eol=lf
