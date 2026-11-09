@@ -27,20 +27,29 @@ pub const MSG_TYPE_TELL: u32 = 0x3F008081;
 pub const MSG_TYPE_GUILD: u32 = 0x3E800000;
 
 thread_local! {
-    static OUTGOING_CHAT: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static OUTGOING_CHAT: RefCell<Vec<(Option<u64>, String)>> = const { RefCell::new(Vec::new()) };
     static CHAT_MONOTONIC_SEQ: Cell<u32> = const { Cell::new(1) };
     static CHAT_HISTORY: RefCell<VecDeque<(String, u32, u32)>> = const { RefCell::new(VecDeque::new()) };
 }
 
 pub(crate) fn queue_outgoing_chat(msg: String) {
-    if !report_route(&msg) {
-        OUTGOING_CHAT.with(|q| {
-            let mut q = q.borrow_mut();
-            if q.len() < 32 {
-                q.push(msg);
-            }
-        });
+    queue_owned(None, msg);
+}
+fn queue_owned(owner: Option<u64>, msg: String) -> bool {
+    if report_route(&msg) {
+        return false;
     }
+    OUTGOING_CHAT.with(|q| {
+        let mut q = q.borrow_mut();
+        if q.len() >= 32 {
+            return false;
+        }
+        q.push((owner, msg));
+        true
+    })
+}
+pub(crate) fn cancel_vm(vm: u64) {
+    OUTGOING_CHAT.with(|q| q.borrow_mut().retain(|(owner, _)| *owner != Some(vm)));
 }
 pub(crate) fn report_route(text: &str) -> bool {
     let mut text = text.trim_start();
@@ -81,7 +90,12 @@ pub(crate) fn report_route(text: &str) -> bool {
 }
 
 pub(crate) fn take_outgoing_chat() -> Vec<String> {
-    OUTGOING_CHAT.with(|q| std::mem::take(&mut *q.borrow_mut()))
+    OUTGOING_CHAT.with(|q| {
+        std::mem::take(&mut *q.borrow_mut())
+            .into_iter()
+            .map(|(_, line)| line)
+            .collect()
+    })
 }
 
 pub(crate) fn snapshot_chat(raw_chat: &VecDeque<(String, [f32; 4])>, now_ms: u32) -> ChatSnapshot {
@@ -427,7 +441,9 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
                         Some("message too long (127 character max)".to_string()),
                     ));
                 }
-                queue_outgoing_chat(line);
+                if !queue_owned(Some(super::native_events::bus(lua).borrow().vm), line) {
+                    return Ok((false, Some("chat queue is full".into())));
+                }
                 Ok((true, None::<String>))
             })?,
         )?;
@@ -454,14 +470,18 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
     let installed = send_installed;
     chat_mod.set(
         "UninstallSendHook",
-        lua.create_function(move |_, ()| {
+        lua.create_function(move |lua, ()| {
+            cancel_vm(super::native_events::bus(lua).borrow().vm);
             installed.set(false);
             Ok(true)
         })?,
     )?;
     chat_mod.set(
         "IsSendPending",
-        lua.create_function(|_, ()| Ok(OUTGOING_CHAT.with(|q| !q.borrow().is_empty())))?,
+        lua.create_function(|lua, ()| {
+            let vm = super::native_events::bus(lua).borrow().vm;
+            Ok(OUTGOING_CHAT.with(|q| q.borrow().iter().any(|(owner, _)| *owner == Some(vm))))
+        })?,
     )?;
 
     // Focus & window channel inspection helpers

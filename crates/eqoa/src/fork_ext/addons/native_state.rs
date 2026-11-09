@@ -104,7 +104,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             let (world,value)=CORE.with(|c| {let c=c.borrow();(c.view.in_world,resolve(&r,&c.view,c.generation,kind))});
             if !world {return error(lua,&symbol,"not_in_world","enter a loaded world first");}
             let Some(value)=value else {return error(lua,&symbol,"stale_handle","record no longer exists in this world");};
-            if module=="cooldowns" {let lockout=value["lockout"].as_f64().unwrap_or(0.0);return lua.pack_multi((record(lua,"eqoa.cooldowns.Cooldown",&json!({"active":lockout>0.0,"lockout":lockout,"started_at":null,"estimated_remaining":null}))?,Value::Nil));}
+            if module=="cooldowns" {let lockout=value["lockout"].as_f64().unwrap_or(0.0);return lua.pack_multi((record(lua,"eqoa.cooldowns.Cooldown",&json!({"active":lockout>0.0,"lockout":lockout,"started_at":CORE.with(|c|c.borrow().cooldown_edges.get(value["id"].as_str().unwrap_or_default()).map(|e|e.0)),"estimated_remaining":CORE.with(|c|{let c=c.borrow();c.cooldown_edges.get(value["id"].as_str().unwrap_or_default()).map(|e|(e.2-(super::native_core::time_unborrowed(&c)-e.1)).max(0.0))})}))?,Value::Nil));}
             lua.pack_multi((record(lua,if kind=="entity" {"eqoa.entities.Entity"}else{"eqoa.abilities.Ability"},&value)?,Value::Nil))
         })?)?;
     }

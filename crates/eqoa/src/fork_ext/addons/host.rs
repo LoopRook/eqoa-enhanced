@@ -57,6 +57,7 @@ pub(crate) struct Host {
     pub snapshot: Rc<Cell<Snapshot>>,
     remaining: Rc<Cell<u32>>,
     fatal: Rc<Cell<bool>>,
+    iteration_active: Cell<bool>,
     addon: Option<DiscoveredAddon>,
     host_registry: Rc<RefCell<HashMap<String, Value>>>,
 }
@@ -365,6 +366,7 @@ impl Host {
             snapshot: base.snapshot,
             remaining: base.remaining,
             fatal: base.fatal,
+            iteration_active: Cell::new(false),
             addon: Some(addon.clone()),
             host_registry,
         };
@@ -442,6 +444,7 @@ impl Host {
             snapshot: base.snapshot,
             remaining: base.remaining,
             fatal: base.fatal,
+            iteration_active: Cell::new(false),
             addon: None,
             host_registry: Rc::new(RefCell::new(HashMap::new())),
         };
@@ -520,9 +523,17 @@ impl Host {
     pub fn run(&self, function: &Function) -> Result<()> {
         self.run_with_budget(function, Self::INSTRUCTION_BUDGET)
     }
+    pub(crate) fn begin_iteration(&self) {
+        if !self.iteration_active.replace(true) {
+            self.remaining.set(Self::INSTRUCTION_BUDGET);
+            self.fatal.set(false);
+        }
+    }
+    pub(crate) fn end_iteration(&self) {
+        self.iteration_active.set(false);
+    }
     pub(crate) fn frame_entry(&self, function: &Function) -> Result<()> {
-        self.remaining.set(Self::INSTRUCTION_BUDGET);
-        self.fatal.set(false);
+        self.begin_iteration();
         let bus = super::native_events::bus(&self.lua);
         let initialized = bus.borrow().initialized;
         let once = bus.borrow().once_mode;
@@ -530,6 +541,8 @@ impl Host {
             super::native_events::dispatch(self)?;
         }
         if !once || !initialized {
+            let _phase = super::native::phase(&self.lua, "entry");
+            let _drawing = super::bridge::drawing(!once);
             function.call::<()>(())?;
         }
         bus.borrow_mut().initialized = true;
@@ -571,8 +584,11 @@ impl Host {
         if !(0..=4).contains(&kind) {
             return Err(mlua::Error::runtime("unknown callback type"));
         }
-        self.remaining.set(Self::INSTRUCTION_BUDGET);
-        self.fatal.set(false);
+        if !self.iteration_active.get() {
+            self.remaining.set(Self::INSTRUCTION_BUDGET);
+            self.fatal.set(false);
+        }
+        let _phase = super::native::phase(&self.lua, &format!("callback.{kind}"));
         if let Some(result) = super::native_settings::callback(&self.lua, kind, &value) {
             return result;
         }

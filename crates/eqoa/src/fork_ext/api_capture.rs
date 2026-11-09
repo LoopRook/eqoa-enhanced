@@ -185,7 +185,8 @@ impl Play {
 }
 
 pub(crate) struct ChangeCapture {
-    pub lockout: Option<(u8, i32)>,
+    pub cooldown_change: bool,
+    pub previous_channel: &'static str,
     pub before: View,
 }
 pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> ChangeCapture {
@@ -219,27 +220,79 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
         }
     });
     ChangeCapture {
-        lockout: if let Event::AbilityLockout { index, lockout, .. } = event {
-            Some((*index, *lockout))
-        } else {
-            None
-        },
+        previous_channel: CORE.with(|c| {
+            let mut c = c.borrow_mut();
+            let old = c.text_channel;
+            c.text_channel = match event {
+                Event::GroupChat { .. } => "group",
+                Event::Chat(..) => "unknown",
+                _ => "system",
+            };
+            old
+        }),
+        cooldown_change: matches!(
+            event,
+            Event::AbilityLockout { .. } | Event::AbilityAdd { .. }
+        ),
         before: play.native_view(None),
     }
 }
 pub(crate) fn end_game_event(play: &Play, capture: ChangeCapture) {
     let view = play.native_view(None);
-    CORE.with(|c| {let mut c=c.borrow_mut();
-        if let Some((key,raw))=capture.lockout {
-            let before=capture.before.abilities.iter().find(|a|a["display_key"].as_i64()==Some(key as i64)).map(|a|a["lockout"].clone()).unwrap_or(json!(0));
-            let after=view.abilities.iter().find(|a|a["display_key"].as_i64()==Some(key as i64));
-            let lockout=ee::div(raw.max(0) as f32,1000.0);
-            if before.as_f64()!=Some(lockout as f64) {
-                let event=if lockout==0.0 {"cooldown.ended"}else if before.as_f64().unwrap_or(0.0)==0.0 {"cooldown.started"}else{"cooldown.updated"};
-                let ability=c.view.abilities.iter().find(|a|a["display_key"].as_i64()==Some(key as i64)).map(|a|a["ref"].clone());
-                c.emit(event,json!({"ability":ability,"ability_id":after.map(|a|a["id"].clone()),"display_key":key,"lockout":lockout}));
+    CORE.with(|core| {
+        let mut c = core.borrow_mut();
+        let edges = if capture.cooldown_change {
+            view.abilities
+                .iter()
+                .filter_map(|after| {
+                    let before = capture
+                        .before
+                        .abilities
+                        .iter()
+                        .find(|b| b["id"] == after["id"]);
+                    let old = before.and_then(|b| b["lockout"].as_f64()).unwrap_or(0.0);
+                    let lockout = after["lockout"].as_f64().unwrap_or(0.0).max(0.0);
+                    (old != lockout).then(|| {
+                        (
+                            after["id"].clone(),
+                            after["display_key"].clone(),
+                            old,
+                            lockout,
+                        )
+                    })
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        c.text_channel = capture.previous_channel;
+        c.publish(view, true);
+        for (id, key, old, lockout) in edges {
+            let name = if lockout == 0.0 {
+                "cooldown.ended"
+            } else if old == 0.0 {
+                "cooldown.started"
+            } else {
+                "cooldown.updated"
+            };
+            let now = crate::fork_ext::addons::native_core::time_unborrowed(&c);
+            let id_text = id.as_str().unwrap_or_default().to_string();
+            if lockout == 0.0 {
+                c.cooldown_edges.remove(&id_text);
+            } else {
+                let started = c.cooldown_edges.get(&id_text).map_or(now, |e| e.0);
+                c.cooldown_edges.insert(id_text, (started, now, lockout));
             }
+            let ability = c
+                .view
+                .abilities
+                .iter()
+                .find(|a| a["id"] == id)
+                .map(|a| a["ref"].clone());
+            c.emit(
+                name,
+                json!({"ability":ability,"ability_id":id,"display_key":key,"lockout":lockout}),
+            );
         }
-        c.publish(view,true);
     });
 }

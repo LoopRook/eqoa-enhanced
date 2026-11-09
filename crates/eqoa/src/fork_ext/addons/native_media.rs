@@ -233,7 +233,26 @@ struct Sound {
     owner: Rc<RefCell<super::sound::SoundBank>>,
     id: super::sound::SoundId,
 }
-impl UserData for Sound {}
+impl UserData for Sound {
+    fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_method(mlua::MetaMethod::Eq, |_, this, other: AnyUserData| {
+            Ok(other
+                .borrow::<Sound>()
+                .is_ok_and(|o| Rc::ptr_eq(&o.owner, &this.owner) && o.id == this.id))
+        });
+    }
+}
+pub(crate) fn sound_handle(
+    lua: &Lua,
+    owner: &Rc<RefCell<super::sound::SoundBank>>,
+    id: super::sound::SoundId,
+) -> Result<AnyUserData> {
+    lua.create_userdata(Sound {
+        owner: owner.clone(),
+        id,
+    })
+}
+
 pub(crate) fn sound(lua: &Lua, owner: &Rc<RefCell<super::sound::SoundBank>>) -> Result<()> {
     if lua.named_registry_value::<Table>("eqoa_root").is_err() {
         return Ok(());
@@ -321,6 +340,9 @@ pub(crate) fn sound(lua: &Lua, owner: &Rc<RefCell<super::sound::SoundBank>>) -> 
                     return error(lua, &symbol, "stale_handle", "sound belongs to another VM");
                 }
                 let mut bank = bank.borrow_mut();
+                if !bank.contains(sound.id) && name != "release" {
+                    return error(lua, &symbol, "stale_handle", "sound has been released");
+                }
                 let ok = match name {
                     "is_playing" => {
                         return lua.pack_multi((bank.is_sound_playing(Some(sound.id)), Value::Nil));

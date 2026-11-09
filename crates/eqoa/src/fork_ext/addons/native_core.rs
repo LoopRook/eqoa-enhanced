@@ -67,8 +67,10 @@ pub(crate) struct Core {
     pub effects_received: bool,
     pub entity_versions: BTreeMap<u32, u64>,
     pub ability_versions: BTreeMap<String, u64>,
+    pub cooldown_edges: BTreeMap<String, (f64, f64, f64)>,
     pub disposition_target: Option<u32>,
     pub selected_target: Option<u32>,
+    pub text_channel: &'static str,
     next_version: u64,
     started: Instant,
 }
@@ -91,8 +93,10 @@ impl Default for Core {
             effects_received: false,
             entity_versions: BTreeMap::new(),
             ability_versions: BTreeMap::new(),
+            cooldown_edges: BTreeMap::new(),
             disposition_target: None,
             selected_target: None,
+            text_channel: "system",
             next_version: 0,
             started: Instant::now(),
         }
@@ -156,6 +160,7 @@ impl Core {
         self.generation += 1;
         self.entity_versions.clear();
         self.ability_versions.clear();
+        self.cooldown_edges.clear();
         self.disposition_target = None;
         self.selected_target = None;
         self.stats_received = false;
@@ -350,7 +355,12 @@ fn changed_fields(before: &Json, after: &Json) -> Vec<String> {
 }
 
 pub(crate) fn observe_text(text: &str, color: [f32; 4]) {
-    CORE.with(|c| { let mut c=c.borrow_mut(); let message=json!({"seq":c.seq+1,"time":c.started.elapsed().as_secs_f64(),"text":text.chars().take(8192).collect::<String>(),"color":{"r":color[0],"g":color[1],"b":color[2],"a":color[3]},"channel":"system"});
+    let mut end = text.len().min(8192);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let text = &text[..end];
+    CORE.with(|c| { let mut c=c.borrow_mut(); let message=json!({"seq":c.seq+1,"time":c.started.elapsed().as_secs_f64(),"text":text,"color":{"r":color[0],"g":color[1],"b":color[2],"a":color[3]},"channel":c.text_channel});
         if c.chat.len()==1000 {c.chat.pop_front();} c.chat.push_back(message.clone()); c.emit("chat.message",message);
     });
 }

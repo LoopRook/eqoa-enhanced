@@ -271,8 +271,24 @@ impl Textures {
                         height,
                         &bytes.as_bytes(),
                     ) {
-                        Ok(ud) => Ok(ud),
-                        Err(e) => Err(mlua::Error::runtime(format!("spike textures: {e}"))),
+                        Ok(ud) => {
+                            super::native_events::resource(
+                                lua,
+                                "texture",
+                                Value::UserData(ud.clone()),
+                                None,
+                            )?;
+                            Ok(ud)
+                        }
+                        Err(e) => {
+                            super::native_events::resource(
+                                lua,
+                                "texture",
+                                Value::Nil,
+                                Some(&e.to_string()),
+                            )?;
+                            Err(mlua::Error::runtime(format!("spike textures: {e}")))
+                        }
                     }
                 },
             )?,

@@ -630,6 +630,9 @@ fn controls(
             ui.separator();ui.text(format!("{} ({})",entry.metadata.name,entry.metadata.id));
             ui.text(match entry.status {super::manager::Status::Disabled=>"Disabled",super::manager::Status::Enabled=>"Enabled",super::manager::Status::Failed=>"Failed — reload to retry"});
             let id=&entry.metadata.id;
+            let warnings=manager.diagnostics().iter().filter(|d|d.id.as_ref()==Some(id)).count();
+            if warnings>0 {ui.same_line();ui.text(format!("[Warnings: {warnings}]"));}
+
             if ui.button(format!("{}##enable-{id}",if entry.enabled_intent {"Disable"} else {"Enable"})) {actions.push(Action::Enable(id.clone(),!entry.enabled_intent));}
             ui.same_line();if ui.button(format!("Reload##{id}")) {actions.push(Action::Reload(id.clone()));}
             ui.same_line();if ui.button(format!("Settings##{id}")) {actions.push(Action::Settings(id.clone()));}
@@ -641,6 +644,7 @@ fn controls(
         }
         for diagnostic in manager.diagnostics() {
             ui.separator();ui.text_wrapped(format!("{}{}",diagnostic.id.as_ref().map(|id|format!("{id}: ")).unwrap_or_default(),diagnostic.message));
+            if let Some(details)=&diagnostic.details {ui.text_wrapped(format!("Phase: {} | VM: {} | First: {}s | Last: {}s",details["phase"],details["vm"],details["first_time"],details["last_time"]));}
         }
     });
     actions

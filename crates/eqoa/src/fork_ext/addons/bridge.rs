@@ -114,8 +114,24 @@ pub const CALL_BUDGET: usize = 131_072;
 // vary leak shapes indefinitely, so both history and pending warnings are bounded.
 const MAX_RECOVERY_DIAGNOSTICS: usize = 64;
 
+thread_local! {static DRAWING_ALLOWED:std::cell::Cell<bool>=const{std::cell::Cell::new(true)};}
+pub(crate) struct DrawingScope(bool);
+impl Drop for DrawingScope {
+    fn drop(&mut self) {
+        DRAWING_ALLOWED.with(|v| v.set(self.0));
+    }
+}
+pub(crate) fn drawing(allowed: bool) -> DrawingScope {
+    DrawingScope(DRAWING_ALLOWED.with(|v| v.replace(allowed)))
+}
+
 impl Frame {
     fn check(&mut self) -> Result<()> {
+        if !DRAWING_ALLOWED.with(|v| v.get()) {
+            return Err(mlua::Error::runtime(
+                "drawing is only available in render and settings.render callbacks",
+            ));
+        }
         // All entry points run on the application thread. Lua never receives a
         // native address; the current Context and frame must still be ours.
         if !self.active || unsafe { sys::igGetCurrentContext() } != self.context {

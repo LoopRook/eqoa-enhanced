@@ -438,6 +438,9 @@ impl SoundBank {
 
     /// Resolves, bounds-checks, and opens a sound file. Returns a positive handle
     /// on success or `None` on failure.
+    pub(crate) fn contains(&self, id: SoundId) -> bool {
+        self.sounds.contains_key(&id)
+    }
     pub fn load_sound(
         &mut self,
         path_str: &str,
@@ -931,10 +934,12 @@ impl SoundBank {
         let resource_dirs = addon.resource_dirs.clone();
 
         let bank = owner.clone();
+        let event_owner = owner.clone();
         forge.set(
             "LoadSound",
             lua.create_function(move |lua, path: String| {
                 let mut bank = bank.borrow_mut();
+                let before = bank.sounds.len();
                 let mounts = lua
                     .app_data_ref::<super::sandbox::Mounts>()
                     .map(|m| m.clone());
@@ -962,6 +967,25 @@ impl SoundBank {
                     }
                     None => bank.load_sound(&path, &script_root, &resource_dirs),
                 };
+                let uncached = id.is_none() || bank.sounds.len() > before;
+                drop(bank);
+                if uncached {
+                    let handle = match id {
+                        Some(id) => mlua::Value::UserData(super::native_media::sound_handle(
+                            lua,
+                            &event_owner,
+                            id,
+                        )?),
+                        None => mlua::Value::Nil,
+                    };
+                    super::native_events::resource(
+                        lua,
+                        "sound",
+                        handle,
+                        id.is_none()
+                            .then_some("sound decoder/backend rejected resource"),
+                    )?;
+                }
                 Ok(id.map(|id| id.as_u32()))
             })?,
         )?;

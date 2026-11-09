@@ -28,6 +28,7 @@ pub(crate) struct Session {
     start: Instant,
     addon: String,
     vm: u64,
+    phase: String,
     tokens: f64,
     token_time: f64,
 }
@@ -42,6 +43,7 @@ impl Session {
             start: Instant::now(),
             addon: String::new(),
             vm: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            phase: "lua".into(),
             tokens: 32.0,
             token_time: 0.0,
         };
@@ -160,7 +162,7 @@ impl Session {
     fn capability(&self, path: &str) -> Json {
         let d = self.descriptors.get(path);
         json!({"path":path,"status":d.map_or("unknown", |d| d.status),
-            "revision":u8::from(d.is_some_and(|d| d.status == "supported")),
+            "revision":u8::from(d.is_some_and(|d| matches!(d.status,"supported"|"partial"))),
             "round":d.and_then(|d| d.round), "reason":d.filter(|d| !d.reason.is_empty()).map(|d| &d.reason),
             "children": self.descriptors.keys().filter(|p| p.strip_prefix(&format!("{path}.")).is_some_and(|tail| !tail.contains('.'))).collect::<Vec<_>>()})
     }
@@ -201,7 +203,7 @@ impl Session {
         d.last_time = time;
         d.count += 1;
         if (d.count == 1 || time - d.last_emit >= 60.0) && self.pending.len() < 64 {
-            self.pending.push(json!({"api":"eqoa/1","addon":self.addon,"vm":self.vm,"symbol":symbol,"phase":"lua","code":code,"first_time":d.first_time,"last_time":time,"count":d.count,"message":d.reason}).to_string());
+            self.pending.push(json!({"api":"eqoa/1","addon":self.addon,"vm":self.vm,"symbol":symbol,"phase":self.phase,"code":code,"first_time":d.first_time,"last_time":time,"count":d.count,"message":d.reason}).to_string());
             d.last_emit = time;
             d.emitted = d.count;
         }
@@ -390,7 +392,12 @@ pub(crate) fn record(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
     })
 }
 
-fn guard(lua: &Lua, backing: Table, path: &str, known: Option<Vec<String>>) -> Result<Table> {
+pub(crate) fn guard(
+    lua: &Lua,
+    backing: Table,
+    path: &str,
+    known: Option<Vec<String>>,
+) -> Result<Table> {
     let proxy = lua.create_table()?;
     let mt = lua.create_table()?;
     let prefix = path.to_string();
@@ -444,8 +451,35 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
     table.set(
         name,
         lua.create_function(move |lua, args: MultiValue| {
+            if matches!(
+                symbol.as_str(),
+                "eqoa.client.get"
+                    | "eqoa.client.display"
+                    | "eqoa.client.time"
+                    | "eqoa.player.get"
+                    | "eqoa.target.get"
+                    | "eqoa.group.get"
+                    | "eqoa.entities.list"
+                    | "eqoa.abilities.list"
+                    | "eqoa.hotbar.list"
+                    | "eqoa.effects.list"
+                    | "eqoa.chat.channel"
+                    | "eqoa.combat.counters"
+                    | "eqoa.input.get"
+                    | "eqoa.fonts.default"
+                    | "eqoa.settings.load"
+            ) && !args.is_empty()
+            {
+                return error(
+                    lua,
+                    &symbol,
+                    "invalid_argument",
+                    "this function takes no arguments",
+                );
+            }
             match function.call::<MultiValue>(args) {
                 Ok(value) => Ok(value),
+                Err(e) if fatal_memory(&e) => Err(e),
                 Err(e) => error(lua, &symbol, "invalid_argument", &e.to_string()),
             }
         })?,
@@ -826,4 +860,27 @@ fn install_fields(lua: &Lua) {
         Some(3),
         "item handles arrive in round 3",
     );
+}
+
+pub(crate) fn fatal_memory(error: &mlua::Error) -> bool {
+    match error {
+        mlua::Error::MemoryError(_) => true,
+        mlua::Error::CallbackError { cause, .. } => fatal_memory(cause),
+        _ => false,
+    }
+}
+
+pub(crate) struct Phase {
+    session: Rc<RefCell<Session>>,
+    old: String,
+}
+impl Drop for Phase {
+    fn drop(&mut self) {
+        self.session.borrow_mut().phase = self.old.clone();
+    }
+}
+pub(crate) fn phase(lua: &Lua, name: &str) -> Phase {
+    let session = session(lua);
+    let old = std::mem::replace(&mut session.borrow_mut().phase, name.into());
+    Phase { session, old }
 }

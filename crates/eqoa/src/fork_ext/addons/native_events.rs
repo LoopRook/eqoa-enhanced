@@ -481,7 +481,13 @@ fn deliver_data(
         if let Some(data) = &data {
             event.set("data", data.clone())?;
         }
-        if let Err(err) = call.call::<()>(event) {
+        let _phase = super::native::phase(lua, &e.name);
+        let _drawing =
+            super::bridge::drawing(matches!(e.name.as_str(), "render" | "settings.render"));
+        if let Err(err) = call.call::<()>(readonly_envelope(lua, event)?) {
+            if super::native::fatal_memory(&err) {
+                return Err(err);
+            }
             super::native::diagnose(
                 lua,
                 &format!("eqoa.events.{}", e.name),
@@ -505,7 +511,12 @@ fn deliver_timer(lua: &mlua::Lua, e: &Event, t: &Token, data: mlua::Table) -> Re
     if let Some(sub) = sub {
         let event = envelope(lua, e)?;
         event.set("data", data)?;
-        if let Err(e) = sub.callback.call::<()>(event) {
+        let _phase = super::native::phase(lua, "timer");
+        let _drawing = super::bridge::drawing(false);
+        if let Err(e) = sub.callback.call::<()>(readonly_envelope(lua, event)?) {
+            if super::native::fatal_memory(&e) {
+                return Err(e);
+            }
             super::native::diagnose(lua, "eqoa.events.timer", "failed", &e.to_string());
         }
     }
@@ -561,6 +572,9 @@ pub(crate) fn clear(host: &Host) {
         return;
     }
     super::input::native::release_vm(&host.lua);
+    let vm = bus(&host.lua).borrow().vm;
+    super::chat::cancel_vm(vm);
+    super::weapon_sets::cancel_vm(vm);
     let b = bus(&host.lua);
     let mut b = b.borrow_mut();
     b.subscriptions.clear();
@@ -597,7 +611,7 @@ pub(crate) fn resource(
             record(
                 lua,
                 "eqoa.Error",
-                &json!({"code":"failed","message":message}),
+                &json!({"code":"failed","message":message,"capability":format!("eqoa.{kind}.load")}),
             )?,
         )?;
     }
@@ -610,4 +624,39 @@ pub(crate) fn resource(
         .resources
         .push((local(name, json!({})), data));
     Ok(())
+}
+
+fn readonly_envelope(lua: &mlua::Lua, event: mlua::Table) -> Result<mlua::Table> {
+    let name: String = event.get("name")?;
+    let data: mlua::Table = event.get("data")?;
+    if matches!(
+        name.as_str(),
+        "timer" | "resource.ready" | "resource.failed"
+    ) {
+        event.set(
+            "data",
+            super::native::guard(
+                lua,
+                data,
+                &format!("eqoa.events.{name}.data"),
+                Some(vec![
+                    "token".into(),
+                    "kind".into(),
+                    "handle".into(),
+                    "error".into(),
+                ]),
+            )?,
+        )?;
+    }
+    super::native::guard(
+        lua,
+        event,
+        "eqoa.events.Event",
+        Some(
+            ["name", "seq", "time", "tick", "frame", "generation", "data"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        ),
+    )
 }

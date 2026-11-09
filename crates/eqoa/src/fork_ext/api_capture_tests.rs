@@ -115,3 +115,58 @@ fn native_controller_snapshot_uses_live_report_bytes_and_rotation_is_consumed() 
     crate::fork_ext::prepare_controls(&mut report, false, false);
     host.execute("assert(eqoa.input.get().pad==nil)").unwrap();
 }
+
+#[test]
+fn native_legacy_chat_dispatch_waits_for_game_tick_and_world_readiness() {
+    let mut p = ready();
+    p.forge_snapshot(None);
+    crate::fork_ext::addons::chat::take_outgoing_chat();
+    crate::fork_ext::addons::chat::queue_outgoing_chat("queued".into());
+    begin_iteration(&mut p, false);
+    assert_eq!(
+        crate::fork_ext::addons::chat::take_outgoing_chat(),
+        vec!["queued"]
+    );
+    crate::fork_ext::addons::chat::queue_outgoing_chat("discard on world gap".into());
+    p.session.self_id = None;
+    begin_iteration(&mut p, true);
+    assert!(crate::fork_ext::addons::chat::take_outgoing_chat().is_empty());
+}
+
+#[test]
+fn native_cooldowns_capture_whole_record_and_lockout_edges_with_stable_ids() {
+    let mut p = ready();
+    p.forge_snapshot(None);
+    let h = Host::new().unwrap();
+    h.execute("edges={};for _,name in ipairs({'cooldown.started','cooldown.updated','cooldown.ended'}) do eqoa.events.on(name,function(e) edges[#edges+1]={name=e.name,id=e.data.ability_id,key=e.data.display_key,lockout=e.data.lockout,ref=e.data.ability} end) end").unwrap();
+    let a = net::dump::Ability {
+        id: i64::MAX,
+        display_index: 17,
+        valid: 1,
+        lockout: 5000,
+        ..Default::default()
+    };
+    let event = net::session::Event::AbilityAdd {
+        token: 1,
+        flag: 0,
+        ability: Box::new(a.clone()),
+    };
+    let capture = begin_game_event(&p, &event);
+    p.abilities.insert(a.id, a);
+    end_game_event(&p, capture);
+    for raw in [2500, 0] {
+        let e = net::session::Event::AbilityLockout {
+            index: 17,
+            token: 1,
+            lockout: raw,
+        };
+        let capture = begin_game_event(&p, &e);
+        p.abilities.get_mut(&i64::MAX).unwrap().lockout = raw as i64;
+        end_game_event(&p, capture);
+    }
+    // Reindex after receipt must not change the captured edge identity/key.
+    p.abilities.get_mut(&i64::MAX).unwrap().display_index = 22;
+    p.forge_snapshot(None);
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(#edges==3);assert(edges[1].name=='cooldown.started' and edges[1].id=='9223372036854775807' and edges[1].key==17 and edges[1].lockout==5);assert(edges[2].name=='cooldown.updated' and edges[2].lockout==2.5);assert(edges[3].name=='cooldown.ended' and edges[3].lockout==0);assert(eqoa.abilities.get(edges[1].ref).display_key==22)").unwrap();
+}

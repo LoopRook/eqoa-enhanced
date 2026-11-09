@@ -15,9 +15,20 @@ pub(crate) use api_capture::{begin_game_event, end_game_event};
 pub(crate) fn begin_game_event(_: &Play, _: &net::session::Event) {}
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn end_game_event(_: &Play, _: ()) {}
-pub(crate) fn begin_iteration(_game_step: bool) {
+pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     #[cfg(not(target_arch = "wasm32"))]
-    crate::fork_ext::addons::native_core::iteration(_game_step);
+    {
+        crate::fork_ext::addons::native_core::iteration(_game_step);
+        if _game_step {
+            let ready = _play.native_view(None).in_world;
+            weapon_sets_requests(_play, ready);
+            for msg in crate::fork_ext::addons::chat::take_outgoing_chat() {
+                if ready && _play.mode != 60 && !crate::fork_ext::addons::chat::report_route(&msg) {
+                    _play.chat_line(&msg);
+                }
+            }
+        }
+    }
 }
 pub(crate) fn observe_text(_text: &str, _color: [f32; 4]) {
     #[cfg(not(target_arch = "wasm32"))]
@@ -848,10 +859,6 @@ fn weapon_sets_requests(play: &mut Play, ready: bool) {
 pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        weapon_sets_requests(play, play.forge_snapshot(None).in_game);
-        for msg in crate::fork_ext::addons::chat::take_outgoing_chat() {
-            play.chat_line(&msg);
-        }
         let options_closed =
             if crate::fork_ext::addons::take_close_options_on_open() && play.mode == 34 {
                 play.mode = 0;

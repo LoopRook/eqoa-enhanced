@@ -237,6 +237,7 @@ impl Manager {
         self.awaiting_render = true;
         for e in &self.entries {
             if let Some(i) = &e.instance {
+                i.host.begin_iteration();
                 i.host.snapshot.set(snapshot);
                 i.visibility.update(snapshot.health, i.active);
             }
@@ -361,6 +362,7 @@ impl Manager {
         }
         for entry in &self.entries {
             if let Some(instance) = &entry.instance {
+                instance.host.end_iteration();
                 instance.textures.borrow_mut().collect(false);
             }
         }

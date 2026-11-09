@@ -128,6 +128,7 @@ pub struct FontBank {
     next_handle_id: u32,
     handles: HashMap<u32, LuaImFont>,
     cache_by_key: HashMap<String, LuaImFont>,
+    released: Vec<std::rc::Weak<RefCell<FontHandleState>>>,
     aggregate_bytes: u64,
     diagnostics: Vec<String>,
 }
@@ -172,6 +173,7 @@ impl FontBank {
             next_handle_id: 1,
             handles: HashMap::new(),
             cache_by_key: HashMap::new(),
+            released: Vec::new(),
             aggregate_bytes: 0,
             diagnostics: Vec::new(),
         }
@@ -512,6 +514,14 @@ impl FontBank {
                 let Ok(font) = ud.borrow::<LuaImFont>() else {
                     return error(lua, "eqoa.fonts.release", "stale_handle", "expected Font");
                 };
+                if bank
+                    .borrow()
+                    .released
+                    .iter()
+                    .any(|state| state.upgrade().is_some_and(|s| Rc::ptr_eq(&s, &font.state)))
+                {
+                    return lua.pack_multi((true, mlua::Value::Nil));
+                }
                 if font.handle_id != 0
                     && !bank
                         .borrow()
@@ -528,6 +538,8 @@ impl FontBank {
                 }
                 if font.handle_id != 0 {
                     let mut bank = bank.borrow_mut();
+                    bank.released.retain(|f| f.strong_count() > 0);
+                    bank.released.push(Rc::downgrade(&font.state));
                     bank.handles.remove(&font.handle_id);
                     bank.cache_by_key
                         .retain(|_, f| !Rc::ptr_eq(&f.state, &font.state));

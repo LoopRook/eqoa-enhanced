@@ -67,9 +67,18 @@ impl WeaponSetsSnapshot {
     }
 }
 
-thread_local! { static PENDING: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) }; }
+thread_local! { static PENDING: RefCell<Vec<(u64,i64)>> = const { RefCell::new(Vec::new()) }; }
 pub fn take_pending() -> Vec<i64> {
-    PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()))
+    PENDING.with(|p| {
+        std::mem::take(&mut *p.borrow_mut())
+            .into_iter()
+            .map(|(_, i)| i)
+            .collect()
+    })
+}
+
+pub(crate) fn cancel_vm(vm: u64) {
+    PENDING.with(|q| q.borrow_mut().retain(|(owner, _)| *owner != vm));
 }
 
 pub fn install(host: &Host) -> mlua::Result<()> {
@@ -155,7 +164,7 @@ pub fn install(host: &Host) -> mlua::Result<()> {
     let state = host.snapshot.clone();
     api.set(
         "Use",
-        lua.create_function(move |_, i: i64| {
+        lua.create_function(move |lua, i: i64| {
             let snap = state.get();
             let s = snap.weapon_sets;
             if !s.available
@@ -172,7 +181,7 @@ pub fn install(host: &Host) -> mlua::Result<()> {
                 if p.len() >= 32 {
                     return false;
                 }
-                p.push(i);
+                p.push((super::native_events::bus(lua).borrow().vm, i));
                 true
             }))
         })?,

@@ -91,7 +91,7 @@ impl Mounts {
         let target = root.join("files").join(&key);
         let deleted = root.join("removed").join(&key);
         let _guard = lock_parents(&target, true)?;
-        let _deleted_guard = lock_parents(&deleted, false)?;
+        let _deleted_guard = lock_parents(&deleted, true)?;
         super::file_io::no_links(&deleted)?;
         check_quota(root, &target, bytes.len())?;
         super::storage::atomic_replace(&target, bytes).map_err(|e| e.to_string())?;
