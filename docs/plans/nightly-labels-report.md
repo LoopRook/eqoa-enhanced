@@ -15,13 +15,14 @@ Branch: `fix/nightly-labels` (from `develop`). No push, merge or tag was made.
 - `docs/RELEASING.md` documents the stable release step explicitly: at a
   versioned release, rename `## Unreleased` to
   `## <YYYY-MM-DD> · Enhanced <version>`, keeping its bullets.
-- `crates/eqoa/src/update.rs`:
-  - the built-in-notes test checks the dated sections and ignores the moving
-    `Unreleased` heading;
-  - `whats_new` treats an `Unreleased` section as new when its bullets changed,
-    so a Nightly update still shows its notes (instead of "Nothing").
-- The update window already displays a section title as written, so it shows
-  `Unreleased`; no crash or reordering occurs.
+- `crates/eqoa/src/update.rs`: one test line skips the moving `Unreleased`
+  heading when checking the dated sections. Upstream's `whats_new` is kept
+  exactly as it is (no upstream rewrite).
+- The update window displays a section title as written, so a shown section
+  reads `Unreleased`; no crash or reordering occurs. Accepted limitation:
+  Nightly's in-game what's-new compares section titles, so a later Nightly with
+  the same `Unreleased` title shows no changed section. The release page still
+  publishes the current bullets.
 
 ### B. Player-facing version label
 
@@ -70,7 +71,8 @@ New tests include positive and negative controls:
   the body fall back to "Same as Stable.";
 - malformed Unreleased headings are rejected, including by preflight;
 - `display_version` for Stable, local, Nightly, missing commit and blank commit;
-- `whats_new` shows a changed `Unreleased` section and hides an unchanged one.
+- the built-in notes test still passes while a `## Unreleased` heading is
+  present (negative control: the dated-only assertions would fail on it).
 
 ## Footprint
 
@@ -80,8 +82,8 @@ Two reviewed budgets changed:
 
 | Shared file | Old budget | New budget | Reason |
 | --- | ---: | ---: | --- |
-| `crates/eqoa/src/update.rs` | +3/-3 | +9/-6 | Nightly publishes `## Unreleased`; `whats_new` compares that moving section by content and the built-in-notes test checks dated sections separately. Upstream updater mechanics remain unchanged. |
-| `crates/eqoa/src/logfile.rs` | +8/-0 | +9/-1 | One upstream log-label line now uses the fork build label so Nightly names its build and Stable/local show `VERSION`; the other eight hook lines are unchanged. |
+| `crates/eqoa/src/update.rs` | +3/-3 | +4/-4 | One test line skips the non-dated `## Unreleased` section. Upstream `whats_new` and updater mechanics are untouched. |
+| `crates/eqoa/src/logfile.rs` | +8/-0 | +9/-1 | One upstream log-label line now uses the fork build label so Nightly names its build and Stable/local show `VERSION`. It is a one-line replacement: the +1 added and +1 deleted are the minimum over the eight existing hook lines. |
 
 Both reasons are recorded in `docs/fork-footprint.json` and
 `docs/FORK-OWNERSHIP.md`.
@@ -100,3 +102,6 @@ Both reasons are recorded in `docs/fork-footprint.json` and
 - The compiled Nightly label was checked by unit tests and by a release build
   stamped with `enhanced-dev`; its visual appearance in the running game was
   not inspected.
+- Nightly's in-game what's-new does not show a changed `Unreleased` section
+  when the running build already has a section with that title. This was
+  accepted to keep upstream's `whats_new` unchanged.
