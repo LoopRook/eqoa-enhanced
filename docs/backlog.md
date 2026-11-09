@@ -173,3 +173,16 @@ This entry records future work only; no navigation or movement behavior changes 
 - Reads like leftover chat or text-input state after an empty close (a stale "chat is open" or key
   capture flag that the next Tab triggers). Not yet known whether it is in the client or a mod (check
   with no mods first, as above).
+
+## Nightly update says it is the same as Stable (owner, 2026-11-09)
+
+- **Report:** when Nightly updates, the message says it is the same as Stable, although the Nightly build
+  has newer changes.
+- **Likely cause (unchecked):** Nightly and Stable share `VERSION` (0.4.14 on develop, until the next
+  release), and the update message and "what's new" come from `FORK-UPDATE-NOTES.md`, whose newest
+  section is the last release. The updater (`update.rs`, fork `release.rs`, `EQOA_UPDATE_CHANNEL=
+  enhanced-dev`) can tell builds apart by commit, but the text shown to the player does not.
+- **To check:** which screen says it (update prompt, what's-new box, version label) and the exact
+  wording; whether the Nightly build label shows the commit; then show the build's commit and its own
+  unreleased notes section instead of repeating Stable's.
+- **Status:** deferred; not investigated.
