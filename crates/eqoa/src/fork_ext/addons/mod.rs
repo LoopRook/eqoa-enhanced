@@ -67,6 +67,8 @@ pub(crate) mod weapon_sets;
 mod weapon_sets_tests;
 #[cfg(test)]
 mod wereoxxs_test;
+#[cfg(test)]
+pub(crate) use wereoxxs_test::modern_slot_positions;
 
 #[cfg(test)]
 pub(crate) mod perf_alloc;
