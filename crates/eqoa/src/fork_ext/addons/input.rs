@@ -29,8 +29,8 @@ impl Default for InputSnapshot {
     fn default() -> Self {
         Self {
             button_bitfield: 0xFFFF, // active-low: 0xFFFF means unpressed
-            right_analog: (0x7F, 0x7F),
-            left_analog: (0x7F, 0x7F),
+            right_analog: (0x80, 0x80),
+            left_analog: (0x80, 0x80),
         }
     }
 }

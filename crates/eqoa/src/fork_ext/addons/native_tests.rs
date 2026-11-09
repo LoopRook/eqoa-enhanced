@@ -261,3 +261,11 @@ fn native_events_enforce_two_mebibyte_payload_retention_without_losing_dispatch_
     h.execute("assert(count>200 and count<256);assert(lost+count==1000)")
         .unwrap();
 }
+
+#[test]
+fn native_forge_input_defaults_use_raw_neutral_byte_128() {
+    let snapshot = super::input::InputSnapshot::default();
+    assert_eq!(snapshot.right_analog, (128, 128));
+    assert_eq!(snapshot.left_analog, (128, 128));
+    assert_eq!(snapshot.button_bitfield, 0xffff);
+}

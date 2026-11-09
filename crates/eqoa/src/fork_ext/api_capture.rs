@@ -185,9 +185,8 @@ impl Play {
 }
 
 pub(crate) struct ChangeCapture {
-    pub cooldown_change: bool,
+    pub cooldown_before: Option<(i64, f64)>,
     pub previous_channel: &'static str,
-    pub before: View,
 }
 impl Drop for ChangeCapture {
     fn drop(&mut self) {
@@ -235,27 +234,32 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
             };
             old
         }),
-        cooldown_change: matches!(
-            event,
-            Event::AbilityLockout { .. } | Event::AbilityAdd { .. }
-        ),
-        before: play.native_view(None),
+        cooldown_before: match event {
+            Event::AbilityAdd { ability, .. } => Some((
+                ability.id,
+                play.abilities
+                    .get(&ability.id)
+                    .map_or(0.0, |a| ee::div(a.lockout as f32, 1000.0) as f64),
+            )),
+            Event::AbilityLockout { index, .. } => play
+                .abilities
+                .values()
+                .find(|a| a.display_index == *index as i64)
+                .map(|a| (a.id, ee::div(a.lockout as f32, 1000.0) as f64)),
+            _ => None,
+        },
     }
 }
 pub(crate) fn end_game_event(play: &Play, capture: ChangeCapture) {
     let view = play.native_view(None);
     CORE.with(|core| {
         let mut c = core.borrow_mut();
-        let edges = if capture.cooldown_change {
+        let edges = if let Some((id, old)) = capture.cooldown_before {
+            let id = id.to_string();
             view.abilities
                 .iter()
-                .filter_map(|after| {
-                    let before = capture
-                        .before
-                        .abilities
-                        .iter()
-                        .find(|b| b["id"] == after["id"]);
-                    let old = before.and_then(|b| b["lockout"].as_f64()).unwrap_or(0.0);
+                .find(|a| a["id"].as_str() == Some(id.as_str()))
+                .and_then(|after| {
                     let lockout = after["lockout"].as_f64().unwrap_or(0.0).max(0.0);
                     (old != lockout).then(|| {
                         (
@@ -266,6 +270,7 @@ pub(crate) fn end_game_event(play: &Play, capture: ChangeCapture) {
                         )
                     })
                 })
+                .into_iter()
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
