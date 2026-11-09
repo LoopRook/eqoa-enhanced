@@ -87,7 +87,7 @@ pub(crate) fn frame_library(
         crate::report::note_state(|| report_state::describe(_play, _walker));
         crate::fork_ext::addons::native_core::CORE.with(|c| {
             let mut c = c.borrow_mut();
-            if c.words.is_none() {
+            if crate::fork_ext::addons::native_core::capture_requested() && c.words.is_none() {
                 c.words = _play.words.clone();
             }
         });
@@ -174,8 +174,52 @@ impl Play {
         &self,
         walker: Option<&crate::walker::Walker>,
     ) -> crate::fork_ext::addons::host::Snapshot {
-        let native = self.native_view(walker);
-        crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow_mut().publish(native, false));
+        if !crate::fork_ext::addons::native_core::capture_requested() {
+            api_capture::updates::inactive();
+            let connected =
+                self.session.self_id.is_some() && self.disconnected.is_none() && !self.quit;
+            let ready = self.in_world_now();
+            let start_menu = ready
+                && (is_menu_mode(self.mode)
+                    || self.map.open
+                    || self.start.as_ref().is_some_and(|s| s.menu.visible));
+            let ui_mode = if !ready {
+                0
+            } else if self.mode != 0 {
+                self.mode as u32
+            } else if self.start.as_ref().is_some_and(|s| s.menu.visible) {
+                13
+            } else {
+                0
+            };
+            let ui_busy = ready
+                && (ui_mode != 0
+                    || start_menu
+                    || self.map.open
+                    || self.map.search.open
+                    || self.search.open
+                    || self.typing.is_some());
+            return crate::fork_ext::addons::host::Snapshot {
+                capture_pending: true,
+                character: crate::fork_ext::addons::named_profiles::CharacterSnapshot::new(
+                    connected,
+                    &self.player.name,
+                    self.dump.player.class,
+                ),
+                in_game: ready,
+                start_menu,
+                ui_mode,
+                ui_busy,
+                health: self.forge_health.snapshot(connected, ready),
+                ..Default::default()
+            };
+        }
+        api_capture::updates::refresh(self, walker);
+        let key = api_capture::updates::key(self, walker);
+        if let Some(mut snapshot) = api_capture::updates::cached(key) {
+            snapshot.input = crate::fork_ext::addons::input::live_snapshot();
+            return snapshot;
+        }
         let connected = self.session.self_id.is_some() && self.disconnected.is_none() && !self.quit;
         let hud_ready = self.hud_ready() && !self.loading_up();
         let in_game = connected && hud_ready;
@@ -752,6 +796,7 @@ impl Play {
                 || self.typing.is_some());
 
         let mut snapshot = crate::fork_ext::addons::host::Snapshot {
+            capture_pending: false,
             character: crate::fork_ext::addons::named_profiles::CharacterSnapshot::new(
                 connected,
                 &self.player.name,
@@ -795,6 +840,7 @@ impl Play {
         crate::fork_ext::addons::native_core::CORE.with(|c| {
             crate::fork_ext::addons::native_projection::apply(&mut snapshot, &c.borrow().view)
         });
+        api_capture::updates::cache(key, snapshot);
         snapshot
     }
 }
@@ -842,8 +888,12 @@ fn is_menu_mode(mode: i32) -> bool {
 pub(super) fn health_hidden(play: &Play) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        play.forge_snapshot(None).health.is_available()
-            && !play.loading_up()
+        play.forge_health
+            .snapshot(
+                play.session.self_id.is_some() && play.disconnected.is_none() && !play.quit,
+                play.in_world_now(),
+            )
+            .is_available()
             && crate::fork_ext::addons::visibility::published_health_hidden()
     }
     #[cfg(target_arch = "wasm32")]
@@ -874,7 +924,13 @@ pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) 
             } else {
                 false
             };
-        let ready = play.forge_snapshot(None).health.is_available() && !play.loading_up();
+        let ready = play
+            .forge_health
+            .snapshot(
+                play.session.self_id.is_some() && play.disconnected.is_none() && !play.quit,
+                play.in_world_now(),
+            )
+            .is_available();
         crate::fork_ext::addons::visibility::set_play_ready(ready);
         let hidden = health_hidden(play);
         let vis = if ready {
@@ -1171,6 +1227,7 @@ mod tests {
     }
     #[cfg(not(target_arch = "wasm32"))]
     fn play_as(account: &str) -> Play {
+        crate::fork_ext::addons::native_core::fixture_demand(true);
         struct Nowhere;
         impl net::session::Datagrams for Nowhere {
             fn send_to(&mut self, _: &[u8], _: [u8; 4], _: u16) {}

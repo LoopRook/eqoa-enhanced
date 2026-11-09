@@ -524,6 +524,7 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
                     "this function takes no arguments",
                 );
             }
+            super::native_core::flush_deferred();
             match function.call::<MultiValue>(args) {
                 Ok(value) => Ok(value),
                 Err(e) if fatal_memory(&e) => Err(e),

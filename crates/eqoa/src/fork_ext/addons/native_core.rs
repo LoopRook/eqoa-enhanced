@@ -65,6 +65,7 @@ pub(crate) struct Core {
     pub chat: VecDeque<Json>,
     pub stats_received: bool,
     pub effects_received: bool,
+    pub entity_worlds: BTreeMap<u32, i32>,
     pub entity_versions: BTreeMap<u32, u64>,
     pub ability_versions: BTreeMap<String, u64>,
     pub cooldown_edges: BTreeMap<String, (f64, f64, f64)>,
@@ -73,6 +74,7 @@ pub(crate) struct Core {
     pub text_channel: &'static str,
     next_version: u64,
     started: Instant,
+    source_time: Option<f64>,
 }
 impl Default for Core {
     fn default() -> Self {
@@ -91,6 +93,7 @@ impl Default for Core {
             chat: VecDeque::new(),
             stats_received: false,
             effects_received: false,
+            entity_worlds: BTreeMap::new(),
             entity_versions: BTreeMap::new(),
             ability_versions: BTreeMap::new(),
             cooldown_edges: BTreeMap::new(),
@@ -99,6 +102,7 @@ impl Default for Core {
             text_channel: "system",
             next_version: 0,
             started: Instant::now(),
+            source_time: None,
         }
     }
 }
@@ -123,6 +127,15 @@ pub(crate) fn emit(name: &str, data: Json) {
 }
 
 impl Core {
+    pub(crate) fn receipt_time(&self) -> f64 {
+        self.source_time
+            .unwrap_or_else(|| self.started.elapsed().as_secs_f64())
+    }
+    pub(crate) fn next_incarnation(&mut self) -> u64 {
+        self.next_version += 1;
+        self.next_version
+    }
+
     pub fn emit(&mut self, name: &str, data: Json) {
         *self.stream_counts.entry(name.into()).or_default() += 1;
         if name == "combat.hit" {
@@ -144,7 +157,9 @@ impl Core {
         let event = Event {
             name: name.into(),
             seq: self.seq,
-            time: self.started.elapsed().as_secs_f64(),
+            time: self
+                .source_time
+                .unwrap_or_else(|| self.started.elapsed().as_secs_f64()),
             tick: self.tick,
             frame: self.frame,
             generation: self.generation,
@@ -163,6 +178,7 @@ impl Core {
             );
         }
         self.generation += 1;
+        self.entity_worlds.clear();
         self.entity_versions.clear();
         self.ability_versions.clear();
         self.cooldown_edges.clear();
@@ -219,12 +235,15 @@ impl Core {
             });
             r["ref"] = json!({"$ref":"ability","key":id,"generation":self.generation,"incarnation":version});
         }
-        let entities = view.entities.clone();
+        let refs = view
+            .entities
+            .iter()
+            .filter_map(|e| Some((e["id"].as_u64()?, e["ref"].clone())))
+            .collect::<BTreeMap<_, _>>();
         let entity_ref = |id: &Json| {
-            entities
-                .iter()
-                .find(|r| r["id"] == *id)
-                .map(|r| r["ref"].clone())
+            id.as_u64()
+                .and_then(|id| refs.get(&id))
+                .cloned()
                 .unwrap_or(Json::Null)
         };
         if view.player.is_object() {
@@ -346,7 +365,7 @@ impl Core {
         self.view = view;
     }
 }
-fn changed_fields(before: &Json, after: &Json) -> Vec<String> {
+pub(crate) fn changed_fields(before: &Json, after: &Json) -> Vec<String> {
     if before.is_array() || after.is_array() {
         return vec!["records".into()];
     }
@@ -360,17 +379,142 @@ fn changed_fields(before: &Json, after: &Json) -> Vec<String> {
 }
 
 pub(crate) fn observe_text(text: &str, color: [f32; 4]) {
+    if !capture_requested() {
+        return;
+    }
     let mut end = text.len().min(8192);
     while !text.is_char_boundary(end) {
         end -= 1;
     }
-    let text = &text[..end];
-    CORE.with(|c| { let mut c=c.borrow_mut(); let message=json!({"seq":c.seq+1,"time":c.started.elapsed().as_secs_f64(),"text":text,"color":{"r":color[0],"g":color[1],"b":color[2],"a":color[3]},"channel":c.text_channel});
-        if c.chat.len()==1000 {c.chat.pop_front();} c.chat.push_back(message.clone()); c.emit("chat.message",message);
+    let text = text[..end].to_owned();
+    let channel = CORE.with(|c| c.borrow().text_channel);
+    defer(text.len() + 256, move |c| {
+        let message = json!({"seq":c.seq+1,"time":c.source_time.unwrap_or_else(||time_unborrowed(c)),"text":text,"color":{"r":color[0],"g":color[1],"b":color[2],"a":color[3]},"channel":channel});
+        if c.chat.len() == 1000 {
+            c.chat.pop_front();
+        }
+        c.chat.push_back(message.clone());
+        c.emit("chat.message", message);
     });
 }
 pub(crate) fn observe_hit(attacker: u32, defender: u32, amount: i32, color: Option<[u8; 3]>) {
-    CORE.with(|c| {let mut c=c.borrow_mut(); let me=c.view.player["id"].as_u64();let pet=c.view.player["pet_id"].as_u64();
+    defer(256, move |c| {
+        let me = c.view.player["id"].as_u64();
+        let pet = c.view.player["pet_id"].as_u64();
         c.emit("combat.hit",json!({"attacker_id":attacker,"defender_id":defender,"amount":amount.unsigned_abs(),"kind":if amount>0 {"heal"}else{"damage"},"color":color,"outgoing":me==Some(attacker as u64),"incoming":me==Some(defender as u64),"from_pet":pet==Some(attacker as u64),"to_pet":pet==Some(defender as u64)}));
     });
+}
+
+thread_local! {
+    static MANAGER_DEMAND: std::cell::Cell<bool> = const {std::cell::Cell::new(false)};
+    #[cfg(test)]
+    static FIXTURE_DEMAND: std::cell::Cell<bool> = const {std::cell::Cell::new(false)};
+}
+pub(crate) fn manager_demand(wanted: bool) {
+    MANAGER_DEMAND.with(|d| d.set(wanted));
+}
+#[cfg(test)]
+pub(crate) fn fixture_demand(wanted: bool) {
+    FIXTURE_DEMAND.with(|d| d.set(wanted));
+}
+pub(crate) fn capture_requested() -> bool {
+    #[cfg(test)]
+    if FIXTURE_DEMAND.with(|d| d.get()) {
+        return true;
+    }
+    MANAGER_DEMAND.with(|d| d.get()) || super::native_events::has_consumers()
+}
+
+// Source sites enqueue only compact owned Rust values. Serialization runs at Lua boundaries.
+type PendingApply = Box<dyn FnOnce(&mut Core)>;
+struct Pending {
+    apply: PendingApply,
+    time: f64,
+    generation: u64,
+    tick: u64,
+    frame: u64,
+    bytes: usize,
+}
+#[derive(Default)]
+struct Deferred {
+    queue: VecDeque<Pending>,
+    bytes: usize,
+    lost: u64,
+    flushing: bool,
+}
+thread_local! {static DEFERRED:RefCell<Deferred>=RefCell::new(Deferred::default());}
+pub(crate) fn defer(bytes: usize, apply: impl FnOnce(&mut Core) + 'static) {
+    if !capture_requested() {
+        return;
+    }
+    let (time, tick, frame, generation) = CORE.with(|c| {
+        let c = c.borrow();
+        (time_unborrowed(&c), c.tick, c.frame, c.generation)
+    });
+    DEFERRED.with(|d| {
+        let mut d = d.borrow_mut();
+        while d.queue.len() >= 8192 || d.bytes.saturating_add(bytes) > 32 * 1024 * 1024 {
+            let Some(old) = d.queue.pop_front() else {
+                break;
+            };
+            d.bytes = d.bytes.saturating_sub(old.bytes);
+            d.lost += 1;
+            CAPTURE_EPOCH.with(|e| e.set(e.get().wrapping_add(1)));
+        }
+        if bytes > 32 * 1024 * 1024 {
+            d.lost += 1;
+            return;
+        }
+        d.bytes += bytes;
+        d.queue.push_back(Pending {
+            apply: Box::new(apply),
+            time,
+            generation,
+            tick,
+            frame,
+            bytes,
+        });
+    });
+}
+pub(crate) fn flush_deferred() {
+    let batch = DEFERRED.with(|d| {
+        let mut d = d.borrow_mut();
+        if d.flushing {
+            return None;
+        }
+        d.flushing = true;
+        d.bytes = 0;
+        Some((std::mem::take(&mut d.queue), std::mem::take(&mut d.lost)))
+    });
+    let Some((batch, lost)) = batch else {
+        return;
+    };
+    CORE.with(|c|{let mut c=c.borrow_mut();let saved=(c.tick,c.frame,c.source_time);
+        if lost!=0 {let first=c.seq+1;let last=c.seq+lost;let world=c.view.in_world;c.emit("events.dropped",json!({"count":lost,"streams":["source.capture"],"first_seq":first,"last_seq":last}));c.emit("state.reset",json!({"in_world":world,"initial":false}));}
+        for pending in batch {if pending.generation!=c.generation{continue;}c.tick=pending.tick;c.frame=pending.frame;c.source_time=Some(pending.time);(pending.apply)(&mut c);}
+        (c.tick,c.frame,c.source_time)=saved;
+    });
+    DEFERRED.with(|d| d.borrow_mut().flushing = false);
+}
+pub(crate) fn discard_deferred() {
+    DEFERRED.with(|d| {
+        let mut d = d.borrow_mut();
+        d.queue.clear();
+        d.bytes = 0;
+        d.lost = 0;
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_requested() -> bool {
+    FIXTURE_DEMAND.with(|d| d.get())
+}
+
+thread_local! {static CAPTURE_EPOCH:std::cell::Cell<u64>=const{std::cell::Cell::new(0)};}
+pub(crate) fn capture_epoch() -> u64 {
+    CAPTURE_EPOCH.with(|e| e.get())
+}
+pub(crate) fn invalidate_capture() {
+    CAPTURE_EPOCH.with(|e| e.set(e.get().wrapping_add(1)));
+    discard_deferred();
 }
