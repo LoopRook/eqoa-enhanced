@@ -197,3 +197,24 @@ Optimized review measurements (four performance cases passed, zero failures/igno
 In the same optimized run, zero-addon ordinary frame hooks cost 4.653 us/frame (one 1,024-byte input initialization across 300 frames); mode-13 menu frames cost 4.836 us/frame with zero allocations. Entity packet hooks cost 0.028 us/event and chat 0.008 us/line, both allocation-free. Sixteen retained disabled VMs cost 5.150 us/combined frame with zero allocations. Enabled unchanged frames cost 4.420 us/frame with zero allocations; changed entity packets cost 0.484 us/event and 2.015 allocations / 277.8 bytes per event amortized, while duplicate packets cost 0.186 us/event with zero allocations. These are bounded synthetic hook/capture measurements, not measured live FPS.
 
 The complete CI-style Windows workspace run passed **1,956 reported tests**, **0 failed**, **27 ignored**, with **219 explicit SKIP lines** across stdout/stderr. It uses the scratch configuration, isolated target, timeout-protected shared cargo lock, CI's static CRT/explicit Windows target, and rustc 1.99.1. Missing-data and privilege branches that return success after SKIP are not behavior evidence. Detailed additional gates follow below.
+
+
+| Perf-review gate | Result |
+|---|---|
+| Review behaviors (`perf_review_`) | 12 passed, 0 failed, 0 ignored, no SKIP lines; negative controls described above. |
+| Optimized capture/allocation probes | 4 passed, 0 failed, 0 ignored, no SKIP lines; includes the moving subscriber and zero/disabled-consumer cases. |
+| CI-style full workspace | 1,956 reported passed, 0 failed, 27 ignored; 219 explicit SKIP lines. |
+| Required addon suite | 330 reported passed, 0 failed, 23 ignored; 6 SKIP lines (four privilege-blocked symlink branches and two opt-ins). |
+| Pinned Forge/UI opt-ins | 24 passed, 0 failed, 0 ignored, no SKIP lines; all three bundled UI packages remain unchanged. Includes the installer reference-update opt-in. |
+| Bundled installer | 23 passed, 0 failed, 1 ignored, no SKIP lines. |
+| Update notes (`update::tests`) | 21 passed, 0 failed, 0 ignored, no SKIP lines. |
+| GPU opt-ins | Grid 1/1 and unchanged pinned hearts 1/1 passed, no SKIP lines; hearts full/partial/death pixels remain 1,395 / 690 / 0. |
+| Python tools suite | 94 passed, 0 failed, no SKIP lines. |
+| wasm32-unknown-unknown check | PASS; two existing unused-variable warnings. |
+| Required-base footprint and diff whitespace | PASS against 8435f2c8a00c631d716771f8189fa0011a1fbf50; shared play.rs +759/-53 and viewer.rs +255/-15 unchanged. No budget increase. |
+| CI Windows release and runtime package | PASS at checkpoint 8c3dc04: static-CRT release in 1m 32s (57 warnings); exact CI allowlist/provenance/catalog/checksum package verification passed using the pinned public catalog download. Scratch outputs only. |
+| Development publication preflight | Attempted again on clean 8c3dc04; refused (exit 128) because origin/develop is absent. Feature HEAD is also ahead of local develop. This ancestry/publication guard requires lead integration and CI fetch; no refs were rewritten or publication attempted. |
+
+The 219 workspace SKIP lines include 53 oracle messages, unavailable disc/decomp/other fixtures and four privilege-blocked symlink branches. A test that returns success after SKIP is not evidence for that branch. The two GPU opt-ins and the pinned Forge/installer cases were separately exercised above. Oracle/decomp parity, the four symlink branches, live-game FPS, physical controller/audio checks and native Linux behavior remain unverified. L6's full pinned-renderer Play integration coverage remains deferred as stated above. No MEDIUM finding remains deferred.
+
+All source changes were complete before the full workspace run. The final documentation commit is followed by another static-CRT Windows release and exact runtime-package verification to embed its final SHA; the final worker response reports that repeat. No push, tag, publication or integration merge is performed by this worker.
