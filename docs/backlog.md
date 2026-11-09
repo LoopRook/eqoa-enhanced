@@ -200,3 +200,14 @@ This entry records future work only; no navigation or movement behavior changes 
 - **Bundled UI assumptions:** Avoids Modern UI loops `0..AbilityBar.num_bars-1`, treating bar 2 as items. Wereoxxs prepares three stock bar configs, loops bars 0..3 and reserves 3 for its separate weapon-set extension. Inflating `num_bars` alone would collide with those meanings.
 - **Requested work:** Add explicit extended bar/slot metadata and selection mapping, preserve legacy Forge stock indices, and update the bundled UIs to enumerate supported bars with independent layouts. Native `eqoa.hotbar.list()` already exposes the configured carousel with one-based indices and full native slot counts; document and verify that extended contract alongside `eqoa.abilities`, rather than inventing aliases or silently changing Forge's three-bar contract. Item and weapon-set availability must remain explicit.
 - **Acceptance:** Exercise one/two/four ability bars, special first-menu slots, items and weapon sets; distinct records/positions and correct active-bar selection after carousel changes; retain saved layouts and stock Forge compatibility. Live-test on a server that persists the extra spellbook slots. No bundled Lua rewrite is included in the live-regression fix.
+
+## Two CI jobs per push repeat each other (owner, 2026-11-09; for the Opus lead)
+
+- Every code push to `develop` starts two workflows: "Enhanced public source checks"
+  (`public-source.yml`: footprint, tools tests, workspace tests, an unstamped build, no publishing) and
+  "Development build" (`enhanced-dev.yml`: the same gates, then the stamped build, package and Nightly
+  publish). Both compile and test the workspace, so a code push costs two runners and about 15 minutes.
+- **Question:** keep `public-source.yml` as the gate for pull requests, `enhanced` and tags, and let
+  `develop` pushes rely on the Nightly's own gate? Check what else depends on the public check (branch
+  rules, release gating in `official-release.yml`) before cutting anything.
+- **Status:** deferred; release pipeline, so the Opus lead decides.
