@@ -12,8 +12,8 @@
 //! The client's own, beside the game's: an Extended row between Sound and
 //! Save Changes (the menu a row longer), its words the client's (no
 //! WORDS.TXT entry). It opens a menu of its own over the options menu, drawn
-//! as that one is: Video, World, UI, Controller, Camera, Characters, Sound
-//! and natively Textures (`CATEGORIES`), each of which opens a page laid out and driven as
+//! as that one is: Video, World, Lighting, UI, Controller, Camera, Characters,
+//! Sound, natively Textures, and Map (`CATEGORIES`), each of which opens a page laid out and driven as
 //! the game's pages are, short enough that none scrolls (`PAGE_MOST`):
 //! - Video: Display (natively: Window or Full Screen, the window's own as
 //!   F11 and Alt+Enter toggle it, `display`: it changes at once and stays,
@@ -41,6 +41,25 @@
 //!   Art (Frontiers' or the 2002 disc's, `era`,
 //!   as F9 swaps it: drawn as it moves, the 2002 disc asked for the first
 //!   time);
+//! - Lighting (2026-11-08): Dynamic Lighting (Off, the PS2's: the strip
+//!   programs' light per vertex, the personal light the one point light;
+//!   On: the light per fragment, and the fires, placed lights, spells and
+//!   glowing weapons lighting what is round them, `lights`, `render::lit`)
+//!   and Sun Shadows (Off, the sun through everything as on a PS2; On, with
+//!   Dynamic Lighting on: walls, roofs, trees, characters and hills casting
+//!   shadows that move with the sun, `render::sunshadow`; on without it,
+//!   the page says what they need),
+//!   Light Shadows (2026-11-09: Off, the fires, the personal light and the
+//!   spells lighting through everything; On, with Dynamic Lighting on: what
+//!   stands between a surface and one of those lights casting a shadow
+//!   away from it, as Sun Shadows' from the sun, `render::lightshadow`; on
+//!   without it, the page says what they need), Shadow Distance (a slider
+//!   and its number: how far out Sun Shadows and Light Shadows reach, the
+//!   game's 250 to 1000 in 125s: the sun's cascades' far edge, and from the 8
+//!   lights shadowed (4 in a page and on Android) to every light Dynamic
+//!   Lighting draws, `render::Renderer::set_shadow_distance`)
+//!   and Ambient Occlusion (Off, the game's picture; On: the opaque scene's
+//!   creases, corners and contacts darkened per pixel, `render::ao`);
 //! - UI: Ability Bars (the game's 2, or 3 or 4: the HUD's quick menus and
 //!   the spell book's slots, `hudmenu`), Update Notices (one setting for
 //!   every window: off, the game never asks to restart into a newer build,
@@ -82,12 +101,30 @@
 //!   the system lists, the default while it is not connected: `audio`'s
 //!   `retarget`; its page says where the sound plays now);
 //! - Textures, natively (2026-11-08): Texture Packs (Off, the game's: every
-//!   texture its own; On: one a PCSX2 replacement pack in the config
-//!   directory's `textures/SLUS-20744/replacements` names drawn as the pack
-//!   has it, `texpack`; its page says how many the packs hold) and Dump
+//!   texture its own; On: one a PCSX2 replacement pack in
+//!   `textures/SLUS-20744/replacements` names drawn as the pack has it,
+//!   `texpack`; its page says how many the packs hold, and where) and Dump
 //!   Textures (Off; On: each texture made written to `textures/SLUS-20744/
 //!   dumps` under the names PCSX2 gives it, and how many beside Back), each
-//!   making every texture again as it moves.
+//!   making every texture again as it moves; the `textures` folder is
+//!   beside the program (2026-11-09; in the settings where the program's
+//!   folder cannot be written to, which the page then says, and on
+//!   Android), and on a computer Texture Folder (Open) shows it in the
+//!   system's file manager, the page saying where it is
+//!   (`texpack::open_folder`);
+//! - Map (2026-11-09, the user's "also add the map and quest helper we had in
+//!   a former update"): Map (On: the client's own map on M and the compass's
+//!   click, the minimap, the waypoints on the compass and the group's
+//!   waypoint, `map`; Off: none of them, the game's own), Minimap (On: the
+//!   map round the player under the quick menus, `map::mini`; N turns it
+//!   too), Map Markers (On: the map's XP camps and coaches, `map::markers`;
+//!   the map's own X or ○ turns it too), Quest Helper (On: the quests' marks
+//!   on the map and the minimap and their tracker, from a server that sends
+//!   them, else the client's own guide, `questguide`, `map::quests`; Off:
+//!   none, and no server asked for them) and Quest Tracker (On: the HUD's
+//!   list of the quests under way, each step counted, under the minimap,
+//!   `tracker`). Each defaults to On; the Map and the Quest Helper Off are
+//!   the game as it is without them.
 //! Triangle goes back a step: a page to the categories, the categories to
 //! the options menu. They change as they are moved, Triangle on the options
 //! menu puts them back, and Save Changes keeps them with the game's
@@ -110,7 +147,7 @@ mod fork_options;
 
 use crate::bindpage::ControlsPage;
 use crate::pointer::{Hits, key, rows_rect};
-use crate::settings::{BRIGHTNESS_STEPS, CAMERA_MAX, CAMERA_MIN, CAMERA_STEP, ClientOptions, ENTITY_SLOTS_GAME, ENTITY_SLOTS_MAX, ENTITY_SLOTS_STEP, ENTITY_VIEW_GAME, ENTITY_VIEW_MAX, ENTITY_VIEW_STEP, Focus, FrameRate, NAME_DISTANCE_GAME, NAME_DISTANCE_MAX, TOUCH_SIZE_MAX, TOUCH_SIZE_MIN, TOUCH_SIZE_STEP, TURN_MAX, TURN_MIN, TURN_STEP};
+use crate::settings::{BRIGHTNESS_STEPS, CAMERA_MAX, CAMERA_MIN, CAMERA_STEP, ClientOptions, ENTITY_SLOTS_GAME, ENTITY_SLOTS_MAX, ENTITY_SLOTS_STEP, ENTITY_VIEW_GAME, ENTITY_VIEW_MAX, ENTITY_VIEW_STEP, Focus, FrameRate, NAME_DISTANCE_GAME, NAME_DISTANCE_MAX, SHADOW_DISTANCE_GAME, SHADOW_DISTANCE_MAX, SHADOW_DISTANCE_STEP, TOUCH_SIZE_MAX, TOUCH_SIZE_MIN, TOUCH_SIZE_STEP, TURN_MAX, TURN_MIN, TURN_STEP};
 use vi::fpu::{Ee, F};
 use vi::ui::{Raster, UI_COLORS, Vui, Window, wide};
 
@@ -561,7 +598,9 @@ impl WndOptions {
     /// fives from 50 to 100 as a slider; Text (30) goes between Sharp and
     /// Smooth; Update Notices (29), Overlapping Names (34, Hide and Show),
     /// Mipmaps (35), Loading Screens (38, Longer and Instant), Texture Packs
-    /// (50) and Dump Textures (51) turn over;
+    /// (50), Dump Textures (51), the Map (41), Minimap (42), Map Markers (43),
+    /// the Quest Helper (44) and Quest Tracker (45) turn over; Texture Folder (55) shows the
+    /// folder (`texpack::open_folder`: sound 8, or 9 with none to show);
     /// Output Device (32) goes round the system default and the devices
     /// listed (`step_output`); Display (33) turns the window over (`display`). A
     /// slider (`slider_at`) makes its own
@@ -635,11 +674,23 @@ impl WndOptions {
                     // Raid List: the server told from the next frame
                     // (`Session::agree_raid_roster`)
                     49 => c.raid_list = !c.raid_list,
+                    // the Map: the map, the minimap and the waypoints from
+                    // the next frame (`Play::map_frame`; off, an open map
+                    // closes)
+                    // Minimap: drawn or not from the next frame (`map::mini`)
+                    // Map Markers: the map's camps and coaches from its next
+                    // frame (`map::markers`)
+                    // the Quest Helper and its Quest Tracker: the server told
+                    // from the next frame (`Play::agree_quests`), the marks
+                    // and the HUD's list drawn or not
                     // Texture Packs and Dump Textures: set from the next
                     // frame, every texture made again (`texpack::sync`,
                     // `viewer`'s `retexture`)
                     50 => c.texture_packs = !c.texture_packs,
                     51 => c.dump_textures = !c.dump_textures,
+                    // Texture Folder: shown either way, as ✕ shows it
+                    // (`select`)
+                    55 => cues.push(if crate::texpack::open_folder() { 8 } else { 9 }),
                     // Text: every font drawn from the next frame (`viewer`)
                     30 => c.text = c.text.other(),
                     // Loading Screens: the next long trip's (`loading`)
@@ -666,6 +717,29 @@ impl WndOptions {
                     // Ground Fog: the fog's fans from the next frame (`fx`,
                     // `render::fog16`)
                     47 => c.ps2_fog = !c.ps2_fog,
+                    // Sun Shadows: cast or not from the next frame, with
+                    // Dynamic Lighting on (`viewer`, `render::sunshadow`)
+                    53 => c.sun_shadows = !c.sun_shadows,
+                    // Light Shadows: cast or not from the next frame, with
+                    // Dynamic Lighting on (`viewer`, `render::lightshadow`)
+                    56 => c.light_shadows = !c.light_shadows,
+                    // Shadow Distance: a step of 125 from the game's 250 to
+                    // 1000, the shadows' reach from the next frame (`viewer`)
+                    57 => {
+                        let v = c.shadow_distance as i32 + d.signum() * SHADOW_DISTANCE_STEP as i32;
+                        if (SHADOW_DISTANCE_GAME as i32..=SHADOW_DISTANCE_MAX as i32).contains(&v) {
+                            c.shadow_distance = v as u16;
+                            cues.push(11);
+                        } else {
+                            cues.push(9);
+                        }
+                    }
+                    // Ambient Occlusion: its passes over the world from the
+                    // next frame (`viewer`, `render::ao`)
+                    54 => c.ambient_occlusion = !c.ambient_occlusion,
+                    // Dynamic Lighting: the world lit per fragment or the
+                    // PS2's way from the next frame (`viewer`, `lights`)
+                    52 => c.dynamic_lighting = !c.dynamic_lighting,
                     // Output Device: the sound opened there from the next
                     // frame (`audio::retarget`)
                     32 => step_output(&mut c, &crate::audio::outputs().listed.map(|l| l.1).unwrap_or_default(), d),
@@ -726,7 +800,8 @@ impl WndOptions {
             }
             _ => {}
         }
-        let inert = self.item == 26 && cfg!(target_arch = "wasm32");
+        // (Texture Folder makes its own sound)
+        let inert = (self.item == 26 && cfg!(target_arch = "wasm32")) || self.item == 55;
         let slides = matches!(self.item, 3 | 4) || slider_at(self.item).is_some();
         if !slides && !inert && ((0..=11).contains(&self.item) || extended(self.item)) {
             cues.push(11);
@@ -765,6 +840,12 @@ impl WndOptions {
         }
         if self.page == 3 && self.cat.is_some() && fork_options::activate(self.item) {
             cues.push(8);
+            return false;
+        }
+        // ✕ on Texture Folder shows it, as left and right do (`change`); on
+        // any other row of a page it does nothing, as on the game's
+        if self.page == 3 && self.cat.is_some() && self.item == 55 {
+            cues.push(if crate::texpack::open_folder() { 8 } else { 9 });
             return false;
         }
         if self.page != -1 {
@@ -1091,14 +1172,31 @@ impl WndOptions {
                 scale_note(asked, render::scale::would_draw(asked)).filter(|_| self.item == 39)
             }
             Note::Output | Note::Textures if cfg!(target_arch = "wasm32") => None,
-            Note::Textures => crate::texpack::note(self.item == 51),
+            Note::Textures => crate::texpack::note(self.item),
             Note::Output => Some(match crate::audio::playing() {
                 Some(d) => format!("Plays on {d}"),
                 None => "No output now".to_string(),
             }),
+            Note::Lighting => match self.item {
+                53 => sun_note(&crate::settings::client()),
+                56 => light_note(&crate::settings::client()),
+                _ => None,
+            },
             Note::None => None,
         }
     }
+}
+
+/// What Lighting's page says beside Back while Sun Shadows are chosen: that
+/// they need Dynamic Lighting, when they are on and it is off (they are
+/// drawn only with it).
+fn sun_note(c: &ClientOptions) -> Option<String> {
+    (c.sun_shadows && !c.dynamic_lighting).then(|| "Sun Shadows need Dynamic Lighting".to_string())
+}
+
+/// And while Light Shadows are chosen: the same of them.
+fn light_note(c: &ClientOptions) -> Option<String> {
+    (c.light_shadows && !c.dynamic_lighting).then(|| "Light Shadows need Dynamic Lighting".to_string())
 }
 
 /// The client's words for its own pages (no WORDS.TXT entry): the menu's
@@ -1110,7 +1208,7 @@ const CONTROLS: &str = "Controls";
 /// Extended's rows, by the item each changes (`change`), and their labels.
 /// A row is drawn by its item (`value_text`, or `slider_at` for a slider)
 /// and shown on the page of the category that lists it (`CATEGORIES`).
-const EXTENDED_ITEMS: [(i32, &str); 33] = [
+const EXTENDED_ITEMS: [(i32, &str); 39] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1144,6 +1242,12 @@ const EXTENDED_ITEMS: [(i32, &str); 33] = [
     (49, "Raid List"),
     (50, "Texture Packs"),
     (51, "Dump Textures"),
+    (52, "Dynamic Lighting"),
+    (53, "Sun Shadows"),
+    (54, "Ambient Occlusion"),
+    (55, "Texture Folder"),
+    (56, "Light Shadows"),
+    (57, "Shadow Distance"),
 ];
 
 /// What a category's page says beside its Back legend.
@@ -1160,13 +1264,18 @@ enum Note {
     Scale,
     /// where the sound plays now (`audio::playing`), natively
     Output,
-    /// how many replacements the packs hold, or how many textures have been
-    /// dumped while Dump Textures is chosen (`texpack::note`), natively
+    /// how many replacements the packs hold and where, how many textures
+    /// have been dumped while Dump Textures is chosen, or where the folder
+    /// is while Texture Folder is (`texpack::note`), natively
     Textures,
+    /// that Sun Shadows or Light Shadows need Dynamic Lighting, while they
+    /// are chosen and on and it is off (`sun_note`, `light_note`)
+    Lighting,
 }
 
 /// One of Extended's categories: its name, its rows (their items, in the
 /// page's order) and its note.
+#[derive(Clone, Copy)]
 struct Category {
     name: &'static str,
     items: &'static [i32],
@@ -1177,22 +1286,25 @@ struct Category {
 /// Video, UI, Controller, etc."), each a page of `PAGE_MOST` rows at most;
 /// natively Textures last (2026-11-08: Texture Packs and Dump Textures, a
 /// folder's files a page cannot reach).
-const ALL_CATEGORIES: [Category; 10] = [
+const ALL_CATEGORIES: [Category; 12] = [
     Category { name: "Video", items: VIDEO, note: Note::Scale },
     Category { name: "World", items: &[20, 35, 36, 37, 47, 25], note: Note::None },
+    Category { name: "Lighting", items: &[52, 53, 56, 57, 54], note: Note::Lighting },
     Category { name: "UI", items: fork_options::UI, note: Note::None },
     Category { name: "Controller", items: &[16, 19, 48], note: Note::Reads },
     Category { name: "Camera", items: &[15, 17, 18], note: Note::None },
     Category { name: "Characters", items: &[12, 23, 24, 27, 34, 46], note: Note::Server },
     Category { name: "Sound", items: SOUND, note: Note::Output },
     fork_options::QUESTS_CATEGORY,
+    fork_options::MAP_CATEGORY,
     fork_options::CATEGORY,
-    Category { name: "Textures", items: &[50, 51], note: Note::Textures },
+    Category { name: "Textures", items: TEXTURES, note: Note::Textures },
 ];
 #[cfg(not(target_arch = "wasm32"))]
 const CATEGORIES: &[Category] = &ALL_CATEGORIES;
+/// A page's: all but Textures.
 #[cfg(target_arch = "wasm32")]
-const CATEGORIES: &[Category] = ALL_CATEGORIES.split_at(9).0;
+const CATEGORIES: &[Category] = ALL_CATEGORIES.split_at(11).0;
 
 /// Video's rows: natively Display first (F3 20261024-201507: full screen was
 /// F11's alone); a page's full screen is the browser's. Fog and Mipmaps went
@@ -1209,6 +1321,15 @@ const VIDEO: &[i32] = &[13, 14, 26, 39, 38];
 const SOUND: &[i32] = &[21, 32];
 #[cfg(target_arch = "wasm32")]
 const SOUND: &[i32] = &[21];
+
+/// Textures' rows (natively; a page has none): on a computer Texture Folder
+/// after Texture Packs and Dump Textures, showing the folder beside the
+/// program (`texpack::open_folder`); an Android app's is in its own
+/// storage, which no file manager shows.
+#[cfg(not(target_os = "android"))]
+const TEXTURES: &[i32] = &[50, 51, 55];
+#[cfg(target_os = "android")]
+const TEXTURES: &[i32] = &[50, 51];
 
 /// Extended's menu (`draw_categories`): the categories from its first row,
 /// the legend two under the last, as the options menu's six and its legend
@@ -1276,11 +1397,16 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         49 => on_off(c.raid_list),
         50 => on_off(c.texture_packs),
         51 => on_off(c.dump_textures),
+        55 => wide("Open"),
         35 => on_off(c.mipmaps),
         36 => on_off(c.flora),
         37 => on_off(c.environment),
         46 => on_off(c.shadows),
         47 => wide(if c.ps2_fog { "PS2" } else { "Exact" }),
+        53 => on_off(c.sun_shadows),
+        56 => on_off(c.light_shadows),
+        54 => on_off(c.ambient_occlusion),
+        52 => on_off(c.dynamic_lighting),
         38 => wide(if c.loading_longer { "Longer" } else { "Instant" }),
         39 => wide(&format!("x{}", c.render_scale)),
         40 => wide(match c.hud {
@@ -1335,6 +1461,7 @@ fn slider_at(item: i32) -> Option<(f32, Option<u16>)> {
         24 => (at(c.entity_view as f32, ENTITY_VIEW_GAME as f32, ENTITY_VIEW_MAX as f32), Some(c.entity_view)),
         27 => name_distance_slider(&c),
         48 => (at(c.touch_size as f32, TOUCH_SIZE_MIN as f32, TOUCH_SIZE_MAX as f32), Some(c.touch_size as u16)),
+        57 => (at(c.shadow_distance as f32, SHADOW_DISTANCE_GAME as f32, SHADOW_DISTANCE_MAX as f32), Some(c.shadow_distance)),
         _ => return None,
     })
 }
@@ -1656,10 +1783,74 @@ mod tests {
         assert_eq!((w.row, cues.last()), (5, Some(&9)), "World's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.cat, w.cat_sel, w.item), (3, None, 1, -1), "back to the categories, World still lit");
+        // Lighting: Dynamic Lighting, Off (the PS2's), then On
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        press(&mut w, &mut o, key::CROSS, &mut cues);
+        assert_eq!((w.cat, w.item), (Some(2), 52), "Lighting, Dynamic Lighting");
+        assert_eq!(value_text(&vui, 52), Some(wide(vui.words.get(552, vui.language))), "Off, the PS2's light");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::client().dynamic_lighting, cues.last()), (true, Some(&11)), "On");
+        assert_eq!(value_text(&vui, 52), Some(wide(vui.words.get(551, vui.language))));
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::client().dynamic_lighting, "and back: two values");
+        // Sun Shadows: Off, then On, which without Dynamic Lighting the page
+        // says they need
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.item, 53, "Sun Shadows");
+        assert_eq!(value_text(&vui, 53), Some(wide(vui.words.get(552, vui.language))), "Off");
+        assert_eq!(w.page_note(2), None, "off: no note");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::client().sun_shadows, cues.last()), (true, Some(&11)), "On");
+        assert_eq!(value_text(&vui, 53), Some(wide(vui.words.get(551, vui.language))));
+        assert_eq!(w.page_note(2).as_deref(), Some("Sun Shadows need Dynamic Lighting"), "on without Dynamic Lighting");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::client().sun_shadows, "and back: two values");
+        // Light Shadows: the same, with their own note
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.item, 56, "Light Shadows");
+        assert_eq!(value_text(&vui, 56), Some(wide(vui.words.get(552, vui.language))), "Off");
+        assert_eq!(w.page_note(2), None, "off: no note");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::client().light_shadows, settings::client().sun_shadows, cues.last()), (true, false, Some(&11)), "On, Sun Shadows still off");
+        assert_eq!(value_text(&vui, 56), Some(wide(vui.words.get(551, vui.language))));
+        assert_eq!(w.page_note(2).as_deref(), Some("Light Shadows need Dynamic Lighting"), "on without Dynamic Lighting");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::client().light_shadows, "and back: two values");
+        // Shadow Distance: a slider and its number, the game's 250 at the
+        // left, a step of 125 a press, 1000 at the right
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.item, 57, "Shadow Distance");
+        assert_eq!(slider_at(57), Some((0.0, Some(250))), "the game's 250");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert_eq!((settings::client().shadow_distance, cues.last()), (250, Some(&9)), "nothing under the game's");
+        for want in [375u16, 500, 625, 750, 875, 1000] {
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!((settings::client().shadow_distance, cues.last()), (want, Some(&11)));
+        }
+        assert_eq!(slider_at(57), Some((1.0, Some(1000))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::client().shadow_distance, cues.last()), (1000, Some(&9)), "nothing past 1000");
+        for _ in 0..6 {
+            press(&mut w, &mut o, key::LEFT, &mut cues);
+        }
+        assert_eq!(settings::client().shadow_distance, 250, "and back");
+        // Ambient Occlusion, Off (the game's picture), then On
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.item, 54, "Ambient Occlusion");
+        assert_eq!(value_text(&vui, 54), Some(wide(vui.words.get(552, vui.language))), "Off, the game's picture");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::client().ambient_occlusion, settings::client().dynamic_lighting, cues.last()), (true, false, Some(&11)), "On, Dynamic Lighting still off");
+        assert_eq!(value_text(&vui, 54), Some(wide(vui.words.get(551, vui.language))));
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::client().ambient_occlusion, "and back: two values");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (4, Some(&9)), "Lighting's last row");
+        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
+        assert_eq!((w.page, w.cat, w.cat_sel, w.item), (3, None, 2, -1), "back to the categories, Lighting still lit");
         // UI: Ability Bars, Target of Target, Mana Bars, Minimap, Stats Box, Update Notices
         press(&mut w, &mut o, key::DOWN, &mut cues);
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(2), 22), "UI, Ability Bars");
+        assert_eq!((w.cat, w.item), (Some(3), 22), "UI, Ability Bars");
         assert_eq!(settings::ability_bars(), 2, "the game's two");
         for want in [3, 4, 2] {
             press(&mut w, &mut o, key::RIGHT, &mut cues);
@@ -1684,7 +1875,7 @@ mod tests {
         // Controller: Controller Focus, Capture Controller, Touch Pad Size
         press(&mut w, &mut o, key::DOWN, &mut cues);
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(3), 16), "Controller, Controller Focus");
+        assert_eq!((w.cat, w.item), (Some(4), 16), "Controller, Controller Focus");
         assert_eq!(settings::focus(), Focus::Auto);
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::focus(), Focus::Off, "round to Off");
@@ -1718,7 +1909,7 @@ mod tests {
         // Camera: Camera Distance, Camera Turn Speed, Screen Shake
         press(&mut w, &mut o, key::DOWN, &mut cues);
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(4), 15), "Camera, Camera Distance");
+        assert_eq!((w.cat, w.item), (Some(5), 15), "Camera, Camera Distance");
         for _ in 0..15 {
             press(&mut w, &mut o, key::RIGHT, &mut cues);
         }
@@ -1750,13 +1941,12 @@ mod tests {
         // Characters: Level of Detail, NPC/PC Display, NPC/PC Distance
         press(&mut w, &mut o, key::DOWN, &mut cues);
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(5), 12), "Characters, Level of Detail");
+        assert_eq!((w.cat, w.item), (Some(6), 12), "Characters, Level of Detail");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert!(!settings::client().lod);
         assert_eq!(cues.last(), Some(&11));
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 23, "NPC/PC Display");
-        assert_eq!(settings::entity_slots(), 64, "the first-run 64");
         settings::set_client(settings::ClientOptions { entity_slots: 24, ..settings::client() });
         assert_eq!(settings::entity_slots(), 24, "the game's 24");
         press(&mut w, &mut o, key::LEFT, &mut cues);
@@ -1780,7 +1970,6 @@ mod tests {
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 24, "NPC/PC Distance");
-        assert_eq!(settings::entity_view(), 650, "the first-run 650");
         settings::set_client(settings::ClientOptions { entity_view: 100, ..settings::client() });
         assert_eq!(settings::entity_view(), 100, "the game's 100");
         press(&mut w, &mut o, key::LEFT, &mut cues);
@@ -1828,7 +2017,7 @@ mod tests {
         // Sound: Sound in Background
         press(&mut w, &mut o, key::DOWN, &mut cues);
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(6), 21), "Sound, Sound in Background");
+        assert_eq!((w.cat, w.item), (Some(7), 21), "Sound, Sound in Background");
         assert!(settings::background_sound(), "on: a window behind others keeps its sound");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert!(!settings::background_sound());
@@ -1836,34 +2025,46 @@ mod tests {
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 32, "Output Device");
         assert_eq!(value_text(&vui, 32), Some(wide(SYSTEM_DEFAULT)), "the system's default");
-        assert!(w.page_note(6).is_some_and(|n| n.starts_with("Plays on ") || n == "No output now"), "where it plays, beside Back");
+        assert!(w.page_note(7).is_some_and(|n| n.starts_with("Plays on ") || n == "No output now"), "where it plays, beside Back");
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.row, cues.last()), (1, Some(&9)), "Sound's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        for _ in 0..3 {
-            press(&mut w, &mut o, key::DOWN, &mut cues);
-        }
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        press(&mut w, &mut o, key::DOWN, &mut cues);
         // Textures (natively): Texture Packs and Dump Textures, each Off
         // then On; a test keeps no folder, so the note says there is none
-        assert_eq!((w.cat_sel, cues.last()), (9, Some(&11)), "Textures, after Sound");
+        assert_eq!((w.cat_sel, cues.last()), (11, Some(&11)), "Textures, after Sound");
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(9), 50), "Textures, Texture Packs");
+        assert_eq!((w.cat, w.item), (Some(11), 50), "Textures, Texture Packs");
         assert_eq!(value_text(&vui, 50), Some(wide(vui.words.get(552, vui.language))), "Off, the game's own textures");
-        assert_eq!(w.page_note(9), None, "off: no note");
+        assert_eq!(w.page_note(11), None, "off: no note");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert!(settings::client().texture_packs);
         assert_eq!((value_text(&vui, 50), cues.last()), (Some(wide(vui.words.get(551, vui.language))), Some(&11)));
-        assert_eq!(w.page_note(9).as_deref(), Some("No folder here"));
+        assert_eq!(w.page_note(11).as_deref(), Some("No folder here"));
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 51, "Dump Textures");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().dump_textures, "either way turns it over");
-        assert_eq!(w.page_note(9).as_deref(), Some("0 dumped"), "how many dumped, beside Back");
+        assert_eq!(w.page_note(11).as_deref(), Some("0 dumped"), "how many dumped, beside Back");
+        // Texture Folder: Open; with no folder here (a test's), nothing to
+        // show, sound 9, by either way or ✕
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (1, Some(&9)), "Textures' last row");
+        assert_eq!((w.item, cues.last()), (55, Some(&11)), "Texture Folder");
+        assert_eq!(value_text(&vui, 55), Some(wide("Open")));
+        assert_eq!(w.page_note(11).as_deref(), Some("No folder here"), "where it is, beside Back");
+        for k in [key::RIGHT, key::LEFT, key::CROSS] {
+            press(&mut w, &mut o, k, &mut cues);
+            assert_eq!(cues.last(), Some(&9), "none to show ({k})");
+        }
+        assert!(crate::texpack::testing::shown().is_empty());
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (2, Some(&9)), "Textures' last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.cat_sel, cues.last()), (9, Some(&9)), "Textures, the last category");
+        assert_eq!((w.cat_sel, cues.last()), (11, Some(&9)), "Textures, the last category");
         // Triangle: the menu, then closed with every setting put back
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.sel), (-1, 3), "the menu, on Extended");
@@ -1890,7 +2091,8 @@ mod tests {
             key::CROSS,
             key::LEFT,
             key::TRIANGLE,
-            // Camera: Camera Turn Speed a step up
+            // Camera: Camera Turn Speed a step up (past Lighting)
+            key::DOWN,
             key::DOWN,
             key::DOWN,
             key::DOWN,
@@ -2023,7 +2225,7 @@ mod tests {
             v.sort();
             v
         };
-        let mut all: Vec<i32> = fork_options::items().map(|&(i, _)| i).collect();
+        let mut all: Vec<i32> = fork_options::items().map(|&(i, _)| i).filter(|&i| !(cfg!(target_os = "android") && i == 55)).collect();
         all.sort();
         assert_eq!(listed(CATEGORIES), all);
         assert!(fits(CATEGORIES));
@@ -2141,15 +2343,15 @@ mod tests {
         let y = |w: &WndOptions, k: i32| w.window2.row_center(&vui, &NullRaster, k + 1)[1] as f32;
         let down = |n: usize, last: i32| std::iter::repeat_n(key::DOWN, n).chain([last]).collect::<Vec<_>>();
         // the categories: Camera chosen at once
-        assert_eq!(w.point(category(&w, 4)), vec![key::CROSS]);
-        assert_eq!(w.cat_sel, 4, "Camera");
-        assert_eq!(w.point(category(&w, 6)), vec![key::CROSS]);
-        assert_eq!(w.cat_sel, 6, "Sound");
+        assert_eq!(w.point(category(&w, 5)), vec![key::CROSS]);
+        assert_eq!(w.cat_sel, 5, "Camera");
+        assert_eq!(w.point(category(&w, 7)), vec![key::CROSS]);
+        assert_eq!(w.cat_sel, 7, "Sound");
         assert!(w.point([5.0, 5.0]).is_empty());
-        w.point(category(&w, 4));
+        w.point(category(&w, 5));
         w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
         w.draw(&vui, &mut r, &o, &mut ups);
-        assert_eq!(w.cat, Some(4), "Camera's page");
+        assert_eq!(w.cat, Some(5), "Camera's page");
         for k in 0..CATEGORIES.len() as i32 {
             assert!(w.hits.at(category(&w, k)).is_none_or(|h| h >= LABEL), "category {k} behind the page answers nothing");
         }
@@ -2197,10 +2399,10 @@ mod tests {
         // Characters: NPC/PC Display's knob at its left end (the game's 24),
         // then at 128 near its middle
         w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
-        w.cat_sel = 5;
+        w.cat_sel = 6;
         w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
         w.draw(&vui, &mut r, &o, &mut ups);
-        assert_eq!(w.cat, Some(5), "Characters' page");
+        assert_eq!(w.cat, Some(6), "Characters' page");
         assert_eq!(w.point([frame + 110.0, y(&w, 0)]), vec![key::RIGHT], "Level of Detail's value");
         crate::settings::set_client(ClientOptions { entity_slots: 24, ..crate::settings::client() });
         w.draw(&vui, &mut r, &o, &mut ups);
@@ -2227,7 +2429,7 @@ mod tests {
         assert_eq!(w.point([slider + 110.0, y(&w, 3)]), down(3, key::LEFT), "left of the knob at 200");
         // Controller: Controller Focus's halves
         w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
-        w.cat_sel = 3;
+        w.cat_sel = 4;
         w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
         w.draw(&vui, &mut r, &o, &mut ups);
         assert_eq!(w.point([frame + 20.0, y(&w, 0)]), vec![key::LEFT], "Controller Focus's value, left");
@@ -2258,13 +2460,14 @@ mod tests {
         assert_eq!(CATEGORIES[by_name("Characters")].note, Note::Server);
         assert_eq!(CATEGORIES[by_name("Sound")].note, Note::Output);
         assert_eq!(CATEGORIES[by_name("Video")].note, Note::Scale);
-        assert!(CATEGORIES.iter().filter(|c| c.note != Note::None).count() == if cfg!(target_arch = "wasm32") { 4 } else { 5 }, "the notes only");
+        assert_eq!(CATEGORIES[by_name("Lighting")].note, Note::Lighting);
+        assert!(CATEGORIES.iter().filter(|c| c.note != Note::None).count() == if cfg!(target_arch = "wasm32") { 5 } else { 6 }, "the notes only");
         #[cfg(not(target_arch = "wasm32"))]
         {
             // Textures: nothing to say while both are off (a test keeps no
             // folder, so with Texture Packs on there is none to read)
             assert_eq!(CATEGORIES[by_name("Textures")].note, Note::Textures);
-            assert_eq!(CATEGORIES[by_name("Textures")].items, &[50, 51]);
+            assert_eq!(CATEGORIES[by_name("Textures")].items, &[50, 51, 55]);
             assert_eq!(note(&w, by_name("Textures")), None, "both off: no note");
             crate::settings::set_client(crate::settings::ClientOptions { texture_packs: true, ..crate::settings::client() });
             assert_eq!(note(&w, by_name("Textures")).as_deref(), Some("No folder here"), "on, with no folder to read");
@@ -2285,5 +2488,101 @@ mod tests {
         assert_eq!(note(&w, by_name("Video")), None, "the control: none on Video's");
         // no output in a test (no device opened): said so
         assert_eq!(note(&w, by_name("Sound")).as_deref(), Some("No output now"), "Sound: where it plays");
+    }
+
+    /// Texture Folder (55) on a computer: its value Open; right, left and ✕
+    /// each show the Frontiers disc's folder in the `textures` beside the
+    /// program (sound 8), made with its replacements, the page saying
+    /// where, and no setting changes; the control: with no folder (a run
+    /// that keeps no settings) sound 9 and nothing shown.
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn the_texture_folder_row_shows_the_folder() {
+        use crate::pointer::testing::{NullRaster, vui};
+        use crate::texpack::{Beside, Place, testing};
+        crate::settings::testing::reset(false);
+        let vui = vui();
+        let mut r = NullRaster;
+        let mut o = GameOptions::default();
+        let mut w = WndOptions::default();
+        let (mut cues, mut ups) = (Vec::new(), Vec::new());
+        let d = std::env::temp_dir().join(format!("eqoa-options-texture-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        testing::set_place(Some(Place { dir: d.join("textures"), also: None, beside: Beside::Program("eqoa.exe".into()), moved: None, why: None }));
+        let textures = CATEGORIES.iter().position(|c| c.name == "Textures").unwrap();
+        w.open(&vui, &r, &o);
+        w.sel = 3;
+        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+        w.cat_sel = textures as i32;
+        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+        w.draw(&vui, &mut r, &o, &mut ups);
+        for _ in 0..2 {
+            w.key(&vui, &mut r, &mut o, key::DOWN, 0, &mut cues, &mut ups);
+            w.draw(&vui, &mut r, &o, &mut ups);
+        }
+        assert_eq!((w.cat, w.item), (Some(textures), 55), "Texture Folder, the third row");
+        assert_eq!(w.page_note(textures).as_deref(), Some("Beside eqoa.exe"));
+        for k in [key::RIGHT, key::LEFT, key::CROSS] {
+            cues.clear();
+            w.key(&vui, &mut r, &mut o, k, 0, &mut cues, &mut ups);
+            w.draw(&vui, &mut r, &o, &mut ups);
+            assert_eq!(cues, vec![8], "shown ({k})");
+        }
+        let folder = d.join("textures").join(esf::pcsx2::SERIAL);
+        assert_eq!(testing::shown(), vec![folder.clone(); 3]);
+        assert!(folder.join("replacements").is_dir(), "made as PCSX2 makes it");
+        assert_eq!(crate::settings::client(), ClientOptions::default(), "no setting changed");
+        testing::set_place(None);
+        cues.clear();
+        w.key(&vui, &mut r, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
+        assert_eq!((cues, testing::shown()), (vec![9], vec![]), "the control: no folder");
+        crate::settings::testing::reset(false);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Sun Shadows' note: only while they are on and Dynamic Lighting is
+    /// off (they are drawn only with it); none with both on, none off.
+    #[test]
+    fn sun_shadows_say_what_they_need() {
+        let with = |sun_shadows: bool, dynamic_lighting: bool| sun_note(&ClientOptions { sun_shadows, dynamic_lighting, ..Default::default() });
+        assert_eq!(with(true, false).as_deref(), Some("Sun Shadows need Dynamic Lighting"));
+        assert_eq!(with(true, true), None, "both on: drawn");
+        assert_eq!(with(false, false), None);
+        assert_eq!(with(false, true), None);
+    }
+
+    /// Light Shadows' note: the same, of them alone (Sun Shadows' says
+    /// nothing of them, nor theirs of Sun Shadows).
+    #[test]
+    fn light_shadows_say_what_they_need() {
+        let with = |light_shadows: bool, dynamic_lighting: bool| light_note(&ClientOptions { light_shadows, dynamic_lighting, ..Default::default() });
+        assert_eq!(with(true, false).as_deref(), Some("Light Shadows need Dynamic Lighting"));
+        assert_eq!(with(true, true), None, "both on: drawn");
+        assert_eq!(with(false, false), None);
+        assert_eq!(with(false, true), None);
+        assert_eq!(sun_note(&ClientOptions { light_shadows: true, ..Default::default() }), None, "Sun Shadows' note not theirs");
+        assert_eq!(light_note(&ClientOptions { sun_shadows: true, ..Default::default() }), None, "nor theirs Sun Shadows'");
+    }
+
+    /// Every Extended row is one item, and each category's rows are rows:
+    /// two branches that took the same number for a row (Lighting's) fail
+    /// here, where a second match arm would only warn.
+    #[test]
+    fn every_extended_row_has_its_own_item() {
+        let mut items: Vec<i32> = fork_options::items().map(|r| r.0).collect();
+        items.sort_unstable();
+        let n = items.len();
+        items.dedup();
+        assert_eq!(items.len(), n, "an item named twice in EXTENDED_ITEMS");
+        for c in ALL_CATEGORIES.iter() {
+            for i in c.items {
+                assert!(fork_options::items().any(|r| r.0 == *i), "{}'s item {i} has no row", c.name);
+            }
+        }
+        let listed: Vec<i32> = ALL_CATEGORIES.iter().flat_map(|c| c.items.iter().copied()).collect();
+        let mut once = listed.clone();
+        once.sort_unstable();
+        once.dedup();
+        assert_eq!(once.len(), listed.len(), "an item on two pages");
     }
 }

@@ -225,3 +225,30 @@ The defaults export also makes two existing Play tests select retail slots and
 distance explicitly (+2/-1). They previously inherited old defaults; their
 retail-behavior assertions remain unchanged. Production Play code is unchanged.
 
+
+
+## 2026-11-09 map restoration sync review
+
+Pinned upstream base: `91f9e72dd6d111e20a37b73cea461444a18ad79c` (134 commits).
+The owner selected combine: retain Enhanced map/search/journal/theme/circle and
+port upstream master switches, offered GM travel, cache precedence, quest rim and
+O/G layout. Detailed decisions and verification are in
+[the sync report](plans/sync-2026-11-09-report.md).
+
+The upstream map restoration makes formerly fork-added code part of the baseline.
+Existing substitutions therefore consume more deletion budget. Reviewed maxima:
+HUD +316/-44 (previous -15), options +46/-142 (previous +41/-41),
+Play +759/-89 (previous -53), settings +334/-38 (previous -23).
+The manifest gives each reason: preserve HUD claims/circle fixtures, represent
+colliding stock map rows through owned rows and tests, keep search/journal/live
+dot adapters, and retain Enhanced saved settings rather than vanilla assertions
+that they disappeared. Lighting IDs 56/57 remain upstream's; existing fork IDs
+remain unchanged, masters use 1054/1055. Every page still has at most six rows.
+The extra options references also cover the new combined-registry uniqueness test
+and explicit 24/100 retail-boundary fixtures under Enhanced's 64/650 defaults.
+
+A new shared `texpack.rs` budget is +1/-1 for a Windows-portable test fixture:
+Unix-shaped absolute fixture paths gain a drive on Windows. Its AppImage and
+relative-path controls then exercise the same production helper on this host;
+production texture code is unchanged. The master category has its own named hook
+guard. Renderer and network budgets did not increase.

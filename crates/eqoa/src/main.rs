@@ -19,6 +19,8 @@
 //! eqoa fxview [visual [secs]]   a human casting a spell visual at another, again and again, as
 //!                               0x00B1 plays it (the GM panel's preview; `fxview`); with an
 //!                               out.png after the visual, `[ms,...] [secs]`: drawn at those times
+//! eqoa emotes <body> <out.png> [pose...]   a body playing its emotes (or actions), a row
+//!                               each, a few moments across (`emoteview`)
 //! eqoa rumble                   each controller the game would read rumbles a moment, as the game
 //!                               rumbles one (the large motor, then the small)
 //!                               (walk: the human walks forward, its footsteps with it;
@@ -45,6 +47,7 @@ mod audio;
 mod era;
 #[cfg(target_os = "macos")]
 mod macos;
+mod cape;
 mod chat;
 mod dialog;
 mod attackclock;
@@ -91,6 +94,7 @@ mod bugnote;
 mod gear;
 mod gram;
 mod hideui;
+mod jump;
 mod livewords;
 mod hud;
 mod raidlist;
@@ -116,6 +120,7 @@ mod faction;
 mod fishing;
 mod duel;
 mod duelwnd;
+mod lights;
 mod loading;
 mod lod;
 mod loot;
@@ -132,7 +137,10 @@ mod questlog;
 mod statbox;
 mod tracker;
 mod quickchat;
+mod racebody;
+mod raceemote;
 mod racelabel;
+mod raceopts;
 mod record;
 mod alarm;
 mod startmenu;
@@ -150,6 +158,8 @@ mod zones;
 mod flora;
 mod fx;
 mod fxview;
+mod dressview;
+mod emoteview;
 mod particles;
 mod patcher;
 mod play;
@@ -159,6 +169,7 @@ mod rings;
 mod scene;
 mod servers;
 mod shadows;
+mod slotless;
 mod sky;
 mod spelling;
 mod touch;
@@ -542,6 +553,47 @@ fn run(args: &[String]) -> Result<()> {
                 None => fxview::run(lib, effect, secs(rest.get(1))?, aim, None)?,
             }
         }
+        // `eqoa dress <body> <out.png> [look...]`: a body off the disc dressed
+        // in a look, standing, from four sides (`dressview`)
+        #[cfg(not(target_arch = "wasm32"))]
+        Some("dress") => {
+            let usage = "usage: eqoa dress <body DictID> <out.png> [set=N armor=a,b,c,d,e tint=T robe=R rtint=T dye=RRGGBB hair=c,l,s face=F helm=N helmfit=0 main=ID off=ID shield=ID race=1 action=N at=ms size=WxH cape=N capecolor=RRGGBB era=2002]";
+            let model = args.get(1).and_then(|m| fxview::parse_visual(m)).ok_or(usage)? as i32;
+            let out = args.get(2).filter(|o| o.ends_with(".png")).ok_or(usage)?;
+            let words = dressview::parse(&args[3..])?;
+            let mut iso = disc(None)?;
+            let mut lib = esf::Library::new();
+            for f in dressview::FILES {
+                lib.add(*f, esf::Container::open(iso.read(f)?)?);
+            }
+            // the 2002 disc's copies standing in, as the world has them with F9
+            if words.y2002 {
+                let path = era::disc().ok_or("era=2002 needs the 2002 disc (EQOA_2002_ISO)")?;
+                let mut d = iso::Iso::open(&path).map_err(|e| format!("{path}: {e}"))?;
+                let mut art = Vec::new();
+                for f in dressview::FILES {
+                    art.push((f.to_string(), esf::Container::open(d.read(f)?)?));
+                }
+                era::install(&mut lib, art);
+            }
+            dressview::shot(&lib, model, &words, out)?;
+        }
+        // `eqoa emotes <body> <out.png> [pose...]`: the body's emotes as a
+        // race's player plays them (`raceemote`), or its own actions, or the
+        // human's carried onto it, a row each (`emoteview`)
+        #[cfg(not(target_arch = "wasm32"))]
+        Some("emotes") => {
+            let usage = "usage: eqoa emotes <body DictID> <out.png> [wave bow point cheer N human:N cols=N size=WxH]";
+            let model = args.get(1).and_then(|m| fxview::parse_visual(m)).ok_or(usage)? as i32;
+            let out = args.get(2).filter(|o| o.ends_with(".png")).ok_or(usage)?;
+            let words = emoteview::parse(&args[3..])?;
+            let mut iso = disc(None)?;
+            let mut lib = esf::Library::new();
+            for f in emoteview::FILES {
+                lib.add(*f, esf::Container::open(iso.read(f)?)?);
+            }
+            emoteview::sheet(&lib, model, &words, out)?;
+        }
         Some("listen") => {
             let usage = "usage: eqoa listen <world> <x> <z> <seconds> <out.wav> [hour]";
             let file = args.get(1).ok_or(usage)?;
@@ -765,7 +817,21 @@ fn login(host: &str, user: &str, pass: &str) -> Result<(net::session::Session, n
     let server = net::addr::resolve(host, port("EQOA_GAME_PORT", 10070))?;
     let mut s = Session::connect(server, user, l.token)?;
     let t = std::time::Instant::now();
+    // the character picked, and when its list came: it is asked for a second
+    // after, so the offers that follow a list (the live look, creation's races,
+    // capes) are answered on the session before the selection, as a player at
+    // character select answers them; an answer the server reads after it has
+    // made the game's session is acked on the new connection, which then never
+    // forms (go-eqoa-server's promotion spends its new-instance flag on that ack)
+    let mut picked: Option<(net::session::Character, std::time::Instant)> = None;
     while t.elapsed() < std::time::Duration::from_secs(30) {
+        if let Some((c, at)) = picked.take() {
+            if at.elapsed() >= std::time::Duration::from_secs(1) {
+                s.select_character(&c);
+            } else {
+                picked = Some((c, at));
+            }
+        }
         let events = s.pump();
         for (k, e) in events.iter().enumerate() {
             match e {
@@ -788,8 +854,10 @@ fn login(host: &str, user: &str, pass: &str) -> Result<(net::session::Session, n
                     // `EQOA_CHAR=<name>` picks one; else the first.
                     let want = std::env::var("EQOA_CHAR").ok();
                     let pick = list.iter().find(|c| want.as_deref() == Some(c.name.as_str())).or(list.first());
-                    if let Some(c) = pick {
-                        s.select_character(&c.clone());
+                    if let Some(c) = pick
+                        && picked.is_none()
+                    {
+                        picked = Some((c.clone(), std::time::Instant::now()));
                     }
                 }
                 Event::WorldEntry { self_id, player, dump } => {
@@ -880,7 +948,8 @@ fn source(file: &str, rest: &[String]) -> Result<(esf::Library, viewer::Source)>
             lib.file(main).zones().get(index).ok_or("no such zone")?;
             add_twin(&mut lib, main, file);
             stream::load_zone_now(&mut lib, main, index)?;
-            let character = lib.lookup(viewer::HUMAN).ok_or("no human model")?;
+            // `EQOA_BODY=<DictID>`: another body than the human's (`viewer::shot_body`)
+            let character = lib.lookup(viewer::shot_body() as i32).ok_or("no such body")?;
             Ok((lib, viewer::Source::Walk { file: main, index, character, spawn: None }))
         }
         [z, n] if z == "zone" => {

@@ -19,11 +19,17 @@ pub const BUTTONS: [(&str, i32); 5] = [("Close", key::TRIANGLE), ("+", key::R1),
 const PAD_LEGEND: [(i32, &str); 10] = [(65, "Close"), (66, "Center"), (67, "Waypoint"), (68, "Markers"), (189, "Towns"), (214, "Suggest"), (185, ""), (187, "Zoom"), (-1, "Sticks, drag, pinch: pan and zoom"), (-1, "Tap: waypoint")];
 const KEY_LEGEND: [&str; 8] = ["M Close", "Space Center", "+ - or wheel Zoom", "Arrows, WASD or drag Pan", "Click or Q Waypoint", "X Markers", "T Towns", "N Suggest"];
 /// In a group, the legend's words for the waypoint keys, the group's beside
-/// the player's own (`group_waypoint`): □ held, a finger held, G or a click
+/// the player's own (`group_waypoint`): □ held, a finger held, O or a click
 /// with Shift.
 const PAD_LEGEND_GROUP: (i32, &str) = (67, "Waypoint, held: the group's");
 const TAP_LEGEND_GROUP: &str = "Tap: waypoint, hold: the group's";
-const KEY_LEGEND_GROUP: &str = "G, Q held or Shift+click Group waypoint";
+const KEY_LEGEND_GROUP: &str = "O, Q held or Shift+click Group waypoint";
+/// A GM's, while the server offers travel by the map (`Map::travel`): the
+/// click that asks for it, ⌘ on a Mac.
+#[cfg(target_os = "macos")]
+pub const LEGEND_TRAVEL: &str = "Cmd+click Travel here";
+#[cfg(not(target_os = "macos"))]
+pub const LEGEND_TRAVEL: &str = "Ctrl+click Travel here";
 
 /// Long rebound key names must wrap inside the legend, not enlarge its panel.
 fn wrap_keyboard_label(r: &dyn Raster, label: &str, max_width: i32) -> Vec<String> {
@@ -79,7 +85,7 @@ fn keyboard_legend(b: &crate::binds::Binds, group: bool, quests: bool) -> Vec<St
     };
     let mut labels: Vec<String> = KEY_LEGEND.iter().map(|s| s.to_string()).collect();
     labels[0] = format!("{} Close", key("map", "M"));
-    labels[1] = format!("{} Center", key("attack", "Space"));
+    labels[1] = format!("{} Center", key("jump", "Space"));
     labels[2] = format!(
         "{} {} or wheel Zoom",
         key("map_in", "+"),
@@ -125,10 +131,10 @@ fn keyboard_legend(b: &crate::binds::Binds, group: bool, quests: bool) -> Vec<St
         labels.insert(7, format!("{} Quests", key("look_left", "J")));
     }
     if group {
-        let (g, q) = (key("map_group_waypoint", "G"), key("talk", "Q"));
+        let (g, q) = (key("map_group_waypoint", "O"), key("talk", "Q"));
         labels.insert(
             5,
-            if g == "G" && q == "Q" {
+            if g == "O" && q == "Q" {
                 KEY_LEGEND_GROUP.into()
             } else {
                 format!("{g}, {q} held or Shift+click Group waypoint")
@@ -168,6 +174,9 @@ pub struct Chrome {
     pub notice: Option<String>,
     /// in a group: the legend names the group's waypoint (`group_waypoint`)
     pub group: bool,
+    /// a GM's, offered travel by the map: the legend names its click
+    /// (`LEGEND_TRAVEL`)
+    pub travel: bool,
 }
 
 /// A panel the size of `w` x `h` at `at` (VIWndGoto's).
@@ -315,6 +324,12 @@ pub fn draw(r: &mut dyn Raster, vui: &Vui, c: &Chrome) -> Vec<Button> {
                 }
             }
         }
+    if c.travel {
+        // a GM's: after the waypoints' keys, a keyboard's and a pad's alike
+        // (a mouse goes with either)
+        let at = pieces.iter().rposition(|p| p.1.contains("aypoint")).map_or(pieces.len(), |i| i + 1);
+        pieces.insert(at, (-1, LEGEND_TRAVEL));
+    }
     if c.quests.is_some() && !c.keyboard {
         // after the towns' key (R3's glyph, 215, inline)
         let at = pieces.iter().position(|p| p.1.ends_with("Towns")).map_or(pieces.len(), |i| i + 1);
@@ -438,6 +453,27 @@ mod tests {
     }
 
     #[test]
+    fn center_legend_follows_the_space_row_after_attack_moves_to_g() {
+        use crate::binds::{Binds, KeyEdge, Sent};
+        let mut binds = Binds::default();
+        let stock = keyboard_legend(&binds, true, false);
+        assert!(stock.iter().any(|s| s == "Space Center"));
+        assert!(stock.iter().any(|s| s == KEY_LEGEND_GROUP));
+        assert_eq!(super::super::keyboard("g"), None);
+        binds.bind_key(crate::binds::row_named("jump").unwrap(), "y");
+        let rebound = keyboard_legend(&binds, true, false);
+        assert!(rebound.iter().any(|s| s == "Y Center"));
+        let mut edge = KeyEdge::default();
+        let Some(Sent::Key(name)) = edge.key("y", true, false, false, &binds) else {
+            panic!("the rebound center key must reach the map");
+        };
+        assert_eq!(
+            super::super::keyboard(&name),
+            Some((key::CROSS, super::super::Hold::Once))
+        );
+    }
+
+    #[test]
     fn rebound_map_key_dispatches_the_advertised_action_but_typing_stays_text() {
         use crate::binds::{Binds, KeyEdge, Sent};
         let mut b = Binds::default();
@@ -549,7 +585,7 @@ mod tests {
     }
 
     fn chrome(keyboard: bool) -> Chrome {
-        Chrome { corners: [[-106.0, 0.0], [746.0, 448.0]], title: "Tunaria: Freeport (North)".into(), names: Vec::new(), keyboard, progress: Some((3, 175)), quests: None, pointer: None, notice: None, group: false }
+        Chrome { corners: [[-106.0, 0.0], [746.0, 448.0]], title: "Tunaria: Freeport (North)".into(), names: Vec::new(), keyboard, progress: Some((3, 175)), quests: None, pointer: None, notice: None, group: false, travel: false }
     }
 
     /// The chrome's footprint covers its title (top left), its buttons (top
@@ -632,7 +668,7 @@ mod tests {
     }
 
     /// In a group the legend names the group's waypoint beside the player's
-    /// own: a keyboard's G, Q held or Shift and a click, a pad's □ held and a
+    /// own: a keyboard's O, Q held or Shift and a click, a pad's □ held and a
     /// finger held on the map. The control: out of a group, none of it.
     #[test]
     fn in_a_group_the_legend_names_the_groups_waypoint() {
@@ -674,6 +710,14 @@ mod tests {
             let alone = said(keyboard, false);
             assert!(alone.iter().any(|s| s.contains("aypoint")), "the control drew its legend: {alone:?}");
             assert!(!alone.iter().any(|s| s.contains("group's") || s.contains("Group waypoint")), "out of a group: {alone:?}");
+        }
+        // a GM's offered travel: its click named, a keyboard's legend and a
+        // pad's; the control: none of it for anyone else (`said` above)
+        for keyboard in [true, false] {
+            let mut r = Words::default();
+            draw(&mut r, &vui(), &Chrome { travel: true, ..chrome(keyboard) });
+            assert!(r.0.iter().any(|s| s == LEGEND_TRAVEL), "{:?}", r.0);
+            assert!(!said(keyboard, true).iter().any(|s| s == LEGEND_TRAVEL));
         }
     }
 }

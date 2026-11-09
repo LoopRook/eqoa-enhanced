@@ -231,7 +231,8 @@ fn the_keyboard_works_the_map() {
     assert!(m.open, "the control: Y is not the map's");
     assert_eq!(keyboard("y"), None);
     assert_eq!(keyboard("q"), Some((key::SQUARE, Hold::Held)), "Q is the keyboard's □: the waypoint, held the group's");
-    assert_eq!(keyboard("g"), Some((KEY_GROUP, Hold::Once)), "G: the group's waypoint");
+    assert_eq!(keyboard("o"), Some((KEY_GROUP, Hold::Once)), "O: the group's waypoint");
+    assert_eq!(keyboard("g"), None, "G: the attack's, not the map's");
     m.keyboard_key("escape", true, false);
     assert!(!m.open);
 }
@@ -382,7 +383,7 @@ fn square_puts_it_at_the_middle_once_panned() {
 /// the waypoint on the target's spot and a second □ takes it away there;
 /// once the map is panned, the middle is □'s spot, the target or not (what
 /// the player chose on the map first); with the target out of view □ is as
-/// it was. G (the group's at once) takes the same spots. The control: the
+/// it was. O (the group's at once) takes the same spots. The control: the
 /// same □ with no target takes the waypoint away.
 #[test]
 fn the_target_is_squares_spot_while_following() {
@@ -397,7 +398,7 @@ fn the_target_is_squares_spot_while_following() {
     assert_eq!(m.waypoint(0), None, "on it already: taken away");
     tap(&mut m);
     m.key(KEY_GROUP, true);
-    assert_eq!(m.take_group_ask(), Some(community::Spot { world: 0, at: merchant }), "G: the target's spot");
+    assert_eq!(m.take_group_ask(), Some(community::Spot { world: 0, at: merchant }), "O: the target's spot");
     // another world mapped than the player's: no target on it
     m.player_world = 2;
     assert_eq!(m.target_spot(), None);
@@ -409,7 +410,7 @@ fn the_target_is_squares_spot_while_following() {
     tap(&mut m);
     assert_eq!(m.waypoint(0), Some(there), "panned: the middle, not the target");
     m.key(KEY_GROUP, true);
-    assert_eq!(m.take_group_ask(), Some(community::Spot { world: 0, at: there }), "G panned: the middle");
+    assert_eq!(m.take_group_ask(), Some(community::Spot { world: 0, at: there }), "O panned: the middle");
     // following again, the target out of view: as it was
     m.follow = true;
     m.view = Some(View { center: FREEPORT, ..m.view.unwrap() });
@@ -417,7 +418,7 @@ fn the_target_is_squares_spot_while_following() {
     tap(&mut m);
     assert_eq!(m.waypoint(0), None, "the control: no target, taken away");
     m.key(KEY_GROUP, true);
-    assert_eq!(m.take_group_ask(), Some(community::Spot { world: 0, at: FREEPORT }), "G, no target: the player's own place");
+    assert_eq!(m.take_group_ask(), Some(community::Spot { world: 0, at: FREEPORT }), "O, no target: the player's own place");
 }
 
 /// □ held `group_waypoint::HOLD` seconds of the clock asks the group to be
@@ -498,6 +499,50 @@ fn shift_and_a_click_or_a_finger_held_tell_the_group() {
     far.shift = true;
     assert!(!far.click([10.0, 10.0], false), "past the world's edge");
     assert_eq!(far.take_group_ask(), None);
+}
+
+/// A GM's click with Ctrl held, while the server offers travel by the map,
+/// asks to travel to the spot under it (a coach's own spot on its
+/// horseshoe), and leaves the waypoints be; a finger's tap never travels. The
+/// controls: Ctrl without the offer is a click (the player's own waypoint),
+/// the offer without Ctrl a click too, and off the world's edge nothing.
+#[test]
+fn a_gms_ctrl_and_a_click_asks_to_travel_there() {
+    use super::markers_data::COACHES;
+    crate::settings::testing::reset(false);
+    let size = (1280, 720);
+    let mut m = up(size);
+    let v = m.view.unwrap();
+    m.ctrl = true;
+    assert!(m.click([900.0, 300.0], false));
+    assert_eq!(m.take_travel_ask(), None, "the control: not offered");
+    assert!(m.waypoint(0).is_some(), "not offered: a click, the waypoint put");
+    m.set_waypoint(0, None);
+    m.travel = true;
+    assert!(m.click([900.0, 300.0], false));
+    let asked = m.take_travel_ask().expect("asked");
+    assert!(near(asked.at, v.to_world(size, [900.0, 300.0]), 1e-3) && asked.world == 0, "{asked:?}");
+    assert_eq!(m.take_travel_ask(), None, "once");
+    assert_eq!(m.waypoint(0), None, "the waypoint left be");
+    let ronks = COACHES.iter().position(|c| c.coachman == "Coachman Ronks").unwrap();
+    let p = v.to_window(size, COACHES[ronks].at);
+    assert!(m.click([p[0] + 2.0, p[1]], false));
+    assert_eq!(m.take_travel_ask().map(|s| s.at), Some(COACHES[ronks].at), "the coach's own spot");
+    m.shift = true;
+    assert!(m.click([900.0, 300.0], false));
+    assert!(m.take_travel_ask().is_some() && m.take_group_ask().is_none(), "Ctrl before Shift");
+    m.shift = false;
+    m.click([700.0, 200.0], true);
+    assert_eq!(m.take_travel_ask(), None, "a finger's tap");
+    m.ctrl = false;
+    assert!(m.click([900.0, 300.0], false));
+    assert_eq!(m.take_travel_ask(), None, "the control: no Ctrl");
+    let mut far = up(size);
+    far.view = Some(View { center: [2000.0, 0.0], scale: 10.0 });
+    far.ctrl = true;
+    far.travel = true;
+    assert!(!far.click([10.0, 10.0], false), "past the world's edge");
+    assert_eq!(far.take_travel_ask(), None);
 }
 
 /// The group's waypoint goes once the player reaches it, but only after
@@ -981,4 +1026,26 @@ fn world_map_stays_in_window_coordinates_at_render_scales() {
             assert!(pixel(mid_x * k, mid_y * k)[1] > 200, "UI quad missing/misaligned at size {size:?} scale {k}");
         }
     }
+}
+
+#[test]
+fn master_off_releases_world_and_closes_search_without_losing_saved_waypoints() {
+    crate::settings::testing::reset(false);
+    let mut m = up((1280, 720));
+    m.set_waypoint(0, Some(FREEPORT));
+    m.open = false;
+    m.search.open = true;
+    m.mini.up = true;
+    m.travel_ask = Some(community::Spot {
+        world: 0,
+        at: FREEPORT,
+    });
+    m.group_ask = m.travel_ask;
+    assert!(m.world.is_some() && m.search.open && m.mini.up);
+    m.off();
+    assert!(!m.open && !m.search.open && !m.mini.up);
+    assert!(m.world.is_none() && m.layers.is_none());
+    assert!(m.take_travel_ask().is_none() && m.take_group_ask().is_none());
+    assert_eq!(m.waypoint(0), Some(FREEPORT));
+    crate::settings::testing::reset(false);
 }

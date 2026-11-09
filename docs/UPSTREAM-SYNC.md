@@ -26,6 +26,15 @@ footprint passing) merges without one (the owner, 2026-11-08). Always run the te
 through the script (`--continue --tests-only`): it uses one thread and a scratch
 EQOA_CONFIG, and a parallel run's GPU/addon tests collide and hang.
 
+Owner disk-space rule (2026-11-09): all local cargo builds/tests use
+`CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared` under the shared mkdir lock
+`C:/Users/hocka/Paseo/cargo-build.lock`, with a timeout. The sync script honors an
+explicit `CARGO_TARGET_DIR` while retaining its scratch `EQOA_CONFIG` and one test
+thread. Do not make another build target in a worktree or on another drive; remove
+legacy worktree targets after gates pass. Do not remove `targets/eqoa-api-r2`
+while its agent moves off it. The worktree's temporary `target/sync-*.log` files
+are logs/configuration, not an additional Cargo cache; archive them before cleanup.
+
 ## Initial integration
 
 Enhanced baseline: 8aeaf91. Upstream merge target: 8d90350. Common upstream

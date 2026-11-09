@@ -579,6 +579,14 @@ impl Hud {
             };
             patch(p, color);
         }
+        // the map's waypoints (the client's own, `map::Map::click`), at any
+        // distance: the group's in its orange, the player's own in magenta
+        // over it (`waypoint_point`)
+        for (w, color) in [(s.group_waypoint, crate::map::group_waypoint::COLOR), (s.waypoint, crate::map::WAYPOINT)] {
+            if let Some(w) = w {
+                patch(waypoint_point(s.heading, s.camera, w), color);
+            }
+        }
         // the live client's duel, last (eqoa-live-1500's DrawPatch, 0x0135E124):
         // the duel's centre in orange, at any distance
         if let Some(c) = s.duel {
@@ -621,7 +629,7 @@ fn waypoint_point(yaw: f32, camera: [f32; 3], w: [f32; 2]) -> [f32; 2] {
 }
 
 /// `patch_point` at any distance (the live client's duel patch measures
-/// none).
+/// none, nor does the map's waypoint).
 fn bearing_point(yaw: f32, d: [f32; 3]) -> [f32; 2] {
     use std::f32::consts::PI;
     let (center, radius) = ([39.0f32, 55.0], 27.0f32);

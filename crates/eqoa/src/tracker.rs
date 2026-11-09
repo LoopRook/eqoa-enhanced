@@ -55,6 +55,7 @@ fn count_text(have: u16, need: u16) -> String {
 
 /// An objective's words: "Bat Eye: 0/3", or as they are with nothing to
 /// count ("Speak with Kellina").
+#[cfg(test)]
 pub fn goal_text(text: &str, have: u16, need: u16) -> String {
     format!("{text}{}", count_text(have, need))
 }

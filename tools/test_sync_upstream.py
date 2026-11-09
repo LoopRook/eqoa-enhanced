@@ -276,6 +276,22 @@ class WholeSync(unittest.TestCase):
 
 
 class TestStep(unittest.TestCase):
+    def test_configured_cargo_target_is_kept_with_isolated_config_and_one_thread(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for configured in (None, "C:/shared-build-cache"):
+                env = {} if configured is None else {"CARGO_TARGET_DIR": configured}
+                results = [subprocess.CompletedProcess([], 0, "test result: ok. 1 passed; 0 failed; 0 ignored", ""),
+                           subprocess.CompletedProcess([], 0, "", "Ran 1 test")]
+                with mock.patch.dict(sync.os.environ, env, clear=True), \
+                     mock.patch.object(sync.subprocess, "run", side_effect=results) as run:
+                    ok, _ = sync.run_tests(root)
+                self.assertTrue(ok)
+                cargo = run.call_args_list[0]
+                self.assertEqual(cargo.kwargs["env"]["CARGO_TARGET_DIR"], configured or str(root / "target"))
+                self.assertEqual(cargo.kwargs["env"]["EQOA_CONFIG"], str(root / "target" / "sync-config"))
+                self.assertIn("--test-threads=1", cargo.args[0])
+
     def test_another_build_running_is_not_success(self):
         with mock.patch.object(sync, "other_cargo_running", return_value=True), \
              mock.patch.object(sync, "run_tests", side_effect=AssertionError("must not build")):
@@ -288,6 +304,24 @@ class TestStep(unittest.TestCase):
 
 
 class RepositorySetup(unittest.TestCase):
+    def test_shader_checkout_keeps_lf_when_windows_conversion_is_enabled(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            git(root, "init", "-q")
+            git(root, "config", "user.name", "Sync fixture")
+            git(root, "config", "user.email", "fixture@example.invalid")
+            git(root, "config", "core.autocrlf", "true")
+            (root / ".gitattributes").write_bytes((REPO / ".gitattributes").read_bytes())
+            source = b"fn shader() {\n    return;\n}\n"
+            shader = root / "crates" / "render" / "src" / "receiver.wgsl"
+            shader.parent.mkdir(parents=True)
+            shader.write_bytes(source)
+            git(root, "add", ".")
+            git(root, "commit", "-qm", "fixture")
+            shader.unlink()
+            git(root, "checkout", "--", "crates/render/src/receiver.wgsl")
+            self.assertEqual(shader.read_bytes(), source, "shadow assembly matches LF-terminated lines")
+
     def test_readme_and_claude_keep_ours(self):
         attrs = (REPO / ".gitattributes").read_text(encoding="utf-8").splitlines()
         self.assertIn("CLAUDE.md merge=ours", attrs)

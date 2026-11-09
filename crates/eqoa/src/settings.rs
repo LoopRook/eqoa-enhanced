@@ -319,10 +319,27 @@ pub fn set_home_shard(name: &str) -> Result<(), String> {
 
 const SERVER_FILE: &str = "server.opt";
 
+/// The server a client that never kept one connects to (the user, 2026-11-08:
+/// "lets make eqoaclassic.com the default network config for the vanilla
+/// client. apk users reporting they cannot login"): natively alone, as a page
+/// is told its own (`web`'s `server` option) and another site's page must not
+/// be sent here.
+pub const DEFAULT_SERVER: &str = "eqoaclassic.com";
+
 /// The server the title's Network Setup keeps (`server.opt`: the address
-/// alone, a host name or IPv4 address), if one was set.
+/// alone, a host name or IPv4 address), if one was set; a blank one kept is
+/// none. With no `server.opt` at all (a new install, a phone's) it is
+/// [`DEFAULT_SERVER`], natively.
 pub fn server() -> Option<String> {
-    store::read(SERVER_FILE).map(|b| String::from_utf8_lossy(&b).trim().to_string()).filter(|s| !s.is_empty())
+    match store::read(SERVER_FILE) {
+        Some(b) => Some(String::from_utf8_lossy(&b).trim().to_string()).filter(|s| !s.is_empty()),
+        None => default_server(),
+    }
+}
+
+/// [`DEFAULT_SERVER`] natively; none in a page.
+fn default_server() -> Option<String> {
+    (!cfg!(target_arch = "wasm32")).then(|| DEFAULT_SERVER.to_string())
 }
 
 /// Keeps `s` as the server (blank: none).
@@ -633,6 +650,43 @@ pub struct ClientOptions {
     /// HUD where the server sends them, in place of the group's bars, which
     /// hold three. On by default (the user, 2026-11-07).
     pub raid_list: bool,
+    /// Map (the user, 2026-11-09: "also add the map and quest helper we had
+    /// in a former update"; on by default): the client's own map (M, the
+    /// compass's click, `map`), the minimap, the waypoints on the compass and
+    /// the group's waypoint said in its chat; off, none of them, as the game
+    /// has none (M does nothing, the compass is the game's, a group line is a
+    /// chat line, nothing is built or kept, the community's marks are not
+    /// asked for). Its own parts under it: Minimap (N turns it too), Map
+    /// Markers (the map's X or ○) and the town names (the map's T or Select).
+    pub map: bool,
+    /// Minimap (on by default): the map's pictures round the player under
+    /// the quick menus' name plate (`map::mini`); off, none.
+    pub minimap: bool,
+    /// Map Markers: on, the map (M) marks EQOA-Data's XP camps and every
+    /// coach (`map::markers`), each with a card of what it is under the
+    /// pointer (the user, F3 pass 18: "mark popular xp camps on map with an XP
+    /// icon", "also add all coaches to the map"); off, the map shows neither.
+    /// The map's own key (X, ○) turns it too.
+    pub map_markers: bool,
+    /// Town names on the map (the user, F3 pass 18: "add town names to the
+    /// map too", `map::markers`): the map's own key (T, Select) turns them,
+    /// kept as Map Markers is; on by default.
+    pub map_towns: bool,
+    /// Quest Helper (the user, 2026-11-09; on by default): the quest marks on
+    /// the map and the minimap (a "!" at each giver of a quest the player may
+    /// take, a "?" where a step is to be done) and the quest tracker on the
+    /// HUD, from a server that sends them (`net::session::OP_QUEST_MARKERS`,
+    /// `OP_QUEST_PROGRESS`: go-eqoa-server), else the client's own guide's
+    /// (`questguide`: Sandstorm sends no such thing); off, none, the server
+    /// asked for none and the guide not run, as the game has none.
+    pub quest_helper: bool,
+    /// Quest Markers (under the Quest Helper, on by default): the map's and
+    /// the minimap's quest marks; the map's own key (J, R3) turns it.
+    pub quest_markers: bool,
+    /// Quest Tracker (under the Quest Helper, on by default): the HUD's list
+    /// of the quests under way under the minimap, each step's objectives
+    /// counted ("Bat Eye 0/3"); off, none.
+    pub quest_tracker: bool,
     /// Art: Frontiers' (the disc the game runs off), or the 2002 disc's
     /// (`era`, F9)
     pub art: esf::Era,
@@ -666,26 +720,11 @@ pub struct ClientOptions {
     /// (`net::session::OP_POWER_BARS`; the game shows only the player's
     /// own); none where none is sent (Sandstorm).
     pub mana_bars: bool,
-    /// Minimap (the user's ask, on by default): the map's pictures round the
-    /// player under the quick menus' name plate (`map::mini`); off, none.
-    pub minimap: bool,
     /// Stats Box (the user, 2026-10-26: "make your stats show on the screen
     /// in a box like the mini map ... a toggle off by default"): the
     /// player's stats in a box on the HUD, an effect's raise or cut marked
     /// (`statbox`); off by default. B turns it too (`binds`' "stats_box").
     pub stats_box: bool,
-    /// Quest Markers (the user's ask, on by default): the map's "!" at each
-    /// giver of a quest the player may take and "?" where a step of its
-    /// quests is to be done, from a server that sends them
-    /// (`net::session::OP_QUEST_MARKERS`: go-eqoa-server), else the client's
-    /// own guide's (`questguide`: Sandstorm sends no such thing).
-    pub quest_markers: bool,
-    /// Quest Tracker (the user's ask, on by default): the HUD's list of the
-    /// quests under way under the minimap, each step's objectives counted
-    /// ("Bat Eye 0/3"), from a server that sends them
-    /// (`net::session::OP_QUEST_PROGRESS`: go-eqoa-server), else the guide's;
-    /// off, none.
-    pub quest_tracker: bool,
     /// Mipmaps: on, the textures' mip levels sampled as the GS samples them
     /// (`render::gs_lod_k`: the level by depth, blended), which is how the
     /// game is drawn; off, every texel off the base level, sharper and
@@ -708,17 +747,39 @@ pub struct ClientOptions {
     /// at eight bits a channel (a brighter cloud). PS2 by default, the
     /// game's look (the user, 2026-10-30, named no default: flip it here).
     pub ps2_fog: bool,
-    /// Map Markers: on, the map (M) marks EQOA-Data's XP camps and every
-    /// coach (`map::markers`), each with a card of what it is under the
-    /// pointer (the user, F3 pass 18: "mark popular xp camps on map with an XP
-    /// icon", "also add all coaches to the map"); off, the map shows neither.
-    /// The map's own key (X, ○) turns it too.
-    pub map_markers: bool,
-    /// Town names on the map (the user, F3 pass 18: "add town names to the
-    /// map too", `map::markers`): the map's own key (T, Select) turns them,
-    /// kept as Map Markers is; on by default.
-    pub map_towns: bool,
 
+    /// Ambient Occlusion (the user's of 2026-11-08, "lets add ambient
+    /// occlusion"): off, the picture as the game draws it; on, the opaque
+    /// scene's creases, corners and contacts darkened per pixel
+    /// (`render::ao`). Off by default.
+    pub ambient_occlusion: bool,
+    /// Sun Shadows (Extended > Lighting, 2026-11-08): on, and with Dynamic
+    /// Lighting on, the sun's light stopped by what stands between a surface
+    /// and the sun, walls, roofs, trees, characters and hills casting
+    /// shadows that move with the time of day (`render::sunshadow`); off, the
+    /// sun lights through everything, as the PS2's. Off by default.
+    pub sun_shadows: bool,
+    /// Light Shadows (Extended > Lighting, 2026-11-09, the user's "sun
+    /// shadows lets make all light sources act similar"): on, and with
+    /// Dynamic Lighting on, the fires', the personal light's and the spells'
+    /// light stopped by what stands between a surface and the light, as Sun
+    /// Shadows stop the sun's (`render::lightshadow`); off, those lights
+    /// light through everything. Off by default.
+    pub light_shadows: bool,
+    /// Shadow Distance (Extended > Lighting, 2026-11-09, the user's "the light
+    /// shadows need a slider to raise to a greater distance"): how far out
+    /// Sun Shadows and Light Shadows reach, from the game's
+    /// `SHADOW_DISTANCE_GAME` (Sun Shadows' 250 before the camera, 8 lights
+    /// shadowed, 4 in a page and on Android) to `SHADOW_DISTANCE_MAX` (1000,
+    /// every light Dynamic Lighting draws) in `SHADOW_DISTANCE_STEP`s
+    /// (`render::Renderer::set_shadow_distance`).
+    pub shadow_distance: u16,
+    /// Dynamic Lighting (the user's of 2026-11-08, phase 1): off, the
+    /// PS2's, the strip programs' light per vertex with the personal light
+    /// the one point light; on, the light per fragment and the scene's fires,
+    /// placed lights, spells and glowing weapons lighting what is round them
+    /// (`lights`, `render::lit`). Off by default.
+    pub dynamic_lighting: bool,
     /// Loading Screens: Longer, a long trip (Return Home, a coach, a port of
     /// 200 or more with zones a PS2 would read, another world) keeps the
     /// loading screen up at least a second, as a PS2's disc read would
@@ -765,10 +826,10 @@ pub struct ClientOptions {
     pub touch_size: u8,
     /// Texture Packs, natively (the user, 2026-11-08: PCSX2's replacement
     /// packs read as they are, "an Extended page row turns packs on and
-    /// off"): on, a texture a pack in the config directory's
-    /// `textures/SLUS-20744/replacements` names is drawn as the pack has it
-    /// (`texpack`); off, every texture the game's own. Off by default, as
-    /// PCSX2's Load Textures is.
+    /// off"): on, a texture a pack in `textures/SLUS-20744/replacements`
+    /// names (the `textures` beside the program, `texpack::place`) is drawn
+    /// as the pack has it (`texpack`); off, every texture the game's own.
+    /// Off by default, as PCSX2's Load Textures is.
     pub texture_packs: bool,
     /// Dump Textures, natively: on, each texture made is written to
     /// `textures/SLUS-20744/dumps` under the names PCSX2 gives it
@@ -784,6 +845,16 @@ pub const RENDER_SCALES: [u8; 3] = [1, 2, 4];
 pub const TOUCH_SIZE_MIN: u8 = (crate::touch::SMALLEST * 100.0) as u8;
 pub const TOUCH_SIZE_MAX: u8 = 100;
 pub const TOUCH_SIZE_STEP: u8 = 5;
+
+/// Shadow Distance's ends and step (`ClientOptions::shadow_distance`).
+pub const SHADOW_DISTANCE_GAME: u16 = 250;
+pub const SHADOW_DISTANCE_MAX: u16 = 1000;
+pub const SHADOW_DISTANCE_STEP: u16 = 125;
+
+/// Shadow Distance as the renderer takes it: times the game's.
+pub fn shadow_scale() -> f32 {
+    client().shadow_distance as f32 / SHADOW_DISTANCE_GAME as f32
+}
 
 /// The touch screen's pad's size now, of the full pad (`touch::layout`).
 pub fn touch_scale() -> f32 {
@@ -850,24 +921,31 @@ impl Default for ClientOptions {
             name_distance: NAME_DISTANCE_GAME,
             overlapping_names: false,
             raid_list: true,
+            map: true,
+            minimap: true,
+            map_markers: true,
+            map_towns: true,
+            quest_helper: true,
+            quest_markers: true,
+            quest_tracker: true,
             art: esf::Era::Frontiers,
             vsync: true,
             shouts: true,
             update_notices: true,
             target_of_target: false,
             mana_bars: true,
-            minimap: true,
             stats_box: false,
-            quest_markers: true,
-            quest_tracker: true,
             text: render::ui::TextFilter::Sharp,
             mipmaps: true,
             flora: true,
             shadows: true,
             environment: true,
             ps2_fog: true,
-            map_markers: true,
-            map_towns: true,
+            ambient_occlusion: false,
+            sun_shadows: false,
+            light_shadows: false,
+            shadow_distance: SHADOW_DISTANCE_GAME,
+            dynamic_lighting: false,
             loading_longer: true,
             render_scale: 1,
             hud: render::ui::HudFilter::Nearest,
@@ -889,11 +967,14 @@ impl ClientOptions {
     /// it is not Auto, Capture Controller only when on, Sound in Background
     /// only when off, Ability Bars, NPC/PC Display, NPC/PC Distance and
     /// Name Distance only when not the game's, Overlapping Names only when
-    /// Show, Art only when it is the 2002 disc's, VSync, Shouts and Update
+    /// Show, the Map, Minimap, Map Markers, the map's town names, the Quest
+    /// Helper, Quest Markers and Quest Tracker only when off, Art only when it
+    /// is the 2002 disc's, VSync, Shouts and Update
     /// Notices only when off, Text only when Smooth, Render Scale only above
     /// 1, HUD only when Nearest, Output Device only when a device is
     /// chosen (by its name), Touch Pad Size only when smaller than
-    /// the full pad, and Texture Packs and Dump Textures only when on.
+    /// the full pad, and Texture Packs and Dump Textures only when on
+    /// (Ambient Occlusion and Dynamic Lighting the same).
     pub fn to_text(self) -> String {
         let mut s = format!("lod={}\nbrightness={}\ncamera_distance={}\n", if self.lod { "on" } else { "off" }, self.brightness, self.camera_distance);
         if let Some(r) = self.frame_rate {
@@ -935,6 +1016,20 @@ impl ClientOptions {
         if !self.raid_list {
             s.push_str("raid_list=off\n");
         }
+        // the map's and the quests' only when off
+        for (on, key) in [
+            (self.map, "map"),
+            (self.minimap, "minimap"),
+            (self.map_markers, "map_markers"),
+            (self.map_towns, "map_towns"),
+            (self.quest_helper, "quest_helper"),
+            (self.quest_markers, "quest_markers"),
+            (self.quest_tracker, "quest_tracker"),
+        ] {
+            if !on {
+                s.push_str(&format!("{key}=off\n"));
+            }
+        }
         if self.art == esf::Era::Y2002 {
             s.push_str("art=2002\n");
         }
@@ -955,20 +1050,9 @@ impl ClientOptions {
         if !self.mana_bars {
             s.push_str("mana_bars=off\n");
         }
-        // Minimap only when off
-        if !self.minimap {
-            s.push_str("minimap=off\n");
-        }
         // Stats Box only when on
         if self.stats_box {
             s.push_str("stats_box=on\n");
-        }
-        // Quest Markers and Quest Tracker only when off
-        if !self.quest_markers {
-            s.push_str("quest_markers=off\n");
-        }
-        if !self.quest_tracker {
-            s.push_str("quest_tracker=off\n");
         }
         if self.text == render::ui::TextFilter::Smooth {
             s.push_str("text=smooth\n");
@@ -992,13 +1076,25 @@ impl ClientOptions {
         if !self.ps2_fog {
             s.push_str("ground_fog=exact\n");
         }
-        // Map Markers only when off
-        if !self.map_markers {
-            s.push_str("map_markers=off\n");
+        // Ambient Occlusion only when on
+        if self.ambient_occlusion {
+            s.push_str("ambient_occlusion=on\n");
         }
-        // the map's town names only when off
-        if !self.map_towns {
-            s.push_str("map_towns=off\n");
+        // Sun Shadows only when on
+        if self.sun_shadows {
+            s.push_str("sun_shadows=on\n");
+        }
+        // Light Shadows only when on
+        if self.light_shadows {
+            s.push_str("light_shadows=on\n");
+        }
+        // Shadow Distance only when not the game's
+        if self.shadow_distance != SHADOW_DISTANCE_GAME {
+            s.push_str(&format!("shadow_distance={}\n", self.shadow_distance));
+        }
+        // Dynamic Lighting only when on
+        if self.dynamic_lighting {
+            s.push_str("dynamic_lighting=on\n");
         }
         // Loading Screens only when Instant
         if !self.loading_longer {
@@ -1074,20 +1170,28 @@ impl ClientOptions {
                 ("update_notices", "off") => c.update_notices = false,
                 ("raid_list", "on") => c.raid_list = true,
                 ("raid_list", "off") => c.raid_list = false,
+                ("map", "on") => c.map = true,
+                ("map", "off") => c.map = false,
+                ("minimap", "on") => c.minimap = true,
+                ("minimap", "off") => c.minimap = false,
+                ("map_markers", "on") => c.map_markers = true,
+                ("map_markers", "off") => c.map_markers = false,
+                ("map_towns", "on") => c.map_towns = true,
+                ("map_towns", "off") => c.map_towns = false,
+                ("quest_helper", "on") => c.quest_helper = true,
+                ("quest_helper", "off") => c.quest_helper = false,
+                ("quest_markers", "on") => c.quest_markers = true,
+                ("quest_markers", "off") => c.quest_markers = false,
+                ("quest_tracker", "on") => c.quest_tracker = true,
+                ("quest_tracker", "off") => c.quest_tracker = false,
                 ("overlapping_names", "show") => c.overlapping_names = true,
                 ("overlapping_names", "hide") => c.overlapping_names = false,
                 ("target_of_target", "on") => c.target_of_target = true,
                 ("target_of_target", "off") => c.target_of_target = false,
                 ("mana_bars", "on") => c.mana_bars = true,
                 ("mana_bars", "off") => c.mana_bars = false,
-                ("minimap", "on") => c.minimap = true,
-                ("minimap", "off") => c.minimap = false,
                 ("stats_box", "on") => c.stats_box = true,
                 ("stats_box", "off") => c.stats_box = false,
-                ("quest_markers", "on") => c.quest_markers = true,
-                ("quest_markers", "off") => c.quest_markers = false,
-                ("quest_tracker", "on") => c.quest_tracker = true,
-                ("quest_tracker", "off") => c.quest_tracker = false,
                 ("text", "sharp") => c.text = render::ui::TextFilter::Sharp,
                 ("text", "smooth") => c.text = render::ui::TextFilter::Smooth,
                 ("mipmaps", "on") => c.mipmaps = true,
@@ -1100,10 +1204,19 @@ impl ClientOptions {
                 ("environment", "off") => c.environment = false,
                 ("ground_fog", "ps2") => c.ps2_fog = true,
                 ("ground_fog", "exact") => c.ps2_fog = false,
-                ("map_markers", "on") => c.map_markers = true,
-                ("map_markers", "off") => c.map_markers = false,
-                ("map_towns", "on") => c.map_towns = true,
-                ("map_towns", "off") => c.map_towns = false,
+                ("ambient_occlusion", "on") => c.ambient_occlusion = true,
+                ("ambient_occlusion", "off") => c.ambient_occlusion = false,
+                ("sun_shadows", "on") => c.sun_shadows = true,
+                ("sun_shadows", "off") => c.sun_shadows = false,
+                ("light_shadows", "on") => c.light_shadows = true,
+                ("light_shadows", "off") => c.light_shadows = false,
+                ("shadow_distance", v) => {
+                    if let Some(d) = v.parse::<u16>().ok().filter(|d| (SHADOW_DISTANCE_GAME..=SHADOW_DISTANCE_MAX).contains(d)) {
+                        c.shadow_distance = d;
+                    }
+                }
+                ("dynamic_lighting", "on") => c.dynamic_lighting = true,
+                ("dynamic_lighting", "off") => c.dynamic_lighting = false,
                 ("loading", "longer") => c.loading_longer = true,
                 ("loading", "instant") => c.loading_longer = false,
                 ("render_scale", v) => {
@@ -1390,6 +1503,19 @@ pub fn set_shouts(heard: bool) -> Result<(), String> {
     save_client()
 }
 
+/// Whether the map is on (Extended's Map): the map, the minimap, the
+/// waypoints and the group's waypoint; off, none of them.
+pub fn map() -> bool {
+    client().map
+}
+
+/// Whether the minimap is up where it could be: the Map on, and its own
+/// Minimap.
+pub fn minimap() -> bool {
+    let c = client();
+    c.map && c.minimap
+}
+
 /// Whether the map marks the XP camps and the coaches (Map Markers).
 pub fn map_markers() -> bool {
     client().map_markers
@@ -1417,9 +1543,17 @@ pub fn set_map_towns(on: bool) -> Result<(), String> {
     save_client()
 }
 
-/// Whether the map shows the quest marks a server sends (Quest Markers).
+/// Whether the Quest Helper is on (Extended's): the quest marks, the tracker
+/// and the guide; off, none of them, and no server asked for them.
+pub fn quest_helper() -> bool {
+    client().quest_helper
+}
+
+/// Whether the map and the minimap show quest marks: the Quest Helper on,
+/// and its own Quest Markers (the map's J).
 pub fn quest_markers() -> bool {
-    client().quest_markers
+    let c = client();
+    c.quest_helper && c.quest_markers
 }
 
 /// Quest Markers turned (the map's own key), and kept at once, as Map
@@ -1429,6 +1563,13 @@ pub fn set_quest_markers(on: bool) -> Result<(), String> {
     c.quest_markers = on;
     set_client(c);
     save_client()
+}
+
+/// Whether the HUD shows the quest tracker where it could: the Quest Helper
+/// on, and its own Quest Tracker.
+pub fn quest_tracker() -> bool {
+    let c = client();
+    c.quest_helper && c.quest_tracker
 }
 
 /// Minimap turned (its key, N: `binds`' "minimap"), and kept at once, as
@@ -2092,6 +2233,96 @@ mod tests {
         assert!(ClientOptions::from_text("flora=off").shadows);
     }
 
+    /// Ambient Occlusion, off by default (the picture as the game draws
+    /// it), kept only when on; anything but on or off leaves it off. The
+    /// control: Dynamic Lighting on is not it.
+    #[test]
+    fn ambient_occlusion_kept_only_when_on() {
+        let d = ClientOptions::default();
+        assert!(!d.ambient_occlusion, "off, the game's picture");
+        assert!(!d.to_text().contains("ambient_occlusion"), "the default not written");
+        let on = ClientOptions { ambient_occlusion: true, ..Default::default() };
+        assert_eq!(on.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nambient_occlusion=on\n");
+        assert_eq!(ClientOptions::from_text(&on.to_text()), on);
+        assert!(ClientOptions::from_text("ambient_occlusion=off") == d);
+        for bad in ["ambient_occlusion=1", "ambient_occlusion=", "ambient_occlusion=On", "ao=on", "dynamic_lighting=on"] {
+            assert!(!ClientOptions::from_text(bad).ambient_occlusion, "{bad}: off, the default");
+        }
+    }
+
+    /// Sun Shadows, off by default, kept only when on, and apart from
+    /// Dynamic Lighting (either may be on without the other); anything but
+    /// on or off leaves them off.
+    #[test]
+    fn sun_shadows_kept_only_when_on() {
+        let d = ClientOptions::default();
+        assert!(!d.sun_shadows, "off by default");
+        assert!(!d.to_text().contains("sun_shadows"), "the default not written");
+        let on = ClientOptions { sun_shadows: true, ..Default::default() };
+        assert_eq!(on.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nsun_shadows=on\n");
+        assert_eq!(ClientOptions::from_text(&on.to_text()), on);
+        let both = ClientOptions { sun_shadows: true, dynamic_lighting: true, ..Default::default() };
+        assert_eq!(ClientOptions::from_text(&both.to_text()), both);
+        assert!(!ClientOptions::from_text("sun_shadows=on").dynamic_lighting, "Dynamic Lighting not turned on with them");
+        assert!(ClientOptions::from_text("sun_shadows=off") == d);
+        for bad in ["sun_shadows=1", "sun_shadows=", "sun_shadows=On", "shadows=on"] {
+            assert!(!ClientOptions::from_text(bad).sun_shadows, "{bad}: off, the default");
+        }
+    }
+
+    /// Light Shadows, off by default, kept only when on, and apart from
+    /// Dynamic Lighting and Sun Shadows (each may be on without the others);
+    /// anything but on or off leaves them off.
+    #[test]
+    fn light_shadows_kept_only_when_on() {
+        let d = ClientOptions::default();
+        assert!(!d.light_shadows, "off by default");
+        assert!(!d.to_text().contains("light_shadows"), "the default not written");
+        let on = ClientOptions { light_shadows: true, ..Default::default() };
+        assert_eq!(on.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nlight_shadows=on\n");
+        assert_eq!(ClientOptions::from_text(&on.to_text()), on);
+        let all = ClientOptions { light_shadows: true, sun_shadows: true, dynamic_lighting: true, ..Default::default() };
+        assert_eq!(ClientOptions::from_text(&all.to_text()), all);
+        let them = ClientOptions::from_text("light_shadows=on");
+        assert!(!them.dynamic_lighting && !them.sun_shadows, "Dynamic Lighting and Sun Shadows not turned on with them");
+        assert!(ClientOptions::from_text("light_shadows=off") == d);
+        for bad in ["light_shadows=1", "light_shadows=", "light_shadows=On", "shadows=on", "sun_shadows=on"] {
+            assert!(!ClientOptions::from_text(bad).light_shadows, "{bad}: off, the default");
+        }
+    }
+
+    /// Shadow Distance, the game's 250 by default and not written then, kept
+    /// between it and 1000; anything else leaves the game's.
+    #[test]
+    fn shadow_distance_kept_when_raised() {
+        let d = ClientOptions::default();
+        assert_eq!(d.shadow_distance, 250, "the game's");
+        assert!(!d.to_text().contains("shadow_distance"), "the default not written");
+        let far = ClientOptions { shadow_distance: 750, ..Default::default() };
+        assert_eq!(far.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nshadow_distance=750\n");
+        assert_eq!(ClientOptions::from_text(&far.to_text()), far);
+        for bad in ["shadow_distance=1001", "shadow_distance=249", "shadow_distance=", "shadow_distance=far", "shadow_distance=-500"] {
+            assert_eq!(ClientOptions::from_text(bad).shadow_distance, 250, "{bad}: the game's");
+        }
+        assert_eq!(ClientOptions::from_text("shadow_distance=1000").shadow_distance, 1000);
+    }
+
+    /// Dynamic Lighting, off by default (the PS2's light), kept only when
+    /// on; anything but on or off leaves it off.
+    #[test]
+    fn dynamic_lighting_kept_only_when_on() {
+        let d = ClientOptions::default();
+        assert!(!d.dynamic_lighting, "off, the PS2's");
+        assert!(!d.to_text().contains("dynamic_lighting"), "the default not written");
+        let on = ClientOptions { dynamic_lighting: true, ..Default::default() };
+        assert_eq!(on.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\ndynamic_lighting=on\n");
+        assert_eq!(ClientOptions::from_text(&on.to_text()), on);
+        assert!(ClientOptions::from_text("dynamic_lighting=off") == d);
+        for bad in ["dynamic_lighting=1", "dynamic_lighting=", "dynamic_lighting=On", "lighting=on"] {
+            assert!(!ClientOptions::from_text(bad).dynamic_lighting, "{bad}: off, the default");
+        }
+    }
+
     /// Ground Fog, PS2 by default (the game's look), kept only when Exact;
     /// anything but ps2 or exact leaves it PS2. The control: Environment off
     /// is not Ground Fog's Exact.
@@ -2222,6 +2453,30 @@ mod tests {
     /// save reaches this one at its next look (`look_shared`), while its own
     /// change not saved yet stands until the file changes; the control: the
     /// other settings stay this window's as it read them.
+    #[test]
+    fn the_map_and_the_quest_helper_kept_only_when_off() {
+        let d = ClientOptions::default();
+        assert!(d.map && d.minimap && d.map_markers && d.map_towns && d.quest_helper && d.quest_markers && d.quest_tracker, "on by default");
+        for key in ["map", "minimap", "map_markers", "map_towns", "quest_helper", "quest_markers", "quest_tracker"] {
+            let off = ClientOptions::from_text(&format!("{key}=off"));
+            assert_ne!(off, d, "{key}=off read");
+            assert_eq!(off.to_text(), format!("lod=on\nbrightness=5\ncamera_distance=11\n{key}=off\n"), "{key}: only when off");
+            assert_eq!(ClientOptions::from_text(&off.to_text()), off, "{key}: read back off");
+            assert_eq!(ClientOptions::from_text(&format!("{key}=on")), d, "{key}=on");
+            for bad in ["0", "no", ""] {
+                assert_eq!(ClientOptions::from_text(&format!("{key}={bad}")), d, "{key}={bad}: on, the default");
+            }
+        }
+        testing::reset(false);
+        assert!(minimap() && quest_markers() && quest_tracker() && map() && quest_helper());
+        set_client(ClientOptions { map: false, quest_helper: false, ..Default::default() });
+        assert!(!minimap() && !quest_markers() && !quest_tracker() && !map() && !quest_helper(), "the masters off: their parts off");
+        assert!(client().minimap && client().quest_markers && client().quest_tracker, "the parts' own settings kept");
+        set_client(ClientOptions { minimap: false, ..Default::default() });
+        assert!(!minimap() && map() && quest_markers(), "the control: a part off alone");
+        testing::reset(false);
+    }
+
     #[test]
     fn capture_controller_reaches_every_window() {
         testing::reset(false);
@@ -2730,19 +2985,20 @@ mod tests {
         assert_eq!(saved_login(), (String::new(), String::new(), false));
     }
 
-    /// Network Setup's server: kept trimmed, a blank one is none, and a
-    /// store that refuses keeps nothing.
+    /// Network Setup's server: eqoaclassic.com until one is kept, kept
+    /// trimmed, a blank one is none (not the default again), and a store that
+    /// refuses keeps nothing.
     #[test]
     fn the_server_is_kept_trimmed_and_blank_is_none() {
         testing::reset(false);
-        assert_eq!(server(), None);
+        assert_eq!(server().as_deref(), Some(DEFAULT_SERVER), "none kept yet: the default");
         set_server("  eqoa.example.com \n").unwrap();
         assert_eq!(server().as_deref(), Some("eqoa.example.com"));
         set_server("").unwrap();
         assert_eq!(server(), None, "blank is none");
         testing::reset(true);
         assert!(set_server("192.0.2.1").is_err(), "the control: a refusing store");
-        assert_eq!(server(), None);
+        assert_eq!(server().as_deref(), Some(DEFAULT_SERVER), "nothing kept: the default");
         testing::reset(false);
     }
 
