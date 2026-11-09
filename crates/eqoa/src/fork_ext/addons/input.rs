@@ -233,6 +233,28 @@ pub fn wants_key_capture(
         && !is_synthetic
 }
 
+/// Whether a physical key event may be handed to ImGui's own input queue.
+///
+/// Dear ImGui starts Tab navigation even without `NavEnableKeyboard`, and its
+/// tab stops include inputable items (`imgui.cpp`, `NavUpdate` and
+/// `NavProcessItemForTabbingRequest`). Forwarding an unclaimed Tab therefore
+/// moves focus into a mod's text field while the same press also reaches plain
+/// gameplay. Tab is the only gated key: a Tab press is forwarded when a focused
+/// addon widget, active text capture, or a mod's key claim owns it. Tab
+/// releases always pass so ImGui never keeps a key down it saw pressed, and
+/// every other key keeps its existing routing.
+pub fn forwards_key_to_imgui(
+    keyboard: bool,
+    code: Option<u8>,
+    pressed: bool,
+    plain_play: bool,
+) -> bool {
+    if code == Some(0x09) && pressed {
+        return keyboard || is_text_capture_active() || (plain_play && is_key_suppressed(0x09));
+    }
+    true
+}
+
 fn get_key_name(code: u8) -> String {
     match code {
         0x0D => "Enter".to_string(),

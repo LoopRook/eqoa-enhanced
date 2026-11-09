@@ -4,6 +4,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Pressing Tab no longer reopens the mod chat input after closing it with an empty Enter. Tab targets once, and the game keeps the key.
 - Mod UIs keep receiving combat and cooldown events when another mod listens to player movement; waiting or disabled mods keep native state capture idle.
 
 - Fixed severe in-world slowdown from addon state capture, including with every addon disabled.
