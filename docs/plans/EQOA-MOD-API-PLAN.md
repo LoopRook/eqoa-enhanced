@@ -53,9 +53,9 @@ Owner decisions, approved 2026-11-09:
    stays; it no longer sets the order of the rounds.
 2. **HUD extras become mods.** Stats Box, Target of Target, Mana Bars and HUD numbers become bundled
    mods that are on by default (round 3).
-3. **Round minimap and the fork's map look.** The owner asks Winfro, as a question and not a pull
-   request, whether vanilla would take them as options (Minimap: Square/Round). If not, they become
-   an alternative mod in round 4.
+3. **Round minimap and the fork's map look are mods** (round 4), and nothing is pushed upstream for
+   them. The owner may mention them to Winfro, but plan on the assumption that vanilla won't take
+   them (owner's correction, 2026-11-09, to the review's "ask first" recommendation).
 4. **Fix pull requests go out now**, the animation crash fix first. The owner opens each one under
    their own name.
 5. **First-run defaults (NPC display 64, distance 650) are kept**, applied from the fork's own
@@ -246,8 +246,8 @@ with a negative control, and the vanilla test suite passing:
    it as first users).
 Descriptions the owner can send are in the direction review, section 3. The owner opens each PR
 under their own name. When one is accepted, the next sync deletes the matching fork lines and
-lowers the budget. Two questions go to Winfro directly, not as PRs: the round minimap as an option
-(decision 3) and the live-server client check (decision 6).
+lowers the budget. One question goes to Winfro directly, not as a PR: the live-server client check
+(decision 6). The round minimap and map look are not offered; they are mods (decision 3).
 
 ### Round 4: map API and map mods
 
@@ -261,8 +261,8 @@ Upstream's map is the base. Add to the API:
 - Packaged read-only data above 1 MiB (the creature catalogue), read through the client.
 Mods, in this order, each with the owner's five-line approval: the creature journal; search and
 guidance (F2/F4); the round minimap with hover cards; the map skin (only if a theme seam exists).
-The round minimap and skin are built as mods only if Winfro declines them as vanilla options
-(decision 3). Then take upstream's map files unchanged. Anything that can't move behind the API is
+The round minimap is an alternative mod: it hides upstream's minimap and draws its own (decision 3).
+Then take upstream's map files unchanged. Anything that can't move behind the API is
 listed for the owner with its sync cost. Measure frame time with the map mods on before deciding
 (gate 1 covers them off).
 
