@@ -143,3 +143,50 @@ fn native_subscriber_heap_exhaustion_is_terminal() {
     super::native_core::observe_text("heap test", [1.0; 4]);
     assert!(super::native_events::dispatch(&h).is_err());
 }
+
+#[test]
+fn native_storage_quota_combines_private_files_default_settings_and_named_profiles() {
+    use super::{
+        named_profiles::{Document, Store},
+        storage::Storage,
+    };
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let config = std::env::temp_dir().join(format!(
+        "eqoa-native-quota-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let key = "a".repeat(64);
+    let storage = Storage::new(Some(config.clone()));
+    storage
+        .save_encoded(&key, &serde_json::json!("old"))
+        .unwrap();
+    let data = storage.files_dir(&key).unwrap();
+    std::fs::create_dir_all(data.join("files")).unwrap();
+    let file = std::fs::File::create(data.join("files/large.bin")).unwrap();
+    file.set_len(16 * 1024 * 1024 - 8).unwrap();
+    drop(file);
+    assert!(
+        storage
+            .save_encoded(&key, &serde_json::json!("too large"))
+            .is_err(),
+        "settings must share the file quota"
+    );
+    assert_eq!(
+        std::fs::read_to_string(storage.profile_path(&key).unwrap()).unwrap(),
+        "\"old\""
+    );
+    let store = Store::new(Some(config.clone()));
+    let mut doc = Document::empty();
+    doc.addons.insert(key.clone(), serde_json::json!("x"));
+    store.write("First", &doc).unwrap();
+    assert!(
+        store.write("Second", &doc).is_err(),
+        "saved profiles must share the addon aggregate quota"
+    );
+    assert!(
+        super::sandbox::check_quota(&data, &data.join("new.bin"), 1).is_err(),
+        "file writes must include existing settings"
+    );
+    std::fs::remove_dir_all(config).unwrap();
+}

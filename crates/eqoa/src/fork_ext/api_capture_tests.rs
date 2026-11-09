@@ -138,6 +138,16 @@ fn native_cooldowns_capture_whole_record_and_lockout_edges_with_stable_ids() {
     let mut p = ready();
     p.forge_snapshot(None);
     let h = Host::new().unwrap();
+    crate::fork_ext::addons::ability::install_ability_list_adapter(&h).unwrap();
+    h.lua
+        .globals()
+        .set(
+            "forge_abilities",
+            h.registered_modules()["frontiers_forge.ability_list"].clone(),
+        )
+        .unwrap();
+    h.snapshot.set(p.forge_snapshot(None));
+    h.execute("forge_edges={};forge_abilities.Acquire('native-regression');for _,name in ipairs({'OnLockoutStart','OnLockoutEnd'}) do forge_abilities.On('native-regression',name,function(e) forge_edges[#forge_edges+1]={name=name,key=e.display_index,lockout=e.lockout_ms} end) end").unwrap();
     h.execute("edges={};for _,name in ipairs({'cooldown.started','cooldown.updated','cooldown.ended'}) do eqoa.events.on(name,function(e) edges[#edges+1]={name=e.name,id=e.data.ability_id,key=e.data.display_key,lockout=e.data.lockout,ref=e.data.ability} end) end").unwrap();
     let a = net::dump::Ability {
         id: i64::MAX,
@@ -167,6 +177,8 @@ fn native_cooldowns_capture_whole_record_and_lockout_edges_with_stable_ids() {
     // Reindex after receipt must not change the captured edge identity/key.
     p.abilities.get_mut(&i64::MAX).unwrap().display_index = 22;
     p.forge_snapshot(None);
+    h.snapshot.set(p.forge_snapshot(None));
+    h.execute("forge_abilities.Update();assert(#forge_edges==2);assert(forge_edges[1].name=='OnLockoutStart' and forge_edges[1].key==17 and forge_edges[1].lockout==5000);assert(forge_edges[2].name=='OnLockoutEnd' and forge_edges[2].key==17 and forge_edges[2].lockout==0)").unwrap();
     native_events::dispatch(&h).unwrap();
     h.execute("assert(#edges==3);assert(edges[1].name=='cooldown.started' and edges[1].id=='9223372036854775807' and edges[1].key==17 and edges[1].lockout==5);assert(edges[2].name=='cooldown.updated' and edges[2].lockout==2.5);assert(edges[3].name=='cooldown.ended' and edges[3].lockout==0);assert(eqoa.abilities.get(edges[1].ref).display_key==22)").unwrap();
 }

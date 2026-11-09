@@ -354,10 +354,12 @@ impl Storage {
 
     pub fn save_profile(&self, key: &str, value: Value) -> Result<(), String> {
         let data = super::profile::encode(value).map_err(|e| e.to_string())?;
-        write_json(&self.profile_path(key)?, &data)
+        self.save_encoded(key, &data)
     }
     pub(crate) fn save_encoded(&self, key: &str, value: &Json) -> Result<(), String> {
-        write_json(&self.profile_path(key)?, value)
+        let path = self.profile_path(key)?;
+        super::sandbox::check_settings_quota(&self.files_dir(key)?, &path, value)?;
+        write_json(&path, value)
     }
 
     pub fn load_profile(&self, key: &str, lua: &Lua) -> Result<Option<Value>, String> {

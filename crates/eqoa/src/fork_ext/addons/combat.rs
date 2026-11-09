@@ -111,6 +111,7 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
 
     let snapshot_cell = host.snapshot.clone();
     let hook_claims = Rc::new(RefCell::new(HashSet::<String>::new()));
+    let installed = Rc::new(std::cell::Cell::new(true));
     let subscribers = Rc::new(RefCell::new(std::collections::HashMap::<
         String,
         std::collections::HashMap<String, mlua::Function>,
@@ -124,9 +125,11 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
     // Hook claims
     {
         let claims = hook_claims.clone();
+        let installed = installed.clone();
         combat_mod.set(
             "Acquire",
             lua.create_function(move |_, owner: String| {
+                installed.set(true);
                 claims.borrow_mut().insert(owner);
                 Ok(true)
             })?,
@@ -161,16 +164,31 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
     }
 
     {
-        let claims = hook_claims.clone();
-        let s = snapshot_cell.clone();
+        let installed = installed.clone();
         combat_mod.set(
             "IsHookInstalled",
-            lua.create_function(move |_, ()| Ok(!claims.borrow().is_empty() || s.get().in_game))?,
+            lua.create_function(move |_, ()| Ok(installed.get()))?,
         )?;
     }
-
-    combat_mod.set("InstallHook", lua.create_function(|_, ()| Ok(true))?)?;
-    combat_mod.set("UninstallHook", lua.create_function(|_, ()| Ok(true))?)?;
+    for (name, active) in [("InstallHook", true), ("UninstallHook", false)] {
+        let installed = installed.clone();
+        let cursor = last_seq.clone();
+        combat_mod.set(
+            name,
+            lua.create_function(move |_, ()| {
+                installed.set(active);
+                *cursor.borrow_mut() = super::native_core::CORE.with(|c| {
+                    let c = c.borrow();
+                    if c.view.in_world {
+                        c.seq as u32
+                    } else {
+                        COMBAT_MONOTONIC_SEQ.with(|s| s.get().saturating_sub(1))
+                    }
+                });
+                Ok(true)
+            })?,
+        )?;
+    }
 
     {
         let claims = hook_claims.clone();
@@ -183,16 +201,20 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
 
     {
         let s = snapshot_cell.clone();
+        let installed = installed.clone();
         combat_mod.set(
             "GetHookInfo",
             lua.create_function(move |lua_ctx, ()| {
                 let snap = s.get();
                 let tbl = lua_ctx.create_table()?;
-                tbl.set("installed", true)?;
+                tbl.set("installed", installed.get())?;
                 let total_events =
                     COMBAT_MONOTONIC_SEQ.with(|seq_cell| seq_cell.get().saturating_sub(1));
                 tbl.set("event_count", total_events)?;
-                tbl.set("dropped", 0)?;
+                tbl.set(
+                    "dropped",
+                    super::native_events::bus(lua_ctx).borrow().dropped,
+                )?;
                 tbl.set("player_id", snap.player.entity_id)?;
                 if let Some(pet) = snap.player.pet_entity_id {
                     tbl.set("pet_id", pet)?;
@@ -298,6 +320,9 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
         combat_mod.set(
             "Update",
             lua.create_function(move |lua_ctx, ()| {
+                if !installed.get() {
+                    return Ok(());
+                }
                 let snap = s.get();
                 let combat_snap = snap.combat;
                 let native = super::native_core::CORE.with(|c| {
@@ -314,14 +339,14 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
                                         + (rgb[1].as_u64().unwrap_or(0) as u32) * 256
                                         + rgb[0].as_u64().unwrap_or(0) as u32
                                 });
-                                let amount = d["amount"].as_u64().unwrap_or(0) as i32;
+                                let amount = d["amount"].as_u64().unwrap_or(0) as i64;
                                 CombatEventSnapshot {
                                     attacker_id: d["attacker_id"].as_u64().unwrap_or(0) as u32,
                                     defender_id: d["defender_id"].as_u64().unwrap_or(0) as u32,
                                     amount: if d["kind"] == "heal" {
-                                        amount
+                                        amount as i32
                                     } else {
-                                        amount.saturating_neg()
+                                        (-amount) as i32
                                     },
                                     seq: e.seq as u32,
                                     color,

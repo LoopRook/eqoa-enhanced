@@ -260,6 +260,14 @@ impl Store {
             self.read(name)?;
         }
         Document::parse(doc.json())?;
+        let addons = self.root()?.parent().ok_or("missing addon storage root")?;
+        for (key, value) in &doc.addons {
+            super::sandbox::check_settings_quota(
+                &addons.join(format!("{key}-files")),
+                &path,
+                value,
+            )?;
+        }
         write_json(&path, &doc.json())
     }
     pub fn names(&self) -> Result<Vec<String>, String> {
