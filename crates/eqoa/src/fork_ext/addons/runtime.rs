@@ -87,6 +87,7 @@ struct Active {
 }
 impl Runtime {
     pub fn from_env() -> Self {
+        let _ = super::native_core::time();
         crate::fork_ext::mods::auto_create_mods_dir();
         crate::fork_ext::bundled::install_bundled_mods_if_needed();
         let mut runtime = Self::new(Paths::select(

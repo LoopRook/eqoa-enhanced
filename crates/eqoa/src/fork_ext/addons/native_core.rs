@@ -109,10 +109,12 @@ pub(crate) fn time() -> f64 {
 pub(crate) fn time_unborrowed(c: &Core) -> f64 {
     c.started.elapsed().as_secs_f64()
 }
+pub(crate) fn presentation() {
+    CORE.with(|c| c.borrow_mut().frame += 1);
+}
 pub(crate) fn iteration(game_step: bool) {
     CORE.with(|c| {
         let mut c = c.borrow_mut();
-        c.frame += 1;
         c.tick += u64::from(game_step);
     });
 }
@@ -128,17 +130,18 @@ impl Core {
         }
         self.seq += 1;
         let bytes = serde_json::to_vec(&data).map_or(1024 * 1024 + 1, |v| v.len()) + 128;
-        while self.events.len() >= 2048 || self.event_bytes.saturating_add(bytes) > 1024 * 1024 {
+        while self.events.len() >= 2048 || self.event_bytes.saturating_add(bytes) > 4 * 1024 * 1024
+        {
             let Some(old) = self.events.pop_front() else {
                 break;
             };
             self.event_bytes = self.event_bytes.saturating_sub(old.bytes);
         }
-        if bytes > 1024 * 1024 {
+        if bytes > 4 * 1024 * 1024 {
             return;
         }
         self.event_bytes += bytes;
-        self.events.push_back(Event {
+        let event = Event {
             name: name.into(),
             seq: self.seq,
             time: self.started.elapsed().as_secs_f64(),
@@ -147,7 +150,9 @@ impl Core {
             generation: self.generation,
             data,
             bytes,
-        });
+        };
+        super::native_events::publish(&event);
+        self.events.push_back(event);
     }
     pub fn reset(&mut self, reason: &str) {
         super::input::reset_input_state();

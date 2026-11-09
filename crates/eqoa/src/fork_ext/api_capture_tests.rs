@@ -209,3 +209,44 @@ fn native_combat_and_forge_share_signed_amount_rgb_snapshot_and_consumer_lifecyc
     h.snapshot.set(p.forge_snapshot(None));
     h.execute("forge_combat.Update();assert(#hits==1);assert(forge_combat.InstallHook());assert(forge_combat.IsHookInstalled());forge_combat.Update();assert(#hits==1)").unwrap();
 }
+
+#[test]
+fn native_chat_context_uses_group_opcode_and_restores_after_capture_is_revoked() {
+    let mut p = ready();
+    p.forge_snapshot(None);
+    let h = Host::new().unwrap();
+    let event = net::session::Event::GroupChat {
+        from: 0x200,
+        text: "group line".into(),
+    };
+    let capture = begin_game_event(&p, &event);
+    p.add_chat("group line".into(), [1.0; 4]);
+    drop(capture); // Models an early native exit before end_game_event.
+    p.add_chat("local line".into(), [1.0; 4]);
+    h.execute("local history=eqoa.chat.history();assert(history[1].channel=='group');assert(history[2].channel=='system');assert(history[1].sender==nil and history[1].outgoing==nil)").unwrap();
+}
+
+#[test]
+fn native_presentation_counter_includes_pregame_without_counting_extra_game_steps() {
+    let mut p = ready();
+    let mut report = crate::input::Report::default();
+    crate::fork_ext::prepare_controls(&mut report, false, false);
+    CORE.with(|c| {
+        let c = c.borrow();
+        assert_eq!(c.frame, 1);
+        assert_eq!(c.tick, 0);
+    });
+    begin_iteration(&mut p, false);
+    begin_iteration(&mut p, true);
+    CORE.with(|c| {
+        let c = c.borrow();
+        assert_eq!(c.frame, 1);
+        assert_eq!(c.tick, 1);
+    });
+    crate::fork_ext::prepare_controls(&mut report, true, true);
+    CORE.with(|c| {
+        let c = c.borrow();
+        assert_eq!(c.frame, 2);
+        assert_eq!(c.tick, 1);
+    });
+}

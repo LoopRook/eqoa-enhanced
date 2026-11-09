@@ -33,8 +33,9 @@ All Cargo commands use `C:/Users/hocka/Paseo/targets/eqoa-api-r2`, the shared mk
 | Gate | Result |
 |---|---|
 | Initial native registration negative control | Both initial tests failed before registration and passed after it. |
-| Focused native behavior checkpoint | 34 passed, 0 failed, 0 ignored; no SKIP lines. Includes Play-owned source fixtures and actual live controls adapter, not just synthetic Lua records. |
-| Combat/retention negative control | 32 passed, 2 expected failures before implementation. Both pass in the fixed 34/34 native suite: signed minimum damage/black RGB in the Forge snapshot, and mixed/completion-only event overflow. |
+| Focused native behavior checkpoint | 38 passed, 0 failed, 0 ignored; no SKIP lines. Includes Play-owned source fixtures and actual live controls adapter, not just synthetic Lua records. |
+| Combat/retention negative control | 32 passed, 2 expected failures before implementation. The combat case is valid. The original retention assertion confused the dispatch cap with retention; it was corrected to the normative 1,024 events/2 MiB buffer and 256 dispatch budget. Corrected backlog/overflow/byte-cap cases pass. |
+| Heap/context negative control | 34 passed, 2 expected failures before implementation: nested pcall swallowed heap exhaustion, and a revoked packet capture leaked group-chat context. Both pass after the fixes. |
 | Additional quota/Forge source negative control | 30 passed, 2 expected failures before implementation. The restored/fixed native suite passed 32/32. Settings/file quota aggregation and Forge delivery of native whole-record cooldown edges now pass. |
 | Deliberate negative controls | 23 passed, **8 expected failures**, 0 ignored, no SKIP lines, Cargo exit 101. Restored all five production files automatically. Removing real effect projection, logical chat capture, live report capture, tick gating, VM queue cancellation, whole-record cooldown edges, shared instruction budgeting and fatal heap propagation each failed its corresponding behavior test. |
 | Required addon suite | Committed checkpoint verified: 310 passed, 0 failed, 23 ignored; 6 SKIP lines. A final run after subsequent fixes remains pending. |
@@ -54,9 +55,10 @@ Items, inventory, bank, loot, merchant, gems, quests, camera, map, mastery, dial
 
 The following require explicit review before calling Round 2 spec-complete:
 
+- The existing ImGui call budget remains 131,072 calls per VM/ImGui frame, preserving the bundled UI regression baseline. Section 9 lists 4,096 calls/invocation; this is an explicit limit deviation requiring lead/audit review. No lower limit was silently imposed on existing mods.
 - The descriptor inventory is implementation-driven for many Forge members and ImGui methods. A full per-object/constant/field conformance audit remains Round 5 work; no claim of exhaustive descriptor parity is made.
-- Event loss markers and reset envelopes are allocated at delivery time, while retained source envelopes retain their source sequence. Source order is preserved, but the synthetic marker's sequence can exceed the following retained event's sequence. Source and resource completions now share the 256-event/1 MiB retention limit and report losses, including completion-only overflow.
+- Event loss markers and reset envelopes are allocated at delivery time, while retained source envelopes retain their source sequence. Source order is preserved, but the synthetic marker's sequence can exceed the following retained event's sequence. Source and resource completions now share the specified 1,024-event/2 MiB per-VM retention limit; a boundary delivers at most 256 envelopes and preserves its backlog. Tests cover mixed/completion-only overflow and the byte cap.
 - Secure rooted file operations are implemented for Windows; equivalent non-Windows rooted operations are not implemented. Their failure must be reported as unsupported; a native Linux run was not performed. wasm is a compilation gate, not a browser mod-runtime acceptance test.
-- The native monotonic clock begins with first core initialization, and the presentation frame count advances at Play iteration. Pregame-to-world elapsed/frame continuity needs owner/reviewer confirmation against the client-lifetime wording.
+- The monotonic clock is initialized when the addon runtime is constructed at client startup. Presentation frames now advance through the existing live and pregame controls seam; game ticks advance only through the game-step seam.
 
 These are reported limitations, not accepted design changes. The API stays experimental until independent review, fixes and the Round 5 audit. No stability or live-game parity promise is made here.

@@ -946,7 +946,7 @@ impl SoundBank {
                 let resolved = mounts.as_ref().map(|m| m.media(&path));
                 let id = match resolved {
                     Some(Ok(p)) => {
-                        let _guard = match super::sandbox::lock_parents(&p, false) {
+                        let _guard = match super::sandbox::lock_resource(&p) {
                             Ok(g) => g,
                             Err(e) => {
                                 super::native::diagnose(

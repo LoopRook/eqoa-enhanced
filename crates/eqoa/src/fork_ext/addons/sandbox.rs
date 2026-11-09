@@ -186,9 +186,34 @@ pub(crate) fn lock_parents(path: &Path, create: bool) -> Result<PathGuard, Strin
     }
     Ok(PathGuard { _parents: handles })
 }
-pub(crate) fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>, String> {
-    let _guard = lock_parents(path, false)?;
+pub(crate) fn lock_resource(path: &Path) -> Result<PathGuard, String> {
+    let mut guard = lock_parents(path, false)?;
     super::file_io::no_links(path)?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .access_mode(0)
+            .share_mode(3)
+            .custom_flags(0x00200000)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        if file
+            .metadata()
+            .map_err(|e| e.to_string())?
+            .file_attributes()
+            & 0x400
+            != 0
+        {
+            return Err("reparse point in addon resource".into());
+        }
+        guard._parents.push(file);
+    }
+    Ok(guard)
+}
+pub(crate) fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>, String> {
+    let _guard = lock_resource(path)?;
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(windows)]

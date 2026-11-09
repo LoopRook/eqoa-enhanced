@@ -300,6 +300,18 @@ fn create_base_host() -> Result<BaseHost> {
     let fatal_pcall = fatal.clone();
     let pcall_fn = lua.create_function(move |_, args: mlua::MultiValue| {
         let call_res = orig_pcall.call::<mlua::MultiValue>(args);
+        if let Ok(values) = &call_res {
+            if values.front() == Some(&Value::Boolean(false))
+                && values.get(1).is_some_and(|v| match v {
+                    Value::Error(e) => super::native::fatal_memory(e),
+                    Value::String(s) => s.to_str().is_ok_and(|s| s.as_ref() == "not enough memory"),
+                    _ => false,
+                })
+            {
+                return Err(mlua::Error::MemoryError("not enough memory".into()));
+            }
+        }
+
         if fatal_pcall.get() {
             return Err(mlua::Error::runtime(format!(
                 "Forge instruction budget exceeded: {} instructions (limit: {})",
@@ -525,9 +537,13 @@ impl Host {
     }
     pub(crate) fn begin_iteration(&self) {
         if !self.iteration_active.replace(true) {
+            super::native_events::start_iteration(&self.lua);
             self.remaining.set(Self::INSTRUCTION_BUDGET);
             self.fatal.set(false);
         }
+    }
+    pub(crate) fn iteration_in_progress(&self) -> bool {
+        self.iteration_active.get()
     }
     pub(crate) fn end_iteration(&self) {
         self.iteration_active.set(false);

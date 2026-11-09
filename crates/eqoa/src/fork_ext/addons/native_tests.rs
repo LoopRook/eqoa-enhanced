@@ -57,8 +57,15 @@ fn native_events_allow_removal_during_dispatch_and_report_real_overflow() {
         super::native_core::observe_text("burst", [1.0; 4]);
     }
     native_events::dispatch(&h).unwrap();
-    h.execute("assert(dropped==44);assert(#calls==258)")
+    h.execute("assert(dropped==nil);assert(#calls==258)")
         .unwrap();
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(#calls==302 and dropped==nil)").unwrap();
+    for _ in 0..1300 {
+        super::native_core::observe_text("overflow", [1.0; 4]);
+    }
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(dropped==276 and #calls==556)").unwrap();
 }
 
 #[test]
@@ -207,13 +214,50 @@ fn native_events_share_one_retention_limit_for_sources_and_resource_completions(
         native_events::resource(&h.lua, "texture", mlua::Value::Nil, None).unwrap();
     }
     native_events::dispatch(&h).unwrap();
-    h.execute("assert(seen==256 and resources==100 and dropped==44)")
+    h.execute("assert(seen==256 and resources==56 and dropped==0)")
+        .unwrap();
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(seen==300 and resources==100 and dropped==0)")
         .unwrap();
     h.execute("seen=0;resources=0;dropped=0").unwrap();
-    for _ in 0..300 {
+    for _ in 0..1300 {
         native_events::resource(&h.lua, "texture", mlua::Value::Nil, None).unwrap();
     }
     native_events::dispatch(&h).unwrap();
-    h.execute("assert(seen==256 and resources==256 and dropped==44)")
+    h.execute("assert(seen==254 and resources==254 and dropped==276)")
+        .unwrap();
+    for _ in 0..4 {
+        native_events::dispatch(&h).unwrap();
+    }
+    h.execute("assert(seen==1024 and resources==1024 and dropped==276)")
+        .unwrap();
+}
+
+#[test]
+fn native_memory_exhaustion_cannot_be_swallowed_by_nested_pcall() {
+    let h = Host::new().unwrap();
+    let result = h.execute(
+        "pcall(function() pcall(function() local x=string.rep('x',32*1024*1024) end) end)",
+    );
+    assert!(
+        result.is_err(),
+        "heap exhaustion must escape every protected call and fail this VM boundary"
+    );
+}
+
+#[test]
+fn native_events_enforce_two_mebibyte_payload_retention_without_losing_dispatch_backlog() {
+    use super::{
+        native_core::{CORE, Core},
+        native_events,
+    };
+    CORE.with(|c| *c.borrow_mut() = Core::default());
+    let h = Host::new().unwrap();
+    h.execute("count=0;lost=0;eqoa.events.on('chat.message',function() count=count+1 end);eqoa.events.on('events.dropped',function(e) lost=e.data.count end)").unwrap();
+    for _ in 0..1000 {
+        super::native_core::observe_text(&"x".repeat(8192), [1.0; 4]);
+    }
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(count>200 and count<256);assert(lost+count==1000)")
         .unwrap();
 }

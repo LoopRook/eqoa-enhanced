@@ -7,7 +7,6 @@ use mlua::{Lua, Result as LuaResult, Table, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -137,20 +136,17 @@ pub(crate) fn read_bounded_source(
     path: &Path,
     max_bytes: usize,
 ) -> std::result::Result<String, String> {
-    let mut file =
-        fs::File::open(path).map_err(|e| format!("failed to open '{}': {e}", path.display()))?;
-    let mut buf = Vec::new();
-    let bytes_read = (&mut file)
-        .take((max_bytes + 1) as u64)
-        .read_to_end(&mut buf)
-        .map_err(|e| format!("failed to read '{}': {e}", path.display()))?;
-    if bytes_read > max_bytes {
-        return Err(format!(
-            "file '{}' exceeds size limit of {} bytes",
-            path.display(),
-            max_bytes
-        ));
-    }
+    let buf = super::sandbox::read_bounded(path, max_bytes).map_err(|e| {
+        if e.contains("byte limit") {
+            format!(
+                "file '{}' exceeds size limit of {} bytes",
+                path.display(),
+                max_bytes
+            )
+        } else {
+            format!("failed to read '{}': {e}", path.display())
+        }
+    })?;
     String::from_utf8(buf)
         .map_err(|e| format!("file '{}' contains invalid UTF-8: {e}", path.display()))
 }

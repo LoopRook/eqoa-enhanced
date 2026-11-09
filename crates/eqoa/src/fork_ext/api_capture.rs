@@ -189,6 +189,11 @@ pub(crate) struct ChangeCapture {
     pub previous_channel: &'static str,
     pub before: View,
 }
+impl Drop for ChangeCapture {
+    fn drop(&mut self) {
+        CORE.with(|c| c.borrow_mut().text_channel = self.previous_channel);
+    }
+}
 pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> ChangeCapture {
     use net::session::Event;
     CORE.with(|c| {

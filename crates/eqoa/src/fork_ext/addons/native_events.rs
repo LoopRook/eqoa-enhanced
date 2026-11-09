@@ -38,17 +38,20 @@ pub(crate) struct Bus {
     pub vm: u64,
     next: u64,
     subscriptions: Vec<Subscription>,
-    cursor: u64,
+    active: bool,
     pub once_mode: bool,
     pub initialized: bool,
     last_render: Option<Instant>,
     last_settings: Option<Instant>,
     pub received: u64,
     pub dropped: u64,
-    combat_total: u64,
-    stream_counts: std::collections::BTreeMap<String, u64>,
-    resources: Vec<(Event, mlua::Table)>,
-    resource_lost: std::collections::BTreeMap<String, u64>,
+    delivered: usize,
+    pending: std::collections::VecDeque<(Event, Option<mlua::Table>)>,
+    pending_bytes: usize,
+    retired: Vec<mlua::Table>,
+    lost: std::collections::BTreeMap<String, u64>,
+    first_lost: Option<u64>,
+    last_lost: u64,
     boundary: u64,
 }
 type Shared = Rc<RefCell<Bus>>;
@@ -175,27 +178,32 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
         id.set(next + 1);
         next
     });
-    let (cursor, combat_total) = CORE.with(|c| {
-        let c = c.borrow();
-        (c.seq, c.combat_total)
-    });
-    lua.set_app_data(Rc::new(RefCell::new(Bus {
+    let shared = Rc::new(RefCell::new(Bus {
         vm,
         next: 0,
         subscriptions: Vec::new(),
-        cursor,
+        active: true,
         once_mode,
         initialized: false,
         last_render: None,
         last_settings: None,
         received: 0,
         dropped: 0,
-        combat_total,
-        stream_counts: CORE.with(|c| c.borrow().stream_counts.clone()),
-        resources: Vec::new(),
-        resource_lost: Default::default(),
+        delivered: 0,
+        pending: Default::default(),
+        pending_bytes: 0,
+        retired: Vec::new(),
+        lost: Default::default(),
+        first_lost: None,
+        last_lost: 0,
         boundary: 0,
-    })));
+    }));
+    REGISTRY.with(|registry| {
+        let mut r = registry.borrow_mut();
+        r.retain(|w| w.strong_count() > 0);
+        r.push(Rc::downgrade(&shared));
+    });
+    lua.set_app_data(shared);
     for name in EVENTS {
         super::native::describe(
             lua,
@@ -323,75 +331,40 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
 pub(crate) fn dispatch(host: &Host) -> Result<()> {
     let lua = &host.lua;
     let shared = bus(lua);
-    let cursor = shared.borrow().cursor;
-    shared.borrow_mut().boundary += 1;
-    let (mut events, last, total, counts) = CORE.with(|c| {
-        let c = c.borrow();
-        (
-            c.events
-                .iter()
-                .filter(|e| e.seq > cursor)
-                .cloned()
-                .collect::<Vec<_>>(),
-            c.seq,
-            c.combat_total,
-            c.stream_counts.clone(),
-        )
-    });
-    let mut merged = events.drain(..).map(|e| (e, None)).collect::<Vec<_>>();
-    let mut resource_lost = std::mem::take(&mut shared.borrow_mut().resource_lost);
-    merged.extend(
-        std::mem::take(&mut shared.borrow_mut().resources)
-            .into_iter()
-            .map(|(e, data)| (e, Some(data))),
-    );
-    merged.sort_by_key(|(e, _)| e.seq);
-    let mut bytes = merged.iter().map(|(e, _)| e.bytes).sum::<usize>();
-    let mut remove = 0;
-    while merged.len().saturating_sub(remove) > 256 || bytes > 1024 * 1024 {
-        let Some((event, data)) = merged.get(remove) else {
-            break;
+    if !host.iteration_in_progress() {
+        start_iteration(lua);
+    }
+    let (batch, gap) = {
+        let mut b = shared.borrow_mut();
+        b.boundary += 1;
+        b.retired.clear();
+        let gap = if b.lost.is_empty() {
+            None
+        } else {
+            let lost = std::mem::take(&mut b.lost);
+            Some((b.first_lost.take().unwrap_or(0), b.last_lost, lost))
         };
-        bytes = bytes.saturating_sub(event.bytes);
-        if data.is_some() {
-            *resource_lost.entry(event.name.clone()).or_default() += 1;
+        let limit = 256usize.saturating_sub(
+            b.delivered + usize::from(b.once_mode) + if gap.is_some() { 2 } else { 0 },
+        );
+        let n = b.pending.len().min(limit);
+        let batch = b.pending.drain(..n).collect::<Vec<_>>();
+        for (e, _) in &batch {
+            b.pending_bytes = b.pending_bytes.saturating_sub(e.bytes);
+            if e.name == "combat.hit" {
+                b.received += 1;
+            }
         }
-        remove += 1;
-    }
-    merged.drain(..remove);
-    let delivered = merged.iter().filter(|(_, data)| data.is_none()).fold(
-        std::collections::BTreeMap::<String, u64>::new(),
-        |mut counts, (event, _)| {
-            *counts.entry(event.name.clone()).or_default() += 1;
-            counts
-        },
-    );
-    let mut lost = resource_lost.values().sum::<u64>();
-    let mut streams = resource_lost.keys().cloned().collect::<Vec<_>>();
-    for (stream, total) in &counts {
-        let previous = shared
-            .borrow()
-            .stream_counts
-            .get(stream)
-            .copied()
-            .unwrap_or(0);
-        let count = total
-            .saturating_sub(previous)
-            .saturating_sub(delivered.get(stream).copied().unwrap_or(0));
-        if count > 0 {
-            lost += count;
-            streams.push(stream.clone());
-        }
-    }
-    streams.sort();
-    streams.dedup();
-    shared.borrow_mut().stream_counts = counts;
-    if lost > 0 {
+        (batch, gap)
+    };
+    if let Some((first, last, streams)) = gap {
+        let count = streams.values().sum::<u64>();
+        let names = streams.keys().cloned().collect::<Vec<_>>();
         deliver(
             lua,
             &local(
                 "events.dropped",
-                json!({"first_seq":cursor+1,"last_seq":merged.first().map_or(last,|(e,_)|e.seq.saturating_sub(1)),"count":lost,"streams":streams}),
+                json!({"first_seq":first,"last_seq":last,"count":count,"streams":names}),
             ),
             None,
         )?;
@@ -402,20 +375,13 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
             None,
         )?;
     }
-    {
-        let mut b = shared.borrow_mut();
-        b.cursor = last;
-        let hits = merged
-            .iter()
-            .filter(|(e, _)| e.name == "combat.hit")
-            .count() as u64;
-        b.received += hits;
-        b.dropped += total.saturating_sub(b.combat_total).saturating_sub(hits);
-        b.combat_total = total;
-    }
-    for (event, data) in merged {
+    for (event, data) in batch {
         deliver_data(lua, &event, None, data)?;
     }
+    let timer_budget = {
+        let b = shared.borrow();
+        256usize.saturating_sub(b.delivered + usize::from(b.once_mode))
+    };
     let due = shared
         .borrow()
         .subscriptions
@@ -425,6 +391,7 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
                 && s.not_before <= shared.borrow().boundary
         })
         .map(|s| s.token.clone())
+        .take(timer_budget)
         .collect::<Vec<_>>();
     for t in due {
         let mut e = local("timer", json!({}));
@@ -475,6 +442,13 @@ fn deliver_data(
     data: Option<mlua::Table>,
 ) -> Result<()> {
     let shared = bus(lua);
+    {
+        let mut b = shared.borrow_mut();
+        if b.delivered >= 256 {
+            return Ok(());
+        }
+        b.delivered += 1;
+    }
     let candidates = shared
         .borrow()
         .subscriptions
@@ -527,6 +501,13 @@ fn deliver_timer(lua: &mlua::Lua, e: &Event, t: &Token, data: mlua::Table) -> Re
             .map(|i| b.subscriptions.remove(i))
     };
     if let Some(sub) = sub {
+        {
+            let mut b = shared.borrow_mut();
+            if b.delivered >= 256 {
+                return Ok(());
+            }
+            b.delivered += 1;
+        }
         let event = envelope(lua, e)?;
         event.set("data", data)?;
         let _phase = super::native::phase(lua, "timer");
@@ -596,11 +577,14 @@ pub(crate) fn clear(host: &Host) {
     let b = bus(&host.lua);
     let mut b = b.borrow_mut();
     b.subscriptions.clear();
-    b.resources.clear();
-    b.resource_lost.clear();
+    b.pending.clear();
+    b.pending_bytes = 0;
+    b.retired.clear();
+    b.lost.clear();
+    b.first_lost = None;
+    b.active = false;
     b.initialized = false;
     b.last_render = None;
-    b.cursor = CORE.with(|c| c.borrow().seq);
 }
 pub(crate) fn resource(
     lua: &mlua::Lua,
@@ -612,10 +596,7 @@ pub(crate) fn resource(
         return Ok(());
     }
     let b = bus(lua);
-    if b.borrow().resources.len() >= 256 {
-        let (old, _) = b.borrow_mut().resources.remove(0);
-        *b.borrow_mut().resource_lost.entry(old.name).or_default() += 1;
-    }
+    b.borrow_mut().retired.clear();
     let data = lua.create_table()?;
     data.set("kind", kind)?;
     data.set("handle", handle)?;
@@ -637,7 +618,7 @@ pub(crate) fn resource(
     };
     let mut event = local(name, json!({}));
     event.bytes = 256 + failure.map_or(0, |s| s.len().min(8192));
-    b.borrow_mut().resources.push((event, data));
+    enqueue(&mut b.borrow_mut(), event, Some(data));
     Ok(())
 }
 
@@ -679,10 +660,50 @@ fn readonly_envelope(lua: &mlua::Lua, event: mlua::Table) -> Result<mlua::Table>
 pub(crate) fn prime(host: &Host) {
     let shared = bus(&host.lua);
     let mut b = shared.borrow_mut();
-    CORE.with(|c| {
-        let c = c.borrow();
-        b.cursor = c.seq;
-        b.stream_counts = c.stream_counts.clone();
-        b.combat_total = c.combat_total;
+    b.pending.clear();
+    b.pending_bytes = 0;
+    b.retired.clear();
+    b.lost.clear();
+    b.first_lost = None;
+    b.active = true;
+}
+
+thread_local! {static REGISTRY:RefCell<Vec<std::rc::Weak<RefCell<Bus>>>>=const{RefCell::new(Vec::new())};}
+// Called from the native source only. It does not evaluate Lua or release Lua values.
+pub(crate) fn publish(event: &Event) {
+    REGISTRY.with(|registry| {
+        for weak in registry.borrow().iter() {
+            if let Some(shared) = weak.upgrade() {
+                let mut b = shared.borrow_mut();
+                if b.active {
+                    enqueue(&mut b, event.clone(), None);
+                }
+            }
+        }
     });
+}
+fn enqueue(b: &mut Bus, event: Event, data: Option<mlua::Table>) {
+    b.pending_bytes = b.pending_bytes.saturating_add(event.bytes);
+    b.pending.push_back((event, data));
+    while b.pending.len() > 1024 || b.pending_bytes > 2 * 1024 * 1024 {
+        let Some((old, data)) = b.pending.pop_front() else {
+            break;
+        };
+        b.pending_bytes = b.pending_bytes.saturating_sub(old.bytes);
+        b.first_lost = Some(b.first_lost.map_or(old.seq, |first| first.min(old.seq)));
+        b.last_lost = b.last_lost.max(old.seq);
+        *b.lost.entry(old.name.clone()).or_default() += 1;
+        if old.name == "combat.hit" {
+            b.dropped += 1;
+        }
+        if let Some(data) = data {
+            b.retired.push(data);
+        }
+    }
+}
+
+pub(crate) fn start_iteration(lua: &mlua::Lua) {
+    if let Some(b) = lua.app_data_ref::<Shared>() {
+        b.borrow_mut().delivered = 0;
+    }
 }

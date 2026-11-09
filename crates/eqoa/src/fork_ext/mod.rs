@@ -30,5 +30,8 @@ pub(crate) fn prepare_controls(
     _gameplay: bool,
 ) {
     #[cfg(not(target_arch = "wasm32"))]
-    addons::input::observe_report(_report, _connected, _gameplay);
+    {
+        addons::native_core::presentation();
+        addons::input::observe_report(_report, _connected, _gameplay);
+    }
 }
