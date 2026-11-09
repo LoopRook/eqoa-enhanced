@@ -132,9 +132,29 @@ The producer now captures only typed affected records after a field fingerprint 
 
 The enabled path caches fixed frame keys and Forge snapshot metadata; repeated frames do not scan or clone all entities/abilities. Entity packets copy one exposed entity record, group packets copy the visible roster, and ability packets copy one added record or scalar slot/lockout edits. Movement refreshes player data only. The first enabled consumer and world transitions still perform a full bootstrap. Disabled retained VMs do not count as consumers. File/profile/settings/log persistence remains outside these source loops.
 
-Regression coverage also checks 16 retained disabled VMs with alternating world/menu frames, input changes, two packets and chat per frame; enabled unchanged frames; 600 delivered entity changes; and duplicate-packet zero allocation. A new typed-source behavior fixture verifies group positions, target disposition and stable ability references after hotbar edits. It exposed an existing native hotbar lookup error: menu entries hold ability IDs, not spellbook slots. Both bootstrap and incremental lookup now use IDs. The initial group fixture lacked its in-group prerequisite and was corrected; that setup failure is not counted as a negative control.
+Regression coverage also checks 16 retained disabled VMs with alternating world/menu frames, input changes, two packets and chat per frame; enabled unchanged frames; 600 delivered entity changes; and duplicate-packet zero allocation. A new typed-source behavior fixture verifies group positions, target disposition and stable ability references after hotbar edits. It exposed an existing native hotbar lookup error: menu entries hold ability IDs, not spellbook slots. Both bootstrap and incremental lookup now use IDs. Self-entity changes also refresh the player fighting flag; entity replacement/removal refreshes group links and removes old world-map keys. The roster is copied for identity changes, not ordinary entity movement. The initial group fixture lacked its in-group prerequisite and was corrected; that setup failure is not counted as a negative control.
 
 
 Final optimized measurements: the three performance cases passed with no SKIP lines. The 16-disabled-VM combined frame measured 4.934 us with zero allocations. Enabled unchanged frames measured 4.398 us with zero allocations; a changed entity packet measured 0.452 us with 2.015 allocations / 277.8 bytes per event amortized (including deferred-queue growth); duplicate packets measured 0.244 us and zero allocations. The source-boundary conversion and delivery of all 600 entity events is verified separately from producer timing. No wall-clock threshold is enforced: deterministic allocation/full-view-build bounds avoid machine-load timing failures. The baseline negative control above fails those bounds.
 
 The final ordinary zero-addon measurement has one 1,024-byte input initialization allocation across 300 frames; subsequent menu frames, packet events and chat lines allocate nothing. That replaces roughly 10 MB and 80,480 allocations per ordinary frame. This identifies and removes the measured mechanism; it does not prove live-game FPS recovery. The owner must retest world entry, sustained busy-world play and in-game menus in a built Nightly.
+
+
+Validation uses rustc 1.99.1 (the installed stable alias resolves to 1.99.1), isolated CARGO_TARGET_DIR, scratch EQOA_CONFIG and the timeout-protected shared cargo lock. The Windows workspace/release gates use CI's explicit x86_64-pc-windows-msvc target, static CRT flag and enhanced-dev build environment. Read-only publication preflight was attempted on a clean feature checkpoint: it refused because this checkout has no origin/develop ref; HEAD is also ahead of local develop. That ancestry/publication guard requires lead integration and CI's fetch. No refs were rewritten, no publication was attempted and no push was made.
+
+
+| Performance-fix gate | Result |
+|---|---|
+| Source hooks, including performance cases | 38 passed, 0 failed, 0 ignored, no SKIP lines. |
+| Optimized performance / allocation tests | 3 passed, 0 failed, 0 ignored, no SKIP lines; baseline negative control: 0 passed / 1 expected allocation-bound failure. |
+| Required addon command | 322 reported passed, 0 failed, 23 ignored; 6 SKIP lines. The final CI client rerun below covers the completed source as well. |
+| Python release/tooling suite | 94 passed, 0 failed, no SKIP lines. |
+| CI-equivalent Windows workspace | 1,944 reported passed, 0 failed, 27 ignored; 219 explicit SKIP lines across stdout/stderr. Includes arithmetic reference tests and client/update tests. |
+| Pinned Forge opt-ins | 24 passed, 0 failed, 0 ignored, no SKIP lines. Unchanged Wereoxxs, ARPG and Modern UI fixtures pass. |
+| Bundled installer | 23 passed, 0 failed, 1 ignored, no SKIP lines; ignored reference migration exercised in the pinned 24-test run. |
+| Explicit update::tests | 21 passed, 0 failed, 0 ignored, no SKIP lines. |
+| Pinned GPU opt-ins | Grid 1/1, hearts 1/1, no SKIP lines; heart pixels 1,395 / 690 / 0. |
+| wasm32 check | PASS, two existing unused-variable warnings in report_core. |
+| Required-base footprint | PASS against 8435f2c8a00c631d716771f8189fa0011a1fbf50; performance changes add no shared hook lines or budget increases. play.rs remains +759/-53; viewer.rs +255/-15. |
+
+Reported Rust pass totals include early-returning SKIP cases. The workspace's explicit SKIPs comprise 53 oracle, four symlink privilege, two GPU opt-in and 160 other missing data/disc/capture prerequisites. The two GPU opt-ins subsequently ran without SKIP; the four privilege-blocked symlink branches and unavailable disc/decomp/oracle checks remain unverified. Ignored tests are distinct from SKIP output; pinned opt-ins exercise the 24 Forge/installer ignored cases. No live gameplay, physical controller, audio listening, native Linux or owner acceptance is claimed.

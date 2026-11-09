@@ -418,10 +418,16 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
                 .get(slot)
                 .and_then(|e| e.as_ref())
                 .map(|e| EntityData::read(play, e));
-            let player = entity
-                .as_ref()
-                .filter(|e| Some(e.id) == play.self_id32())
-                .map(|_| PlayerData::read(play));
+            let roster_links_changed = entity.is_none()
+                || CORE.with(|c| {
+                    c.borrow().view.entity_slots.get(slot).copied().flatten()
+                        != entity.as_ref().map(|e| e.id)
+                });
+            let player = (roster_links_changed
+                || entity
+                    .as_ref()
+                    .is_some_and(|e| Some(e.id) == play.self_id32()))
+            .then(|| PlayerData::read(play));
             native_core::defer(
                 512 + entity.as_ref().map_or(0, |e| e.name.len()),
                 move |c| patch_entity(c, slot, entity),
@@ -431,6 +437,9 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
                     let value = player.value(c);
                     patch_player(c, value);
                 });
+            }
+            if roster_links_changed {
+                capture(play, &Kind::Group, None);
             }
         }
         Kind::Player => {

@@ -788,6 +788,24 @@ fn native_incremental_packets_preserve_group_target_and_hotbar_records() {
     end_game_event(&p, capture);
     h.execute("assert(eqoa.player.get().fighting==true)")
         .unwrap();
+    let event = net::session::Event::State {
+        channel: 0,
+        data: vec![],
+    };
+    let capture = begin_game_event(&p, &event);
+    p.entities.slots[0] = None;
+    end_game_event(&p, capture);
+    h.execute("local m=eqoa.group.get().members[1];assert(m.entity==nil and m.position==nil and m.world_id==nil)")
+        .unwrap();
+    let event = net::session::Event::State {
+        channel: 1,
+        data: vec![],
+    };
+    let capture = begin_game_event(&p, &event);
+    p.entities.slots[1] = None;
+    end_game_event(&p, capture);
+    h.execute("assert(eqoa.player.get().fighting==nil)")
+        .unwrap();
 }
 
 #[test]
