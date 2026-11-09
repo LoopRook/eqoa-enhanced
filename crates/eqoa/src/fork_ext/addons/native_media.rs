@@ -350,7 +350,7 @@ pub(crate) fn sound(lua: &Lua, owner: &Rc<RefCell<super::sound::SoundBank>>) -> 
                     "stop" => bank.stop_sound(Some(sound.id)),
                     "release" => {
                         bank.release_sound(Some(sound.id));
-                        true
+                        !bank.contains(sound.id)
                     }
                     "set_volume" => {
                         let Some(volume) = option

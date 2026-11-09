@@ -2040,4 +2040,41 @@ mod tests {
     fn wav_bytes_len(samples: usize) -> u64 {
         (44 + samples * 4) as u64
     }
+    #[test]
+    #[cfg(windows)]
+    fn native_sound_release_reports_backend_failure_and_can_retry_idempotently() {
+        let dir = temp_dir("native-release");
+        std::fs::write(dir.join("silence.wav"), generate_minimal_pcm_wav(8)).unwrap();
+        let host = crate::fork_ext::addons::host::Host::new().unwrap();
+        let bank = Rc::new(RefCell::new(SoundBank::with_owner_id_and_backend(
+            700,
+            Box::new(RecorderBackend::new(vec![
+                Ok("".into()),
+                Err("close rejected".into()),
+                Ok("".into()),
+            ])),
+        )));
+        let addon = DiscoveredAddon {
+            id: "release".into(),
+            name: "release".into(),
+            entry: dir.join("main.lua"),
+            script_root: dir.clone(),
+            package_root: dir.clone(),
+            module_dirs: vec![],
+            resource_dirs: vec![dir],
+            api: None,
+            requested_capabilities: vec![],
+            initially_enabled: true,
+            mods_root: None,
+        };
+        SoundBank::install_for_addon(&bank, &host.lua, &addon).unwrap();
+        host.execute("sound=assert(eqoa.sound.load('silence.wav'));local ok,e=eqoa.sound.release(sound);assert(ok==nil and e.code=='failed');assert(eqoa.sound.release(sound));assert(eqoa.sound.release(sound))").unwrap();
+        assert_eq!(bank.borrow().len(), 0);
+        assert!(
+            host.drain_logs()
+                .unwrap()
+                .iter()
+                .any(|m| m.contains("eqoa.sound.release"))
+        );
+    }
 }

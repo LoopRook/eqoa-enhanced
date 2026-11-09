@@ -1538,8 +1538,11 @@ mod tests {
                     0 => "death",
                     _ => "other",
                 };
-                let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join(format!("../../target/forge-hearts-{name}.png"));
+                let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"));
+                fs::create_dir_all(&target_dir).unwrap();
+                let path = target_dir.join(format!("forge-hearts-{name}.png"));
                 let mut encoder = png::Encoder::new(fs::File::create(path).unwrap(), 256, 192);
                 encoder.set_color(png::ColorType::Rgba);
                 encoder.set_depth(png::BitDepth::Eight);
