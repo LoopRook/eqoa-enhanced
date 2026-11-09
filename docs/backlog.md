@@ -190,3 +190,13 @@ This entry records future work only; no navigation or movement behavior changes 
 - **Tab/chat, scout result (2026-11-09):** likely Wereoxxs plus ImGui Tab navigation with one-frame-late
   key capture (`runtime.rs`); predates round 2. Details and the smallest fix: `docs/plans/eqoa-api/tab-chat-scout.md`.
   Queued as a fix on a branch after round 2's slowdown fix merges (same input code).
+
+
+## Server-added ability bars in bundled Forge UIs (owner, 2026-11-09)
+
+- **Status:** Deferred feature request, separate from the fixed round-2 icon-stacking regression.
+- **Current boundary:** Native `hudmenu::HudMenus` has six menu records: ability menus 0/1/4/5, items 2, weapon sets 3. The carousel order is 0,1,4,5,2,3. Expansion bit 1 and the Extended Ability Bars setting permit up to four ability bars with five regular slots each; the first menu can additionally hold four special slots (252-255), for nine entries.
+- **Inherited Forge limit:** Pinned FrontiersForge and the native adapter at both 413d1ee and current develop expose `num_bars=3`, zero-based indices 0/1 for abilities and 2 for items. Legacy snapshots cap at five/five/four slots. Menus 4/5 are omitted; the existing selected-bar clamp can highlight the item bar while an extra native ability bar is selected. This is not new in round 2.
+- **Bundled UI assumptions:** Avoids Modern UI loops `0..AbilityBar.num_bars-1`, treating bar 2 as items. Wereoxxs prepares three stock bar configs, loops bars 0..3 and reserves 3 for its separate weapon-set extension. Inflating `num_bars` alone would collide with those meanings.
+- **Requested work:** Add explicit extended bar/slot metadata and selection mapping, preserve legacy Forge stock indices, and update the bundled UIs to enumerate supported bars with independent layouts. Native `eqoa.hotbar.list()` already exposes the configured carousel with one-based indices and full native slot counts; document and verify that extended contract alongside `eqoa.abilities`, rather than inventing aliases or silently changing Forge's three-bar contract. Item and weapon-set availability must remain explicit.
+- **Acceptance:** Exercise one/two/four ability bars, special first-menu slots, items and weapon sets; distinct records/positions and correct active-bar selection after carousel changes; retain saved layouts and stock Forge compatibility. Live-test on a server that persists the extra spellbook slots. No bundled Lua rewrite is included in the live-regression fix.

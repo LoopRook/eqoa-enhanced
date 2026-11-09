@@ -1195,3 +1195,178 @@ fn perf_review_l5_target_knowledge_survives_a_missing_roster_record() {
     h.execute("assert(eqoa.target.get().disposition==4)")
         .unwrap();
 }
+
+#[test]
+fn live_regression_signed_icon_hashes_keep_modern_slots_separate() {
+    let mut p = ready();
+    let host = Host::new().unwrap();
+    for i in 0..5 {
+        p.abilities.insert(
+            400 + i,
+            net::dump::Ability {
+                id: 400 + i,
+                display_index: i,
+                slot: i,
+                valid: 1,
+                icon_back: 10,
+                icon_front: (0x8000_1000u32 + i as u32) as i32 as i64,
+                lockout: 480_000,
+                name: format!("Signed icon {i}"),
+                ..Default::default()
+            },
+        );
+    }
+    p.dump.inventory.items.push(net::dump::NetItem {
+        quantity: 480,
+        charges: 480,
+        quick_slot: 0,
+        item: net::dump::Item {
+            name: "Stackable potion".into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    p.hud_menus
+        .build(&p.abilities, &p.dump.inventory, &p.gear, p.hud_bars());
+    let current = p.forge_snapshot(None);
+    let mut stable = current;
+    // Exactly 413d1ee's legacy ability snapshot casts, before the native view
+    // overwrite. The unchanged Forge bar adapter and unchanged real Modern Lua
+    // run against both shapes below.
+    for a in &mut stable.abilities.abilities[..stable.abilities.ability_count as usize] {
+        let raw = &p.abilities[&(a.id as i64)];
+        a.icon_background_ref = raw.icon_back as u32;
+        a.icon_foreground_ref = raw.icon_front as u32;
+    }
+    let Some(before) = crate::fork_ext::addons::modern_slot_positions(stable) else {
+        return;
+    };
+    let Some(after) = crate::fork_ext::addons::modern_slot_positions(current) else {
+        return;
+    };
+    assert_eq!(
+        before.len(),
+        14,
+        "Stable has five+five ability slots and four item slots"
+    );
+    assert_eq!(after.len(), 14);
+    eprintln!(
+        "MEASURED MODERN SIGNED ICONS: Stable first bar={:?}; current={:?}",
+        &before[..5],
+        &after[..5]
+    );
+    for i in 1..5 {
+        assert!(
+            before[i].1 - before[i - 1].1 >= 40.,
+            "Stable reference reserves a whole slot"
+        );
+        assert!(
+            after[i].1 - after[i - 1].1 >= 40.,
+            "round-2 projection must not collapse Modern slot positions"
+        );
+    }
+    assert_eq!(after, before, "same data must have Stable geometry");
+    for i in 0..5 {
+        assert_eq!(
+            current.abilities.abilities[i].icon_foreground_ref,
+            0x8000_1000 + i as u32
+        );
+    }
+    let mut ability = p.abilities[&400].clone();
+    ability.icon_front = (0xfedc_ba98u32 as i32) as i64;
+    let event = net::session::Event::AbilityAdd {
+        token: 1,
+        flag: 0,
+        ability: Box::new(ability.clone()),
+    };
+    let capture = begin_game_event(&p, &event);
+    p.abilities.insert(400, ability);
+    end_game_event(&p, capture);
+    host.snapshot.set(p.forge_snapshot(None));
+    host.execute("assert(eqoa.abilities.find('400').icon_foreground==0xfedcba98)")
+        .unwrap();
+    assert_eq!(
+        host.snapshot.get().abilities.abilities[0].icon_foreground_ref,
+        0xfedc_ba98
+    );
+}
+
+#[test]
+fn live_regression_extended_carousel_keeps_stock_forge_and_native_bar_indices() {
+    struct Restore(crate::settings::ClientOptions);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            crate::settings::set_client(self.0);
+        }
+    }
+    let previous = crate::settings::client();
+    let _restore = Restore(previous);
+    let mut options = previous;
+    options.ability_bars = 4;
+    crate::settings::set_client(options);
+    let mut p = ready();
+    p.session.expansion |= 2;
+    let host = Host::new().unwrap();
+    for slot in 0..20 {
+        p.abilities.insert(
+            400 + slot,
+            net::dump::Ability {
+                id: 400 + slot,
+                display_index: slot,
+                slot,
+                valid: 1,
+                icon_back: 10,
+                icon_front: 11,
+                name: format!("Server slot {slot}"),
+                ..Default::default()
+            },
+        );
+    }
+    for slot in 252..256 {
+        p.abilities.insert(
+            1000 + slot,
+            net::dump::Ability {
+                id: 1000 + slot,
+                display_index: slot,
+                slot,
+                valid: 1,
+                icon_front: 11,
+                ..Default::default()
+            },
+        );
+    }
+    p.hud_menus
+        .build(&p.abilities, &p.dump.inventory, &p.gear, p.hud_bars());
+    assert_eq!(
+        p.hud_menus.defs[0].count, 9,
+        "native first menu includes four special slots"
+    );
+    assert_eq!(p.hud_menus.defs[4].entries[0].id, 410);
+    assert_eq!(p.hud_menus.defs[5].entries[0].id, 415);
+    host.snapshot.set(p.forge_snapshot(None));
+    crate::fork_ext::addons::ability::install_ability_bar_adapter(&host).unwrap();
+    host.lua
+        .globals()
+        .set(
+            "forge_bars",
+            host.registered_modules()["frontiers_forge.ability_bar"].clone(),
+        )
+        .unwrap();
+    host.execute(
+        r#"
+        local bars=eqoa.hotbar.list()
+        assert(#bars==5 and #bars[1].slots==9)
+        for b=1,4 do assert(bars[b].index==b and bars[b].kind=='abilities') end
+        assert(bars[5].kind=='items' and #bars[5].slots==4)
+        assert(bars[3].slots[1].ability==eqoa.abilities.find('410').ref)
+        assert(bars[4].slots[1].ability==eqoa.abilities.find('415').ref)
+        assert(forge_bars.num_bars==3 and forge_bars.GetSlotCount(0)==5)
+        assert(forge_bars.GetSlotCount(1)==5 and forge_bars.GetSlotCount(2)==4)
+        assert(forge_bars.GetAbility(0,0):GetId()==400)
+        assert(forge_bars.GetAbility(1,0):GetId()==405)
+        assert(forge_bars.GetAbility(2,0)==nil)
+        assert(not pcall(forge_bars.GetAbilitySlot,3,0))
+    "#,
+    )
+    .unwrap();
+}

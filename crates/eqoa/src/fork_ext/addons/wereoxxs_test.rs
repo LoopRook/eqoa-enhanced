@@ -1319,7 +1319,18 @@ fn create_test_play() -> crate::play::Play {
 #[test]
 #[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
 fn forge_claimed_enter_focuses_addon_input_and_say_window_stays_closed() {
-    use winit::keyboard::{Key, NamedKey};
+    replay_live_enter(false);
+}
+
+#[test]
+#[ignore = "needs EQOA_FORGE_REFERENCE (pinned FrontiersForge 4026d5c / UiForge 6f2d125)"]
+fn live_regression_enter_after_focus_cleanup_reaches_wereoxxs_not_game_chat() {
+    replay_live_enter(true);
+}
+
+fn replay_live_enter(focus_cleanup: bool) {
+    use super::capture::{Button, Capture, Owner};
+    use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 
     super::input::reset_input_state();
     let root = find_wereoxxs_scripts_root();
@@ -1369,23 +1380,39 @@ fn forge_claimed_enter_focuses_addon_input_and_say_window_stays_closed() {
         "Enter must be suppressed by wereoxxs_ui"
     );
 
-    // Enter key is pressed
-    let enter_key = Key::Named(NamedKey::Enter);
-    let code = super::input::logical_key_to_code(&enter_key);
-    assert_eq!(code, Some(0x0D));
-    super::input::record_key_event(code.unwrap(), true);
-
-    let wants_key_capture = super::input::wants_key_capture(false, code, false, true);
-    assert!(wants_key_capture, "claimed Enter must be captured by addon");
-
-    // In viewer, when wants_key_capture is true, the event is consumed by Addon
-    // and Play::chat_key is NOT called, so Say window stays closed (mode == 0)
-    let play = create_test_play();
-    assert_eq!(play.mode, 0, "Say window starts closed");
-    assert_eq!(
-        play.mode, 0,
-        "Say window must stay closed when Enter is claimed"
-    );
+    if focus_cleanup {
+        super::input::focus(false);
+        super::input::focus(true);
+        // Resume the unchanged Lua VM: its local enter_claimed is still true.
+        gpu.begin();
+        bridge.invoke(|| host.run_addon(addon)).unwrap();
+        gpu.render();
+    }
+    let code = super::input::logical_key_to_code(&Key::Named(NamedKey::Enter));
+    let mut capture = Capture::default();
+    let button = Button::Key(PhysicalKey::Code(KeyCode::Enter));
+    let mut play = create_test_play();
+    for down in [true, false] {
+        super::input::record_key_event(code.unwrap(), down);
+        if super::input::forwards_key_to_imgui(false, code, down, true) {
+            gpu.context
+                .io_mut()
+                .add_key_event(dear_imgui_rs::Key::Enter, down);
+        }
+        let owner = if down {
+            capture.press(
+                button,
+                super::input::wants_key_capture(false, code, false, true),
+            )
+        } else {
+            capture.release(button)
+        };
+        if down && owner == Owner::Game {
+            play.chat_key("", false);
+        }
+        assert_eq!(play.mode, 0, "physical Enter must not open the game's chat");
+        assert_eq!(owner, Owner::Addon, "Enter down and up belong to Wereoxxs");
+    }
 
     // Frame 3: wereoxxs_ui runs PumpEnterKey, polls key events, and requests focus
     gpu.begin();
@@ -2306,4 +2333,311 @@ fn forge_addon_runtime_error_releases_all_claims_and_unhides_game_hud() {
         crate::hud::fork_hud::ability_bar_visible(),
         "game ability bars must be visible again after addon fault"
     );
+}
+
+#[test]
+fn live_regression_modern_missing_legacy_settings_probe_is_quiet() {
+    let root = bundled_tree();
+    let addon = discovery::discover(&root.0)
+        .addons
+        .into_iter()
+        .find(|a| a.id == "avoids_modern_ui")
+        .unwrap();
+    let config = ScratchDir::new();
+    let host = Host::for_addon(&addon).unwrap();
+    super::file_io::install(&host, &addon, Some(config.0.clone())).unwrap();
+    host.execute(
+        r#"
+        local persist = require('avoids_persist')
+        local state = {size=34}
+        assert(persist.MigrateLegacyFile(UiForge.resources_path..'/ability_bar_settings.cfg',
+            state, {{key='size',type='number'}}) == false)
+        assert(state.size == 34)
+    "#,
+    )
+    .unwrap();
+    assert!(
+        super::native::finish(&host.lua).is_empty(),
+        "the real Modern UI missing-legacy migration probe is normal"
+    );
+}
+
+#[test]
+fn live_regression_wereoxxs_slot_positions_default_and_stable_profile() {
+    struct Provider;
+    impl super::icons::IconProvider for Provider {
+        fn decode_icon(&self, _id: u32) -> Option<super::icons::DecodedIcon> {
+            let mut rgba = vec![0; 32 * 32 * 4];
+            for y in 2..30 {
+                for x in 2..30 {
+                    rgba[(y * 32 + x) * 4..(y * 32 + x) * 4 + 4]
+                        .copy_from_slice(&[64, 192, 96, 255]);
+                }
+            }
+            for y in 6..26 {
+                for x in 6..26 {
+                    rgba[(y * 32 + x) * 4..(y * 32 + x) * 4 + 4]
+                        .copy_from_slice(&[224, 64, 32, 255]);
+                }
+            }
+            Some(super::icons::DecodedIcon {
+                width: 32,
+                height: 32,
+                rgba,
+            })
+        }
+        fn decode_ui_texture(&self, id: u32) -> Option<super::icons::DecodedIcon> {
+            self.decode_icon(id)
+        }
+    }
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            super::icons::set_custom_icon_provider(None);
+        }
+    }
+    let _reset = Reset;
+    let root = bundled_tree();
+    let addon = discovery::discover(&root.0)
+        .addons
+        .into_iter()
+        .find(|a| a.id == "wereoxxs_ui")
+        .unwrap();
+    let Some(mut gpu) = TestGpu::new() else {
+        return;
+    };
+    let host = Host::for_addon(&addon).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, &addon).unwrap();
+    let _cache = super::icons::attach_icon_cache(&host.lua, textures).unwrap();
+    super::icons::set_custom_icon_provider(Some(Box::new(Provider)));
+    let mut snapshot = rich_in_game_snapshot();
+    snapshot.player.available = true;
+    for bar in 0..3 {
+        snapshot.abilities.bars[bar].slot_count = if bar == 2 { 4 } else { 5 };
+        for slot in 0..5 {
+            snapshot.abilities.bars[bar].slots[slot] = AbilityBarSlotSnapshot {
+                source_type: if bar == 2 {
+                    super::ability::ITEM_SOURCE_TAG
+                } else {
+                    super::ability::ABILITY_SOURCE_TAG
+                },
+                source_index: if bar == 2 {
+                    slot as u32
+                } else {
+                    slot as u32 + 1
+                },
+                ability_icon_ref: 11,
+            };
+        }
+    }
+    for slot in 0..5 {
+        snapshot.abilities.abilities[slot].id = 400 + slot as u32;
+        snapshot.abilities.abilities[slot].display_index = slot as u32;
+        snapshot.abilities.abilities[slot].cooldown_lockout_ms = 480_000;
+        snapshot.abilities.items[slot].populated = true;
+        snapshot.abilities.items[slot].icon_ref = 11;
+        let item = &mut snapshot.abilities.items[slot];
+        copy_str_to_array("Potion", &mut item.name, &mut item.name_len);
+    }
+    host.snapshot.set(snapshot);
+    host.execute(
+        r#"
+        probes = {}
+        windows = {bars=true}
+        local bars = require('ability_bars')
+        local paint = require('paint')
+        local border = paint.Border
+        local draw = bars.Draw
+        local get_list = ImGui.GetWindowDrawList
+        local current
+        paint.Border = function(d,x,y,w,h,...)
+            if current then current.rects[#current.rects+1] = {x=x,y=y,w=w,h=h} end
+            return border(d,x,y,w,h,...)
+        end
+        ImGui.GetWindowDrawList = function()
+            local raw = get_list()
+            if not current then return raw end
+            return setmetatable({}, {__index=function(_,key)
+                return function(_, ...)
+                    if key=='AddImage' then
+                        local tex,p0,p1 = ...
+                        current.images[#current.images+1] = {x=p0.x,y=p0.y,w=p1.x-p0.x,h=p1.y-p0.y}
+                    end
+                    return raw[key](raw,...)
+                end
+            end})
+        end
+        bars.Draw = function(slots,config,selected)
+            current = {rects={},images={},count=#slots,step=config.slot_size+config.spacing}
+            local result = current
+            local x,y,name = draw(slots,config,selected)
+            current = nil
+            probes[#probes+1] = result
+            return x,y,name
+        end
+        function distinct_bar_positions()
+            if #probes~=3 then return false end
+            for _,bar in ipairs(probes) do
+                if #bar.rects~=bar.count or bar.step<=0 then return false end
+                if bar.count==5 and #bar.images<bar.count then return false end
+                for i,a in ipairs(bar.rects) do
+                    if a.w<=0 or a.h<=0 then return false end
+                    for j=1,i-1 do
+                        local b=bar.rects[j]
+                        if math.abs(a.x-b.x)<3 and math.abs(a.y-b.y)<3 then return false end
+                    end
+                end
+            end
+            return true
+        end
+    "#,
+    )
+    .unwrap();
+    for _ in 0..3 {
+        host.execute("probes={}").unwrap();
+        gpu.begin();
+        bridge.invoke(|| host.run_addon(&addon)).unwrap();
+        gpu.render();
+    }
+    let layout: String = host.lua.load(r#"
+        local out = {}
+        for _,bar in ipairs(probes) do
+            local rects = {}
+            for _,r in ipairs(bar.rects) do rects[#rects+1] = string.format('%.1f,%.1f',r.x,r.y) end
+            out[#out+1] = string.format('count=%d images=%d step=%.1f [%s]',bar.count,#bar.images,bar.step,table.concat(rects,';'))
+        end
+        return table.concat(out, ' | ')
+    "#).eval().unwrap();
+    eprintln!("MEASURED WEREOXXS SLOT GEOMETRY: {layout}");
+    host.execute("assert(distinct_bar_positions(), 'default slot positions must be distinct')")
+        .unwrap();
+    let config = ScratchDir::new();
+    let storage = super::storage::Storage::new(Some(config.0.clone()));
+    let key = super::storage::Storage::key(&addon).unwrap();
+    // The unchanged pre-round-2 Save/Load callback table, stored with the same
+    // tagged profile codec as Stable. Exercise a vertical left bar and all tabs.
+    host.execute(
+        "bar_configs[1].layout='vertical';bar_configs[1].slot_size=48;bar_configs[1].spacing=6",
+    )
+    .unwrap();
+    let saved = host.callback(2, mlua::Value::Nil).unwrap();
+    storage.save_profile(&key, saved).unwrap();
+    host.execute("bar_configs[1].slot_size=1;bar_configs[1].spacing=0")
+        .unwrap();
+    host.callback(3, storage.load_profile(&key, &host.lua).unwrap().unwrap())
+        .unwrap();
+    host.execute("assert(bar_configs[1].slot_size==48 and bar_configs[1].spacing==6 and bar_configs[1].layout=='vertical');probes={}").unwrap();
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(&addon)).unwrap();
+    gpu.render();
+    host.execute(
+        "assert(distinct_bar_positions(), 'Stable-format profile must preserve distinct slots')",
+    )
+    .unwrap();
+    // A deliberately collapsed profile is a negative control for the geometry
+    // detector, not a claim that Stable or the current adapter creates it.
+    host.execute("bar_configs[1].spacing=-bar_configs[1].slot_size;probes={}")
+        .unwrap();
+    gpu.begin();
+    bridge.invoke(|| host.run_addon(&addon)).unwrap();
+    gpu.render();
+    host.execute(
+        "assert(not distinct_bar_positions(), 'collapsed-layout control must be detected')",
+    )
+    .unwrap();
+}
+
+pub(crate) fn modern_slot_positions(snapshot: Snapshot) -> Option<Vec<(f32, f32)>> {
+    struct Provider;
+    impl super::icons::IconProvider for Provider {
+        fn decode_icon(&self, id: u32) -> Option<super::icons::DecodedIcon> {
+            if id == 0 || id == u32::MAX {
+                return None;
+            }
+            let mut rgba = vec![0; 32 * 32 * 4];
+            for y in 2..30 {
+                for x in 2..30 {
+                    rgba[(y * 32 + x) * 4..(y * 32 + x) * 4 + 4].copy_from_slice(
+                        if (x + y) % 2 == 0 {
+                            &[64, 192, 96, 255]
+                        } else {
+                            &[224, 64, 32, 255]
+                        },
+                    );
+                }
+            }
+            Some(super::icons::DecodedIcon {
+                width: 32,
+                height: 32,
+                rgba,
+            })
+        }
+        fn decode_ui_texture(&self, id: u32) -> Option<super::icons::DecodedIcon> {
+            self.decode_icon(id)
+        }
+    }
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            super::icons::set_custom_icon_provider(None);
+        }
+    }
+    let _reset = Reset;
+    let root = bundled_tree();
+    let addon = discovery::discover(&root.0)
+        .addons
+        .into_iter()
+        .find(|a| a.id == "avoids_modern_ui")
+        .unwrap();
+    let mut gpu = TestGpu::new()?;
+    let host = Host::for_addon(&addon).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let textures = super::textures::Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
+    super::textures::Textures::install_for_addon(&textures, &host.lua, &addon).unwrap();
+    let _cache = super::icons::attach_icon_cache(&host.lua, textures).unwrap();
+    super::icons::set_custom_icon_provider(Some(Box::new(Provider)));
+    host.snapshot.set(snapshot);
+    host.execute(
+        r#"
+        modern_bar = require('avoids_ability_bar')
+        modern_ability_bar_state.show_navigation_highlight=false
+        modern_ability_bar_state.show_cooldown_overlay=false
+        layout_rects={}
+        local get_list=ImGui.GetWindowDrawList
+        ImGui.GetWindowDrawList=function()
+            local raw=get_list()
+            return setmetatable({}, {__index=function(_,key)
+                return function(_, ...)
+                    if key=='AddRectFilled' then
+                        local a,b=...
+                        if math.abs(b.x-a.x-40)<0.1 and math.abs(b.y-a.y-40)<0.1 then
+                            layout_rects[#layout_rects+1]={x=a.x,y=a.y}
+                        end
+                    end
+                    return raw[key](raw,...)
+                end
+            end})
+        end
+    "#,
+    )
+    .unwrap();
+    for _ in 0..3 {
+        host.execute("layout_rects={}").unwrap();
+        gpu.begin();
+        bridge
+            .invoke(|| host.execute("modern_bar.Update()"))
+            .unwrap();
+        gpu.render();
+    }
+    let rows: Table = host.lua.globals().get("layout_rects").unwrap();
+    Some(
+        rows.sequence_values::<Table>()
+            .map(|r| {
+                let r = r.unwrap();
+                (r.get("x").unwrap(), r.get("y").unwrap())
+            })
+            .collect(),
+    )
 }
