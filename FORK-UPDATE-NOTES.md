@@ -2,7 +2,7 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
-## Unreleased
+## 2026-11-09 · Enhanced dev build
 
 - Added the experimental native `eqoa/1` mod API and an EQOA Example Hearts mod. Enable it from the Addon Manager after installing bundled mods. The API remains under review until the Round 5 audit.
 - Mods share bundled resources read-only and keep file changes in private overlays. Unsupported calls appear in the Addon Manager and its error log.
