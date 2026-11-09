@@ -408,7 +408,9 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
     let subscriber_errors = Rc::new(RefCell::new(Vec::<Table>::new()));
     let lockout_cache = Rc::new(RefCell::new(HashMap::<u32, u32>::new()));
     let installed = Rc::new(Cell::new(true));
-    let native_next_seq = Rc::new(Cell::new(super::native_core::CORE.with(|c| c.borrow().seq)));
+    let native_next_seq = Rc::new(Cell::new(
+        super::native_core::CORE.with(|c| c.borrow().forge_cooldowns.next),
+    ));
     let next_seq = Rc::new(Cell::new(LOCKOUT_RING.with(|r| r.borrow().next_seq)));
     let dropped = Rc::new(Cell::new(0u64));
     let seeded = Rc::new(Cell::new(false));
@@ -437,7 +439,7 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
                 cache.insert(a.display_index, a.cooldown_lockout_ms);
             }
             cursor.set(LOCKOUT_RING.with(|r| r.borrow().next_seq));
-            native_cursor.set(super::native_core::CORE.with(|c| c.borrow().seq));
+            native_cursor.set(super::native_core::CORE.with(|c| c.borrow().forge_cooldowns.next));
         }
     };
 
@@ -740,7 +742,8 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
                 if !snapshot.in_game || !installed.get() || !super::native_events::active(lua_ctx) {
                     cache.borrow_mut().clear();
                     seeded.set(false);
-                    native_next_seq.set(super::native_core::CORE.with(|c| c.borrow().seq));
+                    native_next_seq
+                        .set(super::native_core::CORE.with(|c| c.borrow().forge_cooldowns.next));
                     next_seq.set(LOCKOUT_RING.with(|r| r.borrow().next_seq));
                     return Ok(());
                 }
@@ -748,17 +751,26 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
                 let native = super::native_core::CORE.with(|core| {
                     let c = core.borrow();
                     c.view.in_world.then(|| {
-                        let first = c.events.front().map_or(c.seq, |e| e.seq);
-                        if native_next_seq.get().saturating_add(1) < first {
-                            dropped.set(dropped.get() + first - native_next_seq.get() - 1);
-                        }
-                        let updates = c
-                            .events
+                        let cursor = native_next_seq.get();
+                        let retained = c
+                            .forge_cooldowns
+                            .entries
                             .iter()
-                            .filter(|e| {
-                                e.seq > native_next_seq.get() && e.name.starts_with("cooldown.")
-                            })
-                            .map(|e| LockoutUpdate {
+                            .filter(|(i, _)| *i >= cursor)
+                            .count() as u64;
+                        dropped.set(
+                            dropped.get()
+                                + c.forge_cooldowns
+                                    .next
+                                    .saturating_sub(cursor)
+                                    .saturating_sub(retained),
+                        );
+                        let updates = c
+                            .forge_cooldowns
+                            .entries
+                            .iter()
+                            .filter(|(i, _)| *i >= cursor)
+                            .map(|(_, e)| LockoutUpdate {
                                 display_index: e.data["display_key"].as_u64().unwrap_or(0) as u32,
                                 lockout_ms: ee::mul(
                                     e.data["lockout"].as_f64().unwrap_or(0.0) as f32,
@@ -773,7 +785,7 @@ pub fn install_ability_list_adapter(host: &Host) -> LuaResult<()> {
                                 }),
                             })
                             .collect::<Vec<_>>();
-                        native_next_seq.set(c.seq);
+                        native_next_seq.set(c.forge_cooldowns.next);
                         updates
                     })
                 });

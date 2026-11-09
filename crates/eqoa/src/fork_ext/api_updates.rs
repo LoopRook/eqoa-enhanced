@@ -134,14 +134,7 @@ fn patch_player(c: &mut Core, mut after: Json) {
             c.emit("target.changed",json!({"before":ref_for(c,&before["target_id"]),"after":ref_for(c,&c.view.player["target_id"])}));
         }
     }
-    if interested("player.changed") {
-        let after = c.view.player.clone();
-        let changed = crate::fork_ext::addons::native_core::changed_fields(&before, &after);
-        c.emit(
-            "player.changed",
-            json!({"before":before,"after":after,"changed":changed}),
-        );
-    }
+    c.player_changed(before);
 }
 fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
     while c.view.entity_slots.len() <= slot {
@@ -351,7 +344,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     if first || manual || CORE.with(|c| c.borrow().view.in_world != play.in_world_now()) {
         native_core::flush_deferred();
         let view = play.native_view(walker);
-        CORE.with(|c| c.borrow_mut().publish(view, false));
+        CORE.with(|c| c.borrow_mut().publish(view));
         CORE.with(|c| {
             c.borrow_mut().entity_worlds = play
                 .entities
@@ -370,6 +363,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         return;
     }
     native_core::flush_deferred();
+    CORE.with(|c| c.borrow_mut().flush_player_motion());
     let now = key(play, walker);
     let previous = KEY.with(|k| k.replace(Some(now)));
     if previous != Some(now) {

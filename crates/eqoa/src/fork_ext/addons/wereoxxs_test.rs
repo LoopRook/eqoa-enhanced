@@ -220,16 +220,13 @@ fn native_bundled_hearts_once_mode_draws_and_releases_its_health_claim() {
     use super::native_core::{CORE, Core, View};
     CORE.with(|c| {
         let mut core = Core::default();
-        core.publish(
-            View {
-                in_world: true,
-                phase: "world",
-                world_id: Some(0),
-                player: serde_json::json!({"id":256,"hp":{"current":50,"maximum":100,"base":100}}),
-                ..Default::default()
-            },
-            false,
-        );
+        core.publish(View {
+            in_world: true,
+            phase: "world",
+            world_id: Some(0),
+            player: serde_json::json!({"id":256,"hp":{"current":50,"maximum":100,"base":100}}),
+            ..Default::default()
+        });
         *c.borrow_mut() = core;
     });
     let root = bundled_tree();
