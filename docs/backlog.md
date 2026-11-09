@@ -164,3 +164,12 @@ This entry records future work only; no navigation or movement behavior changes 
   0.4.14. If it only happens with Wereoxxs, look at its Tab handling (input claims and text capture); if
   it also happens with no mods, it is client behaviour and a binds question.
 - **Status:** deferred; not investigated. Note it in the round 2 live test if it shows up there.
+
+### Tab opens chat: reproduction (owner, 2026-11-09)
+
+- Tab normally targets. After pressing Enter to open chat and Enter again to close it without typing,
+  one Tab press targets and then chat opens again. Casting a spell or opening a menu seems to clear it,
+  until the Enter, Enter sequence is repeated.
+- Reads like leftover chat or text-input state after an empty close (a stale "chat is open" or key
+  capture flag that the next Tab triggers). Not yet known whether it is in the client or a mod (check
+  with no mods first, as above).
