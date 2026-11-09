@@ -2065,6 +2065,59 @@ mod tests {
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.cat_sel, cues.last()), (11, Some(&9)), "Textures, the last category");
+        // Triangle: the menu, then closed with every setting put back
+        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
+        assert_eq!((w.page, w.sel), (-1, 3), "the menu, on Extended");
+        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
+        assert_eq!(settings::client(), settings::ClientOptions::default());
+        assert_eq!(testing::kept("client.opt"), None, "nothing kept yet");
+        // again, and saved this time, Auto Attack with it
+        w.open(&vui, &NullRaster, &o);
+        for k in [
+            key::DOWN,
+            key::CROSS,
+            key::RIGHT,
+            key::TRIANGLE,
+            key::DOWN,
+            key::DOWN,
+            key::CROSS,
+            // Video: Brightness a step down (past Display)
+            key::CROSS,
+            key::DOWN,
+            key::LEFT,
+            key::TRIANGLE,
+            // World: Fog a step down
+            key::DOWN,
+            key::CROSS,
+            key::LEFT,
+            key::TRIANGLE,
+            // Camera: Camera Turn Speed a step up (past Lighting)
+            key::DOWN,
+            key::DOWN,
+            key::DOWN,
+            key::DOWN,
+            key::CROSS,
+            key::DOWN,
+            key::RIGHT,
+            key::TRIANGLE,
+            key::TRIANGLE,
+            // Save Changes, Yes
+            key::DOWN,
+            key::DOWN,
+            key::CROSS,
+            key::LEFT,
+            key::CROSS,
+        ] {
+            press(&mut w, &mut o, k, &mut cues);
+        }
+        assert_eq!(w.save_count, 3, "Saving... (one frame drawn)");
+        for _ in 0..3 {
+            w.draw(&vui, &mut NullRaster, &o, &mut ups);
+        }
+        let kept = String::from_utf8(testing::kept("client.opt").unwrap()).unwrap();
+        assert_eq!(kept, "lod=on\nbrightness=4\ncamera_distance=11\ncamera_turn=125\nfog=4\n");
+        assert_eq!(GameOptions::from_card(&testing::kept("game.opt").unwrap()).unwrap().auto_attack, 1);
+        testing::reset(false);
     }
 
     /// Video's note while Render Scale is chosen: the scale the frame is

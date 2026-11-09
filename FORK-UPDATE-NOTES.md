@@ -8,6 +8,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 - Group waypoints now use O; G attacks, and Space jumps on servers that offer jumps. Saved custom bindings remain supported.
 - GMs can Ctrl-click the map to travel when their server offers it. Distant quest offers no longer crowd the minimap rim.
 - Integrated upstream lighting, shadows, camera, character and input updates.
+- Quest tracking stays silent when turned off before the server's first request, as the vanilla client's does.
 
 
 - Pressing Tab no longer reopens the mod chat input after closing it with an empty Enter. Tab targets once, and the game keeps the key.

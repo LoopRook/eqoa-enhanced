@@ -86,7 +86,9 @@ pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
         1048 => c.target_hp_percent = !c.target_hp_percent,
         1049 => c.xp_details = !c.xp_details,
         1050 => c.hud_numbers = !c.hud_numbers,
-        _ => return activate(item),
+        // An action row (Open Mods Folder, Combat Parser, Addon Manager) acts
+        // on ✕ (`activate`), not on left or right.
+        _ => return false,
     }
     true
 }
@@ -147,6 +149,17 @@ mod tests {
         assert!(!crate::fork_ext::addons::take_open_request());
         assert!(ITEMS.iter().any(|(id, _)| *id == 1052));
         assert!(CATEGORY.items.contains(&1053));
+    }
+    /// The action rows act on ✕ (`activate`), not on a left or right step:
+    /// stepping over "Addon Manager" must not open it.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn left_and_right_do_not_run_the_action_rows() {
+        let mut c = ClientOptions::default();
+        crate::fork_ext::addons::take_open_request();
+        assert!(!change(&mut c, 1053), "the Addon Manager acts on ✕, not on a step");
+        assert!(!crate::fork_ext::addons::take_open_request(), "no open requested by a step");
+        assert!(!change(&mut c, 9999), "an unknown row has nothing to change");
     }
     #[test]
     fn number_toggles_change_only_their_own_saved_setting() {

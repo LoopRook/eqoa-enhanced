@@ -3644,21 +3644,6 @@ impl App {
             self.toggle_era();
             return;
         }
-        // The map (`map.rs`), while it is up, takes every key.
-        if let Some(p) = self.play.as_mut().filter(|p| p.map.open) {
-            let name = match &event.logical_key {
-                Key::Named(NamedKey::Escape) => Some("escape".to_string()),
-                Key::Named(NamedKey::Backspace) => Some("backspace".to_string()),
-                Key::Named(NamedKey::Enter) => Some("enter".to_string()),
-                Key::Named(NamedKey::Space) => Some("space".to_string()),
-                k => held_name(k),
-            };
-            if let Some(n) = name {
-                p.keyboard = true;
-                p.map.keyboard_key(&n, event.state == ElementState::Pressed, event.repeat);
-            }
-            return;
-        }
         // F3: a bug report, Support's request form on Bug Report, from the
         // world on a server that offered bug reports (`Play::open_bug_report`)
         if event.logical_key == Key::Named(NamedKey::F3)
@@ -3680,6 +3665,7 @@ impl App {
                 k => held_name(k),
             };
             if let Some(n) = name {
+                p.keyboard = true;
                 p.map.keyboard_key(&n, event.state == ElementState::Pressed, event.repeat);
             }
             return;
@@ -5267,8 +5253,6 @@ impl App {
                     p.map.let_go();
                     p.map.mini_hover(None);
                     p.chat_let_go();
-                    p.map.let_go();
-                    p.map.mini_hover(None);
                 }
             }
             WindowEvent::MouseInput { state, button, .. } if matches!(button, MouseButton::Left | MouseButton::Right) => {

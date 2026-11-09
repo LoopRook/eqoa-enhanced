@@ -28,7 +28,7 @@ Status: complete (sync finishing work and verification recorded; the full worksp
 - `crates/eqoa/src/tracker.rs`: Keep fork implementation; reconcile upstream restored baseline and applicable later fixes without dropping search, journal, theme or circular clipping.
 - `crates/eqoa/src/viewer.rs`: Retain upstream camera/AO/render-scale paths plus addon/report/search hooks; add offered GM Ctrl-click modifiers and focus reset.
 - `crates/net/src/session.rs`: Retain upstream network behavior and quest negotiation plus fork mana bars; add offered GM travel protocol 0x7E34/35.
-- `crates/render/src/lib.rs`: Retain upstream renderer exports and scaled capture callback; circular map renderer remains fork-owned.
+- `crates/render/src/lib.rs`: Upstream's verbatim (no fork edits; the circular map renderer lives in `render/src/map.rs` and `ui.rs`, which do differ), retaining upstream renderer exports and scaled capture callback.
 - `crates/render/src/map.rs`: Keep fork implementation; reconcile upstream restored baseline and applicable later fixes without dropping search, journal, theme or circular clipping.
 - `crates/render/src/map.wgsl`: Keep fork implementation; reconcile upstream restored baseline and applicable later fixes without dropping search, journal, theme or circular clipping.
 
@@ -122,3 +122,29 @@ The pinned `reviewed_base` was already `91f9e72dd6d111e20a37b73cea461444a18ad79c
 Archived the sync/validation logs and API audit under ignored `run/sync-2026-11-09-validation/` before cleanup. Verified the absolute cleanup targets and that `target/` contains no tracked files. Detached the four `target/{debug,release,wasm32-unknown-unknown,x86_64-pc-windows-msvc}` junctions themselves without traversing them, then removed this worktree's generated `target/` folder and `D:/eqoa-sync-2026-11-09-build-cache`. Both paths are absent. The shared cache remains the only build target. `C:/Users/hocka/Paseo/targets/eqoa-api-r2` still exists and was untouched. The final build uses scratch configuration/logs in the ignored archive, so it does not recreate a worktree target.
 
 No push, tag, merge into develop/enhanced, live play acceptance, or release publication was performed. The known upstream AO failures, missing fixture/privilege coverage, live owner/GM-server checks, Android device behavior and browser runtime remain outstanding; successful compilation and addon tests do not establish those results.
+
+## Review fixes
+
+Independent review `docs/plans/sync-2026-11-09-review.md` (now tracked) found three HIGH and four MEDIUM issues; all are fixed here, plus two trivial LOW documentation corrections. Shared upstream files (`options.rs`, `viewer.rs`, `bindpage.rs`) got minimal changes; no upstream code was deleted to simplify a hunk.
+
+- **H1 (options save round-trip):** restored the block the merge dropped at the end of `the_extended_pages`, re-walked against the fork's order (menu 0 Game, 1 Interface, 3 Extended, 5 Save Changes; categories Video 0, World 1, Camera 5). It drives ✕ on Auto Attack, Video Brightness, World Fog and Camera Turn Speed, then Save Changes and Yes, and asserts `client.opt` = `lod=on\nbrightness=4\ncamera_distance=11\ncamera_turn=125\nfog=4\n` and `game.opt`'s `auto_attack = 1`. The asserted values are the fork's defaults plus one step each. Negative control: commenting out `crate::settings::save(o)` made the test fail at `testing::kept("client.opt").unwrap()`; restored bytes pass.
+- **H2 (duplicate map capture):** deleted the merge's second, unreachable map key-capture block (`viewer.rs`); the first stays and keeps `p.keyboard = true`.
+- **H3 (F3 while the map is up):** moved the F3 bug-report handler above the map capture, matching upstream's F9 → F3 → map order. `keyboard()` needs an `ActiveEventLoop`, so a live dispatch test is not available; `sync_f3_is_handled_before_the_map_takes_every_key` in `fork_ext/report_sync_tests.rs` is a source-order wiring guard (and asserts one map block), complementing the existing F3 dialog test.
+- **M1 (bindpage `(null)` labels):** the two tests use the `hide_ui` row again, so assertions read `Hide UI: F10. H does nothing now.`, `Hide UI: |(. (null) has no button now.` and `(null): |9. Hide UI has no button now.`; F10 (not upstream's F2) is used for the keyboard case because F2 is now Map search's default.
+- **M2 (G attack / O group waypoint):** verified against `Binds::from_text`; saved custom layouts migrate (including G→jump and macros). A fork player on unsaved defaults keeps the owner's chosen new defaults, and `FORK-UPDATE-NOTES.md` already says "Group waypoints now use O; G attacks". Not a code defect; no change.
+- **M3 (left/right running Mods & Addons actions):** `fork_options::change` no longer falls through to `activate`, so LEFT/RIGHT only toggle values and the action rows act on ✕ only. Regression `left_and_right_do_not_run_the_action_rows` checks the Addon Manager request is not raised by a step.
+- **M4 (`CursorLeft` duplicate calls):** removed the duplicated `map.let_go()` / `mini_hover(None)` pair in `viewer.rs`; `chat_let_go()` stays.
+- **L1/L2 (docs):** corrected the `render/src/lib.rs` wording (it is upstream's verbatim; the circular map lives in `render/src/map.rs`/`ui.rs`) and noted the restored upstream quest-negotiation silence in `FORK-UPDATE-NOTES.md`. L3 was verified against upstream and left; L4's scratch-config path nit is unchanged (logs/configuration, not a Cargo cache).
+
+Verification after the fixes, with `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`, the shared mkdir lock, scratch `EQOA_CONFIG` and one test thread:
+
+| Gate | Result |
+| --- | --- |
+| Focused client tests (`options::`, `bindpage::`, `viewer::`, `sync_`) | 36 + 6 passed, 0 failed |
+| `python tools/sync_upstream.py --continue --tests-only` | 1,871 passed / 0 failed / 29 ignored; 176 SKIP messages; Python tools 96 passed |
+| Explicit Python tools discovery | 96 passed |
+| `cargo check --locked -p eqoa --target wasm32-unknown-unknown` | PASS |
+| `python -X utf8 tools/check_fork_footprint.py --base 91f9e72` | PASS: 353 fork-owned / 31 shared; no budget raised |
+| `cargo build --release --locked -p eqoa` | PASS (final post-commit build, static CRT, `x86_64-pc-windows-msvc`) |
+
+The two `render --test ao` failures remain the same on untouched upstream `91f9e72` on this GPU (NVIDIA RTX 3070 Ti / Vulkan), as recorded above; they are unrelated to these files and were not rerun as evidence here.
