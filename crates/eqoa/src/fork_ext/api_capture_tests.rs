@@ -15,6 +15,138 @@ fn ready() -> Play {
     ));
     p
 }
+// Shared bundled-UI fixture: populate the native client structures, then use
+// exactly the cached projection that Play supplies to the addon manager.
+impl Play {
+    pub(crate) fn bundled_ui_fixture() -> Self {
+        let mut p = ready();
+        super::api_capture::updates::inactive();
+        crate::fork_ext::addons::native_core::fixture_demand(false);
+        crate::fork_ext::addons::native_core::manager_demand(true);
+        p.player.name = "Wereoxx".into();
+        p.dump.player.level = 50;
+        p.dump.player.class = 0;
+        p.stats.stat[7] = 2500;
+        p.stats.stat[8] = 3000;
+        p.stats.stat[9] = 100;
+        p.stats.stat[10] = 100;
+        let mut hp = vec![0; 233];
+        hp[28..32].copy_from_slice(&2500_i32.to_le_bytes());
+        hp[32..36].copy_from_slice(&3000_i32.to_le_bytes());
+        p.forge_health.receive(&hp);
+        p.self_at = Some(([100., 50., 200.], None));
+        p.target = 2002;
+        p.target_info = Some(1);
+        p.entities.slots = vec![None; 24];
+        p.entities.slots[1] = Some(net::entity::Entity {
+            id: 2002,
+            p19: 180,
+            creature: Some(net::entity::Creature {
+                name: "Moss Snake".into(),
+                level: 15,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        p.group.in_group = true;
+        p.group.members = [
+            (100, "Healer", 240, [105., 50., 202.]),
+            (101, "Nuker", 255, [98., 50., 195.]),
+        ]
+        .into_iter()
+        .map(|(id, name, hp, pos)| crate::group::Member {
+            id,
+            name: name.into(),
+            hp,
+            pos,
+            hp_known: 1,
+            active: true,
+            ..Default::default()
+        })
+        .collect();
+        p.effects.count = 2;
+        for (i, name) in ["Spirit of Wolf", "Shield of Thorns"]
+            .into_iter()
+            .enumerate()
+        {
+            p.effects.icon[i] = 0x4001 + i as u32;
+            p.effects.name[i] = name.encode_utf16().collect();
+        }
+        for i in 0..5 {
+            let id = i as i64 + 1;
+            p.abilities.insert(
+                id,
+                net::dump::Ability {
+                    id,
+                    name: format!("Slash {i}"),
+                    valid: 1,
+                    icon_back: 10,
+                    icon_front: 11,
+                    cast_time: 1500,
+                    cooldown: 5,
+                    power_cost: 20,
+                    scope: 1,
+                    display_index: i as i64,
+                    ..Default::default()
+                },
+            );
+            p.hud_menus.defs[0].entries[i].msg = 0x8060000;
+            p.hud_menus.defs[0].entries[i].id = id as _;
+        }
+        p.hud_menus.defs[0].count = 5;
+        for title in ["Bat Eyes", "The Militia"] {
+            p.quests.add(title.encode_utf16().collect());
+        }
+        p.add_chat("Welcome to EQOA: Frontiers Native!".into(), [1.; 4]);
+        p.add_chat(
+            "Wereoxx slashes a moss snake for 42 points of damage.".into(),
+            [1.; 4],
+        );
+        p
+    }
+}
+
+#[test]
+fn bundled_ui_fixture_projects_native_state_and_invalidates_cached_values() {
+    let mut p = Play::bundled_ui_fixture();
+    let first = p.forge_snapshot(None);
+    assert!(first.in_game && first.player.available);
+    assert_eq!(first.player.current_hp, 2500);
+    assert_eq!(first.abilities.ability_count, 5);
+    assert_eq!(first.entities.entities[1].id, 2002);
+    assert_eq!(first.group.member_count, 2);
+    assert_eq!(first.journal.count, 2);
+    super::api_capture::take_view_builds();
+    let cached = p.forge_snapshot(None);
+    assert_eq!(cached.player.current_hp, first.player.current_hp);
+    assert_eq!(
+        super::api_capture::take_view_builds(),
+        0,
+        "second frame must use cache"
+    );
+    // Negative control: a cached old frame must fail after a real entity packet.
+    let event = net::session::Event::State {
+        channel: 1,
+        data: vec![],
+    };
+    let capture = begin_game_event(&p, &event);
+    p.entities.slots[1]
+        .as_mut()
+        .unwrap()
+        .creature
+        .as_mut()
+        .unwrap()
+        .name = "Changed Snake".into();
+    end_game_event(&p, capture);
+    let next = p.forge_snapshot(None);
+    assert_ne!(
+        first.entities.entities[1].name,
+        next.entities.entities[1].name
+    );
+    p.session.self_id = None;
+    assert!(!p.forge_snapshot(None).in_game);
+}
+
 #[test]
 fn native_state_preserves_signed_stats_full_strings_ids_and_unbounded_lists() {
     let mut p = ready();
@@ -446,6 +578,15 @@ fn performance_busy_world_zero_addons_frame_and_packet_allocation_bound() {
         .collect();
     p.forge_snapshot(None);
     let mut report = crate::input::Report::default();
+    // Initialize thread-local input/health/iteration services before measuring
+    // the steady-state frame. Snapshot-only warmup misses their first use.
+    begin_iteration(&mut p, true);
+    health_redraw(&mut p, true, false);
+    std::hint::black_box(health_hidden(&p));
+    std::hint::black_box(p.forge_snapshot(None));
+    input::observe_report(&mut report, true, true);
+    std::hint::black_box(input::live_snapshot());
+    super::api_capture::take_view_builds();
     let (_, frame_time, frame_allocs, frame_bytes) = measure(|| {
         for _ in 0..300 {
             begin_iteration(&mut p, true);
@@ -500,22 +641,19 @@ fn performance_busy_world_zero_addons_frame_and_packet_allocation_bound() {
         chat_allocs as f64 / 600.,
         chat_bytes as f64 / 600.
     );
-    assert!(
-        menu_allocs <= 300,
-        "zero-addon menus must not allocate snapshots: {menu_allocs}"
-    );
-    assert!(
-        frame_allocs <= 300,
-        "zero enabled addons must not allocate per-frame state: {frame_allocs}"
-    );
-    assert!(
-        event_allocs <= 600,
-        "zero enabled addons must not allocate packet state: {event_allocs}"
-    );
+    assert_eq!(menu_allocs, 0, "zero-addon menu allocations");
+    assert_eq!(frame_allocs, 0, "zero-addon frame allocations");
+    assert_eq!(event_allocs, 0, "zero-addon entity packet allocations");
+    assert_eq!(chat_allocs, 0, "zero-addon chat allocations");
     assert_eq!(
-        chat_allocs, 0,
-        "zero enabled addons must not allocate a chat journal"
+        super::api_capture::take_view_builds(),
+        0,
+        "no full native view"
     );
+
+    // Negative control: the meter must see a deliberately allocated view-sized value.
+    let (_, _, control_allocs, control_bytes) = measure(|| std::hint::black_box(vec![0u8; 4096]));
+    assert!(control_allocs > 0 && control_bytes >= 4096);
 }
 
 #[test]

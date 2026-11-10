@@ -60,6 +60,10 @@
 //! game sees only the buttons pressed (`macros::Run`, before `VIPad::Read`):
 //! nothing new goes to a server.
 
+#[cfg(test)]
+#[path = "fork_ext/binds.rs"]
+mod fork_binds;
+
 use crate::input::bit;
 use winit::keyboard::{Key, NamedKey};
 
@@ -176,13 +180,15 @@ pub const ROWS: &[Row] = &[
     row("group_leave", "{994}", &["f8"], Pad::None, ""),
     row("art", "Art: Frontiers' or 2002's", &["f9"], Pad::None, "Everything drawn swaps between Frontiers' art and the 2002 disc's (EverQuest Online Adventures, USA, SLUS-20470), at once; the first time, it asks for that disc."),
     row("hide_ui", "Hide UI", &["h"], Pad::None, "Hides everything over the world: the HUD, the chat, the names over heads, the damage numbers and the target's rings. Again, or any window coming up, shows them."),
-    row("minimap", "Minimap", &["n"], Pad::None, "Shows or hides the minimap, as Extended's UI page does, and keeps it. On the map: a community marker suggested."),
-    row("stats_box", "Stats Box", &["b"], Pad::None, "Shows or hides your stats in a box under the effects' icons (an effect's raise in blue, its cut in red), as Extended's UI page does, and keeps it."),
+    row("minimap", "Minimap", &["n"], Pad::None, "Shows or hides the minimap, as Extended's Map page does, and keeps it. On the map: a community marker suggested."),
+    row("stats_box", "Stats Box", &["b"], Pad::None, "Shows or hides your stats in a box under the effects' icons (an effect's raise in blue, its cut in red), as Extended's Enhanced HUD page does, and keeps it."),
     row("controls", "Controls", &["f1"], Pad::None, "This page, from play."),
 ];
 
 /// A row's index by its name.
 pub fn row_named(id: &str) -> Option<usize> {
+    #[cfg(test)]
+    if !fork_binds::visible(id) { return None; }
     ROWS.iter().position(|r| r.id == id)
 }
 
@@ -690,8 +696,7 @@ impl Binds {
         let mut b = Binds::default();
         let button = |n: &str| BUTTONS.iter().position(|x| x.0 == n).map(|i| i as u8);
         for line in s.lines() {
-            let Some((k, v)) = line.split_once('=') else { continue;
-            };
+            let Some((k, v)) = line.split_once('=') else { continue };
             if let Some(id) = k.strip_prefix("key.") {
                 let Some(r) = row_named(id) else { continue };
                 if v.is_empty() {
@@ -1129,9 +1134,7 @@ mod tests {
             "F8" => NamedKey::F8,
             "F9" => NamedKey::F9,
             "F11" => NamedKey::F11,
-            other => {
-                panic!("the dispatch matches NamedKey::{other}: give it a name here and a row")
-            }
+            other => panic!("the dispatch matches NamedKey::{other}: give it a name here and a row"),
         }
     }
 
@@ -1167,6 +1170,23 @@ mod tests {
         let text = b.to_text();
         assert!(!text.contains("push_to_talk") && !text.contains("voice"), "{text}");
         assert!(text.contains("key.attack=v"), "{text}");
+    }
+
+    /// A layout kept by a build with the map's rows (before they went on
+    /// 2026-10-27, or since they came back) reads them again, and the Stats
+    /// Box's line (its row gone for good) is left out and written back no
+    /// more. The control: a known row's line beside them is read.
+    #[test]
+    fn a_layout_with_the_maps_rows_reads_them() {
+        let _upstream = fork_binds::upstream_rows();
+        let b = Binds::from_text("key.map=y\nbutton.map=r3\nkey.stats_box=b\nkey.attack=u\n");
+        assert_eq!(b.key(row_named("attack").unwrap()), Some("u"), "the known line read");
+        assert_eq!(b.key(row_named("map").unwrap()), Some("y"), "the map's key read");
+        assert_eq!(b.row_button(row_named("map").unwrap()), bit_index(bit::R3), "and its button");
+        assert!(row_named("stats_box").is_none(), "no Stats Box row");
+        let text = b.to_text();
+        assert!(!text.contains("stats_box"), "{text}");
+        assert!(text.contains("key.map=y\n") && text.contains("button.map=r3\n"), "{text}");
     }
 
     /// Moving a row: to a free key it goes there and its key is free; to

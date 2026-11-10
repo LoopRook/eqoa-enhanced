@@ -29,9 +29,9 @@ numbers. The separate parser project is outside this repository's scope.
 The complete file ownership map, exact shared-file budgets and hook table are in
 [docs/FORK-OWNERSHIP.md](docs/FORK-OWNERSHIP.md). Its executable policy is
 [docs/fork-footprint.json](docs/fork-footprint.json). Fork-owned code includes
-map/, questguide/, tracker.rs, groupmark.rs, mapsuggest.rs, statbox.rs and
+questguide/, statbox.rs and
 fork_ext/ (including report_core.rs, report_state.rs, report_viewer.rs and report_sync_tests.rs,
-the retained local report/crash core, adapter and regression tests) under crates/eqoa/src; the render map module/shader; mods/, launcher
+the retained local report/crash core, adapter and regression tests) under crates/eqoa/src; mods/, launcher
 scripts, AGENTS.md, the fork README/changelog, design/map-parity/ and docs/.
 
 Existing restored systems still touch hud.rs, play.rs, viewer.rs, settings.rs,
@@ -40,6 +40,11 @@ client_image.rs, main.rs, net/src/session.rs and render/src/{lib,ui,fans}.rs and
 ui.wgsl. The exact allowlist also records dependency, mesh, animation and browser
 touch points. No map/quest rewrite is part of this cleanup. Isolating restored
 features behind a crate or feature flag is a later option requiring its own plan.
+
+The app map family (map/**, tracker.rs, groupmark.rs, mapsuggest.rs) and the render
+map module/shader are shared since upstream restored them. Round 2.5 removes their
+old fork-owned exemptions; changed files have exact measured budgets and identical
+files have no reserved budget. New fork implementation belongs in fork-owned files.
 
 ## Extension seams and new features
 

@@ -868,18 +868,12 @@ pub const ABILITY_BARS_GAME: u8 = 2;
 pub const ENTITY_SLOTS_GAME: u8 = net::entity::RETAIL_SLOTS as u8;
 pub const ENTITY_SLOTS_MAX: u8 = net::entity::MAX_SLOTS as u8;
 pub const ENTITY_SLOTS_STEP: u8 = 8;
-/// NPC/PC Display's first-run value: 64, where the game's 24 remains the
-/// lowest a server that offers more can be asked for.
-pub const ENTITY_SLOTS_DEFAULT: u8 = 64;
 /// The game's character draw distance (a player race's LOD body's last
 /// level), the farthest NPC/PC Distance goes (the client reads the
 /// world's zones to 1050 round the player), and its step.
 pub const ENTITY_VIEW_GAME: u16 = 100;
 pub const ENTITY_VIEW_MAX: u16 = 1000;
 pub const ENTITY_VIEW_STEP: u16 = 50;
-/// NPC/PC Distance's first-run value: 650, where the game's 100 remains the
-/// nearest a server that offers more can be asked for.
-pub const ENTITY_VIEW_DEFAULT: u16 = 650;
 /// The game's name plate distance (`VINameSprite::Raster`: a plate within 22
 /// of the camera), the farthest Name Distance goes (twice the game's
 /// character draw distance: past it a name is a few pixels at any zoom), and
@@ -916,8 +910,8 @@ impl Default for ClientOptions {
             capture: false,
             background_sound: true,
             ability_bars: ABILITY_BARS_GAME,
-            entity_slots: ENTITY_SLOTS_DEFAULT,
-            entity_view: ENTITY_VIEW_DEFAULT,
+            entity_slots: ENTITY_SLOTS_GAME,
+            entity_view: ENTITY_VIEW_GAME,
             name_distance: NAME_DISTANCE_GAME,
             overlapping_names: false,
             raid_list: true,
@@ -1001,10 +995,10 @@ impl ClientOptions {
         if self.ability_bars != ABILITY_BARS_GAME {
             s.push_str(&format!("ability_bars={}\n", self.ability_bars));
         }
-        if self.entity_slots != ENTITY_SLOTS_DEFAULT {
+        if self.entity_slots != ENTITY_SLOTS_GAME {
             s.push_str(&format!("entity_slots={}\n", self.entity_slots));
         }
-        if self.entity_view != ENTITY_VIEW_DEFAULT {
+        if self.entity_view != ENTITY_VIEW_GAME {
             s.push_str(&format!("entity_view={}\n", self.entity_view));
         }
         if self.name_distance != NAME_DISTANCE_GAME {
@@ -1041,18 +1035,6 @@ impl ClientOptions {
         }
         if !self.update_notices {
             s.push_str("update_notices=off\n");
-        }
-        // Target of Target only when on
-        if self.target_of_target {
-            s.push_str("target_of_target=on\n");
-        }
-        // Mana Bars only when off
-        if !self.mana_bars {
-            s.push_str("mana_bars=off\n");
-        }
-        // Stats Box only when on
-        if self.stats_box {
-            s.push_str("stats_box=on\n");
         }
         if self.text == render::ui::TextFilter::Smooth {
             s.push_str("text=smooth\n");
@@ -1186,12 +1168,6 @@ impl ClientOptions {
                 ("quest_tracker", "off") => c.quest_tracker = false,
                 ("overlapping_names", "show") => c.overlapping_names = true,
                 ("overlapping_names", "hide") => c.overlapping_names = false,
-                ("target_of_target", "on") => c.target_of_target = true,
-                ("target_of_target", "off") => c.target_of_target = false,
-                ("mana_bars", "on") => c.mana_bars = true,
-                ("mana_bars", "off") => c.mana_bars = false,
-                ("stats_box", "on") => c.stats_box = true,
-                ("stats_box", "off") => c.stats_box = false,
                 ("text", "sharp") => c.text = render::ui::TextFilter::Sharp,
                 ("text", "smooth") => c.text = render::ui::TextFilter::Smooth,
                 ("mipmaps", "on") => c.mipmaps = true,
@@ -1280,6 +1256,7 @@ impl ClientOptions {
 
 /// client.opt as it stands: window 1's rows, and what the windows share.
 fn read_shared() -> ClientOptions {
+    if let Some(c) = fork_settings::migrate_defaults() { return c; }
     store::read(CLIENT_FILE).map_or_else(ClientOptions::default, |b| ClientOptions::from_text(&String::from_utf8_lossy(&b)))
 }
 
@@ -1867,6 +1844,7 @@ pub mod testing {
         super::FRAME_DUE.with(|d| d.set(0.0));
         super::DISPLAY_GAP.with(|g| g.set(1000.0 / 60.0));
         super::FILE_SHARED.with(|f| f.set(None));
+        super::fork_settings::reset_test_client();
     }
 
     /// Writes `name` in the store as another window's save would.
@@ -2040,11 +2018,11 @@ mod tests {
         assert_eq!(ClientOptions { entity_slots: 128, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nentity_slots=128\n", "NPC/PC Display only when not the game's");
         assert_eq!(ClientOptions::from_text("entity_slots=100").entity_slots, 100, "any number in range");
         for bad in ["entity_slots=23", "entity_slots=205", "entity_slots=999", "entity_slots=lots"] {
-            assert_eq!(ClientOptions::from_text(bad).entity_slots, ENTITY_SLOTS_DEFAULT, "{bad}: the first-run 64");
+            assert_eq!(ClientOptions::from_text(bad).entity_slots, ENTITY_SLOTS_GAME, "{bad}: the game's 24");
         }
         assert_eq!(ClientOptions { entity_view: 600, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nentity_view=600\n", "NPC/PC Distance only when not the game's");
         for bad in ["entity_view=99", "entity_view=1001", "entity_view=far"] {
-            assert_eq!(ClientOptions::from_text(bad).entity_view, ENTITY_VIEW_DEFAULT, "{bad}: the first-run 650");
+            assert_eq!(ClientOptions::from_text(bad).entity_view, ENTITY_VIEW_GAME, "{bad}: the game's 100");
         }
         assert_eq!(ClientOptions { name_distance: 60, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nname_distance=60\n", "Name Distance only when not the game's");
         assert_eq!(ClientOptions::from_text("name_distance=60").name_distance, 60, "read back");
@@ -2078,11 +2056,6 @@ mod tests {
         for bad in ["shouts=no\nupdate_notices=0", "shouts=ignored\nupdate_notices=never"] {
             let c = ClientOptions::from_text(bad);
             assert!(c.shouts && c.update_notices, "{bad}: on, the defaults");
-        }
-        assert_eq!(ClientOptions { target_of_target: true, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\ntarget_of_target=on\n", "Target of Target only when on");
-        assert!(ClientOptions::from_text("target_of_target=on").target_of_target && !ClientOptions::from_text("target_of_target=off").target_of_target);
-        for bad in ["target_of_target=yes", "target_of_target=1"] {
-            assert!(!ClientOptions::from_text(bad).target_of_target, "{bad}: off, the default");
         }
         assert_eq!(ClientOptions { overlapping_names: true, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\noverlapping_names=show\n", "Overlapping Names only when Show");
         assert!(ClientOptions::from_text("overlapping_names=show").overlapping_names && !ClientOptions::from_text("overlapping_names=hide").overlapping_names);
@@ -2129,71 +2102,6 @@ mod tests {
         assert!(!ClientOptions::from_text("mipmaps=off").mipmaps && ClientOptions::from_text("mipmaps=on").mipmaps);
         for bad in ["mipmaps=0", "mipmaps=no", "mipmaps="] {
             assert!(ClientOptions::from_text(bad).mipmaps, "{bad}: on, the default");
-        }
-    }
-
-    /// Quest Markers, on by default, kept only when off; anything but on or
-    /// off leaves it on.
-    #[test]
-    fn quest_markers_kept_only_when_off() {
-        assert!(ClientOptions::default().quest_markers, "on by default");
-        assert_eq!(ClientOptions { quest_markers: false, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nquest_markers=off\n");
-        assert!(!ClientOptions::from_text("quest_markers=off").quest_markers);
-        assert!(ClientOptions::from_text("quest_markers=on") == ClientOptions::default());
-        for bad in ["quest_markers=0", "quest_markers=no", "quest_markers="] {
-            assert!(ClientOptions::from_text(bad).quest_markers, "{bad}: on, the default");
-        }
-    }
-
-    /// Quest Tracker, on by default, kept only when off, apart from Quest
-    /// Markers; anything but on or off leaves it on.
-    #[test]
-    fn quest_tracker_kept_only_when_off() {
-        assert!(ClientOptions::default().quest_tracker, "on by default");
-        assert_eq!(ClientOptions { quest_tracker: false, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nquest_tracker=off\n");
-        let off = ClientOptions::from_text("quest_tracker=off");
-        assert!(!off.quest_tracker && off.quest_markers, "the tracker off, the marks kept");
-        for bad in ["quest_tracker=0", "quest_tracker="] {
-            assert!(ClientOptions::from_text(bad).quest_tracker, "{bad}: on, the default");
-        }
-    }
-
-    /// Mana Bars, on by default, kept only when off; anything but on or off
-    /// leaves it on.
-    #[test]
-    fn minimap_kept_only_when_off() {
-        assert!(ClientOptions::default().minimap, "on by default");
-        assert_eq!(ClientOptions { minimap: false, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nminimap=off\n");
-        assert!(!ClientOptions::from_text("minimap=off").minimap);
-        assert!(ClientOptions::from_text("minimap=on") == ClientOptions::default());
-        for bad in ["minimap=0", "minimap=no", "minimap="] {
-            assert!(ClientOptions::from_text(bad).minimap, "{bad}: on, the default");
-        }
-    }
-
-    /// Stats Box, off by default, kept only when on, apart from Minimap;
-    /// anything but on or off leaves it off. The control: Minimap's own line
-    /// does not turn it.
-    #[test]
-    fn stats_box_kept_only_when_on() {
-        assert!(!ClientOptions::default().stats_box, "off by default");
-        assert_eq!(ClientOptions { stats_box: true, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nstats_box=on\n");
-        let on = ClientOptions::from_text("stats_box=on");
-        assert!(on.stats_box && on.minimap, "the box on, the minimap kept");
-        assert!(ClientOptions::from_text("stats_box=off") == ClientOptions::default());
-        for bad in ["stats_box=1", "stats_box=yes", "stats_box=", "minimap=on"] {
-            assert!(!ClientOptions::from_text(bad).stats_box, "{bad}: off, the default");
-        }
-    }
-
-    #[test]
-    fn mana_bars_kept_only_when_off() {
-        assert!(ClientOptions::default().mana_bars, "on by default");
-        assert_eq!(ClientOptions { mana_bars: false, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nmana_bars=off\n");
-        assert!(!ClientOptions::from_text("mana_bars=off").mana_bars);
-        assert!(ClientOptions::from_text("mana_bars=on") == ClientOptions::default());
-        for bad in ["mana_bars=0", "mana_bars=no", "mana_bars="] {
-            assert!(ClientOptions::from_text(bad).mana_bars, "{bad}: on, the default");
         }
     }
 
@@ -2423,36 +2331,41 @@ mod tests {
     /// back no more. The control: the lines beside them are read.
     #[test]
     fn options_with_the_voice_lines_still_load() {
-        let c = ClientOptions::from_text("voice=ptt\nvoice_demo=on\nvoice_volume=15\nmap_markers=off\nloading=instant\n");
-        assert!(!c.map_markers && !c.loading_longer, "the lines beside them read");
+        let c = ClientOptions::from_text("voice=ptt\nvoice_demo=on\nvoice_volume=15\nflora=off\nloading=instant\n");
+        assert!(!c.flora && !c.loading_longer, "the lines beside them read");
         let text = c.to_text();
         assert!(!text.contains("voice"), "{text}");
-        assert!(text.contains("map_markers=off\n") && text.contains("loading=instant\n"), "{text}");
+        assert!(text.contains("flora=off\n") && text.contains("loading=instant\n"), "{text}");
     }
 
-    /// Map Markers is on unless chosen off, kept only when off; a value not
-    /// understood leaves it on. The control: off read back off.
+    /// The options kept by a build with the Stats Box, others' mana bars
+    /// and Target of Target (all gone) still load: their lines are left out
+    /// and written back no more; the map's and the quests' beside them (gone
+    /// on 2026-10-27, back on 2026-11-09) are read again. The control: the
+    /// lines beside them are read.
     #[test]
-    fn map_markers_kept_only_when_off() {
-        assert!(ClientOptions::default().map_markers, "on");
-        let off = ClientOptions { map_markers: false, ..Default::default() };
-        assert_eq!(off.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nmap_markers=off\n");
-        assert!(!ClientOptions::from_text(&off.to_text()).map_markers, "the control: off read back off");
-        assert!(ClientOptions::from_text("map_markers=on").map_markers);
-        for bad in ["map_markers=0", "map_markers="] {
-            assert!(ClientOptions::from_text(bad).map_markers, "{bad}: on, the default");
+    fn options_with_the_lines_of_rows_gone_still_load() {
+        let _upstream = fork_settings::upstream_rows();
+        let old = "target_of_target=on\nmana_bars=off\nminimap=off\nstats_box=on\nquest_markers=off\nquest_tracker=off\nmap_markers=off\nmap_towns=off\nflora=off\nloading=instant\n";
+        let c = ClientOptions::from_text(old);
+        let want = ClientOptions { minimap: false, quest_markers: false, quest_tracker: false, map_markers: false, map_towns: false, flora: false, loading_longer: false, ..Default::default() };
+        assert_eq!(c, want, "the lines beside them read");
+        let text = c.to_text();
+        for gone in ["target_of_target", "mana_bars", "stats_box"] {
+            assert!(!text.contains(gone), "{gone}: {text}");
         }
-        // the town names the same way, apart from the markers
-        let towns = ClientOptions { map_towns: false, ..Default::default() };
-        assert_eq!(towns.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nmap_towns=off\n");
-        let back = ClientOptions::from_text(&towns.to_text());
-        assert!(!back.map_towns && back.map_markers, "off read back off, the markers kept on");
+        for kept in ["minimap=off\n", "quest_markers=off\n", "quest_tracker=off\n", "map_markers=off\n", "map_towns=off\n", "flora=off\n", "loading=instant\n"] {
+            assert!(text.contains(kept), "{kept}: {text}");
+        }
+        assert!(c.map && c.quest_helper, "the Map and the Quest Helper on, their defaults");
     }
 
-    /// Capture Controller is one setting for every window: another window's
-    /// save reaches this one at its next look (`look_shared`), while its own
-    /// change not saved yet stands until the file changes; the control: the
-    /// other settings stay this window's as it read them.
+    /// The Map, the Quest Helper and the parts under them: on by default,
+    /// each kept only when off and read back off; anything but on or off
+    /// leaves it on. A part off leaves its master on and the other parts
+    /// (the controls: one line moves one setting); a master off turns off
+    /// what reads through it (`minimap`, `quest_markers`, `quest_tracker`)
+    /// while the parts' own settings stay as they were.
     #[test]
     fn the_map_and_the_quest_helper_kept_only_when_off() {
         let d = ClientOptions::default();
@@ -2477,6 +2390,10 @@ mod tests {
         testing::reset(false);
     }
 
+    /// Capture Controller is one setting for every window: another window's
+    /// save reaches this one at its next look (`look_shared`), while its own
+    /// change not saved yet stands until the file changes; the control: the
+    /// other settings stay this window's as it read them.
     #[test]
     fn capture_controller_reaches_every_window() {
         testing::reset(false);

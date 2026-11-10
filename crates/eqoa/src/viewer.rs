@@ -465,7 +465,6 @@ pub fn shot_with(
                 p.map.show();
             }
             touch.window = play.as_ref().is_some_and(|p| p.window_up() || p.map.open || p.map.search.open);
-            touch.dpad = play.as_mut().is_some_and(|p| p.quick_dpad());
             touch.scale = crate::settings::touch_scale();
             for (_, id, phase, at) in touch_script.iter().filter(|e| e.0 == t) {
                 touch.touch(*id, *phase, *at, Instant::now(), (w, h));
@@ -3603,11 +3602,6 @@ impl App {
         {
             self.held.remove(&n);
         }
-        if let Some(p)=self.play.as_mut().filter(|p|p.map.suggestion.open) {
-            p.release_map_search_holds();
-            if event.state==ElementState::Pressed {let name=crate::binds::name_of(&event.logical_key).unwrap_or_default();p.map.suggestion.key(&name,event.text.as_deref());}
-            return;
-        }
         // A map query owns text before any global gameplay shortcut.
         if let Some(p) = self.play.as_mut().filter(|p| p.map.search.open) {
             p.release_map_search_holds();
@@ -5338,9 +5332,7 @@ impl App {
                     MouseScrollDelta::PixelDelta(p) => (p.y as f32 / 40.0, p.y as f32 / 100.0),
                 };
                 let at = [self.cursor.0 as f32, self.cursor.1 as f32];
-                if self.play.as_ref().is_some_and(|p|p.map.suggestion.open) {
-                    // The form owns the pointer; no map or camera wheel action.
-                } else if let Some(p) = self.play.as_mut().filter(|p| p.map.search.open) {
+                if let Some(p) = self.play.as_mut().filter(|p| p.map.search.open) {
                     p.map
                         .search
                         .key(if steps > 0.0 { "up" } else { "down" }, None);
@@ -5582,7 +5574,6 @@ impl App {
                 }
                 self.touch.holds = self.play.as_ref().is_some_and(|p| p.map.open);
                 self.touch.window = self.play.as_ref().is_some_and(|p| p.window_up() || p.map.open || p.map.search.open);
-                self.touch.dpad = self.play.as_mut().is_some_and(|p| p.quick_dpad());
                 self.touch.scale = crate::settings::touch_scale();
                 mark(&mut self.perf, 17);
                 self.grab_pointer(true);

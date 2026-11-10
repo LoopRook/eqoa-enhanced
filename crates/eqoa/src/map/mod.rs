@@ -93,7 +93,6 @@ pub mod picture;
 pub mod quests;
 pub mod search;
 pub mod theme;
-pub mod suggest;
 pub mod store;
 // natively (a page has nothing to call it; it compiles there as main.rs's
 // commands do)
@@ -254,7 +253,6 @@ struct Press {
 #[derive(Default)]
 pub struct Map {
     pub search: search::Search,
-    pub suggestion: suggest::Form,
     /// up, full screen, with the keys
     pub open: bool,
     view: Option<View>,
@@ -363,7 +361,6 @@ impl Map {
     pub fn close(&mut self) {
         self.open = false;
         self.search.hide();
-        self.suggestion.cancel();
         self.held = [false; 6];
         self.press = None;
         self.square_hold = None;
@@ -427,7 +424,7 @@ impl Map {
     /// (a right click is △, as on every window).
     pub fn mouse_button(&mut self, right: bool, down: bool, at: [f32; 2]) -> Option<crate::mouse::Click> {
         self.cursor = at;
-        if self.search.open || self.suggestion.open {
+        if self.search.open {
             return (!down).then_some(if right {
                 crate::mouse::Click::Right(at[0] as f64, at[1] as f64)
             } else {
@@ -454,7 +451,7 @@ impl Map {
         let d = [at[0] - self.cursor[0], at[1] - self.cursor[1]];
         self.cursor = at;
         self.pointer_seen = true;
-        if self.search.open || self.suggestion.open {
+        if self.search.open {
             return;
         }
         if let Some(p) = self.press.as_mut() {
@@ -482,7 +479,7 @@ impl Map {
     /// middle when none): the point under the pointer stays under it, so
     /// the map stops following the player unless the pointer is on it.
     pub fn wheel(&mut self, lines: f32, at: Option<[f32; 2]>) {
-        if self.search.open || self.suggestion.open || lines == 0.0 {
+        if self.search.open || lines == 0.0 {
             return;
         }
         let size = self.size;
@@ -1190,7 +1187,7 @@ impl Map {
         self.keyboard = cx.keyboard;
         self.target = cx.target;
         self.player_world = cx.world;
-        if self.search.open || self.suggestion.open {
+        if self.search.open {
             self.held = [false; 6];
             self.press = None;
             self.square_hold = None;
@@ -1741,7 +1738,6 @@ impl Map {
         self.buttons = chrome::draw(&mut r, vui, &c);
         self.search.toolbar_top=Some(chrome::search_anchor(&r,vui,&c));
         self.search.draw(&mut r, vui, c.corners, None);
-        self.suggestion.draw(&mut r,c.corners);
         self.glyphs = r.glyphs;
         // laid out against the window: cut to it, not to the frame
         for q in &mut ui.quads {

@@ -4,13 +4,10 @@
 //! callbacks (Settings, Save, Load, DisableScript, OnEject), multi-frame rendering, and GPU pipeline.
 
 use super::{
-    ability::{AbilityBarSlotSnapshot, AbilitySnapshot},
+    ability::AbilityBarSlotSnapshot,
     bridge::Bridge,
     chat::{ChatMessageSnapshot, MSG_TYPE_SAY},
     discovery,
-    effects::EffectSnapshot,
-    group::GroupMemberSnapshot,
-    health::HealthSnapshot,
     host::{Host, Snapshot},
     manager::{Command, Manager, Status},
 };
@@ -56,22 +53,7 @@ fn modern_package_at(id: &str, root: PathBuf) {
         super::fonts::current_context_epoch(),
     )));
     super::fonts::FontBank::install_for_addon(&fonts, &host.lua, &addon).unwrap();
-    let mut snapshot = rich_in_game_snapshot();
-    snapshot.player.available = true;
-    snapshot.effects.count = 2;
-    snapshot.entities.count = 1;
-    for i in 0..5 {
-        snapshot.abilities.bars[0].slots[i].source_type = super::ability::ABILITY_SOURCE_TAG;
-        snapshot.abilities.bars[0].slots[i].source_index = i as u32 + 1;
-        snapshot.abilities.abilities[i].display_index = i as u32;
-    }
-    snapshot.journal = super::quest_log::JournalSnapshot::from_titles(
-        true,
-        &[
-            "Bat Eyes".encode_utf16().collect(),
-            "The Militia".encode_utf16().collect(),
-        ],
-    );
+    let snapshot = rich_in_game_snapshot();
     host.snapshot.set(snapshot);
     for _ in 0..4 {
         gpu.begin();
@@ -420,6 +402,7 @@ struct TestGpu {
     context: Context,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    last_target: Option<wgpu::Texture>,
 }
 
 impl TestGpu {
@@ -452,6 +435,7 @@ impl TestGpu {
             context,
             device,
             queue,
+            last_target: None,
         })
     }
 
@@ -508,6 +492,7 @@ impl TestGpu {
             vtx
         };
         self.queue.submit([encoder.finish()]);
+        self.last_target = Some(target);
         total_vtx
     }
 
@@ -521,117 +506,7 @@ impl TestGpu {
 }
 
 pub(super) fn rich_in_game_snapshot() -> Snapshot {
-    let mut snap = Snapshot::default();
-    snap.in_game = true;
-    snap.start_menu = false;
-    snap.health = HealthSnapshot::new(true, 2500, 3000);
-
-    // Player
-    copy_str_to_array("Wereoxx", &mut snap.player.name, &mut snap.player.name_len);
-    snap.player.class_id = 0; // Warrior
-    snap.player.level = 50;
-    snap.player.current_hp = 2500;
-    snap.player.max_hp = 3000;
-    snap.player.current_pwr = 100;
-    snap.player.max_pwr = 100;
-    snap.player.position = [100.0, 50.0, 200.0];
-    snap.player.velocity = [0.0, 0.0, 0.0];
-    snap.player.heading_rad = 1.5707963; // ~90 degrees (West)
-
-    // Abilities & Hotbars
-    snap.abilities.ability_count = 5;
-    for i in 0..5 {
-        snap.abilities.abilities[i] = AbilitySnapshot {
-            id: i as u32 + 1,
-            valid: true,
-            icon_background_ref: 10,
-            icon_foreground_ref: 11,
-            cast_time: 1500,
-            cooldown_seconds: 5,
-            power_cost: 20,
-            scope: 1,
-            ..AbilitySnapshot::default()
-        };
-        copy_str_to_array(
-            &format!("Slash {i}"),
-            &mut snap.abilities.abilities[i].name,
-            &mut snap.abilities.abilities[i].name_len,
-        );
-
-        snap.abilities.bars[0].slots[i] = AbilityBarSlotSnapshot {
-            source_type: 1,
-            source_index: i as u32,
-            ability_icon_ref: 10,
-        };
-    }
-
-    // Group members
-    snap.group.in_group = true;
-    snap.group.member_count = 2;
-
-    let mut m0 = GroupMemberSnapshot::default();
-    m0.entity_id = 100;
-    copy_str_to_array("Healer", &mut m0.name, &mut m0.name_len);
-    m0.active = true;
-    m0.hp_known = true;
-    m0.percent_hp_255 = 240;
-    m0.position = [105.0, 50.0, 202.0];
-    snap.group.members[0] = m0;
-
-    let mut m1 = GroupMemberSnapshot::default();
-    m1.entity_id = 101;
-    copy_str_to_array("Nuker", &mut m1.name, &mut m1.name_len);
-    m1.active = true;
-    m1.hp_known = true;
-    m1.percent_hp_255 = 255;
-    m1.position = [98.0, 50.0, 195.0];
-    snap.group.members[1] = m1;
-
-    // Active effects / buffs
-    let mut e0 = EffectSnapshot::default();
-    e0.icon_ref = 0x4001;
-    copy_str_to_array("Spirit of Wolf", &mut e0.name, &mut e0.name_len);
-    snap.effects.effects[0] = e0;
-
-    let mut e1 = EffectSnapshot::default();
-    e1.icon_ref = 0x4002;
-    copy_str_to_array("Shield of Thorns", &mut e1.name, &mut e1.name_len);
-    snap.effects.effects[1] = e1;
-
-    // Chat scrollback
-    snap.chat.count = 2;
-    let mut msg0 = ChatMessageSnapshot::default();
-    copy_str_to_array(
-        "Welcome to EQOA: Frontiers Native!",
-        &mut msg0.text,
-        &mut msg0.text_len,
-    );
-    msg0.msg_type = MSG_TYPE_SAY;
-    msg0.seq = 1;
-    snap.chat.messages[0] = msg0;
-
-    let mut msg1 = ChatMessageSnapshot::default();
-    copy_str_to_array(
-        "Wereoxx slashes a moss snake for 42 points of damage.",
-        &mut msg1.text,
-        &mut msg1.text_len,
-    );
-    msg1.msg_type = MSG_TYPE_SAY;
-    msg1.seq = 2;
-    snap.chat.messages[1] = msg1;
-
-    // Target entity
-    snap.player.target_entity_id = 2002;
-    let mut target_ent = super::entity::EntitySnapshot::default();
-    target_ent.id = 2002;
-    target_ent.is_populated = true;
-    target_ent.level = 15;
-    target_ent.health_percent_255 = 180;
-    target_ent.disposition = Some(1); // Hostile
-    copy_str_to_array("Moss Snake", &mut target_ent.name, &mut target_ent.name_len);
-    snap.entities.entities[0] = target_ent;
-
-    snap
+    crate::play::Play::bundled_ui_fixture().forge_snapshot(None)
 }
 
 #[test]
@@ -2641,3 +2516,6 @@ pub(crate) fn modern_slot_positions(snapshot: Snapshot) -> Option<Vec<(f32, f32)
             .collect(),
     )
 }
+
+#[path = "bundled_picture_tests.rs"]
+mod bundled_picture_tests;

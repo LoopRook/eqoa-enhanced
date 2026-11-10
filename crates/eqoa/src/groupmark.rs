@@ -275,27 +275,3 @@ mod tests {
         assert_eq!(p.map.waypoint(0), Some(merchant), "the long press's release is nothing");
     }
 }
-
-impl super::Play {
-    pub(super) fn take_map_travel(&mut self) {
-        let Some(spot) = self.map.take_travel_ask() else {
-            return;
-        };
-        if spot.world < 0
-            || !self
-                .session
-                .map_travel_to(spot.world as u32, spot.at[0], spot.at[1])
-        {
-            eprintln!(
-                "map: no travel asked: the server offers none, or world {}",
-                spot.world
-            );
-            return;
-        }
-        eprintln!(
-            "map: travel asked to x {:.0}, z {:.0} in world {}",
-            spot.at[0], spot.at[1], spot.world
-        );
-        self.map.close();
-    }
-}
