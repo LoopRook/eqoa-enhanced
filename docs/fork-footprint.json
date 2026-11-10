@@ -81,9 +81,9 @@
       "reason": "Restored and map input settings rows. Sync 2026-11-07: upstream's macro-key tests use 'y' because the fork binds 'g' to the map's group waypoint (+4/-4)."
     },
     "crates/eqoa/src/binds.rs": {
-      "added": 55,
-      "deleted": 54,
-      "reason": "Restored/map controls and saved binding defaults. Sync 2026-11-07: upstream's macro and alias tests use 'y' for the same reason (+7/-7)."
+      "added": 62,
+      "deleted": 38,
+      "reason": "Restored/map controls and saved binding defaults. Sync 2026-11-07: upstream's macro and alias tests use 'y' for the same reason (+7/-7). Round 2.5 review fix (MiniMax H1): upstream's a_layout_with_the_maps_rows_reads_them is restored verbatim plus one setup-hook line, so deletions fall 54 to 38 and the hook calls add 7."
     },
     "crates/eqoa/src/hud.rs": {
       "added": 264,
@@ -106,9 +106,9 @@
       "reason": "Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged."
     },
     "crates/eqoa/src/options.rs": {
-      "added": 18,
-      "deleted": 11,
-      "reason": "Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. Owner-approved defaults export adds eight regression setup/assertion lines for the 64/650 defaults and retail-minimum controls. Sync 2026-11-07: upstream's Raid List row sits in Map & Quests (UI already holds six, PAGE_MOST stays 6); its walk-test lines move with it (+5/-5). Sync 2026-11-08: upstream's Textures page goes after Map & Quests and Mods & Addons (index 9, so the web build's split_at keeps the fork pages); its row-doc, array lengths, split_at and walk-test page numbers move with it (+5/-5). Refactor/fork-options-rows: the fork's rows, category, change/value_text arms and walk-test steps moved into fork-owned fork_ext/options.rs, leaving only hook calls and page references here (+41/-41). Sync 2026-11-09: Upstream restored IDs 41?45 overlap existing Mana Bars 42. Route map parts and masters through owned rows (existing IDs retained; new 1054/1055), retain six-row pages and put Textures last on web. Stock map/UI walk assertions move to the owned fork walk, retaining Lighting/Texture Folder tests in place. +1 for the new owned master-category reference; deletions remove the conflicting stock rows/arms and relocated assertions. New upstream unique-ID test uses the combined registry, and its retail-boundary fixture explicitly selects 24/100 rather than Enhanced defaults."
+      "added": 21,
+      "deleted": 13,
+      "reason": "Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. Owner-approved defaults export adds eight regression setup/assertion lines for the 64/650 defaults and retail-minimum controls. Sync 2026-11-07: upstream's Raid List row sits in Map & Quests (UI already holds six, PAGE_MOST stays 6); its walk-test lines move with it (+5/-5). Sync 2026-11-08: upstream's Textures page goes after Map & Quests and Mods & Addons (index 9, so the web build's split_at keeps the fork pages); its row-doc, array lengths, split_at and walk-test page numbers move with it (+5/-5). Refactor/fork-options-rows: the fork's rows, category, change/value_text arms and walk-test steps moved into fork-owned fork_ext/options.rs, leaving only hook calls and page references here (+41/-41). Sync 2026-11-09: Upstream restored IDs 41?45 overlap existing Mana Bars 42. Route map parts and masters through owned rows (existing IDs retained; new 1054/1055), retain six-row pages and put Textures last on web. Stock map/UI walk assertions move to the owned fork walk, retaining Lighting/Texture Folder tests in place. +1 for the new owned master-category reference; deletions remove the conflicting stock rows/arms and relocated assertions. New upstream unique-ID test uses the combined registry, and its retail-boundary fixture explicitly selects 24/100 rather than Enhanced defaults. Round 2.5 review fix (MiniMax H2/M1): upstream walk and table tests restored verbatim; +3/-2 net for the restored text and one allow(dead_code) on the unused stock row table."
     },
     "crates/eqoa/src/play.rs": {
       "added": 381,
