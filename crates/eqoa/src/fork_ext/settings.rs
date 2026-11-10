@@ -87,25 +87,15 @@ pub(super) fn migrate_defaults() -> Option<ClientOptions> {
 #[cfg(test)]
 pub(super) fn reset_test_client() {
     super::testing::put(FILE, DEFAULTS_APPLIED.as_bytes());
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        crate::fork_ext::addons::options::reset_in_memory();
+        crate::fork_ext::bindpage::reset_in_memory();
+    }
     // An already-loaded client remains at upstream defaults when this
     // fixture subsequently refuses every read, including the marker.
     if super::store::REFUSE.with(|refuse| refuse.get()) {
         super::set_client(ClientOptions::default());
-    }
-}
-#[cfg(test)]
-thread_local! { static UPSTREAM_ROWS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
-#[cfg(test)]
-pub(super) struct UpstreamRows;
-#[cfg(test)]
-pub(super) fn upstream_rows() -> UpstreamRows {
-    UPSTREAM_ROWS.with(|upstream| upstream.set(true));
-    UpstreamRows
-}
-#[cfg(test)]
-impl Drop for UpstreamRows {
-    fn drop(&mut self) {
-        UPSTREAM_ROWS.with(|upstream| upstream.set(false));
     }
 }
 pub(super) fn write(_c: &ClientOptions, _text: &mut String) {}
@@ -118,26 +108,19 @@ pub(super) fn parse(_c: &mut ClientOptions, key: &str, value: &str) {
             "off" => false,
             _ => return,
         };
-        match key {
-            "target_of_target" => {
-                crate::fork_ext::addons::options::set_toggle("eqoa_target_of_target", "target_of_target", on);
+        let target = match key {
+            "target_of_target" => Some(("eqoa_target_of_target", "target_of_target")),
+            "mana_bars" => Some(("eqoa_mana_bars", "mana_bars")),
+            "stats_box" => Some(("eqoa_stats_box", "stats_box")),
+            "target_hp_percent" => Some(("eqoa_hud_numbers", "target_hp_percent")),
+            "xp_details" => Some(("eqoa_hud_numbers", "xp_details")),
+            "hud_numbers" => Some(("eqoa_hud_numbers", "hud_numbers")),
+            _ => None,
+        };
+        if let Some((addon, id)) = target {
+            if crate::fork_ext::addons::options::load_persisted_toggle(addon, id).is_none() {
+                crate::fork_ext::addons::options::set_toggle(addon, id, on);
             }
-            "mana_bars" => {
-                crate::fork_ext::addons::options::set_toggle("eqoa_mana_bars", "mana_bars", on);
-            }
-            "stats_box" => {
-                crate::fork_ext::addons::options::set_toggle("eqoa_stats_box", "stats_box", on);
-            }
-            "target_hp_percent" => {
-                crate::fork_ext::addons::options::set_toggle("eqoa_hud_numbers", "target_hp_percent", on);
-            }
-            "xp_details" => {
-                crate::fork_ext::addons::options::set_toggle("eqoa_hud_numbers", "xp_details", on);
-            }
-            "hud_numbers" => {
-                crate::fork_ext::addons::options::set_toggle("eqoa_hud_numbers", "hud_numbers", on);
-            }
-            _ => {}
         }
     }
     #[cfg(target_arch = "wasm32")]
@@ -149,10 +132,10 @@ pub(super) fn parse(_c: &mut ClientOptions, key: &str, value: &str) {
 pub fn migrate_configs() {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // 1. client.opt: migrate legacy keys to mod options toggles and strip them
+        // 1. client.opt: write legacy keys to mod storage FIRST, then strip them only after write succeeds.
         if let Some(bytes) = crate::settings::read_config("client.opt") {
             let text = String::from_utf8_lossy(&bytes);
-            let mut modified = false;
+            let mut stripped_any = false;
             let mut cleaned_lines = Vec::new();
             for line in text.lines() {
                 if let Some((k, v)) = line.split_once('=') {
@@ -163,40 +146,45 @@ pub fn migrate_configs() {
                         "off" => Some(false),
                         _ => None,
                     };
-                    match (k, on) {
+                    let target = match (k, on) {
                         ("target_of_target", Some(b)) => {
-                            crate::fork_ext::addons::options::set_toggle("eqoa_target_of_target", "target_of_target", b);
-                            modified = true;
+                            Some(("eqoa_target_of_target", "target_of_target", b))
                         }
-                        ("mana_bars", Some(b)) => {
-                            crate::fork_ext::addons::options::set_toggle("eqoa_mana_bars", "mana_bars", b);
-                            modified = true;
-                        }
-                        ("stats_box", Some(b)) => {
-                            crate::fork_ext::addons::options::set_toggle("eqoa_stats_box", "stats_box", b);
-                            modified = true;
-                        }
+                        ("mana_bars", Some(b)) => Some(("eqoa_mana_bars", "mana_bars", b)),
+                        ("stats_box", Some(b)) => Some(("eqoa_stats_box", "stats_box", b)),
                         ("target_hp_percent", Some(b)) => {
-                            crate::fork_ext::addons::options::set_toggle("eqoa_hud_numbers", "target_hp_percent", b);
-                            modified = true;
+                            Some(("eqoa_hud_numbers", "target_hp_percent", b))
                         }
-                        ("xp_details", Some(b)) => {
-                            crate::fork_ext::addons::options::set_toggle("eqoa_hud_numbers", "xp_details", b);
-                            modified = true;
-                        }
-                        ("hud_numbers", Some(b)) => {
-                            crate::fork_ext::addons::options::set_toggle("eqoa_hud_numbers", "hud_numbers", b);
-                            modified = true;
-                        }
-                        _ => {
+                        ("xp_details", Some(b)) => Some(("eqoa_hud_numbers", "xp_details", b)),
+                        ("hud_numbers", Some(b)) => Some(("eqoa_hud_numbers", "hud_numbers", b)),
+                        _ => None,
+                    };
+                    if let Some((addon, id, b)) = target {
+                        if let Some(existing) =
+                            crate::fork_ext::addons::options::load_persisted_toggle(addon, id)
+                        {
+                            let _ = crate::fork_ext::addons::options::set_toggle_persisted(
+                                addon, id, existing,
+                            );
+                            stripped_any = true;
+                        } else if crate::fork_ext::addons::options::set_toggle_persisted(
+                            addon, id, b,
+                        )
+                        .is_ok()
+                        {
+                            stripped_any = true;
+                        } else {
+                            // Failed to persist to mod storage: keep legacy line in client.opt!
                             cleaned_lines.push(line);
                         }
+                    } else {
+                        cleaned_lines.push(line);
                     }
                 } else {
                     cleaned_lines.push(line);
                 }
             }
-            if modified {
+            if stripped_any {
                 let mut out = cleaned_lines.join("\n");
                 if !out.is_empty() && !out.ends_with('\n') {
                     out.push('\n');
@@ -205,29 +193,34 @@ pub fn migrate_configs() {
             }
         }
 
-        // 2. keys.opt: migrate key.stats_box to mod.eqoa_stats_box.toggle and strip it
+        // 2. keys.opt: migrate key.stats_box to mod.eqoa_stats_box.toggle and strip it only after write succeeds.
         if let Some(bytes) = crate::settings::read_config("keys.opt") {
             let text = String::from_utf8_lossy(&bytes);
-            let mut modified = false;
-            let mut cleaned_lines = Vec::new();
             let mut stats_box_key = None;
+            let mut explicit_mod_key = None;
             for line in text.lines() {
                 if let Some(val) = line.strip_prefix("key.stats_box=") {
                     stats_box_key = Some(val.trim().to_ascii_lowercase());
-                    modified = true;
-                } else {
-                    cleaned_lines.push(line);
+                } else if let Some(val) = line.strip_prefix("mod.eqoa_stats_box.toggle=") {
+                    explicit_mod_key = Some(val.trim().to_ascii_lowercase());
                 }
             }
-            if let Some(k) = stats_box_key {
-                crate::fork_ext::bindpage::register("eqoa_stats_box", "toggle", "b", "Toggle Stats Box");
-                crate::fork_ext::bindpage::set_key("eqoa_stats_box", "toggle", &k);
-            } else if modified {
-                let mut out = cleaned_lines.join("\n");
-                if !out.is_empty() && !out.ends_with('\n') {
-                    out.push('\n');
+            if let Some(legacy_k) = stats_box_key {
+                let target_k = explicit_mod_key.unwrap_or(legacy_k);
+                if crate::fork_ext::bindpage::save_mod_bind(
+                    "eqoa_stats_box",
+                    "toggle",
+                    &target_k,
+                )
+                .is_ok()
+                {
+                    crate::fork_ext::bindpage::register(
+                        "eqoa_stats_box",
+                        "toggle",
+                        "b",
+                        "Toggle Stats Box",
+                    );
                 }
-                let _ = crate::settings::write_config("keys.opt", out.as_bytes());
             }
         }
     }
@@ -377,46 +370,208 @@ mod tests {
         super::super::testing::put("client.opt", legacy_client.as_bytes());
         super::super::testing::put("keys.opt", legacy_keys.as_bytes());
 
-        // Run migration
+        // 0. If write fails, legacy keys are NOT stripped from client.opt or keys.opt
+        super::super::store::REFUSE.with(|r| r.set(true));
+        migrate_configs();
+        super::super::store::REFUSE.with(|r| r.set(false));
+        let unstripped_client =
+            String::from_utf8(super::super::testing::kept("client.opt").unwrap()).unwrap();
+        assert!(
+            unstripped_client.contains("stats_box=on")
+                && unstripped_client.contains("mana_bars=off"),
+            "failed write must not strip client.opt: {unstripped_client}"
+        );
+        let unstripped_keys =
+            String::from_utf8(super::super::testing::kept("keys.opt").unwrap()).unwrap();
+        assert!(
+            unstripped_keys.contains("key.stats_box=j"),
+            "failed write must not strip keys.opt: {unstripped_keys}"
+        );
+
+        // Run migration with writes enabled
         migrate_configs();
 
-        // 1. Mod option toggles received the migrated values
-        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_target_of_target", "target_of_target"), Some(true));
-        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_mana_bars", "mana_bars"), Some(false));
-        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_stats_box", "stats_box"), Some(true));
-        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_hud_numbers", "target_hp_percent"), Some(false));
-        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_hud_numbers", "xp_details"), Some(false));
-        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_hud_numbers", "hud_numbers"), Some(false));
+        // 1. Mod option toggles received the migrated values and persisted under real addon IDs
+        assert_eq!(
+            crate::fork_ext::addons::options::get_toggle(
+                "eqoa_target_of_target",
+                "target_of_target"
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            crate::fork_ext::addons::options::get_toggle("eqoa_mana_bars", "mana_bars"),
+            Some(false)
+        );
+        assert_eq!(
+            crate::fork_ext::addons::options::get_toggle("eqoa_stats_box", "stats_box"),
+            Some(true)
+        );
+        assert_eq!(
+            crate::fork_ext::addons::options::get_toggle(
+                "eqoa_hud_numbers",
+                "target_hp_percent"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            crate::fork_ext::addons::options::get_toggle("eqoa_hud_numbers", "xp_details"),
+            Some(false)
+        );
+        assert_eq!(
+            crate::fork_ext::addons::options::get_toggle("eqoa_hud_numbers", "hud_numbers"),
+            Some(false)
+        );
 
         // 2. Mod keybind received the migrated key
-        assert_eq!(crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle"), Some("j".to_string()));
+        assert_eq!(
+            crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle"),
+            Some("j".to_string())
+        );
 
         // 3. client.opt is stripped of legacy keys
-        let kept_client = String::from_utf8(super::super::testing::kept("client.opt").unwrap()).unwrap();
-        for gone in ["target_of_target", "mana_bars", "stats_box", "target_hp_percent", "xp_details", "hud_numbers"] {
-            assert!(!kept_client.contains(gone), "legacy key {gone} must be stripped from client.opt: {kept_client}");
+        let kept_client =
+            String::from_utf8(super::super::testing::kept("client.opt").unwrap()).unwrap();
+        for gone in [
+            "target_of_target",
+            "mana_bars",
+            "stats_box",
+            "target_hp_percent",
+            "xp_details",
+            "hud_numbers",
+        ] {
+            assert!(
+                !kept_client.contains(gone),
+                "legacy key {gone} must be stripped from client.opt: {kept_client}"
+            );
         }
         assert!(kept_client.contains("lod=on\n"));
         assert!(kept_client.contains("brightness=5\n"));
 
         // 4. keys.opt is stripped of key.stats_box and has mod keybind
-        let kept_keys = String::from_utf8(super::super::testing::kept("keys.opt").unwrap()).unwrap();
-        assert!(!kept_keys.contains("key.stats_box="), "key.stats_box must be stripped from keys.opt: {kept_keys}");
-        assert!(kept_keys.contains("mod.eqoa_stats_box.toggle=j"), "mod bind must be present in keys.opt: {kept_keys}");
-        assert!(kept_keys.contains("key.attack=q"), "unrelated keys must be preserved: {kept_keys}");
+        let kept_keys =
+            String::from_utf8(super::super::testing::kept("keys.opt").unwrap()).unwrap();
+        assert!(
+            !kept_keys.contains("key.stats_box="),
+            "key.stats_box must be stripped from keys.opt: {kept_keys}"
+        );
+        assert!(
+            kept_keys.contains("mod.eqoa_stats_box.toggle=j"),
+            "mod bind must be present in keys.opt: {kept_keys}"
+        );
+        assert!(
+            kept_keys.contains("key.attack=q"),
+            "unrelated keys must be preserved: {kept_keys}"
+        );
 
-        // 5. Explicit user choice subsequently made must be preserved across a second run
-        crate::fork_ext::addons::options::set_toggle("eqoa_target_of_target", "target_of_target", false);
+        // 5. Simulate restart: wipe in-memory state, run second start, and verify mods see persisted values from disk
+        crate::fork_ext::addons::options::reset_in_memory();
+        crate::fork_ext::bindpage::reset_in_memory();
         migrate_configs();
-        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_target_of_target", "target_of_target"), Some(false), "second run does nothing and keeps explicit choices");
+        assert_eq!(
+            crate::fork_ext::addons::options::register_toggle(
+                "eqoa_stats_box",
+                "stats_box",
+                "Stats Box",
+                false
+            )
+            .0,
+            true,
+            "stats_box persisted true survives restart even when default is false"
+        );
+        assert_eq!(
+            crate::fork_ext::addons::options::register_toggle(
+                "eqoa_target_of_target",
+                "target_of_target",
+                "Target of Target",
+                false
+            )
+            .0,
+            true
+        );
+        assert_eq!(
+            crate::fork_ext::addons::options::register_toggle(
+                "eqoa_mana_bars",
+                "mana_bars",
+                "Mana Bars",
+                true
+            )
+            .0,
+            false
+        );
+        assert_eq!(
+            crate::fork_ext::addons::options::register_toggle(
+                "eqoa_hud_numbers",
+                "hud_numbers",
+                "HUD Numbers",
+                true
+            )
+            .0,
+            false
+        );
+        assert_eq!(
+            crate::fork_ext::addons::options::register_toggle(
+                "eqoa_hud_numbers",
+                "target_hp_percent",
+                "Target HP %",
+                true
+            )
+            .0,
+            false
+        );
+        assert_eq!(
+            crate::fork_ext::addons::options::register_toggle(
+                "eqoa_hud_numbers",
+                "xp_details",
+                "XP Details",
+                true
+            )
+            .0,
+            false
+        );
+        crate::fork_ext::bindpage::register("eqoa_stats_box", "toggle", "b", "Toggle Stats Box");
+        assert_eq!(
+            crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle"),
+            Some("j".to_string()),
+            "rebound key survives restart"
+        );
 
-        // 6. Negative control: fresh/empty files trigger no spurious options
+        // 6. Explicit user choice subsequently made must be preserved across another run, even if legacy keys reappear
+        crate::fork_ext::addons::options::set_toggle(
+            "eqoa_target_of_target",
+            "target_of_target",
+            false,
+        );
+        crate::fork_ext::bindpage::set_key("eqoa_stats_box", "toggle", "f10");
+        super::super::testing::put("client.opt", b"target_of_target=on\n");
+        super::super::testing::put(
+            "keys.opt",
+            b"mod.eqoa_stats_box.toggle=f10\nkey.stats_box=j\n",
+        );
+        migrate_configs();
+        assert_eq!(
+            crate::fork_ext::addons::options::get_toggle(
+                "eqoa_target_of_target",
+                "target_of_target"
+            ),
+            Some(false),
+            "explicit mod option choice kept"
+        );
+        assert_eq!(
+            crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle"),
+            Some("f10".to_string()),
+            "explicit mod bind choice kept"
+        );
+
+        // 7. Negative control: fresh/empty files trigger no spurious options
         super::super::testing::put("client.opt", b"lod=on\n");
         super::super::testing::put("keys.opt", b"key.attack=q\n");
         migrate_configs();
-        let fresh_client = String::from_utf8(super::super::testing::kept("client.opt").unwrap()).unwrap();
+        let fresh_client =
+            String::from_utf8(super::super::testing::kept("client.opt").unwrap()).unwrap();
         assert_eq!(fresh_client, "lod=on\n");
-        let fresh_keys = String::from_utf8(super::super::testing::kept("keys.opt").unwrap()).unwrap();
+        let fresh_keys =
+            String::from_utf8(super::super::testing::kept("keys.opt").unwrap()).unwrap();
         assert_eq!(fresh_keys, "key.attack=q\n");
 
         super::super::testing::reset(false);

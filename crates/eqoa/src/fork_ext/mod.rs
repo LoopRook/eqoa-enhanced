@@ -18,11 +18,11 @@ pub mod report_core;
 pub mod telemetry;
 pub mod version;
 
-/// Returns whether the client is in plain gameplay (mode 0 with no dialog,
-/// menu, map, editor, or search claiming keyboard input).
+/// Returns whether the client is in plain gameplay (mode 0 or manual camera 38
+/// with no dialog, menu, map, editor, or search claiming keyboard input).
 pub fn is_plain_play(play: Option<&mut crate::play::Play>) -> bool {
     match play {
-        Some(p) => p.mode == 0 && !p.wants_ui(),
+        Some(p) => (p.mode == 0 || p.mode == 38) && !p.wants_ui() && !p.map.search.open,
         None => false,
     }
 }

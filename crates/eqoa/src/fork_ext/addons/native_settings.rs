@@ -132,6 +132,14 @@ pub(crate) fn callback(lua: &Lua, kind: i32, value: &Value) -> Option<Result<Val
             .flatten()
             .is_some();
         if !forge_has_save {
+            if s.borrow().committed.is_none() {
+                let addon = super::native::session(lua).borrow().addon.clone();
+                if !addon.is_empty() {
+                    if let Some(persisted) = super::options::load_persisted_json(&addon) {
+                        return Some(super::profile::decode(lua, &persisted));
+                    }
+                }
+            }
             if let Some(value) = &s.borrow().value {
                 return Some(super::profile::decode(lua, value));
             }

@@ -581,7 +581,8 @@ fn round_3_stage_a_options_toggle_and_get() {
     )
     .unwrap();
 
-    // Valid registration
+    // Valid registration under the caller's real addon ID
+    super::native::session(&h.lua).borrow_mut().addon = "my_custom_mod".to_string();
     h.execute(
         r#"
         local t, err = eqoa.options.toggle({ id = "test_opt", label = "Test Option", default = true })
@@ -594,10 +595,10 @@ fn round_3_stage_a_options_toggle_and_get() {
     )
     .unwrap();
 
-    // Change setting via item ID
-    let item_id = super::options::get_toggle("mod", "test_opt");
-    assert_eq!(item_id, Some(true));
-    super::options::set_toggle("mod", "test_opt", false);
+    // Change setting via real addon ID
+    let item_val = super::options::get_toggle("my_custom_mod", "test_opt");
+    assert_eq!(item_val, Some(true));
+    super::options::set_toggle("my_custom_mod", "test_opt", false);
 
     h.execute(
         r#"
@@ -606,6 +607,52 @@ fn round_3_stage_a_options_toggle_and_get() {
     "#,
     )
     .unwrap();
+
+    // Second mod with the same toggle id ("test_opt") does not collide with my_custom_mod
+    let h2 = Host::new().unwrap();
+    super::native::session(&h2.lua).borrow_mut().addon = "other_custom_mod".to_string();
+    h2.execute(
+        r#"
+        local t, err = eqoa.options.toggle({ id = "test_opt", label = "Other Option", default = true })
+        assert(err == nil and t.value == true, "second mod gets its own toggle state")
+        assert(eqoa.options.get("test_opt") == true)
+    "#,
+    )
+    .unwrap();
+    assert_eq!(
+        super::options::get_toggle("my_custom_mod", "test_opt"),
+        Some(false),
+        "first mod toggle state preserved"
+    );
+
+    // Disabling a mod hides its option rows and key rows
+    crate::fork_ext::bindpage::register("my_custom_mod", "act", "k", "Custom Act");
+    assert!(
+        super::options::active_mod_items()
+            .iter()
+            .any(|(_, label)| label == "Test Option")
+    );
+    let rows_before = crate::fork_ext::bindpage::extra_rows();
+    super::options::set_addon_enabled("my_custom_mod", false);
+    crate::fork_ext::bindpage::set_addon_enabled("my_custom_mod", false);
+    assert!(
+        !super::options::active_mod_items()
+            .iter()
+            .any(|(_, label)| label == "Test Option"),
+        "disabled mod option row disappears"
+    );
+    assert_eq!(
+        crate::fork_ext::bindpage::extra_rows(),
+        rows_before - 1,
+        "disabled mod bind row disappears"
+    );
+    assert_eq!(
+        crate::fork_ext::bindpage::dispatch_keypress("k"),
+        None,
+        "disabled mod keybind does not fire"
+    );
+    super::options::reset_in_memory();
+    crate::fork_ext::bindpage::reset_in_memory();
 }
 
 #[test]

@@ -34,6 +34,49 @@ const PAGES: [Category; 13] = categories({
 const _: () = assert!(super::fits(&PAGES));
 #[cfg(test)]
 thread_local! { static FORK_PAGES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+#[cfg(not(target_arch = "wasm32"))]
+type DynamicHudEntry = (
+    Vec<(i32, String)>,
+    &'static [Category],
+    &'static [(i32, &'static str)],
+);
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! {
+    static DYNAMIC_HUD_CACHE: std::cell::RefCell<Vec<DynamicHudEntry>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn dynamic_hud_tables() -> (&'static [Category], &'static [(i32, &'static str)]) {
+    let active = crate::fork_ext::addons::options::active_mod_items();
+    let is_default = active.len() == 6
+        && active
+            .iter()
+            .zip(&ITEMS[4..])
+            .all(|((id, l), (def_id, def_l))| id == def_id && l == def_l);
+    if is_default {
+        return (&PAGES, ITEMS);
+    }
+    DYNAMIC_HUD_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((_, pages, items)) = cache.iter().find(|(k, _, _)| *k == active) {
+            return (*pages, *items);
+        }
+        let item_ids: &'static [i32] =
+            Box::leak(active.iter().map(|(id, _)| *id).collect::<Vec<_>>().into_boxed_slice());
+        let mut pages_vec = PAGES.to_vec();
+        let hud_idx = pages_vec.len() - 2;
+        pages_vec[hud_idx].items = item_ids;
+        let pages_slice: &'static [Category] = Box::leak(pages_vec.into_boxed_slice());
+        let mut items_vec = ITEMS[..4].to_vec();
+        for (id, label) in &active {
+            let leaked_label: &'static str = Box::leak(label.clone().into_boxed_str());
+            items_vec.push((*id, leaked_label));
+        }
+        let items_slice: &'static [(i32, &'static str)] = Box::leak(items_vec.into_boxed_slice());
+        cache.push((active, pages_slice, items_slice));
+        (pages_slice, items_slice)
+    })
+}
 /// Production always uses appended pages. Upstream fixtures retain their own
 /// tables; the fork's walker explicitly opts into the complete runtime view.
 pub(super) fn pages() -> &'static [Category] {
@@ -41,7 +84,14 @@ pub(super) fn pages() -> &'static [Category] {
     if !FORK_PAGES.with(|enabled| enabled.get()) {
         return super::CATEGORIES;
     }
-    &PAGES
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        dynamic_hud_tables().0
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        &PAGES
+    }
 }
 pub(super) fn category_legend() -> i32 {
     pages().len() as i32 + 2
@@ -90,7 +140,11 @@ pub(super) const CATEGORY: Category = Category {
 };
 /// The registered rows: upstream's and the fork's own.
 pub(super) fn items() -> impl Iterator<Item = &'static (i32, &'static str)> {
-    super::EXTENDED_ITEMS.iter().chain(ITEMS.iter())
+    #[cfg(not(target_arch = "wasm32"))]
+    let fork_items = dynamic_hud_tables().1;
+    #[cfg(target_arch = "wasm32")]
+    let fork_items = ITEMS;
+    super::EXTENDED_ITEMS.iter().chain(fork_items.iter())
 }
 /// The fork's toggles: the server and the
 /// frame follow their setting as upstream's rows do.
@@ -181,6 +235,8 @@ mod tests {
     }
     #[test]
     fn number_toggles_change_only_their_own_saved_setting() {
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::fork_ext::addons::options::reset_in_memory();
         let defaults = ClientOptions::default();
         let mut c = defaults;
         assert!(change(&mut c, 2004));
@@ -206,9 +262,13 @@ mod tests {
         assert_eq!(c.shadows, defaults.shadows);
         assert!(!change(&mut c, 9999));
         assert!(!activate(9999));
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::fork_ext::addons::options::reset_in_memory();
     }
     #[test]
     fn number_values_use_game_words_and_unknown_rows_have_no_value() {
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::fork_ext::addons::options::reset_in_memory();
         let words = (1..=552)
             .map(|i| match i {
                 551 => "Localized On",
@@ -228,10 +288,14 @@ mod tests {
         assert_eq!(value_text(&vui, 2005, &c), Some(wide("Localized Off")));
         assert_eq!(value_text(&vui, 1051, &c), Some(wide("Open")));
         assert_eq!(value_text(&vui, 9999, &c), None);
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::fork_ext::addons::options::reset_in_memory();
     }
 
     #[test]
     fn combined_tables_preserve_the_upstream_prefix_and_own_every_row_once() {
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::fork_ext::addons::options::reset_in_memory();
         let _pages = ForkPages::enter();
         let upstream = super::super::CATEGORIES;
         for (actual, original) in pages().iter().zip(upstream) {
@@ -271,6 +335,8 @@ mod tests {
     #[test]
     fn the_fork_pages_and_rows() {
         testing::reset(false);
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::fork_ext::addons::options::reset_in_memory();
         let _pages = ForkPages::enter();
         let vui = vui();
         let mut w = WndOptions::default();
@@ -309,6 +375,8 @@ mod tests {
                 assert_eq!(w.item, item);
                 assert!(item >= 1000);
                 let before = settings::client();
+                #[cfg(not(target_arch = "wasm32"))]
+                let mod_before = crate::fork_ext::addons::options::value_by_item(item);
                 w.key(
                     &vui,
                     &mut NullRaster,
@@ -331,6 +399,25 @@ mod tests {
                         &mut ups,
                     );
                     assert_eq!(settings::client(), before);
+                } else if item >= 2000 {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let mod_after = crate::fork_ext::addons::options::value_by_item(item);
+                        assert_ne!(mod_after, mod_before, "mod toggle {item}");
+                        w.key(
+                            &vui,
+                            &mut NullRaster,
+                            &mut o,
+                            key::LEFT,
+                            0,
+                            &mut cues,
+                            &mut ups,
+                        );
+                        assert_eq!(
+                            crate::fork_ext::addons::options::value_by_item(item),
+                            mod_before
+                        );
+                    }
                 } else {
                     assert_eq!(after, before, "action rows do not toggle");
                 }

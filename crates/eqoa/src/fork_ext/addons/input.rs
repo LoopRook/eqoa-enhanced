@@ -157,10 +157,17 @@ pub fn reset_input_state() {
     });
 }
 
-pub fn record_key_event(key: u8, is_down: bool) {
+pub fn emit_named_key_event(key_name: &str, is_down: bool) {
+    let key_str = key_name.to_ascii_lowercase();
     super::native_core::defer(256, move |c| {
-        c.emit("input.key",serde_json::json!({"key":get_key_name(key),"down":is_down,"repeat":false,"synthetic":false}))
+        c.emit(
+            "input.key",
+            serde_json::json!({"key": key_str, "down": is_down, "repeat": false, "synthetic": false}),
+        )
     });
+}
+
+pub fn record_key_event_only(key: u8, is_down: bool) {
     INPUT_STATE.with(|s| {
         let mut state = s.borrow_mut();
         let seq = state.event_seq;
@@ -172,6 +179,11 @@ pub fn record_key_event(key: u8, is_down: bool) {
         }
         state.key_events.push(event);
     });
+}
+
+pub fn record_key_event(key: u8, is_down: bool) {
+    emit_named_key_event(&get_key_name(key), is_down);
+    record_key_event_only(key, is_down);
 }
 
 #[allow(dead_code)]

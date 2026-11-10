@@ -231,9 +231,15 @@ impl Runtime {
             } => {
                 let button = Button::Key(event.physical_key);
                 let code = super::input::winit_key_to_code(event);
-                if let Some(code) = code {
-                    if !is_synthetic && !event.repeat {
-                        super::input::record_key_event(code, event.state == ElementState::Pressed);
+                if !is_synthetic && !event.repeat {
+                    let is_down = event.state == ElementState::Pressed;
+                    if let Some(code) = code {
+                        super::input::record_key_event_only(code, is_down);
+                    }
+                    if plain_play && !keyboard && !super::input::is_text_capture_active() {
+                        if let Some(name) = crate::binds::name_of(&event.logical_key) {
+                            super::input::emit_named_key_event(&name, is_down);
+                        }
                     }
                 }
                 let wants_key_capture =

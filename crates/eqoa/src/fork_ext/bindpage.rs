@@ -20,6 +20,7 @@ pub struct ModBind {
     pub default_key: String,
     pub current_key: String,
     pub description: String,
+    pub enabled: bool,
 }
 
 static MOD_BINDS: Mutex<Vec<ModBind>> = Mutex::new(Vec::new());
@@ -36,6 +37,10 @@ pub fn register(addon: &str, id: &str, default_key: &str, description: &str) -> 
     if let Some(existing) = binds.iter_mut().find(|b| b.addon_id == addon && b.id == id) {
         existing.default_key = default_key.to_ascii_lowercase();
         existing.description = description.to_string();
+        existing.enabled = true;
+        if let Some(saved) = load_saved_key(addon, id) {
+            existing.current_key = saved;
+        }
         return true;
     }
 
@@ -48,13 +53,29 @@ pub fn register(addon: &str, id: &str, default_key: &str, description: &str) -> 
         default_key: default_key.to_ascii_lowercase(),
         current_key,
         description: description.to_string(),
+        enabled: true,
     });
     true
 }
 
+pub fn set_addon_enabled(addon_id: &str, enabled: bool) {
+    let mut binds = MOD_BINDS.lock().unwrap();
+    for b in binds.iter_mut() {
+        if b.addon_id == addon_id {
+            b.enabled = enabled;
+        }
+    }
+}
+
+pub fn reset_in_memory() {
+    let mut binds = MOD_BINDS.lock().unwrap();
+    binds.clear();
+}
+
 pub fn get_key(addon: &str, id: &str) -> Option<String> {
     let binds = MOD_BINDS.lock().unwrap();
-    binds.iter()
+    binds
+        .iter()
         .find(|b| b.addon_id == addon && b.id == id)
         .map(|b| b.current_key.clone())
 }
@@ -63,7 +84,7 @@ pub fn set_key(addon: &str, id: &str, key: &str) -> bool {
     let mut binds = MOD_BINDS.lock().unwrap();
     if let Some(b) = binds.iter_mut().find(|b| b.addon_id == addon && b.id == id) {
         b.current_key = key.to_ascii_lowercase();
-        save_mod_bind(addon, id, &b.current_key);
+        let _ = save_mod_bind(addon, id, &b.current_key);
         true
     } else {
         false
@@ -72,7 +93,7 @@ pub fn set_key(addon: &str, id: &str, key: &str) -> bool {
 
 pub fn extra_rows() -> i32 {
     let binds = MOD_BINDS.lock().unwrap();
-    binds.len() as i32
+    binds.iter().filter(|b| b.enabled).count() as i32
 }
 
 pub fn help_or_defaults(row: i32) -> String {
@@ -80,7 +101,7 @@ pub fn help_or_defaults(row: i32) -> String {
     if r >= ROWS.len() {
         let idx = r - ROWS.len();
         let binds = MOD_BINDS.lock().unwrap();
-        if let Some(b) = binds.get(idx) {
+        if let Some(b) = binds.iter().filter(|b| b.enabled).nth(idx) {
             return format!("{} (from mod: {}).", b.description, b.addon_id);
         }
     }
@@ -104,7 +125,7 @@ pub fn draw(
     }
     let idx = (entry - base) as usize;
     let binds = MOD_BINDS.lock().unwrap();
-    let Some(bind) = binds.get(idx) else {
+    let Some(bind) = binds.iter().filter(|b| b.enabled).nth(idx) else {
         return false;
     };
 
@@ -141,7 +162,7 @@ pub fn reset_defaults() {
     let mut binds = MOD_BINDS.lock().unwrap();
     for b in binds.iter_mut() {
         b.current_key = b.default_key.clone();
-        save_mod_bind(&b.addon_id, &b.id, &b.current_key);
+        let _ = save_mod_bind(&b.addon_id, &b.id, &b.current_key);
     }
 }
 
@@ -158,13 +179,13 @@ pub fn capture_key(
     }
     let idx = row - base;
     let mut binds = MOD_BINDS.lock().unwrap();
-    let Some(bind) = binds.get_mut(idx) else {
+    let Some(bind) = binds.iter_mut().filter(|b| b.enabled).nth(idx) else {
         return false;
     };
 
     let key_name = name.to_ascii_lowercase();
     bind.current_key = key_name.clone();
-    save_mod_bind(&bind.addon_id, &bind.id, &key_name);
+    let _ = save_mod_bind(&bind.addon_id, &bind.id, &key_name);
 
     *capture = None;
     *note = Some(format!("{}: {}.", bind.description, binds::display(&key_name)));
@@ -191,7 +212,7 @@ fn load_saved_key(addon: &str, id: &str) -> Option<String> {
     None
 }
 
-fn save_mod_bind(addon: &str, id: &str, key: &str) {
+pub fn save_mod_bind(addon: &str, id: &str, key: &str) -> Result<(), String> {
     let existing = read_config(KEYS_FILE).unwrap_or_default();
     let text = String::from_utf8_lossy(&existing);
     let key_line = format!("mod.{addon}.{id}={key}");
@@ -215,13 +236,13 @@ fn save_mod_bind(addon: &str, id: &str, key: &str) {
         out.push_str(&key_line);
         out.push('\n');
     }
-    let _ = write_config(KEYS_FILE, out.as_bytes());
+    write_config(KEYS_FILE, out.as_bytes())
 }
 
 pub fn dispatch_keypress(key_name: &str) -> Option<(String, String)> {
     let key = key_name.to_ascii_lowercase();
     let binds = MOD_BINDS.lock().unwrap();
-    for b in binds.iter() {
+    for b in binds.iter().filter(|b| b.enabled) {
         if b.current_key == key {
             return Some((b.addon_id.clone(), b.id.clone()));
         }

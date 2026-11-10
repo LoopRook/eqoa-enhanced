@@ -116,6 +116,12 @@ impl Storage {
         identity_relative(&addon.entry, &addon.package_root, &mods_root, &addon.id)
     }
 
+    /// Computes the folder-independent v2 storage key for a standard `<id>/main.lua` addon.
+    pub(crate) fn key_for_addon_id(id: &str) -> String {
+        let entry = format!("{id}/main.lua");
+        digest_fields_v2(entry.as_bytes(), id.as_bytes(), id.as_bytes())
+    }
+
     /// Computes the legacy v1 storage key (hashing absolute paths). Retained for migration.
     pub fn v1_key(addon: &DiscoveredAddon) -> Result<String, String> {
         identity_v1(&addon.entry, &addon.package_root, &addon.id)

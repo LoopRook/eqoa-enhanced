@@ -82,6 +82,15 @@ pub fn clear_all() {
     });
 }
 
+/// Clear all queued commands for a specific addon.
+pub fn clear_addon(addon_id: &str) {
+    MOD_QUEUES.with(|queues| {
+        if let Some(queue) = queues.borrow_mut().get_mut(addon_id) {
+            queue.clear();
+        }
+    });
+}
+
 /// Draw all queued mod HUD commands through the native `UiRaster` and `Vui`.
 pub fn draw(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>) {
     let (orig_anchor, orig_vert) = (ui.ui.anchor, ui.ui.vertical);

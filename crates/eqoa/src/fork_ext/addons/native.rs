@@ -57,7 +57,7 @@ impl Session {
                 4,
             ),
             ("bank", "get", 3),
-            ("binds", "register", 3),
+            ("binds", "get register", 3),
             ("camera", "get compass", 4),
             ("capabilities", "get list has", 2),
             ("chat", "history get_channel channel_name", 2),

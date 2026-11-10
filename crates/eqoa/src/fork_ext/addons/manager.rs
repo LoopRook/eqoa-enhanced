@@ -122,6 +122,7 @@ impl Manager {
         queue: &wgpu::Queue,
         renderer: Rc<RefCell<WgpuRenderer>>,
     ) -> Self {
+        super::options::set_storage_root(storage_root.clone());
         let mut manager = Self {
             named: None,
             root,
@@ -293,6 +294,8 @@ impl Manager {
                     }
                 }
                 self.configure_native_settings(entry);
+                super::options::set_addon_enabled(&entry.metadata.id, true);
+                crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, true);
                 let instance = entry.instance.as_mut().unwrap();
                 instance.host.snapshot.set(snapshot);
                 instance.active = true;
@@ -676,6 +679,9 @@ impl Manager {
         if entry.status != Status::Failed {
             entry.status = Status::Disabled;
         }
+        super::options::set_addon_enabled(&entry.metadata.id, false);
+        crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, false);
+        super::hud_layer::clear_addon(&entry.metadata.id);
     }
 
     fn fail(&mut self, entry: &mut Entry, phase: &'static str, error: String, rendering: bool) {
@@ -760,6 +766,8 @@ impl Manager {
                     );
                 } else {
                     entry.enabled_intent = enabled;
+                    super::options::set_addon_enabled(&entry.metadata.id, enabled);
+                    crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, enabled);
                     let result = if let Some(s) = &mut self.named {
                         s.data.enabled.insert(entry.key.clone(), enabled);
                         s.dirty = true;
@@ -889,6 +897,11 @@ impl Manager {
                 }
             };
             let enabled_intent = intent.or(persisted).unwrap_or(metadata.initially_enabled);
+            super::options::set_addon_enabled(&metadata.id, enabled_intent);
+            crate::fork_ext::bindpage::set_addon_enabled(&metadata.id, enabled_intent);
+            if !enabled_intent {
+                super::hud_layer::clear_addon(&metadata.id);
+            }
             self.entries.push(Entry {
                 metadata,
                 key,
