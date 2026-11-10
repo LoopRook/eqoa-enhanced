@@ -54,25 +54,62 @@ atlas; blank ability icons are an explicit fixture limit, not verified game-art 
 
 ## Validation
 
-Final integrated checks:
+Final integrated checks at `c7a5498` (the options merge), all run in this worktree with
+`CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared` and a scratch `EQOA_CONFIG`:
 
 | Check | Result |
 | --- | --- |
-| Workspace (unfiltered, no-fail-fast) | 2165 passed / 2 known AO failures / 32 ignored; 269 explicit SKIP lines |
-| Client binary within that suite | 1810 passed / 0 failed / 30 ignored |
-| Bundled picture capture and missing-layer controls | 3 passed; 3 golden-comparison SKIPs; 0 GPU skips |
-| Tooling | 97 passed |
-| Pinned footprint | PASS, 344 owned / 42 shared |
-| Optimized zero-addon gate | Running |
-| Wasm check | Pending |
-| Release build | Pending |
+| Workspace (`cargo test --locked --workspace --no-fail-fast -- --test-threads=1`) | **2172 passed / 2 known AO failures / 32 ignored**; 271 SKIP lines |
+| Client binary within that suite | 1817 passed / 0 failed / 30 ignored |
+| Bundled picture capture and missing-layer controls | 3 passed; **3 golden-comparison SKIPs**; 0 GPU skips |
+| Tooling (`python -X utf8 -m unittest discover -s tools -p "test_*.py"`) | 97 passed |
+| Pinned footprint (`--base 91f9e72…`) | **FAIL**: +6149/-349 in 42 shared files, 346 owned; 2 budgets exceeded |
+| Optimized zero-addon gate (exact CI command) | **PASS**: `1 passed`, zero allocations and bytes |
+| `cargo check -p eqoa --target wasm32-unknown-unknown` | PASS (two unused-parameter warnings only) |
+| `cargo build --release --locked -p eqoa` | PASS |
+| Release packaging allowlist (CI env: `+crt-static`, commit stamp, `enhanced-dev`) | PASS |
+| Notes heading check | PASS |
+| Dry-run merge against `origin/master` | 7 conflicted files |
 
-Rust pass counts include fixture tests that print SKIP and return; the 269 SKIP lines are
-reported separately and must not be read as verified disc/oracle/golden coverage.
+The two workspace failures are the known upstream/NVIDIA AO tests and are left visible:
+`the_foot_of_a_wall_darkened_and_open_ground_not` (grey `[127,127,127]` where `[128,128,128]`
+was drawn) and `the_same_at_freeport_as_at_the_origin` (factor 54, 56 at half the radius,
+1227 pixels under 200), both on an NVIDIA RTX 3070 Ti Vulkan adapter. No renderer code or
+assertion was changed.
+
+The optimized gate ran exactly as `public-source.yml` does:
+`cargo +1.99.1 test --release --locked -p eqoa --bin eqoa --target x86_64-pc-windows-msvc
+play::fork_hooks::native_tests::performance_busy_world_zero_addons_frame_and_packet_allocation_bound
+-- --exact --test-threads=1 --nocapture`, with the nonempty-result guard satisfied by
+`test result: ok. 1 passed;`. Measured: menu 11.655 µs/frame, world 7.310 µs/frame,
+0.069 µs/event, 0.018 µs/chat, with `0.0` allocations and bytes on every path.
+
+**Picture SKIPs.** The SKIP count is 271 lines: 260 `SKIP: …`, 9 other `SKIP …` lines and
+2 `SKIPPED: …` lines. Three of them are exactly the bundled picture tests
+(`arpg_ui`, `avoids_modern_ui`, `wereoxxs_ui`), and they skip the golden comparison because
+the reviewed golden PNGs are absent from this checkout (`EQOA_BUNDLED_UI_GOLDENS` is unset
+and empty). Their captures are written to the shared target as `r25-*.png`, and the
+missing-addon-layer controls pass, but a capture is not visual parity: no picture was
+verified against a reviewed baseline here.
+
+The packaging step was re-run on a CI-equivalent build (`RUSTFLAGS=-C
+target-feature=+crt-static`, `EQOA_BUILD_COMMIT` set, `EQOA_UPDATE_CHANNEL=enhanced-dev`)
+because the plain release build has no static CRT and no commit stamp; it produced the
+expected `EQOA-Enhanced-Nightly-Windows-x64.zip`, stamped exe, `SHA256SUMS`, `update.txt`
+and `update-notes.md` in a scratch output directory. `dev_release.py preflight` itself cannot
+run on this branch: it requires the commit to be an ancestor of `refs/remotes/origin/develop`,
+and this checkout's `origin` is upstream (develop is `looprook/develop`), while a feature
+branch is deliberately not on develop. Its notes check (`unreleased_heading_problem`) passes,
+and the tooling suite covers it.
+
+Rust pass counts include fixture tests that print SKIP and return; the 271 SKIP lines are
+reported separately and must not be read as verified disc/oracle/golden coverage. The two AO
+failures are the only failures; no other target failed.
 
 Earlier validation history (kept to document the negative cases and their fixes):
-Tooling: **97 passed** on the final run, including both workflow negative controls. Footprint:
-**PASS** against the pinned base. The subsequent item-3 policy changes are detailed below.
+Tooling: **97 passed** on that run, including both workflow negative controls. Footprint:
+**PASS** at the policy-only snapshot (`c9dd806` + `ce814af`) against the pinned base, before
+the options merge. The item-3 policy changes are detailed below.
 
 The initial optimized eqoa run was **1806 passed / 2 failed / 30 ignored**. Both failures were
 in new test setup: Wereoxxs initializes before drawing, so visible geometry is now required
@@ -110,32 +147,49 @@ shared budgets, including new files under that family counted in full. Identical
 groupmark, mapsuggest and other map-family paths have no dormant allowance: an edit to an
 unlisted shared file fails review. Ten obsolete budgets were removed and twelve existing
 budgets tightened; **no existing budget increased**. Both options hook-record corrections
-(`aa6cd8e`, `6d2666e`) survive unchanged. FORK.md and FORK-OWNERSHIP.md now agree with the manifest.
-The checker passes with **344 fork-owned / 42 shared changed files**. A negative control
-reducing map/mini.rs's allowance by one line fails with `exceeds budget`.
+(`aa6cd8e`, `6d2666e`) survive unchanged. FORK.md and FORK-OWNERSHIP.md agree with the manifest.
+That policy snapshot passed at `c9dd806` + `ce814af` with **344 fork-owned / 42 shared changed
+files**; a negative control reducing map/mini.rs's allowance by one line failed with
+`exceeds budget`.
 
-Line counts use the checker's exact `git diff --no-renames --numstat` semantics against the
-pinned base; the reported totals sum its `SHARED` rows. Before = develop `264a5fb`, after =
-merged source `c9dd806` plus the policy-only correction `ce814af`.
+**The merged branch HEAD does not pass its own footprint gate.** Measured at `c7a5498` with
+`python -X utf8 tools/check_fork_footprint.py --base 91f9e72…`:
 
-| Measurement | Before | After |
+| Shared path | Measured | Budget | Result |
+| --- | ---: | ---: | --- |
+| `crates/eqoa/src/binds.rs` | +62 / -38 | +55 / -54 | exceeds budget |
+| `crates/eqoa/src/options.rs` | +21 / -13 | +18 / -11 | exceeds budget |
+
+Both paths received options-branch code at the merge (`c7a5498` adds 23 lines to
+`binds.rs` and 33 to `options.rs`), while the merge kept the first parent's tightened
+budgets. The second parent's manifest values (`binds.rs` 100/87, `options.rs` 46/142) were
+measured on a different base and are not a valid replacement. **No budget was raised and no
+source or test was changed to satisfy the gate.** A fresh measurement would raise the added
+allowance by 7 lines (`binds.rs`) and 3 lines (`options.rs`) and lower both deleted allowances;
+that is an owner policy decision and remains open.
+
+The checker still reports **346 fork-owned / 42 shared changed files**. Line counts use its
+exact `git diff --no-renames --numstat` semantics against the pinned base and sum its `SHARED`
+rows.
+
+| Measurement | Before (`264a5fb`) | After (`c7a5498`) |
 | --- | ---: | ---: |
-| Actual checker totals under the policy then in force | +1995 / -424 (31 files) | +6249 / -394 (42 files) |
-| Same corrected classification applied to both snapshots | +6657 / -509 (46 files) | +6249 / -394 (42 files) |
-| Total changed shared lines, same classification | 7166 | 6643 |
+| Same corrected classification applied to both snapshots | +6657 / -509 (46 files) | +6149 / -349 (42 files) |
+| Total changed shared lines, same classification | 7166 | 6498 |
 
-The raw checker total rises because the old policy hid map-family code. On the same
-classification the round removes **408 added lines and 115 deleted-line divergences**,
-**523 fewer changed lines** overall. Classification changes do not add gameplay code.
+The policy-only snapshot before the options merge measured +6249 / -394 (6643 changed lines);
+the merge's restored upstream settings/fixtures account for the further drop. Against the
+develop snapshot the merged round removes **508 added lines, 160 deleted-line divergences and
+668 changed lines** under one classification. Classification changes do not add gameplay code.
 
-Dry-run merges used `git merge --no-commit --no-ff` in a disposable shared clone, first at
-`264a5fb`, then at `c9dd806`, against pinned `origin/master`
-`986206b69cd432b6d9be21b9a1a08c2b0051d6bb`. The scratch clone used the repository's
-`merge.ours.driver=true` for its fork-owned README/CLAUDE rules. Both merges were aborted and
-clean state verified. Conflicted files: **8 before -> 7 after**, matching the options worker.
-The touch.rs conflict disappears. Remaining conflicts: hud.rs, map/chrome.rs, map/mini.rs,
-options.rs, play.rs, settings.rs and viewer.rs. No merge into develop or upstream was performed.
+The dry-run merge was repeated in this worktree rather than a clone: repository config already
+held `merge.ours.driver=true`, so `git merge --no-commit --no-ff origin/master`
+(`986206b69cd432b6d9be21b9a1a08c2b0051d6bb`) was run on a clean tree. Conflicted files:
+**7** — `hud.rs`, `map/chrome.rs`, `map/mini.rs`, `options.rs`, `play.rs`, `settings.rs` and
+`viewer.rs` (the options worker's 8 -> 7, with `touch.rs` gone). The merge was aborted
+immediately; HEAD stayed at `c7a5498` and `git status` is clean. No merge into develop or
+upstream was performed.
 
-All Cargo commands use `C:/Users/hocka/Paseo/targets/shared`, the shared mkdir build lock with
-a bounded acquisition wait, and scratch configuration. No worktree target directory is created.
-No worktree target folder was created. The scratch merges changed no protected branch.
+All Cargo commands use `C:/Users/hocka/Paseo/targets/shared`, one at a time, with a scratch
+`EQOA_CONFIG`; no worktree target directory was created. The packaging check wrote only to
+`%TEMP%`. The dry-run merge changed no protected branch.
