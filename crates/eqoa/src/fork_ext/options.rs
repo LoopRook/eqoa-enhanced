@@ -107,6 +107,9 @@ pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
         1048 => c.target_hp_percent = !c.target_hp_percent,
         1049 => c.xp_details = !c.xp_details,
         1050 => c.hud_numbers = !c.hud_numbers,
+        item if item >= crate::fork_ext::addons::options::MOD_OPTION_BASE => {
+            return crate::fork_ext::addons::options::toggle_by_item(item);
+        }
         // An action row (Open Mods Folder, Combat Parser, Addon Manager) acts
         // on ✕ (`activate`), not on left or right.
         _ => return false,
@@ -145,6 +148,9 @@ pub(super) fn value_text(vui: &Vui, item: i32, c: &ClientOptions) -> Option<Vec<
         } else {
             "Launch"
         }),
+        item if item >= crate::fork_ext::addons::options::MOD_OPTION_BASE => {
+            crate::fork_ext::addons::options::value_by_item(item).map(on_off)?
+        }
         _ => return None,
     })
 }

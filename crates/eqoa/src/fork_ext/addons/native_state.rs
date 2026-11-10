@@ -546,5 +546,162 @@ fn install_math(lua: &Lua) -> Result<()> {
         let d=distance(a,b);let range=ability["range"].as_f64().unwrap_or(0.0) as f32;
         lua.pack_multi((record(lua,"eqoa.abilities.RangeResult",&json!({"in_range":range==0.0 || ability["scope"]==0 || ee::le(d,range),"distance":d}))?,Value::Nil))
     })?)?;
+    bind(
+        lua,
+        "player",
+        "stats",
+        lua.create_function(|lua, ()| {
+            read(lua, "eqoa.player.stats", "eqoa.player.Stats", |v| {
+                v.player_stats.clone().unwrap_or(Json::Null)
+            })
+        })?,
+    )?;
+    bind(
+        lua,
+        "actions",
+        "assist",
+        lua.create_function(|lua, ()| {
+            let in_world = CORE.with(|c| c.borrow().view.in_world);
+            if !in_world {
+                return error(lua, "eqoa.actions.assist", "not_in_world", "enter a loaded world first");
+            }
+            super::actions::request_assist();
+            lua.pack_multi((true, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "windows",
+        "open",
+        lua.create_function(|lua, name: Value| {
+            let Some(name) = name.as_string().and_then(|s| s.to_str().ok().map(|s| s.to_string())) else {
+                return error(lua, "eqoa.windows.open", "invalid_argument", "window name must be a string");
+            };
+            if name != "summary" {
+                return error(lua, "eqoa.windows.open", "invalid_argument", "unsupported window name");
+            }
+            let in_world = CORE.with(|c| c.borrow().view.in_world);
+            if !in_world {
+                return error(lua, "eqoa.windows.open", "not_in_world", "enter a loaded world first");
+            }
+            super::actions::request_summary();
+            lua.pack_multi((true, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "hud",
+        "frame",
+        lua.create_function(|lua, arg: Option<Value>| {
+            let (w, h) = match arg {
+                Some(Value::Table(t)) => {
+                    let w = t.get::<Option<u32>>("width")?.unwrap_or(640);
+                    let h = t.get::<Option<u32>>("height")?.unwrap_or(448);
+                    (w, h)
+                }
+                _ => super::hud_layout::get_window_size(),
+            };
+            let j = super::hud_layout::hud_frame_json((w, h));
+            lua.pack_multi((record(lua, "eqoa.hud.Frame", &j)?, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "hud",
+        "layout",
+        lua.create_function(|lua, arg: Option<Value>| {
+            let (w, h) = match arg {
+                Some(Value::Table(t)) => {
+                    let w = t.get::<Option<u32>>("width")?.unwrap_or(640);
+                    let h = t.get::<Option<u32>>("height")?.unwrap_or(448);
+                    (w, h)
+                }
+                _ => super::hud_layout::get_window_size(),
+            };
+            let j = super::hud_layout::hud_layout_json((w, h));
+            lua.pack_multi((record(lua, "eqoa.hud.Layout", &j)?, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "hud",
+        "visible",
+        lua.create_function(|lua, element: Option<String>| {
+            let in_world = CORE.with(|c| c.borrow().view.in_world);
+            if !in_world {
+                return lua.pack_multi((false, Value::Nil));
+            }
+            let vis = match element {
+                Some(name) => super::hud_layout::hud_element_visible(&name),
+                None => super::hud_layout::hud_element_visible("hud"),
+            };
+            lua.pack_multi((vis, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "fonts",
+        "game",
+        lua.create_function(|lua, ()| {
+            let j = json!({
+                "name": "ArialUI",
+                "height": 21,
+                "scale": 0.6,
+            });
+            lua.pack_multi((record(lua, "eqoa.fonts.GameFont", &j)?, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "options",
+        "toggle",
+        lua.create_function(|lua, spec: Value| {
+            let Value::Table(t) = spec else {
+                return error(lua, "eqoa.options.toggle", "invalid_argument", "spec must be a table");
+            };
+            let id: String = match t.get("id") {
+                Ok(s) => s,
+                Err(_) => return error(lua, "eqoa.options.toggle", "invalid_argument", "id is required"),
+            };
+            let label: String = t.get("label").unwrap_or_else(|_| id.clone());
+            let default: bool = t.get("default").unwrap_or(false);
+            let (val, item_id) = super::options::register_toggle("mod", &id, &label, default);
+            let j = json!({
+                "id": id,
+                "label": label,
+                "default": default,
+                "value": val,
+                "item_id": item_id,
+            });
+            lua.pack_multi((record(lua, "eqoa.options.Toggle", &j)?, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "options",
+        "get",
+        lua.create_function(|lua, id: String| {
+            let val = super::options::get_toggle("mod", &id);
+            lua.pack_multi((val, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "input",
+        "bind",
+        lua.create_function(|lua, (spec, callback): (Value, Option<Value>)| {
+            let Value::Table(t) = spec else {
+                return error(lua, "eqoa.input.bind", "invalid_argument", "spec must be a table");
+            };
+            let id: String = match t.get("id") {
+                Ok(s) => s,
+                Err(_) => return error(lua, "eqoa.input.bind", "invalid_argument", "id is required"),
+            };
+            let _default_key: String = t.get("default_key").unwrap_or_else(|_| "b".into());
+            let _label: String = t.get("label").unwrap_or_else(|_| id.clone());
+            let _ = callback;
+            lua.pack_multi((true, Value::Nil))
+        })?,
+    )?;
     Ok(())
 }

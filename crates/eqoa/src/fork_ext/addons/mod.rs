@@ -21,6 +21,7 @@ pub(crate) fn take_close_options_on_open() -> bool {
     CLOSE_OPTIONS_ON_OPEN.swap(false, std::sync::atomic::Ordering::AcqRel)
 }
 pub(crate) mod ability;
+pub(crate) mod actions;
 pub(crate) mod bit;
 pub(crate) mod chat;
 pub(crate) mod chat_history;
@@ -39,6 +40,7 @@ pub(crate) mod group;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod health;
 pub(crate) mod host;
+pub(crate) mod hud_layout;
 #[cfg(test)]
 mod icon_tests;
 pub(crate) mod icons;
@@ -54,6 +56,7 @@ pub(crate) mod native_settings;
 mod native_state;
 #[cfg(test)]
 mod native_tests;
+pub(crate) mod options;
 pub(crate) mod package;
 pub(crate) mod player;
 mod profile;

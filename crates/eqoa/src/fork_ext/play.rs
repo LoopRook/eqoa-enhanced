@@ -22,6 +22,17 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         if _game_step {
             let ready = _play.in_world_now();
             weapon_sets_requests(_play, ready);
+            let reqs = crate::fork_ext::addons::actions::take_action_requests();
+            if ready && _play.mode == 0 {
+                if reqs.assist {
+                    _play.assist_target();
+                }
+                if reqs.summary {
+                    _play.trainer_open = true;
+                    _play.trainer_from_hud = true;
+                    _play.mode = 12;
+                }
+            }
             if !ready {
                 crate::fork_ext::addons::chat::cancel_outgoing_chat(
                     "world became unavailable before queued chat could be sent",

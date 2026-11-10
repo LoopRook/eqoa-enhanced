@@ -67,10 +67,7 @@ const ROOM: &str = "8888";
 /// The seven trainable stats and the armour class; the maximum hit points
 /// (HPMax, the channel's 8), the maximum power (POW, 10) and the resists in
 /// the Summary's order (fire, cold, lightning, arcane, poison, disease).
-pub const ROWS: [[(i32, i32); 8]; 2] = [
-    [(226, 0), (227, 1), (228, 2), (229, 3), (230, 4), (231, 5), (232, 6), (242, 14)],
-    [(234, 8), (496, 10), (447, 24), (451, 25), (450, 26), (452, 27), (448, 22), (449, 23)],
-];
+pub use crate::fork_ext::player_stats::{Row, ROWS, Shift, Source, View, view};
 
 /// A row's label, a value as it stands, one an effect raises, one it lowers,
 /// and the words' shadow; the box's backing.
@@ -80,86 +77,6 @@ pub const RAISED: [f32; 4] = [0.45, 0.78, 1.0, 1.0];
 pub const LOWERED: [f32; 4] = [1.0, 0.45, 0.4, 1.0];
 const SHADOW: [f32; 4] = [0.0, 0.0, 0.0, 0.85];
 const BACK: [f32; 4] = [0.05, 0.06, 0.08, 0.85];
-
-/// How the effects leave a stat.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Shift {
-    Same,
-    Raised,
-    Lowered,
-}
-
-/// A row: its stat's word, its value, and what it is without the effects:
-/// between the base's and the worn items' alone and that with the masteries'
-/// (none for POW, whose effects' share cannot be told).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Row {
-    pub word: i32,
-    pub value: i32,
-    pub without: Option<(i32, i32)>,
-}
-
-impl Row {
-    pub fn shift(&self) -> Shift {
-        match self.without {
-            Some((_, high)) if self.value > high => Shift::Raised,
-            Some((low, _)) if self.value < low => Shift::Lowered,
-            _ => Shift::Same,
-        }
-    }
-
-    pub fn color(&self) -> [f32; 4] {
-        match self.shift() {
-            Shift::Same => SAME,
-            Shift::Raised => RAISED,
-            Shift::Lowered => LOWERED,
-        }
-    }
-}
-
-/// What the box shows: `ROWS`' rows, column by column.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct View {
-    pub rows: [[Row; 8]; 2],
-}
-
-/// What the box reads off the client: the stat channel, the inventory (its
-/// worn items), the masteries' stats and stat-cap bonuses
-/// (`VIClientPart4EC58`, the dump's and 0x1402's) and the stat cap
-/// (`m_player.m_p44`, none when 0).
-pub struct Source<'a> {
-    pub stats: &'a Stats,
-    pub inv: &'a ItemList,
-    pub mastery: &'a [i64; 29],
-    pub bonuses: &'a [i64; 7],
-    pub p44: i32,
-}
-
-/// The rows as they stand, or none before the stat channel has come (no
-/// maximum hit points yet).
-pub fn view(s: &Source) -> Option<View> {
-    if s.stats.stat[8] <= 0 {
-        return None;
-    }
-    // each stat without the effects: the base and the worn items, and that
-    // with the masteries, the seven within their cap
-    let (mut low, mut high) = ([0i32; 29], [0i32; 29]);
-    for i in 0..29 {
-        let gear = crate::infotext::stat_total(&s.stats.base, s.inv, i as i64) as i32;
-        let m = crate::trainer::mastery_stat(s.mastery, i as i32);
-        let cap = |v: i32| if i < 7 && s.p44 > 0 { v.min(crate::trainer::stat_cap(s.p44, s.bonuses, i as i32)) } else { v };
-        (low[i], high[i]) = (cap(gear.min(gear + m)), cap(gear.max(gear + m)));
-    }
-    let mut out = View::default();
-    for (col, rows) in ROWS.iter().enumerate() {
-        for (k, &(word, stat)) in rows.iter().enumerate() {
-            let derived = |v: &[i32; 29]| crate::trainer::Data::derived(v, stat);
-            let without = (stat != 10).then(|| (derived(&low), derived(&high)));
-            out.rows[col][k] = Row { word, value: derived(&s.stats.stat), without };
-        }
-    }
-    Some(out)
-}
 
 /// B (`binds`' "stats_box"): the box shown or hidden, kept (Extended's
 /// Stats Box).

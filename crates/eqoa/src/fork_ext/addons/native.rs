@@ -50,6 +50,7 @@ impl Session {
         // Normative function index (§2). Registration does not imply implementation.
         for (module, names, round) in [
             ("abilities", "list get find in_range", 2),
+            ("actions", "assist", 3),
             (
                 "actions",
                 "status cancel target cycle_target assist interact attack cast use_hotbar use_item equip destroy swap_items quick_slot weapon_set prepare_weapon_set assign_ability unmemorize_ability unmemorize_all arrange_ability loot loot_all buy sell bank_move bank_money chat command move look autorun follow stop camera open_window close_window select_row activate_row dialog_answer input_text drop_quest mastery_share mastery_browse mastery_buy mastery_refund buttons menu_command",
@@ -68,13 +69,16 @@ impl Session {
             ("files", "read write remove", 2),
             ("files", "list", 4),
             ("fonts", "load default release", 2),
+            ("fonts", "game", 3),
             ("gems", "get is_gem format", 3),
             ("group", "get", 2),
             ("hotbar", "list", 2),
             ("hud", "hide show hidden_by", 2),
+            ("hud", "frame layout visible", 3),
             ("icons", "resource ui info", 2),
             ("icons", "class disposition", 4),
             ("input", "get claim release capture_text rotate_dpad", 2),
+            ("input", "bind", 3),
             ("inventory", "get", 3),
             (
                 "items",
@@ -95,13 +99,16 @@ impl Session {
                 2,
             ),
             ("merchant", "get price", 3),
+            ("options", "toggle get", 3),
             ("player", "get experience_for_level", 2),
+            ("player", "stats", 3),
             ("quests", "list get", 4),
             ("settings", "load save on_save on_load", 2),
             ("sound", "load play stop set_volume is_playing release", 2),
             ("target", "get", 2),
             ("text", "localized", 2),
             ("textures", "load rgba release", 2),
+            ("windows", "open", 3),
             ("windows", "get find get_window format_hint parse_hint", 4),
         ] {
             s.describe(
@@ -504,6 +511,9 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
                     | "eqoa.client.display"
                     | "eqoa.client.time"
                     | "eqoa.player.get"
+                    | "eqoa.player.stats"
+                    | "eqoa.actions.assist"
+                    | "eqoa.fonts.game"
                     | "eqoa.target.get"
                     | "eqoa.group.get"
                     | "eqoa.entities.list"
@@ -810,6 +820,14 @@ fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.input.InputState", "pad") => Some("eqoa.input.Pad"),
         ("eqoa.input.Pad", "left" | "right") => Some("eqoa.Vec2"),
         ("eqoa.input.Pad", "raw_left" | "raw_right") => Some("eqoa.input.RawAxes"),
+        ("eqoa.player.Stats", "rows") => Some("eqoa.player.StatItem"),
+        ("eqoa.player.Stats", "strength" | "stamina" | "agility" | "dexterity" | "wisdom" | "intelligence" | "charisma" | "armor" | "max_hp" | "max_power" | "fire" | "cold" | "lightning" | "arcane" | "poison" | "disease") => Some("eqoa.player.StatItem"),
+        ("eqoa.hud.Layout", "player") => Some("eqoa.hud.PlayerLayout"),
+        ("eqoa.hud.Layout", "group_members") => Some("eqoa.hud.GroupMemberLayout"),
+        ("eqoa.hud.Layout", "target") => Some("eqoa.hud.TargetLayout"),
+        ("eqoa.hud.Layout", "target_of_target") => Some("eqoa.hud.TotLayout"),
+        ("eqoa.hud.Layout", "pet" | "stats_box") => Some("eqoa.hud.SinglePanelLayout"),
+        ("eqoa.hud.PlayerLayout" | "eqoa.hud.TargetLayout" | "eqoa.hud.TotLayout" | "eqoa.hud.GroupMemberLayout" | "eqoa.hud.SinglePanelLayout", "panel" | "health" | "power" | "exp") => Some("eqoa.hud.Rect"),
         _ => None,
     }
 }
@@ -847,8 +865,16 @@ fn install_fields(lua: &Lua) {
             "world_id place_id compass_id name cell_x cell_z",
         ),
         (
+            "eqoa.player.Stats",
+            "rows strength stamina agility dexterity wisdom intelligence charisma armor max_hp max_power fire cold lightning arcane poison disease",
+        ),
+        (
+            "eqoa.player.StatItem",
+            "name word stat_id current base min max change shift",
+        ),
+        (
             "eqoa.entities.Entity",
-            "ref id name level position hp_fraction kind class_code target_id status_flags poisoned diseased disposition disposition_name",
+            "ref id name level position hp_fraction power kind class_code target_id status_flags poisoned diseased disposition disposition_name",
         ),
         (
             "eqoa.group.Group",
@@ -856,7 +882,7 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.group.Member",
-            "entity id name active hp_fraction position world_id",
+            "entity id name active hp_fraction power position world_id",
         ),
         (
             "eqoa.group.RaidMember",
@@ -899,6 +925,40 @@ fn install_fields(lua: &Lua) {
         ),
         ("eqoa.textures.TextureInfo", "texture width height"),
         ("eqoa.fonts.FontInfo", "font status reason"),
+        ("eqoa.fonts.GameFont", "name height scale"),
+        (
+            "eqoa.hud.Frame",
+            "width height offset_x offset_y scale_x scale_y side top window_width window_height",
+        ),
+        (
+            "eqoa.hud.Rect",
+            "frame_x frame_y frame_width frame_height x y width height",
+        ),
+        (
+            "eqoa.hud.Layout",
+            "player group_members target target_of_target pet stats_box",
+        ),
+        (
+            "eqoa.hud.PlayerLayout",
+            "panel health power exp",
+        ),
+        (
+            "eqoa.hud.TargetLayout",
+            "panel health power",
+        ),
+        (
+            "eqoa.hud.TotLayout",
+            "panel health power",
+        ),
+        (
+            "eqoa.hud.GroupMemberLayout",
+            "index panel health power",
+        ),
+        (
+            "eqoa.hud.SinglePanelLayout",
+            "panel",
+        ),
+        ("eqoa.options.Toggle", "id label default value item_id"),
     ] {
         describe(lua, path, "supported", Some(2), "");
         for field in fields.split_whitespace() {

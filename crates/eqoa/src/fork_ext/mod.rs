@@ -8,6 +8,7 @@ pub mod app_icon;
 pub mod bundled;
 pub mod chat_history;
 pub mod mods;
+pub mod player_stats;
 pub mod release;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod report;

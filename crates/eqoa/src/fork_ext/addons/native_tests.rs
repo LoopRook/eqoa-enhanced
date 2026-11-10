@@ -424,3 +424,273 @@ fn perf_review_m5_generation_drop_is_visible_when_discarded_without_flush() {
     assert!(logs.iter().any(|l| l.contains("source.generation")));
     assert!(!logs.iter().any(|l| l.contains("old-world secret")));
 }
+
+#[test]
+fn round_3_stage_a_player_stats_api() {
+    use super::native_core::{CORE, Core};
+    use serde_json::json;
+
+    // Negative control: pregame / not in world
+    CORE.with(|c| *c.borrow_mut() = Core::default());
+    let h = Host::new().unwrap();
+    h.execute(
+        r#"
+        local s, err = eqoa.player.stats()
+        assert(s == nil and err.code == 'not_in_world', "must fail when not in world")
+    "#,
+    )
+    .unwrap();
+
+    // In world with populated player_stats
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.in_world = true;
+        c.view.phase = "world";
+        c.view.player_stats = Some(json!({
+            "rows": [
+                { "name": "strength", "word": 226, "stat_id": 0, "current": 120, "base": 100, "min": 100, "max": 100, "change": 20, "shift": "raised" },
+                { "name": "armor", "word": 242, "stat_id": 14, "current": 45, "base": 45, "min": 45, "max": 45, "change": 0, "shift": "same" },
+            ],
+            "strength": { "name": "strength", "word": 226, "stat_id": 0, "current": 120, "base": 100, "min": 100, "max": 100, "change": 20, "shift": "raised" },
+            "armor": { "name": "armor", "word": 242, "stat_id": 14, "current": 45, "base": 45, "min": 45, "max": 45, "change": 0, "shift": "same" },
+        }));
+    });
+
+    h.execute(
+        r#"
+        local s, err = eqoa.player.stats()
+        assert(err == nil, "must succeed in world")
+        assert(s ~= nil, "stats table must exist")
+        assert(s.strength.current == 120, "current strength")
+        assert(s.strength.base == 100, "base strength")
+        assert(s.strength.shift == "raised", "shift raised")
+        assert(s.strength.change == 20, "change 20")
+        assert(s.armor.current == 45, "current armor")
+        assert(s.armor.shift == "same", "shift same")
+        assert(#s.rows == 2, "rows count")
+        assert(s.rows[1].name == "strength", "first row name")
+    "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round_3_stage_a_actions_assist_and_summary_api() {
+    use super::native_core::{CORE, Core};
+
+    // Negative control: not in world
+    CORE.with(|c| *c.borrow_mut() = Core::default());
+    let h = Host::new().unwrap();
+    h.execute(
+        r#"
+        local ok, err = eqoa.actions.assist()
+        assert(ok == nil and err.code == 'not_in_world', "assist not in world")
+        local ok2, err2 = eqoa.windows.open("summary")
+        assert(ok2 == nil and err2.code == 'not_in_world', "summary not in world")
+        local ok3, err3 = eqoa.windows.open("unsupported_window")
+        assert(ok3 == nil and err3.code == 'invalid_argument', "unsupported window")
+    "#,
+    )
+    .unwrap();
+
+    // In world: queue actions
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.in_world = true;
+    });
+
+    super::actions::take_action_requests(); // drain any leftover
+    h.execute(
+        r#"
+        local ok, err = eqoa.actions.assist()
+        assert(ok == true and err == nil, "assist succeeded")
+    "#,
+    )
+    .unwrap();
+    let reqs = super::actions::take_action_requests();
+    assert!(reqs.assist, "assist must be requested");
+    assert!(!reqs.summary, "summary must not be requested");
+
+    h.execute(
+        r#"
+        local ok, err = eqoa.windows.open("summary")
+        assert(ok == true and err == nil, "summary succeeded")
+    "#,
+    )
+    .unwrap();
+    let reqs2 = super::actions::take_action_requests();
+    assert!(!reqs2.assist, "assist must not be requested");
+    assert!(reqs2.summary, "summary must be requested");
+}
+
+#[test]
+fn round_3_stage_a_hud_frame_and_layout_and_visible() {
+    use super::native_core::{CORE, Core};
+
+    // Negative control: not in world -> visible is false
+    CORE.with(|c| *c.borrow_mut() = Core::default());
+    let h = Host::new().unwrap();
+    h.execute(
+        r#"
+        assert(eqoa.hud.visible("health") == false, "not in world visible is false")
+        assert(eqoa.hud.visible() == false, "not in world visible is false")
+    "#,
+    )
+    .unwrap();
+
+    // In world
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.in_world = true;
+    });
+
+    h.execute(
+        r#"
+        assert(eqoa.hud.visible("health") == true, "health visible in world")
+        assert(eqoa.hud.visible("target") == true, "target visible in world")
+        local f = eqoa.hud.frame()
+        assert(f.width == 640 and f.height == 448, "default 640x448 frame")
+        local custom_f = eqoa.hud.frame({ width = 1280, height = 720 })
+        assert(custom_f.window_width == 1280 and custom_f.window_height == 720, "custom resolution")
+
+        local l = eqoa.hud.layout()
+        assert(l.player.health ~= nil, "player health rect")
+        assert(l.target.health ~= nil, "target health rect")
+        assert(l.target_of_target.health ~= nil, "tot health rect")
+        assert(#l.group_members == 4, "4 group members")
+        assert(l.group_members[1].health ~= nil, "member 1 health")
+        assert(l.stats_box.panel ~= nil, "stats box panel")
+    "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round_3_stage_a_options_toggle_and_get() {
+    let h = Host::new().unwrap();
+
+    // Negative control: invalid argument
+    h.execute(
+        r#"
+        local ok, err = eqoa.options.toggle("invalid")
+        assert(ok == nil and err.code == 'invalid_argument', "toggle invalid arg")
+        local ok2, err2 = eqoa.options.toggle({})
+        assert(ok2 == nil and err2.code == 'invalid_argument', "toggle missing id")
+    "#,
+    )
+    .unwrap();
+
+    // Valid registration
+    h.execute(
+        r#"
+        local t, err = eqoa.options.toggle({ id = "test_opt", label = "Test Option", default = true })
+        assert(err == nil, "toggle registered")
+        assert(t.id == "test_opt")
+        assert(t.value == true)
+        local val = eqoa.options.get("test_opt")
+        assert(val == true, "get toggle matches")
+    "#,
+    )
+    .unwrap();
+
+    // Change setting via item ID
+    let item_id = super::options::get_toggle("mod", "test_opt");
+    assert_eq!(item_id, Some(true));
+    super::options::set_toggle("mod", "test_opt", false);
+
+    h.execute(
+        r#"
+        local val = eqoa.options.get("test_opt")
+        assert(val == false, "updated toggle value")
+    "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round_3_stage_a_input_bind_and_fonts_game() {
+    let h = Host::new().unwrap();
+
+    // Negative control: invalid argument
+    h.execute(
+        r#"
+        local ok, err = eqoa.input.bind("not_table")
+        assert(ok == nil and err.code == 'invalid_argument', "bind invalid arg")
+        local ok2, err2 = eqoa.input.bind({})
+        assert(ok2 == nil and err2.code == 'invalid_argument', "bind missing id")
+    "#,
+    )
+    .unwrap();
+
+    // Valid bind registration
+    h.execute(
+        r#"
+        local ok, err = eqoa.input.bind({ id = "stats_box", label = "Stats Box", default_key = "b" })
+        assert(ok == true and err == nil, "bind registered")
+
+        local font = eqoa.fonts.game()
+        assert(font ~= nil, "game font exists")
+        assert(font.name == "ArialUI", "game font name")
+        assert(font.height == 21, "game font height")
+    "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round_3_stage_a_entity_and_group_power_fractions() {
+    use super::native_core::CORE;
+    use serde_json::json;
+
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.in_world = true;
+        c.view.phase = "world";
+        c.view.player = json!({ "id": 1, "target_id": 2 });
+        c.view.entities = vec![
+            json!({
+                "id": 1,
+                "name": "Self",
+                "hp_fraction": 1.0,
+                "power": 0.85,
+                "kind": "player",
+                "class_code": 2,
+            }),
+            json!({
+                "id": 2,
+                "name": "Target",
+                "hp_fraction": 0.5,
+                "power": null, // negative control: server sent no power
+                "kind": "npc",
+                "class_code": 0,
+            }),
+        ];
+        c.view.group = json!({
+            "in_group": true,
+            "self_leader": true,
+            "members": [
+                { "id": 1, "name": "Self", "active": true, "hp_fraction": 1.0, "power": 0.85 },
+                { "id": 3, "name": "Cleric", "active": true, "hp_fraction": 0.9, "power": 0.4 },
+            ],
+            "raid": [],
+            "invites": [],
+        });
+    });
+
+    let h = Host::new().unwrap();
+    h.execute(
+        r#"
+        local entities = eqoa.entities.list()
+        assert(#entities == 2, "2 entities")
+        assert(entities[1].power == 0.85, "self power fraction 0.85")
+        assert(entities[2].power == nil, "negative control: target power nil when not sent")
+
+        local grp = eqoa.group.get()
+        assert(grp.in_group == true, "in group")
+        assert(#grp.members == 2, "2 members")
+        assert(grp.members[1].power == 0.85, "member 1 power")
+        assert(grp.members[2].power == 0.4, "member 2 power")
+    "#,
+    )
+    .unwrap();
+}
