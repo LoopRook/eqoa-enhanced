@@ -163,6 +163,7 @@ pub enum Pick {
     Me,
     Member(u32),
     Pet,
+    Raid(u32),
     Report,
     TargetsTarget,
     /// the minimap (`map::mini`): the map opened
@@ -171,7 +172,6 @@ pub enum Pick {
     Quests,
     /// the Stats Box (`statbox`): the Character menu's Summary opened
     Stats,
-    Raid(u32),
 }
 
 /// The Target of Target bar's place (the frame's, out at a wide window's

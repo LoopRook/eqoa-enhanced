@@ -8322,39 +8322,21 @@ impl Play {
     /// target.
     fn mini_view(&self) -> crate::map::mini::MiniView {
         let me = self.self_id32();
-        let group: Vec<u32> = self.group.members[..self.group.count()]
-            .iter()
-            .map(|m| m.id)
-            .collect();
+        let group: Vec<u32> = self.group.members[..self.group.count()].iter().map(|m| m.id).collect();
         let dots = self
             .entities
             .slots
             .iter()
             .flatten()
-            .filter(|e| {
-                Some(e.id) != me && !group.contains(&e.id) && e.p18 & 2 == 0 && self.in_scene(e)
-            })
+            .filter(|e| Some(e.id) != me && !group.contains(&e.id) && e.p18 & 2 == 0 && self.in_scene(e))
             .filter_map(|e| {
                 let c = e.creature.as_ref()?;
-                let color = if c.p256 < 2 {
-                    0
-                } else if c.p299 & 1 != 0 {
-                    2
-                } else {
-                    1
-                };
+                let color = if c.p256 < 2 { 0 } else if c.p299 & 1 != 0 { 2 } else { 1 };
                 crate::map::mini::Dot::of(e, NAME_COLORS[color])
             })
             .collect();
-        let target = self
-            .actor_pos(self.target)
-            .filter(|_| Some(self.target) != me)
-            .map(|p| [p[0], p[2]]);
-        crate::map::mini::MiniView {
-            dots,
-            target,
-            marks: self.mini_marks(),
-        }
+        let target = self.actor_pos(self.target).filter(|_| Some(self.target) != me).map(|p| [p[0], p[2]]);
+        crate::map::mini::MiniView { dots, target, marks: self.mini_marks() }
     }
 
     /// The marks on the minimap (`map::mini::Mark`: a kind, a world, a place
