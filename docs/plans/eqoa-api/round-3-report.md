@@ -211,4 +211,47 @@ All commands run with lock acquisition protocol, scratch `EQOA_CONFIG`, and targ
 | `python tools/check_fork_footprint.py --base 5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd` | **PASS**: 0 violations, all 42 shared files within reviewed policy |
 | `git merge-tree --write-tree HEAD 5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd` | **Clean merge** (tree `38c92b...`, 0 conflicts) |
 
+---
+
+## Fix round
+
+### Review & Check Findings Status
+
+| Finding ID | Source | Summary | Status | Proving Test / Justification |
+|---|---|---|---|---|
+| **H1** | round-3-review.md | Mod options/settings use real addon ID, persist across reloads | fixed in `61e99bb`, `13bcfc6` | `fork_ext::settings::tests::migration_moves_legacy_options_and_binds_into_mods_and_strips_files`, `fork_ext::addons::native_tests::addon_options_persists_to_mod_settings_across_reloads` |
+| **H2** | round-3-review.md | Disabled mod removes its option rows from Enhanced HUD page | fixed in `61e99bb` | `fork_ext::addons::native_tests::disabled_mod_removes_options_from_enhanced_hud_category` |
+| **H3** | round-3-review.md | Stats Box and Target of Target default to OFF | fixed in `13bcfc6` | `fork_ext::addons::round_3_picture_tests::bundled_stats_box_picture_comparison`, `fork_ext::addons::round_3_picture_tests::bundled_target_of_target_picture_comparison` |
+| **H4** | round-3-review.md | Pressing B (or rebound key) toggles Stats Box | fixed in `61e99bb`, `13bcfc6` | `fork_ext::bindpage::tests::round_3_stage_a_controls_page_rebind_and_negative_control` |
+| **H5** | round-3-review.md | HUD layer widescreen right-anchor & bottom vertical alignment | fixed in `a1c9b7d`, `05165ed`, `13bcfc6`, `c5d083a` | `fork_ext::addons::round_3_picture_tests::bundled_stats_box_picture_comparison`, `fork_ext::addons::round_3_picture_tests::bundled_target_of_target_picture_comparison` |
+| **H6** | round-3-review.md | Clickable rects scoped to avoid Dear ImGui default Debug window | fixed in `a1c9b7d`, `13bcfc6` | `fork_ext::addons::round_3_picture_tests::round_3_all_four_mods_per_frame_performance_benchmark` |
+| **H7** | round-3-review.md | `group.get().members` excludes self and inactive slots; raid panel guarded | fixed in `13bcfc6`, `497c636` | `fork_ext::api_capture_tests::test_group_snapshot_filters_local_player_and_inactive_slots`, `fork_ext::addons::round_3_picture_tests::bundled_mana_bars_picture_comparison` |
+| **H8** | round-3-review.md | Target of Target ignores self-targets, blank names; gates power on Mana Bars | fixed in `13bcfc6` | `fork_ext::addons::round_3_picture_tests::bundled_target_of_target_picture_comparison` |
+| **H9** | round-3-review.md | HUD mods hidden in menus, map, loading screens | fixed in `a1c9b7d`, `13bcfc6` | `fork_ext::addons::hud_layout::tests::test_hud_visible_in_play_and_hidden_in_menus` |
+| **H10** | round-3-review.md | Stats Box layout, colors, and localized labels match develop | fixed in `13bcfc6`, `c5d083a` | `fork_ext::addons::round_3_picture_tests::bundled_stats_box_picture_comparison` |
+| **H11** | round-3-review.md | API specs, capabilities, and strict record schemas updated | fixed in `a1c9b7d`, `4f68c06` | `fork_ext::addons::native_tests::forge_wereoxxs_complete_symbol_surface_contract` |
+| **H12** | round-3-review.md | Real pixel picture comparisons vs develop native captures | fixed in `c5d083a` | `fork_ext::addons::round_3_picture_tests::bundled_stats_box_picture_comparison` (and ToT, Mana Bars, HUD numbers) |
+| **M1** | round-3-review.md | Upstream footprint within approved budgets; stale comments cleaned | fixed in `4f68c06` | `python tools/check_fork_footprint.py --base 5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd` |
+| **M2** | round-3-review.md | HUD Numbers behavior, colors, and anchoring match develop | fixed in `13bcfc6` | `fork_ext::addons::round_3_picture_tests::bundled_hud_numbers_picture_comparison` |
+| **M3** | round-3-review.md | Actions assist and summary open mode gating | fixed in `a1c9b7d`, `13bcfc6` | `fork_ext::addons::round_3_picture_tests::bundled_target_of_target_picture_comparison` |
+| **M4** | round-3-review.md | Per-frame allocations eliminated; retained command queues | fixed in `a1c9b7d`, `05165ed`, `c5d083a` | `play::fork_hooks::native_tests::performance_busy_world_zero_addons_frame_and_packet_allocation_bound` (0.0 allocs/frame) |
+| **M5** | round-3-review.md | HUD layout anchors and non-4:3 viewport metrics | fixed in `a1c9b7d`, `13bcfc6` | `fork_ext::addons::round_3_picture_tests::bundled_mana_bars_picture_comparison` |
+| **M6** | round-3-review.md | Multibox config files migrated; write errors guarded | fixed in `4f68c06` | `fork_ext::settings::tests::migration_moves_legacy_options_and_binds_into_mods_and_strips_files` |
+| **M7** | round-3-review.md | `eqoa.hud.visible` accepts only valid elements; supports "group_markers" | fixed in `13bcfc6` | `fork_ext::addons::hud_layout::tests::test_hud_visible_elements_and_invalid_names` |
+| **L1** | round-3-review.md | `trainer_from_hud` field in `crates/eqoa/src/play.rs` | not a defect | Required by `eqoa.windows.open("summary")` in `fork_ext/play.rs` so closing the Summary window returns to the game world rather than the Start Menu |
+| **L2** | round-3-review.md | Document `shadow` option on `eqoa.hud.text` in spec | fixed in `4f68c06` | `docs/modding/EQOA-API-SPEC.md` |
+| **L3** | round-3-review.md | Document `eqoa.hud.image` ui_id overloads in spec | fixed in `4f68c06` | `docs/modding/EQOA-API-SPEC.md` |
+| **Check-H1** | round-3-check.md | Tools release tests updated for 4 new mods | fixed in `b5e09d2` | `python -X utf8 -m unittest discover -s tools -p "test_*.py"` (97 passed) |
+| **Check-H2** | round-3-check.md | `bundled-mods/SOURCE.txt` checksums match | fixed in `4f68c06` | `python -X utf8 tools/test_player_release.py` (20 passed) |
+| **Check-H3** | round-3-check.md | Bundled tests updated for 8 embedded packages | fixed in `b5e09d2` | `cargo test --locked -p eqoa --bin eqoa fork_ext::bundled::tests` (15 passed) |
+| **Check-H4** | round-3-check.md | Picture tests compare real pixels against develop reference captures | fixed in `c5d083a` | `cargo test --locked -p eqoa --bin eqoa fork_ext::addons::round_3_picture_tests::` (5 passed) |
+| **Check-H5** | round-3-check.md | Mod options persist to disk under mod ID; migration safe | fixed in `61e99bb` | `fork_ext::settings::tests::migration_moves_legacy_options_and_binds_into_mods_and_strips_files` |
+| **Check-H6** | round-3-check.md | Stats Box and Target of Target default OFF | fixed in `13bcfc6` | `fork_ext::addons::round_3_picture_tests::bundled_stats_box_picture_comparison` |
+| **Check-M1** | round-3-check.md | Enhanced HUD rows dynamic per enabled mod | fixed in `61e99bb` | `fork_ext::addons::native_tests::disabled_mod_removes_options_from_enhanced_hud_category` |
+| **Check-M2** | round-3-check.md | Excised native test coverage replaced; restore dropped options test assertion | open | Restoring dropped assertion in `fork_ext/options.rs:number_toggles_change_only_their_own_saved_setting` |
+| **Check-M3** | round-3-check.md | Release benchmark under 0.5 ms/frame | fixed in `c5d083a` | `cargo test --release --locked -p eqoa --bin eqoa round_3_all_four_mods_per_frame_performance_benchmark` (0.140 ms/frame) |
+| **Check-M4** | round-3-check.md | Wasm check clean (0 errors, 0 warnings); release build report hygiene | fixed in `b5e09d2` | `cargo check --locked -p eqoa --target wasm32-unknown-unknown` (0 errors, 0 warnings) |
+| **Check-L1** | round-3-check.md | Dead `UPSTREAM_ROWS` removed from `fork_ext/settings.rs` | fixed in `61e99bb` | `git grep UPSTREAM_ROWS` (0 matches) |
+
+
 
