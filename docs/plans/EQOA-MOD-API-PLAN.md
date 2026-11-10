@@ -71,6 +71,13 @@ Owner decisions, approved 2026-11-09:
 10. **Full automation (botting) stays in the API, but last** (round 6). Small player-style actions
     come early, in round 3.
 
+Owner update, 2026-11-10: upstream (Winfro) will look into a mod API, and group mana bars are to become
+an upstream default later. The final step of this plan (round 8, after round 7) is a pull request that
+offers upstream the mod API itself (runtime, hooks, `eqoa` API), something upstream can take and
+implement. Individual mods stay out of upstream unless the owner decides otherwise. The Mana Bars mod is
+built in round 3 as planned; when upstream ships its own group bars, the next sync retires the mod's
+group part (target and ToT power stay in the mod unless upstream has them too).
+
 Clarified the same day: vanilla has the Assist Target key (F) but not the Target of Target bar.
 Upstream's notes of 2026-11-09 say the Stats Box, other players' mana bars and Target of Target
 "are not coming back". The bar is therefore a mod, and it uses upstream's existing assist action.
@@ -187,6 +194,7 @@ the existing addon tests are the regression gate, and the owner's live test deci
 | 5 Items | inventory, item, bank, loot, merchant, gems | A bag viewer with a loot log |
 | 6 Actions and the rest | Full automation, quests, camera, dialogs | Owner approves the new seams first |
 | 7 Finish | Audit, generated reference, support table, freeze eqoa/1 | Owner approves the release |
+| 8 Offer the mod API upstream | A branch from origin/master with the runtime, hooks and `eqoa` API (no fork mods), upstream's style and tests | The owner sends the PR |
 
 Leads and builders are chosen per round from the roster (`~/Paseo/Agent_Learning_Instructions.md`);
 the reviewer is a different model family from the builder.
