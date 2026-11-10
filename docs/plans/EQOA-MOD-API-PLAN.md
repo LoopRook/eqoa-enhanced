@@ -323,3 +323,20 @@ docs/modding/AGENT-GUIDE.md (one page for agents building mods from an owner bri
   (develop 23d6469). The owner approved all ten recommendations the same day; this plan was
   reordered to match (rounds 2.5 to 7 above). No code changed. Still pending from round 2: the
   owner's live test. Next: round 2.5, when the owner starts it.
+- **Round 2 live test and fixes, 2026-11-09.** The owner's first Nightly ran under 1 fps in the world
+  (a full native view rebuilt every frame and packet, zero addons enabled): Sol replaced it with typed
+  deltas, hook cost 14.7 ms to 5 microseconds per frame, merged ddd1c48 and fixed after MiniMax review
+  (5346797). Further live findings fixed: Wereoxxs Enter (focus cleanup erased the key claim), Avoids
+  Modern UI icon stacking (signed icon IDs dropped), a missing optional file shown as an error, an
+  unclaimed Tab reaching ImGui (all on develop, 294b65f). Nightly release notes and version label
+  fixed (`## Unreleased` section, `0.4.14+nightly (commit)`). Ability icons dark/red was only
+  out of range (no defect). **Owner: round 2 live test passed** (2026-11-09). Logged, not done:
+  server-added extra ability bars in the bundled UIs; native capture's position fallback; duplicate
+  CI jobs per push; the Stable program name (final task before the Stable release).
+- **Upstream sync 2026-11-09 (develop 13ce6ad, CI skip 78e5221).** 134 upstream commits (Light Shadows,
+  Shadow Distance, camera, races, GM travel); map resolved as "combine": fork map files kept, upstream's
+  Map/Quest Helper switches, GM Ctrl+click travel, cache path, quest rim and O/G keys ported. MiniMax
+  review: 3 HIGH, 4 MEDIUM, all fixed (776fe2c). Upstream's AO test
+  `the_foot_of_a_wall_darkened_and_open_ground_not` fails on untouched upstream (RTX 3070 Ti and the CI
+  runner): skipped in all three workflows with the owner's OK. Round 2.5 inherits the options and map
+  tidy listed above; the sync resolved options.rs/binds.rs by hand (budgets rose: options +46/-142).
