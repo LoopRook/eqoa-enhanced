@@ -926,7 +926,11 @@ mod tests {
                 "wereoxxs_ui",
                 "arpg_ui",
                 "avoids_modern_ui",
-                "eqoa_example_hearts"
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1211,7 +1215,11 @@ mod tests {
                 "wereoxxs_ui",
                 "arpg_ui",
                 "avoids_modern_ui",
-                "eqoa_example_hearts"
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
             ]
         );
 
@@ -1229,7 +1237,7 @@ mod tests {
             ids.contains("avoids_modern_ui"),
             "avoids_modern_ui must be discovered on first start"
         );
-        assert_eq!(ids.len(), 4);
+        assert_eq!(ids.len(), 8);
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -1249,7 +1257,11 @@ mod tests {
                 "wereoxxs_ui",
                 "arpg_ui",
                 "avoids_modern_ui",
-                "eqoa_example_hearts"
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
             ]
         );
 
@@ -1261,7 +1273,11 @@ mod tests {
                 "wereoxxs_ui",
                 "arpg_ui",
                 "avoids_modern_ui",
-                "eqoa_example_hearts"
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1339,7 +1355,11 @@ mod tests {
                 "wereoxxs_ui",
                 "arpg_ui",
                 "avoids_modern_ui",
-                "eqoa_example_hearts"
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );
