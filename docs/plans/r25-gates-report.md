@@ -1,7 +1,8 @@
 # Round 2.5: CI and bundled UI gates
 
-Branch: `chore/r25-gates`, from develop `264a5fb`. Scope: item 1 only.
-Items 3 and 8 await the options work/integration; no options, HUD, binds or shared Play files changed.
+Branch: `chore/r25-gates`, from develop `264a5fb`. Scope: items 1, 3 and 8.
+The lead authorized merging options-tidy source `96b1e37` for integrated validation.
+Shared gameplay edits in this branch come from that merge; this worker adds tests, CI and policy records.
 
 ## CI
 
@@ -44,6 +45,7 @@ layer and must differ; when a golden is present, that blank capture must fail co
 Readback follows `addons/gpu_test.rs`; picture equality and changed-image controls follow the
 renderer picture-test pattern.
 
+Wereoxxs enables all eight panel toggles using a fresh ImGui layout; no player profile is loaded.
 Reviewed baseline images are not supplied in this checkout. Missing baselines emit explicit
 `SKIP` lines, counted below; generated captures alone are **not** evidence of visual parity.
 GPU absence also emits a `SKIP`. A configured missing/invalid/mismatched baseline fails.
@@ -54,7 +56,7 @@ atlas; blank ability icons are an explicit fixture limit, not verified game-art 
 
 Validation is in progress. Final counts and remaining limitations will be filled after the runs.
 Tooling: **97 passed** on the final run, including both workflow negative controls. Footprint:
-**PASS** against the pinned base, with no policy or budget changes.
+**PASS** against the pinned base. The subsequent item-3 policy changes are detailed below.
 
 The initial optimized eqoa run was **1806 passed / 2 failed / 30 ignored**. Both failures were
 in new test setup: Wereoxxs initializes before drawing, so visible geometry is now required
@@ -78,11 +80,46 @@ Failures: the new Wereoxxs picture fixture described above, plus
 NVIDIA/upstream failures already documented in the sync handoff; this run leaves them visible
 instead of filtering them. No renderer code or assertions were changed.
 
-At 23:21 Eastern the run released the shared build lock. Per the lead's instruction,
-further Cargo commands are paused until options-tidy finishes its full workspace and release
-validation. The pending Wereoxxs fixture adjustment and CI output-path fallback still need
-verification, followed by the optimized allocation gate, wasm check and final release build.
+The lead released the options-tidy validation hold on November 10. The pending picture fix
+was committed before merging that branch, as requested. On the merged source, all three
+picture fixtures render and their missing-layer controls pass: **3 Rust tests passed,
+3 golden-comparison SKIPs**, no GPU skips. Final integrated suite/optimized/wasm/release
+results are pending below.
+
+## Footprint records and round counters
+
+Pinned policy base remains `91f9e72dd6d111e20a37b73cea461444a18ad79c`.
+The map family no longer has fork-owned exemptions. Twelve differing paths now have exact
+shared budgets, including new files under that family counted in full. Identical tracker,
+groupmark, mapsuggest and other map-family paths have no dormant allowance: an edit to an
+unlisted shared file fails review. Ten obsolete budgets were removed and twelve existing
+budgets tightened; **no existing budget increased**. Both options hook-record corrections
+(`aa6cd8e`, `6d2666e`) survive unchanged. FORK.md and FORK-OWNERSHIP.md now agree with the manifest.
+The checker passes with **344 fork-owned / 42 shared changed files**. A negative control
+reducing map/mini.rs's allowance by one line fails with `exceeds budget`.
+
+Line counts use the checker's exact `git diff --no-renames --numstat` semantics against the
+pinned base; the reported totals sum its `SHARED` rows. Before = develop `264a5fb`, after =
+merged source `c9dd806` plus the policy-only correction `ce814af`.
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Actual checker totals under the policy then in force | +1995 / -424 (31 files) | +6249 / -394 (42 files) |
+| Same corrected classification applied to both snapshots | +6657 / -509 (46 files) | +6249 / -394 (42 files) |
+| Total changed shared lines, same classification | 7166 | 6643 |
+
+The raw checker total rises because the old policy hid map-family code. On the same
+classification the round removes **408 added lines and 115 deleted-line divergences**,
+**523 fewer changed lines** overall. Classification changes do not add gameplay code.
+
+Dry-run merges used `git merge --no-commit --no-ff` in a disposable shared clone, first at
+`264a5fb`, then at `c9dd806`, against pinned `origin/master`
+`986206b69cd432b6d9be21b9a1a08c2b0051d6bb`. The scratch clone used the repository's
+`merge.ours.driver=true` for its fork-owned README/CLAUDE rules. Both merges were aborted and
+clean state verified. Conflicted files: **8 before -> 7 after**, matching the options worker.
+The touch.rs conflict disappears. Remaining conflicts: hud.rs, map/chrome.rs, map/mini.rs,
+options.rs, play.rs, settings.rs and viewer.rs. No merge into develop or upstream was performed.
 
 All Cargo commands use `C:/Users/hocka/Paseo/targets/shared`, the shared mkdir build lock with
 a bounded acquisition wait, and scratch configuration. No worktree target directory is created.
-Footprint base: `91f9e72dd6d111e20a37b73cea461444a18ad79c`; no budgets changed.
+Final validation counts and build results will be added after the active runs.
