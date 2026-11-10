@@ -640,15 +640,180 @@ fn install_math(lua: &Lua) -> Result<()> {
     )?;
     bind(
         lua,
-        "fonts",
-        "game",
-        lua.create_function(|lua, ()| {
-            let j = json!({
-                "name": "ArialUI",
-                "height": 21,
-                "scale": 0.6,
-            });
-            lua.pack_multi((record(lua, "eqoa.fonts.GameFont", &j)?, Value::Nil))
+        "hud",
+        "text",
+        lua.create_function(|lua, spec: Value| {
+            let in_world = CORE.with(|c| c.borrow().view.in_world);
+            if !in_world {
+                return error(lua, "eqoa.hud.text", "not_in_world", "enter a loaded world first");
+            }
+            let Value::Table(t) = spec else {
+                return error(lua, "eqoa.hud.text", "invalid_argument", "spec must be a table");
+            };
+            let x: f32 = match t.get::<f32>("x") {
+                Ok(v) => v,
+                Err(_) => return error(lua, "eqoa.hud.text", "invalid_argument", "x required"),
+            };
+            let y: f32 = match t.get::<f32>("y") {
+                Ok(v) => v,
+                Err(_) => return error(lua, "eqoa.hud.text", "invalid_argument", "y required"),
+            };
+            let text: String = match t.get::<String>("text") {
+                Ok(v) => v,
+                Err(_) => return error(lua, "eqoa.hud.text", "invalid_argument", "text required"),
+            };
+            let color = match t.get::<Option<Vec<f32>>>("color")? {
+                Some(c) if c.len() >= 4 => [c[0], c[1], c[2], c[3]],
+                Some(c) if c.len() == 3 => [c[0], c[1], c[2], 1.0],
+                _ => [1.0, 1.0, 1.0, 1.0],
+            };
+            let scale: f32 = t.get::<Option<f32>>("scale")?.unwrap_or(1.0);
+            let align_str: Option<String> = t.get("align")?;
+            let align = match align_str.as_deref() {
+                Some("center") => super::hud_layer::TextAlign::Center,
+                Some("right") => super::hud_layer::TextAlign::Right,
+                _ => super::hud_layer::TextAlign::Left,
+            };
+            let outline: bool = t.get::<Option<bool>>("outline")?.unwrap_or(false);
+            let shadow: bool = t.get::<Option<bool>>("shadow")?.unwrap_or(false);
+
+            let addon = {
+                let a = super::native::session(lua).borrow().addon.clone();
+                if a.is_empty() { "default".to_string() } else { a }
+            };
+            let cmd = super::hud_layer::HudCommand::Text { x, y, text, color, scale, align, outline, shadow };
+            if let Err(e) = super::hud_layer::queue_command(&addon, cmd) {
+                return error(lua, "eqoa.hud.text", "limit_exceeded", e);
+            }
+            lua.pack_multi((true, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "hud",
+        "gauge",
+        lua.create_function(|lua, spec: Value| {
+            let in_world = CORE.with(|c| c.borrow().view.in_world);
+            if !in_world {
+                return error(lua, "eqoa.hud.gauge", "not_in_world", "enter a loaded world first");
+            }
+            let Value::Table(t) = spec else {
+                return error(lua, "eqoa.hud.gauge", "invalid_argument", "spec must be a table");
+            };
+            let x: i32 = match t.get::<i32>("x") {
+                Ok(v) => v,
+                Err(_) => return error(lua, "eqoa.hud.gauge", "invalid_argument", "x required"),
+            };
+            let y: i32 = match t.get::<i32>("y") {
+                Ok(v) => v,
+                Err(_) => return error(lua, "eqoa.hud.gauge", "invalid_argument", "y required"),
+            };
+            let art: i32 = match t.get::<i32>("art") {
+                Ok(v) => v,
+                Err(_) => return error(lua, "eqoa.hud.gauge", "invalid_argument", "art required"),
+            };
+            let fill: f32 = match t.get::<f32>("fill") {
+                Ok(v) => v,
+                Err(_) => return error(lua, "eqoa.hud.gauge", "invalid_argument", "fill required"),
+            };
+            let lit: bool = t.get::<Option<bool>>("lit")?.unwrap_or(true);
+
+            let addon = {
+                let a = super::native::session(lua).borrow().addon.clone();
+                if a.is_empty() { "default".to_string() } else { a }
+            };
+            let cmd = super::hud_layer::HudCommand::Gauge { x, y, art, fill, lit };
+            if let Err(e) = super::hud_layer::queue_command(&addon, cmd) {
+                return error(lua, "eqoa.hud.gauge", "limit_exceeded", e);
+            }
+            lua.pack_multi((true, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "hud",
+        "image",
+        lua.create_function(|lua, spec: Value| {
+            let in_world = CORE.with(|c| c.borrow().view.in_world);
+            if !in_world {
+                return error(lua, "eqoa.hud.image", "not_in_world", "enter a loaded world first");
+            }
+            let Value::Table(t) = spec else {
+                return error(lua, "eqoa.hud.image", "invalid_argument", "spec must be a table");
+            };
+            let x: i32 = match t.get::<i32>("x") {
+                Ok(v) => v,
+                Err(_) => return error(lua, "eqoa.hud.image", "invalid_argument", "x required"),
+            };
+            let y: i32 = match t.get::<i32>("y") {
+                Ok(v) => v,
+                Err(_) => return error(lua, "eqoa.hud.image", "invalid_argument", "y required"),
+            };
+            let w: Option<i32> = t.get("w")?;
+            let h: Option<i32> = t.get("h")?;
+            let color = match t.get::<Option<Vec<f32>>>("color")? {
+                Some(c) if c.len() >= 4 => Some([c[0], c[1], c[2], c[3]]),
+                Some(c) if c.len() == 3 => Some([c[0], c[1], c[2], 1.0]),
+                _ => None,
+            };
+
+            let addon = {
+                let a = super::native::session(lua).borrow().addon.clone();
+                if a.is_empty() { "default".to_string() } else { a }
+            };
+            let cmd = match t.get::<Value>("ui_id")? {
+                Value::String(s) if s.to_str()? == "panel" => {
+                    super::hud_layer::HudCommand::Panel { x, y, w: w.unwrap_or(148), h: h.unwrap_or(132) }
+                }
+                Value::Integer(id) => super::hud_layer::HudCommand::Image { ui_id: id as i32, x, y, w, h, color },
+                Value::Number(n) => super::hud_layer::HudCommand::Image { ui_id: n as i32, x, y, w, h, color },
+                _ => return error(lua, "eqoa.hud.image", "invalid_argument", "ui_id required"),
+            };
+
+            if let Err(e) = super::hud_layer::queue_command(&addon, cmd) {
+                return error(lua, "eqoa.hud.image", "limit_exceeded", e);
+            }
+            lua.pack_multi((true, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "hud",
+        "panel",
+        lua.create_function(|lua, spec: Value| {
+            let in_world = CORE.with(|c| c.borrow().view.in_world);
+            if !in_world {
+                return error(lua, "eqoa.hud.panel", "not_in_world", "enter a loaded world first");
+            }
+            let Value::Table(t) = spec else {
+                return error(lua, "eqoa.hud.panel", "invalid_argument", "spec must be a table");
+            };
+            let x: i32 = match t.get::<i32>("x") {
+                Ok(v) => v,
+                Err(_) => return error(lua, "eqoa.hud.panel", "invalid_argument", "x required"),
+            };
+            let y: i32 = match t.get::<i32>("y") {
+                Ok(v) => v,
+                Err(_) => return error(lua, "eqoa.hud.panel", "invalid_argument", "y required"),
+            };
+            let w: i32 = match t.get::<i32>("w") {
+                Ok(v) => v,
+                Err(_) => return error(lua, "eqoa.hud.panel", "invalid_argument", "w required"),
+            };
+            let h: i32 = match t.get::<i32>("h") {
+                Ok(v) => v,
+                Err(_) => return error(lua, "eqoa.hud.panel", "invalid_argument", "h required"),
+            };
+
+            let addon = {
+                let a = super::native::session(lua).borrow().addon.clone();
+                if a.is_empty() { "default".to_string() } else { a }
+            };
+            let cmd = super::hud_layer::HudCommand::Panel { x, y, w, h };
+            if let Err(e) = super::hud_layer::queue_command(&addon, cmd) {
+                return error(lua, "eqoa.hud.panel", "limit_exceeded", e);
+            }
+            lua.pack_multi((true, Value::Nil))
         })?,
     )?;
     bind(

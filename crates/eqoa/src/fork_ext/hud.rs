@@ -256,7 +256,7 @@ fn readouts(s: &HudState, need: u32, flags: [bool; 3]) -> Vec<Readout> {
     out
 }
 
-pub(super) fn draw(ui: &mut UiRaster<'_>, s: &HudState) {
+pub(crate) fn draw(vui: &crate::ui::Vui, ui: &mut UiRaster<'_>, s: &HudState) {
     let Some(font) = ui.assets.font else { return };
     let c = crate::settings::client();
     let labels = readouts(
@@ -279,6 +279,8 @@ pub(super) fn draw(ui: &mut UiRaster<'_>, s: &HudState) {
         ui.ui.text_scaled(font, x, y, r.scale, r.color, &text);
     }
     (ui.ui.anchor, ui.ui.vertical) = (anchor, vertical);
+
+    crate::fork_ext::addons::hud_layer::draw(vui, ui);
 }
 
 #[cfg(test)]

@@ -623,16 +623,21 @@ fn round_3_stage_a_input_bind_and_fonts_game() {
     )
     .unwrap();
 
-    // Valid bind registration
+    // Valid bind registration and HUD layer negative controls outside world
     h.execute(
         r#"
         local ok, err = eqoa.binds.register("toggle_stats", "b", "Stats Box")
         assert(ok == true and err == nil, "bind registered via eqoa.binds.register")
 
-        local font = eqoa.fonts.game()
-        assert(font ~= nil, "game font exists")
-        assert(font.name == "ArialUI", "game font name")
-        assert(font.height == 21, "game font height")
+        -- Negative controls: outside world returns not_in_world
+        local res, err_text = eqoa.hud.text({ x = 10, y = 20, text = "Test" })
+        assert(res == nil and err_text.code == "not_in_world", "hud.text outside world returns not_in_world")
+
+        local res_g, err_g = eqoa.hud.gauge({ x = 10, y = 20, art = 9, fill = 0.5 })
+        assert(res_g == nil and err_g.code == "not_in_world", "hud.gauge outside world returns not_in_world")
+
+        local res_i, err_i = eqoa.hud.image({ ui_id = 25, x = 10, y = 20, w = 100 })
+        assert(res_i == nil and err_i.code == "not_in_world", "hud.image outside world returns not_in_world")
     "#,
     )
     .unwrap();
@@ -708,4 +713,47 @@ fn round_3_stage_a_entity_and_group_power_fractions() {
     "#,
     )
     .unwrap();
+}
+
+#[test]
+fn round_3_hud_layer_draw_calls_and_queue() {
+    use super::native_core::CORE;
+    use super::hud_layer;
+    use super::native::session;
+
+    CORE.with(|c| {
+        c.borrow_mut().view.in_world = true;
+    });
+
+    let h = Host::new().unwrap();
+    session(&h.lua).borrow_mut().addon = "hud_layer_test".to_string();
+    hud_layer::clear_all();
+
+    h.execute(
+        r#"
+        local ok1, err1 = eqoa.hud.text({ x = 99, y = 35, text = "100%", scale = 0.6, align = "center", outline = true })
+        assert(ok1 == true and err1 == nil, "hud.text succeeds in world")
+
+        local ok2, err2 = eqoa.hud.gauge({ x = 30, y = 335, art = 9, fill = 0.75, lit = true })
+        assert(ok2 == true and err2 == nil, "hud.gauge succeeds in world")
+
+        local ok3, err3 = eqoa.hud.image({ ui_id = 25, x = 20, y = 300, w = 174 })
+        assert(ok3 == true and err3 == nil, "hud.image succeeds in world")
+
+        local ok4, err4 = eqoa.hud.panel({ x = 200, y = 54, w = 148, h = 132 })
+        assert(ok4 == true and err4 == nil, "hud.panel succeeds in world")
+    "#,
+    )
+    .unwrap();
+
+    let mut count = 0;
+    hud_layer::MOD_QUEUES.with(|q| {
+        let map = q.borrow();
+        if let Some(queue) = map.get("hud_layer_test") {
+            count = queue.len();
+        }
+    });
+    assert_eq!(count, 4, "all 4 commands queued");
+
+    hud_layer::clear_all();
 }

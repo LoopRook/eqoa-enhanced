@@ -41,6 +41,7 @@ pub(crate) mod group;
 pub(crate) mod health;
 pub(crate) mod host;
 pub(crate) mod hud_layout;
+pub(crate) mod hud_layer;
 #[cfg(test)]
 mod icon_tests;
 pub(crate) mod icons;
@@ -68,6 +69,8 @@ mod textures;
 pub(crate) mod weapon_sets;
 #[cfg(test)]
 mod weapon_sets_tests;
+#[cfg(test)]
+mod round_3_picture_tests;
 #[cfg(test)]
 mod wereoxxs_test;
 #[cfg(test)]

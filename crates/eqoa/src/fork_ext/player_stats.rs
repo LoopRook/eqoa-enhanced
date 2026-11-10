@@ -92,8 +92,28 @@ impl Row {
             Shift::Raised => self.value - max.unwrap_or(self.value),
             Shift::Lowered => self.value - min.unwrap_or(self.value),
         };
+        let short_name = match stat {
+            0 => "Str",
+            1 => "Sta",
+            2 => "Agi",
+            3 => "Dex",
+            4 => "Wis",
+            5 => "Int",
+            6 => "Cha",
+            14 => "AC",
+            8 => "HPMax",
+            10 => "POW",
+            24 => "FR",
+            25 => "CR",
+            26 => "LR",
+            27 => "AR",
+            22 => "PR",
+            23 => "DR",
+            _ => "???",
+        };
         json!({
             "name": name,
+            "short": short_name,
             "word": self.word,
             "stat_id": stat,
             "current": self.value,

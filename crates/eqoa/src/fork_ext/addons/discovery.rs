@@ -421,7 +421,11 @@ fn discover_script_root(script_root: &Path, canonical_root: &Path, ctx: &mut Dis
             continue;
         }
 
-        let manifest_path = canonical_pkg.join("mod.json");
+        let manifest_path = if canonical_pkg.join("manifest.json").is_file() {
+            canonical_pkg.join("manifest.json")
+        } else {
+            canonical_pkg.join("mod.json")
+        };
         if manifest_path.is_file() {
             // Layout 4: Native package manifest
             parse_native_manifest(

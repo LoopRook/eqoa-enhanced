@@ -70,12 +70,11 @@ impl Session {
             ("files", "read write remove", 2),
             ("files", "list", 4),
             ("fonts", "load default release", 2),
-            ("fonts", "game", 3),
             ("gems", "get is_gem format", 3),
             ("group", "get", 2),
             ("hotbar", "list", 2),
             ("hud", "hide show hidden_by", 2),
-            ("hud", "frame layout visible", 3),
+            ("hud", "frame layout visible text gauge image panel", 3),
             ("icons", "resource ui info", 2),
             ("icons", "class disposition", 4),
             ("input", "get claim release capture_text rotate_dpad", 2),
@@ -516,7 +515,6 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
                     | "eqoa.actions.assist"
                     | "eqoa.actions.target_target"
                     | "eqoa.actions.toggle_stats_box"
-                    | "eqoa.fonts.game"
                     | "eqoa.target.get"
                     | "eqoa.group.get"
                     | "eqoa.entities.list"
@@ -927,7 +925,6 @@ fn install_fields(lua: &Lua) {
         ),
         ("eqoa.textures.TextureInfo", "texture width height"),
         ("eqoa.fonts.FontInfo", "font status reason"),
-        ("eqoa.fonts.GameFont", "name height scale"),
         (
             "eqoa.hud.Frame",
             "width height offset_x offset_y scale_x scale_y side top window_width window_height",
