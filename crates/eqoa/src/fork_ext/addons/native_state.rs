@@ -1049,10 +1049,11 @@ fn install_math(lua: &Lua) -> Result<()> {
                 let def_for_cb = default_key.to_ascii_lowercase();
                 let wrapper = lua.create_function(move |_, ev: Value| {
                     if let Value::Table(et) = &ev {
-                        let down = et.get::<Option<bool>>("down")?.unwrap_or(false);
-                        let rep = et.get::<Option<bool>>("repeat")?.unwrap_or(false)
-                            || et.get::<Option<bool>>("repeat_")?.unwrap_or(false);
-                        let key = et.get::<Option<String>>("key")?.unwrap_or_default();
+                        let data: mlua::Table = et.get("data")?;
+                        let down = data.get::<Option<bool>>("down")?.unwrap_or(false);
+                        let rep = data.get::<Option<bool>>("repeat")?.unwrap_or(false)
+                            || data.get::<Option<bool>>("repeat_")?.unwrap_or(false);
+                        let key = data.get::<Option<String>>("key")?.unwrap_or_default();
                         if down && !rep {
                             let bound = crate::fork_ext::bindpage::get_key(&addon_for_cb, &id_for_cb)
                                 .unwrap_or_else(|| def_for_cb.clone());

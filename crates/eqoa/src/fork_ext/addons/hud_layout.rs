@@ -195,13 +195,28 @@ pub fn hud_element_visible(element: &str) -> bool {
         "experience_secondary" | "secondary_exp_bar" => !v.secondary_exp_bar,
         "target" | "target_nameplate" | "target_of_target" => !v.target,
         "group_panel" | "group" | "group_member_panel" => !v.group_panel && !state.in_raid,
+        "group_markers" | "group_compass_marks" => !v.group_compass_marks,
         "pet" | "pet_panel" => !v.pet,
         "compass" | "compass_face" | "compass_back" => !v.compass,
         "active_effects" | "effects" => !v.active_effects,
         "chat" | "chat_window" => !v.chat,
         "hotbar" | "ability_bar" | "hotbar_draw_compact" | "hotbar_draw_expanded" => !v.ability_bar,
-        "stats_box" => state.right_hud_up,
+        "stats_box" | "plain_play" => state.right_hud_up,
         "mana_bars" => true,
+        "all" => {
+            !v.health_bar
+                && !v.power_bar
+                && !v.main_exp_bar
+                && !v.secondary_exp_bar
+                && !v.compass
+                && !v.target
+                && !v.group_panel
+                && !v.group_compass_marks
+                && !v.pet
+                && !v.chat
+                && !v.ability_bar
+                && !v.active_effects
+        }
         _ => false,
     }
 }

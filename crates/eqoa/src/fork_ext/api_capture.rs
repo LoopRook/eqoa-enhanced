@@ -160,13 +160,12 @@ impl Play {
         let resists=stats_known.then(||json!({"base":40+self.stats.stat[4].div_euclid(7),"poison":self.stats.stat[22],"disease":self.stats.stat[23],"fire":self.stats.stat[24],"cold":self.stats.stat[25],"lightning":self.stats.stat[26],"arcane":self.stats.stat[27]}));
         let player = json!({"id":id,"name":self.player.name,"class_id":class,"class_name":usize::try_from(class).ok().and_then(|k|crate::fork_ext::addons::player::CLASSES.get(k)),"race_id":race,"race_name":usize::try_from(race).ok().and_then(|k|crate::fork_ext::addons::player::RACES.get(k)),"level":self.dump.player.level,"experience":self.dump.player.exp,"experience_debt":self.dump.player.p2c,"hp":hp,"power":power,"attributes":attributes,"armor":stats_known.then_some(self.stats.stat[14]),"resists":resists,"position":position,"velocity":velocity,"heading":heading,"speed":speed,"horizontal_speed":horizontal_speed,"target_id":valid_id(self.target),"pet_id":valid_id(self.pet_id),"auto_attacking":self.auto_attack,"dead":self.death.is_some(),"has_pet":valid_id(self.pet_id).is_some(),"fighting":fighting,"location":self.native_location(walker),"mastery":null});
         let members = if self.group.in_group {
-            self.group.members.iter().map(|m|{
+            self.group.members[..self.group.count()]
+                .iter()
+                .filter(|m| Some(m.id) != id && m.active)
+                .map(|m|{
             let actor=self.entities.slots.iter().flatten().find(|e|e.id==m.id);
-            let power_val = if Some(m.id) == id {
-                (self.stats.stat[10] > 0).then(|| ee::div(self.stats.stat[9].clamp(0, self.stats.stat[10]) as f32, self.stats.stat[10] as f32))
-            } else {
-                self.session.power_of(m.id).map(|p| ee::div(p as f32, 255.0))
-            };
+            let power_val = self.session.power_of(m.id).map(|p| ee::div(p as f32, 255.0));
             json!({"id":m.id,"name":m.name,"active":m.active,"hp_fraction":(m.hp_known!=0).then(||ee::div(m.hp as f32,255.0)),"power":power_val,"position":actor.map(|e|vec3(e.pos)).or_else(||m.active.then(||vec3(m.pos))),"world_id":actor.map(|e|e.world as i32).or_else(||m.active.then_some(m.x))})
         }).collect::<Vec<_>>()
         } else {

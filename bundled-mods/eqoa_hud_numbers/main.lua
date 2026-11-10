@@ -67,7 +67,7 @@ eqoa.events.on("render", function()
         end
     end
 
-    -- Target HP %
+    -- Target HP % (bottom-anchored with the target plate)
     if target_on and eqoa.hud.visible("target") then
         local target = eqoa.target.get()
         if target and target.id and target.hp_fraction then
@@ -84,6 +84,7 @@ eqoa.events.on("render", function()
                 scale = 0.65,
                 align = "center",
                 outline = true,
+                vertical = "bottom",
             })
         end
     end
