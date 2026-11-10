@@ -435,6 +435,12 @@
       "name": "options appended categories",
       "pattern": "\\bfork_options::categories\\b",
       "count": 2
+    },
+    {
+      "path": "crates/eqoa/src/settings.rs",
+      "name": "settings defaults migration",
+      "pattern": "\\bfork_settings::migrate_defaults\\b",
+      "count": 1
     }
   ]
 }

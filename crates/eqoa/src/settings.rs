@@ -1274,7 +1274,8 @@ impl ClientOptions {
 
 /// client.opt as it stands: window 1's rows, and what the windows share.
 fn read_shared() -> ClientOptions {
-    store::read(CLIENT_FILE).map_or_else(fork_settings::first_run, |b| ClientOptions::from_text(&String::from_utf8_lossy(&b)))
+    if let Some(c) = fork_settings::migrate_defaults() { return c; }
+    store::read(CLIENT_FILE).map_or_else(ClientOptions::default, |b| ClientOptions::from_text(&String::from_utf8_lossy(&b)))
 }
 
 /// The client's settings as this window keeps them: client.opt, with a later
