@@ -150,6 +150,11 @@ impl View {
                 if matches!(stat, 22..=27) {
                     resists.insert(name.to_string(), item.clone());
                 }
+                if stat == 8 {
+                    named.insert("max_hp".to_string(), item.clone());
+                } else if stat == 10 {
+                    named.insert("max_power".to_string(), item.clone());
+                }
                 named.insert(name.to_string(), item.clone());
                 col_json.push(item);
             }

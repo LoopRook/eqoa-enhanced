@@ -13,6 +13,8 @@ struct EntityData {
     level: Option<u8>,
     position: [f32; 3],
     hp: u8,
+    is_target: bool,
+    power: Option<f32>,
     code: Option<u8>,
     target: Option<u32>,
     flags: Option<u8>,
@@ -22,12 +24,25 @@ struct EntityData {
 impl EntityData {
     fn read(p: &Play, e: &net::entity::Entity) -> Self {
         let creature = e.creature.as_ref();
+        let me = p.self_id32();
+        let power = if Some(e.id) == me {
+            (p.stats.stat[10] > 0).then(|| {
+                ee::div(
+                    p.stats.stat[9].clamp(0, p.stats.stat[10]) as f32,
+                    p.stats.stat[10] as f32,
+                )
+            })
+        } else {
+            p.session.power_of(e.id).map(|pw| ee::div(pw as f32, 255.0))
+        };
         Self {
             id: e.id,
             name: creature.map_or("", |c| c.name.as_str()).into(),
             level: creature.map(|c| c.level),
             position: e.pos,
             hp: e.p19,
+            is_target: Some(e.id) == valid_id(p.target),
+            power,
             code: creature.map(|c| c.p256),
             target: creature.and_then(|c| valid_id(c.target)),
             flags: creature.map(|c| c.flags262),
@@ -39,7 +54,7 @@ impl EntityData {
         }
     }
     fn value(&self) -> Json {
-        json!({"id":self.id,"name":self.name,"level":self.level,"position":vec3(self.position),"hp_fraction":(self.hp!=0).then(||ee::div(self.hp as f32,255.)),"kind":match self.code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":self.code,"target_id":self.target,"status_flags":self.flags,"poisoned":self.flags.map(|f|f&4!=0),"diseased":self.flags.map(|f|f&8!=0),"disposition":self.disposition,"disposition_name":self.disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
+        json!({"id":self.id,"name":self.name,"level":self.level,"position":vec3(self.position),"hp_fraction":(self.hp!=0 || self.is_target).then(||ee::div(self.hp as f32,255.)),"power":self.power,"kind":match self.code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":self.code,"target_id":self.target,"status_flags":self.flags,"poisoned":self.flags.map(|f|f&4!=0),"diseased":self.flags.map(|f|f&8!=0),"disposition":self.disposition,"disposition_name":self.disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
     }
 }
 #[derive(Clone)]
@@ -48,6 +63,7 @@ struct PlayerData {
     name: String,
     player: net::dump::Player,
     stats: net::dump::Stats,
+    player_stats: Option<Json>,
     known: bool,
     health: crate::fork_ext::addons::health::HealthSnapshot,
     target: Option<u32>,
@@ -62,12 +78,27 @@ impl PlayerData {
         let health = p
             .forge_health
             .snapshot(p.session.self_id.is_some(), p.in_world_now());
+        let known = CORE.with(|c| c.borrow().stats_received) || health.available;
+        let player_stats = known
+            .then(|| {
+                let m = &p.cm.m;
+                let src = crate::fork_ext::player_stats::Source {
+                    stats: &p.stats,
+                    inv: &p.dump.inventory,
+                    mastery: &m.stats,
+                    bonuses: &m.bonuses,
+                    p44: p.dump.player.p44 as i32,
+                };
+                crate::fork_ext::player_stats::view(&src).map(|v| v.to_json())
+            })
+            .flatten();
         Self {
             id,
             name: p.player.name.clone(),
             player: p.dump.player.clone(),
             stats: p.stats,
-            known: CORE.with(|c| c.borrow().stats_received) || health.available,
+            player_stats,
+            known,
             health,
             target: valid_id(p.target),
             pet: valid_id(p.pet_id),
@@ -233,8 +264,13 @@ fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
 fn ability_value(a: &net::dump::Ability) -> Json {
     json!({"id":a.id.to_string(),"name":a.name,"description":a.desc,"display_key":a.display_index,"spellbook_slot":(a.slot>=0).then(||a.slot+1),"usable":a.valid!=0,"level":a.level,"range":a.range,"cast_time":a.cast_time,"power_cost":a.power_cost,"icon_background":(a.icon_back != -1).then_some(a.icon_back as u32),"icon_foreground":(a.icon_front != -1).then_some(a.icon_front as u32),"scope":a.scope,"cooldown":a.cooldown,"equipment_mask":a.equip_req,"lockout":ee::div(a.lockout as f32,1000.)})
 }
-fn group_value(group: &crate::group::Group, me: Option<u32>, c: &Core) -> Json {
-    json!({"in_group":group.in_group,"self_leader":group.in_group.then(||group.members.first().is_some_and(|m|Some(m.id)==me)),"members":if group.in_group{group.members.iter().map(|m|{let actor=c.view.entities.iter().find(|e|e["id"].as_u64()==Some(m.id as u64));json!({"id":m.id,"name":m.name,"active":m.active,"hp_fraction":(m.hp_known!=0).then(||ee::div(m.hp as f32,255.)),"position":actor.map(|e|e["position"].clone()).or_else(||m.active.then(||vec3(m.pos))),"world_id":actor.and_then(|_|c.entity_worlds.get(&m.id).copied()).or_else(||m.active.then_some(m.x)),"entity":actor.map(|e|e["ref"].clone())})}).collect::<Vec<_>>()}else{Vec::new()},"raid":group.raid.iter().map(|m|json!({"id":m.id,"name":m.name,"hp_fraction":ee::div(m.hp as f32,255.),"power_fraction":ee::div(m.power as f32,255.)})).collect::<Vec<_>>(),"invites":group.invites.iter().map(|i|json!({"id":i.id,"name":i.name})).collect::<Vec<_>>()})
+fn group_value(
+    group: &crate::group::Group,
+    me: Option<u32>,
+    powers: &[Option<f32>],
+    c: &Core,
+) -> Json {
+    json!({"in_group":group.in_group,"self_leader":group.in_group.then(||group.members.first().is_some_and(|m|Some(m.id)==me)),"members":if group.in_group{group.members.iter().enumerate().map(|(idx,m)|{let actor=c.view.entities.iter().find(|e|e["id"].as_u64()==Some(m.id as u64));json!({"id":m.id,"name":m.name,"active":m.active,"hp_fraction":(m.hp_known!=0).then(||ee::div(m.hp as f32,255.)),"power":powers.get(idx).copied().flatten(),"position":actor.map(|e|e["position"].clone()).or_else(||m.active.then(||vec3(m.pos))),"world_id":actor.and_then(|_|c.entity_worlds.get(&m.id).copied()).or_else(||m.active.then_some(m.x)),"entity":actor.map(|e|e["ref"].clone())})}).collect::<Vec<_>>()}else{Vec::new()},"raid":group.raid.iter().map(|m|json!({"id":m.id,"name":m.name,"hp_fraction":ee::div(m.hp as f32,255.),"power_fraction":ee::div(m.power as f32,255.)})).collect::<Vec<_>>(),"invites":group.invites.iter().map(|i|json!({"id":i.id,"name":i.name})).collect::<Vec<_>>()})
 }
 fn patch_section(c: &mut Core, name: &str, after: Json) {
     let target = match name {
@@ -374,6 +410,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         let player = PlayerData::read(play);
         CORE.with(|c| {
             let mut c = c.borrow_mut();
+            c.view.player_stats = player.player_stats.clone();
             let mut after = player.value(&c);
             if let Some(w) = walker {
                 let p = w.cam.walk.phys.position;
@@ -428,6 +465,7 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
             );
             if let Some(player) = player {
                 native_core::defer(2048 + player.name.len(), move |c| {
+                    c.view.player_stats = player.player_stats.clone();
                     let value = player.value(c);
                     patch_player(c, value);
                 });
@@ -439,6 +477,7 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
         Kind::Player => {
             let player = PlayerData::read(play);
             native_core::defer(2048 + player.name.len(), move |c| {
+                c.view.player_stats = player.player_stats.clone();
                 let value = player.value(c);
                 patch_player(c, value)
             });
@@ -451,11 +490,29 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
             group.raid = play.group.raid.clone();
             group.invites = play.group.invites.clone();
             let me = play.self_id32();
+            let powers = group
+                .members
+                .iter()
+                .map(|m| {
+                    if Some(m.id) == me {
+                        (play.stats.stat[10] > 0).then(|| {
+                            ee::div(
+                                play.stats.stat[9].clamp(0, play.stats.stat[10]) as f32,
+                                play.stats.stat[10] as f32,
+                            )
+                        })
+                    } else {
+                        play.session
+                            .power_of(m.id)
+                            .map(|p| ee::div(p as f32, 255.0))
+                    }
+                })
+                .collect::<Vec<_>>();
             native_core::defer(
                 2048 + group.members.iter().map(|m| m.name.len()).sum::<usize>()
                     + group.raid.len() * 256,
                 move |c| {
-                    let value = group_value(&group, me, c);
+                    let value = group_value(&group, me, &powers, c);
                     patch_section(c, "group.changed", value)
                 },
             );
@@ -657,6 +714,7 @@ pub(crate) fn fingerprint(play: &Play, kind: Kind) -> u64 {
                 e.world.hash(&mut h);
                 e.pos.map(f32::to_bits).hash(&mut h);
                 e.p19.hash(&mut h);
+                play.session.power_of(e.id).hash(&mut h);
                 if let Some(c) = &e.creature {
                     c.name.hash(&mut h);
                     c.level.hash(&mut h);
@@ -687,6 +745,7 @@ pub(crate) fn fingerprint(play: &Play, kind: Kind) -> u64 {
                 m.active.hash(&mut h);
                 m.hp_known.hash(&mut h);
                 m.hp.hash(&mut h);
+                play.session.power_of(m.id).hash(&mut h);
                 m.x.hash(&mut h);
                 m.pos.map(f32::to_bits).hash(&mut h);
             }

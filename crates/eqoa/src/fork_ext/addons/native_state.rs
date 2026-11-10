@@ -556,19 +556,24 @@ fn install_math(lua: &Lua) -> Result<()> {
             })
         })?,
     )?;
-    bind(
-        lua,
-        "actions",
-        "assist",
-        lua.create_function(|lua, ()| {
-            let in_world = CORE.with(|c| c.borrow().view.in_world);
-            if !in_world {
-                return error(lua, "eqoa.actions.assist", "not_in_world", "enter a loaded world first");
-            }
-            super::actions::request_assist();
-            lua.pack_multi((true, Value::Nil))
-        })?,
-    )?;
+    for action_name in ["assist", "target_target"] {
+        let sym = format!("eqoa.actions.{action_name}");
+        bind(
+            lua,
+            "actions",
+            action_name,
+            lua.create_function(move |lua, ()| {
+                let in_world = CORE.with(|c| c.borrow().view.in_world);
+                if !in_world {
+                    return error(lua, &sym, "not_in_world", "enter a loaded world first");
+                }
+                if !super::actions::queue_assist() {
+                    return error(lua, &sym, "busy", "assist already queued this tick");
+                }
+                lua.pack_multi((true, Value::Nil))
+            })?,
+        )?;
+    }
     bind(
         lua,
         "windows",
@@ -584,7 +589,9 @@ fn install_math(lua: &Lua) -> Result<()> {
             if !in_world {
                 return error(lua, "eqoa.windows.open", "not_in_world", "enter a loaded world first");
             }
-            super::actions::request_summary();
+            if !super::actions::queue_open_summary() {
+                return error(lua, "eqoa.windows.open", "busy", "summary open already queued this tick");
+            }
             lua.pack_multi((true, Value::Nil))
         })?,
     )?;
@@ -638,11 +645,26 @@ fn install_math(lua: &Lua) -> Result<()> {
             lua.pack_multi((vis, Value::Nil))
         })?,
     )?;
+    let parse_anchor_vert = |t: &mlua::Table| -> Result<(render::ui::Anchor, render::ui::Vertical)> {
+        let anchor_s: Option<String> = t.get("anchor")?;
+        let anchor = match anchor_s.as_deref() {
+            Some("right") => render::ui::Anchor::Right,
+            Some("center") => render::ui::Anchor::Center,
+            _ => render::ui::Anchor::Left,
+        };
+        let vert_s: Option<String> = t.get("vertical")?;
+        let vertical = match vert_s.as_deref() {
+            Some("bottom") => render::ui::Vertical::Bottom,
+            Some("center") => render::ui::Vertical::Center,
+            _ => render::ui::Vertical::Top,
+        };
+        Ok((anchor, vertical))
+    };
     bind(
         lua,
         "hud",
         "text",
-        lua.create_function(|lua, spec: Value| {
+        lua.create_function(move |lua, spec: Value| {
             let in_world = CORE.with(|c| c.borrow().view.in_world);
             if !in_world {
                 return error(lua, "eqoa.hud.text", "not_in_world", "enter a loaded world first");
@@ -650,13 +672,18 @@ fn install_math(lua: &Lua) -> Result<()> {
             let Value::Table(t) = spec else {
                 return error(lua, "eqoa.hud.text", "invalid_argument", "spec must be a table");
             };
-            let x: f32 = match t.get::<f32>("x") {
-                Ok(v) => v,
-                Err(_) => return error(lua, "eqoa.hud.text", "invalid_argument", "x required"),
+            let col: Option<usize> = t.get("col")?;
+            let row: Option<usize> = t.get("row")?;
+            let has_cell = col.zip(row).is_some_and(|(c, r)| (1..=2).contains(&c) && (1..=8).contains(&r));
+            let x: f32 = match t.get::<Option<f32>>("x")? {
+                Some(v) => v,
+                None if has_cell => 0.0,
+                None => return error(lua, "eqoa.hud.text", "invalid_argument", "x required"),
             };
-            let y: f32 = match t.get::<f32>("y") {
-                Ok(v) => v,
-                Err(_) => return error(lua, "eqoa.hud.text", "invalid_argument", "y required"),
+            let y: f32 = match t.get::<Option<f32>>("y")? {
+                Some(v) => v,
+                None if has_cell => 0.0,
+                None => return error(lua, "eqoa.hud.text", "invalid_argument", "y required"),
             };
             let text: String = match t.get::<String>("text") {
                 Ok(v) => v,
@@ -676,12 +703,31 @@ fn install_math(lua: &Lua) -> Result<()> {
             };
             let outline: bool = t.get::<Option<bool>>("outline")?.unwrap_or(false);
             let shadow: bool = t.get::<Option<bool>>("shadow")?.unwrap_or(false);
+            let (anchor, vertical) = parse_anchor_vert(&t)?;
+            let clip_width: Option<i32> = t.get("clip_width")?;
+            let stat_cell = col
+                .zip(row)
+                .filter(|&(c, r)| (1..=2).contains(&c) && (1..=8).contains(&r))
+                .map(|(c, r)| (c - 1, r - 1, align == super::hud_layer::TextAlign::Right));
 
             let addon = {
                 let a = super::native::session(lua).borrow().addon.clone();
                 if a.is_empty() { "default".to_string() } else { a }
             };
-            let cmd = super::hud_layer::HudCommand::Text { x, y, text, color, scale, align, outline, shadow };
+            let cmd = super::hud_layer::HudCommand::Text {
+                x,
+                y,
+                text,
+                color,
+                scale,
+                align,
+                outline,
+                shadow,
+                anchor,
+                vertical,
+                clip_width,
+                stat_cell,
+            };
             if let Err(e) = super::hud_layer::queue_command(&addon, cmd) {
                 return error(lua, "eqoa.hud.text", "limit_exceeded", e);
             }
@@ -692,7 +738,7 @@ fn install_math(lua: &Lua) -> Result<()> {
         lua,
         "hud",
         "gauge",
-        lua.create_function(|lua, spec: Value| {
+        lua.create_function(move |lua, spec: Value| {
             let in_world = CORE.with(|c| c.borrow().view.in_world);
             if !in_world {
                 return error(lua, "eqoa.hud.gauge", "not_in_world", "enter a loaded world first");
@@ -717,12 +763,21 @@ fn install_math(lua: &Lua) -> Result<()> {
                 Err(_) => return error(lua, "eqoa.hud.gauge", "invalid_argument", "fill required"),
             };
             let lit: bool = t.get::<Option<bool>>("lit")?.unwrap_or(true);
+            let (anchor, vertical) = parse_anchor_vert(&t)?;
 
             let addon = {
                 let a = super::native::session(lua).borrow().addon.clone();
                 if a.is_empty() { "default".to_string() } else { a }
             };
-            let cmd = super::hud_layer::HudCommand::Gauge { x, y, art, fill, lit };
+            let cmd = super::hud_layer::HudCommand::Gauge {
+                x,
+                y,
+                art,
+                fill,
+                lit,
+                anchor,
+                vertical,
+            };
             if let Err(e) = super::hud_layer::queue_command(&addon, cmd) {
                 return error(lua, "eqoa.hud.gauge", "limit_exceeded", e);
             }
@@ -733,7 +788,7 @@ fn install_math(lua: &Lua) -> Result<()> {
         lua,
         "hud",
         "image",
-        lua.create_function(|lua, spec: Value| {
+        lua.create_function(move |lua, spec: Value| {
             let in_world = CORE.with(|c| c.borrow().view.in_world);
             if !in_world {
                 return error(lua, "eqoa.hud.image", "not_in_world", "enter a loaded world first");
@@ -756,6 +811,7 @@ fn install_math(lua: &Lua) -> Result<()> {
                 Some(c) if c.len() == 3 => Some([c[0], c[1], c[2], 1.0]),
                 _ => None,
             };
+            let (anchor, vertical) = parse_anchor_vert(&t)?;
 
             let addon = {
                 let a = super::native::session(lua).borrow().addon.clone();
@@ -763,10 +819,35 @@ fn install_math(lua: &Lua) -> Result<()> {
             };
             let cmd = match t.get::<Value>("ui_id")? {
                 Value::String(s) if s.to_str()? == "panel" => {
-                    super::hud_layer::HudCommand::Panel { x, y, w: w.unwrap_or(148), h: h.unwrap_or(132) }
+                    super::hud_layer::HudCommand::Panel {
+                        x,
+                        y,
+                        w: w.unwrap_or(148),
+                        h: h.unwrap_or(132),
+                        anchor,
+                        vertical,
+                    }
                 }
-                Value::Integer(id) => super::hud_layer::HudCommand::Image { ui_id: id as i32, x, y, w, h, color },
-                Value::Number(n) => super::hud_layer::HudCommand::Image { ui_id: n as i32, x, y, w, h, color },
+                Value::Integer(id) => super::hud_layer::HudCommand::Image {
+                    ui_id: id as i32,
+                    x,
+                    y,
+                    w,
+                    h,
+                    color,
+                    anchor,
+                    vertical,
+                },
+                Value::Number(n) => super::hud_layer::HudCommand::Image {
+                    ui_id: n as i32,
+                    x,
+                    y,
+                    w,
+                    h,
+                    color,
+                    anchor,
+                    vertical,
+                },
                 _ => return error(lua, "eqoa.hud.image", "invalid_argument", "ui_id required"),
             };
 
@@ -780,7 +861,7 @@ fn install_math(lua: &Lua) -> Result<()> {
         lua,
         "hud",
         "panel",
-        lua.create_function(|lua, spec: Value| {
+        lua.create_function(move |lua, spec: Value| {
             let in_world = CORE.with(|c| c.borrow().view.in_world);
             if !in_world {
                 return error(lua, "eqoa.hud.panel", "not_in_world", "enter a loaded world first");
@@ -804,12 +885,20 @@ fn install_math(lua: &Lua) -> Result<()> {
                 Ok(v) => v,
                 Err(_) => return error(lua, "eqoa.hud.panel", "invalid_argument", "h required"),
             };
+            let (anchor, vertical) = parse_anchor_vert(&t)?;
 
             let addon = {
                 let a = super::native::session(lua).borrow().addon.clone();
                 if a.is_empty() { "default".to_string() } else { a }
             };
-            let cmd = super::hud_layer::HudCommand::Panel { x, y, w, h };
+            let cmd = super::hud_layer::HudCommand::Panel {
+                x,
+                y,
+                w,
+                h,
+                anchor,
+                vertical,
+            };
             if let Err(e) = super::hud_layer::queue_command(&addon, cmd) {
                 return error(lua, "eqoa.hud.panel", "limit_exceeded", e);
             }

@@ -3474,7 +3474,6 @@ impl Play {
         self.session.agree_pet_effects(crate::settings::pet_effects());
         self.agree_number_tags();
         self.agree_dps_meter();
-        self.session.agree_power_bars(true);
         self.agree_quests();
         self.guide_wait(now);
         self.record_menu(); // Character > Combat Record once the server offers it
@@ -4310,8 +4309,6 @@ impl Play {
         self.do_action(0x0B0E_0006, 0);
     }
 
-    /// Target of Target (the Extended page's, off by default): the name of
-    /// whom the target's channel says it targets (`Creature::target`, its
     /// `FindEntity(m_selfId)`: the player's own entity is in.
     fn self_entity(&self) -> bool {
         let me = self.self_id32();
@@ -4733,19 +4730,6 @@ impl Play {
     /// The creatures' names, slot order.
     pub fn entity_names(&self) -> Vec<String> {
         self.entities.slots.iter().flatten().filter_map(|e| e.creature.as_ref().map(|c| c.name.trim().to_string())).collect()
-    }
-
-    /// Looks up the name of an entity by its id.
-    pub fn entity_name(&self, id: u32) -> Option<String> {
-        if Some(id) == self.self_id32() {
-            return Some(self.player.name.clone());
-        }
-        if id == self.pet_id && !self.pet_name.is_empty() {
-            return Some(self.pet_name.clone());
-        }
-        self.entities.slots.iter().flatten().find(|e| e.id == id)
-            .and_then(|e| e.creature.as_ref())
-            .map(|c| c.name.trim().to_string())
     }
 
     /// Targets the creature called `name` (as a click on it would), 0x0010.

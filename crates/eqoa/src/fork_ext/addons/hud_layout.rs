@@ -8,6 +8,55 @@ pub const SCREEN_H: f32 = 448.0;
 static WINDOW_SIZE: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new((640u64 << 32) | 448u64);
 
+#[derive(Clone, Copy, Debug)]
+pub struct HudState {
+    pub right_hud_up: bool,
+    pub hud_up: bool,
+    pub in_raid: bool,
+    pub pet_y: i32,
+    pub pet_h: i32,
+}
+
+impl Default for HudState {
+    fn default() -> Self {
+        Self {
+            right_hud_up: true,
+            hud_up: true,
+            in_raid: false,
+            pet_y: 285,
+            pet_h: 20,
+        }
+    }
+}
+
+thread_local! {
+    static HUD_STATE: std::cell::Cell<HudState> = const {
+        std::cell::Cell::new(HudState {
+            right_hud_up: true,
+            hud_up: true,
+            in_raid: false,
+            pet_y: 285,
+            pet_h: 20,
+        })
+    };
+}
+
+pub fn set_hud_state(right_hud_up: bool, hud_up: bool, in_raid: bool, pet_y: i32, pet_h: i32) {
+    HUD_STATE.with(|s| {
+        s.set(HudState {
+            right_hud_up,
+            hud_up,
+            in_raid,
+            pet_y,
+            pet_h,
+        });
+    });
+}
+
+pub fn get_hud_state() -> HudState {
+    HUD_STATE.with(|s| s.get())
+}
+
 pub fn set_window_size(w: u32, h: u32) {
     let val = ((w as u64) << 32) | (h as u64);
     WINDOW_SIZE.store(val, std::sync::atomic::Ordering::Release);
@@ -21,7 +70,11 @@ pub fn get_window_size() -> (u32, u32) {
 pub fn frame_metrics(window_size: (u32, u32)) -> (f32, f32, f32, f32, f32, f32) {
     let (tw, th) = (window_size.0 as f32, window_size.1 as f32);
     let fw = (th * 4.0 / 3.0).min(tw);
-    let fh = if fw < th * 4.0 / 3.0 { fw * 3.0 / 4.0 } else { th };
+    let fh = if fw < th * 4.0 / 3.0 {
+        fw * 3.0 / 4.0
+    } else {
+        th
+    };
     let ox = (tw - fw) / 2.0;
     let oy = (th - fh) / 2.0;
     let sx = fw / SCREEN_W;
@@ -80,6 +133,7 @@ pub fn hud_frame_json(window_size: (u32, u32)) -> Json {
 
 pub fn hud_layout_json(window_size: (u32, u32)) -> Json {
     let m = frame_metrics(window_size);
+    let state = get_hud_state();
     let to_rect = |x: f32, y: f32, w: f32, h: f32, anc: &str, vert: &str| {
         let out = transform_rect([x, y, w, h], anc, vert, m);
         json!({
@@ -107,10 +161,10 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> Json {
 
     json!({
         "player": {
-            "panel": to_rect(20.0, 15.0, 174.0, 50.0, "left", "top"),
-            "health": to_rect(30.0, 25.0, 136.0, 8.0, "left", "top"),
-            "power": to_rect(30.0, 35.0, 136.0, 8.0, "left", "top"),
-            "exp": to_rect(30.0, 45.0, 136.0, 8.0, "left", "top"),
+            "panel": to_rect(10.0, 15.0, 190.0, 65.0, "left", "top"),
+            "health": to_rect(69.0, 36.0, 136.0, 8.0, "left", "top"),
+            "power": to_rect(69.0, 46.0, 136.0, 8.0, "left", "top"),
+            "exp": to_rect(69.0, 56.0, 136.0, 8.0, "left", "top"),
         },
         "group_members": members,
         "target": {
@@ -119,7 +173,7 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> Json {
             "power": to_rect(30.0, 408.0, 136.0, 8.0, "left", "bottom"),
         },
         "pet": {
-            "panel": to_rect(20.0, 285.0, 174.0, 20.0, "left", "top"),
+            "panel": to_rect(20.0, state.pet_y as f32, 174.0, state.pet_h as f32, "left", "top"),
         },
     })
 }
@@ -128,22 +182,26 @@ pub fn hud_element_visible(element: &str) -> bool {
     if crate::hideui::hidden() {
         return false;
     }
+    let state = get_hud_state();
+    if !state.hud_up {
+        return false;
+    }
     let v = super::visibility::effective_visibility();
     match element {
+        "hud" => true,
         "health" | "health_bar" => !v.health_bar,
         "power" | "power_bar" => !v.power_bar,
         "experience_main" | "exp" | "main_exp_bar" => !v.main_exp_bar,
         "experience_secondary" | "secondary_exp_bar" => !v.secondary_exp_bar,
-        "target" => !v.target,
-        "group_panel" | "group" => !v.group_panel,
-        "pet" => !v.pet,
-        "compass" => !v.compass,
+        "target" | "target_nameplate" | "target_of_target" => !v.target,
+        "group_panel" | "group" | "group_member_panel" => !v.group_panel && !state.in_raid,
+        "pet" | "pet_panel" => !v.pet,
+        "compass" | "compass_face" | "compass_back" => !v.compass,
         "active_effects" | "effects" => !v.active_effects,
-        "chat" => !v.chat,
-        "hotbar" | "ability_bar" => !v.ability_bar,
-        "stats_box" => true,
-        "target_of_target" => !v.target,
+        "chat" | "chat_window" => !v.chat,
+        "hotbar" | "ability_bar" | "hotbar_draw_compact" | "hotbar_draw_expanded" => !v.ability_bar,
+        "stats_box" => state.right_hud_up,
         "mana_bars" => true,
-        _ => true,
+        _ => false,
     }
 }

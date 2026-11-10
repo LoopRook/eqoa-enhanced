@@ -66,7 +66,6 @@
 //! L1 in them do. The game sees only the buttons pressed (`macros::Run`,
 //! before `VIPad::Read`): nothing new goes to a server.
 
-
 use crate::input::bit;
 use winit::keyboard::{Key, NamedKey};
 
@@ -154,7 +153,7 @@ pub const ROWS: &[Row] = &[
     row("target_4", "Target: group 4", &["4"], Pad::None, ""),
     row("target_5", "Target: group 5", &["5"], Pad::None, ""),
     row("target_pet", "Target: {418}", &["6"], Pad::None, ""),
-    row("target_target", "Target: the target's target", &["f"], Pad::None, "The game's Assist Target: whom the target is targeting, as the server answers. A click on the Target of Target bar (the Extended page's) asks the same."),
+    row("target_target", "Assist Target", &["f"], Pad::None, "The game's Assist Target: whom the target is targeting, as the server answers."),
     row("orbit_left", "Orbit left", &["home"], Pad::None, "The orbiting camera's. On the map: |x."),
     row("orbit_right", "Orbit right", &["end"], Pad::None, "The orbiting camera's."),
     row("tilt_up", "Tilt up, zoom in", &["pageup"], Pad::None, "On the map: zoom in."),

@@ -701,6 +701,8 @@ fn render_managed(
     let fault = plan.fault;
     let result = (|| {
         let extent = FramebufferExtent::from_texture(final_target.texture());
+        super::hud_layout::set_window_size(extent.width(), extent.height());
+        super::hud_layer::clear_all();
         context
             .io_mut()
             .set_display_size([extent.width() as f32, extent.height() as f32]);

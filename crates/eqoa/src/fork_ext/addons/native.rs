@@ -545,11 +545,12 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
     )?;
     let mut s = session(lua).borrow().descriptors.clone();
     let path = format!("eqoa.{module}.{name}");
+    let round = s.get(&path).and_then(|d| d.round).or(Some(2));
     s.insert(
         path,
         Descriptor {
             status: if blocked { "unsupported" } else { "supported" },
-            round: Some(2),
+            round,
             reason: if blocked {
                 "secure file or sound backend is not implemented on this platform".into()
             } else {
@@ -571,11 +572,13 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
     } else {
         "partial"
     };
+    let mod_path = format!("eqoa.{module}");
+    let mod_round = s.get(&mod_path).and_then(|d| d.round).or(Some(2));
     s.insert(
-        format!("eqoa.{module}"),
+        mod_path,
         Descriptor {
             status,
-            round: Some(2),
+            round: mod_round,
             reason: String::new(),
         },
     );
@@ -821,8 +824,9 @@ fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.input.InputState", "pad") => Some("eqoa.input.Pad"),
         ("eqoa.input.Pad", "left" | "right") => Some("eqoa.Vec2"),
         ("eqoa.input.Pad", "raw_left" | "raw_right") => Some("eqoa.input.RawAxes"),
-        ("eqoa.player.Stats", "rows") => Some("eqoa.player.StatItem"),
-        ("eqoa.player.Stats", "strength" | "stamina" | "agility" | "dexterity" | "wisdom" | "intelligence" | "charisma" | "armor" | "max_hp" | "max_power" | "fire" | "cold" | "lightning" | "arcane" | "poison" | "disease") => Some("eqoa.player.StatItem"),
+        ("eqoa.player.Stats", "rows" | "columns") => Some("eqoa.player.StatItem"),
+        ("eqoa.player.Stats", "resists") => Some("eqoa.player.Stats"),
+        ("eqoa.player.Stats", "strength" | "stamina" | "agility" | "dexterity" | "wisdom" | "intelligence" | "charisma" | "armor" | "max_hp" | "hp_max" | "max_power" | "power" | "fire" | "cold" | "lightning" | "arcane" | "poison" | "disease") => Some("eqoa.player.StatItem"),
         ("eqoa.hud.Layout", "player") => Some("eqoa.hud.PlayerLayout"),
         ("eqoa.hud.Layout", "group_members") => Some("eqoa.hud.GroupMemberLayout"),
         ("eqoa.hud.Layout", "target") => Some("eqoa.hud.TargetLayout"),
@@ -866,11 +870,11 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.player.Stats",
-            "rows strength stamina agility dexterity wisdom intelligence charisma armor max_hp max_power fire cold lightning arcane poison disease",
+            "rows columns resists strength stamina agility dexterity wisdom intelligence charisma armor max_hp hp_max max_power power fire cold lightning arcane poison disease",
         ),
         (
             "eqoa.player.StatItem",
-            "name word stat_id current base min max change shift",
+            "name short word stat_id current base min max without_min without_max change effect_change shift",
         ),
         (
             "eqoa.entities.Entity",
@@ -955,9 +959,31 @@ fn install_fields(lua: &Lua) {
         ),
         ("eqoa.options.Toggle", "id label default value item_id"),
     ] {
-        describe(lua, path, "supported", Some(2), "");
+        let round = if path.starts_with("eqoa.hud.")
+            || path.starts_with("eqoa.options.")
+            || matches!(path, "eqoa.player.Stats" | "eqoa.player.StatItem")
+        {
+            Some(3)
+        } else {
+            Some(2)
+        };
+        describe(lua, path, "supported", round, "");
         for field in fields.split_whitespace() {
-            describe(lua, &format!("{path}.{field}"), "supported", Some(2), "");
+            let field_round = if matches!(
+                (path, field),
+                ("eqoa.entities.Entity", "power") | ("eqoa.group.Member", "power")
+            ) {
+                Some(3)
+            } else {
+                round
+            };
+            describe(
+                lua,
+                &format!("{path}.{field}"),
+                "supported",
+                field_round,
+                "",
+            );
         }
     }
     describe(

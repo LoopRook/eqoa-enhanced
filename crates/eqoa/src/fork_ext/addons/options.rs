@@ -276,10 +276,21 @@ pub fn get_toggle(addon_id: &str, id: &str) -> Option<bool> {
                 enabled,
                 explicit_in_memory: true,
             });
-            Some(val)
-        } else {
-            persisted
+            return Some(val);
         }
+        if let Some(persisted) = persisted {
+            return Some(persisted);
+        }
+        if let Some(o) = t.iter_mut().find(|o| o.id == id) {
+            if !o.explicit_in_memory {
+                if let Some(p) = load_persisted_toggle(&o.addon_id, &o.id) {
+                    o.current_value = p;
+                }
+                o.explicit_in_memory = true;
+            }
+            return Some(o.current_value && o.enabled);
+        }
+        None
     })
 }
 
