@@ -1,6 +1,6 @@
 // Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 // Upstream portions up to 1e23e80 remain MIT (NOTICE).
-//! The three enhanced HUD-number setting keys and their existing file format.
+//! Enhanced default migration and HUD-number keys in their existing format.
 use super::ClientOptions;
 const FILE: &str = "enhanced.opt";
 const DEFAULTS_APPLIED: &str = "first_run_defaults_applied=on";
@@ -67,6 +67,11 @@ pub(super) fn migrate_defaults() -> Option<ClientOptions> {
 #[cfg(test)]
 pub(super) fn reset_test_client() {
     super::testing::put(FILE, DEFAULTS_APPLIED.as_bytes());
+    // An already-loaded client remains at upstream defaults when this
+    // fixture subsequently refuses every read, including the marker.
+    if super::store::REFUSE.with(|refuse| refuse.get()) {
+        super::CLIENT.with(|client| client.set(Some(ClientOptions::default())));
+    }
 }
 pub(super) fn write(c: &ClientOptions, text: &mut String) {
     if !c.target_hp_percent {
