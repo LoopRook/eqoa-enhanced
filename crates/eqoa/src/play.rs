@@ -4298,9 +4298,9 @@ impl Play {
         self.loading.up()
     }
 
-    /// The Controls page's "Target: the target's target" (F, the client's
-    /// own key) and a click on the Target of Target bar: the game's Assist
-    /// Target (`DoAction(0x0B0E0006)`, 0x00CB), the server answering whom to
+    /// The Controls page's "Assist Target" (F, the client's own key) and a
+    /// click on the Target of Target bar: the game's Assist Target
+    /// (`DoAction(0x0B0E0006)`, 0x00CB), the server answering whom to
     /// target (`Msg007B`). The server's answer, not the target's channel:
     /// an object id there is the target's own session's on a server that
     /// counts them per session (go-eqoa-server), and the server knows a

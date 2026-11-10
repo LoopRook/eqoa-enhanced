@@ -132,8 +132,11 @@ pub(super) fn parse(_c: &mut ClientOptions, key: &str, value: &str) {
 pub fn migrate_configs() {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // 1. client.opt: write legacy keys to mod storage FIRST, then strip them only after write succeeds.
-        if let Some(bytes) = crate::settings::read_config("client.opt") {
+        // 1. Every multibox window's client options file: write legacy keys to
+        // mod storage FIRST, then strip them only after the write succeeds.
+        for place in 0..crate::multibox::PLACES {
+            let file = super::own_file("client", place);
+            let Some(bytes) = crate::settings::read_config(&file) else { continue };
             let text = String::from_utf8_lossy(&bytes);
             let mut stripped_any = false;
             let mut cleaned_lines = Vec::new();
@@ -189,7 +192,7 @@ pub fn migrate_configs() {
                 if !out.is_empty() && !out.ends_with('\n') {
                     out.push('\n');
                 }
-                let _ = crate::settings::write_config("client.opt", out.as_bytes());
+                let _ = crate::settings::write_config(&file, out.as_bytes());
             }
         }
 
