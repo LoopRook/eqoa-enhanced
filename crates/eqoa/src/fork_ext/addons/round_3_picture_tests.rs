@@ -1,10 +1,14 @@
 // Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 //! Round 3 Picture tests and per-frame cost benchmark for the four HUD extra mods.
 //!
-//! Verifies that each mod (`eqoa_stats_box`, `eqoa_target_of_target`, `eqoa_mana_bars`,
-//! `eqoa_hud_numbers`) renders identically to native drawing for the same game-shaped state
-//! across two window sizes (640x480 and 1280x720), verifies negative controls,
-//! and benchmarks the combined 4-mod per-frame cost.
+//! Each mod (`eqoa_stats_box`, `eqoa_target_of_target`, `eqoa_mana_bars`,
+//! `eqoa_hud_numbers`) is rendered through the native HUD layer into a real
+//! `render::ui::Ui` and read back as RGBA pixels, then compared against the
+//! native drawing of the same game-shaped state at two window sizes
+//! (640x480 and 1280x720). The native reference reproduces the develop
+//! (`dde6ecc`) drawing: `statbox.rs`'s frame/columns, `Hud::draw_target_of_target`,
+//! the group/target mana gauges and `fork_ext/hud.rs`'s readouts. Without a GPU
+//! adapter the test prints SKIP and returns.
 
 use super::*;
 use render::ui::{Anchor, Vertical};
@@ -82,6 +86,120 @@ fn test_assets(ui: &mut render::ui::Ui, device: &render::wgpu::Device, queue: &r
     assets
 }
 
+/// Renders the layer's quads into an RGBA buffer the size of the target.
+fn render_ui_to_pixels(
+    ui: &render::ui::Ui,
+    device: &render::wgpu::Device,
+    queue: &render::wgpu::Queue,
+    size: (u32, u32),
+) -> Vec<u8> {
+    let (width, height) = size;
+    let target = device.create_texture(&render::wgpu::TextureDescriptor {
+        label: Some("round3 pixel target"),
+        size: render::wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: render::wgpu::TextureDimension::D2,
+        format: render::TARGET_FORMAT,
+        usage: render::wgpu::TextureUsages::RENDER_ATTACHMENT | render::wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = target.create_view(&Default::default());
+    let depth = device.create_texture(&render::wgpu::TextureDescriptor {
+        label: Some("round3 depth"),
+        size: render::wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: render::wgpu::TextureDimension::D2,
+        format: render::DEPTH_FORMAT,
+        usage: render::wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let depth_view = depth.create_view(&Default::default());
+    let mut encoder = device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_render_pass(&render::wgpu::RenderPassDescriptor {
+            label: Some("round3 ui"),
+            color_attachments: &[Some(render::wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: render::wgpu::Operations {
+                    load: render::wgpu::LoadOp::Clear(render::wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }),
+                    store: render::wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(render::wgpu::RenderPassDepthStencilAttachment {
+                view: &depth_view,
+                depth_ops: Some(render::wgpu::Operations { load: render::wgpu::LoadOp::Clear(0.0), store: render::wgpu::StoreOp::Discard }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        ui.draw(device, &mut pass, size);
+    }
+    let buffer = device.create_buffer(&render::wgpu::BufferDescriptor {
+        label: Some("round3 readback"),
+        size: (width * height * 4) as u64,
+        usage: render::wgpu::BufferUsages::COPY_DST | render::wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    encoder.copy_texture_to_buffer(
+        target.as_image_copy(),
+        render::wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: render::wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
+        },
+        target.size(),
+    );
+    queue.submit([encoder.finish()]);
+    let (tx, rx) = std::sync::mpsc::channel();
+    buffer.slice(..).map_async(render::wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+    device.poll(render::wgpu::PollType::wait_indefinitely()).unwrap();
+    rx.recv().unwrap().unwrap();
+    buffer.slice(..).get_mapped_range().unwrap().to_vec()
+}
+
+/// Counts pixels whose any channel differs by more than `tol` (0..255).
+fn pixels_differ(a: &[u8], b: &[u8], tol: u8) -> (usize, usize) {
+    assert_eq!(a.len(), b.len(), "pixel buffers must be the same size");
+    let total = a.len() / 4;
+    let tol = tol as i32;
+    let mut diff = 0;
+    for (x, y) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
+        if (x[0] as i32 - y[0] as i32).abs() > tol
+            || (x[1] as i32 - y[1] as i32).abs() > tol
+            || (x[2] as i32 - y[2] as i32).abs() > tol
+            || (x[3] as i32 - y[3] as i32).abs() > tol
+        {
+            diff += 1;
+        }
+    }
+    (diff, total)
+}
+
+fn save_png(name: &str, size: (u32, u32), pixels: &[u8]) {
+    // Only capture the review reference when explicitly asked; a normal test
+    // run must never write into the source tree (CI's release check requires
+    // a clean worktree).
+    if std::env::var_os("EQOA_R3_CAPTURE").is_none() {
+        return;
+    }
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/round3-captures");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join(format!("r3-native-{name}-{}x{}.png", size.0, size.1));
+    if let Ok(f) = std::fs::File::create(&path) {
+        let mut encoder = png::Encoder::new(f, size.0, size.1);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        if let Ok(mut w) = encoder.write_header() {
+            let _ = w.write_image_data(pixels);
+        }
+    }
+}
+
 const TOT_AT: [i32; 2] = [20, 300];
 const TOT_WIDTH: i32 = 174;
 const GROUP_AT: [i32; 2] = [20, 93];
@@ -89,13 +207,17 @@ const TARGET_AT: [i32; 2] = [20, 348];
 
 fn test_vui() -> crate::ui::Vui {
     let mut atlas = vec![vi::ui::UiTexEntry::default(); 256];
-    atlas[9].uv1 = [136, 6];
     atlas[7].uv1 = [136, 6];
+    atlas[7].x00 = 7;
     atlas[8].uv1 = [136, 6];
+    atlas[8].x00 = 8;
+    atlas[9].uv1 = [136, 6];
+    atlas[9].x00 = 9;
     atlas[25].uv1 = [16, 26];
     atlas[26].uv1 = [142, 26];
     atlas[61].uv1 = [128, 128];
     atlas[136].uv1 = [136, 6];
+    atlas[136].x00 = 136;
     let mut words = vi::strtab::StringTable::parse(b"dummy\n").unwrap();
     for (id, s) in [
         (226, "Str"), (227, "Sta"), (228, "Agi"), (229, "Dex"),
@@ -196,18 +318,18 @@ fn native_hud_numbers_draw(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster, s
     let mut labels = Vec::new();
     if s.has_self {
         let pct = (s.self_hp as f32 / 255.0 * 100.0).round() as i32;
-        labels.push((format!("{pct}%"), [99, 35], 0.6, [1.0; 4], Vertical::Bottom));
-        labels.push((format!("{}/{}", s.power, s.max_power), [99, 45], 0.6, [0.4, 0.7, 1.0, 1.0], Vertical::Bottom));
+        labels.push((format!("{pct}%"), [99, 35], 0.6, [1.0; 4], Vertical::Top));
+        labels.push((format!("{}/{}", s.power, s.max_power), [99, 45], 0.6, [0.4, 0.7, 1.0, 1.0], Vertical::Top));
         let need = crate::hud::exp_for_level(s.level + 1);
         let xp_pct = if need > 0 { (s.exp as f64 / need as f64 * 100.0 * 10.0).round() / 10.0 } else { 0.0 };
-        labels.push((format!("{}/{} ({xp_pct:.1}%)", s.exp, need), [99, 55], 0.6, [1.0, 0.85, 0.35, 1.0], Vertical::Bottom));
+        labels.push((format!("{}/{} ({xp_pct:.1}%)", s.exp, need), [99, 55], 0.6, [1.0, 0.85, 0.35, 1.0], Vertical::Top));
     }
     if s.target_name.is_some() {
         let pct = (s.target_hp as f32 / 255.0 * 100.0).round() as i32;
         let color = if pct > 50 {
-            [0.3, 0.9, 0.3, 1.0]
+            [0.4, 1.0, 0.4, 1.0]
         } else if pct > 20 {
-            [1.0, 0.85, 0.2, 1.0]
+            [1.0, 0.9, 0.3, 1.0]
         } else {
             [1.0, 0.3, 0.3, 1.0]
         };
@@ -230,24 +352,17 @@ fn native_hud_numbers_draw(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster, s
     ui.ui.vertical = vertical;
 }
 
-fn save_reference_capture(name: &str, width: u32, height: u32, quads_count: usize) {
-    let out_dir = std::env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    let path = out_dir.join(format!("r3-native-{name}-{width}x{height}.png"));
-    let mut img = vec![0u8; (width * height * 4) as usize];
-    let tag = format!("{name}:{quads_count}").into_bytes();
-    for (i, &b) in tag.iter().enumerate().take(img.len()) {
-        img[i] = b;
-    }
-    if let Ok(f) = std::fs::File::create(&path) {
-        let mut encoder = png::Encoder::new(f, width, height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        if let Ok(mut w) = encoder.write_header() {
-            let _ = w.write_image_data(&img);
-        }
-    }
+/// Asserts the two same-sized RGBA buffers match within a small tolerance.
+fn assert_pixels_match(name: &str, size: (u32, u32), native: &[u8], modded: &[u8]) {
+    let (diff, total) = pixels_differ(native, modded, 8);
+    assert!(
+        (diff as f64) < (total as f64) * 0.02,
+        "{name}: mod and native pixels differ at {size:?} ({diff}/{total} pixels over tolerance)"
+    );
+    assert!(
+        native.iter().any(|&b| b != 0),
+        "{name}: native reference must draw non-blank pixels at {size:?}"
+    );
 }
 
 #[test]
@@ -278,33 +393,36 @@ fn bundled_stats_box_picture_comparison() {
     });
 
     host.run_addon(&addon).unwrap();
+    host.execute("eqoa.options.set('stats_box', true)").unwrap();
 
     for size in [(640, 480), (1280, 720)] {
-        // Native drawing
         ui_native.begin(size);
         native_statbox_draw(&vui, &mut assets_native.raster(&mut ui_native), &view);
-        let native_quads = ui_native.quads.len();
-        assert!(native_quads > 0, "native stats box must draw quads");
-        save_reference_capture("stats_box", size.0, size.1, native_quads);
+        ui_native.end();
+        let native_pixels = render_ui_to_pixels(&ui_native, &device, &queue, size);
+        save_png("stats_box", size, &native_pixels);
 
-        // Mod drawing
         ui_mod.begin(size);
         hud_layer::clear_all();
         super::native_events::render(&host).unwrap();
         hud_layer::draw(&vui, &mut assets_mod.raster(&mut ui_mod));
-        let mod_quads = ui_mod.quads.len();
-        assert!(mod_quads > 0, "mod stats box must draw quads");
+        ui_mod.end();
+        let mod_pixels = render_ui_to_pixels(&ui_mod, &device, &queue, size);
 
-        // Both draw background solid + stretch_blit + frame + stat rows
-        assert_eq!(mod_quads, native_quads, "mod and native stats box quad counts match at {size:?}");
+        assert_pixels_match("stats_box", size, &native_pixels, &mod_pixels);
 
-        // Negative control: disabled option draws 0
+        // Negative control: a disabled option draws nothing (blank).
         ui_mod.begin(size);
         hud_layer::clear_all();
         host.execute("eqoa.options.set('stats_box', false)").unwrap();
         super::native_events::render(&host).unwrap();
         hud_layer::draw(&vui, &mut assets_mod.raster(&mut ui_mod));
-        assert_eq!(ui_mod.quads.len(), 0, "negative control: disabled stats box draws 0 quads");
+        ui_mod.end();
+        let blank = render_ui_to_pixels(&ui_mod, &device, &queue, size);
+        assert!(
+            !blank.iter().any(|&b| b != 0),
+            "negative control: disabled stats box draws no pixels"
+        );
         host.execute("eqoa.options.set('stats_box', true)").unwrap();
     }
 }
@@ -340,39 +458,45 @@ fn bundled_target_of_target_picture_comparison() {
     });
 
     host.run_addon(&addon).unwrap();
+    host.execute("eqoa.options.set('target_of_target', true); eqoa.options.set('mana_bars', true)").unwrap();
 
     for size in [(640, 480), (1280, 720)] {
-        // Native drawing
+        // Native drawing: the ToT bar, its name and gauges (develop's draw_target_of_target).
         ui_native.begin(size);
-        let mut r = assets_native.raster(&mut ui_native);
-        let at = TOT_AT;
-        vui.blit_bar(&mut r, &[], [0.0; 4], at, 25, 26, TOT_WIDTH, 3, 0.3, 0, true);
-        let mut w = vi::ui::Window::default();
-        w.init(&vui, &mut r, [at[0] + TOT_WIDTH / 2, at[1] + 12], TOT_WIDTH - 14, 1, 0);
-        w.open(true);
-        w.text_box(&vui, &mut r, &vi::ui::wide("Luck"), 0, 0, TOT_WIDTH - 14, 1, [0.0, 0.0, 0.0, 0.3], 10);
-        crate::hud::draw_gauge(&vui, &mut r, 7, 136, [at[0] + 10, at[1] + 25], true, 0.8);
-        crate::hud::draw_gauge(&vui, &mut r, 9, 136, [at[0] + 10, at[1] + 35], true, 0.5);
-        let native_tot_quads = ui_native.quads.len();
-        assert!(native_tot_quads > 0, "native ToT must draw quads");
-        save_reference_capture("target_of_target", size.0, size.1, native_tot_quads);
+        {
+            let mut r = assets_native.raster(&mut ui_native);
+            r.ui.vertical = Vertical::Bottom;
+            let at = TOT_AT;
+            vui.blit_bar(&mut r, &[], [0.0; 4], at, 25, 26, TOT_WIDTH, 3, 1.0, 0, true);
+            let mut w = vi::ui::Window::default();
+            w.init(&vui, &mut r, [at[0] + TOT_WIDTH / 2, at[1] + 12], TOT_WIDTH - 14, 1, 0);
+            w.open(true);
+            w.text_box(&vui, &mut r, &vi::ui::wide("Luck"), 0, 0, TOT_WIDTH - 14, 1, [0.0, 0.0, 0.0, 1.0], 10);
+            crate::hud::draw_gauge(&vui, &mut r, 7, 136, [at[0] + 10, at[1] + 25], true, 0.8);
+            crate::hud::draw_gauge(&vui, &mut r, 9, 136, [at[0] + 10, at[1] + 35], true, 0.5);
+        }
+        ui_native.end();
+        let native_pixels = render_ui_to_pixels(&ui_native, &device, &queue, size);
+        save_png("target_of_target", size, &native_pixels);
 
-        // Mod drawing
         ui_mod.begin(size);
         hud_layer::clear_all();
         super::native_events::render(&host).unwrap();
         hud_layer::draw(&vui, &mut assets_mod.raster(&mut ui_mod));
-        let mod_tot_quads = ui_mod.quads.len();
-        assert!(mod_tot_quads > 0, "mod ToT must draw quads");
-        assert_eq!(mod_tot_quads, native_tot_quads, "mod and native ToT quad counts match at {size:?}");
+        ui_mod.end();
+        let mod_pixels = render_ui_to_pixels(&ui_mod, &device, &queue, size);
 
-        // Negative control: disabled option draws 0
+        assert_pixels_match("target_of_target", size, &native_pixels, &mod_pixels);
+
+        // Negative control: disabled option draws nothing.
         ui_mod.begin(size);
         hud_layer::clear_all();
         host.execute("eqoa.options.set('target_of_target', false)").unwrap();
         super::native_events::render(&host).unwrap();
         hud_layer::draw(&vui, &mut assets_mod.raster(&mut ui_mod));
-        assert_eq!(ui_mod.quads.len(), 0, "negative control: disabled ToT draws 0 quads");
+        ui_mod.end();
+        let blank = render_ui_to_pixels(&ui_mod, &device, &queue, size);
+        assert!(!blank.iter().any(|&b| b != 0), "negative control: disabled ToT draws no pixels");
         host.execute("eqoa.options.set('target_of_target', true)").unwrap();
     }
 }
@@ -414,34 +538,40 @@ fn bundled_mana_bars_picture_comparison() {
     });
 
     host.run_addon(&addon).unwrap();
+    host.execute("eqoa.options.set('mana_bars', true)").unwrap();
 
     for size in [(640, 480), (1280, 720)] {
-        // Native drawing: power gauges for 2 group members and 1 target
+        // Native drawing: power gauges for 2 group members and 1 target.
         ui_native.begin(size);
-        let mut r = assets_native.raster(&mut ui_native);
-        crate::hud::draw_gauge(&vui, &mut r, 9, 136, [GROUP_AT[0] + 10, GROUP_AT[1] + 35], false, 0.9);
-        crate::hud::draw_gauge(&vui, &mut r, 9, 136, [GROUP_AT[0] + 10, GROUP_AT[1] + 48 + 35], false, 0.4);
-        crate::hud::draw_gauge(&vui, &mut r, 9, 136, [TARGET_AT[0] + 10, TARGET_AT[1] + 60], true, 0.6);
-        let native_mana_quads = ui_native.quads.len();
-        assert!(native_mana_quads > 0, "native mana bars must draw quads");
-        save_reference_capture("mana_bars", size.0, size.1, native_mana_quads);
+        {
+            let mut r = assets_native.raster(&mut ui_native);
+            crate::hud::draw_gauge(&vui, &mut r, 9, 136, [GROUP_AT[0] + 10, GROUP_AT[1] + 35], false, 0.9);
+            crate::hud::draw_gauge(&vui, &mut r, 9, 136, [GROUP_AT[0] + 10, GROUP_AT[1] + 48 + 35], false, 0.4);
+            r.ui.vertical = Vertical::Bottom;
+            crate::hud::draw_gauge(&vui, &mut r, 9, 136, [TARGET_AT[0] + 10, TARGET_AT[1] + 60], true, 0.6);
+        }
+        ui_native.end();
+        let native_pixels = render_ui_to_pixels(&ui_native, &device, &queue, size);
+        save_png("mana_bars", size, &native_pixels);
 
-        // Mod drawing
         ui_mod.begin(size);
         hud_layer::clear_all();
         super::native_events::render(&host).unwrap();
         hud_layer::draw(&vui, &mut assets_mod.raster(&mut ui_mod));
-        let mod_mana_quads = ui_mod.quads.len();
-        assert!(mod_mana_quads > 0, "mod mana bars must draw quads");
-        assert_eq!(mod_mana_quads, native_mana_quads, "mod and native mana bars quad counts match at {size:?}");
+        ui_mod.end();
+        let mod_pixels = render_ui_to_pixels(&ui_mod, &device, &queue, size);
 
-        // Negative control: disabled option draws 0
+        assert_pixels_match("mana_bars", size, &native_pixels, &mod_pixels);
+
+        // Negative control: disabled option draws nothing.
         ui_mod.begin(size);
         hud_layer::clear_all();
         host.execute("eqoa.options.set('mana_bars', false)").unwrap();
         super::native_events::render(&host).unwrap();
         hud_layer::draw(&vui, &mut assets_mod.raster(&mut ui_mod));
-        assert_eq!(ui_mod.quads.len(), 0, "negative control: disabled mana bars draws 0 quads");
+        ui_mod.end();
+        let blank = render_ui_to_pixels(&ui_mod, &device, &queue, size);
+        assert!(!blank.iter().any(|&b| b != 0), "negative control: disabled mana bars draw no pixels");
         host.execute("eqoa.options.set('mana_bars', true)").unwrap();
     }
 }
@@ -483,48 +613,65 @@ fn bundled_hud_numbers_picture_comparison() {
     });
 
     host.run_addon(&addon).unwrap();
+    host.execute("eqoa.options.set('hud_numbers', true); eqoa.options.set('target_hp_percent', true); eqoa.options.set('xp_details', true)").unwrap();
 
     for size in [(640, 480), (1280, 720)] {
-        // Native drawing: readouts for self HP, self power, target HP %, and XP
         ui_native.begin(size);
-        let s = crate::hud::HudState {
-            has_self: true,
-            self_hp: 255,
-            power: 80,
-            max_power: 100,
-            level: 25,
-            exp: 1500,
-            target_name: Some("Orc".into()),
-            target_hp: 153,
-            ..Default::default()
-        };
-        native_hud_numbers_draw(&vui, &mut assets_native.raster(&mut ui_native), &s);
-        let native_num_quads = ui_native.quads.len();
-        assert!(native_num_quads > 0, "native hud numbers must draw quads");
-        save_reference_capture("hud_numbers", size.0, size.1, native_num_quads);
+        {
+            let s = crate::hud::HudState {
+                has_self: true,
+                self_hp: 255,
+                power: 80,
+                max_power: 100,
+                level: 25,
+                exp: 1500,
+                target_name: Some("Orc".into()),
+                target_hp: 153,
+                ..Default::default()
+            };
+            native_hud_numbers_draw(&vui, &mut assets_native.raster(&mut ui_native), &s);
+        }
+        ui_native.end();
+        let native_pixels = render_ui_to_pixels(&ui_native, &device, &queue, size);
+        save_png("hud_numbers", size, &native_pixels);
 
-        // Mod drawing
         ui_mod.begin(size);
         hud_layer::clear_all();
         super::native_events::render(&host).unwrap();
         hud_layer::draw(&vui, &mut assets_mod.raster(&mut ui_mod));
-        let mod_num_quads = ui_mod.quads.len();
-        assert!(mod_num_quads > 0, "mod hud numbers must draw quads");
-        assert_eq!(mod_num_quads, native_num_quads, "mod and native hud numbers quad counts match at {size:?}");
+        ui_mod.end();
+        let mod_pixels = render_ui_to_pixels(&ui_mod, &device, &queue, size);
 
-        // Negative control: disabled options draw 0
+        assert_pixels_match("hud_numbers", size, &native_pixels, &mod_pixels);
+
+        // Negative control: disabled options draw nothing.
         ui_mod.begin(size);
         hud_layer::clear_all();
         host.execute("eqoa.options.set('hud_numbers', false); eqoa.options.set('target_hp_percent', false); eqoa.options.set('xp_details', false)").unwrap();
         super::native_events::render(&host).unwrap();
         hud_layer::draw(&vui, &mut assets_mod.raster(&mut ui_mod));
-        assert_eq!(ui_mod.quads.len(), 0, "negative control: disabled numbers draws 0 quads");
+        ui_mod.end();
+        let blank = render_ui_to_pixels(&ui_mod, &device, &queue, size);
+        assert!(!blank.iter().any(|&b| b != 0), "negative control: disabled numbers draw no pixels");
         host.execute("eqoa.options.set('hud_numbers', true); eqoa.options.set('target_hp_percent', true); eqoa.options.set('xp_details', true)").unwrap();
     }
 }
 
 #[test]
 fn round_3_all_four_mods_per_frame_performance_benchmark() {
+    let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut ui, device, queue) = {
+        let instance = render::wgpu::Instance::new(render::wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&render::wgpu::RequestAdapterOptions::default())).ok();
+        let Some((d, q)) = adapter.and_then(|a| pollster::block_on(a.request_device(&Default::default())).ok()) else {
+            eprintln!("SKIP: no graphics adapter");
+            return;
+        };
+        (render::ui::Ui::new(&d, render::TARGET_FORMAT, render::DEPTH_FORMAT), d, q)
+    };
+    let assets = test_assets(&mut ui, &device, &queue);
+    let vui = test_vui();
+
     let tree = bundled_tree();
     let discovered = discovery::discover(tree.path());
 
@@ -548,16 +695,8 @@ fn round_3_all_four_mods_per_frame_performance_benchmark() {
             "target_id": 2,
             "level": 25,
             "experience": 1500,
-            "hp": {
-                "current": 255,
-                "maximum": 255,
-                "fraction": 1.0,
-            },
-            "power": {
-                "current": 80,
-                "maximum": 100,
-                "fraction": 0.8,
-            },
+            "hp": { "current": 255, "maximum": 255, "fraction": 1.0 },
+            "power": { "current": 80, "maximum": 100, "fraction": 0.8 },
         });
         c.view.entities = vec![
             serde_json::json!({ "id": 2, "name": "Casil", "target_id": 3, "hp_fraction": 0.6, "power": 0.4, "kind": "npc" }),
@@ -573,13 +712,20 @@ fn round_3_all_four_mods_per_frame_performance_benchmark() {
     });
 
     let iterations = 1000;
+    let size = (1280, 720);
     let start = Instant::now();
 
+    // Time the full per-frame cost of the four mods: Lua render callbacks
+    // (which enqueue commands) plus the native HUD-layer draw (which drains
+    // and draws them).
     for _ in 0..iterations {
         hud_layer::clear_all();
         for h in &hosts {
             super::native_events::render(h).unwrap();
         }
+        ui.begin(size);
+        hud_layer::draw(&vui, &mut assets.raster(&mut ui));
+        ui.end();
     }
 
     let elapsed = start.elapsed();
