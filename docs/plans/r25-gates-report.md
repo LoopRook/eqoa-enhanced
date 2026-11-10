@@ -54,7 +54,23 @@ atlas; blank ability icons are an explicit fixture limit, not verified game-art 
 
 ## Validation
 
-Validation is in progress. Final counts and remaining limitations will be filled after the runs.
+Final integrated checks:
+
+| Check | Result |
+| --- | --- |
+| Workspace (unfiltered, no-fail-fast) | 2165 passed / 2 known AO failures / 32 ignored; 269 explicit SKIP lines |
+| Client binary within that suite | 1810 passed / 0 failed / 30 ignored |
+| Bundled picture capture and missing-layer controls | 3 passed; 3 golden-comparison SKIPs; 0 GPU skips |
+| Tooling | 97 passed |
+| Pinned footprint | PASS, 344 owned / 42 shared |
+| Optimized zero-addon gate | Running |
+| Wasm check | Pending |
+| Release build | Pending |
+
+Rust pass counts include fixture tests that print SKIP and return; the 269 SKIP lines are
+reported separately and must not be read as verified disc/oracle/golden coverage.
+
+Earlier validation history (kept to document the negative cases and their fixes):
 Tooling: **97 passed** on the final run, including both workflow negative controls. Footprint:
 **PASS** against the pinned base. The subsequent item-3 policy changes are detailed below.
 
@@ -84,7 +100,7 @@ The lead released the options-tidy validation hold on November 10. The pending p
 was committed before merging that branch, as requested. On the merged source, all three
 picture fixtures render and their missing-layer controls pass: **3 Rust tests passed,
 3 golden-comparison SKIPs**, no GPU skips. Final integrated suite/optimized/wasm/release
-results are pending below.
+results are recorded in the validation table above.
 
 ## Footprint records and round counters
 
@@ -122,4 +138,4 @@ options.rs, play.rs, settings.rs and viewer.rs. No merge into develop or upstrea
 
 All Cargo commands use `C:/Users/hocka/Paseo/targets/shared`, the shared mkdir build lock with
 a bounded acquisition wait, and scratch configuration. No worktree target directory is created.
-Final validation counts and build results will be added after the active runs.
+No worktree target folder was created. The scratch merges changed no protected branch.
