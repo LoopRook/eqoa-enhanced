@@ -43,5 +43,4 @@ mod touch_tests;
 
 pub(crate) mod map;
 
-#[cfg(test)]
 pub(crate) mod bindpage;

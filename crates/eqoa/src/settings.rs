@@ -739,21 +739,6 @@ pub struct ClientOptions {
     /// next time the game does (`update`'s check before the title, as ever).
     /// A page's Reload notice the same (`web/main.js`).
     pub update_notices: bool,
-    /// Target of Target (a player's request, the user's option, off by
-    /// default): the target's bar shows whom the target is targeting, as its
-    /// channel says (`Play::target_of_target`)
-    pub target_of_target: bool,
-    /// Mana Bars (a player's request, the user's option, on by default):
-    /// a power gauge under the health of each group member, the target and
-    /// the target of target, from a server that sends others' power
-    /// (`net::session::OP_POWER_BARS`; the game shows only the player's
-    /// own); none where none is sent (Sandstorm).
-    pub mana_bars: bool,
-    /// Stats Box (the user, 2026-10-26: "make your stats show on the screen
-    /// in a box like the mini map ... a toggle off by default"): the
-    /// player's stats in a box on the HUD, an effect's raise or cut marked
-    /// (`statbox`); off by default. B turns it too (`binds`' "stats_box").
-    pub stats_box: bool,
     /// Mipmaps: on, the textures' mip levels sampled as the GS samples them
     /// (`render::gs_lod_k`: the level by depth, blended), which is how the
     /// game is drawn; off, every texel off the base level, sharper and
@@ -849,12 +834,6 @@ pub struct ClientOptions {
     /// a device by its name, the default while it is not connected
     /// (`audio::retarget`). Each window its own.
     pub output: Option<DeviceName>,
-    /// Target HP %: display numerical HP percentage next to target's health bar
-    pub target_hp_percent: bool,
-    /// XP Details: display numerical XP and percentage on the XP bar
-    pub xp_details: bool,
-    /// HUD Numbers: display player HP and Power numerical values on the HUD
-    pub hud_numbers: bool,
     /// Touch Stick Size and Touch Button Size: the touch screen's pad's
     /// sticks and buttons (`touch::layout`), each percent of the pad as it
     /// was, `TOUCH_SIZE_MIN` to `TOUCH_SIZE_MAX` in `TOUCH_SIZE_STEP`s, drawn
@@ -1000,9 +979,6 @@ impl Default for ClientOptions {
             vsync: true,
             shouts: true,
             update_notices: true,
-            target_of_target: false,
-            mana_bars: true,
-            stats_box: false,
             text: render::ui::TextFilter::Sharp,
             mipmaps: true,
             flora: true,
@@ -1019,9 +995,6 @@ impl Default for ClientOptions {
             render_scale: 1,
             hud: render::ui::HudFilter::Nearest,
             output: None,
-            target_hp_percent: true,
-            xp_details: true,
-            hud_numbers: true,
             touch_stick: TOUCH_SIZE_WAS,
             touch_buttons: TOUCH_SIZE_WAS,
             touch_opacity: TOUCH_OPACITY_WAS,
@@ -1711,20 +1684,6 @@ pub fn quest_tracker() -> bool {
 pub fn set_minimap(on: bool) -> Result<(), String> {
     let mut c = client();
     c.minimap = on;
-    set_client(c);
-    save_client()
-}
-
-/// Whether the Stats Box is up where it could be (`statbox`).
-pub fn stats_box() -> bool {
-    client().stats_box
-}
-
-/// Stats Box turned (its key, B: `binds`' "stats_box"), and kept at once, as
-/// Minimap's key keeps it.
-pub fn set_stats_box(on: bool) -> Result<(), String> {
-    let mut c = client();
-    c.stats_box = on;
     set_client(c);
     save_client()
 }
@@ -2547,7 +2506,6 @@ mod tests {
     /// lines beside them are read.
     #[test]
     fn options_with_the_lines_of_rows_gone_still_load() {
-        let _upstream = fork_settings::upstream_rows();
         let old = "target_of_target=on\nmana_bars=off\nminimap=off\nstats_box=on\nquest_markers=off\nquest_tracker=off\nmap_markers=off\nmap_towns=off\nflora=off\nloading=instant\n";
         let c = ClientOptions::from_text(old);
         let want = ClientOptions { minimap: false, quest_markers: false, quest_tracker: false, map_markers: false, map_towns: false, flora: false, loading_longer: false, ..Default::default() };

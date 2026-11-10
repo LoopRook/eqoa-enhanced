@@ -547,11 +547,20 @@ impl Play {
             let group = self.group.members[..self.group.count()]
                 .iter()
                 .map(|m| m.id);
+            let tot_id = self
+                .entities
+                .slots
+                .iter()
+                .flatten()
+                .find(|e| e.id == self.target)
+                .and_then(|e| e.creature.as_ref())
+                .map(|c| c.target)
+                .filter(|&t| t != 0 && t != u32::MAX && t != self.target);
             let followed = [Some(self.target), Some(self.pet_id), self.self_id32()]
                 .into_iter()
                 .flatten()
                 .chain(group)
-                .chain(self.target_of_target_id());
+                .chain(tot_id);
             for id in followed {
                 if next == snap_entities.len() {
                     break;

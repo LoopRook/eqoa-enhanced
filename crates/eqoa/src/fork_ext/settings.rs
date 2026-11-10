@@ -9,6 +9,7 @@ const DEFAULTS_APPLIED: &str = "first_run_defaults_applied=on";
 /// 64/650; explicit 24/100 was saved and must remain explicit until the
 /// marker is written. Later saves use upstream's serializer and defaults.
 pub(super) fn migrate_defaults() -> Option<ClientOptions> {
+    migrate_configs();
     let marker = super::store::read(FILE).unwrap_or_default();
     let mut marker = String::from_utf8_lossy(&marker).into_owned();
     if marker.lines().any(|line| line == DEFAULTS_APPLIED) {
@@ -107,54 +108,128 @@ impl Drop for UpstreamRows {
         UPSTREAM_ROWS.with(|upstream| upstream.set(false));
     }
 }
-fn enhanced_rows() -> bool {
-    #[cfg(test)]
-    if UPSTREAM_ROWS.with(|upstream| upstream.get()) {
-        return false;
-    }
-    true
-}
-pub(super) fn write(c: &ClientOptions, text: &mut String) {
-    if enhanced_rows() {
-        if c.target_of_target {
-            text.push_str("target_of_target=on\n");
-        }
-        if !c.mana_bars {
-            text.push_str("mana_bars=off\n");
-        }
-        if c.stats_box {
-            text.push_str("stats_box=on\n");
-        }
-    }
-    if !c.target_hp_percent {
-        text.push_str("target_hp_percent=off\n");
-    }
-    if !c.xp_details {
-        text.push_str("xp_details=off\n");
-    }
-    if !c.hud_numbers {
-        text.push_str("hud_numbers=off\n");
-    }
-}
-pub(super) fn parse(c: &mut ClientOptions, key: &str, value: &str) {
-    let on = match value {
-        "on" => true,
-        "off" => false,
-        _ => return,
-    };
-    if enhanced_rows() {
+pub(super) fn write(_c: &ClientOptions, _text: &mut String) {}
+
+pub(super) fn parse(_c: &mut ClientOptions, key: &str, value: &str) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let on = match value {
+            "on" => true,
+            "off" => false,
+            _ => return,
+        };
         match key {
-            "target_of_target" => c.target_of_target = on,
-            "mana_bars" => c.mana_bars = on,
-            "stats_box" => c.stats_box = on,
+            "target_of_target" => {
+                crate::fork_ext::addons::options::set_toggle("eqoa_target_of_target", "target_of_target", on);
+            }
+            "mana_bars" => {
+                crate::fork_ext::addons::options::set_toggle("eqoa_mana_bars", "mana_bars", on);
+            }
+            "stats_box" => {
+                crate::fork_ext::addons::options::set_toggle("eqoa_stats_box", "stats_box", on);
+            }
+            "target_hp_percent" => {
+                crate::fork_ext::addons::options::set_toggle("eqoa_hud_numbers", "target_hp_percent", on);
+            }
+            "xp_details" => {
+                crate::fork_ext::addons::options::set_toggle("eqoa_hud_numbers", "xp_details", on);
+            }
+            "hud_numbers" => {
+                crate::fork_ext::addons::options::set_toggle("eqoa_hud_numbers", "hud_numbers", on);
+            }
             _ => {}
         }
     }
-    match key {
-        "target_hp_percent" => c.target_hp_percent = on,
-        "xp_details" => c.xp_details = on,
-        "hud_numbers" => c.hud_numbers = on,
-        _ => {}
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (key, value);
+    }
+}
+
+pub fn migrate_configs() {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // 1. client.opt: migrate legacy keys to mod options toggles and strip them
+        if let Some(bytes) = crate::settings::read_config("client.opt") {
+            let text = String::from_utf8_lossy(&bytes);
+            let mut modified = false;
+            let mut cleaned_lines = Vec::new();
+            for line in text.lines() {
+                if let Some((k, v)) = line.split_once('=') {
+                    let k = k.trim();
+                    let v = v.trim();
+                    let on = match v {
+                        "on" => Some(true),
+                        "off" => Some(false),
+                        _ => None,
+                    };
+                    match (k, on) {
+                        ("target_of_target", Some(b)) => {
+                            crate::fork_ext::addons::options::set_toggle("eqoa_target_of_target", "target_of_target", b);
+                            modified = true;
+                        }
+                        ("mana_bars", Some(b)) => {
+                            crate::fork_ext::addons::options::set_toggle("eqoa_mana_bars", "mana_bars", b);
+                            modified = true;
+                        }
+                        ("stats_box", Some(b)) => {
+                            crate::fork_ext::addons::options::set_toggle("eqoa_stats_box", "stats_box", b);
+                            modified = true;
+                        }
+                        ("target_hp_percent", Some(b)) => {
+                            crate::fork_ext::addons::options::set_toggle("eqoa_hud_numbers", "target_hp_percent", b);
+                            modified = true;
+                        }
+                        ("xp_details", Some(b)) => {
+                            crate::fork_ext::addons::options::set_toggle("eqoa_hud_numbers", "xp_details", b);
+                            modified = true;
+                        }
+                        ("hud_numbers", Some(b)) => {
+                            crate::fork_ext::addons::options::set_toggle("eqoa_hud_numbers", "hud_numbers", b);
+                            modified = true;
+                        }
+                        _ => {
+                            cleaned_lines.push(line);
+                        }
+                    }
+                } else {
+                    cleaned_lines.push(line);
+                }
+            }
+            if modified {
+                let mut out = cleaned_lines.join("\n");
+                if !out.is_empty() && !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                let _ = crate::settings::write_config("client.opt", out.as_bytes());
+            }
+        }
+
+        // 2. keys.opt: migrate key.stats_box to mod.eqoa_stats_box.toggle and strip it
+        if let Some(bytes) = crate::settings::read_config("keys.opt") {
+            let text = String::from_utf8_lossy(&bytes);
+            let mut modified = false;
+            let mut cleaned_lines = Vec::new();
+            let mut stats_box_key = None;
+            for line in text.lines() {
+                if let Some(val) = line.strip_prefix("key.stats_box=") {
+                    stats_box_key = Some(val.trim().to_ascii_lowercase());
+                    modified = true;
+                } else {
+                    cleaned_lines.push(line);
+                }
+            }
+            if let Some(k) = stats_box_key {
+                crate::fork_ext::bindpage::register("eqoa_stats_box", "toggle", "b", "Toggle Stats Box");
+                crate::fork_ext::bindpage::set_key("eqoa_stats_box", "toggle", &k);
+            } else if modified {
+                let mut out = cleaned_lines.join("\n");
+                if !out.is_empty() && !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                let _ = crate::settings::write_config("keys.opt", out.as_bytes());
+            }
+        }
     }
 }
 #[cfg(test)]
@@ -226,48 +301,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn stats_box_kept_only_when_on() {
-        assert!(!ClientOptions::default().stats_box, "off by default");
-        assert_eq!(
-            ClientOptions {
-                stats_box: true,
-                ..Default::default()
-            }
-            .to_text(),
-            "lod=on\nbrightness=5\ncamera_distance=11\nstats_box=on\n"
-        );
-        let on = ClientOptions::from_text("stats_box=on");
-        assert!(on.stats_box && on.minimap, "the box on, the minimap kept");
-        assert!(ClientOptions::from_text("stats_box=off") == ClientOptions::default());
-        for bad in ["stats_box=1", "stats_box=yes", "stats_box=", "minimap=on"] {
-            assert!(
-                !ClientOptions::from_text(bad).stats_box,
-                "{bad}: off, the default"
-            );
-        }
-    }
-
-    #[test]
-    fn mana_bars_kept_only_when_off() {
-        assert!(ClientOptions::default().mana_bars, "on by default");
-        assert_eq!(
-            ClientOptions {
-                mana_bars: false,
-                ..Default::default()
-            }
-            .to_text(),
-            "lod=on\nbrightness=5\ncamera_distance=11\nmana_bars=off\n"
-        );
-        assert!(!ClientOptions::from_text("mana_bars=off").mana_bars);
-        assert!(ClientOptions::from_text("mana_bars=on") == ClientOptions::default());
-        for bad in ["mana_bars=0", "mana_bars=no", "mana_bars="] {
-            assert!(
-                ClientOptions::from_text(bad).mana_bars,
-                "{bad}: on, the default"
-            );
-        }
-    }
 
     #[test]
     fn map_markers_kept_only_when_off() {
@@ -336,39 +369,57 @@ mod tests {
         super::super::testing::reset(false);
     }
     #[test]
-    fn target_of_target_keeps_its_saved_key_and_rejects_invalid_values() {
-        assert_eq!(
-            ClientOptions {
-                target_of_target: true,
-                ..Default::default()
-            }
-            .to_text(),
-            "lod=on\nbrightness=5\ncamera_distance=11\ntarget_of_target=on\n"
-        );
-        assert!(ClientOptions::from_text("target_of_target=on").target_of_target);
-        for value in ["off", "yes", "1"] {
-            assert!(
-                !ClientOptions::from_text(&format!("target_of_target={value}")).target_of_target
-            );
+    fn migration_moves_legacy_options_and_binds_into_mods_and_strips_files() {
+        super::super::testing::reset(false);
+        // Stage legacy files: client.opt and keys.opt
+        let legacy_client = "lod=on\nbrightness=5\ncamera_distance=11\ntarget_of_target=on\nmana_bars=off\nstats_box=on\ntarget_hp_percent=off\nxp_details=off\nhud_numbers=off\n";
+        let legacy_keys = "key.stats_box=j\nkey.attack=q\n";
+        super::super::testing::put("client.opt", legacy_client.as_bytes());
+        super::super::testing::put("keys.opt", legacy_keys.as_bytes());
+
+        // Run migration
+        migrate_configs();
+
+        // 1. Mod option toggles received the migrated values
+        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_target_of_target", "target_of_target"), Some(true));
+        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_mana_bars", "mana_bars"), Some(false));
+        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_stats_box", "stats_box"), Some(true));
+        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_hud_numbers", "target_hp_percent"), Some(false));
+        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_hud_numbers", "xp_details"), Some(false));
+        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_hud_numbers", "hud_numbers"), Some(false));
+
+        // 2. Mod keybind received the migrated key
+        assert_eq!(crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle"), Some("j".to_string()));
+
+        // 3. client.opt is stripped of legacy keys
+        let kept_client = String::from_utf8(super::super::testing::kept("client.opt").unwrap()).unwrap();
+        for gone in ["target_of_target", "mana_bars", "stats_box", "target_hp_percent", "xp_details", "hud_numbers"] {
+            assert!(!kept_client.contains(gone), "legacy key {gone} must be stripped from client.opt: {kept_client}");
         }
-    }
-    #[test]
-    fn combined_old_save_keeps_fork_and_upstream_keys_and_drops_unknowns() {
-        let old = "target_of_target=on\nmana_bars=off\nstats_box=on\nminimap=off\nquest_markers=off\nquest_tracker=off\nmap_markers=off\nmap_towns=off\nflora=off\nloading=instant\nunknown_setting=off\n";
-        let c = ClientOptions::from_text(old);
-        assert!(c.target_of_target && !c.mana_bars && c.stats_box);
-        let text = c.to_text();
-        for line in old
-            .lines()
-            .filter(|line| !line.starts_with("unknown_setting="))
-        {
-            assert!(
-                text.lines().any(|kept| kept == line),
-                "missing {line}: {text}"
-            );
-        }
-        assert!(!text.contains("unknown_setting"));
-        assert_eq!(ClientOptions::from_text(&text), c);
+        assert!(kept_client.contains("lod=on\n"));
+        assert!(kept_client.contains("brightness=5\n"));
+
+        // 4. keys.opt is stripped of key.stats_box and has mod keybind
+        let kept_keys = String::from_utf8(super::super::testing::kept("keys.opt").unwrap()).unwrap();
+        assert!(!kept_keys.contains("key.stats_box="), "key.stats_box must be stripped from keys.opt: {kept_keys}");
+        assert!(kept_keys.contains("mod.eqoa_stats_box.toggle=j"), "mod bind must be present in keys.opt: {kept_keys}");
+        assert!(kept_keys.contains("key.attack=q"), "unrelated keys must be preserved: {kept_keys}");
+
+        // 5. Explicit user choice subsequently made must be preserved across a second run
+        crate::fork_ext::addons::options::set_toggle("eqoa_target_of_target", "target_of_target", false);
+        migrate_configs();
+        assert_eq!(crate::fork_ext::addons::options::get_toggle("eqoa_target_of_target", "target_of_target"), Some(false), "second run does nothing and keeps explicit choices");
+
+        // 6. Negative control: fresh/empty files trigger no spurious options
+        super::super::testing::put("client.opt", b"lod=on\n");
+        super::super::testing::put("keys.opt", b"key.attack=q\n");
+        migrate_configs();
+        let fresh_client = String::from_utf8(super::super::testing::kept("client.opt").unwrap()).unwrap();
+        assert_eq!(fresh_client, "lod=on\n");
+        let fresh_keys = String::from_utf8(super::super::testing::kept("keys.opt").unwrap()).unwrap();
+        assert_eq!(fresh_keys, "key.attack=q\n");
+
+        super::super::testing::reset(false);
     }
     #[test]
     fn first_run_and_legacy_omitted_defaults_migrate_once() {
@@ -441,45 +492,5 @@ mod tests {
         assert_eq!(super::super::client(), c);
         assert!(super::super::testing::kept(FILE).is_some());
         super::super::testing::reset(false);
-    }
-    #[test]
-    fn default_number_settings_write_nothing_and_off_keeps_legacy_keys() {
-        let defaults = ClientOptions::default();
-        let mut text = String::new();
-        write(&defaults, &mut text);
-        assert_eq!(text, "");
-        let c = ClientOptions {
-            target_hp_percent: false,
-            xp_details: false,
-            hud_numbers: false,
-            ..defaults
-        };
-        write(&c, &mut text);
-        assert_eq!(
-            text,
-            "target_hp_percent=off\nxp_details=off\nhud_numbers=off\n"
-        );
-        let mut restored = defaults;
-        for line in text.lines() {
-            let (key, value) = line.split_once('=').unwrap();
-            parse(&mut restored, key, value);
-        }
-        assert_eq!(restored, c);
-        parse(&mut restored, "hud_numbers", "on");
-        assert!(restored.hud_numbers);
-    }
-    #[test]
-    fn unknown_keys_and_invalid_number_values_leave_defaults_alone() {
-        let defaults = ClientOptions::default();
-        let mut c = defaults;
-        for (key, value) in [
-            ("minimap", "off"),
-            ("hud_numbers", "false"),
-            ("target_hp_percent", "OFF"),
-            ("xp_details", "0"),
-        ] {
-            parse(&mut c, key, value);
-        }
-        assert_eq!(c, defaults);
     }
 }

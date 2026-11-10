@@ -66,9 +66,6 @@
 //! L1 in them do. The game sees only the buttons pressed (`macros::Run`,
 //! before `VIPad::Read`): nothing new goes to a server.
 
-#[cfg(test)]
-#[path = "fork_ext/binds.rs"]
-mod fork_binds;
 
 use crate::input::bit;
 use winit::keyboard::{Key, NamedKey};
@@ -187,14 +184,11 @@ pub const ROWS: &[Row] = &[
     row("art", "Art: Frontiers' or 2002's", &["f9"], Pad::None, "Everything drawn swaps between Frontiers' art and the 2002 disc's (EverQuest Online Adventures, USA, SLUS-20470), at once; the first time, it asks for that disc."),
     row("hide_ui", "Hide UI", &["h"], Pad::None, "Hides everything over the world: the HUD, the chat, the names over heads, the damage numbers and the target's rings. Again, or any window coming up, shows them."),
     row("minimap", "Minimap", &["n"], Pad::None, "Shows or hides the minimap, as Extended's Map page does, and keeps it. On the map: a community marker suggested."),
-    row("stats_box", "Stats Box", &["b"], Pad::None, "Shows or hides your stats in a box under the effects' icons (an effect's raise in blue, its cut in red), as Extended's Enhanced HUD page does, and keeps it."),
     row("controls", "Controls", &["f1"], Pad::None, "This page, from play."),
 ];
 
 /// A row's index by its name.
 pub fn row_named(id: &str) -> Option<usize> {
-    #[cfg(test)]
-    if !fork_binds::visible(id) { return None; }
     ROWS.iter().position(|r| r.id == id)
 }
 
@@ -1593,7 +1587,6 @@ mod tests {
     /// more. The control: a known row's line beside them is read.
     #[test]
     fn a_layout_with_the_maps_rows_reads_them() {
-        let _upstream = fork_binds::upstream_rows();
         let b = Binds::from_text("key.map=y\nbutton.map=r3\nkey.stats_box=b\nkey.attack=u\n");
         assert_eq!(b.key(row_named("attack").unwrap()), Some("u"), "the known line read");
         assert_eq!(b.key(row_named("map").unwrap()), Some("y"), "the map's key read");

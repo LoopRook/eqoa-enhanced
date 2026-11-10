@@ -7,6 +7,9 @@
 //! and benchmarks the combined 4-mod per-frame cost.
 
 use super::*;
+use render::ui::{Anchor, Vertical};
+use crate::ui::Layout;
+use vi::ui::wide;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use crate::fork_ext::addons::host::Host;
@@ -119,6 +122,114 @@ fn test_view() -> crate::fork_ext::player_stats::View {
     v
 }
 
+const STATBOX_FRAME: [i32; 4] = [200, 54, 348, 186];
+const STATBOX_BORDER: [f32; 2] = [7.0, 9.0];
+const STATBOX_PAD: [f32; 2] = [3.0, 2.0];
+const STATBOX_GAP: f32 = 6.0;
+const STATBOX_LEADING: f32 = 0.08;
+const STATBOX_SCALE: f32 = 0.6;
+const STATBOX_ROOM: &str = "8888";
+const STATBOX_LABEL: [f32; 4] = [0.95, 0.82, 0.5, 1.0];
+const STATBOX_SHADOW: [f32; 4] = [0.0, 0.0, 0.0, 0.85];
+const STATBOX_BACK: [f32; 4] = [0.05, 0.06, 0.08, 0.85];
+
+struct StatboxRows {
+    lefts: [f32; 2],
+    rights: [f32; 2],
+    top: f32,
+    step: f32,
+    scale: f32,
+}
+
+fn statbox_layout(font_h: f32, wide: [f32; 2]) -> StatboxRows {
+    let (x0, y0, x1, y1) = (STATBOX_FRAME[0] as f32, STATBOX_FRAME[1] as f32, STATBOX_FRAME[2] as f32, STATBOX_FRAME[3] as f32);
+    let (left, right) = (x0 + STATBOX_BORDER[0] + STATBOX_PAD[0], x1 - STATBOX_BORDER[0] - STATBOX_PAD[0]);
+    let (top, bottom) = (y0 + STATBOX_BORDER[1] + STATBOX_PAD[1], y1 - STATBOX_BORDER[1] - STATBOX_PAD[1]);
+    let font_h = font_h.max(1.0);
+    let by_height = (bottom - top) / (8.0 * font_h * (1.0 + STATBOX_LEADING));
+    let by_width = (right - left - STATBOX_GAP) / (wide[0] + wide[1]).max(1.0);
+    let scale = STATBOX_SCALE.min(by_height).min(by_width);
+    let step = (bottom - top) / 8.0;
+    StatboxRows { lefts: [left, right - wide[1] * scale], rights: [left + wide[0] * scale, right], top: top + (step - font_h * scale) / 2.0, step, scale }
+}
+
+fn statbox_widths(labels: &[[Vec<u16>; 8]; 2], width: impl Fn(&[u16]) -> f32) -> [f32; 2] {
+    let room = width(&wide(&format!(" {STATBOX_ROOM}")));
+    std::array::from_fn(|c| labels[c].iter().map(|l| width(l)).fold(0.0, f32::max) + room)
+}
+
+fn native_statbox_draw(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster, v: &crate::fork_ext::player_stats::View) {
+    ui.ui.anchor = Anchor::Left;
+    ui.ui.vertical = Vertical::Top;
+    let f = STATBOX_FRAME;
+    let corners = |r: [i32; 4]| [[r[0] as f32, r[1] as f32], [r[2] as f32, r[1] as f32], [r[2] as f32, r[3] as f32], [r[0] as f32, r[3] as f32]];
+    let inside = [f[0] + 2, f[1] + 2, f[2] - 2, f[3] - 2];
+    ui.solid(3, STATBOX_BACK, corners(inside));
+    vui.stretch_blit_ex(ui, 61, [inside[0], inside[1]], [inside[2] - inside[0], inside[3] - inside[1]], 3, 0.6);
+    vui.blit_frame(ui, [f[0], f[1]], [f[2] - f[0], f[3] - f[1]], &vi::ui::frame_sets()[0], 3, 1.0, true);
+    let Some(font) = ui.assets.font else { return };
+    let labels: [[Vec<u16>; 8]; 2] = std::array::from_fn(|c| std::array::from_fn(|k| wide(vui.words.get(v.rows[c][k].word, vui.language))));
+    let l = {
+        let f = &ui.ui.fonts[font];
+        statbox_layout(f.height as f32, statbox_widths(&labels, |s| f.string_width(s) as f32))
+    };
+    for (col, rows) in v.rows.iter().enumerate() {
+        for (k, row) in rows.iter().enumerate() {
+            let y = (l.top + k as f32 * l.step).round();
+            let value = wide(&row.value.to_string());
+            let w = ui.ui.fonts[font].string_width(&value) as f32 * l.scale;
+            let x = (l.rights[col] - w).round();
+            for (s, at, c) in [(&labels[col][k], l.lefts[col].round(), STATBOX_LABEL), (&value, x, row.color())] {
+                ui.ui.text_scaled(font, at + 1.0, y + 1.0, l.scale, STATBOX_SHADOW, s);
+                ui.ui.text_scaled(font, at, y, l.scale, c, s);
+            }
+        }
+    }
+}
+
+fn native_hud_numbers_draw(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster, s: &crate::hud::HudState) {
+    let _ = vui;
+    let Some(font) = ui.assets.font else { return };
+    let (anchor, vertical) = (ui.ui.anchor, ui.ui.vertical);
+    ui.ui.anchor = Anchor::Left;
+
+    let mut labels = Vec::new();
+    if s.has_self {
+        let pct = (s.self_hp as f32 / 255.0 * 100.0).round() as i32;
+        labels.push((format!("{pct}%"), [99, 35], 0.6, [1.0; 4], Vertical::Bottom));
+        labels.push((format!("{}/{}", s.power, s.max_power), [99, 45], 0.6, [0.4, 0.7, 1.0, 1.0], Vertical::Bottom));
+        let need = crate::hud::exp_for_level(s.level + 1);
+        let xp_pct = if need > 0 { (s.exp as f64 / need as f64 * 100.0 * 10.0).round() / 10.0 } else { 0.0 };
+        labels.push((format!("{}/{} ({xp_pct:.1}%)", s.exp, need), [99, 55], 0.6, [1.0, 0.85, 0.35, 1.0], Vertical::Bottom));
+    }
+    if s.target_name.is_some() {
+        let pct = (s.target_hp as f32 / 255.0 * 100.0).round() as i32;
+        let color = if pct > 50 {
+            [0.3, 0.9, 0.3, 1.0]
+        } else if pct > 20 {
+            [1.0, 0.85, 0.2, 1.0]
+        } else {
+            [1.0, 0.3, 0.3, 1.0]
+        };
+        labels.push((format!("{pct}%"), [TARGET_AT[0] + 40, TARGET_AT[1] + 49], 0.65, color, Vertical::Bottom));
+    }
+
+    for (text_str, center, scale, color, vert) in labels {
+        ui.ui.vertical = vert;
+        let text = wide(&text_str);
+        let width = ui.ui.fonts[font].string_width(&text) as f32 * scale;
+        let x = (center[0] as f32 - width / 2.0).round();
+        let y = center[1] as f32;
+        for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+            ui.ui.text_scaled(font, x + dx, y + dy, scale, [0.0, 0.0, 0.0, 0.95], &text);
+        }
+        ui.ui.text_scaled(font, x, y, scale, color, &text);
+    }
+
+    ui.ui.anchor = anchor;
+    ui.ui.vertical = vertical;
+}
+
 fn save_reference_capture(name: &str, width: u32, height: u32, quads_count: usize) {
     let out_dir = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
@@ -171,7 +282,7 @@ fn bundled_stats_box_picture_comparison() {
     for size in [(640, 480), (1280, 720)] {
         // Native drawing
         ui_native.begin(size);
-        crate::statbox::draw(&vui, &mut assets_native.raster(&mut ui_native), &view);
+        native_statbox_draw(&vui, &mut assets_native.raster(&mut ui_native), &view);
         let native_quads = ui_native.quads.len();
         assert!(native_quads > 0, "native stats box must draw quads");
         save_reference_capture("stats_box", size.0, size.1, native_quads);
@@ -387,7 +498,7 @@ fn bundled_hud_numbers_picture_comparison() {
             target_hp: 153,
             ..Default::default()
         };
-        crate::hud::fork_hud::draw(&vui, &mut assets_native.raster(&mut ui_native), &s);
+        native_hud_numbers_draw(&vui, &mut assets_native.raster(&mut ui_native), &s);
         let native_num_quads = ui_native.quads.len();
         assert!(native_num_quads > 0, "native hud numbers must draw quads");
         save_reference_capture("hud_numbers", size.0, size.1, native_num_quads);

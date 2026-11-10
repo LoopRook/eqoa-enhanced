@@ -11,9 +11,12 @@ eqoa.options.toggle({ id = "stats_box", label = "Stats Box", default = true })
 
 eqoa.binds.register("toggle", "b", "Toggle Stats Box")
 
-eqoa.events.on("input.bind", function(id)
-    if id == "toggle" then
-        is_open = not is_open
+eqoa.events.on("input.key", function(e)
+    if e.down and not e.repeat_ then
+        local bound = (eqoa.binds.get and eqoa.binds.get("toggle")) or "b"
+        if e.key == bound then
+            is_open = not is_open
+        end
     end
 end)
 

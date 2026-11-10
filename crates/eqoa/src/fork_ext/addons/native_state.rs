@@ -872,6 +872,17 @@ fn install_math(lua: &Lua) -> Result<()> {
     )?;
     bind(
         lua,
+        "binds",
+        "get",
+        lua.create_function(|lua, id: String| {
+            let addon = super::native::session(lua).borrow().addon.clone();
+            let addon_name = if addon.is_empty() { "mod".to_string() } else { addon };
+            let key = crate::fork_ext::bindpage::get_key(&addon_name, &id);
+            lua.pack_multi((key, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
         "input",
         "bind",
         lua.create_function(|lua, (spec, callback): (Value, Option<Value>)| {

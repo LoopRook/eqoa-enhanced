@@ -9,7 +9,7 @@ use vi::ui::{Vui, wide};
 
 pub(super) const HUD_CATEGORY: Category = Category {
     name: "Enhanced HUD",
-    items: &[1031, 1042, 1047, 1048, 1049, 1050],
+    items: &[2000, 2001, 2002, 2003, 2004, 2005],
     note: Note::None,
 };
 const fn categories<const N: usize, const M: usize>(upstream: [Category; N]) -> [Category; M] {
@@ -65,17 +65,17 @@ impl Drop for ForkPages {
     }
 }
 pub(super) const ITEMS: &[(i32, &str)] = &[
-    (1031, "Target of Target"),
-    (1042, "Mana Bars"),
     (1045, "Quest Markers"),
-    (1047, "Stats Box"),
-    (1048, "Target HP %"),
-    (1049, "XP Details"),
-    (1050, "HUD Numbers"),
     (1051, "Open Mods Folder"),
     (1052, "Combat Parser"),
     #[cfg(not(target_arch = "wasm32"))]
     (1053, "Addon Manager"),
+    (2000, "Stats Box"),
+    (2001, "Target of Target"),
+    (2002, "Mana Bars"),
+    (2003, "HUD Numbers"),
+    (2004, "Target HP %"),
+    (2005, "XP Details"),
 ];
 pub(super) const CATEGORY: Category = Category {
     name: "Mods & Addons",
@@ -96,17 +96,9 @@ pub(super) fn items() -> impl Iterator<Item = &'static (i32, &'static str)> {
 /// frame follow their setting as upstream's rows do.
 pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
     match item {
-        // Target of Target (`Play::target_of_target`)
-        1031 => c.target_of_target = !c.target_of_target,
-        // Mana Bars: the server told from the next frame
-        // (`Play::agree_power_bars`)
-        1042 => c.mana_bars = !c.mana_bars,
         // Independent saved marker toggle, in addition to Quest Helper.
         1045 => c.quest_markers = !c.quest_markers,
-        1047 => c.stats_box = !c.stats_box,
-        1048 => c.target_hp_percent = !c.target_hp_percent,
-        1049 => c.xp_details = !c.xp_details,
-        1050 => c.hud_numbers = !c.hud_numbers,
+        #[cfg(not(target_arch = "wasm32"))]
         item if item >= crate::fork_ext::addons::options::MOD_OPTION_BASE => {
             return crate::fork_ext::addons::options::toggle_by_item(item);
         }
@@ -133,13 +125,7 @@ pub(super) fn activate(item: i32) -> bool {
 pub(super) fn value_text(vui: &Vui, item: i32, c: &ClientOptions) -> Option<Vec<u16>> {
     let on_off = |on| wide(vui.words.get(if on { 551 } else { 552 }, vui.language));
     Some(match item {
-        1031 => on_off(c.target_of_target),
-        1042 => on_off(c.mana_bars),
         1045 => on_off(c.quest_markers),
-        1047 => on_off(c.stats_box),
-        1048 => on_off(c.target_hp_percent),
-        1049 => on_off(c.xp_details),
-        1050 => on_off(c.hud_numbers),
         1051 => wide("Open"),
         #[cfg(not(target_arch = "wasm32"))]
         1053 => wide("Open"),
@@ -148,6 +134,7 @@ pub(super) fn value_text(vui: &Vui, item: i32, c: &ClientOptions) -> Option<Vec<
         } else {
             "Launch"
         }),
+        #[cfg(not(target_arch = "wasm32"))]
         item if item >= crate::fork_ext::addons::options::MOD_OPTION_BASE => {
             crate::fork_ext::addons::options::value_by_item(item).map(on_off)?
         }
@@ -196,25 +183,29 @@ mod tests {
     fn number_toggles_change_only_their_own_saved_setting() {
         let defaults = ClientOptions::default();
         let mut c = defaults;
-        assert!(change(&mut c, 1048));
+        assert!(change(&mut c, 2004));
         assert_eq!(
-            (c.target_hp_percent, c.xp_details, c.hud_numbers),
-            (false, true, true)
+            (
+                crate::fork_ext::addons::options::value_by_item(2004),
+                crate::fork_ext::addons::options::value_by_item(2005),
+                crate::fork_ext::addons::options::value_by_item(2003)
+            ),
+            (Some(false), Some(true), Some(true))
         );
-        assert!(change(&mut c, 1049));
-        assert!(change(&mut c, 1050));
+        assert!(change(&mut c, 2005));
+        assert!(change(&mut c, 2003));
         assert_eq!(
-            (c.target_hp_percent, c.xp_details, c.hud_numbers),
-            (false, false, false)
+            (
+                crate::fork_ext::addons::options::value_by_item(2004),
+                crate::fork_ext::addons::options::value_by_item(2005),
+                crate::fork_ext::addons::options::value_by_item(2003)
+            ),
+            (Some(false), Some(false), Some(false))
         );
         assert_eq!(c.minimap, defaults.minimap);
         assert_eq!(c.shadows, defaults.shadows);
         assert!(!change(&mut c, 9999));
         assert!(!activate(9999));
-        assert_eq!(
-            (c.target_hp_percent, c.xp_details, c.hud_numbers),
-            (false, false, false)
-        );
     }
     #[test]
     fn number_values_use_game_words_and_unknown_rows_have_no_value() {
@@ -232,12 +223,9 @@ mod tests {
             Vec::new(),
         );
         let c = ClientOptions::default();
-        assert_eq!(value_text(&vui, 1048, &c), Some(wide("Localized On")));
-        let off = ClientOptions {
-            xp_details: false,
-            ..c
-        };
-        assert_eq!(value_text(&vui, 1049, &off), Some(wide("Localized Off")));
+        assert_eq!(value_text(&vui, 2004, &c), Some(wide("Localized On")));
+        crate::fork_ext::addons::options::set_toggle("eqoa_hud_numbers", "xp_details", false);
+        assert_eq!(value_text(&vui, 2005, &c), Some(wide("Localized Off")));
         assert_eq!(value_text(&vui, 1051, &c), Some(wide("Open")));
         assert_eq!(value_text(&vui, 9999, &c), None);
     }

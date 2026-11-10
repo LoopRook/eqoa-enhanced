@@ -181,6 +181,13 @@ fn load_saved_key(addon: &str, id: &str) -> Option<String> {
             return Some(val.trim().to_ascii_lowercase());
         }
     }
+    if addon == "eqoa_stats_box" && id == "toggle" {
+        for line in text.lines() {
+            if let Some(val) = line.strip_prefix("key.stats_box=") {
+                return Some(val.trim().to_ascii_lowercase());
+            }
+        }
+    }
     None
 }
 
@@ -197,6 +204,8 @@ fn save_mod_bind(addon: &str, id: &str, key: &str) {
             out.push_str(&key_line);
             out.push('\n');
             replaced = true;
+        } else if line.starts_with("key.stats_box=") {
+            continue;
         } else {
             out.push_str(line);
             out.push('\n');
