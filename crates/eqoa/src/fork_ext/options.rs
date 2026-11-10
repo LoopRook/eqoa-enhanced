@@ -262,6 +262,15 @@ mod tests {
         assert_eq!(c.shadows, defaults.shadows);
         assert!(!change(&mut c, 9999));
         assert!(!activate(9999));
+        assert_eq!(
+            (
+                crate::fork_ext::addons::options::value_by_item(2004),
+                crate::fork_ext::addons::options::value_by_item(2005),
+                crate::fork_ext::addons::options::value_by_item(2003)
+            ),
+            (Some(false), Some(false), Some(false)),
+            "activating an unknown item does not alter existing toggles"
+        );
         #[cfg(not(target_arch = "wasm32"))]
         crate::fork_ext::addons::options::reset_in_memory();
     }
