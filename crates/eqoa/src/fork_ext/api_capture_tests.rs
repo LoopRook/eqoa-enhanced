@@ -200,6 +200,7 @@ fn native_effects_and_group_use_actual_channels_and_current_roster() {
         crate::group::Member {
             id: 0x200,
             name: "New leader".into(),
+            active: true,
             ..Default::default()
         },
         crate::group::Member {
@@ -212,7 +213,7 @@ fn native_effects_and_group_use_actual_channels_and_current_roster() {
     assert_eq!(snapshot.effects.count, 1);
     assert_eq!(snapshot.effects.effects[0].icon_ref, 123);
     assert!(!snapshot.group.is_leader);
-    host.execute("local e=eqoa.effects.list()[1];assert(e.index==1 and e.icon==123 and e.name=='An actual native effect');local g=eqoa.group.get();assert(g.self_leader==false and g.members[1].hp_fraction==nil and g.members[1].position==nil)").unwrap();
+    host.execute("local e=eqoa.effects.list()[1];assert(e.index==1 and e.icon==123 and e.name=='An actual native effect');local g=eqoa.group.get();assert(g.self_leader==false and #g.members==1 and g.members[1].name=='New leader' and g.members[1].hp_fraction==nil)").unwrap();
 }
 #[test]
 fn native_logical_chat_burst_keeps_source_order_and_full_text() {
