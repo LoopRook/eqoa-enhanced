@@ -1313,12 +1313,12 @@ const ALL_CATEGORIES: [Category; 10] = [
     Category { name: "Map", items: &[41, 42, 43, 44, 45], note: Note::None },
 ];
 #[cfg(not(target_arch = "wasm32"))]
-const CATEGORIES: &[Category] = &fork_options::categories::<10, 13>(ALL_CATEGORIES);
+const CATEGORIES: &[Category] = &fork_options::categories::<10, 12>(ALL_CATEGORIES);
 /// A page's: all but Textures.
 #[cfg(target_arch = "wasm32")]
 const CATEGORIES: &[Category] = &{
     let a = ALL_CATEGORIES;
-    fork_options::categories::<9, 12>([a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9]])
+    fork_options::categories::<9, 11>([a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9]])
 };
 
 /// Video's rows: natively Display first (F3 20261024-201507: full screen was
@@ -2280,8 +2280,7 @@ mod tests {
             v
         };
         // (an Android app has no Texture Folder: `TEXTURES`)
-        let mut all: Vec<i32> = fork_options::items().map(|&(i, _)| i).filter(|&i| !(cfg!(target_os = "android") && i == 55)).collect();
-        all.sort();
+        let all: Vec<i32> = fork_options::items().map(|&(i, _)| i).filter(|&i| !(cfg!(target_os = "android") && i == 55)).collect();
         assert_eq!(listed(CATEGORIES), all);
         assert!(fits(CATEGORIES));
         assert!(fork_options::items().all(|&(i, l)| !l.is_empty() && label_of(i) == l));

@@ -12,15 +12,10 @@ pub(super) const HUD_CATEGORY: Category = Category {
     items: &[1031, 1042, 1047, 1048, 1049, 1050],
     note: Note::None,
 };
-pub(super) const QUESTS_CATEGORY: Category = Category {
-    name: "Enhanced Quests",
-    items: &[1045],
-    note: Note::None,
-};
 pub(super) const fn categories<const N: usize, const M: usize>(
     upstream: [Category; N],
 ) -> [Category; M] {
-    assert!(M == N + 3);
+    assert!(M == N + 2);
     let mut all = [HUD_CATEGORY; M];
     let mut i = 0;
     while i < N {
@@ -28,8 +23,7 @@ pub(super) const fn categories<const N: usize, const M: usize>(
         i += 1;
     }
     all[N] = HUD_CATEGORY;
-    all[N + 1] = QUESTS_CATEGORY;
-    all[N + 2] = CATEGORY;
+    all[N + 1] = CATEGORY;
     all
 }
 pub(super) const ITEMS: &[(i32, &str)] = &[
@@ -48,6 +42,7 @@ pub(super) const ITEMS: &[(i32, &str)] = &[
 pub(super) const CATEGORY: Category = Category {
     name: "Mods & Addons",
     items: &[
+        1045,
         1051,
         1052,
         #[cfg(not(target_arch = "wasm32"))]
@@ -222,7 +217,7 @@ mod tests {
             &mut ups,
         );
         let cats = crate::options::CATEGORIES;
-        let first = cats.len() - 3;
+        let first = cats.len() - 2;
         assert_eq!(cats[first - 1].name, "Map");
         assert_eq!(cats[first - 1].items, &[41, 42, 43, 44, 45]);
         assert_eq!(cats[3].items, &[22, 29, 30, 40, 49]);
@@ -295,7 +290,7 @@ mod tests {
         testing::reset(false);
     }
 
-    /// Upstream's Shadows (46) and the fork's Quest Tracker (1046) toggle
+    /// Upstream's Shadows (46) and Quest Tracker (45) toggle
     /// independently and keep their own saved keys.
     #[test]
     fn upstream_shadows_and_enhanced_quest_tracker_toggle_independently() {

@@ -254,6 +254,6 @@ production texture code is unchanged. The master category has its own named hook
 guard. Renderer and network budgets did not increase.
 
 Round 2.5 options tidy: upstream UI and Map retain their own rows and IDs 41-45.
-The categories adapter appends Enhanced HUD, Enhanced Quests and Mods & Addons;
-enhanced-only IDs are 1000+. First-run 64/650 defaults use fork_settings::first_run;
+The categories adapter appends Enhanced HUD and Mods & Addons;
+enhanced-only IDs are 1000+. First-run 64/650 defaults use fork_settings::migrate_defaults;
 ClientOptions::default and saved-file parsing retain upstream defaults.
