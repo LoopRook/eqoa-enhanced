@@ -236,7 +236,7 @@ pub fn draw(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>) {
                             wtext.clear();
                             wtext.extend(text.encode_utf16());
                             if let Some(clip_w) = clip_width {
-                                let mut w = vi::ui::Window::new();
+                                let mut w = vi::ui::Window::default();
                                 w.init(
                                     vui,
                                     ui,

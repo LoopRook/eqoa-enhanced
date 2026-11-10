@@ -44,7 +44,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         };
         crate::fork_ext::addons::hud_layout::set_hud_state(
             _play.right_hud_up(),
-            _play.hud_up(),
+            !_play.loading_up() && _play.hud_ready(),
             _play.group.in_group && !_play.group.raid.is_empty(),
             pet_y,
             pet_h,

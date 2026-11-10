@@ -649,13 +649,13 @@ fn install_math(lua: &Lua) -> Result<()> {
         let anchor_s: Option<String> = t.get("anchor")?;
         let anchor = match anchor_s.as_deref() {
             Some("right") => render::ui::Anchor::Right,
-            Some("center") => render::ui::Anchor::Center,
+            Some("center") => render::ui::Anchor::Middle,
             _ => render::ui::Anchor::Left,
         };
         let vert_s: Option<String> = t.get("vertical")?;
         let vertical = match vert_s.as_deref() {
             Some("bottom") => render::ui::Vertical::Bottom,
-            Some("center") => render::ui::Vertical::Center,
+            Some("center") => render::ui::Vertical::Middle,
             _ => render::ui::Vertical::Top,
         };
         Ok((anchor, vertical))
