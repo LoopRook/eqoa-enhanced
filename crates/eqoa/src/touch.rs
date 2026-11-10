@@ -291,10 +291,6 @@ pub struct TouchPad {
     /// viewer sets it each frame): the pad drawn fainter, and a stick takes
     /// only a finger put down inside its ring
     pub window: bool,
-    /// with a window up the d-pad stays the pad's too (the viewer sets it
-    /// each frame): a quick-chat menu has the keys, whose choices are the
-    /// d-pad's directions, tapped or held
-    pub dpad: bool,
     /// a finger held still is a long press (`take_holds`; the viewer sets it
     /// each frame: the map is up, where it puts the group's waypoint)
     pub holds: bool,
@@ -306,7 +302,6 @@ impl Default for TouchPad {
         TouchPad {
             fingers: Vec::new(),
             scale: 1.0,
-            dpad: false,
             shown: false,
             used: false,
             look: [0.0; 2],
@@ -814,12 +809,6 @@ mod tests {
     fn sizes() -> impl Iterator<Item = f32> {
         (10..=20).map(|k| k as f32 / 20.0)
     }
-
-    /// With long presses wanted (the map up), a finger held still past the
-    /// hold is one, once, where it came down, and its lift no tap; a finger
-    /// lifted sooner is a tap, one that moved a drag, two at once a pinch.
-    /// The control: not wanted, the same long hold is a tap at its lift.
-
 
     /// Every shape keeps the whole controller on the screen with nothing
     /// overlapping, at every size: the sixteen buttons and both sticks'

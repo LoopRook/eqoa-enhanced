@@ -2015,7 +2015,6 @@ mod name_plates {
     #[test]
     fn the_walkers_view_of_the_plates() {
         crate::settings::testing::reset(false);
-        crate::settings::set_client(crate::settings::ClientOptions { entity_slots: crate::settings::ENTITY_SLOTS_GAME, ..Default::default() });
         let mut cam = vi::camera::WalkCamera::<Ee> { camera_mode: 3, target_height: F::new(1.68), ..Default::default() };
         cam.walk.phys.position = Vect3::of(1000.0, 50.0, 2000.0);
         let back = |d: f32| Vect3::of(1000.0, 51.68, 2000.0 - d);
@@ -4588,7 +4587,6 @@ impl Play {
         self.keyboard = !finger;
         let (Click::Target(x, y) | Click::Interact(x, y) | Click::Right(x, y)) = c;
         let f = render::ui::frame_from_window(size, [x as f32, y as f32]);
-        if self.map.suggestion.pointer(f,matches!(c,Click::Right(..))) {return true;}
         // Map chrome remains actionable with search open; closing the popup
         // must not swallow Suggest/Close/zoom and require a second click.
         if self.map.open && self.map.search.open && !matches!(c,Click::Right(..)) {
@@ -5608,11 +5606,6 @@ impl Play {
             self.presses.key(key, down, self.session.timer() as u32, crate::input::from_device());
         }
         self.keyboard = false;
-        if self.map.suggestion.open {
-            if down {self.map.suggestion.key(match key {134=>"enter",144|132=>"escape",138=>"up",139=>"down",140|142=>"tab",_=>""},None);}
-            self.release_map_search_holds();
-            return;
-        }
         if self.map.search.open {
             self.release_map_search_holds();
             if down {
@@ -7980,7 +7973,6 @@ impl Play {
     /// (`binds`).
     pub fn keyboard_typing(&mut self) -> bool {
         self.map.search.open
-            || self.map.suggestion.open
             || self.typing.is_some()
             || self.mode == 2
             || self.quick_typing()
@@ -8110,6 +8102,10 @@ impl Play {
     /// The map's frame (`map.rs`): its build behind the game, and while it
     /// is up its view and quads, the player and the group on it. It closes
     /// when a window comes up (the server's, a dialog) or the player dies.
+    /// With Extended's Map off none of it: an open map closes and lets go of
+    /// what it made (`Map::off`), and nothing is built, drawn or asked for.
+    /// The quest guide's frame runs first, whatever the Map (the Quest
+    /// Helper's tracker is the HUD's).
     #[allow(clippy::too_many_arguments)]
     pub fn map_frame(&mut self, walker: &Walker, lib: &Library, device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat, size: (u32, u32), dt: f32, sticks: [f32; 4]) {
         let now = self.session.now();
@@ -8208,8 +8204,8 @@ impl Play {
 
 
 
-    /// Whether the minimap is up (`map::mini`): Extended's Minimap on, in
-    /// play where the HUD's quick menus are (no window up, no player
+    /// Whether the minimap is up (`map::mini`): Extended's Map and Minimap
+    /// on, in play where the HUD's quick menus are (no window up, no player
     /// search), the HUD made, the map not up and no loading screen.
     pub fn minimap_up(&self) -> bool {
         crate::settings::minimap() && self.right_hud_up()
@@ -8232,8 +8228,8 @@ impl Play {
         crate::statbox::view(&crate::statbox::Source { stats: &self.stats, inv: &self.dump.inventory, mastery: &m.stats, bonuses: &m.bonuses, p44: self.dump.player.p44 as i32 })
     }
 
-    /// The quest tracker's quests while it is up (`tracker`): Quest Tracker
-    /// on, where the minimap could be.
+    /// The quest tracker's quests while it is up (`tracker`): the Quest
+    /// Helper and its Quest Tracker on, where the minimap could be.
     fn tracker_quests(&self) -> Vec<net::session::TrackedQuest> {
         if !crate::settings::quest_tracker() || !self.right_hud_up() {
             Vec::new()
@@ -8244,15 +8240,20 @@ impl Play {
         }
     }
 
+    /// The quest marks for the map and the minimap now (`quest_marks_of`).
+    fn quest_marks(&self, now: u32) -> Option<&[net::session::QuestMark]> {
+        quest_marks_of(&self.session, &self.guide, self.guide_on(now))
+    }
+
+    /// The Quest Helper: a server that offers quest marks and the quest
+    /// tracker told whether to send them, at once and whenever that changes
+    /// (none while a scripted run has the guide make them; the marks only
+    /// with the Map on, which shows them). Off from the start, a server is
+    /// told nothing, as by a client without them.
     fn agree_quests(&mut self) {
         let forced = self.guide_forced;
         self.session.agree_quest_marks(crate::settings::quest_markers() && crate::settings::map() && !forced);
         self.session.agree_quest_progress(crate::settings::quest_tracker() && !forced);
-    }
-
-    /// The quest marks for the map and the minimap now (`quest_marks_of`).
-    fn quest_marks(&self, now: u32) -> Option<&[net::session::QuestMark]> {
-        quest_marks_of(&self.session, &self.guide, self.guide_on(now))
     }
 
     /// The guide off for good once this server offers its own quest marks or
@@ -8264,9 +8265,9 @@ impl Play {
         }
     }
 
-    /// Whether the quest guide makes the marks and the tracker: this server
-    /// never offered its own in the session (a scripted run may say it did
-    /// not), and the wait into the world is over.
+    /// Whether the quest guide makes the marks and the tracker: the Quest
+    /// Helper on, this server never offered its own in the session (a
+    /// scripted run may say it did not), and the wait into the world is over.
     fn guide_on(&self, now: u32) -> bool {
         crate::settings::quest_helper() && !self.server_quests && self.guide_from.is_some_and(|t| now.wrapping_sub(t) as i32 >= 0)
     }
@@ -8347,7 +8348,7 @@ impl Play {
     fn mini_marks(&self) -> Vec<crate::map::mini::Mark> {
         let mut out = Vec::new();
         // the quests' (`map::quests`, the server's or the guide's), while
-        // Quest Markers is on
+        // the Quest Helper and its Quest Markers are on
         if let Some(m) = self.quest_marks(self.session.now()) {
             out.extend(crate::map::quests::mini_marks(m));
         }

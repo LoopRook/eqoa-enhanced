@@ -4,7 +4,9 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
-- Extended keeps the vanilla UI, Map and Textures pages in their original order. Enhanced HUD, Enhanced Quests and Mods & Addons follow them; existing settings are kept.
+- Kept the Enhanced NPC display and distance defaults (64/650) when upgrading older settings; explicit choices stay as saved.
+- Community marker suggestions use the vanilla name-and-note edit boxes for keyboard and controller.
+- Extended keeps the vanilla UI, Map and Textures pages in their original order. Enhanced HUD and Mods & Addons follow them; existing settings are kept.
 
 - Wereoxxs Enter opens its own chat again after switching away from and back to the game. Optional legacy-settings probes no longer clutter the Addon Manager.
 - Restored signed game icon IDs for Forge UIs, fixing overlapping ability icons in Avoids Modern UI.
