@@ -70,7 +70,7 @@ pub(super) fn reset_test_client() {
     // An already-loaded client remains at upstream defaults when this
     // fixture subsequently refuses every read, including the marker.
     if super::store::REFUSE.with(|refuse| refuse.get()) {
-        super::CLIENT.with(|client| client.set(Some(ClientOptions::default())));
+        super::set_client(ClientOptions::default());
     }
 }
 pub(super) fn write(c: &ClientOptions, text: &mut String) {
