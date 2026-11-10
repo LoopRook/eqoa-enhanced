@@ -25,11 +25,11 @@ const fn categories<const N: usize, const M: usize>(upstream: [Category; N]) -> 
     all
 }
 #[cfg(not(target_arch = "wasm32"))]
-const PAGES: [Category; 12] = categories(super::ALL_CATEGORIES);
+const PAGES: [Category; 14] = categories(super::ALL_CATEGORIES);
 #[cfg(target_arch = "wasm32")]
-const PAGES: [Category; 11] = categories({
+const PAGES: [Category; 13] = categories({
     let a = super::ALL_CATEGORIES;
-    [a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9]]
+    [a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9], a[10], a[11]]
 });
 const _: () = assert!(super::fits(&PAGES));
 #[cfg(test)]
@@ -295,9 +295,10 @@ mod tests {
         );
         let cats = pages();
         let first = cats.len() - 2;
-        assert_eq!(cats[first - 1].name, "Map");
-        assert_eq!(cats[first - 1].items, &[41, 42, 43, 44, 45]);
-        assert_eq!(cats[3].items, &[22, 29, 30, 40, 49]);
+        assert_eq!(cats[first - 1].name, "Combat");
+        assert_eq!(cats[first - 1].items, &[70, 71, 72]);
+        assert_eq!(cats[first - 3].items, &[41, 42, 43, 44, 45]);
+        assert_eq!(cats[3].items, &[22, 29, 30, 40, 49, 58]);
         for (index, category) in cats.iter().enumerate().skip(first) {
             w.cat_sel = index as i32;
             w.key(

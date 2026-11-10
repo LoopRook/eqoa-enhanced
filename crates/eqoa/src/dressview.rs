@@ -33,6 +33,11 @@
 //! disc's art (`$EQOA_2002_ISO`), as the world draws them with F9.
 //! `frame=head` frames the views on the head (the node the body names for
 //! it and the nodes under it) instead of the body.
+//! `helmseat=A,sx,sy,sz,ox,oy,oz` (or `A,s,ox,oy,oz`) seats the helm on node
+//! `A` (`named`: the body's node of the human's helm node's name; `head`: its
+//! head's; or a node's number) stretched and moved as given in that node's
+//! frame, in place of the seat the body has (`slotless::HEAD_SEATS`): to
+//! judge a seat by before writing it down.
 
 use esf::Library;
 use glam::{Mat4, Vec3};
@@ -77,6 +82,16 @@ pub struct Words {
     pub y2002: bool,
     /// Framed on the head alone.
     pub head: bool,
+    /// A helm seat tried in place of the body's (`helmseat=`): the node (by
+    /// `slotless::Anchor`, or a node's number) and the fit.
+    pub seat: Option<(SeatNode, crate::slotless::HelmFit)>,
+}
+
+/// The node a tried helm seat hangs on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SeatNode {
+    Anchor(crate::slotless::Anchor),
+    Node(i32),
 }
 
 /// What a list of words names: the look, the items held, the idle's time and
@@ -88,6 +103,7 @@ pub fn parse(words: &[String]) -> Result<Words, String> {
     let mut cape = net::cape::Cape::default();
     let (mut opts, mut sex) = (None, 0);
     let (mut helm_fit, mut y2002, mut head) = (true, false, false);
+    let mut seat = None;
     let nums = |v: &str| v.split(',').map(|n| n.trim().parse::<u8>().map_err(|e| format!("{v}: {e}"))).collect::<Result<Vec<u8>, String>>();
     let hex = |w: &str, v: &str| u32::from_str_radix(v.trim_start_matches("0x").trim_start_matches("0X"), 16).map_err(|e| format!("{w}: {e}"));
     for w in words {
@@ -133,6 +149,21 @@ pub fn parse(words: &[String]) -> Result<Words, String> {
             "sex" => sex = v.parse().map_err(|e| format!("{w}: {e}"))?,
             "helm" => look.armor[5] = nums(v)?[0],
             "helmfit" => helm_fit = v != "0",
+            "helmseat" => {
+                let parts: Vec<&str> = v.split(',').collect();
+                let node = match parts[0] {
+                    "named" => SeatNode::Anchor(crate::slotless::Anchor::Named),
+                    "head" => SeatNode::Anchor(crate::slotless::Anchor::Head),
+                    n => SeatNode::Node(n.parse().map_err(|e| format!("{w}: {e}"))?),
+                };
+                let f: Vec<f32> = parts[1..].iter().map(|n| n.trim().parse::<f32>().map_err(|e| format!("{w}: {e}"))).collect::<Result<_, _>>()?;
+                let (scale, offset) = match f.len() {
+                    4 => (glam::Vec3::splat(f[0]), glam::Vec3::new(f[1], f[2], f[3])),
+                    6 => (glam::Vec3::new(f[0], f[1], f[2]), glam::Vec3::new(f[3], f[4], f[5])),
+                    _ => return Err(format!("{w}: helmseat=A,s,ox,oy,oz or A,sx,sy,sz,ox,oy,oz")),
+                };
+                seat = Some((node, crate::slotless::HelmFit { scale, offset }));
+            }
             "frame" => match v {
                 "head" => head = true,
                 "body" => head = false,
@@ -152,7 +183,7 @@ pub fn parse(words: &[String]) -> Result<Words, String> {
             _ => return Err(format!("{w}: not a word of a look")),
         }
     }
-    Ok(Words { look, items, race, action, at, size, tilt, cape, opts, sex, helm_fit, y2002, head })
+    Ok(Words { look, items, race, action, at, size, tilt, cape, opts, sex, helm_fit, y2002, head, seat })
 }
 
 /// The body drawn in the look, holding what `words` say, from four sides
@@ -197,16 +228,52 @@ pub fn shot(lib: &Library, model: i32, words: &Words, out: &str) -> Result<(), S
     let before = mesh.batches.len();
     // the helm, on its node and seated as a player's character wears it
     let t = vi::cust::Tables::retail();
-    let helm = crate::slotless::helm_on(lib, model as u32, &cs, true, look.armor[5], look.helm_color(&t), &t, words.helm_fit);
+    let mut helm = crate::slotless::helm_on(lib, model as u32, &cs, true, look.armor[5], look.helm_color(&t), &t, words.helm_fit);
+    // a seat tried in place of the body's (`helmseat=`)
+    if let Some((at, fit)) = words.seat {
+        let node = match at {
+            SeatNode::Anchor(crate::slotless::Anchor::Named) => crate::slotless::named_helm_node(lib, model as u32, cs.sex != 0).unwrap_or(-1),
+            SeatNode::Anchor(crate::slotless::Anchor::Head) => cs.node_ids[7],
+            SeatNode::Node(n) => n,
+        };
+        helm = (node >= 0)
+            .then(|| vi::cust::helm_with(look.armor[5], &t))
+            .flatten()
+            .and_then(|h| lib.lookup(h as i32))
+            .and_then(|r| lib.build_model(r))
+            .map(|mut m| {
+                let tint = look.helm_color(&t);
+                m.batches.iter_mut().flat_map(|b| b.layers.iter_mut()).for_each(|l| l.color = tint);
+                fit.apply(&mut m);
+                (node, m)
+            });
+    }
     if look.armor[5] != 0 {
         match &helm {
-            Some((node, _)) => eprintln!("helm {} on node {node}{}", look.armor[5], if !words.helm_fit { " (no fit)" } else if crate::slotless::helm_fit(lib, model as u32, true).is_some() { " (fitted)" } else { "" }),
+            Some((node, _)) => eprintln!(
+                "helm {} on node {node}{}",
+                look.armor[5],
+                if words.seat.is_some() {
+                    " (seat tried)"
+                } else if !words.helm_fit {
+                    " (no fit)"
+                } else if crate::slotless::helm_fit(lib, model as u32, true).or_else(|| crate::slotless::head_fit(model as u32, &cs, true)).is_some() {
+                    " (fitted)"
+                } else {
+                    ""
+                }
+            ),
             None => eprintln!("helm {}: none on this body", look.armor[5]),
         }
     }
     crate::play::dress_look(lib, model, &mut mesh, &cs, look, helm.is_some(), &t, true);
+    // a Wisp's (`wisp`): its armour alone, the wisp hung on the helm's node as an item is
+    let mut wisp = None;
     if let Some((rows, steps)) = &opts {
-        crate::raceopts::dress(lib, model as u32, &mut mesh, &crate::raceopts::look_of_steps(rows, words.sex, steps, model as u32));
+        let rl = crate::raceopts::look_of_steps(rows, words.sex, steps, model as u32);
+        crate::raceopts::dress(lib, model as u32, &mut mesh, &rl);
+        crate::wisp::dress(lib, model as u32, &mut mesh, &cs, look, Some(&rl), &t);
+        wisp = crate::wisp::attachment(lib, model as u32, &cs, Some(&rl));
     }
     let tris = |b: &[esf::Batch]| b.iter().map(|b| b.indices.len() / 3).sum::<usize>();
     // `EQOA_DRESS_DEBUG=slots`: the made-up batches flat, a colour a slot
@@ -224,12 +291,13 @@ pub fn shot(lib: &Library, model: i32, words: &Words, out: &str) -> Result<(), S
     };
     if debug == "slots" {
         const C: [[u8; 3]; 5] = [[220, 40, 40], [230, 210, 40], [40, 200, 60], [50, 90, 230], [210, 50, 210]];
-        for b in &mut mesh.batches[before..] {
+        let from = before.min(mesh.batches.len());
+        for b in mesh.batches[from..].iter_mut().filter(|b| b.material >= crate::slotless::ENTRY) {
             let k = (b.material - crate::slotless::ENTRY) as usize;
             b.layers.iter_mut().for_each(|l| flat(l, C[k]));
         }
         // a body's own slots alike
-        for b in &mut mesh.batches[..before] {
+        for b in mesh.batches.iter_mut().take(before) {
             if let Some(k) = (0..5).find(|&i| cs.text_slots[i].0 == b.material) {
                 b.layers.iter_mut().for_each(|l| flat(l, C[k]));
             }
@@ -240,7 +308,7 @@ pub fn shot(lib: &Library, model: i32, words: &Words, out: &str) -> Result<(), S
     {
         const C: [[u8; 3]; 9] = [[220, 40, 40], [230, 210, 40], [240, 130, 20], [50, 90, 230], [40, 200, 220], [130, 130, 130], [10, 10, 10], [190, 190, 190], [150, 60, 200]];
         let mut split = Vec::new();
-        for (b, g) in mesh.batches[..before].iter().zip(&groups) {
+        for (b, g) in mesh.batches.iter().take(before).zip(&groups) {
             for code in 0..9u8 {
                 let indices: Vec<u32> = b.indices.chunks_exact(3).zip(g).filter(|(_, c)| **c == code).flat_map(|(t, _)| t.to_vec()).collect();
                 if !indices.is_empty() {
@@ -253,14 +321,16 @@ pub fn shot(lib: &Library, model: i32, words: &Words, out: &str) -> Result<(), S
         }
         mesh.batches = split;
     }
+    // a Wisp's body is stripped (`wisp`): fewer batches than it was dressed with
+    let kept = before.min(mesh.batches.len());
     eprintln!(
         "{:#010x}: {} text slots, {} batches dressed, {} made-up batches ({} triangles of {})",
         model as u32,
         cs.text_slots.iter().filter(|s| s.0 != -1).count(),
         before,
-        mesh.batches.len() - before,
-        tris(&mesh.batches[before..]),
-        tris(&mesh.batches[..before])
+        mesh.batches.len() - kept,
+        tris(&mesh.batches[kept..]),
+        tris(&mesh.batches[..kept])
     );
     // the cape, fitted to the body as it is built (`cape::model`)
     let cape = (words.cape.style != 0).then(|| crate::cape::model(lib, words.cape, model as u32, &cs)).flatten();
@@ -400,6 +470,14 @@ pub fn shot(lib: &Library, model: i32, words: &Words, out: &str) -> Result<(), S
         r.set_instances(&queue, &g, &[at.to_cols()]);
         items.push((g, at));
     }
+    if let Some((node, m)) = &wisp
+        && let Some(n) = cs.h.nodes.get(*node as usize)
+    {
+        let at = Matrix44::mul(&n.world, &centre);
+        let g = r.upload(&device, &queue, m, &[render::IDENTITY], &textures);
+        r.set_instances(&queue, &g, &[at.to_cols()]);
+        items.push((g, at));
+    }
     // from the front, from the front a little to its left, from its left,
     // from behind
     let yaws = [0.0f32, 0.6, std::f32::consts::FRAC_PI_2, std::f32::consts::PI];
@@ -470,6 +548,14 @@ mod tests {
         assert_eq!((helmed.look.armor, helmed.helm_fit, helmed.y2002, helmed.head), ([3, 3, 3, 3, 3, 4], false, true, true));
         assert_eq!((bare.look.armor[5], bare.helm_fit, bare.y2002, bare.head), (0, true, false, false), "no helm, the fit on, Frontiers' art and the body framed unless asked");
         assert!(parse(&words("frame=feet")).is_err());
+        let seated = parse(&words("helm=4 helmseat=head,1.4,0,0.36,0.1")).unwrap();
+        assert_eq!(seated.seat, Some((SeatNode::Anchor(crate::slotless::Anchor::Head), crate::slotless::HelmFit { scale: glam::Vec3::splat(1.4), offset: glam::Vec3::new(0.0, 0.36, 0.1) })));
+        let stretched = parse(&words("helmseat=6,2.4,1.6,2.0,0,0.48,0.12")).unwrap();
+        assert_eq!(stretched.seat, Some((SeatNode::Node(6), crate::slotless::HelmFit { scale: glam::Vec3::new(2.4, 1.6, 2.0), offset: glam::Vec3::new(0.0, 0.48, 0.12) })));
+        assert_eq!(parse(&words("helmseat=named,1,0,0,0")).unwrap().seat.map(|s| s.0), Some(SeatNode::Anchor(crate::slotless::Anchor::Named)));
+        assert_eq!(bare.seat, None, "the body's own seat unless asked");
+        assert!(parse(&words("helmseat=head,1,2")).is_err());
+        assert!(parse(&words("helmseat=chin,1,0,0,0")).is_err());
         assert!(parse(&words("sett=3")).is_err());
         assert!(parse(&words("main=sword")).is_err());
         assert!(parse(&words("era=1999")).is_err());

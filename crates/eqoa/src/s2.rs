@@ -1278,10 +1278,13 @@ impl Rules {
     /// six; `None` past the table.
     pub fn world_file(&self, world: i64) -> Option<String> {
         let i = usize::try_from(world).ok()?;
-        match &self.worlds {
+        let table = match &self.worlds {
             Some(w) => w.get(i).map(World::esf_name),
             None => crate::play::WORLD_FILES.get(i).map(|s| s.to_string()),
-        }
+        };
+        // past the table: one of the server's own worlds, built off the disc
+        // (`serverworlds`)
+        table.or_else(|| crate::serverworlds::file_of(world))
     }
 
     /// The patch's art file in its server folder, when it is there (robes 4
@@ -1359,6 +1362,9 @@ pub fn set(r: Rules) {
 pub fn for_server(host: &str) {
     let r = if crate::servers::keeps() { Rules::from_dir(&crate::servers::folder(host)) } else { Rules::retail() };
     set(r);
+    // another server's own worlds are not this one's (`serverworlds`): it
+    // offers its own after its character list
+    crate::serverworlds::forget();
 }
 
 /// A session begins (`Play::new`): `EQOA_S2_DIR` names a folder whose S2

@@ -287,6 +287,11 @@ pub struct GpuModel {
     /// Its instances' vertex colours are a zone's baked lighting (colour
     /// buffers): Dynamic Lighting adds no fixed light on it (`lit`).
     pub baked: bool,
+    /// Casts into Sun Shadows' and Light Shadows' maps while it is drawn
+    /// (`sunshadow`, `lightshadow`); true unless cleared: `eqoa` clears it on
+    /// a Wisp's body and everything it wears and holds (`wisp`), whose shadow
+    /// would give away the human under its armour.
+    pub casts: bool,
     /// The world box its instances cover as last set (`set_instances`), for
     /// Sun Shadows' casters (`sunshadow::world_box`).
     world: std::cell::Cell<Option<(Vec3, Vec3)>>,
@@ -604,6 +609,13 @@ pub struct Renderer {
     /// The PS2 runs drawn a fan at a time, the GS's arithmetic exactly
     /// (`set_ps2_sequential`): the reference the sums are measured against.
     ps2_sequential: bool,
+    /// Whether the world's particles of blend mode 3 are blended as the
+    /// PS2's 16-bit frame keeps them (`set_ps2_particles`, `billboard`), as
+    /// the fans marked `ps2` are; off until told.
+    ps2_particles: bool,
+    /// The copy and the sums the PS2's blends are run over (`fog16`), the
+    /// fans' and the particles' in turn: one set, made at the first.
+    fog16: Option<fog16::Fog16>,
     /// The characters' blob shadows' (`set_shadows`), made at the first.
     shadows: Option<shadow::Shadows>,
     /// What is drawn over the scene with Z off (`set_overlay`), made at the
@@ -893,6 +905,8 @@ impl Renderer {
             fans: None,
             ps2_sums: false,
             ps2_sequential: false,
+            ps2_particles: false,
+            fog16: None,
             shadows: None,
             overlay: None,
             strips: Vec::new(),
@@ -1098,6 +1112,7 @@ impl Renderer {
             level: Some(0),
             lod_dists: m.lod_dists.clone(),
             baked: false,
+            casts: true,
             world: std::cell::Cell::new(sunshadow::world_box((lo, hi), m.skinned, instances)),
             core: std::cell::Cell::new(sunshadow::world_box((lo, hi), false, instances)),
         }

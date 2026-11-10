@@ -6,6 +6,227 @@ in the same push as the changes it describes. The dev release's page shows them
 is put on the page by `.github/workflows/notes.yml`.
 
 
+## 2026-11-10 · Wisps cast no shadow, gargoyles swim, the goblin chieftain's cape
+- A Wisp no longer casts a shadow: there is no round shadow under it, and with Sun Shadows or Light Shadows on,
+  nothing of it casts one, not its armour, its weapons, its helm, its cape or the wisp itself. Its shadow was a
+  human's, and showed what stands inside the armour. Everyone else's shadows are exactly as they were.
+- A Gargoyle swims in water now. Its body has no swimming of its own, so in the water it hung upright with its
+  wings spread, as if flying; it now swims the way a human does, lying along the water and stroking, moving or
+  still. The Jal'Raeth, who sat cross-legged in the water, swim the same way. A pixie or a fairy still hovers in
+  the water: everything they do is flying. Other players with this client see them swim; a PlayStation 2 still
+  shows them as before.
+- On a server with jumps, a character in one of a race's other bodies (a shadow or fire gargoyle, a goblin king,
+  any body the race's appearance choices offer) now falls and lands as its race's own body does. Through a
+  jump or a fall off a ledge it stood in the air as if on the ground.
+- A goblin in the chieftain's body wears its cape the way the other goblins do. The chieftain's spiked shoulder
+  harness made its cape more than twice a goblin's width and depth, so it stood out from its back like a board and
+  hung wider than its arms; it is now sized to the goblin's shoulders and hangs down its back over the harness. The
+  goblin mystic's cape is a little narrower too (its spiked shoulder pads did the same, a little); every other
+  goblin's cape is exactly as before.
+
+## 2026-11-10 · A DPS meter
+- A damage meter for your fights, alone, in a group or in a raid: who did how much damage and how fast. Turn it
+  on in Options > Extended > Combat > DPS Meter (it starts off). It sits on the right of the screen above the
+  chat box, under the quest tracker.
+- Each row is a player: their place, name, damage, damage per second and share of the whole, over a bar in
+  their class's colour. Alone you see yourself and, under your row, your pet. In a group or a raid group you see
+  every member; in a big raid the top rows show, your own row always among them at your place, and the mouse
+  wheel or a click on the rows goes through the rest.
+- A fight starts with your group's first hit and ends ten seconds after its last; the meter keeps the last fight
+  on screen until the next one. Click or tap its title to switch between the fight and Overall (every fight since
+  you logged in), and Reset to clear it. Or type /dps (and /dps fight, /dps overall, /dps reset, /dps on,
+  /dps off). With a controller: Options > Extended > Combat has DPS Meter Shows and Reset DPS Meter.
+- It counts the damage numbers you are shown, your pet's included (and a necromancer's zombie, mummy and
+  spectre, whose hits show no numbers), training dummies and duels too; heals do not count.
+- It needs a server that keeps a meter (eqoaclassic's, once it is updated for it). On any other server nothing
+  is shown.
+
+## 2026-11-10 · Creatures in a server's own colours
+- A server can now give a creature a colour of its own, laid over its whole body, where the game has no body in
+  that colour: eqoaclassic's raid dragon Yhafiran, the black and green oriental dragon, is drawn nearly black,
+  the green of his scales showing, though he wears the same green dragon as the Plane of Disease's twins. Each
+  creature of the name is coloured, whichever spawn it is, a respawn too; what it holds keeps its own colours,
+  and the light, the time of day and the fog fall on it as on any other.
+- Every other creature and character looks exactly as before. On a server that colours none (Sandstorm, or one
+  not updated) nothing changes, and a PS2 on the same server sees the plain green dragon.
+
+## 2026-11-10 · Macros on a page of their own, as PCSX2 has them
+- Macros have their own page: Options > Macros, after Controls (in the title's Options and in play). The
+  sixteen macros are listed on the left with what each presses; choose one and set it on the right, laid
+  out as PCSX2's macro editor is.
+- A macro's trigger is any key, controller button, stick pushed one way or L2 or R2 pulled, or several of
+  them held together (a chord, up to four: L1 and ✕, say). Choose Trigger, hold them and let one go: it is
+  kept. Add a Trigger gives it another (up to four, any one of which runs it), □ (or Q) takes the one
+  you are on off, and Clear Triggers takes them all off. A key a row of the Controls page uses is refused;
+  a controller button you put in a trigger no longer does what it did in the game, until you give it back
+  on the Controls page or take the trigger off.
+- What it presses, all at once: tick any of the game's buttons and the sticks' eight directions on the grid.
+- Press To Toggle: on, one press of its trigger starts the macro and the next stops it; off, it runs while
+  you hold its trigger.
+- Frequency: Off holds what it presses; N lets go and presses again every N frames as PCSX2 counts them
+  (60 a second). The game reads its pad 30 times a second, so 2 is fifteen presses a second, 4 seven and a
+  half, 30 one; the same at any frame rate.
+- Pressure: how far it pushes a stick (under 24% the game reads the stick at rest, from 24% you walk, from
+  60% you run). Deadzone: how far a stick or trigger in its trigger has to go before it counts.
+- As in PCSX2, your controller and the macros press one pad, and whichever changed a button last has it:
+  a macro letting go of ✕ lets go of a ✕ you are holding too, until you press it again.
+- A macro runs at the game's own frames, so it can come up to a thirtieth of a second after its trigger,
+  as on a PS2.
+- Macros now work with no controller plugged in (from the keyboard alone they pressed nothing).
+- Macros you made before keep working: a key and a button become two triggers, and a turbo keeps its speed.
+  The macro rows have left the Controls page, and its Defaults now leave your macros alone (but for the keys
+  and buttons it gives back to the game).
+
+## 2026-11-10 · Light Shadows: soft, steady edges
+- With Light Shadows on, the shadows of your lantern and of torches, braziers and lamps have soft edges now.
+  Up close they showed little steps along every edge, and while your lantern moved (or anything walked past a
+  fire) their edges crawled and flickered a step at a time; now they glide.
+- A glowing weapon or a spell no longer makes the shadows of what is round it shimmer while you stand still: they
+  hold still until the glow itself moves away.
+- In a page and on Android the shadows are softer and steadier too.
+- It costs the graphics card a little more where many lights overlap (on an RX 580 about 0.4 ms a frame at
+  1080p in Freeport's torch-lit courtyard).
+
+## 2026-11-10 · Helms, gloves and boots on every body of the new races
+- On a server with races of its own, a helm now shows on every body those races can choose: giants, goblins,
+  orcs, gnolls, lizardmen, minotaurs, kobolds, ratmen, kerrans, aviaks, frogloks, kappas, satyrs, brownies,
+  dryads, gargoyles, the pixie and the fairy, each kind of body in every colouring and outfit. It sits on the
+  head the way it sits on a human, the face showing, with a snout, beak or muzzle through the front and ears,
+  horns and crests through the top. The fungusmen still wear none: their cap is their head.
+- The bodies that showed only part of their armour (a chest, bracers and legs, but bare hands and feet: the
+  frogloks, kerrans, aviaks, lizardmen, gnolls, orcs, kobolds, ratmen, satyrs, and the goblin warlord's and
+  warmaster's arms) now show gloves, boots and bracers too, laid on the way they are on the races that showed
+  nothing. Whatever these bodies already showed looks exactly as before.
+- The hooded ratman shows its armour and robe (only its bracers showed), and the ratman trickster its gloves
+  and boots.
+- A fairy's shield is the size of its hands (it was more than three times as big as the fairy).
+- A goblin's cape fits it: a goblin stands crouched, and its cape hung down to the ground; it now ends above its
+  feet. Every other race's cape is exactly as before.
+- Only players' characters are dressed this way: creatures and NPCs look as they always have.
+
+## 2026-11-10 · The Homelands end in rocks, not a fall
+- The Homelands' lands no longer end at a drop into nothing: every edge of a homeland that does not lead into
+  another one is closed by a ridge of the game's own rocks (Odus's mossy boulders), on land and out in the
+  water alike, so you cannot walk or swim off a homeland any more.
+  Where two homelands touch (Odus's homes, the coast by the Warrens) you still walk from one into the next.
+- A server's world can now be decorated with the game's own art, placed where the server says: your client
+  (or the web page) copies the pieces off your own disc into the world it builds, as it builds the rest, and
+  draws and collides them like everything else there.
+- An older client cannot build the Homelands any more: its characters of the new races start in their mainland
+  cities until it updates (which it does at its next start).
+
+## 2026-11-10 · The Homelands in the browser
+- The web page now builds a server's own worlds from your disc as the program does. The first time you reach
+  character select on a server that has them (the Homelands, where a server's new races start), the page builds
+  the world into your browser's own storage, a part of your disc at a time, and says how far it has come at the
+  top of the page (a few seconds; nothing of the game is downloaded). Your next visits find it kept and only
+  check it.
+- So in the browser too a new Aviak hatches in Aviak Village, and every race with a homeland starts there,
+  instead of in its home city. A character you play while the world is still being built waits for it.
+- It takes about 130 MB of the browser's storage. A browser that cannot keep it (a page without its storage,
+  some private windows) plays as before: a character from the Homelands starts in its home city.
+
+## 2026-11-09 · A server's own worlds, built from your disc
+- A server can now have worlds of its own made of the game's own lands: the Homelands, where a server's new races
+  start (an Aviak hatches in Aviak Village). The client builds such a world from your own disc the first time you
+  reach character select on that server (a few seconds; nothing of the game is downloaded), keeps it, and then
+  plays it like any other world. The start menu names its places, and the create page's review shows a new
+  race's home as its Starting City.
+- Nothing changes on a server without such worlds.
+
+## 2026-11-09 · Damage numbers in your colours
+- The numbers that float up in a fight can be coloured by what made them, so you can see at a glance that a
+  proc fired or a heal over time ticked. It is in Options > Extended > Number Colors: Your Damage, Your Procs,
+  Your Heals, Pet Damage, Pet Procs and Pet Heals, each Default or one of eleven colours (White, Yellow,
+  Orange, Red, Pink, Purple, Blue, Light Blue, Cyan, Green, Gray), shown in its own colour on the page.
+- Your Damage is your swings and bow shots, your spells and abilities, your damage over time and your damage
+  shield. Your Procs is everything a proc does: a weapon's, a buff's, a worn item's, its hits and its heals.
+  Your Heals is your heals and heals over time, on yourself or anyone else. Your pet's three rows are the same
+  for your pet, its heals on you included.
+- Default is the game's own colour (white for a hit you made, green for a heal), and every row starts on
+  Default, so nothing changes until you pick a colour. Numbers on you that others made (a hit you take, a heal
+  someone else gives you) always keep the game's colours.
+- It needs a server that marks its numbers: eqoaclassic's does from its update of the same day. On any other
+  server (Sandstorm, or one not updated) your numbers stay the game's colours whatever the rows say.
+
+## 2026-11-09 · No cape on a four-legged form
+- A cape is no longer drawn on a character turned into a four-legged animal (Leopard Form, the bear, wolf,
+  lion and panther forms, a rat): it hung from the animal's tail. Two-legged forms (a were, a golem, the
+  illusions of the races) still wear theirs.
+
+## 2026-11-09 · GMs: every trigger in the TEST menu
+- For a GM, TEST > Programming > TRIGGER now lists every trigger that is switched on, each with its number
+  before its name ("140 Marr Twins..."), not only the first eight. Up and Down go through them seven at a time,
+  as the game's other long menus do (Up from the top goes to the last one), and the mouse wheel and a click
+  work there too.
+- Picking one fires that trigger, whatever its number, as `#trigger <number>` does. A trigger made, changed,
+  switched off or started from the GM panel shows in the menu at once, even while it is open.
+- On a server that names only the eight lines, the menu is as it was.
+
+## 2026-11-09 · Your pet's buffs show under your pet's name
+- The buffs on your pet (its own, and the ones you cast on it) show in a small row under your pet's name and
+  health, the same icons as your own buffs at half their size, and each goes away when it wears off. With the
+  server's update of the same day they no longer show in your own buff row next to the compass, on any client: that
+  row is your own buffs only again.
+- Clicking your pet's buff row targets your pet, as clicking its name does.
+- It is in Options > Extended > UI as Pet Effects, on by default. Off, your pet's buffs show nowhere, as on a
+  PS2. On a server that does not send them (Sandstorm), there is no row.
+
+## 2026-11-09 · The Red Swarming Death's swarm looks as it does on a PS2
+- A necromancer's Red Swarming Death (and the Swarming Death, the Construct of Sorrows) is a cloud of red puffs
+  round a faint horned skull. Its puffs used to pile up into one dark red blot; now they are drawn as the PS2 draws
+  them, each faint puff stopping short of the next, a speckled red swarm you can see through, as on a console.
+- The same goes for the other faint particles of that kind: the flies and stench round the rotting creatures
+  (flesh fiends, rats of pestilence, the dead riders), smoke, rain and snow, and the dark auras some spells cast,
+  which come out darker and speckled, as on a PS2.
+- It is in Options > Extended > Lighting > Particles: PS2 (the game's look, the default) or Exact (as before,
+  smoother and darker where many overlap). The fires and glows are unchanged.
+
+## 2026-11-09 · Weapons cast shadows standing still
+- With Light Shadows on, at night your weapons now cast a shadow from your lantern while you stand still, as they do
+  while you move. A sword held across you at rest was being taken for your body (which your own lantern never
+  shadows) and cast nothing. Shadows from the sun and from torches were not affected.
+
+## 2026-11-09 · The on-screen controller: its size, opacity and edge
+- On a phone or a tablet (the browser page and the Android app), Extended > Controller has four new rows for
+  the on-screen controller. Touch Stick Size and Touch Button Size set the two sticks and the buttons apart,
+  from half their size to twice it; Touch Opacity makes the whole controller fainter or brighter (10% to 200%);
+  Touch Edge keeps it farther in from the screen's left and right sides (up to a tenth of the screen).
+- Larger sizes use the room the screen has: on a phone held sideways the sticks go to twice their size and the
+  buttons to about two-thirds larger, the sticks moving in toward the middle to make room. A tablet, or a phone
+  held upright, has less room; where a size you pick does not fit, the controller is drawn as large as fits
+  and the options page says the size it is drawn at. No control ever goes off the screen or onto another.
+- Nothing changes unless you change these rows. They replace Touch Pad Size: if you had set it, both sizes
+  start where it was, so your controller looks just as it did.
+
+## 2026-11-09 · Capes over broad shoulders and round the neck
+- On the big race bodies (a minotaur's hunched shoulders, say) a cape's collar now comes up over the shoulders
+  instead of sinking into them, standing and in the battle stance.
+- The vampire's cape and its mantle sit on the shoulders again: the last update stood the mantle out wide and
+  forward round some bodies, leaving a big opening at the neck. It now closes round the neck and lies on the
+  shoulders as it does on the vampire himself, and walking and running lift it only a little.
+
+## 2026-11-09 · Fewer quest marks, and GMs travel by the map
+- The minimap keeps only your own quests' "?" on its rim, pointing the way to them. A "!" (a quest you can take)
+  shows on the minimap only where it lies within what the minimap shows, so its edge is no longer ringed with them.
+  On the map, a "?" is drawn over a "!" beside it.
+- On go-eqoa-server servers (eqoaclassic's) the "!" marks are far fewer: a quest given in every city, such as
+  Armorcrafting and Jewelcrafting, is marked once, at its nearest giver, and not at all while you have it under way
+  or once you have done it; only quests near your level are marked (from 10 levels below yours, as the server
+  sets it); and a giver where a step of yours is to be done shows that step's "?" alone.
+- GMs: with the map up, Ctrl and a click (Cmd and a click on a Mac) takes you to that spot, on the ground there;
+  the map's legend says so while you are a GM. Anyone else's click puts a waypoint, as before.
+
+## 2026-11-09 · The Jal'Raeth and the Wisp
+- Two more races on a server that has them. The Jal'Raeth float cross-legged: choose their robes, a channeler's
+  body or a knight's armour. They wear chest armour, bracers and gloves as a human does (their crossed legs keep
+  their own garb), their helm sits on their head, their weapons float at their side, and they wave, bow, point
+  and cheer.
+- A Wisp is a light inside an empty suit of armour: you see only what it wears, shaped as a human would wear it,
+  its weapons swinging as a human's do, and the wisp glowing inside the helm. With nothing on, it is the wisp
+  alone, floating where a head would be. Other players with this client see it so; a PlayStation 2 shows a human
+  in the same armour.
+
 ## 2026-11-09 · Light Shadows: no square under lamps, steady weapon glows
 - With Light Shadows on, the ground under a street lamp is lit again. The lamp's light sits inside its little
   housing, and the housing's floor was darkening a square of ground under every lamp.

@@ -332,6 +332,19 @@ impl MainMenu {
         true
     }
 
+    /// The menus' entries changed under the open ones (the server's whole
+    /// list of triggers, `adminplay::set_trigger_list`): each open menu's
+    /// selection kept within its entries, and the seven bars from `top` still
+    /// showing it.
+    pub fn refit(&mut self, menus: &Menus) {
+        let count = menus.list.get(self.menu).map_or(0, |m| m.entries.len()) as i32;
+        self.sel = self.sel.clamp(0, (count - 1).max(0));
+        self.top = self.top.clamp((self.sel - 6).max(0), self.sel.min((count - 7).max(0)));
+        if let Some(s) = self.sub.as_mut() {
+            s.refit(menus);
+        }
+    }
+
     /// `Scroll`: the selection moved by `d`, wrapping, seven bars shown.
     fn scroll_by(&mut self, d: i32, count: i32, now: i64, cues: &mut Vec<i32>) {
         let i = self.sel + d;
@@ -529,8 +542,11 @@ impl MainMenu {
         let col = (loc.pos[0] / loc.cell) as i32;
         let row = (loc.pos[2] / loc.cell) as i32;
         let off = [loc.pos[0] - col as f32 * loc.cell - loc.origin[0], loc.pos[2] - row as f32 * loc.cell - loc.origin[2]];
-        let zone = zone_name(loc, row - 1, col - 1);
-        let name = vui.words.get(zone as i32, vui.language).to_string();
+        // one of the server's own worlds names its zones itself (`serverworlds`)
+        let name = match crate::serverworlds::zone_name(i64::from(loc.world), col, row) {
+            Some(n) => n,
+            None => vui.words.get(zone_name(loc, row - 1, col - 1) as i32, vui.language).to_string(),
+        };
         const DIRS: [[i32; 3]; 3] = [[1426, 1422, 1427], [1425, 1430, 1424], [1428, 1423, 1429]];
         let third = |v: f32| if v < -333.34 { 0 } else if v <= 333.34 { 1 } else { 2 };
         let dir = vui.words.get(DIRS[third(off[1])][third(off[0])], vui.language).to_string();

@@ -54,18 +54,41 @@ pub fn worn_by_a_race(model: u32, races: Option<&Creation>) -> bool {
     model != 0 && (races.is_some_and(|c| c.races.iter().any(|r| r.body.contains(&model))) || crate::raceopts::offered_body(model))
 }
 
+/// Bodies whose shield node their own animations leave at another size than
+/// their other item nodes, and the FixScale that puts it right: the fairy's
+/// (go-eqoa-server's race 19, 0x7A85646C, on both discs). The pixie and the
+/// fairy are a hand high on a skeleton two metres tall, and their animations
+/// draw what they hold at 0.3 by scaling the item nodes; the pixie's do so on
+/// all three, the fairy's on its two hands' and not on its shield's, node 16
+/// (no vertex is skinned to it), so a shield hung there was drawn three and a
+/// third times the size of the fairy (`eqoa dress 7A85646C ... shield=...`).
+const SHIELD_FIX: &[(u32, f32)] = &[(0x7A85_646C, 0.3)];
+
 /// `cs`, made of `model`, holds items when it is a player's character
 /// (`player`) in a body one of the server's races wears (`races`), its shield
-/// on the off hand's hand when it names no node for one; otherwise it keeps
-/// its header's word and its nodes. Whether it holds items after.
+/// on the off hand's hand when it names no node for one, and its shield node
+/// at its hands' size where its animations leave it at another
+/// (`SHIELD_FIX`); otherwise it keeps its header's word and its nodes.
+/// Whether it holds items after.
 pub fn grant(cs: &mut CSprite<Ee>, model: u32, player: bool, races: Option<&Creation>) -> bool {
-    if !cs.holds_items && player && worn_by_a_race(model, races) {
+    if !player || !worn_by_a_race(model, races) {
+        return cs.holds_items;
+    }
+    if !cs.holds_items {
         cs.holds_items = true;
         if cs.item_nodes[2] < 0
             && let Some(off) = usize::try_from(cs.item_nodes[1]).ok().and_then(|i| cs.h.nodes.get(i))
         {
-            cs.item_nodes[2] = if off.parent >= 0 { off.parent } else { cs.item_nodes[1] };
+            // the root is no hand: an off hand's node hung off it (the Jal'Raeth's,
+            // whose item nodes float beside them as their knights' blades do) takes
+            // the shield itself
+            cs.item_nodes[2] = if off.parent > 0 { off.parent } else { cs.item_nodes[1] };
         }
+    }
+    if let Some(&(_, fix)) = SHIELD_FIX.iter().find(|(b, _)| *b == model)
+        && let Some(n) = usize::try_from(cs.item_nodes[2]).ok().and_then(|i| cs.h.nodes.get_mut(i))
+    {
+        n.fix_scale = vi::vect::Vect3::of(fix, fix, fix);
     }
     cs.holds_items
 }
@@ -173,6 +196,60 @@ mod tests {
         let mut human = load(0x70D8_98C6);
         assert!(grant(&mut human, 0x70D8_98C6, true, Some(&listed)));
         assert_eq!([human.item_node(0), human.item_node(1), human.item_node(2)], [Some(18), Some(27), Some(28)], "the human as before");
+    }
+
+    /// The fairy's shield, as a player of the Fairy race holds it, at its hands'
+    /// size: on the disc its animations draw its two hands' item nodes at 0.3
+    /// and leave its shield node, 16, at 1.0, three and a third times larger;
+    /// `grant` gives that node a FixScale of 0.3, so posed in its idle and its
+    /// walk the shield node is drawn at the off hand's size. The controls: an
+    /// NPC fairy's node keeps the art's 1.0, and the pixie, whose animations
+    /// already draw its shield node at 0.3, is left as it is. Needs
+    /// `run/eqoa.iso`.
+    #[test]
+    fn the_fairys_shield_at_its_hands_size() {
+        let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        let Ok(mut iso) = iso::Iso::open(&p) else {
+            eprintln!("SKIP: no disc at run/eqoa.iso");
+            return;
+        };
+        let mut lib = esf::Library::new();
+        lib.add("CHAR.ESF", esf::Container::open(iso.read("CHAR.ESF").unwrap()).unwrap());
+        const FAIRY: u32 = 0x7A85_646C;
+        const PIXIE: u32 = 0x94BA_77CD;
+        let listed = races(&[[FAIRY, FAIRY], [PIXIE, PIXIE]]);
+        // the world scale of item nodes `nodes` posed in action (None: standing)
+        let scales = |id: u32, player: bool, action: Option<i32>| {
+            let (mut sc, mut cache, mut rand) = (AnimScene::<Ee>::default(), AnimCache::new(), Rand(1));
+            let mut cs = load_csprite(&lib, lib.lookup(id as i32).unwrap(), &mut sc, &mut cache, &mut rand).unwrap();
+            grant(&mut cs, id, player, Some(&listed));
+            let mut t = 0;
+            while t <= 900 {
+                sc.time = t;
+                match action {
+                    Some(a) if t == 0 => {
+                        cs.set_action(a, &sc, &mut rand);
+                    }
+                    Some(_) => {}
+                    None => cs.set_locomotion(0, &sc, &mut rand),
+                }
+                cs.h.process(0, &sc);
+                t += 16;
+            }
+            let s = |n: i32| {
+                let m = cs.h.nodes[n as usize].world.to_cols();
+                (m[0][0] * m[0][0] + m[0][1] * m[0][1] + m[0][2] * m[0][2]).sqrt()
+            };
+            (s(cs.item_nodes[1]), s(cs.item_nodes[2]))
+        };
+        for action in [None, Some(1)] {
+            let (off, shield) = scales(FAIRY, true, action);
+            assert!((off - 0.3).abs() < 0.01 && (shield - off).abs() < 0.01, "{action:?}: the fairy's shield at its off hand's size ({shield:.3} against {off:.3})");
+            let (_, npc) = scales(FAIRY, false, action);
+            assert!((npc - 1.0).abs() < 0.01, "{action:?}: the control, an NPC's at the art's {npc:.3}");
+            let (off, shield) = scales(PIXIE, true, action);
+            assert!((off - 0.3).abs() < 0.01 && (shield - 0.3).abs() < 0.01, "{action:?}: the pixie's as its art has them");
+        }
     }
 
     /// Every CSprite on the disc, with the bodies go-eqoa-server's races

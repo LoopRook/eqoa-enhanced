@@ -316,10 +316,10 @@ fn clip(r: [f32; 4], shown: [f32; 4], to_px: impl Fn([f32; 2]) -> [f32; 2]) -> O
 /// Window pixel `q`, outside rectangle `r`, brought in along the line from
 /// `mid` to the rectangle's edge: where something farther than the minimap
 /// shows is marked on its rim.
-pub(crate) fn to_rim(mid: [f32; 2], q: [f32; 2], r: [f32; 4]) -> [f32; 2] {
+fn to_rim(mid: [f32; 2], q: [f32; 2], r: [f32; 4]) -> [f32; 2] {
     let d = [q[0] - mid[0], q[1] - mid[1]];
     let half = [(r[2] - r[0]) / 2.0, (r[3] - r[1]) / 2.0];
-    let k = d[0].hypot(d[1])/half[0].min(half[1]).max(1e-6);
+    let k = (d[0].abs() / half[0].max(1e-6)).max(d[1].abs() / half[1].max(1e-6));
     if k <= 1.0 {
         return q;
     }
@@ -556,6 +556,7 @@ impl Map {
         let own = own_marks(&self.mini.map_marks, cx.world, crate::settings::map_markers());
         let all: Vec<&Mark> = own.iter().chain(&mv.marks).collect();
         let placed = place_marks(&all, cx.world, &to_px, inside, MARK_REACH * px_line, mid, edge);
+        let placed: Vec<_> = placed.into_iter().map(|(q, m)| (if m.kind.on_rim() { crate::fork_ext::map::circular_rim(mid, q, edge) } else { q }, m)).collect();
         let on = |q: [f32; 2], m: f32| q[0] >= inside[0] - m && q[0] <= inside[2] + m && q[1] >= inside[1] - m && q[1] <= inside[3] + m;
         // the coaches (the stable's horseshoe, the map's: off the disc), then
         // the camps' XP badges over them, as the map draws them, smaller;
@@ -608,7 +609,7 @@ impl Map {
             let (r, o) = view::waypoint_radius(size);
             let (r, o) = (r * 0.8, o);
             let edge = [inside[0] + r + o, inside[1] + r + o, inside[2] - r - o, inside[3] - r - o];
-            let q = to_rim(mid, to_px(at), edge);
+            let q = crate::fork_ext::map::circular_rim(mid, to_px(at), edge);
             for (rr, color) in [(r + o * 1.5, OUTLINE), (r, color)] {
                 plain(ui, white, diamond(q, rr).map(f), color, cut);
             }
@@ -920,7 +921,7 @@ mod tests {
 
     #[test]
     fn diagonal_guidance_uses_a_circle_rim_and_corners_are_outside() {
-        let mid=[50.0,50.0];let q=to_rim(mid,[200.0,200.0],[0.0,0.0,100.0,100.0]);
+        let mid=[50.0,50.0];let q=crate::fork_ext::map::circular_rim(mid,[200.0,200.0],[0.0,0.0,100.0,100.0]);
         assert!(((q[0]-50.0).hypot(q[1]-50.0)-50.0).abs()<0.01,"{q:?} is on the circle");
         let mut m=Map::default();m.mini.up=true;m.mini.frame_px=[0.0,0.0,100.0,100.0];
         assert!(m.mini_contains(mid));assert!(!m.mini_contains([1.0,1.0]));
@@ -947,7 +948,7 @@ mod tests {
         let near = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3;
         assert!(near(placed[0].0, [60.0, 70.0]), "the camp where it lies: {:?}", placed[0].0);
         assert!(near(placed[1].0, [55.0, 56.0]), "the near quest to take where it lies: {:?}", placed[1].0);
-        assert!(near(placed[2].0, [92.0, 50.0]), "the far step on the east rim: {:?}", placed[2].0);
+        assert!(near(placed[2].0, [95.0, 50.0]), "the far step on the east rim: {:?}", placed[2].0);
         assert!(near(placed[3].0, [30.0, 20.0]), "the near one where it lies: {:?}", placed[3].0);
         assert!(place_marks(&marks, 2, &to_px, inside, 3.0, mid, [5.0, 8.0, 95.0, 92.0]).is_empty(), "no marks of world 2");
     }
@@ -1035,7 +1036,7 @@ mod tests {
         assert_eq!(to_rim(mid, [60.0, 40.0], r), [60.0, 40.0]);
         assert_eq!(to_rim(mid, [250.0, 50.0], r), [100.0, 50.0]);
         let q = to_rim(mid, [50.0 + 300.0, 50.0 - 150.0], r);
-        assert!(((q[0]-50.0).hypot(q[1]-50.0)-50.0).abs()<1e-3 && ((q[0]-50.0)+2.0*(q[1]-50.0)).abs()<1e-3,"on the circle along the original bearing: {q:?}");
+        assert!((q[0] - 100.0).abs() < 1e-3 && (q[1] - 25.0).abs() < 1e-3, "{q:?}");
     }
 
     /// A world rectangle cut to what the minimap shows: its window place and

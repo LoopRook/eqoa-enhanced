@@ -19,6 +19,8 @@
 //!   the strip programs' (the map's last day not left in it).
 //! - Every frame with Light Shadows off (or Dynamic Lighting off) byte for
 //!   byte a renderer's that never had them.
+//! - A model cleared of casting (`GpuModel::casts`: a Wisp's) casts nothing
+//!   for a fire or the personal light; the control, the same box casting.
 //! Needs a graphics adapter (any backend); without one it says so and passes.
 
 use glam::{Mat4, Vec3};
@@ -194,6 +196,37 @@ fn a_box_shadows_the_floor_away_from_a_light() {
     }
 }
 
+/// A box beside a fire and one beside the personal light, cleared of
+/// casting (`GpuModel::casts` false, as a Wisp's body and all it wears and
+/// holds are: petition 1449), shadow nothing: every pixel within a level of
+/// Light Shadows off, and the maps drawn without them (the floor alone). The
+/// control: the same boxes casting shadow the floor beyond them.
+#[test]
+fn a_model_cleared_of_casting_casts_nothing() {
+    let Some(g) = gpu() else { return };
+    let none = |_: i32| None;
+    let (h, range) = (3.0, 20.0);
+    let lamp = Vec3::new(0.0, h, 0.0);
+    for (what, lights, point) in [("a fire", vec![fire(lamp, range, 1)], None), ("the personal light", Vec::new(), Some((lamp, range, Vec3::X)))] {
+        let frame = |light: bool, casts: bool| {
+            let mut r = renderer(&g, true, false, light);
+            let f = r.upload(&g.device, &g.queue, &floor(HALF), &[at(Vec3::ZERO)], &none);
+            // a character's armour is skinned, and stands beside the lantern
+            let mut b = r.upload(&g.device, &g.queue, &esf::Model { skinned: true, ..cuboid(Vec3::new(1.5, 0.5, -0.5), Vec3::new(2.5, 1.5, 0.5), layer(0, 0)) }, &[at(Vec3::ZERO)], &none);
+            b.casts = casts;
+            let px = shot(&g, &mut r, &view(Vec3::ZERO, &lights, point), &[Draw::Model(&f), Draw::Model(&b)]);
+            (px, r.light_shadow_drawn())
+        };
+        let ((cleared, drawn), (casting, cast), (off, _)) = (frame(true, false), frame(true, true), frame(false, true));
+        let worst = cleared.iter().zip(&off).map(|(a, b)| a.abs_diff(*b)).max().unwrap();
+        assert!(worst <= 1, "{what}: cleared of casting, every pixel within {worst} of Light Shadows off");
+        assert!(red(&cleared, pixel(3.5, 0.0)) > 0.1 + 20.0 / 255.0, "{what}: its shadow's place lit: {}", red(&cleared, pixel(3.5, 0.0)));
+        assert!((red(&casting, pixel(3.5, 0.0)) - 0.1).abs() <= 2.5 / 255.0, "the control, {what}: the box casting shadows it: {}", red(&casting, pixel(3.5, 0.0)));
+        let (cleared, casting) = (drawn.expect("the maps made"), cast.expect("the maps made"));
+        assert!(cleared.maps == 1 && cleared.draws < casting.draws, "{what}: the box drawn into the map only while it casts ({cleared:?} cleared, {casting:?} casting)");
+    }
+}
+
 /// The personal light 3 over a body's feet (the player's lantern) leaves
 /// the ground round them lit; the same light as a fire's shadows the floor
 /// past the body's edge (1.5 out, where the light's ray passes through it);
@@ -207,7 +240,8 @@ fn a_body_does_not_shadow_its_own_light() {
     let frame = |lights: &[PointLight], point: Option<(Vec3, f32, Vec3)>, light: bool| {
         let mut r = renderer(&g, true, false, light);
         let f = r.upload(&g.device, &g.queue, &floor(HALF), &[at(Vec3::ZERO)], &none);
-        let body = r.upload(&g.device, &g.queue, &cuboid(Vec3::new(-1.0, 0.0, -1.0), Vec3::new(1.0, 2.0, 1.0), layer(0, 0)), &[at(Vec3::ZERO)], &none);
+        // a character's body is skinned (its footprint rule's)
+        let body = r.upload(&g.device, &g.queue, &esf::Model { skinned: true, ..cuboid(Vec3::new(-1.0, 0.0, -1.0), Vec3::new(1.0, 2.0, 1.0), layer(0, 0)) }, &[at(Vec3::ZERO)], &none);
         shot(&g, &mut r, &view(Vec3::ZERO, lights, point), &[Draw::Model(&f), Draw::Model(&body)])
     };
     let past = pixel(1.5, 0.0);
@@ -407,6 +441,39 @@ fn a_lamps_housing_casts_no_square() {
     assert!((red(&px, pixel(8.0, 0.0)) - 0.1).abs() <= 2.5 / 255.0, "past the room's wall: its shadow ({})", red(&px, pixel(8.0, 0.0)));
 }
 
+/// A character standing still under its own personal light (the lantern 3
+/// over its feet), a sword held across its front as an idle stance holds it:
+/// the sword's box straddled the lantern's line, so the footprint rule meant
+/// for the body took the sword too and it cast nothing, while walking (the
+/// sword at its side) it did: weapon shadows only while moving (petition
+/// 1389). The body (skinned) still casts nothing for its own lantern; the
+/// sword casts in every one of ten idle frames, as it does held at the side
+/// (the control, walking).
+#[test]
+fn a_still_characters_sword_casts_for_its_lantern() {
+    let Some(g) = gpu() else { return };
+    let none = |_: i32| None;
+    let lamp = (Vec3::new(0.0, 3.0, 0.0), 20.0, Vec3::X);
+    let probe = pixel(1.3, 0.0);
+    let run = |sword: (Vec3, Vec3)| {
+        let mut r = renderer(&g, true, false, true);
+        let f = r.upload(&g.device, &g.queue, &floor(HALF), &[at(Vec3::ZERO)], &none);
+        let body = r.upload(&g.device, &g.queue, &esf::Model { skinned: true, ..cuboid(Vec3::new(-0.5, 0.0, -0.5), Vec3::new(0.5, 2.0, 0.5), layer(0, 0)) }, &[at(Vec3::ZERO)], &none);
+        let blade = r.upload(&g.device, &g.queue, &cuboid(sword.0, sword.1, layer(0, 0)), &[at(Vec3::ZERO)], &none);
+        (0..10)
+            .map(|k| {
+                r.scroll_time = Some(k as f32 / 60.0);
+                let px = shot(&g, &mut r, &view(Vec3::ZERO, &[], Some(lamp)), &[Draw::Model(&f), Draw::Model(&body), Draw::Model(&blade)]);
+                red(&px, probe)
+            })
+            .collect::<Vec<f32>>()
+    };
+    let idle = run((Vec3::new(-0.9, 0.9, -0.2), Vec3::new(0.9, 1.1, 0.2)));
+    assert!(idle.iter().all(|&v| v < 0.15), "the idle sword's shadow from its lantern, every frame: {idle:?}");
+    let walking = run((Vec3::new(0.6, 0.5, -0.2), Vec3::new(0.8, 1.5, 0.2)));
+    assert!(walking.iter().all(|&v| v < 0.15), "the control, the sword at its side: {walking:?}");
+}
+
 /// A light of the moment riding a body (a weapon's glow in its hand, a
 /// spell's particles on it), a hair in and out of the body's box from frame
 /// to frame as its particles move: the body cast no shadow for it every other
@@ -442,6 +509,82 @@ fn a_light_riding_a_body_does_not_flicker() {
     assert!(spread < 8.0 / 255.0 && flips == 0, "a light of the moment riding a body: the floor behind it changed by {spread} with {flips} flips in a second");
     let (spread, flips) = run(true);
     assert!(spread > 0.1 && flips > 20, "the control, a fire moved so: the body's shadow flips ({spread}, {flips})");
+}
+
+/// The floor round a post 1.5 to 2.3 out from a light 3 up, seen from 3
+/// over x 4 (60°, a texel of its map 1.5 to 2.5 pixels there), each frame
+/// with the light at `light(k)`, 60 frames a second: the frames, and the most
+/// any pixel changed from one frame to the next.
+fn moving_light_frames(g: &Gpu, light: impl Fn(usize) -> PointLight, frames: usize) -> (Vec<Vec<u8>>, u8) {
+    let none = |_: i32| None;
+    let mut r = renderer(g, true, false, true);
+    let part = |m| GroupPart { model: m, instances: &[render::IDENTITY], statics: &[], moves: false, baked: false };
+    let (flat, post) = (floor(HALF), cuboid(Vec3::new(1.5, 0.0, -0.4), Vec3::new(2.3, 2.0, 0.4), layer(0, 0)));
+    let gr = r.upload_group(&g.device, &g.queue, &[part(&flat), part(&post)], &none);
+    let eye = Vec3::new(4.0, 3.0, 0.0);
+    let vp = glam::camera::rh::proj::directx::perspective(60f32.to_radians(), 1.0, 0.1, 100.0) * glam::camera::rh::view::look_at_mat4(eye, Vec3::new(4.0, 0.0, 0.0), Vec3::new(0.0, 0.0, -1.0));
+    let (mut out, mut worst): (Vec<Vec<u8>>, u8) = (Vec::new(), 0);
+    for k in 0..frames {
+        r.scroll_time = Some(k as f32 / 60.0);
+        let v = View { view_proj: vp, eye, ..view(Vec3::ZERO, &[light(k)], None) };
+        let px = render::capture(&g.device, &g.queue, &mut r, 256, 256, &v, &[Draw::Group(&gr)], None);
+        if let Some(l) = out.last() {
+            worst = worst.max(px.iter().zip(l).map(|(a, b)| a.abs_diff(*b)).max().unwrap());
+        }
+        out.push(px);
+    }
+    (out, worst)
+}
+
+/// A light moving a millimetre a frame beside a post (a walking lantern's
+/// map is drawn again from where it is every frame): the post's shadow on the
+/// floor follows it, and as the light moves the map's texels flip one by one
+/// along the edge, a row of them at a time where the edge lies along the
+/// map's grid. Through the tent of radius 3 a row is a third of the filter's
+/// weight: no pixel changes by 48 levels of the shadow's 112 in a frame (42
+/// at most). Through the four comparisons half a texel apart before it a row
+/// was half: 3,351 changes of 48 or more in the second, up to 64, every edge
+/// crawling a texel at a time (the owner's "jittery"). The control, the light
+/// 2.5 cm a frame, changes pixels by more than a flip: the measure sees a
+/// move.
+#[test]
+fn a_moving_lights_shadow_glides() {
+    let Some(g) = gpu() else { return };
+    let at = |dz: f32| fire(Vec3::new(0.0, 3.0, dz), 20.0, 4);
+    let (frames, worst) = moving_light_frames(&g, |k| at(k as f32 * 0.001), 60);
+    assert!(worst < 48, "a frame changed a pixel by {worst} (of the shadow's 112) as the light moved a millimetre");
+    // and the shadow moved: its edge 7 cm on, some pixels lit that were dark
+    let moved = frames[0].iter().zip(&frames[59]).map(|(a, b)| a.abs_diff(*b)).max().unwrap();
+    assert!(moved > 40, "the shadow moved with the light: {moved}");
+    let (_, jumps) = moving_light_frames(&g, |k| at(k as f32 * 0.025), 12);
+    assert!(jumps >= 48, "the control, 2.5 cm a frame: {jumps}");
+}
+
+/// A light of the moment swaying 3 cm about its place (a glowing weapon in
+/// an idle stance, its particles' middle following the hand): its map stays
+/// where it was drawn (`MOMENT_HOLD`), so the post's shadow does not move at
+/// all, only the light's own falloff by under a level; drawn again from each
+/// frame's place, the shadow's edges crawled back and forth. The control: a
+/// fire swayed the same way (a fixed light's map goes where it is) changes
+/// its shadow's edge pixels by more.
+#[test]
+fn a_swaying_light_of_the_moment_holds_its_shadow() {
+    let Some(g) = gpu() else { return };
+    let sway = |k: usize, fixed: bool| {
+        let t = k as f32 / 60.0 * 0.7 * std::f32::consts::TAU;
+        let at = Vec3::new(0.0, 3.0, 0.0) + Vec3::new(t.sin(), 0.6 * (2.0 * t).sin(), t.cos()) * 0.03;
+        PointLight { at, range: 20.0, color: Vec3::X, fixed, key: if fixed { 6 } else { (1 << 40) | 6 } }
+    };
+    let (frames, worst) = moving_light_frames(&g, |k| sway(k, false), 60);
+    assert!(worst <= 2, "a frame changed a pixel by {worst} as a light of the moment swayed");
+    assert!(red_at(&frames[30], 128, 128) < 0.15, "the post's shadow there: {}", red_at(&frames[30], 128, 128));
+    let (_, crawl) = moving_light_frames(&g, |k| sway(k, true), 60);
+    assert!(crawl > 2, "the control, a fire swayed so: {crawl}");
+}
+
+/// The red of pixel (x, y) of a 256-wide frame.
+fn red_at(px: &[u8], x: usize, y: usize) -> f32 {
+    px[(y * 256 + x) * 4] as f32 / 255.0
 }
 
 /// With Sun Shadows on too: at noon the box casts the sun's shadow and the

@@ -89,6 +89,7 @@ section there before changing a ported system (anything under `crates/vi`, `ee`,
 - Port game behaviour from the decomp, line by line. The decomp, eqoa-port's oracle and the 2002
   disc are not on this machine, so oracle tests skip here: say so in the report.
 - What the game counts in frames steps on `frames.rs`'s 30 Hz clock, never once per frame drawn.
+- Server worlds: keep the shared Disc/Sink composer streaming one zone at a time on native and browser; mirror composer changes to the server's Compose contract/CRC (see docs/upstream/CLAUDE.md).
 - Android: platform inputs go through android::Event into App::finger/key_input;
   keep APK signing keys and their folder untracked. Enhanced currently publishes Windows only.
 - Windows: the main thread links an 8 MB stack (`crates/eqoa/build.rs`); the program is a GUI

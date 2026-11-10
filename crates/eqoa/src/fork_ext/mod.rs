@@ -39,3 +39,5 @@ pub(crate) fn prepare_controls(
 
 #[cfg(test)]
 mod touch_tests;
+
+pub(crate) mod map;
