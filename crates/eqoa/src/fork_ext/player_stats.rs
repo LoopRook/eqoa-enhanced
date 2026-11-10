@@ -98,8 +98,11 @@ impl Row {
             "stat_id": stat,
             "current": self.value,
             "base": base,
+            "change": change,
             "effect_change": change,
             "shift": shift.as_str(),
+            "min": min,
+            "max": max,
             "without_min": min,
             "without_max": max,
         })
