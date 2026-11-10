@@ -6,6 +6,65 @@ in the same push as the changes it describes. The dev release's page shows them
 is put on the page by `.github/workflows/notes.yml`.
 
 
+## 2026-11-10 · Raids: the leader's crown, loot rolls, a master looter and new commands
+- In a raid the raid list shows who leads it with a gold crown by their name, its helper with a blue cross and
+  its main assist with a red diamond.
+- When your raid's leader sets the loot rules to Need Before Greed, each item a raid boss drops, each no-trade
+  item and each item with stats (never a stack or vendor trash) pops up in a small window at the right of the
+  screen, under the minimap: Need, Greed or Pass, with 120 seconds to choose. Need is greyed out if you cannot wear or use the item.
+  It never stops you moving: click a choice, or on a controller hold R2 and press right to reach it, then left
+  and right to pick and X to choose (up and down for another item); let go of R2 to go back. With a keyboard,
+  hold C and use the arrow keys and Enter. Your roll (0 to 100) is made the moment you choose, and every roll and
+  the winner show in raid chat: any Need beats any Greed. The winner's item goes straight into their pack; with a
+  full pack it waits on the corpse for them alone for 5 minutes (open the corpse to take it).
+- The raid's leader can set the loot rules in Community > Group > Raid > Loot Rules: Free for All, Need Before
+  Greed or Master Looter. They cannot be changed while the raid is in combat, and the raid cannot be disbanded
+  then either.
+- With Master Looter, a raid kill that drops such an item is the leader's alone to open for 5 minutes (anyone else
+  is told whose it is; then it is anyone's). Choosing an item gives the leader a menu: Take, Inspect, Assign (pick a
+  raid member from a list, then confirm) and Abandon (after a confirmation, anyone may loot anything on the corpse).
+- A member kicked from the raid during a fight still gets its rolls (or can be assigned an item) for what the raid
+  was fighting, so no one can be kicked out of their loot just before a boss dies.
+- Community > Group > Raid also has Invite (your target), Raid Flag (everyone near), Kick, Make Leader, Make
+  Helper, Make Main Assist, Assist Main Assist and Leave Raid, each shown to whoever may use it.
+- New commands, typed in chat (on a PS2 put /t in front: /t raidinvite Bob): /raidinvite [name] (your target
+  without a name), /raidaoe (or /raid), /raidleave, /rsay to talk to the raid, /raidloot, /raidleader, /raidhelper,
+  /raidkick, /raidassist (set the main assist, or with no name target what your main assist is fighting: put it
+  in a quick chat line to fire it in a few presses), /invite <name> to invite anyone to your group, and /target <name> (or /tar) to target the nearest player
+  or creature whose name starts that way, within 100. /help lists them all.
+
+## 2026-11-10 · Firefox and WebGL2: no more long crashes
+- In a browser drawing with WebGL2 (Firefox on Linux, Mac or a phone, older Safari), when the browser's
+  graphics stopped (its graphics process restarting, the driver resetting) the game went black and ran
+  on unseen for about a minute, using more and more memory, until it stopped with an unreadable error.
+  Now it stops at once and says what happened, with Reload.
+- With Light Shadows on in WebGL2, the shadows are drawn the way they were before today's soft edges,
+  which ask less of the graphics card. A browser drawing with WebGPU (Chrome, Edge) and the game you
+  download keep the soft edges.
+- If a browser's graphics refuse Dynamic Lighting, Sun Shadows or Light Shadows, that option is left off
+  with a notice saying so, instead of the game stopping every time you enter the world.
+
+## 2026-11-10 · Third-party PS3 controllers: the d-pad works
+- A controller whose d-pad is a "hat", as on most third-party PS3 controllers and many other PC controllers,
+  now works wherever the d-pad does (the menus, the quick menus, every window): in Firefox on Windows, in
+  Chrome, Edge and Firefox on Linux and Chromebooks, in Firefox on a Mac, and in the downloaded game however
+  the system hands the d-pad over. A diagonal presses both of its directions. Controllers that worked before
+  work as they did.
+- In the downloaded game on Linux, a controller the game knows no layout for has all its buttons now (before,
+  only its d-pad and left stick worked), numbered as most PlayStation-style controllers number them: □ ✕ ○ △,
+  L1, R1, L2, R2, Select, Start, L3, R3; its right stick turns the camera. On Android the same for a controller
+  Android has no layout for. A button in the wrong place can be moved on the Controls page.
+- In the downloaded game on Windows, such a controller (two sticks, no analog triggers) no longer seems to
+  hold L2 while its right stick rests: L2 and R2 are its own L2 and R2 buttons, and its right stick moves the
+  camera up and down again.
+- In Firefox on Windows such a controller's right stick moves the camera up and down again too.
+- In Chrome on Linux, a third-party PS3 controller's right stick pushed left while pressing up on the d-pad
+  no longer mixes up its buttons (L2 and R2 held, the d-pad gone) for the rest of the session.
+- A bug report (F3, or /bug) now tells the GMs which controllers you have and how the game reads each one, so
+  one that misbehaves can be put right.
+- Safari does not show a page such a controller's d-pad at all: play in another browser, or the downloaded
+  game.
+
 ## 2026-11-10 · Wisps cast no shadow, gargoyles swim, the goblin chieftain's cape
 - A Wisp no longer casts a shadow: there is no round shadow under it, and with Sun Shadows or Light Shadows on,
   nothing of it casts one, not its armour, its weapons, its helm, its cape or the wisp itself. Its shadow was a

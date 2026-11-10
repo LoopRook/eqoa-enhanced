@@ -4,6 +4,8 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Added upstream raid leadership marks, loot-roll strips, raid menus and master-looter controls on servers that offer them. Hat D-pads and WebGL2 context-loss handling include upstream fixes.
+
 - Added vanilla's Number Colors, Pet Effects, optional server DPS meter and Macros page. Enhanced HUD and Mods & Addons follow every vanilla Extended page.
 - Touch controls now have separate stick/button sizes, opacity and edge spacing; existing Touch Pad Size settings carry over.
 - Integrated upstream server worlds, race bodies, capes and light-shadow improvements.

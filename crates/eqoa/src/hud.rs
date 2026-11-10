@@ -114,6 +114,9 @@ pub struct MemberState {
     pub name: String,
     pub is_target: bool,
     pub hp: Option<(u8, bool, bool)>,
+    /// The client's own: the raid's marks on its bar (`raidlist::draw_marks`),
+    /// none outside a raid or on a server that sends no raid state.
+    pub marks: u8,
     /// Mana Bars: its power of 255 when there is one to show.
     pub power: Option<u8>,
 }
@@ -562,6 +565,9 @@ impl Hud {
             w.init(vui, ui, [p[0] + 87, p[1] + 12], 160, 1, 0);
             w.open(true);
             w.text_box(vui, ui, &wide(&m.name), 0, 0, 160, 1, [0.0, 0.0, 0.0, glow], 10);
+            if m.marks != 0 {
+                crate::raidlist::draw_marks(ui, p[0] + 168, p[1] + 5, m.marks);
+            }
             if let Some((hp, f4, f8)) = m.hp {
                 p = [p[0] + 10, p[1] + 25];
                 draw_gauge(vui, ui, 7, 136, p, m.is_target, hp as f32 / 255.0);
@@ -959,7 +965,7 @@ mod tests {
     /// target.
     #[test]
     fn mana_bars_sit_under_the_health_they_go_with() {
-        let m = |id, power, is_target| MemberState { id, name: "x".into(), is_target, hp: Some((200, false, false)), power };
+        let m = |id, power, is_target| MemberState { id, name: "x".into(), is_target, hp: Some((200, false, false)), power, marks: 0 };
         let s = HudState { group: vec![m(1, Some(255), false), m(2, None, false), m(3, Some(0), true)], ..Default::default() };
         let health = [30, 93 + 25];
         assert_eq!(

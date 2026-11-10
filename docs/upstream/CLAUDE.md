@@ -15,6 +15,10 @@ current.
   Extended options, the updater, the 2002 disc's art on F9, Hide UI
   on H, names from farther and smaller zoomed out (and every one in a crowd, Overlapping Names Show),
   the raid list on a server that has raid groups (the user's of 2026-11-07: `raidlist`, an Extended row, on by default),
+  a raid's windows on a server that sends them (the GM Jibrish's petitions 1448 and 1451, 2026-11-10: the leader's,
+  helper's and main assist's marks in the raid list, the loot rolls' pop-up, Community > Group > Raid and the master
+  looter's menu on a corpse: `raidplay`, `rollwnd`, `masterloot`, go-eqoa-server's 0x7E42-0x7E48; on any other
+  server none of it, and the start menu the game's),
   the pet's effects in a row under its bar on a server that sends them (the server owner's of 2026-11-09, "put the
   buff icons under the pet name plate": `hud::pet_effects_pieces`, go-eqoa-server's 0x7E32/0x7E33, Extended > UI's
   Pet Effects, on by default; off, or on any other server, nothing is drawn),
@@ -251,6 +255,11 @@ current.
   in a page; `EQOA_PAD_TRACE=1` / `?padtrace`; `EQOA_GLYPHS=1` prints the button glyphs a frame drew.
   A button pressed and let go between two frames reaches the game (`input::Latch`, every source but XInput):
   a new source keeps its presses through it.
+  A d-pad that is a hat (third-party PS3 pads) comes from gilrs three ways, OR'd (`input::GilrsRead`: its d-pad
+  buttons, its DPadX/DPadY axes, the hat's own codes where a mapping names it not), and in a page on one axis or two
+  (`padmap::Dpad`, learned per pad); a controller no mapping knows reads by number (`bit::NUMBERED`). Test a pad
+  natively with a uinput clone and `SDL_GAMECONTROLLERCONFIG` for gilrs's mapping cases; a bug report's note says
+  each controller and how it is read (`input::note`).
   A DualSense is plugged in here and gilrs drives its motors: rumble is as real as the speakers. `eqoa rumble` runs each controller's motors through the game's path;
   `EQOA_RUMBLE_TEST=<ms>` casts a vibrating spell effect on the player in a scripted run.
   The local server spawns a character at a random heading each login, so click by name, not pixel.
@@ -298,6 +307,12 @@ current.
   Chromium over the DevTools protocol, the disc image handed to the page's file input). Platform
   code goes behind `net::session::Datagrams`, `net::auth::Exchange`, `iso::Source`/`iso::Sparse`
   and `crates/eqoa/src/web/`; std's `Instant` panics in a browser, so clocks are `web_time`'s.
+  wgpu's GL backend is never told the browser took its WebGL2 context away: `web::watch_webgl`
+  raises the notice and each event loop ends on `web::graphics_lost` in its window events (a new
+  loop does the same), else every frame's uploads are held until the heap runs out. What WebGL2
+  compiles (naga's GLSL ES 3.00, no `GL_EXT_texture_shadow_lod`) no native test runs:
+  `lightshadow::tests::webgl2_compiles_every_module` writes it; a lighting feature a WebGL2 refuses
+  is left off (`render`'s `guarded`), never a panic.
 - A build is `web/dist/v/<build>/`, never changed under its name (the host serves it immutable);
   only the page and `version.json` are revalidated, and `web/deploy.sh` publishes them in that
   order, after the build. Every file a page loads must be in its build (a new one goes into

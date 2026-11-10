@@ -4439,7 +4439,8 @@ impl App {
         }
         // C (67, 99) held: the chat box's history, as R2 holds it
         // (mode 33), its up and down the arrows (19, 20); let go,
-        // play again (`OnKeyDown`/`OnKeyUp` 67, `VIWndChat`).
+        // play again (`OnKeyDown`/`OnKeyUp` 67, `VIWndChat`). A loot
+        // roll's strips take the arrows and Enter as the d-pad's.
         if let Some(p) = self.play.as_mut()
             && (p.mode == 0 || p.mode == 33)
         {
@@ -4448,6 +4449,12 @@ impl App {
                 Key::Character(c) if c.eq_ignore_ascii_case("c") => Some(99),
                 Key::Named(NamedKey::ArrowUp) if p.mode == 33 => Some(19),
                 Key::Named(NamedKey::ArrowDown) if p.mode == 33 => Some(20),
+                // a loot roll's strips up (`raidplay`): right gives them the
+                // arrows, as the d-pad's right with R2 held; left, right and
+                // Enter then the choice and its making
+                Key::Named(NamedKey::ArrowRight) if p.mode == 33 && p.rolls_up() => Some(18),
+                Key::Named(NamedKey::ArrowLeft) if p.mode == 33 && p.rolls_focused() => Some(17),
+                Key::Named(NamedKey::Enter) if p.mode == 33 && p.rolls_focused() => Some(13),
                 _ => None,
             };
             if let Some(k) = k
@@ -4794,6 +4801,14 @@ impl ApplicationHandler for App {
     /// Each window event, its time the client's own when it draws no frame
     /// (`stall`).
     fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        // a page whose WebGL2 context the browser took away draws nothing
+        // more, and its frames' uploads would be held until the heap ran out
+        // (`web::graphics_lost`, said on the page): the client stops here
+        #[cfg(target_arch = "wasm32")]
+        if crate::web::graphics_lost() {
+            el.exit();
+            return;
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if fork_report::event(self, el, &event) { return; }
         #[cfg(not(target_arch = "wasm32"))]
@@ -5781,6 +5796,22 @@ impl App {
                         g.renderer.set_dynamic_lighting(&g.device, dynamic);
                         if let Some(s) = streamer.as_mut() {
                             s.relight(&g.renderer, &g.device);
+                        }
+                        // what a page's WebGL2 refused of them: said, and
+                        // left off (`Renderer::refusals`)
+                        for r in g.renderer.refusals() {
+                            crate::say(&format!("lighting refused by the browser's WebGL2: {r}"));
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                let (what, why) = r.split_once(": ").unwrap_or((r.as_str(), ""));
+                                crate::web::problem(
+                                    "lighting",
+                                    &format!("{what} left off: this browser's graphics (WebGL2) would not take it ({why}). The rest of the game draws as before."),
+                                );
+                            }
+                        }
+                        if let Some(f) = g.renderer.light_shadow_filter().filter(|_| light_shadows && dynamic) {
+                            crate::say(&format!("light shadows' filter: {f:?}"));
                         }
                     }
                     // the particles' blend as the options have it (Particles:
