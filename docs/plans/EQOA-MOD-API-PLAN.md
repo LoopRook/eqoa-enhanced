@@ -210,7 +210,7 @@ the reviewer is a different model family from the builder.
    chat and the map's long press on upstream's touch code; report anything still missing.
 6. First-run defaults (decision 5): apply NPC display 64 and distance 650 from the fork's own
    settings at first run. Restore upstream's default constants and the upstream tests that name them.
-7. Prepare the fix PRs from origin/master, one branch each: animation guards; refused login shows
+7. Prepare the fix PRs from origin/master, one branch each: refused login shows
    its reason; no phantom controller; texpack test path on Windows; .gitattributes LF for shaders.
    Write the note about the two AO tests on NVIDIA. The owner sends them (decision 4).
 8. Report the before and after of both numbers: fork lines in upstream files, dry-run conflicts.
