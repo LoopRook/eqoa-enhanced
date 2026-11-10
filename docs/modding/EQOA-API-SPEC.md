@@ -68,8 +68,9 @@ This is the **normative capability spelling index**, not a list inferred from wh
 | Module | Functions (exact suffixes) | Section / round |
 |---|---|---|
 | `abilities` | list, get, find, in_range | §4 /2 |
-| `actions` | status, cancel, target, cycle_target, assist, interact, attack, cast, use_hotbar, use_item, equip, destroy, swap_items, quick_slot, weapon_set, prepare_weapon_set, assign_ability, unmemorize_ability, unmemorize_all, arrange_ability, loot, loot_all, buy, sell, bank_move, bank_money, chat, command, move, look, autorun, follow, stop, camera, open_window, close_window, select_row, activate_row, dialog_answer, input_text, drop_quest, mastery_share, mastery_browse, mastery_buy, mastery_refund, buttons, menu_command | §8 /4 |
+| `actions` | target_target, toggle_stats_box; status, cancel, target, cycle_target, assist, interact, attack, cast, use_hotbar, use_item, equip, destroy, swap_items, quick_slot, weapon_set, prepare_weapon_set, assign_ability, unmemorize_ability, unmemorize_all, arrange_ability, loot, loot_all, buy, sell, bank_move, bank_money, chat, command, move, look, autorun, follow, stop, camera, open_window, close_window, select_row, activate_row, dialog_answer, input_text, drop_quest, mastery_share, mastery_browse, mastery_buy, mastery_refund, buttons, menu_command | §8 /3 target_target/toggle_stats_box; /4 others |
 | `bank` | get | §6 /3 |
+| `binds` | register | §5 /3 |
 | `camera` | get, compass | §7 /4 |
 | `capabilities` | get, list, has | §2 /2 |
 | `chat` | history, get_channel, channel_name | §4 /2 |
@@ -80,11 +81,11 @@ This is the **normative capability spelling index**, not a list inferred from wh
 | `entities` | list, get, find, named, distance | §4 /2 |
 | `events` | on, off, once, after | §3 /2 |
 | `files` | read, write, remove; list | §5,9 /2; list /4 |
-| `fonts` | load, default, release | §5 /2 |
+| `fonts` | load, default, release; game | §5 /2; game /3 |
 | `gems` | get, is_gem, format | §6 /3 |
 | `group` | get | §4 /2 |
 | `hotbar` | list | §4 /2 |
-| `hud` | hide, show, hidden_by | §5 /2 |
+| `hud` | hide, show, hidden_by; frame, layout, visible | §5 /2; frame/layout/visible /3 |
 | `icons` | resource, ui, info; class, disposition | §5 /2; class/disposition /4 |
 | `imgui` | vec2, vec4, plus **every individually named required ImGui function in §5** | §5 /2 and explicitly marked /4 additions |
 | `input` | get, claim, release, capture_text, rotate_dpad | §4 /2 |
@@ -96,7 +97,8 @@ This is the **normative capability spelling index**, not a list inferred from wh
 | `mastery` | get, skills, selected | §7 /4 |
 | `math` | bearing, degrees, radians, normalize, signed_angle, facing, is_bit_zero | §5 /2 |
 | `merchant` | get, price | §6 /3 |
-| `player` | get, experience_for_level | §4–5 /2; Player.mastery field /4 |
+| `options` | get, set, toggle | §5 /3 |
+| `player` | get, experience_for_level; stats | §4–5 /2; stats /3; Player.mastery field /4 |
 | `quests` | list, get | §7 /4 |
 | `settings` | load, save, on_save, on_load | §5 /2 |
 | `sound` | load, play, stop, set_volume, is_playing, release | §5 /2 if native backend exists |
@@ -297,6 +299,16 @@ Hotbar.index is native carousel menu index+1 (1..number of returned menus); Hotb
 | `eqoa.hud.hide(element:string)` | W: Token for this VM's hide claim; **outside W return nil,not_in_world and create no claim**. Native display projection applies while W; world loss revokes token/claim. `A/visibility.rs:31,240`, `fork_ext/hud.rs:21`. |
 | `eqoa.hud.show(token:Token)` | A: bool removed; does not release another mod's claim. |
 | `eqoa.hud.hidden_by(element:string)` | A: string[] of addon IDs sorted; no arbitrary Lua owner labels. |
+| `eqoa.hud.frame(custom_size?:{width:uint,height:uint})` | A: `Frame={width:640,height:448,offset_x:number,offset_y:number,scale_x:number,scale_y:number,side:number,top:number,window_width:uint,window_height:uint}`: 4:3 virtual frame transformation metrics for the current or custom window size. Native source: `fork_ext/addons/hud_layout.rs`. |
+| `eqoa.hud.layout(custom_size?:{width:uint,height:uint})` | A: `Layout={player:PlayerLayout,group_members:GroupMemberLayout[],target:TargetLayout,pet:SinglePanelLayout}`: bounding rects for stock HUD elements (`panel`, `health`, `power`, `exp`) transformed into screen coordinates. Native source: `fork_ext/addons/hud_layout.rs`. |
+| `eqoa.hud.visible(element?:string)` | W: `bool`: returns whether the specified HUD element (or HUD overall when omitted) is currently visible, respecting `hideui` and mod hide claims. Returns false outside world. Native source: `fork_ext/addons/hud_layout.rs`. |
+| `eqoa.options.get(id:string)` | A: `bool?`: reads the current value of a mod or client toggle setting. Native source: `fork_ext/addons/options.rs`. |
+| `eqoa.options.set(id:string,value:bool)` | A: `bool`: updates the value of a mod toggle setting. Native source: `fork_ext/addons/options.rs`. |
+| `eqoa.options.toggle(spec:{id:string,label?:string,default?:bool})` | A: `Toggle={id:string,label:string,default:bool,value:bool,item_id:int}`: registers an options toggle. Native source: `fork_ext/addons/options.rs`. |
+| `eqoa.binds.register(id:string,default_key:string,description:string)` | A: `bool`: registers a mod-owned keybind on the Controls page under `mod.<addon>.<id>`. Native source: `fork_ext/bindpage.rs`. |
+| `eqoa.actions.target_target()` | W: `bool,nil`: assists the current target by targeting its target. Nil,not_in_world outside world. Native source: `fork_ext/addons/actions.rs`. |
+| `eqoa.actions.toggle_stats_box()` | W: `bool,nil`: toggles the stats box visibility. Nil,not_in_world outside world. Native source: `fork_ext/addons/actions.rs`. |
+| `eqoa.player.stats()` | W: `Stats={strength:StatItem,stamina:StatItem,agility:StatItem,dexterity:StatItem,wisdom:StatItem,intelligence:StatItem,charisma:StatItem,armor:StatItem,max_hp:StatItem,max_power:StatItem,fire:StatItem,cold:StatItem,lightning:StatItem,arcane:StatItem,poison:StatItem,disease:StatItem,rows:StatItem[]}` where `StatItem={name:string,base:int,current:int,change:int}`. Nil,not_in_world outside world. Native source: `fork_ext/addons/player_stats.rs`. |
 | `eqoa.icons.resource(hash:uint,options:IconOptions={})` | W/S: TextureInfo; direct live ESF cache, automatic ownership (no Acquire prerequisite). `A/icons.rs:667,1271`, `F:42`. |
 | `eqoa.icons.ui(id:uint)` | W/S: TextureInfo from current UI atlas (`V/ui.rs:131`, `A/icons.rs:1308`); missing IDs nil,not_found. |
 | `eqoa.icons.info(hash:uint)` | W/S: `{width:uint,height:uint,source_format:string?}`; only data actually decoded by ESF, never invented palette counts. |
@@ -377,6 +389,7 @@ These functions are A unless an individual asset is W/S. Paths are relative virt
 | `eqoa.textures.release(texture:Texture?)` | true; nil and repeated release are idempotent, foreign handle error. Retire after current render; saved handles become stale. |
 | `eqoa.fonts.load(path:string,size:number=16)` | `FontInfo={font:Font,status:"pending"\|"ready"\|"fallback",reason:string?}`; TTF/OTF, size>0 ≤256 pixels, queued atlas rebuild; failure gives real default-font handle with fallback status and diagnostic. If no context: nil,unavailable. `A/fonts.rs:175,272,326`. |
 | `eqoa.fonts.default()` | FontInfo, ready default; `eqoa.fonts.release(font:Font?)` → true, nil/idempotent, release VM reference after frame. Default is immortal. |
+| `eqoa.fonts.game()` | FontInfo? for the native game HUD font; nil,unavailable when bitmap font atlas cannot be loaded into ImGui. Native source: `A/fonts.rs`. |
 | `eqoa.sound.load(path:string)` | Sound; WAV/MP3 via native backend `A/sound.rs:922`. Decode/backend failure nil,Error. |
 | `eqoa.sound.play(sound:Sound,options:{loop:bool=false,volume:number=1}={})` | true only when native backend accepts playback, same handle restarts existing voice, not unbounded voices. Volume 0..1. |
 | `eqoa.sound.stop(sound:Sound?)`, `set_volume(sound:Sound,volume:number)`, `is_playing(sound:Sound?)`, `release(sound:Sound?)` | true / true / bool / true; nil stop/release idempotent, nil is_playing false. Unsupported backend still diagnoses unsupported, never false pretending silent playback works. Source `A/sound.rs:933`. |

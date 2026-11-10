@@ -453,6 +453,14 @@ pub fn set_binds(b: crate::binds::Binds) {
     BINDS.with(|c| *c.borrow_mut() = Some(b));
 }
 
+pub(crate) fn read_config(name: &str) -> Option<Vec<u8>> {
+    store::read(name)
+}
+
+pub(crate) fn write_config(name: &str, bytes: &[u8]) -> Result<(), String> {
+    store::write(name, bytes)
+}
+
 // ---- the client's own: the Extended page ---------------------------------------
 
 /// The Extended page's Brightness: steps 0 to 10, 5 leaving the picture as

@@ -3,7 +3,7 @@ use super::{
     native::{bind, error, record},
     native_core::{CORE, View},
 };
-use mlua::{AnyUserData, Lua, MetaMethod, Result, Table, UserData, UserDataMethods, Value};
+use mlua::{AnyUserData, Lua, MetaMethod, Result, UserData, UserDataMethods, Value};
 use serde_json::{Value as Json, json};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -683,6 +683,26 @@ fn install_math(lua: &Lua) -> Result<()> {
         lua.create_function(|lua, id: String| {
             let val = super::options::get_toggle("mod", &id);
             lua.pack_multi((val, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "options",
+        "set",
+        lua.create_function(|lua, (id, val): (String, bool)| {
+            let ok = super::options::set_toggle("mod", &id, val);
+            lua.pack_multi((ok, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "binds",
+        "register",
+        lua.create_function(|lua, (id, default_key, description): (String, String, String)| {
+            let addon = super::native::session(lua).borrow().addon.clone();
+            let addon_name = if addon.is_empty() { "mod".to_string() } else { addon };
+            let ok = crate::fork_ext::bindpage::register(&addon_name, &id, &default_key, &description);
+            lua.pack_multi((ok, Value::Nil))
         })?,
     )?;
     bind(

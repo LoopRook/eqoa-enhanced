@@ -556,10 +556,11 @@ fn round_3_stage_a_hud_frame_and_layout_and_visible() {
         local l = eqoa.hud.layout()
         assert(l.player.health ~= nil, "player health rect")
         assert(l.target.health ~= nil, "target health rect")
-        assert(l.target_of_target.health ~= nil, "tot health rect")
+        assert(l.target_of_target == nil, "tot removed from layout API")
         assert(#l.group_members == 4, "4 group members")
         assert(l.group_members[1].health ~= nil, "member 1 health")
-        assert(l.stats_box.panel ~= nil, "stats box panel")
+        assert(l.pet.panel ~= nil, "pet panel")
+        assert(l.stats_box == nil, "stats box removed from layout API")
     "#,
     )
     .unwrap();
@@ -625,8 +626,8 @@ fn round_3_stage_a_input_bind_and_fonts_game() {
     // Valid bind registration
     h.execute(
         r#"
-        local ok, err = eqoa.input.bind({ id = "stats_box", label = "Stats Box", default_key = "b" })
-        assert(ok == true and err == nil, "bind registered")
+        local ok, err = eqoa.binds.register("toggle_stats", "b", "Stats Box")
+        assert(ok == true and err == nil, "bind registered via eqoa.binds.register")
 
         local font = eqoa.fonts.game()
         assert(font ~= nil, "game font exists")
@@ -635,6 +636,20 @@ fn round_3_stage_a_input_bind_and_fonts_game() {
     "#,
     )
     .unwrap();
+}
+
+#[test]
+fn round_3_stage_a_controls_page_rebind_and_negative_control() {
+    let entries_before = crate::bindpage::defaults();
+    let _ = crate::fork_ext::bindpage::register("mod_test", "custom_key", "p", "Custom Action");
+    let entries_after = crate::bindpage::defaults();
+    assert_eq!(entries_after, entries_before + 1, "ControlsPage defaults entry shifted down by 1 extra row");
+
+    // Negative control: old key does not fire after rebind
+    assert!(crate::fork_ext::bindpage::set_key("mod_test", "custom_key", "z"));
+    assert_eq!(crate::fork_ext::bindpage::get_key("mod_test", "custom_key"), Some("z".into()));
+    assert_eq!(crate::fork_ext::bindpage::dispatch_keypress("p"), None, "old key does not fire");
+    assert_eq!(crate::fork_ext::bindpage::dispatch_keypress("z"), Some(("mod_test".into(), "custom_key".into())), "new key fires");
 }
 
 #[test]

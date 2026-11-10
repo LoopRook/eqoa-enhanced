@@ -118,16 +118,8 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> Json {
             "health": to_rect(30.0, 398.0, 136.0, 8.0, "left", "bottom"),
             "power": to_rect(30.0, 408.0, 136.0, 8.0, "left", "bottom"),
         },
-        "target_of_target": {
-            "panel": to_rect(20.0, 300.0, 174.0, 46.0, "left", "bottom"),
-            "health": to_rect(30.0, 325.0, 136.0, 8.0, "left", "bottom"),
-            "power": to_rect(30.0, 335.0, 136.0, 8.0, "left", "bottom"),
-        },
         "pet": {
             "panel": to_rect(20.0, 285.0, 174.0, 20.0, "left", "top"),
-        },
-        "stats_box": {
-            "panel": to_rect(200.0, 54.0, 148.0, 132.0, "left", "top"),
         },
     })
 }

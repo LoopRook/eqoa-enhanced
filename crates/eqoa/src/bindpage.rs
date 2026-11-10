@@ -45,12 +45,12 @@ enum Entry {
 }
 
 fn entry(e: i32) -> Entry {
-    if e < ROWS.len() as i32 { Entry::Row(e.max(0) as usize) } else { Entry::Defaults }
+    if e < defaults() { Entry::Row(e.max(0) as usize) } else { Entry::Defaults }
 }
 
 /// Defaults' entry: after the rows.
 pub fn defaults() -> i32 {
-    ROWS.len() as i32
+    ROWS.len() as i32 + crate::fork_ext::bindpage::extra_rows()
 }
 
 /// The page's own rows besides the list: the header, a gap, the help (two),
@@ -102,6 +102,7 @@ impl ControlsPage {
     /// which the game gives none, can be given one), or a button (a row of
     /// the client's keys can be given one; the sticks stay sticks).
     fn bindable(row: i32, col: i32) -> bool {
+        if row >= ROWS.len() as i32 { return col == 0; }
         match entry(row) {
             Entry::Row(r) => {
                 let r = &ROWS[r];
@@ -178,6 +179,7 @@ impl ControlsPage {
     /// awaited; what cannot be moved says why.
     fn select(&mut self, cues: &mut Vec<i32>) {
         if entry(self.row) == Entry::Defaults {
+            crate::fork_ext::bindpage::reset_defaults();
             let b = crate::settings::binds();
             let d = b.controls_defaults();
             let lost = (0..binds::MACROS).filter(|&m| d.macros[m].triggers.len() != b.macros[m].triggers.len()).count();
@@ -216,6 +218,7 @@ impl ControlsPage {
             return;
         }
         let row = self.row as usize;
+        if crate::fork_ext::bindpage::capture_key(&mut self.capture, &mut self.note, row, name, cues) { return; }
         let mut b = crate::settings::binds();
         let had = b.macros_with(&Input::Key(name.to_string()));
         let moved = b.bind_key(row, name);
@@ -344,6 +347,7 @@ impl ControlsPage {
                 self.hits.push(rows_rect(w, vui, r, 40, at, width - KEY_X - 48, 1), entry * 4);
                 continue;
             }
+            if crate::fork_ext::bindpage::draw(self.capture, self.col, vui, r, w, entry, on, at, &mut self.hits) { continue; }
             let row = &ROWS[entry as usize];
             w.text_box(vui, r, &wide(&label(vui, entry as usize)), 40, at, width - KEY_X - 48, 1, c, 2);
             self.hits.push(rows_rect(w, vui, r, 40, at, width - KEY_X - 48, 1), entry * 4);
@@ -401,7 +405,7 @@ impl ControlsPage {
                 expand(vui, row.help)
             }
         } else {
-            "Puts every key and button back as the game began. The macros (Options, Macros) keep what they press, and their triggers of keys no row has.".into()
+            crate::fork_ext::bindpage::help_or_defaults(self.row)
         };
         w.text_box(vui, r, &wide(&help), 40, list_end, width - 80, 2, UI_COLORS[0], 2);
         w.text_box(vui, r, &wide(&window_keys(&b)), 40, list_end + 2, width - 80, 2, UI_COLORS[1], 0);
@@ -654,8 +658,8 @@ mod tests {
         testing::reset(false);
     }
 
-    /// F3 20261024-145732 (the map on R3): a row of the client's keys takes
-    /// a button in its controller's cell; the field it came from is said to
+    /// F3 20261024-145732 (a key of the client's on R3): a row of the client's
+    /// keys takes a button in its controller's cell; the field it came from is said to
     /// have none; moved on to another button, the field that button drove
     /// takes R3 back; a field given the row's button gives the row its own,
     /// here none.

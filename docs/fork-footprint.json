@@ -76,9 +76,9 @@
       "reason": "One hook into fork_ext/app_icon_ico for the owner-supplied program icon: stage the chosen .ico in OUT_DIR and feed its images to the unchanged SIZES/dib/ico/resources path. Stack and linker behavior unchanged."
     },
     "crates/eqoa/src/bindpage.rs": {
-      "added": 7,
+      "added": 11,
       "deleted": 7,
-      "reason": "Restored and map input settings rows. Sync 2026-11-07: upstream's macro-key tests use 'y' because the fork binds 'g' to the map's group waypoint (+4/-4)."
+      "reason": "round 3: one hook so mod-owned keys show on Controls; offset by stage C removing the stats_box row (binds.rs) and the hardcoded B key (viewer.rs)"
     },
     "crates/eqoa/src/binds.rs": {
       "added": 62,

@@ -26,7 +26,7 @@ pub(crate) struct Session {
     diagnostics: BTreeMap<(String, String), Diagnostic>,
     pending: Vec<String>,
     start: Instant,
-    addon: String,
+    pub(crate) addon: String,
     vm: u64,
     phase: String,
     tokens: f64,
@@ -50,13 +50,14 @@ impl Session {
         // Normative function index (§2). Registration does not imply implementation.
         for (module, names, round) in [
             ("abilities", "list get find in_range", 2),
-            ("actions", "assist", 3),
+            ("actions", "assist target_target toggle_stats_box", 3),
             (
                 "actions",
                 "status cancel target cycle_target assist interact attack cast use_hotbar use_item equip destroy swap_items quick_slot weapon_set prepare_weapon_set assign_ability unmemorize_ability unmemorize_all arrange_ability loot loot_all buy sell bank_move bank_money chat command move look autorun follow stop camera open_window close_window select_row activate_row dialog_answer input_text drop_quest mastery_share mastery_browse mastery_buy mastery_refund buttons menu_command",
                 4,
             ),
             ("bank", "get", 3),
+            ("binds", "register", 3),
             ("camera", "get compass", 4),
             ("capabilities", "get list has", 2),
             ("chat", "history get_channel channel_name", 2),
@@ -99,7 +100,7 @@ impl Session {
                 2,
             ),
             ("merchant", "get price", 3),
-            ("options", "toggle get", 3),
+            ("options", "toggle get set", 3),
             ("player", "get experience_for_level", 2),
             ("player", "stats", 3),
             ("quests", "list get", 4),
@@ -217,8 +218,8 @@ impl Session {
     }
 }
 
-type Shared = Rc<RefCell<Session>>;
-fn session(lua: &Lua) -> Shared {
+pub(crate) type Shared = Rc<RefCell<Session>>;
+pub(crate) fn session(lua: &Lua) -> Shared {
     lua.app_data_ref::<Shared>()
         .expect("native API installed")
         .clone()
@@ -513,6 +514,8 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
                     | "eqoa.player.get"
                     | "eqoa.player.stats"
                     | "eqoa.actions.assist"
+                    | "eqoa.actions.target_target"
+                    | "eqoa.actions.toggle_stats_box"
                     | "eqoa.fonts.game"
                     | "eqoa.target.get"
                     | "eqoa.group.get"
@@ -825,9 +828,8 @@ fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.hud.Layout", "player") => Some("eqoa.hud.PlayerLayout"),
         ("eqoa.hud.Layout", "group_members") => Some("eqoa.hud.GroupMemberLayout"),
         ("eqoa.hud.Layout", "target") => Some("eqoa.hud.TargetLayout"),
-        ("eqoa.hud.Layout", "target_of_target") => Some("eqoa.hud.TotLayout"),
-        ("eqoa.hud.Layout", "pet" | "stats_box") => Some("eqoa.hud.SinglePanelLayout"),
-        ("eqoa.hud.PlayerLayout" | "eqoa.hud.TargetLayout" | "eqoa.hud.TotLayout" | "eqoa.hud.GroupMemberLayout" | "eqoa.hud.SinglePanelLayout", "panel" | "health" | "power" | "exp") => Some("eqoa.hud.Rect"),
+        ("eqoa.hud.Layout", "pet") => Some("eqoa.hud.SinglePanelLayout"),
+        ("eqoa.hud.PlayerLayout" | "eqoa.hud.TargetLayout" | "eqoa.hud.GroupMemberLayout" | "eqoa.hud.SinglePanelLayout", "panel" | "health" | "power" | "exp") => Some("eqoa.hud.Rect"),
         _ => None,
     }
 }
@@ -936,7 +938,7 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.hud.Layout",
-            "player group_members target target_of_target pet stats_box",
+            "player group_members target pet",
         ),
         (
             "eqoa.hud.PlayerLayout",
@@ -944,10 +946,6 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.hud.TargetLayout",
-            "panel health power",
-        ),
-        (
-            "eqoa.hud.TotLayout",
             "panel health power",
         ),
         (
