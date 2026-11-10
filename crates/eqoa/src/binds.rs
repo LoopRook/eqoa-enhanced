@@ -176,8 +176,8 @@ pub const ROWS: &[Row] = &[
     row("group_leave", "{994}", &["f8"], Pad::None, ""),
     row("art", "Art: Frontiers' or 2002's", &["f9"], Pad::None, "Everything drawn swaps between Frontiers' art and the 2002 disc's (EverQuest Online Adventures, USA, SLUS-20470), at once; the first time, it asks for that disc."),
     row("hide_ui", "Hide UI", &["h"], Pad::None, "Hides everything over the world: the HUD, the chat, the names over heads, the damage numbers and the target's rings. Again, or any window coming up, shows them."),
-    row("minimap", "Minimap", &["n"], Pad::None, "Shows or hides the minimap, as Extended's UI page does, and keeps it. On the map: a community marker suggested."),
-    row("stats_box", "Stats Box", &["b"], Pad::None, "Shows or hides your stats in a box under the effects' icons (an effect's raise in blue, its cut in red), as Extended's UI page does, and keeps it."),
+    row("minimap", "Minimap", &["n"], Pad::None, "Shows or hides the minimap, as Extended's Map page does, and keeps it. On the map: a community marker suggested."),
+    row("stats_box", "Stats Box", &["b"], Pad::None, "Shows or hides your stats in a box under the effects' icons (an effect's raise in blue, its cut in red), as Extended's Enhanced HUD page does, and keeps it."),
     row("controls", "Controls", &["f1"], Pad::None, "This page, from play."),
 ];
 
@@ -690,8 +690,7 @@ impl Binds {
         let mut b = Binds::default();
         let button = |n: &str| BUTTONS.iter().position(|x| x.0 == n).map(|i| i as u8);
         for line in s.lines() {
-            let Some((k, v)) = line.split_once('=') else { continue;
-            };
+            let Some((k, v)) = line.split_once('=') else { continue };
             if let Some(id) = k.strip_prefix("key.") {
                 let Some(r) = row_named(id) else { continue };
                 if v.is_empty() {
@@ -1129,9 +1128,7 @@ mod tests {
             "F8" => NamedKey::F8,
             "F9" => NamedKey::F9,
             "F11" => NamedKey::F11,
-            other => {
-                panic!("the dispatch matches NamedKey::{other}: give it a name here and a row")
-            }
+            other => panic!("the dispatch matches NamedKey::{other}: give it a name here and a row"),
         }
     }
 

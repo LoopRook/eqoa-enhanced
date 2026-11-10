@@ -868,18 +868,12 @@ pub const ABILITY_BARS_GAME: u8 = 2;
 pub const ENTITY_SLOTS_GAME: u8 = net::entity::RETAIL_SLOTS as u8;
 pub const ENTITY_SLOTS_MAX: u8 = net::entity::MAX_SLOTS as u8;
 pub const ENTITY_SLOTS_STEP: u8 = 8;
-/// NPC/PC Display's first-run value: 64, where the game's 24 remains the
-/// lowest a server that offers more can be asked for.
-pub const ENTITY_SLOTS_DEFAULT: u8 = 64;
 /// The game's character draw distance (a player race's LOD body's last
 /// level), the farthest NPC/PC Distance goes (the client reads the
 /// world's zones to 1050 round the player), and its step.
 pub const ENTITY_VIEW_GAME: u16 = 100;
 pub const ENTITY_VIEW_MAX: u16 = 1000;
 pub const ENTITY_VIEW_STEP: u16 = 50;
-/// NPC/PC Distance's first-run value: 650, where the game's 100 remains the
-/// nearest a server that offers more can be asked for.
-pub const ENTITY_VIEW_DEFAULT: u16 = 650;
 /// The game's name plate distance (`VINameSprite::Raster`: a plate within 22
 /// of the camera), the farthest Name Distance goes (twice the game's
 /// character draw distance: past it a name is a few pixels at any zoom), and
@@ -916,8 +910,8 @@ impl Default for ClientOptions {
             capture: false,
             background_sound: true,
             ability_bars: ABILITY_BARS_GAME,
-            entity_slots: ENTITY_SLOTS_DEFAULT,
-            entity_view: ENTITY_VIEW_DEFAULT,
+            entity_slots: ENTITY_SLOTS_GAME,
+            entity_view: ENTITY_VIEW_GAME,
             name_distance: NAME_DISTANCE_GAME,
             overlapping_names: false,
             raid_list: true,
@@ -1001,10 +995,10 @@ impl ClientOptions {
         if self.ability_bars != ABILITY_BARS_GAME {
             s.push_str(&format!("ability_bars={}\n", self.ability_bars));
         }
-        if self.entity_slots != ENTITY_SLOTS_DEFAULT {
+        if self.entity_slots != ENTITY_SLOTS_GAME {
             s.push_str(&format!("entity_slots={}\n", self.entity_slots));
         }
-        if self.entity_view != ENTITY_VIEW_DEFAULT {
+        if self.entity_view != ENTITY_VIEW_GAME {
             s.push_str(&format!("entity_view={}\n", self.entity_view));
         }
         if self.name_distance != NAME_DISTANCE_GAME {
@@ -1280,6 +1274,7 @@ impl ClientOptions {
 
 /// client.opt as it stands: window 1's rows, and what the windows share.
 fn read_shared() -> ClientOptions {
+    if let Some(c) = fork_settings::migrate_defaults() { return c; }
     store::read(CLIENT_FILE).map_or_else(ClientOptions::default, |b| ClientOptions::from_text(&String::from_utf8_lossy(&b)))
 }
 
@@ -1867,6 +1862,7 @@ pub mod testing {
         super::FRAME_DUE.with(|d| d.set(0.0));
         super::DISPLAY_GAP.with(|g| g.set(1000.0 / 60.0));
         super::FILE_SHARED.with(|f| f.set(None));
+        super::fork_settings::reset_test_client();
     }
 
     /// Writes `name` in the store as another window's save would.
@@ -2040,11 +2036,11 @@ mod tests {
         assert_eq!(ClientOptions { entity_slots: 128, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nentity_slots=128\n", "NPC/PC Display only when not the game's");
         assert_eq!(ClientOptions::from_text("entity_slots=100").entity_slots, 100, "any number in range");
         for bad in ["entity_slots=23", "entity_slots=205", "entity_slots=999", "entity_slots=lots"] {
-            assert_eq!(ClientOptions::from_text(bad).entity_slots, ENTITY_SLOTS_DEFAULT, "{bad}: the first-run 64");
+            assert_eq!(ClientOptions::from_text(bad).entity_slots, ENTITY_SLOTS_GAME, "{bad}: the game's 24");
         }
         assert_eq!(ClientOptions { entity_view: 600, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nentity_view=600\n", "NPC/PC Distance only when not the game's");
         for bad in ["entity_view=99", "entity_view=1001", "entity_view=far"] {
-            assert_eq!(ClientOptions::from_text(bad).entity_view, ENTITY_VIEW_DEFAULT, "{bad}: the first-run 650");
+            assert_eq!(ClientOptions::from_text(bad).entity_view, ENTITY_VIEW_GAME, "{bad}: the game's 100");
         }
         assert_eq!(ClientOptions { name_distance: 60, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nname_distance=60\n", "Name Distance only when not the game's");
         assert_eq!(ClientOptions::from_text("name_distance=60").name_distance, 60, "read back");

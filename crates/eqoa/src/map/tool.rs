@@ -80,7 +80,6 @@ pub fn shot(s: &Shot, out: &str) -> Result<(), Box<dyn std::error::Error>> {
             map.search.key("enter", None);
         }
     }
-    if std::env::var_os("EQOA_MAP_SUGGEST_FORM").is_some(){map.suggestion.show(super::community::Spot{world,at:s.at},"Community marker".into());}
     // `EQOA_MAP_HOVER=<x>,<z>`: that world point taken as the mouse's, its
     // marker's card shown (`markers`)
     map.hover_world = std::env::var("EQOA_MAP_HOVER").ok().and_then(|v| {

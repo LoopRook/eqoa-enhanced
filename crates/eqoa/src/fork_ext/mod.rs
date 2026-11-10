@@ -36,3 +36,6 @@ pub(crate) fn prepare_controls(
         addons::input::observe_report(_report, _connected, _gameplay);
     }
 }
+
+#[cfg(test)]
+mod touch_tests;

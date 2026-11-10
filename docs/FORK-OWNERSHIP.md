@@ -120,7 +120,7 @@ still verifies execution and placement. Do not add duplicate hook names in comme
 | `crates/eqoa/src/main.rs` | `mod fork_ext;`, `mod report_policy;` |
 | `crates/eqoa/src/play.rs` | `self.fork_combat_event(...)`, `fork_hud::chat_history_key(...)`, `fork_hud::ability_bar_shown(...)` |
 | `crates/eqoa/src/hud.rs` | `fork_hud::draw(...)` |
-| `crates/eqoa/src/options.rs` | `fork_options::{CATEGORY, ITEMS, change, activate, value_text}`, once each |
+| `crates/eqoa/src/options.rs` | `fork_options::{categories, items, change, activate, value_text}`; categories append fork pages after upstream on native/web |
 | `crates/eqoa/src/settings.rs` | `fork_settings::{write, parse}`, once each |
 | `crates/eqoa/src/viewer.rs` | `fork_report::surface(...)`, report input/capture hooks |
 | `crates/eqoa/src/hud.rs` | `crate::fork_ext::report_core::hud_button` |
@@ -252,3 +252,8 @@ Unix-shaped absolute fixture paths gain a drive on Windows. Its AppImage and
 relative-path controls then exercise the same production helper on this host;
 production texture code is unchanged. The master category has its own named hook
 guard. Renderer and network budgets did not increase.
+
+Round 2.5 options tidy: upstream UI and Map retain their own rows and IDs 41-45.
+The categories adapter appends Enhanced HUD and Mods & Addons;
+enhanced-only IDs are 1000+. First-run 64/650 defaults use fork_settings::migrate_defaults;
+ClientOptions::default and saved-file parsing retain upstream defaults.
