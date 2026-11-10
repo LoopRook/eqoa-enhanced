@@ -323,3 +323,32 @@ hat/touch and Firefox/WebGL2 play; live raid/loot/new server features/world
 composition; optional Forge/oracle/golden fixtures. The two upstream GPU-test
 failures remain. The HUD extras still await the separately planned mod conversion.
 No further implementation, merge into develop/enhanced, push or tag was done.
+
+## Review fixes
+
+The round-3 review's two defects were fixed on `sync/2026-11-10`:
+
+- **Duplicate GM travel legend (HIGH).** `crates/eqoa/src/map/chrome.rs` had the
+  `if c.travel { ... }` block twice after the merge. The second copy was deleted so
+  the block matches upstream `5d54c0c` exactly. A new fork test,
+  `fork_ext::map::tests::a_gms_travel_click_is_named_once`, draws the legend for a
+  GM and counts `LEGEND_TRAVEL` exactly once (keyboard and pad), with the control
+  that a non-GM legend has none. Negative control: with the duplicate restored the
+  test failed (`left: 2, right: 1`); without it, it passes. Upstream's own test was
+  left untouched.
+- **Dropped quest-off assertions (MEDIUM).** `crates/net/src/session.rs` lost
+  upstream's checks that agreeing off before asking answers nothing in
+  `quest_marks_offer_answer_and_set` and `quest_progress_offer_answer_and_set`.
+  Both `agree_quest_marks(false)` / `agree_quest_progress(false)` + `assert_eq!`
+  lines were restored exactly as upstream wrote them.
+
+Validation (shared target dir, scratch `EQOA_CONFIG`):
+
+- `cargo test --locked -p net -- --test-threads=1`: **87 passed, 0 failed, 0 ignored**.
+- `cargo test --locked -p eqoa --bin eqoa map:: -- --test-threads=1`: **160 passed, 0 failed, 0 ignored**.
+- New fork test: **1 passed, 0 failed**.
+- `python tools/check_fork_footprint.py --base 5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd`: **PASS**.
+  Budgets were only tightened to the measured divergence: `map/chrome.rs` added
+  327 → 304 (deleted 19 unchanged); `net/session.rs` added 281 → 218 and deleted
+  27 → 23. No budget was raised.
+
