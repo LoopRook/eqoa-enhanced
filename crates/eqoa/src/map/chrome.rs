@@ -330,12 +330,6 @@ pub fn draw(r: &mut dyn Raster, vui: &Vui, c: &Chrome) -> Vec<Button> {
         let at = pieces.iter().rposition(|p| p.1.contains("aypoint")).map_or(pieces.len(), |i| i + 1);
         pieces.insert(at, (-1, LEGEND_TRAVEL));
     }
-    if c.travel {
-        // a GM's: after the waypoints' keys, a keyboard's and a pad's alike
-        // (a mouse goes with either)
-        let at = pieces.iter().rposition(|p| p.1.contains("aypoint")).map_or(pieces.len(), |i| i + 1);
-        pieces.insert(at, (-1, LEGEND_TRAVEL));
-    }
     if c.quests.is_some() && !c.keyboard {
         // after the towns' key (R3's glyph, 215, inline)
         let at = pieces.iter().position(|p| p.1.ends_with("Towns")).map_or(pieces.len(), |i| i + 1);
