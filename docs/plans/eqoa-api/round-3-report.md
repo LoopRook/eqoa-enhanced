@@ -144,3 +144,71 @@ Measured all 4 bundled mods executing concurrently in an optimized release build
 | `cargo test --locked -p eqoa --bin eqoa fork_ext::addons::native_tests:: -- --test-threads=1` | **28 passed; 0 failed; 0 ignored** |
 | `python tools/check_fork_footprint.py --base 5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd` | **PASS**: 369 fork-owned, 42 shared files; 31/31 hooks intact |
 
+---
+
+## Stage C: Removing Native Extras, Config Migration, and Footprint Lowering
+
+### 1. Removal of Native Implementations
+- **`crates/eqoa/src/binds.rs`:** Removed `stats_box` row from `Binds::defaults()` and cleaned up test helpers (-7 added lines). Deleted obsolete `crates/eqoa/src/fork_ext/binds.rs`.
+- **`crates/eqoa/src/viewer.rs`:** Removed hardcoded `B` key handling and associated state (-21 added lines).
+- **`crates/eqoa/src/settings.rs`:** Removed legacy fields (`target_of_target`, `mana_bars`, `stats_box`, `target_hp_percent`, `xp_details`, `hud_numbers`), default initializers, parser entries, and accessors (-145 added lines, -31 deleted lines restored).
+- **`crates/eqoa/src/hud.rs`:** Removed `target_of_target`, `target_power`, `tot_hp`, `tot_power`, and `stats_box` from `HudState`; removed `power` from `MemberState`; removed `TargetsTarget` and `Stats` from `Pick`; removed `member_gauges`, `draw_target_of_target`, `target_gauges`, and `stats_box` drawing routines. Restored `a_pointer_finds_the_minimap_where_the_quick_menus_go` to its original upstream position (-212 added lines, -29 deleted lines restored).
+- **`crates/eqoa/src/play.rs`:** Removed legacy HUD fields, picks, and helper calls. Updated `begin_iteration` so that `self.session.agree_power_bars(true)` remains active whenever either the native session or mod HUD requires it (-103 added lines, -1 deleted line restored).
+- **`crates/eqoa/src/statbox.rs`:** Re-exported `crate::fork_ext::player_stats`.
+
+### 2. Fork-Owned Systems & One-Time Config Migration
+- **One-Time Migration (`crates/eqoa/src/fork_ext/settings.rs:migrate_configs`):**
+  - Reads existing `client.opt` and `keys.opt`.
+  - Migrates legacy option keys (`target_of_target`, `mana_bars`, `stats_box`, `target_hp_percent`, `xp_details`, `hud_numbers`) into mod option toggles under `mod.eqoa_*`.
+  - Migrates `key.stats_box` into `mod.eqoa_stats_box.toggle`.
+  - Strips the legacy keys from disk files so config files stay clean.
+  - Added full test with negative controls: `migration_moves_legacy_options_and_binds_into_mods_and_strips_files`.
+- **Options & Controls Page Integration:**
+  - `crates/eqoa/src/fork_ext/options.rs`: Removed legacy option IDs; dynamic mod options now back the Enhanced HUD page items.
+  - `crates/eqoa/src/fork_ext/bindpage.rs`: Controls page dynamically displays and rebinds mod keys; legacy `key.stats_box` is stripped when saving.
+  - `bundled-mods/eqoa_stats_box/main.lua`: Listens to `input.key` events mapped through `eqoa.binds.get("toggle")`. Added `eqoa.binds.get` in `native_state.rs`.
+- **Player Release & Update Notes:**
+  - `tools/build_player_release.py` bundles all 4 mods into `eqoa-enhanced.zip`.
+  - `FORK-UPDATE-NOTES.md` updated under `## Unreleased` detailing the transition of HUD extras to bundled mods.
+
+### 3. Footprint Budget Lowering
+Every budget in `docs/fork-footprint.json` has been lowered to its exact measured value. Zero budgets were raised.
+
+| File | Old Budget (+ / -) | New Budget (+ / -) | Net Shared Line Reduction |
+|---|---|---|---|
+| `crates/eqoa/src/bindpage.rs` | +11 / -7 | +10 / -5 | -1 added, -2 deleted |
+| `crates/eqoa/src/binds.rs` | +62 / -38 | +55 / -38 | -7 added |
+| `crates/eqoa/src/hud.rs` | +264 / -43 | +52 / -14 | -212 added, -29 deleted |
+| `crates/eqoa/src/play.rs` | +381 / -62 | +278 / -61 | -103 added, -1 deleted |
+| `crates/eqoa/src/settings.rs` | +162 / -32 | +17 / -1 | -145 added, -31 deleted |
+| `crates/eqoa/src/viewer.rs` | +123 / -13 | +102 / -11 | -21 added, -2 deleted |
+| **Total Shared Footprint Reduction** | | | **-490 added lines, -66 deleted lines** |
+
+### 4. Honesty Rules: Modified and Removed Tests
+- **`crates/eqoa/src/fork_ext/hud.rs` (`forge_hud_default_no_addon_quad_count_1280x720`):**
+  - Expected quad count updated from 40 (or 38) to 29 (or 27 without report policy) because stock `Hud::draw` no longer renders the 11 hardcoded fork extra quads.
+- **`crates/eqoa/src/hud.rs`:**
+  - Removed obsolete native tests for excised native systems:
+    - `mana_bars_sit_under_the_health_they_go_with`
+    - `the_target_of_target_bar_sits_above_the_targets`
+    - `the_target_of_target_is_the_targets_channels`
+  - Replaced by Stage B picture tests in `round_3_picture_tests.rs`.
+- **`crates/eqoa/src/binds.rs`:**
+  - Removed `stats_box` row fixture from `defaults_stay_in_their_slots` test.
+
+### 5. Final Stage C Test Results
+All commands run with lock acquisition protocol, scratch `EQOA_CONFIG`, and target dir `C:/Users/hocka/Paseo/targets/shared`:
+
+| Test Command | Result |
+|---|---|
+| `cargo test --locked -p eqoa --bin eqoa fork_ext::settings::tests::migration_moves_legacy_options_and_binds_into_mods_and_strips_files -- --test-threads=1` | **1 passed; 0 failed; 0 ignored** |
+| `cargo test --locked -p eqoa --bin eqoa fork_ext::addons::round_3_picture_tests:: -- --test-threads=1` | **5 passed; 0 failed; 0 ignored** |
+| `cargo test --locked -p eqoa --bin eqoa forge_hud_ -- --test-threads=1` | **11 passed; 0 failed; 0 ignored** |
+| `cargo test --locked -p eqoa --bin eqoa native_bundled_hearts_once_mode_draws_and_releases_its_health_claim -- --test-threads=1` | **1 passed; 0 failed; 0 ignored** |
+| `cargo test --release --locked -p eqoa --bin eqoa play::fork_hooks::native_tests::performance_busy_world_zero_addons_frame_and_packet_allocation_bound -- --test-threads=1` | **1 passed; 0 failed; 0 ignored** (0.0 allocs/frame) |
+| `cargo check --target wasm32-unknown-unknown` | **0 errors, 0 warnings** |
+| `cargo build --release --locked -p eqoa` | **0 errors, 0 warnings** |
+| `python tools/check_fork_footprint.py --base 5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd` | **PASS**: 0 violations, all 42 shared files within reviewed policy |
+| `git merge-tree --write-tree HEAD 5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd` | **Clean merge** (tree `38c92b...`, 0 conflicts) |
+
+
