@@ -193,3 +193,133 @@ independent lead review, owner live QA, physical touch/browser play, live server
 feature/world checks and optional Forge/oracle/golden fixtures. The reproduced
 upstream GPU failures remain unfixed. The four HUD extras stay as existing code
 until the separately authorized mod-conversion round.
+
+
+**Batch 2: the newly authorized 18-commit merge**
+
+Checkpoint `bb04abe` was committed first, as requested. On top of it, merge
+`38c930f` retains all 18 additional upstream commits through
+`5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd` (95 incoming commits across both batches). The batch adds raid
+windows/leadership marks/loot controls, hat D-pad fixes and Firefox/WebGL2
+context-loss/lighting guards. This completes the batch listed as pending in the
+first checkpoint; no third batch was fetched or silently folded in.
+
+The four manual conflicts were resolved by taking upstream's code as written
+and attaching existing fork behavior:
+
+| File | Upstream retained | Fork retained / reason |
+|---|---|---|
+| `hud.rs` | MemberState.marks, role marks on group bars, all new raid drawing/tests. | Existing MemberState.power remains alongside marks; mana/ToT/Stats Box/numeric hooks unchanged. Neutral marks=0 added only to existing fork fixtures. |
+| `play.rs` | Loot-roll key capture runs first and returns when the roll owns the key; new raid state/menus/events and two field-wise merged initializers. | Existing chat-history hook runs after the upstream ownership check, so it sees unclaimed keys without stealing loot-roll controls. All HUD/API hooks stay. |
+| `viewer.rs` | Browser exits immediately on graphics_lost, before further event-loop uploads. | Native report and Forge event hooks follow the guard. Their native cfg and browser guard are mutually exclusive; native pointer bookkeeping remains. |
+| `net/session.rs` | Full the_raid_windows_are_agreed_read_and_sent test and raid offer/state/roll/master-loot/command handling. | Existing fork power-offer test and its comments remain immediately after the upstream raid test. Only the obsolete vanilla comment describing its already-absent unanswered-power test is omitted. No upstream test/assertion was removed. |
+
+The script automatically merged two one-line Play literals field by field.
+No resolution rerun or implementation fix was needed after this batch's gates.
+New raid modules (`raidplay.rs`, `raidlist.rs`, `rollwnd.rs`, `masterloot.rs`,
+`net/raid.rs`) are identical to this upstream SHA after line-ending normalization.
+The incoming test-name audit loses no tests except the same inherited
+unanswered-power exception documented in Batch 1.
+
+**Raid overlap audit (current source at 38c930f; Batch 1 line references are at b237316)**
+
+- **Group/target power:** the new batch adds no group-power or target-power
+  display. Upstream's MemberState now adds marks, not power; retained fork power
+  is at `hud.rs:121`. The fork's
+  `member_gauges` at `hud.rs:308` and
+  `target_gauges` at `hud.rs:325` still implement
+  those Mana Bars. Upstream already had raid-roster power before this batch:
+  `raidlist.rs:30` and the combined HP/power
+  draw loop at `raidlist.rs:226`.
+  The 82e64c8 version has that same power field/loop; the new change adds role
+  marks and reserves name width for them. Upstream's raid power remains
+  independent of the fork's Mana Bars toggle. Fork member gauges run only in
+  the non-raid branch, so this merge adds no second power strip to raid rows.
+- **Target of Target:** upstream has no new ToT readout/bar. Main-assist is a raid
+  role (`raidplay.rs:27`), and Assist
+  Main Assist is a server command, not a continuously drawn target's-target
+  bar. The fork's ToT draw remains at
+  `hud.rs:540`. Its existing raid/pet
+  layout limit from Batch 1 remains; no replacement was designed.
+- **Stats Box / HUD numbers:** raid State contains leader/helper/assist IDs and
+  loot rules/flags (`crates/net/src/raid.rs:36`), not player stat summaries or
+  HP/power/XP readout formatting. These fork features remain independent. Native
+  role marks draw at `hud.rs:569`;
+  they decorate names without replacing numeric labels or stat summaries.
+- **Placement and input overlap, by code reading:** loot strips start at
+  `[436,164]`, width 196, height 52, up to three (`rollwnd.rs:30` and `:37`).
+  They cover the right-hand quest-tracker/DPS region as upstream describes,
+  rather than the left-hand HUD readouts. A focused item description uses
+  center `[310,240]`, width 250 and up to 14 text rows
+  (`raidplay.rs:291`);
+  that window can extend over the central Stats Box area depending on item
+  height. It draws after the HUD via
+  `play.rs:9001`. This is a potential
+  visual overlap from code reading, not a claimed pixel/live play-test. The
+  roll's R2/right/d-pad ownership at `raidplay.rs:207`
+  takes precedence over the fork history observer, preserving upstream's flow.
+  Normal corpse/master-looter windows remain ordinary game windows. No special
+  new addon claim for the roll panel or item tooltip was added in this sync.
+
+**Batch 2 gates (rerun once on 38c930f)**
+
+Same shared target, mkdir lock, timeouts, scratch configs and CI static-CRT
+settings as Batch 1. Detailed command/exit logs are named batch2-* beside the
+first logs. The sync script's plain --continue performed the second merge
+commit and the required serial tests.
+
+| Gate | Result | Passed | Failed | Ignored | SKIP lines |
+|---|---|---:|---:|---:|---:|
+| Sync client/net/integrations/doc tests | PASS | 2,027 | 0 | 31 | 206 |
+| CI Python tools tests | PASS | 97 | 0 | 0 | 0 |
+| Required addon suite | PASS | 338 | 0 | 24 | 9 |
+| WASM check | PASS | ? | ? | ? | 0 |
+| CI-style full workspace, --no-fail-fast, known foot AO test filtered | FAIL | 2,319 | 2 | 34 | 298 |
+| Notes test | PASS | 1 | 0 | 0 | 0 |
+| Exact optimized allocation gate | PASS | 1 | 0 | 0 | 0 |
+| Untouched 5d54c0c AO/particles16 control | Same two failures | 1 | 2 | 2 | 0 |
+
+The executed GPU failures have exactly the same values as Batch 1, now freshly
+reproduced on an untouched archive of **5d54c0c**: AO factor 54 and particle
+pixel `[163,102,73]` versus `[155,102,73]`. Both tests and the known filtered foot
+AO test remain unchanged. No additional failing test or CI exclusion was added.
+The allocation gate again reports 0 allocations/bytes for menu, frame, event
+and chat. Both fork touch integration tests also remain passing. SKIP categories
+are unchanged (including four symlink privileges, optional pinned Forge data,
+three absent approved goldens, and missing ISO/module/oracle/capture fixtures).
+Counts are per invocation and include prerequisite-return passes as before.
+
+**Batch 2 footprint, rules, final build receipt and remaining work**
+
+reviewed_base is now **5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd**; the pinned-base checker passes.
+No budgets changed: +5,932/-310 = **6,242** changed shared lines, unchanged from
+the first checkpoint, versus 6,498 before this task. Full metrics:
+batch2-footprint-metrics.json; source audit: batch2-source-audit.txt.
+
+`git merge-tree --write-tree --name-only sync/2026-11-10 origin/master` against
+that same SHA returns exit 0, **zero conflicts**, tree `6fbca9c922ca4f76f8a1bd7a4d9a1ed97a563a91`.
+Both upstream targets are ancestors of this branch, in two separate merge commits.
+
+The upstream CLAUDE copy equals 5d54c0c. Additional rules adopted in the fork's
+CLAUDE.md: a lost WebGL2 context stops the event loop before uploads accumulate;
+unsupported WebGL2 lighting stays off through the renderer guard; preserve the
+combined mapped/axis/raw-hat D-pad paths and upstream controller diagnostics.
+
+The final report-only commit is followed by the required static-CRT release
+build, with EQOA_UPDATE_CHANNEL=enhanced-dev and EQOA_BUILD_COMMIT equal to its
+full HEAD. Because that gate must postdate this file's commit, its authoritative
+receipt is **release-final.json/log**, and the final package's independent
+allowlist/PE/source-SHA/checksum verification is **packaging-final.json/log** in
+`C:/Users/hocka/AppData/Local/Temp/eqoa-sync-2026-11-10-gates`. The final response states their actual outcome. The package
+is local only; no publication/push/tag/protected-branch merge is authorized.
+
+After that gate, sync logs/config are archived as target-archive, and the
+worktree target directory plus both disposable upstream-control sources are
+removed. No Cargo cache was created in the worktree. Final status/cleanup
+receipt is retained as final-state.json beside the logs.
+
+Remaining acceptance work: independent lead review; owner live QA; physical
+hat/touch and Firefox/WebGL2 play; live raid/loot/new server features/world
+composition; optional Forge/oracle/golden fixtures. The two upstream GPU-test
+failures remain. The HUD extras still await the separately planned mod conversion.
+No further implementation, merge into develop/enhanced, push or tag was done.

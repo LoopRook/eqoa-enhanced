@@ -426,3 +426,15 @@ No footprint budgets increased. The new upstream server-worlds rule (stream
 one zone through Disc/Sink, preserve composer CRC parity) is adopted in CLAUDE.md.
 See [the report](plans/sync-2026-11-10-report.md) for per-file resolutions,
 HUD overlaps, precise validation counts and remaining live QA.
+
+### Second batch, same sync branch
+
+After checkpoint bb04abe, second merge 38c930f adds 18 commits through
+5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd (raid windows/marks/loot, hat D-pads,
+WebGL2 guards). Four hand conflicts retain upstream raid/guard code and the
+existing HUD/input/report/power hooks. Reviewed base moved to 5d54c0c; budgets
+unchanged, footprint 6242 shared changed lines. Gates rerun once: client/net
+2027 passed, addons 338, tools 97, WASM/notes/optimized gates passed. Workspace
+2319 passed, 2 GPU failures, 34 ignored, 298 SKIP lines; both failures reproduce
+exactly on untouched 5d54c0c. See the report second section for overlaps, the
+zero-conflict dry run and final post-commit release/package receipts.
