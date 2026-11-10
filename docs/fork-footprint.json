@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "reviewed_base": "91f9e72dd6d111e20a37b73cea461444a18ad79c",
-  "review_state": "Upstream sync 2026-11-07 through eb5916b (AGPL relicence). Re-based from b8e02cd; render/ui.rs takes upstream's text/text_scaled (+86/-3); NOTICE added as a shared path; bindpage/binds/hud/options/play raised to measured for the union with upstream's raid list, chat selection, macro keys and bug-report offer. Cargo manifests now carry upstream's AGPL-3.0-or-later. 2026-11-07 private repo retired: the live shard compatibility code (session.rs client check, s2.rs device-block signature, net sha2) is now public source. Official releases build and publish from this repository's tags (official-release.yml). 2026-11-08 sync to 72a7d48 (17 commits: combat record, server races at creation, /bug form, raid power, spell book scrolling): budgets unchanged, footprint PASS. 2026-11-08 Round 2: owner approved play.rs +4 (755 to 759) for neutral iteration, begin/end event capture, and logical text observation; combat reuses its existing RGB-extended call. Viewer controller observations fit its existing budget. 2026-11-09 Nightly labels: logfile +9/-1 (one one-line label swap) and update.rs +4/-4 (one test-line skip for the non-dated Unreleased section). Sync 2026-11-09: owner combine decision, map restoration reconciled; explicit shared budget reasons recorded per file. Round 2.5 (2026-11-10): preserve options categories/settings-defaults hook corrections; classify the map family as shared, delete ten obsolete budgets and tighten every retained maximum to its measured value. Newly classified map entries expose existing code, not new allowance for edits.",
+  "reviewed_base": "5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd",
+  "review_state": "Upstream sync 2026-11-07 through eb5916b (AGPL relicence). Re-based from b8e02cd; render/ui.rs takes upstream's text/text_scaled (+86/-3); NOTICE added as a shared path; bindpage/binds/hud/options/play raised to measured for the union with upstream's raid list, chat selection, macro keys and bug-report offer. Cargo manifests now carry upstream's AGPL-3.0-or-later. 2026-11-07 private repo retired: the live shard compatibility code (session.rs client check, s2.rs device-block signature, net sha2) is now public source. Official releases build and publish from this repository's tags (official-release.yml). 2026-11-08 sync to 72a7d48 (17 commits: combat record, server races at creation, /bug form, raid power, spell book scrolling): budgets unchanged, footprint PASS. 2026-11-08 Round 2: owner approved play.rs +4 (755 to 759) for neutral iteration, begin/end event capture, and logical text observation; combat reuses its existing RGB-extended call. Viewer controller observations fit its existing budget. 2026-11-09 Nightly labels: logfile +9/-1 (one one-line label swap) and update.rs +4/-4 (one test-line skip for the non-dated Unreleased section). Sync 2026-11-09: owner combine decision, map restoration reconciled; explicit shared budget reasons recorded per file. Round 2.5 (2026-11-10): preserve options categories/settings-defaults hook corrections; classify the map family as shared, delete ten obsolete budgets and tighten every retained maximum to its measured value. Newly classified map entries expose existing code, not new allowance for edits. Sync 2026-11-10: merged upstream 82e64c8 (77 commits); kept upstream options/touch/HUD/protocol additions and appended fork pages. Removed duplicate GM travel method/test and moved circular-rim geometry to fork_ext. No shared-file budgets increased. Second batch 2026-11-10: 18 more upstream commits through 5d54c0c (raid windows/marks, hat D-pad and WebGL2 guards); keep upstream changes with existing HUD/input/report hooks. No budgets increased.",
   "fork_owned": [
     "AGENTS.md",
     ".gitattributes",
@@ -131,8 +131,8 @@
       "reason": "Existing fork integration plus native report adapter registration and one-line input, draw, screenshot/surface hooks; preserve upstream resize and Android code."
     },
     "crates/net/src/session.rs": {
-      "added": 281,
-      "deleted": 27,
+      "added": 218,
+      "deleted": 23,
       "reason": "Restored group/map/quest protocol state and upstream unanswered offers test (re-baselined at sync 2026-10-31). Live shard 0x7F53/0x7F54 client check and its test (docs/LIVE-CLIENT-COMPATIBILITY.md)."
     },
     "crates/render/src/ui.rs": {
@@ -206,7 +206,7 @@
       "reason": "Sync 2026-11-09 Windows CI fixture correction only: synthesize drive-qualified absolute fixture paths on Windows so upstream AppImage absolute-path and negative controls run there; production code is unchanged."
     },
     "crates/eqoa/src/map/chrome.rs": {
-      "added": 327,
+      "added": 304,
       "deleted": 19,
       "reason": "Round 2.5 ownership correction: map family is shared after upstream restored it. Exact measured divergence at the reviewed base; no game code changed in this classification. New files in this family are counted in full."
     },

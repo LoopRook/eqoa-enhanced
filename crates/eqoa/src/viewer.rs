@@ -127,7 +127,9 @@ pub fn lit(
 
 /// What is on screen.
 pub enum Source {
-    Models { list: Vec<(i32, Ref)>, index: usize },
+    /// The models listed and the one shown, in a server's body tint when
+    /// given one (`npctint`: `eqoa shot ... tint=RRGGBBAA`).
+    Models { list: Vec<(i32, Ref)>, index: usize, tint: Option<u32> },
     Zone { file: usize, zone: esf::NodeId, index: usize },
     /// A zone with the character in it, walking: at `spawn` when a server
     /// gave the place.
@@ -143,10 +145,13 @@ impl Source {
             // the model as the library's view has it now (`era`: F9 turns a
             // listed model to the 2002 disc's record of its DictID), built
             // whole in that view
-            Source::Models { list, index, .. } => {
+            Source::Models { list, index, tint } => {
                 let (id, r) = list[*index];
-                let m = lib.with_view(lib.view_for(id), || lib.build_model(lib.lookup(id).unwrap_or(r)));
-                scene::model(id, m.unwrap_or_default())
+                let mut m = lib.with_view(lib.view_for(id), || lib.build_model(lib.lookup(id).unwrap_or(r))).unwrap_or_default();
+                if let Some(t) = tint {
+                    crate::npctint::apply(&mut m, *t);
+                }
+                scene::model(id, m)
             }
             Source::Zone { file, zone, index } => scene::zone(lib, *file, *zone, *index),
             // Only for the spawn point: a walk's zones are streamed. (A world
@@ -351,6 +356,8 @@ pub fn shot_with(
     renderer.set_shadow_distance(crate::settings::shadow_scale());
     renderer.set_ps2_sums(render::fog16::supported(&adapter));
     renderer.set_ps2_sequential(fog_sequential());
+    // the particles' blend (kept only under `$EQOA_CONFIG` for a shot)
+    renderer.set_ps2_particles(crate::settings::client().ps2_particles);
     renderer.scroll_time = Some(script.as_ref().map_or(0, |s| s.ms) as f32 / 1000.0);
     // the options' Texture Packs and Dump Textures (kept only under
     // `$EQOA_CONFIG` for a shot), before a texture is made, every stand-in
@@ -383,6 +390,17 @@ pub fn shot_with(
             && let Some(cs) = walker.sprite.as_mut()
         {
             crate::raceemote::grant_air(lib, cs, &mut walker.anims, shot_body(), true, true);
+        }
+        // a race's body swimming as on a server with races of its own
+        // (`EQOA_SWIM`): the human's swim on a body with none of its own
+        // (`raceemote::put_swim`), but the pixie's and the fairy's
+        // (`SWIM_NONE`), whatever the race table says of the body (a shot has
+        // no race options to map another body of a race to its own)
+        if std::env::var_os("EQOA_SWIM").is_some()
+            && !crate::raceemote::SWIM_NONE.contains(&shot_body())
+            && let Some(cs) = walker.sprite.as_mut()
+        {
+            crate::raceemote::put_swim(lib, cs, &mut walker.anims, [crate::raceemote::Pose::Human; 2]);
         }
         // 60 frames a second of game time, the controls held throughout.
         let script = script.unwrap_or(Script { ms: 0, controls: Controls::default() });
@@ -465,7 +483,7 @@ pub fn shot_with(
                 p.map.show();
             }
             touch.window = play.as_ref().is_some_and(|p| p.window_up() || p.map.open || p.map.search.open);
-            touch.scale = crate::settings::touch_scale();
+            touch.opts = crate::settings::touch_options();
             for (_, id, phase, at) in touch_script.iter().filter(|e| e.0 == t) {
                 touch.touch(*id, *phase, *at, Instant::now(), (w, h));
             }
@@ -854,8 +872,10 @@ pub fn shot_with(
                 {
                     p.fake_quests(&q);
                 }
-                // `EQOA_DAMAGE=<attacker>,<amount>,<defender>@ms;...`: 0x00DBs
-                // then (self, target or a hex id).
+                // `EQOA_DAMAGE=<attacker>,<amount>,<defender>[,<tag>]@ms;...`:
+                // 0x00DBs then (self, target or a hex id), a fourth field the
+                // number's tag in hex (`numcolor`: 05 a proc, 86 the pet's heal),
+                // read as from a server that offered tags.
                 // `EQOA_DIE=ms`: the player dies then, as 0x005E says.
                 if let Ok(v) = std::env::var("EQOA_DIE")
                     && let Ok(ms) = v.parse::<i64>()
@@ -868,10 +888,11 @@ pub fn shot_with(
                         if let Some((hit, ms)) = part.rsplit_once('@')
                             && let Ok(ms) = ms.parse::<i64>()
                             && t == ms / 16 * 16
-                            && let [a, n, d] = hit.split(',').collect::<Vec<_>>()[..]
+                            && let [a, n, d, ref tag @ ..] = hit.split(',').collect::<Vec<_>>()[..]
                             && let Ok(n) = n.parse::<i64>()
                         {
-                            p.fake_damage(a, n, d, walker.cam.camera_mode);
+                            let tag = tag.first().and_then(|t| u8::from_str_radix(t.trim().trim_start_matches("0x"), 16).ok());
+                            p.fake_damage_tagged(a, n, d, tag, walker.cam.camera_mode);
                         }
                     }
                 }
@@ -1551,7 +1572,8 @@ fn held_name(k: &Key) -> Option<String> {
 /// `EQOA_BODY=<DictID>` (hex, 0x optional): the body a walk shot plays,
 /// the human's (`HUMAN`) unless said. With `EQOA_JUMP`, as on a server with
 /// jumps: a body the race table lists falls and lands as it has it
-/// (`raceemote::grant_air`).
+/// (`raceemote::grant_air`); with `EQOA_SWIM`, as on a server with races of
+/// its own: one with no swim of its own swims as the human (`raceemote::put_swim`).
 pub fn shot_body() -> u32 {
     std::env::var("EQOA_BODY").ok().and_then(|v| u32::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok()).unwrap_or(HUMAN as u32)
 }
@@ -2046,7 +2068,7 @@ struct App {
     keys_edge: crate::binds::KeyEdge,
     pad_edge: crate::binds::PadEdge,
     /// the player's macros running (`macros`), and whether this frame drawn
-    /// is one of the game's (their turbo counts those)
+    /// is one of the game's (they act at those, two fields each)
     macro_run: crate::macros::Run,
     macro_frame: bool,
     /// The left stick held past the walk's run threshold once past it
@@ -2176,7 +2198,7 @@ pub fn run_boot(server: Option<String>) -> Result<(), Error> {
 /// `run_boot` on a surface made beforehand (a page's).
 pub fn run_boot_gfx(server: Option<String>, pending: Option<PendingGfx>) -> Result<(), Error> {
     let host = crate::pregame::host::Host::new(crate::pregame::Pregame::new(server), 0);
-    run_app(Library::new(), Source::Models { list: Vec::new(), index: 0 }, None, pending, Some(host))
+    run_app(Library::new(), Source::Models { list: Vec::new(), index: 0, tint: None }, None, pending, Some(host))
 }
 
 /// `run_with` on a surface made beforehand. In a browser the loop is handed
@@ -2797,7 +2819,10 @@ impl App {
                         p.set_key(k, false, w, aspect);
                     }
                 }
-                Sent::Macro(m) => crate::settings::with_binds(|b| self.macro_run.key(m, false, b)),
+                Sent::Macro(name) => {
+                    let now = self.clock.elapsed().as_secs_f64() * 1000.0;
+                    crate::settings::with_binds(|b| self.macro_run.key(&name, false, now, b));
+                }
             }
         }
         // a toggled macro does not run on behind a window that lost the keys
@@ -2857,36 +2882,47 @@ impl App {
         }
         // the player's own buttons (`binds`, the client's): the controllers'
         // (and a script's, which stands for one) on the game's fields; while
-        // the Controls page waits for a button the one pressed is its, and
-        // the game sees nothing of it. The touch screen's pad draws the
-        // game's glyphs, and stays as it is.
-        let capturing = self.play.as_ref().is_some_and(|p| p.capturing().is_some());
+        // the Controls or Macros page waits for a button the ones pressed
+        // are its, and the game sees nothing of them. The touch screen's
+        // pad draws the game's glyphs, and stays as it is.
+        let capture = self.play.as_ref().and_then(|p| p.capturing());
+        let capturing = capture.is_some();
         let f = crate::settings::with_binds(|b| self.pad_edge.frame(report.buttons, capturing, b));
+        // the macros' triggers read the controllers as they hold them
+        let held = crate::macros::Held { buttons: f.held, sticks: report.sticks, triggers: report.triggers };
         report.buttons = f.fields;
-        // every button a capture took, in order (a macro's buttons take them
-        // all; any other capture the first, and is done)
+        // a stick's way in a macro's trigger is the trigger's, not the game's
+        report.sticks = crate::settings::with_binds(|b| b.mask_ways(report.sticks));
+        // every button a capture took, in order (a trigger takes them all;
+        // any other capture the first, and is done), those it took let go
+        // (a trigger is kept at the first), and the sticks for a trigger
         if let Some(p) = self.play.as_mut() {
             for i in (0..16u8).filter(|i| f.caught & (1 << i) != 0) {
                 p.capture_button(i);
             }
-        }
-        // the player's macros (`macros`, the client's): the buttons they
-        // press join the controllers', as the game sees a pad's; none while
-        // the Controls page waits for a key or a button
-        if capturing {
-            self.macro_run.let_go();
-        } else {
-            let game_frame = self.macro_frame;
-            let pressed = crate::settings::with_binds(|b| self.macro_run.frame(f.macros, game_frame, b));
-            if pressed != 0 && crate::input::trace() && report.buttons & pressed != pressed {
-                crate::say(&format!("[pad] macros press {}", crate::input::bit::name(pressed)));
+            if capture == Some(crate::bindpage::Column::Trigger) {
+                for i in (0..16u8).filter(|i| f.let_go & (1 << i) != 0) {
+                    p.capture_button_up(i);
+                }
+                p.capture_axes(held.sticks);
             }
-            report.buttons |= pressed;
         }
         if self.touch.used {
             report.merge(&self.touch.report());
             connected = true;
         }
+        // the player's macros (`macros`, the client's): the pad as they and
+        // every source set it (PCSX2's), the game's frames their clock;
+        // none while a page waits for a key, a button or a trigger
+        let now = self.clock.elapsed().as_secs_f64() * 1000.0;
+        let game_frame = self.macro_frame;
+        let before = report.buttons;
+        report = crate::settings::with_binds(|b| self.macro_run.frame(now, game_frame, capturing, &held, &report, b));
+        if report.buttons != before && crate::input::trace() {
+            crate::say(&format!("[pad] macros: {:#06x} (the sources {before:#06x})", report.buttons));
+        }
+        // a macro set up: the pad is there from then on, controller or none
+        connected |= self.macro_run.connects();
         let dead = self.play.as_ref().is_some_and(|p| p.is_dead());
         crate::fork_ext::prepare_controls(&mut report, connected, true);
         let keys = self.console.poll(report, connected, motors, dead);
@@ -3057,8 +3093,8 @@ impl App {
         }
         match whose {
             Finger::Pad => {
-                // at the size the options give it now (Touch Pad Size)
-                self.touch.scale = crate::settings::touch_scale();
+                // as the options have it now (the Extended page's touch rows)
+                self.touch.opts = crate::settings::touch_options();
                 self.touch.touch(id, phase, at, Instant::now(), size);
                 if let Some(p) = self.play.as_mut() {
                     p.keyboard = false;
@@ -3281,13 +3317,24 @@ impl App {
             report.merge(&s.at(self.clock.elapsed().as_millis() as i64));
             connected = true;
         }
-        // the player's own buttons, and a capture's for the title's Controls page
-        let capturing = self.host.as_ref().is_some_and(|h| h.pre.setup.capturing().is_some());
-        let f = crate::settings::with_binds(|b| self.pad_edge.frame(report.buttons, capturing, b));
-        report.buttons = f.fields;
-        if let (Some(i), Some(h)) = (f.took, self.host.as_mut()) {
-            h.pre.setup.capture_button(i);
+        // the player's own buttons, and a capture's for the title's Controls
+        // and Macros pages (a trigger's: every button pressed, those let go,
+        // the sticks)
+        let capture = self.host.as_ref().and_then(|h| h.pre.setup.capturing());
+        let f = crate::settings::with_binds(|b| self.pad_edge.frame(report.buttons, capture.is_some(), b));
+        if let Some(h) = self.host.as_mut() {
+            for i in (0..16u8).filter(|i| f.caught & (1 << i) != 0) {
+                h.pre.setup.capture_button(i);
+            }
+            if capture == Some(crate::bindpage::Column::Trigger) {
+                for i in (0..16u8).filter(|i| f.let_go & (1 << i) != 0) {
+                    h.pre.setup.capture_button_up(i);
+                }
+                h.pre.setup.capture_axes(report.sticks);
+            }
         }
+        report.buttons = f.fields;
+        report.sticks = crate::settings::with_binds(|b| b.mask_ways(report.sticks));
         // a button on F9's row: the art swapped, as F9 does before the world
         // (the other rows of the client's keys are play's)
         if f.rows.iter().any(|&(row, down)| down && crate::binds::ROWS[row].id == "art") {
@@ -3320,7 +3367,7 @@ impl App {
         // mouse's); its drags scroll nothing (no screen before the world
         // takes the wheel)
         self.touch.window = true;
-        self.touch.scale = crate::settings::touch_scale();
+        self.touch.opts = crate::settings::touch_options();
         let taps = self.touch.take_clicks();
         let _ = self.touch.take_look();
         if let (Some(h), Some(g)) = (self.host.as_mut(), self.gfx.as_ref()) {
@@ -3473,7 +3520,7 @@ impl App {
         self.lib = Library::new();
         // the pregame's own art, applied at the next frame (`poll_era`)
         self.art_drawn = self.lib.view();
-        self.source = Source::Models { list: Vec::new(), index: 0 };
+        self.source = Source::Models { list: Vec::new(), index: 0, tint: None };
         self.grab_pointer(false);
         let now = self.clock.elapsed().as_millis() as i64;
         self.host = Some(crate::pregame::host::Host::new(crate::pregame::Pregame::back(shared, disconnect, now), now));
@@ -4166,7 +4213,9 @@ impl App {
             }
             // the options, buddy and ignore lists and the guild's
             // roster (modes 34, 17/18, 26, 20/21): arrows, Enter or
-            // E, Escape; C (the windows' ○) the roster's sort
+            // E, Escape; C (the windows' ○) the roster's sort; Q (□),
+            // ` (L1) and Tab (R1) the Macros page's (a trigger off, a
+            // slider by ten)
             if p.panel_up() {
                 let k = match &event.logical_key {
                     Key::Named(NamedKey::ArrowUp) => Some(K::UP),
@@ -4176,6 +4225,9 @@ impl App {
                     Key::Named(NamedKey::Enter) => Some(K::CROSS),
                     Key::Character(c) if c.eq_ignore_ascii_case("e") => Some(K::CROSS),
                     Key::Character(c) if c.eq_ignore_ascii_case("c") => Some(135),
+                    Key::Character(c) if c.eq_ignore_ascii_case("q") => Some(133),
+                    Key::Character(c) if c == "`" => Some(140),
+                    Key::Named(NamedKey::Tab) => Some(142),
                     Key::Named(NamedKey::Escape) | Key::Named(NamedKey::Backspace) => Some(K::ESCAPE),
                     _ => None,
                 };
@@ -4387,7 +4439,8 @@ impl App {
         }
         // C (67, 99) held: the chat box's history, as R2 holds it
         // (mode 33), its up and down the arrows (19, 20); let go,
-        // play again (`OnKeyDown`/`OnKeyUp` 67, `VIWndChat`).
+        // play again (`OnKeyDown`/`OnKeyUp` 67, `VIWndChat`). A loot
+        // roll's strips take the arrows and Enter as the d-pad's.
         if let Some(p) = self.play.as_mut()
             && (p.mode == 0 || p.mode == 33)
         {
@@ -4396,6 +4449,12 @@ impl App {
                 Key::Character(c) if c.eq_ignore_ascii_case("c") => Some(99),
                 Key::Named(NamedKey::ArrowUp) if p.mode == 33 => Some(19),
                 Key::Named(NamedKey::ArrowDown) if p.mode == 33 => Some(20),
+                // a loot roll's strips up (`raidplay`): right gives them the
+                // arrows, as the d-pad's right with R2 held; left, right and
+                // Enter then the choice and its making
+                Key::Named(NamedKey::ArrowRight) if p.mode == 33 && p.rolls_up() => Some(18),
+                Key::Named(NamedKey::ArrowLeft) if p.mode == 33 && p.rolls_focused() => Some(17),
+                Key::Named(NamedKey::Enter) if p.mode == 33 && p.rolls_focused() => Some(13),
                 _ => None,
             };
             if let Some(k) = k
@@ -4742,6 +4801,14 @@ impl ApplicationHandler for App {
     /// Each window event, its time the client's own when it draws no frame
     /// (`stall`).
     fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        // a page whose WebGL2 context the browser took away draws nothing
+        // more, and its frames' uploads would be held until the heap ran out
+        // (`web::graphics_lost`, said on the page): the client stops here
+        #[cfg(target_arch = "wasm32")]
+        if crate::web::graphics_lost() {
+            el.exit();
+            return;
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if fork_report::event(self, el, &event) { return; }
         #[cfg(not(target_arch = "wasm32"))]
@@ -5009,14 +5076,18 @@ impl App {
             // the title's Options' Controls page waiting for a key: it is
             // the page's, as play's is
             let host = self.host.as_mut().unwrap();
-            if host.pre.setup.capturing().is_some()
-                && event.state == ElementState::Pressed
+            if let Some(c) = host.pre.setup.capturing()
                 && !event.repeat
                 && let Some(name) = crate::binds::name_of(&event.logical_key)
             {
-                host.pre.setup.capture_key(&name);
-                self.keys_edge.hold_back(&name);
-                return;
+                if event.state == ElementState::Pressed {
+                    host.pre.setup.capture_key(&name);
+                    self.keys_edge.hold_back(&name);
+                    return;
+                }
+                if c == crate::bindpage::Column::Trigger {
+                    host.pre.setup.capture_key_up(&name);
+                }
             }
             if let Some(k) = pregame_key(&event.logical_key) {
                 let down = event.state == ElementState::Pressed;
@@ -5056,18 +5127,23 @@ impl App {
                 p.keyboard = true;
             }
         }
-        // The Controls page waiting for a key (`bindpage`): the key
-        // pressed is its, as it is, and nothing else sees it or its
-        // release.
+        // The Controls or Macros page waiting for a key (`bindpage`,
+        // `macropage`): the key pressed is its, as it is, and nothing else
+        // sees it or its release; a trigger awaited takes the release too
+        // (it is kept at the first)
         if let Some(p) = self.play.as_mut()
-            && p.capturing().is_some()
-            && event.state == ElementState::Pressed
+            && let Some(c) = p.capturing()
             && !event.repeat
             && let Some(name) = crate::binds::name_of(&event.logical_key)
         {
-            p.capture_key(&name);
-            self.keys_edge.hold_back(&name);
-            return;
+            if event.state == ElementState::Pressed {
+                p.capture_key(&name);
+                self.keys_edge.hold_back(&name);
+                return;
+            }
+            if c == crate::bindpage::Column::Trigger {
+                p.capture_key_up(&name);
+            }
         }
         // The player's own keys (`binds`, the client's, at the edge):
         // a key a row was moved onto is that row's default key to all
@@ -5099,10 +5175,11 @@ impl App {
                         return;
                     }
                     // a macro's key: its buttons pressed as the pad's
-                    // (`macros`), from the next pad poll
-                    Some(Sent::Macro(m)) => {
+                    // (`macros`), from the game's next frame
+                    Some(Sent::Macro(name)) => {
                         if !event.repeat {
-                            crate::settings::with_binds(|b| self.macro_run.key(m, down, b));
+                            let now = self.clock.elapsed().as_secs_f64() * 1000.0;
+                            crate::settings::with_binds(|b| self.macro_run.key(&name, down, now, b));
                             if let Some(p) = self.play.as_mut() {
                                 p.keyboard = true;
                             }
@@ -5346,7 +5423,7 @@ impl App {
                     let took = match (self.play.as_mut(), self.gfx.as_ref()) {
                         (Some(p), Some(g)) => {
                             let size = (g.config.width, g.config.height);
-                            p.chat_wheel(self.cursor, size, d) || p.raid_wheel(self.cursor, size, d) || p.book_wheel(self.cursor, size, d)
+                            p.chat_wheel(self.cursor, size, d) || p.raid_wheel(self.cursor, size, d) || p.meter_wheel(self.cursor, size, d) || p.book_wheel(self.cursor, size, d)
                         }
                         _ => false,
                     };
@@ -5574,7 +5651,7 @@ impl App {
                 }
                 self.touch.holds = self.play.as_ref().is_some_and(|p| p.map.open);
                 self.touch.window = self.play.as_ref().is_some_and(|p| p.window_up() || p.map.open || p.map.search.open);
-                self.touch.scale = crate::settings::touch_scale();
+                self.touch.opts = crate::settings::touch_options();
                 mark(&mut self.perf, 17);
                 self.grab_pointer(true);
                 let sticks = self.sticks();
@@ -5720,7 +5797,26 @@ impl App {
                         if let Some(s) = streamer.as_mut() {
                             s.relight(&g.renderer, &g.device);
                         }
+                        // what a page's WebGL2 refused of them: said, and
+                        // left off (`Renderer::refusals`)
+                        for r in g.renderer.refusals() {
+                            crate::say(&format!("lighting refused by the browser's WebGL2: {r}"));
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                let (what, why) = r.split_once(": ").unwrap_or((r.as_str(), ""));
+                                crate::web::problem(
+                                    "lighting",
+                                    &format!("{what} left off: this browser's graphics (WebGL2) would not take it ({why}). The rest of the game draws as before."),
+                                );
+                            }
+                        }
+                        if let Some(f) = g.renderer.light_shadow_filter().filter(|_| light_shadows && dynamic) {
+                            crate::say(&format!("light shadows' filter: {f:?}"));
+                        }
                     }
+                    // the particles' blend as the options have it (Particles:
+                    // PS2, the 16-bit frame's; Exact, eight bits a channel)
+                    g.renderer.set_ps2_particles(crate::settings::client().ps2_particles);
                     if let Some(s) = streamer.as_mut() {
                         // One zone a frame, as the game's loader takes them;
                         // under the loading screen all at once.
@@ -6184,7 +6280,7 @@ mod tests {
         let list = crate::scene::list_models(&lib, f);
         lib.stand_in(f, esf::Container::open(iso::Iso::open(&y2002).unwrap().read("CHAR.ESF").unwrap()).unwrap());
         let index = list.iter().position(|(id, _)| *id == HUMAN).unwrap();
-        let src = Source::Models { list, index };
+        let src = Source::Models { list, index, tint: None };
         let verts = |lib: &Library| src.scene(lib).parts.iter().map(|(m, _)| m.pos.len()).sum::<usize>();
         assert_eq!(verts(&lib), 3644, "Frontiers' human");
         lib.set_view(esf::Era::Y2002);

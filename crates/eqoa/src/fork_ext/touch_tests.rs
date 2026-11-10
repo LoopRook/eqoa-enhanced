@@ -8,7 +8,7 @@ use web_time::{Duration, Instant};
 fn upstream_touch_dpad_reaches_quick_chat_and_releases_without_a_click() {
     let size = (1280, 720);
     let now = Instant::now();
-    let layout = crate::touch::layout(size, 1.0);
+    let layout = crate::touch::layout(size, &crate::touch::Opts::default());
     let mut pad = TouchPad::new(true);
     pad.window = true;
     for (direction, key) in [

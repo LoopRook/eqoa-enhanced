@@ -26,6 +26,9 @@
 
 mod bgm;
 mod disc;
+// a server's own worlds, built off the disc into the origin's storage
+// (`crate::serverworlds`, web/worlds.js)
+mod worlds;
 // the GM panel's spell-visual preview (`crate::fxview`, web/fxview.html)
 mod fxview;
 pub mod pad;
@@ -516,6 +519,9 @@ async fn gfx(canvas: web_sys::HtmlCanvasElement) -> Result<viewer::PendingGfx, S
             crash("The graphics stopped", &format!("the graphics device was lost ({reason:?}): {message}"));
         }
     });
+    if info.backend == wgpu::Backend::Gl {
+        watch_webgl(&canvas);
+    }
     let mut config = surface.get_default_config(&adapter, w, h).ok_or("the surface cannot be configured")?;
     // The bytes go out as the GS's do: no sRGB encode (render::TARGET_FORMAT).
     config.format = config.format.remove_srgb_suffix();
@@ -523,6 +529,47 @@ async fn gfx(canvas: web_sys::HtmlCanvasElement) -> Result<viewer::PendingGfx, S
     let attrs = winit::window::Window::default_attributes().with_canvas(Some(canvas)).with_title("EQOA");
     let ps2_sums = render::fog16::supported(&adapter);
     Ok(viewer::PendingGfx { attrs, surface, config, device, queue, ps2_sums })
+}
+
+thread_local! {
+    /// The browser took the page's WebGL2 context away (`watch_webgl`).
+    static WEBGL_LOST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the browser took the page's WebGL2 context away: nothing drawn
+/// after it shows, and the client stops (`viewer`'s `window_event`).
+pub fn graphics_lost() -> bool {
+    WEBGL_LOST.with(std::cell::Cell::get)
+}
+
+/// A WebGL2 context the browser takes away (its graphics process restarted,
+/// a driver reset or hang, the graphics memory run out: Firefox does it
+/// where Chromium's WebGPU loses its device) draws nothing more, and wgpu's
+/// GL backend is never told: its fences never signal, so every frame's
+/// uploads were held for good, about 60 MB of the heap a second, until its
+/// 4 GB ran out a minute later and the client stopped on an `unreachable`
+/// with nothing to say why (in Firefox, `WEBGL_lose_context`: a black canvas
+/// at 30 fps, 259 MB to 4,095 MB in 70 s). The page's `webglcontextlost`
+/// says so at once and the client stops there, as a lost WebGPU device does.
+fn watch_webgl(canvas: &web_sys::HtmlCanvasElement) {
+    let lost = Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
+        if WEBGL_LOST.with(|l| l.replace(true)) {
+            return;
+        }
+        let lighting = crate::settings::client();
+        let heavy = if lighting.dynamic_lighting && (lighting.light_shadows || lighting.sun_shadows) {
+            " If it happens again, turn off Light Shadows and Sun Shadows (Options, Extended, Lighting): they ask the most of the graphics card."
+        } else {
+            ""
+        };
+        crash(
+            "The graphics stopped",
+            &format!("the browser took the game's WebGL2 context away (its graphics process restarted, the graphics driver reset, or the graphics memory ran out).{heavy}"),
+        );
+    });
+    if canvas.add_event_listener_with_callback("webglcontextlost", lost.as_ref().unchecked_ref()).is_ok() {
+        lost.forget();
+    }
 }
 
 /// Files every scene loads after its own (main.rs's `SHARED`).
@@ -595,7 +642,7 @@ pub async fn view(file: web_sys::File, args: String) -> Result<(), JsValue> {
                 if list.is_empty() {
                     return Err(format!("{name} has no models"));
                 }
-                viewer::Source::Models { list, index }
+                viewer::Source::Models { list, index, tint: None }
             }
             _ => return Err("expected [model], zone <n> or walk <n>".into()),
         };
@@ -713,6 +760,15 @@ pub async fn boot(file: web_sys::File, opts: JsValue) -> Result<(), JsValue> {
         crate::stream::set_world_opener(disc.world_opener());
         // the 2002 disc's art (`era`, F9): its reader and its ask
         hooks_2002();
+        // a server's own worlds, built off this disc into the origin's
+        // storage (`worlds`) where this browser can keep them; elsewhere the
+        // server's offer is not taken, and a character of such a world starts
+        // in its home city
+        if worlds::usable().await {
+            worlds::install(disc.file());
+        } else {
+            log("server worlds: this browser cannot keep them (no private storage for the page): a server's own world is not built here");
+        }
         let (frontiers, which) = crate::discs::describe(disc.boot().await.as_deref());
         if !frontiers {
             problem("disc", &which);
@@ -812,10 +868,19 @@ fn world_loader(disc: &WebDisc) -> crate::pregame::host::WorldLoader {
                         twin_zones = crate::stream::fill_set(&lib, main, x, z).iter().map(|w| w.0).collect();
                         (main, d2.fill(&mut lib, main, x, z).await?)
                     }
-                    None => {
-                        let main = add(&mut lib, &mut d, &world).await?;
-                        (main, d.fill(&mut lib, main, x, z).await?)
-                    }
+                    // a server's own world (`worlds`): its file in the
+                    // origin's storage, read as a disc of that one file
+                    None => match worlds::disc_of(&world) {
+                        Some(mut w) => {
+                            status(&format!("reading {world} (built from the disc, kept in this browser)"));
+                            let main = add(&mut lib, &mut w, &world).await?;
+                            (main, w.fill(&mut lib, main, x, z).await?)
+                        }
+                        None => {
+                            let main = add(&mut lib, &mut d, &world).await?;
+                            (main, d.fill(&mut lib, main, x, z).await?)
+                        }
+                    },
                 };
                 log(&format!("{n} zones read round the spawn"));
                 for name in SHARED.iter().copied().chain(["CHAR.ESF", "ITEM.ESF", "ARIAL.CSF", "UI.CSF", "ARIALUI.CSF", "ITEMICON.ESF", "SPELLFX.CSF", "FX.CSF", "ADDART.CSF"]) {

@@ -15,6 +15,20 @@ current.
   Extended options, the updater, the 2002 disc's art on F9, Hide UI
   on H, names from farther and smaller zoomed out (and every one in a crowd, Overlapping Names Show),
   the raid list on a server that has raid groups (the user's of 2026-11-07: `raidlist`, an Extended row, on by default),
+  a raid's windows on a server that sends them (the GM Jibrish's petitions 1448 and 1451, 2026-11-10: the leader's,
+  helper's and main assist's marks in the raid list, the loot rolls' pop-up, Community > Group > Raid and the master
+  looter's menu on a corpse: `raidplay`, `rollwnd`, `masterloot`, go-eqoa-server's 0x7E42-0x7E48; on any other
+  server none of it, and the start menu the game's),
+  the pet's effects in a row under its bar on a server that sends them (the server owner's of 2026-11-09, "put the
+  buff icons under the pet name plate": `hud::pet_effects_pieces`, go-eqoa-server's 0x7E32/0x7E33, Extended > UI's
+  Pet Effects, on by default; off, or on any other server, nothing is drawn),
+  the floating numbers of the player's own figures and its pet's in a colour chosen for what made them on a server
+  that tags them (the server owner's of 2026-11-09, "we can add the number colors to extended menu": `numcolor`,
+  go-eqoa-server's 0x7E38/0x7E39 and one byte after 0x00DB's body, Extended > Number Colors; every row Default, the
+  game's own colour, until chosen),
+  a DPS meter of the player's group on a server that keeps one (the server owner's of 2026-11-10, "lets add dps meters,
+  will work solo, group, raid": `dpsmeter`, go-eqoa-server's 0x7E3A-0x7E3D, a HUD panel under the quest tracker,
+  `/dps`, Extended > Combat, off by default; off, or on any other server, nothing is drawn or asked),
   Ignore Shouts kept, Update Notices, Text Sharp or Smooth, Loading Screens Longer or Instant, Render
   Scale x1, x2 or x4 (off unless chosen), HUD Nearest or Sharp (Nearest, the game's, by default: the
   user's of 2026-10-28, "make nearest the default ... since there is a cost"; Sharp was the default
@@ -46,14 +60,20 @@ current.
   eqoaclassic.com on any server), the waypoints and the group's waypoint, the minimap on N; the quest marks on
   the map and the minimap and the quest tracker from a server that sends them, else the client's own quest
   guide's, labelled "(guide)"; the Map and the Quest Helper off are the game without them, exactly. The Stats
-  Box, others' mana bars and Target of Target stay out)).
+  Box, others' mana bars and Target of Target stay out; the owner's "they are everywhere" the same day: the
+  minimap's rim keeps only the player's own steps' "?", a "!" only where it lies, and the server marks a quest's
+  name once near the player's level; and a GM's Ctrl+click on the map travels there, offered by go-eqoa-server
+  to a GM's client alone, 0x7E34/0x7E35)).
   `render::lit`, `lights.rs`; off it is the PS2's light exactly, every test and oracle unchanged, and `vi` untouched), and Sun
   Shadows (2026-11-08: Extended > Lighting, off unless chosen, drawn only with Dynamic Lighting; `render::sunshadow`; off, every
   frame byte for byte as before, on Vulkan and GL)).
   there is no pass at all, the picture byte for byte the game's), and a server's own races' customisation on a server
   that sends it (the user's of 2026-11-08, "lets add char customization to the new races": `raceopts.rs`,
   `net::raceopts`, `render::recolor`, README "A server's race's own customisation"; the options are the server's,
-  the parts' triangles too; every row's first step is the body as it is, byte for byte)).
+  the parts' triangles too; every row's first step is the body as it is, byte for byte), and an NPC's body in a
+  server's tint on a server that names one (the server owner's of 2026-11-10, Yhafiran "the black and green oriental
+  dragon" on the disc's green one: `npctint.rs`, `net::npctint`, go-eqoa-server's 0x7E3E-0x7E40; untinted, the body
+  byte for byte as before)).
   A new client-side addition is the user's call: ask first. Sharp filtering is for the 2D layer and
   the text only: the world's textures are drawn smooth, as the game filters them (the user,
   2026-10-27, after a Crisp row for them: "world textures cant render proper without smooth. so
@@ -235,6 +255,11 @@ current.
   in a page; `EQOA_PAD_TRACE=1` / `?padtrace`; `EQOA_GLYPHS=1` prints the button glyphs a frame drew.
   A button pressed and let go between two frames reaches the game (`input::Latch`, every source but XInput):
   a new source keeps its presses through it.
+  A d-pad that is a hat (third-party PS3 pads) comes from gilrs three ways, OR'd (`input::GilrsRead`: its d-pad
+  buttons, its DPadX/DPadY axes, the hat's own codes where a mapping names it not), and in a page on one axis or two
+  (`padmap::Dpad`, learned per pad); a controller no mapping knows reads by number (`bit::NUMBERED`). Test a pad
+  natively with a uinput clone and `SDL_GAMECONTROLLERCONFIG` for gilrs's mapping cases; a bug report's note says
+  each controller and how it is read (`input::note`).
   A DualSense is plugged in here and gilrs drives its motors: rumble is as real as the speakers. `eqoa rumble` runs each controller's motors through the game's path;
   `EQOA_RUMBLE_TEST=<ms>` casts a vibrating spell effect on the player in a scripted run.
   The local server spawns a character at a random heading each login, so click by name, not pixel.
@@ -274,10 +299,20 @@ current.
   reads a server's files reads them there (`servers::file`, `servers::words`), never another server's. Test it
   against a patch port of one's own (go-eqoa-server's 7000, `EQOA_PATCH_PORT`) with `EQOA_CONFIG` under a scratch
   directory; Sandstorm's port only read, and never its login.
+- A server's own worlds (`serverworlds`, README "A server's own worlds"): one composer for both builds,
+  reading through a `Disc` and writing through a `Sink` a zone's record at a time (`compose_into`); natively
+  into a `Vec` written to the cache, in a page in a worker into OPFS (`web::worlds`, `web/worlds.js`), never
+  the whole world in memory. A change to the composer is one to go-eqoa-server's `Compose` too (the CRC).
 - The browser build (`web/`, README "In a browser"): `web/build.sh`, then `web/drive.py` (headless
   Chromium over the DevTools protocol, the disc image handed to the page's file input). Platform
   code goes behind `net::session::Datagrams`, `net::auth::Exchange`, `iso::Source`/`iso::Sparse`
   and `crates/eqoa/src/web/`; std's `Instant` panics in a browser, so clocks are `web_time`'s.
+  wgpu's GL backend is never told the browser took its WebGL2 context away: `web::watch_webgl`
+  raises the notice and each event loop ends on `web::graphics_lost` in its window events (a new
+  loop does the same), else every frame's uploads are held until the heap runs out. What WebGL2
+  compiles (naga's GLSL ES 3.00, no `GL_EXT_texture_shadow_lod`) no native test runs:
+  `lightshadow::tests::webgl2_compiles_every_module` writes it; a lighting feature a WebGL2 refuses
+  is left off (`render`'s `guarded`), never a panic.
 - A build is `web/dist/v/<build>/`, never changed under its name (the host serves it immutable);
   only the page and `version.json` are revalidated, and `web/deploy.sh` publishes them in that
   order, after the build. Every file a page loads must be in its build (a new one goes into

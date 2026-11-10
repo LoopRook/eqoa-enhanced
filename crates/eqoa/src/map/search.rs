@@ -1023,7 +1023,7 @@ impl Search {
         let center = to(self.player);
         if let Some((at, known)) = self.destination() {
             let at = if rim {
-                super::mini::to_rim(
+                crate::fork_ext::map::circular_rim(
                     center,
                     to(at),
                     [clip[0] + 5.0, clip[1] + 5.0, clip[2] - 5.0, clip[3] - 5.0],

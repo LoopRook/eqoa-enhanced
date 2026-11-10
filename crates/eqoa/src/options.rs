@@ -13,7 +13,7 @@
 //! Save Changes (the menu a row longer), its words the client's (no
 //! WORDS.TXT entry). It opens a menu of its own over the options menu, drawn
 //! as that one is: Video, World, Lighting, UI, Controller, Camera, Characters,
-//! Sound, natively Textures, and Map (`CATEGORIES`), each of which opens a page laid out and driven as
+//! Sound, natively Textures, Map, Number Colors and Combat (`CATEGORIES`), each of which opens a page laid out and driven as
 //! the game's pages are, short enough that none scrolls (`PAGE_MOST`):
 //! - Video: Display (natively: Window or Full Screen, the window's own as
 //!   F11 and Alt+Enter toggle it, `display`: it changes at once and stays,
@@ -57,9 +57,15 @@
 //!   and its number: how far out Sun Shadows and Light Shadows reach, the
 //!   game's 250 to 1000 in 125s: the sun's cascades' far edge, and from the 8
 //!   lights shadowed (4 in a page and on Android) to every light Dynamic
-//!   Lighting draws, `render::Renderer::set_shadow_distance`)
-//!   and Ambient Occlusion (Off, the game's picture; On: the opaque scene's
-//!   creases, corners and contacts darkened per pixel, `render::ao`);
+//!   Lighting draws, `render::Renderer::set_shadow_distance`),
+//!   Ambient Occlusion (Off, the game's picture; On: the opaque scene's
+//!   creases, corners and contacts darkened per pixel, `render::ao`) and
+//!   Particles (2026-11-09; PS2, the game's look: the particles of blend
+//!   mode 3, the Red Swarming Death's swarm, the flies and stench of the
+//!   rotting, smoke, blended as the GS blends them into the PS2's 16-bit
+//!   frame, `render::Renderer::set_ps2_particles`, as Ground Fog's fog;
+//!   Exact: at eight bits a channel, where many faint puffs pile up into a
+//!   darker mass; here because World's page is full);
 //! - UI: Ability Bars (the game's 2, or 3 or 4: the HUD's quick menus and
 //!   the spell book's slots, `hudmenu`), Update Notices (one setting for
 //!   every window: off, the game never asks to restart into a newer build,
@@ -73,9 +79,16 @@
 //! - Controller: Controller Focus (which controllers this window reads:
 //!   Auto, Window, Pad 1 to 4 or Off, `input::pick`, kept for each window of
 //!   the client open, `multibox`; what it reads now is said beside Back),
-//!   Capture Controller (one setting for every window) and Touch Pad Size
-//!   (a slider and its number: the touch screen's pad, 50 to 100% of
-//!   the most that fits in fives, `touch::layout`);
+//!   Capture Controller (one setting for every window), and the touch
+//!   screen's pad (`touch`; 2026-11-09, Jibrish's petition 1386): Touch
+//!   Stick Size and Touch Button Size (sliders and their numbers: the sticks
+//!   and the buttons, each 50 to 200% of the pad as it was in fives, drawn
+//!   larger than it was only as far as the window has room, `touch::layout`;
+//!   where it has none for the size asked the page says the size drawn), Touch
+//!   Opacity (10 to 200% of its own in tens) and Touch Edge (how far in from
+//!   the window's left and right edges it keeps, 0 to 10% of the window's
+//!   shorter side); they took over Touch Pad Size (the whole pad's 50 to 100,
+//!   which an older client.opt's line gives both sizes);
 //! - Camera: Camera Distance (a slider: the follow orbit's zoom-out ceiling,
 //!   8 to 50, `camstyle`), Camera Turn Speed (a slider: how fast the stick
 //!   and the keys turn the view, half to three times the game's,
@@ -124,7 +137,23 @@
 //!   none, and no server asked for them) and Quest Tracker (On: the HUD's
 //!   list of the quests under way, each step counted, under the minimap,
 //!   `tracker`). Each defaults to On; the Map and the Quest Helper Off are
-//!   the game as it is without them.
+//!   the game as it is without them;
+//! - Number Colors (2026-11-09, the server owner's "we can add the number
+//!   colors to extended menu"): Your Damage, Your Procs, Your Heals, Pet
+//!   Damage, Pet Procs and Pet Heals, each Default (the game's own colour) or
+//!   one of `numcolor::PALETTE`, its value drawn in it: the floating numbers of
+//!   the player's own figures and its pet's in that colour, by what made them,
+//!   where the server says (go-eqoa-server's tags, asked for while any row is
+//!   not Default: `Session::agree_number_tags`); every row Default by default;
+//! - Combat (2026-11-10, the server owner's "lets add dps meters, will work
+//!   solo, group, raid"): DPS Meter (Off by default; On: the HUD's damage meter
+//!   of the player's group under the quest tracker, where the server keeps one,
+//!   `dpsmeter`, the server asked for it: `Session::agree_dps_meter`), DPS Meter
+//!   Shows (Fight: the fight under way, or the last; Overall: every fight since
+//!   the login; the panel's title and `/dps` turn it too) and Reset DPS Meter
+//!   (Reset: the meter cleared and the server's fight under way dropped, by ✕,
+//!   left or right, as Texture Folder opens; `dpsmeter::ask_reset`), the page
+//!   saying when this server keeps no meter.
 //! Triangle goes back a step: a page to the categories, the categories to
 //! the options menu. They change as they are moved, Triangle on the options
 //! menu puts them back, and Save Changes keeps them with the game's
@@ -133,6 +162,12 @@
 //! The client's own Controls page after it (`bindpage`): every key and
 //! button of the default layout, moved by pressing the one to put there,
 //! kept by Save Changes (`keys.opt`) and put back by Triangle as the rest.
+//! Then its Macros page (`macropage`; the user, 2026-11-10: "lets also add
+//! it as its own menu entry"): PCSX2's sixteen macros, kept and put back
+//! with the keys. The menu's window has a row for each of the three (the
+//! game's has seven rows; this one ten), its bottom where a nine-row one's
+//! was, so the title's menu under it stays in view; the pages open where
+//! the game's open, round the game's middle (`CENTER`).
 //!
 //! A pointer (`pointer`): a menu row is chosen at once; a page's row is
 //! reached with up and down (a page knows which setting its row is only as
@@ -146,8 +181,9 @@
 mod fork_options;
 
 use crate::bindpage::ControlsPage;
+use crate::macropage::MacrosPage;
 use crate::pointer::{Hits, key, rows_rect};
-use crate::settings::{BRIGHTNESS_STEPS, CAMERA_MAX, CAMERA_MIN, CAMERA_STEP, ClientOptions, ENTITY_SLOTS_GAME, ENTITY_SLOTS_MAX, ENTITY_SLOTS_STEP, ENTITY_VIEW_GAME, ENTITY_VIEW_MAX, ENTITY_VIEW_STEP, Focus, FrameRate, NAME_DISTANCE_GAME, NAME_DISTANCE_MAX, SHADOW_DISTANCE_GAME, SHADOW_DISTANCE_MAX, SHADOW_DISTANCE_STEP, TOUCH_SIZE_MAX, TOUCH_SIZE_MIN, TOUCH_SIZE_STEP, TURN_MAX, TURN_MIN, TURN_STEP};
+use crate::settings::{BRIGHTNESS_STEPS, CAMERA_MAX, CAMERA_MIN, CAMERA_STEP, ClientOptions, ENTITY_SLOTS_GAME, ENTITY_SLOTS_MAX, ENTITY_SLOTS_STEP, ENTITY_VIEW_GAME, ENTITY_VIEW_MAX, ENTITY_VIEW_STEP, Focus, FrameRate, NAME_DISTANCE_GAME, NAME_DISTANCE_MAX, SHADOW_DISTANCE_GAME, SHADOW_DISTANCE_MAX, SHADOW_DISTANCE_STEP, TOUCH_EDGE_MAX, TOUCH_EDGE_STEP, TOUCH_OPACITY_MAX, TOUCH_OPACITY_MIN, TOUCH_OPACITY_STEP, TOUCH_SIZE_MAX, TOUCH_SIZE_MIN, TOUCH_SIZE_STEP, TURN_MAX, TURN_MIN, TURN_STEP};
 use vi::fpu::{Ee, F};
 use vi::ui::{Raster, UI_COLORS, Vui, Window, wide};
 
@@ -331,10 +367,10 @@ impl Message {
 #[derive(Default)]
 pub struct WndOptions {
     /// `m_sel`: the menu's row (3 is the client's Extended, 4 its Controls,
-    /// 5 Save Changes)
+    /// 5 its Macros, 6 Save Changes)
     sel: i32,
     /// `m_page`: -1 the menu, 0 Game, 1 Interface, 2 Sound, 3 Extended, 4
-    /// Controls
+    /// Controls, 5 Macros
     page: i32,
     /// `m_row`: the page's row
     row: i32,
@@ -346,6 +382,9 @@ pub struct WndOptions {
     /// it), the Characters page's legend's while NPC/PC Display or View
     /// Distance is chosen; none on the title
     pub server_note: Option<String>,
+    /// In the world on a server that keeps no damage meter, that it keeps
+    /// none (`Play::agree_dps_meter` sets it), the Combat page's legend's
+    pub meter_note: Option<String>,
     /// `m_item`: what the page's row changes (set as the page is drawn)
     item: i32,
     /// the values as the window opened, put back by Triangle
@@ -354,8 +393,10 @@ pub struct WndOptions {
     saved_client: ClientOptions,
     /// the keys and buttons as it opened, put back with them
     saved_binds: crate::binds::Binds,
-    /// the Controls page, and the sounds it made drawing (a held key's steps)
+    /// the Controls page and the Macros page, and the sounds they made
+    /// drawing (a held key's steps)
     controls: ControlsPage,
+    macros: MacrosPage,
     controls_cues: Vec<i32>,
     /// `m_edit93` .. `m_edit97`: the four settings only Save commits, held
     /// the way the window holds them (faction and loot ON while set)
@@ -393,6 +434,9 @@ impl WndOptions {
         if self.page == 4 {
             return self.controls.point(p);
         }
+        if self.page == 5 {
+            return self.macros.point(p);
+        }
         let Some(h) = self.hits.at(p) else { return Vec::new() };
         let k = h % HIT_ROWS;
         if h < LABEL {
@@ -415,11 +459,16 @@ impl WndOptions {
         keys
     }
     /// `OnMessage` 295 with the focus coming from outside: the window (300
-    /// wide, seven rows and one each for Extended and Controls, titled 788)
-    /// opening, the values kept, the menu.
+    /// wide, seven rows and one each for Extended, Controls and Macros,
+    /// titled 788) opening, the values kept, the menu. Its bottom is where
+    /// the nine-row window's was before Macros came (the rows past it grow
+    /// upward, clear of the title's menu under it).
     pub fn open(&mut self, vui: &Vui, r: &dyn Raster, o: &GameOptions) {
         self.window.close(true);
-        self.window.init(vui, r, [320, 246], 300, 9, 0);
+        self.window.init(vui, r, CENTER, 300, MENU_ROWS, 0);
+        let mut nine = Window::default();
+        nine.init(vui, r, CENTER, 300, 9, 0);
+        self.window.center[1] -= self.window.bottom_right()[1] - nine.bottom_right()[1];
         self.window.open(false);
         self.window.set_title(Some(&wide(vui.words.get(788, vui.language))));
         self.message.visible = false;
@@ -445,30 +494,68 @@ impl WndOptions {
         self.select(vui, r, &mut Vec::new());
     }
 
-    /// A key let go: the Controls page's held up or down ends.
+    /// A key let go: the Controls or Macros page's held direction ends.
     pub fn release(&mut self, key: i32) {
-        if self.page == 4 {
-            self.controls.key(key, false, self.now, &mut Vec::new());
+        match self.page {
+            4 => {
+                self.controls.key(key, false, self.now, &mut Vec::new());
+            }
+            5 => {
+                self.macros.key(key, false, self.now, &mut Vec::new());
+            }
+            _ => {}
         }
     }
 
-    /// What the Controls page waits for, if anything.
+    /// What the Controls or Macros page waits for, if anything: a key, a
+    /// button, or (Macros') a trigger.
     pub fn capturing(&self) -> Option<crate::bindpage::Column> {
-        if self.page == 4 && !self.message.visible { self.controls.capture } else { None }
-    }
-
-    /// A key pressed while the Controls page waits (`binds::name_of`).
-    pub fn capture_key(&mut self, vui: &Vui, name: &str, cues: &mut Vec<i32>) {
-        if self.capturing().is_some() {
-            self.controls.capture_key(vui, name, cues);
+        match self.page {
+            _ if self.message.visible => None,
+            4 => self.controls.capture,
+            5 => self.macros.capturing(),
+            _ => None,
         }
     }
 
-    /// A controller's button pressed while the Controls page waits (its bit
-    /// index, before any remap).
+    /// A key pressed while a page waits (`binds::name_of`).
+    pub fn capture_key(&mut self, vui: &Vui, name: &str, cues: &mut Vec<i32>) {
+        match self.capturing().map(|_| self.page) {
+            Some(4) => self.controls.capture_key(vui, name, cues),
+            Some(5) => self.macros.capture_key(vui, name, cues),
+            _ => {}
+        }
+    }
+
+    /// A key let go while the Macros page waits for a trigger: one of the
+    /// trigger's, and it is kept.
+    pub fn capture_key_up(&mut self, vui: &Vui, name: &str, cues: &mut Vec<i32>) {
+        if self.capturing().is_some() && self.page == 5 {
+            self.macros.capture_key_up(vui, name, cues);
+        }
+    }
+
+    /// A controller's button pressed while a page waits (its bit index,
+    /// before any remap).
     pub fn capture_button(&mut self, vui: &Vui, phys: u8, cues: &mut Vec<i32>) {
-        if self.capturing().is_some() {
-            self.controls.capture_button(vui, phys, cues);
+        match self.capturing().map(|_| self.page) {
+            Some(4) => self.controls.capture_button(vui, phys, cues),
+            Some(5) => self.macros.capture_button(phys, cues),
+            _ => {}
+        }
+    }
+
+    /// A controller's button let go while the Macros page waits.
+    pub fn capture_button_up(&mut self, vui: &Vui, phys: u8, cues: &mut Vec<i32>) {
+        if self.capturing().is_some() && self.page == 5 {
+            self.macros.capture_button_up(vui, phys, cues);
+        }
+    }
+
+    /// The controllers' sticks while the Macros page waits for a trigger.
+    pub fn capture_axes(&mut self, vui: &Vui, sticks: [f32; 4], cues: &mut Vec<i32>) {
+        if self.capturing().is_some() && self.page == 5 {
+            self.macros.capture_axes(vui, sticks, cues);
         }
     }
 
@@ -499,6 +586,12 @@ impl WndOptions {
             }
             return;
         }
+        if self.page == 5 {
+            if self.macros.key(key, true, now, cues) {
+                self.back(cues);
+            }
+            return;
+        }
         match key {
             19 | 138 => self.prev(now, cues),
             20 | 139 => self.next(now, cues),
@@ -507,7 +600,7 @@ impl WndOptions {
             13 | 134 => {
                 if self.select(vui, r, cues) {
                     let w = |id: i32| wide(vui.words.get(id, vui.language));
-                    self.message.setup(vui, r, w(1633), w(1634), 2, self.window.center, 300);
+                    self.message.setup(vui, r, w(1633), w(1634), 2, CENTER, 300);
                     self.message.visible = true;
                     self.message.focus(vui, r);
                 }
@@ -560,7 +653,7 @@ impl WndOptions {
     /// categories and their pages.
     fn next(&mut self, now: i64, cues: &mut Vec<i32>) {
         let last = match (self.page, self.cat) {
-            (-1, _) => 5,
+            (-1, _) => MENU.len() as i32 - 1,
             (3, None) => fork_options::pages().len() as i32 - 1,
             (3, Some(c)) => fork_options::pages()[c].items.len() as i32 - 1,
             (page, _) => {
@@ -594,16 +687,19 @@ impl WndOptions {
     /// Distance (24) by fifties from the game's 100 to 1000; Art (25) and
     /// VSync (26) turn over, VSync natively only (a page's stays on with
     /// sound 9: the browser paces it); Name Distance (27) by tens from the
-    /// game's 22 to 200 (`step_name_distance`); Touch Pad Size (48) by
-    /// fives from 50 to 100 as a slider; Text (30) goes between Sharp and
+    /// game's 22 to 200 (`step_name_distance`); Touch Stick Size (59) and
+    /// Touch Button Size (60) by fives from 50 to 200, Touch Opacity (61) by
+    /// tens from 10 to 200 and Touch Edge (62) by ones from 0 to 10, each as
+    /// a slider; Text (30) goes between Sharp and
     /// Smooth; Update Notices (29), Overlapping Names (34, Hide and Show),
     /// Mipmaps (35), Loading Screens (38, Longer and Instant), Texture Packs
     /// (50), Dump Textures (51), the Map (41), Minimap (42), Map Markers (43),
     /// the Quest Helper (44) and Quest Tracker (45) turn over; Texture Folder (55) shows the
     /// folder (`texpack::open_folder`: sound 8, or 9 with none to show);
     /// Output Device (32) goes round the system default and the devices
-    /// listed (`step_output`); Display (33) turns the window over (`display`). A
-    /// slider (`slider_at`) makes its own
+    /// listed (`step_output`); Display (33) turns the window over (`display`);
+    /// the Number Colors rows (64 to 69) go round Default and
+    /// `numcolor::PALETTE`. A slider (`slider_at`) makes its own
     /// sound, as a volume does; every other row sound 11.
     fn change(&mut self, o: &mut GameOptions, d: i32, cues: &mut Vec<i32>, ups: &mut Vec<OptionsUp>) {
         let tracks = if FEATURES & 0x100 != 0 { 10 } else { 3 };
@@ -674,6 +770,10 @@ impl WndOptions {
                     // Raid List: the server told from the next frame
                     // (`Session::agree_raid_roster`)
                     49 => c.raid_list = !c.raid_list,
+                    // Pet Effects: the server told from the next frame
+                    // (`Session::agree_pet_effects`), the row under the pet's
+                    // bar drawn or not (`hud`)
+                    58 => c.pet_effects = !c.pet_effects,
                     // the Map: the map, the minimap and the waypoints from
                     // the next frame (`Play::map_frame`; off, an open map
                     // closes)
@@ -742,6 +842,26 @@ impl WndOptions {
                     // Ambient Occlusion: its passes over the world from the
                     // next frame (`viewer`, `render::ao`)
                     54 => c.ambient_occlusion = !c.ambient_occlusion,
+                    // Particles: their blend from the next frame (`viewer`,
+                    // `render::Renderer::set_ps2_particles`)
+                    63 => c.ps2_particles = !c.ps2_particles,
+                    // Number Colors: round Default and the palette, the next
+                    // number drawn in it and the server told from the next
+                    // frame whether to tag them (`Session::agree_number_tags`)
+                    64..=69 => {
+                        let row = (self.item - 64) as usize;
+                        c.number_colors[row] = crate::numcolor::step(c.number_colors[row], d);
+                    }
+                    // DPS Meter: the server told from the next frame
+                    // (`Session::agree_dps_meter`), the panel drawn or not
+                    70 => c.dps_meter = !c.dps_meter,
+                    // DPS Meter Shows: the panel's view from the next frame
+                    71 => c.dps_view = c.dps_view.other(),
+                    // Reset DPS Meter: done either way, as ✕ does it (`select`)
+                    72 => {
+                        crate::dpsmeter::ask_reset();
+                        cues.push(8);
+                    }
                     // Dynamic Lighting: the world lit per fragment or the
                     // PS2's way from the next frame (`viewer`, `lights`)
                     52 => c.dynamic_lighting = !c.dynamic_lighting,
@@ -771,9 +891,12 @@ impl WndOptions {
                         }
                     }
                     20 => slide(&mut c.fog, 0, crate::fog::STEPS, 1),
-                    // Touch Pad Size: the pad drawn and touched at it
-                    // from the next frame (`viewer`, `touch::layout`)
-                    48 => slide(&mut c.touch_size, TOUCH_SIZE_MIN, TOUCH_SIZE_MAX, TOUCH_SIZE_STEP),
+                    // the touch rows: the pad drawn and touched so from the
+                    // next frame (`viewer`, `touch::layout`, `TouchPad::draw`)
+                    59 => slide(&mut c.touch_stick, TOUCH_SIZE_MIN, TOUCH_SIZE_MAX, TOUCH_SIZE_STEP),
+                    60 => slide(&mut c.touch_buttons, TOUCH_SIZE_MIN, TOUCH_SIZE_MAX, TOUCH_SIZE_STEP),
+                    61 => slide(&mut c.touch_opacity, TOUCH_OPACITY_MIN, TOUCH_OPACITY_MAX, TOUCH_OPACITY_STEP),
+                    62 => slide(&mut c.touch_edge, 0, TOUCH_EDGE_MAX, TOUCH_EDGE_STEP),
                     15 => slide(&mut c.camera_distance, CAMERA_MIN, CAMERA_MAX, CAMERA_STEP),
                     17 => {
                         let t = &mut c.camera_turn;
@@ -805,8 +928,8 @@ impl WndOptions {
             }
             _ => {}
         }
-        // (Texture Folder makes its own sound)
-        let inert = (self.item == 26 && cfg!(target_arch = "wasm32")) || self.item == 55;
+        // (Texture Folder and Reset DPS Meter make their own sound)
+        let inert = (self.item == 26 && cfg!(target_arch = "wasm32")) || self.item == 55 || self.item == 72;
         let slides = matches!(self.item, 3 | 4) || slider_at(self.item).is_some();
         if !slides && !inert && ((0..=11).contains(&self.item) || extended(self.item)) {
             cues.push(11);
@@ -829,11 +952,11 @@ impl WndOptions {
     }
 
     /// `Select`: X on the menu opens a page (its window 440 wide, six to
-    /// eight rows, an empty title; the client's Controls 600 wide over the
-    /// middle of the frame, as many rows as fit), the client's Extended its
-    /// menu of categories (a window as the menu's, titled Extended, over it)
-    /// and X there a category's page (`page_window`), or on Save Changes
-    /// asks (true).
+    /// eight rows, an empty title; the client's Controls and Macros 600 wide
+    /// over the middle of the frame, as many rows as fit), the client's
+    /// Extended its menu of categories (a window as the menu's, titled
+    /// Extended, over it) and X there a category's page (`page_window`), or
+    /// on Save Changes asks (true).
     fn select(&mut self, vui: &Vui, r: &dyn Raster, cues: &mut Vec<i32>) -> bool {
         if self.page == 3 && self.cat.is_none() {
             cues.push(8);
@@ -851,6 +974,12 @@ impl WndOptions {
         }
         if self.page == 3 && self.cat.is_some() && self.item == 55 {
             cues.push(if crate::texpack::open_folder() { 8 } else { 9 });
+            return false;
+        }
+        // and on Reset DPS Meter it resets, as left and right do
+        if self.page == 3 && self.cat.is_some() && self.item == 72 {
+            crate::dpsmeter::ask_reset();
+            cues.push(8);
             return false;
         }
         if self.page != -1 {
@@ -878,20 +1007,24 @@ impl WndOptions {
                 // menu's is: the rows past the menu's nine go up, clear of
                 // the title's own menu under it
                 self.window4.close(true);
-                self.window4.init(vui, r, self.window.center, 300, fork_options::category_rows(), 0);
+                self.window4.init(vui, r, CENTER, 300, fork_options::category_rows(), 0);
                 self.window4.open(false);
                 self.window4.set_title(Some(&wide(EXTENDED)));
                 let bottom = |w: &Window| w.top_left()[1] + w.size[1];
                 self.window4.center[1] -= bottom(&self.window4) - bottom(&self.window);
                 return false;
             }
-            4 => {
-                self.page = 4;
-                self.controls.reset();
+            4 | 5 => {
+                self.page = self.sel;
+                if self.sel == 4 {
+                    self.controls.reset();
+                } else {
+                    self.macros.reset();
+                }
                 self.window2.close(true);
                 self.window2.init(vui, r, [320, 224], 600, ControlsPage::window_rows(vui.font_height(r)), 0);
                 self.window2.open(false);
-                self.window2.set_title(Some(&wide(CONTROLS)));
+                self.window2.set_title(Some(&wide(if self.sel == 4 { CONTROLS } else { MACROS_PAGE })));
                 return false;
             }
             _ => return true,
@@ -909,12 +1042,12 @@ impl WndOptions {
     /// title's menu under it.
     fn page_window(&mut self, vui: &Vui, r: &dyn Raster, rows: i32) {
         self.window2.close(true);
-        self.window2.init(vui, r, self.window.center, 440, rows, 0);
+        self.window2.init(vui, r, CENTER, 440, rows, 0);
         self.window2.open(false);
         if rows > 8 {
             self.window2.set_title(None);
             let mut eight = Window::default();
-            eight.init(vui, r, self.window.center, 440, 8, 0);
+            eight.init(vui, r, CENTER, 440, 8, 0);
             eight.set_title(Some(&[]));
             self.window2.center[1] += eight.top_left()[1] - self.window2.top_left()[1];
         } else {
@@ -976,12 +1109,13 @@ impl WndOptions {
                 }
             }
             4 => self.controls.draw(vui, r, &mut self.window2, &mut self.controls_cues),
+            5 => self.macros.draw(vui, r, &mut self.window2, &mut self.controls_cues),
             _ => {}
         }
         let w = |id: i32| wide(vui.words.get(id, vui.language));
         if self.save_count != 0 {
             self.save_count -= 1;
-            self.window3.init(vui, r, self.window.center, 400, 3, 0);
+            self.window3.init(vui, r, CENTER, 400, 3, 0);
             self.window3.open(true);
             self.window3.draw(vui, r);
             let width = self.window3.size[0];
@@ -998,18 +1132,20 @@ impl WndOptions {
         }
     }
 
-    /// `DrawMenu`: Game, Interface, Sound, the client's Extended and
-    /// Controls, Save Changes, the selected one lit, and the legend.
+    /// `DrawMenu`: Game, Interface, Sound, the client's Extended, Controls
+    /// and Macros, Save Changes, the selected one lit, and the legend two
+    /// rows under the last.
     fn draw_menu(&mut self, vui: &Vui, r: &mut dyn Raster) {
         self.item = -1;
         self.window.draw(vui, r);
         let w = |id: i32| match id {
             -1 => EXTENDED.to_string(),
             -2 => CONTROLS.to_string(),
+            -3 => MACROS_PAGE.to_string(),
             id => vui.words.get(id, vui.language).to_string(),
         };
         let width = self.window.size[0];
-        for (k, id) in [773, 778, 800, -1, -2, 482].into_iter().enumerate() {
+        for (k, id) in MENU.into_iter().enumerate() {
             let on = self.sel == k as i32;
             let s = if on { format!("|q{}|w", w(id)) } else { w(id) };
             self.window.text_box(vui, r, &wide(&s), 40, k as i32 + 1, width - 80, 1, UI_COLORS[on as usize], 8);
@@ -1018,13 +1154,20 @@ impl WndOptions {
             }
         }
         let legend = wide(&format!("|x {}   |t {}", w(212), w(753)));
-        self.window.text(vui, r, &legend, 40, 8, UI_COLORS[0], 0);
+        self.window.text(vui, r, &legend, 40, MENU_ROWS - 1, UI_COLORS[0], 0);
     }
 
     /// A page's rows: its labels, the tick, and each value in its frame
     /// (the arrows on the selected one); a value `None` is a slider drawn by
     /// the caller. The pages start a row down.
     fn draw_rows(&mut self, vui: &Vui, r: &mut dyn Raster, labels: &[Vec<u16>], values: &[Option<Vec<u16>>]) {
+        self.draw_rows_painted(vui, r, labels, values, &[]);
+    }
+
+    /// `draw_rows` with a value drawn in its own colour where `paints` gives
+    /// one (a Number Colors row's, `numcolor::swatch`), shadowed so a light
+    /// one reads on the window; every other as the game's pages draw them.
+    fn draw_rows_painted(&mut self, vui: &Vui, r: &mut dyn Raster, labels: &[Vec<u16>], values: &[Option<Vec<u16>>], paints: &[Option<[f32; 4]>]) {
         self.window2.draw(vui, r);
         let width = self.window2.size[0];
         for (k, label) in labels.iter().enumerate() {
@@ -1039,7 +1182,8 @@ impl WndOptions {
             let Some(v) = v else { continue };
             let row = k as i32 + 1;
             self.window2.draw_frame(vui, r, width - 176, row, 132, 1, if self.row == k as i32 { 96 } else { 64 });
-            self.window2.text_box(vui, r, v, width - 176, row, 132, 1, UI_COLORS[0], 8 | 2);
+            let (c, shadow) = paints.get(k).copied().flatten().map_or((UI_COLORS[0], 0), |c| (c, 1));
+            self.window2.text_box(vui, r, v, width - 176, row, 132, 1, c, 8 | 2 | shadow);
             // the frame's two halves (its side arrows are glyphs)
             let at = self.window2.top_left()[0] + width - 176;
             self.halves(rows_rect(&self.window2, vui, r, width - 176, row, 132, 1), at - 4, at + 66, at + 136, k as i32);
@@ -1140,7 +1284,8 @@ impl WndOptions {
         }
         let labels: Vec<Vec<u16>> = cat.items.iter().map(|&i| wide(label_of(i))).collect();
         let values: Vec<Option<Vec<u16>>> = cat.items.iter().map(|&i| value_text(vui, i)).collect();
-        self.draw_rows(vui, r, &labels, &values);
+        let paints: Vec<Option<[f32; 4]>> = cat.items.iter().map(|&i| value_paint(i)).collect();
+        self.draw_rows_painted(vui, r, &labels, &values, &paints);
         let width = self.window2.size[0];
         let knob = vui.entry(166).uv1[0];
         let at = self.window2.top_left()[0] + width - 180;
@@ -1170,7 +1315,7 @@ impl WndOptions {
     /// row being the one drawn last (`item`).
     fn page_note(&self, c: usize) -> Option<String> {
         match fork_options::pages()[c].note {
-            Note::Reads => Some(crate::input::reads()),
+            Note::Reads => Some(touch_note(self.item, &crate::settings::client().touch_opts(), crate::touch::drawn_here).unwrap_or_else(crate::input::reads)),
             Note::Server => self.server_note.clone().filter(|_| matches!(self.item, 23 | 24)),
             Note::Scale => {
                 let asked = crate::settings::client().render_scale as u32;
@@ -1187,8 +1332,30 @@ impl WndOptions {
                 56 => light_note(&crate::settings::client()),
                 _ => None,
             },
+            Note::Meter => self.meter_note.clone().filter(|_| matches!(self.item, 70..=72)),
             Note::None => None,
         }
+    }
+}
+
+/// What Controller's page says beside Back while Touch Stick Size, Touch
+/// Button Size or Touch Edge is chosen (`drawn` answers the sizes the pad is
+/// drawn at in its window as `o` asks, `touch::drawn_here`): where the window
+/// has no room for a size asked, the size it is drawn at (the larger comes
+/// down first: `touch::layout`), named when only one is; none otherwise
+/// (the page says what this window reads).
+fn touch_note(item: i32, o: &crate::touch::Opts, drawn: impl Fn(&crate::touch::Opts) -> Option<[f32; 2]>) -> Option<String> {
+    if !matches!(item, 59 | 60 | 62) {
+        return None;
+    }
+    let [s, b] = drawn(o)?;
+    // in whole percent, never above what is drawn
+    let pct = |v: f32| (v * 100.0 + 1e-3).floor() as u32;
+    match (s < o.stick, b < o.buttons) {
+        (true, true) => Some(format!("Drawn at {}% here", pct(s.max(b)))),
+        (true, false) => Some(format!("Sticks drawn at {}% here", pct(s))),
+        (false, true) => Some(format!("Buttons drawn at {}% here", pct(b))),
+        (false, false) => None,
     }
 }
 
@@ -1209,11 +1376,24 @@ fn light_note(c: &ClientOptions) -> Option<String> {
 /// "CONTROLS", 1039, is in capitals and used by none of the game's modules.)
 const EXTENDED: &str = "Extended";
 const CONTROLS: &str = "Controls";
+const MACROS_PAGE: &str = "Macros";
+
+/// The options menu's rows, by their words: Game, Interface, Sound (773,
+/// 778, 800), the client's Extended, Controls and Macros, Save Changes
+/// (482).
+const MENU: [i32; 7] = [773, 778, 800, -1, -2, -3, 482];
+
+/// The menu's window: a row down, its rows, a row clear, the legend.
+const MENU_ROWS: i32 = MENU.len() as i32 + 3;
+
+/// The game's middle for the options' windows (`VIWndOptions`' 320, 246):
+/// the pages, the box and "Saving..." open round it.
+const CENTER: [i32; 2] = [320, 246];
 
 /// Extended's rows, by the item each changes (`change`), and their labels.
 /// A row is drawn by its item (`value_text`, or `slider_at` for a slider)
 /// and shown on the page of the category that lists it (`CATEGORIES`).
-const EXTENDED_ITEMS: [(i32, &str); 44] = [
+const EXTENDED_ITEMS: [(i32, &str); 58] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1248,7 +1428,6 @@ const EXTENDED_ITEMS: [(i32, &str); 44] = [
     (45, "Quest Tracker"),
     (46, "Shadows"),
     (47, "Ground Fog"),
-    (48, "Touch Pad Size"),
     (49, "Raid List"),
     (50, "Texture Packs"),
     (51, "Dump Textures"),
@@ -1258,13 +1437,30 @@ const EXTENDED_ITEMS: [(i32, &str); 44] = [
     (55, "Texture Folder"),
     (56, "Light Shadows"),
     (57, "Shadow Distance"),
+    (58, "Pet Effects"),
+    (59, "Touch Stick Size"),
+    (60, "Touch Button Size"),
+    (61, "Touch Opacity"),
+    (62, "Touch Edge"),
+    (63, "Particles"),
+    (64, crate::numcolor::LABELS[0]),
+    (65, crate::numcolor::LABELS[1]),
+    (66, crate::numcolor::LABELS[2]),
+    (67, crate::numcolor::LABELS[3]),
+    (68, crate::numcolor::LABELS[4]),
+    (69, crate::numcolor::LABELS[5]),
+    (70, "DPS Meter"),
+    (71, "DPS Meter Shows"),
+    (72, "Reset DPS Meter"),
 ];
 
 /// What a category's page says beside its Back legend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Note {
     None,
-    /// what this window reads (`input::reads`)
+    /// what this window reads (`input::reads`); while a touch size or
+    /// Touch Edge is chosen and the window has no room for a size asked, the
+    /// size drawn (`touch_note`)
     Reads,
     /// what this server gives (`WndOptions::server_note`), while NPC/PC
     /// Display or Distance is chosen
@@ -1281,6 +1477,9 @@ enum Note {
     /// that Sun Shadows or Light Shadows need Dynamic Lighting, while they
     /// are chosen and on and it is off (`sun_note`, `light_note`)
     Lighting,
+    /// that this server keeps no meter, while a DPS Meter row is chosen
+    /// (`WndOptions::meter_note`, which play sets)
+    Meter,
 }
 
 /// One of Extended's categories: its name, its rows (their items, in the
@@ -1299,18 +1498,22 @@ struct Category {
 /// natively Textures (2026-11-08: Texture Packs and Dump Textures, a
 /// folder's files a page cannot reach; 2026-11-09: Texture Folder); Map last
 /// (2026-11-09: the map and the quest helper, the client's own, back from
-/// before 2026-10-27).
-const ALL_CATEGORIES: [Category; 10] = [
+/// before 2026-10-27); Number Colors after it (2026-11-09: the floating
+/// numbers' colours by what made them, `numcolor`); Combat last (2026-11-10:
+/// the DPS meter, `dpsmeter`).
+const ALL_CATEGORIES: [Category; 12] = [
     Category { name: "Video", items: VIDEO, note: Note::Scale },
     Category { name: "World", items: &[20, 35, 36, 37, 47, 25], note: Note::None },
-    Category { name: "Lighting", items: &[52, 53, 56, 57, 54], note: Note::Lighting },
-    Category { name: "UI", items: &[22, 29, 30, 40, 49], note: Note::None },
-    Category { name: "Controller", items: &[16, 19, 48], note: Note::Reads },
+    Category { name: "Lighting", items: &[52, 53, 56, 57, 54, 63], note: Note::Lighting },
+    Category { name: "UI", items: &[22, 29, 30, 40, 49, 58], note: Note::None },
+    Category { name: "Controller", items: &[16, 19, 59, 60, 61, 62], note: Note::Reads },
     Category { name: "Camera", items: &[15, 17, 18], note: Note::None },
     Category { name: "Characters", items: &[12, 23, 24, 27, 34, 46], note: Note::Server },
     Category { name: "Sound", items: SOUND, note: Note::Output },
     Category { name: "Textures", items: TEXTURES, note: Note::Textures },
     Category { name: "Map", items: &[41, 42, 43, 44, 45], note: Note::None },
+    Category { name: "Number Colors", items: &crate::numcolor::ITEMS, note: Note::None },
+    Category { name: "Combat", items: &[70, 71, 72], note: Note::Meter },
 ];
 #[cfg(not(target_arch = "wasm32"))]
 const CATEGORIES: &[Category] = &ALL_CATEGORIES;
@@ -1318,7 +1521,7 @@ const CATEGORIES: &[Category] = &ALL_CATEGORIES;
 #[cfg(target_arch = "wasm32")]
 const CATEGORIES: &[Category] = &{
     let a = ALL_CATEGORIES;
-    [a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9]]
+    [a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9], a[10], a[11]]
 };
 
 /// Video's rows: natively Display first (F3 20261024-201507: full screen was
@@ -1416,6 +1619,7 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         45 => on_off(c.quest_tracker),
         34 => wide(if c.overlapping_names { "Show" } else { "Hide" }),
         49 => on_off(c.raid_list),
+        58 => on_off(c.pet_effects),
         50 => on_off(c.texture_packs),
         51 => on_off(c.dump_textures),
         55 => wide("Open"),
@@ -1427,6 +1631,11 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         53 => on_off(c.sun_shadows),
         56 => on_off(c.light_shadows),
         54 => on_off(c.ambient_occlusion),
+        63 => wide(if c.ps2_particles { "PS2" } else { "Exact" }),
+        64..=69 => wide(crate::numcolor::name(c.number_colors[(item - 64) as usize])),
+        70 => on_off(c.dps_meter),
+        71 => wide(c.dps_view.name()),
+        72 => wide("Reset"),
         52 => on_off(c.dynamic_lighting),
         38 => wide(if c.loading_longer { "Longer" } else { "Instant" }),
         39 => wide(&format!("x{}", c.render_scale)),
@@ -1442,6 +1651,13 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         33 => wide(if crate::display::full() { "Full Screen" } else { "Window" }),
         _ => return fork_options::value_text(vui, item, &c),
     })
+}
+
+/// The colour an Extended row's value is drawn in, none for the windows'
+/// own: a Number Colors row's colour (Default none).
+fn value_paint(item: i32) -> Option<[f32; 4]> {
+    let row = crate::numcolor::ITEMS.iter().position(|&i| i == item)?;
+    crate::numcolor::swatch(crate::settings::client().number_colors[row])
 }
 
 /// What Video's page says beside Back while Render Scale is chosen: the
@@ -1481,7 +1697,10 @@ fn slider_at(item: i32) -> Option<(f32, Option<u16>)> {
         23 => (at(c.entity_slots as f32, ENTITY_SLOTS_GAME as f32, ENTITY_SLOTS_MAX as f32), Some(c.entity_slots as u16)),
         24 => (at(c.entity_view as f32, ENTITY_VIEW_GAME as f32, ENTITY_VIEW_MAX as f32), Some(c.entity_view)),
         27 => name_distance_slider(&c),
-        48 => (at(c.touch_size as f32, TOUCH_SIZE_MIN as f32, TOUCH_SIZE_MAX as f32), Some(c.touch_size as u16)),
+        59 => (at(c.touch_stick as f32, TOUCH_SIZE_MIN as f32, TOUCH_SIZE_MAX as f32), Some(c.touch_stick as u16)),
+        60 => (at(c.touch_buttons as f32, TOUCH_SIZE_MIN as f32, TOUCH_SIZE_MAX as f32), Some(c.touch_buttons as u16)),
+        61 => (at(c.touch_opacity as f32, TOUCH_OPACITY_MIN as f32, TOUCH_OPACITY_MAX as f32), Some(c.touch_opacity as u16)),
+        62 => (c.touch_edge as f32 / TOUCH_EDGE_MAX as f32, Some(c.touch_edge as u16)),
         57 => (at(c.shadow_distance as f32, SHADOW_DISTANCE_GAME as f32, SHADOW_DISTANCE_MAX as f32), Some(c.shadow_distance)),
         _ => return None,
     })
@@ -1629,10 +1848,10 @@ mod tests {
         o.music_volume = F::ZERO;
         w.draw(&vui, &mut r, &o, &mut ups);
         assert_eq!(w.point([slider + 20.0, y(&w, 2)]), vec![key::DOWN, key::DOWN, key::RIGHT], "volume 0: the knob at the left end");
-        // back to the menu, Save Changes (past the client's Extended and
-        // Controls): the box's choices
+        // back to the menu, Save Changes (past the client's Extended,
+        // Controls and Macros): the box's choices
         w.key(&vui, &mut r, &mut o, 132, 0, &mut cues, &mut ups);
-        w.sel = 5;
+        w.sel = 6;
         w.key(&vui, &mut r, &mut o, 134, 0, &mut cues, &mut ups);
         assert!(w.message.visible);
         w.draw(&vui, &mut r, &o, &mut ups);
@@ -1864,11 +2083,21 @@ mod tests {
         assert_eq!(value_text(&vui, 54), Some(wide(vui.words.get(551, vui.language))));
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(!settings::client().ambient_occlusion, "and back: two values");
+        // Particles, PS2 (the game's look), then Exact
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (4, Some(&9)), "Lighting's last row");
+        assert_eq!(w.item, 63, "Particles");
+        assert!(settings::client().ps2_particles, "PS2: the game's look");
+        assert_eq!(value_text(&vui, 63), Some(wide("PS2")));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::client().ps2_particles, settings::client().ps2_fog, cues.last()), (false, true, Some(&11)), "Exact, Ground Fog still PS2");
+        assert_eq!(value_text(&vui, 63), Some(wide("Exact")));
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::client().ps2_particles, "and back: two values");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Lighting's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.cat, w.cat_sel, w.item), (3, None, 2, -1), "back to the categories, Lighting still lit");
-        // UI: Ability Bars, Update Notices, Text, HUD, Raid List
+        // UI: Ability Bars, Update Notices, Text, HUD, Raid List, Pet Effects
         press(&mut w, &mut o, key::DOWN, &mut cues);
         press(&mut w, &mut o, key::CROSS, &mut cues);
         assert_eq!((w.cat, w.item), (Some(3), 22), "UI, Ability Bars");
@@ -1911,7 +2140,16 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::raid_list(), "and back: two values");
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (4, Some(&9)), "UI's last row");
+        assert_eq!(w.item, 58, "Pet Effects");
+        assert!(settings::pet_effects(), "on: the pet's effects under its bar");
+        assert_eq!(value_text(&vui, 58), Some(wide(vui.words.get(551, vui.language))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::pet_effects(), cues.last()), (false, Some(&11)), "off: the game's bar alone");
+        assert_eq!(value_text(&vui, 58), Some(wide(vui.words.get(552, vui.language))));
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::pet_effects(), "and back: two values");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (5, Some(&9)), "UI's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         // Controller: Controller Focus, Capture Controller, Touch Pad Size
         press(&mut w, &mut o, key::DOWN, &mut cues);
@@ -1931,21 +2169,56 @@ mod tests {
         assert!(!settings::capture(), "off: every window on a pad reads it");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert!(settings::capture());
+        // the touch rows (they took over Touch Pad Size): each from the pad
+        // as it was, to both ends, sound 9 past each
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!(w.item, 48, "Touch Pad Size");
-        assert_eq!((settings::client().touch_size, settings::touch_scale(), slider_at(48)), (100, 1.0, Some((1.0, Some(100)))), "the full pad, the most that fits");
+        assert_eq!(w.item, 59, "Touch Stick Size");
+        assert_eq!((settings::client().touch_stick, slider_at(59)), (100, Some((50.0 / 150.0, Some(100)))), "the pad's as it was, a third along");
+        for _ in 0..21 {
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+        }
+        assert_eq!((settings::client().touch_stick, slider_at(59)), (200, Some((1.0, Some(200)))), "100 to 200 in 20 steps of 5");
+        assert_eq!(&cues[cues.len() - 2..], &[11, 9], "the last step, then its end");
+        for _ in 0..31 {
+            press(&mut w, &mut o, key::LEFT, &mut cues);
+        }
+        assert_eq!((settings::client().touch_stick, slider_at(59), cues.last()), (50, Some((0.0, Some(50))), Some(&9)), "down to 50 in 30");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().touch_size, cues.last()), (100, Some(&9)), "no larger");
+        assert_eq!(settings::client().touch_stick, 55);
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.item, 60, "Touch Button Size");
+        assert_eq!((settings::client().touch_buttons, slider_at(60)), (100, Some((50.0 / 150.0, Some(100)))));
         for _ in 0..11 {
             press(&mut w, &mut o, key::LEFT, &mut cues);
         }
-        assert_eq!((settings::client().touch_size, settings::touch_scale()), (50, 0.5), "100 to 50 in 10 steps of 5");
-        assert_eq!(&cues[cues.len() - 2..], &[11, 9], "the last step, then its end");
-        assert_eq!(slider_at(48), Some((0.0, Some(50))));
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().touch_size, slider_at(48)), (55, Some((0.1, Some(55)))));
+        assert_eq!((settings::client().touch_buttons, cues.last()), (50, Some(&9)), "100 to 50 in 10 steps of 5");
+        for _ in 0..31 {
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+        }
+        assert_eq!((settings::client().touch_buttons, slider_at(60), cues.last()), (200, Some((1.0, Some(200))), Some(&9)));
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (2, Some(&9)), "Controller's last row");
+        assert_eq!(w.item, 61, "Touch Opacity");
+        assert_eq!((settings::client().touch_opacity, slider_at(61)), (100, Some((90.0 / 190.0, Some(100)))), "its own alphas");
+        for _ in 0..10 {
+            press(&mut w, &mut o, key::LEFT, &mut cues);
+        }
+        assert_eq!((settings::client().touch_opacity, slider_at(61), cues.last()), (10, Some((0.0, Some(10))), Some(&9)), "100 to 10 in 9 steps of 10");
+        for _ in 0..20 {
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+        }
+        assert_eq!((settings::client().touch_opacity, cues.last()), (200, Some(&9)), "to 200 in 19");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.item, 62, "Touch Edge");
+        assert_eq!((settings::client().touch_edge, slider_at(62)), (0, Some((0.0, Some(0)))), "none");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert_eq!((settings::client().touch_edge, cues.last()), (0, Some(&9)), "no less");
+        for _ in 0..11 {
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+        }
+        assert_eq!((settings::client().touch_edge, slider_at(62), cues.last()), (10, Some((1.0, Some(10))), Some(&9)), "0 to 10 in ones");
+        assert_eq!(settings::touch_options(), crate::touch::Opts { stick: 0.55, buttons: 2.0, opacity: 2.0, edge: 0.1 }, "the pad drawn so");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Controller's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         // Camera: Camera Distance, Camera Turn Speed, Screen Shake
         press(&mut w, &mut o, key::DOWN, &mut cues);
@@ -2119,7 +2392,66 @@ mod tests {
         assert_eq!((w.row, cues.last()), (4, Some(&9)), "Map's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.cat_sel, cues.last()), (9, Some(&9)), "Map, the last category");
+        // Number Colors: six rows, each Default (the game's colour, drawn as
+        // any value) then round the palette either way, each drawn in its
+        // colour, one moving no other
+        assert_eq!((w.cat_sel, cues.last()), (10, Some(&11)), "Number Colors, after Map");
+        press(&mut w, &mut o, key::CROSS, &mut cues);
+        assert_eq!((w.cat, w.item), (Some(10), 64), "Number Colors, Your Damage");
+        let last = crate::numcolor::PALETTE.len() as u8;
+        for (row, item) in crate::numcolor::ITEMS.into_iter().enumerate() {
+            assert_eq!((w.item, label_of(item)), (item, crate::numcolor::LABELS[row]));
+            assert_eq!(settings::number_colors(), [0; crate::numcolor::ROWS], "{}: every row Default", label_of(item));
+            assert_eq!((value_text(&vui, item), value_paint(item)), (Some(wide("Default")), None), "{}: Default, drawn as any value", label_of(item));
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!((settings::number_colors()[row], cues.last()), (1, Some(&11)), "{}: on to the first colour", label_of(item));
+            assert_eq!((value_text(&vui, item), value_paint(item)), (Some(wide("White")), Some([1.0; 4])), "{}: White, in white", label_of(item));
+            assert_eq!(settings::number_colors().iter().filter(|&&c| c != 0).count(), 1, "{}: no other row moved", label_of(item));
+            press(&mut w, &mut o, key::LEFT, &mut cues);
+            press(&mut w, &mut o, key::LEFT, &mut cues);
+            assert_eq!(settings::number_colors()[row], last, "{}: left of Default, the last", label_of(item));
+            assert_eq!(value_text(&vui, item), Some(wide("Gray")));
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!(settings::number_colors()[row], 0, "{}: and round to Default", label_of(item));
+            press(&mut w, &mut o, key::DOWN, &mut cues);
+        }
+        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Number Colors' last row");
+        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        // Combat: the DPS Meter Off then On, what it shows Fight then Overall,
+        // and Reset DPS Meter asking the meter's reset either way, as ✕ does
+        assert_eq!((w.cat_sel, cues.last()), (11, Some(&11)), "Combat, after Number Colors");
+        press(&mut w, &mut o, key::CROSS, &mut cues);
+        assert_eq!((w.cat, w.item), (Some(11), 70), "Combat, the DPS Meter");
+        assert!(!settings::dps_meter(), "off by default");
+        assert_eq!(value_text(&vui, 70), Some(wide(vui.words.get(552, vui.language))), "Off, the game's word");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::dps_meter(), cues.last()), (true, Some(&11)), "on");
+        assert_eq!(value_text(&vui, 70), Some(wide(vui.words.get(551, vui.language))));
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::dps_meter(), "and back: two values");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.item, 71, "DPS Meter Shows");
+        assert_eq!((settings::dps_view(), value_text(&vui, 71)), (crate::dpsmeter::View::Fight, Some(wide("Fight"))), "the fight by default");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::dps_view(), value_text(&vui, 71), cues.last()), (crate::dpsmeter::View::Overall, Some(wide("Overall")), Some(&11)), "Overall");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert_eq!(settings::dps_view(), crate::dpsmeter::View::Fight, "and back: two values");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.item, value_text(&vui, 72)), (72, Some(wide("Reset"))), "Reset DPS Meter");
+        assert!(!crate::dpsmeter::take_reset(), "none asked yet");
+        for k in [key::RIGHT, key::LEFT, key::CROSS] {
+            press(&mut w, &mut o, k, &mut cues);
+            assert_eq!((crate::dpsmeter::take_reset(), cues.last()), (true, Some(&8)), "a reset asked ({k}), its sound");
+        }
+        assert_eq!(w.page_note(11), None, "no note off a server");
+        w.meter_note = Some("This server keeps no meter".into());
+        assert_eq!(w.page_note(11).as_deref(), Some("This server keeps no meter"), "a server that keeps none said");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (2, Some(&9)), "Combat's last row");
+        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.cat_sel, cues.last()), (11, Some(&9)), "Combat, the last category");
         // Triangle: the menu, then closed with every setting put back
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.sel), (-1, 3), "the menu, on Extended");
@@ -2156,7 +2488,8 @@ mod tests {
             key::RIGHT,
             key::TRIANGLE,
             key::TRIANGLE,
-            // Save Changes, Yes
+            // Save Changes (past Controls and Macros), Yes
+            key::DOWN,
             key::DOWN,
             key::DOWN,
             key::CROSS,
@@ -2318,7 +2651,7 @@ mod tests {
         assert!((0..d).contains(&(h9 - h8)), "less than a row lower at the bottom: {} of {d}", h9 - h8);
         // the control: nine rows laid out as the game's pages are, centred
         let mut game = Window::default();
-        game.init(&vui, &r, w.window.center, 440, 9, 0);
+        game.init(&vui, &r, CENTER, 440, 9, 0);
         game.set_title(Some(&[]));
         assert!(game.top_left()[1] < top8, "centred, it reaches over the tab: {} vs {top8}", game.top_left()[1]);
     }
@@ -2364,13 +2697,92 @@ mod tests {
         assert_eq!((w.sel, w.page), (4, 4), "F1's way: on the page");
         press(&mut w, &mut o, key::CROSS);
         w.capture_key(&vui, "up", &mut Vec::new());
-        for k in [key::TRIANGLE, key::DOWN, key::CROSS, key::LEFT, key::CROSS] {
+        // down past Macros to Save Changes, Yes
+        for k in [key::TRIANGLE, key::DOWN, key::DOWN, key::CROSS, key::LEFT, key::CROSS] {
             press(&mut w, &mut o, k);
         }
         for _ in 0..3 {
             w.draw(&vui, &mut NullRaster, &o, &mut ups);
         }
         assert_eq!(String::from_utf8(testing::kept("keys.opt").unwrap()).unwrap(), "key.walk_forward=up\nkey.menu_up=w\n");
+        settings::set_binds(Default::default());
+        testing::reset(false);
+    }
+
+    /// The client's Macros page, the menu's sixth row (the user,
+    /// 2026-11-10: "lets also add it as its own menu entry"): ✕ opens it on
+    /// Macro 1, ✕ goes into the macro, ✕ on its trigger waits for one (the
+    /// window says so: `capturing`), Y held and let go is kept at once, the
+    /// grid's ✕ ticks the cursor's button; Triangle backs out a step at a
+    /// time and on the menu puts them back; Save Changes keeps them in
+    /// keys.opt beside the keys. The menu's ten rows end where its nine did
+    /// (the title's menu under it); the controls: the Controls page, a row
+    /// up, is still the fifth row, and Save Changes the last.
+    #[test]
+    fn the_macros_page() {
+        use crate::bindpage::Column;
+        use crate::binds::Input;
+        use crate::pointer::testing::{NullRaster, vui};
+        use crate::settings::{self, testing};
+        testing::reset(false);
+        let vui = vui();
+        let mut o = GameOptions::default();
+        let mut w = WndOptions::default();
+        let (mut cues, mut ups) = (Vec::new(), Vec::new());
+        let mut press = |w: &mut WndOptions, o: &mut GameOptions, k: i32| {
+            w.key(&vui, &mut NullRaster, o, k, 0, &mut cues, &mut ups);
+            w.release(k);
+            w.draw(&vui, &mut NullRaster, o, &mut ups);
+        };
+        w.open(&vui, &NullRaster, &o);
+        let mut nine = Window::default();
+        nine.init(&vui, &NullRaster, CENTER, 300, 9, 0);
+        nine.set_title(Some(&[1]));
+        assert_eq!((w.window.rows, w.window.bottom_right()[1]), (10, nine.bottom_right()[1]), "a row more, grown upward");
+        for _ in 0..5 {
+            press(&mut w, &mut o, key::DOWN);
+        }
+        assert_eq!(w.sel, 5);
+        press(&mut w, &mut o, key::CROSS);
+        assert_eq!((w.page, w.window2.title.chars()), (5, wide("Macros")), "Macros");
+        press(&mut w, &mut o, key::CROSS);
+        assert!(w.macros.editing, "into Macro 1");
+        press(&mut w, &mut o, key::CROSS);
+        assert_eq!(w.capturing(), Some(Column::Trigger), "its trigger awaited");
+        w.capture_key(&vui, "y", &mut Vec::new());
+        w.capture_key_up(&vui, "y", &mut Vec::new());
+        assert_eq!((w.capturing(), settings::binds().macros[0].triggers.clone()), (None, vec![vec![Input::Key("y".into())]]), "kept as it was let go");
+        // down to the grid (Add, Clear, the four settings), ✕ ticks ↑
+        for _ in 0..7 {
+            press(&mut w, &mut o, key::DOWN);
+        }
+        press(&mut w, &mut o, key::CROSS);
+        assert_eq!(settings::binds().macros[0].buttons, crate::input::bit::UP);
+        // Triangle: the list, the menu, then closed and put back
+        press(&mut w, &mut o, key::TRIANGLE);
+        assert!(!w.macros.editing && w.page == 5);
+        press(&mut w, &mut o, key::TRIANGLE);
+        assert_eq!((w.page, w.sel), (-1, 5));
+        press(&mut w, &mut o, key::TRIANGLE);
+        assert!(settings::binds().is_default(), "put back");
+        // again, kept with Save Changes
+        w.open(&vui, &NullRaster, &o);
+        w.sel = 5;
+        for k in [key::CROSS, key::CROSS, key::CROSS] {
+            press(&mut w, &mut o, k);
+        }
+        w.capture_button(&vui, crate::binds::bit_index(crate::input::bit::L3).unwrap(), &mut Vec::new());
+        w.capture_button_up(&vui, crate::binds::bit_index(crate::input::bit::L3).unwrap(), &mut Vec::new());
+        for k in [key::TRIANGLE, key::TRIANGLE, key::DOWN, key::CROSS, key::LEFT, key::CROSS] {
+            press(&mut w, &mut o, k);
+        }
+        for _ in 0..3 {
+            w.draw(&vui, &mut NullRaster, &o, &mut ups);
+        }
+        assert_eq!(String::from_utf8(testing::kept("keys.opt").unwrap()).unwrap(), "macro.1.trigger=pad:l3\n");
+        // the controls: Controls is the fifth row, Save Changes the seventh
+        assert_eq!(MENU[4], -2);
+        assert_eq!(MENU.last(), Some(&482));
         settings::set_binds(Default::default());
         testing::reset(false);
     }
@@ -2512,7 +2924,8 @@ mod tests {
         assert_eq!(CATEGORIES[by_name("Sound")].note, Note::Output);
         assert_eq!(CATEGORIES[by_name("Video")].note, Note::Scale);
         assert_eq!(CATEGORIES[by_name("Lighting")].note, Note::Lighting);
-        assert!(CATEGORIES.iter().filter(|c| c.note != Note::None).count() == if cfg!(target_arch = "wasm32") { 5 } else { 6 }, "the notes only");
+        assert_eq!(CATEGORIES[by_name("Combat")].note, Note::Meter);
+        assert!(CATEGORIES.iter().filter(|c| c.note != Note::None).count() == if cfg!(target_arch = "wasm32") { 6 } else { 7 }, "the notes only");
         #[cfg(not(target_arch = "wasm32"))]
         {
             // Textures: nothing to say while both are off (a test keeps no
@@ -2613,6 +3026,97 @@ mod tests {
         assert_eq!(with(false, true), None);
         assert_eq!(sun_note(&ClientOptions { light_shadows: true, ..Default::default() }), None, "Sun Shadows' note not theirs");
         assert_eq!(light_note(&ClientOptions { sun_shadows: true, ..Default::default() }), None, "nor theirs Sun Shadows'");
+    }
+
+    /// Controller's page names the size the touch pad is drawn at while a
+    /// touch size or Touch Edge is chosen and the window has no room for the
+    /// size asked, naming which when only one is; otherwise, and on any other
+    /// row, none (the page says what this window reads). With the real
+    /// layout: a phone held upright has no room for buttons at 200%, one held
+    /// wide has for sticks at 200%.
+    #[test]
+    fn controllers_page_says_the_touch_size_drawn_where_less_than_asked() {
+        let o = crate::touch::Opts { stick: 2.0, buttons: 1.5, ..Default::default() };
+        let note = |item: i32, d: Option<[f32; 2]>| touch_note(item, &o, |_| d);
+        assert_eq!(note(59, Some([1.6834, 1.5])).as_deref(), Some("Sticks drawn at 168% here"));
+        assert_eq!(note(60, Some([2.0, 1.25])).as_deref(), Some("Buttons drawn at 125% here"));
+        assert_eq!(note(62, Some([1.2, 1.2])).as_deref(), Some("Drawn at 120% here"));
+        assert_eq!(note(62, Some([1.5, 1.5])).as_deref(), Some("Sticks drawn at 150% here"), "the sticks down to the buttons' size");
+        assert_eq!(note(59, Some([2.0, 1.5])), None, "as asked");
+        assert_eq!(note(61, Some([1.0, 1.0])), None, "not on Touch Opacity");
+        assert_eq!(note(16, Some([1.0, 1.0])), None);
+        assert_eq!(note(59, None), None, "no window drawn yet");
+        let real = |item: i32, o: crate::touch::Opts, size: (u32, u32)| touch_note(item, &o, |o| Some(crate::touch::layout(size, o).drawn));
+        let upright = real(60, crate::touch::Opts { buttons: 2.0, ..Default::default() }, (1080, 2400));
+        assert!(upright.as_deref().is_some_and(|n| n.starts_with("Buttons drawn at 1") && n.ends_with("% here")), "{upright:?}");
+        assert_eq!(real(59, crate::touch::Opts { stick: 2.0, ..Default::default() }, (2400, 1080)), None);
+    }
+
+    /// Number Colors' page draws a chosen row's value in its colour over a
+    /// black shadow (it reads on the window, a light one too), and a Default
+    /// row's as every value is drawn, in the window's black with no shadow
+    /// (the control: every row Default draws no colour at all).
+    #[test]
+    fn number_colors_values_are_drawn_in_their_colour() {
+        use crate::pointer::testing::{NullRaster, vui};
+        #[derive(Default)]
+        struct Texts(Vec<([i32; 2], [f32; 4], String)>);
+        impl Raster for Texts {
+            fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+            fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+            fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
+            fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
+            fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) {}
+            fn draw_centered_string(&mut self, at: [i32; 2], c: [f32; 4], s: &[u16], _: u32) {
+                self.0.push((at, c, String::from_utf16_lossy(s)));
+            }
+            fn string_width(&self, s: &[u16]) -> i32 {
+                s.len() as i32 * 8
+            }
+            fn point_size(&self) -> i32 {
+                16
+            }
+            fn viewport(&self) -> [i32; 4] {
+                [0, 0, 640, 448]
+            }
+            fn set_viewport(&mut self, _: [i32; 4]) {}
+        }
+        impl crate::ui::Layout for Texts {}
+        let page = |choices: [u8; 6]| -> Vec<([i32; 2], [f32; 4], String)> {
+            crate::settings::testing::reset(false);
+            let mut c = crate::settings::client();
+            c.number_colors = choices;
+            crate::settings::set_client(c);
+            let vui = vui();
+            let mut r = NullRaster;
+            let mut o = GameOptions::default();
+            let mut w = WndOptions::default();
+            let (mut cues, mut ups) = (Vec::new(), Vec::new());
+            w.open(&vui, &r, &o);
+            w.sel = 3;
+            w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+            w.cat_sel = CATEGORIES.iter().position(|c| c.name == "Number Colors").unwrap() as i32;
+            w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+            let mut t = Texts::default();
+            w.draw(&vui, &mut t, &o, &mut ups);
+            t.0
+        };
+        let red = [1.0, 48.0 / 255.0, 48.0 / 255.0, 1.0];
+        let drawn = page([0, crate::numcolor::from_key("red").unwrap(), 0, 0, 0, 0]);
+        let of = |s: &str| drawn.iter().filter(|d| d.2 == s).cloned().collect::<Vec<_>>();
+        let reds = of("Red");
+        assert_eq!(reds.len(), 2, "its shadow and itself: {drawn:?}");
+        assert_eq!((reds[0].1, reds[1].1), ([0.0, 0.0, 0.0, 1.0], red), "a black shadow under it, then it in red");
+        assert_eq!(reds[0].0, [reds[1].0[0] + 2, reds[1].0[1] + 2], "the shadow 2 down and right");
+        let defaults = of("Default");
+        assert_eq!(defaults.len(), 5, "five rows Default, no shadows: {defaults:?}");
+        assert!(defaults.iter().all(|d| d.1 == UI_COLORS[0]), "Default in the window's black");
+        let plain = page([0; 6]);
+        assert!(plain.iter().filter(|d| d.2 == "Default").all(|d| d.1 == UI_COLORS[0]) && plain.iter().filter(|d| d.2 == "Default").count() == 6);
+        for p in crate::numcolor::LABELS {
+            assert!(plain.iter().any(|d| d.2 == p), "{p}'s label on the page");
+        }
+        crate::settings::testing::reset(false);
     }
 
     /// Every Extended row is one item, and each category's rows are rows:

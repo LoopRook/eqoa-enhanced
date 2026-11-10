@@ -237,6 +237,7 @@ fn native_controller_snapshot_uses_live_report_bytes_and_rotation_is_consumed() 
     let mut report = crate::input::Report {
         buttons: 1 << 4,
         sticks: [0.25, -0.5, 0.75, 0.0],
+        triggers: [0.0; 2],
     };
     crate::fork_ext::prepare_controls(&mut report, true, true);
     let snapshot = crate::fork_ext::addons::input::live_snapshot();

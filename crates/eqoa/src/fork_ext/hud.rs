@@ -812,7 +812,7 @@ mod tests {
 
         let with_group = HudState {
             group_count: 2,
-            group: vec![MemberState { id: 2, name: "Ally".into(), is_target: false, hp: Some((128, false, false)), power: Some(128) }],
+            group: vec![MemberState { id: 2, name: "Ally".into(), is_target: false, hp: Some((128, false, false)), power: Some(128), marks: 0 }],
             ..Default::default()
         };
         ui.begin(size);
@@ -854,7 +854,7 @@ mod tests {
 
         let with_pet = HudState {
             group_count: 1,
-            pet: Some(PetState { name: "Bub".into(), is_target: false, creature: None }),
+            pet: Some(PetState { name: "Bub".into(), is_target: false, creature: None, effects: Vec::new() }),
             ..Default::default()
         };
         ui.begin(size);
@@ -1003,8 +1003,8 @@ mod tests {
             heading: 0.5,
             chat_open: true,
             group_count: 2,
-            group: vec![MemberState { id: 2, name: "Ally".into(), is_target: false, hp: Some((200, false, false)), power: Some(150) }],
-            pet: Some(PetState { name: "Bub".into(), is_target: false, creature: Some((200, false, false)) }),
+            group: vec![MemberState { id: 2, name: "Ally".into(), is_target: false, hp: Some((200, false, false)), power: Some(150), marks: 0 }],
+            pet: Some(PetState { name: "Bub".into(), is_target: false, creature: Some((200, false, false)), effects: Vec::new() }),
             target_name: Some("Casil".into()),
             target_hp: 128,
             target_power: Some(128),

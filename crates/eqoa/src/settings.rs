@@ -650,6 +650,27 @@ pub struct ClientOptions {
     /// HUD where the server sends them, in place of the group's bars, which
     /// hold three. On by default (the user, 2026-11-07).
     pub raid_list: bool,
+    /// Pet Effects (`hud`'s pet bar; the user, 2026-11-09: "put the buff icons
+    /// under the pet name plate"): the effects on the player's pet in a row
+    /// under its bar, where the server sends them (`Session::agree_pet_effects`);
+    /// off, none, as the game shows them nowhere. On by default.
+    pub pet_effects: bool,
+    /// Number Colors (`numcolor`; the server owner's of 2026-11-09: "we can add
+    /// the number colors to extended menu"): each row's colour for the floating
+    /// numbers of the player's own figures and its pet's, by what made them, on a
+    /// server that says so (go-eqoa-server's tags), in `numcolor::ROWS`' order:
+    /// 0 Default (the game's own colour), else `numcolor::PALETTE[n - 1]`. Every
+    /// row Default by default, so nothing changes until one is chosen.
+    pub number_colors: [crate::numcolor::Choice; crate::numcolor::ROWS],
+    /// DPS Meter (`dpsmeter`; the server owner's of 2026-11-10: "lets add dps
+    /// meters, will work solo, group, raid"): the HUD's damage meter of the
+    /// player's group, where the server keeps one (go-eqoa-server's offer,
+    /// `Session::agree_dps_meter`); off, none, and the server asked for none, as
+    /// the game has none. Off by default: a panel over the world's right side.
+    pub dps_meter: bool,
+    /// DPS Meter Shows: the fight (under way, or the last) or Overall, every
+    /// fight since the login; a click on the panel's title or `/dps` turns it.
+    pub dps_view: crate::dpsmeter::View,
     /// Map (the user, 2026-11-09: "also add the map and quest helper we had
     /// in a former update"; on by default): the client's own map (M, the
     /// compass's click, `map`), the minimap, the waypoints on the compass and
@@ -747,7 +768,14 @@ pub struct ClientOptions {
     /// at eight bits a channel (a brighter cloud). PS2 by default, the
     /// game's look (the user, 2026-10-30, named no default: flip it here).
     pub ps2_fog: bool,
-
+    /// Particles: PS2, the particles of blend mode 3 (the Red Swarming
+    /// Death's swarm, the flies and stench round the rotting, smoke) blended
+    /// as the GS blends them into the PS2's 16-bit frame, dithered and cut to
+    /// five bits a channel (`render::Renderer::set_ps2_particles`: many faint
+    /// puffs stop short of their colour, each its own, as the game shows
+    /// them); Exact, blended at eight bits a channel (they pile up into a
+    /// darker mass). PS2 by default, the game's look, as Ground Fog's.
+    pub ps2_particles: bool,
     /// Ambient Occlusion (the user's of 2026-11-08, "lets add ambient
     /// occlusion"): off, the picture as the game draws it; on, the opaque
     /// scene's creases, corners and contacts darkened per pixel
@@ -819,11 +847,25 @@ pub struct ClientOptions {
     pub xp_details: bool,
     /// HUD Numbers: display player HP and Power numerical values on the HUD
     pub hud_numbers: bool,
-    /// Touch Pad Size: the touch screen's pad (`touch`), percent of the
-    /// full pad, which is the most that fits (its rows already meet), down
-    /// to `TOUCH_SIZE_MIN` in `TOUCH_SIZE_STEP`s (a player, 2026-11-02:
-    /// "Is there a way to make the on screen controller size adjustable?").
-    pub touch_size: u8,
+    /// Touch Stick Size and Touch Button Size: the touch screen's pad's
+    /// sticks and buttons (`touch::layout`), each percent of the pad as it
+    /// was, `TOUCH_SIZE_MIN` to `TOUCH_SIZE_MAX` in `TOUCH_SIZE_STEP`s, drawn
+    /// larger than it was only as far as the window has room (a player,
+    /// 2026-11-02: "Is there a way to make the on screen controller size
+    /// adjustable?"; Jibrish's petition 1386, 2026-11-09: "Mobile clients and
+    /// mobile browser need the ability to adjust the on screen controler
+    /// size"). They took over Touch Pad Size, the whole pad's 50 to 100,
+    /// which an older client.opt's `touch_size` gives both.
+    pub touch_stick: u8,
+    pub touch_buttons: u8,
+    /// Touch Opacity: the pad's alphas, percent of its own (`touch`'s
+    /// `TouchPad::draw`), `TOUCH_OPACITY_MIN` to `TOUCH_OPACITY_MAX` in
+    /// `TOUCH_OPACITY_STEP`s.
+    pub touch_opacity: u8,
+    /// Touch Edge: how far in from the window's left and right edges the
+    /// pad keeps, percent of the window's shorter side, 0 to
+    /// `TOUCH_EDGE_MAX` (`touch::layout`).
+    pub touch_edge: u8,
     /// Texture Packs, natively (the user, 2026-11-08: PCSX2's replacement
     /// packs read as they are, "an Extended page row turns packs on and
     /// off"): on, a texture a pack in `textures/SLUS-20744/replacements`
@@ -840,11 +882,21 @@ pub struct ClientOptions {
 /// Render Scale's steps, the first the game's picture as drawn.
 pub const RENDER_SCALES: [u8; 3] = [1, 2, 4];
 
-/// Touch Pad Size's range (percent of the full pad: `touch::layout`)
-/// and its step.
+/// Touch Stick Size's and Touch Button Size's range (percent of the pad as
+/// it was, `TOUCH_SIZE_WAS`: `touch::layout`) and their step.
 pub const TOUCH_SIZE_MIN: u8 = (crate::touch::SMALLEST * 100.0) as u8;
-pub const TOUCH_SIZE_MAX: u8 = 100;
+pub const TOUCH_SIZE_WAS: u8 = 100;
+pub const TOUCH_SIZE_MAX: u8 = (crate::touch::LARGEST * 100.0) as u8;
 pub const TOUCH_SIZE_STEP: u8 = 5;
+/// Touch Opacity's range (percent of the pad's own alphas, `TOUCH_OPACITY_WAS`)
+/// and its step.
+pub const TOUCH_OPACITY_MIN: u8 = (crate::touch::FAINTEST * 100.0 + 0.5) as u8;
+pub const TOUCH_OPACITY_WAS: u8 = 100;
+pub const TOUCH_OPACITY_MAX: u8 = (crate::touch::BRIGHTEST * 100.0) as u8;
+pub const TOUCH_OPACITY_STEP: u8 = 10;
+/// Touch Edge's most (percent of the window's shorter side) and its step.
+pub const TOUCH_EDGE_MAX: u8 = (crate::touch::EDGE_MOST * 100.0 + 0.5) as u8;
+pub const TOUCH_EDGE_STEP: u8 = 1;
 
 /// Shadow Distance's ends and step (`ClientOptions::shadow_distance`).
 pub const SHADOW_DISTANCE_GAME: u16 = 250;
@@ -856,9 +908,19 @@ pub fn shadow_scale() -> f32 {
     client().shadow_distance as f32 / SHADOW_DISTANCE_GAME as f32
 }
 
-/// The touch screen's pad's size now, of the full pad (`touch::layout`).
-pub fn touch_scale() -> f32 {
-    client().touch_size as f32 / 100.0
+/// How the touch screen's pad is drawn now (`touch::layout`, `TouchPad::draw`):
+/// the Extended page's Touch Stick Size, Touch Button Size, Touch Opacity and
+/// Touch Edge.
+pub fn touch_options() -> crate::touch::Opts {
+    client().touch_opts()
+}
+
+impl ClientOptions {
+    /// Its touch rows as the pad takes them (`touch::Opts`).
+    pub fn touch_opts(&self) -> crate::touch::Opts {
+        let share = |v: u8| v as f32 / 100.0;
+        crate::touch::Opts { stick: share(self.touch_stick), buttons: share(self.touch_buttons), opacity: share(self.touch_opacity), edge: share(self.touch_edge) }
+    }
 }
 
 /// The game's ability bars (with the expansion's second).
@@ -915,6 +977,10 @@ impl Default for ClientOptions {
             name_distance: NAME_DISTANCE_GAME,
             overlapping_names: false,
             raid_list: true,
+            pet_effects: true,
+            number_colors: [0; crate::numcolor::ROWS],
+            dps_meter: false,
+            dps_view: crate::dpsmeter::View::Fight,
             map: true,
             minimap: true,
             map_markers: true,
@@ -935,6 +1001,7 @@ impl Default for ClientOptions {
             shadows: true,
             environment: true,
             ps2_fog: true,
+            ps2_particles: true,
             ambient_occlusion: false,
             sun_shadows: false,
             light_shadows: false,
@@ -947,7 +1014,10 @@ impl Default for ClientOptions {
             target_hp_percent: true,
             xp_details: true,
             hud_numbers: true,
-            touch_size: TOUCH_SIZE_MAX,
+            touch_stick: TOUCH_SIZE_WAS,
+            touch_buttons: TOUCH_SIZE_WAS,
+            touch_opacity: TOUCH_OPACITY_WAS,
+            touch_edge: 0,
             texture_packs: false,
             dump_textures: false,
         }
@@ -961,14 +1031,17 @@ impl ClientOptions {
     /// it is not Auto, Capture Controller only when on, Sound in Background
     /// only when off, Ability Bars, NPC/PC Display, NPC/PC Distance and
     /// Name Distance only when not the game's, Overlapping Names only when
-    /// Show, the Map, Minimap, Map Markers, the map's town names, the Quest
+    /// Show, each Number Colors row only when not Default
+    /// (`number_color.<row>=<colour>`), the DPS Meter only when on and what it
+    /// shows only when Overall, the Map, Minimap, Map Markers, the map's town names, the Quest
     /// Helper, Quest Markers and Quest Tracker only when off, Art only when it
     /// is the 2002 disc's, VSync, Shouts and Update
     /// Notices only when off, Text only when Smooth, Render Scale only above
     /// 1, HUD only when Nearest, Output Device only when a device is
-    /// chosen (by its name), Touch Pad Size only when smaller than
-    /// the full pad, and Texture Packs and Dump Textures only when on
-    /// (Ambient Occlusion and Dynamic Lighting the same).
+    /// chosen (by its name), Touch Stick Size, Touch Button Size, Touch
+    /// Opacity and Touch Edge only when not the pad as it was (no Touch Pad
+    /// Size, which they took over), and Texture Packs and Dump Textures only
+    /// when on (Ambient Occlusion and Dynamic Lighting the same).
     pub fn to_text(self) -> String {
         let mut s = format!("lod={}\nbrightness={}\ncamera_distance={}\n", if self.lod { "on" } else { "off" }, self.brightness, self.camera_distance);
         if let Some(r) = self.frame_rate {
@@ -1009,6 +1082,22 @@ impl ClientOptions {
         }
         if !self.raid_list {
             s.push_str("raid_list=off\n");
+        }
+        if !self.pet_effects {
+            s.push_str("pet_effects=off\n");
+        }
+        // Number Colors only where a row is not Default
+        for (key, &c) in crate::numcolor::KEYS.iter().zip(&self.number_colors) {
+            if let Some(p) = crate::numcolor::paint(c) {
+                s.push_str(&format!("number_color.{key}={}\n", p.key));
+            }
+        }
+        // the DPS Meter only when on, what it shows only when Overall
+        if self.dps_meter {
+            s.push_str("dps_meter=on\n");
+        }
+        if self.dps_view != crate::dpsmeter::View::Fight {
+            s.push_str(&format!("dps_meter_shows={}\n", self.dps_view.key()));
         }
         // the map's and the quests' only when off
         for (on, key) in [
@@ -1058,6 +1147,10 @@ impl ClientOptions {
         if !self.ps2_fog {
             s.push_str("ground_fog=exact\n");
         }
+        // Particles only when Exact
+        if !self.ps2_particles {
+            s.push_str("particles=exact\n");
+        }
         // Ambient Occlusion only when on
         if self.ambient_occlusion {
             s.push_str("ambient_occlusion=on\n");
@@ -1093,8 +1186,16 @@ impl ClientOptions {
             s.push_str(&format!("output={}\n", d.as_str()));
         }
         fork_settings::write(&self, &mut s);
-        if self.touch_size != TOUCH_SIZE_MAX {
-            s.push_str(&format!("touch_size={}\n", self.touch_size));
+        // the touch rows only when not the pad as it was
+        for (v, was, key) in [
+            (self.touch_stick, TOUCH_SIZE_WAS, "touch_stick"),
+            (self.touch_buttons, TOUCH_SIZE_WAS, "touch_buttons"),
+            (self.touch_opacity, TOUCH_OPACITY_WAS, "touch_opacity"),
+            (self.touch_edge, 0, "touch_edge"),
+        ] {
+            if v != was {
+                s.push_str(&format!("{key}={v}\n"));
+            }
         }
         // Texture Packs and Dump Textures only when on
         if self.texture_packs {
@@ -1107,9 +1208,13 @@ impl ClientOptions {
     }
 
     /// The settings `to_text` wrote; a line not understood, or a value out
-    /// of range, leaves that setting at its default.
+    /// of range, leaves that setting at its default. An older file's Touch
+    /// Pad Size (`touch_size`, the whole pad's 50 to 100) is both touch sizes
+    /// where the file gives neither of its own.
     pub fn from_text(s: &str) -> ClientOptions {
         let mut c = ClientOptions::default();
+        let (mut old_size, mut stick, mut buttons) = (None, None, None);
+        let ranged = |v: &str, lo: u8, hi: u8| v.parse::<u8>().ok().filter(|t| (lo..=hi).contains(t));
         for line in s.lines() {
             let Some((k, v)) = line.split_once('=') else { continue };
             match (k.trim(), v.trim()) {
@@ -1152,6 +1257,12 @@ impl ClientOptions {
                 ("update_notices", "off") => c.update_notices = false,
                 ("raid_list", "on") => c.raid_list = true,
                 ("raid_list", "off") => c.raid_list = false,
+                ("pet_effects", "on") => c.pet_effects = true,
+                ("pet_effects", "off") => c.pet_effects = false,
+                ("dps_meter", "on") => c.dps_meter = true,
+                ("dps_meter", "off") => c.dps_meter = false,
+                ("dps_meter_shows", "fight") => c.dps_view = crate::dpsmeter::View::Fight,
+                ("dps_meter_shows", "overall") => c.dps_view = crate::dpsmeter::View::Overall,
                 ("map", "on") => c.map = true,
                 ("map", "off") => c.map = false,
                 ("minimap", "on") => c.minimap = true,
@@ -1180,6 +1291,8 @@ impl ClientOptions {
                 ("environment", "off") => c.environment = false,
                 ("ground_fog", "ps2") => c.ps2_fog = true,
                 ("ground_fog", "exact") => c.ps2_fog = false,
+                ("particles", "ps2") => c.ps2_particles = true,
+                ("particles", "exact") => c.ps2_particles = false,
                 ("ambient_occlusion", "on") => c.ambient_occlusion = true,
                 ("ambient_occlusion", "off") => c.ambient_occlusion = false,
                 ("sun_shadows", "on") => c.sun_shadows = true,
@@ -1227,9 +1340,23 @@ impl ClientOptions {
                         c.name_distance = d;
                     }
                 }
-                ("touch_size", v) => {
-                    if let Some(t) = v.parse::<u8>().ok().filter(|t| (TOUCH_SIZE_MIN..=TOUCH_SIZE_MAX).contains(t)) {
-                        c.touch_size = t;
+                ("touch_size", v) => old_size = ranged(v, TOUCH_SIZE_MIN, TOUCH_SIZE_WAS).or(old_size),
+                ("touch_stick", v) => stick = ranged(v, TOUCH_SIZE_MIN, TOUCH_SIZE_MAX).or(stick),
+                ("touch_buttons", v) => buttons = ranged(v, TOUCH_SIZE_MIN, TOUCH_SIZE_MAX).or(buttons),
+                ("touch_opacity", v) => {
+                    if let Some(t) = ranged(v, TOUCH_OPACITY_MIN, TOUCH_OPACITY_MAX) {
+                        c.touch_opacity = t;
+                    }
+                }
+                ("touch_edge", v) => {
+                    if let Some(t) = ranged(v, 0, TOUCH_EDGE_MAX) {
+                        c.touch_edge = t;
+                    }
+                }
+                (k, v) if k.starts_with("number_color.") => {
+                    let row = crate::numcolor::KEYS.iter().position(|&r| r == &k["number_color.".len()..]);
+                    if let (Some(row), Some(choice)) = (row, crate::numcolor::from_key(v)) {
+                        c.number_colors[row] = choice;
                     }
                 }
                 (k, v) if k.starts_with("controller.") => {
@@ -1241,6 +1368,8 @@ impl ClientOptions {
                 (k, v) => fork_settings::parse(&mut c, k, v),
             }
         }
+        c.touch_stick = stick.or(old_size).unwrap_or(c.touch_stick);
+        c.touch_buttons = buttons.or(old_size).unwrap_or(c.touch_buttons);
         c
     }
 }
@@ -1418,6 +1547,26 @@ pub fn overlapping_names() -> bool {
 /// The Raid List (`raidlist`).
 pub fn raid_list() -> bool {
     client().raid_list
+}
+
+/// Pet Effects: the pet's effects under its bar (`hud`).
+pub fn pet_effects() -> bool {
+    client().pet_effects
+}
+
+/// Number Colors now: each row's choice (`numcolor`).
+pub fn number_colors() -> [crate::numcolor::Choice; crate::numcolor::ROWS] {
+    client().number_colors
+}
+
+/// The DPS Meter (`dpsmeter`).
+pub fn dps_meter() -> bool {
+    client().dps_meter
+}
+
+/// What the DPS Meter shows (`dpsmeter::View`).
+pub fn dps_view() -> crate::dpsmeter::View {
+    client().dps_view
 }
 
 /// What the windows share as another window saved it (Capture Controller,
@@ -2231,6 +2380,25 @@ mod tests {
         }
     }
 
+    /// Particles, PS2 by default (the game's look), kept only when Exact;
+    /// anything but ps2 or exact leaves it PS2. The control: Ground Fog's
+    /// Exact is not the particles'.
+    #[test]
+    fn particles_kept_only_when_exact() {
+        let d = ClientOptions::default();
+        assert!(d.ps2_particles, "PS2, the game's");
+        assert_eq!(ClientOptions { ps2_particles: false, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nparticles=exact\n");
+        assert!(!d.to_text().contains("particles"), "the default not written");
+        let c = ClientOptions::from_text("particles=exact");
+        assert!(!c.ps2_particles && c.ps2_fog && c.environment, "Particles alone");
+        assert_eq!(ClientOptions::from_text(&c.to_text()), c);
+        assert!(ClientOptions::from_text("particles=ps2") == d);
+        for bad in ["particles=off", "particles=", "particle=exact", "particles=PS2"] {
+            assert!(ClientOptions::from_text(bad).ps2_particles, "{bad}: PS2, the default");
+        }
+        assert!(ClientOptions::from_text("ground_fog=exact").ps2_particles, "Ground Fog's Exact is not the particles'");
+    }
+
     /// Ground Fog, PS2 by default (the game's look), kept only when Exact;
     /// anything but ps2 or exact leaves it PS2. The control: Environment off
     /// is not Ground Fog's Exact.
@@ -2249,19 +2417,45 @@ mod tests {
         assert!(ClientOptions::from_text("environment=off").ps2_fog);
     }
 
-    /// Touch Pad Size: the full pad unless chosen, written only when
-    /// smaller, read back in its range; anything else is the full pad.
+    /// The touch rows: the pad as it was unless chosen (both sizes 100, its
+    /// own opacity, no edge), each written only when not, read back in its
+    /// range; anything else leaves that row as it was. An older file's Touch
+    /// Pad Size is both sizes, unless the file has a size of its own (in
+    /// either order); a save then writes the two, not it. The controls: out
+    /// of its 50 to 100 the old line is nothing, and the default pad's
+    /// options are `touch::Opts`' default.
     #[test]
-    fn touch_size_kept_only_when_smaller() {
+    fn touch_rows_kept_only_when_not_the_pad_as_it_was() {
         let d = ClientOptions::default();
-        assert_eq!((d.touch_size, TOUCH_SIZE_MIN, TOUCH_SIZE_MAX), (100, 50, 100));
-        assert!(!d.to_text().contains("touch_size"), "the default not written");
-        let c = ClientOptions { touch_size: 70, ..Default::default() };
-        assert_eq!(c.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\ntouch_size=70\n");
+        assert_eq!((d.touch_stick, d.touch_buttons, d.touch_opacity, d.touch_edge), (100, 100, 100, 0));
+        assert_eq!(d.touch_opts(), crate::touch::Opts::default(), "the pad as it was");
+        assert_eq!((TOUCH_SIZE_MIN, TOUCH_SIZE_MAX, TOUCH_OPACITY_MIN, TOUCH_OPACITY_MAX, TOUCH_EDGE_MAX), (50, 200, 10, 200, 10));
+        assert!(!d.to_text().contains("touch"), "the defaults not written");
+        let c = ClientOptions { touch_stick: 150, touch_buttons: 55, touch_opacity: 40, touch_edge: 6, ..Default::default() };
+        assert_eq!(c.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\ntouch_stick=150\ntouch_buttons=55\ntouch_opacity=40\ntouch_edge=6\n");
         assert!(ClientOptions::from_text(&c.to_text()) == c);
-        assert_eq!(ClientOptions::from_text("touch_size=50").touch_size, 50);
-        for bad in ["touch_size=49", "touch_size=101", "touch_size=", "touch_size=x", "touch_size=-5", "touchsize=70"] {
-            assert_eq!(ClientOptions::from_text(bad).touch_size, 100, "{bad}: the full pad");
+        assert_eq!(c.touch_opts(), crate::touch::Opts { stick: 1.5, buttons: 0.55, opacity: 0.4, edge: 0.06 });
+        for (line, want) in [("touch_stick=200", (200, 100, 100, 0)), ("touch_buttons=50", (100, 50, 100, 0)), ("touch_opacity=10", (100, 100, 10, 0)), ("touch_edge=10", (100, 100, 100, 10))] {
+            let c = ClientOptions::from_text(line);
+            assert_eq!((c.touch_stick, c.touch_buttons, c.touch_opacity, c.touch_edge), want, "{line}");
+        }
+        for bad in ["touch_stick=49", "touch_stick=201", "touch_buttons=", "touch_buttons=x", "touch_opacity=9", "touch_opacity=201", "touch_edge=11", "touch_edge=-1", "touchstick=150"] {
+            let c = ClientOptions::from_text(bad);
+            assert_eq!((c.touch_stick, c.touch_buttons, c.touch_opacity, c.touch_edge), (100, 100, 100, 0), "{bad}: as it was");
+        }
+        // an older client.opt's Touch Pad Size: both sizes
+        let old = ClientOptions::from_text("lod=on\ntouch_size=70\n");
+        assert_eq!((old.touch_stick, old.touch_buttons), (70, 70));
+        assert_eq!(old.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\ntouch_stick=70\ntouch_buttons=70\n", "saved as the two");
+        assert_eq!(old.touch_opts(), crate::touch::Opts::sized(0.7), "drawn as Touch Pad Size 70 was");
+        assert_eq!(ClientOptions::from_text("touch_size=50").touch_buttons, 50);
+        for (text, want) in [("touch_size=70\ntouch_stick=120", (120, 70)), ("touch_stick=120\ntouch_size=70", (120, 70)), ("touch_buttons=80\ntouch_size=60", (60, 80))] {
+            let c = ClientOptions::from_text(text);
+            assert_eq!((c.touch_stick, c.touch_buttons), want, "{text:?}: a size of its own wins");
+        }
+        for bad in ["touch_size=49", "touch_size=101", "touch_size=150", "touch_size=", "touch_size=x"] {
+            let c = ClientOptions::from_text(bad);
+            assert_eq!((c.touch_stick, c.touch_buttons), (100, 100), "{bad}: the control, as it was");
         }
     }
 
@@ -2442,6 +2636,55 @@ mod tests {
     /// Changes in a later window puts it in client.opt (never in its own
     /// file), and window 1 reads it back. The control: this window's own
     /// brightness stays as it read it.
+    #[test]
+    fn pet_effects_are_kept_only_when_off() {
+        assert!(ClientOptions::default().pet_effects, "on by default");
+        assert!(!ClientOptions::default().to_text().contains("pet_effects"));
+        assert!(ClientOptions { pet_effects: false, ..Default::default() }.to_text().contains("pet_effects=off\n"));
+        assert!(!ClientOptions::from_text("pet_effects=off").pet_effects);
+        assert!(ClientOptions::from_text("pet_effects=on").pet_effects);
+        assert!(ClientOptions::from_text("pet_effects=maybe").pet_effects, "the default");
+    }
+
+    /// Number Colors: every row Default by default and written not at all; a
+    /// chosen row is one line by its row's and its colour's keys, and reads
+    /// back to itself, the others Default; a row or colour not understood is
+    /// Default (the control: an unknown key changes nothing).
+    #[test]
+    fn number_colors_are_kept_only_when_chosen() {
+        let d = ClientOptions::default();
+        assert_eq!(d.number_colors, [0; crate::numcolor::ROWS], "Default by default");
+        assert!(!d.to_text().contains("number_color"), "nothing written for Default");
+        let mut c = ClientOptions::default();
+        c.number_colors[1] = crate::numcolor::from_key("red").unwrap();
+        c.number_colors[5] = crate::numcolor::from_key("light_blue").unwrap();
+        let text = c.to_text();
+        assert!(text.contains("number_color.procs=red\n") && text.contains("number_color.pet_heals=light_blue\n"), "{text}");
+        assert_eq!(text.matches("number_color.").count(), 2, "{text}");
+        assert_eq!(ClientOptions::from_text(&text).number_colors, c.number_colors, "read back");
+        assert_eq!(ClientOptions::from_text(&text), c, "and nothing else changed");
+        let odd = ClientOptions::from_text("number_color.procs=mauve\nnumber_color.elbows=red\nnumber_color.heals=default");
+        assert_eq!(odd.number_colors, [0; crate::numcolor::ROWS], "not understood: Default");
+        assert_eq!(ClientOptions::from_text("number_color.pet_damage=orange").number_colors, [0, 0, 0, 3, 0, 0]);
+    }
+
+    #[test]
+    fn the_dps_meter_is_kept_only_when_on_and_overall() {
+        use crate::dpsmeter::View;
+        let d = ClientOptions::default();
+        assert!(!d.dps_meter && d.dps_view == View::Fight, "off by default, on the fight");
+        assert!(!d.to_text().contains("dps_meter"), "the defaults write nothing");
+        let c = ClientOptions { dps_meter: true, dps_view: View::Overall, ..Default::default() };
+        let t = c.to_text();
+        assert!(t.contains("dps_meter=on\n") && t.contains("dps_meter_shows=overall\n"), "{t}");
+        let back = ClientOptions::from_text(&t);
+        assert!(back.dps_meter && back.dps_view == View::Overall, "round trip");
+        assert!(!ClientOptions::from_text("dps_meter=off").dps_meter);
+        assert_eq!(ClientOptions::from_text("dps_meter_shows=fight").dps_view, View::Fight);
+        let odd = ClientOptions::from_text("dps_meter=maybe\ndps_meter_shows=sideways");
+        assert!(!odd.dps_meter && odd.dps_view == View::Fight, "anything else: the defaults");
+    }
+
     #[test]
     fn the_raid_list_is_kept_only_when_off() {
         assert!(ClientOptions::default().raid_list, "on by default");
