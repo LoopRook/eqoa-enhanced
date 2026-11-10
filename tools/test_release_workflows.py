@@ -17,7 +17,9 @@ class PublicWorkflowTests(unittest.TestCase):
             section, build = section.split("      - name: Build", 1)
             self.assertIn("cargo +1.99.1 test --release --locked -p eqoa --bin eqoa", section)
             self.assertIn(gate + " -- --exact --test-threads=1 --nocapture", section)
-            self.assertIn("if ($LASTEXITCODE -ne 0) { throw", section)
+            self.assertIn("if ($gateExit -ne 0 -or -not ($gateOutput -match", section)
+            self.assertIn("test result: ok\\. 1 passed;", section)
+            self.assertIn("throw 'Optimized zero-addon allocation gate failed'", section)
             self.assertNotIn("continue-on-error", section)
             self.assertIn("cargo +1.99.1 build --release --locked -p eqoa", build)
 
