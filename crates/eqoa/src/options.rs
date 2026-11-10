@@ -677,12 +677,17 @@ impl WndOptions {
                     // the Map: the map, the minimap and the waypoints from
                     // the next frame (`Play::map_frame`; off, an open map
                     // closes)
+                    41 => c.map = !c.map,
                     // Minimap: drawn or not from the next frame (`map::mini`)
+                    42 => c.minimap = !c.minimap,
                     // Map Markers: the map's camps and coaches from its next
                     // frame (`map::markers`)
+                    43 => c.map_markers = !c.map_markers,
                     // the Quest Helper and its Quest Tracker: the server told
                     // from the next frame (`Play::agree_quests`), the marks
                     // and the HUD's list drawn or not
+                    44 => c.quest_helper = !c.quest_helper,
+                    45 => c.quest_tracker = !c.quest_tracker,
                     // Texture Packs and Dump Textures: set from the next
                     // frame, every texture made again (`texpack::sync`,
                     // `viewer`'s `retexture`)
@@ -838,12 +843,12 @@ impl WndOptions {
             self.page_window(vui, r, CATEGORIES[c].items.len() as i32 + 3);
             return false;
         }
+        // ✕ on Texture Folder shows it, as left and right do (`change`); on
+        // any other row of a page it does nothing, as on the game's
         if self.page == 3 && self.cat.is_some() && fork_options::activate(self.item) {
             cues.push(8);
             return false;
         }
-        // ✕ on Texture Folder shows it, as left and right do (`change`); on
-        // any other row of a page it does nothing, as on the game's
         if self.page == 3 && self.cat.is_some() && self.item == 55 {
             cues.push(if crate::texpack::open_folder() { 8 } else { 9 });
             return false;
@@ -1208,7 +1213,7 @@ const CONTROLS: &str = "Controls";
 /// Extended's rows, by the item each changes (`change`), and their labels.
 /// A row is drawn by its item (`value_text`, or `slider_at` for a slider)
 /// and shown on the page of the category that lists it (`CATEGORIES`).
-const EXTENDED_ITEMS: [(i32, &str); 39] = [
+const EXTENDED_ITEMS: [(i32, &str); 44] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1236,6 +1241,11 @@ const EXTENDED_ITEMS: [(i32, &str); 39] = [
     (38, "Loading Screens"),
     (39, "Render Scale"),
     (40, "HUD"),
+    (41, "Map"),
+    (42, "Minimap"),
+    (43, "Map Markers"),
+    (44, "Quest Helper"),
+    (45, "Quest Tracker"),
     (46, "Shadows"),
     (47, "Ground Fog"),
     (48, "Touch Pad Size"),
@@ -1284,27 +1294,32 @@ struct Category {
 
 /// Extended's categories, in its menu's order (the user's: "Extended, then
 /// Video, UI, Controller, etc."), each a page of `PAGE_MOST` rows at most;
-/// natively Textures last (2026-11-08: Texture Packs and Dump Textures, a
-/// folder's files a page cannot reach).
-const ALL_CATEGORIES: [Category; 12] = [
+/// Lighting after World (2026-11-08: Dynamic Lighting, the world's light,
+/// and Ambient Occlusion);
+/// natively Textures (2026-11-08: Texture Packs and Dump Textures, a
+/// folder's files a page cannot reach; 2026-11-09: Texture Folder); Map last
+/// (2026-11-09: the map and the quest helper, the client's own, back from
+/// before 2026-10-27).
+const ALL_CATEGORIES: [Category; 10] = [
     Category { name: "Video", items: VIDEO, note: Note::Scale },
     Category { name: "World", items: &[20, 35, 36, 37, 47, 25], note: Note::None },
     Category { name: "Lighting", items: &[52, 53, 56, 57, 54], note: Note::Lighting },
-    Category { name: "UI", items: fork_options::UI, note: Note::None },
+    Category { name: "UI", items: &[22, 29, 30, 40, 49], note: Note::None },
     Category { name: "Controller", items: &[16, 19, 48], note: Note::Reads },
     Category { name: "Camera", items: &[15, 17, 18], note: Note::None },
     Category { name: "Characters", items: &[12, 23, 24, 27, 34, 46], note: Note::Server },
     Category { name: "Sound", items: SOUND, note: Note::Output },
-    fork_options::QUESTS_CATEGORY,
-    fork_options::MAP_CATEGORY,
-    fork_options::CATEGORY,
     Category { name: "Textures", items: TEXTURES, note: Note::Textures },
+    Category { name: "Map", items: &[41, 42, 43, 44, 45], note: Note::None },
 ];
 #[cfg(not(target_arch = "wasm32"))]
-const CATEGORIES: &[Category] = &ALL_CATEGORIES;
+const CATEGORIES: &[Category] = &fork_options::categories::<10, 13>(ALL_CATEGORIES);
 /// A page's: all but Textures.
 #[cfg(target_arch = "wasm32")]
-const CATEGORIES: &[Category] = ALL_CATEGORIES.split_at(11).0;
+const CATEGORIES: &[Category] = &{
+    let a = ALL_CATEGORIES;
+    fork_options::categories::<9, 12>([a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9]])
+};
 
 /// Video's rows: natively Display first (F3 20261024-201507: full screen was
 /// F11's alone); a page's full screen is the browser's. Fog and Mipmaps went
@@ -1393,6 +1408,11 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         }),
         26 => on_off(crate::settings::vsync()),
         29 => on_off(c.update_notices),
+        41 => on_off(c.map),
+        42 => on_off(c.minimap),
+        43 => on_off(c.map_markers),
+        44 => on_off(c.quest_helper),
+        45 => on_off(c.quest_tracker),
         34 => wide(if c.overlapping_names { "Show" } else { "Hide" }),
         49 => on_off(c.raid_list),
         50 => on_off(c.texture_packs),
@@ -1847,7 +1867,7 @@ mod tests {
         assert_eq!((w.row, cues.last()), (4, Some(&9)), "Lighting's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.cat, w.cat_sel, w.item), (3, None, 2, -1), "back to the categories, Lighting still lit");
-        // UI: Ability Bars, Target of Target, Mana Bars, Minimap, Stats Box, Update Notices
+        // UI: Ability Bars, Update Notices, Text, HUD, Raid List
         press(&mut w, &mut o, key::DOWN, &mut cues);
         press(&mut w, &mut o, key::CROSS, &mut cues);
         assert_eq!((w.cat, w.item), (Some(3), 22), "UI, Ability Bars");
@@ -1859,9 +1879,7 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::ability_bars(), 4, "and the other way");
         assert_eq!(cues.last(), Some(&11));
-        for _ in 0..5 {
-            press(&mut w, &mut o, key::DOWN, &mut cues);
-        }
+        press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 29, "Update Notices");
         assert!(settings::update_notices(), "on: the game asks to restart into a newer build");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
@@ -1870,7 +1888,29 @@ mod tests {
         assert!(settings::update_notices(), "and back: two values");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (5, Some(&9)), "UI's last row (six, a page's most)");
+        assert_eq!(w.item, 30, "Text, back on UI since Render Scale took its place on Video");
+        assert_eq!(settings::client().text, render::ui::TextFilter::Sharp, "Sharp, the default");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::client().text, cues.last()), (render::ui::TextFilter::Smooth, Some(&11)), "Smooth");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert_eq!(settings::client().text, render::ui::TextFilter::Sharp, "and back: two values");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.item, 40, "HUD");
+        assert_eq!((settings::client().hud, value_text(&vui, 40)), (render::ui::HudFilter::Nearest, Some(wide("Nearest"))), "Nearest, the game's and the default");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::client().hud, value_text(&vui, 40), cues.last()), (render::ui::HudFilter::Sharp, Some(wide("Sharp")), Some(&11)), "Sharp");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert_eq!(settings::client().hud, render::ui::HudFilter::Nearest, "and back: two values");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.item, 49, "Raid List");
+        assert!(settings::raid_list(), "on: a raid group's every name and health");
+        assert_eq!(value_text(&vui, 49), Some(wide(vui.words.get(551, vui.language))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::raid_list(), cues.last()), (false, Some(&11)), "off: the game's bars");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::raid_list(), "and back: two values");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (4, Some(&9)), "UI's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         // Controller: Controller Focus, Capture Controller, Touch Pad Size
         press(&mut w, &mut o, key::DOWN, &mut cues);
@@ -1947,7 +1987,6 @@ mod tests {
         assert_eq!(cues.last(), Some(&11));
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 23, "NPC/PC Display");
-        settings::set_client(settings::ClientOptions { entity_slots: 24, ..settings::client() });
         assert_eq!(settings::entity_slots(), 24, "the game's 24");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!((settings::entity_slots(), cues.last()), (24, Some(&9)), "no fewer than the game's");
@@ -1970,7 +2009,6 @@ mod tests {
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 24, "NPC/PC Distance");
-        settings::set_client(settings::ClientOptions { entity_view: 100, ..settings::client() });
         assert_eq!(settings::entity_view(), 100, "the game's 100");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!((settings::entity_view(), cues.last()), (100, Some(&9)), "no nearer than the game's");
@@ -2030,31 +2068,28 @@ mod tests {
         assert_eq!((w.row, cues.last()), (1, Some(&9)), "Sound's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
         // Textures (natively): Texture Packs and Dump Textures, each Off
         // then On; a test keeps no folder, so the note says there is none
-        assert_eq!((w.cat_sel, cues.last()), (11, Some(&11)), "Textures, after Sound");
+        assert_eq!((w.cat_sel, cues.last()), (8, Some(&11)), "Textures, after Sound");
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(11), 50), "Textures, Texture Packs");
+        assert_eq!((w.cat, w.item), (Some(8), 50), "Textures, Texture Packs");
         assert_eq!(value_text(&vui, 50), Some(wide(vui.words.get(552, vui.language))), "Off, the game's own textures");
-        assert_eq!(w.page_note(11), None, "off: no note");
+        assert_eq!(w.page_note(8), None, "off: no note");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert!(settings::client().texture_packs);
         assert_eq!((value_text(&vui, 50), cues.last()), (Some(wide(vui.words.get(551, vui.language))), Some(&11)));
-        assert_eq!(w.page_note(11).as_deref(), Some("No folder here"));
+        assert_eq!(w.page_note(8).as_deref(), Some("No folder here"));
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!(w.item, 51, "Dump Textures");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().dump_textures, "either way turns it over");
-        assert_eq!(w.page_note(11).as_deref(), Some("0 dumped"), "how many dumped, beside Back");
+        assert_eq!(w.page_note(8).as_deref(), Some("0 dumped"), "how many dumped, beside Back");
         // Texture Folder: Open; with no folder here (a test's), nothing to
         // show, sound 9, by either way or ✕
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.item, cues.last()), (55, Some(&11)), "Texture Folder");
         assert_eq!(value_text(&vui, 55), Some(wide("Open")));
-        assert_eq!(w.page_note(11).as_deref(), Some("No folder here"), "where it is, beside Back");
+        assert_eq!(w.page_note(8).as_deref(), Some("No folder here"), "where it is, beside Back");
         for k in [key::RIGHT, key::LEFT, key::CROSS] {
             press(&mut w, &mut o, k, &mut cues);
             assert_eq!(cues.last(), Some(&9), "none to show ({k})");
@@ -2064,7 +2099,26 @@ mod tests {
         assert_eq!((w.row, cues.last()), (2, Some(&9)), "Textures' last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.cat_sel, cues.last()), (11, Some(&9)), "Textures, the last category");
+        // Map: the Map, Minimap, Map Markers, the Quest Helper and Quest
+        // Tracker, each On then Off, one moving no other
+        assert_eq!((w.cat_sel, cues.last()), (9, Some(&11)), "Map, after Textures");
+        press(&mut w, &mut o, key::CROSS, &mut cues);
+        assert_eq!((w.cat, w.item), (Some(9), 41), "Map, the Map");
+        for (item, on) in [(41, settings::map as fn() -> bool), (42, settings::minimap), (43, settings::map_markers), (44, settings::quest_helper), (45, settings::quest_tracker)] {
+            assert_eq!(w.item, item, "{}", label_of(item));
+            assert!(on(), "{}: on by default", label_of(item));
+            assert_eq!(value_text(&vui, item), Some(wide(vui.words.get(551, vui.language))), "{}: On, the game's word", label_of(item));
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!((on(), cues.last()), (false, Some(&11)), "{}: off", label_of(item));
+            assert_eq!(value_text(&vui, item), Some(wide(vui.words.get(552, vui.language))));
+            press(&mut w, &mut o, key::LEFT, &mut cues);
+            assert!(on(), "{}: and back, two values", label_of(item));
+            press(&mut w, &mut o, key::DOWN, &mut cues);
+        }
+        assert_eq!((w.row, cues.last()), (4, Some(&9)), "Map's last row");
+        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        fork_options::assert_after_upstream_walk(w.cat_sel, cues.last());
         // Triangle: the menu, then closed with every setting put back
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.sel), (-1, 3), "the menu, on Extended");
@@ -2225,6 +2279,7 @@ mod tests {
             v.sort();
             v
         };
+        // (an Android app has no Texture Folder: `TEXTURES`)
         let mut all: Vec<i32> = fork_options::items().map(|&(i, _)| i).filter(|&i| !(cfg!(target_os = "android") && i == 55)).collect();
         all.sort();
         assert_eq!(listed(CATEGORIES), all);
@@ -2404,8 +2459,6 @@ mod tests {
         w.draw(&vui, &mut r, &o, &mut ups);
         assert_eq!(w.cat, Some(6), "Characters' page");
         assert_eq!(w.point([frame + 110.0, y(&w, 0)]), vec![key::RIGHT], "Level of Detail's value");
-        crate::settings::set_client(ClientOptions { entity_slots: 24, ..crate::settings::client() });
-        w.draw(&vui, &mut r, &o, &mut ups);
         assert_eq!(w.point([slider + 30.0, y(&w, 1)]), down(1, key::RIGHT));
         assert_eq!(w.point([slider - 2.0, y(&w, 1)]), down(1, key::LEFT), "left of the knob at the bar's end");
         crate::settings::set_client(ClientOptions { entity_slots: 128, ..crate::settings::client() });
@@ -2414,8 +2467,6 @@ mod tests {
         assert_eq!(w.point([slider + 110.0, y(&w, 1)]), down(1, key::RIGHT), "right of it");
         // NPC/PC Distance: its knob at the left end (the game's 100),
         // then at 1000 at the right end
-        crate::settings::set_client(ClientOptions { entity_view: 100, ..crate::settings::client() });
-        w.draw(&vui, &mut r, &o, &mut ups);
         assert_eq!(w.point([slider + 30.0, y(&w, 2)]), down(2, key::RIGHT));
         crate::settings::set_client(ClientOptions { entity_view: 1000, ..crate::settings::client() });
         w.draw(&vui, &mut r, &o, &mut ups);

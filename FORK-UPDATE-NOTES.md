@@ -4,6 +4,8 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Extended keeps the vanilla UI, Map and Textures pages in their original order. Enhanced HUD, Enhanced Quests and Mods & Addons follow them; existing settings are kept.
+
 - Wereoxxs Enter opens its own chat again after switching away from and back to the game. Optional legacy-settings probes no longer clutter the Addon Manager.
 - Restored signed game icon IDs for Forge UIs, fixing overlapping ability icons in Avoids Modern UI.
 - Added Map and Quest Helper master switches while keeping map search, guidance, the creature journal and circular minimap.
