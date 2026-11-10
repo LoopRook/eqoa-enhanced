@@ -79,6 +79,14 @@ jobs:
           # (it fails on untouched upstream 91f9e72 and on this runner); skipped until upstream fixes it.
           cargo +1.99.1 test --locked --workspace --target x86_64-pc-windows-msvc -- --test-threads=1 --skip the_foot_of_a_wall_darkened_and_open_ground_not
           if ($LASTEXITCODE -ne 0) { throw 'Workspace tests failed' }
+      - name: Require optimized zero-addon allocation gate
+        shell: pwsh
+        env:
+          EQOA_CONFIG: ${{ runner.temp }}/eqoa-zero-addon-config
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:EQOA_CONFIG | Out-Null
+          cargo +1.99.1 test --release --locked -p eqoa --bin eqoa --target x86_64-pc-windows-msvc play::fork_hooks::native_tests::performance_busy_world_zero_addons_frame_and_packet_allocation_bound -- --exact --test-threads=1 --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Optimized zero-addon allocation gate failed' }
       - name: Build development Windows client
         run: cargo +1.99.1 build --release --locked -p eqoa --target x86_64-pc-windows-msvc
       - name: Package exact runtime allowlist
