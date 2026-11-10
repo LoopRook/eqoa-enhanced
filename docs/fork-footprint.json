@@ -308,7 +308,7 @@
       "path": "crates/eqoa/src/options.rs",
       "name": "options items",
       "pattern": "\\bfork_options::items\\b",
-      "count": 6
+      "count": 2
     },
     {
       "path": "crates/eqoa/src/options.rs",
@@ -431,15 +431,27 @@
       "count": 1
     },
     {
-      "path": "crates/eqoa/src/options.rs",
-      "name": "options appended categories",
-      "pattern": "\\bfork_options::categories\\b",
-      "count": 2
-    },
-    {
       "path": "crates/eqoa/src/settings.rs",
       "name": "settings defaults migration",
       "pattern": "\\bfork_settings::migrate_defaults\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/options.rs",
+      "name": "options runtime pages",
+      "pattern": "\\bfork_options::pages\\b",
+      "count": 7
+    },
+    {
+      "path": "crates/eqoa/src/options.rs",
+      "name": "options category rows",
+      "pattern": "\\bfork_options::category_rows\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/options.rs",
+      "name": "options category legend",
+      "pattern": "\\bfork_options::category_legend\\b",
       "count": 1
     }
   ]

@@ -561,8 +561,8 @@ impl WndOptions {
     fn next(&mut self, now: i64, cues: &mut Vec<i32>) {
         let last = match (self.page, self.cat) {
             (-1, _) => 5,
-            (3, None) => CATEGORIES.len() as i32 - 1,
-            (3, Some(c)) => CATEGORIES[c].items.len() as i32 - 1,
+            (3, None) => fork_options::pages().len() as i32 - 1,
+            (3, Some(c)) => fork_options::pages()[c].items.len() as i32 - 1,
             (page, _) => {
                 let mut last = [2, 3, 3];
                 if FEATURES & 0x100 != 0 {
@@ -837,10 +837,10 @@ impl WndOptions {
     fn select(&mut self, vui: &Vui, r: &dyn Raster, cues: &mut Vec<i32>) -> bool {
         if self.page == 3 && self.cat.is_none() {
             cues.push(8);
-            let c = self.cat_sel.clamp(0, CATEGORIES.len() as i32 - 1) as usize;
+            let c = self.cat_sel.clamp(0, fork_options::pages().len() as i32 - 1) as usize;
             self.cat = Some(c);
             self.row = 0;
-            self.page_window(vui, r, CATEGORIES[c].items.len() as i32 + 3);
+            self.page_window(vui, r, fork_options::pages()[c].items.len() as i32 + 3);
             return false;
         }
         // ✕ on Texture Folder shows it, as left and right do (`change`); on
@@ -878,7 +878,7 @@ impl WndOptions {
                 // menu's is: the rows past the menu's nine go up, clear of
                 // the title's own menu under it
                 self.window4.close(true);
-                self.window4.init(vui, r, self.window.center, 300, CATEGORY_ROWS, 0);
+                self.window4.init(vui, r, self.window.center, 300, fork_options::category_rows(), 0);
                 self.window4.open(false);
                 self.window4.set_title(Some(&wide(EXTENDED)));
                 let bottom = |w: &Window| w.top_left()[1] + w.size[1];
@@ -1112,7 +1112,7 @@ impl WndOptions {
     fn draw_categories(&mut self, vui: &Vui, r: &mut dyn Raster) {
         self.window4.draw(vui, r);
         let width = self.window4.size[0];
-        for (k, c) in CATEGORIES.iter().enumerate() {
+        for (k, c) in fork_options::pages().iter().enumerate() {
             let on = self.cat_sel == k as i32;
             let s = if on { format!("|q{}|w", c.name) } else { c.name.to_string() };
             self.window4.text_box(vui, r, &wide(&s), 40, k as i32 + 1, width - 80, 1, UI_COLORS[on as usize], 8);
@@ -1122,7 +1122,7 @@ impl WndOptions {
         }
         let w = |id: i32| vui.words.get(id, vui.language);
         let legend = wide(&format!("|x {}   |t {}", w(212), w(750)));
-        self.window4.text(vui, r, &legend, 40, CATEGORY_LEGEND, UI_COLORS[0], 0);
+        self.window4.text(vui, r, &legend, 40, fork_options::category_legend(), UI_COLORS[0], 0);
     }
 
     /// A category's page (`CATEGORIES`), laid out as the game's pages are (a
@@ -1132,7 +1132,7 @@ impl WndOptions {
     /// under them the Back legend and, beside it, the category's note
     /// (`Note`).
     fn draw_category(&mut self, vui: &Vui, r: &mut dyn Raster, c: usize) {
-        let cat = &CATEGORIES[c];
+        let cat = &fork_options::pages()[c];
         self.item = cat.items.get(self.row as usize).copied().unwrap_or(self.item);
         // Output Device's round: the system's devices listed while it shows
         if cat.items.contains(&32) {
@@ -1169,7 +1169,7 @@ impl WndOptions {
     /// What category `c`'s page says beside its Back legend (`Note`), its
     /// row being the one drawn last (`item`).
     fn page_note(&self, c: usize) -> Option<String> {
-        match CATEGORIES[c].note {
+        match fork_options::pages()[c].note {
             Note::Reads => Some(crate::input::reads()),
             Note::Server => self.server_note.clone().filter(|_| matches!(self.item, 23 | 24)),
             Note::Scale => {
@@ -1313,12 +1313,12 @@ const ALL_CATEGORIES: [Category; 10] = [
     Category { name: "Map", items: &[41, 42, 43, 44, 45], note: Note::None },
 ];
 #[cfg(not(target_arch = "wasm32"))]
-const CATEGORIES: &[Category] = &fork_options::categories::<10, 12>(ALL_CATEGORIES);
+const CATEGORIES: &[Category] = &ALL_CATEGORIES;
 /// A page's: all but Textures.
 #[cfg(target_arch = "wasm32")]
 const CATEGORIES: &[Category] = &{
     let a = ALL_CATEGORIES;
-    fork_options::categories::<9, 11>([a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9]])
+    [a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9]]
 };
 
 /// Video's rows: natively Display first (F3 20261024-201507: full screen was
@@ -1351,6 +1351,7 @@ const TEXTURES: &[i32] = &[50, 51];
 /// on its eighth row of nine (`draw_menu`), the window as tall as they are
 /// (F3 20261026-135758: a category drawn on the menu's legend row).
 const CATEGORY_LEGEND: i32 = CATEGORIES.len() as i32 + 2;
+#[allow(dead_code)] // the runtime window uses the fork's appended pages instead
 const CATEGORY_ROWS: i32 = CATEGORY_LEGEND + 1;
 
 /// The most rows a category's page holds: six and the legend are as tall as
@@ -2118,7 +2119,7 @@ mod tests {
         assert_eq!((w.row, cues.last()), (4, Some(&9)), "Map's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        fork_options::assert_after_upstream_walk(w.cat_sel, cues.last());
+        assert_eq!((w.cat_sel, cues.last()), (9, Some(&9)), "Map, the last category");
         // Triangle: the menu, then closed with every setting put back
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.sel), (-1, 3), "the menu, on Extended");
@@ -2280,10 +2281,10 @@ mod tests {
             v
         };
         // (an Android app has no Texture Folder: `TEXTURES`)
-        let all: Vec<i32> = fork_options::items().map(|&(i, _)| i).filter(|&i| !(cfg!(target_os = "android") && i == 55)).collect();
+        let all: Vec<i32> = EXTENDED_ITEMS.iter().map(|&(i, _)| i).filter(|&i| !(cfg!(target_os = "android") && i == 55)).collect();
         assert_eq!(listed(CATEGORIES), all);
         assert!(fits(CATEGORIES));
-        assert!(fork_options::items().all(|&(i, l)| !l.is_empty() && label_of(i) == l));
+        assert!(EXTENDED_ITEMS.iter().all(|&(i, l)| !l.is_empty() && label_of(i) == l));
         let short = [Category { name: "Video", items: &[13, 20], note: Note::None }];
         assert_ne!(listed(&short), all, "the control: rows left out");
         let seven = [Category { name: "Video", items: &[13, 20, 14, 26, 25, 12, 15], note: Note::None }];
@@ -2619,14 +2620,14 @@ mod tests {
     /// here, where a second match arm would only warn.
     #[test]
     fn every_extended_row_has_its_own_item() {
-        let mut items: Vec<i32> = fork_options::items().map(|r| r.0).collect();
+        let mut items: Vec<i32> = EXTENDED_ITEMS.iter().map(|r| r.0).collect();
         items.sort_unstable();
         let n = items.len();
         items.dedup();
         assert_eq!(items.len(), n, "an item named twice in EXTENDED_ITEMS");
         for c in ALL_CATEGORIES.iter() {
             for i in c.items {
-                assert!(fork_options::items().any(|r| r.0 == *i), "{}'s item {i} has no row", c.name);
+                assert!(EXTENDED_ITEMS.iter().any(|r| r.0 == *i), "{}'s item {i} has no row", c.name);
             }
         }
         let listed: Vec<i32> = ALL_CATEGORIES.iter().flat_map(|c| c.items.iter().copied()).collect();

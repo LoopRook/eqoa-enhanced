@@ -12,9 +12,7 @@ pub(super) const HUD_CATEGORY: Category = Category {
     items: &[1031, 1042, 1047, 1048, 1049, 1050],
     note: Note::None,
 };
-pub(super) const fn categories<const N: usize, const M: usize>(
-    upstream: [Category; N],
-) -> [Category; M] {
+const fn categories<const N: usize, const M: usize>(upstream: [Category; N]) -> [Category; M] {
     assert!(M == N + 2);
     let mut all = [HUD_CATEGORY; M];
     let mut i = 0;
@@ -25,6 +23,46 @@ pub(super) const fn categories<const N: usize, const M: usize>(
     all[N] = HUD_CATEGORY;
     all[N + 1] = CATEGORY;
     all
+}
+#[cfg(not(target_arch = "wasm32"))]
+const PAGES: [Category; 12] = categories(super::ALL_CATEGORIES);
+#[cfg(target_arch = "wasm32")]
+const PAGES: [Category; 11] = categories({
+    let a = super::ALL_CATEGORIES;
+    [a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9]]
+});
+const _: () = assert!(super::fits(&PAGES));
+#[cfg(test)]
+thread_local! { static FORK_PAGES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+/// Production always uses appended pages. Upstream fixtures retain their own
+/// tables; the fork's walker explicitly opts into the complete runtime view.
+pub(super) fn pages() -> &'static [Category] {
+    #[cfg(test)]
+    if !FORK_PAGES.with(|enabled| enabled.get()) {
+        return super::CATEGORIES;
+    }
+    &PAGES
+}
+pub(super) fn category_legend() -> i32 {
+    pages().len() as i32 + 2
+}
+pub(super) fn category_rows() -> i32 {
+    category_legend() + 1
+}
+#[cfg(test)]
+struct ForkPages;
+#[cfg(test)]
+impl ForkPages {
+    fn enter() -> Self {
+        FORK_PAGES.with(|enabled| enabled.set(true));
+        Self
+    }
+}
+#[cfg(test)]
+impl Drop for ForkPages {
+    fn drop(&mut self) {
+        FORK_PAGES.with(|enabled| enabled.set(false));
+    }
 }
 pub(super) const ITEMS: &[(i32, &str)] = &[
     (1031, "Target of Target"),
@@ -199,8 +237,47 @@ mod tests {
     }
 
     #[test]
+    fn combined_tables_preserve_the_upstream_prefix_and_own_every_row_once() {
+        let _pages = ForkPages::enter();
+        let upstream = super::super::CATEGORIES;
+        for (actual, original) in pages().iter().zip(upstream) {
+            assert_eq!(
+                (actual.name, actual.items, actual.note),
+                (original.name, original.items, original.note)
+            );
+        }
+        let mut listed: Vec<_> = pages()
+            .iter()
+            .flat_map(|c| c.items.iter().copied())
+            .collect();
+        let mut registered: Vec<_> = items()
+            .map(|row| row.0)
+            .filter(|&id| !(cfg!(target_os = "android") && id == 55))
+            .collect();
+        listed.sort_unstable();
+        registered.sort_unstable();
+        assert_eq!(listed, registered);
+        let count = listed.len();
+        listed.dedup();
+        assert_eq!(listed.len(), count);
+        assert!(super::super::fits(pages()));
+        assert!(
+            items().all(|&(id, label)| !label.is_empty() && super::super::label_of(id) == label)
+        );
+        let without_fork: Vec<_> = upstream
+            .iter()
+            .flat_map(|c| c.items.iter().copied())
+            .collect();
+        assert_ne!(
+            without_fork.len(),
+            registered.len(),
+            "control: missing fork rows detected"
+        );
+    }
+    #[test]
     fn the_fork_pages_and_rows() {
         testing::reset(false);
+        let _pages = ForkPages::enter();
         let vui = vui();
         let mut w = WndOptions::default();
         let mut o = GameOptions::default();
@@ -216,7 +293,7 @@ mod tests {
             &mut cues,
             &mut ups,
         );
-        let cats = crate::options::CATEGORIES;
+        let cats = pages();
         let first = cats.len() - 2;
         assert_eq!(cats[first - 1].name, "Map");
         assert_eq!(cats[first - 1].items, &[41, 42, 43, 44, 45]);
@@ -283,6 +360,20 @@ mod tests {
                 &mut ups,
             );
         }
+        w.key(
+            &vui,
+            &mut NullRaster,
+            &mut o,
+            key::DOWN,
+            0,
+            &mut cues,
+            &mut ups,
+        );
+        assert_eq!(
+            (w.cat_sel, cues.last()),
+            (cats.len() as i32 - 1, Some(&9)),
+            "fork category end stops"
+        );
         assert!(
             !change(&mut ClientOptions::default(), 42),
             "upstream IDs belong to upstream"
@@ -330,10 +421,4 @@ mod tests {
         assert!(!change(&mut c, 41));
         assert!(!change(&mut c, 9999));
     }
-}
-
-#[cfg(test)]
-pub(super) fn assert_after_upstream_walk(category: i32, cue: Option<&i32>) {
-    assert_eq!(category, 10, "the first fork page follows upstream Map");
-    assert_eq!(cue, Some(&11));
 }
