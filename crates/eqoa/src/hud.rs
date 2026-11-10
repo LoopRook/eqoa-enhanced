@@ -803,7 +803,8 @@ pub fn draw_gauge(vui: &Vui, ui: &mut dyn Raster, bar: i32, frame: i32, at: [i32
 
 #[cfg(test)]
 mod tests {
-    use super::{Gauge, member_gauges, target_gauges, FxArt, FxPiece, Hud, HudState, MemberState, PetState, Pick, bearing_point, patch_point, pet_effects_height, pet_effects_pieces, waypoint_point};
+    use super::{Gauge, member_gauges, target_gauges};
+    use super::{FxArt, FxPiece, Hud, HudState, MemberState, PetState, Pick, bearing_point, patch_point, pet_effects_height, pet_effects_pieces, waypoint_point};
 
     /// A Vui whose atlas has the player's effects strip's art at the disc's
     /// sizes (SUPPORT's: the cell 157 32x32, the caps 159 5x34 and 160 3x34).

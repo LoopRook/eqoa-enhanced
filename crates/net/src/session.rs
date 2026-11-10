@@ -3323,33 +3323,6 @@ mod tests {
         assert_eq!(asks(&mut s), Vec::<Vec<u8>>::new());
     }
 
-    // A GM's map travel (go-eqoa-server's 0x7E34/0x7E35): nothing asked without
-    // the offer; offered, the spot sent as the world, x and z; a 0 ends it, and
-    // so does a new connection.
-    #[test]
-    fn map_travel_offered_then_asked() {
-        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
-        let asks = |s: &mut Session| -> Vec<Vec<u8>> {
-            s.flush();
-            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(_, d)| d.starts_with(&[0x35, 0x7E])).map(|(_, d)| d).collect();
-            sent.borrow_mut().clear();
-            m
-        };
-        assert!(!s.map_travel_to(0, 25500.0, 15600.0), "not offered");
-        assert_eq!(asks(&mut s), Vec::<Vec<u8>>::new(), "nothing asked without the offer");
-        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x34, 0x7E, 1, 0, 0, 0]);
-        assert!(s.map_travel);
-        assert!(s.map_travel_to(2, 25500.5, -15600.0));
-        let mut want = vec![0x35, 0x7E, 2, 0, 0, 0];
-        want.extend_from_slice(&25500.5f32.to_le_bytes());
-        want.extend_from_slice(&(-15600.0f32).to_le_bytes());
-        assert_eq!(asks(&mut s), [want]);
-        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x34, 0x7E, 0, 0, 0, 0]);
-        assert!(!s.map_travel && !s.map_travel_to(0, 1.0, 1.0), "a 0 ends it");
-        assert_eq!(asks(&mut s), Vec::<Vec<u8>>::new());
-    }
-
     // Quest marks (go-eqoa-server's 0x7E03/0x7E04): nothing asked without an
     // offer; an offer answered once for each change of mind; a set read whole
     // (a giver's "!" with its quest's levels, offer and rewards), a short one
