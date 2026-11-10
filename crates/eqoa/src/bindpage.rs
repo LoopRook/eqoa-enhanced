@@ -6,9 +6,9 @@
 //! the windows' legends for the keyboard: which key is ✕, △, □, ○, R1 and
 //! R3 there. ✕ on a row's key or button waits for the key or the button to
 //! put there (Escape, or the button on △, gives up); a row of the client's
-//! keys (the map, the targets, F9's art...) takes a button too, which then
-//! does what its key does and leaves the game's use it had (F3 20261024-145732:
-//! the map on R3). Defaults puts every one back. The changes apply at once;
+//! keys (the targets, F9's art, Hide UI...) takes a button too, which then
+//! does what its key does and leaves the game's use it had (F3
+//! 20261024-145732). Defaults puts every one back. The changes apply at once;
 //! Save Changes keeps them (`keys.opt`) and Triangle on the menu puts them
 //! back, as the window does with the rest.
 //!
@@ -588,6 +588,7 @@ mod tests {
         let mut cues = Vec::new();
         assert_eq!(ControlsPage::entries(), ROWS.len() as i32 + 1, "the rows and Defaults alone");
         let mut b = binds::Binds::default();
+        crate::fork_ext::bindpage::free_fixture_key(&mut b);
         let l3 = binds::bit_index(crate::input::bit::L3).unwrap();
         b.set_trigger(0, None, vec![Input::Key("y".into())]).unwrap();
         b.set_trigger(2, None, vec![Input::Key("y".into()), Input::Button(l3)]).unwrap();

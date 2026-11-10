@@ -41,3 +41,6 @@ pub(crate) fn prepare_controls(
 mod touch_tests;
 
 pub(crate) mod map;
+
+#[cfg(test)]
+pub(crate) mod bindpage;

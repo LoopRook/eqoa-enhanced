@@ -413,3 +413,16 @@ Terra) of the four resolutions: no findings; it noted upstream's row-coverage te
 would fail if run on wasm (upstream's, tests run natively). Not tested: texture packs
 with a real PCSX2 pack, and their interplay with Forge addon textures in game. Owner
 play-test pending.
+
+## 2026-11-10 sync
+
+Upstream 91f9e72..82e64c86df07fcdac9cba39e4cc6c5020032953d, 77 incoming
+commits from develop abd47db, on sync/2026-11-10. Eight hand-resolved shared
+files retain upstream implementations and existing fork adapters. Upstream
+Extended pages, Macros, adjustable touch controls, pet effects, Number Colors
+and DPS meter are retained. Enhanced pages append after Combat. The first-run
+64/650 enhanced.opt migration remains; upstream defaults/tests remain intact.
+No footprint budgets increased. The new upstream server-worlds rule (stream
+one zone through Disc/Sink, preserve composer CRC parity) is adopted in CLAUDE.md.
+See [the report](plans/sync-2026-11-10-report.md) for per-file resolutions,
+HUD overlaps, precise validation counts and remaining live QA.

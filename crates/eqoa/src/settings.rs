@@ -678,7 +678,7 @@ pub struct ClientOptions {
     /// has none (M does nothing, the compass is the game's, a group line is a
     /// chat line, nothing is built or kept, the community's marks are not
     /// asked for). Its own parts under it: Minimap (N turns it too), Map
-    /// Markers (the map's X or â—‹) and the town names (the map's T or Select).
+    /// Markers (the map's X or ○) and the town names (the map's T or Select).
     pub map: bool,
     /// Minimap (on by default): the map's pictures round the player under
     /// the quick menus' name plate (`map::mini`); off, none.
@@ -687,7 +687,7 @@ pub struct ClientOptions {
     /// coach (`map::markers`), each with a card of what it is under the
     /// pointer (the user, F3 pass 18: "mark popular xp camps on map with an XP
     /// icon", "also add all coaches to the map"); off, the map shows neither.
-    /// The map's own key (X, â—‹) turns it too.
+    /// The map's own key (X, ○) turns it too.
     pub map_markers: bool,
     /// Town names on the map (the user, F3 pass 18: "add town names to the
     /// map too", `map::markers`): the map's own key (T, Select) turns them,
@@ -2142,7 +2142,7 @@ mod tests {
             ClientOptions { art: esf::Era::Y2002, ..Default::default() },
             ClientOptions { text: render::ui::TextFilter::Smooth, ..Default::default() },
             ClientOptions { output: Some(DeviceName::new("Speakers (Realtek(R) Audio)")), ..Default::default() },
-            ClientOptions { output: Some(DeviceName::new("KopfhÃ¶rer (2- Arctis 7 Game) = Ãœ")), ..Default::default() },
+            ClientOptions { output: Some(DeviceName::new("Kopfhörer (2- Arctis 7 Game) = Ü")), ..Default::default() },
         ] {
             assert_eq!(ClientOptions::from_text(&c.to_text()), c);
         }
@@ -2154,11 +2154,11 @@ mod tests {
         assert_eq!(ClientOptions { output: Some(tv), ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\noutput=LG TV SSCR2 (NVIDIA High Definition Audio)\n", "Output Device only when chosen");
         assert_eq!(ClientOptions::from_text("output=").output, None, "the system default");
         assert!(tv.same("LG TV SSCR2 (NVIDIA High Definition Audio)") && !tv.same("LG TV SSCR2"), "the whole name");
-        let long = "Ã©".repeat(150);
+        let long = "é".repeat(150);
         let cut = DeviceName::new(&long);
-        assert_eq!(cut.as_str().len(), DEVICE_NAME_MAX, "cut at a character: 100 two-byte Ã©");
+        assert_eq!(cut.as_str().len(), DEVICE_NAME_MAX, "cut at a character: 100 two-byte é");
         assert!(cut.same(&long) && ClientOptions::from_text(&format!("output={long}")).output == Some(cut), "matched by its cut");
-        let odd = DeviceName::new(&format!("a{}", "Ã©".repeat(150)));
+        let odd = DeviceName::new(&format!("a{}", "é".repeat(150)));
         assert_eq!(odd.as_str().len(), DEVICE_NAME_MAX - 1, "the character across the end left out");
         assert_eq!(ClientOptions::from_text("text=sharp").text, render::ui::TextFilter::Sharp);
         for bad in ["text=blurry", "text=", "text=1"] {

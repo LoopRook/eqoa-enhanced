@@ -4,6 +4,10 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Added vanilla's Number Colors, Pet Effects, optional server DPS meter and Macros page. Enhanced HUD and Mods & Addons follow every vanilla Extended page.
+- Touch controls now have separate stick/button sizes, opacity and edge spacing; existing Touch Pad Size settings carry over.
+- Integrated upstream server worlds, race bodies, capes and light-shadow improvements.
+
 - Kept the Enhanced NPC display and distance defaults (64/650) when upgrading older settings; explicit choices stay as saved.
 - Community marker suggestions use the vanilla name-and-note edit boxes for keyboard and controller.
 - Extended keeps the vanilla UI, Map and Textures pages in their original order. Enhanced HUD and Mods & Addons follow them; existing settings are kept.
