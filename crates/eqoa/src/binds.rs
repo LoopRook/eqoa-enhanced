@@ -60,6 +60,10 @@
 //! game sees only the buttons pressed (`macros::Run`, before `VIPad::Read`):
 //! nothing new goes to a server.
 
+#[cfg(test)]
+#[path = "fork_ext/binds.rs"]
+mod fork_binds;
+
 use crate::input::bit;
 use winit::keyboard::{Key, NamedKey};
 
@@ -183,6 +187,8 @@ pub const ROWS: &[Row] = &[
 
 /// A row's index by its name.
 pub fn row_named(id: &str) -> Option<usize> {
+    #[cfg(test)]
+    if !fork_binds::visible(id) { return None; }
     ROWS.iter().position(|r| r.id == id)
 }
 
@@ -1164,6 +1170,23 @@ mod tests {
         let text = b.to_text();
         assert!(!text.contains("push_to_talk") && !text.contains("voice"), "{text}");
         assert!(text.contains("key.attack=v"), "{text}");
+    }
+
+    /// A layout kept by a build with the map's rows (before they went on
+    /// 2026-10-27, or since they came back) reads them again, and the Stats
+    /// Box's line (its row gone for good) is left out and written back no
+    /// more. The control: a known row's line beside them is read.
+    #[test]
+    fn a_layout_with_the_maps_rows_reads_them() {
+        let _upstream = fork_binds::upstream_rows();
+        let b = Binds::from_text("key.map=y\nbutton.map=r3\nkey.stats_box=b\nkey.attack=u\n");
+        assert_eq!(b.key(row_named("attack").unwrap()), Some("u"), "the known line read");
+        assert_eq!(b.key(row_named("map").unwrap()), Some("y"), "the map's key read");
+        assert_eq!(b.row_button(row_named("map").unwrap()), bit_index(bit::R3), "and its button");
+        assert!(row_named("stats_box").is_none(), "no Stats Box row");
+        let text = b.to_text();
+        assert!(!text.contains("stats_box"), "{text}");
+        assert!(text.contains("key.map=y\n") && text.contains("button.map=r3\n"), "{text}");
     }
 
     /// Moving a row: to a free key it goes there and its key is free; to
