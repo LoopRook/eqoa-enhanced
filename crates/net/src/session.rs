@@ -3490,6 +3490,8 @@ mod tests {
         s.agree_quest_marks(true);
         assert_eq!(answers(&mut s), [], "no offer, nothing asked");
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x03, 0x7E, 1, 0, 0, 0]);
+        s.agree_quest_marks(false);
+        assert_eq!(answers(&mut s), [], "the Quest Helper off from the start: nothing answered, as today's");
         s.agree_quest_marks(true);
         s.agree_quest_marks(true);
         assert_eq!(answers(&mut s), [(251, vec![0x03, 0x7E, 1, 0, 0, 0])], "asked once");
@@ -3765,6 +3767,8 @@ mod tests {
         s.agree_quest_progress(true);
         assert_eq!(answers(&mut s), [], "no offer, nothing asked");
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x05, 0x7E, 1, 0, 0, 0]);
+        s.agree_quest_progress(false);
+        assert_eq!(answers(&mut s), [], "the Quest Helper off from the start: nothing answered");
         s.agree_quest_progress(true);
         s.agree_quest_progress(true);
         assert_eq!(answers(&mut s), [(251, vec![0x05, 0x7E, 1, 0, 0, 0])], "asked once");
