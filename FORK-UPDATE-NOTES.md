@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## Unreleased
+
+- Added upstream Move HUD and Reset HUD. The round minimap, its hover cards and search control follow its saved position; HUD numbers, mana bars and Target of Target follow their stock bars. Upstream also restores a lost graphics device in place and improves mercenary tags.
+
 ## 2026-11-11 · Enhanced 0.5.0
 
 - Added upstream item links, Q-tap monster information, map places and indoor minimap floors. Crash reports sent to a supporting game server identify EQOA Enhanced; the local crash-save offer remains available.

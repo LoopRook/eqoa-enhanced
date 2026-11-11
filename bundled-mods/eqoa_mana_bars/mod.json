@@ -14,6 +14,7 @@
     "eqoa.hud.visible",
     "eqoa.options.toggle",
     "eqoa.options.get",
-    "eqoa.events.on"
+    "eqoa.events.on",
+    "eqoa.hud.layout"
   ]
 }

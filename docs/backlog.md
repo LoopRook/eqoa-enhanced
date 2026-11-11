@@ -254,3 +254,12 @@ Do this last, before the release that carries round 2 and the sync into `enhance
   and ensure a single key press cannot unexpectedly both Jump and toggle the Stats Box.
 - Specify precedence and persistence before implementation; test both directions, multiple mods,
   restart, disabling/re-enabling a mod, and chat/menu suppression. Do not silently steal native keys.
+
+## Local report loses its screenshot after a native graphics-device recovery (2026-11-11)
+
+- Sync 2026-11-11b review finding 3. `fork_report::surface` (adds `COPY_SRC` to the surface and calls
+  `report::set_gpu`) runs only from `resumed` (`viewer.rs`, about line 4933); upstream's `remake()`
+  (about 3446-3465) builds the new surface configuration without it. After a recovery on native, a
+  saved F3/crash report has no picture and still shows the pre-loss GPU name (it degrades quietly, no
+  crash). Fix needs one more hook line in `remake`, a shared-file budget check, and a test that a
+  recovered surface still captures; low priority until seen.

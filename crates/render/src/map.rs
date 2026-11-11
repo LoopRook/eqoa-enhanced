@@ -8,7 +8,7 @@ use crate::{DEPTH_FORMAT, Draw, Renderer, TARGET_FORMAT, View};
 use bytemuck::{Pod, Zeroable};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-use wgpu::util::DeviceExt;
+use crate::BufferInit;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -257,7 +257,7 @@ impl MapLayer {
             let p = |i: usize| Vertex { pos: [q.pos[i][0] / w * 2.0 - 1.0, 1.0 - q.pos[i][1] / h * 2.0], uv: q.uv[i], circle:circle.filter(|c|c[2].is_finite()&&c[2]>0.0).map_or([0.0;4],|c|[c[0]/w*2.0-1.0,1.0-c[1]/h*2.0,w/(2.0*c[2]),h/(2.0*c[2])]), color: q.color };
             v.extend([p(0), p(1), p(2), p(0), p(2), p(3)]);
         }
-        let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("map"), contents: bytemuck::cast_slice(&v), usage: wgpu::BufferUsages::VERTEX });
+        let buf = device.buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("map"), contents: bytemuck::cast_slice(&v), usage: wgpu::BufferUsages::VERTEX });
         pass.set_pipeline(&self.pipeline);
         pass.set_vertex_buffer(0, buf.slice(..));
         let mut i = 0;

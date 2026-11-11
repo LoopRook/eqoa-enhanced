@@ -8,7 +8,7 @@ pub const SCREEN_H: f32 = 448.0;
 static WINDOW_SIZE: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new((640u64 << 32) | 448u64);
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HudState {
     pub right_hud_up: bool,
     pub hud_up: bool,
@@ -29,7 +29,12 @@ impl Default for HudState {
     }
 }
 
+type LayoutKey = ((u32, u32), HudState, [[f32; 2]; 4]);
+
 thread_local! {
+    // JSON and Lua records stay reusable until a piece actually moves, the
+    // window changes size or the live HUD state changes.
+    static LAYOUT_CACHE: std::cell::RefCell<Option<(LayoutKey, std::rc::Rc<Json>)>> = const { std::cell::RefCell::new(None) };
     static HUD_STATE: std::cell::Cell<HudState> = const {
         std::cell::Cell::new(HudState {
             right_hud_up: true,
@@ -131,10 +136,30 @@ pub fn hud_frame_json(window_size: (u32, u32)) -> Json {
     })
 }
 
-pub fn hud_layout_json(window_size: (u32, u32)) -> Json {
+pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
     let m = frame_metrics(window_size);
     let state = get_hud_state();
-    let to_rect = |x: f32, y: f32, w: f32, h: f32, anc: &str, vert: &str| {
+    use crate::hudlayout::Piece;
+    let shifts = [Piece::Player, Piece::Group, Piece::Target, Piece::Pet]
+        .map(|piece| crate::hudlayout::shift(piece, crate::hudlayout::Beyond::of(window_size)));
+    let key = (window_size, state, shifts);
+    if let Some(value) = LAYOUT_CACHE.with(|c| {
+        c.borrow()
+            .as_ref()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, j)| j.clone())
+    }) {
+        return value;
+    }
+    let to_rect = |piece, x: f32, y: f32, w: f32, h: f32, anc: &str, vert: &str| {
+        let [dx, dy] = shifts[match piece {
+            Piece::Player => 0,
+            Piece::Group => 1,
+            Piece::Target => 2,
+            Piece::Pet => 3,
+            _ => unreachable!("only the documented stock rectangles"),
+        }];
+        let (x, y) = (x + dx, y + dy);
         let out = transform_rect([x, y, w, h], anc, vert, m);
         json!({
             "frame_x": x,
@@ -153,29 +178,31 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> Json {
         let base_y = 93.0 + 48.0 * k as f32;
         members.push(json!({
             "index": k + 1,
-            "panel": to_rect(20.0, base_y, 174.0, 46.0, "left", "top"),
-            "health": to_rect(30.0, base_y + 25.0, 136.0, 8.0, "left", "top"),
-            "power": to_rect(30.0, base_y + 35.0, 136.0, 8.0, "left", "top"),
+            "panel": to_rect(crate::hudlayout::Piece::Group, 20.0, base_y, 174.0, 46.0, "left", "top"),
+            "health": to_rect(crate::hudlayout::Piece::Group, 30.0, base_y + 25.0, 136.0, 8.0, "left", "top"),
+            "power": to_rect(crate::hudlayout::Piece::Group, 30.0, base_y + 35.0, 136.0, 8.0, "left", "top"),
         }));
     }
 
-    json!({
+    let result = std::rc::Rc::new(json!({
         "player": {
-            "panel": to_rect(10.0, 15.0, 190.0, 65.0, "left", "top"),
-            "health": to_rect(69.0, 36.0, 136.0, 8.0, "left", "top"),
-            "power": to_rect(69.0, 46.0, 136.0, 8.0, "left", "top"),
-            "exp": to_rect(69.0, 56.0, 136.0, 8.0, "left", "top"),
+            "panel": to_rect(crate::hudlayout::Piece::Player, 10.0, 15.0, 190.0, 65.0, "left", "top"),
+            "health": to_rect(crate::hudlayout::Piece::Player, 69.0, 36.0, 136.0, 8.0, "left", "top"),
+            "power": to_rect(crate::hudlayout::Piece::Player, 69.0, 46.0, 136.0, 8.0, "left", "top"),
+            "exp": to_rect(crate::hudlayout::Piece::Player, 69.0, 56.0, 136.0, 8.0, "left", "top"),
         },
         "group_members": members,
         "target": {
-            "panel": to_rect(20.0, 348.0, 174.0, 75.0, "left", "bottom"),
-            "health": to_rect(30.0, 398.0, 136.0, 8.0, "left", "bottom"),
-            "power": to_rect(30.0, 408.0, 136.0, 8.0, "left", "bottom"),
+            "panel": to_rect(crate::hudlayout::Piece::Target, 20.0, 348.0, 174.0, 75.0, "left", "bottom"),
+            "health": to_rect(crate::hudlayout::Piece::Target, 30.0, 398.0, 136.0, 8.0, "left", "bottom"),
+            "power": to_rect(crate::hudlayout::Piece::Target, 30.0, 408.0, 136.0, 8.0, "left", "bottom"),
         },
         "pet": {
-            "panel": to_rect(20.0, state.pet_y as f32, 174.0, state.pet_h as f32, "left", "top"),
+            "panel": to_rect(crate::hudlayout::Piece::Pet, 20.0, state.pet_y as f32, 174.0, state.pet_h as f32, "left", "top"),
         },
-    })
+    }));
+    LAYOUT_CACHE.with(|c| *c.borrow_mut() = Some((key, result.clone())));
+    result
 }
 
 pub fn hud_element_visible(element: &str) -> bool {
@@ -218,5 +245,89 @@ pub fn hud_element_visible(element: &str) -> bool {
                 && !v.active_effects
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moved_stock_parts_report_their_frame_and_window_positions() {
+        crate::settings::testing::reset(false);
+        crate::hudlayout::testing_reset();
+        for size in [(640, 480), (1280, 720), (768, 1024)] {
+            crate::settings::save_hud_layout("");
+            crate::hudlayout::testing_reset();
+            let before = hud_layout_json(size);
+            let frame = hud_frame_json(size);
+            crate::settings::save_hud_layout(
+                "player l 35 t 28\ngroup l 60 t 50\ntarget l 80 b -40\npet l 25 t 12\n",
+            );
+            crate::hudlayout::testing_reset();
+            let after = hud_layout_json(size);
+            for (key, dx, dy) in [
+                ("player", 35.0, 28.0),
+                ("target", 80.0, -40.0),
+                ("pet", 25.0, 12.0),
+            ] {
+                let a = &before[key]["panel"];
+                let z = &after[key]["panel"];
+                assert_eq!(
+                    z["frame_x"].as_f64().unwrap() - a["frame_x"].as_f64().unwrap(),
+                    dx
+                );
+                assert_eq!(
+                    z["frame_y"].as_f64().unwrap() - a["frame_y"].as_f64().unwrap(),
+                    dy
+                );
+            }
+            for (old, new) in before["group_members"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(after["group_members"].as_array().unwrap())
+            {
+                for key in ["panel", "health", "power"] {
+                    assert_eq!(
+                        new[key]["frame_x"].as_f64().unwrap()
+                            - old[key]["frame_x"].as_f64().unwrap(),
+                        60.0
+                    );
+                    assert_eq!(
+                        new[key]["frame_y"].as_f64().unwrap()
+                            - old[key]["frame_y"].as_f64().unwrap(),
+                        50.0
+                    );
+                }
+            }
+            for key in ["player", "target", "pet"] {
+                for rect in after[key].as_object().unwrap().values() {
+                    let expected = transform_point(
+                        [
+                            rect["frame_x"].as_f64().unwrap() as f32,
+                            rect["frame_y"].as_f64().unwrap() as f32,
+                        ],
+                        "left",
+                        if key == "target" { "bottom" } else { "top" },
+                        frame_metrics(size),
+                    );
+                    assert!((rect["x"].as_f64().unwrap() - expected[0] as f64).abs() < 0.001);
+                    assert!((rect["y"].as_f64().unwrap() - expected[1] as f64).abs() < 0.001);
+                }
+            }
+            assert_eq!(
+                frame,
+                hud_frame_json(size),
+                "moving pieces keeps the frame transform"
+            );
+            crate::settings::save_hud_layout("");
+            crate::hudlayout::testing_reset();
+            assert_eq!(
+                hud_layout_json(size),
+                before,
+                "negative control: reset restores every stock rectangle"
+            );
+        }
     }
 }

@@ -425,6 +425,16 @@ impl Runtime {
             super::visibility::publish(false);
         }
     }
+    /// Device recovery drops every GPU object. Flush addon state before the
+    /// replacement runtime lazily attaches to the new device and reloads it.
+    pub fn for_new_device(mut self) -> Self {
+        self.shutdown();
+        let mut next = Self::new(self.paths.clone());
+        next.default_server = self.default_server.clone();
+        next.open = self.open;
+        next
+    }
+
     pub fn shutdown(&mut self) {
         self.pause_health();
         if self.stopped {
@@ -823,6 +833,161 @@ mod tests {
             );
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn device_recovery_keeps_paths_server_and_open_intent_but_releases_graphics() {
+        let root = Scratch::new();
+        let config = Scratch::new();
+        let paths = Paths::select(root.0.clone(), None, Some(config.0.clone()), None);
+        let mut old = Runtime::new(paths.clone());
+        old.default_server = "recovery-test".into();
+        old.request_open();
+        let next = old.for_new_device();
+        assert_eq!(next.paths.mods, paths.mods);
+        assert_eq!(next.paths.config, paths.config);
+        assert_eq!(next.default_server, "recovery-test");
+        assert!(next.open && !next.stopped && next.graphics.is_none());
+        assert_eq!(next.launch(next.open), Launch::Managed);
+        let idle = Runtime::new(Paths::select(root.0.clone(), None, None, None)).for_new_device();
+        assert!(!idle.open && idle.graphics.is_none());
+        assert_eq!(
+            idle.launch(false),
+            Launch::Dormant,
+            "negative control: an idle runtime stays lazy"
+        );
+    }
+
+    /// Device recovery with a live, mod-running runtime: the old runtime must
+    /// flush the mod's changed option to the profile before the GPU objects go,
+    /// and the replacement runtime must read that option back on its new device.
+    #[test]
+    fn device_recovery_flushes_a_changed_mod_option_and_the_new_runtime_reads_it_back() {
+        let instance = wgpu::Instance::default();
+        let adapter = match pollster::block_on(instance.request_adapter(&Default::default())) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!(
+                    "SKIP device_recovery_flushes_a_changed_mod_option GPU prerequisite: {e}"
+                );
+                return;
+            }
+        };
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let root = Scratch::new();
+        let config = Scratch::new();
+        // The mod's option is 'default' until its 3rd frame, then 'changed'.
+        // Load restores a saved option; Save reports the option and how many
+        // times this Lua state was asked to save (a second shutdown would
+        // show up as a second save in the old state's final document).
+        root.native(
+            r#"
+            frames=(frames or 0)+1
+            if not registered then
+                registered=true
+                option='default'
+                saves=0
+                UiForge.RegisterCallback(UiForge.CallbackType.Load,function(t)
+                    if t and t.option then option=t.option end
+                end)
+                UiForge.RegisterCallback(UiForge.CallbackType.Save,function()
+                    saves=saves+1
+                    return {option=option,saves=saves}
+                end)
+            end
+            if frames==3 then option='changed' end
+        "#,
+        );
+        let paths = Paths::select(root.0.clone(), None, Some(config.0.clone()), None);
+        let addon_key = Storage::key(&discover(&root.0).addons.remove(0)).unwrap();
+        let saved_addon = || {
+            super::super::named_profiles::Store::new(Some(config.0.clone()))
+                .read("Default")
+                .ok()
+                .and_then(|d| d.addons.get(&addon_key).cloned())
+        };
+        // Profiles store a Lua table as {"table":[[key,value],...]}.
+        let field = |doc: &serde_json::Value, key: &str| {
+            doc["table"]
+                .as_array()
+                .and_then(|pairs| pairs.iter().find(|p| p[0] == key))
+                .map(|p| p[1].clone())
+                .unwrap_or(serde_json::Value::Null)
+        };
+        let frames = |runtime: &mut Runtime, count: usize| {
+            let Some(Graphics::Managed(active)) = runtime.graphics.as_mut() else {
+                panic!("runtime must be launched");
+            };
+            let target = device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width: 64,
+                    height: 64,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let view = target.create_view(&Default::default());
+            for _ in 0..count {
+                active.context.io_mut().set_delta_time(1.0 / 60.0);
+                let mut encoder = device.create_command_encoder(&Default::default());
+                let snapshot = Snapshot {
+                    in_game: true,
+                    health: super::super::health::HealthSnapshot::new(true, 1, 100),
+                    ..Default::default()
+                };
+                render_managed(
+                    &mut active.context,
+                    &active.renderer,
+                    &mut active.manager,
+                    &mut encoder,
+                    &view,
+                    snapshot,
+                    FramePlan::collect(Vec::new(), None),
+                    None,
+                )
+                .unwrap();
+                queue.submit([encoder.finish()]);
+            }
+        };
+
+        let mut old = Runtime::new(paths.clone());
+        old.launch_headless(&device, &queue, format).unwrap();
+        frames(&mut old, 3);
+        assert!(
+            saved_addon().is_none(),
+            "nothing is flushed while the old runtime is still running"
+        );
+        let mut next = old.for_new_device();
+        let flushed =
+            saved_addon().expect("device recovery must flush the old runtime's addon state");
+        assert_eq!(field(&flushed, "option"), "changed", "flushed: {flushed}");
+        assert_eq!(
+            field(&flushed, "saves"),
+            1,
+            "the old runtime shuts down exactly once (a second shutdown would save twice)"
+        );
+        assert!(next.graphics.is_none(), "the replacement attaches lazily");
+
+        next.launch_headless(&device, &queue, format).unwrap();
+        // Two frames never reach the mod's 3rd-frame change, so 'changed'
+        // can only come back through the profile.
+        frames(&mut next, 2);
+        next.shutdown();
+        let after = saved_addon().unwrap();
+        assert_eq!(
+            field(&after, "option"),
+            "changed",
+            "the new runtime must read the option back, not rebuild the default"
+        );
+        assert_eq!(field(&after, "saves"), 1);
     }
 
     #[test]
