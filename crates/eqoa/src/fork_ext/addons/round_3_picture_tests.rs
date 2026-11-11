@@ -789,24 +789,31 @@ fn round_3_all_four_mods_per_frame_performance_benchmark() {
 
     let iterations = 1000;
     let size = (1280, 720);
-    let start = Instant::now();
-
-    // Time the full per-frame cost of the four mods: Lua render callbacks
-    // (which enqueue commands) plus the native HUD-layer draw (which drains
-    // and draws them).
-    for frame in 0..iterations {
-        // Warm command/text/UTF-16 pools and Ui geometry before measuring storage reuse.
-        if frame == 16 {
-            hud_layer::observe_allocations(true);
-        }
+    let mut dispatch_times = [std::time::Duration::ZERO; 4];
+    let mut render_times = [std::time::Duration::ZERO; 4];
+    let mut draw_time = std::time::Duration::ZERO;
+    let mut imgui_time = std::time::Duration::ZERO;
+    let mut run_frame = |frame: usize, profile: bool| {
+        let imgui_start = profile.then(Instant::now);
         context.frame();
+        if let Some(start) = imgui_start {
+            imgui_time += start.elapsed();
+        }
         hud_layer::clear_all();
-        for (host, bridge) in hosts.iter().zip(&bridges) {
+        for (index, (host, bridge)) in hosts.iter().zip(&bridges).enumerate() {
             // Production starts a new event budget at every frame boundary.
+            let dispatch_start = profile.then(Instant::now);
             native_events::dispatch(host).unwrap();
+            if let Some(start) = dispatch_start {
+                dispatch_times[index] += start.elapsed();
+            }
+            let render_start = profile.then(Instant::now);
             bridge
                 .invoke(|| super::native_events::render(host))
                 .unwrap();
+            if let Some(start) = render_start {
+                render_times[index] += start.elapsed();
+            }
         }
         hud_layer::MOD_QUEUES.with(|queues| {
             let queues = queues.borrow();
@@ -817,12 +824,28 @@ fn round_3_all_four_mods_per_frame_performance_benchmark() {
                 );
             }
         });
+        let draw_start = profile.then(Instant::now);
         ui.begin(size);
         hud_layer::draw(&vui, &mut assets.raster(&mut ui));
         ui.end();
+        if let Some(start) = draw_start {
+            draw_time += start.elapsed();
+        }
+        let imgui_start = profile.then(Instant::now);
         drop(context.render_legacy());
-    }
+        if let Some(start) = imgui_start {
+            imgui_time += start.elapsed();
+        }
+    };
 
+    // Allocation instrumentation is deliberately outside the timed workload.
+    // All four mods stay active in both loops; Lua/event and ImGui work is timed too.
+    for frame in 0..iterations {
+        if frame == 16 {
+            hud_layer::observe_allocations(true);
+        }
+        run_frame(frame, false);
+    }
     let hud_allocations = hud_layer::observe_allocations(false);
     assert_eq!(
         &hud_allocations[..3],
@@ -837,7 +860,24 @@ fn round_3_all_four_mods_per_frame_performance_benchmark() {
         hud_allocations[3],
         hud_allocations[3] as f64 / (iterations - 16) as f64
     );
+
+    let start = Instant::now();
+    for frame in 0..iterations {
+        run_frame(frame, true);
+    }
     let elapsed = start.elapsed();
+    for (index, id) in mod_ids.iter().enumerate() {
+        println!(
+            "PROFILE {id}: dispatch={:.3}us render={:.3}us/frame",
+            dispatch_times[index].as_secs_f64() * 1e6 / iterations as f64,
+            render_times[index].as_secs_f64() * 1e6 / iterations as f64
+        );
+    }
+    println!(
+        "PROFILE native_draw={:.3}us imgui_frame={:.3}us/frame",
+        draw_time.as_secs_f64() * 1e6 / iterations as f64,
+        imgui_time.as_secs_f64() * 1e6 / iterations as f64
+    );
     let per_frame_micros = elapsed.as_micros() as f64 / iterations as f64;
     let per_frame_millis = per_frame_micros / 1000.0;
 
@@ -1056,7 +1096,7 @@ fn assert_mod_click(id: &str, option: &str, frame_rect: [f32; 4], vertical: &str
     if !summary {
         // These names are aliases today; distinguish them to guard the ToT's
         // semantic dependency if their policies diverge in a later release.
-        host.execute("local visible=eqoa.hud.visible;eqoa.hud.visible=function(name) if name=='stats_box' then return false end return visible(name) end").unwrap();
+        host.execute("local visible=eqoa.hud.visible;rawset(eqoa.hud,'visible',function(name) if name=='stats_box' then return false end return visible(name) end)").unwrap();
     }
     let bridge = bridge::Bridge::install(&host).unwrap();
     host.execute(&format!("eqoa.options.set('{option}',true)"))

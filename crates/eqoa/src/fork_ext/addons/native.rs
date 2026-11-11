@@ -408,36 +408,39 @@ pub(crate) fn guard(
     let proxy = lua.create_table()?;
     let mt = lua.create_table()?;
     let prefix = path.to_string();
-    mt.set(
+    // Let Lua resolve present fields directly. Only a missing field crosses
+    // into Rust, where unsupported/unknown fields retain their diagnostics.
+    // The callback must not capture backing: a record can contain Lua cycles,
+    // and an mlua Table captured by a Rust closure roots them in the registry.
+    let missing = lua.create_table()?;
+    missing.set(
         "__index",
         lua.create_function(move |lua, (_table, key): (Table, String)| {
-            let value: Value = backing.raw_get(key.as_str())?;
-            if value.is_nil() {
-                let symbol = format!("{prefix}.{key}");
-                let s = session(lua);
-                let descriptor = s.borrow().descriptors.get(&symbol).cloned();
-                if descriptor
-                    .as_ref()
-                    .is_some_and(|d| matches!(d.status, "not_yet" | "unsupported"))
-                    || (descriptor.is_none()
-                        && !known.as_ref().is_some_and(|keys| keys.contains(&key)))
-                {
-                    let code = descriptor.as_ref().map_or("unknown_symbol", |d| d.status);
-                    diagnose(
-                        lua,
-                        &symbol,
-                        code,
-                        descriptor
-                            .as_ref()
-                            .map_or("unknown field; consult eqoa.capabilities", |d| {
-                                d.reason.as_str()
-                            }),
-                    );
-                }
+            let symbol = format!("{prefix}.{key}");
+            let s = session(lua);
+            let descriptor = s.borrow().descriptors.get(&symbol).cloned();
+            if descriptor
+                .as_ref()
+                .is_some_and(|d| matches!(d.status, "not_yet" | "unsupported"))
+                || (descriptor.is_none() && !known.as_ref().is_some_and(|keys| keys.contains(&key)))
+            {
+                let code = descriptor.as_ref().map_or("unknown_symbol", |d| d.status);
+                diagnose(
+                    lua,
+                    &symbol,
+                    code,
+                    descriptor
+                        .as_ref()
+                        .map_or("unknown field; consult eqoa.capabilities", |d| {
+                            d.reason.as_str()
+                        }),
+                );
             }
-            Ok(value)
+            Ok(Value::Nil)
         })?,
     )?;
+    backing.set_metatable(Some(missing))?;
+    mt.set("__index", backing)?;
     mt.set(
         "__newindex",
         lua.create_function(|_, _: MultiValue| -> Result<()> {

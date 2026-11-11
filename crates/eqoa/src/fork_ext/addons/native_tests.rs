@@ -997,3 +997,80 @@ fn stats_box_status_message_matches_the_saved_state() {
         "stats box hidden"
     );
 }
+
+#[test]
+fn guarded_records_keep_cached_reads_missing_diagnostics_and_read_only_semantics() {
+    let host = Host::new().unwrap();
+    let record = super::native::record(
+        &host.lua,
+        "eqoa.guard_fixture",
+        &serde_json::json!({
+            "name":"cached", "optional":null, "nested":{"value":7}
+        }),
+    )
+    .unwrap();
+    host.lua.globals().set("cached_record", record).unwrap();
+    host.execute(
+        r#"
+        for i=1,1000 do
+            assert(cached_record.name=='cached')
+            assert(cached_record.nested.value==7)
+            assert(cached_record.optional==nil)
+        end
+        assert(not pcall(function() cached_record.name='changed' end))
+        assert(not pcall(function() cached_record.new_field=true end))
+        assert(not pcall(function() cached_record.nested.value=8 end))
+    "#,
+    )
+    .unwrap();
+    assert!(
+        host.drain_logs().unwrap().is_empty(),
+        "known nullable fields stay silent"
+    );
+    host.execute("assert(cached_record.missing_field==nil)")
+        .unwrap();
+    let logs = host.drain_logs().unwrap();
+    assert!(
+        logs.iter()
+            .any(|line| line.contains("eqoa.guard_fixture.missing_field")
+                && line.contains("unknown_symbol"))
+    );
+    host.lua.gc_collect().unwrap();
+    host.execute("assert(cached_record.name=='cached' and cached_record.nested.value==7)")
+        .unwrap();
+}
+
+#[test]
+fn guarded_record_lua_cycles_are_collectible_without_rust_registry_roots() {
+    let lua = mlua::Lua::new();
+    let cycle = || {
+        let backing = lua.create_table().unwrap();
+        backing.raw_set("value", 7).unwrap();
+        let proxy = super::native::guard(
+            &lua,
+            backing.clone(),
+            "eqoa.gc_fixture",
+            Some(vec!["value".into(), "self".into()]),
+        )
+        .unwrap();
+        backing.raw_set("self", proxy.clone()).unwrap();
+        assert_eq!(proxy.get::<u32>("value").unwrap(), 7);
+    };
+    // Warm callback/table allocator caches before measuring retained memory.
+    for _ in 0..128 {
+        cycle();
+    }
+    lua.gc_collect().unwrap();
+    lua.gc_collect().unwrap();
+    let baseline = lua.used_memory();
+    for _ in 0..1024 {
+        cycle();
+    }
+    lua.gc_collect().unwrap();
+    lua.gc_collect().unwrap();
+    assert!(
+        lua.used_memory() <= baseline + 32 * 1024,
+        "unreachable guarded Lua cycles retained memory: baseline={baseline}, after={}",
+        lua.used_memory()
+    );
+}
