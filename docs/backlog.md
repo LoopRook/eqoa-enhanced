@@ -267,4 +267,3 @@ Do this last, before the release that carries round 2 and the sync into `enhance
 ## Skinnable map (owner, 2026-11-11)
 
 Upstream's map reads its colours and font from one table a skin mod can set (about 30 constants in 6 upstream map files). A neutral seam to offer upstream in round 8; no skin mod until then.
-
