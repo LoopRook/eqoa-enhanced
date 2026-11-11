@@ -297,9 +297,15 @@ pub fn inner() -> [i32; 4] {
 /// places it (`Anchor::Right`, `Vertical::Top`), in a `size` window's
 /// pixels.
 pub fn window_rect(size: (u32, u32), r: [i32; 4]) -> [f32; 4] {
+    window_rect_moved(size, r, [0.0; 2])
+}
+
+/// `window_rect` moved `shift` frame pixels: the minimap where the player put
+/// it (`hudlayout`).
+pub fn window_rect_moved(size: (u32, u32), r: [i32; 4], shift: [f32; 2]) -> [f32; 4] {
     let (side, top) = (render::ui::side(size), render::ui::top(size));
-    let a = window_from_frame(size, [Anchor::Right.place(r[0] as f32, side), Vertical::Top.place(r[1] as f32, top)]);
-    let b = window_from_frame(size, [Anchor::Right.place(r[2] as f32, side), Vertical::Top.place(r[3] as f32, top)]);
+    let a = window_from_frame(size, [Anchor::Right.place(r[0] as f32, side) + shift[0], Vertical::Top.place(r[1] as f32, top) + shift[1]]);
+    let b = window_from_frame(size, [Anchor::Right.place(r[2] as f32, side) + shift[0], Vertical::Top.place(r[3] as f32, top) + shift[1]]);
     [a[0], a[1], b[0], b[1]]
 }
 
@@ -343,13 +349,6 @@ fn square(q: [f32; 2], r: f32) -> [[f32; 2]; 4] {
 /// A diamond `r` either side of `q`: its points up, right, down and left.
 fn diamond(q: [f32; 2], r: f32) -> [[f32; 2]; 4] {
     [[q[0], q[1] - r], [q[0] + r, q[1]], [q[0], q[1] + r], [q[0] - r, q[1]]]
-}
-
-fn ring_quad(size:(u32,u32),c:[f32;3],i:usize,n:usize,width:f32)->[[f32;2];4] {
-    let a=i as f32*std::f32::consts::TAU/n as f32;let b=(i+1)as f32*std::f32::consts::TAU/n as f32;
-    let at=|t:f32,r:f32|frame_from_window(size,[c[0]+r*t.cos(),c[1]+r*t.sin()]);
-    let inner=(c[2]-width).max(0.0);
-    [at(a,inner),at(a,c[2]),at(b,c[2]),at(b,inner)]
 }
 
 /// A plain quad at frame points `pos`, cut to `cut`, pushed as it is (the
@@ -502,8 +501,10 @@ impl Map {
             return;
         }
         let size = cx.size;
-        let outer = window_rect(size, FRAME);
-        let inside = window_rect(size, inner());
+        // where the player put it (`hudlayout`), the HUD's last frame keeping it on the screen
+        let moved = crate::hudlayout::shift(crate::hudlayout::Piece::Minimap, crate::hudlayout::Beyond::of(size));
+        let outer = window_rect_moved(size, FRAME, moved);
+        let inside = window_rect_moved(size, inner(), moved);
         let across = (inner()[2] - inner()[0]) as f32;
         let k = (inside[2] - inside[0]) / across;
         if k <= 0.0 {
@@ -655,16 +656,13 @@ impl Map {
             // the border, a window's frame round it, placed as the HUD's right side is
             r.ui.anchor = Anchor::Right;
             r.ui.vertical = Vertical::Top;
-            // A thin circular ring; the same circle clips terrain and marks.
-            r.ui.anchor=Anchor::Middle;r.ui.vertical=Vertical::Middle;
-            let ring_start=r.ui.quads.len();
-            for i in 0..96 {plain(r.ui,white,ring_quad(size,self.mini.circle,i,96,px_line),super::theme::BORDER,None);}
-            for q in &mut r.ui.quads[ring_start..] {q.clip=Some(render::ui::WHOLE);}
-            r.ui.anchor=Anchor::Right;r.ui.vertical=Vertical::Top;
+            crate::fork_ext::map::round_minimap_border(r.ui, white, size, self.mini.circle, px_line);
+            r.ui.shift = moved;
             // north, up: the compass turns with the camera, the minimap does not
             let i = inner();
             let h = vui.font_height(&r);
             vui.draw_centered_string_ex(&mut r, &vi::ui::wide("N"), (i[0] + i[2]) / 2, i[1] + h / 2 + 5, [1.0, 1.0, 1.0, 0.95], 3, true);
+            r.ui.shift = [0.0; 2];
             // the quests' "!" and "?" over the other marks, where they were
             // placed in the window (cut to the pictures as the marks are)
             r.ui.anchor = Anchor::Middle;
@@ -1085,3 +1083,7 @@ mod tests {
 #[cfg(test)]
 #[path = "../fork_ext/map_sync_tests.rs"]
 mod fork_sync_tests;
+
+#[cfg(test)]
+#[path = "../fork_ext/map_move_tests.rs"]
+mod fork_move_tests;
