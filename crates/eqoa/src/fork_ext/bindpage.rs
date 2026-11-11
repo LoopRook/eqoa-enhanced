@@ -7,7 +7,8 @@ use crate::settings::{read_config, write_config};
 use std::sync::Mutex;
 use vi::ui::{Raster, UI_COLORS, Vui, Window, wide};
 
-const KEYS_FILE: &str = "keys.opt";
+const KEYS_FILE: &str = "mod-keys.opt";
+const LEGACY_KEYS_FILE: &str = "keys.opt";
 const KEY_X: i32 = 280;
 const KEY_W: i32 = 110;
 const PAD_X: i32 = 138;
@@ -219,19 +220,90 @@ pub fn capture_key(
     true
 }
 
-fn load_saved_key(addon: &str, id: &str) -> Option<String> {
-    let bytes = read_config(KEYS_FILE)?;
-    let text = String::from_utf8_lossy(&bytes);
-    let prefix = format!("mod.{addon}.{id}=");
-    for line in text.lines() {
-        if let Some(val) = line.strip_prefix(&prefix) {
-            return Some(val.trim().to_ascii_lowercase());
+/// Copy every old mod binding before removing it from the native binds file.
+/// Existing values in mod-keys.opt win, including an explicitly unbound key.
+pub(crate) fn migrate_legacy_keys() -> Result<(), String> {
+    let Some(legacy) = read_config(LEGACY_KEYS_FILE) else {
+        return Ok(());
+    };
+    let saved = read_config(KEYS_FILE).unwrap_or_default();
+    migrate_key_text(&legacy, &saved, write_config)
+}
+
+fn migrated_line(line: &str) -> Option<String> {
+    if let Some(key) = line.strip_prefix("key.stats_box=") {
+        Some(format!("mod.eqoa_stats_box.toggle={key}"))
+    } else if line.starts_with("mod.") && line.contains('=') {
+        Some(line.to_string())
+    } else {
+        None
+    }
+}
+
+fn migrate_key_text(
+    legacy: &[u8],
+    saved: &[u8],
+    mut write: impl FnMut(&str, &[u8]) -> Result<(), String>,
+) -> Result<(), String> {
+    let legacy = String::from_utf8_lossy(legacy);
+    let mut out = String::from_utf8_lossy(saved).into_owned();
+    let mut cleaned = String::new();
+    let mut migrated = false;
+    // Explicit mod.* choices beat the older Stats Box row, regardless of order.
+    let lines: Vec<_> = legacy.lines().collect();
+    for line in lines
+        .iter()
+        .filter(|line| !line.starts_with("key.stats_box="))
+        .chain(
+            lines
+                .iter()
+                .filter(|line| line.starts_with("key.stats_box=")),
+        )
+    {
+        if let Some(line) = migrated_line(line) {
+            migrated = true;
+            let (name, _) = line.split_once('=').unwrap();
+            if !out
+                .lines()
+                .any(|old| old.split_once('=').is_some_and(|(key, _)| key == name))
+            {
+                if !out.is_empty() && !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                out.push_str(&line);
+                out.push('\n');
+            }
         }
     }
-    if addon == "eqoa_stats_box" && id == "toggle" {
-        for line in text.lines() {
-            if let Some(val) = line.strip_prefix("key.stats_box=") {
-                return Some(val.trim().to_ascii_lowercase());
+    if !migrated {
+        return Ok(());
+    }
+    for line in legacy.lines().filter(|line| migrated_line(line).is_none()) {
+        cleaned.push_str(line);
+        cleaned.push('\n');
+    }
+    // Always confirm the destination write, even if a previous cleanup failed.
+    write(KEYS_FILE, out.as_bytes())?;
+    write(LEGACY_KEYS_FILE, cleaned.as_bytes())
+}
+
+fn load_saved_key(addon: &str, id: &str) -> Option<String> {
+    if let Err(error) = migrate_legacy_keys() {
+        eprintln!("settings: mod key migration: {error}");
+    }
+    let prefix = format!("mod.{addon}.{id}=");
+    for file in [KEYS_FILE, LEGACY_KEYS_FILE] {
+        let bytes = read_config(file).unwrap_or_default();
+        let text = String::from_utf8_lossy(&bytes);
+        if let Some(value) = text.lines().find_map(|line| line.strip_prefix(&prefix)) {
+            return Some(value.trim().to_ascii_lowercase());
+        }
+        if file == LEGACY_KEYS_FILE && addon == "eqoa_stats_box" && id == "toggle" {
+            if let Some(value) = text
+                .lines()
+                .find_map(|line| line.strip_prefix("key.stats_box="))
+            {
+                return Some(value.trim().to_ascii_lowercase());
             }
         }
     }
@@ -239,29 +311,18 @@ fn load_saved_key(addon: &str, id: &str) -> Option<String> {
 }
 
 pub fn save_mod_bind(addon: &str, id: &str, key: &str) -> Result<(), String> {
+    migrate_legacy_keys()?;
     let existing = read_config(KEYS_FILE).unwrap_or_default();
     let text = String::from_utf8_lossy(&existing);
     let key_line = format!("mod.{addon}.{id}={key}");
     let prefix = format!("mod.{addon}.{id}=");
-
     let mut out = String::new();
-    let mut replaced = false;
-    for line in text.lines() {
-        if line.starts_with(&prefix) {
-            out.push_str(&key_line);
-            out.push('\n');
-            replaced = true;
-        } else if line.starts_with("key.stats_box=") {
-            continue;
-        } else {
-            out.push_str(line);
-            out.push('\n');
-        }
-    }
-    if !replaced {
-        out.push_str(&key_line);
+    for line in text.lines().filter(|line| !line.starts_with(&prefix)) {
+        out.push_str(line);
         out.push('\n');
     }
+    out.push_str(&key_line);
+    out.push('\n');
     write_config(KEYS_FILE, out.as_bytes())
 }
 
@@ -279,6 +340,81 @@ pub fn dispatch_keypress(key_name: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_mod_key_migration_writes_destination_before_cleanup_and_retries() {
+        use std::collections::HashMap;
+        let old = b"key.jump=space\nmod.third_party.open=f9\nkey.stats_box=j\nmod.eqoa_stats_box.toggle=f8\n";
+        let saved = b"mod.third_party.open=f12\nmod.another.open=\n";
+        for fail_at in [1, 2, usize::MAX] {
+            let mut files = HashMap::from([
+                (LEGACY_KEYS_FILE, old.to_vec()),
+                (KEYS_FILE, saved.to_vec()),
+            ]);
+            let mut writes = Vec::new();
+            let result = migrate_key_text(old, saved, |file, bytes| {
+                writes.push(file.to_string());
+                if writes.len() == fail_at {
+                    return Err("injected write failure".into());
+                }
+                files.insert(
+                    if file == KEYS_FILE {
+                        KEYS_FILE
+                    } else {
+                        LEGACY_KEYS_FILE
+                    },
+                    bytes.to_vec(),
+                );
+                Ok(())
+            });
+            assert_eq!(writes[0], KEYS_FILE, "new store is always written first");
+            assert_eq!(result.is_err(), fail_at != usize::MAX);
+            if fail_at != usize::MAX {
+                assert_eq!(
+                    files[LEGACY_KEYS_FILE], old,
+                    "failure keeps every old binding"
+                );
+            }
+            if fail_at == 1 {
+                assert_eq!(
+                    writes.len(),
+                    1,
+                    "cleanup must not run after destination failure"
+                );
+                assert_eq!(files[KEYS_FILE], saved);
+            }
+            // A second start must safely finish either partially completed migration.
+            let legacy = files[LEGACY_KEYS_FILE].clone();
+            let destination = files[KEYS_FILE].clone();
+            migrate_key_text(&legacy, &destination, |file, bytes| {
+                files.insert(
+                    if file == KEYS_FILE {
+                        KEYS_FILE
+                    } else {
+                        LEGACY_KEYS_FILE
+                    },
+                    bytes.to_vec(),
+                );
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(files[LEGACY_KEYS_FILE], b"key.jump=space\n");
+            let destination = String::from_utf8(files[KEYS_FILE].clone()).unwrap();
+            assert!(
+                destination.contains("mod.eqoa_stats_box.toggle=f8\n"),
+                "explicit old mod key wins over legacy Stats row"
+            );
+            assert!(
+                destination.contains("mod.third_party.open=f12\n"),
+                "already saved mod choice wins"
+            );
+            assert!(
+                destination.contains("mod.another.open=\n"),
+                "explicitly unbound values survive"
+            );
+            assert!(!destination.contains("key.stats_box="));
+        }
+    }
 
     #[test]
     fn fixture_frees_f2_while_production_keeps_map_search_on_it() {
@@ -335,7 +471,10 @@ mod tests {
         assert_eq!(get_key("eqoa_stats_box", "toggle"), Some("f8".into()));
         let text = String::from_utf8(crate::settings::testing::kept("keys.opt").unwrap()).unwrap();
         assert!(text.contains("key.attack=q") && text.contains("key.hide_ui=z"));
-        assert!(text.contains("mod.eqoa_stats_box.toggle=f8"));
+        assert!(!text.contains("mod."));
+        let mod_text =
+            String::from_utf8(crate::settings::testing::kept(KEYS_FILE).unwrap()).unwrap();
+        assert!(mod_text.contains("mod.eqoa_stats_box.toggle=f8"));
         assert_eq!(dispatch_keypress("b"), None);
         assert_eq!(
             dispatch_keypress("f8"),

@@ -198,37 +198,97 @@ pub fn migrate_configs() {
             }
         }
 
-        // 2. keys.opt: migrate key.stats_box to mod.eqoa_stats_box.toggle and strip it only after write succeeds.
-        if let Some(bytes) = crate::settings::read_config("keys.opt") {
-            let text = String::from_utf8_lossy(&bytes);
-            let mut stats_box_key = None;
-            let mut explicit_mod_key = None;
-            for line in text.lines() {
-                if let Some(val) = line.strip_prefix("key.stats_box=") {
-                    stats_box_key = Some(val.trim().to_ascii_lowercase());
-                } else if let Some(val) = line.strip_prefix("mod.eqoa_stats_box.toggle=") {
-                    explicit_mod_key = Some(val.trim().to_ascii_lowercase());
-                }
-            }
-            if let Some(legacy_k) = stats_box_key {
-                let target_k = explicit_mod_key.unwrap_or(legacy_k);
-                if crate::fork_ext::bindpage::save_mod_bind("eqoa_stats_box", "toggle", &target_k)
-                    .is_ok()
-                {
-                    crate::fork_ext::bindpage::register(
-                        "eqoa_stats_box",
-                        "toggle",
-                        "b",
-                        "Toggle Stats Box",
-                    );
-                }
-            }
+        // Mod keys have their own store, so native Controls saves cannot erase them.
+        let had_stats_binding = crate::settings::read_config("keys.opt").is_some_and(|bytes| {
+            String::from_utf8_lossy(&bytes).lines().any(|line| {
+                line.starts_with("key.stats_box=") || line.starts_with("mod.eqoa_stats_box.toggle=")
+            })
+        });
+        if let Err(error) = crate::fork_ext::bindpage::migrate_legacy_keys() {
+            eprintln!("settings: mod key migration: {error}");
+        }
+        // Preserve the legacy migration's immediately available Stats Box binding.
+        if had_stats_binding
+            && crate::settings::read_config("mod-keys.opt").is_some_and(|bytes| {
+                String::from_utf8_lossy(&bytes)
+                    .lines()
+                    .any(|line| line.starts_with("mod.eqoa_stats_box.toggle="))
+            })
+        {
+            crate::fork_ext::bindpage::register(
+                "eqoa_stats_box",
+                "toggle",
+                "b",
+                "Toggle Stats Box",
+            );
         }
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_save_binds_preserves_rebound_mod_keys_across_file_reload() {
+        use super::super::{binds, save_binds, set_binds, testing};
+        use crate::fork_ext::bindpage;
+        testing::reset(false);
+        bindpage::reset_in_memory();
+        bindpage::register("eqoa_stats_box", "toggle", "b", "Toggle Stats Box");
+        assert!(bindpage::set_key("eqoa_stats_box", "toggle", "f8"));
+        bindpage::register("third_party", "open", "f11", "Open");
+        assert!(bindpage::set_key("third_party", "open", "f12"));
+        let mut native = binds();
+        let jump = crate::binds::row_named("jump").unwrap();
+        native.bind_key(jump, "f6");
+        set_binds(native);
+        // The real native save function used by Controls rewrites keys.opt.
+        save_binds().unwrap();
+        let native_bytes = testing::kept("keys.opt").unwrap();
+        let mod_bytes = testing::kept("mod-keys.opt").unwrap();
+        assert!(!String::from_utf8_lossy(&native_bytes).contains("mod."));
+        assert!(String::from_utf8_lossy(&mod_bytes).contains("mod.eqoa_stats_box.toggle=f8"));
+        assert!(String::from_utf8_lossy(&mod_bytes).contains("mod.third_party.open=f12"));
+
+        // Test builds use the upstream in-memory store. Round-trip its actual
+        // saved bytes through files, then discard all state before reloading.
+        let root = std::env::temp_dir().join(format!(
+            "eqoa-mod-keys-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("keys.opt"), &native_bytes).unwrap();
+        std::fs::write(root.join("mod-keys.opt"), &mod_bytes).unwrap();
+        testing::reset(false);
+        bindpage::reset_in_memory();
+        for file in ["keys.opt", "mod-keys.opt"] {
+            testing::put(file, &std::fs::read(root.join(file)).unwrap());
+        }
+        bindpage::register("eqoa_stats_box", "toggle", "b", "Toggle Stats Box");
+        bindpage::register("third_party", "open", "f11", "Open");
+        assert_eq!(
+            bindpage::get_key("eqoa_stats_box", "toggle").as_deref(),
+            Some("f8")
+        );
+        assert_eq!(
+            bindpage::get_key("third_party", "open").as_deref(),
+            Some("f12")
+        );
+        assert_eq!(binds().key(jump), Some("f6"));
+        assert_eq!(bindpage::dispatch_keypress("b"), None);
+        assert_eq!(bindpage::dispatch_keypress("f11"), None);
+        assert_eq!(
+            bindpage::dispatch_keypress("f8"),
+            Some(("eqoa_stats_box".into(), "toggle".into()))
+        );
+        std::fs::remove_dir_all(root).unwrap();
+        testing::reset(false);
+        bindpage::reset_in_memory();
+    }
+
     #[test]
     fn quest_markers_kept_only_when_off() {
         assert!(ClientOptions::default().quest_markers, "on by default");
@@ -445,7 +505,7 @@ mod tests {
         assert!(kept_client.contains("lod=on\n"));
         assert!(kept_client.contains("brightness=5\n"));
 
-        // 4. keys.opt is stripped of key.stats_box and has mod keybind
+        // 4. keys.opt keeps native rows; mod-keys.opt owns mod bindings
         let kept_keys =
             String::from_utf8(super::super::testing::kept("keys.opt").unwrap()).unwrap();
         assert!(
@@ -453,8 +513,10 @@ mod tests {
             "key.stats_box must be stripped from keys.opt: {kept_keys}"
         );
         assert!(
-            kept_keys.contains("mod.eqoa_stats_box.toggle=j"),
-            "mod bind must be present in keys.opt: {kept_keys}"
+            String::from_utf8(super::super::testing::kept("mod-keys.opt").unwrap())
+                .unwrap()
+                .contains("mod.eqoa_stats_box.toggle=j"),
+            "mod bind must be present in mod-keys.opt"
         );
         assert!(
             kept_keys.contains("key.attack=q"),
