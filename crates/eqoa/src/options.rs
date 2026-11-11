@@ -9,6 +9,13 @@
 //! `game.opt`, here `settings::save`) and applies; Triangle on the menu puts
 //! every setting back as it was and applies.
 //!
+//! The client's own on the game's Interface page: Profanity Filter under its
+//! rows (the GM Jibrish's petition 1490), On by default as the game is at
+//! every login; it is the server's filter of what the player hears, told to a
+//! server that asks for it (go-eqoa-server's 0x7E60,
+//! `Session::agree_profanity_filter`), taken by Save Changes and put back by
+//! Triangle as an Extended row is.
+//!
 //! The client's own, beside the game's: an Extended row between Sound and
 //! Save Changes (the menu a row longer), its words the client's (no
 //! WORDS.TXT entry). It opens a menu of its own over the options menu, drawn
@@ -153,7 +160,13 @@
 //!   the login; the panel's title and `/dps` turn it too) and Reset DPS Meter
 //!   (Reset: the meter cleared and the server's fight under way dropped, by ✕,
 //!   left or right, as Texture Folder opens; `dpsmeter::ask_reset`), the page
-//!   saying when this server keeps no meter.
+//!   saying when this server keeps no meter;
+//! - Chat (2026-11-10, the GM Jibrish's petition 1463: "This should be off by
+//!   default for ps2 players and a toggle option"): Item Links (On by default:
+//!   items linked from the inventory into the chat line, drawn purple in the
+//!   chat box and opened in a window, `itemlink`, the server asked for them:
+//!   `Session::agree_item_links`; Off: none, the server sends the plain names a
+//!   PS2 gets), the page saying when this server has no links.
 //! Triangle goes back a step: a page to the categories, the categories to
 //! the options menu. They change as they are moved, Triangle on the options
 //! menu puts them back, and Save Changes keeps them with the game's
@@ -385,6 +398,9 @@ pub struct WndOptions {
     /// In the world on a server that keeps no damage meter, that it keeps
     /// none (`Play::agree_dps_meter` sets it), the Combat page's legend's
     pub meter_note: Option<String>,
+    /// In the world on a server that offers no item links, that it has none
+    /// (`Play::agree_item_links` sets it), the Chat page's legend's
+    pub links_note: Option<String>,
     /// `m_item`: what the page's row changes (set as the page is drawn)
     item: i32,
     /// the values as the window opened, put back by Triangle
@@ -661,6 +677,8 @@ impl WndOptions {
                 if FEATURES & 0x100 != 0 {
                     last[1] = 4;
                 }
+                // the client's Profanity Filter under the game's rows
+                last[1] += 1;
                 last[page as usize]
             }
         };
@@ -736,6 +754,14 @@ impl WndOptions {
             6 => o.compact ^= 1,
             7 => o.no_damage = (o.no_damage == 0) as u8,
             8..=11 => self.edit[self.item as usize - 8] ^= 1,
+            // Profanity Filter (Interface, the client's row): the server told
+            // from the next frame (`Session::agree_profanity_filter`), kept by
+            // Save Changes as an Extended row is
+            PROFANITY => {
+                let mut c = crate::settings::client();
+                c.profanity_filter = !c.profanity_filter;
+                crate::settings::set_client(c);
+            }
             16 => {
                 let all = Focus::ALL;
                 let at = all.iter().position(|&f| f == crate::settings::focus()).unwrap_or(0);
@@ -857,6 +883,10 @@ impl WndOptions {
                     70 => c.dps_meter = !c.dps_meter,
                     // DPS Meter Shows: the panel's view from the next frame
                     71 => c.dps_view = c.dps_view.other(),
+                    // Item Links: the server told from the next frame
+                    // (`Session::agree_item_links`), the chat box's links drawn
+                    // or plain, the windows closed when off (`itemlink`)
+                    73 => c.item_links = !c.item_links,
                     // Reset DPS Meter: done either way, as ✕ does it (`select`)
                     72 => {
                         crate::dpsmeter::ask_reset();
@@ -990,11 +1020,12 @@ impl WndOptions {
         self.row = 0;
         let rows = match self.sel {
             0 => 6,
+            // with the client's Profanity Filter a row more
             1 => {
                 if FEATURES & 0x200 != 0 {
-                    8
+                    9
                 } else {
-                    7
+                    8
                 }
             }
             2 => 7,
@@ -1212,19 +1243,28 @@ impl WndOptions {
     }
 
     /// `DrawInterfacePage`: Auto Attack, 3rd Person Camera, Camera Pitch
-    /// Axis, Soft Keyboard and (feature 0x200) Vibration.
+    /// Axis, Soft Keyboard and (feature 0x200) Vibration; then the client's
+    /// Profanity Filter (the GM Jibrish's petition 1490), its words the
+    /// client's.
     fn draw_interface(&mut self, vui: &Vui, r: &mut dyn Raster, o: &GameOptions) {
-        self.item = [10, 0, 1, 6, 11].get(self.row as usize).copied().unwrap_or(self.item);
+        let mut items = vec![10, 0, 1, 6];
         let word = |id: i32| Some(wide(vui.words.get(id, vui.language)));
         let on_off = |v: u8| word(if v != 0 { 551 } else { 552 });
         let mut labels = vec![1792, 747, 752, 794];
         let mut values = vec![on_off(self.edit[2]), word(if o.follow != 0 { 68 } else { 805 }), word(if o.inverted != 0 { 779 } else { 784 }), word(if o.compact != 0 { 755 } else { 802 })];
         if FEATURES & 0x200 != 0 {
+            items.push(11);
             labels.push(1604);
             values.push(on_off(self.edit[3]));
         }
-        self.draw_rows(vui, r, &words(vui, &labels), &values);
-        self.back_legend(vui, r, if FEATURES & 0x200 != 0 { 7 } else { 6 });
+        items.push(PROFANITY);
+        values.push(on_off(crate::settings::profanity_filter() as u8));
+        self.item = items.get(self.row as usize).copied().unwrap_or(self.item);
+        let mut labels = words(vui, &labels);
+        labels.push(wide(PROFANITY_LABEL));
+        let n = labels.len() as i32;
+        self.draw_rows(vui, r, &labels, &values);
+        self.back_legend(vui, r, n + 2);
     }
 
     /// `DrawSoundPage`: Battle Music, Fx Volume, Music Volume, Sound Output.
@@ -1333,6 +1373,7 @@ impl WndOptions {
                 _ => None,
             },
             Note::Meter => self.meter_note.clone().filter(|_| matches!(self.item, 70..=72)),
+            Note::Links => self.links_note.clone().filter(|_| self.item == 73),
             Note::None => None,
         }
     }
@@ -1393,7 +1434,7 @@ const CENTER: [i32; 2] = [320, 246];
 /// Extended's rows, by the item each changes (`change`), and their labels.
 /// A row is drawn by its item (`value_text`, or `slider_at` for a slider)
 /// and shown on the page of the category that lists it (`CATEGORIES`).
-const EXTENDED_ITEMS: [(i32, &str); 58] = [
+const EXTENDED_ITEMS: [(i32, &str); 59] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1452,6 +1493,7 @@ const EXTENDED_ITEMS: [(i32, &str); 58] = [
     (70, "DPS Meter"),
     (71, "DPS Meter Shows"),
     (72, "Reset DPS Meter"),
+    (73, "Item Links"),
 ];
 
 /// What a category's page says beside its Back legend.
@@ -1480,6 +1522,9 @@ enum Note {
     /// that this server keeps no meter, while a DPS Meter row is chosen
     /// (`WndOptions::meter_note`, which play sets)
     Meter,
+    /// that this server has no item links, while Item Links is chosen
+    /// (`WndOptions::links_note`, which play sets)
+    Links,
 }
 
 /// One of Extended's categories: its name, its rows (their items, in the
@@ -1501,7 +1546,7 @@ struct Category {
 /// before 2026-10-27); Number Colors after it (2026-11-09: the floating
 /// numbers' colours by what made them, `numcolor`); Combat last (2026-11-10:
 /// the DPS meter, `dpsmeter`).
-const ALL_CATEGORIES: [Category; 12] = [
+const ALL_CATEGORIES: [Category; 13] = [
     Category { name: "Video", items: VIDEO, note: Note::Scale },
     Category { name: "World", items: &[20, 35, 36, 37, 47, 25], note: Note::None },
     Category { name: "Lighting", items: &[52, 53, 56, 57, 54, 63], note: Note::Lighting },
@@ -1514,6 +1559,7 @@ const ALL_CATEGORIES: [Category; 12] = [
     Category { name: "Map", items: &[41, 42, 43, 44, 45], note: Note::None },
     Category { name: "Number Colors", items: &crate::numcolor::ITEMS, note: Note::None },
     Category { name: "Combat", items: &[70, 71, 72], note: Note::Meter },
+    Category { name: "Chat", items: &[73], note: Note::Links },
 ];
 #[cfg(not(target_arch = "wasm32"))]
 const CATEGORIES: &[Category] = &ALL_CATEGORIES;
@@ -1521,7 +1567,7 @@ const CATEGORIES: &[Category] = &ALL_CATEGORIES;
 #[cfg(target_arch = "wasm32")]
 const CATEGORIES: &[Category] = &{
     let a = ALL_CATEGORIES;
-    [a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9], a[10], a[11]]
+    [a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9], a[10], a[11], a[12]]
 };
 
 /// Video's rows: natively Display first (F3 20261024-201507: full screen was
@@ -1636,6 +1682,7 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         70 => on_off(c.dps_meter),
         71 => wide(c.dps_view.name()),
         72 => wide("Reset"),
+        73 => on_off(c.item_links),
         52 => on_off(c.dynamic_lighting),
         38 => wide(if c.loading_longer { "Longer" } else { "Instant" }),
         39 => wide(&format!("x{}", c.render_scale)),
@@ -1730,6 +1777,11 @@ fn step_name_distance(c: &mut ClientOptions, d: i32, cues: &mut Vec<i32>) {
 /// 2026-10-23 ten, which the Extended page's eleventh row, Ability Bars,
 /// outgrew: its notes read as the first row's).
 const HIT_ROWS: i32 = 100;
+
+/// The Interface page's client row, Profanity Filter (`draw_interface`), its
+/// item past every Extended one's.
+const PROFANITY: i32 = 74;
+const PROFANITY_LABEL: &str = "Profanity Filter";
 const LABEL: i32 = HIT_ROWS;
 
 /// WORDS.TXT's entries `ids`, wide.
@@ -1749,6 +1801,44 @@ mod tests {
         let o = GameOptions::default();
         assert_eq!(o.auto_attack, 1);
         assert_eq!((o.stereo, o.follow, o.vibration, o.no_loot), (1, 0, 1, 0));
+    }
+
+    /// The Interface page's last row is the client's Profanity Filter (petition
+    /// 1490): down to it past the game's five, right turns it off in the
+    /// client's settings (what Play tells the server), Triangle on the menu puts
+    /// it back on. The control: the row above it (Vibration) leaves it alone.
+    #[test]
+    fn the_interface_page_turns_the_profanity_filter() {
+        use crate::pointer::key;
+        use crate::pointer::testing::{NullRaster, vui};
+        crate::settings::testing::reset(false);
+        let vui = vui();
+        let mut r = NullRaster;
+        let mut o = GameOptions::default();
+        let mut w = WndOptions::default();
+        let (mut cues, mut ups) = (Vec::new(), Vec::new());
+        w.open(&vui, &r, &o);
+        w.sel = 1;
+        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+        assert_eq!(w.page, 1);
+        for _ in 0..4 {
+            w.key(&vui, &mut r, &mut o, key::DOWN, 0, &mut cues, &mut ups);
+        }
+        w.draw(&vui, &mut r, &o, &mut ups);
+        assert_eq!(w.item, 11, "Vibration");
+        w.key(&vui, &mut r, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
+        assert!(crate::settings::profanity_filter(), "the control: Vibration is not it");
+        w.key(&vui, &mut r, &mut o, key::DOWN, 0, &mut cues, &mut ups);
+        w.key(&vui, &mut r, &mut o, key::DOWN, 0, &mut cues, &mut ups);
+        w.draw(&vui, &mut r, &o, &mut ups);
+        assert_eq!((w.row, w.item), (5, PROFANITY), "the last row, and no row past it");
+        w.key(&vui, &mut r, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
+        assert!(!crate::settings::profanity_filter(), "turned off");
+        // Triangle to the menu, Triangle there: every setting as it was
+        w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
+        w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
+        assert!(crate::settings::profanity_filter(), "put back on");
+        crate::settings::testing::reset(false);
     }
 
     /// once; Triangle on the menu puts the live ones back.
@@ -2451,7 +2541,25 @@ mod tests {
         assert_eq!((w.row, cues.last()), (2, Some(&9)), "Combat's last row");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.cat_sel, cues.last()), (11, Some(&9)), "Combat, the last category");
+        // Chat: Item Links On by default, then Off and back (the petition 1463's
+        // toggle), the page saying where the server has none
+        assert_eq!((w.cat_sel, cues.last()), (12, Some(&11)), "Chat, after Combat");
+        press(&mut w, &mut o, key::CROSS, &mut cues);
+        assert_eq!((w.cat, w.item), (Some(12), 73), "Chat, Item Links");
+        assert!(settings::item_links(), "on by default");
+        assert_eq!(value_text(&vui, 73), Some(wide(vui.words.get(551, vui.language))), "On, the game's word");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::item_links(), cues.last()), (false, Some(&11)), "off");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::item_links(), "and back: two values");
+        assert_eq!(w.page_note(12), None, "no note off a server");
+        w.links_note = Some("This server has no item links".into());
+        assert_eq!(w.page_note(12).as_deref(), Some("This server has no item links"));
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (0, Some(&9)), "Chat's one row");
+        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.cat_sel, cues.last()), (12, Some(&9)), "Chat, the last category");
         // Triangle: the menu, then closed with every setting put back
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.sel), (-1, 3), "the menu, on Extended");
@@ -2641,8 +2749,9 @@ mod tests {
         w.open(&vui, &r, &o);
         w.sel = 1;
         w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+        assert_eq!(w.window2.rows, 9, "Interface: nine rows (Vibration, the client's Profanity Filter)");
+        w.page_window(&vui, &r, 8);
         let (top8, h8) = (w.window2.top_left()[1], w.window2.size[1]);
-        assert_eq!(w.window2.rows, 8, "Interface: eight rows (Vibration)");
         w.page_window(&vui, &r, PAGE_MOST as i32 + 3);
         let (top9, h9) = (w.window2.top_left()[1], w.window2.size[1]);
         assert_eq!((w.window2.rows, w.window2.title_h), (9, 18), "a row more, no title bar");
@@ -2925,7 +3034,8 @@ mod tests {
         assert_eq!(CATEGORIES[by_name("Video")].note, Note::Scale);
         assert_eq!(CATEGORIES[by_name("Lighting")].note, Note::Lighting);
         assert_eq!(CATEGORIES[by_name("Combat")].note, Note::Meter);
-        assert!(CATEGORIES.iter().filter(|c| c.note != Note::None).count() == if cfg!(target_arch = "wasm32") { 6 } else { 7 }, "the notes only");
+        assert_eq!(CATEGORIES[by_name("Chat")].note, Note::Links);
+        assert!(CATEGORIES.iter().filter(|c| c.note != Note::None).count() == if cfg!(target_arch = "wasm32") { 7 } else { 8 }, "the notes only");
         #[cfg(not(target_arch = "wasm32"))]
         {
             // Textures: nothing to say while both are off (a test keeps no

@@ -85,11 +85,14 @@ pub struct Mini {
     /// the map's own markers as marks, a world's (`map_marks`): made once
     /// a world, their cards with them
     pub map_marks: Option<(i32, Vec<Mark>)>,
+    /// what it showed last frame each way from the player, world units (the
+    /// inside picture's size, `Map::indoor_draw`)
+    pub half: f32,
 }
 
 impl Default for Mini {
     fn default() -> Self {
-        Mini { circle:[0.0;3],masked_until:0,scale: SCALE, up: false, frame_px: [0.0; 4], wanted: Vec::new(), cursor: None, map_marks: None }
+        Mini { circle: [0.0; 3], masked_until: 0, scale: SCALE, up: false, frame_px: [0.0; 4], wanted: Vec::new(), cursor: None, map_marks: None, half: 0.0 }
     }
 }
 
@@ -439,7 +442,23 @@ impl Map {
 
     /// The wheel's `lines` over the minimap (up positive: in).
     pub fn mini_wheel(&mut self, lines: f32) {
+        // inside, its own zoom (`indoor`)
+        if self.indoor.inside() {
+            let (lo, hi) = super::indoor::SCALE_LIMITS;
+            self.indoor.scale = Some((self.indoor.scale() * ZOOM_STEP.powf(-lines)).clamp(lo, hi));
+            return;
+        }
         self.mini.scale = (self.mini.scale * ZOOM_STEP.powf(-lines)).clamp(SCALE_LIMITS.0, SCALE_LIMITS.1);
+    }
+
+    /// The minimap's picture inside drawn again when stale (`indoor`): the
+    /// zones `items` through the game's `renderer` into the map's layer,
+    /// before the frame's own draw. Nothing outside, nor while the minimap is
+    /// not drawn.
+    #[allow(clippy::too_many_arguments)]
+    pub fn indoor_draw(&mut self, renderer: &render::Renderer, device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat, items: &[render::Draw], player: [f32; 3]) {
+        let (true, false, Some(l)) = (self.mini.up, self.open, self.layers.as_mut()) else { return };
+        self.indoor.draw(&mut l.map, renderer, device, queue, format, items, player, self.mini.half);
     }
 
     /// The mouse's pointer moved to window pixel `at` (none: it left the
@@ -490,8 +509,10 @@ impl Map {
         if k <= 0.0 {
             return;
         }
-        // world units a window pixel; the player at the middle, north up
-        let s = self.mini.scale / k;
+        // world units a window pixel; the player at the middle, north up;
+        // inside at its own zoom (`indoor`)
+        let indoors = self.indoor.inside();
+        let s = if indoors { self.indoor.scale() } else { self.mini.scale } / k;
         let mid = [(inside[0] + inside[2]) / 2.0, (inside[1] + inside[3]) / 2.0];
         self.mini.circle=[mid[0],mid[1],(inside[2]-inside[0]).min(inside[3]-inside[1])*0.5];
         let c = [p[0], p[2]];
@@ -501,16 +522,25 @@ impl Map {
         // the pictures: outside the world, a cell not drawn yet, the
         // overview, the tiles over it where they are on the GPU
         let full = [0.0, 0.0, 1.0, 1.0];
+        self.mini.half = ((shown[2] - shown[0]).max(shown[3] - shown[1])) / 2.0;
         let quads = &mut l.map.quads;
         quads.clear();
         quads.push(MapQuad::rect(l.white, inside, full, OUTSIDE));
+        // inside, the floors under the ceiling (`indoor`) once drawn, in
+        // place of the map's pictures
+        let picture = self.indoor.picture().filter(|_| indoors);
+        if let Some((tex, rect)) = picture
+            && let Some((r, uv)) = clip(rect, shown, to_px)
+        {
+            quads.push(MapQuad::rect(tex, r, uv, [1.0; 4]));
+        }
         // the cells it shows that hold a zone: (zone, its rectangle)
         let cells = &w.builder.cells;
         let extent = cells.extent();
         let showing: Vec<(usize, [f32; 4])> = (0..cells.len())
             .filter_map(|cell| {
                 let r = cells.rect(cell);
-                let on = r[0] < shown[2] && r[2] > shown[0] && r[1] < shown[3] && r[3] > shown[1];
+                let on = picture.is_none() && r[0] < shown[2] && r[2] > shown[0] && r[1] < shown[3] && r[3] > shown[1];
                 Some((cells.zone_at[cell].filter(|_| on)?, r))
             })
             .collect();
@@ -519,7 +549,7 @@ impl Map {
                 quads.push(MapQuad::rect(l.white, r, full, NOT_DRAWN));
             }
         }
-        if let Some((r, uv)) = w.overview.and_then(|_| clip(extent, shown, to_px)) {
+        if let Some((r, uv)) = w.overview.filter(|_| picture.is_none()).and_then(|_| clip(extent, shown, to_px)) {
             quads.push(MapQuad::rect(w.overview.unwrap_or_default(), r, uv, [1.0; 4]));
         }
         let mut wanted = Vec::new();
@@ -1051,3 +1081,7 @@ mod tests {
         assert!(clip([2000.0, 0.0, 4000.0, 2000.0], shown, to_px).is_none(), "the control: a cell beside it");
     }
 }
+
+#[cfg(test)]
+#[path = "../fork_ext/map_sync_tests.rs"]
+mod fork_sync_tests;

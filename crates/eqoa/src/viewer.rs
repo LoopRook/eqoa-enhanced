@@ -562,6 +562,14 @@ pub fn shot_with(
                 }
                 // `click @<name>`: at the creature called that, where it is drawn
                 let mut step = step.clone();
+                // `linkclick [k]`: at the newest item link the chat box drew, or
+                // the `k`th before it (`itemlink`)
+                if let Some(k) = step.trim().strip_prefix("linkclick").map(|k| k.trim().parse::<usize>().unwrap_or(0)) {
+                    match play.as_ref().and_then(|p| p.link_on_screen((w, h), k)) {
+                        Some((x, y)) => step = format!("click {x:.0} {y:.0}"),
+                        None => eprintln!("mouse {step}: no link drawn"),
+                    }
+                }
                 if let Some((verb, name)) = step.split_once(" @")
                     && let (Some(p), Some(vp)) = (play.as_ref(), last_view)
                 {
@@ -578,6 +586,27 @@ pub fn shot_with(
                     p.map.mini_wheel(n);
                     eprintln!("mouse {step}: the minimap's zoom, {} units a frame pixel", p.map.mini.scale);
                     continue;
+                }
+                // a click and the wheel go to the chat box first, as the window's
+                // own do (`chat_button`, `MouseWheel`): a click on an item link
+                // opens it (`itemlink`), the wheel steps the history it holds
+                if let Some(p) = play.as_mut() {
+                    let words: Vec<&str> = step.split_whitespace().collect();
+                    let num = |i: usize| words.get(i).and_then(|v| v.parse::<f64>().ok());
+                    match (words.first().copied(), num(1), num(2)) {
+                        (Some("click"), Some(x), Some(y)) if p.chat_press((x, y), (w, h), true) => match p.chat_release() {
+                            crate::chat::Let::Click(..) | crate::chat::Let::NotHeld => {}
+                            got => {
+                                eprintln!("mouse {step}: the chat box's ({got:?}; a link opened, or a selection)");
+                                continue;
+                            }
+                        },
+                        (Some("wheel"), Some(n), _) if p.chat_wheel(mouse.cursor, (w, h), n as f32) => {
+                            eprintln!("mouse {step}: the chat box's history");
+                            continue;
+                        }
+                        _ => {}
+                    }
                 }
                 let click = mouse.play(&step, (w, h), Instant::now());
                 // the map up: the script's cursor is its pointer too (a hover's tooltip)
@@ -3216,7 +3245,8 @@ impl App {
         }
         match p.chat_release() {
             crate::chat::Let::NotHeld => false,
-            crate::chat::Let::Done => true,
+            // a link's click was opened by the play (`itemlink`)
+            crate::chat::Let::Done | crate::chat::Let::Link(..) => true,
             crate::chat::Let::Click(x, y) => {
                 self.click(crate::mouse::Click::Target(x, y), false);
                 true
@@ -4451,6 +4481,11 @@ impl App {
                 Key::Named(NamedKey::ArrowRight) if p.mode == 33 && p.rolls_up() => Some(18),
                 Key::Named(NamedKey::ArrowLeft) if p.mode == 33 && p.rolls_focused() => Some(17),
                 Key::Named(NamedKey::Enter) if p.mode == 33 && p.rolls_focused() => Some(13),
+                // the item links (`itemlink`): left walks up through them, right
+                // back down and Enter opens the one lit while one is
+                Key::Named(NamedKey::ArrowLeft) if p.links_walkable() => Some(17),
+                Key::Named(NamedKey::ArrowRight) if p.link_walking() => Some(18),
+                Key::Named(NamedKey::Enter) if p.link_walking() => Some(13),
                 _ => None,
             };
             if let Some(k) = k
@@ -4465,7 +4500,7 @@ impl App {
             && c.eq_ignore_ascii_case("q")
             && event.state == ElementState::Released
         {
-            p.info_up = false;
+            p.info_let_go();
             return;
         }
         // G: attack, held (`ToggleAutoAttack` / `MaybeStopAutoAttack`), the
@@ -5112,6 +5147,14 @@ impl App {
             self.grab_pointer(false);
             return;
         }
+        // Escape with an item link's window up (`itemlink`), in play or the
+        // chat box's history: the newest closes, and nothing more
+        if event.state == ElementState::Pressed
+            && event.logical_key == Key::Named(NamedKey::Escape)
+            && self.play.as_mut().is_some_and(|p| matches!(p.mode, 0 | 33 | 38) && p.typing.is_none() && p.close_link_window())
+        {
+            return;
+        }
         // a keyboard in use (`gKeyboardAttached`): the edit boxes'
         // compact face, with the options' Soft Keyboard on; the
         // touch screen's pad goes
@@ -5262,6 +5305,8 @@ impl App {
                 if let Some(p) = self.play.as_mut() {
                     p.map.shift = m.state().shift_key();
                     p.map.ctrl = m.state().control_key() || m.state().super_key();
+                    // and a Shift+click on an item links it (`itemlink`)
+                    p.shift = m.state().shift_key();
                 }
                 #[cfg(target_os = "macos")]
                 {
@@ -5753,7 +5798,14 @@ impl App {
                             *walker_sounds = ids;
                         }
                     }
+                    // a Wisp's own moving makes no sound (`wisp::Hushed`)
+                    let wisp = play.as_ref().is_some_and(|p| p.self_wisp());
                     let (m, palette) = match sound.as_mut() {
+                        Some(s) if wisp => {
+                            let quiet = w.sprite.as_ref().map(crate::wisp::step_sounds).unwrap_or_default();
+                            let mut sink = s.sink();
+                            w.pose_sounding(Some(&mut crate::wisp::Hushed { inner: &mut sink, quiet }))
+                        }
                         Some(s) => w.pose_sounding(Some(&mut s.sink())),
                         None => w.pose(),
                     };
@@ -6000,6 +6052,11 @@ impl App {
                     None => self.camera.view(self.bounds, g.config.width as f32 / g.config.height as f32),
                 };
                 self.last_view = Some(view.view_proj);
+                // the minimap inside (`map::indoor`): the ceiling over the
+                // player, in the collision world
+                if let (Some(p), Some(w)) = (self.play.as_mut(), self.walker.as_mut()) {
+                    p.indoor_probe(w, self.frame_s);
+                }
                 #[cfg(not(target_arch = "wasm32"))]
                 let addon_overlay = fork_report::prepare_addons(g, frame.as_ref(), self.play.as_ref(), self.walker.as_ref(), self.booted.as_ref().and_then(|s| s.server.as_deref()));
                 if let (Some(p), Some(w)) = (&mut self.play, &self.walker) {
@@ -6039,6 +6096,12 @@ impl App {
                     p.draw_rings(&mut g.renderer, &g.device, &g.queue, w, view.view_proj, &self.lib, game_frame);
                     // the map (`map.rs`): its build behind the game, and its view while up
                     p.map_frame(w, &self.lib, &g.device, &g.queue, g.config.format, (g.config.width, g.config.height), self.frame_s, self.console.sticks());
+                    // and the minimap's picture inside, when it is due: the
+                    // zones in the game's renderer, before the frame's draw
+                    if p.map.indoor.inside() {
+                        let zones: Vec<render::Draw> = self.streamer.iter().flat_map(|s| s.draws()).collect();
+                        p.indoor_draw(w, &g.renderer, &g.device, &g.queue, g.config.format, &zones);
+                    }
                     let plates = p.plates();
                     if let Some(t) = g.renderer.text.as_mut() {
                         let pv = crate::play::PlateView::of(&w.cam, &w.eye.position, (g.config.width, g.config.height));

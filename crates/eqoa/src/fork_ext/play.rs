@@ -1323,6 +1323,34 @@ mod tests {
         session.self_id = Some(0x100);
         Play::new(session, net::session::Player::default(), Box::default())
     }
+    /// The real path: a player's F3 filing on a server that offered bug
+    /// reports sends the note first, and it names EQOA Enhanced. The control:
+    /// a server that offered none gets no note at all.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn the_note_on_the_wire_is_labelled() {
+        let mut p = play();
+        p.session.record = Some(Vec::new());
+        let notes = |p: &mut crate::play::Play| -> Vec<String> {
+            p.session
+                .record
+                .as_mut()
+                .map(std::mem::take)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(_, d)| d)
+                .filter(|d| d[..2] == [0x0F, 0x7E])
+                .map(|d| String::from_utf8_lossy(&d[10..]).into_owned())
+                .collect()
+        };
+        p.send_bug_note();
+        assert!(notes(&mut p).is_empty(), "control: no offer, no note");
+        p.session.bug_reports = true;
+        p.send_bug_note();
+        let sent = notes(&mut p);
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].starts_with("build: ") && sent[0].contains(&format!("\nclient: {}\n", crate::fork_ext::report_label::enhanced_label())), "{}", sent[0]);
+    }
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn mod_profiles_world_entry_uses_character_not_account_and_survives_loading() {

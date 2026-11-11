@@ -6,6 +6,124 @@ in the same push as the changes it describes. The dev release's page shows them
 is put on the page by `.github/workflows/notes.yml`.
 
 
+
+## 2026-11-11 · Hide the look of a worn item
+- In the start menu's Inventory, Equipment tab, a worn helm, chest piece, bracers, gloves, leggings, boots, robe,
+  weapon, shield, held item or cape now has **Hide Look** in its menu, right under Unequip. The item stays worn
+  with all its stats and effects, but nothing of it is drawn on your character, for you and for everyone around
+  you (a hidden weapon still swings as that weapon does, with nothing in the hand). Choose **Show Look** on it to
+  see it again. The choice is kept for the slot, so a new helm you put on where the old one was hidden stays
+  hidden until you show it, and it is the same at character select and at your next login.
+- It needs the server's own update; on any other server the menu is as it was.
+
+## 2026-11-11 · Whose mercenary is that?
+- A mercenary now has a second line under its name over its head saying whose it is, such as
+  "<Lonewulf's Mercenary>", so you can tell your mercenary from another player's. A mercenary's pet has no such
+  line. It needs the server's own update (the Heirloom Test Server); on any other server the names are as they were.
+
+## 2026-11-11 · Crash reports go to the server you play on
+- If the game ever stops with an error, it now keeps a short **crash report** (what went wrong and where in the
+  game's code, the build, your system and graphics card: never your account, your address or your files). The next
+  time you log in to a server that takes them, it goes to that server's GMs as a ticket marked **Bug Report /
+  Crash**, and you are told its number in chat. You don't have to write anything, and no answer is needed: it
+  helps the developers find and fix the crash. Nothing is sent anywhere else, and a server that doesn't take
+  them is sent nothing.
+
+## 2026-11-11 · A Wisp keeps its cape while invisible, the Wisp's Raiment
+- An invisible Wisp keeps its cape: a Wisp already shows as what hangs on an invisible body, so invisibility now leaves
+  it as it was, the wisp in its helm and its cape, for you and for everyone who sees you. (Anyone else's cape still
+  vanishes with them.) It needs the server's own update.
+- On the Heirloom server, Trickster Flame now also teaches **Wisp's Raiment**: a Wisp keeps its own look, the wisp
+  burning in its helm, and shows all its gear, armour, robe, weapons and cape, for an hour. Remove Illusion, a glamour
+  or clicking it off ends it. A Wisp who already has Trickster Flame finds it in its spell book.
+
+## 2026-11-11 · Wisps walk without a sound
+- A Wisp makes no footsteps: its walking, running, turning, falling, landing and swimming are silent, yours and every
+  other Wisp you meet. Its swings and spells sound as ever. In a mortal form (a glamour from its racial Trickster Flame)
+  it is heard as the body it shows.
+- On a server that hides a Wisp's gear (the Heirloom server), a Wisp in its own form shows only the wisp and its cape;
+  in a glamour it shows its whole body in its armour and weapons.
+
+## 2026-11-11 · Look at any world on the map, the minimap indoors, a profanity filter switch
+- The map has a **Places** button (P on a keyboard, Start on a controller): a list of the worlds (Tunaria, the Rathe
+  Mountains, Odus, Lavastorm, the Plane of Sky and the server's own worlds) and, under the world shown, its towns.
+  Pick one to look at it from wherever you are: in Tunaria and want to see Oggok? Pick the Rathe Mountains, then
+  Oggok. A world you have never been to is drawn from your disc the first time (it takes a little while, and is kept
+  for next time). "Where I am", Center or closing the map takes you back to your own spot.
+- The **minimap now maps indoors**: inside a building, in a cave or in a dungeon it shows the floors around you
+  instead of the roof or the hillside above you, and zooms in to a room's size (the mouse wheel over it still
+  zooms). Step back outside and it shows the usual map again.
+- **Options > Interface > Profanity Filter**: On (as always) or Off. Off, what other players say reaches you as
+  they said it. It needs the server's own update; on any other server nothing changes.
+
+## 2026-11-11 · Dismiss your mercenary from the menu, mercenaries' names, the group search's register
+- On a server with mercenaries (the Heirloom Test Server), Community > Group now has Dismiss Merc while your
+  mercenary is out: it sends it away as /merc dismiss does.
+- A mercenary's name over its head (and its dot on the minimap) is now the pets' blue with a slight red tint, so you
+  can tell a mercenary from a pet at a glance.
+- The group search (Community > Group > Search) shows at its foot whether you are registered as looking for a group;
+  select it to register or unregister. Registered players now show up in every player's search, not only in a group
+  leader's, so anyone can find you and invite you or send you a tell.
+- In the search's list, Options > Tell now starts the tell in your chat line ("/tell <name> "), ready for you to type.
+- A new setting at the search's bottom right, "Allow anyone in my group to invite" (Yes or No, kept for each
+  character): when you lead a regular group and set it to No, only you can invite into it; members of your group
+  see it at once. Yes (the default) lets every member invite, as before. Raid groups are not affected.
+- All of this needs the server's own update too; on any other server the menu, the names and the window are as they
+  were.
+
+## 2026-11-10 · No more long wait after Enter Game World
+- In the browser, your character no longer sits at the spinning figure for 10 to 30 seconds after Enter Game World
+  on a server with worlds of its own (the Homelands). The page used to hold every character until it had built or
+  checked those worlds, on every visit. Now only a character who is in one of those worlds waits for them, a few
+  seconds; every other goes straight in, and the worlds finish building while you play (the notice at the top of
+  the page still says how far the build has come).
+- The program now waits those few seconds too for a character who is in a homeland. Before, a new Aviak or Kerran
+  played right away from the program started in its mainland city instead of its homeland, and stayed there.
+- Going in before the worlds are built no longer leaves you without them until you log in again: once they are
+  built you can be sent into them (the Canyon of Banners' matches, for one). Before, the program often told you
+  "Your game cannot see the arena" for the rest of that visit.
+- All of this needs the server's own update too; on a server without it everything is as it was.
+
+## 2026-11-10 · A server's own races load faster at character select
+- On a server with races of its own (hill giants, fungusmen, kerrans, wisps...), character select and character
+  creation used to stutter while those races' bodies were read off your disc: the whole 148 MB creature file was
+  read for a handful of bodies, twice, and in the browser it was held in the page's memory. Now only the bodies
+  themselves are read (a few MB), in the background, and a character already on screen is no longer redrawn from
+  scratch when more bodies arrive. Everything looks the same; the bodies show sooner, the pauses from reading
+  them are gone, and the browser page uses about 240 MB less memory there. (A short pause the first time a
+  creature's body is dressed in armour is still there.)
+
+## 2026-11-10 · The PS2 loader linked from the browser page
+- Playing on PCSX2 or a real PS2? The browser page's start screen now links eqoaclassic's loader (EQOABOOT.ELF and how
+  to use it: your own unmodified disc, no patched ISO). On a server that offers no loader nothing new is shown.
+
+## 2026-11-10 · Item links in chat
+- On a server that offers them, you can link your items in chat. In your inventory, choose an item and pick
+  Link Item, or Shift+click it (in the bank too): the chat line opens with the item's name in it in purple. Type
+  around it as you like and send; the name stays one piece (Backspace takes it whole). Up to four in a line. If
+  you back out of the line with a link in it, it waits for you: link another item, or open chat again, and it is
+  still there until you send it or clear it.
+- Links in the chat box are purple. Click one to open a small window at the top middle of the screen with the
+  item's icon, name and stats, as the player had it when they linked it (its condition and charges too). Two can
+  be open at once; a third replaces the oldest. Close one with its x, or the newest with Escape or Triangle.
+- On a controller, hold R2 (the chat history) and press left to step up through the links in the chat, right to
+  step back down, and X to open the one lit. Let go of R2 and you are back in the game; next time you hold it you
+  start at the bottom again. With a keyboard, hold C and use the arrow keys and Enter.
+- While you hold R2 (or C), the mouse wheel scrolls the chat history wherever the pointer is.
+- Extended > Chat > Item Links turns it all off (it is on by default): then links show as plain item names, as
+  they do for PlayStation 2 players and older clients.
+
+## 2026-11-10 · A monster's name and level on Q
+- On a server that turns it on, pressing Q (□ on a controller) on a monster that has nothing to say shows its name
+  and level, and nothing else, in the same small window a player's details open in, for about 3 seconds (or for as
+  long as you hold Q). Pressing Q again, another target or opening a menu closes it sooner.
+- It works from any distance, as a player's details do. A monster you can talk to still talks, and Q on everything
+  else is as it was.
+
+## 2026-11-10 · Community > Group > Raid is there
+- On a server with raids, Community > Group now shows Raid, right after Leave, where you see it without
+  scrolling: the start menu dropped it each time it opened. Roll and Follow are now below it (scroll down).
+
 ## 2026-11-10 · Raids: the leader's crown, loot rolls, a master looter and new commands
 - In a raid the raid list shows who leads it with a gold crown by their name, its helper with a blue cross and
   its main assist with a red diamond.

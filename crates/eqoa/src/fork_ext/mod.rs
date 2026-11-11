@@ -14,6 +14,11 @@ pub mod release;
 pub mod report;
 #[cfg(not(target_arch = "wasm32"))]
 mod report_background;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod report_crash_dir;
+pub mod report_label;
+#[cfg(target_arch = "wasm32")]
+pub mod report { pub use super::report_label::enhanced_label; }
 pub mod report_core;
 pub mod telemetry;
 pub mod version;

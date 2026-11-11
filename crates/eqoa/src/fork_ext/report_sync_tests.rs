@@ -113,7 +113,7 @@ fn sync_crash_marker_is_offered_on_next_start_hook() {    assert!(include_str!("
     std::fs::write(&log, closed).unwrap();
     take_last_run(&root, &log);
     assert!(
-        offer_in(&root.join("crashes")).is_none(),
+        offer_in(&crate::fork_ext::report_crash_dir::in_config(&root)).is_none(),
         "negative control: clean exit"
     );
     std::fs::write(
@@ -122,7 +122,7 @@ fn sync_crash_marker_is_offered_on_next_start_hook() {    assert!(include_str!("
     )
     .unwrap();
     take_last_run(&root, &log);
-    let offer = offer_in(&root.join("crashes")).expect("crash offered at next start");
+    let offer = offer_in(&crate::fork_ext::report_crash_dir::in_config(&root)).expect("crash offered at next start");
     assert!(matches!(offer.kind, Kind::Crash(ref files) if files.len() == 1));
     std::fs::remove_dir_all(root).unwrap();
 }
