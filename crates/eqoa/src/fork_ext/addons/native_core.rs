@@ -48,6 +48,7 @@ impl Default for View {
 
 #[derive(Clone)]
 pub(crate) struct Event {
+    pub player_command: bool,
     pub name: String,
     pub seq: u64,
     pub time: f64,
@@ -204,6 +205,7 @@ impl Core {
         }
         self.event_bytes += bytes;
         let event = Event {
+            player_command: false,
             name: name.into(),
             seq: self.seq,
             time: self

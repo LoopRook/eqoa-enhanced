@@ -684,6 +684,7 @@ fn controls(
         for entry in entries {
             ui.separator();ui.text(format!("{} ({})",entry.metadata.name,entry.metadata.id));
             ui.text(match entry.status {super::manager::Status::Disabled=>"Disabled",super::manager::Status::Enabled=>"Enabled",super::manager::Status::Failed=>"Failed — reload to retry"});
+            if !entry.metadata.extensions.permissions.is_empty() {ui.text(format!("Permissions: {}",entry.metadata.extensions.permissions.join(", ")));}
             let id=&entry.metadata.id;
             let warnings=manager.diagnostics().iter().filter(|d|d.id.as_ref()==Some(id)).count();
             if warnings>0 {ui.same_line();ui.text(format!("[Warnings: {warnings}]"));}

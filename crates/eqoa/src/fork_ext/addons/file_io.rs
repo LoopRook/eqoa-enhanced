@@ -621,6 +621,72 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn round4b_mod_command_can_target_its_own_vm() {
+        let (dir,host,mut addon)=fixture();
+        addon.extensions.commands=vec!["self".into()];
+        install(&host,&addon,Some(dir.0.join("config"))).unwrap();
+        host.execute("count=0;eqoa.events.on('mod.command',function(e) count=count+1 end);assert(eqoa.mods.send('pack','self'))").unwrap();
+        super::super::native_events::dispatch(&host).unwrap();
+        assert_eq!(host.lua.globals().get::<u32>("count").unwrap(),1);
+    }
+
+    #[test]
+    fn round4b_player_command_import_export_copy_files_and_cancel() {
+        use super::super::{native_core::CORE,native_events as events,player_files::TestIo};
+        use serde_json::json;
+        let (owner_dir, owner, mut journal) = fixture();
+        journal.id="journal_actions".into();
+        journal.extensions.commands=vec!["import_journal".into(),"export_journal".into()];
+        journal.extensions.permissions=vec!["import".into(),"export".into()];
+        install(&owner,&journal,Some(owner_dir.0.join("config"))).unwrap();
+        let (sender_dir,sender,mut addon)=fixture();
+        addon.extensions.commands=vec!["forward".into()];
+        addon.extensions.permissions=vec!["export".into()];
+        install(&sender,&addon,Some(sender_dir.0.join("config"))).unwrap();
+        let desktop=owner_dir.0.join("Desktop");fs::create_dir_all(&desktop).unwrap();
+        fs::write(desktop.join("EQOA-Creature-Journal.json"),"existing export").unwrap();
+        let picked=owner_dir.0.join("Forge.json");
+        let forge=r#"{"Bat":{"42":{"world":0,"level":2,"pos":[1,2,3]}}}"#;
+        fs::write(&picked,forge).unwrap();
+        owner.lua.set_app_data(TestIo{pick:Some(picked),desktop:desktop.clone()});
+        sender.lua.set_app_data(TestIo{pick:None,desktop:desktop.clone()});
+        owner.execute("assert(eqoa.files.write('journal.json','{\"Bat\":{}}'));last=0;completed=false;cancelled=false;eqoa.events.on('mod.command',function(e) assert(eqoa.mods.send('pack','forward'));if e.data.command=='export_journal' then local no,err=eqoa.files.export('../outside','oops.json');assert(no==nil and err.code=='permission_denied');last=assert(eqoa.files.export('journal.json','EQOA-Creature-Journal.json')) else last=assert(eqoa.files.import({title='Import journal',extensions={'json'}})) end;local no,err=eqoa.files.export('journal.json','again.json');assert(no==nil and err.code=='requires_player') end);eqoa.events.on('resource.ready',function(e) if e.data.kind=='export' or e.data.kind=='import' then assert(e.data.request==last);completed=true;import_path=e.data.path end end);file_failure='';eqoa.events.on('resource.failed',function(e) file_failure=e.data.kind..':'..e.data.error.code..':'..e.data.error.message;if e.data.kind=='import' then assert(e.data.request==last);cancelled=e.data.error.code=='cancelled' end end)").unwrap();
+        sender.execute("forward_denied=false;eqoa.events.on('mod.command',function(e) local no,err=eqoa.files.export('journal.json','forwarded.json');forward_denied=no==nil and err.code=='requires_player' end);command='export_journal';eqoa.events.on('input.key',function(e) if e.data.key=='f2' and e.data.down then assert(eqoa.mods.send('missing','x')==nil);assert(eqoa.mods.send('journal_actions',command)) end end)").unwrap();
+        let press=|| {CORE.with(|c|c.borrow_mut().emit("input.key",json!({"key":"f2","down":true,"synthetic":false,"repeat":false})));};
+        let wait=|flag:&str| {
+            let deadline=std::time::Instant::now()+std::time::Duration::from_secs(5);
+            while !owner.lua.globals().get::<bool>(flag).unwrap() {
+                assert!(std::time::Instant::now()<deadline,"{flag} did not complete; failure={:?}; request={:?}; owner={:?}; sender={:?}",owner.lua.globals().get::<String>("file_failure"),owner.lua.globals().get::<u64>("last"),super::super::native::finish(&owner.lua),super::super::native::finish(&sender.lua));
+                events::dispatch(&owner).unwrap();events::dispatch(&sender).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        };
+        press();events::dispatch(&sender).unwrap();wait("completed");
+        assert_eq!(fs::read_to_string(desktop.join("EQOA-Creature-Journal.json")).unwrap(),"existing export");
+        assert_eq!(fs::read_to_string(desktop.join("EQOA-Creature-Journal (2).json")).unwrap(),r#"{"Bat":{}}"#);
+        events::dispatch(&sender).unwrap();assert!(sender.lua.globals().get::<bool>("forward_denied").unwrap());
+        owner.execute("completed=false").unwrap();sender.execute("command='import_journal'").unwrap();
+        press();events::dispatch(&sender).unwrap();wait("completed");
+        let path=owner.lua.globals().get::<String>("import_path").unwrap();
+        assert!(path.starts_with("imports/"));
+        assert_eq!(fs::read_to_string(owner_dir.0.join("config/files/data").join(path)).unwrap(),forge);
+        owner.lua.set_app_data(TestIo{pick:None,desktop:desktop.clone()});
+        press();events::dispatch(&sender).unwrap();wait("cancelled");
+        assert!(!desktop.join("again.json").exists());assert!(!desktop.join("forwarded.json").exists());
+    }
+
+    #[test]
+    fn round4b_file_actions_require_permission_and_player_activation() {
+        let (dir, host, mut addon) = fixture();
+        host.execute("local ok,e=eqoa.files.import({title='Journal',extensions={'json'}});assert(ok==nil and e.code=='permission_denied');local ok,e=eqoa.files.export('journal.json','journal.json');assert(ok==nil and e.code=='permission_denied')").unwrap();
+        addon.extensions.permissions=vec!["import".into(),"export".into()];
+        install(&host,&addon,Some(dir.0.join("config"))).unwrap();
+        host.execute("local ok,e=eqoa.files.import({title='Journal',extensions={'json'}});assert(ok==nil and e.code=='requires_player');local ok,e=eqoa.files.export('journal.json','journal.json');assert(ok==nil and e.code=='requires_player');denied=false;eqoa.events.after(0,function() local ok,e=eqoa.files.export('journal.json','journal.json');denied=ok==nil and e.code=='requires_player' end)").unwrap();
+        for _ in 0..3 { super::super::native_events::dispatch(&host).unwrap(); }
+        assert!(host.lua.globals().get::<bool>("denied").unwrap());
+    }
+
+    #[test]
     fn round4b_mod_commands_are_declared_bounded_and_delayed() {
         let (dir, receiver, mut addon) = fixture();
         addon.id = "journal_receiver".into();

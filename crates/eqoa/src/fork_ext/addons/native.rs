@@ -78,7 +78,7 @@ impl Session {
             ("entities", "list get find named distance", 2),
             ("events", "on off once after", 2),
             ("files", "read write remove", 2),
-            ("files", "list load_json save_json_async", 4),
+            ("files", "list load_json save_json_async import export", 4),
             ("fonts", "load default release", 2),
             ("gems", "get is_gem format", 3),
             ("group", "get", 2),
@@ -893,6 +893,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::json_save::install(host)?;
     super::exchange::register(lua);
     super::exchange::install(host)?;
+    super::player_files::install(host)?;
     super::native_settings::install(host)?;
     bind(
         lua,

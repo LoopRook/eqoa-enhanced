@@ -34,6 +34,7 @@ pub(crate) mod effects;
 pub(crate) mod entity;
 mod file_io;
 mod exchange;
+mod player_files;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod fonts;
 #[cfg(test)]

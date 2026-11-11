@@ -151,8 +151,8 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("input.pad", "before after"),
         ("pointer.pressed", "x y inside_window button steps"),
         ("pointer.wheel", "x y inside_window button steps"),
-        ("resource.ready", "kind handle error request value"),
-        ("resource.failed", "kind handle error request value"),
+        ("resource.ready", "kind handle error request value path"),
+        ("resource.failed", "kind handle error request value path"),
         ("events.dropped", "first_seq last_seq count streams"),
     ] {
         for field in fields.split_whitespace() {
@@ -351,6 +351,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
 pub(crate) fn dispatch(host: &Host) -> Result<()> {
     super::async_json::poll(&host.lua)?;
     super::json_save::poll(&host.lua)?;
+    super::player_files::poll(&host.lua)?;
     super::native_core::flush_deferred();
     let lua = &host.lua;
     let shared = bus(lua);
@@ -430,6 +431,7 @@ fn local(name: &str, data: serde_json::Value) -> Event {
         let mut c = c.borrow_mut();
         c.seq += 1;
         Event {
+            player_command: false,
             name: name.into(),
             data,
             bytes: 0,
@@ -479,6 +481,9 @@ fn deliver_data(
         .filter(|s| s.name == e.name && s.deadline.is_none() && only.is_none_or(|t| *t == s.token))
         .map(|s| s.token.clone())
         .collect::<Vec<_>>();
+    let direct = (e.name == "input.key" && e.data["down"] == true && e.data["synthetic"] != true && e.data["repeat"] != true)
+        || (e.name == "pointer.pressed" && e.data["inside_window"] == true);
+    let _player = super::exchange::player_scope(shared.borrow().vm, direct, e.player_command);
     for t in candidates {
         let call = {
             let mut b = shared.borrow_mut();
@@ -590,6 +595,7 @@ pub(crate) fn render(host: &Host) -> Result<()> {
     deliver(&host.lua, &local("render", json!({"dt":dt})), None)
 }
 pub(crate) fn clear(host: &Host) {
+    super::player_files::close(&host.lua);
     super::json_save::close(&host.lua);
     super::async_json::close(&host.lua);
     if host.lua.app_data_ref::<Shared>().is_none() {
@@ -674,6 +680,7 @@ fn readonly_envelope(lua: &mlua::Lua, event: mlua::Table) -> Result<mlua::Table>
                     "handle".into(),
                     "request".into(),
                     "value".into(),
+                    "path".into(),
                     "error".into(),
                 ]),
             )?,
@@ -843,13 +850,26 @@ pub(super) fn shared_changed(owner: &str, path: &str) {
     publish(&event);
 }
 
-pub(super) fn command(target: &Rc<RefCell<Bus>>, data: serde_json::Value) -> std::result::Result<(), ()> {
-    let mut target = target.borrow_mut();
-    if !target.active || target.pending.iter().filter(|(e,_)| e.name=="mod.command").count()>=64 {
+pub(super) fn command(target: &Rc<RefCell<Bus>>, data: serde_json::Value, player: impl FnOnce() -> bool) -> std::result::Result<(), ()> {
+    let pending = target.borrow();
+    if !pending.active || pending.pending.iter().filter(|(e,_)| e.name=="mod.command").count()>=64 {
         return Err(());
     }
+    drop(pending);
     let mut event=local("mod.command",data);
+    event.player_command=player();
     event.bytes=event.data.to_string().len();
-    enqueue(&mut target,event,None);
+    enqueue(&mut target.borrow_mut(),event,None);
+    Ok(())
+}
+
+pub(super) fn file_action(lua: &mlua::Lua, data: serde_json::Value, failed: bool) -> Result<()> {
+    let table=lua.create_table()?;
+    for (key,value) in data.as_object().expect("file action record") {
+        table.set(key.as_str(),record(lua,if key=="error" {"eqoa.Error"} else {"eqoa.files.Result"},value)?)?;
+    }
+    let mut event=local(if failed {"resource.failed"} else {"resource.ready"},json!({}));
+    event.bytes=data.to_string().len();
+    enqueue(&mut bus(lua).borrow_mut(),event,Some(table));
     Ok(())
 }
