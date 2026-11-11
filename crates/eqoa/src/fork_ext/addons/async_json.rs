@@ -158,7 +158,9 @@ fn service(lua: &Lua) -> Result<Shared> {
     Ok(s)
 }
 fn resource_path(m: &Mounts, path: &str) -> std::result::Result<PathBuf, String> {
-    if path.starts_with('@') { return super::exchange::read(path); }
+    if path.starts_with('@') {
+        return super::exchange::read(path);
+    }
     if path.starts_with(['/', '\\']) || path.contains(':') {
         return Err("JSON loads require a relative resource path".into());
     }
@@ -332,7 +334,18 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             };
             let path = match resource_path(&m, &path) {
                 Ok(p) => p,
-                Err(e) => return error(lua, "eqoa.files.load_json", "permission_denied", &e),
+                Err(e) => {
+                    return error(
+                        lua,
+                        "eqoa.files.load_json",
+                        if e.starts_with("file not found") {
+                            "not_found"
+                        } else {
+                            "permission_denied"
+                        },
+                        &e,
+                    );
+                }
             };
             let shared = service(lua)?;
             let mut s = shared.borrow_mut();
@@ -376,10 +389,15 @@ mod tests {
         use sha2::{Digest, Sha256};
         let bytes = include_bytes!("../../../../../mods/resources/map-entities.json");
         let hash = format!("{:x}", Sha256::digest(bytes));
-        assert_eq!(hash, "37be57d7996fbf7e7ef936c3e6ced1c3a14f611462346bc204eba5929cce11ca");
+        assert_eq!(
+            hash,
+            "37be57d7996fbf7e7ef936c3e6ced1c3a14f611462346bc204eba5929cce11ca"
+        );
         assert_eq!(
             bytes,
-            include_bytes!("../../../../../bundled-mods/eqoa_map_search/resources/map-entities.json")
+            include_bytes!(
+                "../../../../../bundled-mods/eqoa_map_search/resources/map-entities.json"
+            )
         );
         assert!(bytes.len() > 1024 * 1024);
         let mut bad = bytes.to_vec();

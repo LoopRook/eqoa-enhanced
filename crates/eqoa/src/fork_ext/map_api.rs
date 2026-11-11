@@ -8,6 +8,7 @@ impl Map {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         world.hash(&mut h);
         self.open.hash(&mut h);
+        crate::settings::map().hash(&mut h);
         for w in [&self.world, &self.home].into_iter().flatten() {
             w.index.hash(&mut h);
             w.name.hash(&mut h);
@@ -48,7 +49,7 @@ impl Map {
             let c = &w.builder.cells;
             json!({"x_min":ee::mul(c.col0 as f32,CELL),"z_min":ee::mul(c.row0 as f32,CELL),"x_max":ee::mul((c.col0+c.cols) as f32,CELL),"z_max":ee::mul((c.row0+c.rows) as f32,CELL)})
         });
-        json!({"open":self.open,"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
+        json!({"enabled":crate::settings::map(),"open":self.open,"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
     }
 }
 
@@ -143,13 +144,41 @@ impl Map {
 impl Map {
     /// Disc-free native chrome/round-minimap scene used behind addon captures.
     /// No terrain art is fabricated; tiles remain absent without a disc.
-    pub(crate) fn round4_fixture(device:&wgpu::Device,queue:&wgpu::Queue,size:(u32,u32),mini:bool)->Self{
-        let mut map=crate::map::testing::up(size);
-        map.open=!mini;
-        let lib=esf::Library::new();let vui=crate::pointer::testing::vui();
-        let cx=Context{lib:&lib,device,queue,format:wgpu::TextureFormat::Rgba8Unorm,size,dt:0.,player:Some(([25300.,0.,15200.],0.)),world:0,origin:[0.;2],group:Vec::new(),in_group:false,target:None,sticks:[0.;4],keyboard:true,words:None,vui:Some(&vui),quest_marks:None};
+    pub(crate) fn round4_fixture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        size: (u32, u32),
+        mini: bool,
+    ) -> Self {
+        let mut map = crate::map::testing::up(size);
+        map.open = !mini;
+        let lib = esf::Library::new();
+        let vui = crate::pointer::testing::vui();
+        let cx = Context {
+            lib: &lib,
+            device,
+            queue,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            size,
+            dt: 0.,
+            player: Some(([25300., 0., 15200.], 0.)),
+            world: 0,
+            origin: [0.; 2],
+            group: Vec::new(),
+            in_group: false,
+            target: None,
+            sticks: [0.; 4],
+            keyboard: true,
+            words: None,
+            vui: Some(&vui),
+            quest_marks: None,
+        };
         map.layers(&cx);
-        if mini {map.mini_frame(&cx,&mini::MiniView::default());} else {map.compose(&cx);}
+        if mini {
+            map.mini_frame(&cx, &mini::MiniView::default());
+        } else {
+            map.compose(&cx);
+        }
         map
     }
 }

@@ -1,1 +1,36 @@
-{"schemaVersion":1,"runtime":"lua","api":"eqoa/1","id":"eqoa_map_search","name":"EQOA Map Search","entry":"main.lua","entryMode":"once","enabled":true,"capabilities":["large_data","eqoa.input.bind","eqoa.input.capture_text","eqoa.input.claim_pointer","eqoa.events.on","eqoa.files.load_json","eqoa.mods.send","eqoa.fonts.load","eqoa.hud.layout","eqoa.hud.frame","eqoa.hud.visible","eqoa.map.get","eqoa.map.markers","eqoa.map.set_guide","eqoa.map.clear_guide","eqoa.entities.list","eqoa.player.get","eqoa.group.get","eqoa.imgui"]}
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_map_search",
+  "name": "EQOA Map Search",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": true,
+  "capabilities": [
+    "large_data",
+    "eqoa.input.bind",
+    "eqoa.input.capture_text",
+    "eqoa.input.claim_pointer",
+    "eqoa.events.on",
+    "eqoa.files.load_json",
+    "eqoa.mods.send",
+    "eqoa.fonts.load",
+    "eqoa.hud.layout",
+    "eqoa.hud.frame",
+    "eqoa.hud.visible",
+    "eqoa.map.get",
+    "eqoa.map.markers",
+    "eqoa.map.set_guide",
+    "eqoa.map.clear_guide",
+    "eqoa.entities.list",
+    "eqoa.player.get",
+    "eqoa.group.get",
+    "eqoa.imgui",
+    "eqoa.binds.get",
+    "eqoa.map.open"
+  ],
+  "commands": [
+    "journal_status"
+  ]
+}

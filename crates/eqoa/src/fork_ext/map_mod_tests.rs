@@ -122,6 +122,8 @@ fn round4b_journal_records_play_entities_with_native_filters_and_dedupe() {
         creature(5000, "Self", 15, [0.; 3]),
         creature(91, "Own pet", 15, [0.; 3]),
         creature(21, "Invalid position", 15, [f32::NAN; 3]),
+        creature(22, "\u{2003}\u{85}", 15, [0.; 3]),
+        creature(23, "\u{2003}Bat\u{a0}", 15, [100., 5., 200.]),
     ]);
     p.entities.slots = entities.into_iter().map(Some).collect();
     let (_scratch, host, path) = journal();
@@ -473,7 +475,7 @@ fn round4b_search_selects_live_with_dots_follows_and_falls_back_to_known() {
     p.forge_snapshot(None);
     let (scratch, journal, path) = journal();
     fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(&path,r#"{"MPOG Bat":{"100":{"world":0,"level":15,"pos":[210,2,310]},"101":{"world":0,"level":15,"pos":[610,2,710]}}}"#).unwrap();
+    fs::write(&path,r#"{"MPOG Bat":{"100":{"world":0,"level":15,"pos":[210,2,310]},"101":{"world":0,"level":15,"pos":[610,2,710]},"102":{"world":1,"level":16,"pos":[810,2,910]}}}"#).unwrap();
     // A running declared owner is required for the shared file.
     let ja =
         discovery::discover(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods"))
@@ -489,7 +491,7 @@ fn round4b_search_selects_live_with_dots_follows_and_falls_back_to_known() {
         step(&h, 0.5);
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
-    h.execute("local s=require('search');assert(#s.catalog>1000 and #s.journal==2)")
+    h.execute("local s=require('search');assert(#s.catalog>1000 and #s.journal==3)")
         .unwrap();
     key(&h, Key::Named(NamedKey::F2));
     type_text(&h, "MPOG Bat");
@@ -533,6 +535,17 @@ fn round4b_search_selects_live_with_dots_follows_and_falls_back_to_known() {
     assert!(guides::target_for(vm).is_none());
     key(&h, Key::Named(NamedKey::F2));
     for _ in 0..8 {
+        key(&h, Key::Named(NamedKey::Backspace));
+    }
+    type_text(&h, "level 15 odus");
+    settle(&h);
+    h.execute("local s=require('search');assert(#s.rows==1 and s.rows[1].name=='MPOG Bat')")
+        .unwrap();
+    key(&h, Key::Named(NamedKey::Enter));
+    assert_eq!(guides::target_for(vm), Some([210., 310.]));
+    key(&h, Key::Named(NamedKey::F4));
+    key(&h, Key::Named(NamedKey::F2));
+    for _ in 0..13 {
         key(&h, Key::Named(NamedKey::Backspace));
     }
     type_text(&h, "no such creature 123");
@@ -613,4 +626,181 @@ fn round4b_search_group_departure_places_and_unicode_editor_limit() {
     h.execute("assert(not eqoa.map.get().open)").unwrap();
     native_events::clear(&h);
     input::reset_input_state();
+}
+
+#[test]
+fn round4b_journal_protects_existing_json_array_root() {
+    let mut p = Play::bundled_ui_fixture();
+    p.entities.slots = vec![Some(creature(700, "Array Bat", 3, [4., 5., 6.]))];
+    p.forge_snapshot(None);
+    let (_scratch, host, path) = journal();
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, b"[1,2,3]").unwrap();
+    let addon =
+        discovery::discover(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods"))
+            .addons
+            .into_iter()
+            .find(|a| a.id == "eqoa_creature_journal")
+            .unwrap();
+    host.run_addon(&addon).unwrap();
+    for _ in 0..100 {
+        step(&host, 0.5);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    native_events::lifecycle(&host, "disabling").unwrap();
+    native_events::clear(&host);
+    assert_eq!(
+        fs::read(path).unwrap(),
+        b"[1,2,3]",
+        "non-object root must be protected just like malformed JSON"
+    );
+}
+#[test]
+fn round4b_search_lists_inactive_group_member_as_unavailable() {
+    use crate::fork_ext::addons::{guides, input};
+    use winit::keyboard::{Key, NamedKey};
+    input::reset_input_state();
+    crate::settings::testing::reset(false);
+    let mut p = Play::bundled_ui_fixture();
+    p.group.in_group = true;
+    p.group.members = vec![crate::group::Member {
+        id: 77,
+        name: "Absent Friend".into(),
+        active: false,
+        ..Default::default()
+    }];
+    p.forge_snapshot(None);
+    let scratch = Scratch::new();
+    let (h, a) = search_host(&scratch);
+    h.run_addon(&a).unwrap();
+    key(&h, Key::Named(NamedKey::F2));
+    key(&h, Key::Named(NamedKey::Tab));
+    type_text(&h, "Absent Friend");
+    settle(&h);
+    h.execute("local s=require('search');assert(#s.rows==1 and s.rows[1].detail=='Position unavailable' and s.rows[1].at==nil)").unwrap();
+    key(&h, Key::Named(NamedKey::Enter));
+    assert_eq!(
+        guides::guide_count(),
+        0,
+        "unknown group position must not become origin"
+    );
+    native_events::clear(&h);
+    input::reset_input_state();
+}
+
+#[test]
+fn round4b_search_f2_opens_map_with_minimap_off_and_obeys_map_master() {
+    use crate::fork_ext::addons::{actions, input};
+    use winit::keyboard::{Key, NamedKey};
+    input::reset_input_state();
+    actions::clear_actions();
+    crate::settings::testing::reset(false);
+    let mut p = Play::bundled_ui_fixture();
+    crate::settings::set_minimap(false).unwrap();
+    p.forge_snapshot(None);
+    let scratch = Scratch::new();
+    let (h, a) = search_host(&scratch);
+    h.run_addon(&a).unwrap();
+    key(&h, Key::Named(NamedKey::F2));
+    super::begin_iteration(&mut p, true);
+    p.forge_snapshot(None);
+    settle(&h);
+    assert!(
+        p.map.open,
+        "F2 must reveal the M map when there is no minimap"
+    );
+    h.execute("assert(require('search').open)").unwrap();
+    key(&h, Key::Named(NamedKey::Escape));
+    p.map.close();
+    let mut options = crate::settings::client();
+    options.map = false;
+    crate::settings::set_client(options);
+    p.forge_snapshot(None);
+    key(&h, Key::Named(NamedKey::F2));
+    super::begin_iteration(&mut p, true);
+    settle(&h);
+    assert!(!p.map.open);
+    h.execute("assert(not require('search').open);local ok,err=eqoa.map.open();assert(ok==nil and err.code=='unavailable')").unwrap();
+    native_events::clear(&h);
+    input::reset_input_state();
+    actions::clear_actions();
+    crate::settings::testing::reset(false);
+}
+
+#[test]
+fn round4b_journal_caps_total_and_import_and_export_truncated_view() {
+    use crate::fork_ext::addons::options;
+    for (initial, n, limit) in [(true, 80001, 80000), (false, 50001, 50000)] {
+        let mut p = Play::bundled_ui_fixture();
+        p.entities.slots.clear();
+        p.forge_snapshot(None);
+        let (scratch, host, path) = journal();
+        let ids = (100000..100000 + n)
+            .map(|id| {
+                (
+                    id.to_string(),
+                    serde_json::json!({"world":0,"level":2,"pos":[1,2,3]}),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>();
+        let bytes = serde_json::to_vec(&serde_json::json!({"Cap Creature":ids})).unwrap();
+        let source = scratch.0.join("Forge.json");
+        fs::write(&source, &bytes).unwrap();
+        if initial {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, &bytes).unwrap();
+        }
+        let desktop = scratch.0.join("Desktop");
+        host.test_player_files(Some(source), desktop.clone());
+        let a = discovery::discover(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods"),
+        )
+        .addons
+        .into_iter()
+        .find(|a| a.id == "eqoa_creature_journal")
+        .unwrap();
+        host.run_addon(&a).unwrap();
+        if !initial {
+            let id = options::active_mod_items()
+                .iter()
+                .find(|(_, label)| label == "Import journal...")
+                .unwrap()
+                .0;
+            assert!(options::activate_button(id));
+        }
+        for _ in 0..5000 {
+            step(&host, 0.5);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            if !initial && path.exists() {
+                break;
+            }
+        }
+        let id = options::active_mod_items()
+            .iter()
+            .find(|(_, label)| label == "Export journal")
+            .unwrap()
+            .0;
+        assert!(options::activate_button(id));
+        let exported = desktop.join("EQOA-Creature-Journal.json");
+        for _ in 0..500 {
+            step(&host, 0.5);
+            if exported.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let bytes = fs::read(&exported).unwrap_or_else(|e| {
+            panic!(
+                "capped export missing initial={initial}: {e}; {:?}",
+                host.drain_logs()
+            )
+        });
+        let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            saved["Cap Creature"].as_object().unwrap().len(),
+            limit,
+            "cap must reject exactly the extra valid spawn, initial={initial}"
+        );
+        native_events::clear(&host);
+    }
 }

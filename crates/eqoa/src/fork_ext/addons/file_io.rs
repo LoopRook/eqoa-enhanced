@@ -206,7 +206,9 @@ pub(super) fn relative(
     addon: &DiscoveredAddon,
     path: &str,
 ) -> std::result::Result<PathBuf, String> {
-    if path.starts_with('@') { return Err("shared paths are read-only JSON mounts".into()); }
+    if path.starts_with('@') {
+        return Err("shared paths are read-only JSON mounts".into());
+    }
     let path = path.replace("\\\\?\\", "").replace('\\', "/");
     if path.split('/').any(|part| part == "..") {
         return Err("parent traversal in addon resource path".into());
@@ -344,7 +346,9 @@ fn overlay_room(
                 continue;
             }
             no_links(&entry.path())?;
-            if super::sandbox::import_path(root,&entry.path()) {continue}
+            if super::sandbox::import_path(root, &entry.path()) {
+                continue;
+            }
             if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
                 pending.push(entry.path());
             } else if !entry.path().starts_with(root.join("removed")) {
@@ -404,7 +408,9 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
             let result = (|| -> std::result::Result<FileState, String> {
                 let rel = relative(&addon_open, &path)?;
                 let mode = mode.as_deref().unwrap_or("r");
-                if mode=="w" && super::sandbox::import_key(&rel) {return Err("imports staging is read-only".into())}
+                if mode == "w" && super::sandbox::import_key(&rel) {
+                    return Err("imports staging is read-only".into());
+                }
                 if !matches!(mode, "r" | "w") {
                     return Err("only text modes r and w are supported".into());
                 }
@@ -598,7 +604,10 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
                             &symbol,
                             if e.contains("not found") {
                                 "not_found"
-                            } else if e.contains("reparse point") || e.contains("symlink") || e.contains("imports staging") {
+                            } else if e.contains("reparse point")
+                                || e.contains("symlink")
+                                || e.contains("imports staging")
+                            {
                                 "permission_denied"
                             } else if e.contains("quota") || e.contains("exceeds") {
                                 "quota"
@@ -619,273 +628,706 @@ mod tests {
     use super::*;
     #[test]
     fn round4b_export_waits_for_accepted_async_snapshot_before_first_file_exists() {
-        use super::super::{options,player_files::TestIo,native_events,json_save};
-        struct Release(Option<std::sync::mpsc::Sender<()>>);impl Drop for Release{fn drop(&mut self){if let Some(tx)=self.0.take(){let _=tx.send(());}}}
-        let (dir,host,mut addon)=fixture_with_large_data(true);addon.extensions.permissions=vec!["export".into()];let root=dir.0.join("config");install(&host,&addon,Some(root.clone())).unwrap();let desktop=dir.0.join("Desktop");host.lua.set_app_data(TestIo{pick:None,desktop:desktop.clone()});
-        let (entered,release)=json_save::pause_next_commit();let mut release=Release(Some(release));
+        use super::super::{json_save, native_events, options, player_files::TestIo};
+        struct Release(Option<std::sync::mpsc::Sender<()>>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                if let Some(tx) = self.0.take() {
+                    let _ = tx.send(());
+                }
+            }
+        }
+        let (dir, host, mut addon) = fixture_with_large_data(true);
+        addon.extensions.permissions = vec!["export".into()];
+        let root = dir.0.join("config");
+        install(&host, &addon, Some(root.clone())).unwrap();
+        let desktop = dir.0.join("Desktop");
+        host.lua.set_app_data(TestIo {
+            pick: None,
+            desktop: desktop.clone(),
+        });
+        let (entered, release) = json_save::pause_next_commit();
+        let mut release = Release(Some(release));
         host.execute("accepted=false;done=false;failed='';button_id=assert(eqoa.options.button({id='export',label='Export journal'},function() assert(eqoa.files.save_json_async('journal.json',{stage=42,payload=string.rep('x',2*1024*1024)}));local id,e=eqoa.files.export('journal.json','journal.json');accepted=id~=nil;failed=e and e.message or '' end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='export' then done=true end end);eqoa.events.on('resource.failed',function(e) if e.data.kind=='export' then failed=e.data.error.message end end)").unwrap();
-        assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));native_events::dispatch(&host).unwrap();entered.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
-        assert!(host.lua.globals().get::<bool>("accepted").unwrap(),"{:?}",host.lua.globals().get::<String>("failed"));assert!(!desktop.join("journal.json").exists());release.0.take().unwrap().send(()).unwrap();
-        let end=std::time::Instant::now()+std::time::Duration::from_secs(5);while !host.lua.globals().get::<bool>("done").unwrap(){assert!(std::time::Instant::now()<end,"{:?}",host.lua.globals().get::<String>("failed"));native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}
-        let saved:serde_json::Value=serde_json::from_slice(&fs::read(desktop.join("journal.json")).unwrap()).unwrap();assert_eq!(saved["stage"],42);assert_eq!(saved["payload"].as_str().unwrap().len(),2*1024*1024);
+        assert!(options::activate_button(
+            host.lua.globals().get("button_id").unwrap()
+        ));
+        native_events::dispatch(&host).unwrap();
+        entered
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        assert!(
+            host.lua.globals().get::<bool>("accepted").unwrap(),
+            "{:?}",
+            host.lua.globals().get::<String>("failed")
+        );
+        assert!(!desktop.join("journal.json").exists());
+        release.0.take().unwrap().send(()).unwrap();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !host.lua.globals().get::<bool>("done").unwrap() {
+            assert!(
+                std::time::Instant::now() < end,
+                "{:?}",
+                host.lua.globals().get::<String>("failed")
+            );
+            native_events::dispatch(&host).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(desktop.join("journal.json")).unwrap()).unwrap();
+        assert_eq!(saved["stage"], 42);
+        assert_eq!(saved["payload"].as_str().unwrap().len(), 2 * 1024 * 1024);
     }
 
     #[test]
     fn round4b_review_remove_notifies_shared_readers() {
-        let (dir,owner,mut addon)=fixture();addon.id="owner_remove".into();addon.extensions.shares=vec!["data/journal.json".into()];install(&owner,&addon,Some(dir.0.join("config"))).unwrap();owner.execute("assert(eqoa.files.write('journal.json','{}'))").unwrap();
-        let (_dir,reader,_)=fixture();reader.execute("changed=false;eqoa.events.on('shared.changed',function(e) changed=e.data.mod=='owner_remove' and e.data.path=='data/journal.json' end)").unwrap();
-        owner.execute("assert(eqoa.files.remove('journal.json'))").unwrap();super::super::native_events::dispatch(&reader).unwrap();
+        let (dir, owner, mut addon) = fixture();
+        addon.id = "owner_remove".into();
+        addon.extensions.shares = vec!["data/journal.json".into()];
+        install(&owner, &addon, Some(dir.0.join("config"))).unwrap();
+        owner
+            .execute("assert(eqoa.files.write('journal.json','{}'))")
+            .unwrap();
+        let (_dir, reader, _) = fixture();
+        reader.execute("changed=false;eqoa.events.on('shared.changed',function(e) changed=e.data.mod=='owner_remove' and e.data.path=='data/journal.json' end)").unwrap();
+        owner
+            .execute("assert(eqoa.files.remove('journal.json'))")
+            .unwrap();
+        super::super::native_events::dispatch(&reader).unwrap();
         assert!(reader.lua.globals().get::<bool>("changed").unwrap());
     }
 
     #[test]
     fn round4b_review_disconnect_reports_original_import_kind() {
-        use super::super::{options,player_files::{self,TestIo},native_events};
-        let (dir,host,mut addon)=fixture();addon.extensions.permissions=vec!["import".into()];install(&host,&addon,Some(dir.0.join("config"))).unwrap();host.lua.set_app_data(TestIo{pick:None,desktop:dir.0.join("Desktop")});
+        use super::super::{
+            native_events, options,
+            player_files::{self, TestIo},
+        };
+        let (dir, host, mut addon) = fixture();
+        addon.extensions.permissions = vec!["import".into()];
+        install(&host, &addon, Some(dir.0.join("config"))).unwrap();
+        host.lua.set_app_data(TestIo {
+            pick: None,
+            desktop: dir.0.join("Desktop"),
+        });
         host.execute("got_kind='';capability='';button_id=assert(eqoa.options.button({id='import',label='Import journal...'},function() req=assert(eqoa.files.import({title='Journal',extensions={'json'}})) end)).item_id;eqoa.events.on('resource.failed',function(e) assert(e.data.request==req);got_kind=e.data.kind;capability=e.data.error.capability end)").unwrap();
-        assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));native_events::dispatch(&host).unwrap();player_files::disconnect_worker(&host.lua);native_events::dispatch(&host).unwrap();
-        assert_eq!(host.lua.globals().get::<String>("got_kind").unwrap(),"import");assert_eq!(host.lua.globals().get::<String>("capability").unwrap(),"eqoa.files.import");
+        assert!(options::activate_button(
+            host.lua.globals().get("button_id").unwrap()
+        ));
+        native_events::dispatch(&host).unwrap();
+        player_files::disconnect_worker(&host.lua);
+        native_events::dispatch(&host).unwrap();
+        assert_eq!(
+            host.lua.globals().get::<String>("got_kind").unwrap(),
+            "import"
+        );
+        assert_eq!(
+            host.lua.globals().get::<String>("capability").unwrap(),
+            "eqoa.files.import"
+        );
     }
 
     #[test]
     fn round4b_review_export_has_no_partial_final_file() {
-        use super::super::{options,player_files::{self,TestIo},native_events};
-        struct Release(Option<std::sync::mpsc::Sender<()>>);impl Drop for Release{fn drop(&mut self){if let Some(tx)=self.0.take(){let _=tx.send(());}}}
-        let (dir,host,mut addon)=fixture();addon.extensions.permissions=vec!["export".into()];install(&host,&addon,Some(dir.0.join("config"))).unwrap();let desktop=dir.0.join("Desktop");host.lua.set_app_data(TestIo{pick:None,desktop:desktop.clone()});
-        let (rx,release)=player_files::pause_copy(desktop.clone());let mut release=Release(Some(release));
+        use super::super::{
+            native_events, options,
+            player_files::{self, TestIo},
+        };
+        struct Release(Option<std::sync::mpsc::Sender<()>>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                if let Some(tx) = self.0.take() {
+                    let _ = tx.send(());
+                }
+            }
+        }
+        let (dir, host, mut addon) = fixture();
+        addon.extensions.permissions = vec!["export".into()];
+        install(&host, &addon, Some(dir.0.join("config"))).unwrap();
+        let desktop = dir.0.join("Desktop");
+        host.lua.set_app_data(TestIo {
+            pick: None,
+            desktop: desktop.clone(),
+        });
+        let (rx, release) = player_files::pause_copy(desktop.clone());
+        let mut release = Release(Some(release));
         host.execute("assert(eqoa.files.write('journal.json','complete journal'));done=false;button_id=assert(eqoa.options.button({id='export',label='Export journal'},function() assert(eqoa.files.export('journal.json','journal.json')) end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='export' then done=true end end)").unwrap();
-        assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));native_events::dispatch(&host).unwrap();rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
-        assert!(!desktop.join("journal.json").exists(),"a final export name was visible before publication");
-        let temp=fs::read_dir(&desktop).unwrap().map(|e|e.unwrap().path()).find(|p|p.extension().is_some_and(|e|e=="tmp")).expect("synced temporary export");assert_eq!(fs::read_to_string(temp).unwrap(),"complete journal");
-        release.0.take().unwrap().send(()).unwrap();let end=std::time::Instant::now()+std::time::Duration::from_secs(5);while !host.lua.globals().get::<bool>("done").unwrap(){assert!(std::time::Instant::now()<end);native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}
-        assert_eq!(fs::read_to_string(desktop.join("journal.json")).unwrap(),"complete journal");assert_eq!(fs::read_dir(desktop).unwrap().count(),1);
+        assert!(options::activate_button(
+            host.lua.globals().get("button_id").unwrap()
+        ));
+        native_events::dispatch(&host).unwrap();
+        rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(
+            !desktop.join("journal.json").exists(),
+            "a final export name was visible before publication"
+        );
+        let temp = fs::read_dir(&desktop)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p.extension().is_some_and(|e| e == "tmp"))
+            .expect("synced temporary export");
+        assert_eq!(fs::read_to_string(temp).unwrap(), "complete journal");
+        release.0.take().unwrap().send(()).unwrap();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !host.lua.globals().get::<bool>("done").unwrap() {
+            assert!(std::time::Instant::now() < end);
+            native_events::dispatch(&host).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(
+            fs::read_to_string(desktop.join("journal.json")).unwrap(),
+            "complete journal"
+        );
+        assert_eq!(fs::read_dir(desktop).unwrap().count(), 1);
     }
 
     #[test]
     fn round4b_review_unused_delegated_action_expires_after_dispatch() {
-        use super::super::{native_events,native_core::CORE};use std::sync::atomic::Ordering;
-        let (dir,receiver,mut addon)=fixture();addon.id="unused_receiver".into();addon.extensions.commands=vec!["noop".into()];install(&receiver,&addon,Some(dir.0.join("config"))).unwrap();receiver.execute("seen=false;eqoa.events.on('mod.command',function() seen=true end)").unwrap();
-        let (_dir,sender,_)=fixture();sender.execute("eqoa.events.on('input.key',function() assert(eqoa.mods.send('unused_receiver','noop')) end)").unwrap();
-        let action=CORE.with(|c|{let mut c=c.borrow_mut();c.emit("input.key",serde_json::json!({"key":"f2","down":true,"repeat":false,"synthetic":false}));c.events.back().unwrap().player_action.clone().unwrap()});
-        assert_eq!(action.load(Ordering::Acquire),0);native_events::dispatch(&sender).unwrap();assert_eq!(action.load(Ordering::Acquire),1);native_events::dispatch(&receiver).unwrap();assert!(receiver.lua.globals().get::<bool>("seen").unwrap());assert_eq!(action.load(Ordering::Acquire),2,"unused command authority survived its dispatch");
+        use super::super::{native_core::CORE, native_events};
+        use std::sync::atomic::Ordering;
+        let (dir, receiver, mut addon) = fixture();
+        addon.id = "unused_receiver".into();
+        addon.extensions.commands = vec!["noop".into()];
+        install(&receiver, &addon, Some(dir.0.join("config"))).unwrap();
+        receiver
+            .execute("seen=false;eqoa.events.on('mod.command',function() seen=true end)")
+            .unwrap();
+        let (_dir, sender, _) = fixture();
+        sender.execute("eqoa.events.on('input.key',function() assert(eqoa.mods.send('unused_receiver','noop')) end)").unwrap();
+        let action = CORE.with(|c| {
+            let mut c = c.borrow_mut();
+            c.emit(
+                "input.key",
+                serde_json::json!({"key":"f2","down":true,"repeat":false,"synthetic":false}),
+            );
+            c.events.back().unwrap().player_action.clone().unwrap()
+        });
+        assert_eq!(action.load(Ordering::Acquire), 0);
+        native_events::dispatch(&sender).unwrap();
+        assert_eq!(action.load(Ordering::Acquire), 1);
+        native_events::dispatch(&receiver).unwrap();
+        assert!(receiver.lua.globals().get::<bool>("seen").unwrap());
+        assert_eq!(
+            action.load(Ordering::Acquire),
+            2,
+            "unused command authority survived its dispatch"
+        );
     }
 
     #[test]
     fn round4b_review_disabled_dialog_stays_single_and_has_mod_title() {
-        use super::super::{options,player_files::{TestIo,BlockPick},native_events};
-        struct Release(Option<std::sync::mpsc::Sender<()>>);impl Drop for Release{fn drop(&mut self){if let Some(tx)=self.0.take(){let _=tx.send(());}}}
-        let (dir,host,mut addon)=fixture();addon.name="Journal addon".into();addon.extensions.permissions=vec!["import".into()];
-        let root=dir.0.join("config");install(&host,&addon,Some(root.clone())).unwrap();
-        let source=dir.0.join("picked.json");fs::write(&source,"{}").unwrap();host.lua.set_app_data(TestIo{pick:Some(source),desktop:dir.0.join("Desktop")});
-        let (entered,rx)=std::sync::mpsc::channel();let (tx,release_rx)=std::sync::mpsc::channel();let mut release=Release(Some(tx));
-        host.lua.set_app_data(BlockPick{entered,release:Rc::new(RefCell::new(Some(release_rx)))});
-        let setup=||host.execute("last=nil;done=false;code='';button_id=assert(eqoa.options.button({id='import',label='Import journal...'},function() local id,e=eqoa.files.import({title='Journal',extensions={'json'}});last=id;code=e and e.code or '' end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='import' then done=true end end)").unwrap();
-        setup();assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));native_events::dispatch(&host).unwrap();rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
-        assert_eq!(host.lua.named_registry_value::<String>("player_file_picker_title").unwrap(),"Journal addon: Journal");
-        native_events::clear(&host);install(&host,&addon,Some(root.clone())).unwrap();native_events::prime(&host);setup();
-        assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));native_events::dispatch(&host).unwrap();
-        assert_eq!(host.lua.globals().get::<String>("code").unwrap(),"busy","re-enable must not open a second dialog while the old OS dialog is open");
+        use super::super::{
+            native_events, options,
+            player_files::{BlockPick, TestIo},
+        };
+        struct Release(Option<std::sync::mpsc::Sender<()>>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                if let Some(tx) = self.0.take() {
+                    let _ = tx.send(());
+                }
+            }
+        }
+        let (dir, host, mut addon) = fixture();
+        addon.name = "Journal addon".into();
+        addon.extensions.permissions = vec!["import".into()];
+        let root = dir.0.join("config");
+        install(&host, &addon, Some(root.clone())).unwrap();
+        let source = dir.0.join("picked.json");
+        fs::write(&source, "{}").unwrap();
+        host.lua.set_app_data(TestIo {
+            pick: Some(source),
+            desktop: dir.0.join("Desktop"),
+        });
+        let (entered, rx) = std::sync::mpsc::channel();
+        let (tx, release_rx) = std::sync::mpsc::channel();
+        let mut release = Release(Some(tx));
+        host.lua.set_app_data(BlockPick {
+            entered,
+            release: Rc::new(RefCell::new(Some(release_rx))),
+        });
+        let setup = || {
+            host.execute("last=nil;done=false;code='';button_id=assert(eqoa.options.button({id='import',label='Import journal...'},function() local id,e=eqoa.files.import({title='Journal',extensions={'json'}});last=id;code=e and e.code or '' end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='import' then done=true end end)").unwrap()
+        };
+        setup();
+        assert!(options::activate_button(
+            host.lua.globals().get("button_id").unwrap()
+        ));
+        native_events::dispatch(&host).unwrap();
+        rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            host.lua
+                .named_registry_value::<String>("player_file_picker_title")
+                .unwrap(),
+            "Journal addon: Journal"
+        );
+        native_events::clear(&host);
+        install(&host, &addon, Some(root.clone())).unwrap();
+        native_events::prime(&host);
+        setup();
+        assert!(options::activate_button(
+            host.lua.globals().get("button_id").unwrap()
+        ));
+        native_events::dispatch(&host).unwrap();
+        assert_eq!(
+            host.lua.globals().get::<String>("code").unwrap(),
+            "busy",
+            "re-enable must not open a second dialog while the old OS dialog is open"
+        );
         release.0.take().unwrap().send(()).unwrap();
-        let end=std::time::Instant::now()+std::time::Duration::from_secs(5);
-        while host.lua.globals().get::<Option<u64>>("last").unwrap().is_none(){assert!(std::time::Instant::now()<end);assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}
-        while !host.lua.globals().get::<bool>("done").unwrap(){assert!(std::time::Instant::now()<end);native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}
-        assert_eq!(fs::read_dir(root.join("files/data/imports")).unwrap().count(),1,"disabled dialog copied no file");
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while host
+            .lua
+            .globals()
+            .get::<Option<u64>>("last")
+            .unwrap()
+            .is_none()
+        {
+            assert!(std::time::Instant::now() < end);
+            assert!(options::activate_button(
+                host.lua.globals().get("button_id").unwrap()
+            ));
+            native_events::dispatch(&host).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        while !host.lua.globals().get::<bool>("done").unwrap() {
+            assert!(std::time::Instant::now() < end);
+            native_events::dispatch(&host).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(
+            fs::read_dir(root.join("files/data/imports"))
+                .unwrap()
+                .count(),
+            1,
+            "disabled dialog copied no file"
+        );
     }
 
     #[test]
     fn round4b_review_one_physical_action_is_spent_across_vms() {
-        use super::super::{player_files::TestIo,native_events,native_core::CORE};
-        let (ad,a,mut aa)=fixture();aa.extensions.permissions=vec!["export".into()];install(&a,&aa,Some(ad.0.join("config"))).unwrap();
-        let (bd,b,mut ba)=fixture();ba.id="second".into();ba.extensions.permissions=vec!["export".into()];install(&b,&ba,Some(bd.0.join("config"))).unwrap();
-        a.lua.set_app_data(TestIo{pick:None,desktop:ad.0.join("Desktop")});b.lua.set_app_data(TestIo{pick:None,desktop:bd.0.join("Desktop")});
-        let setup="assert(eqoa.files.write('journal.json','{}'));accepted=false;done=false;local function attempt() local id,e=eqoa.files.export('journal.json','journal.json');accepted=id~=nil;code=e and e.code end;eqoa.events.on('input.key',attempt);eqoa.events.on('pointer.pressed',attempt);eqoa.events.on('resource.ready',function(e) if e.data.kind=='export' then done=true end end)";
-        a.execute(setup).unwrap();b.execute(setup).unwrap();
-        CORE.with(|c|c.borrow_mut().emit("input.key",serde_json::json!({"key":"f2","down":true,"synthetic":true,"repeat":false})));
-        native_events::dispatch(&a).unwrap();native_events::dispatch(&b).unwrap();
-        assert!(!a.lua.globals().get::<bool>("accepted").unwrap()&&!b.lua.globals().get::<bool>("accepted").unwrap());
-        CORE.with(|c|c.borrow_mut().emit("input.key",serde_json::json!({"key":"f2","down":true,"synthetic":false,"repeat":false})));
-        native_events::dispatch(&a).unwrap();native_events::dispatch(&b).unwrap();
-        let accepted=u32::from(a.lua.globals().get::<bool>("accepted").unwrap())+u32::from(b.lua.globals().get::<bool>("accepted").unwrap());
-        assert_eq!(accepted,1,"one native action must not authorize two mods' exports");
-        let end=std::time::Instant::now()+std::time::Duration::from_secs(5);while !a.lua.globals().get::<bool>("done").unwrap(){assert!(std::time::Instant::now()<end);native_events::dispatch(&a).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}
-        CORE.with(|c|c.borrow_mut().emit("pointer.pressed",serde_json::json!({"inside_window":false,"x":0,"y":0,"button":"left"})));
-        native_events::dispatch(&a).unwrap();native_events::dispatch(&b).unwrap();
-        assert!(!a.lua.globals().get::<bool>("accepted").unwrap()&&!b.lua.globals().get::<bool>("accepted").unwrap());
+        use super::super::{native_core::CORE, native_events, player_files::TestIo};
+        let (ad, a, mut aa) = fixture();
+        aa.extensions.permissions = vec!["export".into()];
+        install(&a, &aa, Some(ad.0.join("config"))).unwrap();
+        let (bd, b, mut ba) = fixture();
+        ba.id = "second".into();
+        ba.extensions.permissions = vec!["export".into()];
+        install(&b, &ba, Some(bd.0.join("config"))).unwrap();
+        a.lua.set_app_data(TestIo {
+            pick: None,
+            desktop: ad.0.join("Desktop"),
+        });
+        b.lua.set_app_data(TestIo {
+            pick: None,
+            desktop: bd.0.join("Desktop"),
+        });
+        let setup = "assert(eqoa.files.write('journal.json','{}'));accepted=false;done=false;local function attempt() local id,e=eqoa.files.export('journal.json','journal.json');accepted=id~=nil;code=e and e.code end;eqoa.events.on('input.key',attempt);eqoa.events.on('pointer.pressed',attempt);eqoa.events.on('resource.ready',function(e) if e.data.kind=='export' then done=true end end)";
+        a.execute(setup).unwrap();
+        b.execute(setup).unwrap();
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"f2","down":true,"synthetic":true,"repeat":false}),
+            )
+        });
+        native_events::dispatch(&a).unwrap();
+        native_events::dispatch(&b).unwrap();
+        assert!(
+            !a.lua.globals().get::<bool>("accepted").unwrap()
+                && !b.lua.globals().get::<bool>("accepted").unwrap()
+        );
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"f2","down":true,"synthetic":false,"repeat":false}),
+            )
+        });
+        native_events::dispatch(&a).unwrap();
+        native_events::dispatch(&b).unwrap();
+        let accepted = u32::from(a.lua.globals().get::<bool>("accepted").unwrap())
+            + u32::from(b.lua.globals().get::<bool>("accepted").unwrap());
+        assert_eq!(
+            accepted, 1,
+            "one native action must not authorize two mods' exports"
+        );
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !a.lua.globals().get::<bool>("done").unwrap() {
+            assert!(std::time::Instant::now() < end);
+            native_events::dispatch(&a).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "pointer.pressed",
+                serde_json::json!({"inside_window":false,"x":0,"y":0,"button":"left"}),
+            )
+        });
+        native_events::dispatch(&a).unwrap();
+        native_events::dispatch(&b).unwrap();
+        assert!(
+            !a.lua.globals().get::<bool>("accepted").unwrap()
+                && !b.lua.globals().get::<bool>("accepted").unwrap()
+        );
     }
 
     #[test]
     fn round4b_review_import_ids_survive_enable_and_staging_cannot_starve_saves() {
-        use super::super::{options,player_files::TestIo,native_events};
-        let (dir,host,mut addon)=fixture_with_large_data(true);addon.extensions.permissions=vec!["import".into()];
-        let root=dir.0.join("config");install(&host,&addon,Some(root.clone())).unwrap();
-        let picked=dir.0.join("large.json");fs::write(&picked,format!("{{\"payload\":\"{}\"}}","x".repeat(6*1024*1024))).unwrap();
-        host.lua.set_app_data(TestIo{pick:Some(picked),desktop:dir.0.join("Desktop")});
-        let setup=||host.execute("done=false;failure='';button_id=assert(eqoa.options.button({id='import',label='Import journal...'},function() req=assert(eqoa.files.import({title='Journal',extensions={'json'}})) end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='import' or e.data.kind=='json_saved' then assert(e.data.request==req);done=true;import_path=e.data.path end end);eqoa.events.on('resource.failed',function(e) failure=e.data.error.message end)").unwrap();
-        let wait=||{let end=std::time::Instant::now()+std::time::Duration::from_secs(10);while !host.lua.globals().get::<bool>("done").unwrap(){assert!(std::time::Instant::now()<end,"{:?}",host.lua.globals().get::<String>("failure"));native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}};
-        setup();let mut paths=Vec::new();
+        use super::super::{native_events, options, player_files::TestIo};
+        let (dir, host, mut addon) = fixture_with_large_data(true);
+        addon.extensions.permissions = vec!["import".into()];
+        let root = dir.0.join("config");
+        install(&host, &addon, Some(root.clone())).unwrap();
+        let picked = dir.0.join("large.json");
+        fs::write(
+            &picked,
+            format!("{{\"payload\":\"{}\"}}", "x".repeat(6 * 1024 * 1024)),
+        )
+        .unwrap();
+        host.lua.set_app_data(TestIo {
+            pick: Some(picked),
+            desktop: dir.0.join("Desktop"),
+        });
+        let setup = || {
+            host.execute("done=false;failure='';button_id=assert(eqoa.options.button({id='import',label='Import journal...'},function() req=assert(eqoa.files.import({title='Journal',extensions={'json'}})) end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='import' or e.data.kind=='json_saved' then assert(e.data.request==req);done=true;import_path=e.data.path end end);eqoa.events.on('resource.failed',function(e) failure=e.data.error.message end)").unwrap()
+        };
+        let wait = || {
+            let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while !host.lua.globals().get::<bool>("done").unwrap() {
+                assert!(
+                    std::time::Instant::now() < end,
+                    "{:?}",
+                    host.lua.globals().get::<String>("failure")
+                );
+                native_events::dispatch(&host).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        };
+        setup();
+        let mut paths = Vec::new();
         for i in 0..4 {
-            if i==2 {native_events::clear(&host);install(&host,&addon,Some(root.clone())).unwrap();native_events::prime(&host);setup();}
+            if i == 2 {
+                native_events::clear(&host);
+                install(&host, &addon, Some(root.clone())).unwrap();
+                native_events::prime(&host);
+                setup();
+            }
             host.execute("done=false;failure=''").unwrap();
-            assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));wait();
+            assert!(options::activate_button(
+                host.lua.globals().get("button_id").unwrap()
+            ));
+            wait();
             paths.push(host.lua.globals().get::<String>("import_path").unwrap());
         }
-        assert_eq!(paths,vec!["imports/import-1.json","imports/import-2.json","imports/import-3.json","imports/import-4.json"]);
-        let imports=root.join("files/data/imports");assert_eq!(fs::read_dir(&imports).unwrap().count(),3);assert!(!imports.join("import-1.json").exists());
-        host.execute("local ok,e=eqoa.files.write('imports/escape.json','{}');assert(ok==nil and e.code=='permission_denied');local ok,e=eqoa.files.save_json_async('imports/escape.json',{});assert(ok==nil and e.code=='permission_denied');done=false;req=assert(eqoa.files.save_json_async('journal.json',{payload=string.rep('j',14*1024*1024-128)}))").unwrap();wait();
-        assert!(fs::metadata(root.join("files/data/journal.json")).unwrap().len()>13*1024*1024);
+        assert_eq!(
+            paths,
+            vec![
+                "imports/import-1.json",
+                "imports/import-2.json",
+                "imports/import-3.json",
+                "imports/import-4.json"
+            ]
+        );
+        let imports = root.join("files/data/imports");
+        assert_eq!(fs::read_dir(&imports).unwrap().count(), 3);
+        assert!(!imports.join("import-1.json").exists());
+        host.execute("local ok,e=eqoa.files.write('imports/escape.json','{}');assert(ok==nil and e.code=='permission_denied');local ok,e=eqoa.files.save_json_async('imports/escape.json',{});assert(ok==nil and e.code=='permission_denied');done=false;req=assert(eqoa.files.save_json_async('journal.json',{payload=string.rep('j',14*1024*1024-128)}))").unwrap();
+        wait();
+        assert!(
+            fs::metadata(root.join("files/data/journal.json"))
+                .unwrap()
+                .len()
+                > 13 * 1024 * 1024
+        );
     }
 
     #[cfg(windows)]
     #[test]
     fn round4b_review_redirected_desktop_and_picked_file_keep_private_checks() {
-        use super::super::{options,player_files::TestIo,native_events};
-        let (dir,host,mut addon)=fixture();addon.extensions.permissions=vec!["import".into(),"export".into()];
-        install(&host,&addon,Some(dir.0.join("config"))).unwrap();
-        let actual=dir.0.join("cloud-folder");fs::create_dir_all(&actual).unwrap();
-        let desktop=dir.0.join("Desktop");
-        let result=std::process::Command::new("cmd").args(["/D","/C","mklink","/J"]).arg(&desktop).arg(&actual).output().unwrap();
-        assert!(result.status.success(),"junction creation failed: {:?}",result);
-        fs::write(actual.join("picked.json"),"{\"Bat\":{}}").unwrap();
-        host.lua.set_app_data(TestIo{pick:Some(desktop.join("picked.json")),desktop:desktop.clone()});
+        use super::super::{native_events, options, player_files::TestIo};
+        let (dir, host, mut addon) = fixture();
+        addon.extensions.permissions = vec!["import".into(), "export".into()];
+        install(&host, &addon, Some(dir.0.join("config"))).unwrap();
+        let actual = dir.0.join("cloud-folder");
+        fs::create_dir_all(&actual).unwrap();
+        let desktop = dir.0.join("Desktop");
+        let result = std::process::Command::new("cmd")
+            .args(["/D", "/C", "mklink", "/J"])
+            .arg(&desktop)
+            .arg(&actual)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "junction creation failed: {:?}",
+            result
+        );
+        fs::write(actual.join("picked.json"), "{\"Bat\":{}}").unwrap();
+        host.lua.set_app_data(TestIo {
+            pick: Some(desktop.join("picked.json")),
+            desktop: desktop.clone(),
+        });
         host.execute("assert(eqoa.files.write('journal.json','{}'));mode='export';finished=false;success=false;failure='';button_id=assert(eqoa.options.button({id='file',label='File action'},function() if mode=='export' then assert(eqoa.files.export('journal.json','journal.json')) else assert(eqoa.files.import({title='Journal',extensions={'json'}})) end end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='import' or e.data.kind=='export' then finished=true;success=true;import_path=e.data.path end end);eqoa.events.on('resource.failed',function(e) if e.data.kind=='import' or e.data.kind=='export' then finished=true;failure=e.data.error.message end end)").unwrap();
-        let wait=|| {let end=std::time::Instant::now()+std::time::Duration::from_secs(5);while !host.lua.globals().get::<bool>("finished").unwrap(){assert!(std::time::Instant::now()<end);native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}assert!(host.lua.globals().get::<bool>("success").unwrap(),"{:?}",host.lua.globals().get::<String>("failure"));};
-        let id=host.lua.globals().get("button_id").unwrap();
-        assert!(options::activate_button(id));wait();
-        assert_eq!(fs::read_to_string(actual.join("journal.json")).unwrap(),"{}");
-        host.execute("finished=false;success=false;mode='import'").unwrap();
-        assert!(options::activate_button(id));wait();
-        let imported=host.lua.globals().get::<String>("import_path").unwrap();
-        assert_eq!(fs::read_to_string(dir.0.join("config/files/data").join(imported)).unwrap(),"{\"Bat\":{}}");
-        let private_link=dir.0.join("private-link");
-        let result=std::process::Command::new("cmd").args(["/D","/C","mklink","/J"]).arg(&private_link).arg(&actual).output().unwrap();assert!(result.status.success());
-        install(&host,&addon,Some(private_link)).unwrap();
+        let wait = || {
+            let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !host.lua.globals().get::<bool>("finished").unwrap() {
+                assert!(std::time::Instant::now() < end);
+                native_events::dispatch(&host).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert!(
+                host.lua.globals().get::<bool>("success").unwrap(),
+                "{:?}",
+                host.lua.globals().get::<String>("failure")
+            );
+        };
+        let id = host.lua.globals().get("button_id").unwrap();
+        assert!(options::activate_button(id));
+        wait();
+        assert_eq!(
+            fs::read_to_string(actual.join("journal.json")).unwrap(),
+            "{}"
+        );
+        host.execute("finished=false;success=false;mode='import'")
+            .unwrap();
+        assert!(options::activate_button(id));
+        wait();
+        let imported = host.lua.globals().get::<String>("import_path").unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.0.join("config/files/data").join(imported)).unwrap(),
+            "{\"Bat\":{}}"
+        );
+        let private_link = dir.0.join("private-link");
+        let result = std::process::Command::new("cmd")
+            .args(["/D", "/C", "mklink", "/J"])
+            .arg(&private_link)
+            .arg(&actual)
+            .output()
+            .unwrap();
+        assert!(result.status.success());
+        install(&host, &addon, Some(private_link)).unwrap();
         host.execute("local ok,e=eqoa.files.write('forbidden.json','{}');assert(ok==nil and e.code=='permission_denied')").unwrap();
         assert!(!actual.join("files/data/forbidden.json").exists());
     }
 
     #[test]
     fn round4b_review_commands_preserve_other_events_and_sender_fairness() {
-        use super::super::{native_core::CORE,native_events};
-        let (rd,receiver,mut ra)=fixture();ra.id="receiver".into();ra.extensions.commands=vec!["ping".into()];
-        install(&receiver,&ra,Some(rd.0.join("config"))).unwrap();
-        let (ad,a,mut aa)=fixture();aa.id="sender_a".into();install(&a,&aa,Some(ad.0.join("config"))).unwrap();
-        let (bd,b,mut ba)=fixture();ba.id="sender_b".into();install(&b,&ba,Some(bd.0.join("config"))).unwrap();
+        use super::super::{native_core::CORE, native_events};
+        let (rd, receiver, mut ra) = fixture();
+        ra.id = "receiver".into();
+        ra.extensions.commands = vec!["ping".into()];
+        install(&receiver, &ra, Some(rd.0.join("config"))).unwrap();
+        let (ad, a, mut aa) = fixture();
+        aa.id = "sender_a".into();
+        install(&a, &aa, Some(ad.0.join("config"))).unwrap();
+        let (bd, b, mut ba) = fixture();
+        ba.id = "sender_b".into();
+        install(&b, &ba, Some(bd.0.join("config"))).unwrap();
         receiver.execute("entity_seen=false;resource_seen=false;commands=0;eqoa.events.on('entity.added',function(e) entity_seen=e.data.after.name=='sentinel' end);eqoa.events.on('resource.ready',function(e) if e.data.kind=='json_saved' then resource_seen=e.data.request==19 end end);eqoa.events.on('mod.command',function(e) commands=commands+1 end)").unwrap();
-        native_events::json_saved(&receiver.lua,19,None).unwrap();
+        native_events::json_saved(&receiver.lua, 19, None).unwrap();
         CORE.with(|c|c.borrow_mut().emit("entity.added",serde_json::json!({"after":{"name":"sentinel","padding":"x".repeat(2*1024*1024-2048)}})));
         a.execute("local no,e=eqoa.mods.send('receiver','ping',{p=string.rep('x',4096)});assert(no==nil and e.code=='quota','4 KiB payload cap');for i=1,4 do assert(eqoa.mods.send('receiver','ping',{p=string.rep('a',1000)})) end;local no,e=eqoa.mods.send('receiver','ping',{});assert(no==nil and e.code=='quota','per-sender cap')").unwrap();
-        b.execute("assert(eqoa.mods.send('receiver','ping',{p='other sender'}))").unwrap();
+        b.execute("assert(eqoa.mods.send('receiver','ping',{p='other sender'}))")
+            .unwrap();
         native_events::dispatch(&receiver).unwrap();
-        assert!(receiver.lua.globals().get::<bool>("entity_seen").unwrap(),"command traffic evicted an entity event");
-        assert!(receiver.lua.globals().get::<bool>("resource_seen").unwrap(),"command traffic evicted an import/save completion");
-        assert_eq!(receiver.lua.globals().get::<u32>("commands").unwrap(),5);
-        a.execute("assert(eqoa.mods.send('receiver','ping',{}))").unwrap();
+        assert!(
+            receiver.lua.globals().get::<bool>("entity_seen").unwrap(),
+            "command traffic evicted an entity event"
+        );
+        assert!(
+            receiver.lua.globals().get::<bool>("resource_seen").unwrap(),
+            "command traffic evicted an import/save completion"
+        );
+        assert_eq!(receiver.lua.globals().get::<u32>("commands").unwrap(), 5);
+        a.execute("assert(eqoa.mods.send('receiver','ping',{}))")
+            .unwrap();
     }
 
     #[test]
     fn round4b_review_export_refuses_executable_and_reserved_names() {
-        use super::super::{options,player_files::TestIo,native_events};
-        let (dir,host,mut addon)=fixture();addon.extensions.permissions=vec!["export".into()];
-        install(&host,&addon,Some(dir.0.join("config"))).unwrap();
-        let desktop=dir.0.join("Desktop");host.lua.set_app_data(TestIo{pick:None,desktop:desktop.clone()});
+        use super::super::{native_events, options, player_files::TestIo};
+        let (dir, host, mut addon) = fixture();
+        addon.extensions.permissions = vec!["export".into()];
+        install(&host, &addon, Some(dir.0.join("config"))).unwrap();
+        let desktop = dir.0.join("Desktop");
+        host.lua.set_app_data(TestIo {
+            pick: None,
+            desktop: desktop.clone(),
+        });
         host.execute("assert(eqoa.files.write('journal.json','{}'));rejected=false;done=false;button_id=assert(eqoa.options.button({id='export',label='Export journal'},function() for _,name in ipairs({'evil.bat','evil.lnk','evil.exe','desktop.ini','.hidden.json','.json','CON.txt','x/y.json','x'..string.char(92)..'y.json','file.json.'}) do local ok,e=eqoa.files.export('journal.json',name);assert(ok==nil and e.code=='invalid_argument',name) end;rejected=true;assert(eqoa.files.export('journal.json','Journal.JSON')) end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='export' then done=true end end)").unwrap();
-        assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));
+        assert!(options::activate_button(
+            host.lua.globals().get("button_id").unwrap()
+        ));
         native_events::dispatch(&host).unwrap();
-        assert!(host.lua.globals().get::<bool>("rejected").unwrap(),"unsafe export accepted: {:?}",super::super::native::finish(&host.lua));
-        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(5);
-        while !host.lua.globals().get::<bool>("done").unwrap(){assert!(std::time::Instant::now()<deadline);native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}
-        assert_eq!(fs::read_to_string(desktop.join("Journal.JSON")).unwrap(),"{}");
-        assert_eq!(fs::read_dir(&desktop).unwrap().count(),1);
+        assert!(
+            host.lua.globals().get::<bool>("rejected").unwrap(),
+            "unsafe export accepted: {:?}",
+            super::super::native::finish(&host.lua)
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !host.lua.globals().get::<bool>("done").unwrap() {
+            assert!(std::time::Instant::now() < deadline);
+            native_events::dispatch(&host).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(
+            fs::read_to_string(desktop.join("Journal.JSON")).unwrap(),
+            "{}"
+        );
+        assert_eq!(fs::read_dir(&desktop).unwrap().count(), 1);
     }
 
     #[test]
     fn round4b_option_buttons_are_player_activations_and_disable_cleanly() {
-        use super::super::{options,player_files::TestIo,native_events};
-        let (dir,host,mut addon)=fixture();
-        addon.extensions.permissions=vec!["export".into()];
-        install(&host,&addon,Some(dir.0.join("config"))).unwrap();
-        let desktop=dir.0.join("Desktop");host.lua.set_app_data(TestIo{pick:None,desktop:desktop.clone()});
+        use super::super::{native_events, options, player_files::TestIo};
+        let (dir, host, mut addon) = fixture();
+        addon.extensions.permissions = vec!["export".into()];
+        install(&host, &addon, Some(dir.0.join("config"))).unwrap();
+        let desktop = dir.0.join("Desktop");
+        host.lua.set_app_data(TestIo {
+            pick: None,
+            desktop: desktop.clone(),
+        });
         host.execute("assert(eqoa.files.write('journal.json','{}'));clicked=0;done=false;local row=assert(eqoa.options.button({id='export',label='Export journal'},function() clicked=clicked+1;assert(eqoa.files.export('journal.json','journal.json')) end));button_id=row.item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='export' then done=true end end)").unwrap();
-        let id=host.lua.globals().get::<i32>("button_id").unwrap();
-        assert!(options::active_mod_items().contains(&(id,"Export journal".into())));
-        assert!(!options::toggle_by_item(id),"stepping over an action must not execute it");
-        assert_eq!(host.lua.globals().get::<u32>("clicked").unwrap(),0);
+        let id = host.lua.globals().get::<i32>("button_id").unwrap();
+        assert!(options::active_mod_items().contains(&(id, "Export journal".into())));
+        assert!(
+            !options::toggle_by_item(id),
+            "stepping over an action must not execute it"
+        );
+        assert_eq!(host.lua.globals().get::<u32>("clicked").unwrap(), 0);
         assert!(options::activate_button(id));
-        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !host.lua.globals().get::<bool>("done").unwrap() {
-            assert!(std::time::Instant::now()<deadline);
+            assert!(std::time::Instant::now() < deadline);
             native_events::dispatch(&host).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        assert_eq!(fs::read_to_string(desktop.join("journal.json")).unwrap(),"{}");
+        assert_eq!(
+            fs::read_to_string(desktop.join("journal.json")).unwrap(),
+            "{}"
+        );
         native_events::clear(&host);
         assert!(!options::activate_button(id));
-        assert!(!options::active_mod_items().iter().any(|(item,_)|*item==id));
+        assert!(
+            !options::active_mod_items()
+                .iter()
+                .any(|(item, _)| *item == id)
+        );
     }
 
     #[test]
     fn round4b_mod_command_can_target_its_own_vm() {
-        let (dir,host,mut addon)=fixture();
-        addon.extensions.commands=vec!["self".into()];
-        install(&host,&addon,Some(dir.0.join("config"))).unwrap();
+        let (dir, host, mut addon) = fixture();
+        addon.extensions.commands = vec!["self".into()];
+        install(&host, &addon, Some(dir.0.join("config"))).unwrap();
         host.execute("count=0;eqoa.events.on('mod.command',function(e) count=count+1 end);assert(eqoa.mods.send('pack','self'))").unwrap();
         super::super::native_events::dispatch(&host).unwrap();
-        assert_eq!(host.lua.globals().get::<u32>("count").unwrap(),1);
+        assert_eq!(host.lua.globals().get::<u32>("count").unwrap(), 1);
     }
 
     #[test]
     fn round4b_player_command_import_export_copy_files_and_cancel() {
-        use super::super::{native_core::CORE,native_events as events,player_files::TestIo};
+        use super::super::{native_core::CORE, native_events as events, player_files::TestIo};
         use serde_json::json;
         let (owner_dir, owner, mut journal) = fixture();
-        journal.id="journal_actions".into();
-        journal.extensions.commands=vec!["import_journal".into(),"export_journal".into()];
-        journal.extensions.permissions=vec!["import".into(),"export".into()];
-        install(&owner,&journal,Some(owner_dir.0.join("config"))).unwrap();
-        let (sender_dir,sender,mut addon)=fixture();
-        addon.extensions.commands=vec!["forward".into()];
-        addon.extensions.permissions=vec!["export".into()];
-        install(&sender,&addon,Some(sender_dir.0.join("config"))).unwrap();
-        let desktop=owner_dir.0.join("Desktop");fs::create_dir_all(&desktop).unwrap();
-        fs::write(desktop.join("EQOA-Creature-Journal.json"),"existing export").unwrap();
-        let picked=owner_dir.0.join("Forge.json");
-        let forge=r#"{"Bat":{"42":{"world":0,"level":2,"pos":[1,2,3]}}}"#;
-        fs::write(&picked,forge).unwrap();
-        owner.lua.set_app_data(TestIo{pick:Some(picked),desktop:desktop.clone()});
-        sender.lua.set_app_data(TestIo{pick:None,desktop:desktop.clone()});
+        journal.id = "journal_actions".into();
+        journal.extensions.commands = vec!["import_journal".into(), "export_journal".into()];
+        journal.extensions.permissions = vec!["import".into(), "export".into()];
+        install(&owner, &journal, Some(owner_dir.0.join("config"))).unwrap();
+        let (sender_dir, sender, mut addon) = fixture();
+        addon.extensions.commands = vec!["forward".into()];
+        addon.extensions.permissions = vec!["export".into()];
+        install(&sender, &addon, Some(sender_dir.0.join("config"))).unwrap();
+        let desktop = owner_dir.0.join("Desktop");
+        fs::create_dir_all(&desktop).unwrap();
+        fs::write(
+            desktop.join("EQOA-Creature-Journal.json"),
+            "existing export",
+        )
+        .unwrap();
+        let picked = owner_dir.0.join("Forge.json");
+        let forge = r#"{"Bat":{"42":{"world":0,"level":2,"pos":[1,2,3]}}}"#;
+        fs::write(&picked, forge).unwrap();
+        owner.lua.set_app_data(TestIo {
+            pick: Some(picked),
+            desktop: desktop.clone(),
+        });
+        sender.lua.set_app_data(TestIo {
+            pick: None,
+            desktop: desktop.clone(),
+        });
         owner.execute("assert(eqoa.files.write('journal.json','{\"Bat\":{}}'));last=0;completed=false;cancelled=false;eqoa.events.on('mod.command',function(e) assert(eqoa.mods.send('pack','forward'));if e.data.command=='export_journal' then local no,err=eqoa.files.export('../outside','oops.json');assert(no==nil and err.code=='permission_denied');last=assert(eqoa.files.export('journal.json','EQOA-Creature-Journal.json')) else last=assert(eqoa.files.import({title='Import journal',extensions={'json'}})) end;local no,err=eqoa.files.export('journal.json','again.json');assert(no==nil and err.code=='requires_player') end);eqoa.events.on('resource.ready',function(e) if e.data.kind=='export' or e.data.kind=='import' then assert(e.data.request==last);completed=true;import_path=e.data.path end end);file_failure='';eqoa.events.on('resource.failed',function(e) file_failure=e.data.kind..':'..e.data.error.code..':'..e.data.error.message;if e.data.kind=='import' then assert(e.data.request==last);cancelled=e.data.error.code=='cancelled' end end)").unwrap();
         sender.execute("forward_denied=false;eqoa.events.on('mod.command',function(e) local no,err=eqoa.files.export('journal.json','forwarded.json');forward_denied=no==nil and err.code=='requires_player' end);command='export_journal';eqoa.events.on('input.key',function(e) if e.data.key=='f2' and e.data.down then assert(eqoa.mods.send('missing','x')==nil);assert(eqoa.mods.send('journal_actions',command)) end end)").unwrap();
-        let press=|| {CORE.with(|c|c.borrow_mut().emit("input.key",json!({"key":"f2","down":true,"synthetic":false,"repeat":false})));};
-        let wait=|flag:&str| {
-            let deadline=std::time::Instant::now()+std::time::Duration::from_secs(5);
+        let press = || {
+            CORE.with(|c| {
+                c.borrow_mut().emit(
+                    "input.key",
+                    json!({"key":"f2","down":true,"synthetic":false,"repeat":false}),
+                )
+            });
+        };
+        let wait = |flag: &str| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             while !owner.lua.globals().get::<bool>(flag).unwrap() {
-                assert!(std::time::Instant::now()<deadline,"{flag} did not complete; failure={:?}; request={:?}; owner={:?}; sender={:?}",owner.lua.globals().get::<String>("file_failure"),owner.lua.globals().get::<u64>("last"),super::super::native::finish(&owner.lua),super::super::native::finish(&sender.lua));
-                events::dispatch(&owner).unwrap();events::dispatch(&sender).unwrap();
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "{flag} did not complete; failure={:?}; request={:?}; owner={:?}; sender={:?}",
+                    owner.lua.globals().get::<String>("file_failure"),
+                    owner.lua.globals().get::<u64>("last"),
+                    super::super::native::finish(&owner.lua),
+                    super::super::native::finish(&sender.lua)
+                );
+                events::dispatch(&owner).unwrap();
+                events::dispatch(&sender).unwrap();
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
         };
-        press();events::dispatch(&sender).unwrap();wait("completed");
-        assert_eq!(fs::read_to_string(desktop.join("EQOA-Creature-Journal.json")).unwrap(),"existing export");
-        assert_eq!(fs::read_to_string(desktop.join("EQOA-Creature-Journal (2).json")).unwrap(),r#"{"Bat":{}}"#);
-        events::dispatch(&sender).unwrap();assert!(sender.lua.globals().get::<bool>("forward_denied").unwrap());
-        owner.execute("completed=false").unwrap();sender.execute("command='import_journal'").unwrap();
-        press();events::dispatch(&sender).unwrap();wait("completed");
-        let path=owner.lua.globals().get::<String>("import_path").unwrap();
+        press();
+        events::dispatch(&sender).unwrap();
+        wait("completed");
+        assert_eq!(
+            fs::read_to_string(desktop.join("EQOA-Creature-Journal.json")).unwrap(),
+            "existing export"
+        );
+        assert_eq!(
+            fs::read_to_string(desktop.join("EQOA-Creature-Journal (2).json")).unwrap(),
+            r#"{"Bat":{}}"#
+        );
+        events::dispatch(&sender).unwrap();
+        assert!(sender.lua.globals().get::<bool>("forward_denied").unwrap());
+        owner.execute("completed=false").unwrap();
+        sender.execute("command='import_journal'").unwrap();
+        press();
+        events::dispatch(&sender).unwrap();
+        wait("completed");
+        let path = owner.lua.globals().get::<String>("import_path").unwrap();
         assert!(path.starts_with("imports/"));
-        assert_eq!(fs::read_to_string(owner_dir.0.join("config/files/data").join(path)).unwrap(),forge);
-        owner.lua.set_app_data(TestIo{pick:None,desktop:desktop.clone()});
-        press();events::dispatch(&sender).unwrap();wait("cancelled");
-        assert!(!desktop.join("again.json").exists());assert!(!desktop.join("forwarded.json").exists());
+        assert_eq!(
+            fs::read_to_string(owner_dir.0.join("config/files/data").join(path)).unwrap(),
+            forge
+        );
+        owner.lua.set_app_data(TestIo {
+            pick: None,
+            desktop: desktop.clone(),
+        });
+        press();
+        events::dispatch(&sender).unwrap();
+        wait("cancelled");
+        assert!(!desktop.join("again.json").exists());
+        assert!(!desktop.join("forwarded.json").exists());
     }
 
     #[test]
     fn round4b_file_actions_require_permission_and_player_activation() {
         let (dir, host, mut addon) = fixture();
         host.execute("local ok,e=eqoa.files.import({title='Journal',extensions={'json'}});assert(ok==nil and e.code=='permission_denied');local ok,e=eqoa.files.export('journal.json','journal.json');assert(ok==nil and e.code=='permission_denied')").unwrap();
-        addon.extensions.permissions=vec!["import".into(),"export".into()];
-        install(&host,&addon,Some(dir.0.join("config"))).unwrap();
+        addon.extensions.permissions = vec!["import".into(), "export".into()];
+        install(&host, &addon, Some(dir.0.join("config"))).unwrap();
         host.execute("local ok,e=eqoa.files.import({title='Journal',extensions={'json'}});assert(ok==nil and e.code=='requires_player');local ok,e=eqoa.files.export('journal.json','journal.json');assert(ok==nil and e.code=='requires_player');denied=false;eqoa.events.after(0,function() local ok,e=eqoa.files.export('journal.json','journal.json');denied=ok==nil and e.code=='requires_player' end)").unwrap();
-        for _ in 0..3 { super::super::native_events::dispatch(&host).unwrap(); }
+        for _ in 0..3 {
+            super::super::native_events::dispatch(&host).unwrap();
+        }
         assert!(host.lua.globals().get::<bool>("denied").unwrap());
     }
 
@@ -914,7 +1356,11 @@ mod tests {
         let root = _owner_dir.0.join("config");
         install(&owner, &addon, Some(root.clone())).unwrap();
         fs::create_dir_all(root.join("files/data")).unwrap();
-        fs::write(root.join("files/data/journal.json"), r#"{"Bat":{"42":{"world":0,"level":2,"pos":[1,2,3]}}}"#).unwrap();
+        fs::write(
+            root.join("files/data/journal.json"),
+            r#"{"Bat":{"42":{"world":0,"level":2,"pos":[1,2,3]}}}"#,
+        )
+        .unwrap();
         fs::write(root.join("files/data/secret.json"), "{}").unwrap();
         let (_reader_dir, reader, _) = fixture();
         reader.execute("loaded=false;eqoa.events.on('resource.ready',function(e) if e.data.kind=='json' then loaded=e.data.value.Bat['42'].level==2 end end);local id,e=eqoa.files.load_json('@journal_owner/data/journal.json');assert(id,tostring(e));local no,e=eqoa.files.load_json('@journal_owner/data/secret.json');assert(no==nil and e.code=='permission_denied','undeclared read accepted');assert(eqoa.files.load_json('@journal_owner/data/../secret.json')==nil,'traversal accepted');assert(eqoa.files.write('@journal_owner/data/journal.json','{}')==nil,'shared write accepted')").unwrap();
@@ -925,14 +1371,19 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         reader.execute("changes=0;eqoa.events.on('shared.changed',function(e) assert(e.data.mod=='journal_owner' and e.data.path=='data/journal.json');changes=changes+1 end)").unwrap();
-        owner.execute("assert(eqoa.files.save_json_async('journal.json',{Bat={}}))").unwrap();
+        owner
+            .execute("assert(eqoa.files.save_json_async('journal.json',{Bat={}}))")
+            .unwrap();
         while reader.lua.globals().get::<u32>("changes").unwrap() == 0 {
             assert!(std::time::Instant::now() < deadline);
             super::super::native_events::dispatch(&owner).unwrap();
             super::super::native_events::dispatch(&reader).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        assert_eq!(fs::read_to_string(root.join("files/data/journal.json")).unwrap(), r#"{"Bat":{}}"#);
+        assert_eq!(
+            fs::read_to_string(root.join("files/data/journal.json")).unwrap(),
+            r#"{"Bat":{}}"#
+        );
         super::super::native_events::clear(&owner);
         reader.execute("local id,e=eqoa.files.load_json('@journal_owner/data/journal.json');assert(id==nil and e.code=='permission_denied')").unwrap();
     }
@@ -1553,5 +2004,19 @@ mod tests {
         end
         local value,err=eqoa.files.read('absent.cfg');assert(value==nil and err.code=='not_found')
         "#).unwrap();
+    }
+    #[test]
+    fn round4b_optional_json_missing_is_not_found_without_warning() {
+        let (_scratch, host, _addon) = fixture();
+        host.execute("local value,err=eqoa.files.load_json('missing.json');assert(value==nil and err.code=='not_found')").unwrap();
+        assert!(
+            super::super::native::finish(&host.lua).is_empty(),
+            "fresh journal probe must stay quiet"
+        );
+        host.execute("local value,err=eqoa.files.load_json('../denied.json');assert(value==nil and err.code=='permission_denied')").unwrap();
+        assert!(
+            !super::super::native::finish(&host.lua).is_empty(),
+            "denied path must still diagnose"
+        );
     }
 }

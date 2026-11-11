@@ -954,3 +954,11 @@ autorun and follow state. Mods renew the lease while their editor remains open.
 `eqoa.map.get().open` reports whether the native M map is open, including map
 change invalidation. Static camp/coach markers include their native search label
 in `label` (XP-camp suffix or town/coach name); `name` stays the source name.
+
+`eqoa.map.get().enabled` reports the native Map master switch. `eqoa.map.open()`
+queues an M-map opening through the bounded native action queue, applied only in
+eligible play. It returns true or nil,Error (`not_in_world`, `unavailable` while
+Map is off, or `busy`). This supports F2 search when Minimap is off. Native
+minimap visibility also honours the player's Map/Minimap switches. Missing private
+JSON files return `not_found` without a warning; denied paths still diagnose.
+Group snapshots retain inactive roster members with unknown positions.

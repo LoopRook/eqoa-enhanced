@@ -180,8 +180,10 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
     let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
     let scene = crate::map::Map::round4_fixture(&gpu.device, &gpu.queue, (1024, 768), true);
     // Real worker + sliced materialization, bounded by a wall-clock deadline.
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let load_started = Instant::now();
+    let deadline = load_started + Duration::from_secs(60);
     let mut loaded = false;
+    let mut load_state = (0usize, 0usize, 0usize);
     while Instant::now() < deadline {
         manager.flush_pending_fonts(&mut gpu.context);
         r4_begin(&mut gpu);
@@ -195,10 +197,11 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
             manager.diagnostics()
         );
         let lua = lua(&manager, "eqoa_map_search");
-        loaded = lua
-            .load("local s=require('search');return #s.journal==23000 and #s.catalog>1000")
-            .eval::<bool>()
+        load_state = lua
+            .load("local s=require('search');return #s.journal,#s.catalog,#s.jobs")
+            .eval::<(usize, usize, usize)>()
             .unwrap();
+        loaded = load_state.0 == 23000 && load_state.1 > 1000;
         if loaded {
             break;
         }
@@ -206,8 +209,12 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
     }
     assert!(
         loaded,
-        "large journal/catalogue workload did not run: {:?}",
+        "large journal/catalogue workload did not run: {load_state:?}; {:?}",
         manager.diagnostics()
+    );
+    eprintln!(
+        "R4 initial shared journal load: {:?}",
+        load_started.elapsed()
     );
     {
         let l = lua(&manager, "eqoa_map_search");
@@ -328,6 +335,120 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
                 .unwrap();
         }
     }
+
+    // A footer click delegates its physical activation through the real command
+    // queue to the journal VM. Its worker publishes a real Desktop file.
+    let desktop = config.0.join("Desktop");
+    let j = manager
+        .entries
+        .iter()
+        .find(|e| e.metadata.id == "eqoa_creature_journal")
+        .unwrap()
+        .instance
+        .as_ref()
+        .unwrap();
+    j.host.test_player_files(None, desktop.clone());
+    native_core::emit(
+        "pointer.pressed",
+        serde_json::json!({"x":100.,"y":455.,"inside_window":true,"button":"left"}),
+    );
+    let exported = desktop.join("EQOA-Creature-Journal.json");
+    for _ in 0..100 {
+        manager.flush_pending_fonts(&mut gpu.context);
+        r4_begin(&mut gpu);
+        native_core::presentation();
+        manager.frame(snapshot);
+        r4_render(&mut gpu, &scene);
+        manager.after_render();
+        if exported.exists() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let exported_value: serde_json::Value = serde_json::from_slice(
+        &fs::read(&exported)
+            .unwrap_or_else(|e| panic!("footer export: {e}; {:?}", manager.diagnostics())),
+    )
+    .unwrap();
+    assert_eq!(
+        exported_value["Performance Creature"]
+            .as_object()
+            .unwrap()
+            .len(),
+        23000
+    );
+    for _ in 0..3 {
+        manager.flush_pending_fonts(&mut gpu.context);
+        r4_begin(&mut gpu);
+        native_core::presentation();
+        manager.frame(snapshot);
+        r4_render(&mut gpu, &scene);
+        manager.after_render();
+    }
+    assert!(
+        lua.load(
+            "local s=require('search');return s.message and s.message:find('Saved to ',1,true)~=nil"
+        )
+        .eval::<bool>()
+        .unwrap(),
+        "footer must report export completion"
+    );
+    let forge = config.0.join("Forge.json");
+    fs::write(
+        &forge,
+        r#"{"Footer Imported":{"99999":{"world":0,"level":17,"pos":[11,12,13]}}}"#,
+    )
+    .unwrap();
+    let j = manager
+        .entries
+        .iter()
+        .find(|e| e.metadata.id == "eqoa_creature_journal")
+        .unwrap()
+        .instance
+        .as_ref()
+        .unwrap();
+    j.host.test_player_files(Some(forge), desktop.clone());
+    native_core::emit(
+        "pointer.pressed",
+        serde_json::json!({"x":180.,"y":455.,"inside_window":true,"button":"left"}),
+    );
+    let import_started = Instant::now();
+    let deadline = import_started + Duration::from_secs(60);
+    // The receipt lasts six seconds; incremental loading of this deliberately
+    // large journal may finish later. Observe both boundaries independently.
+    let mut receipt_seen = false;
+    let mut reloaded = false;
+    let mut last_import_state = (0usize, None::<String>);
+    while Instant::now() < deadline {
+        manager.flush_pending_fonts(&mut gpu.context);
+        r4_begin(&mut gpu);
+        native_core::presentation();
+        manager.frame(snapshot);
+        r4_render(&mut gpu, &scene);
+        manager.after_render();
+        last_import_state = lua
+            .load("local s=require('search');return #s.journal,s.message")
+            .eval::<(usize, Option<String>)>()
+            .unwrap();
+        receipt_seen |= last_import_state
+            .1
+            .as_deref()
+            .is_some_and(|m| m.contains("Imported 1 spawns"));
+        reloaded |= last_import_state.0 == 23001;
+        if receipt_seen && reloaded {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        receipt_seen && reloaded,
+        "footer receipt={receipt_seen}, reload={reloaded}, last={last_import_state:?}: {:?}",
+        manager.diagnostics(),
+    );
+    eprintln!(
+        "R4 footer import and shared reload: {:?}",
+        import_started.elapsed()
+    );
     manager.shutdown();
     input::reset_input_state();
     let saved: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();

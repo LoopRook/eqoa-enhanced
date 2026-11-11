@@ -100,7 +100,7 @@ impl Session {
             ("loot", "get", 3),
             (
                 "map",
-                "get markers view set_guide clear_guide images load_image set_waypoint clear_waypoint",
+                "get open markers view set_guide clear_guide images load_image set_waypoint clear_waypoint",
                 4,
             ),
             ("mastery", "get skills selected", 4),
@@ -982,7 +982,7 @@ fn install_fields(lua: &Lua) {
         ("eqoa.map.Marker", "kind name x z level_min level_max label"),
         (
             "eqoa.map.MapState",
-            "open world_id world_name zone bounds revision waypoint",
+            "enabled open world_id world_name zone bounds revision waypoint",
         ),
         ("eqoa.map.Bounds", "x_min z_min x_max z_max"),
         ("eqoa.map.Waypoint", "world_id x z label owner"),

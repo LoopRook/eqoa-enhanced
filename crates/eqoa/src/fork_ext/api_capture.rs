@@ -162,7 +162,7 @@ impl Play {
         let members = if self.group.in_group {
             self.group.members[..self.group.count()]
                 .iter()
-                .filter(|m| Some(m.id) != id && m.active)
+                .filter(|m| Some(m.id) != id)
                 .map(|m|{
             let actor=self.entities.slots.iter().flatten().find(|e|e.id==m.id);
             let power_val = self.session.power_of(m.id).map(|p| ee::div(p as f32, 255.0));

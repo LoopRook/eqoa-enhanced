@@ -7,11 +7,11 @@ use super::Play;
 #[path = "api_capture.rs"]
 mod api_capture;
 #[cfg(all(test, not(target_arch = "wasm32")))]
-#[path = "api_capture_tests.rs"]
-mod native_tests;
-#[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "map_mod_tests.rs"]
 mod map_mod_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "api_capture_tests.rs"]
+mod native_tests;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use api_capture::{begin_game_event, end_game_event};
 #[cfg(target_arch = "wasm32")]
@@ -75,6 +75,9 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
             weapon_sets_requests(_play, ready);
             let reqs = crate::fork_ext::addons::actions::take_action_requests();
             if ready {
+                if reqs.map && crate::settings::map() && _play.addon_input_available() {
+                    _play.map.show();
+                }
                 if reqs.assist && matches!(_play.mode, 0 | 38) {
                     _play.assist_target();
                 }
@@ -2305,5 +2308,7 @@ impl Play {
 
 #[cfg(test)]
 impl Play {
-    pub(crate) fn test_map_search_surface(&mut self,open:bool){self.map.open=open;}
+    pub(crate) fn test_map_search_surface(&mut self, open: bool) {
+        self.map.open = open;
+    }
 }

@@ -107,6 +107,29 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     bind(
         lua,
         "map",
+        "open",
+        lua.create_function(|lua, ()| {
+            if !CORE.with(|c| c.borrow().view.in_world) {
+                return error(
+                    lua,
+                    "eqoa.map.open",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            if !crate::settings::map() {
+                return error(lua, "eqoa.map.open", "unavailable", "Map is turned off");
+            }
+            if !super::actions::queue_open_map() {
+                return error(lua, "eqoa.map.open", "busy", "native action queue is full");
+            }
+            lua.pack_multi((true, Value::Nil))
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "map",
         "get",
         lua.create_function(|lua, ()| {
             read(lua, "eqoa.map.get", "eqoa.map.MapState", |v| v.map.clone())
@@ -929,7 +952,9 @@ fn install_math(lua: &Lua) -> Result<()> {
                     "spec must be a table",
                 );
             };
-            if !t.get::<Value>("texture")?.is_nil() {return super::hud_textures::image(lua,&t);}
+            if !t.get::<Value>("texture")?.is_nil() {
+                return super::hud_textures::image(lua, &t);
+            }
             let t = Spec::new(lua, &t)?;
             let x: i32 = match t.fget::<i32>("x") {
                 Ok(v) => v,

@@ -5,6 +5,22 @@ local count, now, first_dirty, last_change = 0, 0, nil, nil
 local ready, protected, scan = false, false, true
 local loading, importing, saving, revision, saved_revision = nil, nil, nil, 0, 0
 local merge_job
+
+local function notify(message)
+    print(message)
+    eqoa.mods.send("eqoa_map_search", "journal_status", {message=message})
+end
+-- Rust str::trim uses Unicode White_Space, beyond Lua's ASCII %s class.
+local spaces = {}
+for c in ("\194\133\194\160\225\154\128\226\128\128\226\128\129\226\128\130\226\128\131\226\128\132\226\128\133\226\128\134\226\128\135\226\128\136\226\128\137\226\128\138\226\128\168\226\128\169\226\128\175\226\129\159\227\128\128"):gmatch("[%z\1-\127\194-\244][\128-\191]*") do spaces[c] = true end
+local function trim_name(name)
+    local chars = {}
+    for c in name:gmatch("[%z\1-\127\194-\244][\128-\191]*") do chars[#chars+1] = c end
+    local first,last = 1,#chars
+    while first <= last and (spaces[chars[first]] or chars[first]:match("^%s$")) do first=first+1 end
+    while last >= first and (spaces[chars[last]] or chars[last]:match("^%s$")) do last=last-1 end
+    return first > last and "" or table.concat(chars,"",first,last)
+end
 local function finite(n) return type(n) == "number" and n == n and math.abs(n) <= 3.4028234663852886e38 end
 local function changed()
     revision = revision + 1
@@ -47,7 +63,7 @@ local function record(e)
     local p = eqoa.player.get()
     if p and (e.id == p.id or e.id == p.pet_id) then return end
     if not e.is_creature or e.corpse or not e.class_code or e.class_code >= 2 or e.search_flags ~= 0 then return end
-    local name = (e.name or ""):match("^%s*(.-)%s*$")
+    local name = trim_name(e.name or "")
     local pos = e.position
     if name == "" or not pos or not finite(pos.x) or not finite(pos.y) or not finite(pos.z) then return end
     if near(name, e.level, pos.x, pos.z) then return end
@@ -73,9 +89,9 @@ end
 -- Walk large imports in bounded batches; neither validation nor indexing takes
 -- an entire frame. Existing local name/id entries win, as in the native journal.
 local function merge(value, initial)
-    if type(value) ~= "table" then
+    if type(value) ~= "table" or getmetatable(value) == "JSON array" then
         if initial then protected = true end
-        print("Journal: expected JSON object at root"); return
+        notify("Import: expected JSON object at root"); return
     end
     merge_job = {value=value, name=nil, id=nil, ids=nil, n=0, initial=initial, added=0}
 end
@@ -105,11 +121,15 @@ local function merge_step()
     if j.name == nil or count >= 80000 or (not j.initial and j.n >= 50000) then
         merge_job = nil
         if j.initial then ready = true; scan = true
-        elseif j.added > 0 then changed(); save(false) end
+        else
+            if j.added > 0 then changed(); save(false) end
+            notify("Imported " .. j.added .. " spawns")
+        end
     end
 end
 local function import_journal()
-    if not ready or protected or merge_job or importing then return end
+    if not ready or merge_job or importing then notify("Journal is loading"); return end
+    if protected then notify("Journal is disabled to protect existing file"); return end
     local request, err = eqoa.files.import{title="Import creature journal", extensions={"json"}}
     if request then importing = request else print("Journal import: " .. err.message) end
 end
@@ -135,6 +155,7 @@ eqoa.events.on("resource.ready", function(e)
         if request then importing = {load=request} else print("Journal import: " .. err.message) end
     elseif d.kind == "json" and type(importing) == "table" and d.request == importing.load then
         importing = nil; merge(d.value, false)
+    elseif d.kind == "export" then notify("Saved to " .. d.path)
     elseif d.kind == "json_saved" and saving and d.request == saving.id then
         saved_revision = saving.revision; saving = nil
         if saved_revision == revision then first_dirty = nil; last_change = nil end
@@ -145,7 +166,9 @@ eqoa.events.on("resource.failed", function(e)
     if d.kind == "json" and d.request == loading then
         loading = nil; protected = true; print("Journal load failed; preserving existing file")
     elseif saving and d.kind == "json_saved" and d.request == saving.id then saving = nil
-    elseif d.kind == "import" or (type(importing) == "table" and d.request == importing.load) then importing = nil end
+    elseif d.kind == "import" or (type(importing) == "table" and d.request == importing.load) then
+        importing = nil; notify("Import: " .. (d.error and d.error.message or "failed"))
+    elseif d.kind == "export" then notify("Export: " .. (d.error and d.error.message or "failed")) end
 end)
 for _, name in ipairs({"entity.added","entity.changed"}) do
     eqoa.events.on(name, function(e) record(e.data.after) end)

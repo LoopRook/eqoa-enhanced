@@ -35,7 +35,11 @@ local function load_step()
             end
         end
     end
-    if done then M[j.kind]=j.out;table.remove(M.jobs,1);M.dirty=true end
+    if done then
+        M[j.kind]=j.out
+        if j.kind=="journal" then local names={};local n=0;for _,p in ipairs(j.out) do if not names[p.name] then names[p.name]=true;n=n+1 end end;M.journal_names=n end
+        table.remove(M.jobs,1);M.dirty=true
+    end
 end
 local function live_valid(e)
     return e.is_creature and not e.corpse and e.hp_fraction and e.hp_fraction>0 and e.search_flags==0 and e.class_code and e.class_code<2 and e.name and not e.name:match("^%s*$") and e.position and valid(e.position.x,e.position.z)
@@ -50,7 +54,7 @@ function M.observe()
         M.live[#M.live+1]={name=e.name,key=e.name:lower(),world=e.world_id,x=e.position.x,z=e.position.z,level=e.level,id=e.id}
     end end end
     local group=eqoa.group.get();M.group={}
-    if group and group.members then for _,g in ipairs(group.members) do if g.active then M.group[#M.group+1]=g end end end
+    if group and group.members then for _,g in ipairs(group.members) do if g.id~=p.id then M.group[#M.group+1]=g end end end
     M.places={}
     local worlds={0,1,2,3};if M.world>3 then worlds[#worlds+1]=M.world end
     for _,world in ipairs(worlds) do
@@ -90,9 +94,13 @@ local function npc_step(b)
             b.index=b.index+1
             local searchable=p.name
             if b.source==2 then searchable=searchable.." level "..tostring(p.level or 0).." "..(world_names[p.world] or "").." world "..p.world.." "..string.format("%.0f %.0f",p.x,p.z) end
-            if (b.source~=3 or p.world==M.world) and matches(searchable,b.words) then
+            if (b.source~=3 or p.world==M.world) and (b.source==2 or matches(searchable,b.words)) then
                 local r=b.names[p.key]
                 if not r then r={name=p.name,kind="npc",key=p.key,count=0};b.names[p.key]=r end
+                if b.source~=2 or matches(p.name,b.words) then r.keep=true
+                elseif not r.keep then
+                    r.parts=r.parts or {p.name};r.parts[#r.parts+1]=searchable
+                end
                 if p.world==M.world and (not r.at or (b.source==3 and r.count==0) or ((b.source==3 or r.count==0) and distance(p)<distance(r.at))) then r.at=p end
                 if b.source==3 then r.count=r.count+1 end
                 if p.level and p.level>0 then r.lo=math.min(r.lo or p.level,p.level);r.hi=math.max(r.hi or p.level,p.level) end
@@ -123,11 +131,13 @@ local function build_step()
     if M.tab==1 then
         if not npc_step(b) then return end
         for _,r in pairs(b.names) do
+            if r.keep or (r.parts and matches(table.concat(r.parts," "),b.words)) then
             if r.count>0 then
                 local level=not r.lo and "level unknown" or (r.lo==r.hi and "level "..r.lo or "levels "..r.lo.."-"..r.hi)
                 r.detail="Spawned nearby: "..r.count.."; "..level
             elseif r.at then r.detail="Not detected (range/spawn unknown)" else r.detail="Other world; not detected" end
             b.rows[#b.rows+1]=r
+            end
         end
     else other_rows(b) end
     sort_rows(b.rows);M.rows=b.rows;M.build=nil;M.selected=math.min(M.selected,math.max(1,#M.rows))

@@ -7,6 +7,7 @@ use std::collections::VecDeque;
 pub enum ClientAction {
     Assist,
     OpenSummary,
+    OpenMap,
 }
 
 thread_local! {
@@ -37,6 +38,18 @@ pub fn queue_open_summary() -> bool {
     })
 }
 
+pub fn queue_open_map() -> bool {
+    ACTION_QUEUE.with(|q| {
+        let mut q = q.borrow_mut();
+        if q.len() < 16 {
+            q.push_back(ClientAction::OpenMap);
+            true
+        } else {
+            false
+        }
+    })
+}
+
 pub fn drain_actions() -> Vec<ClientAction> {
     ACTION_QUEUE.with(|q| {
         let mut q = q.borrow_mut();
@@ -51,6 +64,7 @@ pub fn clear_actions() {
 pub struct ActionRequests {
     pub assist: bool,
     pub summary: bool,
+    pub map: bool,
 }
 
 pub fn request_assist() {
@@ -64,11 +78,17 @@ pub fn request_summary() {
 pub fn take_action_requests() -> ActionRequests {
     let mut assist = false;
     let mut summary = false;
+    let mut map = false;
     for a in drain_actions() {
         match a {
             ClientAction::Assist => assist = true,
             ClientAction::OpenSummary => summary = true,
+            ClientAction::OpenMap => map = true,
         }
     }
-    ActionRequests { assist, summary }
+    ActionRequests {
+        assist,
+        summary,
+        map,
+    }
 }

@@ -16,9 +16,23 @@ local function command(name)
     local ok,err=eqoa.mods.send("eqoa_creature_journal",name)
     s.message=ok and nil or (err and err.message or "Journal unavailable")
 end
-eqoa.input.bind({id="open",label="Map search",default_key="f2"},function() s.toggle() end)
+eqoa.input.bind({id="open",label="Map search",default_key="f2"},function()
+    local map=eqoa.map.get()
+    if not map or map.enabled==false then return end
+    if not map.open and not eqoa.hud.visible("minimap") then
+        local ok=eqoa.map.open()
+        if not ok then return end
+        s.requested_open_until=(s.now or 0)+1
+    end
+    s.toggle()
+end)
 eqoa.input.bind({id="clear",label="Clear map guide",default_key="f4"},function() s.clear() end)
 eqoa.events.on("input.key",function(e) s.key(e.data) end)
+eqoa.events.on("mod.command",function(e)
+    if e.data.from=="eqoa_creature_journal" and e.data.command=="journal_status" and e.data.args then
+        s.message=e.data.args.message;s.message_until=e.time+6
+    end
+end)
 for _,name in ipairs({"entity.added","entity.changed","entity.removed","group.changed","map.changed","player.changed","state.reset","events.dropped"}) do
     eqoa.events.on(name,function() s.refresh=true end)
 end
@@ -54,9 +68,13 @@ eqoa.events.on("pointer.wheel",function(e)
 end)
 local function draw()
     hits={}
-    local map=eqoa.map.get();if not map then s.close();return end
+    local map=eqoa.map.get();if not map or map.enabled==false then s.close();return end
     local mini=not map.open and eqoa.hud.visible("minimap")
-    if not mini and not map.open then if s.open then s.close() end;return end
+    if not mini and not map.open then
+        if s.open and (not s.requested_open_until or (s.now or 0)>s.requested_open_until) then s.close() end
+        return
+    end
+    s.requested_open_until=nil
     if not eqoa.imgui then return end
     local ui=eqoa.imgui
     local w,h=ui.GetDisplaySize()
@@ -86,7 +104,7 @@ local function draw()
         fill(x,y,w,h,active and c.selected or c.raised);dl:AddRect(v(x,y),v(x+w,y+h),active and c.red or c.border)
         text(x+6,y+4,label,c.text,w-10);hit(x,y,w,h,click)
     end
-    button(x,y,mini and 20 or 100,20,mini and "" or "Search  F2",s.toggle,s.open)
+    button(x,y,mini and 20 or 100,20,mini and "" or ("Search  "..((eqoa.binds.get("open") or ""):upper())),s.toggle,s.open)
     if mini then dl:AddCircle(v(x+8,y+8),5,c.text,24,1);dl:AddLine(v(x+12,y+12),v(x+17,y+17),c.text,1) end
     if s.guide then button(x-24,y,20,20,"X",s.clear) end
     local status=s.status()
@@ -111,8 +129,8 @@ local function draw()
         if #s.rows==0 then text(px+16,py+116,s.build and "Searching..." or s.tab==2 and "No group members" or (#s.catalog==0 and s.tab==1 and "NPC list unavailable: reinstall from the ZIP" or "No matching locations"),c.muted,pw-32) end
         local foot=py+ph-58
         fill(px+10,foot-6,pw-20,1,c.border)
-        text(px+12,foot,s.message or (#s.rows.." matches / Enter guides"),c.muted,pw-24)
-        text(px+12,foot+16,"Journal: "..#s.journal.." spawns",c.muted,pw-24)
+        text(px+12,foot,(s.message and (not s.message_until or s.message_until>s.now) and s.message) or (#s.rows.." matches / Enter guides"),c.muted,pw-24)
+        text(px+12,foot+16,"Journal: "..(s.journal_names or 0).." creatures, "..#s.journal.." spawns",c.muted,pw-24)
         button(px+10,py+ph-25,45,21,"Prev",function() s.offset=math.max(1,s.offset-6);s.selected=s.offset end)
         button(px+59,py+ph-25,82,21,"Export",function() command("export_journal") end)
         button(px+145,py+ph-25,82,21,"Import",function() command("import_journal") end)
@@ -121,7 +139,8 @@ local function draw()
     if font then ui.PopFont() end
     ui.End()
 end
-eqoa.events.on("render",function()
+eqoa.events.on("render",function(e)
+    s.now=e.time
     s.step()
     if s.reacquire and not s.build then s.reacquire=false;if s.guide then s.choose(s.guide) end end
     draw()

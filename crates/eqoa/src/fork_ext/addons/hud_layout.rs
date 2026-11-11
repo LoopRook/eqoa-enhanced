@@ -224,7 +224,7 @@ pub fn hud_element_visible(element: &str) -> bool {
     let v = super::visibility::effective_visibility();
     match element {
         "hud" => true,
-        "minimap" => !v.minimap,
+        "minimap" => crate::settings::minimap() && !v.minimap,
         "health" | "health_bar" => !v.health_bar,
         "power" | "power_bar" => !v.power_bar,
         "experience_main" | "exp" | "main_exp_bar" => !v.main_exp_bar,
