@@ -82,9 +82,28 @@ fn sync_f3_saves_redacted_zip_through_dialog_hook() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// F3 must reach Support's form while the map is up: upstream handles it
+/// before the map captures every key. This wiring guard fails if the map
+/// block moves back above it (and if the block is duplicated again).
 #[test]
-fn sync_crash_marker_is_offered_on_next_start_hook() {
-    assert!(include_str!("../logfile.rs").contains("crate::report::start()"));
+fn sync_f3_is_handled_before_the_map_takes_every_key() {
+    let viewer = include_str!("../viewer.rs");
+    let f3 = viewer.find("// F3: a bug report").expect("the F3 handler");
+    let map = viewer
+        .find("// The map (`map.rs`), while it is up, takes every key.")
+        .expect("the map's key capture");
+    assert!(f3 < map, "F3 must be handled before the map captures every key");
+    assert_eq!(
+        viewer
+            .matches("// The map (`map.rs`), while it is up, takes every key.")
+            .count(),
+        1,
+        "one map key capture"
+    );
+}
+
+#[test]
+fn sync_crash_marker_is_offered_on_next_start_hook() {    assert!(include_str!("../logfile.rs").contains("crate::report::start()"));
     assert!(include_str!("../logfile.rs").contains("crate::report::crash("));
     let root = std::env::temp_dir().join(format!("eqoa-sync-crash-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
@@ -94,7 +113,7 @@ fn sync_crash_marker_is_offered_on_next_start_hook() {
     std::fs::write(&log, closed).unwrap();
     take_last_run(&root, &log);
     assert!(
-        offer_in(&root.join("crashes")).is_none(),
+        offer_in(&crate::fork_ext::report_crash_dir::in_config(&root)).is_none(),
         "negative control: clean exit"
     );
     std::fs::write(
@@ -103,7 +122,7 @@ fn sync_crash_marker_is_offered_on_next_start_hook() {
     )
     .unwrap();
     take_last_run(&root, &log);
-    let offer = offer_in(&root.join("crashes")).expect("crash offered at next start");
+    let offer = offer_in(&crate::fork_ext::report_crash_dir::in_config(&root)).expect("crash offered at next start");
     assert!(matches!(offer.kind, Kind::Crash(ref files) if files.len() == 1));
     std::fs::remove_dir_all(root).unwrap();
 }

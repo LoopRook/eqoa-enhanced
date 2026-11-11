@@ -62,9 +62,7 @@ fn render_and_read_pixel(
         .set_display_framebuffer_scale([1.0, 1.0]);
     gpu.context.frame();
 
-    bridge
-        .invoke(|| host.lua.load(lua_code).exec())
-        .unwrap();
+    bridge.invoke(|| host.lua.load(lua_code).exec()).unwrap();
 
     let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("test render target"),
@@ -101,7 +99,9 @@ fn render_and_read_pixel(
             multiview_mask: None,
         });
 
-        let frame = gpu.context.render(gpu.renderer.borrow_mut().renderer_consumer().unwrap());
+        let frame = gpu
+            .context
+            .render(gpu.renderer.borrow_mut().renderer_consumer().unwrap());
         gpu.renderer
             .borrow_mut()
             .render(frame, &mut pass, FramebufferExtent::new(64, 64))
@@ -131,7 +131,9 @@ fn render_and_read_pixel(
     let slice = readback.slice(..);
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
-    gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    gpu.device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .unwrap();
     rx.recv().unwrap().unwrap();
 
     let data = slice.get_mapped_range().unwrap();
@@ -159,11 +161,25 @@ impl SyntheticProvider {
     }
 
     fn add(&mut self, id: u32, w: u32, h: u32, rgba: Vec<u8>) {
-        self.surfaces.insert(id, DecodedIcon { width: w, height: h, rgba });
+        self.surfaces.insert(
+            id,
+            DecodedIcon {
+                width: w,
+                height: h,
+                rgba,
+            },
+        );
     }
 
     fn add_ui_tex(&mut self, tex_id: u32, w: u32, h: u32, rgba: Vec<u8>) {
-        self.ui_textures.insert(tex_id, DecodedIcon { width: w, height: h, rgba });
+        self.ui_textures.insert(
+            tex_id,
+            DecodedIcon {
+                width: w,
+                height: h,
+                rgba,
+            },
+        );
     }
 }
 
@@ -255,7 +271,11 @@ fn forge_icon_synthetic_surface_pixel_match() {
         10,
         10,
     );
-    assert_eq!(pixel, [255, 0, 0, 255], "rendered pixel at (10, 10) must be RED");
+    assert_eq!(
+        pixel,
+        [255, 0, 0, 255],
+        "rendered pixel at (10, 10) must be RED"
+    );
 
     icons::set_custom_icon_provider(None);
 }
@@ -401,7 +421,9 @@ fn forge_icon_held_handle_survives_eviction_pressure_and_f9_draws_valid_pixels()
     let host = Host::new().unwrap();
     let bridge = Bridge::install(&host).unwrap();
     let textures = Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
-    textures.borrow_mut().set_budget(super::textures::ADDON_BUDGET);
+    textures
+        .borrow_mut()
+        .set_budget(super::textures::ADDON_BUDGET);
     let cache = icons::attach_icon_cache(&host.lua, textures.clone()).unwrap();
 
     let mut provider = SyntheticProvider::new();
@@ -478,7 +500,11 @@ fn forge_icon_held_handle_survives_eviction_pressure_and_f9_draws_valid_pixels()
         5,
         5,
     );
-    assert_eq!(p_old, [255, 0, 0, 255], "held handle across eviction and F9 must draw valid RED pixels");
+    assert_eq!(
+        p_old,
+        [255, 0, 0, 255],
+        "held handle across eviction and F9 must draw valid RED pixels"
+    );
 
     // Drawing _G.h1_new must draw the newly requested BLUE pixels
     let p_new = render_and_read_pixel(
@@ -493,7 +519,11 @@ fn forge_icon_held_handle_survives_eviction_pressure_and_f9_draws_valid_pixels()
         5,
         5,
     );
-    assert_eq!(p_new, [0, 0, 255, 255], "fresh handle under new art view must draw BLUE pixels");
+    assert_eq!(
+        p_new,
+        [0, 0, 255, 255],
+        "fresh handle under new art view must draw BLUE pixels"
+    );
 
     icons::set_custom_icon_provider(None);
 }
@@ -508,7 +538,9 @@ fn forge_icon_disable_and_reenable_preserves_held_handle() {
     let host = Host::new().unwrap();
     let bridge = Bridge::install(&host).unwrap();
     let textures = Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
-    textures.borrow_mut().set_budget(super::textures::ADDON_BUDGET);
+    textures
+        .borrow_mut()
+        .set_budget(super::textures::ADDON_BUDGET);
     icons::attach_icon_cache(&host.lua, textures).unwrap();
 
     let mut provider = SyntheticProvider::new();
@@ -565,7 +597,9 @@ fn forge_icon_shutdown_and_reload_releases_all_textures() {
     };
     let host = Host::new().unwrap();
     let textures = Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
-    textures.borrow_mut().set_budget(super::textures::ADDON_BUDGET);
+    textures
+        .borrow_mut()
+        .set_budget(super::textures::ADDON_BUDGET);
     let cache = icons::attach_icon_cache(&host.lua, textures.clone()).unwrap();
 
     host.lua
@@ -617,7 +651,9 @@ fn forge_icon_budget_exhaustion_diagnostic() {
     };
     let host = Host::new().unwrap();
     let textures = Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
-    textures.borrow_mut().set_budget(super::textures::ADDON_BUDGET);
+    textures
+        .borrow_mut()
+        .set_budget(super::textures::ADDON_BUDGET);
     let cache = icons::attach_icon_cache(&host.lua, textures).unwrap();
 
     // Hold all 64 icons in Lua table
@@ -750,7 +786,11 @@ fn forge_icon_real_disc_ui_and_item_icon_pixel_match() {
     };
 
     // Find first decodable ability/UI surface in UI.CSF
-    let Some(ability_surface) = ui_container.surfaces.iter().find(|s| s.decode(&ui_container.data).is_some()) else {
+    let Some(ability_surface) = ui_container
+        .surfaces
+        .iter()
+        .find(|s| s.decode(&ui_container.data).is_some())
+    else {
         eprintln!("SKIP forge_icon: no decodable surface in UI.CSF");
         return;
     };
@@ -758,7 +798,11 @@ fn forge_icon_real_disc_ui_and_item_icon_pixel_match() {
     let ability_id = ability_surface.dict_id as u32;
 
     // Find first decodable item surface in ITEMICON.ESF
-    let Some(item_surface) = item_container.surfaces.iter().find(|s| s.decode(&item_container.data).is_some()) else {
+    let Some(item_surface) = item_container
+        .surfaces
+        .iter()
+        .find(|s| s.decode(&item_container.data).is_some())
+    else {
         eprintln!("SKIP forge_icon: no decodable surface in ITEMICON.ESF");
         return;
     };
@@ -801,10 +845,11 @@ fn forge_icon_real_disc_ui_and_item_icon_pixel_match() {
 
     // Byte-for-byte pixel comparison for ability icon against stock HUD decode path
     icons::with_active_provider(|p| {
-        let decoded = p.decode_icon(ability_id).expect("provider must decode ability icon");
+        let decoded = p
+            .decode_icon(ability_id)
+            .expect("provider must decode ability icon");
         assert_eq!(
-            decoded.rgba,
-            stock_ability.rgba,
+            decoded.rgba, stock_ability.rgba,
             "ability icon pixels must match stock HUD decode path byte-for-byte"
         );
     });
@@ -828,10 +873,11 @@ fn forge_icon_real_disc_ui_and_item_icon_pixel_match() {
 
     // Byte-for-byte pixel comparison for item icon against stock HUD decode path
     icons::with_active_provider(|p| {
-        let decoded = p.decode_icon(item_id).expect("provider must decode item icon");
+        let decoded = p
+            .decode_icon(item_id)
+            .expect("provider must decode item icon");
         assert_eq!(
-            decoded.rgba,
-            stock_item.rgba,
+            decoded.rgba, stock_item.rgba,
             "item icon pixels must match stock HUD decode path byte-for-byte"
         );
     });
@@ -840,7 +886,14 @@ fn forge_icon_real_disc_ui_and_item_icon_pixel_match() {
     assert!(snap_size > 0, "snapshot size must be greater than zero");
     eprintln!(
         "SUCCESS forge_icon: real disc ability icon {} ({}x{}) and item icon {} ({}x{}) matched stock HUD decode path byte-for-byte (snapshot: {} bytes / {:.2} MiB)",
-        ability_id, ab_w, ab_h, item_id, it_w, it_h, snap_size, snap_size as f64 / (1024.0 * 1024.0)
+        ability_id,
+        ab_w,
+        ab_h,
+        item_id,
+        it_w,
+        it_h,
+        snap_size,
+        snap_size as f64 / (1024.0 * 1024.0)
     );
 }
 
@@ -913,7 +966,10 @@ fn forge_icon_zone_streaming_does_not_trigger_resnapshot() {
 fn forge_icon_server_art_outside_ui_resolves_after_prefetch() {
     let mut lib = esf::Library::new();
     lib.add("UI.CSF", make_test_container_with_surface(1001, 32, 32));
-    lib.add("SS-ART.CSF", make_test_container_with_surface(77777, 32, 32));
+    lib.add(
+        "SS-ART.CSF",
+        make_test_container_with_surface(77777, 32, 32),
+    );
 
     // Prefetch id 77777 (server art outside UI.CSF)
     icons::update_live_data(&lib, None, &[77777]);
@@ -942,7 +998,10 @@ fn forge_icon_server_art_outside_ui_resolves_after_prefetch() {
         .eval()
         .unwrap();
 
-    assert!(loaded, "server art icon outside UI.CSF must resolve after prefetch");
+    assert!(
+        loaded,
+        "server art icon outside UI.CSF must resolve after prefetch"
+    );
     assert_eq!((w, h), (32, 32));
 }
 
@@ -977,12 +1036,7 @@ fn forge_icon_prefetch_set_follows_game_state_lists() {
         ..Default::default()
     }];
 
-    let ids = icons::collect_prefetch_ids(
-        &abilities,
-        &hud_menus,
-        &effects,
-        &inventory,
-    );
+    let ids = icons::collect_prefetch_ids(&abilities, &hud_menus, &effects, &inventory);
 
     assert!(ids.contains(&54321), "must contain ability icon_front");
     assert!(ids.contains(&12345), "must contain ability icon_back");
@@ -998,7 +1052,10 @@ fn forge_icon_prefetch_set_follows_game_state_lists() {
 fn forge_icon_lazy_fallback_queues_and_resolves_on_next_frame() {
     let mut lib = esf::Library::new();
     lib.add("UI.CSF", make_test_container_with_surface(1001, 32, 32));
-    lib.add("ADDART.CSF", make_test_container_with_surface(88888, 32, 32));
+    lib.add(
+        "ADDART.CSF",
+        make_test_container_with_surface(88888, 32, 32),
+    );
 
     // Frame 1: update without prefetching 88888
     icons::update_live_data(&lib, None, &[]);
@@ -1027,7 +1084,10 @@ fn forge_icon_lazy_fallback_queues_and_resolves_on_next_frame() {
         )
         .eval()
         .unwrap();
-    assert!(!frame1_loaded, "frame 1 lookup must return nil and queue hash");
+    assert!(
+        !frame1_loaded,
+        "frame 1 lookup must return nil and queue hash"
+    );
 
     // Frame 2: update_live_data drains the pending queue and loads 88888 from ADDART.CSF
     icons::update_live_data(&lib, None, &[]);
@@ -1054,7 +1114,8 @@ fn forge_icon_lazy_fallback_queues_and_resolves_on_next_frame() {
 
 #[test]
 fn forge_icon_real_disc_enumerated_ability_icons_resolve() {
-    let iso_path = "C:/Users/hocka/Documents/PS2 Games/EverQuest - Online Adventures - Frontiers (USA).iso";
+    let iso_path =
+        "C:/Users/hocka/Documents/PS2 Games/EverQuest - Online Adventures - Frontiers (USA).iso";
     let mut iso = match iso::Iso::open(iso_path) {
         Ok(iso) => iso,
         Err(e) => {
@@ -1100,6 +1161,7 @@ fn forge_icon_real_disc_enumerated_ability_icons_resolve() {
     let opts = icons::TrimOptions {
         trim_transparent: true,
         trim_color: true,
+        color: None,
     };
 
     let mut matched = 0;
@@ -1160,7 +1222,9 @@ fn forge_icon_ui_texture_budget_does_not_starve_get_texture() {
     };
     let host = Host::new().unwrap();
     let textures = Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
-    textures.borrow_mut().set_budget(super::textures::ADDON_BUDGET);
+    textures
+        .borrow_mut()
+        .set_budget(super::textures::ADDON_BUDGET);
     let cache = icons::attach_icon_cache(&host.lua, textures).unwrap();
 
     // Fill all 64 UI texture slots (host.execute resets the instruction budget to 200,000)
@@ -1190,7 +1254,10 @@ fn forge_icon_ui_texture_budget_does_not_starve_get_texture() {
         )
         .eval()
         .unwrap();
-    assert!(icon_tex_loaded, "filling UI textures must not starve GetTexture");
+    assert!(
+        icon_tex_loaded,
+        "filling UI textures must not starve GetTexture"
+    );
     assert_eq!((ab_w, ab_h), (22, 22));
 
     icons::set_custom_icon_provider(None);
@@ -1208,7 +1275,9 @@ fn forge_icon_after_render_cleans_unreferenced_stale_textures() {
     };
     let host = Host::new().unwrap();
     let textures = Textures::new(&gpu.device, &gpu.queue, gpu.renderer.clone());
-    textures.borrow_mut().set_budget(super::textures::ADDON_BUDGET);
+    textures
+        .borrow_mut()
+        .set_budget(super::textures::ADDON_BUDGET);
     let cache = icons::attach_icon_cache(&host.lua, textures.clone()).unwrap();
 
     host.lua
@@ -1312,7 +1381,10 @@ fn forge_icon_steady_frames_zero_atlas_and_safelibrary_clones() {
             &[],
         );
         // Fingerprint unchanged -> steady_ids is empty
-        assert!(steady_ids.is_empty(), "steady frame prefetch ids must be empty");
+        assert!(
+            steady_ids.is_empty(),
+            "steady frame prefetch ids must be empty"
+        );
         icons::update_live_data(&lib, None, &steady_ids);
     }
 
@@ -1337,7 +1409,10 @@ fn forge_icon_steady_frames_zero_atlas_and_safelibrary_clones() {
 fn forge_icon_newly_learned_ability_resolves_on_next_frame() {
     let mut lib = esf::Library::new();
     lib.add("UI.CSF", make_test_container_with_surface(1001, 32, 32));
-    lib.add("SS-ART.CSF", make_test_container_with_surface(77777, 32, 32));
+    lib.add(
+        "SS-ART.CSF",
+        make_test_container_with_surface(77777, 32, 32),
+    );
 
     let mut abilities = std::collections::BTreeMap::new();
     let mut ab1 = net::dump::Ability::default();
@@ -1445,7 +1520,10 @@ fn forge_icon_negative_signed_hash_resolves_and_lua_negative_control() {
     let mut lib = esf::Library::new();
     let negative_id = -1000i32; // 0xFFFFFC18 as u32
     let expected_u32 = negative_id as u32;
-    lib.add("SPELLICON.ESF", make_test_container_with_surface(negative_id, 32, 32));
+    lib.add(
+        "SPELLICON.ESF",
+        make_test_container_with_surface(negative_id, 32, 32),
+    );
 
     icons::update_live_data(&lib, None, &[expected_u32]);
     assert!(
@@ -1488,7 +1566,10 @@ fn forge_icon_negative_signed_hash_resolves_and_lua_negative_control() {
         ))
         .eval()
         .unwrap();
-    assert!(loaded_neg, "GetTexture with negative signed integer must resolve");
+    assert!(
+        loaded_neg,
+        "GetTexture with negative signed integer must resolve"
+    );
     assert_eq!((w2, h2), (32, 32));
 
     // 3. Negative control: hash 0 (which was the bug when max(0) clamped negative hashes) returns nil
@@ -1505,5 +1586,3 @@ fn forge_icon_negative_signed_hash_resolves_and_lua_negative_control() {
         .unwrap();
     assert!(!loaded_zero, "Negative control: hash 0 must return nil");
 }
-
-

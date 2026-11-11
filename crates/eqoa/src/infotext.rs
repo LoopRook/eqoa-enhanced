@@ -82,10 +82,12 @@ impl Info<'_> {
         *d += &format!("{}: {v}", self.w(503));
     }
 
-    /// `AddEquipSlot`.
+    /// `AddEquipSlot`; a cape's slot by its own word where capes are offered
+    /// (`cape`: WORDS.TXT has none).
     fn equip_slot(&self, d: &mut String, v: i64) {
         match wear_slot_word(v) {
             Some(w) => *d += &format!("{}: {}", self.w(490), self.w(w)),
+            None if v == crate::cape::WEAR_SLOT && crate::cape::offered() => *d += &format!("{}: {}", self.w(490), crate::cape::SLOT_WORD),
             None => *d += &format!("{}: {v}", self.w(490)),
         }
     }
@@ -501,6 +503,68 @@ impl Info<'_> {
         self.list_item(it, 0, false)
     }
 
+    /// The client's own, for a record no list of the game's holds (a loot roll's
+    /// item, a corpse's under its master looter's Inspect: `rollwnd`,
+    /// `masterloot`): `DescribeBankItem`'s lines, then every stat bonus as
+    /// `DescribeInvStats` writes them (no "what it would be worn": the item is
+    /// not the player's), then its text.
+    pub fn inspect_item(&self, it: &NetItem) -> String {
+        let mut d = self.list_item(it, 0, false);
+        if !it.item.stats.is_empty() {
+            d += "\n";
+        }
+        for s in &it.item.stats {
+            match find(&STAT_WORDS, s.id) {
+                Some(w) => d += &format!("{}: {}\n", self.w(w), s.value),
+                None => d += &format!("{}: {}\n", s.id, s.value),
+            }
+        }
+        if !it.item.desc.is_empty() {
+            d += " \n";
+            d += &it.item.desc;
+        }
+        d
+    }
+
+    /// The client's own, for an item link's window (`itemlink`, the petition
+    /// 1463's "succint but show all relevant stats"): `inspect_item`'s lines
+    /// without the name (the window's head has it), the stat bonuses as many
+    /// to a row as fit on it (`fits`), then the item's text.
+    pub fn link_item(&self, it: &NetItem, fits: &dyn Fn(&str) -> bool) -> String {
+        let full = self.list_item(it, 0, false);
+        let mut d = full.split_once('\n').map_or(String::new(), |(_, rest)| rest.to_string());
+        let stats: Vec<String> = it
+            .item
+            .stats
+            .iter()
+            .map(|s| match find(&STAT_WORDS, s.id) {
+                Some(w) => format!("{}: {}", self.w(w), s.value),
+                None => format!("{}: {}", s.id, s.value),
+            })
+            .collect();
+        let mut row = String::new();
+        for st in stats {
+            let more = format!("{row}  {st}");
+            if row.is_empty() {
+                row = st;
+            } else if fits(&more) {
+                row = more;
+            } else {
+                d += "\n";
+                d += &std::mem::replace(&mut row, st);
+            }
+        }
+        if !row.is_empty() {
+            d += "\n";
+            d += &row;
+        }
+        if !it.item.desc.is_empty() {
+            d += "\n \n";
+            d += &it.item.desc;
+        }
+        d
+    }
+
     /// `DescribeMerchantItem`.
     pub fn merchant_item(&self, it: &NetItem) -> String {
         self.list_item(it, 0, true)
@@ -693,9 +757,9 @@ impl Info<'_> {
     pub fn stat_with_merchant_item(&self, src: &NetItem, stat: i64) -> (i64, bool) {
         let mut list = ItemList::default();
         for it in self.inv.items.iter().filter(|it| it.equip_slot != -1) {
-            merge(&mut list, it, it.item.max_stack, inventory::CAPACITY);
+            merge(&mut list, it, it.item.max_stack, inventory::pack_cap());
         }
-        let (n, mut key) = add_item_key(&mut list, src, src.item.max_stack, inventory::CAPACITY);
+        let (n, mut key) = add_item_key(&mut list, src, src.item.max_stack, inventory::pack_cap());
         if n == 0 {
             // FindFullStack
             match list.items.iter().find(|it| src.item.id == it.item.id && src.item.max_stack == it.quantity && src.item.max_stack > 1) {
@@ -865,6 +929,8 @@ pub fn equip_slot_for(l: &ItemList, it: &NetItem, class: i64, level: i64) -> i64
         12 | 20 => 14,
         21 => 15,
         22..=27 => 19,
+        // a cape, where capes are offered (`cape`)
+        w if w == crate::cape::WEAR_SLOT && crate::cape::offered() => crate::cape::EQUIP_SLOT,
         _ => -1,
     }
 }
@@ -920,6 +986,47 @@ mod tests {
         // none of the four (a negative count): nothing
         let odd = Item { name: "Odd".into(), wear_slot: -1, p54: -1, ..Default::default() };
         assert_eq!(info.auction_item(&lot(odd)), "");
+    }
+
+    /// The client's own Inspect of a record (a loot roll's, a master looter's
+    /// corpse item): the bank's lines, every stat by its word (one no word names
+    /// by its number), then the text; the control: a record with no stats and no
+    /// text is the bank's lines alone.
+    #[test]
+    fn a_record_is_inspected_with_its_stats() {
+        let words = numbered();
+        let (inv, base) = (ItemList::default(), [0; 29]);
+        let info = Info { words: &words, inv: &inv, hp: [0; 4], base: &base, class: 0, level: 0, attack_words: &[(500, 1)] };
+        let stats = vec![ItemStat { id: 0, value: 5 }, ItemStat { id: 99, value: 7 }];
+        let sword = Item { name: "Sword".into(), damage: 12, wear_slot: 14, race_mask: 0x3FF, class_mask: 0b101, level_req: 30, no_trade: 1, rent: 1, stats, desc: "A blade.".into(), ..Default::default() };
+        let it = NetItem { quantity: 1, item: sword.clone(), ..Default::default() };
+        assert_eq!(info.inspect_item(&it), format!("{}\nw226: 5\n99: 7\n \nA blade.", info.bank_item(&it)));
+        let plain = NetItem { quantity: 1, item: Item { stats: Vec::new(), desc: String::new(), ..sword }, ..Default::default() };
+        assert_eq!(info.inspect_item(&plain), info.bank_item(&plain));
+    }
+
+    /// An item link's window (`itemlink`): the record's lines as Inspect has them
+    /// but its name (the window's head), the stats as many to a row as fit, then
+    /// the text. The controls: Inspect of the same record holds the name and a
+    /// stat a row; a row that fits one stat holds one.
+    #[test]
+    fn a_links_window_is_the_record_two_stats_a_row() {
+        let words = numbered();
+        let (inv, base) = (ItemList::default(), [0; 29]);
+        let info = Info { words: &words, inv: &inv, hp: [0; 4], base: &base, class: 0, level: 0, attack_words: &[(500, 1)] };
+        let stats = vec![ItemStat { id: 0, value: 5 }, ItemStat { id: 1, value: 3 }, ItemStat { id: 14, value: 20 }];
+        let sword = Item { name: "Sword".into(), damage: 12, wear_slot: 14, race_mask: 0x3FF, class_mask: 0b101, level_req: 30, no_trade: 1, rent: 1, stats, desc: "A blade.".into(), ..Default::default() };
+        let it = NetItem { quantity: 1, cur_hp: 0, item: sword, ..Default::default() };
+        let d = info.link_item(&it, &|row| row.len() <= 16);
+        assert!(!d.contains("Sword"), "the name is the head's: {d:?}");
+        assert!(d.starts_with("w493: 12 w490: w340\n"), "{d:?}");
+        assert!(d.ends_with("\nw226: 5  w227: 3\nw242: 20\n \nA blade."), "two fit, then one: {d:?}");
+        let wide_row = info.link_item(&it, &|_| true);
+        assert!(wide_row.ends_with("\nw226: 5  w227: 3  w242: 20\n \nA blade."), "all on one: {wide_row:?}");
+        let narrow = info.link_item(&it, &|_| false);
+        assert!(narrow.ends_with("\nw226: 5\nw227: 3\nw242: 20\n \nA blade."), "one a row: {narrow:?}");
+        let i = info.inspect_item(&it);
+        assert!(i.starts_with("Sword\n") && i.contains("\nw226: 5\nw227: 3\n"), "the control: {i:?}");
     }
 
     /// `AddRaceMask`/`AddClassMask` on a server that sends the live client's
@@ -988,5 +1095,30 @@ mod tests {
         assert_eq!(equip_slot_for(&inv, &inv.items[1], 0, 20), 15);
         assert_eq!(equip_slot_for(&inv, &inv.items[1], 9, 20), 14);
         assert_eq!(equip_slot_for(&inv, &inv.items[1], 0, 19), 14);
+    }
+
+    /// A cape (wear 28, go-eqoa-server's own) is worn in the cape's slot and
+    /// its description names its slot where capes are offered (`cape`); the
+    /// controls: with no offer it is worn nowhere and its slot reads as a
+    /// number, as the game reads any slot it has no word for.
+    #[test]
+    fn a_capes_slot_where_capes_are_offered() {
+        let words = numbered();
+        let inv = ItemList { p04: 0, items: vec![it(28, 0, 0)] };
+        let base = [10; 29];
+        let info = Info { words: &words, inv: &inv, hp: [0; 4], base: &base, class: 0, level: 1, attack_words: &[] };
+        let slot = |info: &Info| {
+            let mut d = String::new();
+            info.equip_slot(&mut d, 28);
+            d
+        };
+        crate::cape::with_offered(true, || {
+            assert_eq!(equip_slot_for(&inv, &inv.items[0], 0, 1), 22);
+            assert_eq!(slot(&info), "w490: Cape");
+        });
+        crate::cape::with_offered(false, || {
+            assert_eq!(equip_slot_for(&inv, &inv.items[0], 0, 1), -1, "the control: no offer");
+            assert_eq!(slot(&info), "w490: 28");
+        });
     }
 }

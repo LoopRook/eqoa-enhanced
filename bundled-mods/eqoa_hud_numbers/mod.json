@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_hud_numbers",
+  "name": "EQOA HUD Numbers",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": true,
+  "capabilities": [
+    "eqoa.player.get",
+    "eqoa.player.experience_for_level",
+    "eqoa.target.get",
+    "eqoa.hud.text",
+    "eqoa.hud.visible",
+    "eqoa.options.toggle",
+    "eqoa.options.get",
+    "eqoa.events.on"
+  ]
+}

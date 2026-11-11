@@ -51,10 +51,13 @@ impl Play {
     /// box as every line goes (`server_line`, in the group's colour), and when
     /// it is a group waypoint's (`group_waypoint::parse`) from a member of the
     /// group as it stands (the player's own line too), the group's waypoint
-    /// on the map. Out of a group, from a name not in it, or in a world the
-    /// map cannot name, nothing more.
+    /// on the map. Out of a group, from a name not in it, in a world the map
+    /// cannot name, or with Extended's Map off (the line alone, as the game
+    /// shows it), nothing more.
     pub(super) fn group_line(&mut self, text: String) {
-        self.heard_group_waypoint(&text);
+        if crate::settings::map() {
+            self.heard_group_waypoint(&text);
+        }
         self.server_line(text, net::session::GROUP_CHAT);
     }
 
@@ -139,7 +142,7 @@ mod tests {
             .collect()
     }
 
-    /// G on the map (`map::KEY_GROUP`), in a group: the spot is said in the
+    /// O on the map (`map::KEY_GROUP`), in a group: the spot is said in the
     /// group's channel (0x000E 2 around the 0x000B, the channel put back)
     /// in `group_waypoint::line`'s words, and the player's own group
     /// waypoint is there at once, from the player; a second within five
@@ -205,6 +208,24 @@ mod tests {
         assert_eq!(p.map.group_mark().map(|g| (g.at, g.from.as_str())), Some(([21000.0, 15000.0], "Dairine")), "the player's own, a newer one");
         assert!(p.chat.iter().any(|(t, c)| t == &from("bob", 20000) && *c == net::session::GROUP_CHAT), "the line in the chat box, the group's colour");
         assert!(p.chat.iter().any(|(t, _)| t == &from("Mallory", 20000)), "every line still in the chat box");
+    }
+
+    /// With Extended's Map off a member's group waypoint line is a chat line
+    /// alone, in the group's colour, as the game shows it: no group waypoint.
+    /// The control: the Map on, the same line puts it.
+    #[test]
+    fn with_the_map_off_a_waypoints_line_is_a_chat_line() {
+        crate::settings::testing::reset(false);
+        let mut p = play();
+        grouped(&mut p);
+        let line = format!("Bob{PHRASE}Waypoint in Tunaria at x 20000, z 15000");
+        crate::settings::set_client(crate::settings::ClientOptions { map: false, ..Default::default() });
+        p.group_line(line.clone());
+        assert_eq!(p.map.group_mark(), None, "the Map off: none");
+        assert!(p.chat.iter().any(|(t, c)| t == &line && *c == net::session::GROUP_CHAT), "the line in the chat box, the group's colour");
+        crate::settings::testing::reset(false);
+        p.group_line(line);
+        assert!(p.map.group_mark().is_some(), "the control: the Map on");
     }
 
     /// The group's waypoint goes when its sender leaves the group (a roster

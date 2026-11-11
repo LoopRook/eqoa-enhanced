@@ -26,6 +26,15 @@ footprint passing) merges without one (the owner, 2026-11-08). Always run the te
 through the script (`--continue --tests-only`): it uses one thread and a scratch
 EQOA_CONFIG, and a parallel run's GPU/addon tests collide and hang.
 
+Owner disk-space rule (2026-11-09): all local cargo builds/tests use
+`CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared` under the shared mkdir lock
+`C:/Users/hocka/Paseo/cargo-build.lock`, with a timeout. The sync script honors an
+explicit `CARGO_TARGET_DIR` while retaining its scratch `EQOA_CONFIG` and one test
+thread. Do not make another build target in a worktree or on another drive; remove
+legacy worktree targets after gates pass. Do not remove `targets/eqoa-api-r2`
+while its agent moves off it. The worktree's temporary `target/sync-*.log` files
+are logs/configuration, not an additional Cargo cache; archive them before cleanup.
+
 ## Initial integration
 
 Enhanced baseline: 8aeaf91. Upstream merge target: 8d90350. Common upstream
@@ -404,3 +413,28 @@ Terra) of the four resolutions: no findings; it noted upstream's row-coverage te
 would fail if run on wasm (upstream's, tests run natively). Not tested: texture packs
 with a real PCSX2 pack, and their interplay with Forge addon textures in game. Owner
 play-test pending.
+
+## 2026-11-10 sync
+
+Upstream 91f9e72..82e64c86df07fcdac9cba39e4cc6c5020032953d, 77 incoming
+commits from develop abd47db, on sync/2026-11-10. Eight hand-resolved shared
+files retain upstream implementations and existing fork adapters. Upstream
+Extended pages, Macros, adjustable touch controls, pet effects, Number Colors
+and DPS meter are retained. Enhanced pages append after Combat. The first-run
+64/650 enhanced.opt migration remains; upstream defaults/tests remain intact.
+No footprint budgets increased. The new upstream server-worlds rule (stream
+one zone through Disc/Sink, preserve composer CRC parity) is adopted in CLAUDE.md.
+See [the report](plans/sync-2026-11-10-report.md) for per-file resolutions,
+HUD overlaps, precise validation counts and remaining live QA.
+
+### Second batch, same sync branch
+
+After checkpoint bb04abe, second merge 38c930f adds 18 commits through
+5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd (raid windows/marks/loot, hat D-pads,
+WebGL2 guards). Four hand conflicts retain upstream raid/guard code and the
+existing HUD/input/report/power hooks. Reviewed base moved to 5d54c0c; budgets
+unchanged, footprint 6242 shared changed lines. Gates rerun once: client/net
+2027 passed, addons 338, tools 97, WASM/notes/optimized gates passed. Workspace
+2319 passed, 2 GPU failures, 34 ignored, 298 SKIP lines; both failures reproduce
+exactly on untouched 5d54c0c. See the report second section for overlaps, the
+zero-conflict dry run and final post-commit release/package receipts.

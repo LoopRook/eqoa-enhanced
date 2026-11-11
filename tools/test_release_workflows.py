@@ -9,6 +9,30 @@ UPSTREAM = "github.repository == 'DabDavis/eqoa-rust-client-vanilla'"
 
 
 class PublicWorkflowTests(unittest.TestCase):
+    def test_optimized_zero_addon_gate_is_mandatory_before_builds(self):
+        gate = "play::fork_hooks::native_tests::performance_busy_world_zero_addons_frame_and_packet_allocation_bound"
+
+        def check(workflow):
+            section = workflow.split("- name: Require optimized zero-addon allocation gate\n", 1)[1]
+            section, build = section.split("      - name: Build", 1)
+            self.assertIn("cargo +1.99.1 test --release --locked -p eqoa --bin eqoa", section)
+            self.assertIn(gate + " -- --exact --test-threads=1 --nocapture", section)
+            self.assertIn("if ($gateExit -ne 0 -or -not ($gateOutput -match", section)
+            self.assertIn("test result: ok\\. 1 passed;", section)
+            self.assertIn("throw 'Optimized zero-addon allocation gate failed'", section)
+            self.assertNotIn("continue-on-error", section)
+            self.assertIn("cargo +1.99.1 build --release --locked -p eqoa", build)
+
+        for name in ("public-source.yml", "enhanced-dev.yml"):
+            with self.subTest(workflow=name):
+                workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+                check(workflow)
+                # Negative controls: a debug run or swallowed failure cannot satisfy the gate.
+                for broken in (workflow.replace("test --release --locked", "test --locked"),
+                               workflow.replace("throw 'Optimized zero-addon", "Write-Host 'Optimized zero-addon")):
+                    with self.assertRaises(AssertionError):
+                        check(broken)
+
     def test_public_source_ci_has_no_publishing_credentials_or_artifacts(self):
         workflow = (ROOT / ".github/workflows/public-source.yml").read_text(encoding="utf-8")
         self.assertIn("contents: read", workflow)

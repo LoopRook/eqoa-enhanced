@@ -14,11 +14,14 @@
 //! eqoa view <world> zone <n>     a zone: terrain and every placed actor
 //! eqoa view <world> walk <n>     the character, walking in a zone
 //! eqoa shot <file> [model | zone <n>] <out.png> [camera]   one view, offscreen
+//!                               (`tint=RRGGBBAA`: a model in a server's body tint, `npctint`)
 //! eqoa listen <world> <x> <z> <seconds> <out.wav> [hour] [walk]   the world's sound there, offline
 //! eqoa mapshot <world> <out.png> [x z [heading [scale [secs]]]]   the map (M) built as in play, drawn
 //! eqoa fxview [visual [secs]]   a human casting a spell visual at another, again and again, as
 //!                               0x00B1 plays it (the GM panel's preview; `fxview`); with an
 //!                               out.png after the visual, `[ms,...] [secs]`: drawn at those times
+//! eqoa emotes <body> <out.png> [pose...]   a body playing its emotes (or actions), a row
+//!                               each, a few moments across (`emoteview`)
 //! eqoa rumble                   each controller the game would read rumbles a moment, as the game
 //!                               rumbles one (the large motor, then the small)
 //!                               (walk: the human walks forward, its footsteps with it;
@@ -45,6 +48,7 @@ mod audio;
 mod era;
 #[cfg(target_os = "macos")]
 mod macos;
+mod cape;
 mod chat;
 mod dialog;
 mod attackclock;
@@ -61,6 +65,7 @@ mod client_image;
 mod playersearch;
 mod searchwnd;
 mod s2;
+mod serverworlds;
 mod controls;
 mod arrival;
 mod craft;
@@ -88,17 +93,25 @@ mod bindpage;
 mod binds;
 mod blacksmith;
 mod bugnote;
+mod crashfile;
 mod gear;
 mod gram;
 mod hideui;
+mod jump;
 mod livewords;
 mod hud;
 mod raidlist;
+mod rollwnd;
+mod masterloot;
 mod damage;
+mod numcolor;
+mod dpsmeter;
+mod npctint;
 mod display;
 mod hudmenu;
 mod influence;
 mod input;
+mod macropage;
 mod macros;
 // the page's gamepads (the browser build), checked natively by its tests
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -109,6 +122,8 @@ mod live;
 mod listbox;
 mod groupsearch;
 mod inventory;
+mod hidelook;
+mod itemlink;
 mod itemmenu;
 mod classmastery;
 mod cs;
@@ -116,6 +131,7 @@ mod faction;
 mod fishing;
 mod duel;
 mod duelwnd;
+mod lights;
 mod loading;
 mod lod;
 mod loot;
@@ -132,7 +148,11 @@ mod questlog;
 mod statbox;
 mod tracker;
 mod quickchat;
+mod racebody;
+mod raceemote;
 mod racelabel;
+mod raceopts;
+mod wisp;
 mod record;
 mod alarm;
 mod startmenu;
@@ -150,6 +170,8 @@ mod zones;
 mod flora;
 mod fx;
 mod fxview;
+mod dressview;
+mod emoteview;
 mod particles;
 mod patcher;
 mod play;
@@ -159,6 +181,7 @@ mod rings;
 mod scene;
 mod servers;
 mod shadows;
+mod slotless;
 mod sky;
 mod spelling;
 mod touch;
@@ -413,6 +436,9 @@ fn volumes(file: &str) -> Result<()> {
 }
 
 fn run(args: &[String]) -> Result<()> {
+    // a server's own worlds are built off the player's disc (`serverworlds`)
+    #[cfg(not(target_arch = "wasm32"))]
+    serverworlds::install();
     match args.first().map(String::as_str) {
         // `eqoa` alone, or `eqoa boot [server]`: the game from the disc's
         // boot (`boot`)
@@ -463,15 +489,19 @@ fn run(args: &[String]) -> Result<()> {
         Some("rumble") => input::check_motors(10_000)?,
         Some("view") | Some("shot") => {
             let shot = args[0] == "shot";
-            let usage = "usage: eqoa view <file> [model] | eqoa view <world> zone <n> | eqoa shot <same> <out.png> [camera...]";
+            let usage = "usage: eqoa view <file> [model] [tint=RRGGBBAA] | eqoa view <world> zone <n> | eqoa shot <same> <out.png> [camera...]";
             let file = args.get(1).ok_or(usage)?;
-            let mut rest = &args[2..];
+            // `tint=RRGGBBAA`: the model in a server's body tint, as an NPC of
+            // a tinted name is drawn (`npctint`)
+            let (tint, rest) = npctint::take_arg(&args[2..])?;
+            let mut rest = &rest[..];
             if shot {
                 // The PNG is the first argument ending in .png.
                 let at = rest.iter().position(|a| a.ends_with(".png")).ok_or(usage)?;
                 let (out, nums) = (&rest[at], &rest[at + 1..]);
                 rest = &rest[..at];
                 let (mut lib, src) = source(file, rest)?;
+                let src = tinted(src, tint)?;
                 let (cam, script) = match src {
                     viewer::Source::Walk { .. } => (None, script_args(nums)?),
                     _ => (camera_args(&src, nums)?, None),
@@ -479,7 +509,7 @@ fn run(args: &[String]) -> Result<()> {
                 viewer::shot(&mut lib, &src, cam, script, (960, 540), out)?;
             } else {
                 let (lib, src) = source(file, rest)?;
-                viewer::run(lib, src)?;
+                viewer::run(lib, tinted(src, tint)?)?;
             }
         }
         // `eqoa icon <size> <out.png>`: the program's own icon, the drawn disc
@@ -542,6 +572,47 @@ fn run(args: &[String]) -> Result<()> {
                 None => fxview::run(lib, effect, secs(rest.get(1))?, aim, None)?,
             }
         }
+        // `eqoa dress <body> <out.png> [look...]`: a body off the disc dressed
+        // in a look, standing, from four sides (`dressview`)
+        #[cfg(not(target_arch = "wasm32"))]
+        Some("dress") => {
+            let usage = "usage: eqoa dress <body DictID> <out.png> [set=N armor=a,b,c,d,e tint=T robe=R rtint=T dye=RRGGBB hair=c,l,s face=F helm=N helmfit=0 main=ID off=ID shield=ID race=1 action=N at=ms size=WxH cape=N capecolor=RRGGBB era=2002]";
+            let model = args.get(1).and_then(|m| fxview::parse_visual(m)).ok_or(usage)? as i32;
+            let out = args.get(2).filter(|o| o.ends_with(".png")).ok_or(usage)?;
+            let words = dressview::parse(&args[3..])?;
+            let mut iso = disc(None)?;
+            let mut lib = esf::Library::new();
+            for f in dressview::FILES {
+                lib.add(*f, esf::Container::open(iso.read(f)?)?);
+            }
+            // the 2002 disc's copies standing in, as the world has them with F9
+            if words.y2002 {
+                let path = era::disc().ok_or("era=2002 needs the 2002 disc (EQOA_2002_ISO)")?;
+                let mut d = iso::Iso::open(&path).map_err(|e| format!("{path}: {e}"))?;
+                let mut art = Vec::new();
+                for f in dressview::FILES {
+                    art.push((f.to_string(), esf::Container::open(d.read(f)?)?));
+                }
+                era::install(&mut lib, art);
+            }
+            dressview::shot(&lib, model, &words, out)?;
+        }
+        // `eqoa emotes <body> <out.png> [pose...]`: the body's emotes as a
+        // race's player plays them (`raceemote`), or its own actions, or the
+        // human's carried onto it, a row each (`emoteview`)
+        #[cfg(not(target_arch = "wasm32"))]
+        Some("emotes") => {
+            let usage = "usage: eqoa emotes <body DictID> <out.png> [wave bow point cheer N human:N cols=N size=WxH]";
+            let model = args.get(1).and_then(|m| fxview::parse_visual(m)).ok_or(usage)? as i32;
+            let out = args.get(2).filter(|o| o.ends_with(".png")).ok_or(usage)?;
+            let words = emoteview::parse(&args[3..])?;
+            let mut iso = disc(None)?;
+            let mut lib = esf::Library::new();
+            for f in emoteview::FILES {
+                lib.add(*f, esf::Container::open(iso.read(f)?)?);
+            }
+            emoteview::sheet(&lib, model, &words, out)?;
+        }
         Some("listen") => {
             let usage = "usage: eqoa listen <world> <x> <z> <seconds> <out.wav> [hour]";
             let file = args.get(1).ok_or(usage)?;
@@ -593,6 +664,9 @@ fn run(args: &[String]) -> Result<()> {
             // keeps them only in `$EQOA_CONFIG`: `settings`)
             if args[0] == "play" {
                 settings::keep_in_user_dir();
+                // a crash kept for the server, as the game's own run keeps one
+                #[cfg(not(target_arch = "wasm32"))]
+                logfile::keep_crashes();
             }
             // the disc: `$EQOA_ISO`, the one picked last, `run/eqoa.iso`
             discs::boot_disc(None).ok_or("no disc image: start eqoa once to choose it, or set EQOA_ISO")?;
@@ -637,6 +711,8 @@ fn run(args: &[String]) -> Result<()> {
 /// (`discs::settle`, in the window's event loop).
 fn boot(image: Option<&str>, server: Option<String>) -> Result<()> {
     settings::keep_in_user_dir();
+    #[cfg(not(target_arch = "wasm32"))]
+    serverworlds::install();
     // the log (`logfile`); the program as it starts, for a start again
     // after a lost graphics device
     #[cfg(not(target_arch = "wasm32"))]
@@ -765,7 +841,24 @@ fn login(host: &str, user: &str, pass: &str) -> Result<(net::session::Session, n
     let server = net::addr::resolve(host, port("EQOA_GAME_PORT", 10070))?;
     let mut s = Session::connect(server, user, l.token)?;
     let t = std::time::Instant::now();
+    // the character picked, and when its list came: it is asked for a second
+    // after, so the offers that follow a list (the live look, creation's races,
+    // capes) are answered on the session before the selection, as a player at
+    // character select answers them; an answer the server reads after it has
+    // made the game's session is acked on the new connection, which then never
+    // forms (go-eqoa-server's promotion spends its new-instance flag on that ack)
+    let mut picked: Option<(net::session::Character, std::time::Instant)> = None;
+    // and once asked for, a list sent again (the live look's) picks nothing more
+    let mut selected = false;
     while t.elapsed() < std::time::Duration::from_secs(30) {
+        if let Some((c, at)) = picked.take() {
+            if at.elapsed() >= std::time::Duration::from_secs(1) {
+                s.select_character(&c);
+                selected = true;
+            } else {
+                picked = Some((c, at));
+            }
+        }
         let events = s.pump();
         for (k, e) in events.iter().enumerate() {
             match e {
@@ -781,15 +874,28 @@ fn login(host: &str, user: &str, pass: &str) -> Result<(net::session::Session, n
                         s.connect_shard(ep, crate::s2::get().shard_hello().as_deref());
                     }
                 }
+                Event::Characters(_) if selected || picked.is_some() => {}
                 Event::Characters(list) => {
                     for c in list {
                         eprintln!("character: {} (id {}, race {}, class {}, level {})", c.name, c.server_id, c.race, c.class, c.level);
+                    }
+                    // the server's own worlds, offered after the list, are
+                    // built and the server told which are held before a
+                    // character is picked: it places the character by them
+                    // (`serverworlds`); a player at character select is slower
+                    let wait = std::time::Instant::now();
+                    while wait.elapsed() < std::time::Duration::from_millis(400) || s.server_worlds_pending() && wait.elapsed() < std::time::Duration::from_secs(60) {
+                        let more = s.pump();
+                        if !more.is_empty() {
+                            s.held.extend(more);
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(16));
                     }
                     // `EQOA_CHAR=<name>` picks one; else the first.
                     let want = std::env::var("EQOA_CHAR").ok();
                     let pick = list.iter().find(|c| want.as_deref() == Some(c.name.as_str())).or(list.first());
                     if let Some(c) = pick {
-                        s.select_character(&c.clone());
+                        picked = Some((c.clone(), std::time::Instant::now()));
                     }
                 }
                 Event::WorldEntry { self_id, player, dump } => {
@@ -880,7 +986,8 @@ fn source(file: &str, rest: &[String]) -> Result<(esf::Library, viewer::Source)>
             lib.file(main).zones().get(index).ok_or("no such zone")?;
             add_twin(&mut lib, main, file);
             stream::load_zone_now(&mut lib, main, index)?;
-            let character = lib.lookup(viewer::HUMAN).ok_or("no human model")?;
+            // `EQOA_BODY=<DictID>`: another body than the human's (`viewer::shot_body`)
+            let character = lib.lookup(viewer::shot_body() as i32).ok_or("no such body")?;
             Ok((lib, viewer::Source::Walk { file: main, index, character, spawn: None }))
         }
         [z, n] if z == "zone" => {
@@ -903,10 +1010,20 @@ fn source(file: &str, rest: &[String]) -> Result<(esf::Library, viewer::Source)>
                     None => m.parse::<usize>().ok().filter(|&i| i < list.len()).ok_or("no such model")?,
                 },
             };
-            Ok((lib, viewer::Source::Models { list, index }))
+            Ok((lib, viewer::Source::Models { list, index, tint: None }))
         }
         _ => Err("expected [model] or zone <n>".into()),
     }
+}
+
+/// A model in a tint (`tint=`, `npctint`); a zone or a walk takes none.
+fn tinted(mut src: viewer::Source, tint: Option<u32>) -> Result<viewer::Source> {
+    match (&mut src, tint) {
+        (_, None) => {}
+        (viewer::Source::Models { tint: t, .. }, Some(c)) => *t = Some(c),
+        _ => return Err("tint= is a model's: eqoa shot <file> <model> <out.png> tint=RRGGBBAA".into()),
+    }
+    Ok(src)
 }
 
 /// `shot` for a walk: `ms [fwd strafe orbit pitch]`, held throughout.

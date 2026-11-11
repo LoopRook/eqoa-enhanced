@@ -52,6 +52,7 @@ pub(crate) struct Diagnostic {
     pub id: Option<String>,
     pub phase: &'static str,
     pub message: String,
+    pub details: Option<serde_json::Value>,
 }
 
 pub(crate) enum Command {
@@ -121,6 +122,7 @@ impl Manager {
         queue: &wgpu::Queue,
         renderer: Rc<RefCell<WgpuRenderer>>,
     ) -> Self {
+        super::options::set_storage_root(storage_root.clone());
         let mut manager = Self {
             named: None,
             root,
@@ -217,13 +219,27 @@ impl Manager {
             return;
         }
         self.frame_number = self.frame_number.saturating_add(1);
+        if !snapshot.in_game && self.snapshot.in_game {
+            super::native_core::CORE
+                .with(|c| c.borrow_mut().publish(super::native_core::View::default()));
+            for entry in &self.entries {
+                if let Some(i) = &entry.instance {
+                    i.visibility.clear();
+                    i.sound_bank.borrow_mut().set_active(false);
+                    super::input::native::release_vm(&i.host.lua);
+                }
+            }
+        }
         self.health_waiting = snapshot.in_game && !snapshot.health.is_available();
         let snapshot = snapshot.managed();
         self.snapshot = snapshot;
         self.awaiting_render = true;
         for e in &self.entries {
             if let Some(i) = &e.instance {
-                i.host.snapshot.set(snapshot);
+                i.host.begin_iteration();
+                if !snapshot.capture_pending || i.active {
+                    i.host.snapshot.set(snapshot);
+                }
                 i.visibility.update(snapshot.health, i.active);
             }
         }
@@ -231,10 +247,30 @@ impl Manager {
             self.command(command);
         }
         let waiting_world = self.profile_waiting_world();
+        let retained = self.entries.iter().filter(|e| e.instance.is_some()).count();
+        // Only an eligible enable needs one presentation-frame bootstrap window.
+        // Running VMs register their own native bus demand.
+        super::native_core::manager_demand(
+            !waiting_world
+                && self.entries.iter().any(|e| {
+                    let inactive = e.instance.as_ref().is_none_or(|i| !i.active);
+                    let bootstrap_due =
+                        snapshot.capture_pending && e.not_before <= self.frame_number;
+                    let staged_next =
+                        e.instance.is_some() && e.not_before == self.frame_number.saturating_add(1);
+                    e.enabled_intent
+                        && e.status != Status::Failed
+                        && inactive
+                        && (e.instance.is_some() || retained < MAX_INSTANCES)
+                        && (bootstrap_due || staged_next)
+                }),
+        );
         let mut entries = std::mem::take(&mut self.entries);
         let mut count = entries.iter().filter(|e| e.instance.is_some()).count();
         for entry in &mut entries {
             if !waiting_world
+                && (!snapshot.capture_pending
+                    || (entry.instance.is_none() && count >= MAX_INSTANCES))
                 && entry.enabled_intent
                 && entry.status != Status::Failed
                 && entry.not_before <= self.frame_number
@@ -257,27 +293,39 @@ impl Manager {
                         }
                     }
                 }
+                self.configure_native_settings(entry);
+                super::options::set_addon_enabled(&entry.metadata.id, true);
+                crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, true);
                 let instance = entry.instance.as_mut().unwrap();
                 instance.host.snapshot.set(snapshot);
                 instance.active = true;
                 instance.sound_bank.borrow_mut().set_active(true);
                 instance.visibility.update(snapshot.health, true);
                 instance.resources_retired = false;
+                let enabling = !super::native_events::bus(&instance.host.lua)
+                    .borrow()
+                    .initialized;
                 let first = !instance.initialized;
                 // An entry that throws can still have registered cleanup callbacks.
                 instance.initialized = true;
                 match instance
                     .bridge
-                    .invoke(|| instance.host.run(&instance.function))
+                    .invoke(|| instance.host.frame_entry(&instance.function))
                 {
                     Ok(()) => {
                         entry.status = Status::Enabled;
                         if first {
                             self.load(entry, true);
                         }
+                        if let Some(i) = entry.instance.as_ref() {
+                            if let Err(e) = i.bridge.invoke(|| i.host.finish_frame(enabling)) {
+                                self.fail(entry, "events", e.to_string(), true);
+                            }
+                        }
                     }
                     Err(e) => self.fail(entry, "frame", e.to_string(), true),
                 }
+                self.collect_native_settings(entry);
             }
             if let Some(i) = entry.instance.as_ref() {
                 for message in i.bridge.drain_diagnostics() {
@@ -315,6 +363,13 @@ impl Manager {
                     for diag in bank.drain_diagnostics() {
                         diags.push((entry.metadata.id.clone(), diag));
                     }
+                    drop(bank);
+                    if let Err(e) = super::fonts::FontBank::publish_outcomes(
+                        &instance.host.lua,
+                        &instance.font_bank,
+                    ) {
+                        diags.push((entry.metadata.id.clone(), e.to_string()));
+                    }
                 }
             }
             for (id, diag) in diags {
@@ -330,6 +385,7 @@ impl Manager {
         }
         for entry in &self.entries {
             if let Some(instance) = &entry.instance {
+                instance.host.end_iteration();
                 instance.textures.borrow_mut().collect(false);
             }
         }
@@ -337,12 +393,41 @@ impl Manager {
         super::visibility::publish_claims(&self.hud_claims.borrow());
     }
     pub fn shutdown(&mut self) {
+        super::native_core::manager_demand(false);
         super::visibility::publish(false);
         self.shutdown_inner(true);
     }
 
     fn diagnostic(&mut self, id: Option<&str>, phase: &'static str, message: String) {
-        let message: String = message.chars().take(2048).collect();
+        let details = serde_json::from_str::<serde_json::Value>(&message)
+            .ok()
+            .filter(|v| v["api"] == "eqoa/1");
+        let display = details.as_ref().map(|v| {
+            format!(
+                "{} [{}]: {} ({} occurrences)",
+                v["symbol"].as_str().unwrap_or("eqoa"),
+                v["code"].as_str().unwrap_or("failed"),
+                v["message"].as_str().unwrap_or(""),
+                v["count"].as_u64().unwrap_or(1)
+            )
+        });
+        let message: String = if details.is_some() {
+            message
+        } else {
+            message.chars().take(2048).collect()
+        };
+        let mut updated = false;
+        if let Some(v) = &details {
+            if let Some(existing) = self.diagnostics.iter_mut().find(|d| {
+                d.details.as_ref().is_some_and(|old| {
+                    old["vm"] == v["vm"] && old["symbol"] == v["symbol"] && old["code"] == v["code"]
+                })
+            }) {
+                existing.details = details.clone();
+                existing.message = display.clone().unwrap_or_else(|| message.clone());
+                updated = true;
+            }
+        }
         if self
             .diagnostics
             .iter()
@@ -350,23 +435,54 @@ impl Manager {
         {
             return;
         }
-        if self.diagnostics.len() == MAX_DIAGNOSTICS {
+        if !updated && self.diagnostics.len() == MAX_DIAGNOSTICS {
             self.diagnostics.remove(0);
         }
-        self.diagnostics.push(Diagnostic {
-            id: id.map(str::to_owned),
-            phase,
-            message: message.clone(),
-        });
+        if !updated {
+            self.diagnostics.push(Diagnostic {
+                id: id.map(str::to_owned),
+                phase,
+                message: display.unwrap_or_else(|| message.clone()),
+                details,
+            });
+        }
         let log_line = format!("[{:?}] [{}] {}\n", phase, id.unwrap_or("general"), message);
         let log_path = self.root.join("addons_error.log");
-        if let Ok(mut f) = std::fs::OpenOptions::new()
+        let rotated = (|| -> std::io::Result<()> {
+            if std::fs::metadata(&log_path).is_ok_and(|m| m.len() >= 5 * 1024 * 1024) {
+                let previous = self.root.join("addons_error.log.1");
+                if previous.exists() {
+                    std::fs::remove_file(&previous)?;
+                }
+                std::fs::rename(&log_path, previous)?;
+            }
+            Ok(())
+        })();
+        if let Err(e) = rotated {
+            eprintln!("Addon log rotation failed: {e}");
+        }
+        let write = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&log_path)
-        {
-            use std::io::Write;
-            let _ = f.write_all(log_line.as_bytes());
+            .and_then(|mut f| {
+                use std::io::Write;
+                f.write_all(log_line.as_bytes())
+            });
+        if let Err(e) = write {
+            let message = format!("Addon diagnostic log could not be written: {e}");
+            eprintln!("{message}");
+            if !self.diagnostics.iter().any(|d| d.phase == "log_io") {
+                if self.diagnostics.len() == MAX_DIAGNOSTICS {
+                    self.diagnostics.remove(0);
+                }
+                self.diagnostics.push(Diagnostic {
+                    id: None,
+                    phase: "log_io",
+                    message,
+                    details: None,
+                });
+            }
         }
     }
 
@@ -399,6 +515,9 @@ impl Manager {
         )));
         super::fonts::FontBank::install_for_addon(&font_bank, &host.lua, metadata)
             .map_err(|e| e.to_string())?;
+        // Compilation/reload staging is not a running native consumer.
+        // frame_entry primes the bus immediately before the first Lua entry.
+        super::native_events::clear(&host);
         Ok(Instance {
             host,
             function,
@@ -494,7 +613,9 @@ impl Manager {
                     self.fail(entry, "load", e.to_string(), rendering);
                 }
             }
-            Ok(None) => {}
+            Ok(None) => {
+                let _ = super::native_settings::callback(&i.host.lua, 3, &Value::Nil);
+            }
             Err(e) => self.diagnostic(Some(&entry.metadata.id), "storage", e),
         }
         if let Some(i) = entry.instance.as_ref().filter(|i| !i.active) {
@@ -510,6 +631,17 @@ impl Manager {
         disposition: Disposition,
     ) {
         let active = entry.instance.as_ref().is_some_and(|i| i.active);
+        if active {
+            if let Some(i) = entry.instance.as_ref() {
+                let _ = super::native_events::lifecycle(&i.host, "disabling");
+            }
+        }
+        if let Some(i) = entry.instance.as_ref() {
+            let messages = super::native::finish(&i.host.lua);
+            for message in messages {
+                self.diagnostic(Some(&entry.metadata.id), "disable", message);
+            }
+        }
         if active && save {
             self.save(entry, rendering);
         }
@@ -527,6 +659,12 @@ impl Manager {
         // Ordinary disable retains the environment and all live cached handles.
         if let Some(i) = &entry.instance {
             i.visibility.clear();
+            super::native_events::clear(&i.host);
+            // Clearing the last bus can diagnose revoked-generation source deltas.
+            // Drain again before reload/shutdown can retire this VM.
+            for message in super::native::finish(&i.host.lua) {
+                self.diagnostic(Some(&entry.metadata.id), "disable", message);
+            }
         }
         // A callback failure is terminal even during an ordinary transition.
         if disposition == Disposition::Retire || entry.status == Status::Failed {
@@ -541,12 +679,63 @@ impl Manager {
         if entry.status != Status::Failed {
             entry.status = Status::Disabled;
         }
+        super::options::set_addon_enabled(&entry.metadata.id, false);
+        crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, false);
+        super::hud_layer::clear_addon(&entry.metadata.id);
     }
 
     fn fail(&mut self, entry: &mut Entry, phase: &'static str, error: String, rendering: bool) {
         self.diagnostic(Some(&entry.metadata.id), phase, error);
         entry.status = Status::Failed;
         self.disable(entry, rendering, false, Disposition::Retire);
+    }
+    fn configure_native_settings(&self, entry: &Entry) {
+        let Some(i) = &entry.instance else {
+            return;
+        };
+        let key = entry.key.clone();
+        let (value, writer): (Option<serde_json::Value>, super::native_settings::Writer) =
+            if let Some(s) = &self.named {
+                let value = s.data.addons.get(&key).cloned();
+                let mut document = s.data.clone();
+                let active = s.active.clone();
+                let store = s.store.clone();
+                let writable = s.writable;
+                (
+                    value,
+                    Rc::new(move |value| {
+                        if !writable {
+                            return Err("active profile is read-only".into());
+                        }
+                        let mut document = document.clone();
+                        document.addons.insert(key.clone(), value.clone());
+                        store.write(&active, &document)
+                    }),
+                )
+            } else {
+                let value = self
+                    .storage
+                    .load_profile(&key, &i.host.lua)
+                    .ok()
+                    .flatten()
+                    .and_then(|v| super::profile::encode(v).ok());
+                let store = self.storage.clone();
+                (value, Rc::new(move |value| store.save_encoded(&key, value)))
+            };
+        super::native_settings::configure(&i.host, value, writer);
+    }
+    fn collect_native_settings(&mut self, entry: &Entry) {
+        let Some(i) = &entry.instance else {
+            return;
+        };
+        let value = super::native_settings::slot(&i.host.lua)
+            .borrow_mut()
+            .committed
+            .take();
+        if let (Some(value), Some(s)) = (value, self.named.as_mut()) {
+            s.data.addons.insert(entry.key.clone(), value);
+            s.dirty = true;
+        }
     }
 
     fn command(&mut self, command: Command) {
@@ -577,6 +766,8 @@ impl Manager {
                     );
                 } else {
                     entry.enabled_intent = enabled;
+                    super::options::set_addon_enabled(&entry.metadata.id, enabled);
+                    crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, enabled);
                     let result = if let Some(s) = &mut self.named {
                         s.data.enabled.insert(entry.key.clone(), enabled);
                         s.dirty = true;
@@ -706,6 +897,11 @@ impl Manager {
                 }
             };
             let enabled_intent = intent.or(persisted).unwrap_or(metadata.initially_enabled);
+            super::options::set_addon_enabled(&metadata.id, enabled_intent);
+            crate::fork_ext::bindpage::set_addon_enabled(&metadata.id, enabled_intent);
+            if !enabled_intent {
+                super::hud_layer::clear_addon(&metadata.id);
+            }
             self.entries.push(Entry {
                 metadata,
                 key,
@@ -1384,8 +1580,11 @@ mod tests {
                     0 => "death",
                     _ => "other",
                 };
-                let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join(format!("../../target/forge-hearts-{name}.png"));
+                let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"));
+                fs::create_dir_all(&target_dir).unwrap();
+                let path = target_dir.join(format!("forge-hearts-{name}.png"));
                 let mut encoder = png::Encoder::new(fs::File::create(path).unwrap(), 256, 192);
                 encoder.set_color(png::ColorType::Rgba);
                 encoder.set_depth(png::BitDepth::Eight);
@@ -1793,6 +1992,156 @@ mod tests {
     }
 
     #[test]
+    fn perf_review_m5_shutdown_persists_capture_loss_diagnostics() {
+        use super::super::native_core;
+        native_core::fixture_demand(false);
+        native_core::CORE.with(|c| *c.borrow_mut() = native_core::Core::default());
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("loss", true, "count=(count or 0)+1");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        for _ in 0..8193 {
+            native_core::defer(1, |_| {});
+        }
+        native_core::observe_text("private-old-world-line", [1.; 4]);
+        native_core::CORE.with(|c| c.borrow_mut().reset("zone"));
+        manager.shutdown();
+        assert!(
+            manager
+                .diagnostics()
+                .iter()
+                .any(|d| d.message.contains("source.generation")),
+            "retirement must drain post-clear diagnostics"
+        );
+        let log = fs::read_to_string(scripts.0.join("addons_error.log")).unwrap();
+        assert!(log.contains("source.capture") && log.contains("source.generation"));
+        assert!(!log.contains("private-old-world-line"));
+    }
+
+    #[test]
+    fn perf_review_l3_disabled_host_keeps_last_real_snapshot() {
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("retained", true, "count=(count or 0)+1");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        let mut full = Snapshot {
+            in_game: true,
+            health: super::super::health::HealthSnapshot::new(true, 1, 1),
+            ..Default::default()
+        };
+        full.player.level = 77;
+        for disabled in [false, true] {
+            if disabled {
+                manager.queue(Command::Enable(
+                    manager.entries[0].metadata.id.clone(),
+                    false,
+                ));
+            }
+            gpu.begin();
+            manager.frame(full);
+            gpu.render();
+            manager.after_render();
+        }
+        assert!(!manager.entries[0].instance.as_ref().unwrap().active);
+        gpu.begin();
+        manager.frame(Snapshot {
+            capture_pending: true,
+            ..Default::default()
+        });
+        gpu.render();
+        manager.after_render();
+        assert_eq!(
+            manager.entries[0]
+                .instance
+                .as_ref()
+                .unwrap()
+                .host
+                .snapshot
+                .get()
+                .player
+                .level,
+            77
+        );
+    }
+
+    #[test]
+    fn perf_review_m2_disabled_reload_does_not_activate_capture() {
+        use super::super::native_core;
+        native_core::fixture_demand(false);
+        native_core::manager_demand(false);
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("staged", false, "count=(count or 0)+1");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        manager.queue(Command::Reload("staged".into()));
+        gpu.frame(&mut manager);
+        assert!(!manager.entries[0].instance.as_ref().unwrap().active);
+        assert!(
+            !native_core::capture_requested(),
+            "a compiled, disabled VM is not a live consumer"
+        );
+        manager.queue(Command::Enable("staged".into(), true));
+        gpu.begin();
+        manager.frame(Snapshot {
+            capture_pending: true,
+            ..Default::default()
+        });
+        gpu.render();
+        manager.after_render();
+        assert!(native_core::capture_requested());
+        gpu.frame(&mut manager);
+        assert!(manager.entries[0].instance.as_ref().unwrap().active);
+    }
+
+    #[test]
+    fn perf_review_m2_waiting_profile_has_no_capture_demand() {
+        use super::super::native_core;
+        native_core::fixture_demand(false);
+        native_core::manager_demand(false);
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("pending", true, "count=(count or 0)+1");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        manager.enable_profiles(Some(config.0.clone()));
+        manager.set_waiting_world_for_test(true);
+        manager.entries[0].enabled_intent = true;
+        gpu.frame(&mut manager);
+        assert!(manager.entries[0].instance.is_none());
+        assert!(
+            !native_core::capture_requested(),
+            "intent without a live or eligible consumer must stay quiescent"
+        );
+        manager.set_waiting_world_for_test(false);
+        gpu.begin();
+        manager.frame(Snapshot {
+            capture_pending: true,
+            ..Default::default()
+        });
+        gpu.render();
+        manager.after_render();
+        assert!(
+            native_core::capture_requested(),
+            "eligible enable must request its bootstrap window"
+        );
+        assert!(manager.entries[0].instance.is_none());
+        native_core::presentation();
+        native_core::presentation();
+        assert!(
+            !native_core::capture_requested(),
+            "bootstrap demand must expire without a VM"
+        );
+        gpu.frame(&mut manager);
+        assert!(manager.entries[0].instance.as_ref().unwrap().active);
+        manager.shutdown();
+        assert!(!native_core::capture_requested());
+    }
+
+    #[test]
     fn forge_manager_disabled_defaults_missing_root_and_sixteen_vm_cap() {
         let Some(mut gpu) = Gpu::new() else {
             return;
@@ -2078,5 +2427,97 @@ mod tests {
                 .any(|d| d.message.contains("failed to write migrated profile")),
             "failed migration must appear in manager diagnostics: {fail_diags:?}"
         );
+    }
+    #[test]
+    fn disabled_bundled_hud_mod_removes_option_key_rows_and_drawing() {
+        let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        let ids = [
+            "eqoa_stats_box",
+            "eqoa_target_of_target",
+            "eqoa_mana_bars",
+            "eqoa_hud_numbers",
+        ];
+        for file in crate::fork_ext::bundled::EMBEDDED_FILES {
+            if ids
+                .iter()
+                .any(|id| file.path.starts_with(&format!("{id}/")))
+            {
+                let path = scripts.0.join(file.path);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, file.data).unwrap();
+            }
+        }
+        super::super::options::reset_in_memory();
+        crate::fork_ext::bindpage::reset_in_memory();
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        super::super::native_core::CORE.with(|c| c.borrow_mut().view.in_world = true);
+        super::super::hud_layout::set_hud_state(true, true, false, 93, 20);
+        gpu.frame(&mut manager);
+        assert_eq!(crate::fork_ext::bindpage::extra_rows(), 1);
+        for (id, assertion) in [
+            (
+                "eqoa_stats_box",
+                "assert(eqoa.options.get('stats_box')==false)",
+            ),
+            (
+                "eqoa_target_of_target",
+                "assert(eqoa.options.get('target_of_target')==false)",
+            ),
+            (
+                "eqoa_mana_bars",
+                "assert(eqoa.options.get('mana_bars')==true)",
+            ),
+            (
+                "eqoa_hud_numbers",
+                "assert(eqoa.options.get('hud_numbers') and eqoa.options.get('xp_details') and eqoa.options.get('target_hp_percent'))",
+            ),
+        ] {
+            lua(&manager, id).load(assertion).exec().unwrap();
+        }
+        for id in ids {
+            let items = super::super::options::BUNDLED_TOGGLES
+                .iter()
+                .filter(|t| t.0 == id)
+                .map(|t| t.3)
+                .collect::<Vec<_>>();
+            assert!(
+                items
+                    .iter()
+                    .all(|item| super::super::options::active_mod_item_ids().contains(item))
+            );
+            super::super::native_core::CORE.with(|c| c.borrow_mut().view.in_world = true);
+            lua(&manager, id)
+                .load("assert(eqoa.hud.panel({x=200,y=54,w=148,h=132}))")
+                .exec()
+                .unwrap();
+            super::super::hud_layer::MOD_QUEUES
+                .with(|q| assert!(!q.borrow()[id].is_empty(), "drawing before disable"));
+            manager.queue(Command::Enable(id.into(), false));
+            gpu.frame(&mut manager);
+            assert!(
+                items
+                    .iter()
+                    .all(|item| !super::super::options::active_mod_item_ids().contains(item))
+            );
+            super::super::hud_layer::MOD_QUEUES.with(|q| {
+                assert!(
+                    q.borrow().get(id).is_none_or(Vec::is_empty),
+                    "no drawing after disable"
+                )
+            });
+            if id == "eqoa_stats_box" {
+                assert_eq!(crate::fork_ext::bindpage::extra_rows(), 0);
+            }
+        }
+        assert!(
+            manager.diagnostics().is_empty(),
+            "{:?}",
+            manager.diagnostics()
+        );
+        manager.shutdown();
+        super::super::options::set_storage_root(None);
     }
 }

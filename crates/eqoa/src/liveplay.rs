@@ -48,20 +48,33 @@ pub struct LivePlay {
 /// The Group menu as the live client has it, on a server that sends its
 /// feature word: the disc's eight entries, then Search, Register and
 /// Unregister (in the place a server's patch puts its own: the live menu's).
-/// With no word, the menu as CLIENT's image (and a patch) made it.
+/// With no word, the menu as CLIENT's image (and a patch) made it. The
+/// client's own entries (`startmenu::own_entry`: Raid, after Leave) are kept
+/// where they are, whenever they were put in: cut to the image's eight as a
+/// count, Raid went at every opening of the start menu (petition 1460).
 pub(super) fn group_menu(menus: &mut Menus) {
     if !crate::live::features().live() {
         return;
     }
     let Some(k) = menus.index_of(GROUP_MENU) else { return };
     let entries = &mut menus.list[k].entries;
-    if entries.len() == 11 && entries[8..].iter().map(|e| (e.word, e.msg)).eq(LIVE_GROUP) {
+    let own = crate::startmenu::own_entry;
+    let image: Vec<(i32, u32)> = entries.iter().filter(|e| !own(e)).map(|e| (e.word, e.msg)).collect();
+    if image.len() == 11 && image[8..].iter().copied().eq(LIVE_GROUP) {
         return;
     }
-    let like = entries.first().cloned().unwrap_or_default();
-    entries.truncate(8);
-    for (word, msg) in LIVE_GROUP {
-        entries.push(MenuEntry { word, msg, id: 0, sub: None, ..like.clone() });
+    let like = entries.iter().find(|e| !own(e)).cloned().unwrap_or_default();
+    // the image's past its eighth go (a patch's own three), the live three after it
+    let mut seen = 0;
+    entries.retain(|e| {
+        own(e) || {
+            seen += 1;
+            seen <= 8
+        }
+    });
+    let at = entries.iter().enumerate().filter(|(_, e)| !own(e)).nth(7).map_or(entries.len(), |(i, _)| i + 1);
+    for (j, (word, msg)) in LIVE_GROUP.into_iter().enumerate() {
+        entries.insert(at + j, MenuEntry { word, msg, id: 0, sub: None, ..like });
     }
 }
 
@@ -159,9 +172,11 @@ impl Play {
                 self.session.send(&w.data);
             }
             // OpenGroupSearch (0x012C7970 -> 0x0135BE08): refused when in a
-            // group and not its leader (1848) or leading a full one (1847)
+            // group and not its leader (1848) or leading a full one (1847);
+            // a member opens it as its leader would where the server lets
+            // its members invite (petition 1476: `Play::members_invite`)
             0x0209_0000 if live => {
-                if self.lfg_not_leader() {
+                if !self.members_invite() && self.lfg_not_leader() {
                     return;
                 }
                 if self.group.in_group && self.group.count() >= 4 {
@@ -223,7 +238,7 @@ impl Play {
         }
         let range = self.lfg_range();
         let bounds = self.start.as_ref().map_or([None; 6], |s| s.bounds);
-        let v = View { now, range, loc, bounds: &bounds };
+        let v = View { now, range, loc, bounds: &bounds, reg: self.session.group_reg };
         let lp = &mut self.live;
         if let Some(leader) = lp.open.take() {
             lp.wnd.open(leader, &mut lp.part, vui, r, &v);
@@ -257,6 +272,20 @@ impl Play {
                 }
                 Out::Invite(id, name) => self.invite_to_group(id, &name),
                 Out::Chat(line) => self.chat_line(&line),
+                // Tell (petition 1476): the window closed, the chat line begun
+                // with the tell, as Sandstorm's player search's (`search_key`)
+                Out::Tell(name) => {
+                    self.live.part.found.clear();
+                    self.mode = 0;
+                    self.chat_key(&format!("/tell {name} "), false);
+                }
+                Out::Register(on) => self.lfg_action(if on { 0x020A_0000 } else { 0x020B_0000 }, 0),
+                Out::InvitesOpen(on) => {
+                    eprintln!("live: Allow anyone in my group to invite: {on} (0x7E5F)");
+                    let mut w = net::stream::Writer::op(net::session::OP_GROUP_INVITES_SETTING);
+                    w.u8(on as u8);
+                    self.session.send(&w.data);
+                }
             }
         }
     }
@@ -340,6 +369,33 @@ pub(super) mod tests {
         p.chat.back().map(|(t, _)| t.clone()).unwrap_or_default()
     }
 
+    /// Petition 1355 ("i cant chat in /say"): a connection with no self id (no
+    /// world entry on it, or a new game connection the server opened after
+    /// one: CLIENT's `ResetWorld`) sends no chat, as CLIENT's `ChatLine`
+    /// sends none; the line is counted, and a bug report's note says so with
+    /// the connections reopened in the world. The control: with the self id
+    /// the same lines go out (/say as 0x000E, 0x000B, 0x000E) and the note
+    /// says nothing of it.
+    #[test]
+    fn a_chat_line_dropped_for_want_of_a_self_id_is_said_in_the_note() {
+        let mut p = play();
+        p.session.self_id = None;
+        p.chat_line("hello");
+        p.chat_line("/say hello");
+        assert!(sent(&mut p).is_empty(), "no self id: nothing sent, as CLIENT");
+        let note = p.bug_note();
+        assert!(note.contains("chat: 2 lines not sent (no self id), the game connection reopened 0 times in the world"), "{note}");
+        // the control
+        let mut p = play();
+        p.chat_line("hello");
+        p.chat_line("/say hello");
+        let out = sent(&mut p);
+        assert_eq!(out.len(), 4, "{out:?}");
+        assert_eq!(&out[0][..2], &[0x0B, 0x00], "the plain line: 0x000B");
+        assert_eq!((&out[1][..], &out[3][..]), (&[0x0E, 0x00, 0][..], &[0x0E, 0x00, 0][..]), "/say: the mode for the line and back");
+        assert!(!p.bug_note().contains("not sent"), "the control's note says nothing of it");
+    }
+
     fn grouped(p: &mut Play, leader: bool, members: usize) {
         p.group.in_group = true;
         p.group.leader = leader;
@@ -376,6 +432,75 @@ pub(super) mod tests {
         assert_eq!(&live[8..], &LIVE_GROUP[..]);
     }
 
+    /// Petition 1460 (the GM Jibrish: "I see no raid button under community >
+    /// group"): on a server that sends the feature word, Start > Community >
+    /// Group shows Raid on its seventh bar, after Leave (the disc's eight round
+    /// it in their order, the live three after Follow), whether the raid's offer
+    /// came before the start menu was first opened or after, however often it
+    /// is opened, from the GM's table (TEST first) or a player's; a click on
+    /// that bar opens the raid's menu. The controls: before the offer the
+    /// seventh bar is Roll (737), and the entry put last, as 5d54c0c put it, is
+    /// on no bar. Skipped without CLIENT's image (`run/client.bin`).
+    #[test]
+    fn group_shows_raid_on_its_seventh_bar() {
+        use crate::startmenu::tests::{click_bar, raid_menu_of, shown};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let Ok(img) = std::fs::read(root.join("run/client.bin")) else {
+            eprintln!("SKIP: no run/client.bin");
+            return;
+        };
+        let img = crate::client_image::ClientImage::from_bytes(img).unwrap();
+        // Invite, Show Chat, Hide Chat, Boot, Disband, Leave
+        let six = ["word 86", "word 643", "word 644", "word 158", "word 529", "word 87"];
+        crate::live::with_features(Some(0x1B), || {
+            for test in [false, true] {
+                for opened_first in [true, false] {
+                    let mut p = play();
+                    p.start = Some(crate::startmenu::StartData::from_image(&img));
+                    p.live_opcode(0x07F5, &0x1Bu32.to_le_bytes()); // a new session has no word
+                    // the start menu opened as `Play`'s HUD frame opens it: its table
+                    // picked, then the live client's Group menu
+                    let open = |p: &mut Play| {
+                        let s = p.start.as_mut().unwrap();
+                        group_menu(&mut s.menus);
+                        shown(s, test, &[420, 107])
+                    };
+                    if opened_first {
+                        let bars = open(&mut p);
+                        assert_eq!(bars[..6], six);
+                        assert_eq!(bars[6], "word 737", "the control: before the offer, Roll on the seventh bar");
+                    }
+                    p.session.raid_offer = true;
+                    p.raid_menu();
+                    for k in 0..3 {
+                        let bars = open(&mut p);
+                        assert_eq!(bars[..6], six, "opening {k}, TEST {test}, opened first {opened_first}");
+                        assert_eq!(bars[6], "Raid", "opening {k}, TEST {test}, opened first {opened_first}");
+                    }
+                    let s = p.start.as_mut().unwrap();
+                    let k = s.menus.index_of(GROUP_MENU).unwrap();
+                    let words: Vec<i32> = s.menus.list[k].entries.iter().map(|e| e.word).collect();
+                    assert_eq!(words, [86, 643, 644, 158, 529, 87, -1, 737, 68, 1673, 1851, 1852], "TEST {test}, opened first {opened_first}");
+                    assert_eq!(click_bar(s, 6), raid_menu_of(s), "a click on the seventh bar opens the raid's menu");
+                }
+            }
+            // the control: put last, as 5d54c0c put it, Raid is on no bar
+            let mut p = play();
+            p.start = Some(crate::startmenu::StartData::from_image(&img));
+            p.live_opcode(0x07F5, &0x1Bu32.to_le_bytes());
+            p.session.raid_offer = true;
+            p.raid_menu();
+            let s = p.start.as_mut().unwrap();
+            group_menu(&mut s.menus);
+            let k = s.menus.index_of(GROUP_MENU).unwrap();
+            let raid = s.menus.list[k].entries.remove(6);
+            s.menus.list[k].entries.push(raid);
+            let bars = shown(s, false, &[420, 107]);
+            assert_eq!(bars.len(), 7, "seven bars drawn: {bars:?}");
+            assert!(!bars.iter().any(|b| b == "Raid"), "the control: put last it is on no bar: {bars:?}");
+        });
+    }
+
     /// Search's refusals as the live client's Open: in a group one does not
     /// lead, 1848 in red; leading a full group (4), 1847; else mode 42, a
     /// leader's search (with room) or a player's. With no feature word
@@ -402,6 +527,39 @@ pub(super) mod tests {
         crate::live::set_features(Features(None));
         p.do_action(0x0209_0000, 0);
         assert_eq!((p.mode, p.live.open), (0, None), "no word, no search");
+    }
+
+    /// Petition 1476: where the server lets any member invite (0x7E17) and
+    /// its group's leader allows it (0x7E5E's bit 2), a member opens Search as
+    /// a leader would (state 0) and invites; with the leader's setting off, the
+    /// live client's refusal (1848) and CLIENT's (640, nothing sent). The
+    /// window's Tell closes it and begins the tell in the chat line; its
+    /// setting's ✕ sends 0x7E5F. The control: no word from the server, the
+    /// member's invites as before.
+    #[test]
+    fn a_member_searches_and_invites_while_its_leader_allows() {
+        use net::session::GroupReg;
+        let mut p = play();
+        crate::live::set_features(Features(Some(0x1B)));
+        p.words = Some(crate::groupsearch::tests::numbered());
+        grouped(&mut p, false, 2);
+        p.session.member_invites = true;
+        p.session.group_reg = Some(GroupReg { registered: false, invites_open: true, members_invite: false });
+        p.do_action(0x0209_0000, 0);
+        assert_eq!((p.mode, last_line(&p), p.live.open), (0, "w1848".into(), None), "the leader's setting off");
+        p.invite_to_group(0x777, "Zed");
+        assert!(sent(&mut p).is_empty(), "the leader's setting off: no invite sent");
+        p.session.group_reg = Some(GroupReg { registered: false, invites_open: true, members_invite: true });
+        p.do_action(0x0209_0000, 0);
+        assert_eq!((p.mode, p.live.open), (42, Some(true)), "a member's search for players");
+        p.mode = 0;
+        p.live.open = None;
+        p.invite_to_group(0x777, "Zed");
+        assert_eq!(sent(&mut p).first().map(|d| d[..2].to_vec()), Some(vec![0x25, 0x06]), "the invite went");
+        // the control: a server that never told the standing (older, or another)
+        p.session.group_reg = None;
+        p.invite_to_group(0x778, "Amy");
+        assert_eq!(sent(&mut p).first().map(|d| d[..2].to_vec()), Some(vec![0x25, 0x06]), "the control: as before 1476");
     }
 
     /// Register and Unregister (sub 2, 3; refused in a group one does not

@@ -51,6 +51,21 @@ BUNDLED_MOD_FILES = [
     "avoids_modern_ui/modules/avoids_pet_frame.lua",
     "avoids_modern_ui/modules/avoids_quest_log.lua",
     "avoids_modern_ui/modules/avoids_target_level.lua",
+    "eqoa_example_hearts/README.md",
+    "eqoa_example_hearts/main.lua",
+    "eqoa_example_hearts/mod.json",
+    "eqoa_hud_numbers/README.md",
+    "eqoa_hud_numbers/main.lua",
+    "eqoa_hud_numbers/mod.json",
+    "eqoa_mana_bars/README.md",
+    "eqoa_mana_bars/main.lua",
+    "eqoa_mana_bars/mod.json",
+    "eqoa_stats_box/README.md",
+    "eqoa_stats_box/main.lua",
+    "eqoa_stats_box/mod.json",
+    "eqoa_target_of_target/README.md",
+    "eqoa_target_of_target/main.lua",
+    "eqoa_target_of_target/mod.json",
     "resources/fonts/Cinzel/OFL.txt",
     "resources/fonts/Cinzel/static/Cinzel-Regular.ttf",
     "resources/fonts/Libre_Baskerville/OFL.txt",
@@ -74,7 +89,7 @@ BUNDLED_MOD_FILES = [
 ]
 
 EXPECTED_ZIP_MEMBERS = [
-    "eqoa.exe", "map-entities.json", "LICENSE", "NOTICE", "FrontiersForge-MIT.txt",
+    "EQOA Enhanced.exe", "map-entities.json", "LICENSE", "NOTICE", "FrontiersForge-MIT.txt",
     "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt", "README.txt",
     "release-manifest.json", "mods/README.txt",
     *(f"mods/{rel}" for rel in BUNDLED_MOD_FILES),
@@ -201,7 +216,7 @@ class PlayerReleaseTests(unittest.TestCase):
             for name, digest in manifest["files"].items():
                 self.assertEqual(hashlib.sha256(archive.read(name)).hexdigest(), digest)
             self.assertEqual(set(manifest["files"]), set(archive.namelist()) - {"release-manifest.json"})
-            self.assertEqual(archive.read("eqoa.exe"), self.executable.read_bytes())
+            self.assertEqual(archive.read("EQOA Enhanced.exe"), self.executable.read_bytes())
             self.assertEqual(archive.read("LICENSE"), (self.root / "LICENSE").read_bytes())
             self.assertEqual(archive.read("NOTICE"), (self.root / "NOTICE").read_bytes())
         exe = self.executable.read_bytes()
@@ -247,6 +262,21 @@ class PlayerReleaseTests(unittest.TestCase):
                         "independent release verification has not been implemented")
         self.build()
         self.assertEqual(self.packager.verify_release(self.output)["sourceCommit"], self.commit)
+
+    def test_development_channel_packages_and_verifies_only_for_the_dev_updater(self):
+        self.executable.write_bytes(minimal_pe(self.commit, self.packager.DEV_DOWNLOAD_BASE))
+        self.build(channel="enhanced-dev")
+        manifest = self.packager.verify_release(self.output, channel="enhanced-dev")
+        self.assertEqual(manifest["updaterChannel"], "enhanced-dev")
+        self.assertEqual(manifest["downloadBase"], self.packager.DEV_DOWNLOAD_BASE)
+        self.assertTrue((self.output / "EQOA-Enhanced-Nightly-Windows-x64.zip").is_file())
+        with zipfile.ZipFile(self.output / "EQOA-Enhanced-Nightly-Windows-x64.zip") as archive:
+            names = set(archive.namelist())
+            self.assertIn("EQOA Enhanced - Nightly.exe", names)
+            self.assertNotIn("EQOA Enhanced.exe", names)
+            self.assertEqual(archive.read("EQOA Enhanced - Nightly.exe"), self.executable.read_bytes())
+        with self.assertRaises(ValueError):
+            self.packager.verify_release(self.output)
 
     def test_independent_verifier_rejects_tampering_even_with_recomputed_outer_hashes(self):
         self.assertTrue(callable(getattr(self.packager, "verify_release", None)),

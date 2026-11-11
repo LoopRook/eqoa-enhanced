@@ -41,7 +41,16 @@ impl FileState {
             return Ok(());
         }
         if let Some(target) = &self.target {
+            let _guard = super::sandbox::lock_parents(target, true)?;
             no_links(target)?;
+            if let Some(files) = target
+                .ancestors()
+                .find(|p| p.file_name().is_some_and(|n| n == "files"))
+            {
+                if let Some(root) = files.parent() {
+                    super::sandbox::check_quota(root, target, self.bytes.len())?;
+                }
+            }
             super::storage::atomic_replace(target, &self.bytes).map_err(|e| e.to_string())?;
             #[cfg(test)]
             {
@@ -193,9 +202,15 @@ fn normalized(path: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn relative(addon: &DiscoveredAddon, path: &str) -> std::result::Result<PathBuf, String> {
+pub(super) fn relative(
+    addon: &DiscoveredAddon,
+    path: &str,
+) -> std::result::Result<PathBuf, String> {
     let path = path.replace("\\\\?\\", "").replace('\\', "/");
-    if path.len() > 4096 {
+    if path.split('/').any(|part| part == "..") {
+        return Err("parent traversal in addon resource path".into());
+    }
+    if path.len() > 4096 || path.chars().any(char::is_control) {
         return Err("invalid addon resource path".into());
     }
     // Absolute Windows paths contain a drive prefix; compare normalized roots
@@ -208,10 +223,26 @@ fn relative(addon: &DiscoveredAddon, path: &str) -> std::result::Result<PathBuf,
     } else {
         path.starts_with(&prefix)
     };
-    if !starts {
-        return Err("file path outside addon resources".into());
-    }
-    let tail = &path[prefix.len()..];
+    let mapped;
+    let tail = if starts {
+        &path[prefix.len()..]
+    } else {
+        if path.contains(':') || path.starts_with('/') {
+            return Err("file path outside issued addon mounts".into());
+        }
+        mapped = if let Some(tail) = path.strip_prefix("package_resources/") {
+            let package = addon
+                .package_root
+                .strip_prefix(&addon.script_root)
+                .map_err(|_| "package outside script root")?;
+            normalized(&package.join("resources").join(tail))
+        } else if path.starts_with("resources/") {
+            path.clone()
+        } else {
+            format!("data/{path}")
+        };
+        &mapped
+    };
     if tail.split('/').count() > 8
         || tail.split('/').any(|s| {
             s == ".."
@@ -228,7 +259,10 @@ fn relative(addon: &DiscoveredAddon, path: &str) -> std::result::Result<PathBuf,
     let source = addon.script_root.join(&rel);
     let private = addon.package_root.join("resources");
     let shared = addon.script_root.join("resources");
-    if !source.starts_with(&private) && !source.starts_with(&shared) {
+    if !source.starts_with(&private)
+        && !source.starts_with(&shared)
+        && !(!starts && tail.starts_with("data/"))
+    {
         return Err("file path outside addon resources".into());
     }
     Ok(rel)
@@ -259,21 +293,12 @@ fn reserved_device(component: &str) -> bool {
 }
 
 fn read(path: &Path) -> std::result::Result<Vec<u8>, String> {
-    let mut bytes = Vec::new();
-    fs::File::open(path)
-        .map_err(|e| e.to_string())?
-        .take(MAX_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.len() > MAX_BYTES {
-        return Err("file exceeds 1 MiB".into());
-    }
-    Ok(bytes)
+    super::sandbox::read_bounded(path, MAX_BYTES)
 }
 
 // Reject symlinks in every existing component, including dangling links. This
 // guards both reads and writes before create_dir_all/atomic_replace follows them.
-fn no_links(path: &Path) -> std::result::Result<(), String> {
+pub(super) fn no_links(path: &Path) -> std::result::Result<(), String> {
     for p in path.ancestors() {
         if let Ok(meta) = fs::symlink_metadata(p) {
             if meta.file_type().is_symlink() {
@@ -320,7 +345,7 @@ fn overlay_room(
             no_links(&entry.path())?;
             if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
                 pending.push(entry.path());
-            } else {
+            } else if !entry.path().starts_with(root.join("removed")) {
                 files += 1;
                 if files >= 64 {
                     return Err("addon file count limit exceeded".into());
@@ -333,6 +358,10 @@ fn overlay_room(
 
 pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf>) -> Result<()> {
     let lua = &host.lua;
+    lua.set_app_data(super::sandbox::Mounts {
+        addon: addon.clone(),
+        data: data.clone(),
+    });
     let io = lua.create_table()?;
     let addon_open = addon.clone();
     let data_open = data.clone();
@@ -380,6 +409,7 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
                 }
                 if mode == "w" {
                     let target = target.ok_or("addon data directory unavailable")?;
+                    let _guard = super::sandbox::lock_parents(&target, true)?;
                     overlay_room(data_open.as_ref().unwrap(), &target, deleted.as_deref())?;
                     super::storage::atomic_replace(&target, &[]).map_err(|e| e.to_string())?;
                     if let Some(deleted) = deleted {
@@ -420,48 +450,186 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
                     let ud = lua.create_userdata(TextFile(state))?;
                     lua.pack_multi(ud)
                 }
-                Err(error) => lua.pack_multi((Value::Nil, error)),
+                Err(error) => {
+                    let code = if error.contains("not found")
+                        || error.contains("os error 2")
+                        || error.contains("os error 3")
+                    {
+                        "not_found"
+                    } else {
+                        "io_error"
+                    };
+                    // Forge scripts probe optional legacy settings with io.open.
+                    // A missing file is a normal nil,error result, not an addon
+                    // failure. Native eqoa.files keeps its explicit diagnostics.
+                    if code != "not_found" {
+                        super::native::diagnose(lua, "io.open", code, &error);
+                    }
+                    lua.pack_multi((Value::Nil, error))
+                }
             }
         })?,
     )?;
     lua.globals().set("io", io)?;
     let os: mlua::Table = lua.globals().get("os")?;
-    let addon = addon.clone();
     os.set(
         "remove",
-        lua.create_function(move |lua, path: String| {
-            let result = (|| -> std::result::Result<(), String> {
-                let rel = relative(&addon, &path)?;
-                let root = data.as_ref().ok_or("addon data directory unavailable")?;
-                let target = root.join("files").join(&rel);
-                let deleted = root.join("removed").join(&rel);
-                no_links(&target)?;
-                no_links(&deleted)?;
-                if deleted.exists() || (!target.exists() && !addon.script_root.join(&rel).is_file())
-                {
-                    return Err("file not found".into());
+        lua.create_function(|lua, path: String| {
+            let mounts = lua
+                .app_data_ref::<super::sandbox::Mounts>()
+                .ok_or_else(|| mlua::Error::runtime("file mounts unavailable"))?
+                .clone();
+            match mounts.remove(&path) {
+                Ok(true) => lua.pack_multi(true),
+                Ok(false) => lua.pack_multi((Value::Nil, "file not found")),
+                Err(e) => {
+                    super::native::diagnose(lua, "os.remove", "io_error", &e);
+                    lua.pack_multi((Value::Nil, e))
                 }
-                if addon.script_root.join(&rel).is_file() {
-                    overlay_room(root, &deleted, Some(&target))?;
-                    super::storage::atomic_replace(&deleted, &[]).map_err(|e| e.to_string())?;
-                }
-                if target.exists() {
-                    fs::remove_file(target).map_err(|e| e.to_string())?;
-                }
-                Ok(())
+            }
+        })?,
+    )?;
+    os.set(
+        "rename",
+        lua.create_function(|lua, (from, to): (String, String)| {
+            let mounts = lua
+                .app_data_ref::<super::sandbox::Mounts>()
+                .ok_or_else(|| mlua::Error::runtime("file mounts unavailable"))?
+                .clone();
+            let result = (|| {
+                let bytes = mounts.read(&from)?;
+                mounts.write(&to, &bytes)?;
+                mounts.remove(&from).and_then(|removed| {
+                    removed
+                        .then_some(())
+                        .ok_or("rename source disappeared".into())
+                })
             })();
             match result {
                 Ok(()) => lua.pack_multi(true),
-                Err(e) => lua.pack_multi((Value::Nil, e)),
+                Err(e) => {
+                    super::native::diagnose(lua, "os.rename", "io_error", &e);
+                    lua.pack_multi((Value::Nil, e))
+                }
             }
         })?,
     )?;
     Ok(())
 }
 
+pub(super) fn install_native(host: &Host) -> Result<()> {
+    for name in ["read", "write", "remove"] {
+        super::native::bind(
+            &host.lua,
+            "files",
+            name,
+            host.lua
+                .create_function(move |lua, (path, bytes): (Value, Option<Value>)| {
+                    let symbol = format!("eqoa.files.{name}");
+                    let Some(path) = path
+                        .as_string()
+                        .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+                    else {
+                        return super::native::error(
+                            lua,
+                            &symbol,
+                            "invalid_argument",
+                            "path must be a relative UTF-8 string",
+                        );
+                    };
+                    if path.starts_with(['/', '\\']) || path.contains(':') {
+                        return super::native::error(
+                            lua,
+                            &symbol,
+                            "permission_denied",
+                            "native file paths must be relative",
+                        );
+                    }
+                    let Some(mounts) = lua
+                        .app_data_ref::<super::sandbox::Mounts>()
+                        .map(|m| m.clone())
+                    else {
+                        return super::native::error(
+                            lua,
+                            &symbol,
+                            "unavailable",
+                            "file mounts unavailable",
+                        );
+                    };
+                    if let Err(reason) = mounts.key(&path) {
+                        return super::native::error(lua, &symbol, "permission_denied", &reason);
+                    }
+                    let result = match name {
+                        "read" => mounts.read(&path).and_then(|b| {
+                            lua.create_string(&b)
+                                .map(Value::String)
+                                .map_err(|e| e.to_string())
+                        }),
+                        "write" => {
+                            let Some(bytes) = bytes.and_then(|v| v.as_string().cloned()) else {
+                                return super::native::error(
+                                    lua,
+                                    &symbol,
+                                    "invalid_argument",
+                                    "bytes must be a binary string",
+                                );
+                            };
+                            mounts
+                                .write(&path, &bytes.as_bytes())
+                                .map(|()| Value::Boolean(true))
+                        }
+                        _ => mounts.remove(&path).map(Value::Boolean),
+                    };
+                    match result {
+                        Ok(v) => lua.pack_multi((v, Value::Nil)),
+                        Err(e) => super::native::error(
+                            lua,
+                            &symbol,
+                            if e.contains("not found") {
+                                "not_found"
+                            } else if matches!(
+                                e.as_str(),
+                                "reparse point in addon path"
+                                    | "reparse point in addon resource"
+                                    | "reparse point in addon file"
+                            ) {
+                                "permission_denied"
+                            } else if e.contains("quota") || e.contains("exceeds") {
+                                "quota"
+                            } else {
+                                "io_error"
+                            },
+                            &e,
+                        ),
+                    }
+                })?,
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn live_regression_optional_forge_file_probe_is_not_a_visible_error() {
+        let (_scratch, host, _addon) = fixture();
+        host.execute("local f,err=io.open(resource..'/optional-missing.cfg','r');assert(f==nil and type(err)=='string')").unwrap();
+        let diagnostics = super::super::native::finish(&host.lua);
+        assert!(
+            diagnostics.is_empty(),
+            "normal missing-file probe must be quiet: {diagnostics:?}"
+        );
+        host.execute(
+            "local f,err=io.open(resource..'/bad.cfg','a');assert(f==nil and type(err)=='string')",
+        )
+        .unwrap();
+        assert!(
+            !super::super::native::finish(&host.lua).is_empty(),
+            "unsupported modes must stay visible"
+        );
+    }
+
     #[test]
     fn forge_review_writes_stay_buffered_until_close() {
         let (scratch, host, _addon) = fixture();
@@ -604,6 +772,7 @@ mod tests {
             module_dirs: vec![],
             resource_dirs: vec![],
             api: None,
+            entry_mode: Default::default(),
             requested_capabilities: vec![],
             initially_enabled: false,
             mods_root: Some(scripts.clone()),
@@ -703,5 +872,17 @@ mod tests {
         host.execute("assert(io.open(legacy)==nil);assert(iters[1]()=='one');assert(iters[1]()=='two');iters=nil").unwrap();
         host.lua.gc_collect().unwrap();
         host.execute("local f=assert(io.open(legacy));local next=f:lines();assert(next()=='one');local other=f:lines();assert(other()=='two');f:close();assert(not pcall(next));local reopened=assert(io.open(legacy));reopened:close()").unwrap();
+    }
+    #[test]
+    fn review_fix_m3_native_files_report_boundary_denials_separately_from_io() {
+        let (_scratch, host, _addon) = fixture();
+        host.execute(r#"for _,path in ipairs({'../neighbor/secret.cfg','resources/../secret.cfg','..\\secret.cfg','CON','data/./bad'}) do
+            for _,op in ipairs({'read','remove','write'}) do
+                local value,err=eqoa.files[op](path,'bytes')
+                assert(value==nil and err.code=='permission_denied',path..' '..op..' '..tostring(err and err.code))
+            end
+        end
+        local value,err=eqoa.files.read('absent.cfg');assert(value==nil and err.code=='not_found')
+        "#).unwrap();
     }
 }

@@ -94,6 +94,9 @@ pub struct CharRecord {
     /// held items', armour slots' and robe's, and the slots' ArmorGroup
     /// variants where the disc's has tints; then no tint is sent.
     pub colors: Option<net::entity::LiveColors>,
+    /// The cape it wears, on a server with capes (`cape`: the session's
+    /// `cape_list` by its server id, which comes after the list).
+    pub cape: Option<net::cape::Cape>,
 }
 
 impl CharRecord {
@@ -124,6 +127,7 @@ impl CharRecord {
             armor: std::array::from_fn(|k| g(20 + k)),
             tints: std::array::from_fn(|k| g(26 + k)),
             colors: None,
+            cape: None,
         }
     }
 
@@ -158,6 +162,7 @@ impl CharRecord {
                 armor: std::array::from_fn(|k| rgba(43 + 4 * k)),
                 robe: rgba(67),
             }),
+            cape: None,
         }
     }
 
@@ -301,6 +306,40 @@ pub struct Client {
     remake: bool,
     /// Bodies came in: the figures to be made again (`bodies_in`).
     refigure: bool,
+    /// the race looks' generation character select's figure was made under
+    /// (`raceopts::generation`)
+    looks_seen: u64,
+    /// A character played while the server's own worlds are still being
+    /// built (`net::session::Session::server_worlds_pending`) whose login
+    /// needs them (`pick_waits`), and when: sent once the server is told
+    /// which are held (`pick_goes`), so the server places it by them, its
+    /// homeland and not its city. The server says which characters those are
+    /// (`Session::pick_needs_worlds`), and every other goes at once. With a
+    /// server that does not say (an older one) a page holds every character
+    /// (`hold_picks`: it could not know) and a native client none, as both
+    /// did before the server said.
+    held_pick: Option<(net::session::Character, i64)>,
+    hold_picks: bool,
+}
+
+/// How long a character played waits for the server's worlds (`held_pick`)
+/// before it goes anyway: `eqoa play`'s wait.
+const PICK_WAIT_MS: i64 = 60_000;
+
+/// Whether a character played now waits for the server's worlds
+/// (`held_pick`): only while they are still to be answered (`pending`), and
+/// then when the server said its login needs them (`needs`), or, the server
+/// not having said, when this client holds every character (`hold_unsaid`:
+/// a page).
+fn pick_waits(pending: bool, needs: Option<bool>, hold_unsaid: bool) -> bool {
+    pending && needs.unwrap_or(hold_unsaid)
+}
+
+/// Whether a character held since `at` goes now (`held_pick`): once it no
+/// longer waits (`pick_waits`: the worlds answered, or the server's word come
+/// that it needs none), or after [`PICK_WAIT_MS`].
+fn pick_goes(waits: bool, at: i64, now: i64) -> bool {
+    !waits || now - at >= PICK_WAIT_MS
 }
 
 impl Default for Client {
@@ -332,6 +371,9 @@ impl Default for Client {
             entered: None,
             remake: false,
             refigure: false,
+            looks_seen: 0,
+            held_pick: None,
+            hold_picks: cfg!(target_arch = "wasm32"),
         }
     }
 }
@@ -360,6 +402,7 @@ impl Client {
         self.login = shared.login.clone();
         self.session = None;
         self.making = None;
+        self.held_pick = None;
         self.state = 20;
         self.code = -1;
         self.phase = -1;
@@ -392,6 +435,7 @@ impl Client {
         self.login = shared.login.clone();
         self.session = None;
         self.making = None;
+        self.held_pick = None;
         self.next = None;
         self.entered = None;
         self.code = -1;
@@ -415,9 +459,16 @@ impl Client {
         self.remake = true;
     }
 
+    /// The bodies the characters' capes are cut from (`cape::bodies`), which
+    /// CHARSEL's files do not hold.
+    pub fn cape_bodies(&self) -> Vec<u32> {
+        crate::cape::bodies(self.chars.iter().filter_map(|c| c.cape.as_ref()))
+    }
+
     /// A server's races' bodies came in (`res::Res::want_bodies`): character
     /// select's figure and creation's made again at the next frame, where their
-    /// `like` races stood in.
+    /// `like` races stood in (`Figure::refresh`: one they change nothing for
+    /// is left as it stands).
     pub fn bodies_in(&mut self) {
         self.refigure = true;
     }
@@ -429,6 +480,7 @@ impl Client {
         }
         self.session = None;
         self.making = None;
+        self.held_pick = None;
         self.top = Wnd::None;
         self.active = Wnd::None;
     }
@@ -498,6 +550,7 @@ impl Client {
         }
         self.session = None;
         self.making = None;
+        self.held_pick = None;
     }
 
     /// `Msg0777Done(mode)`.
@@ -555,8 +608,14 @@ impl Client {
             && let Some(g) = cx.gpu.as_mut()
         {
             self.refigure = false;
-            self.select.remake(&cx.res.lib, g, cx.now);
-            self.create.remake(&cx.res.lib, g, cx.now);
+            self.select.refresh(&cx.res.lib, g, cx.now);
+            self.create.refresh(&cx.res.lib, g, cx.now);
+        }
+        // the server's race looks changed (`raceopts`): character select's
+        // figure made again in its own
+        if crate::raceopts::generation() != self.looks_seen {
+            self.looks_seen = crate::raceopts::generation();
+            self.select.relook();
         }
         // the stage, once ARENA.CSF and the GPU are here (`LoadWorld`'s
         // walk camera limits set as it sets them)
@@ -653,13 +712,16 @@ impl Client {
 
     /// `CreateCharacter`, once creation has sent the form (0x002B): the form
     /// becomes the next entry with no server id yet (its race's model by
-    /// sex, no robe, level 1, the rest zero), selected and shown, and
-    /// `ShowWord(413)` (empty: the pending states end). The server's list
-    /// replaces it; a refusal takes it away.
+    /// sex, or the body its race's options chose: `tables::chosen`; no robe,
+    /// level 1, the rest zero), selected and shown, and `ShowWord(413)`
+    /// (empty: the pending states end). The server's list replaces it; a
+    /// refusal takes it away. (The figure made of it stays until something
+    /// makes it again: a look a server's race chose, a change of selection;
+    /// a body chosen with no look showed its race's own until then.)
     fn create_character(&mut self, f: &net::session::NewChar) {
         let rec = CharRecord {
             server_id: -1,
-            model: create::tables::model_of(f.race, f.sex),
+            model: create::tables::chosen(f).0,
             class: f.class,
             // a server's race as the list will have it: its `like` race's place
             race: create::tables::like(f.race),
@@ -701,9 +763,32 @@ impl Client {
         }
         let Some(s) = self.session.as_mut() else { return };
         let events = s.pump();
+        // a character played while the server's worlds were being built goes
+        // once the server is told which are held (the pump told it), or once
+        // the server's word comes that its login needs none of them
+        if let Some((c, at)) = &self.held_pick
+            && pick_goes(pick_waits(s.server_worlds_pending(), s.pick_needs_worlds(c.server_id), self.hold_picks), *at, self.now)
+        {
+            crate::say(&format!("{} goes in after {} ms", c.name, self.now - at));
+            s.select_character(c);
+            self.held_pick = None;
+        }
         // what the server said creation takes past the game's (`net::creation`),
         // for the create pages and character select's stand-ins
         create::tables::set_offer(s.creation.as_ref());
+        // the characters' capes, on a server with capes (`cape`); they come
+        // after the list, and with every list
+        crate::cape::set_offered(s.capes);
+        // and the lists' sizes, as that server last said (`inventory`)
+        crate::inventory::set_caps(s.item_lists);
+        for c in &mut self.chars {
+            c.cape = if s.capes { s.cape_list.get(&c.server_id).copied() } else { None };
+        }
+        // and its races' own options and the looks chosen (`raceopts`)
+        crate::raceopts::set_options(s.race_options.as_ref());
+        if let Some(b) = s.race_looks.take() {
+            crate::raceopts::take_looks(&b);
+        }
         for (k, e) in events.iter().enumerate() {
             match e {
                 Event::ShardList(list) if matches!(self.phase, 0 | 1) => {
@@ -764,6 +849,7 @@ impl Client {
                     self.phase = 0;
                     self.state = 20;
                     self.session = None;
+                    self.held_pick = None;
                     if let (Some(server), Some(login)) = (self.server.clone(), self.login.clone()) {
                         self.making = Some(connect(&server, &login));
                     } else {
@@ -834,7 +920,20 @@ impl Client {
             self.phase = 4;
             let c = c.character();
             if let Some(s) = self.session.as_mut() {
-                s.select_character(&c);
+                // the server's own worlds still being built, and this
+                // character's login needs them: it waits (`held_pick`)
+                let (pending, needs) = (s.server_worlds_pending(), s.pick_needs_worlds(c.server_id));
+                if pick_waits(pending, needs, self.hold_picks) {
+                    crate::say(&format!("{} waits for the server's worlds to be built", c.name));
+                    self.held_pick = Some((c, self.now));
+                } else {
+                    if pending {
+                        // (a server that never said, natively: as it always went)
+                        let why = if needs.is_some() { "its login needs none of them" } else { "the server does not say which logins need them" };
+                        crate::say(&format!("{} goes in at once: the server's worlds are still being built, and {why}", c.name));
+                    }
+                    s.select_character(&c);
+                }
             }
         }
     }
@@ -948,6 +1047,33 @@ mod tests {
         assert_eq!((look.armor_color, look.robe_color), (Some(l.armor), Some(l.robe)));
         let disc = CharRecord::of(&character("Plain", 8, vec![0; net::session::DISC_GEAR_SIZE]));
         assert!(disc.colors.is_none() && select::look_of(&disc, true).armor_color.is_none(), "the control: the disc's record");
+    }
+
+    /// A character played while the server's worlds are still being built
+    /// waits for them only when its login needs them: the server says which
+    /// characters those are, and then one it names waits, natively as in a
+    /// page, and one it does not goes at once, in a page too (petition 1468:
+    /// a page held every character, 10 to 36 s a login). The server not having
+    /// said (an older one), a page holds every character and a native client
+    /// none, as before. Nothing waits once the worlds are answered, and a
+    /// held one goes after a minute at most. The control: natively
+    /// `hold_picks` is off.
+    #[test]
+    fn a_pick_waits_for_the_servers_worlds_only_when_its_login_needs_them() {
+        for page in [false, true] {
+            assert!(pick_waits(true, Some(true), page), "the server named it: it waits (page {page})");
+            assert!(!pick_waits(true, Some(false), page), "the server did not name it: it goes at once (page {page})");
+            for needs in [None, Some(false), Some(true)] {
+                assert!(!pick_waits(false, needs, page), "the worlds answered: nothing waits ({needs:?}, page {page})");
+            }
+        }
+        assert!(pick_waits(true, None, true), "the server never said: a page holds every character");
+        assert!(!pick_waits(true, None, false), "the server never said: natively a character goes at once");
+        assert!(!pick_goes(true, 1000, 1000), "it waits");
+        assert!(!pick_goes(true, 1000, 1000 + PICK_WAIT_MS - 1), "it still waits");
+        assert!(pick_goes(false, 1000, 1001), "it waits no longer: it goes");
+        assert!(pick_goes(true, 1000, 1000 + PICK_WAIT_MS), "a minute: it goes anyway");
+        assert!(!Client::new().hold_picks, "natively nothing is held on a server that does not say");
     }
 
     /// Where a box of the client's own may stand (`update`'s question): the
@@ -1102,7 +1228,7 @@ mod tests {
         c.chars = vec![CharRecord::of(&character("A", 1, vec![7; 32]))];
         (c.top, c.active) = (Wnd::Create, Wnd::Create);
         c.select.set_pending();
-        let form = net::session::NewChar { name: "Brakk".into(), race: 4, class: 9, sex: 1, hair_color: 2, hair_length: 1, hair_style: 3, face: 2, city: 0, stats: [0; 7] };
+        let form = net::session::NewChar { name: "Brakk".into(), race: 4, class: 9, sex: 1, hair_color: 2, hair_length: 1, hair_style: 3, face: 2, city: 0, stats: [0; 7], options: vec![] };
         c.create_character(&form);
         assert_eq!(c.chars.len(), 2);
         let n = &c.chars[1];
@@ -1121,6 +1247,26 @@ mod tests {
         (c.top, c.active) = (Wnd::Create, Wnd::Create);
         c.create_out(create::Out::Back);
         assert_eq!((c.chars.len(), c.top), (1, Wnd::Select));
+    }
+
+    /// A server's race's character waits in the list in the body its options
+    /// chose (the fungusman's red body), as the list will have it, so
+    /// character select shows that body before the list comes, not its race's
+    /// own; with no body chosen (the control) its race's own.
+    #[test]
+    fn a_created_character_waits_in_its_chosen_body() {
+        let race = net::creation::Race { id: 28, like: 1, city: 0, bonus: [0; 7], class_mask: 0x7FFF, body: [0x4A4D_88FB; 2], name: "Fungusman".into(), short: "FNG".into(), desc: String::new() };
+        create::tables::set_offer(Some(&net::creation::Creation { all_classes: true, races: vec![race] }));
+        crate::raceopts::set_options(Some(&crate::raceopts::tests::fungus_options()));
+        let mut form = net::session::NewChar { name: "Spore".into(), race: 28, class: 9, sex: 0, hair_color: 0, hair_length: 0, hair_style: 0, face: 0, city: 0, stats: [0; 7], options: vec![("body".into(), 1)] };
+        let mut c = Client::new();
+        c.create_character(&form);
+        assert_eq!(c.chars[0].model, 0x5874_ACFC, "the red body chosen");
+        form.options.clear();
+        c.create_character(&form);
+        assert_eq!(c.chars[1].model, 0x4A4D_88FB, "the control: none chosen, its race's own");
+        crate::raceopts::set_options(None);
+        create::tables::set_offer(None);
     }
 
     /// The server's list resets creation's form (`CharacterList`'s `Reset`)

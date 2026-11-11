@@ -23,9 +23,9 @@ pub(super) struct NamedSession {
     pub data: Document,
     pub active: String,
     pub dirty: bool,
-    writable: bool,
+    pub(super) writable: bool,
     shutdown_save_failed: bool,
-    store: Store,
+    pub(super) store: Store,
     character: Option<Character>,
     retry: Option<(Character, Instant)>,
     apply_initial: bool,
@@ -109,6 +109,10 @@ impl Manager {
             selected: None,
             setup: None,
         });
+    }
+    #[cfg(test)]
+    pub(super) fn set_waiting_world_for_test(&mut self, waiting: bool) {
+        self.named.as_mut().unwrap().waiting_world = waiting;
     }
     pub(super) fn profile_waiting_world(&self) -> bool {
         self.named.as_ref().is_some_and(|s| s.waiting_world)

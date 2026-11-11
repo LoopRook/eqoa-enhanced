@@ -77,10 +77,16 @@ pub const GROUP_CHAT: [f32; 4] = [0.5, 0.5, 1.0, 1.0];
 pub const OP_ENTITY_VIEW: u16 = 0x7E00;
 /// go-eqoa-server's own, no retail message either: the GM's trigger names, a
 /// u32 after the opcode, both ways. The server offers them (1) to a GM's
-/// client beside the GM channel's 0x0700 35; this client answers 1 at once
-/// and is then sent the names (0x7E08, `admin::read_triggers`) whenever they
-/// change. A PS2 ignores the offer, as it ignores [`OP_ENTITY_VIEW`]'s.
+/// client beside the GM channel's 0x0700 35; this client answers
+/// [`TRIGGERS_ALL`] at once and is then sent every trigger (0x7E36,
+/// `admin::read_trigger_list`) whenever they change, or, from a server that
+/// takes any answer but 0 as 1 (one from before 2026-11-09), the TEST menu's
+/// eight lines' names (0x7E08, `admin::read_triggers`). A PS2 ignores the
+/// offer, as it ignores [`OP_ENTITY_VIEW`]'s.
 pub const OP_GM_TRIGGERS: u16 = 0x7E07;
+/// The answer to [`OP_GM_TRIGGERS`] that asks for every trigger, by slot (1:
+/// the eight lines' names alone).
+pub const TRIGGERS_ALL: u32 = 2;
 /// go-eqoa-server's own, no retail message either: the live game's duel
 /// messages (0x1501 up, 0x1502 down, the client's `duel` part and its
 /// window), a u32 after the opcode, both ways. The server offers them (1)
@@ -109,6 +115,22 @@ pub const OP_CREATION_OFFER: u16 = 0x7E1E;
 /// The races, to a client that answered [`OP_CREATION_OFFER`]: `creation::read`,
 /// kept as [`Session::creation`].
 pub const OP_CREATION_RACES: u16 = 0x7E1F;
+/// go-eqoa-server's own, no retail message either: a custom race's own character
+/// options and the looks its characters chose (`raceopts`), a u32 after the
+/// opcode, both ways. The server offers them (1) after the session's first
+/// character list; this client answers 1 at once and is sent each race's options
+/// ([`OP_RACE_OPTIONS_DATA`], kept as [`Session::race_options`]) and the looks
+/// ([`OP_RACE_LOOKS`], [`Session::race_looks`]), and the looks again
+/// whenever they change. A PS2 ignores the offer; a server that never makes one
+/// gets no answer, and its creations carry no choice ([`NewChar::options`]).
+pub const OP_RACE_OPTIONS: u16 = 0x7E22;
+/// Each race's options, to a client that answered [`OP_RACE_OPTIONS`]:
+/// `raceopts::read_options`.
+pub const OP_RACE_OPTIONS_DATA: u16 = 0x7E23;
+/// The looks the characters chose, to a client that answered
+/// [`OP_RACE_OPTIONS`]: `raceopts::read_looks`, each one the whole list, kept
+/// as [`Session::race_looks`] for the game to take.
+pub const OP_RACE_LOOKS: u16 = 0x7E24;
 /// go-eqoa-server's own, no retail message either: SOE's live game's look, a
 /// u32 after the opcode, both ways. The server offers it (1) after the
 /// session's first character list; this client answers 1 at once: it reads
@@ -126,21 +148,133 @@ pub const OP_LIVE_LOOK_IN_FORCE: u16 = 0x7E0D;
 /// the opcode, both ways. The server offers them (1) once the player is in
 /// the world; this client answers 1 at once, and then F3 opens Support's
 /// request form on Bug Report, and each petition it files (the form, or a
-/// typed `/bug`/`#bug`) goes after its own note ([`OP_BUG_NOTE`]). A PS2
-/// ignores the offer; a server that never makes one (Sandstorm's,
-/// eqoa.live's) gets no key and no note.
+/// typed `/bug`/`#bug`) goes after its own note ([`OP_BUG_NOTE`]). A second
+/// u32 after the offer's is the most characters of a petition's text the
+/// server takes (go-eqoa-server's since 2026-11-08: 2,047): the form holds
+/// that many, up to [`PETITION_TEXT_MOST`] ([`Session::petition_text`]),
+/// else a PS2's [`PETITION_TEXT_DISC`]. A PS2 ignores the offer; a server
+/// that never makes one (Sandstorm's, eqoa.live's) gets no key and no note.
 pub const OP_BUG_REPORTS: u16 = 0x7E0E;
 /// This client's note for the petition it files next, to a server that
 /// offered [`OP_BUG_REPORTS`]: a u32 version (1), then a u32 byte count and
 /// that many bytes of UTF-8 text, "key: value" lines (`bugnote`), at most
 /// [`BUG_NOTE_MAX`]. The server keeps it for the GMs beside that petition.
 pub const OP_BUG_NOTE: u16 = 0x7E0F;
+/// go-eqoa-server's own, no retail message either: crash reports
+/// (`eqoa::crashfile`). The server offers to take them once the player is in
+/// the world: a u32 version (1), then a u32, the most bytes of a report's text
+/// it takes ([`Session::crash_offer`]); this client then sends each it kept
+/// ([`OP_CRASH_REPORT`]). A PS2 ignores the offer; a server that never makes
+/// one (Sandstorm's, eqoa.live's) is sent none.
+pub const OP_CRASH_OFFER: u16 = 0x7E64;
+/// A crash report, client to server: a u32 version (1), a u32 number of this
+/// client's for it, a u32 byte count and that many bytes of UTF-8 text, at
+/// most the offer's most (a report past 1,300 bytes goes in DRDP's pieces,
+/// which a server that offers reports puts back together).
+pub const OP_CRASH_REPORT: u16 = 0x7E65;
+/// The server's answer to [`OP_CRASH_REPORT`]: the report's u32 number and a
+/// u32 ticket, the petition it was filed as (0: not kept, and not to be sent
+/// again) ([`Session::crash_filed`]).
+pub const OP_CRASH_FILED: u16 = 0x7E66;
+/// The most bytes of a crash report this client sends, whatever an offer says.
+pub const CRASH_REPORT_MOST: usize = 12_000;
 /// go-eqoa-server's own, no retail message either: any member of a group may
 /// invite into it there, a u32 after the opcode (1), from the server once the
 /// player is in the world; no answer. CLIENT lets only the leader invite
 /// (`InviteEntity`, `InviteToGroup`: word 640), and so does this client on a
 /// server that never offers it (Sandstorm's, eqoa.live's).
 pub const OP_MEMBER_INVITES: u16 = 0x7E17;
+/// go-eqoa-server's own: the mercenaries told apart (the GM Jibrish's
+/// petitions 1475 and 1488, 2026-11-11). Both ways: the server's offer once the
+/// player is in the world (a u8, the layout of [`OP_MERCS_DATA`], 1), and this
+/// client's answer at once (a u8, 1). CLIENT has no such case: a PS2 ignores it.
+pub const OP_MERCS_OFFER: u16 = 0x7E5A;
+/// The mercs, from a server the client answered, at once and whenever they
+/// change: a u8 layout (1), a u8 of flags (bit 0: the player's own merc is
+/// out), a u16 count and each merc in the player's world by its name (a u8 byte
+/// count and the bytes). Each is the whole set ([`Mercs`]). This client answers
+/// the offer 2 (the owner, 2026-11-11): a server that knows it sends layout 2,
+/// each name followed by its hirer's (for the "<Hirer's Mercenary>" tag under a
+/// merc's name plate); one that does not takes the 2 as 1 and sends layout 1.
+pub const OP_MERCS_DATA: u16 = 0x7E5B;
+/// The start menu's Group > Dismiss Mercenary, client to server: a u8, 1 (the
+/// server's `/merc dismiss`).
+pub const OP_MERC_DISMISS: u16 = 0x7E5C;
+/// go-eqoa-server's own: the live group search's standing (the GM Jibrish's
+/// petition 1476, 2026-11-11). Both ways, as [`OP_MERCS_OFFER`]: the offer (a u8
+/// layout, 1) and this client's answer (a u8, 1).
+pub const OP_GROUP_REG_OFFER: u16 = 0x7E5D;
+/// The standing, from a server the client answered, at once and whenever it
+/// changes: a u8 layout (1) and a u8 of flags ([`GroupReg`]).
+pub const OP_GROUP_REG_STATE: u16 = 0x7E5E;
+/// "Allow anyone in my group to invite", client to server: a u8, 1 yes, 0 no.
+pub const OP_GROUP_INVITES_SETTING: u16 = 0x7E5F;
+
+/// The mercenaries a server told ([`OP_MERCS_DATA`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Mercs {
+    /// the player's own is out (Group > Dismiss Mercenary)
+    pub own: bool,
+    /// every merc in the player's world, by the name its channel carries
+    pub names: Vec<String>,
+    /// each one's hirer's name, as `names` (layout 2); none from layout 1
+    pub owners: Vec<String>,
+}
+
+impl Mercs {
+    /// [`OP_MERCS_DATA`]'s body past the opcode; none for another layout or a
+    /// short one.
+    pub fn read(b: &[u8]) -> Option<Mercs> {
+        let mut r = Reader::new(b);
+        let (layout, flags, n) = (r.u8(), r.u8(), r.u16() as usize);
+        if r.error || !(1..=2).contains(&layout) {
+            return None;
+        }
+        let (mut names, mut owners) = (Vec::new(), Vec::new());
+        for _ in 0..n {
+            let len = r.u8() as usize;
+            names.push(String::from_utf8_lossy(r.bytes(len)).into_owned());
+            if layout == 2 {
+                let len = r.u8() as usize;
+                owners.push(String::from_utf8_lossy(r.bytes(len)).into_owned());
+            }
+        }
+        (!r.error).then_some(Mercs { own: flags & 1 != 0, names, owners })
+    }
+
+    /// Whether a creature of that name is a merc.
+    pub fn is(&self, name: &str) -> bool {
+        !name.is_empty() && self.names.iter().any(|n| n == name)
+    }
+
+    /// The hirer of the merc of that name, when the server said (layout 2).
+    pub fn owner(&self, name: &str) -> Option<&str> {
+        let k = self.names.iter().position(|n| !name.is_empty() && n == name)?;
+        self.owners.get(k).map(|o| o.as_str()).filter(|o| !o.is_empty())
+    }
+}
+
+/// The live group search's standing a server told ([`OP_GROUP_REG_STATE`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GroupReg {
+    /// registered as looking (0x0801 sub 2)
+    pub registered: bool,
+    /// its own "Allow anyone in my group to invite"
+    pub invites_open: bool,
+    /// its group's members invite now (in none, a raid group, or a regular
+    /// group whose leader has the setting on)
+    pub members_invite: bool,
+}
+
+impl GroupReg {
+    /// [`OP_GROUP_REG_STATE`]'s body past the opcode.
+    pub fn read(b: &[u8]) -> Option<GroupReg> {
+        match b {
+            [1, f, ..] => Some(GroupReg { registered: f & 1 != 0, invites_open: f & 2 != 0, members_invite: f & 4 != 0 }),
+            _ => None,
+        }
+    }
+}
 /// go-eqoa-server's own, no retail message either: a GM's flight (`#fly`), a
 /// u32 after the opcode, both ways. This client says it flies (1) when it is
 /// offered the GM's trigger names ([`OP_GM_TRIGGERS`], a GM's client's alone), so
@@ -159,6 +293,98 @@ pub const OP_FLY: u16 = 0x7E1B;
 pub const OP_COMBAT_RECORD: u16 = 0x7E20;
 /// The record: this client's ask (a u32 1), the server's rows (`record::read`).
 pub const OP_COMBAT_RECORD_DATA: u16 = 0x7E21;
+/// go-eqoa-server's own, no retail message either: worlds the server has past
+/// the disc's, each made of the disc's own zones (`serverworlds`), a u32 after
+/// the opcode, both ways. The server offers them (1) after the session's first
+/// character list; this client answers 1 when it can build them
+/// ([`set_world_builder`]) and is sent the list ([`OP_SERVER_WORLDS_DATA`]). A
+/// PS2 ignores the offer; a server that never makes one has the disc's worlds
+/// alone, as before.
+pub const OP_SERVER_WORLDS: u16 = 0x7E30;
+/// The list, to a client that answered [`OP_SERVER_WORLDS`]
+/// (`serverworlds::read`); this client's answer once it has built them: the
+/// worlds it holds (`serverworlds::encode_ready`), which are all the server
+/// sends it into.
+pub const OP_SERVER_WORLDS_DATA: u16 = 0x7E31;
+
+/// Which of the session's characters a login needs the server's worlds for,
+/// from a server that says (go-eqoa-server's since 2026-11-10, petition 1468),
+/// to a client that answered [`OP_SERVER_WORLDS`] 1, before the list and
+/// after every later character list (`serverworlds::read_chars`, kept as
+/// [`Session::pick_needs_worlds`]): a character played while the worlds are
+/// still being built waits for them only when it is one of these, natively
+/// as in a page. A server that never sends it (an older one) leaves a page
+/// holding every character, as before, and a native client none.
+pub const OP_SERVER_WORLDS_CHARS: u16 = 0x7E54;
+
+/// What builds a server's worlds off the player's disc (the game's
+/// `serverworlds`, set once at its start): handed the list, it answers on the
+/// channel, once, with the ids of those it holds. With none set this client
+/// does not take the offer (a page, a test).
+pub type WorldBuilder = fn(&[crate::serverworlds::World]) -> std::sync::mpsc::Receiver<Vec<u8>>;
+
+static WORLD_BUILDER: std::sync::OnceLock<WorldBuilder> = std::sync::OnceLock::new();
+
+/// Sets what builds a server's worlds ([`WorldBuilder`]).
+pub fn set_world_builder(f: WorldBuilder) {
+    let _ = WORLD_BUILDER.set(f);
+}
+
+/// go-eqoa-server's own, no retail message either: capes (`cape`), a u32 after
+/// the opcode, both ways. The server offers them (1) after the session's first
+/// character list, and only where it turns them on (its `world.capes`); this
+/// client answers 1 at once, and from then on it is sent a cape item as one of
+/// wear slot [`crate::cape::WEAR_SLOT`] worn in equip slot
+/// [`crate::cape::EQUIP_SLOT`], the capes of its list's characters
+/// ([`OP_CAPES_LIST`]) and of the players it sees ([`OP_CAPES_IN_VIEW`]). A PS2
+/// ignores the offer and is sent a cape as a plain item; a server that never
+/// makes one gets no answer, and nothing of capes is drawn or worn.
+pub const OP_CAPES: u16 = 0x7E25;
+/// The capes of the players this client sees, by the id it knows each by (its
+/// own character's too): `cape::read`, the whole set each time.
+pub const OP_CAPES_IN_VIEW: u16 = 0x7E26;
+/// go-eqoa-server's own, no retail message either: a pack and a bank past
+/// CLIENT's 40 records (its `world.pack_slots`, `world.bank_slots`), both ways.
+/// The server offers them after the session's first character list: a u32 1,
+/// then u32 the pack's records and u32 the bank's; this client answers at once
+/// with a u32 1 and the records it holds of each (the offer's, at most
+/// [`ITEM_LISTS_MOST`]), and is told the sizes in force before every
+/// MemoryDump ([`OP_ITEM_LISTS_IN_FORCE`]). A PS2 ignores the offer and holds
+/// 40; a server that never makes one gets no answer, and this client holds
+/// CLIENT's 40 of each too.
+pub const OP_ITEM_LISTS: u16 = 0x7E29;
+/// The sizes in force, to a client that answered [`OP_ITEM_LISTS`]: u32 the
+/// pack's records, u32 the bank's, before every MemoryDump, whose lists hold
+/// that many at most; kept as [`Session::item_lists`] until the next.
+pub const OP_ITEM_LISTS_IN_FORCE: u16 = 0x7E2A;
+/// The records a list holds when no server said otherwise: CLIENT's
+/// (`VIItemList`'s `ItemInternal[40]`, every `AddItem`'s 40).
+pub const ITEM_LIST_DISC: u32 = 40;
+/// The most this client holds in a list: the server names a record by its
+/// index in a byte (0x003C, 0x003E, 0x003F, 0x1250).
+pub const ITEM_LISTS_MOST: u32 = 255;
+/// The capes of the characters in its list, by each one's server id:
+/// `cape::read`, the whole list after each character list.
+pub const OP_CAPES_LIST: u16 = 0x7E27;
+/// go-eqoa-server's own, no retail message either: a jump (`walker`, the client's
+/// own: the game has none), a u32 after the opcode, both ways. The server offers it
+/// (1, `world.jump`) to a client of its own only, one that answered its bug report
+/// offer ([`OP_BUG_REPORTS`]), so a PS2 is never sent it; this client answers 1 at
+/// once and jumps from then on, and the server's movement check takes a jump's arc
+/// from it. A 0 from the server (after a restart into one without jumps) ends it.
+/// A server that never offers it (Sandstorm's, eqoa.live's) gets no answer, and the
+/// walk never leaves the ground there, as the game's never does.
+pub const OP_JUMP: u16 = 0x7E28;
+/// go-eqoa-server's own, no retail message either: a GM's travel by the map. The
+/// server offers it with the GM's channel at world entry, to a GM's client alone,
+/// a u32 after the opcode (1, [`Session::map_travel`]); no answer. A PS2 ignores
+/// the offer; a server that never makes one (Sandstorm's, eqoa.live's) is never
+/// asked ([`OP_MAP_TRAVEL_TO`]).
+pub const OP_MAP_TRAVEL: u16 = 0x7E34;
+/// A GM's ask to travel to a spot of its map (`Session::map_travel_to`): u32 the
+/// world (the MemoryDump's world index), f32 x, f32 z. The server moves a GM's
+/// character there, on the ground's floor, and refuses anyone else's.
+pub const OP_MAP_TRAVEL_TO: u16 = 0x7E35;
 /// go-eqoa-server's own, no retail message either: the whole of a raid group,
 /// where a roster holds four (`m_group`). The offer, from the server once the
 /// player is in the world, a u32 after the opcode (1); a server without it
@@ -172,9 +398,20 @@ pub const OP_RAID_ROSTER_ANSWER: u16 = 0x7E19;
 /// each [`RaidMember`] (u32 id, u8 and the bytes of its name, u8 class, u8
 /// level, u8 HP of 255, u8 power of 255). 0 members: no raid group (now).
 pub const OP_RAID_ROSTER: u16 = 0x7E1A;
-/// The most of a note sent, in bytes: one message, as go-eqoa-server takes
-/// each fragment of a longer one for a message of its own.
+/// The most of a note sent, in bytes: one message, as a go-eqoa-server of
+/// before 2026-11-08 takes each fragment of a longer one for a message of its
+/// own (and says nothing of a petition's length in its offer).
 pub const BUG_NOTE_MAX: usize = 1000;
+/// The most characters of a petition's text (Support's request or reply,
+/// 0x0AA1) for a server that says nothing of it: a PS2's form
+/// (`VIWndCSRequest`'s `m_text[512]`, 511 and its end), which every server takes.
+pub const PETITION_TEXT_DISC: usize = 511;
+/// The most this client's form holds (2,048 with its end), for a server whose
+/// bug report offer ([`OP_BUG_REPORTS`]) says it takes as many (petition 1300,
+/// 2026-11-08: "Increase the text limit in the bug reporting window"). A request
+/// that long is 4,103 bytes, past one message (1,300): DRDP sends it in four
+/// pieces, which go-eqoa-server puts back together since it says so.
+pub const PETITION_TEXT_MOST: usize = 2047;
 
 /// One member of a raid group ([`OP_RAID_ROSTER`]): `id` as this client knows
 /// it (its own, an entity's, or the roster's stand-in for one out of sight).
@@ -194,24 +431,14 @@ pub struct RaidMember {
 /// and robe's colours).
 pub const DISC_GEAR_SIZE: usize = 32;
 pub const LIVE_GEAR_SIZE: usize = 71;
-
-/// go-eqoa-server's own, no retail message: others' power, for the bars the
-/// client draws under its group's, its target's and their target's health
-/// (the game shows no one's but the player's own). A u32 after the opcode,
-/// both ways: the server offers it (1) once the player is in the world, the
-/// client answers 1 to have it and 0 to stop (`agree_power_bars`). A PS2
-/// ignores the offer, as it does [`OP_ENTITY_VIEW`]'s; nothing is asked of a
-/// server that made none.
-pub const OP_POWER_BARS: u16 = 0x7E01;
-/// The power, from a server the client asked ([`OP_POWER_BARS`]): a u8
-/// count, then each a u32 id (as this client knows the entity) and a u8
-/// power of 255. Each is the whole set: an id it leaves out has no bar.
-pub const OP_POWER_BARS_DATA: u16 = 0x7E02;
 /// go-eqoa-server's own, no retail message: the quest marks the map draws (a
 /// "!" at each giver of a quest the player may take, a "?" where a step of
-/// its quests is to be done). A u32 after the opcode, both ways, as
-/// [`OP_POWER_BARS`]: offered once the player is in the world, answered 1 to
-/// have them and 0 to stop (`agree_quest_marks`). A PS2 ignores the offer.
+/// its quests is to be done). A u32 after the opcode, both ways: offered once
+/// the player is in the world, answered 1 to have them and 0 to stop
+/// (`agree_quest_marks`, the Quest Helper's). A PS2 ignores the offer, as it
+/// does [`OP_ENTITY_VIEW`]'s; a client with the Quest Helper off answers
+/// nothing, and nothing is asked of a server that made none. (0x7E01 and
+/// 0x7E02, others' power for mana bars, this client has no case for.)
 pub const OP_QUEST_MARKERS: u16 = 0x7E03;
 /// The marks, from a server the client asked ([`OP_QUEST_MARKERS`]): a u8
 /// count, then each its u8 kind ([`QuestMark::kind`]), u8 world, f32 x and z,
@@ -229,6 +456,233 @@ pub const OP_QUEST_PROGRESS: u16 = 0x7E05;
 /// nothing to count); every text a u8 byte count and UTF-8. Each is the
 /// whole tracker.
 pub const OP_QUEST_PROGRESS_DATA: u16 = 0x7E06;
+/// go-eqoa-server's own: the effects on the player's pet, for the row under
+/// the pet's bar (the user, 2026-11-09: "put the buff icons under the pet name
+/// plate"; `Play::pet_effects`). A u32 after the opcode, both ways: offered
+/// once the player is in the world, answered 1 to have them and 0 to stop, at
+/// once and whenever that changes (`agree_pet_effects`, the Extended page's Pet
+/// Effects). CLIENT shows the pet's effects nowhere (its effects window is
+/// channel 0x43, the player's own), so a PS2 ignores the offer and is sent
+/// none; nothing is asked of a server that made no offer.
+pub const OP_PET_EFFECTS: u16 = 0x7E32;
+/// The pet's effects, from a server the client asked ([`OP_PET_EFFECTS`]),
+/// whenever they change: a u8 count, then each its u32 icon (a DictID, as
+/// channel 0x43's), u32 milliseconds left as the server made the message, and
+/// its name (a u8 byte count and UTF-8), in the order they went on. Each is the
+/// whole set; none, no pet.
+pub const OP_PET_EFFECTS_DATA: u16 = 0x7E33;
+/// go-eqoa-server's own: what made each figure, for the Extended page's Number
+/// Colors (`Play::damage_indication`; the user, 2026-11-09: "we can add the
+/// number colors to extended menu"). The offer, server to client once the
+/// player is in the world: a u8, 1, the tag's layout. CLIENT has no such case,
+/// so a PS2 ignores it; nothing is asked of a server that made no offer.
+pub const OP_NUMBER_TAGS_OFFER: u16 = 0x7E38;
+/// The answer to [`OP_NUMBER_TAGS_OFFER`], client to server, at once and
+/// whenever it changes (`agree_number_tags`): a u8, 1 to have the figures
+/// tagged (a Number Colors row not Default), 0 to stop. From a 1 on, each 0x00DB
+/// of a figure the player or its pet made carries one byte after its body
+/// ([`number_tag`]); every other is the retail body.
+pub const OP_NUMBER_TAGS_ANSWER: u16 = 0x7E39;
+/// go-eqoa-server's own: a damage meter, who in the player's group did how much
+/// damage in the fight and how fast (`dpsmeter`, the Extended page's DPS Meter;
+/// the server owner, 2026-11-10: "lets add dps meters, will work solo, group,
+/// raid"). The offer, server to client once the player is in the world: a u8, 1,
+/// [`OP_DPS_METER_DATA`]'s layout. CLIENT has no such case, so a PS2 ignores it;
+/// nothing is asked of a server that made no offer.
+pub const OP_DPS_METER_OFFER: u16 = 0x7E3A;
+/// The answer to [`OP_DPS_METER_OFFER`], client to server, at once and whenever
+/// it changes (`agree_dps_meter`): a u8, 1 to be sent the meter, 0 to stop.
+pub const OP_DPS_METER_ANSWER: u16 = 0x7E3B;
+/// The meter, from a server the client asked: the fight of the player's group
+/// at most once a second while it changes, and once more as it ends (the server
+/// ends it 10 s after the group's last damage). [`DpsMeter`] has the layout.
+pub const OP_DPS_METER_DATA: u16 = 0x7E3C;
+/// A reset, client to server (`reset_dps_meter`): a u8, 1. The server drops the
+/// fight under way (nothing more is sent of it) and numbers its next another.
+pub const OP_DPS_METER_RESET: u16 = 0x7E3D;
+
+/// A fight on the meter ([`OP_DPS_METER_DATA`]): u8 layout (1), u32 its number
+/// (another number, another fight), u8 1 when it is over (its last message), u32
+/// its length in ms (from its first damage to its latest), u32 the damage of all
+/// its lines, u16 how many lines it has, u16 the player's own line's place among
+/// them (1 the most damage), u8 how many this message holds, then each
+/// [`DpsLine`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DpsMeter {
+    pub fight: u32,
+    pub over: bool,
+    pub length_ms: u32,
+    /// The damage of every line, those not sent too: what a line's share is of.
+    pub total: u32,
+    /// The fight's lines in all; at most the server's 24 are sent, the most
+    /// damage first, the player's own always among them (in the last place
+    /// when its own place is past them).
+    pub count: u16,
+    /// The player's own line's place among all of them, 1 the most damage.
+    pub place: u16,
+    pub lines: Vec<DpsLine>,
+}
+
+/// A line of the meter: u8 flags (1 the player's own, 2 no longer in its group),
+/// u8 class, u32 damage (its pet's included), u32 its pet's share of that, and
+/// its name (a u8 byte count and UTF-8).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DpsLine {
+    pub own: bool,
+    pub left: bool,
+    pub class: u8,
+    pub damage: u32,
+    pub pet: u32,
+    pub name: String,
+}
+
+/// [`OP_DPS_METER_DATA`]'s body, or None when it is short or of another layout.
+fn read_dps_meter(r: &mut Reader) -> Option<DpsMeter> {
+    if r.u8() != 1 {
+        return None;
+    }
+    let (fight, over, length_ms, total, count, place) = (r.u32(), r.u8() == 1, r.u32(), r.u32(), r.u16(), r.u16());
+    let n = r.u8() as usize;
+    let mut lines = Vec::with_capacity(n);
+    for _ in 0..n {
+        let (flags, class, damage, pet) = (r.u8(), r.u8(), r.u32(), r.u32());
+        let len = r.u8() as usize;
+        let name = String::from_utf8_lossy(r.bytes(len)).into_owned();
+        lines.push(DpsLine { own: flags & 1 != 0, left: flags & 2 != 0, class, damage, pet, name });
+    }
+    (!r.error).then_some(DpsMeter { fight, over, length_ms, total, count, place, lines })
+}
+/// go-eqoa-server's own, no retail message: a raid's windows (`raid`; the GM
+/// Jibrish's petitions 1448 and 1451: the leader's mark, the loot rolls' pop-up,
+/// the master looter's Assign and Abandon). The offer, server to client once the
+/// player is in the world: a u8, 1. CLIENT has no such case, so a PS2 ignores it
+/// and is told the same in chat lines; nothing is asked of a server that made no
+/// offer.
+pub const OP_RAID_OFFER: u16 = 0x7E42;
+/// The answer to [`OP_RAID_OFFER`], client to server, at once and whenever it
+/// changes (`agree_raid`): a u8, 1 to be sent the raid's state, its rolls and
+/// the master looter's list, 0 for the chat lines a PS2 gets.
+pub const OP_RAID_ANSWER: u16 = 0x7E43;
+/// The raid as it is, to a client that answered 1, on a change and once all
+/// zero when it is in no raid: `raid::read_state`.
+pub const OP_RAID_STATE: u16 = 0x7E44;
+/// A loot roll offered, or over for this client (0 seconds left):
+/// `raid::read_roll`.
+pub const OP_RAID_ROLL: u16 = 0x7E45;
+/// A roll's answer, client to server: `raid::roll_choice`. The server answers
+/// with the roll over ([`OP_RAID_ROLL`], 0 seconds).
+pub const OP_RAID_ROLL_CHOICE: u16 = 0x7E46;
+/// To the master looter, after the corpse it opened (0x0018): whom it may give
+/// the corpse's items to, and for how long; 0 when that is over:
+/// `raid::read_master_loot`.
+pub const OP_RAID_MASTER_LOOT: u16 = 0x7E47;
+/// The raid menu's commands, client to server: `raid::Command`.
+pub const OP_RAID_COMMAND: u16 = 0x7E48;
+
+/// What made a figure, the byte after a tagged 0x00DB's body
+/// ([`OP_NUMBER_TAGS_ANSWER`]): its kind and whether the player's pet made it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NumberTag {
+    /// The low 7 bits: 1 a swing, 2 a spell or an ability, 3 a damage over
+    /// time's tick, 4 a damage shield, 5 a proc, 6 a heal, 7 a heal over
+    /// time's tick (and any other a later server may send).
+    pub kind: u8,
+    /// Bit 7: the player's pet made it.
+    pub pet: bool,
+}
+
+/// A 0x00DB's tag: `rest` is what follows its body (u32 attacker, zigzag
+/// amount, u32 defender), read only from a server that offered tags
+/// (`offered`); one byte is the tag, a kind of 0 none, and anything else
+/// (no byte, a server's patch's three colour bytes) none.
+pub fn number_tag(rest: &[u8], offered: bool) -> Option<NumberTag> {
+    let &[b] = rest else { return None };
+    (offered && b & 0x7F != 0).then_some(NumberTag { kind: b & 0x7F, pet: b & 0x80 != 0 })
+}
+
+/// One effect on the pet ([`OP_PET_EFFECTS_DATA`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PetEffect {
+    /// Its icon's DictID (UI.CSF's 32x32 surfaces).
+    pub icon: u32,
+    /// What was left of it when the server sent it, in ms.
+    pub left_ms: u32,
+    pub name: String,
+}
+
+/// [`OP_PET_EFFECTS_DATA`]'s body, or None when it is short.
+fn read_pet_effects(r: &mut Reader) -> Option<Vec<PetEffect>> {
+    let n = r.u8() as usize;
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        let (icon, left_ms) = (r.u32(), r.u32());
+        let len = r.u8() as usize;
+        let name = String::from_utf8_lossy(r.bytes(len)).into_owned();
+        out.push(PetEffect { icon, left_ms, name });
+    }
+    (!r.error).then_some(out)
+}
+
+/// go-eqoa-server's own: a tint on the bodies of the NPCs of a name (the server
+/// owner, 2026-11-10: Yhafiran, "the black and green oriental dragon", drawn as
+/// the disc's green one tinted; `crate::npctint`, the game's `npctint`). The
+/// offer, server to client once the player is in the world: a u8, 1, the layout
+/// of [`OP_NPC_TINTS`]. CLIENT has no such case, so a PS2 ignores it and draws
+/// every body in its own colours.
+pub const OP_NPC_TINTS_OFFER: u16 = 0x7E3E;
+/// The answer to [`OP_NPC_TINTS_OFFER`], client to server, at once: a u8, 1 to
+/// be sent the tints (this client drops what it held and is sent the set there
+/// is), 0 to stop.
+pub const OP_NPC_TINTS_ANSWER: u16 = 0x7E3F;
+/// The tints, from a server the client answered ([`OP_NPC_TINTS_ANSWER`]), at
+/// once and whenever a GM changes them: a u16 count, then each its NPC name (a
+/// u8 byte count and UTF-8, keyed as `crate::npctint::key` keys one) and its u32
+/// colour 0xRRGGBBAA (`crate::npctint::read`). Each is the whole set.
+pub const OP_NPC_TINTS: u16 = 0x7E40;
+
+/// go-eqoa-server's own: a monster's name and level, shown when the player
+/// talks to it (□, Q) and it has nothing to say (the GM Jibrish's petition 1459,
+/// 2026-11-10: "press the mob information button on monster ... This should
+/// ONLY show the monsters name and level, nothing else"; the server's
+/// `world.mob_info`). The offer, server to client once the player is in the
+/// world: a u8, 1, the layout of [`OP_MOB_INFO`]. CLIENT has no such case, so a
+/// PS2 ignores it and is shown the two lines in a dialogue box (0x0046).
+pub const OP_MOB_INFO_OFFER: u16 = 0x7E4C;
+/// The answer to [`OP_MOB_INFO_OFFER`], client to server, at once: a u8, 1 to be
+/// sent [`OP_MOB_INFO`] in place of the dialogue box.
+pub const OP_MOB_INFO_ANSWER: u16 = 0x7E4D;
+/// A monster's name and level, from a server the client answered, in answer to
+/// its 0x0004 on a living monster with nothing to say (or out of the talk's
+/// reach): a u8 layout (1), the u32 id the 0x0004 named, a u8 its level and its
+/// name (a u8 byte count and the bytes). Shown in the target's details box as
+/// CLIENT's `DrawTargetInfo` shows a pet's (`Play::target_info_text`), while □
+/// is held.
+pub const OP_MOB_INFO: u16 = 0x7E4E;
+
+/// go-eqoa-server's own: item links in chat (the GM Jibrish's petition 1463,
+/// `crate::itemlink`). Both ways: the server's offer at every world entry (a
+/// u8, the layout, `itemlink::LAYOUT`), and the client's answer (a u8, 1 to be
+/// sent [`OP_ITEM_LINK_LINE`] lines and to send [`OP_ITEM_LINK_SAY`], 0 for the
+/// plain lines a PS2 gets). CLIENT has no case for it: a PS2 ignores the offer.
+pub const OP_ITEM_LINKS: u16 = 0x7E4F;
+
+/// go-eqoa-server's own: the profanity filter set from the client's Options >
+/// Interface row (the GM Jibrish's petition 1490). Both ways: the server's
+/// offer at every world entry (a u8, the layout, 1), and the client's answer
+/// (a u8, 1 the filter on, 0 off), at once and whenever the row changes. The
+/// filter is the server's own (retail's 0x0045, on at every login); a PS2
+/// ignores the offer and keeps it on.
+pub const OP_PROFANITY_CHOICE: u16 = 0x7E60;
+/// A typed line with links, client to server, in place of its retail message
+/// (`itemlink::say`).
+pub const OP_ITEM_LINK_SAY: u16 = 0x7E50;
+/// A retail chat line with its links, server to client (`itemlink::read_line`).
+pub const OP_ITEM_LINK_LINE: u16 = 0x7E51;
+/// A link opened, client to server: the u32 link id (`itemlink::ask`).
+pub const OP_ITEM_LINK_ASK: u16 = 0x7E52;
+/// The answer to [`OP_ITEM_LINK_ASK`]: the link id, and its item's snapshot as
+/// an inventory record or none (`itemlink::read_record`).
+pub const OP_ITEM_LINK_RECORD: u16 = 0x7E53;
 
 /// One quest on the tracker ([`OP_QUEST_PROGRESS_DATA`]): its name and its
 /// step's objectives.
@@ -326,7 +780,18 @@ fn read_quest_marks(r: &mut Reader) -> Option<Vec<QuestMark>> {
     (!r.error).then_some(out)
 }
 
-
+/// go-eqoa-server's own, no retail message: others' power, for the bars the
+/// client draws under its group's, its target's and their target's health
+/// (the game shows no one's but the player's own). A u32 after the opcode,
+/// both ways: the server offers it (1) once the player is in the world, the
+/// client answers 1 to have it and 0 to stop (`agree_power_bars`). A PS2
+/// ignores the offer, as it does [`OP_ENTITY_VIEW`]'s; nothing is asked of a
+/// server that made none.
+pub const OP_POWER_BARS: u16 = 0x7E01;
+/// The power, from a server the client asked ([`OP_POWER_BARS`]): a u8
+/// count, then each a u32 id (as this client knows the entity) and a u8
+/// power of 255. Each is the whole set: an id it leaves out has no bar.
+pub const OP_POWER_BARS_DATA: u16 = 0x7E02;
 #[derive(Clone, Debug)]
 pub struct Shard {
     pub name: String,
@@ -392,6 +857,10 @@ pub struct NewChar {
     /// The points spent over the race's and the class's bonuses (the page
     /// sends a stat less both bonuses), 20 at most in all.
     pub stats: [i32; 7],
+    /// A custom race's own options chosen, each row's key and step (`raceopts`):
+    /// sent after 0x002B's own fields, only when there are some, which there
+    /// are only from a server that sent the race's options.
+    pub options: Vec<(String, u8)>,
 }
 
 #[derive(Clone, Debug)]
@@ -439,6 +908,24 @@ pub enum Event {
     GroupRoster { ids: Vec<u32>, names: Vec<String> },
     /// [`OP_RAID_ROSTER`]: a message's part of the whole raid group.
     RaidRoster { total: usize, first: usize, rows: Vec<RaidMember> },
+    /// [`OP_DPS_METER_DATA`]: the meter's fight as it stands.
+    DpsMeter(DpsMeter),
+    /// [`OP_RAID_STATE`]: the raid as it is now.
+    RaidState(crate::raid::State),
+    /// [`OP_MOB_INFO`]: the monster the client knows by `id` has nothing to say;
+    /// its name and level, for the target's details box.
+    MobInfo { id: u32, level: u8, name: String },
+    /// [`OP_ITEM_LINK_LINE`]: the links of the chat line the next event carries
+    /// (the line's own message, read as ever, comes right after it).
+    ChatLinks(Vec<crate::itemlink::ChatLink>),
+    /// [`OP_ITEM_LINK_RECORD`]: a link's item as the server snapshotted it, or
+    /// none (expired, or never made).
+    ItemLinkRecord { id: u32, item: Option<Box<crate::dump::NetItem>> },
+    /// [`OP_RAID_ROLL`]: a loot roll offered, or over (0 seconds left).
+    RaidRoll(crate::raid::Roll),
+    /// [`OP_RAID_MASTER_LOOT`]: the master looter's list for the corpse it
+    /// opened, or none (over).
+    MasterLoot(Option<crate::raid::MasterLoot>),
     /// 0x0773 (`Msg0773`): an invitation from `id`.
     GroupInvite { id: u32, x: i32, name: String },
     /// 0x0774 (`Msg0774`): the invitation from `id` withdrawn.
@@ -576,6 +1063,10 @@ pub struct Session {
     pub drdp: Drdp<Ee>,
     socket: Box<dyn Datagrams>,
     pub conn: Option<ConnId>,
+    /// Messages not sent since the game connection went from under the session
+    /// (`game_conn`), and whether it did.
+    pub sends_lost: u32,
+    conn_gone: bool,
     pub state: State,
     pub self_id: Option<u64>,
     /// 0x07D1's mask (`VIClient+0x50304`), as the server last sent it.
@@ -596,25 +1087,45 @@ pub struct Session {
     pub power_bars_offer: bool,
     power_bars_asked: Option<bool>,
     pub power_bars: Vec<(u32, u8)>,
-    /// Whether the server offered quest marks ([`OP_QUEST_MARKERS`]), what it
-    /// was last told, and the set it last sent ([`OP_QUEST_MARKERS_DATA`]).
-    pub quest_marks_offer: bool,
-    quest_marks_asked: Option<bool>,
-    pub quest_marks: Vec<QuestMark>,
-    /// The same for the quest tracker ([`OP_QUEST_PROGRESS`],
-    /// [`OP_QUEST_PROGRESS_DATA`]).
-    pub quest_progress_offer: bool,
-    quest_progress_asked: Option<bool>,
-    pub quest_progress: Vec<TrackedQuest>,
     /// The server offered bug reports ([`OP_BUG_REPORTS`]) and this client
     /// took them: F3 and the note. Kept for the session.
     pub bug_reports: bool,
+    /// The most characters of a petition's text Support's forms hold: what
+    /// the offer said the server takes, up to [`PETITION_TEXT_MOST`], else
+    /// [`PETITION_TEXT_DISC`]. Kept for the session.
+    pub petition_text: usize,
+    /// The server offered to take crash reports ([`OP_CRASH_OFFER`]): the
+    /// most bytes of each, for the game to send what it kept
+    /// (`eqoa::crashfile`), which takes it.
+    pub crash_offer: Option<usize>,
+    /// The server's answers to the crash reports sent ([`OP_CRASH_FILED`]):
+    /// each report's number and its ticket (0 not kept), for the game.
+    pub crash_filed: Vec<(u32, u32)>,
     /// The server lets any member of a group invite into it
     /// ([`OP_MEMBER_INVITES`]). Kept for the session.
     pub member_invites: bool,
+    /// The mercenaries the server last told ([`OP_MERCS_DATA`]); none from a
+    /// server that never offered them, and at a new connection.
+    pub mercs: Option<Mercs>,
+    /// The group search's standing the server last told
+    /// ([`OP_GROUP_REG_STATE`]); none from a server that never offered it, and
+    /// at a new connection.
+    pub group_reg: Option<GroupReg>,
     /// What character creation takes past the game's, as the server last told
     /// it ([`OP_CREATION_RACES`]); none from a server that never offers it.
     pub creation: Option<crate::creation::Creation>,
+    /// Each custom race's own options, as the server last told them
+    /// ([`OP_RACE_OPTIONS_DATA`]); none from a server that never offers them.
+    pub race_options: Option<crate::raceopts::Options>,
+    /// The looks list the server last sent ([`OP_RACE_LOOKS`]: its body),
+    /// until the game takes it (`raceopts`), whatever screen is up: the
+    /// pregame's, the world's, a script's straight login.
+    pub race_looks: Option<Vec<u8>>,
+    /// The NPCs' body tints the server last sent ([`OP_NPC_TINTS`], by name as
+    /// `crate::npctint::key` keys one), until the game takes them (`npctint`):
+    /// the empty set at its offer and at a new connection, this client holding
+    /// none then.
+    pub npc_tints: Option<Vec<(String, u32)>>,
     /// The server has this client's character flying ([`OP_FLY`]); gone with
     /// the connection, as the server's goes with its login. A dump (a respawn,
     /// a restart of the server's) leaves it.
@@ -623,9 +1134,91 @@ pub struct Session {
     /// ([`OP_RAID_ROSTER_OFFER`]), and what it was last told since the offer.
     pub raid_roster_offer: bool,
     raid_roster_asked: Option<bool>,
+    /// The server's worlds past the disc's, as it last listed them
+    /// ([`OP_SERVER_WORLDS_DATA`]); none from a server that never offers them.
+    pub server_worlds: Option<Vec<crate::serverworlds::World>>,
+    /// The builder's answer still to come: the list is in and being built.
+    worlds_building: Option<std::sync::mpsc::Receiver<Vec<u8>>>,
+    /// The offer was taken and the server not yet told what this client holds.
+    worlds_pending: bool,
+    /// The characters a login needs the server's worlds for, as the server
+    /// last said ([`OP_SERVER_WORLDS_CHARS`]); none from a server that never
+    /// says.
+    worlds_chars: Option<Vec<u32>>,
+    /// A character was played and the game connection has not opened yet
+    /// (`select_character` to `TYPE_CONNECT`): what is sent now goes on a
+    /// connection the server may already have left.
+    picked: bool,
+    /// The worlds held, as the server was told while `picked`: told again on
+    /// the game connection (`worlds_answer`).
+    worlds_retell: Option<Vec<u8>>,
     /// The server offered the combat record ([`OP_COMBAT_RECORD`]) and this
     /// client took it: Character > Combat Record. Kept for the session.
     pub combat_record: bool,
+    /// The server offered capes ([`OP_CAPES`]) and this client took them: a
+    /// cape is worn in its slot and drawn. Kept for the session.
+    pub capes: bool,
+    /// The records the pack (worn items among them) and the bank hold, as the
+    /// server last said before a MemoryDump ([`OP_ITEM_LISTS_IN_FORCE`]);
+    /// CLIENT's [`ITEM_LIST_DISC`] of each from a server that never says.
+    pub item_lists: [u32; 2],
+    /// The capes of the characters in the list, by server id
+    /// ([`OP_CAPES_LIST`]), and of the players seen, by the id this client
+    /// knows each by ([`OP_CAPES_IN_VIEW`]); `capes_changed` counts the
+    /// messages, so what draws them sees a new one.
+    pub cape_list: std::collections::HashMap<i64, crate::cape::Cape>,
+    pub capes_in_view: std::collections::HashMap<u32, crate::cape::Cape>,
+    pub capes_changed: u64,
+    /// The server offered the jump ([`OP_JUMP`]) and this client took it (the
+    /// jump key, `walker`); gone with the connection, as the server's goes with
+    /// its player.
+    pub jumps: bool,
+    /// The server offered a GM's travel by the map ([`OP_MAP_TRAVEL`]): the
+    /// map's Ctrl+click asks for its spot (`map_travel_to`); gone with the
+    /// connection, as the GM's channel goes with its login.
+    pub map_travel: bool,
+    /// Whether the server offered quest marks ([`OP_QUEST_MARKERS`]), what it
+    /// was last told (none since the offer), and the set it last sent
+    /// ([`OP_QUEST_MARKERS_DATA`]).
+    pub quest_marks_offer: bool,
+    quest_marks_asked: Option<bool>,
+    pub quest_marks: Vec<QuestMark>,
+    /// The same for the quest tracker ([`OP_QUEST_PROGRESS`],
+    /// [`OP_QUEST_PROGRESS_DATA`]).
+    pub quest_progress_offer: bool,
+    quest_progress_asked: Option<bool>,
+    pub quest_progress: Vec<TrackedQuest>,
+    /// Whether the server offered the pet's effects ([`OP_PET_EFFECTS`]),
+    /// what it was last told (none since the offer), the set it last sent
+    /// ([`OP_PET_EFFECTS_DATA`]) and when it came (`now`'s clock): what is
+    /// left of each is counted down from then (`pet_effects_left`).
+    pub pet_effects_offer: bool,
+    pet_effects_asked: Option<bool>,
+    pub pet_effects: Vec<PetEffect>,
+    pub pet_effects_at: u32,
+    /// Whether the server offered the number tags ([`OP_NUMBER_TAGS_OFFER`])
+    /// on this connection, and what it was last told (none since the offer).
+    pub number_tags_offer: bool,
+    number_tags_asked: Option<bool>,
+    /// The same for the damage meter ([`OP_DPS_METER_OFFER`]).
+    pub dps_meter_offer: bool,
+    dps_meter_asked: Option<bool>,
+    /// Whether the server offered the raid's windows ([`OP_RAID_OFFER`]) on
+    /// this connection, and what it was last told (none since the offer).
+    pub raid_offer: bool,
+    raid_asked: Option<bool>,
+    /// Whether the server offered item links ([`OP_ITEM_LINKS`]) on this
+    /// connection, and what it was last told (none since the offer).
+    pub item_links_offer: bool,
+    item_links_asked: Option<bool>,
+    /// Whether the server offered to take the profanity filter's setting
+    /// ([`OP_PROFANITY_CHOICE`]) on this connection, and what it was last told
+    /// (none since the offer).
+    pub profanity_offer: bool,
+    profanity_asked: Option<bool>,
+    /// The worn looks the character hides, as the server told them
+    /// (`crate::hidelook`): none offered until it does.
+    pub hide_look: crate::hidelook::State,
     user: String,
     token: [u8; 32],
     start: Instant,
@@ -756,19 +1349,56 @@ impl Session {
             power_bars_offer: false,
             power_bars_asked: None,
             power_bars: Vec::new(),
+            bug_reports: false,
+            petition_text: PETITION_TEXT_DISC,
+            crash_offer: None,
+            crash_filed: Vec::new(),
+            member_invites: false,
+            mercs: None,
+            group_reg: None,
+            creation: None,
+            server_worlds: None,
+            worlds_building: None,
+            worlds_pending: false,
+            worlds_chars: None,
+            picked: false,
+            worlds_retell: None,
+
+            race_options: None,
+            race_looks: None,
+            npc_tints: None,
+            flying: false,
+            raid_roster_offer: false,
+            raid_roster_asked: None,
+            combat_record: false,
+            capes: false,
+            item_lists: [ITEM_LIST_DISC; 2],
+            cape_list: Default::default(),
+            capes_in_view: Default::default(),
+            capes_changed: 0,
+            jumps: false,
+            map_travel: false,
             quest_marks_offer: false,
             quest_marks_asked: None,
             quest_marks: Vec::new(),
             quest_progress_offer: false,
             quest_progress_asked: None,
             quest_progress: Vec::new(),
-            bug_reports: false,
-            member_invites: false,
-            creation: None,
-            flying: false,
-            raid_roster_offer: false,
-            raid_roster_asked: None,
-            combat_record: false,
+            pet_effects_offer: false,
+            pet_effects_asked: None,
+            pet_effects: Vec::new(),
+            pet_effects_at: 0,
+            number_tags_offer: false,
+            number_tags_asked: None,
+            dps_meter_offer: false,
+            dps_meter_asked: None,
+            raid_offer: false,
+            raid_asked: None,
+            item_links_offer: false,
+            item_links_asked: None,
+            profanity_offer: false,
+            profanity_asked: None,
+            hide_look: crate::hidelook::State::default(),
             user: user.to_string(),
             token,
             start: Instant::now(),
@@ -777,6 +1407,8 @@ impl Session {
             datagrams_in: 0,
             last_datagram: None,
             debug: std::env::var_os("EQOA_NET_DEBUG").is_some(),
+            sends_lost: 0,
+            conn_gone: false,
             chat_mode: 0,
             held: Vec::new(),
             early_states: Vec::new(),
@@ -814,7 +1446,7 @@ impl Session {
 
     /// `SendRaw`: a guaranteed message on the current connection.
     pub fn send(&mut self, data: &[u8]) {
-        if let Some(c) = self.conn {
+        if let Some(c) = self.game_conn() {
             if let Some(r) = self.record.as_mut() {
                 r.push((drdp::TYPE_GUARANTEED, data.to_vec()));
             }
@@ -824,11 +1456,39 @@ impl Session {
 
     /// A state channel update (0x40 is the player's own state).
     pub fn send_state(&mut self, channel: u8, data: &[u8]) {
-        if let Some(c) = self.conn {
+        if let Some(c) = self.game_conn() {
             if let Some(r) = self.record.as_mut() {
                 r.push((channel, data.to_vec()));
             }
             self.drdp.connection_send(c, data, channel);
+        }
+    }
+
+    /// The game connection, while the DRDP library still has it. The library
+    /// can let a connection go with no DISCONNECT reaching the session (system
+    /// messages 20 and 21 close every connection to an endpoint,
+    /// `drdp_close_connections_to_endpoint`), and its handle then names a freed
+    /// slot: a send on it panicked ("dangling handle"), or once the slot was
+    /// taken again went on another connection (petition 1355's crashes are
+    /// unexplained; this one is prevented). The handle is let go, its loss said
+    /// once, and every message after it counted (`sends_lost`) and not sent,
+    /// as `msg_07e0` and `msg_0790_done` already skip a connection gone.
+    pub fn game_conn(&mut self) -> Option<ConnId> {
+        match self.conn {
+            Some(c) if self.drdp.conns.contains(c) => Some(c),
+            Some(_) => {
+                self.conn = None;
+                self.conn_gone = true;
+                self.sends_lost += 1;
+                debug_line("[net] the game connection is gone: DRDP let it go with no disconnect (as its system messages 20 and 21 do); nothing more is sent on it");
+                None
+            }
+            None => {
+                if self.conn_gone {
+                    self.sends_lost += 1;
+                }
+                None
+            }
         }
     }
 
@@ -870,6 +1530,19 @@ impl Session {
         self.send(&w.data);
     }
 
+    /// A GM's travel to (`x`, `z`) of world `world` (the map's Ctrl+click), asked
+    /// of a server that offered it ([`OP_MAP_TRAVEL`]); false, and nothing sent,
+    /// otherwise (a player's map, Sandstorm's, eqoa.live's).
+    pub fn map_travel_to(&mut self, world: u32, x: f32, z: f32) -> bool {
+        if !self.map_travel {
+            return false;
+        }
+        let mut w = Writer::op(OP_MAP_TRAVEL_TO);
+        w.u32(world).u32(x.to_bits()).u32(z.to_bits());
+        self.send(&w.data);
+        true
+    }
+
     /// The combat record asked for now (its window opening), of a server that
     /// offered it ([`OP_COMBAT_RECORD`]); false, and nothing sent, otherwise.
     pub fn ask_combat_record(&mut self) -> bool {
@@ -902,6 +1575,20 @@ impl Session {
         w.u32(1).u32(b.len() as u32).bytes(b);
         self.send(&w.data);
     }
+
+    /// [`OP_CRASH_REPORT`]: a crash report kept (`number`, its text), cut to
+    /// `most` bytes (and [`CRASH_REPORT_MOST`]) on a character's edge.
+    pub fn send_crash_report(&mut self, number: u32, text: &str, most: usize) {
+        let mut end = text.len().min(most).min(CRASH_REPORT_MOST);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        let b = &text.as_bytes()[..end];
+        let mut w = Writer::op(OP_CRASH_REPORT);
+        w.u32(1).u32(number).u32(b.len() as u32).bytes(b);
+        self.send(&w.data);
+    }
+
     /// [`OP_ENTITY_VIEW`] to the server: how many entity slots this client
     /// keeps and how far it draws them (a server that offered them fills that
     /// many from that far).
@@ -915,6 +1602,10 @@ impl Session {
     /// is told whether to send it (`want`), at once and whenever that
     /// changes; one that made no offer is told nothing. Off, the set it
     /// sent is forgotten.
+    pub fn power_of(&self, id: u32) -> Option<u8> {
+        self.power_bars.iter().find(|&&(i, _)| i == id).map(|&(_, p)| p)
+    }
+
     pub fn agree_power_bars(&mut self, want: bool) {
         if !want {
             self.power_bars.clear();
@@ -928,15 +1619,17 @@ impl Session {
         self.send(&w.data);
     }
 
-    /// Quest Markers: a server that offered quest marks
-    /// ([`OP_QUEST_MARKERS`]) is told whether to send them (`want`), at once
-    /// and whenever that changes; one that made no offer is told nothing.
-    /// Off, the set it sent is forgotten.
+    /// Quest Markers (the Quest Helper's): a server that offered quest marks
+    /// ([`OP_QUEST_MARKERS`]) is told to send them (`want`) at once, and to
+    /// stop when that changes; one that made no offer is told nothing, nor is
+    /// one never asked for them (the Quest Helper off from the start: as a
+    /// client without it, it answers nothing). Off, the set it sent is
+    /// forgotten.
     pub fn agree_quest_marks(&mut self, want: bool) {
         if !want {
             self.quest_marks.clear();
         }
-        if !self.quest_marks_offer || self.quest_marks_asked == Some(want) {
+        if !self.quest_marks_offer || self.quest_marks_asked.unwrap_or(false) == want {
             return;
         }
         self.quest_marks_asked = Some(want);
@@ -953,7 +1646,7 @@ impl Session {
         if !want {
             self.quest_progress.clear();
         }
-        if !self.quest_progress_offer || self.quest_progress_asked == Some(want) {
+        if !self.quest_progress_offer || self.quest_progress_asked.unwrap_or(false) == want {
             return;
         }
         self.quest_progress_asked = Some(want);
@@ -962,13 +1655,177 @@ impl Session {
         self.send(&w.data);
     }
 
-    /// The power of 255 the server last sent for entity `id`
-    /// ([`OP_POWER_BARS_DATA`]), if it sent one.
-    pub fn power_of(&self, id: u32) -> Option<u8> {
-        self.power_bars.iter().find(|&&(i, _)| i == id).map(|&(_, p)| p)
+    /// Pet Effects: a server that offered the pet's effects
+    /// ([`OP_PET_EFFECTS`]) is told whether to send them (`want`), at once and
+    /// whenever that changes, and afresh at another offer (each world entry's
+    /// player is a new one on the server); one that made no offer is told
+    /// nothing. Off, the set it sent is forgotten.
+    pub fn agree_pet_effects(&mut self, want: bool) {
+        if !want {
+            self.pet_effects.clear();
+        }
+        if !self.pet_effects_offer || self.pet_effects_asked == Some(want) {
+            return;
+        }
+        self.pet_effects_asked = Some(want);
+        self.send_op_int(OP_PET_EFFECTS, want as u32);
     }
 
-    /// `SendOpcodeByte(op, v)`.
+    /// Number Colors: a server that offered the number tags
+    /// ([`OP_NUMBER_TAGS_OFFER`]) is told whether to send them (`want`: a row
+    /// not Default), at once and whenever that changes, and afresh at another
+    /// offer; one that made no offer is told nothing.
+    pub fn agree_number_tags(&mut self, want: bool) {
+        if !self.number_tags_offer || self.number_tags_asked == Some(want) {
+            return;
+        }
+        self.number_tags_asked = Some(want);
+        let mut w = Writer::op(OP_NUMBER_TAGS_ANSWER);
+        w.u8(want as u8);
+        self.send(&w.data);
+    }
+
+    /// The DPS Meter: a server that offered a damage meter
+    /// ([`OP_DPS_METER_OFFER`]) is told whether to send it (`want`), at once and
+    /// whenever that changes, and afresh at another offer; one that made no offer
+    /// is told nothing.
+    pub fn agree_dps_meter(&mut self, want: bool) {
+        if !self.dps_meter_offer || self.dps_meter_asked == Some(want) {
+            return;
+        }
+        self.dps_meter_asked = Some(want);
+        let mut w = Writer::op(OP_DPS_METER_ANSWER);
+        w.u8(want as u8);
+        self.send(&w.data);
+    }
+
+    /// The raid's windows: a server that offered them ([`OP_RAID_OFFER`]) is
+    /// told whether to send them (`want`), at once and whenever that changes,
+    /// and afresh at another offer; one that made no offer is told nothing.
+    pub fn agree_raid(&mut self, want: bool) {
+        if !self.raid_offer || self.raid_asked == Some(want) {
+            return;
+        }
+        self.raid_asked = Some(want);
+        let mut w = Writer::op(OP_RAID_ANSWER);
+        w.u8(want as u8);
+        self.send(&w.data);
+    }
+
+    /// Item Links: a server that offered item links ([`OP_ITEM_LINKS`]) is told
+    /// whether this client takes them (`want`, the Extended row), at once and
+    /// whenever that changes, and afresh at another offer; one that made no
+    /// offer is told nothing.
+    pub fn agree_item_links(&mut self, want: bool) {
+        if !self.item_links_offer || self.item_links_asked == Some(want) {
+            return;
+        }
+        self.item_links_asked = Some(want);
+        let mut w = Writer::op(OP_ITEM_LINKS);
+        w.u8(want as u8);
+        self.send(&w.data);
+    }
+
+    /// Profanity Filter (Options > Interface): a server that offered to take it
+    /// ([`OP_PROFANITY_CHOICE`]) is told it (`on`), at once and whenever it
+    /// changes, and afresh at another offer; one that made no offer is told
+    /// nothing (its filter stays as the game's 0x0045 leaves it).
+    pub fn agree_profanity_filter(&mut self, on: bool) {
+        if !self.profanity_offer || self.profanity_asked == Some(on) {
+            return;
+        }
+        self.profanity_asked = Some(on);
+        let mut w = Writer::op(OP_PROFANITY_CHOICE);
+        w.u8(on as u8);
+        self.send(&w.data);
+    }
+
+    /// Hide Look and Show Look on a worn item (`crate::hidelook`): the look of
+    /// what is worn in `equip_slot` hidden or shown, told only to a server that
+    /// offered it; the server answers the slots after it.
+    pub fn hide_look(&mut self, equip_slot: i32, hide: bool) {
+        if self.hide_look.offered && crate::hidelook::shown(equip_slot) {
+            self.send(&crate::hidelook::set(equip_slot, hide));
+        }
+    }
+
+    /// Links are in force on this connection: the server offered them and was
+    /// told this client takes them. Only then does a typed line carry links
+    /// ([`say_linked`](Self::say_linked)) or a link open.
+    pub fn item_links(&self) -> bool {
+        self.item_links_offer && self.item_links_asked == Some(true)
+    }
+
+    /// A typed line with links ([`OP_ITEM_LINK_SAY`]) in place of its retail
+    /// message, where links are in force; false, and nothing sent, elsewhere
+    /// (the caller sends the plain line).
+    pub fn say_linked(&mut self, route: crate::itemlink::Route, text: &str, target: u32, links: &[crate::itemlink::Linked]) -> bool {
+        if !self.item_links() || links.is_empty() {
+            return false;
+        }
+        let m = crate::itemlink::say(route, text, target, links);
+        self.send(&m);
+        true
+    }
+
+    /// A link opened ([`OP_ITEM_LINK_ASK`]), where links are in force.
+    pub fn ask_item_link(&mut self, id: u32) -> bool {
+        if !self.item_links() {
+            return false;
+        }
+        let m = crate::itemlink::ask(id);
+        self.send(&m);
+        true
+    }
+
+    /// The meter's reset: a server that offered a meter and was asked for it
+    /// drops the fight under way ([`OP_DPS_METER_RESET`]); false (nothing sent)
+    /// otherwise.
+    pub fn reset_dps_meter(&mut self) -> bool {
+        if !self.dps_meter_offer || self.dps_meter_asked != Some(true) {
+            return false;
+        }
+        let mut w = Writer::op(OP_DPS_METER_RESET);
+        w.u8(1);
+        self.send(&w.data);
+        true
+    }
+
+    /// Whether the server is sending the raid's windows: it offered them and
+    /// was told yes.
+    pub fn raid_windows(&self) -> bool {
+        self.raid_offer && self.raid_asked == Some(true)
+    }
+
+    /// A roll's answer ([`OP_RAID_ROLL_CHOICE`]) to a server that offered the
+    /// raid's windows; false, and nothing sent, to any other.
+    pub fn send_roll_choice(&mut self, id: u32, c: crate::raid::Choice) -> bool {
+        if !self.raid_offer {
+            return false;
+        }
+        self.send(&crate::raid::roll_choice(id, c));
+        true
+    }
+
+    /// A raid command ([`OP_RAID_COMMAND`]) to a server that offered the
+    /// raid's windows; false, and nothing sent, to any other.
+    pub fn send_raid_command(&mut self, c: crate::raid::Command) -> bool {
+        if !self.raid_offer {
+            return false;
+        }
+        self.send(&c.bytes());
+        true
+    }
+
+    /// The pet's effects the server last sent that are not over at `now`
+    /// (`now`'s clock): each its icon and the ms left of it, in their order.
+    pub fn pet_effects_left(&self, now: u32) -> Vec<(u32, u32)> {
+        let gone = now.wrapping_sub(self.pet_effects_at);
+        // a clock read before the set came (none: it is read after) counts as no time gone
+        let gone = if (gone as i32) < 0 { 0 } else { gone };
+        self.pet_effects.iter().filter(|e| e.left_ms > gone).map(|e| (e.icon, e.left_ms - gone)).collect()
+    }
+
     pub fn send_op_byte(&mut self, op: u16, v: u8) {
         if op == 0x000E {
             self.chat_mode = v;
@@ -992,11 +1849,16 @@ impl Session {
     /// and its device block); `None` is retail's.
     pub fn connect_shard(&mut self, endpoint: u64, hello: Option<&[u8]>) {
         self.state = State::Shard;
-        if let Some(c) = self.conn.take() {
+        // a shard is a server of its own: its lists' sizes are what it says
+        self.item_lists = [ITEM_LIST_DISC; 2];
+        if let Some(c) = self.conn.take()
+            && self.drdp.conns.contains(c)
+        {
             self.drdp.connection_close(c);
         }
         let sys = self.drdp.system_endpoint;
         self.conn = self.drdp.connection_open(sys, endpoint);
+        self.conn_gone = false;
         match hello {
             Some(h) => {
                 let mut w = Writer::op(0x0000);
@@ -1033,6 +1895,7 @@ impl Session {
     /// `SelectCharacter`: 0x002A with the server id and the face and hair.
     pub fn select_character(&mut self, c: &Character) {
         self.state = State::Selecting;
+        self.picked = true;
         let mut w = Writer::op(0x002A);
         for v in [c.server_id, c.face, c.hair_style, c.hair_length, c.hair_color] {
             w.u32(v as u32);
@@ -1105,8 +1968,58 @@ impl Session {
             }
             self.route(m, &mut events);
         }
+        self.worlds_answer();
         self.flush();
         events
+    }
+
+    /// The server told which of its worlds this client holds, once they are
+    /// built (`OP_SERVER_WORLDS_DATA`): the builder's answer, or none when it
+    /// stopped without one. One that goes after a character was played and
+    /// before the game connection opened (`picked`) is told again on that
+    /// connection: the server promotes the session when it takes the pick and
+    /// leaves the lobby connection's later packets alone, so an answer a
+    /// moment behind the pick never reached it and the session held none of
+    /// the server's worlds for the visit (no arena, no GM's move there; seen
+    /// in a page whose kept worlds were checked 60 ms after its pick). Told
+    /// twice is the same set twice.
+    fn worlds_answer(&mut self) {
+        let Some(rx) = &self.worlds_building else { return };
+        let ids = match rx.try_recv() {
+            Ok(ids) => ids,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Vec::new(),
+        };
+        self.worlds_building = None;
+        self.worlds_pending = false;
+        self.tell_worlds(&ids);
+        if self.picked {
+            self.worlds_retell = Some(ids);
+        }
+    }
+
+    /// `OP_SERVER_WORLDS_DATA` to the server: the worlds this client holds.
+    fn tell_worlds(&mut self, ids: &[u8]) {
+        let mut w = Writer::op(OP_SERVER_WORLDS_DATA);
+        w.bytes(&crate::serverworlds::encode_ready(ids));
+        self.send(&w.data);
+    }
+
+    /// Whether the server's worlds were offered and taken and it is not yet
+    /// told which this client holds: a character picked now would be placed
+    /// by a server that does not know yet (`eqoa play` waits).
+    pub fn server_worlds_pending(&self) -> bool {
+        self.worlds_pending
+    }
+
+    /// Whether a login of the character `server_id` needs the server's
+    /// worlds, as the server last said ([`OP_SERVER_WORLDS_CHARS`]): it
+    /// starts in one of them for a client that holds it, and in its mainland
+    /// city, for good, for one that does not, so its pick waits while they
+    /// are pending. `Some(false)`: the server placed it the same either way.
+    /// `None`: the server never said (an older one, or its word not yet in).
+    pub fn pick_needs_worlds(&self, server_id: i64) -> Option<bool> {
+        self.worlds_chars.as_ref().map(|c| u32::try_from(server_id).is_ok_and(|id| c.contains(&id)))
     }
 
     /// The flush `pump` ends with, and the sends: what was sent goes out now
@@ -1155,9 +2068,32 @@ impl Session {
                     self.drdp.connection_close(c);
                 }
                 self.conn = m.connection;
+                self.conn_gone = false;
                 self.self_id = None;
+                // the server's worlds, taken and their list never in whole:
+                // the character went in before it (one the worlds were not
+                // waited for), and what the server still had to send of it
+                // went with the old connection. Asked for again here, so
+                // they are built while the game is played and the server can
+                // send the player into them (its arena, a GM's move).
+                if self.worlds_pending && self.worlds_building.is_none() {
+                    self.send_op_int(OP_SERVER_WORLDS, 1);
+                }
+                // and the worlds held, told while the pick was on its way:
+                // told again, on the connection the server now reads
+                self.picked = false;
+                if let Some(ids) = self.worlds_retell.take() {
+                    self.tell_worlds(&ids);
+                }
                 self.entity_view_offer = None;
                 self.flying = false;
+                self.jumps = false;
+                self.map_travel = false;
+                // the NPCs' body tints too (the next world entry offers them)
+                self.npc_tints = Some(Vec::new());
+                // the mercs and the group search's standing (offered again)
+                self.mercs = None;
+                self.group_reg = None;
                 // the old connection's channels go with it
                 self.early_states.clear();
                 self.power_bars_offer = false;
@@ -1169,6 +2105,18 @@ impl Session {
                 self.quest_progress_offer = false;
                 self.quest_progress_asked = None;
                 self.quest_progress.clear();
+                self.pet_effects_offer = false;
+                self.pet_effects_asked = None;
+                self.pet_effects.clear();
+                self.number_tags_offer = false;
+                self.number_tags_asked = None;
+                self.dps_meter_offer = false;
+                self.dps_meter_asked = None;
+                self.item_links_offer = false;
+                self.item_links_asked = None;
+                self.profanity_offer = false;
+                self.profanity_asked = None;
+                self.hide_look = crate::hidelook::State::default();
                 ev.push(Event::Promoted);
             }
             drdp::TYPE_DISCONNECT => {
@@ -1303,12 +2251,19 @@ impl Session {
                     self.entity_view_offer = Some((slots, view));
                 }
             }
-            // the trigger names offered: taken (the TEST menu shows them), and
-            // this GM's client says it flies
+            // the trigger names offered: taken, every trigger (the TEST menu
+            // lists them), and this GM's client says it flies
             OP_GM_TRIGGERS => {
                 if r.u32() != 0 && !r.error {
-                    self.send_op_int(OP_GM_TRIGGERS, 1);
+                    self.send_op_int(OP_GM_TRIGGERS, TRIGGERS_ALL);
                     self.send_op_int(OP_FLY, 1);
+                }
+            }
+            // a GM's travel by the map offered (the map's Ctrl+click), or no more
+            OP_MAP_TRAVEL => {
+                let on = r.u32() != 0;
+                if !r.error {
+                    self.map_travel = on;
                 }
             }
             // flight on or off (`Play::control_client`, `walker`)
@@ -1316,6 +2271,16 @@ impl Session {
                 let on = r.u32() != 0;
                 if !r.error {
                     self.flying = on;
+                }
+            }
+            // the jump offered: taken (the jump key, `walker`); a 0 ends it
+            OP_JUMP => {
+                let on = r.u32() != 0;
+                if !r.error {
+                    if on && !self.jumps {
+                        self.send_op_int(OP_JUMP, 1);
+                    }
+                    self.jumps = on;
                 }
             }
             // the combat record offered: taken (`record`, Character > Combat
@@ -1340,11 +2305,32 @@ impl Session {
                     self.send_op_int(OP_LIVE_LOOK, 1);
                 }
             }
-            // bug reports offered: taken (F3 and the note, `bugnote`)
+            // bug reports offered: taken (F3 and the note, `bugnote`), with the
+            // most of a petition's text the server takes when it says
             OP_BUG_REPORTS => {
                 if r.u32() != 0 && !r.error {
                     self.bug_reports = true;
+                    if m.data.len() >= r.pos + 4 {
+                        let most = r.u32() as usize;
+                        if most > 0 {
+                            self.petition_text = most.min(PETITION_TEXT_MOST);
+                        }
+                    }
                     self.send_op_int(OP_BUG_REPORTS, 1);
+                }
+            }
+            // crash reports taken: the game sends what it kept (`crashfile`)
+            OP_CRASH_OFFER => {
+                let (version, most) = (r.u32(), r.u32());
+                if version != 0 && !r.error && most > 0 {
+                    self.crash_offer = Some((most as usize).min(CRASH_REPORT_MOST));
+                }
+            }
+            // a crash report answered: the game lets it go
+            OP_CRASH_FILED => {
+                let (number, ticket) = (r.u32(), r.u32());
+                if !r.error {
+                    self.crash_filed.push((number, ticket));
                 }
             }
             // a race's own words offered: taken (`racelabel`)
@@ -1353,6 +2339,43 @@ impl Session {
                     self.send_op_int(OP_RACE_LABELS, 1);
                 }
             }
+            // capes offered: taken (`cape`: worn in their slot, drawn)
+            OP_CAPES => {
+                if r.u32() != 0 && !r.error {
+                    self.capes = true;
+                    self.send_op_int(OP_CAPES, 1);
+                }
+            }
+            // a pack and a bank past 40 offered: taken, as many as offered up
+            // to what this client holds; their sizes count from the server's
+            // word before a dump
+            OP_ITEM_LISTS => {
+                let (on, pack, bank) = (r.u32(), r.u32(), r.u32());
+                if on != 0 && !r.error {
+                    let mut w = Writer::op(OP_ITEM_LISTS);
+                    w.u32(1);
+                    w.u32(pack.clamp(ITEM_LIST_DISC, ITEM_LISTS_MOST));
+                    w.u32(bank.clamp(ITEM_LIST_DISC, ITEM_LISTS_MOST));
+                    self.send(&w.data);
+                }
+            }
+            OP_ITEM_LISTS_IN_FORCE => {
+                let (pack, bank) = (r.u32(), r.u32());
+                if !r.error {
+                    self.item_lists = [pack.clamp(ITEM_LIST_DISC, ITEM_LISTS_MOST), bank.clamp(ITEM_LIST_DISC, ITEM_LISTS_MOST)];
+                }
+            }
+            OP_CAPES_LIST | OP_CAPES_IN_VIEW if self.capes => match crate::cape::read(&m.data[2.min(m.data.len())..]) {
+                Some(list) => {
+                    if op == OP_CAPES_LIST {
+                        self.cape_list = list.into_iter().map(|(id, c)| (id as i64, c)).collect();
+                    } else {
+                        self.capes_in_view = list.into_iter().collect();
+                    }
+                    self.capes_changed += 1;
+                }
+                None => debug_line(&format!("[net] capes: {} bytes not read", m.data.len())),
+            },
             // creation's races offered: taken (the create pages offer them)
             OP_CREATION_OFFER => {
                 if r.u32() != 0 && !r.error {
@@ -1362,6 +2385,146 @@ impl Session {
             OP_CREATION_RACES => match crate::creation::read(&m.data[2.min(m.data.len())..]) {
                 Some(c) => self.creation = Some(c),
                 None => debug_line(&format!("[net] creation's races: {} bytes not read", m.data.len())),
+            },
+            // the server's own worlds offered: taken when they can be built
+            // here (`set_world_builder`)
+            OP_SERVER_WORLDS => {
+                if r.u32() != 0 && !r.error && WORLD_BUILDER.get().is_some() {
+                    self.send_op_int(OP_SERVER_WORLDS, 1);
+                    self.worlds_pending = true;
+                }
+            }
+            OP_SERVER_WORLDS_DATA => match crate::serverworlds::read(&m.data[2.min(m.data.len())..]) {
+                Some(w) => {
+                    if let Some(build) = WORLD_BUILDER.get() {
+                        self.worlds_building = Some(build(&w));
+                        self.worlds_pending = true;
+                    }
+                    self.server_worlds = Some(w);
+                }
+                None => debug_line(&format!("[net] the server's worlds: {} bytes not read", m.data.len())),
+            },
+            // which characters a login needs them for: the whole set each
+            // time; one not read leaves what was known
+            OP_SERVER_WORLDS_CHARS => match crate::serverworlds::read_chars(&m.data[2.min(m.data.len())..]) {
+                Some(c) => self.worlds_chars = Some(c),
+                None => debug_line(&format!("[net] the characters that need the server's worlds: {} bytes not read", m.data.len())),
+            },
+
+            // a custom race's own options offered: taken (the create pages and
+            // the bodies drawn, `raceopts`)
+            OP_RACE_OPTIONS => {
+                if r.u32() != 0 && !r.error {
+                    self.send_op_int(OP_RACE_OPTIONS, 1);
+                }
+            }
+            OP_RACE_OPTIONS_DATA => match crate::raceopts::read_options(&m.data[2.min(m.data.len())..]) {
+                Some(o) => self.race_options = Some(o),
+                None => debug_line(&format!("[net] race options: {} bytes not read", m.data.len())),
+            },
+            OP_RACE_LOOKS => self.race_looks = Some(m.data[2.min(m.data.len())..].to_vec()),
+            // the NPCs' body tints offered: taken (`npctint`), what was held
+            // dropped, the server sending the set there is
+            OP_NPC_TINTS_OFFER => {
+                r.u8();
+                if !r.error {
+                    self.npc_tints = Some(Vec::new());
+                    let mut w = Writer::op(OP_NPC_TINTS_ANSWER);
+                    w.u8(1);
+                    self.send(&w.data);
+                }
+            }
+            OP_NPC_TINTS => match crate::npctint::read(&m.data[2.min(m.data.len())..]) {
+                Some(t) => self.npc_tints = Some(t),
+                None => debug_line(&format!("[net] NPC tints: {} bytes not read", m.data.len())),
+            },
+            // a monster's name and level offered (each world entry): taken at
+            // once, in the layout this client reads, for the target's details
+            // box (`Play::mob_info`); another layout is left to the box
+            OP_MOB_INFO_OFFER => {
+                let layout = r.u8();
+                if !r.error && layout == 1 {
+                    let mut w = Writer::op(OP_MOB_INFO_ANSWER);
+                    w.u8(1);
+                    self.send(&w.data);
+                }
+            }
+            // item links offered (again at every world entry), in the layout
+            // this client reads: told afresh whether it takes them
+            // (`agree_item_links`); another layout is left alone
+            // the profanity filter's setting asked for (again at every world
+            // entry): told afresh (`agree_profanity_filter`); another layout
+            // is left alone
+            OP_PROFANITY_CHOICE => {
+                let layout = r.u8();
+                if !r.error && layout == 1 {
+                    self.profanity_offer = true;
+                    self.profanity_asked = None;
+                }
+            }
+            // the worn looks hidden: offered (with the slots hidden) and
+            // answered (`crate::hidelook`)
+            crate::hidelook::OP_OFFER | crate::hidelook::OP_STATE => {
+                self.hide_look.read(op, &m.data[2.min(m.data.len())..]);
+            }
+            OP_ITEM_LINKS => {
+                let layout = r.u8();
+                if !r.error && layout == crate::itemlink::LAYOUT {
+                    self.item_links_offer = true;
+                    self.item_links_asked = None;
+                }
+            }
+            // a chat line with its links: the links, then the line's own
+            // message read as it always is (a line that wraps another of
+            // these, or none, is the plain message alone)
+            OP_ITEM_LINK_LINE => match crate::itemlink::read_line(&m.data[2.min(m.data.len())..]) {
+                Some((links, inner)) => {
+                    let inner = drdp::Message { data: inner.to_vec(), ..m.clone() };
+                    ev.push(Event::ChatLinks(links));
+                    self.dispatch(&inner, ev);
+                }
+                None => debug_line(&format!("[net] a linked chat line: {} bytes not read", m.data.len())),
+            },
+            OP_ITEM_LINK_RECORD => match crate::itemlink::read_record(&m.data[2.min(m.data.len())..]) {
+                Some((id, item)) => ev.push(Event::ItemLinkRecord { id, item: item.map(Box::new) }),
+                None => debug_line(&format!("[net] an item link's record: {} bytes not read", m.data.len())),
+            },
+            OP_MOB_INFO => {
+                let (layout, id, level, len) = (r.u8(), r.u32(), r.u8(), r.u8() as usize);
+                let name = String::from_utf8_lossy(r.bytes(len)).into_owned();
+                if !r.error && layout == 1 {
+                    ev.push(Event::MobInfo { id, level, name });
+                } else {
+                    debug_line(&format!("[net] a monster's name and level: {} bytes not read", m.data.len()));
+                }
+            }
+            // the mercs offered (each world entry): taken at once, answered 2
+            // (the names with their hirers': the tag under a merc's name; a
+            // server that knows only 1 sends 1)
+            OP_MERCS_OFFER => {
+                let layout = r.u8();
+                if !r.error && layout == 1 {
+                    let mut w = Writer::op(OP_MERCS_OFFER);
+                    w.u8(2);
+                    self.send(&w.data);
+                }
+            }
+            OP_MERCS_DATA => match Mercs::read(&m.data[2.min(m.data.len())..]) {
+                Some(v) => self.mercs = Some(v),
+                None => debug_line(&format!("[net] the mercenaries: {} bytes not read", m.data.len())),
+            },
+            // the group search's standing offered: taken likewise
+            OP_GROUP_REG_OFFER => {
+                let layout = r.u8();
+                if !r.error && layout == 1 {
+                    let mut w = Writer::op(OP_GROUP_REG_OFFER);
+                    w.u8(1);
+                    self.send(&w.data);
+                }
+            }
+            OP_GROUP_REG_STATE => match GroupReg::read(&m.data[2.min(m.data.len())..]) {
+                Some(v) => self.group_reg = Some(v),
+                None => debug_line(&format!("[net] the group search's standing: {} bytes not read", m.data.len())),
             },
             // any member invites into its group there (`Play::may_invite`)
             OP_MEMBER_INVITES => {
@@ -1440,6 +2603,66 @@ impl Session {
                     self.quest_progress = set;
                 }
             }
+            // the pet's effects offered (again at every world entry): told
+            // afresh what the client wants (`agree_pet_effects`), the server's
+            // player being a new one
+            OP_PET_EFFECTS => {
+                r.u32();
+                if !r.error {
+                    self.pet_effects_offer = true;
+                    self.pet_effects_asked = None;
+                }
+            }
+            OP_PET_EFFECTS_DATA => {
+                if let Some(set) = read_pet_effects(&mut r) {
+                    self.pet_effects = set;
+                    self.pet_effects_at = self.now();
+                }
+            }
+            // the number tags offered (again at every world entry): told
+            // afresh whether the client wants them (`agree_number_tags`)
+            OP_NUMBER_TAGS_OFFER => {
+                r.u8();
+                if !r.error {
+                    self.number_tags_offer = true;
+                    self.number_tags_asked = None;
+                }
+            }
+            // the damage meter offered (again at every world entry): told
+            // afresh whether the client wants it (`agree_dps_meter`)
+            OP_DPS_METER_OFFER => {
+                r.u8();
+                if !r.error {
+                    self.dps_meter_offer = true;
+                    self.dps_meter_asked = None;
+                }
+            }
+            OP_DPS_METER_DATA => {
+                if let Some(m) = read_dps_meter(&mut r) {
+                    ev.push(Event::DpsMeter(m));
+                }
+            }
+            // the raid's windows offered (again at every world entry): told
+            // afresh whether the client wants them (`agree_raid`)
+            OP_RAID_OFFER => {
+                r.u8();
+                if !r.error {
+                    self.raid_offer = true;
+                    self.raid_asked = None;
+                }
+            }
+            OP_RAID_STATE => match crate::raid::read_state(&m.data[2.min(m.data.len())..]) {
+                Some(st) => ev.push(Event::RaidState(st)),
+                None => eprintln!("net: a raid state of {} bytes not read", m.data.len()),
+            },
+            OP_RAID_ROLL => match crate::raid::read_roll(&m.data[2.min(m.data.len())..]) {
+                Some(roll) => ev.push(Event::RaidRoll(roll)),
+                None => eprintln!("net: a loot roll of {} bytes not read", m.data.len()),
+            },
+            OP_RAID_MASTER_LOOT => match crate::raid::read_master_loot(&m.data[2.min(m.data.len())..]) {
+                Some(ml) => ev.push(Event::MasterLoot(ml)),
+                None => eprintln!("net: a master looter's list of {} bytes not read", m.data.len()),
+            },
             0x0013 => {
                 // SetTime: each clock moved to the server's reading at the
                 // local timer's now
@@ -1751,6 +2974,9 @@ pub fn new_char_message(c: &NewChar) -> Vec<u8> {
     for v in c.stats {
         w.u32(v as u32);
     }
+    if let Some(b) = crate::raceopts::choices_block(&c.options) {
+        w.bytes(&b);
+    }
     w.data
 }
 
@@ -1981,6 +3207,138 @@ mod tests {
         assert_eq!(s.record.as_deref(), Some(&[][..]), "nothing sent on receipt");
         s.answer_teleport(7);
         assert_eq!(s.record.unwrap(), [(drdp::TYPE_GUARANTEED, vec![0x49, 0x00, 14])]);
+    }
+
+    /// Item links (`itemlink`): nothing is said to a server that made no offer
+    /// and no link goes there (the line goes plain: `say_linked` false); an
+    /// offer in this layout is told the Extended row at once and again only as
+    /// it changes, and links are in force only while it is on. The controls: an
+    /// offer of another layout is not taken; a promotion forgets the offer.
+    /// The profanity filter's setting goes only to a server that asked for it
+    /// (0x7E60 in layout 1), once and again only as it changes, and afresh at
+    /// the next offer. The controls: nothing before the offer, an offer of
+    /// another layout is not taken, a new connection forgets the offer.
+    #[test]
+    fn the_profanity_filter_is_told_only_to_a_server_that_asked() {
+        let mut s = session();
+        s.record = Some(Vec::new());
+        s.agree_profanity_filter(false);
+        assert_eq!(s.record.as_ref().unwrap().len(), 0, "nothing to a server that made no offer");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x60, 0x7E, 2]);
+        s.agree_profanity_filter(false);
+        assert!(!s.profanity_offer, "another layout is not taken");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x60, 0x7E, 1]);
+        s.agree_profanity_filter(false);
+        s.agree_profanity_filter(false);
+        s.agree_profanity_filter(true);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x60, 0x7E, 1]);
+        s.agree_profanity_filter(true);
+        let sent: Vec<Vec<u8>> = s.record.take().unwrap().into_iter().map(|(_, d)| d).collect();
+        assert_eq!(sent, vec![vec![0x60, 0x7E, 0], vec![0x60, 0x7E, 1], vec![0x60, 0x7E, 1]], "off once, on, on again at the second offer");
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert!(!s.profanity_offer);
+    }
+
+    #[test]
+    fn item_links_are_told_only_to_a_server_that_offered_them() {
+        use crate::itemlink::{Linked, Route};
+        let l = Linked { start: 0, len: 5, list: 0, key: 3 };
+        let mut s = session();
+        s.record = Some(Vec::new());
+        s.agree_item_links(true);
+        assert!(!s.item_links() && !s.say_linked(Route::Say, "Sword", u32::MAX, &[l]) && !s.ask_item_link(9));
+        assert_eq!(s.record.as_ref().unwrap().len(), 0, "nothing to a server that made no offer");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x4F, 0x7E, 2]);
+        s.agree_item_links(true);
+        assert!(!s.item_links_offer, "another layout is not taken");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x4F, 0x7E, 1]);
+        s.agree_item_links(true);
+        s.agree_item_links(true);
+        assert!(s.item_links());
+        assert_eq!(s.record.as_ref().unwrap()[..], [(drdp::TYPE_GUARANTEED, vec![0x4F, 0x7E, 1])], "told once");
+        assert!(s.say_linked(Route::Say, "Sword", u32::MAX, &[l]));
+        assert!(!s.say_linked(Route::Say, "Sword", u32::MAX, &[]), "a line with no link goes plain");
+        assert!(s.ask_item_link(9));
+        s.agree_item_links(false);
+        assert!(!s.item_links() && !s.ask_item_link(9), "the row off: none");
+        let sent: Vec<Vec<u8>> = s.record.take().unwrap().into_iter().map(|(_, d)| d).collect();
+        assert_eq!(sent.len(), 4);
+        assert_eq!(&sent[1][..3], &[0x50, 0x7E, 0], "the line in place of 0x000B");
+        assert_eq!(sent[2], vec![0x52, 0x7E, 9, 0, 0, 0]);
+        assert_eq!(sent[3], vec![0x4F, 0x7E, 0]);
+        // a new connection: the offer is the next world entry's
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert!(!s.item_links_offer);
+    }
+
+    /// A linked line is its links' event, then the line's own message read as
+    /// ever (a group line, a white one); a link's record is the item or none.
+    /// The control: the same message unwrapped has no links' event.
+    #[test]
+    fn a_linked_line_is_read_as_its_own_message() {
+        let mut s = session();
+        let mut inner = Writer::op(0x069E);
+        inner.u32(0x14F51).wide("Bob tells the group: see Rusty Sword");
+        let mut w = Writer::op(OP_ITEM_LINK_LINE);
+        w.u8(1).u16(25).u16(11).u32(4242).bytes(&inner.data);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, w.data);
+        assert!(
+            matches!(&ev[..], [Event::ChatLinks(l), Event::GroupChat { from: 0x14F51, text }] if l.len() == 1 && l[0].id == 4242 && l[0].start == 25 && text.ends_with("Rusty Sword")),
+            "{ev:?}"
+        );
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, inner.data);
+        assert!(matches!(&ev[..], [Event::GroupChat { .. }]), "the control: {ev:?}");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x53, 0x7E, 7, 0, 0, 0, 0]);
+        assert!(matches!(&ev[..], [Event::ItemLinkRecord { id: 7, item: None }]), "{ev:?}");
+    }
+
+    /// The net library's lines, as a test reads them (`set_debug_sink`: once
+    /// for the process, so every test's lines come here after it is set).
+    static NET_LINES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    fn keep_net_line(s: &str) {
+        NET_LINES.lock().unwrap().push(s.to_string());
+    }
+
+    // A game connection the DRDP library let go with no DISCONNECT reaching
+    // the session, as its system messages 20 and 21 close every connection to
+    // an endpoint (`drdp_close_connections_to_endpoint`): a send on its handle
+    // panicked ("dangling handle"). Now the handle is let go, the loss said
+    // once, every message after it counted and not sent, and a game connection
+    // opened again sends. Control: with the connection live, the same sends go
+    // into its queue and nothing is lost or said.
+    #[test]
+    fn a_connection_drdp_let_go_is_never_sent_on() {
+        set_debug_sink(keep_net_line);
+        let said = || NET_LINES.lock().unwrap().iter().filter(|l| l.contains("the game connection is gone")).count();
+        // the control
+        let mut s = session();
+        s.record = Some(Vec::new());
+        let c = s.conn.unwrap();
+        let queued = s.drdp.conns[c].send_queue.len();
+        s.send(&[0x0B, 0x00]);
+        s.send_state(0x40, &[1, 2, 3]);
+        assert_eq!(s.drdp.conns[c].send_queue.len(), queued + 2, "the control: both queued");
+        assert_eq!((s.sends_lost, s.record.as_ref().unwrap().len()), (0, 2));
+        let before = said();
+        // gone from under the session, as system messages 20 and 21 make it
+        let remote = s.drdp.conns[c].remote_id;
+        s.drdp.close_connections_to_endpoint(remote);
+        assert!(!s.drdp.conns.contains(c), "the connection is gone");
+        assert_eq!(s.conn, Some(c), "and the session still holds its handle");
+        s.send(&[0x0B, 0x00]);
+        s.send_state(0x40, &[1, 2, 3]);
+        s.send(&[0x0E, 0x00, 0]);
+        assert_eq!(s.conn, None, "the handle let go");
+        assert_eq!(s.sends_lost, 3, "every message after it counted");
+        assert_eq!(s.record.as_ref().unwrap().len(), 2, "none of them sent");
+        assert_eq!(said() - before, 1, "said once");
+        // a new game connection sends again (as connect_shard opens one)
+        s.connect_shard(remote, None);
+        let c2 = s.conn.expect("a new connection");
+        let queued = s.drdp.conns[c2].send_queue.len();
+        s.send(&[0x0B, 0x00]);
+        assert_eq!(s.drdp.conns[c2].send_queue.len(), queued + 1);
+        assert_eq!(s.sends_lost, 3, "nothing lost on the new one");
     }
 
     // 0x07A4, what go-eqoa-server sends a session whose character logged in
@@ -2374,6 +3732,64 @@ mod tests {
         assert!(n <= BUG_NOTE_MAX && n % 2 == 0 && m[0].len() == 10 + n, "cut on a character's edge: {n}");
     }
 
+    // The crash report offer: taken with its most (this client's at most), a
+    // short one not; a report goes as its number, count and text cut to the
+    // most on a character's edge; an answer is kept for the game. The control:
+    // before an offer nothing is held to send.
+    #[test]
+    fn crash_reports_offer_report_and_answer() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let ours = |s: &mut Session| -> Vec<Vec<u8>> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).map(|(_, d)| d).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        ours(&mut s);
+        assert_eq!(s.crash_offer, None, "the control: no offer");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x64, 0x7E, 1, 0, 0, 0]);
+        assert_eq!(s.crash_offer, None, "a short offer");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x64, 0x7E, 1, 0, 0, 0, 0xE0, 0x2E, 0, 0]);
+        assert_eq!(s.crash_offer, Some(12_000));
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x64, 0x7E, 1, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0]);
+        assert_eq!(s.crash_offer, Some(CRASH_REPORT_MOST), "at most this client's");
+        assert_eq!(ours(&mut s), Vec::<Vec<u8>>::new(), "the offer is not answered");
+        s.send_crash_report(7, "panic: boom", 100);
+        let mut want = vec![0x65, 0x7E, 1, 0, 0, 0, 7, 0, 0, 0, 11, 0, 0, 0];
+        want.extend(b"panic: boom");
+        assert_eq!(ours(&mut s), [want]);
+        s.send_crash_report(8, &"é".repeat(100), 51);
+        let m = ours(&mut s);
+        let n = u32::from_le_bytes(m[0][10..14].try_into().unwrap()) as usize;
+        assert_eq!((n, m[0].len()), (50, 14 + 50), "cut on a character's edge");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x66, 0x7E, 7, 0, 0, 0, 0xE8, 0x03, 0, 0]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x66, 0x7E, 8, 0, 0, 0]);
+        assert_eq!(s.crash_filed, [(7, 1000)], "an answer cut short is not kept");
+    }
+
+    // The most of a petition's text: a PS2's 511 from an offer that says
+    // nothing more (a go-eqoa-server of before 2026-11-08), else what it says,
+    // up to this client's form; a 0 or a second field cut short says nothing
+    // (the last kept). The answer is 1 either way.
+    #[test]
+    fn the_offer_says_how_long_a_petition_may_be() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x0E, 0x7E, 1, 0, 0, 0]);
+        assert!(s.bug_reports);
+        assert_eq!(s.petition_text, PETITION_TEXT_DISC, "an offer that says nothing of a petition's length");
+        for (said, want) in [(vec![0xFF, 0x07, 0, 0], 2047), (vec![0xFF, 0xFF, 0, 0], PETITION_TEXT_MOST), (vec![0x2C, 0x01, 0, 0], 300), (vec![0, 0, 0, 0], 300), (vec![0xFF, 0x07], 300)] {
+            let mut offer = vec![0x0E, 0x7E, 1, 0, 0, 0];
+            offer.extend(said);
+            deliver(&mut s, drdp::TYPE_GUARANTEED, offer);
+            assert_eq!(s.petition_text, want);
+        }
+        s.flush();
+        let answers: Vec<Vec<u8>> = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).map(|(_, d)| d).collect();
+        assert!(!answers.is_empty() && answers.iter().all(|a| *a == [0x0E, 0x7E, 1, 0, 0, 0]), "{answers:?}");
+    }
+
     // Any member's invites (0x7E17): the offer kept, a short one not, and
     // nothing answered. The control: a session never offered it keeps the
     // leader's rule.
@@ -2396,6 +3812,60 @@ mod tests {
         assert_eq!(ours(&mut s), Vec::<Vec<u8>>::new(), "nothing answered");
     }
 
+    // The mercs (0x7E5A/0x7E5B) and the group search's standing (0x7E5D/
+    // 0x7E5E): each offer answered 1 at once, another layout nothing; the sets
+    // kept as told (own merc, the names; the three flags), a short one not.
+    // The control: never offered, nothing held.
+    #[test]
+    fn mercs_and_group_reg_offered_answered_kept() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let ours = |s: &mut Session| -> Vec<Vec<u8>> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).map(|(_, d)| d).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        ours(&mut s);
+        assert_eq!((s.mercs.clone(), s.group_reg), (None, None), "the control: never offered");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x5A, 0x7E, 2]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x5D, 0x7E, 2]);
+        assert_eq!(ours(&mut s), Vec::<Vec<u8>>::new(), "another layout: no answer");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x5A, 0x7E, 1]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x5D, 0x7E, 1]);
+        assert_eq!(ours(&mut s), vec![vec![0x5A, 0x7E, 2], vec![0x5D, 0x7E, 1]], "the mercs' answered 2 (their hirers too)");
+        let mut d = vec![0x5B, 0x7E, 1, 1, 2, 0, 7];
+        d.extend_from_slice(b"Ralthas");
+        d.push(3);
+        d.extend_from_slice(b"Kel");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, d.clone());
+        assert_eq!(s.mercs, Some(Mercs { own: true, names: vec!["Ralthas".into(), "Kel".into()], owners: Vec::new() }));
+        assert_eq!(s.mercs.as_ref().unwrap().owner("Kel"), None, "layout 1 names no hirer");
+        assert!(s.mercs.as_ref().unwrap().is("Kel") && !s.mercs.as_ref().unwrap().is("Kelso") && !s.mercs.as_ref().unwrap().is(""));
+        d.pop();
+        deliver(&mut s, drdp::TYPE_GUARANTEED, d);
+        assert_eq!(s.mercs.as_ref().map(|m| m.names.len()), Some(2), "a short set is not taken");
+        // layout 2: each with its hirer's name
+        let mut d = vec![0x5B, 0x7E, 2, 0, 2, 0, 7];
+        d.extend_from_slice(b"Ralthas");
+        d.push(8);
+        d.extend_from_slice(b"Lonewulf");
+        d.push(3);
+        d.extend_from_slice(b"Kel");
+        d.push(4);
+        d.extend_from_slice(b"Abby");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, d.clone());
+        let m = s.mercs.clone().unwrap();
+        assert_eq!((m.own, m.owner("Ralthas"), m.owner("Kel"), m.owner("Lonewulf")), (false, Some("Lonewulf"), Some("Abby"), None));
+        d.pop();
+        deliver(&mut s, drdp::TYPE_GUARANTEED, d);
+        assert_eq!(s.mercs.as_ref().and_then(|m| m.owner("Kel")), Some("Abby"), "a short layout 2 is not taken");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x5E, 0x7E, 1, 0b101]);
+        assert_eq!(s.group_reg, Some(GroupReg { registered: true, invites_open: false, members_invite: true }));
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x5E, 0x7E, 1]);
+        assert_eq!(s.group_reg.map(|g| g.registered), Some(true), "a short one is not taken");
+    }
+
     // A GM's flight (0x7E1B): this client says it flies when it is offered the
     // GM's trigger names, in answer to nothing else (the control: the other
     // offers, a short one and a 0 say nothing); the server's word is kept, a
@@ -2416,7 +3886,7 @@ mod tests {
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x07, 0x7E, 0, 0, 0, 0]);
         assert_eq!(ours(&mut s), Vec::<Vec<u8>>::new(), "the control: nothing said to anything else");
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x07, 0x7E, 1, 0, 0, 0]);
-        assert_eq!(ours(&mut s), [vec![0x07, 0x7E, 1, 0, 0, 0], vec![0x1B, 0x7E, 1, 0, 0, 0]], "the offer answered, and that it flies");
+        assert_eq!(ours(&mut s), [vec![0x07, 0x7E, 2, 0, 0, 0], vec![0x1B, 0x7E, 1, 0, 0, 0]], "the offer answered (every trigger), and that it flies");
 
         assert!(!s.flying, "not until the server says so");
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x1B, 0x7E, 1, 0]);
@@ -2430,6 +3900,38 @@ mod tests {
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x1B, 0x7E, 1, 0, 0, 0]);
         deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
         assert!(!s.flying, "a new connection, a new login: not flying");
+    }
+
+    // The jump (0x7E28): the offer answered with 1 at once and kept; a 0 ends it
+    // and is answered nothing; it goes with the connection. The controls: an
+    // offer cut short and an offer of 0 are neither answered nor kept, and a
+    // session never offered one says nothing and does not jump.
+    #[test]
+    fn the_jump_offer_is_answered_and_kept_for_the_connection() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let ours = |s: &mut Session| -> Vec<Vec<u8>> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).map(|(_, d)| d).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        ours(&mut s);
+        assert!(!s.jumps, "never offered: no jump");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x28, 0x7E, 1, 0]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x28, 0x7E, 0, 0, 0, 0]);
+        assert!(!s.jumps, "the controls: cut short, or 0");
+        assert_eq!(ours(&mut s), Vec::<Vec<u8>>::new(), "nothing said to them");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x28, 0x7E, 1, 0, 0, 0]);
+        assert!(ev.is_empty() && s.jumps, "the offer is the session's: {ev:?}");
+        assert_eq!(ours(&mut s), [vec![0x28, 0x7E, 1, 0, 0, 0]], "answered: it jumps");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x28, 0x7E, 0, 0, 0, 0]);
+        assert!(!s.jumps, "the server's 0 ends it");
+        assert_eq!(ours(&mut s), Vec::<Vec<u8>>::new(), "and is answered nothing");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x28, 0x7E, 1, 0, 0, 0]);
+        assert_eq!(ours(&mut s), [vec![0x28, 0x7E, 1, 0, 0, 0]], "offered again: answered again");
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert!(!s.jumps, "a new connection, a new login: no jump until offered");
     }
 
     // The whole of a raid group: told nothing with no offer; offered, told what
@@ -2474,6 +3976,57 @@ mod tests {
         m.pop();
         let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m);
         assert!(!ev.iter().any(|e| matches!(e, Event::RaidRoster { .. })), "a short one: {ev:?}");
+    }
+
+    /// The raid's windows (0x7E42-0x7E48): answered only after an offer, once,
+    /// when the answer changes and afresh at another offer; the state, a roll,
+    /// its end and the master looter's list read into events, and a short one
+    /// not; a roll's choice and a command sent only to a server that offered.
+    #[test]
+    fn the_raid_windows_are_agreed_read_and_sent() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let ours = |s: &mut Session| -> Vec<Vec<u8>> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).map(|(_, d)| d).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        ours(&mut s);
+        s.agree_raid(true);
+        assert!(!s.send_roll_choice(3, crate::raid::Choice::Need) && !s.send_raid_command(crate::raid::Command::Leave));
+        assert_eq!(ours(&mut s), Vec::<Vec<u8>>::new(), "no offer: nothing (the control)");
+        assert!(!s.raid_windows());
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x42, 0x7E, 1]);
+        s.agree_raid(true);
+        s.agree_raid(true);
+        assert_eq!(ours(&mut s), [vec![0x43, 0x7E, 1]], "once");
+        assert!(s.raid_windows());
+        s.agree_raid(false);
+        assert_eq!(ours(&mut s), [vec![0x43, 0x7E, 0]], "when it changes");
+        assert!(!s.raid_windows());
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x42, 0x7E, 1]);
+        s.agree_raid(false);
+        assert_eq!(ours(&mut s), [vec![0x43, 0x7E, 0]], "afresh at another offer");
+        assert!(s.send_roll_choice(3, crate::raid::Choice::Need));
+        assert!(s.send_raid_command(crate::raid::Command::Kick(0x1234)));
+        assert_eq!(ours(&mut s), [vec![0x46, 0x7E, 3, 0, 0, 0, 1], vec![0x48, 0x7E, 11, 0x34, 0x12, 0, 0]]);
+
+        let mut st = vec![0x44, 0x7E];
+        st.extend([1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2, 3]);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, st.clone());
+        assert!(matches!(&ev[..], [Event::RaidState(x)] if x.leader == 1 && x.helper == 2 && x.rule == 2 && x.leads()), "{ev:?}");
+        st.pop();
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, st);
+        assert!(!ev.iter().any(|e| matches!(e, Event::RaidState(_))), "a short one: {ev:?}");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x45, 0x7E, 9, 0, 0, 0, 0, 0]);
+        assert!(matches!(&ev[..], [Event::RaidRoll(r)] if r.id == 9 && r.seconds == 0 && r.item.is_none()), "{ev:?}");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x45, 0x7E, 9, 0, 0, 0, 120, 0, 1]);
+        assert!(!ev.iter().any(|e| matches!(e, Event::RaidRoll(_))), "a roll without its item: {ev:?}");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x47, 0x7E, 0]);
+        assert!(matches!(&ev[..], [Event::MasterLoot(None)]), "{ev:?}");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x47, 0x7E, 1, 44, 1, 1, 5, 0, 0, 0, 2, b'B', b'o']);
+        assert!(matches!(&ev[..], [Event::MasterLoot(Some(m))] if m.seconds == 300 && m.members == [(5, "Bo".to_string())]), "{ev:?}");
     }
 
     // go-eqoa-server's 0x7E01 offer: nothing is asked before it, the answer
@@ -2524,6 +4077,33 @@ mod tests {
         assert_eq!(answers(&mut s), [], "and nothing asked");
     }
 
+    // A GM's map travel (go-eqoa-server's 0x7E34/0x7E35): nothing asked without
+    // the offer; offered, the spot sent as the world, x and z; a 0 ends it, and
+    // so does a new connection.
+    #[test]
+    fn map_travel_offered_then_asked() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let asks = |s: &mut Session| -> Vec<Vec<u8>> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(_, d)| d.starts_with(&[0x35, 0x7E])).map(|(_, d)| d).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        assert!(!s.map_travel_to(0, 25500.0, 15600.0), "not offered");
+        assert_eq!(asks(&mut s), Vec::<Vec<u8>>::new(), "nothing asked without the offer");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x34, 0x7E, 1, 0, 0, 0]);
+        assert!(s.map_travel);
+        assert!(s.map_travel_to(2, 25500.5, -15600.0));
+        let mut want = vec![0x35, 0x7E, 2, 0, 0, 0];
+        want.extend_from_slice(&25500.5f32.to_le_bytes());
+        want.extend_from_slice(&(-15600.0f32).to_le_bytes());
+        assert_eq!(asks(&mut s), [want]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x34, 0x7E, 0, 0, 0, 0]);
+        assert!(!s.map_travel && !s.map_travel_to(0, 1.0, 1.0), "a 0 ends it");
+        assert_eq!(asks(&mut s), Vec::<Vec<u8>>::new());
+    }
+
     // Quest marks (go-eqoa-server's 0x7E03/0x7E04): nothing asked without an
     // offer; an offer answered once for each change of mind; a set read whole
     // (a giver's "!" with its quest's levels, offer and rewards), a short one
@@ -2541,6 +4121,8 @@ mod tests {
         s.agree_quest_marks(true);
         assert_eq!(answers(&mut s), [], "no offer, nothing asked");
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x03, 0x7E, 1, 0, 0, 0]);
+        s.agree_quest_marks(false);
+        assert_eq!(answers(&mut s), [], "the Quest Helper off from the start: nothing answered, as today's");
         s.agree_quest_marks(true);
         s.agree_quest_marks(true);
         assert_eq!(answers(&mut s), [(251, vec![0x03, 0x7E, 1, 0, 0, 0])], "asked once");
@@ -2577,6 +4159,267 @@ mod tests {
         assert!(s.quest_marks.is_empty(), "off: the set forgotten");
     }
 
+    // The pet's effects (go-eqoa-server's 0x7E32/0x7E33): nothing asked with
+    // no offer (the control); an offer answered at once with what is wanted
+    // (0 too, as 0x7E01 is) and again only when that changes; a set read whole
+    // and counted down from when it came, an effect over gone from it, a short
+    // set not taken; off, stopped and forgotten; a new connection asks nothing
+    // until it is offered again.
+    #[test]
+    fn pet_effects_offer_answer_and_set() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(_, d)| d.starts_with(&[0x32, 0x7E])).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        s.agree_pet_effects(true);
+        assert_eq!(answers(&mut s), [], "no offer, nothing asked");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x32, 0x7E, 1, 0, 0, 0]);
+        s.agree_pet_effects(false);
+        assert_eq!(answers(&mut s), [(251, vec![0x32, 0x7E, 0, 0, 0, 0])], "off from the start: told at once, as 0x7E01");
+        s.agree_pet_effects(true);
+        s.agree_pet_effects(true);
+        assert_eq!(answers(&mut s), [(251, vec![0x32, 0x7E, 1, 0, 0, 0])], "asked once");
+
+        let effect = |m: &mut Vec<u8>, icon: u32, left: u32, name: &str| {
+            m.extend_from_slice(&icon.to_le_bytes());
+            m.extend_from_slice(&left.to_le_bytes());
+            m.push(name.len() as u8);
+            m.extend_from_slice(name.as_bytes());
+        };
+        let mut m = vec![0x33, 0x7E, 2];
+        effect(&mut m, 0xBDD6_0F01, 1_780_000, "Undead Proc");
+        effect(&mut m, 0xBDD6_0F02, 900, "Soul Mastery");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, m.clone());
+        let want = vec![
+            PetEffect { icon: 0xBDD6_0F01, left_ms: 1_780_000, name: "Undead Proc".into() },
+            PetEffect { icon: 0xBDD6_0F02, left_ms: 900, name: "Soul Mastery".into() },
+        ];
+        assert_eq!(s.pet_effects, want);
+        let at = s.pet_effects_at;
+        assert_eq!(s.pet_effects_left(at), [(0xBDD6_0F01, 1_780_000), (0xBDD6_0F02, 900)], "as it came");
+        assert_eq!(s.pet_effects_left(at.wrapping_add(400)), [(0xBDD6_0F01, 1_779_600), (0xBDD6_0F02, 500)], "counted down");
+        assert_eq!(s.pet_effects_left(at.wrapping_add(900)), [(0xBDD6_0F01, 1_779_100)], "one over");
+        assert_eq!(s.pet_effects_left(at.wrapping_sub(5)), [(0xBDD6_0F01, 1_780_000), (0xBDD6_0F02, 900)], "a clock from before it: no time gone");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, m[..m.len() - 3].to_vec());
+        assert_eq!(s.pet_effects, want, "a short set is not taken");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x33, 0x7E, 0]);
+        assert!(s.pet_effects.is_empty(), "the pet gone: an empty set");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, m);
+        s.agree_pet_effects(false);
+        assert_eq!(answers(&mut s), [(251, vec![0x32, 0x7E, 0, 0, 0, 0])], "and stopped");
+        assert!(s.pet_effects.is_empty(), "off: the set forgotten");
+
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        s.agree_pet_effects(true);
+        assert_eq!(answers(&mut s), [], "a new connection: nothing asked before its offer");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x32, 0x7E, 1, 0, 0, 0]);
+        s.agree_pet_effects(true);
+        assert_eq!(answers(&mut s), [(251, vec![0x32, 0x7E, 1, 0, 0, 0])], "its offer answered");
+    }
+
+    // The number tags (go-eqoa-server's 0x7E38/0x7E39): nothing asked with no
+    // offer (the control); an offer answered at once with what is wanted (0
+    // too), a u8, and again only when that changes; a new connection asks
+    // nothing until it is offered again.
+    #[test]
+    fn number_tags_offer_and_answer() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(_, d)| d.starts_with(&[0x39, 0x7E])).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        s.agree_number_tags(true);
+        assert_eq!(answers(&mut s), [], "no offer, nothing asked");
+        assert!(!s.number_tags_offer);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x38, 0x7E]);
+        assert!(!s.number_tags_offer, "a short offer is no offer");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x38, 0x7E, 1]);
+        assert!(s.number_tags_offer);
+        s.agree_number_tags(false);
+        assert_eq!(answers(&mut s), [(251, vec![0x39, 0x7E, 0])], "every row Default: told at once, 0");
+        s.agree_number_tags(true);
+        s.agree_number_tags(true);
+        assert_eq!(answers(&mut s), [(251, vec![0x39, 0x7E, 1])], "a colour chosen: asked once");
+        s.agree_number_tags(false);
+        assert_eq!(answers(&mut s), [(251, vec![0x39, 0x7E, 0])], "back to Default: stopped");
+        // the offer again (the next world entry): told afresh
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x38, 0x7E, 1]);
+        s.agree_number_tags(false);
+        assert_eq!(answers(&mut s), [(251, vec![0x39, 0x7E, 0])], "a new offer is answered again");
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert!(!s.number_tags_offer, "a new connection: no offer");
+        s.agree_number_tags(true);
+        assert_eq!(answers(&mut s), [], "a new connection: nothing asked before its offer");
+    }
+
+    // The NPCs' body tints (go-eqoa-server's 0x7E3E-0x7E40): an offer is
+    // answered at once with a u8 1, each time it comes, and leaves the game the
+    // empty set (this client holds none until the server sends them); a set is
+    // the session's until the game takes it, and answered with nothing; a new
+    // connection leaves the empty set. The controls: an offer cut short is not
+    // answered, and a set cut short leaves nothing new.
+    #[test]
+    fn npc_tints_offer_answer_and_set() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(_, d)| d.starts_with(&[0x3F, 0x7E])).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x3E, 0x7E]);
+        assert_eq!((answers(&mut s), s.npc_tints.take()), (vec![], None), "a short offer is no offer");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x3E, 0x7E, 1]);
+        assert!(ev.is_empty(), "the offer is the session's: {ev:?}");
+        assert_eq!(answers(&mut s), [(251, vec![0x3F, 0x7E, 1])], "answered at once, a u8 1");
+        assert_eq!(s.npc_tints.take(), Some(vec![]), "what was held dropped");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x40, 0x7E, 1, 0, 8, b'y', b'h', b'a', b'f', b'i', b'r', b'a', b'n', 0xFF, 0x50, 0x8C, 0x55]);
+        assert!(ev.is_empty(), "the set is the session's until taken: {ev:?}");
+        assert_eq!(s.npc_tints.take(), Some(vec![("yhafiran".to_string(), 0x558C_50FF)]));
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x40, 0x7E, 1, 0, 8, b'y', b'h']);
+        assert_eq!(s.npc_tints, None, "the control: a set cut short is nothing new");
+        assert_eq!(answers(&mut s), [], "the set answered nothing");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x3E, 0x7E, 1]);
+        assert_eq!(answers(&mut s), [(251, vec![0x3F, 0x7E, 1])], "a new offer is answered again");
+        s.npc_tints = None;
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert_eq!(s.npc_tints.take(), Some(vec![]), "a new connection: none held");
+    }
+
+    // A monster's name and level (go-eqoa-server's 0x7E4C-0x7E4E): an offer of
+    // layout 1 is answered at once with a u8 1, each time it comes, and passed
+    // on as nothing; the message read as the server writes it (go-eqoa-server's
+    // TestMobInfoOnTheWire's bytes) is its event, answered with nothing. The
+    // controls: an offer cut short or of another layout is not answered (the
+    // server's dialogue box stays), and a message cut short or of another layout
+    // is no event.
+    #[test]
+    fn mob_info_offer_answer_and_show() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(_, d)| d.starts_with(&[0x4D, 0x7E])).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x4C, 0x7E]);
+        assert_eq!(answers(&mut s), [], "a short offer is no offer");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x4C, 0x7E, 2]);
+        assert_eq!(answers(&mut s), [], "another layout is left to the box");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x4C, 0x7E, 1]);
+        assert!(ev.is_empty(), "the offer is the session's: {ev:?}");
+        assert_eq!(answers(&mut s), [(251, vec![0x4D, 0x7E, 1])], "answered at once, a u8 1");
+        let wire = vec![0x4E, 0x7E, 1, 0xA1, 0x86, 0x01, 0x00, 3, 10, b'm', b'o', b's', b's', b' ', b's', b'n', b'a', b'k', b'e'];
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, wire.clone());
+        assert!(matches!(&ev[..], [Event::MobInfo { id: 0x186A1, level: 3, name }] if name == "moss snake"), "{ev:?}");
+        assert_eq!(answers(&mut s), [], "the message answered nothing");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, wire[..wire.len() - 1].to_vec());
+        assert!(ev.is_empty(), "the control: one cut short is nothing: {ev:?}");
+        let mut other = wire.clone();
+        other[2] = 2;
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, other);
+        assert!(ev.is_empty(), "the control: another layout is nothing: {ev:?}");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x4C, 0x7E, 1]);
+        assert_eq!(answers(&mut s), [(251, vec![0x4D, 0x7E, 1])], "a new offer is answered again");
+    }
+
+    // The damage meter (go-eqoa-server's 0x7E3A-0x7E3D): nothing asked with no
+    // offer (the control); an offer answered at once with what is wanted (0
+    // too), a u8, and again only when that changes; the fight read as the server
+    // writes it (go-eqoa-server's TestDPSMeterOnTheWire's bytes), one of another
+    // layout or cut short not taken; a reset sent only to a server that was asked
+    // for the meter; a new connection asks nothing until it is offered again.
+    #[test]
+    fn dps_meter_offer_answer_fight_and_reset() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(_, d)| d.len() >= 2 && d[1] == 0x7E && matches!(d[0], 0x3B | 0x3D)).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        s.agree_dps_meter(true);
+        assert!(!s.reset_dps_meter());
+        assert_eq!(answers(&mut s), [], "no offer, nothing asked");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x3A, 0x7E]);
+        assert!(!s.dps_meter_offer, "a short offer is no offer");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x3A, 0x7E, 1]);
+        assert!(s.dps_meter_offer);
+        s.agree_dps_meter(false);
+        assert!(!s.reset_dps_meter(), "not asked for: no reset");
+        assert_eq!(answers(&mut s), [(251, vec![0x3B, 0x7E, 0])], "off: told at once, 0");
+        s.agree_dps_meter(true);
+        s.agree_dps_meter(true);
+        assert_eq!(answers(&mut s), [(251, vec![0x3B, 0x7E, 1])], "on: asked once");
+        assert!(s.reset_dps_meter());
+        assert_eq!(answers(&mut s), [(251, vec![0x3D, 0x7E, 1])], "the reset");
+
+        // a fight of two lines: Dab's own 1000, Jib's 300 (120 its pet's), gone
+        // from the group; over, 1.5 s long, number 0x01020304
+        let body = [
+            1, 4, 3, 2, 1, 1, 0xDC, 5, 0, 0, 0x14, 5, 0, 0, 2, 0, 1, 0, 2, 1, 3, 0xE8, 3, 0, 0, 0, 0, 0, 0, 3, b'D', b'a', b'b', 2, 10, 0x2C, 1, 0, 0, 0x78, 0, 0, 0, 3, b'J', b'i', b'b',
+        ];
+        let mut m = vec![0x3C, 0x7E];
+        m.extend_from_slice(&body);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m.clone());
+        let want = DpsMeter {
+            fight: 0x0102_0304,
+            over: true,
+            length_ms: 1500,
+            total: 1300,
+            count: 2,
+            place: 1,
+            lines: vec![
+                DpsLine { own: true, left: false, class: 3, damage: 1000, pet: 0, name: "Dab".into() },
+                DpsLine { own: false, left: true, class: 10, damage: 300, pet: 120, name: "Jib".into() },
+            ],
+        };
+        assert!(matches!(&ev[..], [Event::DpsMeter(got)] if *got == want), "{ev:?}");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m[..m.len() - 1].to_vec());
+        assert!(!ev.iter().any(|e| matches!(e, Event::DpsMeter(_))), "cut short: {ev:?}");
+        let mut other = m.clone();
+        other[2] = 2;
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, other);
+        assert!(!ev.iter().any(|e| matches!(e, Event::DpsMeter(_))), "another layout: {ev:?}");
+
+        // the offer again (the next world entry): told afresh
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x3A, 0x7E, 1]);
+        s.agree_dps_meter(true);
+        assert_eq!(answers(&mut s), [(251, vec![0x3B, 0x7E, 1])], "a new offer is answered again");
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert!(!s.dps_meter_offer, "a new connection: no offer");
+        s.agree_dps_meter(true);
+        assert!(!s.reset_dps_meter());
+        assert_eq!(answers(&mut s), [], "a new connection: nothing asked before its offer");
+    }
+
+    /// A 0x00DB's tag: one byte after its body from a server that offered
+    /// them, its low 7 bits the kind and bit 7 the pet's; none with no offer
+    /// (the control), no byte, a kind of 0, or three bytes (a server's patch's
+    /// colour).
+    #[test]
+    fn a_number_tag_is_one_byte_from_a_server_that_offered() {
+        assert_eq!(number_tag(&[0x05], true), Some(NumberTag { kind: 5, pet: false }));
+        assert_eq!(number_tag(&[0x86], true), Some(NumberTag { kind: 6, pet: true }));
+        assert_eq!(number_tag(&[0x81], true), Some(NumberTag { kind: 1, pet: true }));
+        assert_eq!(number_tag(&[0x09], true), Some(NumberTag { kind: 9, pet: false }), "a kind a later server sends");
+        assert_eq!(number_tag(&[0x05], false), None, "no offer: a stray byte is no tag");
+        assert_eq!(number_tag(&[], true), None);
+        assert_eq!(number_tag(&[0x00], true), None);
+        assert_eq!(number_tag(&[0x80], true), None, "the pet's bit alone");
+        assert_eq!(number_tag(&[255, 128, 0], true), None, "three bytes are a patch's colour");
+    }
+
     /// The quest tracker's offer is answered once, its body read whole (the
     /// counts, a goal done only counted and all there), a short one not
     /// taken (the control), and off it is stopped and forgotten.
@@ -2593,6 +4436,8 @@ mod tests {
         s.agree_quest_progress(true);
         assert_eq!(answers(&mut s), [], "no offer, nothing asked");
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x05, 0x7E, 1, 0, 0, 0]);
+        s.agree_quest_progress(false);
+        assert_eq!(answers(&mut s), [], "the Quest Helper off from the start: nothing answered");
         s.agree_quest_progress(true);
         s.agree_quest_progress(true);
         assert_eq!(answers(&mut s), [(251, vec![0x05, 0x7E, 1, 0, 0, 0])], "asked once");
@@ -2672,9 +4517,10 @@ mod tests {
     }
 
     // go-eqoa-server's offer of the GM's trigger names (0x7E07) is answered
-    // with 1 at once, every time it comes, with this client's word that it flies
-    // (0x7E1B), and its names (0x7E08) are passed on for the TEST menu with nothing
-    // answered. The controls: an offer cut short and an offer of 0 are not answered.
+    // with 2 (every trigger) at once, every time it comes, with this client's word
+    // that it flies (0x7E1B), and its whole list (0x7E36) and an older server's
+    // names (0x7E08) are passed on for the TEST menu with nothing answered. The
+    // controls: an offer cut short and an offer of 0 are not answered.
     #[test]
     fn the_trigger_names_offer_is_answered() {
         let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -2693,7 +4539,7 @@ mod tests {
         assert_eq!(answers(&mut s), [], "the control: an offer of 0");
         let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x07, 0x7E, 1, 0, 0, 0]);
         assert!(ev.is_empty(), "the offer is the session's: {ev:?}");
-        let answer = [(251, vec![0x07, 0x7E, 1, 0, 0, 0]), (251, vec![0x1B, 0x7E, 1, 0, 0, 0])];
+        let answer = [(251, vec![0x07, 0x7E, 2, 0, 0, 0]), (251, vec![0x1B, 0x7E, 1, 0, 0, 0])];
         assert_eq!(answers(&mut s), answer);
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x07, 0x7E, 1, 0, 0, 0]);
         assert_eq!(answers(&mut s), answer, "again for another offer");
@@ -2701,6 +4547,10 @@ mod tests {
         let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, names);
         assert!(matches!(&ev[..], [Event::Opcode { op: 0x7E08, data }] if data[..] == [1, 2, 1, 3, b'O', b'n', b'e']), "{ev:?}");
         assert_eq!(answers(&mut s), [], "the names answered nothing");
+        let list = vec![0x36, 0x7E, 1, 0, 140, 0, 0, 0, 1, 3, b'O', b'n', b'e'];
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, list);
+        assert!(matches!(&ev[..], [Event::Opcode { op: 0x7E36, data }] if data[..] == [1, 0, 140, 0, 0, 0, 1, 3, b'O', b'n', b'e']), "{ev:?}");
+        assert_eq!(answers(&mut s), [], "the list answered nothing");
     }
 
     // A race's own words (0x7E1C): the offer answered with 1 at once, every time
@@ -2767,6 +4617,204 @@ mod tests {
         assert_eq!((g.like, g.class_mask, g.body_for(1), g.name.as_str(), g.desc.as_str()), (2, 0x7E49, 0x6C13_08E0, "Goblin", "Sly."));
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x1F, 0x7E, 1, 0, 1, 13]);
         assert_eq!(s.creation, Some(c), "the control: races cut short leave what was kept");
+    }
+
+    fn ready_builder(w: &[crate::serverworlds::World]) -> std::sync::mpsc::Receiver<Vec<u8>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(w.iter().filter(|w| w.name != "not here").map(|w| w.id).collect()).unwrap();
+        rx
+    }
+
+    // The server's worlds (0x7E30): with no builder the offer is not taken; with
+    // one it is answered with 1, the list (0x7E31) kept and built, and the server
+    // told which are held, once, then nothing more. The controls: no builder, an
+    // offer cut short, an offer of 0, a list cut short (kept as before, nothing
+    // told); a world the builder could not make is left out of the answer.
+    #[test]
+    fn the_server_worlds_are_built_and_the_server_told_which() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.pump();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        if WORLD_BUILDER.get().is_none() {
+            deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x30, 0x7E, 1, 0, 0, 0]);
+            assert_eq!((answers(&mut s), s.server_worlds_pending()), (vec![], false), "the control: no builder, no answer");
+        }
+        set_world_builder(ready_builder);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x30, 0x7E, 1, 0, 0]);
+        assert_eq!(answers(&mut s), [], "the control: an offer cut short");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x30, 0x7E, 0, 0, 0, 0]);
+        assert_eq!(answers(&mut s), [], "the control: an offer of 0");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x30, 0x7E, 1, 0, 0, 0]);
+        assert!(ev.is_empty(), "the offer is the session's: {ev:?}");
+        assert_eq!(answers(&mut s), [(251, vec![0x30, 0x7E, 1, 0, 0, 0])]);
+        assert!(s.server_worlds_pending(), "taken, not yet answered");
+        let w = |id: u8, name: &str| crate::serverworlds::World { id, name: name.into(), size: 1, crc: 2, parts: vec![] };
+        let list = crate::serverworlds::encode(&[w(10, "the Homelands"), w(11, "not here")]);
+        let mut cut = vec![0x31, 0x7E];
+        cut.extend(&list[..list.len() - 1]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, cut);
+        assert_eq!((answers(&mut s), s.server_worlds.is_none(), s.server_worlds_pending()), (vec![], true, true), "the control: a list cut short");
+        let mut msg = vec![0x31, 0x7E];
+        msg.extend(&list);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, msg);
+        assert!(ev.is_empty(), "the list is the session's: {ev:?}");
+        assert_eq!(answers(&mut s), [(251, vec![0x31, 0x7E, 1, 10])], "only the world built");
+        assert_eq!((s.server_worlds.as_ref().map(Vec::len), s.server_worlds_pending()), (Some(2), false));
+        assert_eq!(answers(&mut s), [], "told once");
+    }
+
+    // Which characters a login needs the server's worlds for (0x7E54): kept
+    // whole each time, a character it names waits and one it does not need
+    // not, and nothing is answered. The controls: a server that never said
+    // (None, not "none of them"); a message cut short or of another version
+    // leaves what was known.
+    #[test]
+    fn the_server_says_which_characters_need_its_worlds() {
+        let mut s = session();
+        s.record = Some(Vec::new());
+        assert_eq!(s.pick_needs_worlds(630), None, "the control: never said");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x54, 0x7E, 1, 2, 0x76, 0x02, 0, 0, 4, 3, 2, 1]);
+        assert!(ev.is_empty(), "the set is the session's: {ev:?}");
+        let needs = |s: &Session| [630, 0x0102_0304, 558, -1, 1 << 40].map(|id| s.pick_needs_worlds(id));
+        assert_eq!(needs(&s), [Some(true), Some(true), Some(false), Some(false), Some(false)]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x54, 0x7E, 1, 2, 0x76, 0x02, 0, 0, 4]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x54, 0x7E, 2, 0]);
+        assert_eq!(needs(&s)[..3], [Some(true), Some(true), Some(false)], "the controls: cut short, another version");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x54, 0x7E, 1, 1, 0x2E, 0x02, 0, 0]);
+        assert_eq!(needs(&s)[..3], [Some(false), Some(false), Some(true)], "the whole set each time");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x54, 0x7E, 1, 0]);
+        assert_eq!(needs(&s)[..3], [Some(false); 3], "none of them: said, and no character waits");
+        assert_eq!(s.record.as_deref(), Some(&[][..]), "nothing answered");
+    }
+
+    // The server's worlds taken and a character gone in before their list
+    // was in (one that did not wait for them: the promotion empties the queue
+    // the list waited in): the new game connection asks for them again (0x7E30
+    // 1), and the list that then comes is built and answered as ever. The
+    // controls: a session never offered them asks nothing at a promotion; one
+    // whose list was in and being built is not sent it twice; one that
+    // answered asks nothing more.
+    #[test]
+    fn the_worlds_are_asked_for_again_when_a_character_went_in_before_their_list() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.pump();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        set_world_builder(ready_builder);
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert_eq!(answers(&mut s), [], "the control: never offered, nothing asked");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x30, 0x7E, 1, 0, 0, 0]);
+        assert_eq!(answers(&mut s), [(251, vec![0x30, 0x7E, 1, 0, 0, 0])], "the offer taken");
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert_eq!(answers(&mut s), [(251, vec![0x30, 0x7E, 1, 0, 0, 0])], "in the world before the list: asked again");
+        assert!(s.server_worlds_pending());
+        let w = crate::serverworlds::World { id: 10, name: "the Homelands".into(), size: 1, crc: 2, parts: vec![] };
+        let mut list = vec![0x31, 0x7E];
+        list.extend(crate::serverworlds::encode(std::slice::from_ref(&w)));
+        // the list in and its build not yet answered: a promotion now asks nothing
+        deliver(&mut s, drdp::TYPE_GUARANTEED, list.clone());
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert_eq!(answers(&mut s), [(251, vec![0x31, 0x7E, 1, 10])], "the control: the list was in; built and answered, not asked for twice");
+        assert!(!s.server_worlds_pending());
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert_eq!(answers(&mut s), [], "the control: answered, nothing more asked");
+    }
+
+    // The worlds held, told the server after a character was played and before
+    // the game connection opened (their check ended a moment after the pick):
+    // the server has left the lobby connection by then and never reads it, so
+    // the new connection tells it again, once. The controls: told before the
+    // pick, nothing is told again at the promotion; a later promotion tells
+    // nothing more.
+    #[test]
+    fn the_worlds_held_are_told_again_when_the_answer_went_behind_the_pick() {
+        let mut s = session();
+        s.record = Some(Vec::new());
+        // what the session sent of ours since the last look (its record: the
+        // wire holds a message back while those before it are unacknowledged)
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.pump();
+            s.record.replace(Vec::new()).unwrap().into_iter().filter(|(_, d)| d.get(1) == Some(&0x7E)).collect()
+        };
+        let c = Character { server_id: 558, ..Default::default() };
+        let building = |s: &mut Session| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            s.worlds_building = Some(rx);
+            s.worlds_pending = true;
+            tx
+        };
+        // the control: answered, then the pick, then the promotion
+        let tx = building(&mut s);
+        tx.send(vec![10, 11]).unwrap();
+        assert_eq!(answers(&mut s), [(251, vec![0x31, 0x7E, 2, 10, 11])]);
+        s.select_character(&c);
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert_eq!(answers(&mut s), [], "the control: told before the pick, not told again");
+        // the pick, then the answer, then the promotion
+        let tx = building(&mut s);
+        s.select_character(&c);
+        assert_eq!(answers(&mut s), [], "still being checked");
+        tx.send(vec![10, 11]).unwrap();
+        assert_eq!(answers(&mut s), [(251, vec![0x31, 0x7E, 2, 10, 11])], "told on the lobby connection");
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert_eq!(answers(&mut s), [(251, vec![0x31, 0x7E, 2, 10, 11])], "told again on the game connection");
+        assert!(!s.server_worlds_pending());
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert_eq!(answers(&mut s), [], "the control: once");
+    }
+
+    // A custom race's own options (0x7E22): the offer answered with 1 at once,
+    // the options (0x7E23) kept on the session for the create pages and the
+    // bodies drawn, the looks (0x7E24) passed on whole for the game to keep. The
+    // controls: a session never offered says nothing and keeps none; an offer cut
+    // short or of 0 is not answered; options that do not read leave what was kept.
+    #[test]
+    fn the_race_options_offer_is_answered_and_its_lists_kept() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        assert_eq!((answers(&mut s), s.race_options.is_none()), (vec![], true), "never offered");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x22, 0x7E, 1, 0, 0]);
+        assert_eq!(answers(&mut s), [], "the control: an offer cut short");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x22, 0x7E, 0, 0, 0, 0]);
+        assert_eq!(answers(&mut s), [], "the control: an offer of 0");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x22, 0x7E, 1, 0, 0, 0]);
+        assert!(ev.is_empty(), "the offer is the session's: {ev:?}");
+        assert_eq!(answers(&mut s), [(251, vec![0x22, 0x7E, 1, 0, 0, 0])]);
+        // a race of one body row, two steps
+        let mut options = vec![0x23, 0x7E, 1, 1, 13, 1, 4, b'b', b'o', b'd', b'y', 5, b'T', b'r', b'i', b'b', b'e', 1, 0, 2];
+        options.extend([1, b'G']);
+        options.extend(0x6C13_08E0u32.to_le_bytes());
+        options.extend(1000u16.to_le_bytes());
+        options.extend([1, b'I']);
+        options.extend(0xE961_79D4u32.to_le_bytes());
+        options.extend(875u16.to_le_bytes());
+        options.push(0);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, options);
+        assert!(ev.is_empty(), "the options are the session's: {ev:?}");
+        let o = s.race_options.clone().expect("kept");
+        assert_eq!(o.rows(13)[0].steps(0).iter().map(|s| s.value).collect::<Vec<_>>(), vec![0x6C13_08E0, 0xE961_79D4]);
+        assert_eq!(o.body_size(13, 0xE961_79D4), 0.875);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x23, 0x7E, 1, 1, 13]);
+        assert_eq!(s.race_options, Some(o), "the control: options cut short leave what was kept");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x24, 0x7E, 1, 0, 0]);
+        assert!(ev.is_empty(), "the looks are the session's until taken: {ev:?}");
+        assert_eq!(s.race_looks.take(), Some(vec![1, 0, 0]));
+        assert_eq!(answers(&mut s), [], "the lists answered nothing");
     }
 
     // go-eqoa-server's offer of the live duel's messages (0x7E09) is answered
@@ -2851,6 +4899,99 @@ mod tests {
         let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x21, 0x7E, 1, 0, 0]);
         assert!(matches!(&ev[..], [Event::Opcode { op: OP_COMBAT_RECORD_DATA, data }] if data[..] == [1, 0, 0]), "{ev:?}");
         assert_eq!(answers(&mut s), [], "the record answered nothing");
+    }
+
+    // Capes (0x7E25): the offer answered with 1 at once and kept; then the list's
+    // capes (0x7E27, by server id) and those in view (0x7E26, by entity id) kept,
+    // each message the whole of it, a style of 0 left out and a count of each.
+    // The controls: an offer cut short or of 0 is neither answered nor kept, a
+    // session never offered capes keeps no list sent to it anyway, and a list cut
+    // short changes nothing.
+    #[test]
+    fn the_cape_offer_is_answered_and_its_lists_kept() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        let list = |op: u16, entries: &[(u32, u8, u32)]| {
+            let mut m = op.to_le_bytes().to_vec();
+            m.push(entries.len() as u8);
+            for &(id, style, color) in entries {
+                m.extend_from_slice(&id.to_le_bytes());
+                m.push(style);
+                m.extend_from_slice(&color.to_le_bytes());
+            }
+            m
+        };
+        answers(&mut s);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, list(OP_CAPES_IN_VIEW, &[(5, 1, 0)]));
+        assert!(s.capes_in_view.is_empty() && s.capes_changed == 0, "the control: never offered, nothing kept");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x25, 0x7E, 1, 0, 0]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x25, 0x7E, 0, 0, 0, 0]);
+        assert!(!s.capes, "the controls: cut short, or 0");
+        assert_eq!(answers(&mut s), []);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x25, 0x7E, 1, 0, 0, 0]);
+        assert!(ev.is_empty() && s.capes, "the offer is the session's: {ev:?}");
+        assert_eq!(answers(&mut s), [(251, vec![0x25, 0x7E, 1, 0, 0, 0])]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, list(OP_CAPES_LIST, &[(1234, 3, 0xFF0000FF), (99, 0, 0)]));
+        assert_eq!(s.cape_list.get(&1234), Some(&crate::cape::Cape { style: 3, color: 0xFF0000FF }));
+        assert_eq!((s.cape_list.len(), s.capes_changed), (1, 1), "a style of 0 wears none");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, list(OP_CAPES_IN_VIEW, &[(0x7F00_0001, 2, 0), (40, 1, 0)]));
+        assert_eq!((s.capes_in_view.len(), s.capes_changed), (2, 2));
+        let mut short = list(OP_CAPES_IN_VIEW, &[(40, 4, 0)]);
+        short.pop();
+        deliver(&mut s, drdp::TYPE_GUARANTEED, short);
+        assert_eq!((s.capes_in_view.len(), s.capes_changed), (2, 2), "the control: cut short, the set as it was");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, list(OP_CAPES_IN_VIEW, &[]));
+        assert!(s.capes_in_view.is_empty(), "the whole set each time: none now");
+        assert_eq!(s.cape_list.len(), 1, "the list kept apart");
+        assert_eq!(answers(&mut s), [], "the lists answered nothing");
+    }
+
+    // A pack and a bank past 40 (0x7E29): the offer answered at once with what
+    // this client holds of each (the offer's, between 40 and 255), the sizes
+    // taken only from the server's word before a dump (0x7E2A). The controls:
+    // an offer cut short or of 0 is not answered, a session never told keeps
+    // CLIENT's 40, and a word cut short changes nothing.
+    #[test]
+    fn the_item_lists_offer_is_answered_and_its_sizes_kept() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        let words = |op: u16, w: &[u32]| {
+            let mut m = op.to_le_bytes().to_vec();
+            for v in w {
+                m.extend_from_slice(&v.to_le_bytes());
+            }
+            m
+        };
+        answers(&mut s);
+        assert_eq!(s.item_lists, [40, 40], "the control: never told, CLIENT's");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, words(OP_ITEM_LISTS, &[1, 100]));
+        deliver(&mut s, drdp::TYPE_GUARANTEED, words(OP_ITEM_LISTS, &[0, 100, 100]));
+        assert_eq!(answers(&mut s), [], "the controls: cut short, or 0");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, words(OP_ITEM_LISTS, &[1, 100, 1000]));
+        assert!(ev.is_empty(), "the offer is the session's: {ev:?}");
+        assert_eq!(answers(&mut s), [(251, words(OP_ITEM_LISTS, &[1, 100, 255]))]);
+        assert_eq!(s.item_lists, [40, 40], "an answer is not the sizes: the server's word is");
+        let mut short = words(OP_ITEM_LISTS_IN_FORCE, &[100, 100]);
+        short.pop();
+        deliver(&mut s, drdp::TYPE_GUARANTEED, short);
+        assert_eq!(s.item_lists, [40, 40], "the control: cut short, as it was");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, words(OP_ITEM_LISTS_IN_FORCE, &[100, 100]));
+        assert_eq!(s.item_lists, [100, 100]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, words(OP_ITEM_LISTS_IN_FORCE, &[12, 9000]));
+        assert_eq!(s.item_lists, [40, 255], "never under CLIENT's, never past a byte's index");
+        assert_eq!(answers(&mut s), [], "the sizes answered nothing");
     }
 
     // A state channel's update that comes before the world entry (live, a

@@ -52,6 +52,7 @@ pub enum FontHandleState {
         file_size: u64,
     },
     Fallback,
+    Released,
 }
 
 #[derive(Clone)]
@@ -72,6 +73,7 @@ impl UserData for LuaImFont {
                     format!("ImFont(ready, size={size_pixels})")
                 }
                 FontHandleState::Fallback => "ImFont(fallback)".to_string(),
+                FontHandleState::Released => "ImFont(released)".to_string(),
             };
             Ok(desc)
         });
@@ -126,11 +128,44 @@ pub struct FontBank {
     next_handle_id: u32,
     handles: HashMap<u32, LuaImFont>,
     cache_by_key: HashMap<String, LuaImFont>,
+    released: Vec<std::rc::Weak<RefCell<FontHandleState>>>,
     aggregate_bytes: u64,
     diagnostics: Vec<String>,
 }
 
 impl FontBank {
+    pub(crate) fn publish_outcomes(lua: &Lua, bank: &Rc<RefCell<Self>>) -> LuaResult<()> {
+        #[derive(Default)]
+        struct Published(std::collections::HashSet<u32>);
+        if lua.app_data_ref::<Published>().is_none() {
+            lua.set_app_data(Published::default());
+        }
+        let handles = bank.borrow().handles.values().cloned().collect::<Vec<_>>();
+        for font in handles {
+            let status = match &*font.state.borrow() {
+                FontHandleState::Ready { .. } => Some(false),
+                FontHandleState::Fallback => Some(true),
+                _ => None,
+            };
+            if let Some(failed) = status {
+                let first = lua
+                    .app_data_mut::<Published>()
+                    .unwrap()
+                    .0
+                    .insert(font.handle_id);
+                if first {
+                    let handle = mlua::Value::UserData(lua.create_userdata(font)?);
+                    super::native_events::resource(
+                        lua,
+                        "font",
+                        handle,
+                        failed.then_some("font could not be loaded; using default font"),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
     pub fn new(owner_id: u64, context_epoch: u64) -> Self {
         Self {
             _owner_id: owner_id,
@@ -138,6 +173,7 @@ impl FontBank {
             next_handle_id: 1,
             handles: HashMap::new(),
             cache_by_key: HashMap::new(),
+            released: Vec::new(),
             aggregate_bytes: 0,
             diagnostics: Vec::new(),
         }
@@ -210,7 +246,11 @@ impl FontBank {
             self.record_diagnostic(FontDiagnostic::HandleLimitExceeded {
                 limit: MAX_FONT_HANDLES,
             });
-            return Some(fallback_handle(self, cache_key));
+            return Some(LuaImFont {
+                handle_id: 0,
+                state: Rc::new(RefCell::new(FontHandleState::Fallback)),
+                context_epoch: self.context_epoch,
+            });
         }
 
         let canonical_path =
@@ -280,7 +320,12 @@ impl FontBank {
                 file_size,
             } = &*state
             {
-                let data = match StbTrueTypeFontData::from_file(canonical_path) {
+                let data = match super::sandbox::read_bounded(
+                    canonical_path,
+                    MAX_FONT_FILE_BYTES as usize,
+                )
+                .and_then(|bytes| StbTrueTypeFontData::from_bytes(bytes).map_err(|e| e.to_string()))
+                {
                     Ok(d) => d,
                     Err(e) => {
                         self.record_diagnostic(FontDiagnostic::ValidationFailed(format!(
@@ -334,10 +379,174 @@ impl FontBank {
 
         forge.set(
             "LoadFont",
-            lua.create_function(move |_, (path_str, size_px): (String, Option<f32>)| {
+            lua.create_function(move |lua, (path_str, size_px): (String, Option<f32>)| {
                 let context_initialized = unsafe { !sys::igGetCurrentContext().is_null() };
                 let mut bank = bank.borrow_mut();
-                Ok(bank.load_font(&path_str, size_px, &addon_clone, context_initialized))
+                if let Some(mounts) = lua.app_data_ref::<super::sandbox::Mounts>() {
+                    match mounts.media(&path_str) {
+                        Ok(path) => {
+                            let mut scoped = addon_clone.clone();
+                            scoped.script_root = path.parent().unwrap().to_path_buf();
+                            scoped.resource_dirs = vec![scoped.script_root.clone()];
+                            Ok(bank.load_font(
+                                &path.to_string_lossy(),
+                                size_px,
+                                &scoped,
+                                context_initialized,
+                            ))
+                        }
+                        Err(e) => {
+                            super::native::diagnose(lua, "UiForge.LoadFont", "io_error", &e);
+                            Ok(bank.load_font(
+                                "__missing_font__.ttf",
+                                size_px,
+                                &addon_clone,
+                                context_initialized,
+                            ))
+                        }
+                    }
+                } else {
+                    Ok(bank.load_font(&path_str, size_px, &addon_clone, context_initialized))
+                }
+            })?,
+        )?;
+        Self::install_native(owner, lua)?;
+        Ok(())
+    }
+    fn install_native(owner: &Rc<RefCell<Self>>, lua: &Lua) -> LuaResult<()> {
+        if lua.named_registry_value::<Table>("eqoa_root").is_err() {
+            return Ok(());
+        }
+        use super::native::{bind, error};
+        let forge: Table = lua.globals().get("UiForge")?;
+        let load: mlua::Function = forge.get("LoadFont")?;
+        bind(
+            lua,
+            "fonts",
+            "load",
+            lua.create_function(
+                move |lua, (path, size): (mlua::Value, Option<mlua::Value>)| {
+                    let Some(path) = path
+                        .as_string()
+                        .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+                    else {
+                        return error(
+                            lua,
+                            "eqoa.fonts.load",
+                            "invalid_argument",
+                            "path must be a relative string",
+                        );
+                    };
+                    if path.starts_with(['/', '\\']) || path.contains(':') {
+                        return error(
+                            lua,
+                            "eqoa.fonts.load",
+                            "permission_denied",
+                            "native paths must be relative",
+                        );
+                    }
+                    let size = size
+                        .as_ref()
+                        .map_or(Some(16.0), super::native_state::number)
+                        .filter(|n| *n > 0.0 && *n <= 256.0);
+                    let Some(size) = size else {
+                        return error(
+                            lua,
+                            "eqoa.fonts.load",
+                            "invalid_argument",
+                            "font size must be finite in (0,256]",
+                        );
+                    };
+                    let value: Option<mlua::AnyUserData> = load.call((path, size))?;
+                    let Some(ud) = value else {
+                        return error(lua, "eqoa.fonts.load", "unavailable", "no font context");
+                    };
+                    let font = ud.borrow::<LuaImFont>()?.clone();
+                    let status = match *font.state.borrow() {
+                        FontHandleState::Pending { .. } => "pending",
+                        FontHandleState::Ready { .. } => "ready",
+                        FontHandleState::Fallback => "fallback",
+                        FontHandleState::Released => "fallback",
+                    };
+                    let t = lua.create_table()?;
+                    t.set("status", status)?;
+                    if status == "fallback" {
+                        t.set("reason", "resource unavailable; using default font")?;
+                    }
+                    t.set("font", font)?;
+                    lua.pack_multi((t, mlua::Value::Nil))
+                },
+            )?,
+        )?;
+        bind(
+            lua,
+            "fonts",
+            "default",
+            lua.create_function(|lua, ()| {
+                if unsafe { sys::igGetCurrentContext().is_null() } {
+                    return error(lua, "eqoa.fonts.default", "unavailable", "no font context");
+                }
+                let t = lua.create_table()?;
+                t.set("status", "ready")?;
+                t.set(
+                    "font",
+                    LuaImFont {
+                        handle_id: 0,
+                        state: Rc::new(RefCell::new(FontHandleState::Fallback)),
+                        context_epoch: current_context_epoch(),
+                    },
+                )?;
+                lua.pack_multi((t, mlua::Value::Nil))
+            })?,
+        )?;
+        let bank = owner.clone();
+        bind(
+            lua,
+            "fonts",
+            "release",
+            lua.create_function(move |lua, value: mlua::Value| {
+                if value.is_nil() {
+                    return lua.pack_multi((true, mlua::Value::Nil));
+                }
+                let Some(ud) = value.as_userdata() else {
+                    return error(lua, "eqoa.fonts.release", "stale_handle", "expected Font");
+                };
+                let Ok(font) = ud.borrow::<LuaImFont>() else {
+                    return error(lua, "eqoa.fonts.release", "stale_handle", "expected Font");
+                };
+                if bank
+                    .borrow()
+                    .released
+                    .iter()
+                    .any(|state| state.upgrade().is_some_and(|s| Rc::ptr_eq(&s, &font.state)))
+                {
+                    return lua.pack_multi((true, mlua::Value::Nil));
+                }
+                if font.handle_id != 0
+                    && !bank
+                        .borrow()
+                        .handles
+                        .values()
+                        .any(|f| Rc::ptr_eq(&f.state, &font.state))
+                {
+                    return error(
+                        lua,
+                        "eqoa.fonts.release",
+                        "stale_handle",
+                        "font belongs to another VM",
+                    );
+                }
+                if font.handle_id != 0 {
+                    let mut bank = bank.borrow_mut();
+                    bank.released.retain(|f| f.strong_count() > 0);
+                    bank.released.push(Rc::downgrade(&font.state));
+                    bank.handles.remove(&font.handle_id);
+                    bank.cache_by_key
+                        .retain(|_, f| !Rc::ptr_eq(&f.state, &font.state));
+                    *font.state.borrow_mut() = FontHandleState::Released;
+                }
+                // Atlas allocation retires with its context; the VM handle is revoked now.
+                lua.pack_multi((true, mlua::Value::Nil))
             })?,
         )?;
         Ok(())
@@ -501,6 +710,7 @@ mod tests {
             module_dirs: vec![root.to_path_buf()],
             resource_dirs: vec![res_dir],
             api: Some("eqoa/1".to_string()),
+            entry_mode: Default::default(),
             requested_capabilities: vec![],
             initially_enabled: true,
             mods_root: Some(root.to_path_buf()),
@@ -649,6 +859,7 @@ mod tests {
 
         let dir = temp_test_dir("render_distinction");
         let addon = test_addon(&dir);
+        fs::copy(sys_font, addon.resource_dirs[0].join("times.ttf")).unwrap();
 
         let mut context = Context::create();
         context.set_ini_filename::<PathBuf>(None).unwrap();
@@ -670,8 +881,8 @@ mod tests {
         let script0 = host
             .compile(
                 r#"
-            times20 = UiForge.LoadFont("C:\\Windows\\Fonts\\times.ttf", 20.0)
-            times36 = UiForge.LoadFont("C:\\Windows\\Fonts\\times.ttf", 36.0)
+            times20 = UiForge.LoadFont("times.ttf", 20.0)
+            times36 = UiForge.LoadFont("times.ttf", 36.0)
             assert(times20 ~= nil and times36 ~= nil)
             ImGui.PushFont(times20)
             local w0, h0 = ImGui.CalcTextSize("Hello EQOA")

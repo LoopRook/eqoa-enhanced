@@ -7,6 +7,13 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum EntryMode {
+    #[default]
+    Frame,
+    Once,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DiscoveredAddon {
     pub id: String,
@@ -17,6 +24,7 @@ pub(crate) struct DiscoveredAddon {
     pub module_dirs: Vec<PathBuf>,
     pub resource_dirs: Vec<PathBuf>,
     pub api: Option<String>,
+    pub entry_mode: EntryMode,
     pub requested_capabilities: Vec<String>,
     pub initially_enabled: bool,
     pub mods_root: Option<PathBuf>,
@@ -367,6 +375,7 @@ fn discover_script_root(script_root: &Path, canonical_root: &Path, ctx: &mut Dis
                     module_dirs: deduplicate_dirs(module_dirs),
                     resource_dirs: deduplicate_dirs(resource_dirs),
                     api: None,
+                    entry_mode: Default::default(),
                     requested_capabilities: Vec::new(),
                     initially_enabled: false,
                     mods_root: Some(canonical_root.to_path_buf()),
@@ -412,7 +421,11 @@ fn discover_script_root(script_root: &Path, canonical_root: &Path, ctx: &mut Dis
             continue;
         }
 
-        let manifest_path = canonical_pkg.join("mod.json");
+        let manifest_path = if canonical_pkg.join("manifest.json").is_file() {
+            canonical_pkg.join("manifest.json")
+        } else {
+            canonical_pkg.join("mod.json")
+        };
         if manifest_path.is_file() {
             // Layout 4: Native package manifest
             parse_native_manifest(
@@ -527,6 +540,19 @@ fn parse_native_manifest(
             return;
         }
     }
+
+    let entry_mode = match raw.get("entryMode") {
+        None => EntryMode::Frame,
+        Some(serde_json::Value::String(mode)) if mode == "frame" => EntryMode::Frame,
+        Some(serde_json::Value::String(mode)) if mode == "once" => EntryMode::Once,
+        Some(value) => {
+            ctx.add_diagnostic(
+                manifest_path.to_path_buf(),
+                format!("Invalid manifest entryMode: {value}; expected 'frame' or 'once'"),
+            );
+            return;
+        }
+    };
 
     // Check id: nonempty ASCII letters, digits, _, ., -
     let id = match raw.get("id") {
@@ -718,6 +744,7 @@ fn parse_native_manifest(
         module_dirs: deduplicate_dirs(module_dirs),
         resource_dirs: deduplicate_dirs(resource_dirs),
         api: Some("eqoa/1".to_string()),
+        entry_mode,
         requested_capabilities,
         initially_enabled,
         mods_root: Some(canonical_root.to_path_buf()),
@@ -816,6 +843,7 @@ fn parse_legacy_package(
         module_dirs: deduplicate_dirs(module_dirs),
         resource_dirs: deduplicate_dirs(resource_dirs),
         api: None,
+        entry_mode: Default::default(),
         requested_capabilities: Vec::new(),
         initially_enabled: false,
         mods_root: Some(canonical_root.to_path_buf()),
@@ -1336,5 +1364,59 @@ mod tests {
         let disc = discover(root);
         assert!(disc.addons.is_empty());
         assert!(disc.diagnostics.is_empty());
+    }
+    #[test]
+    fn review_fix_m2_discovery_rejects_invalid_entry_modes_and_records_once() {
+        let temp = TempDir::new("entry_mode");
+        let pkg = temp.path().join("example");
+        fs::create_dir_all(&pkg).unwrap();
+        fs::write(pkg.join("main.lua"), "-- entry").unwrap();
+        let base = serde_json::json!({"schemaVersion":1,"runtime":"lua","api":"eqoa/1","id":"example","entry":"main.lua"});
+        for bad in [
+            serde_json::json!("Once"),
+            serde_json::json!(123),
+            serde_json::Value::Null,
+        ] {
+            let mut manifest = base.clone();
+            manifest["entryMode"] = bad;
+            fs::write(pkg.join("mod.json"), manifest.to_string()).unwrap();
+            let found = discover(temp.path());
+            assert!(
+                found.addons.is_empty(),
+                "invalid entryMode must reject the package"
+            );
+            assert!(
+                found
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("entryMode"))
+            );
+        }
+        let mut manifest = base.clone();
+        manifest["entryMode"] = serde_json::json!("once");
+        fs::write(pkg.join("mod.json"), manifest.to_string()).unwrap();
+        let found = discover(temp.path());
+        assert_eq!(found.addons.len(), 1);
+        fs::write(pkg.join("mod.json"), base.to_string()).unwrap();
+        let host = super::super::host::Host::for_addon(&found.addons[0]).unwrap();
+        assert!(
+            host.once_mode(),
+            "execution uses validated discovery metadata, not a second disk read"
+        );
+        let found = discover(temp.path());
+        assert!(
+            !super::super::host::Host::for_addon(&found.addons[0])
+                .unwrap()
+                .once_mode()
+        );
+        fs::write(temp.path().join("loose.lua"), "-- loose").unwrap();
+        fs::write(temp.path().join("mod.json"), manifest.to_string()).unwrap();
+        let found = discover(temp.path());
+        let loose = found.addons.iter().find(|a| a.id == "loose").unwrap();
+        assert!(
+            !super::super::host::Host::for_addon(loose)
+                .unwrap()
+                .once_mode()
+        );
     }
 }

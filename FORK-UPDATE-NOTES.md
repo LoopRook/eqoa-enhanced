@@ -2,6 +2,40 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-11 · Enhanced 0.5.0
+
+- Added upstream item links, Q-tap monster information, map places and indoor minimap floors. Crash reports sent to a supporting game server identify EQOA Enhanced; the local crash-save offer remains available.
+
+- Rebound mod keys survive later changes to native controls. Failed HUD option saves report an error, and disabling Mana Bars stops requesting group power updates. Target of Target fades with the native target plate.
+
+- Four HUD extras (Stats Box, Target of Target, Mana Bars, and HUD numbers) are now bundled Lua mods (`eqoa_stats_box`, `eqoa_target_of_target`, `eqoa_mana_bars`, and `eqoa_hud_numbers`), enabled by default. Stats Box and Target of Target start off; Mana Bars and numeric readouts start on. Existing settings carry over, and the Stats Box key can be rebound on Controls. Disabling a mod removes its HUD options and key rows.
+- Added upstream raid leadership marks, loot-roll strips, raid menus and master-looter controls on servers that offer them. Hat D-pads and WebGL2 context-loss handling include upstream fixes.
+
+- Added vanilla's Number Colors, Pet Effects, optional server DPS meter and Macros page. Enhanced HUD and Mods & Addons follow every vanilla Extended page.
+- Touch controls now have separate stick/button sizes, opacity and edge spacing; existing Touch Pad Size settings carry over.
+- Integrated upstream server worlds, race bodies, capes and light-shadow improvements.
+
+- Kept the Enhanced NPC display and distance defaults (64/650) when upgrading older settings; explicit choices stay as saved.
+- Community marker suggestions use the vanilla name-and-note edit boxes for keyboard and controller.
+- Extended keeps the vanilla UI, Map and Textures pages in their original order. Enhanced HUD and Mods & Addons follow them; existing settings are kept.
+
+- Wereoxxs Enter opens its own chat again after switching away from and back to the game. Optional legacy-settings probes no longer clutter the Addon Manager.
+- Restored signed game icon IDs for Forge UIs, fixing overlapping ability icons in Avoids Modern UI.
+- Added Map and Quest Helper master switches while keeping map search, guidance, the creature journal and circular minimap.
+- Group waypoints now use O; G attacks, and Space jumps on servers that offer jumps. Saved custom bindings remain supported.
+- GMs can Ctrl-click the map to travel when their server offers it. Distant quest offers no longer crowd the minimap rim.
+- Integrated upstream lighting, shadows, camera, character and input updates.
+- Quest tracking stays silent when turned off before the server's first request, as the vanilla client's does.
+- Pressing Tab no longer reopens the mod chat input after closing it with an empty Enter. Tab targets once, and the game keeps the key.
+- Mod UIs keep receiving combat and cooldown events when another mod listens to player movement; waiting or disabled mods keep native state capture idle.
+
+- Fixed severe in-world slowdown from addon state capture, including with every addon disabled.
+- Nightly builds now say they are Nightly and name the build commit, so they no longer look like the Stable version. Stable is unchanged.
+- Added the experimental native `eqoa/1` mod API and an EQOA Example Hearts mod. Enable it from the Addon Manager after installing bundled mods. The API remains under review until the Round 5 audit.
+- Mods share bundled resources read-only and keep file changes in private overlays. Unsupported calls appear in the Addon Manager and its error log.
+- Effects and controller reads use native game state; existing Forge UI mods keep their compatibility interface.
+- Mod chat queued while Combat Record is open waits until it closes. World changes cancel unsent mod chat with a visible Addon Manager diagnostic.
+
 ## 2026-11-08 · Enhanced 0.4.14
 
 - Nothing changes in how you play. Behind the scenes, Enhanced's own options are kept apart from the vanilla client's, so new vanilla options arrive sooner and with fewer surprises.

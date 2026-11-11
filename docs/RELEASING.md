@@ -20,9 +20,13 @@ from the commit compiled into the running build.
    footprint check, the workspace tests and the release build, and nothing is
    published unless they pass, so a release needs no second local suite or
    build (the owner, 2026-11-08). Run them locally only to debug a failed job.
-2. Bump VERSION using MAJOR.MINOR.PATCH. Add docs/releases/<version>.md and a
-   FORK-UPDATE-NOTES.md entry. Patch increments for fixes, minor for substantial
-   additions; major 0 is early development.
+2. Bump VERSION using MAJOR.MINOR.PATCH. Add docs/releases/<version>.md. In
+   FORK-UPDATE-NOTES.md, rename the `## Unreleased` heading to that version's
+   dated entry, `## <YYYY-MM-DD> · Enhanced <version>`, and keep its bullets (or
+   add a new entry above it). Nightly publishes exactly that `## Unreleased`
+   section, so the release converts it in place; `tools/dev_release.py` refuses a
+   differently written Unreleased heading. Patch increments for fixes, minor for
+   substantial additions; major 0 is early development.
 3. With the owner's go-ahead, merge `develop` into `enhanced`, push it, then
    create and push the matching `v<version>` tag on that `enhanced` commit.
 4. The tag starts Official release. The `windows` job (read-only) checks that
@@ -54,6 +58,31 @@ the updater manifest. Upstream master/dev workflows must not publish this fork;
 `dev.yml` and `notes.yml` run only in the upstream repository, and the old
 `enhanced-release.yml` stays inert. `public-source.yml` checks every push, pull
 request and tag without publishing anything.
+
+## Nightly (development channel)
+
+Every push to `develop` starts `.github/workflows/enhanced-dev.yml`. It runs the
+same footprint, tooling, workspace-test and release-build gate as the official
+workflow, then refreshes one rolling GitHub release whose tag is `dev`. That
+release is always a prerelease and is never marked latest, so
+`releases/latest/download/` keeps pointing at the newest stable version. The
+development build is stamped with update channel `enhanced-dev` and updates
+itself from `releases/download/dev/`. Players see it as **Nightly** (release
+title, ZIP `EQOA-Enhanced-Nightly-Windows-x64.zip`, README link). Its notes are
+FORK-UPDATE-NOTES.md's `## Unreleased` section, or "Same as Stable." without
+one; at a stable release that section becomes the version's entry.
+
+The release keeps the same asset set as a versioned one, with `update.txt`
+uploaded last. Assets left over from an older development build are removed.
+If `develop` has moved on while the job was running, the publisher exits
+without touching the release; the newer run publishes instead.
+
+Pushes that change only top-level `*.md` files, `docs/` or `.github/` build no
+Nightly (no update offer for documentation). To rebuild the current `develop`
+head without pushing, run Nightly build
+manually with **Run workflow** (`workflow_dispatch`). A versioned release still
+comes only from the tag path above; publishing `dev` never changes `VERSION`,
+FORK-UPDATE-NOTES.md or the stable channel.
 
 ## Retry an existing tag after a CI environment fix
 

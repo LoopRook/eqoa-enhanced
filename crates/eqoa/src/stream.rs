@@ -142,9 +142,14 @@ pub struct FileZones {
 }
 
 impl FileZones {
-    /// The file `name` inside the image at `iso_path`.
+    /// The file `name` inside the image at `iso_path`, or one of the server's
+    /// own worlds of that name (`serverworlds`), built off it.
     pub fn open(iso_path: &std::path::Path, name: &str) -> Option<Self> {
-        let e = iso::Iso::open(iso_path).ok()?.find(name)?.clone();
+        let Some(e) = iso::Iso::open(iso_path).ok()?.find(name).cloned() else {
+            let f = std::fs::File::open(crate::serverworlds::path_of(name)?).ok()?;
+            let len = f.metadata().ok()?.len();
+            return Some(FileZones { src: esf::Window::new(f, 0, len), done: VecDeque::new() });
+        };
         let f = iso::open_file(iso_path).ok()?;
         Some(FileZones { src: esf::Window::new(f, e.lba as u64 * iso::SECTOR, e.size as u64), done: VecDeque::new() })
     }
@@ -278,6 +283,15 @@ pub fn open_world(name: &str, x: f32, z: f32) -> Arrival {
 /// reads every file whole.
 pub fn open_file(iso_path: &std::path::Path, name: &str) -> Result<Container, Box<dyn std::error::Error>> {
     let Some(e) = iso::Iso::open(iso_path)?.find(name).cloned() else {
+        // one of the server's own worlds, built off the disc
+        // (`serverworlds`): its zones left in its file, as a disc world's
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(path) = crate::serverworlds::path_of(name) {
+            let f = std::fs::File::open(&path)?;
+            let len = f.metadata()?.len();
+            let mut src = esf::Window::new(f, 0, len);
+            return Ok(Container::open_deferred(&mut src)?);
+        }
         // a world a server's patch adds that no disc carries (`s2`:
         // Sandstorm's world 6), out of the server's folder, whole
         if let Some(path) = crate::s2::get().folder_file(name) {
@@ -526,9 +540,9 @@ impl Streamer {
         let props = AnimatedProps::new(world, lib, &s.hsprites);
         let prop_mats = props.matrices(world);
         let mut parts: Vec<GroupPart> =
-            s.parts.iter().zip(&s.statics).map(|((m, mats), st)| GroupPart { model: m, instances: mats, statics: st, moves: false }).collect();
+            s.parts.iter().zip(&s.statics).zip(&s.baked).map(|(((m, mats), st), &baked)| GroupPart { model: m, instances: mats, statics: st, moves: false, baked }).collect();
         let props_at = parts.len();
-        parts.extend(props.groups.iter().zip(&prop_mats).map(|(group, mats)| GroupPart { model: &group.model, instances: mats, statics: &[], moves: true }));
+        parts.extend(props.groups.iter().zip(&prop_mats).map(|(group, mats)| GroupPart { model: &group.model, instances: mats, statics: &[], moves: true, baked: false }));
         let group = g.renderer.upload_group(g.device, g.queue, &parts, &textures);
         self.zones.insert(z, Loaded { group, props, props_at });
     }
@@ -540,6 +554,15 @@ impl Streamer {
         let zones: Vec<usize> = self.zones.keys().copied().collect();
         for z in zones {
             self.upload(z, world, lib, &mut g);
+        }
+    }
+
+    /// Every zone drawn now recorded for Dynamic Lighting where it is not
+    /// yet (`Renderer::relight`: turned on with zones in, which were
+    /// recorded the PS2's way alone).
+    pub fn relight(&mut self, r: &Renderer, device: &wgpu::Device) {
+        for l in self.zones.values_mut() {
+            r.relight(device, &mut l.group);
         }
     }
 

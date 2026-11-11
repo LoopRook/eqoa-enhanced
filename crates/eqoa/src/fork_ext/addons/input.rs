@@ -8,6 +8,8 @@ use winit::keyboard::{Key, NamedKey};
 
 const KEY_RING_SIZE: usize = 128;
 const TEXT_CAPTURE_LAPSE_SECS: f32 = 1.0;
+#[path = "native_input.rs"]
+pub(crate) mod native;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RawKeyEvent {
@@ -27,8 +29,8 @@ impl Default for InputSnapshot {
     fn default() -> Self {
         Self {
             button_bitfield: 0xFFFF, // active-low: 0xFFFF means unpressed
-            right_analog: (0x7F, 0x7F),
-            left_analog: (0x7F, 0x7F),
+            right_analog: (0x80, 0x80),
+            left_analog: (0x80, 0x80),
         }
     }
 }
@@ -85,6 +87,68 @@ impl Default for InputState {
 
 thread_local! {
     static INPUT_STATE: RefCell<InputState> = RefCell::new(InputState::default());
+    static LIVE_REPORT: std::cell::Cell<Option<crate::input::Report>> = const {std::cell::Cell::new(None)};
+    static FOCUSED: std::cell::Cell<bool> = const {std::cell::Cell::new(false)};
+}
+
+pub(crate) fn observe_report(report: &mut crate::input::Report, connected: bool, gameplay: bool) {
+    let before = LIVE_REPORT.with(|r| r.replace(connected.then_some(*report)));
+    let after = connected.then_some(*report);
+    if before != after && super::native_core::capture_requested() {
+        super::native_core::defer(512, move |c| {
+            c.emit("input.pad",serde_json::json!({"before":before.map(native::pad_value),"after":after.map(native::pad_value)}))
+        });
+    }
+    if gameplay && is_dpad_rotated() {
+        let b = report.buttons;
+        let d = b & 0x00f0;
+        report.buttons = (b & !0x00f0) | ((d << 1) & 0x00e0) | ((d >> 3) & 0x0010);
+    }
+}
+pub(crate) fn live_snapshot() -> InputSnapshot {
+    LIVE_REPORT.with(|r| {
+        r.get()
+            .map(|r| {
+                let d = r.data();
+                InputSnapshot {
+                    button_bitfield: !r.buttons,
+                    right_analog: (d[4], d[5]),
+                    left_analog: (d[6], d[7]),
+                }
+            })
+            .unwrap_or_default()
+    })
+}
+pub(crate) fn focus(focused: bool) {
+    FOCUSED.with(|f| f.set(focused));
+    if !focused {
+        INPUT_STATE.with(|s| {
+            let mut state = s.borrow_mut();
+            // Claims describe live VM intent, not a held physical key. The
+            // unchanged Forge VM caches AcquireKey success across focus changes.
+            // Keep those leases; only revoke pending input and editor capture.
+            // Capture::focus_lost separately releases physical press ownership.
+            state.key_events.clear();
+            let seq = state.event_seq;
+            state
+                .key_cursors
+                .values_mut()
+                .for_each(|cursor| *cursor = seq);
+            state.unowned_cursor = seq;
+            state.text_capture_owners.clear();
+            state.text_capture = false;
+        });
+    }
+}
+pub(crate) fn native_get(lua: &mlua::Lua) -> mlua::Result<mlua::Value> {
+    let pad=LIVE_REPORT.with(|r|r.get().map(|r|{let d=r.data();let names=["select","l3","r3","start","up","right","down","left","l2","r2","l1","r1","triangle","circle","cross","square"];
+        serde_json::json!({"buttons":names.iter().enumerate().filter_map(|(i,n)|(r.buttons&(1<<i)!=0).then_some(n)).collect::<Vec<_>>(),"left":{"x":r.sticks[2],"y":r.sticks[3]},"right":{"x":r.sticks[0],"y":r.sticks[1]},"raw_left":{"x":d[6],"y":d[7]},"raw_right":{"x":d[4],"y":d[5]}})
+    }));
+    super::native::record(
+        lua,
+        "eqoa.input.InputState",
+        &serde_json::json!({"focused":FOCUSED.with(|f|f.get()),"pad":pad,"text_capture":is_text_capture_active()}),
+    )
 }
 
 pub fn reset_input_state() {
@@ -93,7 +157,34 @@ pub fn reset_input_state() {
     });
 }
 
-pub fn record_key_event(key: u8, is_down: bool) {
+/// Routes a live logical key after native chat/menu and ImGui focus gating.
+/// Kept independent of WindowEvent so tests exercise exactly the live policy.
+pub(crate) fn route_mod_key(
+    key: &Key,
+    down: bool,
+    repeat: bool,
+    synthetic: bool,
+    plain_play: bool,
+    keyboard: bool,
+) {
+    if !synthetic && !repeat && plain_play && !keyboard && !is_text_capture_active() {
+        if let Some(name) = crate::binds::name_of(key) {
+            emit_named_key_event(&name, down);
+        }
+    }
+}
+
+pub fn emit_named_key_event(key_name: &str, is_down: bool) {
+    let key_str = key_name.to_ascii_lowercase();
+    super::native_core::defer(256, move |c| {
+        c.emit(
+            "input.key",
+            serde_json::json!({"key": key_str, "down": is_down, "repeat": false, "synthetic": false}),
+        )
+    });
+}
+
+pub fn record_key_event_only(key: u8, is_down: bool) {
     INPUT_STATE.with(|s| {
         let mut state = s.borrow_mut();
         let seq = state.event_seq;
@@ -105,6 +196,11 @@ pub fn record_key_event(key: u8, is_down: bool) {
         }
         state.key_events.push(event);
     });
+}
+
+pub fn record_key_event(key: u8, is_down: bool) {
+    emit_named_key_event(&get_key_name(key), is_down);
+    record_key_event_only(key, is_down);
 }
 
 #[allow(dead_code)]
@@ -179,6 +275,28 @@ pub fn wants_key_capture(
 ) -> bool {
     (keyboard || is_text_capture_active() || (plain_play && code.is_some_and(is_key_suppressed)))
         && !is_synthetic
+}
+
+/// Whether a physical key event may be handed to ImGui's own input queue.
+///
+/// Dear ImGui starts Tab navigation even without `NavEnableKeyboard`, and its
+/// tab stops include inputable items (`imgui.cpp`, `NavUpdate` and
+/// `NavProcessItemForTabbingRequest`). Forwarding an unclaimed Tab therefore
+/// moves focus into a mod's text field while the same press also reaches plain
+/// gameplay. Tab is the only gated key: a Tab press is forwarded when a focused
+/// addon widget, active text capture, or a mod's key claim owns it. Tab
+/// releases always pass so ImGui never keeps a key down it saw pressed, and
+/// every other key keeps its existing routing.
+pub fn forwards_key_to_imgui(
+    keyboard: bool,
+    code: Option<u8>,
+    pressed: bool,
+    plain_play: bool,
+) -> bool {
+    if code == Some(0x09) && pressed {
+        return keyboard || is_text_capture_active() || (plain_play && is_key_suppressed(0x09));
+    }
+    true
 }
 
 fn get_key_name(code: u8) -> String {
@@ -808,6 +926,7 @@ pub(crate) fn create_module(
 
 pub fn install_input_adapter(host: &super::host::Host) -> mlua::Result<()> {
     let input_mod = create_module(&host.lua, &host.snapshot)?;
+    native::scope_forge(&host.lua, &input_mod)?;
     host.register_host_module("frontiers_forge.input", mlua::Value::Table(input_mod))?;
     Ok(())
 }
@@ -841,6 +960,7 @@ mod tests {
             module_dirs: vec![root.to_path_buf()],
             resource_dirs: vec![],
             api: Some("eqoa/1".to_string()),
+            entry_mode: Default::default(),
             requested_capabilities: vec![],
             initially_enabled: true,
             mods_root: Some(root.to_path_buf()),

@@ -592,6 +592,13 @@ impl Stage {
         &self.spells.batches
     }
 
+    /// The frame's spell bolts, as the last `step` left them (`prepare`
+    /// hands them to the renderer).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn strips(&self) -> &[render::billboard::Strips] {
+        &self.spells.strips
+    }
+
     /// The frame drawn into `target`: the two and the projectiles, then the
     /// particles and the lightning over them (`VIScene::Render`'s
     /// particle system, then the spell effects).
@@ -900,6 +907,13 @@ impl winit::application::ApplicationHandler for App {
     fn window_event(&mut self, el: &winit::event_loop::ActiveEventLoop, _id: winit::window::WindowId, event: winit::event::WindowEvent) {
         use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
         use winit::keyboard::{Key, NamedKey};
+        // the page's WebGL2 context taken away: nothing drawn shows, and the
+        // frames' uploads would pile up (`web::graphics_lost`)
+        #[cfg(target_arch = "wasm32")]
+        if crate::web::graphics_lost() {
+            el.exit();
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::Resized(size) => {

@@ -308,7 +308,7 @@ def run_tests(root):
     target = root / "target"
     config = target / "sync-config"
     config.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ, CARGO_TARGET_DIR=str(target), EQOA_CONFIG=str(config))
+    env = dict(os.environ, CARGO_TARGET_DIR=os.environ.get("CARGO_TARGET_DIR", str(target)), EQOA_CONFIG=str(config))
     cargo = subprocess.run(["cargo", "test", "--locked", "-p", "eqoa", "-p", "net", "--", "--nocapture", "--test-threads=1"],
                            cwd=root, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
     log = cargo.stdout + cargo.stderr

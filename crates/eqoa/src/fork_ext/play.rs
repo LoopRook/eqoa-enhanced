@@ -4,6 +4,99 @@
 use super::Play;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "api_capture.rs"]
+mod api_capture;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "api_capture_tests.rs"]
+mod native_tests;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use api_capture::{begin_game_event, end_game_event};
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn begin_game_event(_: &Play, _: &net::session::Event) {}
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn end_game_event(_: &Play, _: ()) {}
+pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
+    #[cfg(not(target_arch = "wasm32"))]
+    let want_power =
+        crate::fork_ext::addons::options::effective_toggle("eqoa_mana_bars", "mana_bars");
+    #[cfg(target_arch = "wasm32")]
+    let want_power = false;
+    _play.session.agree_power_bars(want_power);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let has_pet = _play.pet_id != u32::MAX;
+        let effects_height = if has_pet {
+            crate::hud::pet_effects_height(_play.pet_effects().len())
+        } else {
+            0
+        };
+        let pet_y = if _play.group.raid.is_empty() {
+            93 + ((_play.group.count() as i32 - 1) * 48).max(0)
+        } else {
+            let below = if has_pet {
+                crate::raidlist::PET_H + effects_height
+            } else {
+                0
+            };
+            crate::raidlist::Fit::under(_play.group.raid.len(), below).bounds([20, 93])[3] + 2
+        };
+        // Hud's effect strip begins at y=48; an unbuffed pet panel ends at 46.
+        let pet_h = if !has_pet {
+            0
+        } else if effects_height == 0 {
+            46
+        } else {
+            48 + effects_height
+        };
+        crate::fork_ext::addons::hud_layout::set_hud_state(
+            _play.right_hud_up(),
+            _play.right_hud_up(),
+            _play.group.in_group && !_play.group.raid.is_empty(),
+            pet_y,
+            pet_h,
+        );
+        crate::fork_ext::addons::native_core::iteration(_game_step);
+        if _game_step {
+            let ready = _play.in_world_now();
+            weapon_sets_requests(_play, ready);
+            let reqs = crate::fork_ext::addons::actions::take_action_requests();
+            if ready {
+                if reqs.assist && matches!(_play.mode, 0 | 38) {
+                    _play.assist_target();
+                }
+                if reqs.summary
+                    && _play.mode == 0
+                    && !_play.map.open
+                    && !_play.map.search.open
+                    && !_play.search.open
+                    && _play.typing.is_none()
+                    && _play.death.is_none()
+                {
+                    _play.trainer_open = true;
+                    _play.trainer_from_hud = true;
+                    _play.mode = 12;
+                }
+            }
+            if !ready {
+                crate::fork_ext::addons::chat::cancel_outgoing_chat(
+                    "world became unavailable before queued chat could be sent",
+                );
+            } else if _play.mode != 60 {
+                for msg in crate::fork_ext::addons::chat::take_outgoing_chat() {
+                    if !crate::fork_ext::addons::chat::report_route(&msg) {
+                        _play.chat_line(&msg);
+                    }
+                }
+            }
+        }
+    }
+}
+pub(crate) fn observe_text(_text: &str, _color: [f32; 4]) {
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::fork_ext::addons::native_core::observe_text(_text, _color);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "report_state.rs"]
 mod report_state;
 
@@ -47,6 +140,12 @@ pub(crate) fn frame_library(
     #[cfg(not(target_arch = "wasm32"))]
     {
         crate::report::note_state(|| report_state::describe(_play, _walker));
+        crate::fork_ext::addons::native_core::CORE.with(|c| {
+            let mut c = c.borrow_mut();
+            if crate::fork_ext::addons::native_core::capture_requested() && c.words.is_none() {
+                c.words = _play.words.clone();
+            }
+        });
         let current_key = if let Some((vui, _, _)) = &_play.hud {
             AtlasKey::Hud(&vui.textures as *const _ as usize)
         } else if let Some((_, textures)) = &_play.ui_data {
@@ -102,6 +201,8 @@ pub(crate) fn frame_library(
 
 pub(crate) fn art_changed() {
     #[cfg(not(target_arch = "wasm32"))]
+    crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow_mut().words = None);
+    #[cfg(not(target_arch = "wasm32"))]
     crate::fork_ext::addons::icons::notify_art_changed();
 }
 
@@ -128,6 +229,52 @@ impl Play {
         &self,
         walker: Option<&crate::walker::Walker>,
     ) -> crate::fork_ext::addons::host::Snapshot {
+        if !crate::fork_ext::addons::native_core::capture_requested() {
+            api_capture::updates::inactive();
+            let connected =
+                self.session.self_id.is_some() && self.disconnected.is_none() && !self.quit;
+            let ready = self.in_world_now();
+            let start_menu = ready
+                && (is_menu_mode(self.mode)
+                    || self.map.open
+                    || self.start.as_ref().is_some_and(|s| s.menu.visible));
+            let ui_mode = if !ready {
+                0
+            } else if self.mode != 0 {
+                self.mode as u32
+            } else if self.start.as_ref().is_some_and(|s| s.menu.visible) {
+                13
+            } else {
+                0
+            };
+            let ui_busy = ready
+                && (ui_mode != 0
+                    || start_menu
+                    || self.map.open
+                    || self.map.search.open
+                    || self.search.open
+                    || self.typing.is_some());
+            return crate::fork_ext::addons::host::Snapshot {
+                capture_pending: true,
+                character: crate::fork_ext::addons::named_profiles::CharacterSnapshot::new(
+                    connected,
+                    &self.player.name,
+                    self.dump.player.class,
+                ),
+                in_game: ready,
+                start_menu,
+                ui_mode,
+                ui_busy,
+                health: self.forge_health.snapshot(connected, ready),
+                ..Default::default()
+            };
+        }
+        api_capture::updates::refresh(self, walker);
+        let key = api_capture::updates::key(self, walker);
+        if let Some(mut snapshot) = api_capture::updates::cached(key) {
+            snapshot.input = crate::fork_ext::addons::input::live_snapshot();
+            return snapshot;
+        }
         let connected = self.session.self_id.is_some() && self.disconnected.is_none() && !self.quit;
         let hud_ready = self.hud_ready() && !self.loading_up();
         let in_game = connected && hud_ready;
@@ -357,7 +504,11 @@ impl Play {
             }
             crate::fork_ext::addons::group::GroupSnapshot {
                 in_group: true,
-                is_leader: self.group.leader,
+                is_leader: self
+                    .group
+                    .members
+                    .first()
+                    .is_some_and(|m| Some(m.id) == self.self_id32()),
                 member_count: count as u8,
                 members,
             }
@@ -385,8 +536,7 @@ impl Play {
                     class_byte = c.p256;
                     status_flags = c.flags262;
                 }
-                let is_target =
-                    self.target != u32::MAX && self.target != 0 && e.id == self.target;
+                let is_target = self.target != u32::MAX && self.target != 0 && e.id == self.target;
                 let disposition = if is_target { self.target_info } else { None };
                 crate::fork_ext::addons::entity::EntitySnapshot {
                     id: e.id,
@@ -438,12 +588,23 @@ impl Play {
             // never reaches: the records after the 24 hold those, the target
             // first, so a mod's target box, pet or group frame finds them by id.
             let mut next = crate::fork_ext::addons::entity::RETAIL_RECORDS;
-            let group = self.group.members[..self.group.count()].iter().map(|m| m.id);
+            let group = self.group.members[..self.group.count()]
+                .iter()
+                .map(|m| m.id);
+            let tot_id = self
+                .entities
+                .slots
+                .iter()
+                .flatten()
+                .find(|e| e.id == self.target)
+                .and_then(|e| e.creature.as_ref())
+                .map(|c| c.target)
+                .filter(|&t| t != 0 && t != u32::MAX && t != self.target);
             let followed = [Some(self.target), Some(self.pet_id), self.self_id32()]
                 .into_iter()
                 .flatten()
                 .chain(group)
-                .chain(self.target_of_target_id());
+                .chain(tot_id);
             for id in followed {
                 if next == snap_entities.len() {
                     break;
@@ -698,7 +859,8 @@ impl Play {
                 || self.search.open
                 || self.typing.is_some());
 
-        crate::fork_ext::addons::host::Snapshot {
+        let mut snapshot = crate::fork_ext::addons::host::Snapshot {
+            capture_pending: false,
             character: crate::fork_ext::addons::named_profiles::CharacterSnapshot::new(
                 connected,
                 &self.player.name,
@@ -729,8 +891,8 @@ impl Play {
                 .unwrap_or_default(),
             chat,
             combat,
-            input: crate::fork_ext::addons::input::InputSnapshot::default(),
-            effects: crate::fork_ext::addons::effects::EffectsSnapshot::default(),
+            input: crate::fork_ext::addons::input::live_snapshot(),
+            effects: crate::fork_ext::addons::effects::EffectsSnapshot::from_native(&self.effects),
             journal: crate::fork_ext::addons::quest_log::JournalSnapshot::from_titles(
                 in_game,
                 &self.quests.titles,
@@ -738,7 +900,12 @@ impl Play {
             chat_history: crate::fork_ext::chat_history::snapshot(
                 in_game && self.mode == 33 && !crate::hud::fork_hud::chat_window_visible(),
             ),
-        }
+        };
+        crate::fork_ext::addons::native_core::CORE.with(|c| {
+            crate::fork_ext::addons::native_projection::apply(&mut snapshot, &c.borrow().view)
+        });
+        api_capture::updates::cache(key, snapshot);
+        snapshot
     }
 }
 
@@ -785,8 +952,12 @@ fn is_menu_mode(mode: i32) -> bool {
 pub(super) fn health_hidden(play: &Play) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        play.forge_snapshot(None).health.is_available()
-            && !play.loading_up()
+        play.forge_health
+            .snapshot(
+                play.session.self_id.is_some() && play.disconnected.is_none() && !play.quit,
+                play.in_world_now(),
+            )
+            .is_available()
             && crate::fork_ext::addons::visibility::published_health_hidden()
     }
     #[cfg(target_arch = "wasm32")]
@@ -808,10 +979,6 @@ fn weapon_sets_requests(play: &mut Play, ready: bool) {
 pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        weapon_sets_requests(play, play.forge_snapshot(None).in_game);
-        for msg in crate::fork_ext::addons::chat::take_outgoing_chat() {
-            play.chat_line(&msg);
-        }
         let options_closed =
             if crate::fork_ext::addons::take_close_options_on_open() && play.mode == 34 {
                 play.mode = 0;
@@ -821,7 +988,13 @@ pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) 
             } else {
                 false
             };
-        let ready = play.forge_snapshot(None).health.is_available() && !play.loading_up();
+        let ready = play
+            .forge_health
+            .snapshot(
+                play.session.self_id.is_some() && play.disconnected.is_none() && !play.quit,
+                play.in_world_now(),
+            )
+            .is_available();
         crate::fork_ext::addons::visibility::set_play_ready(ready);
         let hidden = health_hidden(play);
         let vis = if ready {
@@ -831,7 +1004,8 @@ pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) 
         };
         let hud_changed = play.forge_health.hud_changed(hidden);
         let vis_changed = play.forge_health.vis_changed(vis);
-        hud_changed || vis_changed || options_closed || step || loading_changed
+        let layer_dirty = crate::fork_ext::addons::hud_layer::take_dirty();
+        hud_changed || vis_changed || layer_dirty || options_closed || step || loading_changed
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -886,9 +1060,29 @@ fn snapshot(play: &Play, attacker: u32, amount: i32, defender: u32) -> CombatSna
     }
 }
 impl Play {
-    pub(super) fn fork_combat_event(&self, _attacker: u32, _amount: i32, _defender: u32) {
+    pub fn entity_name(&self, id: u32) -> Option<String> {
+        if id == 0 || id == u32::MAX {
+            return None;
+        }
+        self.entities
+            .slots
+            .iter()
+            .flatten()
+            .find(|e| e.id == id)
+            .and_then(|e| e.creature.as_ref())
+            .map(|c| c.name.clone())
+    }
+    pub(super) fn fork_combat_event(
+        &self,
+        _attacker: u32,
+        _amount: i32,
+        _defender: u32,
+        _color: Option<[u8; 3]>,
+    ) {
         #[cfg(not(target_arch = "wasm32"))]
         crate::fork_ext::addons::combat::record_combat_event(_attacker, _amount, _defender);
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::fork_ext::addons::native_core::observe_hit(_attacker, _defender, _amount, _color);
         // Unit tests never emit to a real companion. The browser has no native socket
         // or SystemTime clock; neither is touched by this hook there.
         #[cfg(all(not(target_arch = "wasm32"), not(test)))]
@@ -964,15 +1158,42 @@ mod tests {
         };
         struct Discard;
         impl vi::ui::Raster for Discard {
-            fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
-            fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+            fn blit(
+                &mut self,
+                _: u32,
+                _: u32,
+                _: [i32; 2],
+                _: [i32; 2],
+                _: [i32; 2],
+                _: i32,
+                _: f32,
+            ) {
+            }
+            fn stretch_blit(
+                &mut self,
+                _: u32,
+                _: u32,
+                _: [i32; 2],
+                _: [i32; 2],
+                _: [i32; 2],
+                _: [i32; 2],
+                _: i32,
+                _: f32,
+            ) {
+            }
             fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
             fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
             fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) {}
             fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) {}
-            fn string_width(&self, _: &[u16]) -> i32 { 0 }
-            fn point_size(&self) -> i32 { 12 }
-            fn viewport(&self) -> [i32; 4] { [0, 0, 639, 447] }
+            fn string_width(&self, _: &[u16]) -> i32 {
+                0
+            }
+            fn point_size(&self) -> i32 {
+                12
+            }
+            fn viewport(&self) -> [i32; 4] {
+                [0, 0, 639, 447]
+            }
             fn set_viewport(&mut self, _: [i32; 4]) {}
         }
 
@@ -1027,16 +1248,36 @@ mod tests {
         };
         p.chat_history_key(19, true);
         draw(&mut wnd, 0.44);
-        assert_eq!(p.forge_snapshot(None).chat_history.total, 1, "up steps back once at once");
+        assert_eq!(
+            p.forge_snapshot(None).chat_history.total,
+            1,
+            "up steps back once at once"
+        );
         draw(&mut wnd, 0.01);
-        assert_eq!(p.forge_snapshot(None).chat_history.total, 2, "and repeats after 0.45 s");
+        assert_eq!(
+            p.forge_snapshot(None).chat_history.total,
+            2,
+            "and repeats after 0.45 s"
+        );
         p.chat_history_key(19, false);
         draw(&mut wnd, 1.0);
-        assert_eq!(p.forge_snapshot(None).chat_history.total, 2, "release stops the repeat");
+        assert_eq!(
+            p.forge_snapshot(None).chat_history.total,
+            2,
+            "release stops the repeat"
+        );
         p.chat_history_key(20, true);
-        assert_eq!(p.forge_snapshot(None).chat_history.total, 1, "down steps forward");
+        assert_eq!(
+            p.forge_snapshot(None).chat_history.total,
+            1,
+            "down steps forward"
+        );
         draw(&mut wnd, 0.40);
-        assert_eq!(p.forge_snapshot(None).chat_history.total, 1, "no repeat before 0.45 s");
+        assert_eq!(
+            p.forge_snapshot(None).chat_history.total,
+            1,
+            "no repeat before 0.45 s"
+        );
         p.chat_history_key(20, false);
 
         // Negative controls: another mode ignores the key, and releasing the
@@ -1045,7 +1286,11 @@ mod tests {
         assert!(!p.forge_snapshot(None).chat_history.active);
         p.mode = 33;
         p.chat_history_key(150, true);
-        assert_eq!(p.forge_snapshot(None).chat_history.total, 1, "non-scroll keys pass through");
+        assert_eq!(
+            p.forge_snapshot(None).chat_history.total,
+            1,
+            "non-scroll keys pass through"
+        );
         publish_claims(&HudClaimsRegistry::new());
         assert!(!p.forge_snapshot(None).chat_history.active);
         assert!(
@@ -1054,11 +1299,12 @@ mod tests {
         );
         crate::fork_ext::chat_history::reset();
     }
-    fn play() -> Play {
+    pub(super) fn play() -> Play {
         play_as("test")
     }
     #[cfg(not(target_arch = "wasm32"))]
     fn play_as(account: &str) -> Play {
+        crate::fork_ext::addons::native_core::fixture_demand(true);
         struct Nowhere;
         impl net::session::Datagrams for Nowhere {
             fn send_to(&mut self, _: &[u8], _: [u8; 4], _: u16) {}
@@ -1076,6 +1322,34 @@ mod tests {
         .unwrap();
         session.self_id = Some(0x100);
         Play::new(session, net::session::Player::default(), Box::default())
+    }
+    /// The real path: a player's F3 filing on a server that offered bug
+    /// reports sends the note first, and it names EQOA Enhanced. The control:
+    /// a server that offered none gets no note at all.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn the_note_on_the_wire_is_labelled() {
+        let mut p = play();
+        p.session.record = Some(Vec::new());
+        let notes = |p: &mut crate::play::Play| -> Vec<String> {
+            p.session
+                .record
+                .as_mut()
+                .map(std::mem::take)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(_, d)| d)
+                .filter(|d| d[..2] == [0x0F, 0x7E])
+                .map(|d| String::from_utf8_lossy(&d[10..]).into_owned())
+                .collect()
+        };
+        p.send_bug_note();
+        assert!(notes(&mut p).is_empty(), "control: no offer, no note");
+        p.session.bug_reports = true;
+        p.send_bug_note();
+        let sent = notes(&mut p);
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].starts_with("build: ") && sent[0].contains(&format!("\nclient: {}\n", crate::fork_ext::report_label::enhanced_label())), "{}", sent[0]);
     }
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
@@ -1651,7 +1925,11 @@ mod tests {
         p.forge_health.receive(&bytes);
         let creature = |id: u32, name: &str| net::entity::Entity {
             id,
-            creature: Some(net::entity::Creature { name: name.into(), level: 18, ..Default::default() }),
+            creature: Some(net::entity::Creature {
+                name: name.into(),
+                level: 18,
+                ..Default::default()
+            }),
             ..Default::default()
         };
         p.entities.slots = vec![None; 40];
@@ -1676,7 +1954,14 @@ mod tests {
         // control: a target inside the 24 keeps its slot and is not repeated
         p.target = 0x205;
         let snap = p.forge_snapshot(None);
-        assert_eq!(snap.entities.entities.iter().filter(|e| e.id == 0x205).count(), 1);
+        assert_eq!(
+            snap.entities
+                .entities
+                .iter()
+                .filter(|e| e.id == 0x205)
+                .count(),
+            1
+        );
         assert_eq!(snap.entities.entities[5].id, 0x205);
     }
 

@@ -85,8 +85,26 @@ struct Active {
     platform: WinitPlatform,
     context: Context,
 }
+
+/// Whether this key event should reach ImGui's input queue before the next
+/// frame. Seed the decision from the last completed frame's capture state; the
+/// winit backend queues events without changing that state synchronously.
+fn forward_key_to_imgui(
+    context: &Context,
+    code: Option<u8>,
+    pressed: bool,
+    plain_play: bool,
+) -> bool {
+    super::input::forwards_key_to_imgui(
+        context.io().want_capture_keyboard(),
+        code,
+        pressed,
+        plain_play,
+    )
+}
 impl Runtime {
     pub fn from_env() -> Self {
+        let _ = super::native_core::time();
         crate::fork_ext::mods::auto_create_mods_dir();
         crate::fork_ext::bundled::install_bundled_mods_if_needed();
         let mut runtime = Self::new(Paths::select(
@@ -163,10 +181,23 @@ impl Runtime {
         let (mut keyboard, mut mouse) = (false, false);
         match self.graphics.as_mut() {
             Some(Graphics::Managed(active)) => {
-                if let Err(e) =
-                    active
-                        .platform
-                        .handle_window_event(&mut active.context, window, event)
+                // Decide before forwarding: a key no addon owns must not move
+                // ImGui's own focus. The platform only queues the event, so the
+                // previous frame's capture state remains authoritative here.
+                let forward = match event {
+                    WindowEvent::KeyboardInput { event, .. } => forward_key_to_imgui(
+                        &active.context,
+                        super::input::winit_key_to_code(event),
+                        event.state == ElementState::Pressed,
+                        plain_play,
+                    ),
+                    _ => true,
+                };
+                if forward
+                    && let Err(e) =
+                        active
+                            .platform
+                            .handle_window_event(&mut active.context, window, event)
                 {
                     self.error = Some(e.to_string());
                     crate::say(&format!("Addons: {e}"));
@@ -189,6 +220,9 @@ impl Runtime {
         if self.error.is_some() {
             self.pause_health();
         }
+        if let WindowEvent::Focused(focused) = event {
+            super::input::focus(*focused);
+        }
         let consumed = match event {
             WindowEvent::KeyboardInput {
                 event,
@@ -197,10 +231,19 @@ impl Runtime {
             } => {
                 let button = Button::Key(event.physical_key);
                 let code = super::input::winit_key_to_code(event);
-                if let Some(code) = code {
-                    if !is_synthetic && !event.repeat {
-                        super::input::record_key_event(code, event.state == ElementState::Pressed);
+                if !is_synthetic && !event.repeat {
+                    let is_down = event.state == ElementState::Pressed;
+                    if let Some(code) = code {
+                        super::input::record_key_event_only(code, is_down);
                     }
+                    super::input::route_mod_key(
+                        &event.logical_key,
+                        is_down,
+                        event.repeat,
+                        *is_synthetic,
+                        plain_play,
+                        keyboard,
+                    );
                 }
                 let wants_key_capture =
                     super::input::wants_key_capture(keyboard, code, *is_synthetic, plain_play);
@@ -627,6 +670,9 @@ fn controls(
             ui.separator();ui.text(format!("{} ({})",entry.metadata.name,entry.metadata.id));
             ui.text(match entry.status {super::manager::Status::Disabled=>"Disabled",super::manager::Status::Enabled=>"Enabled",super::manager::Status::Failed=>"Failed — reload to retry"});
             let id=&entry.metadata.id;
+            let warnings=manager.diagnostics().iter().filter(|d|d.id.as_ref()==Some(id)).count();
+            if warnings>0 {ui.same_line();ui.text(format!("[Warnings: {warnings}]"));}
+
             if ui.button(format!("{}##enable-{id}",if entry.enabled_intent {"Disable"} else {"Enable"})) {actions.push(Action::Enable(id.clone(),!entry.enabled_intent));}
             ui.same_line();if ui.button(format!("Reload##{id}")) {actions.push(Action::Reload(id.clone()));}
             ui.same_line();if ui.button(format!("Settings##{id}")) {actions.push(Action::Settings(id.clone()));}
@@ -638,6 +684,7 @@ fn controls(
         }
         for diagnostic in manager.diagnostics() {
             ui.separator();ui.text_wrapped(format!("{}{}",diagnostic.id.as_ref().map(|id|format!("{id}: ")).unwrap_or_default(),diagnostic.message));
+            if let Some(details)=&diagnostic.details {ui.text_wrapped(format!("Phase: {} | VM: {} | First: {}s | Last: {}s",details["phase"],details["vm"],details["first_time"],details["last_time"]));}
         }
     });
     actions
@@ -657,6 +704,8 @@ fn render_managed(
     let fault = plan.fault;
     let result = (|| {
         let extent = FramebufferExtent::from_texture(final_target.texture());
+        super::hud_layout::set_window_size(extent.width(), extent.height());
+        super::hud_layer::clear_all();
         context
             .io_mut()
             .set_display_size([extent.width() as f32, extent.height() as f32]);
@@ -919,6 +968,188 @@ mod tests {
             !published_health_hidden(),
             "idempotent shutdown also revokes stale publication"
         );
+    }
+
+    #[derive(Default)]
+    struct ChatProbe {
+        text: String,
+        focus_requested: bool,
+        input_active: bool,
+        submitted: bool,
+    }
+
+    fn headless_imgui_context() -> Context {
+        let mut context = Context::create();
+        context.set_ini_filename::<PathBuf>(None).unwrap();
+        context
+            .font_atlas()
+            .add_font(&[dear_imgui_rs::FontSource::default_font()]);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy font atlas")
+            .build();
+        context.io_mut().set_display_size([800.0, 600.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+    }
+
+    /// One frame of the bundled chat window's relevant behaviour: the mod asks
+    /// for the text focus on the frame after an Enter press, and the input
+    /// submits and releases focus on an empty Enter.
+    fn chat_frame(context: &mut Context, chat: &mut ChatProbe) {
+        context.io_mut().set_display_size([800.0, 600.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        let ui = context.frame();
+        ui.window("wereoxxs chat").build(|| {
+            if chat.focus_requested {
+                ui.set_keyboard_focus_here();
+                chat.focus_requested = false;
+            }
+            chat.submitted = ui
+                .input_text("##chat_input", &mut chat.text)
+                .enter_returns_true(true)
+                .build();
+            chat.input_active = ui.is_item_active();
+        });
+        let _ = context.end_frame();
+    }
+
+    /// Enter, Enter (empty), Tab with the real routing decision. Returns
+    /// `(tab_forwarded_to_imgui, game_keeps_tab, chat_focused_after_tab)`.
+    /// `old_forwarding` simulates the pre-fix unconditional hand-off.
+    fn replay_enter_enter_tab(old_forwarding: bool) -> (bool, bool, bool) {
+        use winit::event::ElementState;
+
+        let mut context = headless_imgui_context();
+        let mut chat = ChatProbe::default();
+        chat_frame(&mut context, &mut chat);
+        assert!(!chat.input_active, "chat starts unfocused");
+
+        for state in [ElementState::Pressed, ElementState::Released] {
+            assert!(
+                forward_key_to_imgui(&context, Some(0x0D), state == ElementState::Pressed, true),
+                "a claimed Enter reaches ImGui"
+            );
+            context
+                .io_mut()
+                .add_key_event(dear_imgui_rs::Key::Enter, state == ElementState::Pressed);
+            if state == ElementState::Pressed {
+                chat.focus_requested = true; // PumpEnterKey on the Enter-down event
+            }
+        }
+        chat_frame(&mut context, &mut chat); // focus request is queued
+        chat_frame(&mut context, &mut chat); // nav activation applies to the item
+        assert!(chat.input_active, "the first Enter focuses the chat input");
+        chat_frame(&mut context, &mut chat); // settle one frame, as the game loop does
+        assert!(chat.input_active);
+
+        // The second Enter submits nothing and releases the field. The player
+        // sees the chat closed at this point, so this replay does not ask for
+        // focus again; the opening Enter above is the focus request the
+        // regression needs.
+        for state in [ElementState::Pressed, ElementState::Released] {
+            assert!(forward_key_to_imgui(
+                &context,
+                Some(0x0D),
+                state == ElementState::Pressed,
+                true,
+            ));
+            context
+                .io_mut()
+                .add_key_event(dear_imgui_rs::Key::Enter, state == ElementState::Pressed);
+        }
+        chat_frame(&mut context, &mut chat);
+        assert!(chat.text.is_empty(), "the second Enter is empty");
+        assert!(chat.submitted, "the empty Enter still submits");
+        assert!(
+            !chat.input_active,
+            "an empty Enter submits and releases the chat input"
+        );
+        chat_frame(&mut context, &mut chat); // settle before the user's Tab
+
+        let forwarded = if old_forwarding {
+            true
+        } else {
+            forward_key_to_imgui(&context, Some(0x09), true, true)
+        };
+        let wants_tab = super::super::input::wants_key_capture(
+            context.io().want_capture_keyboard(),
+            Some(0x09),
+            false,
+            true,
+        );
+        let mut capture = Capture::default();
+        let tab_button = Button::Key(winit::keyboard::PhysicalKey::Code(
+            winit::keyboard::KeyCode::Tab,
+        ));
+        assert_eq!(
+            capture.press(tab_button, wants_tab),
+            Owner::Game,
+            "gameplay must own the Tab press"
+        );
+        let game_keeps_tab = !wants_tab;
+        if forwarded {
+            context
+                .io_mut()
+                .add_key_event(dear_imgui_rs::Key::Tab, true);
+        }
+        chat_frame(&mut context, &mut chat); // tabbing request
+        chat_frame(&mut context, &mut chat); // activation applies to the item
+        (forwarded, game_keeps_tab, chat.input_active)
+    }
+
+    #[test]
+    fn forge_runtime_empty_chat_enter_then_tab_targets_without_refocusing() {
+        let (forwarded, game_keeps_tab, focused_after) = replay_enter_enter_tab(false);
+        assert!(!forwarded, "an unclaimed Tab must not reach ImGui");
+        assert!(game_keeps_tab, "gameplay must own the Tab press");
+        assert!(
+            !focused_after,
+            "Tab must not re-focus the chat input after an empty Enter"
+        );
+
+        // Negative control: the old unconditional hand-off reproduces the bug.
+        let (old_forwarded, _, old_focused) = replay_enter_enter_tab(true);
+        assert!(old_forwarded);
+        assert!(
+            old_focused,
+            "old routing must let Tab move ImGui's text focus into the chat"
+        );
+    }
+
+    #[test]
+    fn forge_runtime_focused_chat_input_still_receives_tab_and_typing() {
+        let mut context = headless_imgui_context();
+        let mut chat = ChatProbe::default();
+        chat_frame(&mut context, &mut chat);
+        chat.focus_requested = true;
+        chat_frame(&mut context, &mut chat);
+        chat_frame(&mut context, &mut chat);
+        chat_frame(&mut context, &mut chat); // capture state catches up
+        assert!(chat.input_active);
+        assert!(
+            context.io().want_capture_keyboard(),
+            "an owned text field captures the keyboard"
+        );
+
+        context.io_mut().add_input_character('x');
+        chat_frame(&mut context, &mut chat);
+        assert!(
+            chat.text.ends_with('x'),
+            "typing still reaches the focused field: {:?}",
+            chat.text
+        );
+
+        assert!(
+            forward_key_to_imgui(&context, Some(0x09), true, true),
+            "a Tab owned by the focused field still reaches ImGui"
+        );
+        context
+            .io_mut()
+            .add_key_event(dear_imgui_rs::Key::Tab, true);
+        chat_frame(&mut context, &mut chat);
+        assert!(chat.input_active, "the field keeps the keyboard");
     }
 
     #[test]

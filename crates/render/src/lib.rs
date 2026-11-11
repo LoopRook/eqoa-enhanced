@@ -12,14 +12,20 @@
 //! second pass goes in model order, where the game's goes rooms, flora, then
 //! actors in the order its tree walk met them.
 
+pub mod ao;
 pub mod billboard;
 pub mod curve;
 pub mod fans;
 pub mod fog16;
+pub mod lightshadow;
+pub mod lit;
 pub mod map;
 pub mod overlay;
+pub mod recolor;
 pub mod scale;
 pub mod shadow;
+pub mod standin;
+pub mod sunshadow;
 pub mod text;
 pub mod ui;
 
@@ -27,6 +33,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
 
+pub use lit::{Lights, MAX_LIGHTS, PointLight};
 pub use wgpu;
 
 /// Which winding is front, in esf's strip-to-list order. Settled by looking.
@@ -105,6 +112,19 @@ pub trait Pack: Send + Sync {
     /// What tells this pack's stand-ins apart from an earlier pack's: a
     /// replaced texture's key carries it (`LibraryTextures::key`).
     fn generation(&self) -> u64;
+    /// A stand-in still being read for the surface (on the pack's own
+    /// thread): its size and level count, `(w, h, n)`, as `levels` will
+    /// give them, its read asked for under the texture key `key`
+    /// (`take_ready` hands its levels back under it); `None` when the pack
+    /// has none for the surface, or has its levels already (`levels`).
+    fn request(&self, _key: u64, _c: &esf::Container, _s: &esf::Surface, _era: esf::Era) -> Option<(u32, u32, u32)> {
+        None
+    }
+    /// The stand-ins read since the last call, by the key each was asked
+    /// for under (`request`).
+    fn take_ready(&self) -> standin::Ready {
+        Vec::new()
+    }
 }
 
 static PACK: std::sync::RwLock<Option<std::sync::Arc<dyn Pack>>> = std::sync::RwLock::new(None);
@@ -201,6 +221,25 @@ struct Pass {
     made: UvMapping,
     /// The texture's level shift (`level_shift`), in `base`'s K.
     shift: f32,
+    /// The least alpha of its texture's texels, every level (255 for none):
+    /// Sun Shadows draw a layer whose alpha test can let nothing through as
+    /// depth alone (`Pass::solid`).
+    alpha_min: u8,
+}
+
+impl Pass {
+    /// Whether no texel of the layer fails the alpha test (`solid`).
+    fn solid(&self) -> bool {
+        solid(self.alpha_min, self.base.tint[3])
+    }
+}
+
+/// Whether a layer whose texture's least alpha is `alpha_min` and whose
+/// colour's alpha is `tint_a` lets every texel through fs_main's alpha test
+/// (texel × tint ≥ 0.5 at every level and every filtered place between):
+/// Sun Shadows draw it as depth alone, with no fragment to run.
+pub(crate) fn solid(alpha_min: u8, tint_a: f32) -> bool {
+    alpha_min as f32 / 255.0 * tint_a >= 0.5
 }
 
 /// A layer's UV mapping: the transform and scroll (`LayerUniform::uv0`,
@@ -245,6 +284,21 @@ pub struct GpuModel {
     /// The levels' distances (`esf::Model::lod_dists`), for whoever sets
     /// `level`; empty for a model with no levels.
     pub lod_dists: Vec<f32>,
+    /// Its instances' vertex colours are a zone's baked lighting (colour
+    /// buffers): Dynamic Lighting adds no fixed light on it (`lit`).
+    pub baked: bool,
+    /// Casts into Sun Shadows' and Light Shadows' maps while it is drawn
+    /// (`sunshadow`, `lightshadow`); true unless cleared: `eqoa` clears it on
+    /// a Wisp's body and everything it wears and holds (`wisp`), whose shadow
+    /// would give away the human under its armour.
+    pub casts: bool,
+    /// The world box its instances cover as last set (`set_instances`), for
+    /// Sun Shadows' casters (`sunshadow::world_box`).
+    world: std::cell::Cell<Option<(Vec3, Vec3)>>,
+    /// The same without a skinned model's room to move: the box its own
+    /// bounds make at its instances, which Light Shadows ask whether it holds
+    /// a light (`lightshadow`).
+    core: std::cell::Cell<Option<(Vec3, Vec3)>>,
 }
 
 impl GpuModel {
@@ -277,7 +331,17 @@ pub struct GpuGroup {
     statics: wgpu::Buffer,
     members: Vec<Member>,
     runs: Vec<Run>,
+    /// Its casters for Sun Shadows (`sunshadow`), recorded while they are on.
+    sun: Option<sunshadow::GroupSun>,
+    /// Which group it is, and what its members can cover in the world: Light
+    /// Shadows' maps keep what the groups within a light's reach cast while
+    /// they are the same ones (`lightshadow`).
+    id: u64,
+    bounds: Option<(Vec3, Vec3)>,
 }
+
+/// The next group's id (`GpuGroup::id`).
+static GROUP_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Members a run of a group.
 const RUN: usize = 32;
@@ -292,6 +356,16 @@ struct Run {
     bundles: [Option<wgpu::RenderBundle>; 2],
     /// models with anything in either pass, and each pass's draw calls
     drawn: (u32, [u32; 2]),
+    /// The same through Dynamic Lighting's pipelines (`lit`), recorded while
+    /// it is on (`Renderer::relight`); none until then.
+    lit: Option<[Option<wgpu::RenderBundle>; 2]>,
+    /// The same through Sun Shadows' pipelines (`sunshadow`), recorded while
+    /// they are on; none until then.
+    sun: Option<[Option<wgpu::RenderBundle>; 2]>,
+    /// The same through Light Shadows' (`lightshadow`), alone and with the
+    /// sun's map (while Sun Shadows are on too), recorded while they are on.
+    points: Option<[Option<wgpu::RenderBundle>; 2]>,
+    both: Option<[Option<wgpu::RenderBundle>; 2]>,
 }
 
 /// One model of a group: its first instance and their count, and each
@@ -300,6 +374,19 @@ struct Member {
     instance0: u32,
     instances: u32,
     batches: Vec<(std::ops::Range<u32>, Vec<Material>)>,
+    /// `GroupPart::baked`
+    baked: bool,
+    /// What it can cover in the world (`part_bounds`), for Sun Shadows'
+    /// casters, which draw the members near one another together.
+    bounds: Option<(Vec3, Vec3)>,
+    /// Its instances move after the upload (`GroupPart::moves`), and the box
+    /// they cover as last set (`set_group_instances`); its model's own box;
+    /// and, for one that does not move, each instance's box: Light Shadows'
+    /// casters, culled instance by instance (`lightshadow`).
+    moves: bool,
+    posed: std::cell::Cell<Option<(Vec3, Vec3)>>,
+    own: Option<(Vec3, Vec3)>,
+    boxes: Vec<(Vec3, Vec3)>,
 }
 
 /// A layer pass whose bind group (texture, sampler, uniform) every layer
@@ -308,6 +395,8 @@ struct Member {
 struct Material {
     blend: usize,
     bg: wgpu::BindGroup,
+    /// No texel fails its alpha test (`solid`).
+    solid: bool,
 }
 
 /// A model as `upload_group` takes it: the mesh, a matrix per instance
@@ -319,11 +408,25 @@ pub struct GroupPart<'a> {
     /// Its instances move after the upload (`set_group_instances`: a zone's
     /// animated props), so its bounds are taken loosely.
     pub moves: bool,
+    /// Its vertex colours are baked lighting (`GpuModel::baked`).
+    pub baked: bool,
 }
 
 /// How far past its own size a moving part's bounds reach from where its
 /// instances were at the upload (a prop's parts swing about their nodes).
 const MOVING_SLACK: f32 = 50.0;
+
+/// A model's own box, its vertices' least and most.
+fn model_box(m: &esf::Model) -> Option<(Vec3, Vec3)> {
+    let (first, rest) = m.pos.split_first()?;
+    Some(rest.iter().fold((Vec3::from(*first), Vec3::from(*first)), |(lo, hi), q| (lo.min(Vec3::from(*q)), hi.max(Vec3::from(*q)))))
+}
+
+/// The world box the box `b` makes at each of `instances` (column-major).
+fn instance_boxes(b: Option<(Vec3, Vec3)>, instances: &[[[f32; 4]; 4]]) -> Vec<(Vec3, Vec3)> {
+    let Some(b) = b else { return Vec::new() };
+    instances.iter().map(|m| sunshadow::world_box(b, false, std::slice::from_ref(m)).unwrap_or(b)).collect()
+}
 
 /// The world-space box a part's instances cover (`GpuGroup::bounds`).
 fn part_bounds(p: &GroupPart) -> Option<(Vec3, Vec3)> {
@@ -365,6 +468,29 @@ fn in_view(planes: &[glam::Vec4; 5], (lo, hi): (Vec3, Vec3)) -> bool {
     })
 }
 
+/// What the world is drawn through (`Renderer::pipeline_of`): the PS2's
+/// pipelines, Dynamic Lighting's (`lit`), Sun Shadows' (`sunshadow`), or
+/// Light Shadows' (`lightshadow`; with the sun's map too when `true`).
+#[derive(Clone, Copy)]
+enum Shade<'a> {
+    Ps2,
+    Lit(&'a lit::Lit),
+    Sun(&'a sunshadow::Sun),
+    Points(&'a lightshadow::Receivers, bool),
+}
+
+impl<'a> Shade<'a> {
+    /// The group 3 its pipelines take (the lights, and the maps), if any.
+    fn group3(self) -> Option<&'a wgpu::BindGroup> {
+        match self {
+            Shade::Ps2 => None,
+            Shade::Lit(l) => Some(&l.bg),
+            Shade::Sun(s) => Some(&s.bg),
+            Shade::Points(p, _) => Some(&p.bg),
+        }
+    }
+}
+
 /// What `draw` draws, in order.
 pub enum Draw<'a> {
     Model(&'a GpuModel),
@@ -396,6 +522,14 @@ pub trait TextureSource {
     fn native_size(&self, _id: i32) -> Option<(u32, u32)> {
         None
     }
+    /// A pack's stand-in for `id` still being read (`Pack::request`, asked
+    /// under the texture key `key`): its size and level count, which its
+    /// texture is made at at once, the surface's own levels drawn into it
+    /// (`standin::placeholder`) until it is read (`Renderer::take_stand_ins`).
+    /// `None`: `levels` are the texture's now.
+    fn pending(&self, _id: i32, _key: u64) -> Option<(u32, u32, u32)> {
+        None
+    }
 }
 
 impl<F: Fn(i32) -> Option<esf::Image>> TextureSource for F {
@@ -418,12 +552,45 @@ pub struct Renderer {
     sky_frame_bg: wgpu::BindGroup,
     material_layout: wgpu::BindGroupLayout,
     palette_layout: wgpu::BindGroupLayout,
+    /// The frame uniform's layout, which Dynamic Lighting's pipelines share.
+    frame_layout: wgpu::BindGroupLayout,
+    /// Dynamic Lighting's pipelines and lights (`lit`), made when it is first
+    /// turned on, and whether it is on.
+    lit: Option<lit::Lit>,
+    lit_on: bool,
+    /// Sun Shadows (`sunshadow`): the map and its pipelines, made when they
+    /// are first on with Dynamic Lighting, and whether they are on.
+    sun: Option<sunshadow::Sun>,
+    sun_on: bool,
+    /// Light Shadows (`lightshadow`): the maps and their pipelines, made when
+    /// they are first on with Dynamic Lighting, and whether they are on.
+    points: Option<lightshadow::Points>,
+    points_on: bool,
+    /// Which of Dynamic Lighting, Sun Shadows and Light Shadows a page's
+    /// WebGL2 refused (`guarded`): not made again while the page lives.
+    refused: Vec<&'static str>,
+    /// What each refusal said, until the client takes it (`refusals`).
+    refusals: Vec<String>,
+    /// The options' Shadow Distance, times the game's (1 to 4,
+    /// `set_shadow_distance`): the sun's cascades' far edge, and how many
+    /// lights cast.
+    shadow_scale: f32,
     /// repeat, clamp, mirror.
     samplers: [wgpu::Sampler; 3],
     white: wgpu::TextureView,
     /// A source's key for a DictID (`TextureSource::key`) -> uploaded texture
     /// and its level shift (`level_shift`; `None`: the id resolved to nothing).
     textures: std::collections::HashMap<u64, Option<(wgpu::TextureView, f32)>>,
+    /// Each uploaded texture's least texel alpha over its levels, by the same
+    /// key (`Pass::alpha_min`).
+    texture_alpha: std::collections::HashMap<u64, u8>,
+    /// The textures of stand-ins being read, by key, with the size and level
+    /// count each was made at (`standin`), and the stand-ins read and not
+    /// yet written into them, in order (`take_stand_ins`).
+    stand_ins: std::collections::HashMap<u64, (wgpu::Texture, (u32, u32, u32))>,
+    stand_ins_ready: std::collections::VecDeque<(u64, std::sync::Arc<Vec<esf::Image>>)>,
+    /// What draws a placeholder's levels, made with the first.
+    blit: Option<standin::Blit>,
     /// DictIDs a batch asked for that no loaded file holds.
     pub missing_textures: std::collections::BTreeSet<i32>,
     start: web_time::Instant,
@@ -447,6 +614,13 @@ pub struct Renderer {
     /// The PS2 runs drawn a fan at a time, the GS's arithmetic exactly
     /// (`set_ps2_sequential`): the reference the sums are measured against.
     ps2_sequential: bool,
+    /// Whether the world's particles of blend mode 3 are blended as the
+    /// PS2's 16-bit frame keeps them (`set_ps2_particles`, `billboard`), as
+    /// the fans marked `ps2` are; off until told.
+    ps2_particles: bool,
+    /// The copy and the sums the PS2's blends are run over (`fog16`), the
+    /// fans' and the particles' in turn: one set, made at the first.
+    fog16: Option<fog16::Fog16>,
     /// The characters' blob shadows' (`set_shadows`), made at the first.
     shadows: Option<shadow::Shadows>,
     /// What is drawn over the scene with Z off (`set_overlay`), made at the
@@ -472,6 +646,8 @@ pub struct Renderer {
     pub scale: scale::Scale,
     /// The options' Brightness over the scene (`curve`): none until set.
     pub curve: curve::Curve,
+    /// The options' Ambient Occlusion (`ao`): off until set.
+    pub ao: ao::Ao,
 }
 
 /// What to draw this frame. The lights are the VU1 strip programs' uniforms:
@@ -495,6 +671,9 @@ pub struct View {
     pub clear: Vec3,
     /// The view with its translation zeroed, for `GpuModel::sky` models.
     pub sky_view_proj: Option<Mat4>,
+    /// Dynamic Lighting's point lights (`lit`): with them (and it on), the
+    /// models drawn lit per fragment; `None`, the PS2's way.
+    pub lights: Option<Lights>,
 }
 
 impl View {
@@ -510,6 +689,7 @@ impl View {
             point: None,
             clear: Vec3::new(0.18, 0.2, 0.24),
             sky_view_proj: None,
+            lights: None,
         }
     }
 }
@@ -526,6 +706,83 @@ pub(crate) fn blend_state(mode: usize) -> Option<wgpu::BlendState> {
         _ => return None,
     };
     Some(wgpu::BlendState { color, alpha: C { src_factor: Fa::Zero, dst_factor: Fa::One, operation: Op::Add } })
+}
+
+/// A model layer's pipeline for blend `mode` (`blend_state`; the sky's with
+/// no depth test or write), through `module`'s entry points `entries`
+/// (vertex, fragment): the PS2's (shader.wgsl's `vs_main`, `fs_main`) and
+/// Dynamic Lighting's (`lit`) are made alike, over the same vertices.
+pub(crate) fn model_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    module: &wgpu::ShaderModule,
+    entries: (&str, &str),
+    mode: usize,
+    sky: bool,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    let blend = blend_state(mode);
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("layer"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some(entries.0),
+            compilation_options: Default::default(),
+            buffers: &[
+                Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x3, 3 => Float32x4, 8 => Uint8x4, 9 => Uint8x4],
+                }),
+                Some(wgpu::VertexBufferLayout {
+                    array_stride: 64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4],
+                }),
+                // the instance's static light (VIRaster::SetStaticLighting)
+                Some(wgpu::VertexBufferLayout {
+                    array_stride: 16,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![10 => Float32x4],
+                }),
+            ],
+        },
+        // Strips are lists with the winding made consistent; the
+        // strip programs cull back faces (ADC), so this does too.
+        primitive: wgpu::PrimitiveState {
+            front_face: FRONT_FACE,
+            cull_mode: Some(wgpu::Face::Back),
+            ..Default::default()
+        },
+        // Opaque: depth tested and written. Blended: TEST's
+        // AFAIL = RGB_ONLY with a NEVER alpha test, i.e. colour
+        // only, no depth write.
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(blend.is_none() && !sky),
+            depth_compare: Some(if sky { wgpu::CompareFunction::Always } else { wgpu::CompareFunction::LessEqual }),
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample: Default::default(),
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some(entries.1),
+            compilation_options: Default::default(),
+            // Colour only, opaque or not: nothing reads the
+            // target's alpha (no GS ALPHA setting the game uses
+            // takes the destination's), and it must stay the
+            // clear's 1. A page's WebGL2 canvas is composited
+            // with it (wgpu makes the context with alpha), and
+            // a picture of it came out with the colour
+            // of every alpha-tested edge wrapped round: a cyan
+            // fringe where red exceeded alpha.
+            targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::COLOR })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 impl Renderer {
@@ -566,70 +823,7 @@ impl Renderer {
             bind_group_layouts: &[Some(&frame_layout), Some(&material_layout), Some(&palette_layout)],
             immediate_size: 0,
         });
-        let make = |mode: usize, sky: bool| {
-                let blend = blend_state(mode);
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("layer"),
-                    layout: Some(&layout),
-                    vertex: wgpu::VertexState {
-                        module: &shader,
-                        entry_point: Some("vs_main"),
-                        compilation_options: Default::default(),
-                        buffers: &[
-                            Some(wgpu::VertexBufferLayout {
-                                array_stride: std::mem::size_of::<Vertex>() as u64,
-                                step_mode: wgpu::VertexStepMode::Vertex,
-                                attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x3, 3 => Float32x4, 8 => Uint8x4, 9 => Uint8x4],
-                            }),
-                            Some(wgpu::VertexBufferLayout {
-                                array_stride: 64,
-                                step_mode: wgpu::VertexStepMode::Instance,
-                                attributes: &wgpu::vertex_attr_array![4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4],
-                            }),
-                            // the instance's static light (VIRaster::SetStaticLighting)
-                            Some(wgpu::VertexBufferLayout {
-                                array_stride: 16,
-                                step_mode: wgpu::VertexStepMode::Instance,
-                                attributes: &wgpu::vertex_attr_array![10 => Float32x4],
-                            }),
-                        ],
-                    },
-                    // Strips are lists with the winding made consistent; the
-                    // strip programs cull back faces (ADC), so this does too.
-                    primitive: wgpu::PrimitiveState {
-                        front_face: FRONT_FACE,
-                        cull_mode: Some(wgpu::Face::Back),
-                        ..Default::default()
-                    },
-                    // Opaque: depth tested and written. Blended: TEST's
-                    // AFAIL = RGB_ONLY with a NEVER alpha test, i.e. colour
-                    // only, no depth write.
-                    depth_stencil: Some(wgpu::DepthStencilState {
-                        format: DEPTH_FORMAT,
-                        depth_write_enabled: Some(blend.is_none() && !sky),
-                        depth_compare: Some(if sky { wgpu::CompareFunction::Always } else { wgpu::CompareFunction::LessEqual }),
-                        stencil: Default::default(),
-                        bias: Default::default(),
-                    }),
-                    multisample: Default::default(),
-                    fragment: Some(wgpu::FragmentState {
-                        module: &shader,
-                        entry_point: Some("fs_main"),
-                        compilation_options: Default::default(),
-                        // Colour only, opaque or not: nothing reads the
-                        // target's alpha (no GS ALPHA setting the game uses
-                        // takes the destination's), and it must stay the
-                        // clear's 1. A page's WebGL2 canvas is composited
-                        // with it (wgpu makes the context with alpha), and
-                        // a picture of it came out with the colour
-                        // of every alpha-tested edge wrapped round: a cyan
-                        // fringe where red exceeded alpha.
-                        targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::COLOR })],
-                    }),
-                    multiview_mask: None,
-                    cache: None,
-                })
-        };
+        let make = |mode: usize, sky: bool| model_pipeline(device, &layout, &shader, ("vs_main", "fs_main"), mode, sky, format);
         let pipelines = (0..5).map(|m| make(m, false)).collect();
         let sky_pipelines = (0..5).map(|m| make(m, true)).collect();
         let frame_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -691,9 +885,23 @@ impl Renderer {
             sky_frame_bg,
             material_layout,
             palette_layout,
+            frame_layout,
+            lit: None,
+            lit_on: false,
+            sun: None,
+            sun_on: false,
+            points: None,
+            points_on: false,
+            refused: Vec::new(),
+            refusals: Vec::new(),
+            shadow_scale: 1.0,
             samplers,
             white,
             textures: Default::default(),
+            texture_alpha: Default::default(),
+            stand_ins: Default::default(),
+            stand_ins_ready: Default::default(),
+            blit: None,
             missing_textures: Default::default(),
             start: web_time::Instant::now(),
             scroll_time: None,
@@ -704,6 +912,8 @@ impl Renderer {
             fans: None,
             ps2_sums: false,
             ps2_sequential: false,
+            ps2_particles: false,
+            fog16: None,
             shadows: None,
             overlay: None,
             strips: Vec::new(),
@@ -713,6 +923,7 @@ impl Renderer {
             identity_palette,
             scale: scale::Scale::new(format),
             curve: curve::Curve::new(format),
+            ao: ao::Ao::new(format),
         }
     }
 
@@ -726,19 +937,70 @@ impl Renderer {
         if id == 0 {
             return None;
         }
+        let key = src.key(id);
+        if !self.textures.contains_key(&key) && self.blit.is_none() && pack().is_some() {
+            self.blit = Some(standin::Blit::new(device));
+        }
         let missing = &mut self.missing_textures;
+        let alpha = &mut self.texture_alpha;
+        let (stand_ins, blit) = (&mut self.stand_ins, &self.blit);
         self.textures
-            .entry(src.key(id))
+            .entry(key)
             .or_insert_with(|| {
+                // a pack's stand-in still being read: its texture made at its
+                // size now, the surface's own drawn into it, written over
+                // once read (`standin`); asked first, so that a stand-in
+                // read meanwhile is still written in
+                let pending = src.pending(id, key);
                 let levels = src.levels(id);
                 if levels.is_empty() {
                     missing.insert(id);
                     return None;
                 }
+                if let (Some(size), Some(blit)) = (pending, blit) {
+                    let (tex, view) = standin::placeholder(device, queue, blit, &levels, size);
+                    // its texels unknown until read: never drawn as one no
+                    // texel of which fails its alpha test (Sun Shadows)
+                    alpha.insert(key, 0);
+                    stand_ins.insert(key, (tex, size));
+                    return Some((view, level_shift((size.0, size.1), src.native_size(id))));
+                }
+                alpha.insert(key, levels.iter().flat_map(|l| l.rgba.chunks_exact(4).map(|p| p[3])).min().unwrap_or(255));
                 let shift = level_shift((levels[0].width, levels[0].height), src.native_size(id));
                 Some((upload_levels(device, queue, &levels), shift))
             })
             .clone()
+    }
+
+    /// The stand-ins a pack has read since (`Pack::take_ready`) written over
+    /// their textures' placeholders (`standin`), as many as `standin::BUDGET`
+    /// bytes allow (one at least), the rest left for the next frame: called
+    /// once a frame, before it is drawn. How many were written.
+    pub fn take_stand_ins(&mut self, queue: &wgpu::Queue) -> usize {
+        if let Some(p) = pack() {
+            self.stand_ins_ready.extend(p.take_ready());
+        }
+        let sizes: Vec<usize> = self.stand_ins_ready.iter().map(|(_, l)| standin::bytes(l)).collect();
+        let n = standin::due(&sizes, standin::BUDGET);
+        for (key, levels) in self.stand_ins_ready.drain(..n) {
+            if let Some((tex, size)) = self.stand_ins.remove(&key)
+                && standin::fits(&levels, size)
+            {
+                standin::write(queue, &tex, &levels);
+            }
+        }
+        n
+    }
+
+    /// Stand-ins read and not yet written (`take_stand_ins`).
+    pub fn stand_ins_waiting(&self) -> usize {
+        self.stand_ins_ready.len()
+    }
+
+    /// The least texel alpha of the texture `id` names in `src` (255 for none
+    /// or one not uploaded).
+    fn alpha_min(&self, id: i32, src: &Textures) -> u8 {
+        if id == 0 { 255 } else { self.texture_alpha.get(&src.key(id)).copied().unwrap_or(255) }
     }
 
     /// Uploads a model, drawn once per matrix in `instances` (column-major),
@@ -819,7 +1081,8 @@ impl Renderer {
                         wgpu::BindGroupEntry { binding: 2, resource: uniform.as_entire_binding() },
                     ],
                 });
-                passes.push(Pass { blend, bg, uniform, base, texture: l.texture, sampler: si, made: (base.uv0, base.uv1, si), shift: shift.unwrap_or(0.0) });
+                let alpha_min = if view.is_some() { self.alpha_min(l.texture, textures) } else { 255 };
+                passes.push(Pass { blend, bg, uniform, base, texture: l.texture, sampler: si, made: (base.uv0, base.uv1, si), shift: shift.unwrap_or(0.0), alpha_min });
             }
             let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("indices"),
@@ -855,6 +1118,10 @@ impl Renderer {
             passes_used: usize::MAX,
             level: Some(0),
             lod_dists: m.lod_dists.clone(),
+            baked: false,
+            casts: true,
+            world: std::cell::Cell::new(sunshadow::world_box((lo, hi), m.skinned, instances)),
+            core: std::cell::Cell::new(sunshadow::world_box((lo, hi), false, instances)),
         }
     }
 
@@ -884,6 +1151,7 @@ impl Renderer {
         let (uv0, uv1, si) = uv.and_then(|u| ps.get(u)).map_or(FRESH_UV, |src| src.made);
         let rebind = p.texture != texture || p.sampler != si;
         let (view, shift) = if rebind { self.texture_shifted(device, queue, texture, textures).unzip() } else { (None, None) };
+        let alpha_min = if view.is_some() { self.alpha_min(texture, textures) } else { 255 };
         let Some(p) = m.batches.get_mut(batch).and_then(|b| b.2.get_mut(pass)) else { return };
         if rebind {
             let shift = shift.unwrap_or(0.0);
@@ -901,6 +1169,7 @@ impl Renderer {
             p.texture = texture;
             p.sampler = si;
             p.base.flags[0] = view.is_some() as i32 as f32;
+            p.alpha_min = alpha_min;
         }
         p.blend = blend.min(4);
         p.base.flags[1] = (p.blend != 0) as i32 as f32;
@@ -1027,6 +1296,8 @@ impl Renderer {
     pub fn set_instances(&self, queue: &wgpu::Queue, m: &GpuModel, instances: &[[[f32; 4]; 4]]) {
         let n = instances.len().min(m.instance_count as usize);
         queue.write_buffer(&m.instances, 0, bytemuck::cast_slice(&instances[..n]));
+        m.world.set(sunshadow::world_box(m.bounds, m.skinned, &instances[..n]));
+        m.core.set(sunshadow::world_box(m.bounds, false, &instances[..n]));
     }
 
     pub fn draw(
@@ -1079,9 +1350,9 @@ impl Renderer {
         // The view-projection relative to the eye, in doubles: `view_proj`'s
         // translation is the projection of the eye's world position, which
         // the eye's own translation here cancels (shader.wgsl, vs_main).
-        let rel = (view.view_proj.as_dmat4() * glam::DMat4::from_translation(view.eye.as_dvec3())).as_mat4();
+        let rel = view.view_proj.as_dmat4() * glam::DMat4::from_translation(view.eye.as_dvec3());
         let uniform = FrameUniform {
-            view_proj: rel.to_cols_array_2d(),
+            view_proj: rel.as_mat4().to_cols_array_2d(),
             eye: view.eye.extend(mipmaps() as i32 as f32).to_array(),
             sun_dir: view.sun_dir.normalize().extend(0.0).to_array(),
             sun: view.sun.extend(self.scroll_time.unwrap_or_else(|| self.start.elapsed().as_secs_f32())).to_array(),
@@ -1109,6 +1380,29 @@ impl Renderer {
             let sky = FrameUniform { view_proj: vp.to_cols_array_2d(), eye: [0.0, 0.0, 0.0, uniform.eye[3]], ..uniform };
             queue.write_buffer(&self.sky_frame_buf, 0, bytemuck::bytes_of(&sky));
         }
+        // Sun Shadows: the frame's casters into their map before the world,
+        // and the world drawn through their pipelines while the sun casts
+        // (`sunshadow`)
+        let sun = match (view.lights.as_ref(), self.sun_drawn()) {
+            (Some(_), Some((_, s))) if s.draw(self, queue, encoder, view, items) => Some(s),
+            _ => None,
+        };
+        // Light Shadows: the frame's lights' maps, and the world drawn
+        // through their receivers (with the sun's map too while Sun Shadows
+        // are on, whose sun term is the strip programs' alone in a frame the
+        // sun casts nothing: by night)
+        let points = match (view.lights.as_ref(), self.points_drawn()) {
+            (Some(_), Some(p)) => {
+                p.draw(self, queue, encoder, view, items, self.scroll_time.unwrap_or_else(|| self.start.elapsed().as_secs_f32()));
+                if sun.is_none()
+                    && let Some((_, s)) = self.sun_drawn()
+                {
+                    s.unshadowed(queue);
+                }
+                Some(p)
+            }
+            _ => None,
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("models"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1158,6 +1452,24 @@ impl Renderer {
                 }
             }
         }
+        // Dynamic Lighting: this view's lights, its models through the lit
+        // pipelines and its groups' runs through their lit bundles (`lit`)
+        let lit = match (view.lights.as_ref(), self.lit.as_ref()) {
+            (Some(l), Some(lit)) if self.lit_on => {
+                queue.write_buffer(&lit.buf, 0, bytemuck::bytes_of(&lit::LightsUniform::new(view.point, l, view.eye, view.view_proj)));
+                Some(lit)
+            }
+            _ => None,
+        };
+        let shade = match (lit, sun, points) {
+            (None, _, _) => Shade::Ps2,
+            (Some(_), _, Some(p)) => match (self.sun_drawn(), p.with_sun.as_ref()) {
+                (Some(_), Some(w)) => Shade::Points(w, true),
+                _ => Shade::Points(&p.receivers, false),
+            },
+            (Some(_), Some(s), None) => Shade::Sun(s),
+            (Some(l), None, None) => Shade::Lit(l),
+        };
         let planes = frustum(view.view_proj);
         let shown = |r: &&Run| r.bounds.is_some_and(|b| in_view(&planes, b));
         let (mut drawn_models, mut draws) = (0u32, 0u32);
@@ -1171,8 +1483,32 @@ impl Renderer {
         // Two passes, as VIScene::Render's: a material whose layer 0 is
         // opaque (MaterialHasDepthSort) draws all its layers at once in the
         // first, one whose layer 0 blends is deferred whole to the second
-        // (DrawPrimBuffer's flags; RenderDeferredList).
+        // (DrawPrimBuffer's flags; RenderDeferredList). The Ambient Occlusion
+        // goes between them, over what the first wrote, in passes of its own
+        // (`ao`: the frame `prepare` readied it for, never part of one).
+        let ao = rect.is_none() && self.ao.take(depth);
         for deferred in [false, true] {
+            if deferred && ao {
+                drop(pass);
+                self.ao.run(queue, encoder, target, rel, view.fog);
+                pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("models, blended"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: depth,
+                        depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+            }
             // the pass's state, unset again by each bundle it executes
             let mut bound = false;
             let mut current = usize::MAX;
@@ -1184,10 +1520,13 @@ impl Renderer {
                         }
                         if !bound {
                             pass.set_bind_group(0, &self.frame_bg, &[]);
+                            if let Some(bg) = shade.group3() {
+                                pass.set_bind_group(3, bg, &[]);
+                            }
                             bound = true;
                             current = usize::MAX;
                         }
-                        draws += self.encode_model(&mut pass, m, deferred, &mut current, 0..m.instance_count);
+                        draws += self.encode_model(&mut pass, m, deferred, &mut current, 0..m.instance_count, shade);
                     }
                     Draw::Instances(m, r) => {
                         if !Self::draws_anything(m) || r.is_empty() {
@@ -1195,14 +1534,28 @@ impl Renderer {
                         }
                         if !bound {
                             pass.set_bind_group(0, &self.frame_bg, &[]);
+                            if let Some(bg) = shade.group3() {
+                                pass.set_bind_group(3, bg, &[]);
+                            }
                             bound = true;
                             current = usize::MAX;
                         }
-                        draws += self.encode_model(&mut pass, m, deferred, &mut current, r.start..r.end.min(m.instance_count));
+                        draws += self.encode_model(&mut pass, m, deferred, &mut current, r.start..r.end.min(m.instance_count), shade);
                     }
                     Draw::Group(g) => {
                         for r in g.runs.iter().filter(shown) {
-                            if let Some(b) = &r.bundles[deferred as usize] {
+                            let earlier = match (lit, sun, &r.sun, &r.lit) {
+                                (Some(_), Some(_), Some(b), _) => b,
+                                (Some(_), _, _, Some(b)) => b,
+                                _ => &r.bundles,
+                            };
+                            // Light Shadows' where they are recorded (`relight`)
+                            let bundles = match shade {
+                                Shade::Points(_, true) => r.both.as_ref().unwrap_or(earlier),
+                                Shade::Points(_, false) => r.points.as_ref().unwrap_or(earlier),
+                                _ => earlier,
+                            };
+                            if let Some(b) = &bundles[deferred as usize] {
                                 pass.execute_bundles([b]);
                                 bound = false;
                             }
@@ -1221,9 +1574,9 @@ impl Renderer {
     }
 
     /// One model's commands for one of the two passes, into a pass or a
-    /// bundle; `current` is the blend mode whose pipeline is set. Returns the
-    /// draw calls.
-    fn encode_model<'a, E: wgpu::util::RenderEncoder<'a>>(&'a self, e: &mut E, m: &'a GpuModel, deferred: bool, current: &mut usize, range: std::ops::Range<u32>) -> u32 {
+    /// bundle; `current` is the pipeline set (`pipeline_of`'s key), through
+    /// `shade`'s pipelines. Returns the draw calls.
+    fn encode_model<'a, E: wgpu::util::RenderEncoder<'a>>(&'a self, e: &mut E, m: &'a GpuModel, deferred: bool, current: &mut usize, range: std::ops::Range<u32>, shade: Shade<'a>) -> u32 {
         let in_pass = |passes: &[Pass], lod: Option<u8>| passes.first().is_some_and(|p| (p.blend != 0) == deferred) && level_drawn(lod, m.level);
         if !m.batches.iter().any(|(_, _, passes, lod)| in_pass(passes, *lod)) {
             return 0;
@@ -1239,9 +1592,10 @@ impl Renderer {
             }
             e.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
             for p in passes.iter().take(m.passes_used) {
-                if p.blend != *current {
-                    e.set_pipeline(&self.pipelines[p.blend]);
-                    *current = p.blend;
+                let (key, pipeline) = self.pipeline_of(p.blend, m.baked, shade);
+                if key != *current {
+                    e.set_pipeline(pipeline);
+                    *current = key;
                 }
                 e.set_bind_group(1, Some(&p.bg), &[]);
                 e.draw_indexed(0..*count, 0, range.clone());
@@ -1257,9 +1611,10 @@ impl Renderer {
         let (view, shift) = self.texture_shifted(device, queue, l.texture, textures).unzip();
         let (blend, mut base, si) = layer_state(l, view.is_some());
         base.flags[2] += shift.unwrap_or(0.0);
+        let solid = solid(if view.is_some() { self.alpha_min(l.texture, textures) } else { 255 }, base.tint[3]);
         let key = (textures.key(l.texture), si, bytemuck::cast(base));
         if let Some(bg) = self.materials.get(&key) {
-            return Material { blend, bg: bg.clone() };
+            return Material { blend, bg: bg.clone(), solid };
         }
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("material"),
@@ -1276,7 +1631,7 @@ impl Renderer {
             ],
         });
         self.materials.insert(key, bg.clone());
-        Material { blend, bg }
+        Material { blend, bg, solid }
     }
 
     /// Uploads `parts` as one [`GpuGroup`], drawn as `draw` would draw them
@@ -1327,42 +1682,261 @@ impl Renderer {
             write(&indices, first_index, 4, bytemuck::cast_slice(&part_indices));
             write(&instances, instance0, 64, bytemuck::cast_slice(p.instances));
             write(&statics, instance0, 16, bytemuck::cast_slice(&lights));
-            members.push(Member { instance0, instances: p.instances.len() as u32, batches });
+            let own = model_box(p.model);
+            members.push(Member {
+                instance0,
+                instances: p.instances.len() as u32,
+                batches,
+                baked: p.baked,
+                bounds: part_bounds(p),
+                moves: p.moves,
+                posed: std::cell::Cell::new(if p.moves { own.and_then(|b| sunshadow::world_box(b, false, p.instances)) } else { None }),
+                own,
+                boxes: if p.moves { Vec::new() } else { instance_boxes(own, p.instances) },
+            });
             base += verts.len() as u32;
             first_index += part_indices.len() as u32;
             instance0 += p.instances.len() as u32;
         }
-        let mut g = GpuGroup { vertices, indices, instances, statics, members, runs: Vec::new() };
+        let bounds = members.iter().filter_map(|m| m.bounds).reduce(|(a, b), (c, d)| (a.min(c), b.max(d)));
+        let id = GROUP_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut g = GpuGroup { vertices, indices, instances, statics, members, runs: Vec::new(), sun: None, id, bounds };
         for at in (0..parts.len()).step_by(RUN) {
             let span = at..(at + RUN).min(parts.len());
             let bounds = parts[span.clone()].iter().filter_map(part_bounds).reduce(|(a, b), (c, d)| (a.min(c), b.max(d)));
             let drawn = g.members[span.clone()].iter().filter(|m| m.instances > 0 && !m.batches.is_empty()).count() as u32;
-            let mut run = Run { bounds, bundles: [None, None], drawn: (drawn, [0, 0]) };
-            for deferred in [false, true] {
-                let mut e = device.create_render_bundle_encoder(&wgpu::RenderBundleEncoderDescriptor {
-                    label: Some("group"),
-                    color_formats: &[Some(self.format)],
-                    depth_stencil: Some(wgpu::RenderBundleDepthStencil { format: DEPTH_FORMAT, depth_read_only: false, stencil_read_only: true }),
-                    sample_count: 1,
-                    multiview: None,
-                });
-                let n = self.encode_run(&mut e, &g, &g.members[span.clone()], deferred);
-                if n > 0 {
-                    run.bundles[deferred as usize] = Some(e.finish(&wgpu::RenderBundleDescriptor { label: Some("group") }));
-                }
-                run.drawn.1[deferred as usize] = n;
-            }
-            g.runs.push(run);
+            let (bundles, n) = self.record(device, &g, span.clone(), Shade::Ps2);
+            // and through Dynamic Lighting's pipelines while it is on
+            let lit = self.lit.as_ref().filter(|_| self.lit_on).map(|l| self.record(device, &g, span.clone(), Shade::Lit(l)).0);
+            // and Sun Shadows' while they are on
+            let sun = self.sun_drawn().map(|(_, s)| self.record(device, &g, span.clone(), Shade::Sun(s)).0);
+            // and Light Shadows' while they are on, with the sun's map while
+            // Sun Shadows are too
+            let [points, both] = self.points_shades().map(|sh| sh.map(|sh| self.record(device, &g, span.clone(), sh).0));
+            g.runs.push(Run { bounds, bundles, drawn: (drawn, n), lit, sun, points, both });
         }
+        // and its casters
+        g.sun = self.sun_drawn().map(|(_, s)| s.casters(self, device, &g));
         g
     }
 
+    /// The bundles of a group's members `span` for the two passes (none for
+    /// a pass they draw nothing in), and each pass's draw calls, through
+    /// `shade`'s pipelines.
+    fn record(&self, device: &wgpu::Device, g: &GpuGroup, span: std::ops::Range<usize>, shade: Shade) -> ([Option<wgpu::RenderBundle>; 2], [u32; 2]) {
+        let (mut bundles, mut drawn) = ([None, None], [0, 0]);
+        for deferred in [false, true] {
+            let mut e = device.create_render_bundle_encoder(&wgpu::RenderBundleEncoderDescriptor {
+                label: Some("group"),
+                color_formats: &[Some(self.format)],
+                depth_stencil: Some(wgpu::RenderBundleDepthStencil { format: DEPTH_FORMAT, depth_read_only: false, stencil_read_only: true }),
+                sample_count: 1,
+                multiview: None,
+            });
+            let n = self.encode_run(&mut e, g, &g.members[span.clone()], deferred, shade);
+            if n > 0 {
+                bundles[deferred as usize] = Some(e.finish(&wgpu::RenderBundleDescriptor { label: Some("group") }));
+            }
+            drawn[deferred as usize] = n;
+        }
+        (bundles, drawn)
+    }
+
+    /// Turns Dynamic Lighting on or off (`lit`): on, its pipelines made the
+    /// first time, a view's lights drawn, and a group uploaded from now on
+    /// recorded for it as well; the groups uploaded before need `relight`.
+    pub fn set_dynamic_lighting(&mut self, device: &wgpu::Device, on: bool) {
+        if on && self.lit.is_none() && !self.refused.contains(&LIT) {
+            self.lit = guarded(device, &mut self.refused, &mut self.refusals, LIT, || Some(lit::Lit::new(device, [&self.frame_layout, &self.material_layout, &self.palette_layout], self.format)));
+        }
+        self.lit_on = on;
+        self.make_sun(device);
+        self.make_points(device);
+    }
+
+    /// Turns Sun Shadows on or off (`sunshadow`): drawn only while Dynamic
+    /// Lighting is on too, their map and pipelines made the first time both
+    /// are, and a group uploaded from then on recorded for them; the groups
+    /// uploaded before need `relight`.
+    pub fn set_sun_shadows(&mut self, device: &wgpu::Device, on: bool) {
+        self.sun_on = on;
+        self.make_sun(device);
+        self.make_points(device);
+    }
+
+    /// Turns Light Shadows on or off (`lightshadow`): drawn only while
+    /// Dynamic Lighting is on too, their maps and pipelines made the first
+    /// time both are, and a group uploaded from then on recorded for them;
+    /// the groups uploaded before need `relight`.
+    pub fn set_light_shadows(&mut self, device: &wgpu::Device, on: bool) {
+        self.points_on = on;
+        self.make_points(device);
+    }
+
+    /// The options' Shadow Distance, `scale` times the game's (1 to 4, as
+    /// built at 1): Sun Shadows' far edge (`sunshadow::ends`) and how many
+    /// lights Light Shadows shadow (`lightshadow::slots_at`), from the next
+    /// frame.
+    pub fn set_shadow_distance(&mut self, scale: f32) {
+        self.shadow_scale = scale.clamp(1.0, 4.0);
+    }
+
+    /// Whether Light Shadows are on (`set_light_shadows`; drawn only with
+    /// Dynamic Lighting on).
+    pub fn light_shadows(&self) -> bool {
+        self.points_on
+    }
+
+    /// What the last frame drew into Light Shadows' maps; `None` before they
+    /// were first on.
+    pub fn light_shadow_drawn(&self) -> Option<lightshadow::Drawn> {
+        self.points.as_ref().map(|p| p.drawn.get())
+    }
+
+    /// What a page's WebGL2 refused of Dynamic Lighting, Sun Shadows and
+    /// Light Shadows since the last call, each "<name>: <what it said>"
+    /// (`guarded`): the client's to tell the player, the option left as
+    /// they set it and the feature not drawn.
+    pub fn refusals(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.refusals)
+    }
+
+    /// The comparisons Light Shadows' receivers take (`Filter::for_device`);
+    /// `None` before they were first made.
+    pub fn light_shadow_filter(&self) -> Option<lightshadow::Filter> {
+        self.points.as_ref().map(lightshadow::Points::filter)
+    }
+
+    /// The maps and their pipelines, the first time Light Shadows and
+    /// Dynamic Lighting are both on; and their receivers with the sun's map
+    /// once Sun Shadows' are made.
+    fn make_points(&mut self, device: &wgpu::Device) {
+        let layouts = [&self.frame_layout, &self.material_layout, &self.palette_layout];
+        if self.points_on
+            && self.points.is_none()
+            && !self.refused.contains(&POINTS)
+            && let Some(l) = self.lit.as_ref().filter(|_| self.lit_on)
+        {
+            self.points = guarded(device, &mut self.refused, &mut self.refusals, POINTS, || lightshadow::Points::new(device, layouts, l, self.sun.as_ref(), self.format));
+        }
+        if let (Some(p), Some(l), Some(s)) = (self.points.as_mut(), self.lit.as_ref(), self.sun.as_ref())
+            && p.with_sun.is_none()
+            && guarded(device, &mut self.refused, &mut self.refusals, POINTS, || {
+                p.attach_sun(device, layouts, l, s, self.format);
+                Some(())
+            })
+            .is_none()
+        {
+            // refused with the sun's map: none at all, not maps whose
+            // receivers would leave the sun's shadow out
+            self.points = None;
+        }
+    }
+
+    /// Light Shadows' while they and Dynamic Lighting are on.
+    fn points_drawn(&self) -> Option<&lightshadow::Points> {
+        self.lit.as_ref().filter(|_| self.lit_on)?;
+        self.points.as_ref().filter(|_| self.points_on)
+    }
+
+    /// The shades a group records for Light Shadows while they are on: alone
+    /// while Sun Shadows are off, with the sun's map while they are on.
+    fn points_shades(&self) -> [Option<Shade<'_>>; 2] {
+        let Some(p) = self.points_drawn() else { return [None, None] };
+        match (self.sun_drawn(), p.with_sun.as_ref()) {
+            (Some(_), Some(w)) => [None, Some(Shade::Points(w, true))],
+            _ => [Some(Shade::Points(&p.receivers, false)), None],
+        }
+    }
+
+    /// Whether Sun Shadows are on (`set_sun_shadows`; drawn only with
+    /// Dynamic Lighting on).
+    pub fn sun_shadows(&self) -> bool {
+        self.sun_on
+    }
+
+    /// What the last frame drew into Sun Shadows' cascades, all four: the
+    /// casters' bundles executed and the draw calls; `None` before they were
+    /// first on.
+    pub fn sun_shadow_drawn(&self) -> Option<(u32, u32)> {
+        self.sun.as_ref().map(|s| s.drawn.get())
+    }
+
+    /// The sun's map and pipelines, the first time Sun Shadows and Dynamic
+    /// Lighting are both on.
+    fn make_sun(&mut self, device: &wgpu::Device) {
+        if self.sun_on
+            && self.sun.is_none()
+            && !self.refused.contains(&SUN)
+            && let Some(l) = self.lit.as_ref().filter(|_| self.lit_on)
+        {
+            self.sun = guarded(device, &mut self.refused, &mut self.refusals, SUN, || sunshadow::Sun::new(device, [&self.frame_layout, &self.material_layout, &self.palette_layout], l, self.format));
+        }
+    }
+
+    /// Dynamic Lighting's and Sun Shadows' while both are on.
+    fn sun_drawn(&self) -> Option<(&lit::Lit, &sunshadow::Sun)> {
+        Some((self.lit.as_ref().filter(|_| self.lit_on)?, self.sun.as_ref().filter(|_| self.sun_on)?))
+    }
+
+    /// Whether Dynamic Lighting is on (`set_dynamic_lighting`).
+    pub fn dynamic_lighting(&self) -> bool {
+        self.lit_on
+    }
+
+    /// Records a group's lit bundles where it has none, while Dynamic
+    /// Lighting is on (a group uploaded while it was off draws the PS2's way
+    /// until then).
+    pub fn relight(&self, device: &wgpu::Device, g: &mut GpuGroup) {
+        let Some(l) = self.lit.as_ref().filter(|_| self.lit_on) else { return };
+        let sun = self.sun.as_ref().filter(|_| self.sun_on);
+        let [points, both] = self.points_shades();
+        for k in 0..g.runs.len() {
+            let span = k * RUN..((k + 1) * RUN).min(g.members.len());
+            if g.runs[k].lit.is_none() {
+                let (bundles, _) = self.record(device, g, span.clone(), Shade::Lit(l));
+                g.runs[k].lit = Some(bundles);
+            }
+            // and Sun Shadows' while they are on
+            if let Some(s) = sun.filter(|_| g.runs[k].sun.is_none()) {
+                g.runs[k].sun = Some(self.record(device, g, span.clone(), Shade::Sun(s)).0);
+            }
+            // and Light Shadows' while they are on
+            if let Some(sh) = points.filter(|_| g.runs[k].points.is_none()) {
+                g.runs[k].points = Some(self.record(device, g, span.clone(), sh).0);
+            }
+            if let Some(sh) = both.filter(|_| g.runs[k].both.is_none()) {
+                g.runs[k].both = Some(self.record(device, g, span, sh).0);
+            }
+        }
+        if let Some(s) = sun.filter(|_| g.sun.is_none()) {
+            g.sun = Some(s.casters(self, device, g));
+        }
+    }
+
+    /// The pipeline a layer pass of blend `blend` is drawn through, and its
+    /// key for a run of passes (a pipeline set once while the key stays):
+    /// the PS2's, or Dynamic Lighting's, a baked instance's own, Sun Shadows'
+    /// or Light Shadows' (`shade`).
+    fn pipeline_of<'a>(&'a self, blend: usize, baked: bool, shade: Shade<'a>) -> (usize, &'a wgpu::RenderPipeline) {
+        match shade {
+            Shade::Ps2 => (blend, &self.pipelines[blend]),
+            Shade::Sun(s) => (32 + blend + 8 * baked as usize, &s.pipelines[baked as usize][blend]),
+            Shade::Lit(l) => (8 + blend + 8 * baked as usize, &l.pipelines[baked as usize][blend]),
+            Shade::Points(p, sun) => (64 + 32 * sun as usize + blend + 8 * baked as usize, &p.pipelines[baked as usize][blend]),
+        }
+    }
+
     /// The commands of some of a group's members for one of the two passes,
-    /// as `encode_model` issues a model's. Returns the draw calls.
-    fn encode_run<'a>(&'a self, e: &mut wgpu::RenderBundleEncoder<'a>, g: &'a GpuGroup, members: &'a [Member], deferred: bool) -> u32 {
+    /// as `encode_model` issues a model's, through `shade`'s pipelines.
+    /// Returns the draw calls.
+    fn encode_run<'a>(&'a self, e: &mut wgpu::RenderBundleEncoder<'a>, g: &'a GpuGroup, members: &'a [Member], deferred: bool, shade: Shade<'a>) -> u32 {
         let in_pass = |passes: &[Material]| passes.first().is_some_and(|p| (p.blend != 0) == deferred);
         e.set_bind_group(0, &self.frame_bg, &[]);
         e.set_bind_group(2, &self.identity_palette, &[]);
+        if let Some(bg) = shade.group3() {
+            e.set_bind_group(3, bg, &[]);
+        }
         e.set_vertex_buffer(0, g.vertices.slice(..));
         e.set_index_buffer(g.indices.slice(..), wgpu::IndexFormat::Uint32);
         let mut current = usize::MAX;
@@ -1379,9 +1953,10 @@ impl Renderer {
                     continue;
                 }
                 for p in passes {
-                    if p.blend != current {
-                        e.set_pipeline(&self.pipelines[p.blend]);
-                        current = p.blend;
+                    let (key, pipeline) = self.pipeline_of(p.blend, m.baked, shade);
+                    if key != current {
+                        e.set_pipeline(pipeline);
+                        current = key;
                     }
                     e.set_bind_group(1, &p.bg, &[]);
                     e.draw_indexed(range.clone(), 0, 0..m.instances);
@@ -1398,6 +1973,10 @@ impl Renderer {
         let Some(m) = g.members.get(member) else { return };
         let n = instances.len().min(m.instances as usize);
         queue.write_buffer(&g.instances, m.instance0 as u64 * 64, bytemuck::cast_slice(&instances[..n]));
+        // where it is now, for Light Shadows' casters (an animated prop)
+        if m.moves {
+            m.posed.set(m.own.and_then(|b| sunshadow::world_box(b, false, &instances[..n])));
+        }
     }
 }
 
@@ -1469,7 +2048,53 @@ fn layer_state(l: &esf::Layer, textured: bool) -> (usize, LayerUniform, usize) {
     (blend, base, si)
 }
 
-fn uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
+/// The lighting features' names, as `Renderer::refusals` says them.
+const LIT: &str = "Dynamic Lighting";
+const SUN: &str = "Sun Shadows";
+const POINTS: &str = "Light Shadows";
+
+/// What `make` makes (a lighting feature's maps, samplers and pipelines),
+/// unless a page's WebGL2 refuses it. A browser's GL driver may refuse a
+/// shader every other takes (its compiler's own limits and bugs), and a
+/// refusal was an error nothing caught: a panic, the client stopped at every
+/// world entry for as long as the option stayed on. On WebGL2 `make` runs
+/// under error scopes (`caught`): refused, nothing is made, and `what` is
+/// kept in `refused` and what it said in `said`. Elsewhere (natively, and a
+/// page on WebGPU, whose scopes answer only later) `make` alone.
+fn guarded<T>(device: &wgpu::Device, refused: &mut Vec<&'static str>, said: &mut Vec<String>, what: &'static str, make: impl FnOnce() -> Option<T>) -> Option<T> {
+    if !(cfg!(target_arch = "wasm32") && device.adapter_info().backend == wgpu::Backend::Gl) {
+        return make();
+    }
+    caught(device, refused, said, what, make)
+}
+
+/// `make` under error scopes (`guarded`): what it made, or `None` with
+/// `what` kept in `refused` and its first error in `said` when it raised
+/// any. wgpu's own backends (GL among them) answer a scope at once.
+fn caught<T>(device: &wgpu::Device, refused: &mut Vec<&'static str>, said: &mut Vec<String>, what: &'static str, make: impl FnOnce() -> Option<T>) -> Option<T> {
+    let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+    let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let made = make();
+    // innermost first
+    let errors = [ready(validation.pop()), ready(internal.pop()), ready(memory.pop())];
+    let Some(e) = errors.into_iter().flatten().flatten().next() else { return made };
+    let text: String = e.to_string().split_whitespace().collect::<Vec<_>>().join(" ").chars().take(400).collect();
+    refused.push(what);
+    said.push(format!("{what}: {text}"));
+    None
+}
+
+/// A future's output if it has one now, without waiting.
+fn ready<F: std::future::Future>(f: F) -> Option<F::Output> {
+    let mut f = std::pin::pin!(f);
+    match f.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) {
+        std::task::Poll::Ready(v) => Some(v),
+        std::task::Poll::Pending => None,
+    }
+}
+
+pub(crate) fn uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility,
@@ -1480,7 +2105,7 @@ fn uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGrou
 
 /// A texture of `levels` (the base first, each half the one before), as
 /// the surface cache puts a surface's levels in the GS's memory.
-fn upload_levels(device: &wgpu::Device, queue: &wgpu::Queue, levels: &[esf::Image]) -> wgpu::TextureView {
+pub(crate) fn upload_levels(device: &wgpu::Device, queue: &wgpu::Queue, levels: &[esf::Image]) -> wgpu::TextureView {
     let base = &levels[0];
     let tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("surface"),
@@ -1534,7 +2159,8 @@ pub fn depth_view(device: &wgpu::Device, w: u32, h: u32) -> wgpu::TextureView {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            // read by the Ambient Occlusion's passes (`ao`)
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         })
         .create_view(&Default::default())
@@ -1583,12 +2209,13 @@ pub fn capture_with_sky(
     particles: Option<(Mat4, Mat4, &[billboard::Batch], &Textures)>,
     sky: Option<(Mat4, Mat4, &[billboard::Batch], &Textures)>,
 ) -> Vec<u8> {
-    capture_around(device, queue, renderer, w, h, view, items, particles, sky, |_, _, _| {})
+    capture_around(device, queue, renderer, w, h, view, items, particles, sky, |_, _, _, _| {})
 }
 
 /// `capture_with_sky` with `between` drawn between the labels and the 2D
 /// layer, as `Renderer::draw_text_around` draws it (the minimap): given the
-/// encoder, the target and its depth.
+/// encoder, the target and its depth, and the target's size (the Render
+/// Scale's, `w` x `h` times it).
 #[allow(clippy::too_many_arguments)]
 pub fn capture_around(
     device: &wgpu::Device,
@@ -1600,7 +2227,7 @@ pub fn capture_around(
     items: &[Draw],
     particles: Option<(Mat4, Mat4, &[billboard::Batch], &Textures)>,
     sky: Option<(Mat4, Mat4, &[billboard::Batch], &Textures)>,
-    between: impl FnOnce(&mut wgpu::CommandEncoder, &wgpu::TextureView, &wgpu::TextureView),
+    between: impl FnOnce(&mut wgpu::CommandEncoder, &wgpu::TextureView, &wgpu::TextureView, (u32, u32)),
 ) -> Vec<u8> {
     let format = TARGET_FORMAT;
     let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -1629,6 +2256,8 @@ pub fn capture_around(
     renderer.read_frame_through(&f.color);
     let scene = renderer.curve.scene_target(device, f.size);
     let st = scene.as_ref().unwrap_or(&f.color);
+    // the Ambient Occlusion's passes over its opaque half, while set (`ao`)
+    renderer.ao.prepare(device, &f);
     renderer.draw(queue, &mut enc, st, &f.depth, view, items);
     if let Some((v, p, batches, textures)) = sky {
         renderer.draw_sky_billboards(device, queue, &mut enc, st, &f.depth, v, p, batches, textures);
@@ -1639,7 +2268,7 @@ pub fn capture_around(
         renderer.draw_billboards_and_shadows(device, queue, &mut enc, st, &f.depth, v, p, batches, textures, view);
     }
     renderer.curve.apply(queue, &mut enc, &f.color);
-    renderer.draw_text_around(device, &mut enc, &f.color, &f.depth, f.size, |enc| between(enc, &f.color, &f.depth));
+    renderer.draw_text_around(device, &mut enc, &f.color, &f.depth, f.size, |enc| between(enc, &f.color, &f.depth, f.size));
     renderer.scale.resolve(&mut enc, &tv);
     enc.copy_texture_to_buffer(
         target.as_image_copy(),
@@ -1683,18 +2312,38 @@ impl LibraryTextures<'_> {
 /// as the pack's levels, keyed apart (its generation in bits 40 and up);
 /// every other texture, and every texture with none set, is the surface's
 /// own under its own key.
+///
+/// A recoloured texture's id ([`recolor::recolored`]: a body's part a player
+/// recoloured) is its source's levels, recoloured, under a key of its own; a
+/// texture's own id resolves as it always did.
 impl TextureSource for LibraryTextures<'_> {
     fn image(&self, id: i32) -> Option<esf::Image> {
         self.levels(id).into_iter().next()
     }
     fn levels(&self, id: i32) -> Vec<esf::Image> {
-        let Some((c, s, era)) = self.surface(id) else { return Vec::new() };
+        let Some((c, s, era)) = self.surface(id) else {
+            return match recolor::source_of(id) {
+                Some((source, r)) => {
+                    let mut levels = self.levels(source);
+                    for l in &mut levels {
+                        recolor::recolor_rgba(&mut l.rgba, r);
+                    }
+                    levels
+                }
+                None => Vec::new(),
+            };
+        };
         if let Some(l) = pack().and_then(|p| p.levels(c, &s, era)).filter(|l| !l.is_empty()) {
             return l;
         }
         s.decode_levels(&c.data)
     }
     fn key(&self, id: i32) -> u64 {
+        if self.surface(id).is_none()
+            && let Some((source, r)) = recolor::source_of(id)
+        {
+            return recolor::key_of(self.key(source), r);
+        }
         let key = self.0.texture_key(id);
         let Some(p) = pack() else { return key };
         match self.surface(id) {
@@ -1703,7 +2352,14 @@ impl TextureSource for LibraryTextures<'_> {
         }
     }
     fn native_size(&self, id: i32) -> Option<(u32, u32)> {
-        self.0.surface(id).map(|(_, s)| (s.width.max(0) as u32, s.height.max(0) as u32))
+        if let Some((_, s)) = self.0.surface(id) {
+            return Some((s.width.max(0) as u32, s.height.max(0) as u32));
+        }
+        recolor::source_of(id).and_then(|(source, _)| self.native_size(source))
+    }
+    fn pending(&self, id: i32, key: u64) -> Option<(u32, u32, u32)> {
+        let (c, s, era) = self.surface(id)?;
+        pack()?.request(key, c, &s, era)
     }
 }
 
@@ -1728,5 +2384,43 @@ mod tests {
         assert!(!level_drawn(Some(0), None) && !level_drawn(Some(1), None));
         let every = |_: Option<u8>, _: Option<u8>| true;
         assert_ne!(every(Some(1), Some(0)), level_drawn(Some(1), Some(0)));
+    }
+
+    /// What a page's WebGL2 refuses of a lighting feature is caught
+    /// (`super::caught`): nothing made, the feature's name kept and what was
+    /// said, the device's uncaught-error handler (a panic, by default) never
+    /// reached; what it takes is made with nothing kept. The control: the
+    /// same refusal made without the scopes reaches the handler. Needs a
+    /// graphics adapter (any backend); without one it says so and passes.
+    #[test]
+    fn a_refused_feature_is_caught_not_raised() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+            eprintln!("SKIP: no graphics adapter");
+            return;
+        };
+        let (device, _queue) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let raised = Arc::new(AtomicUsize::new(0));
+        let r = raised.clone();
+        device.on_uncaptured_error(Arc::new(move |_: wgpu::Error| {
+            r.fetch_add(1, Ordering::SeqCst);
+        }));
+        // a buffer both mapped for reading and written to: refused without
+        // the device feature that allows it
+        let refused_buffer = || device.create_buffer(&wgpu::BufferDescriptor { label: Some("refused"), size: 16, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::MAP_WRITE, mapped_at_creation: false });
+        let taken = || device.create_buffer(&wgpu::BufferDescriptor { label: Some("taken"), size: 16, usage: wgpu::BufferUsages::UNIFORM, mapped_at_creation: false });
+        let (mut refused, mut said) = (Vec::new(), Vec::new());
+        assert!(super::caught(&device, &mut refused, &mut said, super::POINTS, || Some(taken())).is_some(), "taken: made");
+        assert!(refused.is_empty() && said.is_empty());
+        assert!(super::caught(&device, &mut refused, &mut said, super::POINTS, || Some(refused_buffer())).is_none(), "refused: nothing made");
+        assert_eq!(refused, [super::POINTS]);
+        assert!(said.len() == 1 && said[0].starts_with("Light Shadows: ") && said[0].contains("MAP_WRITE"), "{said:?}");
+        assert_eq!(raised.load(Ordering::SeqCst), 0, "caught, not raised");
+        // natively `guarded` is `make` alone, its refusals as raised as ever
+        let (mut r2, mut s2) = (Vec::new(), Vec::new());
+        assert!(super::guarded(&device, &mut r2, &mut s2, super::SUN, || Some(refused_buffer())).is_some() && r2.is_empty());
+        assert_eq!(raised.load(Ordering::SeqCst), 1, "the control: without the scopes the refusal is raised");
     }
 }

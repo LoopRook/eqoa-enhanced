@@ -33,6 +33,7 @@
 //! itself) and plays its sounds as `Cue`s. What the game counts in frames
 //! steps on `frames.rs`'s clock (`Ctx::game_frame`).
 
+pub mod bodytrace;
 pub mod boot;
 pub mod figure;
 pub mod client;
@@ -321,9 +322,15 @@ impl Pregame {
     /// moves on if its files are in.
     pub fn update(&mut self, now: i64) {
         self.res.poll();
+        if bodytrace::on() {
+            bodytrace::characters(&self.client.chars.iter().map(|c| (c.name.as_str(), c.model)).collect::<Vec<_>>());
+        }
         // a server's races' bodies (CHARSEL's files hold the game's alone):
         // read once it tells of them, and the figures made again when they come
-        self.res.want_bodies(&client::create::tables::bodies());
+        // and the bodies the characters' capes are cut from (`cape`)
+        let mut bodies = client::create::tables::bodies();
+        bodies.extend(self.client.cape_bodies());
+        self.res.want_bodies(&bodies);
         if self.res.take_bodies_in() {
             self.client.bodies_in();
         }
@@ -398,6 +405,14 @@ impl Pregame {
     /// what it asks for next.
     #[allow(clippy::too_many_arguments)]
     pub fn frame(&mut self, cx_now: i64, game_frame: bool, r: &mut dyn crate::ui::Layout, cues: &mut Vec<crate::sound::Cue>, music: &mut Vec<Music>, gpu: Option<crate::play::Gpu>) {
+        bodytrace::frame_begin();
+        self.frame_work(cx_now, game_frame, r, cues, music, gpu);
+        bodytrace::frame_end();
+    }
+
+    /// `frame`'s work.
+    #[allow(clippy::too_many_arguments)]
+    fn frame_work(&mut self, cx_now: i64, game_frame: bool, r: &mut dyn crate::ui::Layout, cues: &mut Vec<crate::sound::Cue>, music: &mut Vec<Music>, gpu: Option<crate::play::Gpu>) {
         self.update(cx_now);
         // the keyboard's next event, read once a frame of the game's
         if game_frame && let Some((k, down)) = self.keyboard.pop_front() {
@@ -423,6 +438,7 @@ impl Pregame {
                 // until a server's patch
                 self.res.set_server_words(None);
                 crate::s2::set(crate::s2::Rules::retail());
+                crate::serverworlds::forget();
                 self.enter(Stage::Setup, cx_now);
             }
             Next::Station => {

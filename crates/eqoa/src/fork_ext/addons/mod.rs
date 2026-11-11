@@ -21,6 +21,7 @@ pub(crate) fn take_close_options_on_open() -> bool {
     CLOSE_OPTIONS_ON_OPEN.swap(false, std::sync::atomic::Ordering::AcqRel)
 }
 pub(crate) mod ability;
+pub(crate) mod actions;
 pub(crate) mod bit;
 pub(crate) mod chat;
 pub(crate) mod chat_history;
@@ -39,16 +40,29 @@ pub(crate) mod group;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod health;
 pub(crate) mod host;
+pub(crate) mod hud_layout;
+pub(crate) mod hud_layer;
 #[cfg(test)]
 mod icon_tests;
 pub(crate) mod icons;
 pub(crate) mod input;
 pub(crate) mod manager;
+pub(crate) mod named_profiles;
+pub(crate) mod native;
+pub(crate) mod native_core;
+pub(crate) mod native_events;
+mod native_media;
+pub(crate) mod native_projection;
+pub(crate) mod native_settings;
+mod native_state;
+#[cfg(test)]
+mod native_tests;
+pub(crate) mod options;
 pub(crate) mod package;
 pub(crate) mod player;
 mod profile;
-pub(crate) mod named_profiles;
 pub(crate) mod quest_log;
+mod sandbox;
 mod spike;
 pub(crate) mod storage;
 mod textures;
@@ -56,4 +70,11 @@ pub(crate) mod weapon_sets;
 #[cfg(test)]
 mod weapon_sets_tests;
 #[cfg(test)]
+mod round_3_picture_tests;
+#[cfg(test)]
 mod wereoxxs_test;
+#[cfg(test)]
+pub(crate) use wereoxxs_test::modern_slot_positions;
+
+#[cfg(test)]
+pub(crate) mod perf_alloc;

@@ -80,7 +80,6 @@ pub fn shot(s: &Shot, out: &str) -> Result<(), Box<dyn std::error::Error>> {
             map.search.key("enter", None);
         }
     }
-    if std::env::var_os("EQOA_MAP_SUGGEST_FORM").is_some(){map.suggestion.show(super::community::Spot{world,at:s.at},"Community marker".into());}
     // `EQOA_MAP_HOVER=<x>,<z>`: that world point taken as the mouse's, its
     // marker's card shown (`markers`)
     map.hover_world = std::env::var("EQOA_MAP_HOVER").ok().and_then(|v| {
@@ -200,8 +199,8 @@ pub fn capture(map: &Map, device: &wgpu::Device, queue: &wgpu::Queue, size: (u32
             multiview_mask: None,
         });
     }
-    map.draw(device, &mut enc, &tv, &depth);
-    map.draw_mini(device, &mut enc, &tv, &depth);
+    map.draw(device, &mut enc, &tv, &depth, map.size, size);
+    map.draw_mini(device, &mut enc, &tv, &depth, map.size, size);
     enc.copy_texture_to_buffer(
         target.as_image_copy(),
         wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },

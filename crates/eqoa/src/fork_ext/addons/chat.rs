@@ -27,20 +27,122 @@ pub const MSG_TYPE_TELL: u32 = 0x3F008081;
 pub const MSG_TYPE_GUILD: u32 = 0x3E800000;
 
 thread_local! {
-    static OUTGOING_CHAT: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static OUTGOING_CHAT: RefCell<Vec<(Option<u64>, String, Option<super::native::DiagnosticSink>)>> = const { RefCell::new(Vec::new()) };
     static CHAT_MONOTONIC_SEQ: Cell<u32> = const { Cell::new(1) };
     static CHAT_HISTORY: RefCell<VecDeque<(String, u32, u32)>> = const { RefCell::new(VecDeque::new()) };
 }
 
 pub(crate) fn queue_outgoing_chat(msg: String) {
-    OUTGOING_CHAT.with(|q| q.borrow_mut().push(msg));
+    queue_owned(None, msg, None);
+}
+fn queue_owned(
+    owner: Option<u64>,
+    msg: String,
+    diagnostics: Option<super::native::DiagnosticSink>,
+) -> bool {
+    if report_route(&msg) {
+        return false;
+    }
+    OUTGOING_CHAT.with(|q| {
+        let mut q = q.borrow_mut();
+        if q.len() >= 32 {
+            return false;
+        }
+        q.push((owner, msg, diagnostics));
+        true
+    })
+}
+pub(crate) fn cancel_vm(vm: u64) {
+    OUTGOING_CHAT.with(|q| q.borrow_mut().retain(|(owner, _, _)| *owner != Some(vm)));
+}
+pub(crate) fn report_route(text: &str) -> bool {
+    let mut text = text.trim_start();
+    for _ in 0..16 {
+        let (head, rest) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+        let command = head.to_ascii_lowercase();
+        if matches!(command.as_str(), "#bug" | "/bug") {
+            return true;
+        }
+        if matches!(
+            command.as_str(),
+            "/say"
+                | "/s"
+                | "/group"
+                | "/g"
+                | "/party"
+                | "/p"
+                | "/guild"
+                | "/gu"
+                | "/shout"
+                | "/sh"
+                | "/reply"
+                | "/r"
+        ) {
+            text = rest.trim_start();
+            continue;
+        }
+        if matches!(command.as_str(), "/tell" | "/t") {
+            let rest = rest.trim_start();
+            text = rest
+                .split_once(char::is_whitespace)
+                .map_or("", |(_, rest)| rest.trim_start());
+            continue;
+        }
+        return false;
+    }
+    true
 }
 
 pub(crate) fn take_outgoing_chat() -> Vec<String> {
-    OUTGOING_CHAT.with(|q| std::mem::take(&mut *q.borrow_mut()))
+    OUTGOING_CHAT.with(|q| {
+        std::mem::take(&mut *q.borrow_mut())
+            .into_iter()
+            .map(|(_, line, _)| line)
+            .collect()
+    })
+}
+
+pub(crate) fn cancel_outgoing_chat(reason: &str) {
+    OUTGOING_CHAT.with(|q| {
+        for (_, _, sink) in q.borrow_mut().drain(..) {
+            if let Some(sink) = sink {
+                sink.record("frontiers_forge.chat.SendChatText", "cancelled", reason);
+            }
+        }
+    });
 }
 
 pub(crate) fn snapshot_chat(raw_chat: &VecDeque<(String, [f32; 4])>, now_ms: u32) -> ChatSnapshot {
+    if let Some(snapshot) = super::native_core::CORE.with(|core| {
+        let c = core.borrow();
+        c.view.in_world.then(|| {
+            let mut out = ChatSnapshot::default();
+            let records = c
+                .chat
+                .iter()
+                .rev()
+                .take(MAX_CHAT_MESSAGES)
+                .collect::<Vec<_>>();
+            out.count = records.len() as u8;
+            for (i, m) in records.into_iter().rev().enumerate() {
+                let text = m["text"].as_str().unwrap_or("");
+                let mut end = text.len().min(128);
+                while !text.is_char_boundary(end) {
+                    end -= 1;
+                }
+                out.messages[i].text[..end].copy_from_slice(&text.as_bytes()[..end]);
+                out.messages[i].text_len = end as u8;
+                out.messages[i].msg_type =
+                    (m["color"]["r"].as_f64().unwrap_or(0.0) as f32).to_bits();
+                out.messages[i].timestamp_ms = (m["time"].as_f64().unwrap_or(0.0) * 1000.0) as u32;
+                out.messages[i].seq = m["seq"].as_u64().unwrap_or(0) as u32;
+            }
+            out
+        })
+    }) {
+        return snapshot;
+    }
+
     CHAT_HISTORY.with(|hist_cell| {
         let mut hist = hist_cell.borrow_mut();
         let raw_len = raw_chat.len();
@@ -250,17 +352,46 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
         chat_mod.set(
             "Update",
             lua.create_function(move |lua_ctx, ()| {
+                if !super::native_events::active(lua_ctx) {
+                    return Ok(());
+                }
                 let snap = s.get().chat;
+                let native = super::native_core::CORE.with(|c| {
+                    let c = c.borrow();
+                    c.view.in_world.then(|| {
+                        c.chat
+                            .iter()
+                            .map(|m| {
+                                (
+                                    m["seq"].as_u64().unwrap_or(0) as u32,
+                                    m["text"].as_str().unwrap_or("").to_string(),
+                                    (m["color"]["r"].as_f64().unwrap_or(0.0) as f32).to_bits(),
+                                    (m["time"].as_f64().unwrap_or(0.0) * 1000.0) as u32,
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                });
+                let records = native.unwrap_or_else(|| {
+                    snap.messages[..snap.count as usize]
+                        .iter()
+                        .map(|m| {
+                            (
+                                m.seq,
+                                String::from_utf8_lossy(&m.text[..m.text_len as usize])
+                                    .into_owned(),
+                                m.msg_type,
+                                m.timestamp_ms,
+                            )
+                        })
+                        .collect()
+                });
                 let mut last = *last_seq.borrow();
                 let was_primed = *is_primed.borrow();
 
                 if !was_primed {
                     // Initial drain primes without reporting historical scrollback
-                    let max_seq = snap.messages[..snap.count as usize]
-                        .iter()
-                        .map(|m| m.seq)
-                        .max()
-                        .unwrap_or(0);
+                    let max_seq = records.iter().map(|m| m.0).max().unwrap_or(0);
                     *last_seq.borrow_mut() = max_seq;
                     *is_primed.borrow_mut() = true;
                     return Ok(());
@@ -268,19 +399,17 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
 
                 let mut dead_owners = Vec::new();
 
-                for i in 0..snap.count as usize {
-                    let m = &snap.messages[i];
-                    if m.seq > last {
-                        let text_slice = &m.text[..(m.text_len as usize).min(m.text.len())];
-                        let text = std::str::from_utf8(text_slice).unwrap_or("");
-                        let type_name = get_message_type_string(m.msg_type);
+                for (i, m) in records.iter().enumerate() {
+                    if m.0 > last {
+                        let text = &m.1;
+                        let type_name = get_message_type_string(m.2);
 
                         let payload = lua_ctx.create_table()?;
                         payload.set("start_index", i)?;
-                        payload.set("committed_ms", m.timestamp_ms)?;
-                        payload.set("msg_type", m.msg_type)?;
+                        payload.set("committed_ms", m.3)?;
+                        payload.set("msg_type", m.2)?;
                         payload.set("type_name", type_name)?;
-                        payload.set("text", text)?;
+                        payload.set("text", text.as_str())?;
 
                         let subs_map = subs.borrow();
                         for (owner, func) in subs_map.iter() {
@@ -298,8 +427,8 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
                             }
                         }
 
-                        if m.seq > last {
-                            last = m.seq;
+                        if m.0 > last {
+                            last = m.0;
                         }
                     }
                 }
@@ -318,12 +447,17 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
         )?;
     }
 
+    let send_installed = Rc::new(Cell::new(true));
     // SendChatText(text, mode)
     {
         let s = snapshot_cell.clone();
+        let installed = send_installed.clone();
         chat_mod.set(
             "SendChatText",
-            lua.create_function(move |_, (text, mode): (Option<String>, Option<String>)| {
+            lua.create_function(move |lua, (text, mode): (Option<String>, Option<String>)| {
+                if !installed.get() || !super::native_events::active(lua) {
+                    return Ok((false, Some("send hook is not installed".to_string())));
+                }
                 if !s.get().in_game {
                     return Ok((false, Some("not in game".to_string())));
                 }
@@ -336,44 +470,91 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
                         line = format!("{m} {line}");
                     }
                 }
-                if line.len() >= 0x80 {
+                if report_route(&line) {
+                    super::native::diagnose(
+                        lua,
+                        "frontiers_forge.chat.SendChatText",
+                        "permission_denied",
+                        "synthetic report routes are excluded",
+                    );
+                    return Ok((
+                        false,
+                        Some("permission_denied: report routes are excluded".into()),
+                    ));
+                }
+                if line.encode_utf16().count() >= 0x80 || line.contains('\0') {
                     return Ok((
                         false,
                         Some("message too long (127 character max)".to_string()),
                     ));
                 }
-                queue_outgoing_chat(line);
+                if !queue_owned(
+                    Some(super::native_events::bus(lua).borrow().vm),
+                    line,
+                    Some(super::native::diagnostic_sink(lua)),
+                ) {
+                    return Ok((false, Some("chat queue is full".into())));
+                }
                 Ok((true, None::<String>))
             })?,
         )?;
     }
 
-    // Send hook management stubs (in native engine these are always operational)
+    // A consumer lease controls this VM's queue submission.
+    let installed = send_installed.clone();
     chat_mod.set(
         "IsSendHookInstalled",
-        lua.create_function(|_, ()| Ok(true))?,
+        lua.create_function(move |lua, ()| {
+            Ok(installed.get() && super::native_events::active(lua))
+        })?,
     )?;
     chat_mod.set(
         "IsSendHookSuspended",
         lua.create_function(|_, ()| Ok(false))?,
     )?;
-    chat_mod.set("InstallSendHook", lua.create_function(|_, ()| Ok(true))?)?;
-    chat_mod.set("UninstallSendHook", lua.create_function(|_, ()| Ok(true))?)?;
-    chat_mod.set("IsSendPending", lua.create_function(|_, ()| Ok(false))?)?;
+    let installed = send_installed.clone();
+    chat_mod.set(
+        "InstallSendHook",
+        lua.create_function(move |_, ()| {
+            installed.set(true);
+            Ok(true)
+        })?,
+    )?;
+    let installed = send_installed;
+    chat_mod.set(
+        "UninstallSendHook",
+        lua.create_function(move |lua, ()| {
+            cancel_vm(super::native_events::bus(lua).borrow().vm);
+            installed.set(false);
+            Ok(true)
+        })?,
+    )?;
+    chat_mod.set(
+        "IsSendPending",
+        lua.create_function(|lua, ()| {
+            let vm = super::native_events::bus(lua).borrow().vm;
+            Ok(OUTGOING_CHAT.with(|q| q.borrow().iter().any(|(owner, _, _)| *owner == Some(vm))))
+        })?,
+    )?;
 
     // Focus & window channel inspection helpers
     chat_mod.set(
         "CaptureChannelTypeFromGameWindow",
-        lua.create_function(|_, ()| Ok((0u8, None::<String>, 0u32)))?,
+        lua.create_function(|lua, ()| {
+            let reason =
+                "unsupported: native client has no Forge custom-channel window configuration";
+            super::native::diagnose(
+                lua,
+                "frontiers_forge.chat.CaptureChannelTypeFromGameWindow",
+                "unsupported",
+                reason,
+            );
+            Ok((Value::Nil, reason, Value::Nil))
+        })?,
     )?;
-    chat_mod.set(
-        "DebugDumpFocusChain",
-        lua.create_function(|lua_ctx, ()| Ok(lua_ctx.create_table()?))?,
-    )?;
-    chat_mod.set(
-        "GetChannelTableInfo",
-        lua.create_function(|lua_ctx, ()| Ok(lua_ctx.create_table()?))?,
-    )?;
+    for name in ["DebugDumpFocusChain", "GetChannelTableInfo"] {
+        chat_mod.set(name,lua.create_function(move |lua,()|{let reason="unsupported: native client has no Forge channel-pointer table/focus-chain addresses";super::native::diagnose(lua,&format!("frontiers_forge.chat.{name}"),"unsupported",reason);Ok((Value::Nil,reason))})?)?;
+    }
 
     host.register_host_module("frontiers_forge.chat", Value::Table(chat_mod))?;
     Ok(())
@@ -407,6 +588,7 @@ mod tests {
             module_dirs: vec![root.to_path_buf()],
             resource_dirs: vec![],
             api: Some("eqoa/1".to_string()),
+            entry_mode: Default::default(),
             requested_capabilities: vec![],
             initially_enabled: true,
             mods_root: Some(root.to_path_buf()),

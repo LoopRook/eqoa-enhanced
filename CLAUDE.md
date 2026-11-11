@@ -20,7 +20,9 @@ Report results in a player's terms, with what was tested and what was not.
 1. Read `FORK.md`. It is the source of truth for scope, file ownership and merge policy.
 2. Read the current handoff for the work at hand. Handoffs live in `docs/` on the branch that holds
    the work (Forge/addons: `docs/FORGE-COMPATIBILITY-HANDOFF.md`). `docs/backlog.md` holds deferred
-   requests.
+   requests. Direction and the order of work (owner, 2026-11-09): `docs/plans/EQOA-MOD-API-PLAN.md`.
+   The fork is heading for "upstream plus mods": neutral hooks are offered upstream, the fork's own
+   features move into mods, and each round runs in the order that plan gives (2.5, 3, 3u, 4 to 7).
 3. Read `C:\Users\hocka\Paseo\Agent_Learning_Instructions.md` and the experience log beside it. Add an
    entry there after each meaningful task, and update the existing entry when the owner's test
    results arrive.
@@ -66,8 +68,11 @@ workers. Read `list_profiles` and pick by each profile's notes. Defaults:
   branch, tell it to commit only there (no push, merge, tag, or other folders), and review its diff
   before anything merges.
 
-One cargo build at a time across all agents: builds are slow and share the CPU. Keep each worktree on
-its own `CARGO_TARGET_DIR` unless the handoff names a shared one.
+One cargo build at a time across all agents: builds are slow and share the CPU. All agents share ONE `CARGO_TARGET_DIR`, `C:/Users/hocka/Paseo/targets/shared` (the builds are serial
+behind the lock anyway, so one cache serves every branch; separate folders cost about 10-15 GB each and
+filled the owner's SSD on 2026-11-09). Never create a per-worktree or per-task target folder. Before you
+finish, delete any `target` folder you made inside a worktree, and the lead deletes a retired worktree's
+folder when its branch merges.
 
 ## Engineering rules kept from upstream
 
@@ -84,6 +89,8 @@ section there before changing a ported system (anything under `crates/vi`, `ee`,
 - Port game behaviour from the decomp, line by line. The decomp, eqoa-port's oracle and the 2002
   disc are not on this machine, so oracle tests skip here: say so in the report.
 - What the game counts in frames steps on `frames.rs`'s 30 Hz clock, never once per frame drawn.
+- Server worlds: keep the shared Disc/Sink composer streaming one zone at a time on native and browser; mirror composer changes to the server's Compose contract/CRC (see docs/upstream/CLAUDE.md).
+- Browser event loops must exit on web::graphics_lost after a lost WebGL2 context; unsupported WebGL2 lighting stays off through the renderer's guard. Hat D-pads combine mapped buttons, axes and raw hat codes; retain upstream's controller diagnostics and test paths.
 - Android: platform inputs go through android::Event into App::finger/key_input;
   keep APK signing keys and their folder untracked. Enhanced currently publishes Windows only.
 - Windows: the main thread links an 8 MB stack (`crates/eqoa/build.rs`); the program is a GUI

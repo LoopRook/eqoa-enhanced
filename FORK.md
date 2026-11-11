@@ -29,9 +29,9 @@ numbers. The separate parser project is outside this repository's scope.
 The complete file ownership map, exact shared-file budgets and hook table are in
 [docs/FORK-OWNERSHIP.md](docs/FORK-OWNERSHIP.md). Its executable policy is
 [docs/fork-footprint.json](docs/fork-footprint.json). Fork-owned code includes
-map/, questguide/, tracker.rs, groupmark.rs, mapsuggest.rs, statbox.rs and
+questguide/, statbox.rs and
 fork_ext/ (including report_core.rs, report_state.rs, report_viewer.rs and report_sync_tests.rs,
-the retained local report/crash core, adapter and regression tests) under crates/eqoa/src; the render map module/shader; mods/, launcher
+the retained local report/crash core, adapter and regression tests) under crates/eqoa/src; mods/, launcher
 scripts, AGENTS.md, the fork README/changelog, design/map-parity/ and docs/.
 
 Existing restored systems still touch hud.rs, play.rs, viewer.rs, settings.rs,
@@ -40,6 +40,11 @@ client_image.rs, main.rs, net/src/session.rs and render/src/{lib,ui,fans}.rs and
 ui.wgsl. The exact allowlist also records dependency, mesh, animation and browser
 touch points. No map/quest rewrite is part of this cleanup. Isolating restored
 features behind a crate or feature flag is a later option requiring its own plan.
+
+The app map family (map/**, tracker.rs, groupmark.rs, mapsuggest.rs) and the render
+map module/shader are shared since upstream restored them. Round 2.5 removes their
+old fork-owned exemptions; changed files have exact measured budgets and identical
+files have no reserved budget. New fork implementation belongs in fork-owned files.
 
 ## Extension seams and new features
 
@@ -57,7 +62,11 @@ with positive and negative controls and update FORK-UPDATE-NOTES.md.
 
 F3 and the HUD report button open the local Save to Desktop dialog (F3 opens
 upstream's Support bug-report form instead on a server that takes bug reports); crash reports
-are offered at the next start. Nothing is uploaded. The retained report core is
+are offered locally at the next start. Upstream also keeps a panic for a supporting
+server the player logs into (0x7E64-0x7E66). Every crash this build sends carries
+`fork_ext::report::enhanced_label()` through the fork-owned send hook in
+`fork_ext/report_label.rs`; a server whose limit cannot fit the whole identity
+gets no report, and it stays kept. F3's server Support petitions remain upstream's. The retained report core is
 fork-owned at fork_ext/report_core.rs; upstream logfile keeps logging through hooks.
 The small fork_ext/report_state.rs snapshot is a child of the Play adapter and is
 noted at most once a second through its existing frame_library hook. Upstream
@@ -67,7 +76,7 @@ changed-only state writes and the snapshot's enabled-addon cache (refreshed at
 most once per 30 seconds, off the frame thread). The crash handler can also read
 the latest redacted in-memory snapshot.
 Historical HTTP transport exists only in tests against numeric loopback fixtures;
-the production report path only saves locally. The obsolete browser report policy
+the fork dialog only saves locally; the upstream game-server crash path uses the Enhanced identity hook. The obsolete browser report policy
 was removed after upstream deleted browser reporting. Keep map/community
 suggestions distinct from bug-report uploads.
 

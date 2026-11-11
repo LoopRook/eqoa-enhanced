@@ -33,6 +33,7 @@ pub const ALL_UI_ELEMENTS: &[&str] = &[
 pub struct HudClaimsRegistry {
     // element_name -> (InstanceToken -> HashSet<owner_label>)
     claims: HashMap<String, HashMap<InstanceToken, HashSet<String>>>,
+    identities: HashMap<InstanceToken, String>,
 }
 
 impl HudClaimsRegistry {
@@ -104,6 +105,7 @@ struct Intent {
     token: InstanceToken,
     registry: Rc<RefCell<HealthBarClaimsRegistry>>,
     hud_claims: Rc<RefCell<HudClaimsRegistry>>,
+    native_generation: u64,
 }
 
 impl Intent {
@@ -152,6 +154,7 @@ impl VisibilityLease {
                 token: InstanceToken::next()?,
                 registry,
                 hud_claims,
+                native_generation: 0,
             })),
         })
     }
@@ -159,6 +162,16 @@ impl VisibilityLease {
     pub fn update(&self, health: HealthSnapshot, active: bool) {
         self.snapshot.set(health);
         let mut intent = self.intent.borrow_mut();
+        let (world, generation) = super::native_core::CORE.with(|c| {
+            let c = c.borrow();
+            (c.view.in_world, c.generation)
+        });
+        if !world || generation != intent.native_generation {
+            for labels in intent.desired.values_mut() {
+                labels.retain(|label| !label.starts_with("eqoa:"));
+            }
+            intent.native_generation = generation;
+        }
         intent.active = active;
         intent.suspended = false;
         intent.project(health);
@@ -226,6 +239,13 @@ pub(crate) fn install_managed_health_adapter(
     host: &Host,
     lease: &VisibilityLease,
 ) -> mlua::Result<()> {
+    if host
+        .lua
+        .named_registry_value::<mlua::Table>("eqoa_modules")
+        .is_ok()
+    {
+        install_native(host, lease)?;
+    }
     let token = lease.intent.borrow().token;
     let registry = lease.intent.borrow().registry.clone();
     if !host.has_host_module("frontiers_forge.player") {
@@ -504,21 +524,220 @@ pub(crate) fn install_managed_health_adapter(
 
     ui.set(
         "GetClassIconTexture",
-        host.lua
-            .create_function(|_, _: Option<u32>| Ok((Value::Nil, Value::Nil, Value::Nil)))?,
+        host.lua.create_function(|lua, _: Option<u32>| {
+            super::native::diagnose(
+                lua,
+                "frontiers_forge.ui.GetClassIconTexture",
+                "not_yet",
+                "class icon textures arrive in round 4",
+            );
+            Ok((Value::Nil, Value::Nil, Value::Nil))
+        })?,
     )?;
     ui.set(
         "DrawDispositionIcon",
-        host.lua
-            .create_function(|_, _: mlua::MultiValue| Ok(false))?,
+        host.lua.create_function(|lua, _: mlua::MultiValue| {
+            super::native::diagnose(
+                lua,
+                "frontiers_forge.ui.DrawDispositionIcon",
+                "not_yet",
+                "disposition drawing arrives in round 4",
+            );
+            Ok(false)
+        })?,
     )?;
     ui.set(
         "DrawClassIcon",
-        host.lua
-            .create_function(|_, _: mlua::MultiValue| Ok(false))?,
+        host.lua.create_function(|lua, _: mlua::MultiValue| {
+            super::native::diagnose(
+                lua,
+                "frontiers_forge.ui.DrawClassIcon",
+                "not_yet",
+                "class icon drawing arrives in round 4",
+            );
+            Ok(false)
+        })?,
     )?;
 
     host.register_host_module("frontiers_forge.ui", Value::Table(ui))
+}
+
+fn native_leaves(element: &str) -> Option<Vec<&'static str>> {
+    Some(match element {
+        "health" => vec!["health_bar"],
+        "power" => vec!["power_bar"],
+        "experience_main" => vec!["main_exp_bar"],
+        "experience_secondary" => vec!["secondary_exp_bar"],
+        "compass" => vec!["compass_face", "compass_back"],
+        "target" => vec!["target_nameplate"],
+        "group_panel" => vec!["group_member_panel"],
+        "group_markers" => vec!["group_compass_marks"],
+        "pet" => vec!["pet_panel"],
+        "effects" => vec!["active_effects"],
+        "hotbar" => vec!["hotbar_draw_compact", "hotbar_draw_expanded"],
+        "chat" => vec!["chat_window"],
+        "all" => ALL_UI_ELEMENTS.to_vec(),
+        _ => return None,
+    })
+}
+fn install_native(host: &Host, lease: &VisibilityLease) -> mlua::Result<()> {
+    use super::{
+        native::{bind, error},
+        native_events::{token, valid_token},
+    };
+    let lua = &host.lua;
+    lease
+        .intent
+        .borrow()
+        .hud_claims
+        .borrow_mut()
+        .identities
+        .insert(lease.intent.borrow().token, host.addon_id());
+    let claims = Rc::new(RefCell::new(HashMap::<u64, (u64, Vec<&'static str>)>::new()));
+    let active = claims.clone();
+    let intent = lease.intent.clone();
+    let snapshot = lease.snapshot.clone();
+    bind(
+        lua,
+        "hud",
+        "hide",
+        lua.create_function(move |lua, element: mlua::Value| {
+            let Some(element) = element
+                .as_string()
+                .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+            else {
+                return error(
+                    lua,
+                    "eqoa.hud.hide",
+                    "invalid_argument",
+                    "element must be a string",
+                );
+            };
+            let Some(leaves) = native_leaves(&element) else {
+                return error(
+                    lua,
+                    "eqoa.hud.hide",
+                    "invalid_argument",
+                    "unknown HUD element",
+                );
+            };
+            let (world, generation) = super::native_core::CORE.with(|c| {
+                let c = c.borrow();
+                (c.view.in_world, c.generation)
+            });
+            if !world {
+                return error(
+                    lua,
+                    "eqoa.hud.hide",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            let t = token(lua, "hud");
+            let label = format!("eqoa:{}", t.id);
+            if !intent.borrow().active {
+                return error(
+                    lua,
+                    "eqoa.hud.hide",
+                    "unavailable",
+                    "HUD claim consumer is inactive",
+                );
+            }
+            if leaves.iter().any(|leaf| {
+                intent
+                    .borrow()
+                    .desired
+                    .get(*leaf)
+                    .is_some_and(|labels| labels.len() >= health::MAX_OWNERS_PER_VM)
+            }) {
+                return error(lua, "eqoa.hud.hide", "quota", "HUD claim limit reached");
+            }
+            for leaf in &leaves {
+                disable_element(
+                    &mut intent.borrow_mut(),
+                    snapshot.get(),
+                    leaf,
+                    Some(label.clone()),
+                )?;
+            }
+            active.borrow_mut().insert(t.id, (generation, leaves));
+            lua.pack_multi((lua.create_userdata(t)?, mlua::Value::Nil))
+        })?,
+    )?;
+    let active = claims;
+    let intent = lease.intent.clone();
+    let snapshot = lease.snapshot.clone();
+    bind(
+        lua,
+        "hud",
+        "show",
+        lua.create_function(move |lua, value: mlua::Value| {
+            let Some(t) = valid_token(lua, &value, "hud") else {
+                return error(
+                    lua,
+                    "eqoa.hud.show",
+                    "stale_handle",
+                    "token belongs to another VM or service",
+                );
+            };
+            let claim = active.borrow_mut().remove(&t.id);
+            let generation = super::native_core::CORE.with(|c| c.borrow().generation);
+            if let Some((old, leaves)) = claim {
+                let alive = leaves.iter().any(|leaf| {
+                    intent
+                        .borrow()
+                        .desired
+                        .get(*leaf)
+                        .is_some_and(|labels| labels.contains(&format!("eqoa:{}", t.id)))
+                });
+                for leaf in leaves {
+                    enable_element(
+                        &mut intent.borrow_mut(),
+                        snapshot.get(),
+                        leaf,
+                        Some(format!("eqoa:{}", t.id)),
+                    );
+                }
+                return lua.pack_multi((old == generation && alive, mlua::Value::Nil));
+            }
+            lua.pack_multi((false, mlua::Value::Nil))
+        })?,
+    )?;
+    let registry = lease.intent.borrow().hud_claims.clone();
+    bind(
+        lua,
+        "hud",
+        "hidden_by",
+        lua.create_function(move |lua, element: String| {
+            let Some(leaves) = native_leaves(&element) else {
+                return error(
+                    lua,
+                    "eqoa.hud.hidden_by",
+                    "invalid_argument",
+                    "unknown HUD element",
+                );
+            };
+            let registry = registry.borrow();
+            let mut ids = std::collections::BTreeSet::new();
+            for leaf in leaves {
+                if let Some(instances) = registry.claims.get(leaf) {
+                    for (token, claims) in instances {
+                        if !claims.is_empty() {
+                            if let Some(id) = registry.identities.get(token) {
+                                ids.insert(id.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            let t = lua.create_table()?;
+            for id in ids {
+                t.raw_push(id)?;
+            }
+            lua.pack_multi((t, mlua::Value::Nil))
+        })?,
+    )?;
+    Ok(())
 }
 
 pub(crate) fn install_standalone_ui_adapter(host: &Host) -> mlua::Result<()> {
@@ -666,6 +885,7 @@ mod tests {
             module_dirs: vec![],
             resource_dirs: vec![],
             api: None,
+            entry_mode: Default::default(),
             requested_capabilities: vec![],
             initially_enabled: true,
             mods_root: None,
@@ -977,5 +1197,24 @@ mod tests {
             assert(UI.DrawClassIcon(0) == false)
         "#;
         host.execute(script).unwrap();
+    }
+    #[test]
+    fn review_fix_m5_native_hidden_by_includes_forge_claims_from_managed_vms() {
+        let health = Rc::new(RefCell::new(HealthBarClaimsRegistry::new()));
+        let hud = Rc::new(RefCell::new(HudClaimsRegistry::new()));
+        let forge = host();
+        let native = Host::new().unwrap();
+        let a = VisibilityLease::with_hud_claims(health.clone(), hud.clone()).unwrap();
+        let b = VisibilityLease::with_hud_claims(health, hud).unwrap();
+        install_managed_health_adapter(&forge, &a).unwrap();
+        install_managed_health_adapter(&native, &b).unwrap();
+        a.update(HealthSnapshot::new(true, 50, 100), true);
+        b.update(HealthSnapshot::new(true, 50, 100), true);
+        forge.execute("ui=require('frontiers_forge.ui');assert(ui.DisableUI('arbitrary label'));assert(ui.DisableHealthBar('another label'))").unwrap();
+        native.execute("for _,element in ipairs({'health','compass','hotbar','all'}) do local ids=eqoa.hud.hidden_by(element);assert(#ids==1 and ids[1]=='visibility') end").unwrap();
+        a.clear();
+        native
+            .execute("assert(#eqoa.hud.hidden_by('all')==0)")
+            .unwrap();
     }
 }

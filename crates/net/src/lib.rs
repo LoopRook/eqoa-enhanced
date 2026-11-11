@@ -5,8 +5,15 @@
 
 pub mod addr;
 pub mod auth;
+pub mod cape;
 pub mod creation;
 pub mod dump;
 pub mod entity;
+pub mod hidelook;
+pub mod itemlink;
+pub mod npctint;
+pub mod raceopts;
+pub mod raid;
+pub mod serverworlds;
 pub mod session;
 pub mod stream;

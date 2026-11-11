@@ -15,6 +15,12 @@
 //! yet (jib's "TBD"): a pad reaches it by M on a keyboard, or by a click or
 //! a tap on the HUD's compass, which opens it too (the touch screen's way).
 //!
+//! The places (`places`, petition 1479): the Places button, P or Start opens
+//! a list of the worlds the map can draw and the towns of the one shown; a
+//! world or a town picked is shown in place of the player's (read off the
+//! disc into the map's own library, drawn as the player's is), "Where I am",
+//! Center or closing the map brings the player's back.
+//!
 //! A waypoint (F3 20261026-000207, a player's suggestion; the user's choice:
 //! personal, any server, nothing sent): a click or a tap on the map puts a
 //! magenta diamond there, one a world, and a click on it takes it away; □
@@ -44,9 +50,9 @@
 //!
 //! The group's waypoint (`group_waypoint`, F3 20261026-212034, a player's
 //! "Long-press square on map to set a group waypoint"; the user's choice:
-//! over the group's chat): □ held `HOLD` (Q held), G, a click with Shift held
+//! over the group's chat): □ held `HOLD` (Q held), O, a click with Shift held
 //! or a finger held still on the map asks Play to tell the group
-//! (`take_group_ask`): □ held and G at □'s spot (the middle once panned, else
+//! (`take_group_ask`): □ held and O at □'s spot (the middle once panned, else
 //! the target, else the player's own place: come to me), a click or a finger
 //! at the spot under it (a marker's own spot on one). It is drawn orange under
 //! the personal one with its sender's name, on the minimap and the compass
@@ -84,16 +90,19 @@ pub mod cells;
 pub mod chrome;
 pub mod community;
 pub mod group_waypoint;
+// the minimap inside: the floors under the ceiling (`indoor`)
+pub mod indoor;
 pub mod journal;
 pub mod markers;
 mod markers_data;
 // the minimap, in play under the quick menus (`mini`)
 pub mod mini;
 pub mod picture;
+// the list of places another world or a town is shown from (`places`)
+pub mod places;
 pub mod quests;
 pub mod search;
 pub mod theme;
-pub mod suggest;
 pub mod store;
 // natively (a page has nothing to call it; it compiles there as main.rs's
 // commands do)
@@ -232,6 +241,18 @@ struct World {
     view: Option<View>,
 }
 
+/// A world shown that is not the player's (`places`): its index, its file,
+/// the map's own library holding that file (opened deferred, as the game
+/// opens a world: none until its read is in), the read under way, and the
+/// town to show once it is drawn.
+struct Shown {
+    index: i32,
+    name: String,
+    lib: Option<esf::Library>,
+    arrival: Option<crate::stream::Arrival>,
+    town: Option<usize>,
+}
+
 /// The GPU's part: the pictures' layer and the chrome's (ArialUI, UI.CSF's
 /// art for the pad's glyphs), the chrome in the art of the library's view it
 /// was made in (`era`, F9).
@@ -254,7 +275,6 @@ struct Press {
 #[derive(Default)]
 pub struct Map {
     pub search: search::Search,
-    pub suggestion: suggest::Form,
     /// up, full screen, with the keys
     pub open: bool,
     view: Option<View>,
@@ -317,6 +337,12 @@ pub struct Map {
     square_hold: Option<(f32, bool)>,
     /// Shift is held (the viewer's): a click puts the group's waypoint
     pub shift: bool,
+    /// Ctrl (or ⌘) is held (the viewer's), and the server offered a GM's
+    /// travel by the map (`net::session::Session::map_travel`, Play's every
+    /// frame): together, a click asks to travel to its spot (`take_travel_ask`)
+    pub ctrl: bool,
+    pub travel: bool,
+    travel_ask: Option<community::Spot>,
     /// the group's waypoint, and the spot the player asked the group to be
     /// told of (`take_group_ask`)
     group_mark: Option<group_waypoint::GroupMark>,
@@ -328,18 +354,33 @@ pub struct Map {
     /// when the player last told the group of one (the session's clock, ms;
     /// `group_wait`)
     group_told: Option<u32>,
+    /// the list of places (`places`), a world shown in place of the player's
+    /// (asked or drawn), and the player's world's map waiting meanwhile
+    pub places: places::Picker,
+    shown: Option<Shown>,
+    home: Option<World>,
+    /// the minimap inside a building, a cave or a dungeon (`indoor`)
+    pub indoor: indoor::Indoor,
 }
 
-/// G on a keyboard while the map is up (`keyboard`): the group's waypoint at
+/// O on a keyboard while the map is up (`keyboard`): the group's waypoint at
 /// □'s spot at once. No pad key has it; □ held is the pad's.
 pub const KEY_GROUP: i32 = 0x7E31_0001;
+/// P on a keyboard, Start on a pad and the Places button: the list of places
+/// (`places`) opened or closed; and a row of it taken (a click on it), the
+/// row's index past `KEY_PLACE_ROW`.
+pub const KEY_PLACES: i32 = 0x7E31_0002;
+pub const KEY_PLACE_ROW: i32 = 0x7E32_0000;
 
 impl Map {
     /// Opens the map on the player's area (the view it was last left at, or
     /// the opening one, centred on the player). The mouse points at nothing
     /// until it moves over the map, and no waypoint is this time's yet
-    /// (Suggest's spot, `suggest`).
+    /// (Suggest's spot, `suggest`). Nothing with Extended's Map off.
     pub fn show(&mut self) {
+        if !crate::settings::map() {
+            return;
+        }
         self.open = true;
         self.follow = true;
         self.held = [false; 6];
@@ -352,9 +393,11 @@ impl Map {
     /// Closes the map; its tiles leave the GPU (they come back from the
     /// cache when it is opened again), the overview stays.
     pub fn close(&mut self) {
+        self.places.open = false;
+        // the player's own world's map again (`places`)
+        self.unpick();
         self.open = false;
         self.search.hide();
-        self.suggestion.cancel();
         self.held = [false; 6];
         self.press = None;
         self.square_hold = None;
@@ -366,6 +409,28 @@ impl Map {
         }
     }
 
+    /// Extended's Map off (`Play::map_frame`, every frame it is): closed, and
+    /// what it made let go of (the world's build, its pictures on the GPU,
+    /// the minimap's), as a map never made; made again once it is on, out of
+    /// the cache (`store`). The waypoints, the group's waypoint and the
+    /// worlds' names stay.
+    pub fn off(&mut self) {
+        self.close();
+        self.travel_ask = None;
+        self.group_ask = None;
+        self.mini_off();
+        if self.layers.is_some() || self.world.is_some() {
+            crate::say("map: off, its pictures let go");
+        }
+        self.layers = None;
+        self.world = None;
+        self.home = None;
+        self.shown = None;
+        self.indoor.forget();
+        self.icon.tex = None;
+        self.reported = None;
+    }
+
     /// A key (the pad's codes, `SetKey`'s: 128 + the field) while the map is
     /// up. Whether the map took it (every key, while it is up).
     pub fn key(&mut self, k: i32, down: bool) -> bool {
@@ -373,9 +438,19 @@ impl Map {
             return false;
         }
         let hold = |held: &mut [bool; 6], i: usize| held[i] = down;
+        // the list of places takes the keys it moves by while it is up
+        if self.places.open && self.places_key(k, down) {
+            return true;
+        }
         match k {
-            key::TRIANGLE | key::START if down => self.close(),
-            key::CROSS if down => self.follow = true,
+            KEY_PLACES | key::START if down => self.toggle_places(),
+            k if down && (KEY_PLACE_ROW..KEY_PLACE_ROW + 0x1_0000).contains(&k) => self.take_place((k - KEY_PLACE_ROW) as usize),
+            key::TRIANGLE if down => self.close(),
+            // Center: the player again, back on its own world (`places`)
+            key::CROSS if down => {
+                self.unpick();
+                self.follow = true;
+            }
             key::SQUARE => self.square_key(down),
             KEY_GROUP if down => self.group_square(),
             key::CIRCLE if down => self.toggle_markers(),
@@ -399,7 +474,7 @@ impl Map {
     /// (a right click is △, as on every window).
     pub fn mouse_button(&mut self, right: bool, down: bool, at: [f32; 2]) -> Option<crate::mouse::Click> {
         self.cursor = at;
-        if self.search.open || self.suggestion.open {
+        if self.search.open {
             return (!down).then_some(if right {
                 crate::mouse::Click::Right(at[0] as f64, at[1] as f64)
             } else {
@@ -426,7 +501,7 @@ impl Map {
         let d = [at[0] - self.cursor[0], at[1] - self.cursor[1]];
         self.cursor = at;
         self.pointer_seen = true;
-        if self.search.open || self.suggestion.open {
+        if self.search.open {
             return;
         }
         if let Some(p) = self.press.as_mut() {
@@ -454,7 +529,7 @@ impl Map {
     /// middle when none): the point under the pointer stays under it, so
     /// the map stops following the player unless the pointer is on it.
     pub fn wheel(&mut self, lines: f32, at: Option<[f32; 2]>) {
-        if self.search.open || self.suggestion.open || lines == 0.0 {
+        if self.search.open || lines == 0.0 {
             return;
         }
         let size = self.size;
@@ -516,10 +591,17 @@ impl Map {
     /// `view::waypoint_reach`, a finger's miss more) it takes it away, else
     /// on the group's it takes that away, else it puts this world's waypoint
     /// there, on the world's ground. With Shift held it asks the group to be
-    /// told of the spot under it instead (`spot_under`). Whether it did any.
+    /// told of the spot under it instead (`spot_under`), and a GM's with Ctrl
+    /// (or ⌘) held, while the server offers it (`travel`), asks to travel
+    /// there (`take_travel_ask`). Whether it did any.
     pub fn click(&mut self, s: [f32; 2], finger: bool) -> bool {
         let (true, Some(v), Some(w)) = (self.open, self.view, self.world.as_ref()) else { return false };
         let (world, extent, size) = (w.index, w.builder.cells.extent(), self.size);
+        if self.ctrl && self.travel && !finger {
+            let Some(at) = self.spot_under(s, finger) else { return false };
+            self.travel_ask = Some(community::Spot { world, at });
+            return true;
+        }
         if self.shift && !finger {
             let Some(at) = self.spot_under(s, finger) else { return false };
             self.ask_group(world, at);
@@ -637,6 +719,12 @@ impl Map {
         self.group_ask.take()
     }
 
+    /// The spot a GM's Ctrl+click asked to travel to, once: Play asks the
+    /// server (`Play::take_map_travel`).
+    pub fn take_travel_ask(&mut self) -> Option<community::Spot> {
+        self.travel_ask.take()
+    }
+
     /// A line under the map's title for a few seconds (the community list's
     /// answers' place).
     pub fn notice(&mut self, line: &str) {
@@ -737,9 +825,13 @@ impl Map {
     }
 
     /// R3 (J on a keyboard, the Quests button): the quest marks shown or
-    /// hidden, kept (Extended's Quest Markers); hidden, the server is told to
-    /// send none (`Play`'s `agree_quest_marks`).
+    /// hidden, kept (the Quest Helper's own Quest Markers); hidden, the server
+    /// is told to send none (`Play`'s `agree_quests`). Nothing with the Quest
+    /// Helper off (no marks, no button).
     fn toggle_quests(&mut self) {
+        if !crate::settings::quest_helper() {
+            return;
+        }
         let on = !crate::settings::quest_markers();
         if let Err(e) = crate::settings::set_quest_markers(on) {
             crate::say(&format!("map: quest marks {}, not kept: {e}", if on { "shown" } else { "hidden" }));
@@ -1044,7 +1136,7 @@ impl Map {
         }
     }
 
-    /// □ held (`hold`) or G: the group asked to be told of □'s spot (Play's,
+    /// □ held (`hold`) or O: the group asked to be told of □'s spot (Play's,
     /// `take_group_ask`): the map's middle once it is panned, else the
     /// target's spot, else the player's own place (the middle while the map
     /// follows the player: come to me).
@@ -1131,6 +1223,245 @@ impl Map {
         }
     }
 
+    /// The worlds the list of places offers (`places`): CLIENT's six that
+    /// have a name and a file, then the server's own held here.
+    pub fn place_worlds(&self) -> Vec<i32> {
+        let rules = crate::s2::get();
+        let mut v: Vec<i32> = (0..6).filter(|&w| self.names.names[w as usize].is_some() && rules.world_file(w as i64).is_some()).collect();
+        for (id, _) in crate::serverworlds::held_worlds() {
+            if !v.contains(&(id as i32)) {
+                v.push(id as i32);
+            }
+        }
+        // a world shown or played in is always there
+        for w in [self.world.as_ref().map(|w| w.index), self.home.as_ref().map(|w| w.index)].into_iter().flatten() {
+            if !v.contains(&w) {
+                v.push(w);
+            }
+        }
+        v
+    }
+
+    /// The world the list's towns are of: the one asked for while its read
+    /// is under way, else the one shown.
+    fn shown_index(&self) -> Option<i32> {
+        self.shown.as_ref().map(|s| s.index).or(self.world.as_ref().map(|w| w.index))
+    }
+
+    /// The player's world's index as the map has it.
+    fn home_index(&self) -> Option<i32> {
+        self.home.as_ref().or(self.world.as_ref()).map(|w| w.index)
+    }
+
+    /// The list of places' rows now.
+    pub fn place_rows(&self) -> Vec<places::Row> {
+        places::rows(&self.place_worlds(), self.shown_index().unwrap_or(-1))
+    }
+
+    /// A row's words: "Where I am", a world's name, a town's indented.
+    pub fn place_label(&self, r: places::Row, words: Option<&vi::strtab::StringTable>) -> String {
+        match r {
+            places::Row::Here => "Where I am".to_string(),
+            places::Row::World(w) => self.world_title(w, words).or_else(|| crate::serverworlds::held_worlds().into_iter().find(|h| h.0 as i32 == w).map(|h| h.1)).unwrap_or_else(|| format!("World {w}")),
+            places::Row::Town(i) => format!("   {}", places::town_name(i)),
+        }
+    }
+
+    /// Places (P, Start, the button): the list opened on what is shown, or
+    /// closed.
+    fn toggle_places(&mut self) {
+        if self.places.open {
+            self.places.open = false;
+            return;
+        }
+        let rows = self.place_rows();
+        let at = match &self.shown {
+            Some(s) => places::Row::World(s.index),
+            None => places::Row::Here,
+        };
+        self.places.show(&rows, at);
+        self.held = [false; 6];
+    }
+
+    /// A key while the list is up: up and down move it, ✕ takes the row, △
+    /// closes it. Whether it took the key.
+    fn places_key(&mut self, k: i32, down: bool) -> bool {
+        match k {
+            key::UP | key::DOWN => {
+                if down {
+                    let n = self.place_rows().len();
+                    self.places.step(if k == key::UP { -1 } else { 1 }, n);
+                }
+                true
+            }
+            key::CROSS => {
+                if down {
+                    self.take_place(self.places.sel);
+                }
+                true
+            }
+            key::TRIANGLE => {
+                if down {
+                    self.places.open = false;
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Row `i` taken: "Where I am" the player's world again, following it (the
+    /// list closed); a world shown (its towns come under it, the list stays);
+    /// a town shown close in on its world (the list closed).
+    fn take_place(&mut self, i: usize) {
+        let rows = self.place_rows();
+        let Some(&row) = rows.get(i) else { return };
+        let home = self.home_index();
+        match row {
+            places::Row::Here => {
+                self.unpick();
+                self.follow = true;
+                self.places.open = false;
+            }
+            places::Row::World(w) => {
+                if Some(w) == home {
+                    self.unpick();
+                    self.follow = true;
+                } else {
+                    self.pick(w, None);
+                }
+                let rows = self.place_rows();
+                self.places.select(&rows, places::Row::World(w));
+            }
+            places::Row::Town(t) => {
+                let Some((w, at)) = places::town(t) else { return };
+                if Some(w) == home {
+                    self.unpick();
+                    self.centre_on(at);
+                } else {
+                    self.pick(w, Some(t));
+                }
+                self.places.open = false;
+            }
+        }
+    }
+
+    /// The view on `at`, close in (`places::TOWN_SCALE`), not following.
+    fn centre_on(&mut self, at: [f32; 2]) {
+        self.follow = false;
+        let v = View { center: at, scale: places::TOWN_SCALE };
+        self.view = Some(v);
+        if let Some(w) = self.world.as_mut() {
+            w.view = Some(v);
+        }
+    }
+
+    /// World `index` asked to be shown (`town`: then that town in it): its
+    /// file read as the game reads a world (`stream::open_world`, its zones
+    /// left on the disc); shown once it is in (`take_shown`). Already shown,
+    /// only the town.
+    fn pick(&mut self, index: i32, town: Option<usize>) {
+        if let Some(s) = self.shown.as_mut().filter(|s| s.index == index) {
+            match (s.lib.is_some(), town.and_then(places::town)) {
+                (true, Some((_, at))) => self.centre_on(at),
+                (false, _) => s.town = town,
+                _ => {}
+            }
+            return;
+        }
+        let Some(name) = crate::s2::get().world_file(index as i64) else {
+            self.notice("That world is not on this disc");
+            return;
+        };
+        // no arrival: nothing round a place read ahead (a page's reads)
+        let arrival = crate::stream::open_world(&name, -1.0e7, -1.0e7);
+        crate::say(&format!("map: world {index} ({name}) asked for"));
+        self.shown = Some(Shown { index, name, lib: None, arrival: Some(arrival), town });
+    }
+
+    /// The player's world's map back (`places`): the world shown let go (its
+    /// pictures off the GPU) and the view where it was left.
+    fn unpick(&mut self) {
+        self.shown = None;
+        let Some(home) = self.home.take() else { return };
+        if let Some(old) = self.world.replace(home) {
+            self.free_world(old);
+        }
+        self.view = self.world.as_ref().and_then(|w| w.view);
+        self.reported = None;
+    }
+
+    /// A world's pictures off the GPU.
+    fn free_world(&mut self, old: World) {
+        if let Some(l) = self.layers.as_mut() {
+            if let Some(t) = old.overview {
+                l.map.free(t);
+            }
+            for (t, _) in old.tiles.values() {
+                l.map.free(*t);
+            }
+        }
+    }
+
+    /// The world asked for (`pick`) once its read is in: its map begun in the
+    /// map's own library and shown, the player's waiting (`home`); a world
+    /// that would not open said, and the player's kept.
+    fn take_shown(&mut self, cx: &Context) {
+        let Some(s) = self.shown.as_mut() else { return };
+        if s.lib.is_some() {
+            return;
+        }
+        let Some(a) = s.arrival.as_ref() else { return };
+        let Some(got) = a.borrow_mut().take() else { return };
+        s.arrival = None;
+        let (index, name, town) = (s.index, s.name.clone(), s.town);
+        let opened = match got {
+            Ok(o) => o,
+            Err(e) => {
+                crate::say(&format!("map: world {index} ({name}) would not open: {e}"));
+                self.shown = None;
+                self.notice("That world would not open");
+                return;
+            }
+        };
+        let mut lib = esf::Library::new();
+        lib.add_from(name.clone(), opened.container, opened.era);
+        let Some(world) = self.make_world(cx, &lib, name, index) else {
+            self.shown = None;
+            self.notice("That world has no map");
+            return;
+        };
+        if let Some(s) = self.shown.as_mut() {
+            s.lib = Some(lib);
+        }
+        self.show_world(world, town);
+    }
+
+    /// `world` shown in place of the player's (`take_shown`), on `town` when
+    /// one was asked for, else on its middle; the player's waits (`home`).
+    fn show_world(&mut self, world: World, town: Option<usize>) {
+        match self.home {
+            // another world shown before: let go
+            Some(_) => {
+                if let Some(old) = self.world.replace(world) {
+                    self.free_world(old);
+                }
+            }
+            None => self.home = self.world.replace(world),
+        }
+        self.reported = None;
+        self.follow = false;
+        let size = self.size;
+        match town.and_then(places::town) {
+            Some((_, at)) => self.centre_on(at),
+            None => {
+                let e = self.world.as_ref().map(|w| w.builder.cells.extent()).unwrap_or_default();
+                let v = View { center: [(e[0] + e[2]) / 2.0, (e[1] + e[3]) / 2.0], scale: view::opening_scale(size) * 2.0 };
+                self.view = Some(v);
+            }
+        }
+    }
+
     /// CLIENT's part, once its image is here.
     pub fn client_data(&mut self, img: &crate::client_image::ClientImage) {
         self.names = WorldNames::from_image(img);
@@ -1145,7 +1476,7 @@ impl Map {
         self.keyboard = cx.keyboard;
         self.target = cx.target;
         self.player_world = cx.world;
-        if self.search.open || self.suggestion.open {
+        if self.search.open {
             self.held = [false; 6];
             self.press = None;
             self.square_hold = None;
@@ -1160,10 +1491,18 @@ impl Map {
         self.search.set_waypoint(cx.world,self.waypoints.get(&cx.world).copied());
         let name = cx.lib.files.get(WORLD_FILE).map(|f| f.0.clone()).unwrap_or_default();
         let era = cx.lib.era_of(WORLD_FILE);
-        let r = renew(self.layers.as_ref().map(|l| l.view), cx.lib.view(), self.world.as_ref().map(|w| (w.name.as_str(), w.era)), &name, era);
+        let r = renew(self.layers.as_ref().map(|l| l.view), cx.lib.view(), self.home.as_ref().or(self.world.as_ref()).map(|w| (w.name.as_str(), w.era)), &name, era);
+        if r.layers || r.world {
+            // the player's world again first (`places`): a new world, or the
+            // art turned, makes it again
+            self.places.open = false;
+            self.unpick();
+        }
         let looking = self.view;
         if r.layers {
             // their textures go with them, the world's pictures among them
+            // (and the minimap's inside picture)
+            self.indoor.forget();
             self.layers = None;
             self.world = None;
             self.icon.tex = None;
@@ -1176,6 +1515,12 @@ impl Map {
                 w.view = looking;
             }
         }
+        self.take_shown(cx);
+        // a world shown that is not the player's reads out of its own library
+        let lib = match (&self.shown, self.home.is_some()) {
+            (Some(Shown { lib: Some(l), .. }), true) => l,
+            _ => cx.lib,
+        };
         let Some(w) = self.world.as_mut() else { return };
         // the build: harder while the map is up, behind the game a while after the world was entered
         let focus = match (self.open, self.view, cx.player) {
@@ -1189,7 +1534,7 @@ impl Map {
             None => (w.made.elapsed() >= PLAY_DELAY).then(|| budget(PLAY_BUDGET, cx.dt)),
         };
         if let Some(b) = budget {
-            w.builder.step(cx.lib, &build::Gpu { device: cx.device, queue: cx.queue }, focus, b);
+            w.builder.step(lib, &build::Gpu { device: cx.device, queue: cx.queue }, focus, b);
         }
         self.find_icon(cx);
         let Some(w) = self.world.as_mut() else { return };
@@ -1256,26 +1601,33 @@ impl Map {
         }
         self.view = None;
         self.reported = None;
-        let Some(c) = cx.lib.files.get(WORLD_FILE).map(|f| &f.1) else { return };
-        let Some(base) = c.roots.first().and_then(|&r| c.child(r, 0x8200)) else { return };
+        // its `gWorldInfo` index by its file (the player's world number
+        // changes with a teleport before the library has the new file)
+        let index = crate::play::WORLD_FILES.iter().position(|f| f.eq_ignore_ascii_case(&name)).map_or(cx.world, |i| i as i32);
+        self.world = self.make_world(cx, cx.lib, name, index);
+    }
+
+    /// The map of the world in `lib`'s `WORLD_FILE` (the game's library, or
+    /// the map's own for a world shown from the list of places), its
+    /// pictures from the cache or made; none for a file that is no world.
+    fn make_world(&mut self, cx: &Context, lib: &esf::Library, name: String, index: i32) -> Option<World> {
+        let c = lib.files.get(WORLD_FILE).map(|f| &f.1)?;
+        let base = c.roots.first().and_then(|&r| c.child(r, 0x8200))?;
         let bounds: Vec<[f32; 4]> = vi::world::World::<vi::fpu::Ee>::proxies(c, base).iter().map(|b| [b.min.x.0, b.min.z.0, b.max.x.0, b.max.z.0]).collect();
         if bounds.is_empty() {
-            return;
+            return None;
         }
-        let ranges: Vec<(u64, usize)> = (0..cx.lib.zone_count(WORLD_FILE)).map(|z| cx.lib.zone_range(WORLD_FILE, z).unwrap_or((0, 0))).collect();
+        let ranges: Vec<(u64, usize)> = (0..lib.zone_count(WORLD_FILE)).map(|z| lib.zone_range(WORLD_FILE, z).unwrap_or((0, 0))).collect();
         let key = cells::cache_key(&name, &c.data, &ranges);
         let store = store::open(&key);
-        let source = source(cx.lib);
+        let source = source(lib);
         let builder = Builder::new(WORLD_FILE, &bounds, store, source);
         let overview = self.layers.as_mut().map(|l| {
             let (w, h) = builder.cells.overview_size();
             l.map.texture(cx.device, w.max(1), h.max(1), OVERVIEW_LEVELS)
         });
         crate::say(&format!("map: {name}, {} zones in {} x {} cells, kept as {key}", bounds.len(), builder.cells.cols, builder.cells.rows));
-        // its `gWorldInfo` index by its file (the player's world number
-        // changes with a teleport before the library has the new file)
-        let index = crate::play::WORLD_FILES.iter().position(|f| f.eq_ignore_ascii_case(&name)).map_or(cx.world, |i| i as i32);
-        self.world = Some(World { name, era: cx.lib.era_of(WORLD_FILE), index, builder, overview, tiles: BTreeMap::new(), made: Instant::now(), view: None });
+        Some(World { name, era: lib.era_of(WORLD_FILE), index, builder, overview, tiles: BTreeMap::new(), made: Instant::now(), view: None })
     }
 
     /// The build's overview cells into the overview; its tiles onto the GPU
@@ -1376,7 +1728,21 @@ impl Map {
         let pointer = self.pointer_world(cx.keyboard).map(|p| format!("x {:.0}, z {:.0}", p[0], p[1]));
         let icon = self.icon.tex;
         let target = self.target_spot();
+        // the list of places' rows, when it is up: their words, whether each
+        // is what is shown, the selected and the first shown (`places`)
+        let place_rows = self.places.open.then(|| {
+            let rows = self.place_rows();
+            let shown = self.shown_index();
+            let words: Vec<(String, bool)> = rows.iter().map(|&r| (self.place_label(r, cx.words), r == places::Row::World(shown.unwrap_or(-1)) || (r == places::Row::Here && self.shown.is_none()))).collect();
+            chrome::Places { rows: words, sel: self.places.sel, top: self.places.top }
+        });
+        let opening = self.shown.as_ref().filter(|s| s.lib.is_none()).map(|s| s.index);
+        let opening = opening.map(|i| format!("Opening {}...", self.place_label(places::Row::World(i), cx.words)));
         let (Some(w), Some(v), Some(l)) = (self.world.as_ref(), self.view, self.layers.as_mut()) else { return };
+        // the player is drawn on its own world alone (`places`: another shown)
+        let here = self.home.is_none();
+        let player = cx.player.filter(|_| here);
+        let group: &[([f32; 3], usize)] = if here { &cx.group } else { &[] };
         let group_mark = self.group_mark.as_ref().filter(|g| g.world == w.index);
         let size = cx.size;
         let cells = &w.builder.cells;
@@ -1457,14 +1823,17 @@ impl Map {
             names.push((f([s[0], s[1] + r * 2.8]), format!("{from}: {:.0} away", (p[0] - g.at[0]).hypot(p[2] - g.at[1]))));
         }
         let world_name = self.names.names.get(w.index.max(0) as usize).copied().flatten().and_then(|n| word(n as i32)).unwrap_or_else(|| title_case(w.name.split('.').next().unwrap_or("")));
-        let area = cx.player.and_then(|(p, _)| {
-            let (c, r) = ((p[0] / CELL) as i32, (p[2] / CELL) as i32);
-            let n = word(cells::name(w.index, bounds, c, r)? as i32)?;
-            Some(match word(cells::ninth(p[0], p[2], cx.origin)) {
-                Some(d) => format!("{n} ({d})"),
-                None => n,
-            })
-        });
+        let area = match player {
+            Some((p, _)) => {
+                let (c, r) = ((p[0] / CELL) as i32, (p[2] / CELL) as i32);
+                cells::name(w.index, bounds, c, r).and_then(|n| word(n as i32)).map(|n| match word(cells::ninth(p[0], p[2], cx.origin)) {
+                    Some(d) => format!("{n} ({d})"),
+                    None => n,
+                })
+            }
+            // another world (`places`): the area at the view's middle
+            None => cells::name(w.index, bounds, (v.center[0] / CELL) as i32, (v.center[1] / CELL) as i32).and_then(|n| word(n as i32)),
+        };
         let (built, of) = w.builder.progress();
         let c = chrome::Chrome {
             corners: [f([0.0, 0.0]), f([size.0 as f32, size.1 as f32])],
@@ -1477,8 +1846,10 @@ impl Map {
             progress: (built < of).then_some((built, of)),
             quests: cx.quest_marks.map(|_| crate::settings::quest_markers()),
             pointer,
-            notice: self.community.notice_now().map(str::to_string),
+            notice: opening.or_else(|| self.community.notice_now().map(str::to_string)),
             group: cx.in_group,
+            travel: self.travel,
+            places: place_rows,
         };
         let fallback;
         let vui = match cx.vui {
@@ -1546,7 +1917,7 @@ impl Map {
                 })
                 .collect();
             obstacles.extend_from_slice(&footprint);
-            if let Some((p, _)) = cx.player {
+            if let Some((p, _)) = player {
                 let at = f(v.to_window(size, [p[0], p[2]]));
                 let (r, o) = view::marker_radius(size);
                 let e = (r + o) * k * 1.25;
@@ -1579,7 +1950,7 @@ impl Map {
                 .collect();
             obstacles.extend_from_slice(&footprint);
             obstacles.extend_from_slice(&town_rects);
-            if let Some((p, _)) = cx.player {
+            if let Some((p, _)) = player {
                 let at = f(v.to_window(size, [p[0], p[2]]));
                 let (r, o) = view::marker_radius(size);
                 let e = (r + o) * k * 1.25;
@@ -1600,19 +1971,21 @@ impl Map {
             community::draw_names(ui, white, fo, &placed, &names, t, pad);
         }
         // the quest marks (`quests`) over the markers and the towns' names,
-        // under the group and the player
+        // under the group and the player; the quests to take first, so a step
+        // of the player's own ("?") is drawn over a "!" beside it
         let (lo, hi) = ([-40.0, -40.0], [size.0 as f32 + 40.0, size.1 as f32 + 40.0]);
-        let marks: Vec<(u8, [f32; 2])> = self
+        let mut marks: Vec<(u8, [f32; 2])> = self
             .quests
             .of_world(w.index)
             .map(|(_, m)| (m.kind, v.to_window(size, [m.x, m.z])))
             .filter(|(_, p)| p[0] >= lo[0] && p[1] >= lo[1] && p[0] <= hi[0] && p[1] <= hi[1])
             .map(|(kind, p)| (kind, f(p)))
             .collect();
+        marks.sort_by_key(|&(kind, _)| kind != 1);
         let (r, o) = view::quest_radius(size);
         quests::draw_marks(ui, &l.assets, vui, white, &marks, r * k, o * k);
         // the group's members, their compass colours (1 green, 2 blue, 3 cyan, the rest yellow)
-        for (pos, index) in &cx.group {
+        for (pos, index) in group {
             let p = v.to_window(size, [pos[0], pos[2]]);
             let color = match index {
                 1 => [0.0, 1.0, 0.0, 1.0],
@@ -1660,7 +2033,7 @@ impl Map {
             }
         }
         // the player: the HUD's size at every zoom (`view::marker_radius`)
-        if let Some((p, h)) = cx.player {
+        if let Some((p, h)) = player {
             let at = v.to_window(size, [p[0], p[2]]);
             let (r, o) = view::marker_radius(size);
             for (rr, color) in [(r + o, OUTLINE), (r, MARKER)] {
@@ -1693,7 +2066,6 @@ impl Map {
         self.buttons = chrome::draw(&mut r, vui, &c);
         self.search.toolbar_top=Some(chrome::search_anchor(&r,vui,&c));
         self.search.draw(&mut r, vui, c.corners, None);
-        self.suggestion.draw(&mut r,c.corners);
         self.glyphs = r.glyphs;
         // laid out against the window: cut to it, not to the frame
         for q in &mut ui.quads {
@@ -1702,10 +2074,10 @@ impl Map {
     }
 
     /// The map over the frame, while it is up: its own pass into `target`
-    /// (`depth` its depth buffer).
-    pub fn draw(&self, device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, depth: &wgpu::TextureView) {
+    /// (`depth` its depth buffer), laid out on a `window` window and drawn
+    /// into a `size` target (the window's, or the Render Scale's frame).
+    pub fn draw(&self, device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, depth: &wgpu::TextureView, window: (u32, u32), size: (u32, u32)) {
         let (true, Some(l)) = (self.open, self.layers.as_ref()) else { return };
-        let size = (target.texture().width(), target.texture().height());
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("map"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: target, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })],
@@ -1714,10 +2086,6 @@ impl Map {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        // Terrain and the backdrop use window pixels; the render target
-        // may be larger when supersampling. UI quads use frame coordinates
-        // and normalize against the target.
-        let window = self.size;
         l.map.draw(device, &mut pass, window);
         l.ui.draw(device, &mut pass, size);
     }
@@ -1792,12 +2160,15 @@ pub fn keyboard(name: &str) -> Option<(i32, Hold)> {
         // Q is the keyboard's □ (`binds`' "talk" row): the waypoint, held
         // the group's (its release counts, `Map::square_key`)
         "q" => (key::SQUARE, Hold::Held),
-        // G: the group's waypoint at once (`binds`' "map_group_waypoint" row)
-        "g" => (KEY_GROUP, Hold::Once),
+        // O: the group's waypoint at once (`binds`' "map_group_waypoint" row;
+        // G was its key till the attack took G, 2026-11-09)
+        "o" => (KEY_GROUP, Hold::Once),
         // J (the journal's letter) is R3: the quest marks shown or hidden
         "j" => (key::R3, Hold::Once),
         // N is L3: a community marker suggested (`community`)
         "n" => (key::L3, Hold::Once),
+        // P: the list of places (`places`)
+        "p" => (KEY_PLACES, Hold::Once),
         "+" | "=" | "pageup" => (key::R1, Hold::Step),
         "-" | "_" | "pagedown" => (key::L1, Hold::Step),
         "up" | "w" => (key::UP, Hold::Held),

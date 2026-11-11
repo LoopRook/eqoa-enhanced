@@ -59,32 +59,69 @@ pub struct Res {
     /// The art changed: what is drawn is made again in it once its files are
     /// in (`take_art_change`).
     art_due: bool,
-    /// A server's races' bodies (`want_bodies`): each asked for once; CHAR.ESF
-    /// being read for some; some just put in the library (`take_bodies_in`).
+    /// A server's races' bodies (`want_bodies`): each asked for once; some
+    /// being cut out of CHAR.ESF; some just put in the library
+    /// (`take_bodies_in`).
     bodies_asked: HashSet<u32>,
-    bodies_reading: Option<(Vec<u32>, files::Pending)>,
+    bodies_reading: Option<(Vec<u32>, files::PendingCut)>,
+    /// when the cut under way was asked for (`bodytrace`)
+    bodies_since: Option<web_time::Instant>,
     bodies_in: bool,
+    /// Each bodies' file in the library and the bodies cut into it; in the
+    /// 2002 art the 2002 disc's copies of them (`want_bodies_2002`): the files
+    /// asked of it, and those being cut out of its CHAR.ESF.
+    bodies_files: Vec<(usize, Vec<u32>)>,
+    bodies_asked_2002: HashSet<usize>,
+    bodies_reading_2002: Option<(Vec<usize>, files::PendingCut)>,
 }
 
 /// The name a server's races' bodies go into the library under.
 pub const BODIES: &str = "CHAR.ESF (bodies)";
 
-/// A server's races' bodies out of CHAR.ESF: each body's CSprite record
-/// (0x2700, header and all) whole, together one container of those records
-/// alone; every other record let go. A body's record holds its skeleton,
-/// meshes, materials and surfaces: built from it alone it is the whole file's
-/// (`tests::a_cut_body_is_the_whole_files`). None when none of them is there.
+/// The file the bodies are cut out of, on either disc.
+pub const BODIES_FILE: &str = "DATA/CHAR.ESF";
+
+/// A server's races' bodies out of CHAR.ESF read whole (`file`): each body's
+/// CSprite record (0x2700, header and all) whole, together one container of
+/// those records alone; every other record let go. A body's record holds its
+/// skeleton, meshes, materials and surfaces: built from it alone it is the
+/// whole file's (`tests::a_cut_body_is_the_whole_files`). None when none of
+/// them is there. What the pregame did until 2026-11-10 (148 MB read and
+/// parsed for a few bodies), and what its cut by the file's directory
+/// (`files::cut`) is held to, byte for byte.
+#[cfg(test)]
 pub fn cut_bodies(file: Vec<u8>, ids: &[u32]) -> Option<esf::Container> {
-    let c = esf::Container::open(file).ok()?;
-    let mut bytes = Vec::new();
-    for &id in ids {
-        let Some(&n) = c.dict.get(&(id as i32)) else { continue };
-        let node = c.node(n);
-        if node.ty == 0x2700 && node.body >= 12 {
-            bytes.extend_from_slice(&c.data[node.body - 12..node.body + node.size]);
-        }
+    files::cut_whole(file, &[ids.to_vec()]).ok()?.groups.pop()?
+}
+
+/// The 2002 disc's copy of a bodies' file (`c`: the same bodies cut out of
+/// that disc's CHAR.ESF) stood in for it (`f`, its index in `lib`), as the
+/// world's CHAR.ESF has its copy stand in for it (`era::install`), so the
+/// 2002 art draws a server's race's body in character select and creation as
+/// the world draws it (the 2002 disc's skeleton, goblin, lizardman, brownie,
+/// gnoll, orc and minotaur are its own; until 2026-11-08 the pregame drew
+/// Frontiers', whose helm nodes differ: a skeleton's helm showed in
+/// character select and not in the world). A copy that is its file's bytes
+/// stands in for nothing. Whether it stands in.
+fn stand_in_cut(lib: &mut esf::Library, f: usize, c: esf::Container) -> bool {
+    if c.data == lib.file(f).data {
+        return false;
     }
-    (!bytes.is_empty()).then(|| esf::Container::parse_records(bytes))
+    lib.keep_frontiers(&crate::era::kept());
+    lib.stand_in(f, c);
+    true
+}
+
+/// `stand_in_cut` for each of `files` (each one's index in `lib` and the
+/// bodies cut into it) out of the 2002 disc's CHAR.ESF read whole (`bytes`):
+/// how many stand in. A file the 2002 disc has none of the bodies of is left
+/// out. What the pregame did until 2026-11-10, and what the cut by that
+/// disc's directory is held to.
+#[cfg(test)]
+pub fn stand_in_bodies(lib: &mut esf::Library, files: &[(usize, Vec<u32>)], bytes: Vec<u8>) -> usize {
+    let groups: Vec<Vec<u32>> = files.iter().map(|(_, ids)| ids.clone()).collect();
+    let Ok(cut) = files::cut_whole(bytes, &groups) else { return 0 };
+    files.iter().zip(cut.groups).filter_map(|(&(f, _), c)| c.map(|c| stand_in_cut(lib, f, c))).filter(|&stood| stood).count()
 }
 
 /// A file's name in the library: its disc path's last part (`SETUP.CSF`).
@@ -164,6 +201,7 @@ impl Res {
         if era == Era::Y2002 {
             let all: Vec<String> = self.asked.iter().cloned().collect();
             self.want_2002(&all.iter().map(String::as_str).collect::<Vec<_>>());
+            self.want_bodies_2002();
         }
         self.art_due = true;
         self.relayer = true;
@@ -181,7 +219,7 @@ impl Res {
     /// The art to make what is drawn again in, once: when it changed and its
     /// 2002 files (if any are being read) are all in.
     pub fn take_art_change(&mut self) -> Option<Era> {
-        (self.art_due && self.pending_2002.is_empty()).then(|| {
+        (self.art_due && self.pending_2002.is_empty() && self.bodies_reading_2002.is_none()).then(|| {
             self.art_due = false;
             self.art
         })
@@ -225,8 +263,9 @@ impl Res {
     }
 
     /// Asks for the bodies among `ids` the library lacks (a server's races',
-    /// `create::tables::bodies`): CHAR.ESF read, one read at a time, and only
-    /// those bodies' records kept (`cut_bodies`), as `BODIES`. Each is asked
+    /// `create::tables::bodies`): cut out of CHAR.ESF by its own directory
+    /// (`files::cut`: each body's record read alone, off the frame's thread),
+    /// one cut at a time, and kept as `BODIES`, a file a cut. Each is asked
     /// for once.
     pub fn want_bodies(&mut self, ids: &[u32]) {
         if self.bodies_reading.is_some() {
@@ -234,39 +273,95 @@ impl Res {
         }
         let new: Vec<u32> = ids.iter().copied().filter(|&id| id != 0 && self.lib.lookup(id as i32).is_none() && self.bodies_asked.insert(id)).collect();
         if !new.is_empty() {
-            self.bodies_reading = Some((new, files::read(&["DATA/CHAR.ESF"])));
+            super::bodytrace::note(|| format!("{} bodies asked for", new.len()));
+            self.bodies_since = Some(web_time::Instant::now());
+            let ask = files::CutAsk { era: Era::Frontiers, path: BODIES_FILE.into(), groups: vec![new.clone()] };
+            self.bodies_reading = Some((new, files::cut(ask)));
         }
     }
 
-    /// Whether bodies came in since the last call: the figures are made again.
+    /// Whether bodies came in (or the 2002 disc's copies of them stood in)
+    /// since the last call: the figures made of what they changed are made
+    /// again (`figure::Figure::refresh`).
     pub fn take_bodies_in(&mut self) -> bool {
         std::mem::take(&mut self.bodies_in)
     }
 
-    /// The bodies' read, once it is done: cut and put in the library.
+    /// The bodies' cut, once it is done: put in the library.
     fn poll_bodies(&mut self) {
         let Some((_, p)) = self.bodies_reading.as_mut() else { return };
         let Some(r) = p.poll() else { return };
         let (ids, _) = self.bodies_reading.take().expect("reading");
+        let since = self.bodies_since.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1e3);
         match r {
-            Ok(list) => {
-                for (_, bytes) in list {
-                    match cut_bodies(bytes, &ids) {
-                        Some(c) => {
-                            self.lib.add(BODIES, c);
-                            self.bodies_in = true;
-                        }
-                        None => crate::say(&format!("pregame: CHAR.ESF has none of the bodies {ids:08X?}")),
+            Ok(mut cut) => {
+                super::bodytrace::note(|| format!("{} bodies cut out of CHAR.ESF ({:?}: {} reads, {:.1} MB), {since:.1} ms after they were asked for", ids.len(), cut.found, cut.reads, cut.bytes as f64 / 1048576.0));
+                match cut.groups.pop().flatten() {
+                    Some(c) => {
+                        let took = super::bodytrace::watch();
+                        let mb = c.data.len() as f64 / 1048576.0;
+                        let f = self.lib.add(BODIES, c);
+                        super::bodytrace::note(|| format!("their file ({mb:.1} MB) put in the library in {:.1} ms on the frame's thread", took()));
+                        self.bodies_files.push((f, ids));
+                        self.bodies_in = true;
                     }
+                    None => crate::say(&format!("pregame: CHAR.ESF has none of the bodies {ids:08X?}")),
                 }
             }
             Err(e) => crate::say(&format!("pregame: the bodies: {e}")),
         }
+        self.want_bodies_2002();
+    }
+
+    /// In the 2002 art (a 2002 disc at hand), the 2002 disc's copies of the
+    /// bodies' files not asked of it yet: the same bodies cut out of its
+    /// CHAR.ESF, one cut at a time, for `stand_in_cut`.
+    fn want_bodies_2002(&mut self) {
+        if !self.reads_2002() || self.bodies_reading_2002.is_some() {
+            return;
+        }
+        let new: Vec<usize> = self.bodies_files.iter().map(|&(f, _)| f).filter(|&f| self.bodies_asked_2002.insert(f)).collect();
+        if !new.is_empty() {
+            let groups = self.bodies_files.iter().filter(|(f, _)| new.contains(f)).map(|(_, ids)| ids.clone()).collect();
+            let ask = files::CutAsk { era: Era::Y2002, path: BODIES_FILE.into(), groups };
+            self.bodies_reading_2002 = Some((new, files::cut(ask)));
+        }
+    }
+
+    /// The 2002 disc's copies of the bodies' files asked of it, once they are
+    /// cut: each stood in for its file (`stand_in_cut`; a disc without them,
+    /// or a read that failed, leaves Frontiers'), the figures made of them
+    /// made again.
+    fn poll_bodies_2002(&mut self) {
+        let Some((_, r)) = self.bodies_reading_2002.as_mut() else { return };
+        let Some(read) = r.poll() else { return };
+        let (asked, _) = self.bodies_reading_2002.take().expect("reading");
+        match read {
+            Ok(cut) => {
+                let took = super::bodytrace::watch();
+                let files: Vec<usize> = self.bodies_files.iter().map(|&(f, _)| f).filter(|f| asked.contains(f)).collect();
+                let (found, reads, mb) = (cut.found, cut.reads, cut.bytes as f64 / 1048576.0);
+                let mut n = 0;
+                for (f, c) in files.iter().zip(cut.groups) {
+                    if c.is_some_and(|c| stand_in_cut(&mut self.lib, *f, c)) {
+                        n += 1;
+                    }
+                }
+                super::bodytrace::note(|| format!("the 2002 disc's bodies ({found:?}: {reads} reads, {mb:.1} MB): {n} of {} files stood in for, in {:.1} ms on the frame's thread", files.len(), took()));
+                if n > 0 {
+                    self.bodies_in = true;
+                }
+            }
+            Err(e) => crate::say(&format!("pregame: the 2002 disc's bodies: {e}")),
+        }
+        // files that came in meanwhile
+        self.want_bodies_2002();
     }
 
     /// The files read since the last frame, put where they go.
     pub fn poll(&mut self) {
         self.poll_bodies();
+        self.poll_bodies_2002();
         let mut arrived = Vec::new();
         self.pending.retain_mut(|p| match p.poll() {
             Some(r) => {
@@ -598,5 +693,109 @@ mod tests {
         // the controls: one not asked for is not there, one CHAR.ESF lacks leaves none
         assert!(cut.lookup(0x2217_6258).is_none(), "the kerran man was not asked for");
         assert!(cut_bodies(bytes, &[0x1234_5678]).is_none());
+    }
+
+    /// In the 2002 disc's art a server's race's body is drawn in character
+    /// select and creation as the world draws it: the bodies cut out of each
+    /// disc's CHAR.ESF, the 2002 cut standing in for Frontiers'
+    /// (`stand_in_bodies`), against both whole files as the world has them
+    /// (the 2002 CHAR.ESF standing in for Frontiers', `era::install`). Per
+    /// body (every one go-eqoa-server's races wear, and the three skeletons
+    /// its Skeleton race's options offer, which `create::tables::bodies` cuts
+    /// with them) and art: the same record off the same disc, the same model
+    /// and skeleton, and a player's helm on the same node
+    /// (`slotless::helm_node`). The human that dresses the skeletons is cut in
+    /// beside them, where character select has it out of CHARSEL3.CSF (whose
+    /// 2002 copy stands in as every pregame file's does): it is not one of the
+    /// bodies, and its own helm node is 5 in Frontiers' art and 6 in the 2002
+    /// disc's. The control: without the stand-in (the pregame until
+    /// 2026-11-08) only the 2002 art differed, on the bodies the 2002 disc has
+    /// its own of, and with them the helm nodes of the four skeletons
+    /// (Frontiers' each name node 5, the 2002 disc's none) and the brownie's
+    /// (seated on its node of the human's helm node's name, `slotless::
+    /// HEAD_SEATS`: 5 on Frontiers' skeleton, 6 on the 2002 disc's); the
+    /// goblin's and the orc's are the same in both (the 2002 disc's name a helm
+    /// node, and a player's helm on Frontiers' hangs on the node of that name).
+    /// A cut that is its
+    /// file's bytes (the hill giant is the same on both discs) or has none of
+    /// the bodies (no kerran on the 2002 disc) stands in for nothing. Needs
+    /// both discs (`run/eqoa.iso`, and `$EQOA_2002_ISO` or the USA disc under
+    /// `../decomp-builds/discs/eqoa-usa/`; without them it passes having
+    /// checked nothing, and says so only under `--nocapture`).
+    #[test]
+    fn the_2002_art_draws_a_races_body_as_the_world_does() {
+        let iso = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        let Ok(mut d) = iso::Iso::open(iso.to_str().unwrap()) else {
+            eprintln!("SKIP: no run/eqoa.iso");
+            return;
+        };
+        let y2002 = std::env::var_os("EQOA_2002_ISO").map(std::path::PathBuf::from).or_else(|| {
+            let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../decomp-builds/discs/eqoa-usa");
+            std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("iso")))
+        });
+        let Some(mut d2) = y2002.and_then(|p| iso::Iso::open(p).ok()) else {
+            eprintln!("SKIP: no 2002 disc (set EQOA_2002_ISO)");
+            return;
+        };
+        let (bf, by) = (d.read("CHAR.ESF").unwrap(), d2.read("CHAR.ESF").unwrap());
+        let (goblin, orc, skeleton, hill_giant, kerran) = (0x6C13_08E0u32, 0x8214_A32Du32, 0x6AF9_8A81u32, 0xFFB1_EA2Cu32, 0x2217_6258u32);
+        // the skeleton's options: old, mossy and frost bone
+        let options = [0x45A8_B064u32, 0x198B_AA64, 0x648D_FC11];
+        let mut bodies = vec![0x141B_FE0C, hill_giant, kerran, 0xB749_BF57, goblin, 0x3151_DF13, 0x8EFD_12EA, 0x9112_20E2, 0x31A1_5F17, 0x4376_EB52, 0x94BA_77CD];
+        bodies.extend([0x7A85_646C, 0xCF41_5561, orc, 0xCFC4_78EE, 0xC5CB_F4CF, 0xBADC_25C9, 0xBE10_226F, 0x70EF_CE05, skeleton, 0x4A4D_88FB, 0xB4D2_D132]);
+        bodies.extend(options);
+        let human = vi::hash::hash_resource_id("HumanMale");
+        let ids: Vec<u32> = bodies.iter().copied().chain([human]).collect();
+        let mut world = esf::Library::new();
+        let f = world.add("CHAR.ESF", esf::Container::open(bf.clone()).unwrap());
+        world.stand_in(f, esf::Container::open(by.clone()).unwrap());
+        let mut before = esf::Library::new();
+        before.add(BODIES, cut_bodies(bf.clone(), &ids).unwrap());
+        let mut pregame = esf::Library::new();
+        let g = pregame.add(BODIES, cut_bodies(bf.clone(), &ids).unwrap());
+        assert_eq!(stand_in_bodies(&mut pregame, &[(g, ids.clone())], by.clone()), 1);
+        let drawn = |lib: &esf::Library, id: u32| {
+            lib.with_view(lib.view_for(id as i32), || {
+                let r = lib.lookup(id as i32).expect("there");
+                let m = lib.build_model(r).unwrap();
+                let cs = crate::pregame::figure::actor_sprite(lib, r, &mut vi::hsprite::AnimScene::default(), &mut vi::csprite::Rand(1)).unwrap();
+                (lib.era_of(r.file), m.pos.len(), m.triangles, cs.h.nodes.len(), cs.node_ids, crate::slotless::helm_node(lib, id, &cs, true))
+            })
+        };
+        let mut differed = Vec::new();
+        for (era, own) in [(Era::Frontiers, 5), (Era::Y2002, 6)] {
+            for lib in [&world, &before, &pregame] {
+                lib.set_view(era);
+            }
+            for &id in &bodies {
+                let (w, b) = (drawn(&world, id), drawn(&before, id));
+                assert_eq!(drawn(&pregame, id), w, "{era:?}: {id:08X}");
+                if b != w {
+                    differed.push((era, id, b.5, w.5));
+                }
+            }
+            // the human beside them, as the world has it
+            assert_eq!(drawn(&pregame, human), drawn(&world, human), "{era:?}: the human");
+            assert_eq!(drawn(&world, human).5, own, "{era:?}: the human's own helm node");
+        }
+        // the control: the pregame as it was
+        assert!(differed.iter().all(|d| d.0 == Era::Y2002), "{differed:08X?}");
+        assert_eq!(differed.len(), 10, "the seven race bodies the 2002 disc has its own of, and the three options: {differed:08X?}");
+        // (a player's helm on the goblin's and the orc's Frontiers bodies hangs on
+        // their node of the human's helm node's name, `slotless::HEAD_SEATS`, the
+        // node the 2002 disc's own name for it: the same in both)
+        let helms: Vec<(u32, i32, i32)> = differed.iter().filter(|d| d.2 != d.3).map(|d| (d.1, d.2, d.3)).collect();
+        let brownie = 0x4376_EB52u32;
+        let mut want = vec![(brownie, 5, 6), (skeleton, 5, 6)];
+        want.extend(options.map(|o| (o, 5, 6)));
+        assert_eq!(helms, want);
+        assert!(differed.iter().any(|d| d.1 == goblin) && differed.iter().any(|d| d.1 == orc), "the goblin's and orc's bodies are the 2002 disc's own");
+        // a cut of its file's bytes, and one of none of them
+        for one in [hill_giant, kerran] {
+            let mut lib = esf::Library::new();
+            let h = lib.add(BODIES, cut_bodies(bf.clone(), &[one]).unwrap());
+            assert_eq!(stand_in_bodies(&mut lib, &[(h, vec![one])], by.clone()), 0, "{one:08X}");
+            assert!(!lib.has_2002());
+        }
     }
 }

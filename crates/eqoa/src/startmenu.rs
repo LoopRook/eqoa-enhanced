@@ -332,6 +332,19 @@ impl MainMenu {
         true
     }
 
+    /// The menus' entries changed under the open ones (the server's whole
+    /// list of triggers, `adminplay::set_trigger_list`): each open menu's
+    /// selection kept within its entries, and the seven bars from `top` still
+    /// showing it.
+    pub fn refit(&mut self, menus: &Menus) {
+        let count = menus.list.get(self.menu).map_or(0, |m| m.entries.len()) as i32;
+        self.sel = self.sel.clamp(0, (count - 1).max(0));
+        self.top = self.top.clamp((self.sel - 6).max(0), self.sel.min((count - 7).max(0)));
+        if let Some(s) = self.sub.as_mut() {
+            s.refit(menus);
+        }
+    }
+
     /// `Scroll`: the selection moved by `d`, wrapping, seven bars shown.
     fn scroll_by(&mut self, d: i32, count: i32, now: i64, cues: &mut Vec<i32>) {
         let i = self.sel + d;
@@ -529,8 +542,11 @@ impl MainMenu {
         let col = (loc.pos[0] / loc.cell) as i32;
         let row = (loc.pos[2] / loc.cell) as i32;
         let off = [loc.pos[0] - col as f32 * loc.cell - loc.origin[0], loc.pos[2] - row as f32 * loc.cell - loc.origin[2]];
-        let zone = zone_name(loc, row - 1, col - 1);
-        let name = vui.words.get(zone as i32, vui.language).to_string();
+        // one of the server's own worlds names its zones itself (`serverworlds`)
+        let name = match crate::serverworlds::zone_name(i64::from(loc.world), col, row) {
+            Some(n) => n,
+            None => vui.words.get(zone_name(loc, row - 1, col - 1) as i32, vui.language).to_string(),
+        };
         const DIRS: [[i32; 3]; 3] = [[1426, 1422, 1427], [1425, 1430, 1424], [1428, 1423, 1429]];
         let third = |v: f32| if v < -333.34 { 0 } else if v <= 333.34 { 1 } else { 2 };
         let dir = vui.words.get(DIRS[third(off[1])][third(off[0])], vui.language).to_string();
@@ -913,6 +929,37 @@ pub struct StartData {
     pub menu: StartMenu,
     /// the live client's Duel menu (`set_duels`), once made
     duel_menu: Option<usize>,
+    /// the client's own Raid menu and its Loot Rules (`set_raid`), once made
+    raid_menu: Option<(usize, usize)>,
+}
+
+/// One entry of a menu the client makes itself, its words set at run time
+/// (`Menus::labels`): its message (0: the menu's own sub-menu, `set_raid`'s Loot
+/// Rules), its label and the tail kept whole after it, and whether it is drawn
+/// dimmed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LabelRow {
+    pub msg: u32,
+    pub text: &'static str,
+    pub tail: &'static str,
+    pub dim: bool,
+}
+
+/// The ids the Raid entry and its Loot Rules entry carry, their labels' keys
+/// with message 0 (`set_raid`): none of the game's sub-menu entries has them.
+const RAID_ENTRY: i32 = 0x7E48;
+const RAID_LOOT_ENTRY: i32 = 0x7E49;
+/// The Raid entries' messages' high half (`raidplay::MSG_RAID`).
+const RAID_MSGS: u32 = 0x7E48_0000;
+/// The Group menu's Leave (word 87), the sixth of the disc's eight: the Raid
+/// entry goes after it, on the seventh bar (`set_raid`).
+const GROUP_LEAVE: i32 = 87;
+
+/// Whether `e` is an entry the client puts in one of the game's menus itself
+/// (Community > Group > Raid, `set_raid`; Dismiss Mercenary, `set_merc`): a rebuild of that menu
+/// (`liveplay::group_menu`) keeps it where it is.
+pub fn own_entry(e: &crate::client_image::MenuEntry) -> bool {
+    (e.msg == 0 && e.id == RAID_ENTRY) || e.msg == crate::play::MSG_DISMISS_MERC
 }
 
 impl StartData {
@@ -933,7 +980,7 @@ impl StartData {
         let slot_words = (0..23u32).map(|k| (img.i32_at(0x00CDF6F8 + 8 * k), img.i32_at(0x00CDF6FC + 8 * k) as i64)).collect();
         let buddy_menu = menus.def(img, 0x00CD03B0);
         let ignore_menu = menus.def(img, 0x00CD0340);
-        StartData { menus, tables, tables_test, bounds, world_words, item_counts, attack_words, slot_words, buddy_menu, ignore_menu, menu, duel_menu: None }
+        StartData { menus, tables, tables_test, bounds, world_words, item_counts, attack_words, slot_words, buddy_menu, ignore_menu, menu, duel_menu: None, raid_menu: None }
     }
 
     /// The live client's Community > Duel (its Community menu, 0x013DFFE8,
@@ -983,6 +1030,82 @@ impl StartData {
         }
     }
 
+    /// Community > Group > Raid (the client's own; the GM Jibrish's petitions 1448
+    /// and 1451, `raidplay`): an entry put after Leave in every Group menu (title
+    /// word 107: Community's, reached from every start table) while the server
+    /// offers the raid's windows, opening a menu of `rows`' entries (a row of
+    /// message 0 opens the second list's, the leader's Loot Rules), or taken out
+    /// (`None`). Every word is set at run time (`Menus::labels`): the game has no
+    /// raid. After Leave is the seventh bar, the last the menu shows at once
+    /// (`MainMenu` draws seven): put last, it was the ninth of the disc's Group and
+    /// the twelfth of the live client's, below them, and the live client's rebuild
+    /// (`liveplay::group_menu`, which keeps it now: `own_entry`) cut it out
+    /// (petition 1460).
+    pub fn set_raid(&mut self, rows: Option<(&[LabelRow], &[LabelRow])>) {
+        use crate::client_image::{Label, MenuEntry};
+        let (raid, loot) = *self.raid_menu.get_or_insert_with(|| {
+            let raid = self.menus.push(Menu { x00: -1, x04: -1, entries: Vec::new() });
+            (raid, self.menus.push(Menu { x00: -1, x04: -1, entries: Vec::new() }))
+        });
+        self.menus.labels.retain(|k, _| k.0 & 0xFFFF_0000 != RAID_MSGS && !(k.0 == 0 && matches!(k.1, RAID_ENTRY | RAID_LOOT_ENTRY)));
+        let groups = |menus: &Menus| (0..menus.list.len()).filter(|&k| menus.list[k].x04 == 107).collect::<Vec<_>>();
+        let Some((main, loot_rows)) = rows else {
+            for g in groups(&self.menus) {
+                self.menus.list[g].entries.retain(|e| e.sub != Some(raid));
+            }
+            return;
+        };
+        let label = |r: &LabelRow| Label { text: wide(r.text), tail: wide(r.tail), dim: r.dim };
+        let mut labels = vec![((0, RAID_ENTRY), Label { text: wide("Raid"), ..Default::default() })];
+        let mut entries = Vec::new();
+        for r in main {
+            if r.msg == 0 {
+                entries.push(MenuEntry { sub: Some(loot), msg: 0, id: RAID_LOOT_ENTRY, ..Default::default() });
+                labels.push(((0, RAID_LOOT_ENTRY), label(r)));
+            } else {
+                entries.push(MenuEntry { msg: r.msg, id: 0, ..Default::default() });
+                labels.push(((r.msg, 0), label(r)));
+            }
+        }
+        self.menus.list[raid].entries = entries;
+        self.menus.list[loot].entries = loot_rows.iter().map(|r| MenuEntry { msg: r.msg, id: 0, ..Default::default() }).collect();
+        labels.extend(loot_rows.iter().map(|r| ((r.msg, 0), label(r))));
+        self.menus.labels.extend(labels);
+        for g in groups(&self.menus) {
+            let entries = &mut self.menus.list[g].entries;
+            if !entries.iter().any(|e| e.sub == Some(raid)) {
+                let at = entries.iter().position(|e| e.word == GROUP_LEAVE).map_or(entries.len().min(6), |k| k + 1);
+                entries.insert(at, MenuEntry { sub: Some(raid), msg: 0, id: RAID_ENTRY, ..Default::default() });
+            }
+        }
+    }
+
+    /// Community > Group > Dismiss Mercenary (the client's own; the GM Jibrish's
+    /// petition 1475, 2026-11-11: "Put the option under the group options in main
+    /// menu"), put after Leave (and the Raid entry, when it is there) in every
+    /// Group menu while the server says the player's merc is out (`mercplay`), or
+    /// taken out. Its words are set at run time (`Menus::labels`).
+    pub fn set_merc(&mut self, on: bool) {
+        use crate::client_image::{Label, MenuEntry};
+        let msg = crate::play::MSG_DISMISS_MERC;
+        self.menus.labels.insert((msg, 0), Label { text: wide(crate::play::MERC_ENTRY), ..Default::default() });
+        let raid = self.raid_menu.map(|(r, _)| r);
+        for m in self.menus.list.iter_mut().filter(|m| m.x04 == 107) {
+            let at = m.entries.iter().position(|e| e.msg == msg);
+            match (on, at) {
+                (true, None) => {
+                    let after = m.entries.iter().position(|e| raid.is_some() && e.sub == raid).or_else(|| m.entries.iter().position(|e| e.word == GROUP_LEAVE));
+                    let k = after.map_or(m.entries.len().min(6), |k| k + 1);
+                    m.entries.insert(k, MenuEntry { msg, id: 0, ..Default::default() });
+                }
+                (false, Some(k)) => {
+                    m.entries.remove(k);
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// `OpenStartMenu`'s table: the bank's when a banker is in range, the
     /// expansion's when the mask has bit 1.
     pub fn pick(&mut self, bank: bool, expansion: u32) {
@@ -1002,7 +1125,7 @@ impl StartData {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::client_image::Menu;
 
@@ -1215,6 +1338,65 @@ mod tests {
         r.0.into_iter().filter(|(at, ..)| at[0] == 18 + BAR_WIDTH / 2).map(|(_, c, s)| (s, c)).collect()
     }
 
+    /// A `Vui` whose word n is "word n" (to 1,900: the live client's words
+    /// too) and whose bars' caps are 0 wide.
+    fn numbered_vui() -> Vui {
+        let mut atlas = vec![vi::ui::UiTexEntry::default(); 252];
+        for id in [141, 142] {
+            atlas[id] = vi::ui::UiTexEntry { x00: id as i32, row: 1, uv1: [0, 26], ..Default::default() };
+        }
+        let words: Vec<String> = (1..=1900).map(|n| format!("word {n}")).collect();
+        Vui::new(vi::strtab::StringTable::parse(words.join("\n").as_bytes()).unwrap(), Default::default(), atlas)
+    }
+
+    fn nowhere() -> Location {
+        Location { world: 0, pos: [0.0; 3], cols: 1, rows: 1, cell: 1.0, origin: [0.0; 3], bounds: None }
+    }
+
+    /// The start menu as the player sees it opened: its table as `pick_test`
+    /// picks it (the GM's TEST first when `test`), reset as the start button
+    /// opens it, `path`'s entries opened in turn (each found by its word and
+    /// opened as ✕ opens it), and the menu that leaves drawn once as
+    /// `MainMenu` draws it: its bars' texts, top to bottom (seven at most), the
+    /// game's words "word n" and the client's own by their labels.
+    pub(crate) fn shown(d: &mut StartData, test: bool, path: &[i32]) -> Vec<String> {
+        let (vui, loc) = (numbered_vui(), nowhere());
+        let mut r = Texts::default();
+        d.pick_test(false, 2, test);
+        d.menu.visible = true;
+        d.menu.show_main(&vui, &r, true, 0, &loc);
+        let mut m = &mut d.menu.main;
+        for word in path {
+            let k = d.menus.list[m.menu].entries.iter().position(|e| e.word == *word).expect("an entry on the path") as i32;
+            (m.sel, m.top) = (k, (k - 6).max(0));
+            m.select(&vui, &r, &d.menus, 0, &loc);
+            m = m.sub.as_mut().expect("a sub-menu opened");
+        }
+        d.menu.draw(&vui, &mut r, &d.menus, 16, &Stats::default(), &mut Vec::new());
+        r.0.into_iter().filter(|(at, ..)| at[0] == 18 + BAR_WIDTH / 2).map(|(_, _, s)| s).collect()
+    }
+
+    /// The pointer on bar `bar` of the menu `shown` left up, then ✕: the
+    /// menu that has the focus then (an entry's sub-menu opened), by index.
+    pub(crate) fn click_bar(d: &mut StartData, bar: i32) -> Option<usize> {
+        let (vui, loc) = (numbered_vui(), nowhere());
+        let r = Texts::default();
+        if !d.menu.point([18.0 + 40.0, (56 + 27 * bar + 10) as f32], &d.menus) {
+            return None;
+        }
+        d.menu.key(&vui, &r, &d.menus, 13, true, 0, &loc, &mut Vec::new());
+        let mut m = &d.menu.main;
+        while let Some(s) = m.sub.as_ref().filter(|s| s.visible && s.focused()) {
+            m = s;
+        }
+        m.x48.then_some(m.menu)
+    }
+
+    /// The Raid menu (`set_raid`), once made.
+    pub(crate) fn raid_menu_of(d: &StartData) -> Option<usize> {
+        d.raid_menu.map(|(raid, _)| raid)
+    }
+
     /// The bars' colours as `OnDrawSelf` gives them: the selected teal, and
     /// black.
     const LIT: [f32; 4] = [10.0 / 255.0, 50.0 / 255.0, 70.0 / 255.0, 1.0];
@@ -1393,5 +1575,55 @@ mod tests {
         }
         d.set_record(false);
         assert_eq!(character(&d), disc, "taken out");
+    }
+
+    /// Community > Group > Raid: put after Leave in the Group menu (title word
+    /// 107) on every table, the seventh bar (`liveplay`'s
+    /// `group_shows_raid_on_its_seventh_bar` draws it), once however often it
+    /// is set, its entries and Loot Rules as given with their words set at run
+    /// time, changed in place, and taken out again (the control: the disc's
+    /// Group menu). Needs `run/client.bin` (SKIPs without).
+    #[test]
+    fn the_raid_entry_goes_in_group() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/client.bin");
+        let Some(img) = std::fs::read(&path).ok().and_then(crate::client_image::ClientImage::from_bytes) else {
+            eprintln!("SKIP: no run/client.bin");
+            return;
+        };
+        let mut d = StartData::from_image(&img);
+        let group = |d: &StartData| -> Vec<Vec<(i32, u32, i32)>> {
+            d.menus.list.iter().filter(|m| m.x04 == 107).map(|m| m.entries.iter().map(|e| (e.word, e.msg, e.id)).collect()).collect()
+        };
+        let disc = group(&d);
+        assert_eq!(disc.len(), 1, "one Group menu");
+        assert_eq!(disc[0].iter().map(|e| e.0).collect::<Vec<_>>(), [86, 643, 644, 158, 529, 87, 737, 68], "the control: the disc's Group menu");
+        let row = |msg, text| LabelRow { msg, text, tail: "", dim: false };
+        let main = [row(0, "Loot Rules"), row(0x7E48_0200, "Leave Raid")];
+        let loot = [LabelRow { msg: 0x7E48_0101, text: "Need Before Greed", tail: " *", dim: true }];
+        d.set_raid(Some((&main, &loot)));
+        d.set_raid(Some((&main, &loot)));
+        let g = group(&d);
+        assert_eq!(g[0].len(), disc[0].len() + 1, "once");
+        assert_eq!(g[0][6], (-1, 0, RAID_ENTRY), "after Leave, a sub-menu");
+        assert_eq!([&g[0][..6], &g[0][7..]].concat(), disc[0], "the disc's round it in their order");
+        let text = |d: &StartData, k: (u32, i32)| d.menus.labels.get(&k).map(|l| (String::from_utf16_lossy(&l.text), String::from_utf16_lossy(&l.tail), l.dim));
+        assert_eq!(text(&d, (0, RAID_ENTRY)), Some(("Raid".into(), String::new(), false)));
+        let (raid, lr) = d.raid_menu.unwrap();
+        assert_eq!(d.menus.list[raid].entries.iter().map(|e| (e.msg, e.sub)).collect::<Vec<_>>(), [(0, Some(lr)), (0x7E48_0200, None)]);
+        assert_eq!(text(&d, (0, RAID_LOOT_ENTRY)).unwrap().0, "Loot Rules");
+        assert_eq!(text(&d, (0x7E48_0101, 0)), Some(("Need Before Greed".into(), " *".into(), true)));
+        for (bank, x) in [(false, 0), (false, 2), (true, 0), (true, 2)] {
+            d.pick(bank, x);
+            let root = &d.menus.list[d.menu.main.menu];
+            let community = root.entries.iter().find(|e| e.word == 420).and_then(|e| e.sub).expect("Community in the root");
+            let grp = d.menus.list[community].entries.iter().find(|e| e.word == 107).and_then(|e| e.sub).expect("Group in Community");
+            assert_eq!(d.menus.list[grp].entries.get(6).map(|e| e.sub), Some(Some(raid)), "reached from table {bank} {x}");
+        }
+        // a member's rows: the menu's changed in place, the old labels gone
+        d.set_raid(Some((&[row(0x7E48_0200, "Leave Raid")], &[])));
+        assert_eq!(d.menus.list[raid].entries.len(), 1);
+        assert_eq!(text(&d, (0x7E48_0101, 0)), None, "the leader's rows' words gone");
+        d.set_raid(None);
+        assert_eq!(group(&d), disc, "taken out");
     }
 }

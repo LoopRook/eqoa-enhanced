@@ -10,6 +10,8 @@
 /// The account name and the password the game sent Station (its API's
 /// logins), taken out of every report.
 pub fn secret(account: &str, password: &str) {
+    #[cfg(target_arch = "wasm32")]
+    let _ = (account, password);
     #[cfg(not(target_arch = "wasm32"))]
     native::secret(account, password);
     #[cfg(not(target_arch = "wasm32"))]
@@ -117,7 +119,9 @@ pub fn fit(text: &str, max: usize) -> String {
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) use native::ended_without_closing_for_test;
+pub(crate) use native::{
+    ended_without_closing_for_test, offer_in_for_test, prune_waiting_for_test, waiting_for_test,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use native::{
     Button, Kind, Sent, Status, clean_noted, dir, has_noted_accounts, state_file, tail,
@@ -328,11 +332,9 @@ mod native {
         crate::fork_ext::report::warm_saved_login_cache();
         crate::fork_ext::report_background::start();
         if let Some(d) = dir {
+            crate::fork_ext::report_crash_dir::migrate_legacy(&d);
             take_last_run(&d, &d.join(own("eqoa", "log")));
-            let old = waiting();
-            for f in &old[..old.len().saturating_sub(CRASHES_KEPT)] {
-                let _ = std::fs::remove_file(f);
-            }
+            prune_waiting(&crate::fork_ext::report_crash_dir::in_config(&d));
         }
     }
 
@@ -415,10 +417,7 @@ mod native {
     }
 
     fn version() -> String {
-        crate::update::COMMIT.map_or_else(
-            || "local".to_string(),
-            |c| format!("dev-{}", &c[..c.len().min(7)]),
-        )
+        crate::fork_ext::version::current()
     }
 
     fn channel() -> &'static str {
@@ -478,11 +477,21 @@ mod native {
         )
     }
 
+    /// The fork's own crash folder (`enhanced-crashes/`), never upstream's
+    /// `crashes/` (`crashfile` sends those to a server).
     fn crashes() -> Option<PathBuf> {
-        Some(dir()?.join("crashes"))
+        Some(crate::fork_ext::report_crash_dir::in_config(&dir()?))
     }
 
-    /// A crash report on disk now (`crashes/crash-<run>.txt`): `detail`,
+    /// Of the crash reports waiting in `d`, only the newest `CRASHES_KEPT` stay.
+    pub(super) fn prune_waiting(d: &Path) {
+        let old = waiting_in(d);
+        for f in &old[..old.len().saturating_sub(CRASHES_KEPT)] {
+            let _ = std::fs::remove_file(f);
+        }
+    }
+
+    /// A crash report on disk now (`enhanced-crashes/crash-<run>.txt`): `detail`,
     /// the log's last lines, scrubbed. `log` stands
     /// in for this run's log (a run before's). `at` is when the game
     /// stopped (its `when:`). Locks are only tried: a panic may come while
@@ -565,8 +574,7 @@ mod native {
         };
         // "[eqoa] run <run>, <version> (<channel>), <os> <arch>, window <n>"
         let of = first.split(", ").nth(1).filter(|v| v.ends_with(')'));
-        if dir
-            .join("crashes")
+        if crate::fork_ext::report_crash_dir::in_config(dir)
             .join(format!("crash-{run}.txt"))
             .exists()
         {
@@ -581,13 +589,31 @@ mod native {
             .and_then(|m| m.modified())
             .unwrap_or_else(|_| SystemTime::now());
         write_crash_in(
-            &dir.join("crashes"),
+            &crate::fork_ext::report_crash_dir::in_config(dir),
             &unclosed_detail(run, &lines),
             Some((run, &tail)),
             at,
             of,
             &std::fs::read_to_string(dir.join(own("state", "txt"))).unwrap_or_default(),
         );
+    }
+
+    #[cfg(test)]
+    pub(crate) fn waiting_for_test(d: &Path) -> Vec<PathBuf> {
+        waiting_in(d)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prune_waiting_for_test(d: &Path) {
+        prune_waiting(d)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn offer_in_for_test(d: &Path) -> Option<Vec<PathBuf>> {
+        offer_in(d).and_then(|o| match o.kind {
+            Kind::Crash(files) => Some(files),
+            Kind::Problem => None,
+        })
     }
 
     /// What a crash report says of a run that did not close: out of memory
@@ -609,11 +635,6 @@ mod native {
         format!(
             "The run of {run} ended without closing: killed, or stopped by a fault no panic caught (its log's last line is the last it wrote)."
         )
-    }
-
-    /// The crash reports waiting, oldest first.
-    fn waiting() -> Vec<PathBuf> {
-        crashes().map_or_else(Vec::new, |d| waiting_in(&d))
     }
 
     /// The crash reports in the directory `d`, oldest first (their names are
@@ -1646,7 +1667,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let prev = dir.join("eqoa.prev.log");
         let run = "20261103-234501";
-        let crash = dir.join("crashes").join(format!("crash-{run}.txt"));
+        let crash = crate::fork_ext::report_crash_dir::in_config(&dir).join(format!("crash-{run}.txt"));
         let closed = format!(
             "[eqoa] run {run}, dev-review (enhanced), windows x86_64, window 1\n[eqoa] closed\n"
         );

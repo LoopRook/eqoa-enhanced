@@ -126,6 +126,8 @@ pub fn start() {
             crate::gpulost::relaunch();
         }
         let bt = std::backtrace::Backtrace::force_capture();
+        // kept for the server it plays on, at the next login (`crashfile`)
+        keep_crash(info, &thread, &bt);
         crate::report::crash(&format!("{info}\n{bt}"));
         let text = format!("thread '{thread}' {info}");
         if let Ok(mut l) = LOG.try_lock() {
@@ -141,6 +143,39 @@ pub fn start() {
         }
         let shown = std::env::var("RUST_BACKTRACE").is_ok_and(|v| v != "0");
         to_terminal(&if shown { format!("{text}\nstack backtrace:\n{bt}\n") } else { format!("{text}\n") });
+    }));
+}
+
+/// A panic kept as a crash report (`crashfile`): its file written before
+/// anything else the hook does.
+fn keep_crash(info: &std::panic::PanicHookInfo, thread: &str, bt: &std::backtrace::Backtrace) {
+    let now = SystemTime::now();
+    let when = now.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let mut facts = crate::crashfile::facts(format!("{} UTC", stamp(now)));
+    facts.push(("thread", thread.to_string()));
+    let place = info.location().map_or(String::new(), |l| format!("{}:{}:{}: ", l.file(), l.line(), l.column()));
+    let text = crate::crashfile::compose(&facts, &format!("{place}{}", crate::crashfile::payload_text(info.payload())), &bt.to_string());
+    let window = WINDOW.load(Ordering::Relaxed);
+    let name = if window > 1 { format!("{}-w{window}-{when}", stamp(now)) } else { format!("{}-{when}", stamp(now)) };
+    if let Some(p) = crate::crashfile::write(&name, &text)
+        && let Ok(mut l) = LOG.try_lock()
+    {
+        push_line(&mut l, &format!("[eqoa] crash kept for the server: {}", p.file_name().and_then(|n| n.to_str()).unwrap_or("")));
+    }
+}
+
+/// The panic hook of a run without the log (`eqoa play`, the scripts' way
+/// in): the crash kept as `start`'s keeps it (`crashfile`), then the
+/// default hook's message.
+pub fn keep_crashes() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if CAUGHT.with(|c| c.get()) > 0 {
+            return;
+        }
+        let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
+        keep_crash(info, &thread, &std::backtrace::Backtrace::force_capture());
+        default(info);
     }));
 }
 
@@ -373,7 +408,7 @@ pub fn close() {
 }
 
 fn version() -> String {
-    crate::update::COMMIT.map_or_else(|| "local".to_string(), |c| format!("dev-{}", &c[..c.len().min(7)]))
+    crate::fork_ext::version::current()
 }
 
 fn channel() -> &'static str {

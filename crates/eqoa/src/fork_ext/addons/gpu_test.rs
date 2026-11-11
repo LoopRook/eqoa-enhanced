@@ -183,8 +183,13 @@ fn forge_gpu_pinned_grid_and_texture_fixture() {
                 .any(|p| p[0] < 40 && p[1] > 220 && p[2] < 40),
             "texture fixture must render green RGBA pixels"
         );
-        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/forge-spike-grid.png");
+        let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target")
+            });
+        std::fs::create_dir_all(&target_dir).unwrap();
+        let out = target_dir.join("forge-spike-grid.png");
         let mut png = png::Encoder::new(std::fs::File::create(&out).unwrap(), width, height);
         png.set_color(png::ColorType::Rgba);
         png.set_depth(png::BitDepth::Eight);

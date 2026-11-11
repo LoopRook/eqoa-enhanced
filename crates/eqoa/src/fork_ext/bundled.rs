@@ -22,7 +22,16 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub const PACKAGES: &[&str] = &["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"];
+pub const PACKAGES: &[&str] = &[
+    "wereoxxs_ui",
+    "arpg_ui",
+    "avoids_modern_ui",
+    "eqoa_example_hearts",
+    "eqoa_stats_box",
+    "eqoa_target_of_target",
+    "eqoa_mana_bars",
+    "eqoa_hud_numbers",
+];
 
 #[derive(Clone, Copy, Debug)]
 pub struct BundledFile {
@@ -41,6 +50,81 @@ pub struct InstallResult {
 }
 
 pub const EMBEDDED_FILES: &[BundledFile] = &[
+    BundledFile {
+        path: "eqoa_example_hearts/mod.json",
+        package: "eqoa_example_hearts",
+        data: include_bytes!("../../../../bundled-mods/eqoa_example_hearts/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_example_hearts/main.lua",
+        package: "eqoa_example_hearts",
+        data: include_bytes!("../../../../bundled-mods/eqoa_example_hearts/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_example_hearts/README.md",
+        package: "eqoa_example_hearts",
+        data: include_bytes!("../../../../bundled-mods/eqoa_example_hearts/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_stats_box/mod.json",
+        package: "eqoa_stats_box",
+        data: include_bytes!("../../../../bundled-mods/eqoa_stats_box/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_stats_box/main.lua",
+        package: "eqoa_stats_box",
+        data: include_bytes!("../../../../bundled-mods/eqoa_stats_box/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_stats_box/README.md",
+        package: "eqoa_stats_box",
+        data: include_bytes!("../../../../bundled-mods/eqoa_stats_box/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_target_of_target/mod.json",
+        package: "eqoa_target_of_target",
+        data: include_bytes!("../../../../bundled-mods/eqoa_target_of_target/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_target_of_target/main.lua",
+        package: "eqoa_target_of_target",
+        data: include_bytes!("../../../../bundled-mods/eqoa_target_of_target/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_target_of_target/README.md",
+        package: "eqoa_target_of_target",
+        data: include_bytes!("../../../../bundled-mods/eqoa_target_of_target/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_mana_bars/mod.json",
+        package: "eqoa_mana_bars",
+        data: include_bytes!("../../../../bundled-mods/eqoa_mana_bars/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_mana_bars/main.lua",
+        package: "eqoa_mana_bars",
+        data: include_bytes!("../../../../bundled-mods/eqoa_mana_bars/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_mana_bars/README.md",
+        package: "eqoa_mana_bars",
+        data: include_bytes!("../../../../bundled-mods/eqoa_mana_bars/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_hud_numbers/mod.json",
+        package: "eqoa_hud_numbers",
+        data: include_bytes!("../../../../bundled-mods/eqoa_hud_numbers/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_hud_numbers/main.lua",
+        package: "eqoa_hud_numbers",
+        data: include_bytes!("../../../../bundled-mods/eqoa_hud_numbers/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_hud_numbers/README.md",
+        package: "eqoa_hud_numbers",
+        data: include_bytes!("../../../../bundled-mods/eqoa_hud_numbers/README.md"),
+    },
     BundledFile {
         path: "arpg_ui/arpg_ui.lua",
         package: "arpg_ui",
@@ -744,11 +828,20 @@ mod tests {
     fn test_embedded_files_match_bundled_mods_directory() {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let bundled_dir = manifest_dir.join("../../bundled-mods");
-        assert!(bundled_dir.is_dir(), "bundled-mods directory must exist at {}", bundled_dir.display());
+        assert!(
+            bundled_dir.is_dir(),
+            "bundled-mods directory must exist at {}",
+            bundled_dir.display()
+        );
 
         let mut disk_files = HashMap::new();
         for entry in walk_dir(&bundled_dir) {
-            let rel = entry.strip_prefix(&bundled_dir).unwrap().to_str().unwrap().replace('\\', "/");
+            let rel = entry
+                .strip_prefix(&bundled_dir)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .replace('\\', "/");
             if rel == "SOURCE.txt" {
                 continue;
             }
@@ -827,12 +920,29 @@ mod tests {
         let config_dir = temp.join("config");
 
         let res = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
-        assert_eq!(res.packages_extracted, vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"]);
+        assert_eq!(
+            res.packages_extracted,
+            vec![
+                "wereoxxs_ui",
+                "arpg_ui",
+                "avoids_modern_ui",
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
+            ]
+        );
         assert!(res.files_extracted >= 50);
 
         assert!(mods_dir.join("wereoxxs_ui/wereoxxs_ui.lua").is_file());
+        assert!(mods_dir.join("eqoa_example_hearts/main.lua").is_file());
         assert!(mods_dir.join("arpg_ui/arpg_ui.lua").is_file());
-        assert!(mods_dir.join("avoids_modern_ui/avoids_modern_ui.lua").is_file());
+        assert!(
+            mods_dir
+                .join("avoids_modern_ui/avoids_modern_ui.lua")
+                .is_file()
+        );
         assert!(mods_dir.join("resources/gear-icon.png").is_file());
 
         let registry = load_bundled_registry(Some(&config_dir), &mods_dir);
@@ -858,9 +968,12 @@ mod tests {
         assert!(res.packages_extracted.contains(&"arpg_ui".to_string()));
 
         let arpg_content = fs::read_to_string(&arpg_file).unwrap();
-        assert_eq!(arpg_content, "CUSTOM ARPG CONTENT", "existing file must be untouched");
+        assert_eq!(
+            arpg_content, "CUSTOM ARPG CONTENT",
+            "existing file must be untouched"
+        );
 
-        // Registry records all 3 so future deletes are remembered
+        // Registry records all 4 so future deletes are remembered
         let registry = load_bundled_registry(Some(&config_dir), &mods_dir);
         assert!(registry.contains("arpg_ui"));
         assert!(registry.contains("wereoxxs_ui"));
@@ -891,7 +1004,10 @@ mod tests {
         // 3. Second run
         let res2 = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
         assert!(res2.packages_extracted.is_empty());
-        assert!(!mods_dir.join("wereoxxs_ui").exists(), "deleted package must not be reinstalled");
+        assert!(
+            !mods_dir.join("wereoxxs_ui").exists(),
+            "deleted package must not be reinstalled"
+        );
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -907,8 +1023,14 @@ mod tests {
 
         for file in EMBEDDED_FILES {
             let extracted_path = mods_dir.join(file.path);
-            let disk_bytes = fs::read(&extracted_path).unwrap_or_else(|e| panic!("failed to read {}: {e}", extracted_path.display()));
-            assert_eq!(disk_bytes.as_slice(), file.data, "byte mismatch for {}", file.path);
+            let disk_bytes = fs::read(&extracted_path)
+                .unwrap_or_else(|e| panic!("failed to read {}: {e}", extracted_path.display()));
+            assert_eq!(
+                disk_bytes.as_slice(),
+                file.data,
+                "byte mismatch for {}",
+                file.path
+            );
         }
 
         let _ = fs::remove_dir_all(&temp);
@@ -947,7 +1069,10 @@ mod tests {
 
         let res = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
         assert!(res.packages_extracted.contains(&"arpg_ui".to_string()));
-        assert!(arpg_lua.is_file(), "missing file in unrecorded package must be extracted");
+        assert!(
+            arpg_lua.is_file(),
+            "missing file in unrecorded package must be extracted"
+        );
         assert_eq!(
             fs::read_to_string(&arpg_readme).unwrap(),
             "ORIGINAL CUSTOM README",
@@ -960,7 +1085,10 @@ mod tests {
         fs::remove_file(&arpg_lua).unwrap();
         let res2 = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
         assert!(!res2.packages_extracted.contains(&"arpg_ui".to_string()));
-        assert!(arpg_lua.is_file(), "missing files inside an installed package are restored");
+        assert!(
+            arpg_lua.is_file(),
+            "missing files inside an installed package are restored"
+        );
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -973,7 +1101,10 @@ mod tests {
 
         let res = install_bundled_mods(&mods_dir, None);
         assert!(res.is_err(), "must fail when config_dir is None");
-        assert!(!mods_dir.exists() || fs::read_dir(&mods_dir).unwrap().next().is_none(), "must install nothing");
+        assert!(
+            !mods_dir.exists() || fs::read_dir(&mods_dir).unwrap().next().is_none(),
+            "must install nothing"
+        );
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -987,7 +1118,10 @@ mod tests {
 
         let res = install_bundled_mods(&bad_mods_dir, Some(&config_dir));
         assert!(res.is_err(), "must reject fallback mods folder");
-        assert!(!bad_mods_dir.exists() || fs::read_dir(&bad_mods_dir).unwrap().next().is_none(), "must install nothing");
+        assert!(
+            !bad_mods_dir.exists() || fs::read_dir(&bad_mods_dir).unwrap().next().is_none(),
+            "must install nothing"
+        );
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -1005,7 +1139,10 @@ mod tests {
 
         let res = install_bundled_mods(&mods_dir, Some(&config_dir));
         assert!(res.is_err(), "must fail when registry cannot be written");
-        assert!(!mods_dir.exists() || fs::read_dir(&mods_dir).unwrap().next().is_none(), "must install nothing");
+        assert!(
+            !mods_dir.exists() || fs::read_dir(&mods_dir).unwrap().next().is_none(),
+            "must install nothing"
+        );
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -1029,7 +1166,13 @@ mod tests {
                 created = true;
             } else {
                 let status = std::process::Command::new("cmd")
-                    .args(&["/c", "mklink", "/J", link_target.to_str().unwrap(), outside_dir.to_str().unwrap()])
+                    .args(&[
+                        "/c",
+                        "mklink",
+                        "/J",
+                        link_target.to_str().unwrap(),
+                        outside_dir.to_str().unwrap(),
+                    ])
                     .status();
                 if status.map(|s| s.success()).unwrap_or(false) {
                     created = true;
@@ -1046,7 +1189,10 @@ mod tests {
         if created {
             let res = install_bundled_mods(&mods_dir, Some(&config_dir));
             assert!(res.is_err(), "must reject symlink/junction in mods path");
-            assert!(!outside_dir.join("arpg_ui.lua").exists(), "must not write through symlink or junction");
+            assert!(
+                !outside_dir.join("arpg_ui.lua").exists(),
+                "must not write through symlink or junction"
+            );
         } else {
             eprintln!("SKIP symlink test: neither symlink nor junction could be created");
         }
@@ -1054,7 +1200,7 @@ mod tests {
         let _ = fs::remove_dir_all(&temp);
     }
     #[test]
-    fn test_from_env_setup_discovers_all_three_bundled_packages_on_fresh_mods_folder() {
+    fn test_from_env_setup_discovers_all_bundled_packages_on_fresh_mods_folder() {
         let temp = std::env::temp_dir().join(format!("eqoa-fresh-from-env-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp);
         let mods_dir = temp.join("mods");
@@ -1063,14 +1209,35 @@ mod tests {
         // Simulate from_env: fresh mods folder, install synchronously before discovery
         reset_installed_once_for_test();
         let res = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
-        assert_eq!(res.packages_extracted, vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"]);
+        assert_eq!(
+            res.packages_extracted,
+            vec![
+                "wereoxxs_ui",
+                "arpg_ui",
+                "avoids_modern_ui",
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
+            ]
+        );
 
         let discovery = crate::fork_ext::addons::discovery::discover(&mods_dir);
         let ids: BTreeSet<String> = discovery.addons.iter().map(|a| a.id.clone()).collect();
-        assert!(ids.contains("wereoxxs_ui"), "wereoxxs_ui must be discovered on first start");
-        assert!(ids.contains("arpg_ui"), "arpg_ui must be discovered on first start");
-        assert!(ids.contains("avoids_modern_ui"), "avoids_modern_ui must be discovered on first start");
-        assert_eq!(ids.len(), 3);
+        assert!(
+            ids.contains("wereoxxs_ui"),
+            "wereoxxs_ui must be discovered on first start"
+        );
+        assert!(
+            ids.contains("arpg_ui"),
+            "arpg_ui must be discovered on first start"
+        );
+        assert!(
+            ids.contains("avoids_modern_ui"),
+            "avoids_modern_ui must be discovered on first start"
+        );
+        assert_eq!(ids.len(), 8);
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -1084,18 +1251,43 @@ mod tests {
 
         // First install into folder A
         let res_a = install_bundled_mods(&mods_dir_a, Some(&config_dir)).unwrap();
-        assert_eq!(res_a.packages_extracted, vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"]);
+        assert_eq!(
+            res_a.packages_extracted,
+            vec![
+                "wereoxxs_ui",
+                "arpg_ui",
+                "avoids_modern_ui",
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
+            ]
+        );
 
         // Now install into folder B (different install location)
         let res_b = install_bundled_mods(&mods_dir_b, Some(&config_dir)).unwrap();
         assert_eq!(
             res_b.packages_extracted,
-            vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"],
+            vec![
+                "wereoxxs_ui",
+                "arpg_ui",
+                "avoids_modern_ui",
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
+            ],
             "second mods folder must get all packages even when first folder has records"
         );
         assert!(mods_dir_b.join("wereoxxs_ui/wereoxxs_ui.lua").is_file());
         assert!(mods_dir_b.join("arpg_ui/arpg_ui.lua").is_file());
-        assert!(mods_dir_b.join("avoids_modern_ui/avoids_modern_ui.lua").is_file());
+        assert!(
+            mods_dir_b
+                .join("avoids_modern_ui/avoids_modern_ui.lua")
+                .is_file()
+        );
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -1122,10 +1314,16 @@ mod tests {
         // Second run on folder A respects deletion
         let res_a2 = install_bundled_mods(&mods_dir_a, Some(&config_dir)).unwrap();
         assert!(res_a2.packages_extracted.is_empty());
-        assert!(!mods_dir_a.join("wereoxxs_ui").exists(), "deleted package in folder A must not be reinstalled");
+        assert!(
+            !mods_dir_a.join("wereoxxs_ui").exists(),
+            "deleted package in folder A must not be reinstalled"
+        );
 
         // Folder B still has its copy intact
-        assert!(mods_dir_b.join("wereoxxs_ui").is_dir(), "folder B retains its installed package");
+        assert!(
+            mods_dir_b.join("wereoxxs_ui").is_dir(),
+            "folder B retains its installed package"
+        );
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -1143,33 +1341,62 @@ mod tests {
         let flat_json = serde_json::json!({
             "installed": ["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"]
         });
-        fs::write(&registry_file, serde_json::to_string_pretty(&flat_json).unwrap()).unwrap();
+        fs::write(
+            &registry_file,
+            serde_json::to_string_pretty(&flat_json).unwrap(),
+        )
+        .unwrap();
 
-        // Run install: flat registry must be ignored on fresh folder, installing all three
+        // Run install: the old flat registry must not suppress any current package.
         let res = install_bundled_mods(&mods_dir, Some(&config_dir)).unwrap();
         assert_eq!(
             res.packages_extracted,
-            vec!["wereoxxs_ui", "arpg_ui", "avoids_modern_ui"],
+            vec![
+                "wereoxxs_ui",
+                "arpg_ui",
+                "avoids_modern_ui",
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
+            ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );
         assert!(mods_dir.join("wereoxxs_ui/wereoxxs_ui.lua").is_file());
         assert!(mods_dir.join("arpg_ui/arpg_ui.lua").is_file());
-        assert!(mods_dir.join("avoids_modern_ui/avoids_modern_ui.lua").is_file());
+        assert!(
+            mods_dir
+                .join("avoids_modern_ui/avoids_modern_ui.lua")
+                .is_file()
+        );
 
         // Verify registry file has been rewritten in the new per-folder format
         let new_registry_data = fs::read_to_string(&registry_file).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&new_registry_data).unwrap();
         let key = mods_folder_key(&mods_dir);
-        let folders = parsed.get("folders").expect("registry must have 'folders' object");
-        let recorded = folders.get(&key).expect("registry must record current folder under its SHA-256 key");
-        let recorded_arr: Vec<String> = recorded.as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect();
+        let folders = parsed
+            .get("folders")
+            .expect("registry must have 'folders' object");
+        let recorded = folders
+            .get(&key)
+            .expect("registry must record current folder under its SHA-256 key");
+        let recorded_arr: Vec<String> = recorded
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap().to_string())
+            .collect();
         assert!(recorded_arr.contains(&"wereoxxs_ui".to_string()));
         assert!(recorded_arr.contains(&"arpg_ui".to_string()));
         assert!(recorded_arr.contains(&"avoids_modern_ui".to_string()));
 
         // Ensure no raw filesystem path is stored anywhere in bundled.json
         let raw_path = mods_dir.to_string_lossy();
-        assert!(!new_registry_data.contains(raw_path.as_ref()), "bundled.json must never contain raw folder paths");
+        assert!(
+            !new_registry_data.contains(raw_path.as_ref()),
+            "bundled.json must never contain raw folder paths"
+        );
 
         let _ = fs::remove_dir_all(&temp);
     }

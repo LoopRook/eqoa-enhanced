@@ -15,17 +15,76 @@ current.
   Extended options, the updater, the 2002 disc's art on F9, Hide UI
   on H, names from farther and smaller zoomed out (and every one in a crowd, Overlapping Names Show),
   the raid list on a server that has raid groups (the user's of 2026-11-07: `raidlist`, an Extended row, on by default),
+  a raid's windows on a server that sends them (the GM Jibrish's petitions 1448 and 1451, 2026-11-10: the leader's,
+  helper's and main assist's marks in the raid list, the loot rolls' pop-up, Community > Group > Raid and the master
+  looter's menu on a corpse: `raidplay`, `rollwnd`, `masterloot`, go-eqoa-server's 0x7E42-0x7E48; on any other
+  server none of it, and the start menu the game's),
+  the pet's effects in a row under its bar on a server that sends them (the server owner's of 2026-11-09, "put the
+  buff icons under the pet name plate": `hud::pet_effects_pieces`, go-eqoa-server's 0x7E32/0x7E33, Extended > UI's
+  Pet Effects, on by default; off, or on any other server, nothing is drawn),
+  the floating numbers of the player's own figures and its pet's in a colour chosen for what made them on a server
+  that tags them (the server owner's of 2026-11-09, "we can add the number colors to extended menu": `numcolor`,
+  go-eqoa-server's 0x7E38/0x7E39 and one byte after 0x00DB's body, Extended > Number Colors; every row Default, the
+  game's own colour, until chosen),
+  a DPS meter of the player's group on a server that keeps one (the server owner's of 2026-11-10, "lets add dps meters,
+  will work solo, group, raid": `dpsmeter`, go-eqoa-server's 0x7E3A-0x7E3D, a HUD panel under the quest tracker,
+  `/dps`, Extended > Combat, off by default; off, or on any other server, nothing is drawn or asked),
   Ignore Shouts kept, Update Notices, Text Sharp or Smooth, Loading Screens Longer or Instant, Render
   Scale x1, x2 or x4 (off unless chosen), HUD Nearest or Sharp (Nearest, the game's, by default: the
   user's of 2026-10-28, "make nearest the default ... since there is a cost"; Sharp was the default
   on 2026-10-27), and the live game's duel window on a server that turns duels on (the user's of
   2026-10-29, "port the duel window to vanilla too": `duel.rs`, `duelwnd.rs`, `duelplay.rs`, read off SOE's
   final CLIENT in the Corsten save state, README "duels"), and a GM's flight on a server that turns it on (the
-  user's of 2026-11-07, "lets add a gm fly command": `walker.rs`, never in `vi`), and the combat record's window on a
+  user's of 2026-11-07, "lets add a gm fly command": `walker.rs`, never in `vi`), and a jump on a server that offers
+  one (the user's of 2026-11-09, "lets add jump to the game": go-eqoa-server's `world.jump`, 0x7E28; `walker.rs` and
+  `jump.rs`, never in `vi`; Space (and V), a Controls row, the attack on G with Space still the attack's where it makes no
+  jump; others in the air drawn at their height there, their fall in by the top and their landing played), and the combat record's window on a
   server that keeps one (the user's of 2026-11-07, "lets add a combat record for pvp and duels to the menu": Character >
   Combat Record, `record.rs`, `recordplay.rs`, the server's rows by 0x7E20/0x7E21), and PCSX2's texture packs and
   texture dumps natively (the user's of 2026-11-08, "one pack works in both": Extended > Textures, both off unless
-  chosen, `texpack.rs`)).
+  chosen, `texpack.rs`), and Dynamic Lighting (the user's of 2026-11-08, phase 1: Extended > Lighting, off unless chosen;
+  `render::lit`, `lights.rs`; off it is the PS2's light exactly, every test and oracle unchanged, and `vi` untouched), and
+  Ambient Occlusion (the user's of 2026-11-08, "lets add ambient occlusion": Extended > Lighting, off unless chosen;
+  `render::ao`, screen-space between `draw`'s opaque and blended passes, run only in the draw `prepare` readied; off
+  there is no pass at all, the picture byte for byte the game's), and capes on a server that has them
+  (the server owner's of 2026-11-08: "lets add a new equip slot for heirloom server only. capes for all. there
+  are many capes we can borrow from for various styles": `cape.rs`, go-eqoa-server's offer 0x7E25 and its lists
+  0x7E26/0x7E27; the disc's own capes cut out of their bodies and fitted to the wearer's skeleton; with none
+  worn, or on any other server, nothing is made or drawn), and a pack and a bank of 100 on a server that offers them (the
+  server owner's of 2026-11-09: "lets increase inventory and bank space to 100": go-eqoa-server's offer 0x7E29 and the sizes
+  in force before each dump 0x7E2A, `inventory::pack_cap`/`bank_cap`; every list's window takes them, CLIENT's 40 everywhere
+  else; a merchant's wares, a corpse and the trade's offers stay the game's), and the map and the quest helper (the user's of
+  2026-11-09, "also add the map and quest helper we had in a former update", back from before the
+  2026-10-27 strip: Extended > Map, every row on by default; the map on M with its XP camps, coaches, routes,
+  town names and the community's markers (suggested from the map, accepted by a GM, the list asked of
+  eqoaclassic.com on any server), the waypoints and the group's waypoint, the minimap on N; the quest marks on
+  the map and the minimap and the quest tracker from a server that sends them, else the client's own quest
+  guide's, labelled "(guide)"; the Map and the Quest Helper off are the game without them, exactly. The Stats
+  Box, others' mana bars and Target of Target stay out; the owner's "they are everywhere" the same day: the
+  minimap's rim keeps only the player's own steps' "?", a "!" only where it lies, and the server marks a quest's
+  name once near the player's level; and a GM's Ctrl+click on the map travels there, offered by go-eqoa-server
+  to a GM's client alone, 0x7E34/0x7E35); the map's list of places, any world or town shown from the player's
+  own disc, and the minimap inside a building, cave or dungeon (players' petitions 1479 and 1494, 2026-11-11:
+  `map::places`, `map::indoor`, the floors under the ceiling as FrontiersForge's minimap drew them), and
+  Options > Interface's Profanity Filter told to a server that asks (the GM Jibrish's petition 1490:
+  go-eqoa-server's 0x7E60; the filter is the server's, on at every login)).
+  `render::lit`, `lights.rs`; off it is the PS2's light exactly, every test and oracle unchanged, and `vi` untouched), and Sun
+  Shadows (2026-11-08: Extended > Lighting, off unless chosen, drawn only with Dynamic Lighting; `render::sunshadow`; off, every
+  frame byte for byte as before, on Vulkan and GL)).
+  there is no pass at all, the picture byte for byte the game's), and a server's own races' customisation on a server
+  that sends it (the user's of 2026-11-08, "lets add char customization to the new races": `raceopts.rs`,
+  `net::raceopts`, `render::recolor`, README "A server's race's own customisation"; the options are the server's,
+  the parts' triangles too; every row's first step is the body as it is, byte for byte), and an NPC's body in a
+  server's tint on a server that names one (the server owner's of 2026-11-10, Yhafiran "the black and green oriental
+  dragon" on the disc's green one: `npctint.rs`, `net::npctint`, go-eqoa-server's 0x7E3E-0x7E40; untinted, the body
+  byte for byte as before), and a monster's name and level in the target's details box on a server that offers it (the GM
+  Jibrish's petition 1459, 2026-11-10, "This should ONLY show the monsters name and level, nothing else": Q's talk sent
+  as ever, the server's answer 0x7E4E drawn as CLIENT draws a pet's for 3 s or while Q is held, `Play::mob_info_shown`,
+  go-eqoa-server's `world.mob_info`, 0x7E4C-0x7E4E; on any other server, or a monster that talks, the game's), and
+  item links in chat on a server that offers them (the GM Jibrish's petition 1463, 2026-11-10: the item menu's Link Item
+  and a Shift+click put an item in the chat line as a purple unit, a link in the chat box opens a window of the item at
+  the top middle, two at most, R2 held walks the links: `itemlink.rs`, `linkplay.rs`, `net::itemlink`, go-eqoa-server's
+  0x7E4F-0x7E53; Extended > Chat > Item Links, on by default; off, or on any other server, plain names, the game's)).
   A new client-side addition is the user's call: ask first. Sharp filtering is for the 2D layer and
   the text only: the world's textures are drawn smooth, as the game filters them (the user,
   2026-10-27, after a Crisp row for them: "world textures cant render proper without smooth. so
@@ -173,6 +232,11 @@ current.
   real GPU without a presentable display (here: `DISPLAY=:99`, the Xvfb, whose Vulkan has no DRI3);
   `EQOA_QUIT=s`, `EQOA_WALK` script a run. A renderer change is held to `shot` PNGs byte for byte
   (`EQOA_HOUR` pinned; a shot's layers scroll by its script time).
+- Dynamic Lighting's lights of the moment (spells', held items', fiery creatures') are held from frame to
+  frame (`lights::Moment`) and the choice among all the lights is eased (`lights::Chooser`): no light may
+  come, go or change in a frame (petition 1321: each frame's own, out of a few particles, flashed up to 18
+  times a second; photosensitivity guidance, WCAG 2.2's 2.3.1, allows 3). `lights::tests::no_spell_visual_flashes`
+  holds every visual on the disc to it; `survey_spell_flashes` (`--ignored --nocapture`) measures them.
 - The `vi` structs are `#[repr(C)]` in the EE layout because the oracle compares raw bytes; keep it that way while ports are being proven. Later (not urgent): native runtime types beside them, converted at the edges, the layout types kept for oracle tests.
 - `ee`'s adder has the EE's one guard bit (PCSX2's recompiler, `FPU_ADD_SUB`); go-eqoa-vi measured through
   the tracer's `call`, which runs PCSX2's INTERPRETER (every bit kept): that adder is `ee::interp`.
@@ -202,6 +266,11 @@ current.
   in a page; `EQOA_PAD_TRACE=1` / `?padtrace`; `EQOA_GLYPHS=1` prints the button glyphs a frame drew.
   A button pressed and let go between two frames reaches the game (`input::Latch`, every source but XInput):
   a new source keeps its presses through it.
+  A d-pad that is a hat (third-party PS3 pads) comes from gilrs three ways, OR'd (`input::GilrsRead`: its d-pad
+  buttons, its DPadX/DPadY axes, the hat's own codes where a mapping names it not), and in a page on one axis or two
+  (`padmap::Dpad`, learned per pad); a controller no mapping knows reads by number (`bit::NUMBERED`). Test a pad
+  natively with a uinput clone and `SDL_GAMECONTROLLERCONFIG` for gilrs's mapping cases; a bug report's note says
+  each controller and how it is read (`input::note`).
   A DualSense is plugged in here and gilrs drives its motors: rumble is as real as the speakers. `eqoa rumble` runs each controller's motors through the game's path;
   `EQOA_RUMBLE_TEST=<ms>` casts a vibrating spell effect on the player in a scripted run.
   The local server spawns a character at a random heading each login, so click by name, not pixel.
@@ -241,10 +310,27 @@ current.
   reads a server's files reads them there (`servers::file`, `servers::words`), never another server's. Test it
   against a patch port of one's own (go-eqoa-server's 7000, `EQOA_PATCH_PORT`) with `EQOA_CONFIG` under a scratch
   directory; Sandstorm's port only read, and never its login.
+- A server's own worlds (`serverworlds`, README "A server's own worlds"): one composer for both builds,
+  reading through a `Disc` and writing through a `Sink` a zone's record at a time (`compose_into`); natively
+  into a `Vec` written to the cache, in a page in a worker into OPFS (`web::worlds`, `web/worlds.js`), never
+  the whole world in memory. A change to the composer is one to go-eqoa-server's `Compose` too (the CRC).
+  A character played while they are being built waits for them only when the server names it (0x7E54,
+  `Session::pick_needs_worlds`, `pregame::client`'s `pick_waits`: its login is placed by what the client
+  holds), natively as in a page; a page holds every character only for a server that never says. One that
+  goes in before the worlds' list is in loses the rest with the lobby connection: the session asks for it
+  again at the promotion, and the worlds are built while the game is played. An answer (0x7E31) sent between
+  the pick and the promotion is told again on the game connection (`worlds_retell`): the server leaves the
+  lobby connection's packets alone once it has promoted.
 - The browser build (`web/`, README "In a browser"): `web/build.sh`, then `web/drive.py` (headless
   Chromium over the DevTools protocol, the disc image handed to the page's file input). Platform
   code goes behind `net::session::Datagrams`, `net::auth::Exchange`, `iso::Source`/`iso::Sparse`
   and `crates/eqoa/src/web/`; std's `Instant` panics in a browser, so clocks are `web_time`'s.
+  wgpu's GL backend is never told the browser took its WebGL2 context away: `web::watch_webgl`
+  raises the notice and each event loop ends on `web::graphics_lost` in its window events (a new
+  loop does the same), else every frame's uploads are held until the heap runs out. What WebGL2
+  compiles (naga's GLSL ES 3.00, no `GL_EXT_texture_shadow_lod`) no native test runs:
+  `lightshadow::tests::webgl2_compiles_every_module` writes it; a lighting feature a WebGL2 refuses
+  is left off (`render`'s `guarded`), never a panic.
 - A build is `web/dist/v/<build>/`, never changed under its name (the host serves it immutable);
   only the page and `version.json` are revalidated, and `web/deploy.sh` publishes them in that
   order, after the build. Every file a page loads must be in its build (a new one goes into
@@ -265,8 +351,16 @@ current.
   Support's request form on Bug Report (`Play::open_bug_report`), and each petition the player files
   (the form, a typed `/bug` or `#bug`) goes after the client's note (0x7E0F, `bugnote.rs`: build,
   platform, graphics, frame rate, where it shows the player and its target; one message, at most
-  1,000 bytes; never an account name, an address or a path). Nothing goes unless the player files
-  one, and nothing to a server that made no offer. The log stays on the player's
+  1,000 bytes; never an account name, an address or a path). Support's forms hold as many characters
+  as the offer's second u32 says the server takes (`Session::petition_text`, at most 2,047, petition
+  1300; none said, the disc's 511): a longer request goes in DRDP's pieces of 1,300 bytes, which only
+  a server that says so puts back together (go-eqoa-server since 2026-11-08). Nothing goes unless the player files
+  one, and nothing to a server that made no offer. A crash is the one report made for the player (the server owner,
+  2026-11-11, "we may need to add crash reports back"): `crashfile` keeps a panic as it happens (natively
+  `crashes/` in the config directory, from `logfile`'s hook and `eqoa play`'s; in a page `eqoa.crashReport`, or an
+  older page's `eqoa.lastCrash` line) and sends each kept to a server that offers to take them (go-eqoa-server's
+  0x7E64-0x7E66), which files it as a petition, Bug Report / Crash; it is let go at the answer. No path of the
+  player's goes (`crashfile::scrub`). A debug build's `EQOA_CRASH_TEST=<ms>` panics on purpose. The log stays on the player's
   machine, theirs to hand on: never log a credential. Natively stderr goes through the log's pipe
   (`logfile::start`, `eqoa boot` only): anything that starts another program in this one's place
   puts it back first (`logfile::restore_stderr`), or the new one inherits a pipe nothing reads, and

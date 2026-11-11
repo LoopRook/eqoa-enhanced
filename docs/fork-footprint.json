@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "reviewed_base": "8435f2c8a00c631d716771f8189fa0011a1fbf50",
-  "review_state": "Upstream sync 2026-11-07 through eb5916b (AGPL relicence). Re-based from b8e02cd; render/ui.rs takes upstream's text/text_scaled (+86/-3); NOTICE added as a shared path; bindpage/binds/hud/options/play raised to measured for the union with upstream's raid list, chat selection, macro keys and bug-report offer. Cargo manifests now carry upstream's AGPL-3.0-or-later. 2026-11-07 private repo retired: the live shard compatibility code (session.rs client check, s2.rs device-block signature, net sha2) is now public source. Official releases build and publish from this repository's tags (official-release.yml). 2026-11-08 sync to 72a7d48 (17 commits: combat record, server races at creation, /bug form, raid power, spell book scrolling): budgets unchanged, footprint PASS.",
+  "reviewed_base": "a3cedec7d8bb2688cf8ed56d34a280f4a459b0ef",
+  "review_state": "Upstream sync 2026-11-07 through eb5916b (AGPL relicence). Re-based from b8e02cd; render/ui.rs takes upstream's text/text_scaled (+86/-3); NOTICE added as a shared path; bindpage/binds/hud/options/play raised to measured for the union with upstream's raid list, chat selection, macro keys and bug-report offer. Cargo manifests now carry upstream's AGPL-3.0-or-later. 2026-11-07 private repo retired: the live shard compatibility code (session.rs client check, s2.rs device-block signature, net sha2) is now public source. Official releases build and publish from this repository's tags (official-release.yml). 2026-11-08 sync to 72a7d48 (17 commits: combat record, server races at creation, /bug form, raid power, spell book scrolling): budgets unchanged, footprint PASS. 2026-11-08 Round 2: owner approved play.rs +4 (755 to 759) for neutral iteration, begin/end event capture, and logical text observation; combat reuses its existing RGB-extended call. Viewer controller observations fit its existing budget. 2026-11-09 Nightly labels: logfile +9/-1 (one one-line label swap) and update.rs +4/-4 (one test-line skip for the non-dated Unreleased section). Sync 2026-11-09: owner combine decision, map restoration reconciled; explicit shared budget reasons recorded per file. Round 2.5 (2026-11-10): preserve options categories/settings-defaults hook corrections; classify the map family as shared, delete ten obsolete budgets and tighten every retained maximum to its measured value. Newly classified map entries expose existing code, not new allowance for edits. Sync 2026-11-10: merged upstream 82e64c8 (77 commits); kept upstream options/touch/HUD/protocol additions and appended fork pages. Removed duplicate GM travel method/test and moved circular-rim geometry to fork_ext. No shared-file budgets increased. Second batch 2026-11-10: 18 more upstream commits through 5d54c0c (raid windows/marks, hat D-pad and WebGL2 guards); keep upstream changes with existing HUD/input/report hooks. No budgets increased. Sync 2026-11-11: merged upstream a3cedec (41 commits: indoor minimap, places list, crash sender 0x7E64-66, item links, mercenary name colours, Hide Look); reviewed_base moved to a3cedec. crashfile.rs budget +1/-1 (the send-boundary Enhanced label hook) and +1 more for the test-only #[path] line (fork-owned crash-folder tests); play.rs deletions 61 to 62 (the Support note wrapper, +1/-1); two fork-only duplicate comment blocks removed from net/session.rs (play.rs's stray doc comment is upstream's own at a3cedec and stays). The fork's local crash reports moved to <config>/enhanced-crashes/ (migrated once) so upstream's kept-report sender never sees them.",
   "fork_owned": [
     "AGENTS.md",
     ".gitattributes",
@@ -19,18 +19,12 @@
     "crates/eqoa/resources/map-data/**",
     "crates/eqoa/resources/app-icon/**",
     "crates/eqoa/resources/map-ui/**",
-    "crates/eqoa/src/map/**",
     "crates/eqoa/src/questguide/**",
-    "crates/eqoa/src/groupmark.rs",
-    "crates/eqoa/src/mapsuggest.rs",
     "crates/eqoa/src/statbox.rs",
-    "crates/eqoa/src/tracker.rs",
     "crates/eqoa/src/fork_ext/**",
     "crates/eqoa/src/fork_ext/report_core.rs",
     "crates/eqoa/src/report_policy.rs",
     "crates/eqoa/src/report_policy_transport_tests.rs",
-    "crates/render/src/map.rs",
-    "crates/render/src/map.wgsl",
     "crates/render/tests/map_circle.rs",
     "crates/esf/tests/terrain_alone.rs",
     "tools/build-map-preview.ps1",
@@ -54,22 +48,25 @@
     ".github/workflows/official-release.yml",
     "tools/official_release.py",
     "tools/test_official_release.py",
+    "tools/dev_release.py",
+    "tools/test_dev_release.py",
+    ".github/workflows/enhanced-dev.yml",
     "tools/sync_upstream.py",
     "tools/test_sync_upstream.py"
   ],
   "shared": {
     ".gitignore": {
-      "added": 6,
+      "added": 7,
       "deleted": 0,
-      "reason": "Fork-local generated output and scratch configuration exclusions."
+      "reason": "Fork-local generated output and scratch configuration exclusions. 2026-11-09 (owner-approved +1): *.stackdump, so a Git Bash tool's crash note in a checkout cannot fail the footprint check."
     },
     "Cargo.lock": {
-      "added": 154,
+      "added": 153,
       "deleted": 3,
       "reason": "Reviewed native Lua 5.1 and Dear ImGui 0.18 spike dependency resolution, including rustc-hash version disambiguation; license metadata follows upstream (AGPL-3.0-or-later since ab32f96). sha2 for the live shard client check (formerly private-only, published 2026-11-07)."
     },
     "crates/eqoa/Cargo.toml": {
-      "added": 9,
+      "added": 7,
       "deleted": 1,
       "reason": "Reviewed native-only mlua and Dear ImGui spike dependencies, Win32_System_Com for Shell known-folder CoTaskMemFree, plus existing fork/release settings; license metadata follows upstream (AGPL-3.0-or-later since ab32f96)."
     },
@@ -79,29 +76,24 @@
       "reason": "One hook into fork_ext/app_icon_ico for the owner-supplied program icon: stage the chosen .ico in OUT_DIR and feed its images to the unchanged SIZES/dib/ico/resources path. Stack and linker behavior unchanged."
     },
     "crates/eqoa/src/bindpage.rs": {
-      "added": 20,
-      "deleted": 20,
-      "reason": "Restored and map input settings rows. Sync 2026-11-07: upstream's macro-key tests use 'y' because the fork binds 'g' to the map's group waypoint (+4/-4)."
+      "added": 10,
+      "deleted": 5,
+      "reason": "round 3: one hook so mod-owned keys show on Controls; offset by stage C removing the stats_box row (binds.rs) and the hardcoded B key (viewer.rs)"
     },
     "crates/eqoa/src/binds.rs": {
-      "added": 100,
-      "deleted": 87,
-      "reason": "Restored/map controls and saved binding defaults. Sync 2026-11-07: upstream's macro and alias tests use 'y' for the same reason (+7/-7)."
+      "added": 55,
+      "deleted": 38,
+      "reason": "Restored/map controls and saved binding defaults. Sync 2026-11-07: upstream's macro and alias tests use 'y' for the same reason (+7/-7). Round 2.5 review fix (MiniMax H1): upstream's a_layout_with_the_maps_rows_reads_them is restored verbatim plus one setup-hook line, so deletions fall 54 to 38 and the hook calls add 7. Round 3 Stage C removes stats_box row, lowering added lines from 62 to 55."
     },
-    "crates/eqoa/src/client_image.rs": {
-      "added": 10,
-      "deleted": 0,
-      "reason": "Map theme font/image resources."
-    },
-    "crates/eqoa/src/hideui.rs": {
-      "added": 3,
-      "deleted": 3,
-      "reason": "Restored map and tracker visibility."
+    "crates/eqoa/src/crashfile.rs": {
+      "added": 2,
+      "deleted": 1,
+      "reason": "Sync 2026-11-11: send-boundary hook prefixes every native/browser/legacy crash report with fork-owned Enhanced identity; upstream persistence, wire protocol and tests retained. Fix round: one test-only #[path] line loads fork_ext/crashfile_dirs_tests.rs (it needs crashfile's private files_in/pending_in/write_in/answered_in; proves the fork's local crash folder and upstream's never mix)."
     },
     "crates/eqoa/src/hud.rs": {
-      "added": 316,
-      "deleted": 15,
-      "reason": "Existing Enhanced HUD plus a local report button rectangle hook and Pick variant; drawing implementation lives in fork_ext/report_core.rs. Review follow-up adds +6/-3 for the restored Report pick assertion, 28px atlas fixture and displaced-position negative control. Sync 2026-11-07: the fork's member gauges move inside upstream's group-only branch beside the raid list (+1/-1)."
+      "added": 52,
+      "deleted": 14,
+      "reason": "Existing Enhanced HUD plus a local report button rectangle hook and Pick variant; drawing implementation lives in fork_ext/report_core.rs. Round 3 Stage C removes hardcoded native Stats Box, ToT, and Mana Bars drawing, lowering added lines from 264 to 52 and deletions from 43 to 14."
     },
     "crates/eqoa/src/icon.rs": {
       "added": 4,
@@ -113,35 +105,25 @@
       "deleted": 3,
       "reason": "Map controls and focus/input behavior."
     },
-    "crates/eqoa/src/lod.rs": {
-      "added": 9,
-      "deleted": 8,
-      "reason": "Restored map terrain observation."
-    },
     "crates/eqoa/src/main.rs": {
-      "added": 33,
+      "added": 6,
       "deleted": 0,
       "reason": "Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged."
     },
     "crates/eqoa/src/options.rs": {
-      "added": 41,
-      "deleted": 41,
-      "reason": "Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. Owner-approved defaults export adds eight regression setup/assertion lines for the 64/650 defaults and retail-minimum controls. Sync 2026-11-07: upstream's Raid List row sits in Map & Quests (UI already holds six, PAGE_MOST stays 6); its walk-test lines move with it (+5/-5). Sync 2026-11-08: upstream's Textures page goes after Map & Quests and Mods & Addons (index 9, so the web build's split_at keeps the fork pages); its row-doc, array lengths, split_at and walk-test page numbers move with it (+5/-5). Refactor/fork-options-rows: the fork's rows, category, change/value_text arms and walk-test steps moved into fork-owned fork_ext/options.rs, leaving only hook calls and page references here (+41/-41)."
+      "added": 21,
+      "deleted": 13,
+      "reason": "Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. Owner-approved defaults export adds eight regression setup/assertion lines for the 64/650 defaults and retail-minimum controls. Sync 2026-11-07: upstream's Raid List row sits in Map & Quests (UI already holds six, PAGE_MOST stays 6); its walk-test lines move with it (+5/-5). Sync 2026-11-08: upstream's Textures page goes after Map & Quests and Mods & Addons (index 9, so the web build's split_at keeps the fork pages); its row-doc, array lengths, split_at and walk-test page numbers move with it (+5/-5). Refactor/fork-options-rows: the fork's rows, category, change/value_text arms and walk-test steps moved into fork-owned fork_ext/options.rs, leaving only hook calls and page references here (+41/-41). Sync 2026-11-09: Upstream restored IDs 41?45 overlap existing Mana Bars 42. Route map parts and masters through owned rows (existing IDs retained; new 1054/1055), retain six-row pages and put Textures last on web. Stock map/UI walk assertions move to the owned fork walk, retaining Lighting/Texture Folder tests in place. +1 for the new owned master-category reference; deletions remove the conflicting stock rows/arms and relocated assertions. New upstream unique-ID test uses the combined registry, and its retail-boundary fixture explicitly selects 24/100 rather than Enhanced defaults. Round 2.5 review fix (MiniMax H2/M1): upstream walk and table tests restored verbatim; +3/-2 net for the restored text and one allow(dead_code) on the unused stock row table."
     },
     "crates/eqoa/src/play.rs": {
-      "added": 755,
-      "deleted": 53,
-      "reason": "Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus, live esf::Library icon provider hook, F9 art_changed icon cache drop, and creature journal discovery recording hook in map_frame; implementation in fork_ext and map. Trimmed to measured upstream diff in the b5e6310 review follow-up. Integration 2026-11-03 adds the R2 chat-history key tap and the mode-33 ability-bar exception (one rewritten stock condition line). The existing frame_library line forwards the walker in place for the fork-owned report snapshot. Defaults export explicitly selects retail slots/distance in two existing tests (+2/-1); production gameplay unchanged. Sync 2026-11-07: re-measured on eb5916b; the fork's test Play literal carries upstream's new last_pos field (+1)."
+      "added": 278,
+      "deleted": 62,
+      "reason": "Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus... Round 3 Stage C removes native Stats Box, ToT, and Mana Bars fields, lowering added lines from 381 to 278 and deletions from 62 to 61. Sync 2026-11-11 fix round: send_bug_note wraps its note in fork_ext::report_label::bug_note (one line changed, +1/-1 against the measured 263/62) so F3's server Support note names EQOA Enhanced; deletions return to 62."
     },
     "crates/eqoa/src/settings.rs": {
-      "added": 334,
-      "deleted": 23,
-      "reason": "Restored map/quest settings plus one adapter reference per settings hook (re-baselined at sync 2026-10-31), and one-line in-memory report cache update on save_login. Trimmed to measured upstream diff in the b5e6310 review follow-up. Owner-approved defaults export adds two default constants, updates default/serialization comparisons and invalid-input regression expectations (+12/-6)."
-    },
-    "crates/eqoa/src/touch.rs": {
-      "added": 81,
-      "deleted": 2,
-      "reason": "Reconcile Enhanced long-press release suppression with upstream full-size touch slop; preserve the map behavior and new adjustable pad size."
+      "added": 17,
+      "deleted": 1,
+      "reason": "Restored map/quest settings plus one adapter reference per settings hook... Round 3 Stage C removes hardcoded legacy HUD options (stats_box, target_of_target, mana_bars, hud_numbers, xp_details, target_hp_percent), lowering added lines from 162 to 17 and deletions from 32 to 1."
     },
     "crates/eqoa/src/ui.rs": {
       "added": 10,
@@ -149,33 +131,18 @@
       "reason": "Map UI state and input integration plus one-line pub(crate) visibility on UiAssets.surfaces for fork-owned HUD tests."
     },
     "crates/eqoa/src/viewer.rs": {
-      "added": 255,
-      "deleted": 15,
-      "reason": "Existing fork integration plus native report adapter registration and one-line input, draw, screenshot/surface hooks; preserve upstream resize and Android code."
-    },
-    "crates/esf/src/mesh.rs": {
-      "added": 9,
-      "deleted": 0,
-      "reason": "Terrain mesh lookup for restored map."
+      "added": 101,
+      "deleted": 11,
+      "reason": "Existing fork integration plus native report adapter registration and one-line input, draw, screenshot/surface hooks; preserve upstream resize and Android code. Round 3 Stage C removes hardcoded B key for stats box, lowering added lines from 123 to 102 and deletions from 13 to 11. Fix audit moves Lua preparation before native HUD drawing and submits its separately recorded overlay after the scene; the two named hooks reduce added lines to 101."
     },
     "crates/net/src/session.rs": {
-      "added": 524,
-      "deleted": 30,
+      "added": 218,
+      "deleted": 23,
       "reason": "Restored group/map/quest protocol state and upstream unanswered offers test (re-baselined at sync 2026-10-31). Live shard 0x7F53/0x7F54 client check and its test (docs/LIVE-CLIENT-COMPATIBILITY.md)."
     },
-    "crates/render/src/fans.rs": {
-      "added": 0,
-      "deleted": 0,
-      "reason": "Restored UI render behavior (re-baselined at sync 2026-10-31)."
-    },
-    "crates/render/src/lib.rs": {
-      "added": 50,
-      "deleted": 4,
-      "reason": "Restored map rendering pipeline and exports."
-    },
     "crates/render/src/ui.rs": {
-      "added": 97,
-      "deleted": 8,
+      "added": 85,
+      "deleted": 2,
       "reason": "Map circle clipping and map font rendering."
     },
     "crates/render/src/ui.wgsl": {
@@ -193,25 +160,10 @@
       "deleted": 3,
       "reason": "Animation bounds guards and negative-control regression tests."
     },
-    "crates/vi/src/ui.rs": {
-      "added": 3,
-      "deleted": 2,
-      "reason": "Restored player-facing UI behavior."
-    },
-    "release/README.txt": {
-      "added": 1,
-      "deleted": 1,
-      "reason": "Enhanced Windows bundle startup instructions."
-    },
-    "web/main.js": {
-      "added": 48,
-      "deleted": 0,
-      "reason": "Restored browser input/map bindings."
-    },
     "crates/eqoa/src/update.rs": {
-      "added": 3,
-      "deleted": 3,
-      "reason": "Fork release routing and fork-owned update notes; upstream updater mechanics unchanged."
+      "added": 4,
+      "deleted": 4,
+      "reason": "Fork release routing and fork-owned update notes; upstream updater mechanics unchanged. One test line skips Nightly's non-dated `## Unreleased` section; whats_new stays upstream's exactly."
     },
     "crates/eqoa/src/updatewnd.rs": {
       "added": 3,
@@ -219,9 +171,9 @@
       "reason": "Fork release page link with fork/vanilla UI regression assertions."
     },
     "crates/eqoa/src/logfile.rs": {
-      "added": 8,
-      "deleted": 0,
-      "reason": "Upstream logger retained around eight hook lines: initialize fork crash capture before rotation, share the exact run ID, redact/feed the ring, add Enhanced header, capture panic, flush journal on close."
+      "added": 9,
+      "deleted": 1,
+      "reason": "Upstream logger retained around eight hook lines: initialize fork crash capture before rotation, share the exact run ID, redact/feed the ring, add Enhanced header, capture panic, flush journal on close. One one-line swap replaces upstream's dev-commit log label with fork_ext::version's player-facing label: Nightly names its build commit, while Stable and local builds show VERSION. Its +1 added and +1 deleted over the previous eight-line budget is the minimum for that swap."
     },
     "crates/eqoa/src/pregame/station/api.rs": {
       "added": 65,
@@ -252,6 +204,71 @@
       "added": 13,
       "deleted": 4,
       "reason": "Live client signature (CDSS 01 02 0c 00) in the S2 device block and its test assertions (docs/LIVE-CLIENT-COMPATIBILITY.md)."
+    },
+    "crates/eqoa/src/texpack.rs": {
+      "added": 1,
+      "deleted": 1,
+      "reason": "Sync 2026-11-09 Windows CI fixture correction only: synthesize drive-qualified absolute fixture paths on Windows so upstream AppImage absolute-path and negative controls run there; production code is unchanged."
+    },
+    "crates/eqoa/src/map/chrome.rs": {
+      "added": 304,
+      "deleted": 19,
+      "reason": "Round 2.5 ownership correction: map family is shared after upstream restored it. Exact measured divergence at the reviewed base; no game code changed in this classification. New files in this family are counted in full."
+    },
+    "crates/eqoa/src/map/community.rs": {
+      "added": 10,
+      "deleted": 1,
+      "reason": "Round 2.5 ownership correction: map family is shared after upstream restored it. Exact measured divergence at the reviewed base; no game code changed in this classification. New files in this family are counted in full."
+    },
+    "crates/eqoa/src/map/journal.rs": {
+      "added": 1567,
+      "deleted": 0,
+      "reason": "Round 2.5 ownership correction: map family is shared after upstream restored it. Exact measured divergence at the reviewed base; no game code changed in this classification. New files in this family are counted in full."
+    },
+    "crates/eqoa/src/map/markers.rs": {
+      "added": 7,
+      "deleted": 5,
+      "reason": "Round 2.5 ownership correction: map family is shared after upstream restored it. Exact measured divergence at the reviewed base; no game code changed in this classification. New files in this family are counted in full."
+    },
+    "crates/eqoa/src/map/mini.rs": {
+      "added": 313,
+      "deleted": 44,
+      "reason": "Round 2.5 ownership correction: map family is shared after upstream restored it. Exact measured divergence at the reviewed base; no game code changed in this classification. New files in this family are counted in full."
+    },
+    "crates/eqoa/src/map/mod.rs": {
+      "added": 70,
+      "deleted": 10,
+      "reason": "Round 2.5 ownership correction: map family is shared after upstream restored it. Exact measured divergence at the reviewed base; no game code changed in this classification. New files in this family are counted in full."
+    },
+    "crates/eqoa/src/map/search.rs": {
+      "added": 1716,
+      "deleted": 0,
+      "reason": "Round 2.5 ownership correction: map family is shared after upstream restored it. Exact measured divergence at the reviewed base; no game code changed in this classification. New files in this family are counted in full."
+    },
+    "crates/eqoa/src/map/tests.rs": {
+      "added": 116,
+      "deleted": 0,
+      "reason": "Round 2.5 ownership correction: map family is shared after upstream restored it. Exact measured divergence at the reviewed base; no game code changed in this classification. New files in this family are counted in full."
+    },
+    "crates/eqoa/src/map/theme.rs": {
+      "added": 148,
+      "deleted": 0,
+      "reason": "Round 2.5 ownership correction: map family is shared after upstream restored it. Exact measured divergence at the reviewed base; no game code changed in this classification. New files in this family are counted in full."
+    },
+    "crates/eqoa/src/map/tool.rs": {
+      "added": 73,
+      "deleted": 3,
+      "reason": "Round 2.5 ownership correction: map family is shared after upstream restored it. Exact measured divergence at the reviewed base; no game code changed in this classification. New files in this family are counted in full."
+    },
+    "crates/render/src/map.rs": {
+      "added": 10,
+      "deleted": 2,
+      "reason": "Round 2.5 ownership correction: map family is shared after upstream restored it. Exact measured divergence at the reviewed base; no game code changed in this classification. New files in this family are counted in full."
+    },
+    "crates/render/src/map.wgsl": {
+      "added": 6,
+      "deleted": 1,
+      "reason": "Round 2.5 ownership correction: map family is shared after upstream restored it. Exact measured divergence at the reviewed base; no game code changed in this classification. New files in this family are counted in full."
     }
   },
   "immutable": [
@@ -298,27 +315,9 @@
     },
     {
       "path": "crates/eqoa/src/options.rs",
-      "name": "options CATEGORY",
-      "pattern": "\\bfork_options::CATEGORY\\b",
-      "count": 1
-    },
-    {
-      "path": "crates/eqoa/src/options.rs",
-      "name": "options QUESTS_CATEGORY",
-      "pattern": "\\bfork_options::QUESTS_CATEGORY\\b",
-      "count": 1
-    },
-    {
-      "path": "crates/eqoa/src/options.rs",
-      "name": "options UI rows",
-      "pattern": "\\bfork_options::UI\\b",
-      "count": 1
-    },
-    {
-      "path": "crates/eqoa/src/options.rs",
       "name": "options items",
       "pattern": "\\bfork_options::items\\b",
-      "count": 4
+      "count": 2
     },
     {
       "path": "crates/eqoa/src/options.rs",
@@ -438,6 +437,54 @@
       "path": "crates/eqoa/src/fork_ext/play.rs",
       "name": "throttled local report snapshot",
       "pattern": "crate::report::note_state\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/settings.rs",
+      "name": "settings defaults migration",
+      "pattern": "\\bfork_settings::migrate_defaults\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/options.rs",
+      "name": "options runtime pages",
+      "pattern": "\\bfork_options::pages\\b",
+      "count": 7
+    },
+    {
+      "path": "crates/eqoa/src/options.rs",
+      "name": "options category rows",
+      "pattern": "\\bfork_options::category_rows\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/options.rs",
+      "name": "options category legend",
+      "pattern": "\\bfork_options::category_legend\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/viewer.rs",
+      "name": "addon HUD preparation",
+      "pattern": "fork_report::prepare_addons\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/play.rs",
+      "name": "Enhanced Support note",
+      "pattern": "crate::fork_ext::report_label::bug_note\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/crashfile.rs",
+      "name": "Enhanced crash send identity",
+      "pattern": "crate::fork_ext::report_label::pending\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/viewer.rs",
+      "name": "addon overlay submission",
+      "pattern": "fork_report::submit_addons\\(",
       "count": 1
     }
   ]

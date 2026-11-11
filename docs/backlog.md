@@ -154,3 +154,103 @@ This entry records future work only; no navigation or movement behavior changes 
   shadows theirs.
 - **Smallest fix:** hide the ToT bar while it would overlap (one guard in hud.rs); moving it
   needs layout work. Leave upstream's raidlist.rs untouched.
+
+## Tab opens chat (owner, 2026-11-09)
+
+- **Report:** pressing Tab seems to open chat. Not yet known whether the cause is ours (the client's key
+  handling, or the new `eqoa` input claims from round 2) or Wereoxxs UI's own key handling.
+- **To find out:** reproduce with no mods enabled (in the upstream client Tab may already be the
+  chat/target key; check the key binds), then with only Wereoxxs, then the round 2 dev build versus
+  0.4.14. If it only happens with Wereoxxs, look at its Tab handling (input claims and text capture); if
+  it also happens with no mods, it is client behaviour and a binds question.
+- **Status:** deferred; not investigated. Note it in the round 2 live test if it shows up there.
+
+### Tab opens chat: reproduction (owner, 2026-11-09)
+
+- Tab normally targets. After pressing Enter to open chat and Enter again to close it without typing,
+  one Tab press targets and then chat opens again. Casting a spell or opening a menu seems to clear it,
+  until the Enter, Enter sequence is repeated.
+- Reads like leftover chat or text-input state after an empty close (a stale "chat is open" or key
+  capture flag that the next Tab triggers). Not yet known whether it is in the client or a mod (check
+  with no mods first, as above).
+
+## Nightly update says it is the same as Stable (owner, 2026-11-09)
+
+- **Report:** when Nightly updates, the message says it is the same as Stable, although the Nightly build
+  has newer changes.
+- **Likely cause (unchecked):** Nightly and Stable share `VERSION` (0.4.14 on develop, until the next
+  release), and the update message and "what's new" come from `FORK-UPDATE-NOTES.md`, whose newest
+  section is the last release. The updater (`update.rs`, fork `release.rs`, `EQOA_UPDATE_CHANNEL=
+  enhanced-dev`) can tell builds apart by commit, but the text shown to the player does not.
+- **To check:** which screen says it (update prompt, what's-new box, version label) and the exact
+  wording; whether the Nightly build label shows the commit; then show the build's commit and its own
+  unreleased notes section instead of repeating Stable's.
+- **Status:** deferred; not investigated.
+
+- **Tab/chat, scout result (2026-11-09):** likely Wereoxxs plus ImGui Tab navigation with one-frame-late
+  key capture (`runtime.rs`); predates round 2. Details and the smallest fix: `docs/plans/eqoa-api/tab-chat-scout.md`.
+  Queued as a fix on a branch after round 2's slowdown fix merges (same input code).
+
+
+## Server-added ability bars in bundled Forge UIs (owner, 2026-11-09)
+
+- **Status:** Deferred feature request, separate from the fixed round-2 icon-stacking regression.
+- **Current boundary:** Native `hudmenu::HudMenus` has six menu records: ability menus 0/1/4/5, items 2, weapon sets 3. The carousel order is 0,1,4,5,2,3. Expansion bit 1 and the Extended Ability Bars setting permit up to four ability bars with five regular slots each; the first menu can additionally hold four special slots (252-255), for nine entries.
+- **Inherited Forge limit:** Pinned FrontiersForge and the native adapter at both 413d1ee and current develop expose `num_bars=3`, zero-based indices 0/1 for abilities and 2 for items. Legacy snapshots cap at five/five/four slots. Menus 4/5 are omitted; the existing selected-bar clamp can highlight the item bar while an extra native ability bar is selected. This is not new in round 2.
+- **Bundled UI assumptions:** Avoids Modern UI loops `0..AbilityBar.num_bars-1`, treating bar 2 as items. Wereoxxs prepares three stock bar configs, loops bars 0..3 and reserves 3 for its separate weapon-set extension. Inflating `num_bars` alone would collide with those meanings.
+- **Requested work:** Add explicit extended bar/slot metadata and selection mapping, preserve legacy Forge stock indices, and update the bundled UIs to enumerate supported bars with independent layouts. Native `eqoa.hotbar.list()` already exposes the configured carousel with one-based indices and full native slot counts; document and verify that extended contract alongside `eqoa.abilities`, rather than inventing aliases or silently changing Forge's three-bar contract. Item and weapon-set availability must remain explicit.
+- **Acceptance:** Exercise one/two/four ability bars, special first-menu slots, items and weapon sets; distinct records/positions and correct active-bar selection after carousel changes; retain saved layouts and stock Forge compatibility. Live-test on a server that persists the extra spellbook slots. No bundled Lua rewrite is included in the live-regression fix.
+
+## Two CI jobs per push repeat each other (owner, 2026-11-09; for the Opus lead)
+
+- Every code push to `develop` starts two workflows: "Enhanced public source checks"
+  (`public-source.yml`: footprint, tools tests, workspace tests, an unstamped build, no publishing) and
+  "Development build" (`enhanced-dev.yml`: the same gates, then the stamped build, package and Nightly
+  publish). Both compile and test the workspace, so a code push costs two runners and about 15 minutes.
+- **Question:** keep `public-source.yml` as the gate for pull requests, `enhanced` and tags, and let
+  `develop` pushes rely on the Nightly's own gate? Check what else depends on the public check (branch
+  rules, release gating in `official-release.yml`) before cutting anything.
+- **Status:** deferred; release pipeline, so the Opus lead decides.
+
+## Final task before merging develop into stable (owner, 2026-11-09)
+
+Do this last, before the release that carries round 2 and the sync into `enhanced`:
+
+- **The Stable program must be named "EQOA Enhanced.exe".** The owner's 0.4.14 download is not (the ZIP's
+  program carries the old updater-style name). `tools/build_player_release.py` already maps
+  `EXE_NAMES["enhanced"] = "EQOA Enhanced.exe" (37dce3a, develop only so far). Verify on the release
+  candidate: the ZIP lists `EQOA Enhanced.exe`; a player on 0.4.14 who updates gets a working program
+  (the updater replaces whichever file is running: check what happens to the old name, the shortcut,
+  the folder's other files); Nightly stays "EQOA Enhanced - Nightly.exe"; the update asset
+  (`eqoa-enhanced-windows-x86_64.exe`) still works. Owner checks the downloaded Stable.
+- Also in that release: move `## Unreleased` in FORK-UPDATE-NOTES.md to the version's dated entry
+  (docs/RELEASING.md), and re-run the live test of Wereoxxs, Avoids Modern UI and the hearts example on
+  the release candidate.
+
+## Native capture lacks Stable's player-position fallback (Sol observation, 2026-11-09; untested)
+
+- Found while checking the ability-icon colours (those were only out of range; no regression). In the
+  eqoa native capture path (`api_capture.rs` / `native_projection.rs`), the player's position has no
+  equivalent of Stable's `self_at` fallback when no walker exists (for example before the walker is
+  ready, or in the offline fixtures). Possible effects: position reads as zero for a frame or two at world
+  entry, so range-based UI states (out-of-range tints) could flicker or read wrong briefly.
+- **To check:** at world entry and after a zone change, watch an ability bar with a target in range;
+  and add a test with no walker and a known self position. Low priority until seen in play.
+
+## Upstream AO tests fail on GPUs and on the CI runner (2026-11-09)
+
+- `crates/render/tests/ao.rs`: `the_foot_of_a_wall_darkened_and_open_ground_not` fails on untouched upstream
+  91f9e72 on the owner's RTX 3070 Ti (Vulkan and dx12) and on GitHub's Windows runner;
+  `the_same_at_freeport_as_at_the_origin` fails on the RTX but passes on the runner. All three
+  workflows now `--skip` the first (owner agreed, 2026-11-09). A worker should find out whether the
+  assertions assume a particular GPU (plain grey 127 versus 128, a factor difference of 54 against
+  a maximum of 6) and, if so, report it to upstream; then drop the skip.
+
+## Round 7 API: conflicts between mod and native key bindings (round 3 review NEW-M2)
+
+- Deferred by the lead on 2026-11-10. Round 3 retains independent mod bindings.
+- Define conflict handling across native controls and all enabled mods, including default keys,
+  rebound keys, and changes saved from either Controls section. Match native freed/swapped feedback
+  and ensure a single key press cannot unexpectedly both Jump and toggle the Stats Box.
+- Specify precedence and persistence before implementation; test both directions, multiple mods,
+  restart, disabling/re-enabling a mod, and chat/menu suppression. Do not silently steal native keys.

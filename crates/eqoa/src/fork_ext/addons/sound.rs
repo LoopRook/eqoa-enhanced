@@ -228,7 +228,9 @@ pub(crate) fn skip_without_audio_output(test: &str) -> bool {
         return false;
     }
     let msg = format!("SKIP {test}: no audio output device (MCI wave-out) present");
-    if std::env::var_os("EQOA_SOUND_NATIVE_REQUIRED").is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true")) {
+    if std::env::var_os("EQOA_SOUND_NATIVE_REQUIRED")
+        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    {
         panic!("EQOA_SOUND_NATIVE_REQUIRED: {msg}");
     }
     eprintln!("{msg}");
@@ -436,6 +438,9 @@ impl SoundBank {
 
     /// Resolves, bounds-checks, and opens a sound file. Returns a positive handle
     /// on success or `None` on failure.
+    pub(crate) fn contains(&self, id: SoundId) -> bool {
+        self.sounds.contains_key(&id)
+    }
     pub fn load_sound(
         &mut self,
         path_str: &str,
@@ -929,15 +934,63 @@ impl SoundBank {
         let resource_dirs = addon.resource_dirs.clone();
 
         let bank = owner.clone();
+        let event_owner = owner.clone();
         forge.set(
             "LoadSound",
-            lua.create_function(move |_, path: String| {
+            lua.create_function(move |lua, path: String| {
                 let mut bank = bank.borrow_mut();
-                let id = bank.load_sound(&path, &script_root, &resource_dirs);
+                let before = bank.sounds.len();
+                let mounts = lua
+                    .app_data_ref::<super::sandbox::Mounts>()
+                    .map(|m| m.clone());
+                let resolved = mounts.as_ref().map(|m| m.media(&path));
+                let id = match resolved {
+                    Some(Ok(p)) => {
+                        let _guard = match super::sandbox::lock_resource(&p) {
+                            Ok(g) => g,
+                            Err(e) => {
+                                super::native::diagnose(
+                                    lua,
+                                    "UiForge.LoadSound",
+                                    "permission_denied",
+                                    &e,
+                                );
+                                return Ok(None);
+                            }
+                        };
+                        let parent = p.parent().unwrap();
+                        bank.load_sound(&p.to_string_lossy(), parent, &[parent.to_path_buf()])
+                    }
+                    Some(Err(e)) => {
+                        super::native::diagnose(lua, "UiForge.LoadSound", "io_error", &e);
+                        None
+                    }
+                    None => bank.load_sound(&path, &script_root, &resource_dirs),
+                };
+                let uncached = id.is_none() || bank.sounds.len() > before;
+                drop(bank);
+                if uncached {
+                    let handle = match id {
+                        Some(id) => mlua::Value::UserData(super::native_media::sound_handle(
+                            lua,
+                            &event_owner,
+                            id,
+                        )?),
+                        None => mlua::Value::Nil,
+                    };
+                    super::native_events::resource(
+                        lua,
+                        "sound",
+                        handle,
+                        id.is_none()
+                            .then_some("sound decoder/backend rejected resource"),
+                    )?;
+                }
                 Ok(id.map(|id| id.as_u32()))
             })?,
         )?;
 
+        super::native_media::sound(lua, owner)?;
         let bank = owner.clone();
         forge.set(
             "PlaySound",
@@ -1411,6 +1464,7 @@ mod tests {
                 module_dirs: vec![],
                 resource_dirs: vec![script_root.clone()],
                 api: None,
+                entry_mode: Default::default(),
                 requested_capabilities: vec![],
                 initially_enabled: true,
                 mods_root: None,
@@ -1779,6 +1833,7 @@ mod tests {
                 module_dirs: vec![],
                 resource_dirs: vec![script_root.clone()],
                 api: None,
+                entry_mode: Default::default(),
                 requested_capabilities: vec![],
                 initially_enabled: true,
                 mods_root: None,
@@ -1986,5 +2041,43 @@ mod tests {
 
     fn wav_bytes_len(samples: usize) -> u64 {
         (44 + samples * 4) as u64
+    }
+    #[test]
+    #[cfg(windows)]
+    fn native_sound_release_reports_backend_failure_and_can_retry_idempotently() {
+        let dir = temp_dir("native-release");
+        std::fs::write(dir.join("silence.wav"), generate_minimal_pcm_wav(8)).unwrap();
+        let host = crate::fork_ext::addons::host::Host::new().unwrap();
+        let bank = Rc::new(RefCell::new(SoundBank::with_owner_id_and_backend(
+            700,
+            Box::new(RecorderBackend::new(vec![
+                Ok("".into()),
+                Err("close rejected".into()),
+                Ok("".into()),
+            ])),
+        )));
+        let addon = DiscoveredAddon {
+            id: "release".into(),
+            name: "release".into(),
+            entry: dir.join("main.lua"),
+            script_root: dir.clone(),
+            package_root: dir.clone(),
+            module_dirs: vec![],
+            resource_dirs: vec![dir],
+            api: None,
+            entry_mode: Default::default(),
+            requested_capabilities: vec![],
+            initially_enabled: true,
+            mods_root: None,
+        };
+        SoundBank::install_for_addon(&bank, &host.lua, &addon).unwrap();
+        host.execute("sound=assert(eqoa.sound.load('silence.wav'));local ok,e=eqoa.sound.release(sound);assert(ok==nil and e.code=='failed');assert(eqoa.sound.release(sound));assert(eqoa.sound.release(sound))").unwrap();
+        assert_eq!(bank.borrow().len(), 0);
+        assert!(
+            host.drain_logs()
+                .unwrap()
+                .iter()
+                .any(|m| m.contains("eqoa.sound.release"))
+        );
     }
 }

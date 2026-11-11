@@ -26,6 +26,9 @@
 
 mod bgm;
 mod disc;
+// a server's own worlds, built off the disc into the origin's storage
+// (`crate::serverworlds`, web/worlds.js)
+mod worlds;
 // the GM panel's spell-visual preview (`crate::fxview`, web/fxview.html)
 mod fxview;
 pub mod pad;
@@ -259,10 +262,25 @@ pub fn can_rumble() -> bool {
 /// player without the console open would see only a frame that no longer
 /// moves.
 pub fn start() {
+    // the net library's own lines (`debug_line`: a connection gone, a message
+    // not read) to the console: a page has no stderr
+    net::session::set_debug_sink(log);
     std::panic::set_hook(Box::new(|info| {
         console_error_panic_hook::hook(info);
+        keep_crash(info);
         crash("The client stopped", &info.to_string());
     }));
+}
+
+/// A panic kept as a crash report for the server, sent at the next login
+/// (`crashfile`): the page's facts, the panic's place and message, and the
+/// JavaScript stack it was raised on (the wasm functions' names in it).
+fn keep_crash(info: &std::panic::PanicHookInfo) {
+    let stack = js_sys::Reflect::get(&js_sys::Error::new(""), &JsValue::from_str("stack")).ok().and_then(|v| v.as_string()).unwrap_or_default();
+    let when = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+    let place = info.location().map_or(String::new(), |l| format!("{}:{}:{}: ", l.file(), l.line(), l.column()));
+    let text = crate::crashfile::compose(&crate::crashfile::facts(when), &format!("{place}{}", crate::crashfile::payload_text(info.payload())), &stack);
+    crate::crashfile::write_page(&text);
 }
 
 /// Update Notices (the Extended page, one setting for every window): off,
@@ -400,6 +418,55 @@ fn hooks_2002() {
     }));
 }
 
+/// How many of a cut's reads are under way at once (`cut_page`): the
+/// browser reads them together, and at most this many records wait in its
+/// memory to be taken.
+const CUT_READS: usize = 6;
+
+/// `pregame::files::cut` in a page: the bodies `ask` names cut out of its
+/// disc's resource file by the file's own directory, a slice of the image a
+/// body (a few of them read at once, each record parsed as it is taken: a
+/// fraction of a millisecond between frames, never the 148 MB file in the
+/// page's memory); a file with no directory is read whole and cut as it
+/// always was. The 2002 disc's file is found by its last part, and a 2002
+/// disc without it has none of the bodies.
+async fn cut_page(mut d: WebDisc, ask: &crate::pregame::files::CutAsk) -> crate::pregame::files::CutResult {
+    use crate::pregame::files::{Cut, Cutter, Found};
+    let name = match ask.era {
+        esf::Era::Y2002 => crate::pregame::res::name_of(&ask.path),
+        esf::Era::Frontiers => ask.path.as_str(),
+    };
+    let Some(e) = d.find(name).cloned() else {
+        return match ask.era {
+            esf::Era::Y2002 => Ok(Cut { groups: ask.groups.iter().map(|_| None).collect(), found: Found::Directory, reads: 0, bytes: 0 }),
+            esf::Era::Frontiers => Err(format!("{name}: not on the disc")),
+        };
+    };
+    let base = e.lba as u64 * iso::SECTOR;
+    if let Some(dir) = d.resource_dir(&e).await? {
+        let mut c = Cutter::new(&dir, &ask.groups);
+        let reads: Vec<(usize, u64, usize)> = c.plan().collect();
+        let mut under_way = std::collections::VecDeque::new();
+        let (mut next, mut sound) = (0, true);
+        while sound && (next < reads.len() || !under_way.is_empty()) {
+            while next < reads.len() && under_way.len() < CUT_READS {
+                let (k, off, len) = reads[next];
+                under_way.push_back((k, d.start_read(base + off, len)?));
+                next += 1;
+            }
+            if let Some((k, read)) = under_way.pop_front() {
+                let buf = read.await.map_err(err)?;
+                sound = c.put(k, js_sys::Uint8Array::new(&buf).to_vec()).is_ok();
+            }
+        }
+        if sound {
+            return Ok(c.finish());
+        }
+    }
+    let whole = d.read_at(base, e.size as usize).await?;
+    crate::pregame::files::cut_whole(whole, &ask.groups)
+}
+
 /// A test server's port from the page's address, as natively its
 /// environment variable (`pregame::port`): `?auth_port=29735` for
 /// `EQOA_AUTH_PORT`, `?game_port=`, `?patch_port=`, `?news_port=`.
@@ -513,6 +580,9 @@ async fn gfx(canvas: web_sys::HtmlCanvasElement) -> Result<viewer::PendingGfx, S
             crash("The graphics stopped", &format!("the graphics device was lost ({reason:?}): {message}"));
         }
     });
+    if info.backend == wgpu::Backend::Gl {
+        watch_webgl(&canvas);
+    }
     let mut config = surface.get_default_config(&adapter, w, h).ok_or("the surface cannot be configured")?;
     // The bytes go out as the GS's do: no sRGB encode (render::TARGET_FORMAT).
     config.format = config.format.remove_srgb_suffix();
@@ -520,6 +590,47 @@ async fn gfx(canvas: web_sys::HtmlCanvasElement) -> Result<viewer::PendingGfx, S
     let attrs = winit::window::Window::default_attributes().with_canvas(Some(canvas)).with_title("EQOA");
     let ps2_sums = render::fog16::supported(&adapter);
     Ok(viewer::PendingGfx { attrs, surface, config, device, queue, ps2_sums })
+}
+
+thread_local! {
+    /// The browser took the page's WebGL2 context away (`watch_webgl`).
+    static WEBGL_LOST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the browser took the page's WebGL2 context away: nothing drawn
+/// after it shows, and the client stops (`viewer`'s `window_event`).
+pub fn graphics_lost() -> bool {
+    WEBGL_LOST.with(std::cell::Cell::get)
+}
+
+/// A WebGL2 context the browser takes away (its graphics process restarted,
+/// a driver reset or hang, the graphics memory run out: Firefox does it
+/// where Chromium's WebGPU loses its device) draws nothing more, and wgpu's
+/// GL backend is never told: its fences never signal, so every frame's
+/// uploads were held for good, about 60 MB of the heap a second, until its
+/// 4 GB ran out a minute later and the client stopped on an `unreachable`
+/// with nothing to say why (in Firefox, `WEBGL_lose_context`: a black canvas
+/// at 30 fps, 259 MB to 4,095 MB in 70 s). The page's `webglcontextlost`
+/// says so at once and the client stops there, as a lost WebGPU device does.
+fn watch_webgl(canvas: &web_sys::HtmlCanvasElement) {
+    let lost = Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
+        if WEBGL_LOST.with(|l| l.replace(true)) {
+            return;
+        }
+        let lighting = crate::settings::client();
+        let heavy = if lighting.dynamic_lighting && (lighting.light_shadows || lighting.sun_shadows) {
+            " If it happens again, turn off Light Shadows and Sun Shadows (Options, Extended, Lighting): they ask the most of the graphics card."
+        } else {
+            ""
+        };
+        crash(
+            "The graphics stopped",
+            &format!("the browser took the game's WebGL2 context away (its graphics process restarted, the graphics driver reset, or the graphics memory ran out).{heavy}"),
+        );
+    });
+    if canvas.add_event_listener_with_callback("webglcontextlost", lost.as_ref().unchecked_ref()).is_ok() {
+        lost.forget();
+    }
 }
 
 /// Files every scene loads after its own (main.rs's `SHARED`).
@@ -592,7 +703,7 @@ pub async fn view(file: web_sys::File, args: String) -> Result<(), JsValue> {
                 if list.is_empty() {
                     return Err(format!("{name} has no models"));
                 }
-                viewer::Source::Models { list, index }
+                viewer::Source::Models { list, index, tint: None }
             }
             _ => return Err("expected [model], zone <n> or walk <n>".into()),
         };
@@ -710,6 +821,15 @@ pub async fn boot(file: web_sys::File, opts: JsValue) -> Result<(), JsValue> {
         crate::stream::set_world_opener(disc.world_opener());
         // the 2002 disc's art (`era`, F9): its reader and its ask
         hooks_2002();
+        // a server's own worlds, built off this disc into the origin's
+        // storage (`worlds`) where this browser can keep them; elsewhere the
+        // server's offer is not taken, and a character of such a world starts
+        // in its home city
+        if worlds::usable().await {
+            worlds::install(disc.file());
+        } else {
+            log("server worlds: this browser cannot keep them (no private storage for the page): a server's own world is not built here");
+        }
         let (frontiers, which) = crate::discs::describe(disc.boot().await.as_deref());
         if !frontiers {
             problem("disc", &which);
@@ -737,6 +857,24 @@ pub async fn boot(file: web_sys::File, opts: JsValue) -> Result<(), JsValue> {
                     }
                 }
                 *out.borrow_mut() = Some(r.map(|_| files));
+            });
+            slot
+        }));
+        // the bodies of a server's races, out of CHAR.ESF by its directory
+        // (`cut_page`); the 2002 disc's off the one in hand
+        let d = disc.copy();
+        crate::pregame::files::set_cutter(Box::new(move |ask| {
+            let slot: crate::pregame::files::CutSlot = Default::default();
+            let (out, d) = (slot.clone(), d.copy());
+            wasm_bindgen_futures::spawn_local(async move {
+                let r = match ask.era {
+                    esf::Era::Frontiers => cut_page(d, &ask).await,
+                    esf::Era::Y2002 => match disc_2002_copy() {
+                        Some(d2) => cut_page(d2, &ask).await,
+                        None => Err("no 2002 disc image (F9 asks for it)".to_string()),
+                    },
+                };
+                *out.borrow_mut() = Some(r);
             });
             slot
         }));
@@ -809,10 +947,19 @@ fn world_loader(disc: &WebDisc) -> crate::pregame::host::WorldLoader {
                         twin_zones = crate::stream::fill_set(&lib, main, x, z).iter().map(|w| w.0).collect();
                         (main, d2.fill(&mut lib, main, x, z).await?)
                     }
-                    None => {
-                        let main = add(&mut lib, &mut d, &world).await?;
-                        (main, d.fill(&mut lib, main, x, z).await?)
-                    }
+                    // a server's own world (`worlds`): its file in the
+                    // origin's storage, read as a disc of that one file
+                    None => match worlds::disc_of(&world) {
+                        Some(mut w) => {
+                            status(&format!("reading {world} (built from the disc, kept in this browser)"));
+                            let main = add(&mut lib, &mut w, &world).await?;
+                            (main, w.fill(&mut lib, main, x, z).await?)
+                        }
+                        None => {
+                            let main = add(&mut lib, &mut d, &world).await?;
+                            (main, d.fill(&mut lib, main, x, z).await?)
+                        }
+                    },
                 };
                 log(&format!("{n} zones read round the spawn"));
                 for name in SHARED.iter().copied().chain(["CHAR.ESF", "ITEM.ESF", "ARIAL.CSF", "UI.CSF", "ARIALUI.CSF", "ITEMICON.ESF", "SPELLFX.CSF", "FX.CSF", "ADDART.CSF"]) {

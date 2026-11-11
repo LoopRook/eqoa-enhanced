@@ -87,6 +87,16 @@ impl WebDisc {
         Ok(d)
     }
 
+    /// A file of the origin's private storage read as a disc of that one
+    /// file, named `name`: a server's world built off the disc
+    /// (`super::worlds`), its container opened and its zones read as a disc
+    /// world's are.
+    pub fn of_file(file: web_sys::File, name: &str) -> WebDisc {
+        let len = file.size() as u64;
+        let entries = vec![Entry { path: name.to_string(), lba: 0, size: len as u32 }];
+        WebDisc { file, len, entries, sparse: Sparse::new(len) }
+    }
+
     /// Another reader of the same image, with a cache of its own (a task
     /// that reads while others do).
     pub fn copy(&self) -> WebDisc {
@@ -120,6 +130,39 @@ impl WebDisc {
                 Ok(v) => return Ok(v),
             }
         }
+    }
+
+    /// The directory of the resource file `e` (`esf::ResourceDir`: CHAR.ESF's
+    /// table of its bodies), read as the synchronous walks are, against the
+    /// cache: the file's header and its table's chunks are fetched, never its
+    /// objects. None when the file has no directory to go by.
+    pub async fn resource_dir(&mut self, e: &Entry) -> Result<Option<esf::ResourceDir>, String> {
+        let (base, len) = (e.lba as u64 * iso::SECTOR, e.size as u64);
+        loop {
+            match esf::ResourceDir::read(&mut Window { sparse: &mut self.sparse, base, len }) {
+                Ok(dir) => {
+                    // what the walk fetched is not needed again
+                    self.sparse = Sparse::new(self.len);
+                    return Ok(Some(dir));
+                }
+                Err(esf::Error::Io(x)) if x.kind() == std::io::ErrorKind::WouldBlock => {
+                    for (off, n) in std::mem::take(&mut self.sparse.missing) {
+                        let b = self.read_at(off, n as usize).await?;
+                        self.sparse.fill(off, &b);
+                    }
+                }
+                Err(esf::Error::Io(x)) => return Err(format!("{}: {x}", e.path)),
+                Err(_) => return Ok(None),
+            }
+        }
+    }
+
+    /// `len` bytes at `off` of the image, begun now: several begun together
+    /// are read together (`read_blob` awaits one).
+    pub fn start_read(&self, off: u64, len: usize) -> Result<JsFuture, String> {
+        let end = (off + len as u64).min(self.len);
+        let blob = self.file.slice_with_f64_and_f64(off as f64, end as f64).map_err(err)?;
+        Ok(JsFuture::from(blob.array_buffer()))
     }
 
     /// A container off the disc: a world (an OBJF whose first record is
@@ -166,7 +209,9 @@ impl WebDisc {
             // off the disc of the art drawn when that disc has the world
             // (`era::world_era`: Tunaria off the 2002 disc), and saying so
             let d2 = (crate::era::world_era(name) == esf::Era::Y2002).then(super::disc_2002_copy).flatten();
-            let frontiers = WebDisc { file: file.clone(), len, entries: entries.clone(), sparse: Sparse::new(len) };
+            // a server's own world off its file in the origin's storage
+            // (`super::worlds`), else the disc's
+            let frontiers = super::worlds::disc_of(name).unwrap_or_else(|| WebDisc { file: file.clone(), len, entries: entries.clone(), sparse: Sparse::new(len) });
             let (o, name) = (out.clone(), name.to_string());
             wasm_bindgen_futures::spawn_local(async move {
                 let t = web_time::Instant::now();
@@ -231,7 +276,9 @@ impl WebDisc {
             let name = &lib.files[f].0;
             let z = match lib.era_of(f) {
                 esf::Era::Y2002 => super::disc_2002_copy().and_then(|d2| d2.zone_source(name)),
-                esf::Era::Frontiers => d.zone_source(name),
+                // a server's own world's out of its file in the origin's
+                // storage (`super::worlds`)
+                esf::Era::Frontiers => super::worlds::disc_of(name).and_then(|w| w.zone_source(name)).or_else(|| d.zone_source(name)),
             };
             z.map(|z| Box::new(z) as Box<dyn crate::stream::ZoneSource>)
         })
