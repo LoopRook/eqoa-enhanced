@@ -4464,17 +4464,6 @@ mod tests {
         assert!(s.quest_progress.is_empty(), "off: forgotten");
     }
 
-    // Quest marks (go-eqoa-server's 0x7E03/0x7E04): nothing asked without an
-    // offer; an offer answered once for each change of mind; a set read whole
-    // (a giver's "!" with its quest's levels, offer and rewards), a short one
-    // not taken, off forgotten.
-
-
-    /// The quest tracker's offer is answered once, its body read whole (the
-    /// counts, a goal done only counted and all there), a short one not
-    /// taken (the control), and off it is stopped and forgotten.
-
-
     // go-eqoa-server's offer of the live game's look (0x7E0C) is answered
     // with 1 at once; the server's answer (0x7E0D) decides how the character
     // lists after it are read: the disc's 32 raw bytes a record until it says
