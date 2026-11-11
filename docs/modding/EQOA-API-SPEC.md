@@ -568,9 +568,9 @@ MenuRow.index and Window.selected_row are 1..#rows, `WndList.sel+1` only for dir
 
 `eqoa.hud.image{texture=TextureInfo,x,y,width?,height?,shape="square"|"circle"}` supports owned textures. Circle masks live in the fork-owned HUD pass; this does not modify native map shaders. No ring option is promised.
 
-`eqoa.hud.hide("minimap")` / `show` also hide native minimap clicks. `eqoa.hud.layout().minimap` reports its current rectangle, including upstream Move HUD changes. `eqoa.input.pointer()` returns `{x,y,inside_window:bool}` in HUD coordinates. `pointer.pressed` and `pointer.wheel` include coordinates; `eqoa.input.claim_pointer(rect)` consumes clicks/wheel inside the mod's rectangle. Claims belong to the VM, are refreshed each render frame (32 rectangles/VM/frame), expire after one additional frame, and end on disable/focus loss. Move HUD drag takes precedence. A native `hud.layout()` rectangle may be passed directly; other rectangles use central HUD-frame coordinates. `eqoa.input.minimap_wheel(steps)` forwards a claimed wheel to the same native minimap zoom path, including indoor zoom. Mod HUD/ImGui, keys and captured text continue over the open M map through the existing addon route.
+`eqoa.hud.hide("minimap")` / `show` also hide native minimap clicks. `eqoa.hud.layout().minimap` reports its current rectangle, including upstream Move HUD changes. `eqoa.input.pointer()` returns `{x,y,inside_window:bool}` in physical window pixels. `pointer.pressed` and `pointer.wheel` include coordinates; `eqoa.input.claim_pointer(rect)` consumes clicks/wheel inside the mod's rectangle. Claims belong to the VM, are refreshed each render frame (32 rectangles/VM/frame), expire after one additional frame, and end on disable/focus loss. Move HUD drag takes precedence. A native `hud.layout()` rectangle may be passed directly; all pointer rectangles use physical window pixels, matching layout x/y/width/height. `eqoa.input.minimap_wheel(steps)` forwards a claimed wheel to the same native minimap zoom path, including indoor zoom. Mod HUD/ImGui, keys and captured text continue over the open M map through the existing addon route.
 
-`eqoa.files.load_json(path)` queues native JSON decoding off the frame thread, from read-only package/resource mounts only (16 MiB cap); `resource.ready` has kind `"json"` and the decoded table. `eqoa.files.save_json_async(path,value)` writes only to the mod's private area; native encoding/writing is off the frame thread and pending values coalesce to the latest. The save function is implemented only if a measured 14 MiB Lua journal save exceeds 2 ms of frame time. Entity deltas carry journal data: id, name, world, level, position and native creature/corpse flags; unknown flags remain unknown.
+`eqoa.files.load_json(path)` queues native JSON decoding off the frame thread, from package/resource mounts or the mod's own private data (16 MiB cap); `resource.ready` has kind `"json"` and the decoded table. `eqoa.files.save_json_async(path,value)` writes only to the mod's private area; native encoding/writing is off the frame thread and pending values coalesce to the latest. The save function is implemented only if a measured 14 MiB Lua journal save exceeds 2 ms of frame time. Entity deltas carry journal data: id, name, world, level, position and native creature/corpse flags; unknown flags remain unknown.
 
 `Bounds={x_min:number,z_min:number,x_max:number,z_max:number}`. `MapImage={id:string,world_id:int,kind:"cell"|"overview",bounds:Bounds,width:uint,height:uint,revision:uint,available:bool}`; bounds are actual world calibration, pixels top-left correspond (x_min,z_min), u increases x, v increases z. IDs are opaque strings scoped to native cache/art revision; no raw directories or paths. `Waypoint={world_id:int,x:number,z:number,label:string?,owner:string?}`; nil owner means player-owned. Map image loading may request existing cached/generated native data using its current build budget; must not start full-world work in Lua callback. Decoded/uploaded image charged to normal per-addon texture quota; requests max 8 pending/VM and bounded native work (existing map builder budget). No promise of all-world images before those worlds have been loaded. Missing handmade art remains missing unless the mod ships its own PNG/JPEG. Changing waypoint invokes native persistence/search invalidation; the fork-owned adapter tracks owner and drops ownership on native user change, arrival, deletion, or disable. On disable clear only a still-owned mod pin; player pins survive. Group chat waypoint creation is an explicit game chat action, not an implied map operation.
 
@@ -794,15 +794,21 @@ Round 3: `player.stats_changed` is a notification with an empty data record when
 
 Round 4 JSON resource details: `files.load_json(path)` returns a request integer and nil,
 or nil plus an Error. At most two loads per VM are in flight; size is at most 16 MiB,
-depth 32, two million JSON values, and root object/array. Paths must name read-only
-`resources/` or `package_resources/` mounts; private overlays are bypassed. Completion
+depth 32, two million JSON values, and root object/array. Structural preflight also
+counts object keys against the node cap before allocating the decoded tree.
+`resources/` and `package_resources/` read packaged copies, bypassing overlays.
+Relative private names such as `journal.json` read only that mod's own data area,
+including tombstones. Completion
 uses `resource.ready{kind="json",request,value,handle=value}` or
 `resource.failed{kind="json",request,error}`. Decoded tables are mutable. JSON null is
 `eqoa.files.null`; decoded arrays retain an internal array tag, including empty arrays.
 The worker reads and decodes; Lua table materialization occurs on the VM thread at
-dispatch. Calling the loader opts that VM into a 128 MiB heap (ordinary VMs retain their
-existing limit), so the bounded catalogue can coexist with journal tables. This is a
-memory allowance, not a guarantee that materializing a large table fits one frame.
+dispatch, in slices of at most 512 values or 1 ms per dispatch, one completion at a
+time. A native manifest must declare `"capabilities": ["large_data"]` to receive a
+128 MiB Lua heap at startup. Other mods retain 8 MiB; JSON calls never raise the
+heap. A materialisation memory failure delivers `resource.failed` with the request
+id and a memory/capability message; it does not disable the mod. The slice budget
+is cooperative: a single allocation or GC can exceed it.
 
 
 `files.save_json_async(path,value)` is enabled by the measured round 4 Lua save cost.
@@ -813,13 +819,18 @@ worker. Dense positive numeric keys are arrays; empty ordinary tables are object
 JSON null and decoded array tags round-trip. Cycles, mixed/sparse array keys, handles,
 functions, non-finite values, depth over 32 and over two million values are rejected.
 Snapshot string/key bytes and encoded output are each capped at 14 MiB; existing total
-private storage remains capped at 16 MiB. Save also opts the VM into the 128 MiB heap.
+private storage remains capped at 16 MiB. Save never raises the VM heap allowance.
 Each VM has one active write and one replaceable pending value for the same path.
 A different path returns quota until that stream drains. Latest pending value wins;
 coalesced requests need not produce individual completions. The latest completion is
 `resource.ready{kind="json_saved",request}` or `resource.failed` with request/error.
-Accepted writes drain when the VM is dropped; no Lua object crosses threads. Snapshot
-copying is synchronous and has no 2 ms latency guarantee.
+Track only the latest request id for a coalesced save stream. A process-wide writer
+serialises paths across VM generations and checks acceptance generations before
+rename: older data cannot overwrite a newer accepted value. Disable, runtime
+shutdown, device recovery and VM drop flush accepted saves and join the idle writer,
+with a 2 s wait. A timeout is diagnosed and cancels pending commits, preventing a
+late commit from recreating cleared data after disable. No Lua object crosses
+threads. Snapshot copying is synchronous and has no 2 ms latency guarantee.
 
 
 Journal entity fields: `Entity.world_id` is the protocol world byte,
@@ -833,3 +844,22 @@ of the corpse flag; unknown level/search/class fields remain nil.
 Circle HUD images inscribe a physical circle inside the transformed image bounds.
 Extra extent from unequal HUD X/Y scales is clipped with matching UVs, preserving
 projection alignment instead of stretching the texture.
+
+
+Round 4 view lifecycle: `view:close()` releases the capture lease immediately; discarded
+views are otherwise released by Lua GC. Views share one capture draw per frame.
+`view.texture` is nil until a usable capture exists, after resize until recapture,
+and after close/disable/device loss. Quota exhaustion returns nil and records a visible
+diagnostic; `view.error` contains the Error and `view.get_texture()` returns nil,Error
+without throwing. `project` tests `inside` against the visible physical circle.
+`hide("all")`, Forge `DisableUI` and their ownership queries exclude the minimap;
+hide it explicitly by name. Pointer x/y, claims, and layout x/y/width/height share physical window pixels.
+Legacy frame_x/frame_y remain native anchored HUD drawing coordinates for existing
+HUD commands; use the primary x/y fields for pointer comparisons. Pressed/wheel notifications go to all subscribers for mouse
+input anywhere in the window, including unclaimed positions. Touch is not translated
+into this mouse-only API. Point guides end on world loss; invalid guide coordinates
+return nil,Error.
+
+Pointer comparison example: `local r=eqoa.hud.layout().minimap; local p=eqoa.input.pointer();
+local inside=p.x>=r.x and p.x<=r.x+r.width and p.y>=r.y and p.y<=r.y+r.height`.
+The same `r` can be passed directly to `eqoa.input.claim_pointer(r)`.
