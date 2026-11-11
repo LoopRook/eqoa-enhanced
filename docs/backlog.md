@@ -263,3 +263,8 @@ Do this last, before the release that carries round 2 and the sync into `enhance
   saved F3/crash report has no picture and still shows the pre-loss GPU name (it degrades quietly, no
   crash). Fix needs one more hook line in `remake`, a shared-file budget check, and a test that a
   recovered surface still captures; low priority until seen.
+
+## Skinnable map (owner, 2026-11-11)
+
+Upstream's map reads its colours and font from one table a skin mod can set (about 30 constants in 6 upstream map files). A neutral seam to offer upstream in round 8; no skin mod until then.
+
