@@ -9,7 +9,7 @@ use serde_json::json;
 use std::{
     cell::RefCell,
     fs::{self, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     rc::Rc,
     sync::{
@@ -143,6 +143,19 @@ fn start(
     s.permit = Some(permit);
     lua.pack_multi((id, Value::Nil))
 }
+// The OS/player chose these endpoints. They may be cloud placeholders, links,
+// redirected profiles or UNC paths; only the copy into private storage is sandboxed.
+fn read_selected(path: &Path) -> std::result::Result<Vec<u8>, String> {
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut bytes = Vec::new();
+    file.take(CAP as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() > CAP {
+        return Err("selected file exceeds 16 MiB".into());
+    }
+    Ok(bytes)
+}
 fn active(permit: &AtomicBool) -> std::result::Result<(), String> {
     if permit.load(Ordering::Acquire) {
         Ok(())
@@ -158,7 +171,9 @@ fn unique_copy(
     permit: &AtomicBool,
     quota_root: Option<&Path>,
 ) -> std::result::Result<PathBuf, String> {
-    super::file_io::no_links(dir)?;
+    if quota_root.is_some() {
+        super::file_io::no_links(dir)?;
+    }
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let source = Path::new(name);
     let stem = source
@@ -178,8 +193,14 @@ fn unique_copy(
             format!("{stem} ({n}){ext}")
         };
         let path = dir.join(name);
-        let _guard = super::sandbox::lock_parents(&path, false)?;
-        super::file_io::no_links(&path)?;
+        let _guard = if quota_root.is_some() {
+            Some(super::sandbox::lock_parents(&path, false)?)
+        } else {
+            None
+        };
+        if quota_root.is_some() {
+            super::file_io::no_links(&path)?;
+        }
         if let Some(root) = quota_root {
             super::sandbox::check_quota(root, &path, bytes.len())?;
         }
@@ -284,7 +305,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 let path = picker().ok_or(("cancelled", "file selection cancelled".into()))?;
                 let run = || -> std::result::Result<String, String> {
                     active(&permit)?;
-                    let bytes = super::sandbox::read_bounded(&path, CAP)?;
+                    let bytes = read_selected(&path)?;
                     let dir = root.join("files/data/imports");
                     let name = format!("import-{id}.json");
                     let target = dir.join(&name);

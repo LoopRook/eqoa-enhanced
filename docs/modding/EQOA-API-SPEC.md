@@ -907,3 +907,8 @@ from each sender. Arguments are JSON values with depth <=8, <=256 values, and
 activation. Command traffic cannot evict native events or resource completions.
 Player authority is offered only at the next receiver boundary and expires after
 that command's dispatch; an undelivered older command loses its player mark.
+
+The Desktop destination and the player-selected source use bounded native file
+I/O and support OS links, redirected folders and cloud-backed paths. Reparse/link
+checks remain mandatory on private mod storage and the private import copy.
+A missing Desktop folder is created; an unavailable Desktop returns `unavailable`.

@@ -596,12 +596,7 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
                             &symbol,
                             if e.contains("not found") {
                                 "not_found"
-                            } else if matches!(
-                                e.as_str(),
-                                "reparse point in addon path"
-                                    | "reparse point in addon resource"
-                                    | "reparse point in addon file"
-                            ) {
+                            } else if e.contains("reparse point") || e.contains("symlink") {
                                 "permission_denied"
                             } else if e.contains("quota") || e.contains("exceeds") {
                                 "quota"
@@ -620,6 +615,34 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn round4b_review_redirected_desktop_and_picked_file_keep_private_checks() {
+        use super::super::{options,player_files::TestIo,native_events};
+        let (dir,host,mut addon)=fixture();addon.extensions.permissions=vec!["import".into(),"export".into()];
+        install(&host,&addon,Some(dir.0.join("config"))).unwrap();
+        let actual=dir.0.join("cloud-folder");fs::create_dir_all(&actual).unwrap();
+        let desktop=dir.0.join("Desktop");
+        let result=std::process::Command::new("cmd").args(["/D","/C","mklink","/J"]).arg(&desktop).arg(&actual).output().unwrap();
+        assert!(result.status.success(),"junction creation failed: {:?}",result);
+        fs::write(actual.join("picked.json"),"{\"Bat\":{}}").unwrap();
+        host.lua.set_app_data(TestIo{pick:Some(desktop.join("picked.json")),desktop:desktop.clone()});
+        host.execute("assert(eqoa.files.write('journal.json','{}'));mode='export';finished=false;success=false;failure='';button_id=assert(eqoa.options.button({id='file',label='File action'},function() if mode=='export' then assert(eqoa.files.export('journal.json','journal.json')) else assert(eqoa.files.import({title='Journal',extensions={'json'}})) end end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='import' or e.data.kind=='export' then finished=true;success=true;import_path=e.data.path end end);eqoa.events.on('resource.failed',function(e) if e.data.kind=='import' or e.data.kind=='export' then finished=true;failure=e.data.error.message end end)").unwrap();
+        let wait=|| {let end=std::time::Instant::now()+std::time::Duration::from_secs(5);while !host.lua.globals().get::<bool>("finished").unwrap(){assert!(std::time::Instant::now()<end);native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}assert!(host.lua.globals().get::<bool>("success").unwrap(),"{:?}",host.lua.globals().get::<String>("failure"));};
+        let id=host.lua.globals().get("button_id").unwrap();
+        assert!(options::activate_button(id));wait();
+        assert_eq!(fs::read_to_string(actual.join("journal.json")).unwrap(),"{}");
+        host.execute("finished=false;success=false;mode='import'").unwrap();
+        assert!(options::activate_button(id));wait();
+        let imported=host.lua.globals().get::<String>("import_path").unwrap();
+        assert_eq!(fs::read_to_string(dir.0.join("config/files/data").join(imported)).unwrap(),"{\"Bat\":{}}");
+        let private_link=dir.0.join("private-link");
+        let result=std::process::Command::new("cmd").args(["/D","/C","mklink","/J"]).arg(&private_link).arg(&actual).output().unwrap();assert!(result.status.success());
+        install(&host,&addon,Some(private_link)).unwrap();
+        host.execute("local ok,e=eqoa.files.write('forbidden.json','{}');assert(ok==nil and e.code=='permission_denied')").unwrap();
+        assert!(!actual.join("files/data/forbidden.json").exists());
+    }
+
     #[test]
     fn round4b_review_commands_preserve_other_events_and_sender_fairness() {
         use super::super::{native_core::CORE,native_events};
