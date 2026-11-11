@@ -380,3 +380,17 @@ Gate results (static CRT, shared target, scratch EQOA_CONFIG):
 - Full `eqoa` bin suite: 1983 passed, 2 failed (before the disabled-VM fix; now 1 failed: the benchmark), 31 ignored, 0 SKIP prints.
 - `-p net`: all pass. Python tools: 97 OK. Zero-addon release gate: 1 passed. wasm32 check: 0 warnings. Footprint: PASS. merge-tree vs 5d54c0c: clean.
 - **Benchmark FAILS.** Release: 1.161 ms/frame against the 0.5 ms gate (was 1.418). Per frame: stats_box 500 us, ToT 192 us, mana_bars 188 us, hud_numbers 210 us (Lua render callbacks, each call crossing the native API), native draw 45 us, ImGui 22 us. HUD text/queue allocations are 0 in steady state. Debug build 5.75 ms against its 5 ms check. Not met; the brief called 0.5 ms an aim. Next lever: cut per-call API cost in the Lua-to-native bridge, or make the mods event-driven.
+
+## Benchmark regression: cause and fix (builder pass 2)
+
+The "0.368 ms at 5ab52e5" figure was not a regression's baseline. The old benchmark never reset the per-frame event budget, so after 256 deliveries the mods' render callbacks silently stopped running and the loop timed almost nothing. Release runs of the benchmark as it was at each commit: 5ab52e5 = 0.314 ms, c3721f7 = 0.401 ms (both with the capped-callback loop); 0627871 = 1.885 ms and b712fe8 = 1.161 ms (corrected loop, mods really running). So the corrected cost was never under 0.5 ms; it was hidden. Machine load was about 55% from other programs during these runs, so numbers below are the best of three, and runs vary by about 10%.
+
+Cause (measured per call with `EQOA_API_PROFILE=1`, which prints `APICOST` lines from the benchmark test): each native call built its answer or parsed its spec expensively.
+- Records (`target.get`, `entities.find`, `hud.frame`, `player.get`) rebuilt a guarded Lua table with two closures and a copied key list every call: 17-27 us each. Now one shared metatable per record shape, and an unchanged value returns the same read-only table (about 1.5 us).
+- `hud.text`/`gauge`/`image`/`panel` did about 13 protected table lookups per call, mostly for absent fields (7-13 us). Now one pass over the spec table (3-5 us); a spec with a metatable keeps full `get` semantics.
+- Hot calls went through a second wrapped Lua function; they now run inside one callback (`bind_fn`).
+- Mods: the Stats Box builds its row spec tables (with localized labels) only when stats change and reuses them every frame; all four mods hold the draw functions in locals.
+
+Release benchmark, all four mods on, threshold unchanged (0.5 ms): 0.398 / 0.433 / 0.464 ms/frame in three runs (was 1.161). Per-mod split in the best run: stats_box 152 us, target_of_target 67 us, mana_bars 53 us, hud_numbers 71 us (render callbacks incl. API calls); event dispatch under 1 us each; native HUD draw about 43 us; ImGui frame about 17 us.
+
+Tests: `record_reuse_returns_fresh_values_after_a_change_and_the_same_table_when_unchanged` (negative control: serving the cached table without the equality check fails it with "a changed value is never served stale") and `hud_specs_with_metatable_defaults_and_plain_specs_both_read_their_fields`.

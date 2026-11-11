@@ -31,6 +31,13 @@ pub(crate) struct Session {
     phase: String,
     tokens: f64,
     token_time: f64,
+    /// Shared missing-field metatables and the read-only guard, so building a
+    /// record allocates only its own tables (no per-record closures).
+    guard_missing: std::collections::HashMap<u64, Table>,
+    guard_readonly: Option<Function>,
+    /// Last record built per call site: records are read-only, so an unchanged
+    /// native value is handed back as the same table instead of being rebuilt.
+    record_cache: std::collections::HashMap<String, (Json, Table)>,
 }
 
 impl Session {
@@ -46,6 +53,9 @@ impl Session {
             phase: "lua".into(),
             tokens: 32.0,
             token_time: 0.0,
+            guard_missing: std::collections::HashMap::new(),
+            guard_readonly: None,
+            record_cache: std::collections::HashMap::new(),
         };
         // Normative function index (§2). Registration does not imply implementation.
         for (module, names, round) in [
@@ -389,14 +399,47 @@ pub(crate) fn record(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
                     record(lua, nested_type(path, k).unwrap_or(path), v)?,
                 )?;
             }
-            Value::Table(guard(
+            Value::Table(guard_keyed(
                 lua,
                 backing,
                 path,
-                Some(fields.keys().cloned().collect()),
+                signature(path, true, fields.keys().map(String::as_str)),
+                || Some(fields.keys().cloned().collect()),
             )?)
         }
     })
+}
+
+fn signature<'a>(path: &str, has_keys: bool, keys: impl Iterator<Item = &'a str>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut h);
+    has_keys.hash(&mut h);
+    for k in keys {
+        k.hash(&mut h);
+    }
+    h.finish()
+}
+
+/// `record`, reusing the previous result of `slot` while the native value is unchanged.
+pub(crate) fn record_cached(lua: &Lua, slot: &str, path: &str, value: &Json) -> Result<Value> {
+    if !matches!(value, Json::Object(_)) {
+        return record(lua, path, value);
+    }
+    let session_rc = session(lua);
+    if let Ok(s) = session_rc.try_borrow() {
+        if let Some((json, table)) = s.record_cache.get(slot) {
+            if json == value {
+                return Ok(Value::Table(table.clone()));
+            }
+        }
+    }
+    let built = record(lua, path, value)?;
+    if let (Value::Table(table), Ok(mut s)) = (&built, session_rc.try_borrow_mut()) {
+        s.record_cache
+            .insert(slot.to_string(), (value.clone(), table.clone()));
+    }
+    Ok(built)
 }
 
 pub(crate) fn guard(
@@ -405,50 +448,94 @@ pub(crate) fn guard(
     path: &str,
     known: Option<Vec<String>>,
 ) -> Result<Table> {
-    let proxy = lua.create_table()?;
-    let mt = lua.create_table()?;
-    let prefix = path.to_string();
+    let sig = signature(
+        path,
+        known.is_some(),
+        known.iter().flatten().map(String::as_str),
+    );
+    guard_keyed(lua, backing, path, sig, || known)
+}
+
+/// `sig` identifies (path, known keys); records of one shape share one
+/// missing-field metatable, built the first time the shape is seen.
+fn guard_keyed(
+    lua: &Lua,
+    backing: Table,
+    path: &str,
+    sig: u64,
+    known: impl FnOnce() -> Option<Vec<String>>,
+) -> Result<Table> {
+    // A bare Lua (no session) or a session in use higher up the stack just
+    // builds uncached: the cache is an optimisation, never a requirement.
+    let session_rc = lua.app_data_ref::<Shared>().map(|s| s.clone());
+    let (cached_missing, cached_readonly) = session_rc
+        .as_ref()
+        .and_then(|rc| rc.try_borrow().ok())
+        .map_or((None, None), |s| {
+            (s.guard_missing.get(&sig).cloned(), s.guard_readonly.clone())
+        });
     // Let Lua resolve present fields directly. Only a missing field crosses
     // into Rust, where unsupported/unknown fields retain their diagnostics.
     // The callback must not capture backing: a record can contain Lua cycles,
     // and an mlua Table captured by a Rust closure roots them in the registry.
-    let missing = lua.create_table()?;
-    missing.set(
-        "__index",
-        lua.create_function(move |lua, (_table, key): (Table, String)| {
-            let symbol = format!("{prefix}.{key}");
-            let s = session(lua);
-            let descriptor = s.borrow().descriptors.get(&symbol).cloned();
-            if descriptor
-                .as_ref()
-                .is_some_and(|d| matches!(d.status, "not_yet" | "unsupported"))
-                || (descriptor.is_none() && !known.as_ref().is_some_and(|keys| keys.contains(&key)))
-            {
-                let code = descriptor.as_ref().map_or("unknown_symbol", |d| d.status);
-                diagnose(
-                    lua,
-                    &symbol,
-                    code,
-                    descriptor
+    let missing = match cached_missing {
+        Some(t) => t,
+        None => {
+            let known = known();
+            let prefix = path.to_string();
+            let missing = lua.create_table()?;
+            missing.set(
+                "__index",
+                lua.create_function(move |lua, (_table, key): (Table, String)| {
+                    let symbol = format!("{prefix}.{key}");
+                    let s = session(lua);
+                    let descriptor = s.borrow().descriptors.get(&symbol).cloned();
+                    if descriptor
                         .as_ref()
-                        .map_or("unknown field; consult eqoa.capabilities", |d| {
-                            d.reason.as_str()
-                        }),
-                );
+                        .is_some_and(|d| matches!(d.status, "not_yet" | "unsupported"))
+                        || (descriptor.is_none()
+                            && !known.as_ref().is_some_and(|keys| keys.contains(&key)))
+                    {
+                        let code = descriptor.as_ref().map_or("unknown_symbol", |d| d.status);
+                        diagnose(
+                            lua,
+                            &symbol,
+                            code,
+                            descriptor
+                                .as_ref()
+                                .map_or("unknown field; consult eqoa.capabilities", |d| {
+                                    d.reason.as_str()
+                                }),
+                        );
+                    }
+                    Ok(Value::Nil)
+                })?,
+            )?;
+            if let Some(mut s) = session_rc.as_ref().and_then(|rc| rc.try_borrow_mut().ok()) {
+                s.guard_missing.insert(sig, missing.clone());
             }
-            Ok(Value::Nil)
-        })?,
-    )?;
+            missing
+        }
+    };
+    let readonly = match cached_readonly {
+        Some(f) => f,
+        None => {
+            let f = lua.create_function(|_, _: MultiValue| -> Result<()> {
+                Err(mlua::Error::runtime(
+                    "eqoa records and modules are read-only",
+                ))
+            })?;
+            if let Some(mut s) = session_rc.as_ref().and_then(|rc| rc.try_borrow_mut().ok()) {
+                s.guard_readonly = Some(f.clone());
+            }
+            f
+        }
+    };
+    let proxy = lua.create_table()?;
+    let mt = lua.create_table_with_capacity(0, 3)?;
     backing.set_metatable(Some(missing))?;
     mt.set("__index", backing)?;
-    mt.set(
-        "__newindex",
-        lua.create_function(|_, _: MultiValue| -> Result<()> {
-            Err(mlua::Error::runtime(
-                "eqoa records and modules are read-only",
-            ))
-        })?,
-    )?;
+    mt.set("__newindex", readonly)?;
     mt.set("__metatable", false)?;
     proxy.set_metatable(Some(mt))?;
     Ok(proxy)
@@ -546,6 +633,34 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
             }
         })?,
     )?;
+    register_descriptor(lua, module, name, blocked)
+}
+
+/// `bind` for hot, never-blocked calls: the body runs inside the one Lua
+/// callback instead of being called back through a second wrapped function.
+pub(crate) fn bind_fn<A, F>(lua: &Lua, module: &str, name: &str, f: F) -> Result<()>
+where
+    A: mlua::FromLuaMulti,
+    F: Fn(&Lua, A) -> Result<MultiValue> + 'static,
+{
+    let modules: Table = lua.named_registry_value("eqoa_modules")?;
+    let table: Table = modules.get(module)?;
+    let symbol = format!("eqoa.{module}.{name}");
+    table.set(
+        name,
+        lua.create_function(move |lua, args: A| {
+            super::native_core::flush_deferred();
+            match f(lua, args) {
+                Ok(value) => Ok(value),
+                Err(e) if fatal_memory(&e) => Err(e),
+                Err(e) => error(lua, &symbol, call_error_code(&e), &e.to_string()),
+            }
+        })?,
+    )?;
+    register_descriptor(lua, module, name, false)
+}
+
+fn register_descriptor(lua: &Lua, module: &str, name: &str, blocked: bool) -> Result<()> {
     let mut s = session(lua).borrow().descriptors.clone();
     let path = format!("eqoa.{module}.{name}");
     let round = s.get(&path).and_then(|d| d.round).or(Some(2));

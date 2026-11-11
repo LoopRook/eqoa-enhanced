@@ -15,6 +15,8 @@ end)
 
 -- Stats change on server channels, not on every display frame. Copy only the
 -- scalar drawing data; retain no mutable public snapshot arrays.
+local hud_text, hud_panel = eqoa.hud.text, eqoa.hud.panel
+local panel_spec = { x = 200, y = 54, w = 148, h = 132 }
 local rows
 local dirty = true
 local function invalidate() dirty = true end
@@ -34,17 +36,22 @@ eqoa.events.on("render", function()
             local color = off_white
             if r.shift == "raised" then color = raised_blue
             elseif r.shift == "lowered" then color = lowered_red end
-            rows[i] = { col = (i > 8) and 2 or 1, row = ((i - 1) % 8) + 1,
-                word = r.word, fallback = r.short or r.name, value = tostring(r.current), color = color }
+            local col, row = (i > 8) and 2 or 1, ((i - 1) % 8) + 1
+            local label = eqoa.text.localized(r.word) or r.short or r.name
+            -- Spec tables are built once per change and reused every frame.
+            rows[i] = {
+                { col = col, row = row, text = label, color = gold, shadow = true },
+                { col = col, row = row, text = tostring(r.current), color = color, align = "right", shadow = true },
+            }
         end
         dirty = false
     end
     if not rows then return end
-    eqoa.hud.panel({ x = 200, y = 54, w = 148, h = 132 })
-    for _, r in ipairs(rows) do
-        local label = eqoa.text.localized(r.word) or r.fallback
-        eqoa.hud.text({ col = r.col, row = r.row, text = label, color = gold, shadow = true })
-        eqoa.hud.text({ col = r.col, row = r.row, text = r.value, color = r.color, align = "right", shadow = true })
+    hud_panel(panel_spec)
+    for i = 1, #rows do
+        local r = rows[i]
+        hud_text(r[1])
+        hud_text(r[2])
     end
 
     -- Clickable area to open the Summary window, only while the HUD is in

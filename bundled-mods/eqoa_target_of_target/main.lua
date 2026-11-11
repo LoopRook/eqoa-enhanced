@@ -2,6 +2,8 @@
 -- Displays the Target of Target bar above the Target panel with health and
 -- mana gauges, and Assist Target on click.
 
+local hud_text, hud_gauge, hud_image = eqoa.hud.text, eqoa.hud.gauge, eqoa.hud.image
+
 local black = { 0.0, 0.0, 0.0, 1.0 }
 
 eqoa.options.toggle({ id = "target_of_target", label = "Target of Target", default = false })
@@ -18,19 +20,19 @@ eqoa.events.on("render", function()
     if not tot or not tot.name or tot.name == "" or tot.name:match("^%s*$") then return end
 
     -- 3-piece bar at [20, 300], width 174
-    eqoa.hud.image({ ui_id = 25, x = 20, y = 300, w = 174, target_fade = true, vertical = "bottom" })
+    hud_image({ ui_id = 25, x = 20, y = 300, w = 174, target_fade = true, vertical = "bottom" })
 
     -- Centered black name text
-    eqoa.hud.text({ x = 20 + 87, y = 300 + 12, text = tot.name, color = black, clip_width = 160, target_fade = true, vertical = "bottom" })
+    hud_text({ x = 20 + 87, y = 300 + 12, text = tot.name, color = black, clip_width = 160, target_fade = true, vertical = "bottom" })
 
     -- HP gauge (art 7)
     if tot.hp_fraction then
-        eqoa.hud.gauge({ x = 30, y = 325, art = 7, fill = tot.hp_fraction, lit = true, vertical = "bottom" })
+        hud_gauge({ x = 30, y = 325, art = 7, fill = tot.hp_fraction, lit = true, vertical = "bottom" })
     end
 
     -- Power gauge (art 9), gated by the Mana Bars option
     if tot.power and eqoa.options.get("mana_bars", "eqoa_mana_bars") then
-        eqoa.hud.gauge({ x = 30, y = 335, art = 9, fill = tot.power, lit = true, vertical = "bottom" })
+        hud_gauge({ x = 30, y = 335, art = 9, fill = tot.power, lit = true, vertical = "bottom" })
     end
 
     -- Clickable name bar to Assist, only while the HUD is in plain play.

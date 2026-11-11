@@ -1074,3 +1074,65 @@ fn guarded_record_lua_cycles_are_collectible_without_rust_registry_roots() {
         lua.used_memory()
     );
 }
+
+#[test]
+fn record_reuse_returns_fresh_values_after_a_change_and_the_same_table_when_unchanged() {
+    use super::native_core::CORE;
+    let h = Host::new().unwrap();
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.in_world = true;
+        c.view.player = serde_json::json!({"id": 1, "level": 10});
+    });
+    h.execute(
+        r#"
+        local a = eqoa.player.get()
+        local b = eqoa.player.get()
+        assert(rawequal(a, b), 'unchanged value is reused')
+        assert(a.level == 10)
+        assert(not pcall(function() a.level = 11 end), 'reused record stays read-only')
+        f1 = eqoa.hud.frame()
+        assert(rawequal(f1, eqoa.hud.frame()))
+    "#,
+    )
+    .unwrap();
+    CORE.with(|c| c.borrow_mut().view.player = serde_json::json!({"id": 1, "level": 11}));
+    h.execute(
+        r#"
+        local c = eqoa.player.get()
+        assert(c.level == 11, 'a changed value is never served stale')
+        local d = eqoa.hud.frame({width = 320, height = 224})
+        assert(not rawequal(d, f1), 'a different frame request is not served from the cache')
+    "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn hud_specs_with_metatable_defaults_and_plain_specs_both_read_their_fields() {
+    use super::{hud_layer, native_core::CORE};
+    let h = Host::new().unwrap();
+    CORE.with(|c| c.borrow_mut().view.in_world = true);
+    hud_layer::clear_all();
+    h.execute(
+        r#"
+        local defaults = setmetatable({}, {__index = {x = 7, y = 9, text = 'from defaults'}})
+        assert(eqoa.hud.text(defaults))
+        assert(eqoa.hud.text({x = 1, y = 2, text = 'plain', scale = 2}))
+        local ok, e = eqoa.hud.text({y = 2, text = 'no x'})
+        assert(ok == nil and e.code == 'invalid_argument')
+    "#,
+    )
+    .unwrap();
+    let queued = hud_layer::MOD_QUEUES.with(|q| q.borrow().values().flatten().cloned().collect::<Vec<_>>());
+    let texts = queued
+        .iter()
+        .filter_map(|c| match c {
+            hud_layer::HudCommand::Text { x, y, text, scale, .. } => Some((*x, *y, text.clone(), *scale)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(texts.contains(&(7.0, 9.0, "from defaults".to_string(), 1.0)), "{texts:?}");
+    assert!(texts.contains(&(1.0, 2.0, "plain".to_string(), 2.0)), "{texts:?}");
+    hud_layer::clear_all();
+}

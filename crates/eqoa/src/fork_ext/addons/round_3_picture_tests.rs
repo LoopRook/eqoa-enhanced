@@ -787,6 +787,38 @@ fn round_3_all_four_mods_per_frame_performance_benchmark() {
         );
     }
 
+    if std::env::var_os("EQOA_API_PROFILE").is_some() {
+        let calls = [
+            ("hud.visible", "eqoa.hud.visible('stats_box')"),
+            ("options.get", "eqoa.options.get('stats_box')"),
+            ("hud.frame", "eqoa.hud.frame()"),
+            ("text.localized", "eqoa.text.localized(1)"),
+            ("hud.text", "eqoa.hud.text({col=1,row=1,text='x',color={1,1,1,1},shadow=true})"),
+            ("hud.text min", "eqoa.hud.text({x=1,y=1,text='x'})"),
+            ("hud.text color", "eqoa.hud.text({x=1,y=1,text='x',color={1,1,1,1}})"),
+            ("hud.text full", "eqoa.hud.text({x=1,y=1,text='x',color={1,1,1,1},shadow=true,align='right'})"),
+            ("hud.gauge", "eqoa.hud.gauge({x=30,y=325,art=7,fill=0.5,lit=true,vertical='bottom'})"),
+            ("hud.image", "eqoa.hud.image({ui_id=25,x=20,y=300,w=174,target_fade=true,vertical='bottom'})"),
+            ("imgui.Begin+End", "eqoa.imgui.Begin('w',nil,0) eqoa.imgui.End()"),
+            ("imgui.InvisibleButton", "eqoa.imgui.InvisibleButton('b',10,10)"),
+            ("hud.panel", "eqoa.hud.panel({x=200,y=54,w=148,h=132})"),
+            ("target.get", "eqoa.target.get()"),
+            ("entities.find", "eqoa.entities.find(2)"),
+            ("imgui.SetNextWindowPos", "eqoa.imgui.SetNextWindowPos(1,1)"),
+            ("noop lua", "local x=1"),
+        ];
+        context.frame();
+        for (name, code) in calls {
+            let t = Instant::now();
+            bridges[0]
+                .invoke(|| hosts[0].execute(&format!("for i=1,200 do {code} end")))
+                .unwrap();
+            println!("APICOST {name}: {:.2}us/call", t.elapsed().as_secs_f64() * 1e6 / 200.0);
+            hud_layer::clear_all();
+        }
+        drop(context.render_legacy());
+    }
+
     let iterations = 1000;
     let size = (1280, 720);
     let mut dispatch_times = [std::time::Duration::ZERO; 4];

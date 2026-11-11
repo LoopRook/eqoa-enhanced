@@ -1,6 +1,8 @@
 -- EQOA HUD Numbers Mod
 -- Authentic numeric readouts for player HP, Power, XP, and Target HP percentage.
 
+local hud_text = eqoa.hud.text
+
 local white = { 1.0, 1.0, 1.0, 1.0 }
 local blue = { 0.4, 0.7, 1.0, 1.0 }
 local gold = { 1.0, 0.85, 0.35, 1.0 }
@@ -22,7 +24,7 @@ eqoa.events.on("render", function()
         -- Player HP %
         if hud_on and eqoa.hud.visible("health") and player.hp_fraction ~= nil then
             local pct = math.floor(player.hp_fraction * 100 + 0.5)
-            eqoa.hud.text({
+            hud_text({
                 x = 99,
                 y = 35,
                 text = tostring(pct) .. "%",
@@ -36,7 +38,7 @@ eqoa.events.on("render", function()
         -- Player Power
         if hud_on and eqoa.hud.visible("power") and player.power and player.power.maximum and player.power.maximum > 0 then
             local txt = tostring(player.power.current) .. "/" .. tostring(player.power.maximum)
-            eqoa.hud.text({
+            hud_text({
                 x = 99,
                 y = 45,
                 text = txt,
@@ -54,7 +56,7 @@ eqoa.events.on("render", function()
                 local cur = player.experience
                 local pct = math.max(0, math.min(100, (cur / need) * 100))
                 local txt = string.format("%d/%d (%.1f%%)", cur, need, pct)
-                eqoa.hud.text({
+                hud_text({
                     x = 99,
                     y = 55,
                     text = txt,
@@ -76,7 +78,7 @@ eqoa.events.on("render", function()
             if pct > 50 then col = green
             elseif pct > 20 then col = yellow end
 
-            eqoa.hud.text({
+            hud_text({
                 x = 60,
                 y = 397,
                 text = tostring(pct) .. "%",
