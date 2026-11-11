@@ -885,7 +885,7 @@ impl Manager {
                 }
             };
             let saved_intent = if let Some(s) = &self.named {
-                Ok(Some(s.data.enabled.get(&key).copied().unwrap_or(false)))
+                Ok(Some(s.data.enabled_for(&metadata, &key)))
             } else {
                 self.storage.enabled(&key)
             };

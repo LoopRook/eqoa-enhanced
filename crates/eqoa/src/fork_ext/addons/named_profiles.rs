@@ -12,6 +12,13 @@ use std::{
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 const MAX_LAYOUT: usize = 1024 * 1024;
 pub(super) const DEFAULT: &str = "Default";
+/// A mod that ships inside this client (`fork_ext::bundled::PACKAGES`).
+pub(super) fn is_bundled(addon: &DiscoveredAddon) -> bool {
+    let dir = addon.package_root.file_name().and_then(|n| n.to_str());
+    crate::fork_ext::bundled::PACKAGES
+        .iter()
+        .any(|p| dir == Some(*p) && addon.id == *p)
+}
 pub(super) const ROLES: [&str; 4] = ["Tank", "Healer", "Melee", "Caster"];
 pub(super) fn class_role(class: u8) -> &'static str {
     match class {
@@ -130,6 +137,30 @@ impl Document {
             schema: 1,
             ..Default::default()
         }
+    }
+    /// Whether the document turns `addon` on. A key the document never recorded
+    /// (a profile written before the addon existed) falls back to the addon's own
+    /// default only for the mods this client bundles; any other mod stays off.
+    pub fn enabled_for(&self, addon: &DiscoveredAddon, key: &str) -> bool {
+        self.enabled
+            .get(key)
+            .copied()
+            .unwrap_or_else(|| is_bundled(addon) && addon.initially_enabled)
+    }
+    /// Records the default for every bundled mod the document has no key for, so
+    /// later starts read a stable answer. Returns whether anything was added.
+    pub fn record_bundled_defaults<'a>(
+        &mut self,
+        addons: impl IntoIterator<Item = (&'a DiscoveredAddon, &'a str)>,
+    ) -> bool {
+        let mut changed = false;
+        for (addon, key) in addons {
+            if is_bundled(addon) && !self.enabled.contains_key(key) {
+                self.enabled.insert(key.to_string(), addon.initially_enabled);
+                changed = true;
+            }
+        }
+        changed
     }
     fn json(&self) -> Json {
         json!({"schemaVersion":self.schema,"enabled":self.enabled,"addons":self.addons,"layout":self.layout})
