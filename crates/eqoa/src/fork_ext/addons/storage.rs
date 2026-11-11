@@ -587,7 +587,7 @@ pub(crate) fn atomic_replace(target: &Path, bytes: &[u8]) -> std::io::Result<()>
 }
 
 // Private fault seam: production passes std::fs::rename. No public IO framework.
-fn atomic_replace_with(
+pub(super) fn atomic_replace_with(
     target: &Path,
     bytes: &[u8],
     rename: impl FnOnce(&Path, &Path) -> std::io::Result<()>,

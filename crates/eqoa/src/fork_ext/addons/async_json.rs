@@ -33,6 +33,7 @@ struct Service {
     next: u64,
     pending: usize,
     last_worker: Option<thread::ThreadId>,
+    building: Option<Build>,
 }
 type Shared = Rc<RefCell<Service>>;
 fn validate(value: &Json, depth: usize, left: &mut usize) -> std::result::Result<(), String> {
@@ -55,6 +56,25 @@ fn validate(value: &Json, depth: usize, left: &mut usize) -> std::result::Result
     }
     Ok(())
 }
+// Bound structure before serde allocates its tree. Keys count too (conservative).
+fn preflight(bytes: &[u8]) -> std::result::Result<(), String> {
+    let (mut string, mut escape, mut atom, mut depth, mut nodes) = (false,false,false,0usize,0usize);
+    for &b in bytes {
+        if string {
+            if escape { escape=false; } else if b == b'\\' { escape=true; } else if b == b'"' { string=false; }
+            continue;
+        }
+        match b {
+            b'"' => { string=true; nodes+=1; atom=false; }
+            b'[' | b'{' => { depth+=1; nodes+=1; atom=false; }
+            b']' | b'}' => { depth=depth.saturating_sub(1); atom=false; }
+            b',' | b':' | b' ' | b'\r' | b'\n' | b'\t' => atom=false,
+            _ => if !atom { nodes+=1; atom=true; },
+        }
+        if depth>33 || nodes>NODES { return Err("JSON exceeds depth/node quota".into()); }
+    }
+    Ok(())
+}
 fn service(lua: &Lua) -> Result<Shared> {
     if let Some(s) = lua.app_data_ref::<Shared>() {
         return Ok(s.clone());
@@ -67,6 +87,7 @@ fn service(lua: &Lua) -> Result<Shared> {
             while let Ok(job) = requests.recv() {
                 let result = (|| {
                     let bytes = super::sandbox::read_bounded(&job.path, READ_CAP)?;
+                    preflight(&bytes)?;
                     let v: Json = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
                     if !v.is_object() && !v.is_array() {
                         return Err("JSON root must be an object or array".into());
@@ -94,6 +115,7 @@ fn service(lua: &Lua) -> Result<Shared> {
         next: 0,
         pending: 0,
         last_worker: None,
+        building: None,
     }));
     lua.set_app_data(s.clone());
     Ok(s)
@@ -104,55 +126,67 @@ fn resource_path(m: &Mounts, path: &str) -> std::result::Result<PathBuf, String>
     }
     let key = m.key(path)?;
     if key.starts_with("data") {
-        return Err("JSON loads accept read-only resource mounts only".into());
+        return m.read_path(&key);
     }
-    // Deliberately bypass private overlays: load_json never reads mutable addon data.
+    // Packaged mounts bypass overlays; private names use only this mod's storage.
     Ok(m.addon.script_root.join(key))
 }
-fn from_json(lua: &Lua, v: &Json) -> Result<Value> {
-    Ok(match v {
-        Json::Null => lua.named_registry_value("eqoa_json_null")?,
-        Json::Bool(v) => Value::Boolean(*v),
-        Json::Number(v) => Value::Number(
-            v.as_f64()
-                .ok_or_else(|| mlua::Error::runtime("invalid JSON number"))?,
-        ),
-        Json::String(v) => Value::String(lua.create_string(v)?),
-        Json::Array(a) => {
-            let t = lua.create_table_with_capacity(a.len(), 0)?;
-            for (i, v) in a.iter().enumerate() {
-                t.raw_set(i + 1, from_json(lua, v)?)?;
+enum Key { Index(usize), Field(String) }
+enum Task {
+    Visit(Json, Option<(Table,Key)>),
+    Array(Table, std::iter::Enumerate<std::vec::IntoIter<Json>>),
+    Object(Table, serde_json::map::IntoIter),
+}
+struct Build { id:u64, root:Option<Value>, stack:Vec<Task> }
+impl Build {
+    fn new(id:u64,value:Json)->Self { Self{id,root:None,stack:vec![Task::Visit(value,None)]} }
+    fn step(&mut self,lua:&Lua)->Result<bool> {
+        let start=std::time::Instant::now();let mut nodes=0;
+        while let Some(task)=self.stack.pop() {
+            match task {
+                Task::Visit(v,parent)=> {
+                    nodes+=1;
+                    let value=match v {
+                        Json::Null=>lua.named_registry_value("eqoa_json_null")?,
+                        Json::Bool(v)=>Value::Boolean(v),
+                        Json::Number(v)=>Value::Number(v.as_f64().unwrap()),
+                        Json::String(v)=>Value::String(lua.create_string(v)?),
+                        Json::Array(a)=> { let t=lua.create_table()?;t.set_metatable(Some(lua.named_registry_value("eqoa_json_array")?))?;self.stack.push(Task::Array(t.clone(),a.into_iter().enumerate()));Value::Table(t) },
+                        Json::Object(o)=> {let t=lua.create_table()?;self.stack.push(Task::Object(t.clone(),o.into_iter()));Value::Table(t)},
+                    };
+                    if let Some((t,key))=parent { match key {Key::Index(i)=>t.raw_set(i,value)?,Key::Field(k)=>t.raw_set(k,value)?} }
+                    else {self.root=Some(value);}
+                }
+                Task::Array(t,mut iter)=>if let Some((i,v))=iter.next() {self.stack.push(Task::Array(t.clone(),iter));self.stack.push(Task::Visit(v,Some((t,Key::Index(i+1)))));},
+                Task::Object(t,mut iter)=>if let Some((k,v))=iter.next() {self.stack.push(Task::Object(t.clone(),iter));self.stack.push(Task::Visit(v,Some((t,Key::Field(k)))));},
             }
-            t.set_metatable(Some(lua.named_registry_value("eqoa_json_array")?))?;
-            Value::Table(t)
+            if nodes>=512 || start.elapsed()>=std::time::Duration::from_millis(1) {break;}
         }
-        Json::Object(o) => {
-            let t = lua.create_table_with_capacity(0, o.len())?;
-            for (k, v) in o {
-                t.raw_set(k.as_str(), from_json(lua, v)?)?;
-            }
-            Value::Table(t)
-        }
-    })
+        Ok(self.stack.is_empty())
+    }
 }
 pub(crate) fn poll(lua: &Lua) -> Result<()> {
-    let Some(s) = lua.app_data_ref::<Shared>().map(|s| s.clone()) else {
-        return Ok(());
-    };
-    loop {
-        let item = s.borrow_mut().rx.try_recv();
-        let Ok(done) = item else { break };
-        {
-            let mut s = s.borrow_mut();
-            s.pending = s.pending.saturating_sub(1);
-            s.last_worker = Some(done.worker);
-        }
-        match done.result {
-            Ok(v) => {
-                super::native_events::json_resource(lua, done.id, Some(from_json(lua, &v)?), None)?
+    let Some(s)=lua.app_data_ref::<Shared>().map(|s|s.clone()) else {return Ok(())};
+    let mut build=s.borrow_mut().building.take();
+    if build.is_none() {
+        let item=s.borrow().rx.try_recv();
+        match item {
+            Ok(done)=> {
+                s.borrow_mut().last_worker=Some(done.worker);
+                match done.result {
+                    Ok(v)=>build=Some(Build::new(done.id,v)),
+                    Err(e)=> {{let mut service=s.borrow_mut();service.pending=service.pending.saturating_sub(1);}super::native_events::json_resource(lua,done.id,None,Some(&e))?;return Ok(());}
+                }
             }
-            Err(e) => super::native_events::json_resource(lua, done.id, None, Some(&e))?,
+            Err(mpsc::TryRecvError::Disconnected)=> {s.borrow_mut().pending=0;super::native::diagnose(lua,"eqoa.files.load_json","failed","JSON worker disconnected");return Ok(());}
+            Err(mpsc::TryRecvError::Empty)=>return Ok(()),
         }
+    }
+    let mut build=build.unwrap();
+    match build.step(lua) {
+        Ok(false)=>s.borrow_mut().building=Some(build),
+        Ok(true)=> {let value=build.root.take().unwrap();let id=build.id;drop(build);s.borrow_mut().pending-=1;super::native_events::json_resource(lua,id,Some(value),None)?;}
+        Err(_)=> {let id=build.id;drop(build);s.borrow_mut().pending-=1;lua.gc_collect()?;super::native_events::json_resource(lua,id,None,Some("JSON exceeds Lua memory; large data requires manifest capability large_data"))?;}
     }
     Ok(())
 }
@@ -194,7 +228,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     "at most two JSON requests in flight",
                 );
             }
-            lua.set_memory_limit(JSON_HEAP)?;
+
             s.next += 1;
             let id = s.next;
             if s.tx.try_send(Load { id, path }).is_err() {

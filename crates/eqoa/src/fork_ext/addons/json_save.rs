@@ -11,7 +11,9 @@ use std::{
     io::Write,
     path::PathBuf,
     rc::Rc,
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex, OnceLock, mpsc, atomic::{AtomicBool, AtomicU64, Ordering}},
+    collections::BTreeMap,
+    time::{Duration, Instant},
     thread,
 };
 const CAP: usize = 14 * 1024 * 1024;
@@ -20,6 +22,8 @@ struct Job {
     key: PathBuf,
     root: PathBuf,
     value: Json,
+    generation: u64,
+    permit: Arc<AtomicBool>,
 }
 struct Done {
     id: u64,
@@ -45,18 +49,49 @@ impl Queue {
     }
 }
 type Work = Arc<(Mutex<Queue>, Condvar)>;
+// All VM generations share one writer and one per-path acceptance sequence.
+static NEXT: AtomicU64 = AtomicU64::new(1);
+static LATEST: OnceLock<Mutex<BTreeMap<PathBuf,u64>>> = OnceLock::new();
+fn latest() -> &'static Mutex<BTreeMap<PathBuf,u64>> { LATEST.get_or_init(Default::default) }
+struct Writer { tx: mpsc::Sender<Work>, join: thread::JoinHandle<()>, users: usize }
+static WRITER: Mutex<Option<Writer>> = Mutex::new(None);
 struct Service {
     work: Work,
+    permit: Arc<AtomicBool>,
     next: u64,
     last_worker: Option<thread::ThreadId>,
 }
 impl Drop for Service {
     fn drop(&mut self) {
-        let mut q = self.work.0.lock().unwrap();
-        q.closed = true;
-        self.work.1.notify_one();
+        let deadline=Instant::now()+Duration::from_secs(2);
+        let mut q=self.work.0.lock().unwrap();
+        q.closed=true;
+        while q.active.is_some() || q.pending.is_some() {
+            let remaining=deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() { break; }
+            q=self.work.1.wait_timeout(q,remaining).unwrap().0;
+        }
+        let drained=q.active.is_none() && q.pending.is_none();
+        q.pending=None;
+        drop(q);
+        // Same gate as the final rename: after this boundary an old generation
+        // cannot recreate a cleared file, even if encoding or sync was slow.
+        { let _gate=latest().lock().unwrap(); self.permit.store(false,Ordering::Release); }
+        if !drained { eprintln!("addon JSON save flush timed out after 2 s; pending commit cancelled"); }
+        let mut writer=WRITER.lock().unwrap();
+        if let Some(w)=writer.as_mut() {
+            w.users-=1;
+            if w.users==0 && drained {
+                let w=writer.take().unwrap();
+                drop(w.tx);
+                while !w.join.is_finished() && Instant::now()<deadline { thread::sleep(Duration::from_millis(1)); }
+                if w.join.is_finished() { let _=w.join.join(); }
+                else { eprintln!("addon JSON writer join timed out after 2 s"); }
+            }
+        }
     }
 }
+pub(crate) fn close(lua: &Lua) { drop(lua.remove_app_data::<Shared>()); }
 type Shared = Rc<RefCell<Service>>;
 struct Limited(Vec<u8>);
 impl Write for Limited {
@@ -81,10 +116,15 @@ fn write(job: &Job) -> std::result::Result<(), String> {
     super::file_io::no_links(&target)?;
     super::file_io::no_links(&deleted)?;
     super::sandbox::check_quota(&job.root, &target, out.0.len())?;
-    super::storage::atomic_replace(&target, &out.0).map_err(|e| e.to_string())?;
-    if deleted.exists() {
-        std::fs::remove_file(deleted).map_err(|e| e.to_string())?;
-    }
+    super::storage::atomic_replace_with(&target, &out.0, |from,to| {
+        let gate=latest().lock().unwrap();
+        if !job.permit.load(Ordering::Acquire) || gate.get(&target)!=Some(&job.generation) {
+            return Err(std::io::Error::other("JSON save superseded or disabled"));
+        }
+        std::fs::rename(from,to)?;
+        if deleted.exists() { std::fs::remove_file(&deleted)?; }
+        Ok(())
+    }).map_err(|e| e.to_string())?;
     Ok(())
 }
 fn service(lua: &Lua) -> Result<Shared> {
@@ -92,33 +132,28 @@ fn service(lua: &Lua) -> Result<Shared> {
         return Ok(s.clone());
     }
     let work: Work = Arc::new((Mutex::new(Queue::default()), Condvar::new()));
-    let worker = work.clone();
-    thread::Builder::new()
-        .name("addon-json-save".into())
-        .spawn(move || {
-            loop {
-                let job = {
-                    let mut q = worker.0.lock().unwrap();
-                    while q.pending.is_none() && !q.closed {
-                        q = worker.1.wait(q).unwrap();
-                    }
-                    let Some(job) = q.pending.take() else { break };
-                    q.active = Some(job.key.clone());
-                    job
-                };
-                let result = write(&job);
-                let mut q = worker.0.lock().unwrap();
-                q.active = None;
-                q.done = Some(Done {
-                    id: job.id,
-                    result,
-                    worker: thread::current().id(),
-                });
+    let mut global=WRITER.lock().unwrap();
+    if global.is_none() {
+        let (tx,rx)=mpsc::channel::<Work>();
+        let join=thread::Builder::new().name("addon-json-save".into()).spawn(move || {
+            while let Ok(worker)=rx.recv() {
+                loop {
+                    let job={ let mut q=worker.0.lock().unwrap(); let Some(job)=q.pending.take() else { break }; q.active=Some(job.key.clone()); job };
+                    let result=write(&job);
+                    let mut q=worker.0.lock().unwrap();
+                    q.active=None;
+                    q.done=Some(Done {id:job.id,result,worker:thread::current().id()});
+                    worker.1.notify_all();
+                }
             }
-        })
-        .map_err(mlua::Error::external)?;
+        }).map_err(mlua::Error::external)?;
+        *global=Some(Writer{tx,join,users:0});
+    }
+    global.as_mut().unwrap().users+=1;
+    drop(global);
     let s = Rc::new(RefCell::new(Service {
         work,
+        permit: Arc::new(AtomicBool::new(true)),
         next: 0,
         last_worker: None,
     }));
@@ -276,26 +311,39 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                         "private storage unavailable",
                     );
                 };
-                lua.set_memory_limit(super::async_json::JSON_HEAP)?;
+
+                let s = service(lua)?;
+                {
+                    let s=s.borrow(); let q=s.work.0.lock().unwrap();
+                    if q.closed || q.active.as_ref().is_some_and(|p| *p!=key) || q.pending.as_ref().is_some_and(|j| j.key!=key) {
+                        return error(lua,"eqoa.files.save_json_async","quota","one JSON save path at a time");
+                    }
+                }
                 let value = match snapshot(value) {
                     Ok(v) => v,
                     Err(e) => {
                         return error(lua, "eqoa.files.save_json_async", "invalid_argument", &e);
                     }
                 };
-                let s = service(lua)?;
                 let mut s = s.borrow_mut();
                 s.next += 1;
                 let id = s.next;
+                let generation=NEXT.fetch_add(1,Ordering::Relaxed);
+                let target=root.join("files").join(&key);
+                let mut gate=latest().lock().unwrap();
                 if let Err(e) = s.work.0.lock().unwrap().push(Job {
                     id,
                     key,
                     root,
                     value,
+                    generation,
+                    permit:s.permit.clone(),
                 }) {
                     return error(lua, "eqoa.files.save_json_async", "quota", &e);
                 }
-                s.work.1.notify_one();
+                gate.insert(target,generation);
+                drop(gate);
+                WRITER.lock().unwrap().as_ref().unwrap().tx.send(s.work.clone()).map_err(mlua::Error::external)?;
                 lua.pack_multi((id, Value::Nil))
             })?,
     )
@@ -311,6 +359,8 @@ mod tests {
             key: key.into(),
             root: PathBuf::new(),
             value: Json::Object(Map::new()),
+            generation:id,
+            permit:Arc::new(AtomicBool::new(true)),
         };
         q.push(job(1, "data/journal")).unwrap();
         q.push(job(2, "data/journal")).unwrap();

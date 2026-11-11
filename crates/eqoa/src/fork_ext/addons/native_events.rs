@@ -586,6 +586,7 @@ pub(crate) fn render(host: &Host) -> Result<()> {
     deliver(&host.lua, &local("render", json!({"dt":dt})), None)
 }
 pub(crate) fn clear(host: &Host) {
+    super::json_save::close(&host.lua);
     if host.lua.app_data_ref::<Shared>().is_none() {
         return;
     }
