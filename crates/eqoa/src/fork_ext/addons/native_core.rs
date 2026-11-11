@@ -12,6 +12,7 @@ pub(crate) struct View {
     pub phase: &'static str,
     pub world_id: Option<i32>,
     pub player: Json,
+    pub map: Json,
     pub player_stats: Option<Json>,
     pub entities: Vec<Json>,
     pub entity_slots: Vec<Option<u32>>,
@@ -28,6 +29,7 @@ impl Default for View {
             phase: "pregame",
             world_id: None,
             player: Json::Null,
+            map: Json::Null,
             player_stats: None,
             entities: Vec::new(),
             entity_slots: Vec::new(),
@@ -381,6 +383,21 @@ impl Core {
                 json!({"world_id":view.world_id,"initial":false}),
             );
             self.emit("state.reset", json!({"in_world":true,"initial":false}));
+        }
+        let mut before = self.view.map.clone();
+        let mut after = view.map.clone();
+        if let Some(m) = before.as_object_mut() {
+            m.remove("revision");
+        }
+        if let Some(m) = after.as_object_mut() {
+            m.remove("revision");
+        }
+        let revision = self.view.map["revision"].as_u64().unwrap_or(0);
+        if view.map.is_object() {
+            view.map["revision"] = json!(revision + u64::from(before != after));
+        }
+        if before != after {
+            self.emit("map.changed", json!({"before":self.view.map,"after":view.map,"changed":changed_fields(&before,&after)}));
         }
         let previous = std::mem::replace(&mut self.view, view);
         if self.view.in_world && previous.player_stats != self.view.player_stats {

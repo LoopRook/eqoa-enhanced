@@ -202,8 +202,13 @@ impl Play {
             in_world: true,
             phase,
             world_id: Some(self.world_id() as i32),
-            player,
+            player: player.clone(),
             player_stats,
+            map: self.map.api_state(
+                self.world_id() as i32,
+                &player["location"],
+                self.words.as_ref(),
+            ),
             entities,
             entity_slots: self
                 .entities

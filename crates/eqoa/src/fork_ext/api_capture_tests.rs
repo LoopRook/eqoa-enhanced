@@ -1822,3 +1822,28 @@ fn mana_subscription_follows_enabled_mod_and_its_saved_switch_both_directions() 
     }
     options::reset_in_memory();
 }
+
+#[test]
+fn map_state_comes_from_play_and_changed_event_has_negative_control() {
+    let mut p = ready();
+    p.map = crate::map::testing::up((640, 448));
+    let h = Host::new().unwrap();
+    h.execute("maps=0;eqoa.events.on('map.changed',function(e) maps=maps+1;last=e.data.after end)")
+        .unwrap();
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    native_events::dispatch(&h).unwrap();
+    h.execute("local m=assert(eqoa.map.get());assert(m.world_id==0 and m.revision>0);assert(m.bounds.x_min==2000 and m.bounds.z_max==34000);assert(m.waypoint==nil);assert(maps==1)").unwrap();
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(maps==1)").unwrap();
+    p.map = crate::map::Map::default();
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(maps==2 and last.bounds==nil)").unwrap();
+    CORE.with(|c| c.borrow_mut().reset("test"));
+    h.execute("local m,e=eqoa.map.get();assert(m==nil and e.code=='not_in_world')")
+        .unwrap();
+}

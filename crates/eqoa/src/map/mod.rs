@@ -85,6 +85,9 @@
 //! a pad, the Quests button) shows or hides them, as Extended's Quest Markers
 //! does.
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../fork_ext/map_api.rs"]
+pub(crate) mod extension;
 pub mod build;
 pub mod cells;
 pub mod chrome;

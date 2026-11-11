@@ -57,12 +57,24 @@ fn read(
         c.view.in_world.then(|| f(&c.view))
     });
     match value {
-        Some(v) => lua.pack_multi((super::native::record_cached(lua, symbol, path, &v)?, Value::Nil)),
+        Some(v) => lua.pack_multi((
+            super::native::record_cached(lua, symbol, path, &v)?,
+            Value::Nil,
+        )),
         None => error(lua, symbol, "not_in_world", "enter a loaded world first"),
     }
 }
 pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
+    bind(
+        lua,
+        "map",
+        "get",
+        lua.create_function(|lua, ()| {
+            read(lua, "eqoa.map.get", "eqoa.map.MapState", |v| v.map.clone())
+        })?,
+    )?;
+
     bind(lua,"client","get",lua.create_function(|lua,()| CORE.with(|c| {let c=c.borrow();record(lua,"eqoa.client.Client",&json!({"in_world":c.view.in_world,"phase":c.view.phase,"generation":c.generation,"tick":c.tick,"frame":c.frame,"time":super::native_core::time_unborrowed(&c),"world_id":c.view.world_id}))}))?)?;
     for (module, name, path) in [
         ("player", "get", "eqoa.player.Player"),
@@ -647,7 +659,10 @@ fn install_math(lua: &Lua) -> Result<()> {
                 _ => super::hud_layout::get_window_size(),
             };
             let j = super::hud_layout::hud_frame_json((w, h));
-            lua.pack_multi((super::native::record_cached(lua, "eqoa.hud.frame", "eqoa.hud.Frame", &j)?, Value::Nil))
+            lua.pack_multi((
+                super::native::record_cached(lua, "eqoa.hud.frame", "eqoa.hud.Frame", &j)?,
+                Value::Nil,
+            ))
         })?,
     )?;
     bind(
@@ -664,7 +679,10 @@ fn install_math(lua: &Lua) -> Result<()> {
                 _ => super::hud_layout::get_window_size(),
             };
             let j = super::hud_layout::hud_layout_json((w, h));
-            lua.pack_multi((super::native::record_cached(lua, "eqoa.hud.layout", "eqoa.hud.Layout", &j)?, Value::Nil))
+            lua.pack_multi((
+                super::native::record_cached(lua, "eqoa.hud.layout", "eqoa.hud.Layout", &j)?,
+                Value::Nil,
+            ))
         })?,
     )?;
     bind_fn(
@@ -683,22 +701,21 @@ fn install_math(lua: &Lua) -> Result<()> {
             lua.pack_multi((vis, Value::Nil))
         },
     )?;
-    let parse_anchor_vert =
-        |t: &Spec| -> Result<(render::ui::Anchor, render::ui::Vertical)> {
-            let anchor_s: Option<mlua::String> = t.fget("anchor")?;
-            let anchor = match anchor_s.as_ref().map(|s| s.as_bytes()).as_deref() {
-                Some(b"right") => render::ui::Anchor::Right,
-                Some(b"center") => render::ui::Anchor::Middle,
-                _ => render::ui::Anchor::Left,
-            };
-            let vert_s: Option<mlua::String> = t.fget("vertical")?;
-            let vertical = match vert_s.as_ref().map(|s| s.as_bytes()).as_deref() {
-                Some(b"bottom") => render::ui::Vertical::Bottom,
-                Some(b"center") => render::ui::Vertical::Middle,
-                _ => render::ui::Vertical::Top,
-            };
-            Ok((anchor, vertical))
+    let parse_anchor_vert = |t: &Spec| -> Result<(render::ui::Anchor, render::ui::Vertical)> {
+        let anchor_s: Option<mlua::String> = t.fget("anchor")?;
+        let anchor = match anchor_s.as_ref().map(|s| s.as_bytes()).as_deref() {
+            Some(b"right") => render::ui::Anchor::Right,
+            Some(b"center") => render::ui::Anchor::Middle,
+            _ => render::ui::Anchor::Left,
         };
+        let vert_s: Option<mlua::String> = t.fget("vertical")?;
+        let vertical = match vert_s.as_ref().map(|s| s.as_bytes()).as_deref() {
+            Some(b"bottom") => render::ui::Vertical::Bottom,
+            Some(b"center") => render::ui::Vertical::Middle,
+            _ => render::ui::Vertical::Top,
+        };
+        Ok((anchor, vertical))
+    };
     bind_fn(
         lua,
         "hud",
@@ -1193,8 +1210,28 @@ pub(crate) fn stats_box_message(shown: bool) -> &'static str {
 
 /// Spec-table fields the HUD and option calls read.
 const SPEC_KEYS: [&str; 23] = [
-    "col", "row", "x", "y", "text", "color", "scale", "align", "outline", "shadow", "anchor",
-    "vertical", "clip_width", "target_fade", "art", "fill", "lit", "w", "h", "ui_id", "id", "label",
+    "col",
+    "row",
+    "x",
+    "y",
+    "text",
+    "color",
+    "scale",
+    "align",
+    "outline",
+    "shadow",
+    "anchor",
+    "vertical",
+    "clip_width",
+    "target_fade",
+    "art",
+    "fill",
+    "lit",
+    "w",
+    "h",
+    "ui_id",
+    "id",
+    "label",
     "default",
 ];
 

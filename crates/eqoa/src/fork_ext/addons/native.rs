@@ -967,6 +967,12 @@ fn nested_type(path: &str, key: &str) -> Option<&'static str> {
 fn install_fields(lua: &Lua) {
     for (path, fields) in [
         ("eqoa.Error", "code message capability retry_after"),
+        (
+            "eqoa.map.MapState",
+            "world_id world_name zone bounds revision waypoint",
+        ),
+        ("eqoa.map.Bounds", "x_min z_min x_max z_max"),
+        ("eqoa.map.Waypoint", "world_id x z label owner"),
         ("eqoa.Vec2", "x y"),
         ("eqoa.Vec3", "x y z"),
         ("eqoa.Color", "r g b a"),

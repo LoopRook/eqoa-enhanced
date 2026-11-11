@@ -92,6 +92,7 @@ const EVENTS: &[&str] = &[
     "entity.changed",
     "entity.removed",
     "group.changed",
+    "map.changed",
     "abilities.changed",
     "hotbar.changed",
     "cooldown.started",
@@ -122,6 +123,7 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("entity.changed", "ref before after changed"),
         ("entity.removed", "ref before after changed"),
         ("group.changed", "before after changed"),
+        ("map.changed", "before after changed"),
         ("abilities.changed", "before after changed"),
         ("hotbar.changed", "before after changed"),
         ("effects.changed", "before after changed"),
@@ -160,7 +162,7 @@ fn install_event_fields(lua: &mlua::Lua) {
         ),
         (
             4,
-            "quests.changed camera.changed windows.changed map.changed mastery.changed action.result",
+            "quests.changed camera.changed windows.changed mastery.changed action.result",
         ),
     ] {
         for name in names.split_whitespace() {
