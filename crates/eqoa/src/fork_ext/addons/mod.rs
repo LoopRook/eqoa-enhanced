@@ -35,6 +35,7 @@ pub(crate) mod entity;
 mod file_io;
 mod exchange;
 mod player_files;
+mod map_migration;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod fonts;
 #[cfg(test)]

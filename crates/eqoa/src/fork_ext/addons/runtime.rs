@@ -127,6 +127,11 @@ impl Runtime {
         runtime
     }
     pub(super) fn new(paths: Paths) -> Self {
+        if let Some(config) = &paths.config {
+            if let Err(error) = super::map_migration::migrate(config) {
+                eprintln!("journal migration: {error}");
+            }
+        }
         super::visibility::publish(false);
         let discovery = super::discovery::discover(&paths.mods);
         let storage = Storage::new(paths.config.clone());
@@ -839,6 +844,27 @@ mod tests {
             );
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn round4b_first_start_copies_legacy_journal_without_overwrite() {
+        let mods=Scratch::new();let config=Scratch::new();
+        let original=config.0.join("journal.json");
+        let text=format!("{{\"payload\":\"{}\"}}","x".repeat(1024*1024+64));
+        fs::write(&original,&text).unwrap();
+        let paths=Paths::select(mods.0.clone(),None,Some(config.0.clone()),None);
+        let _runtime=Runtime::new(paths.clone());
+        let key=Storage::key_for_addon_id("eqoa_creature_journal");
+        let target=config.0.join("addons").join(format!("{key}-files/files/data/journal.json"));
+        assert_eq!(fs::read_to_string(&target).unwrap(),text);
+        assert_eq!(fs::read_to_string(&original).unwrap(),text);
+        fs::write(&target,"{\"new\":{}}").unwrap();
+        let _runtime=Runtime::new(paths.clone());
+        assert_eq!(fs::read_to_string(&target).unwrap(),"{\"new\":{}}");
+        fs::remove_file(&target).unwrap();
+        let _runtime=Runtime::new(paths);
+        assert!(!target.exists(),"a one-time migration must not resurrect a deleted journal");
+        assert_eq!(fs::read_to_string(&original).unwrap(),text);
     }
 
     #[test]

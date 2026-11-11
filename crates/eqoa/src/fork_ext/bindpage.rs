@@ -230,14 +230,18 @@ pub(crate) fn migrate_legacy_keys() -> Result<(), String> {
     migrate_key_text(&legacy, &saved, write_config)
 }
 
+fn native_mod_key(line: &str) -> bool {
+    ["key.stats_box=", "key.map_search=", "key.map_stop="].iter().any(|prefix| line.starts_with(prefix))
+}
 fn migrated_line(line: &str) -> Option<String> {
-    if let Some(key) = line.strip_prefix("key.stats_box=") {
-        Some(format!("mod.eqoa_stats_box.toggle={key}"))
-    } else if line.starts_with("mod.") && line.contains('=') {
-        Some(line.to_string())
-    } else {
-        None
+    for (old,new) in [
+        ("key.stats_box=","mod.eqoa_stats_box.toggle="),
+        ("key.map_search=","mod.eqoa_map_search.open="),
+        ("key.map_stop=","mod.eqoa_map_search.clear="),
+    ] {
+        if let Some(key)=line.strip_prefix(old) {return Some(format!("{new}{key}"))}
     }
+    (line.starts_with("mod.") && line.contains('=')).then(||line.to_string())
 }
 
 fn migrate_key_text(
@@ -253,11 +257,11 @@ fn migrate_key_text(
     let lines: Vec<_> = legacy.lines().collect();
     for line in lines
         .iter()
-        .filter(|line| !line.starts_with("key.stats_box="))
+        .filter(|line| !native_mod_key(line))
         .chain(
             lines
                 .iter()
-                .filter(|line| line.starts_with("key.stats_box=")),
+                .filter(|line| native_mod_key(line)),
         )
     {
         if let Some(line) = migrated_line(line) {
@@ -340,6 +344,21 @@ pub fn dispatch_keypress(key_name: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn round4b_migration_keeps_rebound_search_and_stop_keys() {
+        let legacy=b"key.map_search=f8\nkey.map_stop=f9\nkey.jump=space\n";
+        let mut files=std::collections::HashMap::new();
+        migrate_key_text(legacy,b"mod.eqoa_map_search.clear=\n",|name,bytes|{files.insert(name.to_string(),bytes.to_vec());Ok(())}).unwrap();
+        let saved=String::from_utf8(files[KEYS_FILE].clone()).unwrap();
+        assert!(saved.contains("mod.eqoa_map_search.open=f8\n"));
+        assert!(saved.contains("mod.eqoa_map_search.clear=\n"));
+        assert!(!saved.contains("clear=f9"));
+        assert_eq!(files[LEGACY_KEYS_FILE],b"key.jump=space\n");
+        let mut writes=0;
+        migrate_key_text(b"key.jump=space\n",saved.as_bytes(),|_,_|{writes+=1;Ok(())}).unwrap();
+        assert_eq!(writes,0,"unrelated keys never trigger a migration write");
+    }
 
     #[test]
     fn legacy_mod_key_migration_writes_destination_before_cleanup_and_retries() {
