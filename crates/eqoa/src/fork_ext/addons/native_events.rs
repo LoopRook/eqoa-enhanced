@@ -149,7 +149,7 @@ fn install_event_fields(lua: &mlua::Lua) {
             "combat.hit",
             "attacker_id defender_id amount kind color outgoing incoming from_pet to_pet",
         ),
-        ("input.key", "key down repeat synthetic"),
+        ("input.key", "key down repeat synthetic text"),
         ("input.pad", "before after"),
         ("pointer.pressed", "x y inside_window button steps"),
         ("pointer.wheel", "x y inside_window button steps"),

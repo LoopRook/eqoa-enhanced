@@ -45,6 +45,9 @@ pub(crate) fn prepare_controls(
     {
         addons::native_core::presentation();
         addons::input::observe_report(_report, _connected, _gameplay);
+        if _gameplay && addons::input::is_text_capture_active() {
+            *_report = crate::input::Report::default();
+        }
     }
 }
 

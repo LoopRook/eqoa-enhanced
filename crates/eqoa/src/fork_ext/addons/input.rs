@@ -167,9 +167,21 @@ pub(crate) fn route_mod_key(
     plain_play: bool,
     keyboard: bool,
 ) {
-    if !synthetic && !repeat && plain_play && !keyboard && !is_text_capture_active() {
+    let editor = is_text_capture_active();
+    if !synthetic && plain_play && (editor || (!repeat && !keyboard)) {
         if let Some(name) = crate::binds::name_of(key) {
-            emit_named_key_event(&name, down);
+            let text = if editor && down {
+                match key {
+                    Key::Character(s) => Some(s.to_string()),
+                    Key::Named(NamedKey::Space) => Some(" ".into()),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            super::native_core::defer(256 + text.as_ref().map_or(0, String::len), move |c| {
+                c.emit("input.key", serde_json::json!({"key":name,"down":down,"repeat":repeat,"synthetic":false,"text":text}));
+            });
         }
     }
 }

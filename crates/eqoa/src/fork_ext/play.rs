@@ -27,6 +27,13 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     _play.session.agree_power_bars(want_power);
     #[cfg(not(target_arch = "wasm32"))]
     {
+        if crate::fork_ext::addons::input::is_text_capture_active() {
+            _play.attack_release();
+            _play.info_up = false;
+            _play.aim_hold = false;
+            _play.autorun = false;
+            _play.following = false;
+        }
         let has_pet = _play.pet_id != u32::MAX;
         let effects_height = if has_pet {
             crate::hud::pet_effects_height(_play.pet_effects().len())

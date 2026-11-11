@@ -365,3 +365,67 @@ fn round4b_journal_max_interval_flushes_during_continuous_discoveries() {
     assert_eq!(saved["Continuous Bat"].as_object().unwrap().len(), 7);
     native_events::clear(&host);
 }
+#[test]
+fn round4b_text_editor_receives_keys_and_releases_held_gameplay() {
+    use crate::fork_ext::addons::input as addon_input;
+    use winit::keyboard::{Key, NamedKey};
+    addon_input::reset_input_state();
+    let mut p = Play::bundled_ui_fixture();
+    p.forge_snapshot(None);
+    let h = Host::new().unwrap();
+    h.execute("texts='';arrows=0;eqoa.events.on('input.key',function(e) if e.data.down then if e.data.text then texts=texts..e.data.text end;if e.data.key=='up' then arrows=arrows+1 end end end);assert(eqoa.input.capture_text(true))").unwrap();
+    p.aim_hold = true;
+    p.info_up = true;
+    super::begin_iteration(&mut p, false);
+    assert!(
+        !p.aim_hold && !p.info_up,
+        "editor must release held camera and information state"
+    );
+    let mut report = crate::input::Report {
+        buttons: u16::MAX,
+        sticks: [1.; 4],
+        triggers: [1.; 2],
+    };
+    crate::fork_ext::prepare_controls(&mut report, true, true);
+    assert_eq!(report.buttons, 0);
+    assert_eq!(report.sticks, [0.; 4]);
+    for text in ["M", "P", "O", "G", "é"] {
+        addon_input::route_mod_key(&Key::Character(text.into()), true, false, false, true, true);
+    }
+    addon_input::route_mod_key(
+        &Key::Named(NamedKey::ArrowUp),
+        true,
+        true,
+        false,
+        true,
+        true,
+    );
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(texts=='MPOGé' and arrows==1)").unwrap();
+    // Neither a native dialog nor a synthetic key is exposed as editor input.
+    addon_input::route_mod_key(
+        &Key::Character("secret".into()),
+        true,
+        false,
+        false,
+        false,
+        true,
+    );
+    addon_input::route_mod_key(
+        &Key::Character("synthetic".into()),
+        true,
+        false,
+        true,
+        true,
+        true,
+    );
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(texts=='MPOGé');eqoa.input.capture_text(false)")
+        .unwrap();
+    p.aim_hold = true;
+    p.info_up = true;
+    super::begin_iteration(&mut p, false);
+    assert!(p.aim_hold && p.info_up);
+    native_events::clear(&h);
+    addon_input::reset_input_state();
+}
