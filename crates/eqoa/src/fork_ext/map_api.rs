@@ -7,6 +7,7 @@ impl Map {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         world.hash(&mut h);
+        self.open.hash(&mut h);
         for w in [&self.world, &self.home].into_iter().flatten() {
             w.index.hash(&mut h);
             w.name.hash(&mut h);
@@ -47,7 +48,7 @@ impl Map {
             let c = &w.builder.cells;
             json!({"x_min":ee::mul(c.col0 as f32,CELL),"z_min":ee::mul(c.row0 as f32,CELL),"x_max":ee::mul((c.col0+c.cols) as f32,CELL),"z_max":ee::mul((c.row0+c.rows) as f32,CELL)})
         });
-        json!({"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
+        json!({"open":self.open,"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
     }
 }
 
@@ -62,7 +63,7 @@ pub(crate) fn static_markers(world: i32) -> std::rc::Rc<Vec<Json>> {
                 markers::Marker::Camp(i) => { let c = &markers_data::CAMPS[i]; ("camp",c.name,Some(c.levels.0),Some(c.levels.1)) },
                 markers::Marker::Coach(i) => ("coach",markers_data::COACHES[i].coachman,None,None),
             };
-            out.push(json!({"kind":kind,"name":name,"x":at[0],"z":at[1],"level_min":lo,"level_max":hi,"label":null}));
+            out.push(json!({"kind":kind,"name":name,"x":at[0],"z":at[1],"level_min":lo,"level_max":hi,"label":match m { markers::Marker::Camp(_) => format!("{name} (XP camp)"), markers::Marker::Coach(i) => format!("{} - {name} (coach)",markers_data::COACHES[i].town) }}));
         }
         for (_,t) in markers::towns_of(world) { out.push(json!({"kind":"town","name":t.name,"x":t.at[0],"z":t.at[1],"label":null})); }
         std::rc::Rc::new(out)

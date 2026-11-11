@@ -429,3 +429,188 @@ fn round4b_text_editor_receives_keys_and_releases_held_gameplay() {
     native_events::clear(&h);
     addon_input::reset_input_state();
 }
+fn search_host(scratch: &Scratch) -> (Host, discovery::DiscoveredAddon) {
+    let addon =
+        discovery::discover(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods"))
+            .addons
+            .into_iter()
+            .find(|a| a.id == "eqoa_map_search")
+            .expect("bundled map search");
+    assert!(addon.initially_enabled);
+    let data = Storage::new(Some(scratch.0.join("config")))
+        .data_dir(&addon)
+        .unwrap()
+        .unwrap();
+    (Host::for_addon_with_files(&addon, data).unwrap(), addon)
+}
+fn key(host: &Host, key: winit::keyboard::Key) {
+    crate::fork_ext::addons::input::route_mod_key(&key, true, false, false, true, false);
+    step(host, 0.5);
+}
+fn type_text(host: &Host, text: &str) {
+    for c in text.chars() {
+        key(host, winit::keyboard::Key::Character(c.to_string().into()));
+    }
+}
+fn settle(host: &Host) {
+    for _ in 0..80 {
+        step(host, 0.5);
+    }
+}
+#[test]
+fn round4b_search_selects_live_with_dots_follows_and_falls_back_to_known() {
+    use crate::fork_ext::addons::{guides, input};
+    use winit::keyboard::{Key, NamedKey};
+    input::reset_input_state();
+    crate::settings::testing::reset(false);
+    let mut p = Play::bundled_ui_fixture();
+    let mut bat = creature(6000, "MPOG Bat", 15, [200., 2., 300.]);
+    bat.p19 = 255;
+    let mut bat2 = creature(6001, "MPOG Bat", 16, [500., 2., 800.]);
+    bat2.p19 = 255;
+    p.entities.slots = vec![Some(bat), Some(bat2)];
+    p.player.pos = [190., 2., 290.];
+    p.forge_snapshot(None);
+    let (scratch, journal, path) = journal();
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path,r#"{"MPOG Bat":{"100":{"world":0,"level":15,"pos":[210,2,310]},"101":{"world":0,"level":15,"pos":[610,2,710]}}}"#).unwrap();
+    // A running declared owner is required for the shared file.
+    let ja =
+        discovery::discover(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods"))
+            .addons
+            .into_iter()
+            .find(|a| a.id == "eqoa_creature_journal")
+            .unwrap();
+    journal.run_addon(&ja).unwrap();
+    let (h, a) = search_host(&scratch);
+    h.run_addon(&a).unwrap();
+    for _ in 0..1500 {
+        step(&journal, 0.5);
+        step(&h, 0.5);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    h.execute("local s=require('search');assert(#s.catalog>1000 and #s.journal==2)")
+        .unwrap();
+    key(&h, Key::Named(NamedKey::F2));
+    type_text(&h, "MPOG Bat");
+    settle(&h);
+    h.execute("local s=require('search');assert(s.open and s.query=='MPOG Bat');assert(#s.rows==1 and s.rows[1].count==2 and s.rows[1].detail=='Spawned nearby: 2; levels 15-16')").unwrap();
+    assert!(!p.map.open, "typing M/P/O/G must not open the native map");
+    key(&h, Key::Named(NamedKey::Enter));
+    let vm = native_events::bus(&h.lua).borrow().vm;
+    assert_eq!(guides::target_for(vm), Some([200., 300.]));
+    assert_eq!(guides::dots_for(vm).len(), 2);
+    let packet = net::session::Event::State {
+        channel: 0,
+        data: vec![],
+    };
+    let before = super::begin_game_event(&p, &packet);
+    p.entities.slots[0].as_mut().unwrap().pos = [250., 2., 350.];
+    super::end_game_event(&p, before);
+    step(&h, 0.5);
+    assert_eq!(
+        guides::target_for(vm),
+        Some([250., 350.]),
+        "live guide follows protocol movement"
+    );
+    for channel in 0..2 {
+        let packet = net::session::Event::State {
+            channel,
+            data: vec![],
+        };
+        let before = super::begin_game_event(&p, &packet);
+        p.entities.slots[channel as usize] = None;
+        super::end_game_event(&p, before);
+        step(&h, 0.5);
+        settle(&h);
+    }
+    assert_eq!(
+        guides::target_for(vm),
+        Some([210., 310.]),
+        "lost live entity falls back to nearest recorded spawn"
+    );
+    key(&h, Key::Named(NamedKey::F4));
+    assert!(guides::target_for(vm).is_none());
+    key(&h, Key::Named(NamedKey::F2));
+    for _ in 0..8 {
+        key(&h, Key::Named(NamedKey::Backspace));
+    }
+    type_text(&h, "no such creature 123");
+    settle(&h);
+    key(&h, Key::Named(NamedKey::Enter));
+    assert!(
+        guides::target_for(vm).is_none(),
+        "unmatched Enter cannot create a guide"
+    );
+    native_events::clear(&h);
+    native_events::clear(&journal);
+    input::reset_input_state();
+}
+#[test]
+fn round4b_search_group_departure_places_and_unicode_editor_limit() {
+    use crate::fork_ext::addons::{guides, input};
+    use winit::keyboard::{Key, NamedKey};
+    input::reset_input_state();
+    crate::settings::testing::reset(false);
+    let mut p = Play::bundled_ui_fixture();
+    p.group.in_group = true;
+    p.group.members = vec![crate::group::Member {
+        id: 77,
+        name: "Group Friend".into(),
+        active: true,
+        x: 0,
+        pos: [50., 2., 75.],
+        ..Default::default()
+    }];
+    p.forge_snapshot(None);
+    let scratch = Scratch::new();
+    let (h, a) = search_host(&scratch);
+    h.run_addon(&a).unwrap();
+    key(&h, Key::Named(NamedKey::F2));
+    key(&h, Key::Named(NamedKey::Tab));
+    type_text(&h, "Group Friend");
+    settle(&h);
+    h.execute("local s=require('search');assert(s.tab==2 and #s.rows==1 and s.rows[1].detail=='Group position')").unwrap();
+    key(&h, Key::Named(NamedKey::Enter));
+    let vm = native_events::bus(&h.lua).borrow().vm;
+    assert_eq!(guides::target_for(vm), Some([50., 75.]));
+    let packet = net::session::Event::GroupDisbanded;
+    let before = super::begin_game_event(&p, &packet);
+    p.group.clear();
+    super::end_game_event(&p, before);
+    settle(&h);
+    assert!(guides::target_for(vm).is_none());
+    h.execute("assert(require('search').guide==nil)").unwrap();
+    key(&h, Key::Named(NamedKey::F2));
+    for _ in 0..12 {
+        key(&h, Key::Named(NamedKey::Backspace));
+    }
+    key(&h, Key::Named(NamedKey::Tab));
+    type_text(&h, "Saltwater");
+    settle(&h);
+    h.execute("local s=require('search');assert(s.tab==3 and #s.rows>0 and s.rows[1].name:find('(XP camp)',1,true))").unwrap();
+    key(&h, Key::Named(NamedKey::Enter));
+    assert!(guides::target_for(vm).is_some());
+    key(&h, Key::Named(NamedKey::F4));
+    assert!(guides::target_for(vm).is_none());
+    key(&h, Key::Named(NamedKey::F2));
+    for _ in 0..9 {
+        key(&h, Key::Named(NamedKey::Backspace));
+    }
+    type_text(&h, &"é".repeat(81));
+    h.execute("local s=require('search');assert(#s.query==160)")
+        .unwrap();
+    key(&h, Key::Named(NamedKey::Backspace));
+    h.execute("assert(#require('search').query==158)").unwrap();
+    key(&h, Key::Named(NamedKey::Escape));
+    h.execute("assert(not require('search').open)").unwrap();
+    assert!(!input::is_text_capture_active());
+    p.map.open = true;
+    p.forge_snapshot(None);
+    h.execute("assert(eqoa.map.get().open)").unwrap();
+    p.map.open = false;
+    p.forge_snapshot(None);
+    h.execute("assert(not eqoa.map.get().open)").unwrap();
+    native_events::clear(&h);
+    input::reset_input_state();
+}

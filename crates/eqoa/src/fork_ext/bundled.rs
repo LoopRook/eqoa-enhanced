@@ -32,6 +32,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_mana_bars",
     "eqoa_hud_numbers",
     "eqoa_creature_journal",
+    "eqoa_map_search",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -51,6 +52,50 @@ pub struct InstallResult {
 }
 
 pub const EMBEDDED_FILES: &[BundledFile] = &[
+    BundledFile {
+        path: "eqoa_map_search/mod.json",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_map_search/main.lua",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_map_search/modules/search.lua",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/modules/search.lua"),
+    },
+    BundledFile {
+        path: "eqoa_map_search/README.md",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_map_search/resources/map-entities.json",
+        package: "eqoa_map_search",
+        data: include_bytes!(
+            "../../../../bundled-mods/eqoa_map_search/resources/map-entities.json"
+        ),
+    },
+    BundledFile {
+        path: "eqoa_map_search/resources/README.txt",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/resources/README.txt"),
+    },
+    BundledFile {
+        path: "eqoa_map_search/resources/SpaceMono-Regular.ttf",
+        package: "eqoa_map_search",
+        data: include_bytes!(
+            "../../../../bundled-mods/eqoa_map_search/resources/SpaceMono-Regular.ttf"
+        ),
+    },
+    BundledFile {
+        path: "eqoa_map_search/resources/OFL.txt",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/resources/OFL.txt"),
+    },
     BundledFile {
         path: "eqoa_creature_journal/mod.json",
         package: "eqoa_creature_journal",

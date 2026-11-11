@@ -950,3 +950,7 @@ logical navigation keys, repeats, and optional `text` (Unicode logical character
 text, preserving case). Native dialogs and synthetic keys remain excluded. The
 lease neutralises merged gameplay pad input and releases held combat/camera,
 autorun and follow state. Mods renew the lease while their editor remains open.
+
+`eqoa.map.get().open` reports whether the native M map is open, including map
+change invalidation. Static camp/coach markers include their native search label
+in `label` (XP-camp suffix or town/coach name); `name` stays the source name.

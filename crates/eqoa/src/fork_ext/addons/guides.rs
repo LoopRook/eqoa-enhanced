@@ -310,3 +310,13 @@ pub(crate) fn target_for(vm: u64) -> Option<[f32; 2]> {
         })
     })
 }
+
+#[cfg(test)]
+pub(crate) fn dots_for(vm: u64) -> Vec<[f32; 2]> {
+    GUIDES.with(|g| {
+        g.borrow()
+            .get(&vm)
+            .map(|g| g.dots.clone())
+            .unwrap_or_default()
+    })
+}

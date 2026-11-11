@@ -219,3 +219,5 @@ Upstream changes remain in UPDATE-NOTES.md.
 - A control with no keyboard key assigned is shown as unbound.
 
 - Creature recording now has an enabled-by-default Creature Journal addon, with its own import/export rows, bounded Forge journal imports, and quiet/periodic saves.
+
+- Map Search is an enabled-by-default addon with rebindable F2/F4, creature/group/place tabs, a minimap button that follows Move HUD, shared journal results, and live/known guidance.
