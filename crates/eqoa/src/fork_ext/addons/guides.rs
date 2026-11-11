@@ -15,6 +15,8 @@ struct Guide {
     label: Option<String>,
 }
 thread_local! {static GUIDES:RefCell<BTreeMap<u64,Guide>>=const{RefCell::new(BTreeMap::new())};}
+#[cfg(test)]
+pub(crate) fn guide_count()->usize { GUIDES.with(|g|g.borrow().len()) }
 fn point(t: &Table) -> Result<[f32; 2]> {
     let p = [t.get::<f32>("x")?, t.get::<f32>("z")?];
     if !p.iter().all(|v| v.is_finite()) {
@@ -52,7 +54,7 @@ pub(crate) fn release_vm(vm: u64) {
     });
 }
 pub(crate) fn update(c: &mut Core) {
-    GUIDES.with(|g|{let mut g=g.borrow_mut();let lost=g.iter().filter_map(|(vm,v)|v.entity.filter(|id|!c.view.in_world||entity_point(c,*id,v.world).is_none()).map(|_|*vm)).collect::<Vec<_>>();for vm in lost{let v=g.remove(&vm).unwrap();c.emit("guide.lost",json!({"owner":vm,"world_id":v.world,"entity_id":v.entity,"label":v.label,"reason":"entity_left"}));}});
+    GUIDES.with(|g|{let mut g=g.borrow_mut();let lost=g.iter().filter_map(|(vm,v)|(!c.view.in_world||v.entity.is_some_and(|id|entity_point(c,id,v.world).is_none())).then_some(*vm)).collect::<Vec<_>>();for vm in lost{let v=g.remove(&vm).unwrap();c.emit("guide.lost",json!({"owner":vm,"world_id":v.world,"entity_id":v.entity,"label":v.label,"reason":if c.view.in_world {"entity_left"}else{"world_left"}}));}});
 }
 pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
@@ -94,7 +96,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 },
             };
             let at = if entity.is_none() {
-                Some(point(&t)?)
+                match point(&t) { Ok(p)=>Some(p), Err(e)=>return error(lua,"eqoa.map.set_guide","invalid_argument",&e.to_string()) }
             } else {
                 None
             };
@@ -128,7 +130,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     );
                 }
                 for p in ts.sequence_values::<Table>() {
-                    dots.push(point(&p?)?);
+                    match point(&p?) {Ok(p)=>dots.push(p),Err(e)=>return error(lua,"eqoa.map.set_guide","invalid_argument",&e.to_string())}
                 }
             }
             let vm = super::native_events::bus(lua).borrow().vm;

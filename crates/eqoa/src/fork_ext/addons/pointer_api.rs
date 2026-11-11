@@ -15,6 +15,8 @@ struct Pointer {
     wheels: BTreeMap<u64, f32>,
 }
 thread_local! {static POINTER:RefCell<Pointer>=RefCell::new(Pointer::default());}
+#[cfg(test)]
+pub(crate) fn claim_count()->usize { POINTER.with(|p|p.borrow().claims.len()) }
 pub(crate) fn position(at: [f32; 2], inside: bool, size: (u32, u32)) {
     POINTER.with(|p| {
         let mut p = p.borrow_mut();
@@ -223,6 +225,23 @@ pub(crate) fn install(host: &Host) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn round4_map_text_capture_owns_keys_and_releases_but_unclaimed_keys_pass() {
+        let mut p=crate::play::Play::bundled_ui_fixture();p.map.open=true;
+        let h=Host::new().unwrap();h.snapshot.set(p.forge_snapshot(None));
+        h.execute("assert(eqoa.input.capture_text(true))").unwrap();
+    let mut capture = super::super::capture::Capture::default();
+    use super::super::capture::{Button,Owner};
+    for (code, key) in [(b'P',winit::keyboard::KeyCode::KeyP),(b'M',winit::keyboard::KeyCode::KeyM),(b'O',winit::keyboard::KeyCode::KeyO),(b'G',winit::keyboard::KeyCode::KeyG),(13,winit::keyboard::KeyCode::Enter)] {
+        let button=Button::Key(winit::keyboard::PhysicalKey::Code(key));
+        assert_eq!(capture.press(button,crate::fork_ext::addons::input::wants_key_capture(false,Some(code),false,crate::fork_ext::is_plain_play(Some(&mut p)))),Owner::Addon);
+        h.execute("assert(eqoa.input.capture_text(false))").unwrap();
+        assert_eq!(capture.release(button),Owner::Addon,"release follows text capture owner");
+        assert_eq!(capture.press(button,crate::fork_ext::addons::input::wants_key_capture(false,Some(code),false,true)),Owner::Game);
+        capture.release(button);
+        h.execute("assert(eqoa.input.capture_text(true))").unwrap();
+    }
+    }
+    #[test]
     fn round4_wide_pointer_layout_and_observed_press_share_coordinates() {
         use winit::event::{DeviceId, WindowEvent, ElementState, MouseButton, MouseScrollDelta, TouchPhase};
         let mut p = crate::play::Play::bundled_ui_fixture();
@@ -241,9 +260,16 @@ mod tests {
         assert!(observe(&press,(1920,1080)));
         assert_eq!(capture.press(super::super::capture::Button::Mouse(MouseButton::Left),observe(&press,(1920,1080))),super::super::capture::Owner::Addon);
         assert!(observe(&WindowEvent::MouseWheel{device_id,delta:MouseScrollDelta::LineDelta(0.,1.),phase:TouchPhase::Moved},(1920,1080)));
+        crate::hudlayout::set_unlocked(true);
+        assert!(!observe(&press,(1920,1080)),"Move HUD owns its drag");
+        crate::hudlayout::set_unlocked(false);
+        observe(&WindowEvent::CursorMoved{device_id,position:winit::dpi::PhysicalPosition::new(0.,0.)},(1920,1080));
+        assert!(!observe(&press,(1920,1080)),"unclaimed position passes to game");
+        assert_eq!(capture.release(super::super::capture::Button::Mouse(MouseButton::Left)),super::super::capture::Owner::Addon);
         observe(&WindowEvent::Focused(false),(1920,1080));
         assert!(!observe(&press,(1920,1080)));
-        assert_eq!(capture.release(super::super::capture::Button::Mouse(MouseButton::Left)),super::super::capture::Owner::Addon);
+        capture.focus_lost();
+        assert_eq!(capture.release(super::super::capture::Button::Mouse(MouseButton::Left)),super::super::capture::Owner::Game);
         super::super::hud_layout::set_window_size(640,448);
     }
     #[test]

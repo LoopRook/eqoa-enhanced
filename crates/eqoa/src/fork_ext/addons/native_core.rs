@@ -619,6 +619,7 @@ pub(crate) fn flush_deferred() {
             c.source_time = Some(pending.time);
             (pending.apply)(&mut c);
         }
+        super::guides::update(&mut c);
         (c.tick, c.frame, c.source_time) = saved;
     });
     DEFERRED.with(|d| d.borrow_mut().flushing = false);

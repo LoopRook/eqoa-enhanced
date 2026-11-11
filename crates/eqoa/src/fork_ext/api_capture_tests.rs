@@ -18,6 +18,7 @@ fn ready() -> Play {
 // Shared bundled-UI fixture: populate the native client structures, then use
 // exactly the cached projection that Play supplies to the addon manager.
 impl Play {
+    pub(crate) fn bundled_ui_walker() -> crate::walker::Walker { perf_review_walker() }
     pub(crate) fn bundled_ui_fixture() -> Self {
         let mut p = ready();
         super::api_capture::updates::inactive();
@@ -2011,6 +2012,14 @@ fn round4_guide_follows_live_entity_and_lost_is_owner_scoped() {
     h.execute("assert(lost==1);assert(eqoa.map.clear_guide())")
         .unwrap();
     other.execute("assert(lost==0)").unwrap();
+}
+
+#[test]
+fn round4_point_guide_rejects_bad_coordinates_and_ends_on_world_loss() {
+    let mut p=Play::bundled_ui_fixture();let h=Host::new().unwrap();p.forge_snapshot(None);
+    h.execute("lost=false;eqoa.events.on('guide.lost',function(e) assert(e.data.reason=='world_left');lost=true end);local v,e=eqoa.map.set_guide{world_id=0,x=0/0,z=0};assert(v==nil and e.code=='invalid_argument');assert(eqoa.map.set_guide{world_id=0,x=1,z=2})").unwrap();
+    p.quit=true;p.forge_snapshot(None);native_events::dispatch(&h).unwrap();
+    h.execute("assert(lost)").unwrap();assert_eq!(crate::fork_ext::addons::guides::guide_count(),0);
 }
 
 #[test]
