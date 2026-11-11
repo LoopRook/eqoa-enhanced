@@ -224,17 +224,21 @@ pub(crate) fn migrate_legacy_keys() -> Result<(), String> {
 }
 
 fn native_mod_key(line: &str) -> bool {
-    ["key.stats_box=", "key.map_search=", "key.map_stop="].iter().any(|prefix| line.starts_with(prefix))
+    ["key.stats_box=", "key.map_search=", "key.map_stop="]
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
 }
 fn migrated_line(line: &str) -> Option<String> {
-    for (old,new) in [
-        ("key.stats_box=","mod.eqoa_stats_box.toggle="),
-        ("key.map_search=","mod.eqoa_map_search.open="),
-        ("key.map_stop=","mod.eqoa_map_search.clear="),
+    for (old, new) in [
+        ("key.stats_box=", "mod.eqoa_stats_box.toggle="),
+        ("key.map_search=", "mod.eqoa_map_search.open="),
+        ("key.map_stop=", "mod.eqoa_map_search.clear="),
     ] {
-        if let Some(key)=line.strip_prefix(old) {return Some(format!("{new}{key}"))}
+        if let Some(key) = line.strip_prefix(old) {
+            return Some(format!("{new}{key}"));
+        }
     }
-    (line.starts_with("mod.") && line.contains('=')).then(||line.to_string())
+    (line.starts_with("mod.") && line.contains('=')).then(|| line.to_string())
 }
 
 fn migrate_key_text(
@@ -251,11 +255,7 @@ fn migrate_key_text(
     for line in lines
         .iter()
         .filter(|line| !native_mod_key(line))
-        .chain(
-            lines
-                .iter()
-                .filter(|line| native_mod_key(line)),
-        )
+        .chain(lines.iter().filter(|line| native_mod_key(line)))
     {
         if let Some(line) = migrated_line(line) {
             migrated = true;
@@ -340,27 +340,50 @@ mod tests {
 
     #[test]
     fn round4b_review_key_migration_keeps_existing_mod_collision() {
-        let mut files=std::collections::HashMap::new();
-        migrate_key_text(b"key.map_search=f8\n",b"mod.third_party.open=f8\n",|name,bytes|{files.insert(name.to_string(),bytes.to_vec());Ok(())}).unwrap();
-        let saved=String::from_utf8(files[KEYS_FILE].clone()).unwrap();
-        assert!(saved.contains("mod.third_party.open=f8\n"),"another mod's explicit binding was overwritten");
-        assert!(saved.contains("mod.eqoa_map_search.open=f8\n"),"the player's rebound search key was lost");
-        assert_eq!(saved.lines().count(),2);assert!(files[LEGACY_KEYS_FILE].is_empty());
+        let mut files = std::collections::HashMap::new();
+        migrate_key_text(
+            b"key.map_search=f8\n",
+            b"mod.third_party.open=f8\n",
+            |name, bytes| {
+                files.insert(name.to_string(), bytes.to_vec());
+                Ok(())
+            },
+        )
+        .unwrap();
+        let saved = String::from_utf8(files[KEYS_FILE].clone()).unwrap();
+        assert!(
+            saved.contains("mod.third_party.open=f8\n"),
+            "another mod's explicit binding was overwritten"
+        );
+        assert!(
+            saved.contains("mod.eqoa_map_search.open=f8\n"),
+            "the player's rebound search key was lost"
+        );
+        assert_eq!(saved.lines().count(), 2);
+        assert!(files[LEGACY_KEYS_FILE].is_empty());
     }
 
     #[test]
     fn round4b_migration_keeps_rebound_search_and_stop_keys() {
-        let legacy=b"key.map_search=f8\nkey.map_stop=f9\nkey.jump=space\n";
-        let mut files=std::collections::HashMap::new();
-        migrate_key_text(legacy,b"mod.eqoa_map_search.clear=\n",|name,bytes|{files.insert(name.to_string(),bytes.to_vec());Ok(())}).unwrap();
-        let saved=String::from_utf8(files[KEYS_FILE].clone()).unwrap();
+        let legacy = b"key.map_search=f8\nkey.map_stop=f9\nkey.jump=space\n";
+        let mut files = std::collections::HashMap::new();
+        migrate_key_text(legacy, b"mod.eqoa_map_search.clear=\n", |name, bytes| {
+            files.insert(name.to_string(), bytes.to_vec());
+            Ok(())
+        })
+        .unwrap();
+        let saved = String::from_utf8(files[KEYS_FILE].clone()).unwrap();
         assert!(saved.contains("mod.eqoa_map_search.open=f8\n"));
         assert!(saved.contains("mod.eqoa_map_search.clear=\n"));
         assert!(!saved.contains("clear=f9"));
-        assert_eq!(files[LEGACY_KEYS_FILE],b"key.jump=space\n");
-        let mut writes=0;
-        migrate_key_text(b"key.jump=space\n",saved.as_bytes(),|_,_|{writes+=1;Ok(())}).unwrap();
-        assert_eq!(writes,0,"unrelated keys never trigger a migration write");
+        assert_eq!(files[LEGACY_KEYS_FILE], b"key.jump=space\n");
+        let mut writes = 0;
+        migrate_key_text(b"key.jump=space\n", saved.as_bytes(), |_, _| {
+            writes += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(writes, 0, "unrelated keys never trigger a migration write");
     }
 
     #[test]
@@ -439,16 +462,9 @@ mod tests {
     }
 
     #[test]
-    fn fixture_frees_f2_while_production_keeps_map_search_on_it() {
-        let row = row_named("map_search").unwrap();
-        let mut fixture = Binds::default();
-        assert_eq!(fixture.key(row), Some("f2"), "production default");
-        assert_eq!(fixture.key(row), Some("f24"));
-        assert_eq!(
-            Binds::default().key(row),
-            Some("f2"),
-            "only this fixture moved"
-        );
+    fn round4b_gate_native_search_bind_rows_are_removed() {
+        assert!(row_named("map_search").is_none());
+        assert!(row_named("map_stop").is_none());
     }
 
     #[test]

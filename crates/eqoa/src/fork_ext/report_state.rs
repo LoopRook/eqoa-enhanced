@@ -241,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn report_state_includes_claimed_hud_elements_and_movement_flags() {
+    fn round4b_gate_report_includes_claimed_hud_elements_and_movement_flags() {
         use crate::fork_ext::addons::health::InstanceToken;
         struct Reset;
         impl Drop for Reset {
@@ -264,7 +264,7 @@ mod tests {
         let text = describe(&p, None);
         for item in [
             "Addon HUD claims: compass_back, hotbar_draw_compact",
-            "Map open: true; search open: true",
+            "Map open: true; player search open: true",
             "Autorun: true; following: true; follow id: 0x00000001",
         ] {
             assert!(text.contains(item), "missing {item}");

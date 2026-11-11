@@ -1516,7 +1516,7 @@ fn live_regression_extended_carousel_keeps_stock_forge_and_native_bar_indices() 
     .unwrap();
 }
 #[test]
-fn group_capture_excludes_player_and_inactive_slots_before_lua() {
+fn round4b_gate_group_excludes_player_and_keeps_inactive_members_unpositioned() {
     let mut p = ready();
     p.session.self_id = Some(0x100);
     p.group.in_group = true;
@@ -1543,7 +1543,7 @@ fn group_capture_excludes_player_and_inactive_slots_before_lua() {
     ];
     p.forge_snapshot(None);
     let host = Host::new().unwrap();
-    host.execute("local m=eqoa.group.get().members;assert(#m==1 and m[1].id==0x200);assert(m[1].position.x==1);assert(eqoa.player.get().position==nil)").unwrap();
+    host.execute("local m=eqoa.group.get().members;assert(#m==2 and m[1].id==0x200 and m[2].id==0x300);assert(m[1].position.x==1);assert(m[2].position==nil and not m[2].active);assert(eqoa.player.get().position==nil)").unwrap();
     p.group.in_group = false;
     super::api_capture::updates::inactive();
     p.forge_snapshot(None);
