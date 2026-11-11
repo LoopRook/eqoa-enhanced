@@ -261,6 +261,7 @@ mod tests {
         let bytes = include_bytes!("../../../../../mods/resources/map-entities.json");
         let hash = format!("{:x}", Sha256::digest(bytes));
         assert_eq!(hash, crate::map::search::CATALOG_SHA256);
+        assert_eq!(bytes, include_bytes!("../../../resources/map-data/map-entities.json"));
         assert!(bytes.len() > 1024 * 1024);
         let mut bad = bytes.to_vec();
         bad[0] ^= 1;

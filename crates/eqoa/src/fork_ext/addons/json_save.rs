@@ -36,6 +36,7 @@ struct Queue {
     active: Option<PathBuf>,
     done: Option<Done>,
     closed: bool,
+    scheduled: bool,
 }
 impl Queue {
     fn push(&mut self, job: Job) -> std::result::Result<(), String> {
@@ -116,6 +117,11 @@ fn write(job: &Job) -> std::result::Result<(), String> {
     super::file_io::no_links(&target)?;
     super::file_io::no_links(&deleted)?;
     super::sandbox::check_quota(&job.root, &target, out.0.len())?;
+    #[cfg(test)]
+    if let Some((started, release)) = PAUSE.lock().unwrap().take() {
+        let _ = started.send(());
+        let _ = release.recv_timeout(Duration::from_secs(5));
+    }
     super::storage::atomic_replace_with(&target, &out.0, |from,to| {
         let gate=latest().lock().unwrap();
         if !job.permit.load(Ordering::Acquire) || gate.get(&target)!=Some(&job.generation) {
@@ -126,6 +132,12 @@ fn write(job: &Job) -> std::result::Result<(), String> {
         Ok(())
     }).map_err(|e| e.to_string())?;
     Ok(())
+}
+#[cfg(test)]
+static PAUSE:Mutex<Option<(mpsc::Sender<()>,mpsc::Receiver<()>)>>=Mutex::new(None);
+#[cfg(test)]
+pub(crate) fn pause_next_commit()->(mpsc::Receiver<()>,mpsc::Sender<()>) {
+    let (started,rx)=mpsc::channel();let (tx,release)=mpsc::channel();*PAUSE.lock().unwrap()=Some((started,release));(rx,tx)
 }
 fn service(lua: &Lua) -> Result<Shared> {
     if let Some(s) = lua.app_data_ref::<Shared>() {
@@ -138,7 +150,7 @@ fn service(lua: &Lua) -> Result<Shared> {
         let join=thread::Builder::new().name("addon-json-save".into()).spawn(move || {
             while let Ok(worker)=rx.recv() {
                 loop {
-                    let job={ let mut q=worker.0.lock().unwrap(); let Some(job)=q.pending.take() else { break }; q.active=Some(job.key.clone()); job };
+                    let job={ let mut q=worker.0.lock().unwrap(); let Some(job)=q.pending.take() else { q.scheduled=false; break }; q.active=Some(job.key.clone()); job };
                     let result=write(&job);
                     let mut q=worker.0.lock().unwrap();
                     q.active=None;
@@ -331,7 +343,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 let generation=NEXT.fetch_add(1,Ordering::Relaxed);
                 let target=root.join("files").join(&key);
                 let mut gate=latest().lock().unwrap();
-                if let Err(e) = s.work.0.lock().unwrap().push(Job {
+                let notify = {
+                let mut q=s.work.0.lock().unwrap();
+                if let Err(e) = q.push(Job {
                     id,
                     key,
                     root,
@@ -341,9 +355,11 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 }) {
                     return error(lua, "eqoa.files.save_json_async", "quota", &e);
                 }
+                let notify=!q.scheduled; q.scheduled=true; notify
+                };
                 gate.insert(target,generation);
                 drop(gate);
-                WRITER.lock().unwrap().as_ref().unwrap().tx.send(s.work.clone()).map_err(mlua::Error::external)?;
+                if notify { WRITER.lock().unwrap().as_ref().unwrap().tx.send(s.work.clone()).map_err(mlua::Error::external)?; }
                 lua.pack_multi((id, Value::Nil))
             })?,
     )
