@@ -2,7 +2,7 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
-## Unreleased
+## 2026-11-11 · Enhanced 0.5.1
 
 - Added upstream Move HUD and Reset HUD. The round minimap, its hover cards and search control follow its saved position; HUD numbers, mana bars and Target of Target follow their stock bars. Upstream also restores a lost graphics device in place and improves mercenary tags.
 
