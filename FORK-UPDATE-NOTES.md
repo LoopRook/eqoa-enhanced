@@ -4,6 +4,8 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Added upstream item links, Q-tap monster information, map places and indoor minimap floors. Crash reports sent to a supporting game server identify EQOA Enhanced; the local crash-save offer remains available.
+
 - Rebound mod keys survive later changes to native controls. Failed HUD option saves report an error, and disabling Mana Bars stops requesting group power updates. Target of Target fades with the native target plate.
 
 - Four HUD extras (Stats Box, Target of Target, Mana Bars, and HUD numbers) are now bundled Lua mods (`eqoa_stats_box`, `eqoa_target_of_target`, `eqoa_mana_bars`, and `eqoa_hud_numbers`), enabled by default. Stats Box and Target of Target start off; Mana Bars and numeric readouts start on. Existing settings carry over, and the Stats Box key can be rebound on Controls. Disabling a mod removes its HUD options and key rows.

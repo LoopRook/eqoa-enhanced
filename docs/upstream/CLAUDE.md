@@ -63,7 +63,11 @@ current.
   Box, others' mana bars and Target of Target stay out; the owner's "they are everywhere" the same day: the
   minimap's rim keeps only the player's own steps' "?", a "!" only where it lies, and the server marks a quest's
   name once near the player's level; and a GM's Ctrl+click on the map travels there, offered by go-eqoa-server
-  to a GM's client alone, 0x7E34/0x7E35)).
+  to a GM's client alone, 0x7E34/0x7E35); the map's list of places, any world or town shown from the player's
+  own disc, and the minimap inside a building, cave or dungeon (players' petitions 1479 and 1494, 2026-11-11:
+  `map::places`, `map::indoor`, the floors under the ceiling as FrontiersForge's minimap drew them), and
+  Options > Interface's Profanity Filter told to a server that asks (the GM Jibrish's petition 1490:
+  go-eqoa-server's 0x7E60; the filter is the server's, on at every login)).
   `render::lit`, `lights.rs`; off it is the PS2's light exactly, every test and oracle unchanged, and `vi` untouched), and Sun
   Shadows (2026-11-08: Extended > Lighting, off unless chosen, drawn only with Dynamic Lighting; `render::sunshadow`; off, every
   frame byte for byte as before, on Vulkan and GL)).
@@ -73,7 +77,14 @@ current.
   the parts' triangles too; every row's first step is the body as it is, byte for byte), and an NPC's body in a
   server's tint on a server that names one (the server owner's of 2026-11-10, Yhafiran "the black and green oriental
   dragon" on the disc's green one: `npctint.rs`, `net::npctint`, go-eqoa-server's 0x7E3E-0x7E40; untinted, the body
-  byte for byte as before)).
+  byte for byte as before), and a monster's name and level in the target's details box on a server that offers it (the GM
+  Jibrish's petition 1459, 2026-11-10, "This should ONLY show the monsters name and level, nothing else": Q's talk sent
+  as ever, the server's answer 0x7E4E drawn as CLIENT draws a pet's for 3 s or while Q is held, `Play::mob_info_shown`,
+  go-eqoa-server's `world.mob_info`, 0x7E4C-0x7E4E; on any other server, or a monster that talks, the game's), and
+  item links in chat on a server that offers them (the GM Jibrish's petition 1463, 2026-11-10: the item menu's Link Item
+  and a Shift+click put an item in the chat line as a purple unit, a link in the chat box opens a window of the item at
+  the top middle, two at most, R2 held walks the links: `itemlink.rs`, `linkplay.rs`, `net::itemlink`, go-eqoa-server's
+  0x7E4F-0x7E53; Extended > Chat > Item Links, on by default; off, or on any other server, plain names, the game's)).
   A new client-side addition is the user's call: ask first. Sharp filtering is for the 2D layer and
   the text only: the world's textures are drawn smooth, as the game filters them (the user,
   2026-10-27, after a Crisp row for them: "world textures cant render proper without smooth. so
@@ -303,6 +314,13 @@ current.
   reading through a `Disc` and writing through a `Sink` a zone's record at a time (`compose_into`); natively
   into a `Vec` written to the cache, in a page in a worker into OPFS (`web::worlds`, `web/worlds.js`), never
   the whole world in memory. A change to the composer is one to go-eqoa-server's `Compose` too (the CRC).
+  A character played while they are being built waits for them only when the server names it (0x7E54,
+  `Session::pick_needs_worlds`, `pregame::client`'s `pick_waits`: its login is placed by what the client
+  holds), natively as in a page; a page holds every character only for a server that never says. One that
+  goes in before the worlds' list is in loses the rest with the lobby connection: the session asks for it
+  again at the promotion, and the worlds are built while the game is played. An answer (0x7E31) sent between
+  the pick and the promotion is told again on the game connection (`worlds_retell`): the server leaves the
+  lobby connection's packets alone once it has promoted.
 - The browser build (`web/`, README "In a browser"): `web/build.sh`, then `web/drive.py` (headless
   Chromium over the DevTools protocol, the disc image handed to the page's file input). Platform
   code goes behind `net::session::Datagrams`, `net::auth::Exchange`, `iso::Source`/`iso::Sparse`
@@ -337,7 +355,12 @@ current.
   as the offer's second u32 says the server takes (`Session::petition_text`, at most 2,047, petition
   1300; none said, the disc's 511): a longer request goes in DRDP's pieces of 1,300 bytes, which only
   a server that says so puts back together (go-eqoa-server since 2026-11-08). Nothing goes unless the player files
-  one, and nothing to a server that made no offer. The log stays on the player's
+  one, and nothing to a server that made no offer. A crash is the one report made for the player (the server owner,
+  2026-11-11, "we may need to add crash reports back"): `crashfile` keeps a panic as it happens (natively
+  `crashes/` in the config directory, from `logfile`'s hook and `eqoa play`'s; in a page `eqoa.crashReport`, or an
+  older page's `eqoa.lastCrash` line) and sends each kept to a server that offers to take them (go-eqoa-server's
+  0x7E64-0x7E66), which files it as a petition, Bug Report / Crash; it is let go at the answer. No path of the
+  player's goes (`crashfile::scrub`). A debug build's `EQOA_CRASH_TEST=<ms>` panics on purpose. The log stays on the player's
   machine, theirs to hand on: never log a credential. Natively stderr goes through the log's pipe
   (`logfile::start`, `eqoa boot` only): anything that starts another program in this one's place
   puts it back first (`logfile::restore_stderr`), or the new one inherits a pipe nothing reads, and

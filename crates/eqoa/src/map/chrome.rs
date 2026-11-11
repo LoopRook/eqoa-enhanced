@@ -12,18 +12,22 @@ use vi::ui::{Raster, Vui, wide};
 
 /// The buttons, right to left from the top right corner: their words and
 /// the pad's keys they press (Suggest, L3's: a community marker, `community`).
-pub const BUTTONS: [(&str, i32); 5] = [("Close", key::TRIANGLE), ("+", key::R1), ("-", key::L1), ("Center", key::CROSS), ("Suggest", key::L3)];
+pub const BUTTONS: [(&str, i32); 6] = [("Close", key::TRIANGLE), ("+", key::R1), ("-", key::L1), ("Center", key::CROSS), ("Suggest", key::L3), ("Places", super::KEY_PLACES)];
 
 /// The legend for the pad: the inline glyphs (△ 65, ✕ 66, □ 67, ○ 68, L1
 /// 185, R1 187, L3 214) and what each does.
-const PAD_LEGEND: [(i32, &str); 10] = [(65, "Close"), (66, "Center"), (67, "Waypoint"), (68, "Markers"), (189, "Towns"), (214, "Suggest"), (185, ""), (187, "Zoom"), (-1, "Sticks, drag, pinch: pan and zoom"), (-1, "Tap: waypoint")];
-const KEY_LEGEND: [&str; 8] = ["M Close", "Space Center", "+ - or wheel Zoom", "Arrows, WASD or drag Pan", "Click or Q Waypoint", "X Markers", "T Towns", "N Suggest"];
+const PAD_LEGEND: [(i32, &str); 11] = [(65, "Close"), (66, "Center"), (67, "Waypoint"), (68, "Markers"), (189, "Towns"), (190, "Places"), (214, "Suggest"), (185, ""), (187, "Zoom"), (-1, "Sticks, drag, pinch: pan and zoom"), (-1, "Tap: waypoint")];
+pub(crate) const KEY_LEGEND: [&str; 9] = ["M Close", "Space Center", "+ - or wheel Zoom", "Arrows, WASD or drag Pan", "Click or Q Waypoint", "X Markers", "T Towns", "P Places", "N Suggest"];
+/// The legend while the list of places is up (`places`), in place of the
+/// map's: how it is moved through, taken from and closed.
+const PAD_LEGEND_PLACES: [(i32, &str); 3] = [(-1, "Up, down: a place"), (66, "Show it"), (65, "Close the list")];
+const KEY_LEGEND_PLACES: [&str; 3] = ["Up, down: a place", "Enter or click Show it", "Escape or P Close the list"];
 /// In a group, the legend's words for the waypoint keys, the group's beside
 /// the player's own (`group_waypoint`): □ held, a finger held, O or a click
 /// with Shift.
 const PAD_LEGEND_GROUP: (i32, &str) = (67, "Waypoint, held: the group's");
 const TAP_LEGEND_GROUP: &str = "Tap: waypoint, hold: the group's";
-const KEY_LEGEND_GROUP: &str = "O, Q held or Shift+click Group waypoint";
+pub(crate) const KEY_LEGEND_GROUP: &str = "O, Q held or Shift+click Group waypoint";
 /// A GM's, while the server offers travel by the map (`Map::travel`): the
 /// click that asks for it, ⌘ on a Mac.
 #[cfg(target_os = "macos")]
@@ -31,118 +35,10 @@ pub const LEGEND_TRAVEL: &str = "Cmd+click Travel here";
 #[cfg(not(target_os = "macos"))]
 pub const LEGEND_TRAVEL: &str = "Ctrl+click Travel here";
 
-/// Long rebound key names must wrap inside the legend, not enlarge its panel.
-fn wrap_keyboard_label(r: &dyn Raster, label: &str, max_width: i32) -> Vec<String> {
-    let mut rest = label;
-    let mut parts = Vec::new();
-    while r.string_width(&wide(rest)) > max_width && !rest.is_empty() {
-        let (mut end, mut space) = (0, None);
-        for (at, ch) in rest.char_indices() {
-            let next = at + ch.len_utf8();
-            if r.string_width(&wide(&rest[..next])) > max_width {
-                break;
-            }
-            end = next;
-            if ch.is_whitespace() && at > 0 {
-                space = Some(at);
-            }
-        }
-        let end = space.unwrap_or_else(|| {
-            if end > 0 {
-                end
-            } else {
-                rest.chars().next().unwrap().len_utf8()
-            }
-        });
-        parts.push(rest[..end].trim_end().to_string());
-        rest = rest[end..].trim_start();
-    }
-    if !rest.is_empty() {
-        parts.push(rest.to_string());
-    }
-    parts
-}
+use crate::fork_ext::map::wrap_keyboard_label;
+#[cfg(test)]
+use crate::fork_ext::map::keyboard_legend;
 
-/// Keyboard hints use the same rows as input dispatch; remapping must not leave
-/// the map advertising a key that no longer performs its action.
-fn keyboard_legend(b: &crate::binds::Binds, group: bool, quests: bool) -> Vec<String> {
-    let key = |id: &str, default: &str| {
-        let row = crate::binds::row_named(id).expect("map action has a Controls row");
-        let preferred = crate::binds::ROWS[row]
-            .keys
-            .iter()
-            .find(|name| crate::binds::display(name) == default)
-            .copied()
-            .unwrap_or(crate::binds::ROWS[row].keys[0]);
-        if !b.moved(row) && matches!(b.alias(preferred), crate::binds::Alias::Same) {
-            default.to_string()
-        } else {
-            b.key(row)
-                .filter(|s| !s.is_empty())
-                .map(crate::binds::display)
-                .unwrap_or_else(|| "Unbound".into())
-        }
-    };
-    let mut labels: Vec<String> = KEY_LEGEND.iter().map(|s| s.to_string()).collect();
-    labels[0] = format!("{} Close", key("map", "M"));
-    labels[1] = format!("{} Center", key("jump", "Space"));
-    labels[2] = format!(
-        "{} {} or wheel Zoom",
-        key("map_in", "+"),
-        key("map_out", "-")
-    );
-    let directions = |rows: &[(&str, &str)], default: &str| {
-        if rows
-            .iter()
-            .any(|(id, _)| b.moved(crate::binds::row_named(id).unwrap()))
-        {
-            rows.iter()
-                .map(|(id, label)| key(id, label))
-                .collect::<Vec<_>>()
-                .join("/")
-        } else {
-            default.to_string()
-        }
-    };
-    let arrows = directions(
-        &[
-            ("menu_up", "↑"),
-            ("menu_down", "↓"),
-            ("menu_prev", "←"),
-            ("menu_next", "→"),
-        ],
-        "Arrows",
-    );
-    let walking = directions(
-        &[
-            ("walk_forward", "W"),
-            ("walk_back", "S"),
-            ("walk_left", "A"),
-            ("walk_right", "D"),
-        ],
-        "WASD",
-    );
-    labels[3] = format!("{arrows}, {walking} or drag Pan");
-    labels[4] = format!("Click or {} Waypoint", key("talk", "Q"));
-    labels[5] = format!("{} Markers", key("autorun", "X"));
-    labels[6] = format!("{} Towns", key("tell", "T"));
-    labels[7] = format!("{} Suggest", key("minimap", "N"));
-    if quests {
-        labels.insert(7, format!("{} Quests", key("look_left", "J")));
-    }
-    if group {
-        let (g, q) = (key("map_group_waypoint", "O"), key("talk", "Q"));
-        labels.insert(
-            5,
-            if g == "O" && q == "Q" {
-                KEY_LEGEND_GROUP.into()
-            } else {
-                format!("{g}, {q} held or Shift+click Group waypoint")
-            },
-        );
-    }
-    labels
-}
 
 pub const NAME: [f32; 4] = super::theme::TEXT;
 /// The community list's answer under the title: the game's gold words.
@@ -177,7 +73,22 @@ pub struct Chrome {
     /// a GM's, offered travel by the map: the legend names its click
     /// (`LEGEND_TRAVEL`)
     pub travel: bool,
+    /// the list of places, while it is up (`places`)
+    pub places: Option<Places>,
 }
+
+/// The list of places as the chrome draws it: each row's words and whether
+/// it is what the map shows, the selected row and the first shown.
+#[derive(Clone, Debug, Default)]
+pub struct Places {
+    pub rows: Vec<(String, bool)>,
+    pub sel: usize,
+    pub top: usize,
+}
+
+/// The list's selected row's words, and a row that is what the map shows.
+const SELECTED: [f32; 4] = [1.0, 0.82, 0.25, 1.0];
+const CURRENT: [f32; 4] = [0.6, 0.9, 1.0, 1.0];
 
 /// A panel the size of `w` x `h` at `at` (VIWndGoto's).
 pub fn panel(vui: &Vui, r: &mut dyn Raster, at: [i32; 2], w: i32, h: i32) {
@@ -307,15 +218,50 @@ pub fn draw(r: &mut dyn Raster, vui: &Vui, c: &Chrome) -> Vec<Button> {
         panel(vui, r, [tl[0] + m, y], tw + 12, line);
         vui.draw_string_ex(r, &s, tl[0] + m + 6, y + 3, color, true);
     }
+    // the list of places under them (`places`): one panel as wide as its
+    // widest row, the rows shown from `top`, each a hit of its own
+    if let Some(p) = &c.places {
+        let shown: Vec<(usize, &(String, bool))> = p.rows.iter().enumerate().skip(p.top).take(super::places::SHOWN).collect();
+        let more = (p.top > 0, p.top + super::places::SHOWN < p.rows.len());
+        let wide_rows: Vec<Vec<u16>> = shown.iter().map(|(_, (w, _))| wide(w)).collect();
+        let lw = wide_rows.iter().map(|s| r.string_width(s).max(0)).max().unwrap_or(0).max(r.string_width(&wide("Where I am")).max(0)) + 28;
+        y += line + 4;
+        let rows_h = shown.len() as i32 * line + if more.0 { line / 2 } else { 0 } + if more.1 { line / 2 } else { 0 };
+        panel(vui, r, [tl[0] + m, y], lw, rows_h + 8);
+        let mut ry = y + 4;
+        if more.0 {
+            vui.draw_string_ex(r, &wide("..."), tl[0] + m + 14, ry - 4, DIM, true);
+            ry += line / 2;
+        }
+        for ((i, (_, current)), s) in shown.iter().zip(&wide_rows) {
+            let selected = *i == p.sel;
+            let color = if selected { SELECTED } else if *current { CURRENT } else { NAME };
+            if selected {
+                vui.draw_string_ex(r, &wide(">"), tl[0] + m + 4, ry + 3, SELECTED, true);
+            }
+            vui.draw_string_ex(r, s, tl[0] + m + 14, ry + 3, color, true);
+            hits.push(([tl[0] + m, ry, tl[0] + m + lw, ry + line], super::KEY_PLACE_ROW + *i as i32));
+            ry += line;
+        }
+        if more.1 {
+            vui.draw_string_ex(r, &wide("..."), tl[0] + m + 14, ry - 4, DIM, true);
+        }
+    }
     // the legend: its pieces (a glyph or none, and words) in lines that fit
-    let keyboard = if c.keyboard {
-        crate::settings::with_binds(|b| keyboard_legend(b, c.group, c.quests.is_some()))
-    } else {
-        Vec::new()
+    let mut pieces: Vec<(i32, &str)> = match (c.keyboard, c.places.is_some()) {
+        (true, false) => KEY_LEGEND.iter().map(|s| (-1, *s)).collect(),
+        (false, false) => PAD_LEGEND.to_vec(),
+        (true, true) => KEY_LEGEND_PLACES.iter().map(|s| (-1, *s)).collect(),
+        (false, true) => PAD_LEGEND_PLACES.to_vec(),
     };
-    let mut pieces: Vec<(i32, &str)> = if c.keyboard {
-        keyboard.iter().map(|s| (-1, s.as_str())).collect() } else { PAD_LEGEND.to_vec() };
-    if c.group && !c.keyboard {
+    if c.places.is_some() {
+        // the list's keys alone
+    } else if c.group {
+        // the group's waypoint beside the player's own
+        if c.keyboard {
+            let at = pieces.iter().position(|p| p.1.ends_with("Waypoint")).map_or(pieces.len(), |i| i + 1);
+            pieces.insert(at, (-1, KEY_LEGEND_GROUP));
+        } else {
             for p in &mut pieces {
                 if *p == PAD_LEGEND[2] {
                     *p = PAD_LEGEND_GROUP;
@@ -324,16 +270,23 @@ pub fn draw(r: &mut dyn Raster, vui: &Vui, c: &Chrome) -> Vec<Button> {
                 }
             }
         }
-    if c.travel {
+    }
+    if c.travel && c.places.is_none() {
         // a GM's: after the waypoints' keys, a keyboard's and a pad's alike
         // (a mouse goes with either)
         let at = pieces.iter().rposition(|p| p.1.contains("aypoint")).map_or(pieces.len(), |i| i + 1);
         pieces.insert(at, (-1, LEGEND_TRAVEL));
     }
-    if c.quests.is_some() && !c.keyboard {
+    if c.quests.is_some() && c.places.is_none() {
         // after the towns' key (R3's glyph, 215, inline)
         let at = pieces.iter().position(|p| p.1.ends_with("Towns")).map_or(pieces.len(), |i| i + 1);
             pieces.insert(at, (215, "Quests"));
+    }
+    let keyboard = if c.keyboard && c.places.is_none() {
+        crate::fork_ext::map::keyboard_pieces(c.group, c.quests.is_some(), c.travel)
+    } else { Vec::new() };
+    if c.keyboard && c.places.is_none() {
+        pieces = keyboard.iter().map(|s| (-1, s.as_str())).collect();
     }
     let wrapped: Vec<(i32, String)> = pieces
         .into_iter()
@@ -585,7 +538,7 @@ mod tests {
     }
 
     fn chrome(keyboard: bool) -> Chrome {
-        Chrome { corners: [[-106.0, 0.0], [746.0, 448.0]], title: "Tunaria: Freeport (North)".into(), names: Vec::new(), keyboard, progress: Some((3, 175)), quests: None, pointer: None, notice: None, group: false, travel: false }
+        Chrome { corners: [[-106.0, 0.0], [746.0, 448.0]], title: "Tunaria: Freeport (North)".into(), names: Vec::new(), keyboard, progress: Some((3, 175)), quests: None, pointer: None, notice: None, group: false, travel: false, places: None }
     }
 
     /// The chrome's footprint covers its title (top left), its buttons (top

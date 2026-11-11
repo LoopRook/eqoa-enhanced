@@ -32,6 +32,11 @@ mod raidplay;
 mod mapsuggest;
 #[path = "groupmark.rs"]
 mod groupmark;
+#[path = "linkplay.rs"]
+mod linkplay;
+#[path = "mercplay.rs"]
+mod mercplay;
+pub use mercplay::{ENTRY as MERC_ENTRY, MSG_DISMISS_MERC};
 
 #[path = "fork_ext/play.rs"]
 mod fork_hooks;
@@ -152,11 +157,21 @@ struct ActorAt {
 /// `VICSprite::NameColors`.
 const NAME_COLORS: [[f32; 4]; 3] = [[212.0 / 255.0, 192.0 / 255.0, 111.0 / 255.0, 1.0], [100.0 / 255.0, 175.0 / 255.0, 220.0 / 255.0, 1.0], [90.0 / 255.0, 1.0, 80.0 / 255.0, 1.0]];
 
-/// A name plate to draw: where, in what colour, what.
+/// A mercenary's name (the GM Jibrish's petition 1488, 2026-11-11: "Change
+/// mercenary name colors to match that of pets, with a slight reddish tint"):
+/// `NAME_COLORS[1]`, the pet's (100, 175, 220), with red brought up and the
+/// rest down a little. A server tells which creatures are mercs
+/// (`net::session::Mercs`); on any other, and for a PS2, a merc's name is the
+/// pet's.
+const MERC_COLOR: [f32; 4] = [155.0 / 255.0, 165.0 / 255.0, 210.0 / 255.0, 1.0];
+
+/// A name plate to draw: where, in what colour, what, and a line under it
+/// (a merc's "<Hirer's Mercenary>": `mercplay`).
 pub struct Plate {
     pub at: [f32; 3],
     pub color: [f32; 4],
     pub name: String,
+    pub tag: Option<String>,
 }
 
 pub struct Play {
@@ -332,12 +347,33 @@ pub struct Play {
     target_guild: String,
     /// `m_p678`: the target's info window wanted (Q held on a player).
     pub info_up: bool,
+    /// A server's own (go-eqoa-server's `world.mob_info`, `net::session::OP_MOB_INFO`):
+    /// the last monster it said has nothing to say, by the id this client knows
+    /// it by, its level and name, for the info window as a pet's; `talk_held`,
+    /// a talk (0x0004) pressed and not yet let go, which keeps the window up
+    /// while held; and `mob_shown_at`, when the answer came (the session's
+    /// clock), the window up for [`MOB_INFO_MS`] from then however short the
+    /// press was.
+    mob_info: Option<(u32, u8, String)>,
+    talk_held: bool,
+    mob_shown_at: Option<u32>,
     /// `m_petId` and `m_petName` (filled from the entity once it is seen).
     pet_id: u32,
     pet_name: String,
     info_window: vi::ui::Window,
-    /// Chat lines waiting for the chat box, with when they came.
-    chat_pending: Vec<(String, [f32; 4], u32)>,
+    /// Chat lines waiting for the chat box, with when they came and their item
+    /// links (`itemlink`).
+    chat_pending: Vec<(String, [f32; 4], u32, Vec<net::itemlink::ChatLink>)>,
+    /// Item links (`itemlink`): the windows open; the chat line kept with its
+    /// links (cancelled with a link in it: until it is sent or emptied); the
+    /// events read this frame counted, and the links of the line the next one
+    /// carries (`Event::ChatLinks`, by the event it came as); Shift held (a
+    /// click on an item links it).
+    pub links: crate::itemlink::Links,
+    link_draft: Option<(Vec<u16>, Vec<crate::editbox::TextLink>)>,
+    event_no: u64,
+    next_links: Option<(u64, Vec<net::itemlink::ChatLink>)>,
+    pub shift: bool,
     /// The chat box (`VIWndChat`), with the HUD.
     wnd_chat: Option<crate::chat::WndChat>,
     /// When the HUD was last drawn (its frame time).
@@ -370,6 +406,8 @@ pub struct Play {
     pub group: crate::group::Group,
     /// The DPS meter's fights (`dpsmeter`), from a server that keeps one.
     pub meter: crate::dpsmeter::Meter,
+    /// A server's mercenaries' entry in the start menu (`mercplay`).
+    merc: mercplay::MercPlay,
     /// `VIWndMBox` (mode 14).
     mbox: crate::dialog::MBox,
     /// The player's death camera (`m_pC1B0`) and the screen's fade; the
@@ -619,6 +657,12 @@ const FAR_POSE_BUDGET: u32 = 50;
 /// marks and tracker before making its own (`Play::guide_on`): go-eqoa-server
 /// offers them at once, with the world entry's first replies.
 const GUIDE_WAIT_MS: u32 = 3000;
+
+/// How long a monster's name and level stay in the target's info window from
+/// the server's answer to a press of □ or Q (`Play::mob_info_shown`): a tap is
+/// let go before the answer comes, and the GM Jibrish's petition 1459 asks for
+/// a press; held longer, the window stays while held.
+pub const MOB_INFO_MS: u32 = 3000;
 
 /// The colour a 0x00DB's number is drawn in, from what follows its body
 /// (`rest`): a server's patch's three bytes when it colours them (`patch`:
@@ -952,6 +996,9 @@ impl Play {
     /// (2) or 0x0061 (8); a player or a corpse opens the details box (not
     /// ported); anyone else is talked to (0x0004).
     pub fn interact_with_target(&mut self) {
+        // another press of □/Q ends a monster's name and level shown after a
+        // tap (`mob_shown_at`); this press's own answer may show them again
+        self.mob_shown_at = None;
         let Some(e) = self.entities.slots.iter().flatten().find(|e| e.id == self.target) else { return };
         let Some(c) = &e.creature else { return };
         let f = c.npc_flags;
@@ -965,6 +1012,10 @@ impl Play {
             self.info_up = true;
             return;
         } else {
+            // a server with `world.mob_info` answers a monster with nothing to
+            // say with its name and level, for the info window while this
+            // press is held (`mob_info_shown`)
+            self.talk_held = true;
             0x0004
         };
         let mut w = net::stream::Writer::op(op);
@@ -1068,6 +1119,17 @@ fn build_puppet_in(lib: &Library, g: &mut Gpu, e: &net::entity::Entity, look: Op
                     p.set_casts();
                     Some(p)
                 })
+}
+
+/// Whether a character's cape is drawn: with its body (`body`: shown, and its
+/// skins not hidden by invisibility, `skins_shown`), but a Wisp's whenever it
+/// is shown at all (`shown`). A Wisp is drawn as what hangs on an invisible
+/// body (`wisp`), so invisibility leaves it as it was, the wisp in its helm and
+/// its cape (the owner, 2026-11-11: "let the capes be visible on wisp players";
+/// an invisible Wisp had shown its wisp alone, and go-eqoa-server sends an
+/// invisible Wisp's cape since: its `entity/capes.go`).
+fn cape_shown(wisp: bool, shown: bool, body: bool) -> bool {
+    if wisp { shown } else { body }
 }
 
 /// A player's character puts on the cape the server says it wears (`cape`:
@@ -1513,8 +1575,17 @@ fn labels_by(plates: &[Plate], view: &PlateView, view_proj: glam::Mat4, width: i
         let (qx, qy) = ((ndc.x * 320.0 + 320.0) as i32, (-ndc.y * 224.0 + 224.0) as i32);
         let w = (width(&p.name) as f32 * view.scale).round() as i32;
         let h = (height as f32 * view.scale).round() as i32;
-        let min = (qx - (w >> 1), qy - (h >> 1));
-        queued.push((clip.w, min, (min.0 + w, min.1 + h), ndc, p));
+        let mut min = (qx - (w >> 1), qy - (h >> 1));
+        let mut max = (min.0 + w, min.1 + h);
+        // a tag's line under the name: the plate's rect takes it in
+        if let Some(t) = &p.tag {
+            let tw = (width(t) as f32 * view.scale).round() as i32;
+            max.1 += h;
+            if tw > w {
+                (min.0, max.0) = (qx - (tw >> 1), qx - (tw >> 1) + tw);
+            }
+        }
+        queued.push((clip.w, min, max, ndc, p));
     }
     queued.sort_by(|a, b| a.0.total_cmp(&b.0));
     /// A kept plate: its rect's corners, where it is drawn, what.
@@ -1529,7 +1600,17 @@ fn labels_by(plates: &[Plate], view: &PlateView, view_proj: glam::Mat4, width: i
     if view.overlap {
         kept.reverse();
     }
-    kept.into_iter().map(|(_, _, ndc, p)| render::text::Label { at: ndc.to_array(), color: p.color, text: p.name.clone() }).collect()
+    // a tag a line below its name, the line the font's height at the plates'
+    // size (`Text::vertices`: a pixel of the PS2's 448 lines is 2 / 448 high)
+    let line = 2.0 * height as f32 * view.scale / render::text::SCREEN_H;
+    let mut out = Vec::new();
+    for (_, _, ndc, p) in kept {
+        out.push(render::text::Label { at: ndc.to_array(), color: p.color, text: p.name.clone() });
+        if let Some(t) = &p.tag {
+            out.push(render::text::Label { at: [ndc.x, ndc.y - line, ndc.z], color: p.color, text: t.clone() });
+        }
+    }
+    out
 }
 
 /// `CalcSlotWorldTransform(slot)`'s translation: the slot's node under the
@@ -2070,11 +2151,31 @@ mod name_plates {
     /// A plate at `at` (the view is the identity, so its x and y are where
     /// it is on the screen, -1 to 1).
     fn plate(at: [f32; 3], name: &str) -> Plate {
-        Plate { at, color: [1.0; 4], name: name.into() }
+        Plate { at, color: [1.0; 4], name: name.into(), tag: None }
     }
 
     fn names(view: &PlateView, plates: &[Plate]) -> Vec<String> {
         labels_by(plates, view, Mat4::IDENTITY, width, 12).into_iter().map(|l| l.text).collect()
+    }
+
+    /// A merc's tag (`mercplay`) is a second label a line under its name, in
+    /// its colour, and its plate's rect takes it in: a plate just under the
+    /// name, where the tag is, is dropped as one meeting it. The control: the
+    /// same plates untagged, both are kept.
+    #[test]
+    fn a_tag_is_a_line_under_its_name() {
+        let eye = Vec3::new(0.0, 0.0, -1.0);
+        let below = -14.0 / 224.0;
+        let mut merc = plate([0.0, 0.0, 0.5], "Ralthas");
+        merc.tag = Some("<Lonewulf's Mercenary>".into());
+        let under = plate([0.0, below, 0.5], "Kel");
+        let ls = labels_by(&[merc, under], &PlateView::game(eye), Mat4::IDENTITY, width, 12);
+        let texts: Vec<_> = ls.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, ["Ralthas", "<Lonewulf's Mercenary>"], "the plate under the tag is dropped");
+        assert!((ls[1].at[1] - (ls[0].at[1] - 2.0 * 12.0 / 448.0)).abs() < 1e-6 && ls[1].at[0] == ls[0].at[0], "{:?}", ls[1].at);
+        assert_eq!(ls[1].color, ls[0].color);
+        let untagged = [plate([0.0, 0.0, 0.5], "Ralthas"), plate([0.0, below, 0.5], "Kel")];
+        assert_eq!(names(&PlateView::game(eye), &untagged), ["Ralthas", "Kel"], "the control must fail");
     }
 
     /// Zoomed out to 50 the plates round the player stay, measured from the
@@ -2753,7 +2854,7 @@ impl Play {
         crate::racelabel::clear();
         // Msg000D reads `m_speed` out of the dump
         let speed = dump.speed;
-        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, stood_sent: false, last_pos: [0.0; 3], send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), aloft_vy: vec![None; MAX_SLOTS], airs: vec![Default::default(); MAX_SLOTS], actors: vec![None; MAX_SLOTS], self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_wait_since: None, cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, chat_unsent: 0, reopened: 0, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, rumbles: Vec::new(), glyphs: Default::default(), wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default(), record: Default::default(), raid: Default::default(), meter: Default::default() };
+        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, stood_sent: false, last_pos: [0.0; 3], send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), aloft_vy: vec![None; MAX_SLOTS], airs: vec![Default::default(); MAX_SLOTS], actors: vec![None; MAX_SLOTS], self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, mob_info: None, talk_held: false, mob_shown_at: None, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), links: Default::default(), link_draft: None, event_no: 0, next_links: None, shift: false, wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_wait_since: None, cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, chat_unsent: 0, reopened: 0, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, rumbles: Vec::new(), glyphs: Default::default(), wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default(), record: Default::default(), raid: Default::default(), meter: Default::default(), merc: Default::default() };
         p.take_abilities();
         p.npcw_world_entry();
         // world entry: LoadModels and StreamFillCache under the loading screen
@@ -2784,6 +2885,7 @@ impl Play {
         // and the combat record's, if its offer did
         self.record_menu_again();
         self.raid_menu_again();
+        self.merc_menu_again();
     }
 
     /// CLIENT's and SUPPORT's data, taken up as each image comes
@@ -2876,9 +2978,27 @@ impl Play {
         if let Some(t) = self.session.npc_tints.take() {
             crate::npctint::set(t);
         }
+        // the server takes crash reports: this client's kept ones go, each let
+        // go at its answer (`crashfile`)
+        if let Some(most) = self.session.crash_offer.take() {
+            crate::crashfile::send_pending(&mut self.session, most);
+        }
+        if !self.session.crash_filed.is_empty() {
+            crate::crashfile::take_answers(&mut self.session);
+        }
+        // a debug build's `EQOA_CRASH_TEST=<ms>`: a panic then, for a test of
+        // the reports (never in a release build)
+        if crate::crashfile::test_panic_due(game_ms) {
+            panic!("EQOA_CRASH_TEST: a crash on purpose, {game_ms} ms into play");
+        }
         for e in events {
+            self.event_no += 1;
             let change = fork_hooks::begin_game_event(self, &e);
             match e {
+                // a chat line's links, for the line the next event carries
+                // (`add_chat`; `itemlink`)
+                Event::ChatLinks(links) => self.next_links = Some((self.event_no, links)),
+                Event::ItemLinkRecord { id, item } => self.links.record(id, item.map(|b| *b)),
                 Event::TargetInfo { disposition, b, title, guild, .. } => {
                     self.target_info = Some(disposition);
                     self.rings.con = Some(b);
@@ -2935,6 +3055,9 @@ impl Play {
                     self.meter.take(m);
                 }
                 Event::RaidState(st) => self.raid_state(st),
+                // a server's word on a monster with nothing to say
+                // (`world.mob_info`): its name and level, for the info window
+                Event::MobInfo { id, level, name } => self.mob_info_shown(id, level, name, now),
                 Event::RaidRoll(r) => self.raid_roll(r),
                 Event::MasterLoot(m) => self.master_loot(m),
                 Event::GroupInvite { id, name, .. } => {
@@ -3479,7 +3602,12 @@ impl Play {
         self.record_menu(); // Character > Combat Record once the server offers it
         self.agree_raid();
         self.raid_menu(); // Community > Group > Raid once the server offers it
+        self.merc_menu(); // Community > Group > Dismiss Mercenary while one's merc is out
+        self.agree_item_links();
+        // Options > Interface's Profanity Filter, to a server that asks (0x7E60)
+        self.session.agree_profanity_filter(crate::settings::profanity_filter());
         self.drop_dead_target_info();
+        self.drop_stale_mob_info(now);
         if self.has_self() {
             self.auto_attack_tick(walker, now);
             self.self_visibility(walker);
@@ -3703,7 +3831,12 @@ impl Play {
                     // VICSprite::Process: the sounds its triggers fired, for the
                     // 24 heard (`heard_slots`); past them it is quiet
                     if let Some(s) = sound.as_deref_mut() {
-                        if heard[slot] {
+                        if heard[slot] && p.wisp {
+                            // a Wisp's moving makes no sound (`wisp::Hushed`)
+                            let quiet = crate::wisp::step_sounds(cs);
+                            let mut sink = s.sink();
+                            cs.process_sounds(&walker.eye.position, &walker.eye.direction, &at, Some(&mut crate::wisp::Hushed { inner: &mut sink, quiet }));
+                        } else if heard[slot] {
                             cs.process_sounds(&walker.eye.position, &walker.eye.direction, &at, Some(&mut s.sink()));
                         } else {
                             hush(cs, s);
@@ -3755,7 +3888,7 @@ impl Play {
                     g.renderer.set_palette(g.queue, cg, &palette);
                 }
                 crate::lod::place(cg, &p.centre, &eye);
-                cg.visible = p.gpu.visible;
+                cg.visible = cape_shown(p.wisp, shown, p.gpu.visible);
             }
         }
         self.far_last = far;
@@ -4080,6 +4213,17 @@ impl Play {
         r.set_overlay(device, queue, view_proj, &tris, &render::library_textures(lib));
     }
 
+    /// A creature's name's colour: `NameColors[ApplyLook's pick]` (an NPC's
+    /// 0, a player's or a pet's 1, one flagged for PvP 2), a merc's
+    /// (`MERC_COLOR`) in 1's place where the server named it one.
+    fn name_color(&self, c: &net::entity::Creature) -> [f32; 4] {
+        let k = if c.p256 < 2 { 0 } else if c.p299 & 1 != 0 { 2 } else { 1 };
+        if k == 1 && self.session.mercs.as_ref().is_some_and(|m| m.is(&c.name)) {
+            return MERC_COLOR;
+        }
+        NAME_COLORS[k]
+    }
+
     /// `SetName`'s plates for every creature drawn: its name, in
     /// `NameColors[ApplyLook's pick]`, at its name node.
     pub fn plates(&self) -> Vec<Plate> {
@@ -4095,8 +4239,7 @@ impl Play {
             if c.name.is_empty() || !p.shown {
                 continue;
             }
-            let color = if c.p256 < 2 { 0 } else if c.p299 & 1 != 0 { 2 } else { 1 };
-            out.push(Plate { at, color: NAME_COLORS[color], name: c.name.clone() });
+            out.push(Plate { at, color: self.name_color(c), name: c.name.clone(), tag: self.merc_tag(c) });
         }
         out
     }
@@ -4106,6 +4249,11 @@ impl Play {
     /// ends the scroll, L3 toggles autorun (33 is a chat mode), and the
     /// attack and the target's details are let go as in play.
     fn chat_scroll_key(&mut self, key: i32, down: bool) {
+        // the walk through the item links (`itemlink`), unless a loot roll's
+        // strips have the d-pad
+        if down && !self.rolls_focused() && self.link_key(key) {
+            return;
+        }
         // a loot roll's strips up: right gives them the d-pad (`raidplay`)
         if self.roll_key(key, down) {
             return;
@@ -4131,7 +4279,7 @@ impl Play {
                 self.mode = 0;
             }
             134 => self.attack_release(),
-            133 => self.info_up = false,
+            133 => self.info_let_go(),
             _ => {}
         }
     }
@@ -4290,7 +4438,7 @@ impl Play {
     /// map, a server's player search, the target's details (Q held), a line
     /// being typed, or the player dead.
     pub fn wants_ui(&mut self) -> bool {
-        self.window_up() || self.map.open || self.search.open || self.info_up || self.info_window.open > 0.0 || self.keyboard_typing() || self.is_dead()
+        self.window_up() || self.map.open || self.search.open || self.info_wanted() || self.info_window.open > 0.0 || self.keyboard_typing() || self.is_dead()
     }
 
     /// The loading screen is up (drawn on the 2D layer, never hidden).
@@ -4849,6 +4997,14 @@ impl Play {
         if matches!(c, Click::Target(..) | Click::Interact(..)) && matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && self.roll_point(f) {
             return true;
         }
+        // the item links' windows (`itemlink`): a click on one is theirs, on
+        // its X it closes
+        if matches!(c, Click::Target(..) | Click::Interact(..)) && matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && self.links.covers(f) {
+            if self.links.point(f) {
+                self.cues.push(crate::sound::Cue::Ui(8));
+            }
+            return true;
+        }
         // in play; a server's player search over it is a window
         if self.mode == 0 && !self.search.open {
             // Hide UI (`hideui`): none of the HUD's buttons is there to press
@@ -4874,8 +5030,7 @@ impl Play {
             }
             // the chat box: the chat line, as R3 opens it
             if crate::hud::fork_hud::chat_window_visible() && self.wnd_chat.as_ref().is_some_and(|w| w.contains([f[0] - side, f[1] - up])) {
-                self.open_edit(0xB0F0000, 128, -1, false);
-                self.edit.title = self.chat_title();
+                self.open_chat_line();
                 return true;
             }
             // the player's frame, a member's bar, the pet's: targeted, as
@@ -4966,7 +5121,13 @@ impl Play {
     /// The left button let go (`chat::Let`).
     pub fn chat_release(&mut self) -> crate::chat::Let {
         let scrolling = self.mode == 33;
-        self.wnd_chat.as_mut().map_or(crate::chat::Let::NotHeld, |c| c.release(scrolling))
+        let got = self.wnd_chat.as_mut().map_or(crate::chat::Let::NotHeld, |c| c.release(scrolling));
+        // a click on an item link opens it (`itemlink`)
+        if let crate::chat::Let::Link(id, name) = &got {
+            self.open_link(*id, name);
+            return crate::chat::Let::Done;
+        }
+        got
     }
 
     /// A press of the chat box's that is down (the other button's are nothing
@@ -4993,7 +5154,8 @@ impl Play {
 
     /// The wheel's `lines` over the chat box's history (`WndChat::wheel`).
     pub fn chat_wheel(&mut self, at: (f64, f64), size: (u32, u32), lines: f32) -> bool {
-        self.wnd_chat.as_mut().is_some_and(|c| c.wheel(Self::chat_point(at, size), lines))
+        let held = self.mode == 33;
+        self.wnd_chat.as_mut().is_some_and(|c| c.wheel(Self::chat_point(at, size), lines, held))
     }
 
     /// The wheel's `lines` (up positive; a finger's drag down) on the window
@@ -5032,6 +5194,16 @@ impl Play {
             return one(self.edit.point(f).flatten());
         }
         if self.bank_owns() {
+            // Shift+click on an item of either list: linked in the chat line
+            // (`itemlink`)
+            if self.mode == 11
+                && self.shift
+                && self.links_made()
+                && let Some((list, i)) = self.bank_item_at(f)
+            {
+                self.link_item(list, i);
+                return Vec::new();
+            }
             return self.bank_point(f);
         }
         if self.npcw_owns() {
@@ -5057,6 +5229,17 @@ impl Play {
         }
         if self.record_owns() {
             return self.record_point(f);
+        }
+        // Shift+click on an item in the inventory: linked in the chat line
+        // (`itemlink`)
+        if self.mode == 13
+            && self.items.visible
+            && self.shift
+            && self.links_made()
+            && let Some(i) = self.items.item_at(f)
+        {
+            self.link_item(0, i);
+            return Vec::new();
         }
         if let Some(s) = self.start.as_mut() {
             match self.mode {
@@ -5144,6 +5327,9 @@ impl Play {
                 self.attack_release();
             } else {
                 self.interact_with_target();
+                // a click holds nothing, as a tapped key does not: a
+                // monster's name and level show for `MOB_INFO_MS`, then go
+                self.talk_held = false;
             }
         }
     }
@@ -5186,6 +5372,18 @@ impl Play {
     /// Plain text goes to the current channel. Not here: the crafting
     /// commands.
     pub fn chat_line(&mut self, text: &str) {
+        self.chat_line_linked(text, &[]);
+    }
+
+    /// `chat_line` for a typed line with item links (`itemlink`, the chat
+    /// line's `editbox::TextLink`s): where the server offered links and the
+    /// Extended row is on, a line that goes with any of them goes as
+    /// `net::itemlink::say` in place of its retail message (0x000B, 0x0C01 2,
+    /// 0x0578 12), each link's place counted in the text that goes (a slash
+    /// command's own word off; `/r`'s tell put before it); everywhere else, and
+    /// for a command, the plain line, the items' names in it.
+    pub fn chat_line_linked(&mut self, text: &str, links: &[crate::editbox::TextLink]) {
+        use net::itemlink::Route;
         let wide: Vec<u16> = text.encode_utf16().collect();
         if self.session.self_id.is_none() {
             self.chat_unsent += 1;
@@ -5203,9 +5401,13 @@ impl Play {
             if text.split(' ').next().is_some_and(|w| w.eq_ignore_ascii_case("#bug")) {
                 self.send_bug_note();
             }
+            let l = Self::wire_links(&wide, links, 0, 0);
             match self.channel {
+                4 if self.session.say_linked(Route::Guild, text, target, &l) => {}
                 4 => self.session.send_op_sub_wide(0x0578, 12, text),
+                3 if self.session.say_linked(Route::Shout, text, target, &l) => {}
                 3 => self.session.send_op_sub_wide(0x0C01, 2, text),
+                _ if self.session.say_linked(Route::Say, text, target, &l) => {}
                 _ => self.session.say(text, target),
             }
             return;
@@ -5228,28 +5430,44 @@ impl Play {
             return;
         }
         let back = self.channel;
+        // the links in what goes after the command's word, counted from there
+        let in_rest = Self::wire_links(&wide, links, rest_at, 0);
         match cmd.as_str() {
             "/sa" | "/say" => {
                 self.session.send_op_byte(0x000E, 0);
-                self.session.say(&rest, target);
+                if !self.session.say_linked(Route::Say, &rest, target, &in_rest) {
+                    self.session.say(&rest, target);
+                }
                 self.session.send_op_byte(0x000E, back);
             }
             "/g" | "/group" => {
                 self.session.send_op_byte(0x000E, 2);
-                self.session.say(&rest, target);
+                if !self.session.say_linked(Route::Say, &rest, target, &in_rest) {
+                    self.session.say(&rest, target);
+                }
                 self.session.send_op_byte(0x000E, back);
             }
             "/gu" | "/guild" => {
                 self.session.send_op_byte(0x000E, 4);
-                self.session.send_op_sub_wide(0x0578, 12, &rest);
+                if !self.session.say_linked(Route::Guild, &rest, target, &in_rest) {
+                    self.session.send_op_sub_wide(0x0578, 12, &rest);
+                }
                 self.session.send_op_byte(0x000E, back);
             }
             "/s" | "/shout" => {
                 self.session.send_op_byte(0x000E, 3);
-                self.session.send_op_sub_wide(0x0C01, 2, &rest);
+                if !self.session.say_linked(Route::Shout, &rest, target, &in_rest) {
+                    self.session.send_op_sub_wide(0x0C01, 2, &rest);
+                }
                 self.session.send_op_byte(0x000E, back);
             }
-            "/t" | "/tell" => self.session.say(text, target),
+            // a tell goes whole (the server parses it), its links where typed
+            "/t" | "/tell" => {
+                let l = Self::wire_links(&wide, links, 0, 0);
+                if !self.session.say_linked(Route::Say, text, target, &l) {
+                    self.session.say(text, target);
+                }
+            }
             "/alarm" => self.alarm_command(&rest),
             // the DPS meter's (`dpsmeter`), the client's own
             "/dps" => self.dps_command(&rest),
@@ -5268,7 +5486,12 @@ impl Play {
             "/r" | "/reply" => {
                 if !self.reply_name.is_empty() {
                     let line = format!("/t {} {}", self.reply_name, rest);
-                    self.session.say(&line, target);
+                    // the links after the tell's words put before them
+                    let at = line.encode_utf16().count() - (wide.len() - rest_at.min(wide.len()));
+                    let l = Self::wire_links(&wide, links, rest_at, at);
+                    if !self.session.say_linked(Route::Say, &line, target, &l) {
+                        self.session.say(&line, target);
+                    }
                 }
             }
             // go-eqoa-server's bug report: F3's form with the words typed after
@@ -5381,7 +5604,21 @@ impl Play {
         if std::env::var_os("EQOA_CHAT_LOG").is_some() {
             eprintln!("chat: {text}");
         }
-        self.chat_pending.push((text.clone(), color, self.session.now()));
+        // the links of a line the server sent with them: the event before this
+        // line's (`Event::ChatLinks`), else none
+        let links = match self.next_links.take() {
+            Some((n, l)) if n + 1 == self.event_no => l,
+            _ => Vec::new(),
+        };
+        if !links.is_empty() && std::env::var_os("EQOA_CHAT_LOG").is_some() {
+            let w: Vec<u16> = text.encode_utf16().collect();
+            for l in &links {
+                let a = (l.start as usize).min(w.len());
+                let b = (a + l.len as usize).min(w.len());
+                eprintln!("chat: link {} {:?}", l.id, String::from_utf16_lossy(&w[a..b]));
+            }
+        }
+        self.chat_pending.push((text.clone(), color, self.session.now(), links));
         self.chat.push_back((text, color));
         while self.chat.len() > 8 {
             self.chat.pop_front();
@@ -5863,7 +6100,7 @@ impl Play {
         if !down {
             match key {
                 134 => self.attack_release(),
-                133 => self.info_up = false,
+                133 => self.info_let_go(),
                 // L1, R1: the manual camera ended, or the hold given up
                 140 | 142 => self.target_key_up(walker),
                 _ => {}
@@ -5884,8 +6121,7 @@ impl Play {
                 135 => self.hud_key(H::Use),
                 147 => {
                     self.reset_view(walker);
-                    self.open_edit(0xB0F0000, 128, -1, false);
-                    self.edit.title = self.chat_title();
+                    self.open_chat_line();
                 }
                 _ => {}
             }
@@ -5896,7 +6132,12 @@ impl Play {
             145 => self.camera_style_key(walker),
             134 => self.attack_press(),
             133 => self.interact_with_target(),
-            132 => self.clear_target(),
+            // △: the newest item link's window closed first (`itemlink`)
+            132 => {
+                if !self.close_link_window() {
+                    self.clear_target();
+                }
+            }
             140 | 142 => self.target_key(key == 140, walker, aspect),
             136 => self.hud_key(H::Left),
             137 => self.hud_key(H::Right),
@@ -5904,10 +6145,7 @@ impl Play {
             139 => self.hud_key(H::Down),
             135 => self.hud_key(H::Use),
             // R3: the chat line, the edit box with the channel's title
-            147 => {
-                self.open_edit(0xB0F0000, 128, -1, false);
-                self.edit.title = self.chat_title();
-            }
+            147 => self.open_chat_line(),
             146 => self.toggle_autorun(),
             // R2 held: the chat box's history (mode 33), movement and the
             // camera allowed (`SetP06DC0(1, 1)`)
@@ -6146,6 +6384,18 @@ impl Play {
                         self.session.send(&w.data);
                     }
                 }
+                // Link Item (`itemlink`)
+                ItemOut::Link(i) => {
+                    self.link_item(0, i);
+                }
+                // Hide Look / Show Look (`hidelook`): the worn item's slot
+                ItemOut::HideLook(i, hide) => {
+                    if let Some(it) = self.dump.inventory.items.get(i.max(0) as usize).filter(|_| i >= 0) {
+                        let slot = i32::try_from(it.equip_slot).unwrap_or(-1);
+                        eprintln!("play: {} look of {:?} (equip slot {slot})", if hide { "hide the" } else { "show the" }, it.item.name);
+                        self.session.hide_look(slot, hide);
+                    }
+                }
                 ItemOut::Back => {}
             }
         }
@@ -6245,12 +6495,17 @@ impl Play {
         // each tab holds the definition's 40, or every record of a pack past
         // them (`inventory::pack_cap`)
         let counts = s.item_counts.map(|c| c.max(crate::inventory::pack_cap() as i32));
-        self.items.set_built(crate::itemmenu::build(
+        // Link Item in every item's popup where links are made (`itemlink`)
+        let link = crate::settings::item_links() && self.session.item_links_offer;
+        let built = crate::itemmenu::build_linked(
             inv,
             counts,
             &|k| crate::inventory::item_icon(&inv.items[k], flags) as i32,
             &|k| crate::inventory::can_use(&inv.items[k], pl.class, pl.race, pl.level),
-        ));
+            link,
+        );
+        // Hide Look / Show Look on a worn item where the server offers it (`hidelook`)
+        self.items.set_built(crate::hidelook::with_rows(built, inv, &self.session.hide_look));
         self.items.set_gear(self.gear.view(inv, &vui.words, vui.language));
         let info = crate::infotext::Info {
             words: &vui.words,
@@ -6869,9 +7124,17 @@ impl Play {
 
     /// Whether this player may invite into its group: CLIENT's rule, not in
     /// one or its leader (`InviteEntity`, `InviteToGroup`: else word 640), or
-    /// any member on a server that offered it (`Session::member_invites`).
+    /// any member where the server lets one (`members_invite`).
     fn may_invite(&self) -> bool {
-        !self.group.in_group || self.group.leader || self.session.member_invites
+        !self.group.in_group || self.group.leader || self.members_invite()
+    }
+
+    /// Whether a member of this player's group invites into it: on a server
+    /// that offered it (`Session::member_invites`), unless it told that the
+    /// group's leader lets only the leader invite (`Session::group_reg`, the GM
+    /// Jibrish's petition 1476: "Allow anyone in my group to invite").
+    fn members_invite(&self) -> bool {
+        self.session.member_invites && self.session.group_reg.is_none_or(|g| g.members_invite)
     }
 
     /// `InviteToGroup(rec)`: as `InviteEntity`, by the record's id and name.
@@ -6923,6 +7186,12 @@ impl Play {
             self.edit.title = self.chat_title();
         }
         self.edit.set_text(&crate::ui::wide(text));
+        // a plain open (Enter) holds the line kept with its links (`itemlink`)
+        if text.is_empty()
+            && let Some((t, l)) = self.link_draft.clone()
+        {
+            self.edit.set_linked(&t, &l);
+        }
     }
 
     /// Whether a server's player search is up (`searchwnd`): it has the
@@ -7019,6 +7288,10 @@ impl Play {
                 crate::editbox::EditUp::Done(purpose) => self.edit_done(purpose),
                 crate::editbox::EditUp::Cancel => {
                     let purpose = self.edit.purpose;
+                    // the chat line given up with a link in it is kept (`itemlink`)
+                    if purpose == 0x0B0F_0000 {
+                        self.keep_link_draft();
+                    }
                     if !self.map_edit_done(purpose, false) {
                         self.mode = if self.who_tell.take().is_some() { 35 } else { 0 };
                     }
@@ -7036,6 +7309,14 @@ impl Play {
             return;
         }
         let text = String::from_utf16_lossy(&self.edit.text);
+        // the chat line sent (or emptied): no line kept with its links
+        // (`itemlink`)
+        let links = if purpose == 0x0B0F_0000 {
+            self.link_draft = None;
+            std::mem::take(&mut self.edit.links)
+        } else {
+            Vec::new()
+        };
         // VIWndWhoList::SendTell, back to the list
         if let Some(name) = self.who_tell.take() {
             if !text.is_empty() {
@@ -7048,7 +7329,7 @@ impl Play {
         if !text.is_empty() {
             match purpose {
                 0x0B0F_0000 => {
-                    self.chat_line(&text);
+                    self.chat_line_linked(&text, &links);
                     // /bug opened F3's form (support.rs): it keeps its mode
                     if self.mode == 31 {
                         self.edit.title.clear();
@@ -7136,6 +7417,10 @@ impl Play {
         }
         // Community > Group > Raid (`raidplay`)
         if self.raid_action(id) {
+            return;
+        }
+        // Community > Group > Dismiss Mercenary (`mercplay`)
+        if self.merc_action(id) {
             return;
         }
         let target = self.target;
@@ -7578,15 +7863,12 @@ impl Play {
                 Out::Send(m) => self.session.send(&m),
                 Out::Key(k, true) => match k {
                     27 | 132 | 141 | 90 | 122 if self.mode == 30 => self.mode = 0,
-                    13 | 147 => {
-                        self.open_edit(0xB0F0000, 128, -1, false);
-                        self.edit.title = self.chat_title();
-                    }
+                    13 | 147 => self.open_chat_line(),
                     _ => {}
                 },
                 Out::Key(k, false) => match k {
                     134 => self.attack_release(),
-                    133 => self.info_up = false,
+                    133 => self.info_let_go(),
                     _ => {}
                 },
             }
@@ -8498,6 +8780,27 @@ impl Play {
         }
     }
 
+    /// The minimap inside (`map::indoor`), before the frame's draw: the
+    /// ceiling over the player probed in the collision world while the minimap
+    /// is up (its state let go while it is not).
+    pub fn indoor_probe(&mut self, walker: &mut Walker, dt: f32) {
+        if !(crate::settings::map() && self.minimap_up() && !crate::hideui::hidden()) {
+            self.map.indoor.idle();
+            return;
+        }
+        let p = walker.cam.walk.phys.position;
+        self.map.indoor.probe(&mut walker.scene, [p.x.0, p.y.0, p.z.0], dt);
+    }
+
+    /// The minimap's picture inside drawn again when stale (`map::indoor`):
+    /// the zones `items` through the game's `renderer`, after `map_frame` and
+    /// before the frame's own draw.
+    #[allow(clippy::too_many_arguments)]
+    pub fn indoor_draw(&mut self, walker: &Walker, renderer: &render::Renderer, device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat, items: &[render::Draw]) {
+        let p = walker.cam.walk.phys.position;
+        self.map.indoor_draw(renderer, device, queue, format, items, [p.x.0, p.y.0, p.z.0]);
+    }
+
     /// The map's travel ask (a GM's Ctrl+click, `Map::take_travel_ask`): the
     /// spot asked of the server (`Session::map_travel_to`), which moves a GM's
     /// character there on the ground's floor and says so in the chat, and the
@@ -8631,8 +8934,7 @@ impl Play {
             .filter(|e| Some(e.id) != me && !group.contains(&e.id) && e.p18 & 2 == 0 && self.in_scene(e))
             .filter_map(|e| {
                 let c = e.creature.as_ref()?;
-                let color = if c.p256 < 2 { 0 } else if c.p299 & 1 != 0 { 2 } else { 1 };
-                crate::map::mini::Dot::of(e, NAME_COLORS[color])
+                crate::map::mini::Dot::of(e, self.name_color(c))
             })
             .collect();
         let target = self.actor_pos(self.target).filter(|_| Some(self.target) != me).map(|p| [p[0], p[2]]);
@@ -8752,7 +9054,7 @@ impl Play {
         crate::editbox::set_pad_only(self.keyboard && self.options.compact != 0);
         let under_liquid = walker.cam.walk.is_under_liquid();
         let (start_stats, start_loc) = self.start_view(walker);
-        let info_text = if self.info_up || self.info_window.open > 0.0 { self.target_info_text() } else { None };
+        let info_text = if self.info_wanted() || self.info_window.open > 0.0 { self.target_info_text() } else { None };
         let me = self.self_id32();
         let find = |id: Option<u32>| self.entities.slots.iter().flatten().find(|e| Some(e.id) == id);
         let me_e = find(me);
@@ -8905,9 +9207,11 @@ impl Play {
                 if !in_play {
                     c.clear_selection(false);
                 }
-                for (text, color, at) in self.chat_pending.drain(..) {
+                // item links drawn as links, or the line's plain words (`itemlink`)
+                c.show_links = crate::settings::item_links();
+                for (text, color, at, links) in self.chat_pending.drain(..) {
                     let rr = &r;
-                    c.text.add_text(&crate::ui::wide(&text), color, at, |s| vi::ui::Raster::string_width(rr, s));
+                    c.text.add_text_linked(&crate::ui::wide(&text), color, at, |s| vi::ui::Raster::string_width(rr, s), &links);
                 }
                 crate::hud::fork_hud::draw_chat_window(c, vui, &mut r, now, dt);
                 c.draw_selection(&mut r);
@@ -8917,6 +9221,9 @@ impl Play {
             r.ui.vertical = Vertical::Middle;
             // a raid's loot rolls (`raidplay`), under every window
             self.run_rolls(vui, &mut r);
+            // the item links' windows (`itemlink`), at the top middle
+            let side = crate::ui::Layout::side(&r);
+            self.run_links(vui, &mut r, side);
             if self.mode == 9 {
                 self.priv_chat.draw(vui, &mut r);
             }
@@ -8997,7 +9304,7 @@ impl Play {
             }
             // the target's info window, in the middle of a tall window's right
             r.ui.vertical = Vertical::Middle;
-            if self.info_up {
+            if self.info_wanted() {
                 self.info_window.open(false);
             } else {
                 self.info_window.close(false);
@@ -9295,6 +9602,55 @@ impl Play {
         }
     }
 
+    /// The server's word on a monster (`mob_info`) is for the target it came
+    /// for, alive: gone once the target moves on, or the monster leaves (its id
+    /// may come back on another) or dies. Shown after a tap, it stays
+    /// [`MOB_INFO_MS`] from when it came (`now`, the session's clock), and goes
+    /// sooner when a menu or a window opens over the game.
+    fn drop_stale_mob_info(&mut self, now: u32) {
+        if self.mob_info.as_ref().is_some_and(|m| m.0 != self.target || !self.entities.slots.iter().flatten().any(|e| e.id == m.0 && e.p19 != 0)) {
+            self.mob_info = None;
+            self.mob_shown_at = None;
+        }
+        if self.mob_shown_at.is_some_and(|at| now.wrapping_sub(at) >= MOB_INFO_MS) || self.window_up() || self.map.open || self.search.open {
+            self.mob_shown_at = None;
+        }
+    }
+
+    /// The target's info window wanted: `m_p678` (□ or Q held on a player, or
+    /// on a monster the server answered for), or a monster's name and level
+    /// shown for a while after a tap (`mob_shown_at`), for that monster alone.
+    fn info_wanted(&self) -> bool {
+        self.info_up || (self.mob_shown_at.is_some() && self.mob_info.as_ref().is_some_and(|m| m.0 == self.target))
+    }
+
+    /// □ (or Q) let go: the info window closes (`OnKeyUp` 81, 113, 133), and a
+    /// monster's name and level the server sends after it opens nothing.
+    pub fn info_let_go(&mut self) {
+        self.info_up = false;
+        self.talk_held = false;
+    }
+
+    /// The server's answer to a talk to a monster with nothing to say
+    /// (go-eqoa-server's `world.mob_info`, `net::session::OP_MOB_INFO`; the GM
+    /// Jibrish's petition 1459, 2026-11-10: "press the mob information button
+    /// on monster ... This should ONLY show the monsters name and level,
+    /// nothing else"), for the target it still is: the info window shows them,
+    /// as a pet's, for [`MOB_INFO_MS`] from now (`now`, the session's clock)
+    /// however short the press (a tap is let go before the answer comes), and
+    /// as long as the press is held (`m_p678`, as on a player). An answer for
+    /// another than the target is nothing.
+    pub fn mob_info_shown(&mut self, id: u32, level: u8, name: String, now: u32) {
+        if self.target != id {
+            return;
+        }
+        if self.talk_held {
+            self.info_up = true;
+        }
+        self.mob_shown_at = Some(now);
+        self.mob_info = Some((id, level, name));
+    }
+
     /// `DrawTargetInfo`'s text: a player's name, guild, race, title or
     /// class and level (the guild and title with 0x0010's answer), a
     /// creature's name and level; `None` closes the window.
@@ -9316,7 +9672,9 @@ impl Play {
                 Some(if guild.is_empty() { format!("{}\n{race}\n{rank}\n{level}", c.name) } else { format!("{}\n{guild}\n{race}\n{rank}\n{level}", c.name) })
             }
             3 => Some(format!("{}\n{level}", c.name)),
-            _ => None,
+            // a monster the server said has nothing to say (`mob_info`): its
+            // name and level as the server holds them, as a pet's are drawn
+            _ => self.mob_info.as_ref().filter(|m| m.0 == e.id).map(|(_, lv, name)| format!("{name}\n{} {lv}", word(503))),
         }
     }
 
@@ -9424,6 +9782,12 @@ impl Play {
     /// (`self_shown`: not in first person), on its walker's pose. A Wisp's
     /// (`wisp::is`: the player's by its entity's race look, so from its first
     /// frame) casts none.
+    /// Whether the player's own character is drawn as a Wisp (its puppet's
+    /// `wisp`): its moving makes no sound (`wisp::Hushed`, the viewer's walker).
+    pub fn self_wisp(&self) -> bool {
+        self.self_puppet.as_ref().is_some_and(|p| p.wisp)
+    }
+
     pub fn shadow_casters(&self, walker: &mut Walker, lib: &Library) -> Vec<crate::shadows::Caster> {
         let me = self.self_id32();
         let mut out = Vec::new();
@@ -9469,7 +9833,7 @@ impl Play {
             if !palette.is_empty() {
                 r.set_palette(queue, cg, palette);
             }
-            cg.visible = p.gpu.visible;
+            cg.visible = cape_shown(p.wisp, shown, p.gpu.visible);
         }
         let Some(cs) = walker.sprite.as_ref() else { return };
         let centre = glam_to_matrix(matrix);
@@ -11704,6 +12068,21 @@ mod commands {
         assert!(skins_shown(None));
     }
 
+    /// An invisible Wisp keeps its cape (the owner, 2026-11-11: "let the capes
+    /// be visible on wisp players"): its skins hidden, the cape is drawn while
+    /// the Wisp is shown at all, as its wisp and what it holds are. The
+    /// controls: anyone else's cape goes with its hidden skins, and a Wisp out
+    /// of sight (past its off distance) shows none.
+    #[test]
+    fn an_invisible_wisp_keeps_its_cape() {
+        let invisible = net::entity::Creature { flags262: 1, ..Default::default() };
+        let body = |shown: bool| shown && skins_shown(Some(&invisible));
+        assert!(cape_shown(true, true, body(true)), "an invisible Wisp's cape");
+        assert!(!cape_shown(false, true, body(true)), "the control: an invisible human's");
+        assert!(!cape_shown(true, false, body(false)), "the control: a Wisp out of sight");
+        assert!(cape_shown(false, true, true) && cape_shown(true, true, true), "anyone seen");
+    }
+
     /// `ToggleFollow`: a targeted member of the group is followed; the
     /// player itself, someone outside the group or nothing is word 1195.
     /// Again, off.
@@ -11809,6 +12188,148 @@ mod commands {
         p.target = 0x11;
         assert_eq!(p.target_info_text().as_deref(), Some("Plainogre\nw190\nw174\nw503 60"), "a name not on the list");
         crate::racelabel::clear();
+    }
+
+    /// A monster the server says has nothing to say (go-eqoa-server's
+    /// `world.mob_info`, petition 1459): its name and the server's level alone in
+    /// the info window, as a pet's are drawn; with the press still held at the
+    /// answer it stays while held, past `MOB_INFO_MS` too, and goes at the
+    /// release. The controls: no answer yet, nothing (a creature's window closes,
+    /// as CLIENT's); an answer for another than the target is nothing; the answer
+    /// is gone once the target moves on (and back) or the monster dies; a
+    /// player's window is as it was.
+    #[test]
+    fn the_info_window_shows_a_monsters_name_and_level() {
+        let mut p = play();
+        p.words = Some(crate::groupsearch::tests::numbered());
+        let creature = |id: u32, name: &str, p256: u8| net::entity::Entity {
+            id,
+            p19: 255,
+            creature: Some(net::entity::Creature { name: name.into(), level: 9, p256, ..Default::default() }),
+            ..Default::default()
+        };
+        p.entities.slots[0] = Some(creature(0x20, "moss snake", 0));
+        p.entities.slots[1] = Some(creature(0x21, "fruit bat", 0));
+        p.entities.slots[2] = Some(creature(0x22, "Plainogre", 2));
+        p.target = 0x20;
+        p.interact_with_target(); // Q down: a talk sent
+        p.drop_stale_mob_info(1000);
+        assert!(!p.info_wanted() && p.target_info_text().is_none(), "the control: no answer yet, nothing");
+        p.mob_info_shown(0x20, 3, "moss snake".into(), 1000);
+        p.drop_stale_mob_info(1000);
+        assert!(p.info_up && p.info_wanted(), "the answer with the press held: the window up");
+        assert_eq!(p.target_info_text().as_deref(), Some("moss snake\nw503 3"), "the name and the server's level, nothing else");
+        p.drop_stale_mob_info(1000 + MOB_INFO_MS + 2000);
+        assert!(p.info_wanted(), "held past MOB_INFO_MS: still up");
+        p.info_let_go(); // Q up
+        assert!(!p.info_wanted(), "let go: closed");
+
+        p.interact_with_target();
+        p.mob_info_shown(0x21, 2, "fruit bat".into(), 9000);
+        p.drop_stale_mob_info(9000);
+        assert!(!p.info_wanted(), "an answer for another than the target shows nothing");
+        assert_ne!(p.target_info_text().as_deref(), Some("fruit bat\nw503 2"), "and is not kept");
+
+        p.mob_info_shown(0x20, 3, "moss snake".into(), 9100);
+        assert!(p.info_wanted());
+        p.target = 0x21; // Tab with Q still held
+        p.drop_stale_mob_info(9200);
+        assert_eq!(p.target_info_text(), None, "another monster: the window closes, as CLIENT's");
+        p.target = 0x20;
+        assert_eq!(p.target_info_text(), None, "and back: the answer was gone with its target");
+
+        p.mob_info_shown(0x20, 3, "moss snake".into(), 9300);
+        p.entities.slots[0].as_mut().unwrap().p19 = 0; // it died
+        p.drop_stale_mob_info(9400);
+        assert_eq!(p.target_info_text(), None, "a dead monster: nothing");
+        p.info_let_go();
+
+        p.target = 0x22;
+        p.interact_with_target();
+        assert!(p.info_up, "a player: the window up at the press, as ever");
+        assert_eq!(p.target_info_text().as_deref(), Some("Plainogre\nw183\nw165\nw503 9"));
+        p.info_let_go();
+        assert!(!p.info_wanted(), "and closed at the release, as ever");
+    }
+
+    /// A tap of □ or Q on a monster, let go before the server's answer comes (the
+    /// petition's press): its name and level from the answer for `MOB_INFO_MS`,
+    /// then gone; sooner at another press of □ or Q (whose own answer shows them
+    /// again), a change of target (not back with it), a menu or the map opened,
+    /// the monster's death or its leaving view; a click is a tap. The control:
+    /// nothing before the answer, which comes after the release, so with the
+    /// window held by the press alone a tap shows nothing at all.
+    #[test]
+    fn a_tap_shows_a_monsters_name_and_level_for_a_while() {
+        let mut p = play();
+        p.words = Some(crate::groupsearch::tests::numbered());
+        let creature = |id: u32, name: &str| net::entity::Entity {
+            id,
+            p19: 255,
+            creature: Some(net::entity::Creature { name: name.into(), level: 9, ..Default::default() }),
+            ..Default::default()
+        };
+        p.entities.slots[0] = Some(creature(0x30, "moss snake"));
+        p.entities.slots[1] = Some(creature(0x31, "fruit bat"));
+        let shown = |p: &Play| p.info_wanted() && p.target_info_text().is_some();
+        let snake = |p: &mut Play, at: u32| p.mob_info_shown(0x30, 3, "moss snake".into(), at);
+        p.target = 0x30;
+        p.interact_with_target(); // Q down
+        p.info_let_go(); // and up, before the answer
+        p.drop_stale_mob_info(1000);
+        assert!(!shown(&p), "the control: nothing before the answer");
+        snake(&mut p, 1000);
+        p.drop_stale_mob_info(1000);
+        assert!(!p.info_up && shown(&p), "the answer after the release: shown all the same");
+        assert_eq!(p.target_info_text().as_deref(), Some("moss snake\nw503 3"));
+        p.drop_stale_mob_info(1000 + MOB_INFO_MS - 1);
+        assert!(shown(&p), "still up just before MOB_INFO_MS");
+        p.drop_stale_mob_info(1000 + MOB_INFO_MS);
+        assert!(!p.info_wanted(), "gone at MOB_INFO_MS");
+
+        snake(&mut p, 5000);
+        assert!(p.info_wanted());
+        p.interact_with_target();
+        assert!(!p.info_wanted(), "another press: gone");
+        p.info_let_go();
+        snake(&mut p, 5200);
+        assert!(p.info_wanted(), "until its own answer shows it again");
+
+        p.target = 0x31;
+        p.drop_stale_mob_info(5300);
+        assert!(!p.info_wanted(), "another target: gone");
+        p.target = 0x30;
+        p.drop_stale_mob_info(5400);
+        assert!(!p.info_wanted(), "and not back with the target");
+
+        snake(&mut p, 6000);
+        p.mode = 13; // the start menu
+        p.drop_stale_mob_info(6100);
+        p.mode = 0;
+        assert!(!p.info_wanted(), "a menu opened: gone");
+        snake(&mut p, 6200);
+        p.map.open = true;
+        p.drop_stale_mob_info(6300);
+        p.map.open = false;
+        assert!(!p.info_wanted(), "the map opened: gone");
+
+        snake(&mut p, 7000);
+        p.entities.slots[0].as_mut().unwrap().p19 = 0;
+        p.drop_stale_mob_info(7100);
+        assert!(!p.info_wanted(), "dead: gone");
+        p.entities.slots[0].as_mut().unwrap().p19 = 255;
+        snake(&mut p, 7200);
+        let left = p.entities.slots[0].take();
+        p.drop_stale_mob_info(7300);
+        assert!(!p.info_wanted(), "out of view: gone");
+        p.entities.slots[0] = left;
+
+        p.click(Some(0x30), true);
+        snake(&mut p, 8000);
+        p.drop_stale_mob_info(8000);
+        assert!(!p.info_up && p.info_wanted(), "a click: shown, nothing held");
+        p.drop_stale_mob_info(8000 + MOB_INFO_MS);
+        assert!(!p.info_wanted(), "and gone at MOB_INFO_MS");
     }
 
     /// 0x7E1D reaches the list through the frame's events, and a world entry starts

@@ -679,6 +679,19 @@ pub struct ClientOptions {
     /// DPS Meter Shows: the fight (under way, or the last) or Overall, every
     /// fight since the login; a click on the panel's title or `/dps` turns it.
     pub dps_view: crate::dpsmeter::View,
+    /// Item Links (`itemlink`; the GM Jibrish's petition 1463: "This should be
+    /// off by default for ps2 players and a toggle option. If toggled off for
+    /// players, they should just see a plain text item name if linked"): links
+    /// made from the inventory, drawn and opened in the chat box, on a server
+    /// that offers them (`Session::agree_item_links`); off, none, and the server
+    /// sends the plain names a PS2 is sent. On by default.
+    pub item_links: bool,
+    /// Profanity Filter (the GM Jibrish's petition 1490: "Under options then
+    /// interface add an option to turn the profanity filter on or off"): the
+    /// server's filter of what this player hears, told to a server that asks
+    /// for it (`Session::agree_profanity_filter`, go-eqoa-server's 0x7E60);
+    /// on by default, as the game has it at every login. Options > Interface.
+    pub profanity_filter: bool,
     /// Map (the user, 2026-11-09: "also add the map and quest helper we had
     /// in a former update"; on by default): the client's own map (M, the
     /// compass's click, `map`), the minimap, the waypoints on the compass and
@@ -968,6 +981,8 @@ impl Default for ClientOptions {
             number_colors: [0; crate::numcolor::ROWS],
             dps_meter: false,
             dps_view: crate::dpsmeter::View::Fight,
+            item_links: true,
+            profanity_filter: true,
             map: true,
             minimap: true,
             map_markers: true,
@@ -1079,6 +1094,14 @@ impl ClientOptions {
         }
         if self.dps_view != crate::dpsmeter::View::Fight {
             s.push_str(&format!("dps_meter_shows={}\n", self.dps_view.key()));
+        }
+        // Item Links only when off
+        if !self.item_links {
+            s.push_str("item_links=off\n");
+        }
+        // the Profanity Filter only when off
+        if !self.profanity_filter {
+            s.push_str("profanity_filter=off\n");
         }
         // the map's and the quests' only when off
         for (on, key) in [
@@ -1244,6 +1267,10 @@ impl ClientOptions {
                 ("dps_meter", "off") => c.dps_meter = false,
                 ("dps_meter_shows", "fight") => c.dps_view = crate::dpsmeter::View::Fight,
                 ("dps_meter_shows", "overall") => c.dps_view = crate::dpsmeter::View::Overall,
+                ("item_links", "on") => c.item_links = true,
+                ("item_links", "off") => c.item_links = false,
+                ("profanity_filter", "on") => c.profanity_filter = true,
+                ("profanity_filter", "off") => c.profanity_filter = false,
                 ("map", "on") => c.map = true,
                 ("map", "off") => c.map = false,
                 ("minimap", "on") => c.minimap = true,
@@ -1543,6 +1570,16 @@ pub fn number_colors() -> [crate::numcolor::Choice; crate::numcolor::ROWS] {
 /// The DPS Meter (`dpsmeter`).
 pub fn dps_meter() -> bool {
     client().dps_meter
+}
+
+/// Item Links (`itemlink`).
+pub fn item_links() -> bool {
+    client().item_links
+}
+
+/// Profanity Filter (Options > Interface).
+pub fn profanity_filter() -> bool {
+    client().profanity_filter
 }
 
 /// What the DPS Meter shows (`dpsmeter::View`).
@@ -2610,6 +2647,29 @@ mod tests {
         assert!(!ClientOptions::from_text("pet_effects=off").pet_effects);
         assert!(ClientOptions::from_text("pet_effects=on").pet_effects);
         assert!(ClientOptions::from_text("pet_effects=maybe").pet_effects, "the default");
+    }
+
+    /// Profanity Filter: on by default (the game's at every login) and
+    /// written only when off.
+    #[test]
+    fn the_profanity_filter_is_kept_only_when_off() {
+        assert!(ClientOptions::default().profanity_filter, "on by default");
+        assert!(!ClientOptions::default().to_text().contains("profanity"));
+        assert!(ClientOptions { profanity_filter: false, ..Default::default() }.to_text().contains("profanity_filter=off\n"));
+        assert!(!ClientOptions::from_text("profanity_filter=off").profanity_filter);
+        assert!(ClientOptions::from_text("profanity_filter=on").profanity_filter);
+        assert!(ClientOptions::from_text("profanity_filter=maybe").profanity_filter, "the default");
+    }
+
+    /// Item Links: on by default and written only when off.
+    #[test]
+    fn item_links_are_kept_only_when_off() {
+        assert!(ClientOptions::default().item_links, "on by default");
+        assert!(!ClientOptions::default().to_text().contains("item_links"));
+        assert!(ClientOptions { item_links: false, ..Default::default() }.to_text().contains("item_links=off\n"));
+        assert!(!ClientOptions::from_text("item_links=off").item_links);
+        assert!(ClientOptions::from_text("item_links=on").item_links);
+        assert!(ClientOptions::from_text("item_links=maybe").item_links, "the default");
     }
 
     /// Number Colors: every row Default by default and written not at all; a
