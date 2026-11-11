@@ -470,6 +470,12 @@
       "count": 1
     },
     {
+      "path": "crates/eqoa/src/crashfile.rs",
+      "name": "Enhanced crash send identity",
+      "pattern": "crate::fork_ext::report_label::pending\\(",
+      "count": 1
+    },
+    {
       "path": "crates/eqoa/src/viewer.rs",
       "name": "addon overlay submission",
       "pattern": "fork_report::submit_addons\\(",

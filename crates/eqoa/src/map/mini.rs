@@ -1081,3 +1081,7 @@ mod tests {
         assert!(clip([2000.0, 0.0, 4000.0, 2000.0], shown, to_px).is_none(), "the control: a cell beside it");
     }
 }
+
+#[cfg(test)]
+#[path = "../fork_ext/map_sync_tests.rs"]
+mod fork_sync_tests;

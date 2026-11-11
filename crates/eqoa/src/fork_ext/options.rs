@@ -12,25 +12,20 @@ pub(super) const HUD_CATEGORY: Category = Category {
     items: &[2000, 2001, 2002, 2003, 2004, 2005],
     note: Note::None,
 };
-const fn categories<const N: usize, const M: usize>(upstream: [Category; N]) -> [Category; M] {
-    assert!(M == N + 2);
+const fn categories<const M: usize>(upstream: &[Category]) -> [Category; M] {
+    let n = upstream.len();
+    assert!(M == n + 2);
     let mut all = [HUD_CATEGORY; M];
     let mut i = 0;
-    while i < N {
+    while i < n {
         all[i] = upstream[i];
         i += 1;
     }
-    all[N] = HUD_CATEGORY;
-    all[N + 1] = CATEGORY;
+    all[n] = HUD_CATEGORY;
+    all[n + 1] = CATEGORY;
     all
 }
-#[cfg(not(target_arch = "wasm32"))]
-const PAGES: [Category; 14] = categories(super::ALL_CATEGORIES);
-#[cfg(target_arch = "wasm32")]
-const PAGES: [Category; 13] = categories({
-    let a = super::ALL_CATEGORIES;
-    [a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9], a[10], a[11]]
-});
+const PAGES: [Category; super::CATEGORIES.len() + 2] = categories(super::CATEGORIES);
 const _: () = assert!(super::fits(&PAGES));
 #[cfg(test)]
 thread_local! { static FORK_PAGES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
@@ -61,8 +56,13 @@ fn dynamic_hud_tables() -> (&'static [Category], &'static [(i32, &'static str)])
         if let Some((_, pages, items)) = cache.iter().find(|(k, _, _)| *k == active) {
             return (*pages, *items);
         }
-        let item_ids: &'static [i32] =
-            Box::leak(active.iter().map(|(id, _)| *id).collect::<Vec<_>>().into_boxed_slice());
+        let item_ids: &'static [i32] = Box::leak(
+            active
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        );
         let mut pages_vec = PAGES.to_vec();
         let hud_idx = pages_vec.len() - 2;
         pages_vec[hud_idx].items = item_ids;
@@ -364,9 +364,11 @@ mod tests {
         );
         let cats = pages();
         let first = cats.len() - 2;
-        assert_eq!(cats[first - 1].name, "Combat");
-        assert_eq!(cats[first - 1].items, &[70, 71, 72]);
-        assert_eq!(cats[first - 3].items, &[41, 42, 43, 44, 45]);
+        assert_eq!(cats[first - 1].name, "Chat");
+        assert_eq!(cats[first - 1].items, &[73]);
+        assert_eq!(cats[first - 2].name, "Combat");
+        assert_eq!(cats[first - 2].items, &[70, 71, 72]);
+        assert_eq!(cats[first - 4].items, &[41, 42, 43, 44, 45]);
         assert_eq!(cats[3].items, &[22, 29, 30, 40, 49, 58]);
         for (index, category) in cats.iter().enumerate().skip(first) {
             w.cat_sel = index as i32;

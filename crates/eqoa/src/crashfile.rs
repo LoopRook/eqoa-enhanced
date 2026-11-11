@@ -248,9 +248,9 @@ pub fn answered(number: u32) -> bool {
 /// The server offered to take crash reports (`most` bytes of each): each kept
 /// is sent. How many went.
 pub fn send_pending(session: &mut Session, most: usize) -> usize {
-    let kept = pending();
+    let kept = crate::fork_ext::report_label::pending(pending(), most);
     for k in &kept {
-        session.send_crash_report(k.number, &crate::fork_ext::report_label::crash_text(&k.text), most);
+        session.send_crash_report(k.number, &k.text, most);
     }
     if !kept.is_empty() {
         eprintln!("crash: {} report(s) of this client's sent to the server", kept.len());

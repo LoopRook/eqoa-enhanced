@@ -94,7 +94,7 @@ mod tests {
 }
 
 use crate::map::chrome::{KEY_LEGEND, KEY_LEGEND_GROUP};
-use vi::ui::Raster;
+use vi::ui::{Raster, wide};
 
 /// Long rebound key names must wrap inside the legend, not enlarge its panel.
 pub(crate) fn wrap_keyboard_label(r: &dyn Raster, label: &str, max_width: i32) -> Vec<String> {
@@ -191,7 +191,8 @@ pub(crate) fn keyboard_legend(b: &crate::binds::Binds, group: bool, quests: bool
     labels[4] = format!("Click or {} Waypoint", key("talk", "Q"));
     labels[5] = format!("{} Markers", key("autorun", "X"));
     labels[6] = format!("{} Towns", key("tell", "T"));
-    labels[7] = format!("{} Suggest", key("minimap", "N"));
+    *labels.last_mut().expect("map legend ends with Suggest") =
+        format!("{} Suggest", key("minimap", "N"));
     if quests {
         labels.insert(7, format!("{} Quests", key("look_left", "J")));
     }
