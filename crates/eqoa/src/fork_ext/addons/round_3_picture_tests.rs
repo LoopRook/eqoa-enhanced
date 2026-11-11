@@ -913,6 +913,25 @@ fn tot_uses_targets_channels_and_rejects_self_and_nameless_and_honors_mana() {
 }
 #[test]
 fn mod_click_rect_owns_mouse_inside_and_passes_it_outside() {
+    assert_mod_click(
+        "eqoa_stats_box",
+        "stats_box",
+        [200., 54., 148., 132.],
+        "top",
+        true,
+    );
+}
+#[test]
+fn tot_click_name_bar_routes_assist_and_passes_outside_clicks() {
+    assert_mod_click(
+        "eqoa_target_of_target",
+        "target_of_target",
+        [20., 300., 174., 26.],
+        "bottom",
+        false,
+    );
+}
+fn assert_mod_click(id: &str, option: &str, frame_rect: [f32; 4], vertical: &str, summary: bool) {
     let mut context = dear_imgui_rs::Context::create();
     context.set_ini_filename::<PathBuf>(None).unwrap();
     context.io_mut().set_delta_time(1.0 / 60.0);
@@ -923,24 +942,30 @@ fn mod_click_rect_owns_mouse_inside_and_passes_it_outside() {
         .build();
     let tree = bundled_tree();
     options::reset_in_memory();
-    let host = load_hud_mod(&tree, "eqoa_stats_box");
+    let host = load_hud_mod(&tree, id);
     let bridge = bridge::Bridge::install(&host).unwrap();
-    host.execute("eqoa.options.set('stats_box',true)").unwrap();
+    host.execute(&format!("eqoa.options.set('{option}',true)"))
+        .unwrap();
     native_core::CORE.with(|c| {
         let mut c = c.borrow_mut();
         c.view.in_world = true;
         c.view.player_stats = Some(test_view().to_json());
+        c.view.player = serde_json::json!({"id":1,"target_id":2});
+        c.view.entities = vec![
+            serde_json::json!({"id":2,"name":"Casil","target_id":3}),
+            serde_json::json!({"id":3,"name":"Luck","hp_fraction":0.8}),
+        ];
     });
     hud_layout::set_hud_state(true, true, false, 93, 20);
-    for size in [(640, 480), (1280, 720)] {
+    for size in [(640, 480), (1280, 720), (768, 1024)] {
         hud_layout::set_window_size(size.0, size.1);
         context
             .io_mut()
             .set_display_size([size.0 as f32, size.1 as f32]);
         let rect = hud_layout::transform_rect(
-            [200., 54., 148., 132.],
+            frame_rect,
             "left",
-            "top",
+            vertical,
             hud_layout::frame_metrics(size),
         );
         let run = |context: &mut dear_imgui_rs::Context| {
@@ -976,9 +1001,14 @@ fn mod_click_rect_owns_mouse_inside_and_passes_it_outside() {
             .io_mut()
             .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
         run(&mut context);
+        let request = actions::take_action_requests();
         assert!(
-            actions::take_action_requests().summary,
-            "native Summary action at corner of the drawn rect"
+            if summary {
+                request.summary
+            } else {
+                request.assist
+            },
+            "native action at corner of {id}'s drawn rect"
         );
         context
             .io_mut()

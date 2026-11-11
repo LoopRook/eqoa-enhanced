@@ -35,7 +35,14 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
             };
             crate::raidlist::Fit::under(_play.group.raid.len(), below).bounds([20, 93])[3] + 2
         };
-        let pet_h = if has_pet { 46 + effects_height } else { 0 };
+        // Hud's effect strip begins at y=48; an unbuffed pet panel ends at 46.
+        let pet_h = if !has_pet {
+            0
+        } else if effects_height == 0 {
+            46
+        } else {
+            48 + effects_height
+        };
         crate::fork_ext::addons::hud_layout::set_hud_state(
             _play.right_hud_up(),
             _play.right_hud_up(),

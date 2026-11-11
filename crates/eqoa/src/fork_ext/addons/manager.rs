@@ -2457,6 +2457,26 @@ mod tests {
         super::super::hud_layout::set_hud_state(true, true, false, 93, 20);
         gpu.frame(&mut manager);
         assert_eq!(crate::fork_ext::bindpage::extra_rows(), 1);
+        for (id, assertion) in [
+            (
+                "eqoa_stats_box",
+                "assert(eqoa.options.get('stats_box')==false)",
+            ),
+            (
+                "eqoa_target_of_target",
+                "assert(eqoa.options.get('target_of_target')==false)",
+            ),
+            (
+                "eqoa_mana_bars",
+                "assert(eqoa.options.get('mana_bars')==true)",
+            ),
+            (
+                "eqoa_hud_numbers",
+                "assert(eqoa.options.get('hud_numbers') and eqoa.options.get('xp_details') and eqoa.options.get('target_hp_percent'))",
+            ),
+        ] {
+            lua(&manager, id).load(assertion).exec().unwrap();
+        }
         for id in ids {
             let items = super::super::options::BUNDLED_TOGGLES
                 .iter()

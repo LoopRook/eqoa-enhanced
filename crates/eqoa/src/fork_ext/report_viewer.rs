@@ -177,6 +177,27 @@ pub(super) fn submit_addons(
 #[cfg(test)]
 mod addon_order_tests {
     use super::*;
+    // The GPU test below checks submission behavior. This source-level contract
+    // also guards the live call site: preparing after p.hud loses the current
+    // frame's native mod primitives even if submit_addons itself is correct.
+    #[test]
+    fn live_redraw_prepares_mods_before_native_hud_and_submits_after_resolve() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/viewer.rs"),
+        )
+        .unwrap();
+        let redraw = &source[source
+            .rfind("self.last_view = Some(view.view_proj);")
+            .unwrap()..];
+        let prepare = redraw.find("fork_report::prepare_addons(").unwrap();
+        let hud = redraw.find("p.hud(").unwrap();
+        let resolve = redraw.find("g.renderer.scale.resolve(").unwrap();
+        let submit = redraw.find("fork_report::submit_addons(").unwrap();
+        assert!(
+            prepare < hud && hud < resolve && resolve < submit,
+            "Lua preparation must precede native HUD consumption; overlay submits after scene resolve"
+        );
+    }
     #[test]
     fn addon_overlay_recorded_first_is_submitted_after_the_scene() {
         let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());

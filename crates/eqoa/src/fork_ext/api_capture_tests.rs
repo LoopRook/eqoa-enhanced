@@ -1577,6 +1577,46 @@ fn mod_hud_visibility_tracks_live_menu_map_loading_and_hide_ui() {
     assert!(!visible("target"), "no HUD during loading");
 }
 #[test]
+fn live_pet_layout_follows_group_raid_and_native_effect_strip() {
+    use crate::fork_ext::addons::hud_layout::get_hud_state;
+    let mut p = ready();
+    p.mode = 0;
+    p.pet_id = 42;
+    p.group.in_group = true;
+    for members in [1, 2, 4] {
+        p.group.members = vec![crate::group::Member::default(); members];
+        begin_iteration(&mut p, false);
+        let state = get_hud_state();
+        assert_eq!(state.pet_y, 93 + (members as i32 - 1) * 48);
+        assert_eq!(state.pet_h, 46, "native panel without effects");
+    }
+    assert!(crate::settings::pet_effects());
+    p.session.pet_effects_at = p.session.now();
+    p.session.pet_effects = vec![net::session::PetEffect {
+        icon: 1,
+        left_ms: 60_000,
+        name: "Pet buff".into(),
+    }];
+    begin_iteration(&mut p, false);
+    assert_eq!(
+        get_hud_state().pet_h,
+        68,
+        "48px native offset plus 20px effects row"
+    );
+    for members in [1, 12, 50] {
+        p.group.raid = vec![net::session::RaidMember::default(); members];
+        begin_iteration(&mut p, false);
+        let native = crate::raidlist::Fit::under(members, crate::raidlist::PET_H + 20);
+        assert_eq!(get_hud_state().pet_y, native.bounds([20, 93])[3] + 2);
+        assert_eq!(get_hud_state().pet_h, 68);
+    }
+    p.pet_id = u32::MAX;
+    begin_iteration(&mut p, false);
+    assert_eq!(get_hud_state().pet_h, 0, "no phantom pet rectangle");
+    let native = crate::raidlist::Fit::under(50, 0);
+    assert_eq!(get_hud_state().pet_y, native.bounds([20, 93])[3] + 2);
+}
+#[test]
 fn player_numeric_hp_uses_native_gauge_byte_not_exact_stat_ratio() {
     use crate::fork_ext::addons::{hud_layer, native};
     let mut p = ready();
