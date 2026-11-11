@@ -565,8 +565,10 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                         );
                     }
                 };
+                let fence = super::json_save::export_fence(lua, &key);
                 let source = match m.read_path(&key) {
                     Ok(p) => p,
+                    Err(_) if fence.is_some() => m.data.as_ref().unwrap().join("files").join(&key),
                     Err(e) => return error(lua, "eqoa.files.export", "not_found", &e),
                 };
                 let Some(dest) = desktop(lua) else {
@@ -588,6 +590,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 start(lua, "export", owner, move |_, permit| {
                     let run = || -> std::result::Result<String, String> {
                         active(&permit)?;
+                        if let Some(fence) = fence {
+                            fence.wait(&permit)?;
+                        }
                         let bytes = super::sandbox::read_bounded(&source, CAP)?;
                         let dest = unique_copy(&dest, &name, &bytes, &permit, None)?;
                         Ok(dest.file_name().unwrap().to_string_lossy().into_owned())

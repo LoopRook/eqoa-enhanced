@@ -8,7 +8,7 @@ use mlua::{Lua, Result, Value};
 use serde_json::{Map, Value as Json};
 use std::{
     cell::RefCell,
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     io::Write,
     path::PathBuf,
     rc::Rc,
@@ -40,6 +40,7 @@ struct Queue {
     pending: Option<Job>,
     active: Option<PathBuf>,
     done: Option<Done>,
+    completed: VecDeque<(u64, PathBuf, std::result::Result<(), String>)>,
     closed: bool,
     scheduled: bool,
 }
@@ -129,6 +130,54 @@ pub(crate) fn close(lua: &Lua) {
     drop(lua.remove_app_data::<Shared>());
 }
 type Shared = Rc<RefCell<Service>>;
+// An export made in the same click as an accepted save must copy that snapshot,
+// including when no previous file exists. Only the file worker waits.
+pub(super) struct ExportFence {
+    work: Work,
+    key: PathBuf,
+    request: u64,
+}
+pub(super) fn export_fence(lua: &Lua, key: &std::path::Path) -> Option<ExportFence> {
+    let s = lua.app_data_ref::<Shared>()?;
+    let s = s.borrow();
+    let q = s.work.0.lock().unwrap();
+    if q.active.as_deref() != Some(key) && !q.pending.as_ref().is_some_and(|j| j.key == key) {
+        return None;
+    }
+    Some(ExportFence {
+        work: s.work.clone(),
+        key: key.into(),
+        request: s.next,
+    })
+}
+impl ExportFence {
+    pub(super) fn wait(&self, permit: &AtomicBool) -> std::result::Result<(), String> {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut q = self.work.0.lock().unwrap();
+        loop {
+            if !permit.load(Ordering::Acquire) {
+                return Err("export cancelled because mod was disabled".into());
+            }
+            if let Some((_, _, result)) = q
+                .completed
+                .iter()
+                .find(|(id, key, _)| *id >= self.request && *key == self.key)
+            {
+                return result.clone();
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err("timed out waiting for JSON save before export".into());
+            }
+            q = self
+                .work
+                .1
+                .wait_timeout(q, left.min(Duration::from_millis(20)))
+                .unwrap()
+                .0;
+        }
+    }
+}
 struct Limited(Vec<u8>);
 impl Write for Limited {
     fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
@@ -221,6 +270,11 @@ fn service(lua: &Lua) -> Result<Shared> {
                         }
                         let mut q = worker.0.lock().unwrap();
                         q.active = None;
+                        q.completed
+                            .push_back((job.id, job.key.clone(), result.clone()));
+                        if q.completed.len() > 64 {
+                            q.completed.pop_front();
+                        }
                         q.done = Some(Done {
                             id: job.id,
                             key: job.key.clone(),
@@ -387,7 +441,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     );
                 }
                 let key = match m.key(&path) {
-                    Ok(k) if k.starts_with("data") && !super::sandbox::import_key(&k) => ordered_path(k),
+                    Ok(k) if k.starts_with("data") && !super::sandbox::import_key(&k) => {
+                        ordered_path(k)
+                    }
                     _ => {
                         return error(
                             lua,

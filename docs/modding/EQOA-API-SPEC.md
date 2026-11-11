@@ -940,3 +940,7 @@ pre-existing files receive numbered collision suffixes. Worker disconnects retai
 the original `import`/`export` kind and request id. Removing a shared file emits
 `shared.changed` as saving does. Migrated key collisions preserve both explicit
 assignments for the player to resolve on Controls.
+
+An export queued in the same player callback as an accepted asynchronous JSON save
+waits up to two seconds on its file worker for that save before reading the file.
+This includes the first save when no older file exists; save failure fails export.

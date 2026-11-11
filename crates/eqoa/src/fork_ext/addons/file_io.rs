@@ -618,6 +618,19 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn round4b_export_waits_for_accepted_async_snapshot_before_first_file_exists() {
+        use super::super::{options,player_files::TestIo,native_events,json_save};
+        struct Release(Option<std::sync::mpsc::Sender<()>>);impl Drop for Release{fn drop(&mut self){if let Some(tx)=self.0.take(){let _=tx.send(());}}}
+        let (dir,host,mut addon)=fixture_with_large_data(true);addon.extensions.permissions=vec!["export".into()];let root=dir.0.join("config");install(&host,&addon,Some(root.clone())).unwrap();let desktop=dir.0.join("Desktop");host.lua.set_app_data(TestIo{pick:None,desktop:desktop.clone()});
+        let (entered,release)=json_save::pause_next_commit();let mut release=Release(Some(release));
+        host.execute("accepted=false;done=false;failed='';button_id=assert(eqoa.options.button({id='export',label='Export journal'},function() assert(eqoa.files.save_json_async('journal.json',{stage=42,payload=string.rep('x',2*1024*1024)}));local id,e=eqoa.files.export('journal.json','journal.json');accepted=id~=nil;failed=e and e.message or '' end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='export' then done=true end end);eqoa.events.on('resource.failed',function(e) if e.data.kind=='export' then failed=e.data.error.message end end)").unwrap();
+        assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));native_events::dispatch(&host).unwrap();entered.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(host.lua.globals().get::<bool>("accepted").unwrap(),"{:?}",host.lua.globals().get::<String>("failed"));assert!(!desktop.join("journal.json").exists());release.0.take().unwrap().send(()).unwrap();
+        let end=std::time::Instant::now()+std::time::Duration::from_secs(5);while !host.lua.globals().get::<bool>("done").unwrap(){assert!(std::time::Instant::now()<end,"{:?}",host.lua.globals().get::<String>("failed"));native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}
+        let saved:serde_json::Value=serde_json::from_slice(&fs::read(desktop.join("journal.json")).unwrap()).unwrap();assert_eq!(saved["stage"],42);assert_eq!(saved["payload"].as_str().unwrap().len(),2*1024*1024);
+    }
+
+    #[test]
     fn round4b_review_remove_notifies_shared_readers() {
         let (dir,owner,mut addon)=fixture();addon.id="owner_remove".into();addon.extensions.shares=vec!["data/journal.json".into()];install(&owner,&addon,Some(dir.0.join("config"))).unwrap();owner.execute("assert(eqoa.files.write('journal.json','{}'))").unwrap();
         let (_dir,reader,_)=fixture();reader.execute("changed=false;eqoa.events.on('shared.changed',function(e) changed=e.data.mod=='owner_remove' and e.data.path=='data/journal.json' end)").unwrap();
