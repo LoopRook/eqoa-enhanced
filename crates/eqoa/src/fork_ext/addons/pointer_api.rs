@@ -16,11 +16,13 @@ struct Pointer {
 }
 thread_local! {static POINTER:RefCell<Pointer>=RefCell::new(Pointer::default());}
 #[cfg(test)]
-pub(crate) fn claim_count()->usize { POINTER.with(|p|p.borrow().claims.len()) }
-pub(crate) fn position(at: [f32; 2], inside: bool, size: (u32, u32)) {
+pub(crate) fn claim_count() -> usize {
+    POINTER.with(|p| p.borrow().claims.len())
+}
+pub(crate) fn position(at: [f32; 2], inside: bool, _size: (u32, u32)) {
     POINTER.with(|p| {
         let mut p = p.borrow_mut();
-        p.at = render::ui::frame_from_window(size, at);
+        p.at = at;
         p.inside = inside;
     });
 }
@@ -137,7 +139,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     "enter a loaded world first",
                 );
             }
-            let mut r = [
+            let r = [
                 t.get::<f32>("x")?,
                 t.get("y")?,
                 t.get::<Option<f32>>("width")?
@@ -147,14 +149,6 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     .or(t.get("h")?)
                     .unwrap_or(0.0),
             ];
-            if !t.get::<Value>("frame_x")?.is_nil() {
-                let a = render::ui::frame_from_window(
-                    super::hud_layout::get_window_size(),
-                    [r[0], r[1]],
-                );
-                let m = super::hud_layout::frame_metrics(super::hud_layout::get_window_size());
-                r = [a[0], a[1], r[2] / m.2, r[3] / m.3];
-            }
             if !r.iter().all(|v| v.is_finite() && v.abs() <= 32768.0) || r[2] <= 0.0 || r[3] <= 0.0
             {
                 return error(
@@ -226,51 +220,129 @@ mod tests {
     use super::*;
     #[test]
     fn round4_map_text_capture_owns_keys_and_releases_but_unclaimed_keys_pass() {
-        let mut p=crate::play::Play::bundled_ui_fixture();p.map.open=true;
-        let h=Host::new().unwrap();h.snapshot.set(p.forge_snapshot(None));
+        let mut p = crate::play::Play::bundled_ui_fixture();
+        p.map.open = true;
+        let h = Host::new().unwrap();
+        h.snapshot.set(p.forge_snapshot(None));
         h.execute("assert(eqoa.input.capture_text(true))").unwrap();
-    let mut capture = super::super::capture::Capture::default();
-    use super::super::capture::{Button,Owner};
-    for (code, key) in [(b'P',winit::keyboard::KeyCode::KeyP),(b'M',winit::keyboard::KeyCode::KeyM),(b'O',winit::keyboard::KeyCode::KeyO),(b'G',winit::keyboard::KeyCode::KeyG),(13,winit::keyboard::KeyCode::Enter)] {
-        let button=Button::Key(winit::keyboard::PhysicalKey::Code(key));
-        assert_eq!(capture.press(button,crate::fork_ext::addons::input::wants_key_capture(false,Some(code),false,crate::fork_ext::is_plain_play(Some(&mut p)))),Owner::Addon);
-        h.execute("assert(eqoa.input.capture_text(false))").unwrap();
-        assert_eq!(capture.release(button),Owner::Addon,"release follows text capture owner");
-        assert_eq!(capture.press(button,crate::fork_ext::addons::input::wants_key_capture(false,Some(code),false,true)),Owner::Game);
-        capture.release(button);
-        h.execute("assert(eqoa.input.capture_text(true))").unwrap();
-    }
+        let mut capture = super::super::capture::Capture::default();
+        use super::super::capture::{Button, Owner};
+        for (code, key) in [
+            (b'P', winit::keyboard::KeyCode::KeyP),
+            (b'M', winit::keyboard::KeyCode::KeyM),
+            (b'O', winit::keyboard::KeyCode::KeyO),
+            (b'G', winit::keyboard::KeyCode::KeyG),
+            (13, winit::keyboard::KeyCode::Enter),
+        ] {
+            let button = Button::Key(winit::keyboard::PhysicalKey::Code(key));
+            assert_eq!(
+                capture.press(
+                    button,
+                    crate::fork_ext::addons::input::wants_key_capture(
+                        false,
+                        Some(code),
+                        false,
+                        crate::fork_ext::is_plain_play(Some(&mut p))
+                    )
+                ),
+                Owner::Addon
+            );
+            h.execute("assert(eqoa.input.capture_text(false))").unwrap();
+            assert_eq!(
+                capture.release(button),
+                Owner::Addon,
+                "release follows text capture owner"
+            );
+            assert_eq!(
+                capture.press(
+                    button,
+                    crate::fork_ext::addons::input::wants_key_capture(
+                        false,
+                        Some(code),
+                        false,
+                        true
+                    )
+                ),
+                Owner::Game
+            );
+            capture.release(button);
+            h.execute("assert(eqoa.input.capture_text(true))").unwrap();
+        }
     }
     #[test]
     fn round4_wide_pointer_layout_and_observed_press_share_coordinates() {
-        use winit::event::{DeviceId, WindowEvent, ElementState, MouseButton, MouseScrollDelta, TouchPhase};
+        use winit::event::{
+            DeviceId, ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
+        };
         let mut p = crate::play::Play::bundled_ui_fixture();
         let h = Host::new().unwrap();
-        super::super::hud_layout::set_window_size(1920,1080);
+        super::super::hud_layout::set_window_size(1920, 1080);
         h.snapshot.set(p.forge_snapshot(None));
-        h.execute("r=eqoa.hud.layout().minimap;assert(eqoa.input.claim_pointer(r))").unwrap();
-        let rect = super::super::hud_layout::hud_layout_json((1920,1080));
+        h.execute("r=eqoa.hud.layout().minimap;assert(eqoa.input.claim_pointer(r))")
+            .unwrap();
+        let rect = super::super::hud_layout::hud_layout_json((1920, 1080));
         let r = &rect["minimap"];
-        let at = [r["x"].as_f64().unwrap()+10., r["y"].as_f64().unwrap()+10.];
+        let at = [
+            r["x"].as_f64().unwrap() + 10.,
+            r["y"].as_f64().unwrap() + 10.,
+        ];
         let device_id = DeviceId::dummy();
-        observe(&WindowEvent::CursorMoved{device_id,position:winit::dpi::PhysicalPosition::new(at[0],at[1])},(1920,1080));
-        h.execute("local p=eqoa.input.pointer();local f=eqoa.hud.frame();assert(math.abs(p.x-r.frame_x-10/f.scale_x)<0.001 and math.abs(p.y-r.frame_y-10/f.scale_y)<0.001)").unwrap();
+        observe(
+            &WindowEvent::CursorMoved {
+                device_id,
+                position: winit::dpi::PhysicalPosition::new(at[0], at[1]),
+            },
+            (1920, 1080),
+        );
+        h.execute("local p=eqoa.input.pointer();assert(math.abs(p.x-r.x-10)<0.001 and math.abs(p.y-r.y-10)<0.001)").unwrap();
         let mut capture = super::super::capture::Capture::default();
-        let press = WindowEvent::MouseInput{device_id,state:ElementState::Pressed,button:MouseButton::Left};
-        assert!(observe(&press,(1920,1080)));
-        assert_eq!(capture.press(super::super::capture::Button::Mouse(MouseButton::Left),observe(&press,(1920,1080))),super::super::capture::Owner::Addon);
-        assert!(observe(&WindowEvent::MouseWheel{device_id,delta:MouseScrollDelta::LineDelta(0.,1.),phase:TouchPhase::Moved},(1920,1080)));
+        let press = WindowEvent::MouseInput {
+            device_id,
+            state: ElementState::Pressed,
+            button: MouseButton::Left,
+        };
+        assert!(observe(&press, (1920, 1080)));
+        assert_eq!(
+            capture.press(
+                super::super::capture::Button::Mouse(MouseButton::Left),
+                observe(&press, (1920, 1080))
+            ),
+            super::super::capture::Owner::Addon
+        );
+        assert!(observe(
+            &WindowEvent::MouseWheel {
+                device_id,
+                delta: MouseScrollDelta::LineDelta(0., 1.),
+                phase: TouchPhase::Moved
+            },
+            (1920, 1080)
+        ));
         crate::hudlayout::set_unlocked(true);
-        assert!(!observe(&press,(1920,1080)),"Move HUD owns its drag");
+        assert!(!observe(&press, (1920, 1080)), "Move HUD owns its drag");
         crate::hudlayout::set_unlocked(false);
-        observe(&WindowEvent::CursorMoved{device_id,position:winit::dpi::PhysicalPosition::new(0.,0.)},(1920,1080));
-        assert!(!observe(&press,(1920,1080)),"unclaimed position passes to game");
-        assert_eq!(capture.release(super::super::capture::Button::Mouse(MouseButton::Left)),super::super::capture::Owner::Addon);
-        observe(&WindowEvent::Focused(false),(1920,1080));
-        assert!(!observe(&press,(1920,1080)));
+        observe(
+            &WindowEvent::CursorMoved {
+                device_id,
+                position: winit::dpi::PhysicalPosition::new(0., 0.),
+            },
+            (1920, 1080),
+        );
+        assert!(
+            !observe(&press, (1920, 1080)),
+            "unclaimed position passes to game"
+        );
+        assert_eq!(
+            capture.release(super::super::capture::Button::Mouse(MouseButton::Left)),
+            super::super::capture::Owner::Addon
+        );
+        observe(&WindowEvent::Focused(false), (1920, 1080));
+        assert!(!observe(&press, (1920, 1080)));
         capture.focus_lost();
-        assert_eq!(capture.release(super::super::capture::Button::Mouse(MouseButton::Left)),super::super::capture::Owner::Game);
-        super::super::hud_layout::set_window_size(640,448);
+        assert_eq!(
+            capture.release(super::super::capture::Button::Mouse(MouseButton::Left)),
+            super::super::capture::Owner::Game
+        );
+        super::super::hud_layout::set_window_size(640, 448);
     }
     #[test]
     fn round4_pointer_claim_routes_window_coordinates_and_expires() {
@@ -279,12 +351,12 @@ mod tests {
             c.borrow_mut().view.in_world = true;
         });
         let h = Host::new().unwrap();
-        position(render::ui::window_from_frame((640,448),[50.0,60.0]), true, (640, 448));
+        position([50.0, 60.0], true, (640, 448));
         h.execute("local p=eqoa.input.pointer();assert(math.abs(p.x-50)<0.001 and math.abs(p.y-60)<0.001 and p.inside_window);assert(eqoa.input.claim_pointer{x=40,y=50,width=30,height=30})").unwrap();
         assert!(claimed());
         position([10.0, 10.0], true, (640, 448));
         assert!(!claimed());
-        position(render::ui::window_from_frame((640,448),[50.0,60.0]), true, (640, 448));
+        position([50.0, 60.0], true, (640, 448));
         CORE.with(|c| c.borrow_mut().frame += 2);
         assert!(!claimed());
         h.execute("assert(eqoa.input.minimap_wheel(1))").unwrap();

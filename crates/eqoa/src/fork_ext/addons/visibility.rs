@@ -1240,9 +1240,13 @@ mod round4_tests {
             VisibilityLease::new(Rc::new(RefCell::new(HealthBarClaimsRegistry::new()))).unwrap();
         lease.update(snapshot.health, true);
         install_managed_health_adapter(&h, &lease).unwrap();
-        h.execute("all=assert(eqoa.hud.hide('all'));assert(#eqoa.hud.hidden_by('minimap')==0)").unwrap();
+        h.execute("all=assert(eqoa.hud.hide('all'));assert(#eqoa.hud.hidden_by('minimap')==0)")
+            .unwrap();
         publish_claims(&lease.intent.borrow().hud_claims.borrow());
-        assert!(!effective_visibility().minimap, "all keeps the minimap visible");
+        assert!(
+            !effective_visibility().minimap,
+            "all keeps the minimap visible"
+        );
         h.execute("assert(eqoa.hud.show(all))").unwrap();
         h.execute("claim=assert(eqoa.hud.hide('minimap'))").unwrap();
         publish_claims(&lease.intent.borrow().hud_claims.borrow());
@@ -1262,7 +1266,7 @@ fn round4_minimap_layout_tracks_upstream_drag_and_reset() {
     use crate::hudlayout::{self, Beyond, Piece};
     hudlayout::reset();
     let before = super::hud_layout::hud_layout_json((640, 448));
-    assert_eq!(before["minimap"]["frame_x"], render::ui::frame_from_window((640,448), [before["minimap"]["x"].as_f64().unwrap() as f32, 0.])[0]);
+    assert_eq!(before["minimap"]["frame_x"], 474.0);
     hudlayout::frame_begin();
     hudlayout::note(Piece::Minimap, [474.0, 50.0, 586.0, 162.0], [0.0, 0.0]);
     hudlayout::frame_end();
@@ -1272,7 +1276,10 @@ fn round4_minimap_layout_tracks_upstream_drag_and_reset() {
     hudlayout::drag_to([500.0, 126.0], b);
     assert!(hudlayout::release());
     let moved = super::hud_layout::hud_layout_json((640, 448));
-    assert_eq!(moved["minimap"]["frame_x"].as_f64().unwrap(), before["minimap"]["frame_x"].as_f64().unwrap()-30.0);
+    assert_eq!(
+        moved["minimap"]["frame_x"].as_f64().unwrap(),
+        before["minimap"]["frame_x"].as_f64().unwrap() - 30.0
+    );
     assert_eq!(moved["minimap"]["frame_y"], 70.0);
     assert_eq!(
         moved["player"], before["player"],
