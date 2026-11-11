@@ -165,6 +165,44 @@ pub(super) fn prepare_addons(
         snapshot,
         server,
     );
+    // The full map is submitted after the stock HUD. Consume mod HUD commands
+    // separately into this final overlay so they remain above the map too.
+    if let Some(p) = play.filter(|p| p.map.open)
+        && crate::fork_ext::addons::hud_layer::has_queued_commands()
+        && let Some(ui) = g.renderer.ui.as_mut()
+    {
+        let quads = std::mem::take(&mut ui.quads);
+        let shift = std::mem::replace(&mut ui.shift, [0.0; 2]);
+        p.draw_map_addon_hud(ui);
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mod HUD over map"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &g.depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            ui.draw(&g.device, &mut pass, (g.config.width, g.config.height));
+        }
+        ui.quads = quads;
+        ui.shift = shift;
+    }
     Some(encoder.finish())
 }
 pub(super) fn submit_addons(

@@ -59,7 +59,9 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         if _game_step {
             let ready = _play.in_world_now();
             let wheel = crate::fork_ext::addons::pointer_api::take_wheel();
-            if ready && wheel != 0.0 { _play.map.mini_wheel(wheel); }
+            if ready && wheel != 0.0 {
+                _play.map.mini_wheel(wheel);
+            }
             weapon_sets_requests(_play, ready);
             let reqs = crate::fork_ext::addons::actions::take_action_requests();
             if ready {
@@ -1351,7 +1353,15 @@ mod tests {
         p.send_bug_note();
         let sent = notes(&mut p);
         assert_eq!(sent.len(), 1);
-        assert!(sent[0].starts_with("build: ") && sent[0].contains(&format!("\nclient: {}\n", crate::fork_ext::report_label::enhanced_label())), "{}", sent[0]);
+        assert!(
+            sent[0].starts_with("build: ")
+                && sent[0].contains(&format!(
+                    "\nclient: {}\n",
+                    crate::fork_ext::report_label::enhanced_label()
+                )),
+            "{}",
+            sent[0]
+        );
     }
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
@@ -2258,5 +2268,28 @@ mod tests {
             p.minimap_up(),
             "releasing the chat claim keeps the minimap up in mode 33"
         );
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Play {
+    pub(crate) fn addon_input_available(&mut self) -> bool {
+        matches!(self.mode, 0 | 38)
+            && !self.window_up()
+            && !self.search.open
+            && !self.info_wanted()
+            && self.info_window.open <= 0.0
+            && !self.keyboard_typing()
+            && !self.is_dead()
+            && !self.map.search.open
+    }
+    pub(crate) fn draw_map_addon_hud(&self, ui: &mut render::ui::Ui) {
+        if !self.map.open || self.loading.up() {
+            return;
+        }
+        if let Some((vui, assets, _)) = &self.hud {
+            let mut r = assets.raster(ui);
+            crate::fork_ext::addons::hud_layer::draw(vui, &mut r);
+        }
     }
 }

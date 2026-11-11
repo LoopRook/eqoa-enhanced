@@ -691,3 +691,7 @@ mod tests {
         clear_all();
     }
 }
+
+pub(crate) fn has_queued_commands() -> bool {
+    MOD_QUEUES.with(|q| q.borrow().values().any(|v| !v.is_empty()))
+}

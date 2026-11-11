@@ -1927,23 +1927,78 @@ fn map_markers_use_native_quest_cache_and_filter_other_worlds() {
 
 #[test]
 fn round4_map_view_projects_native_player_scale_and_rejects_pregame() {
-    let mut p=Play::bundled_ui_fixture();
-    p.map.mini.up=true;p.map.mini.scale=6.0;p.map.mini.frame_px=[474.0,50.0,586.0,162.0];
-    let mut walker=perf_review_walker();walker.cam.walk.phys.position.x.0=100.0;walker.cam.walk.phys.position.y.0=50.0;walker.cam.walk.phys.position.z.0=200.0;let h=Host::new().unwrap();let view=p.native_view(Some(&walker));CORE.with(|c|c.borrow_mut().publish(view));
+    let mut p = Play::bundled_ui_fixture();
+    p.map.mini.up = true;
+    p.map.mini.scale = 6.0;
+    p.map.mini.frame_px = [474.0, 50.0, 586.0, 162.0];
+    let mut walker = perf_review_walker();
+    walker.cam.walk.phys.position.x.0 = 100.0;
+    walker.cam.walk.phys.position.y.0 = 50.0;
+    walker.cam.walk.phys.position.z.0 = 200.0;
+    let h = Host::new().unwrap();
+    let view = p.native_view(Some(&walker));
+    CORE.with(|c| c.borrow_mut().publish(view));
     h.execute("v=assert(eqoa.map.view{size=200});local x,y,inside=v.project(268,200);assert(math.abs(x-150)<0.01 and math.abs(y-100)<0.01 and inside);local x,z=v.unproject(100,100);assert(math.abs(x-100)<0.01 and math.abs(z-200)<0.01);local _,_,inside=v.project(99999,200);assert(not inside);local bad,e=eqoa.map.view{center={x=0,z=0}};assert(bad==nil and e.code=='invalid_argument')").unwrap();
-    CORE.with(|c|c.borrow_mut().reset("test"));
-    h.execute("local v,e=eqoa.map.view{};assert(v==nil and e.code=='not_in_world')").unwrap();
+    CORE.with(|c| c.borrow_mut().reset("test"));
+    h.execute("local v,e=eqoa.map.view{};assert(v==nil and e.code=='not_in_world')")
+        .unwrap();
 }
 
 #[test]
 fn round4_guide_follows_live_entity_and_lost_is_owner_scoped() {
-    let mut p=Play::bundled_ui_fixture();let h=Host::new().unwrap();let other=Host::new().unwrap();
-    let view=p.native_view(None);CORE.with(|c|c.borrow_mut().publish(view));
+    let mut p = Play::bundled_ui_fixture();
+    let h = Host::new().unwrap();
+    let other = Host::new().unwrap();
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
     h.execute("lost=0;eqoa.events.on('guide.lost',function(e) lost=lost+1;assert(e.data.entity_id==2002) end);assert(eqoa.map.set_guide{world_id=0,entity_id=2002,dots={{x=10,z=20}},label='snake'})").unwrap();
-    other.execute("lost=0;eqoa.events.on('guide.lost',function() lost=lost+1 end)").unwrap();
-    p.entities.slots[1].as_mut().unwrap().pos=[300.0,0.0,400.0];let view=p.native_view(None);CORE.with(|c|c.borrow_mut().publish(view));
-    assert_eq!(crate::fork_ext::addons::guides::target_for(crate::fork_ext::addons::native_events::bus(&h.lua).borrow().vm),Some([300.0,400.0]));
-    native_events::dispatch(&h).unwrap();h.execute("assert(lost==0)").unwrap();
-    p.entities.slots[1]=None;let view=p.native_view(None);CORE.with(|c|c.borrow_mut().publish(view));
-    native_events::dispatch(&h).unwrap();native_events::dispatch(&other).unwrap();h.execute("assert(lost==1);assert(eqoa.map.clear_guide())").unwrap();other.execute("assert(lost==0)").unwrap();
+    other
+        .execute("lost=0;eqoa.events.on('guide.lost',function() lost=lost+1 end)")
+        .unwrap();
+    p.entities.slots[1].as_mut().unwrap().pos = [300.0, 0.0, 400.0];
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    assert_eq!(
+        crate::fork_ext::addons::guides::target_for(
+            crate::fork_ext::addons::native_events::bus(&h.lua)
+                .borrow()
+                .vm
+        ),
+        Some([300.0, 400.0])
+    );
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(lost==0)").unwrap();
+    p.entities.slots[1] = None;
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    native_events::dispatch(&h).unwrap();
+    native_events::dispatch(&other).unwrap();
+    h.execute("assert(lost==1);assert(eqoa.map.clear_guide())")
+        .unwrap();
+    other.execute("assert(lost==0)").unwrap();
+}
+
+#[test]
+fn round4_addon_input_and_render_continue_over_map_but_not_chat_or_search() {
+    let mut p = ready();
+    p.map.open = true;
+    assert!(
+        crate::fork_ext::is_plain_play(Some(&mut p)),
+        "open map permits addon key/text route"
+    );
+    assert!(p.map.open, "eligibility must not close native map");
+    p.map.search.open = true;
+    assert!(!crate::fork_ext::is_plain_play(Some(&mut p)));
+    p.map.search.open = false;
+    p.search.open = true;
+    assert!(!crate::fork_ext::is_plain_play(Some(&mut p)));
+    p.search.open = false;
+    let h = Host::new().unwrap();
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    native_events::bus(&h.lua).borrow_mut().once_mode = true;
+    h.execute("rendered=0;assert(eqoa.events.on('render',function() rendered=rendered+1 end));assert(eqoa.input.capture_text(true))").unwrap();
+    native_events::render(&h).unwrap();
+    h.execute("assert(rendered==1);assert(eqoa.input.capture_text(false))")
+        .unwrap();
 }
