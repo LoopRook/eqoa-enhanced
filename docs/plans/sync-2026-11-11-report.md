@@ -203,3 +203,16 @@ rerun passed with every test green, and the fork_ext run, which includes it, pas
 L2 (a loopback test through `send_pending` itself: partly met by the new wire test), L3 (viewer.rs upstream comment text and
 `chat_let_go` order), L5 (chrome.rs keyboard legend line), L6 (F2 beside the places list), L8 (F4 rebinding), and the `play.rs`
 stray doc comment (it is upstream's own, kept). Archived logs: `C:/Users/hocka/AppData/Local/Temp/fx-evidence` (script runs 1 to 3).
+
+## Check and lead fix
+
+Codex Terra checked the fix round (`docs/plans/sync-2026-11-11-check.md`): FAIL on one point. If moving
+a legacy crash report failed (folder not creatable, rename/copy failing) start-up continued and the
+report stayed in `crashes/` for upstream's sender; a directory-read error still marked the migration
+done. Lead fix in `fork_ext/report_crash_dir.rs`: a report that cannot move is renamed in place to
+`enhanced-crash-*.txt` (outside the sender's `crash-*.txt` pattern; removed if even that fails), and the
+migration is marked done only when the folder was read and every report moved, so it retries at the
+next start. New test `crashfile::fork_dirs_tests::a_failed_move_still_keeps_old_reports_from_the_server_and_retries`
+(blocks the fork folder with a file; the previous code returned before touching `crashes/`, so its
+"none left for a server" assertion would fail: negative control by reading, not run). Reruns:
+`crashfile` 8 passed, `report` 71 passed, footprint PASS.

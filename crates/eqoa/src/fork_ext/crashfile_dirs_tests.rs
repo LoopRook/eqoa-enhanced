@@ -163,3 +163,26 @@ fn a_limit_barely_over_the_label_sends_nothing_and_keeps_the_report() {
     assert!(source.contains("let kept = crate::fork_ext::report_label::pending(pending(), most);"));
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// When the fork's folder cannot be made (here a file is in its way), old
+/// local reports still leave the sender's pattern at once, and the move is
+/// retried at the next start. The control: before migrating, both would be
+/// sent at the next login.
+#[test]
+fn a_failed_move_still_keeps_old_reports_from_the_server_and_retries() {
+    let root = scratch("blocked");
+    let up = root.join("crashes");
+    std::fs::create_dir_all(&up).unwrap();
+    std::fs::write(up.join("crash-20261101-000001.txt"), FORK_TEXT).unwrap();
+    std::fs::write(up.join("crash-20261102-000002.txt"), FORK_TEXT).unwrap();
+    std::fs::write(in_config(&root), "in the way").unwrap();
+    assert_eq!(pending_in(&up).len(), 2, "control: unmoved, both would be sent at the next login");
+    assert_eq!(migrate_legacy(&root), 0, "nothing could move");
+    assert!(pending_in(&up).is_empty(), "none left for a server even though the move failed");
+    std::fs::remove_file(in_config(&root)).unwrap();
+    assert_eq!(migrate_legacy(&root), 2, "not marked done: the next start moves them");
+    assert!(std::fs::read_dir(&up).unwrap().next().is_none(), "nothing parked is left behind");
+    assert_eq!(crate::fork_ext::report_core::waiting_for_test(&in_config(&root)).len(), 2, "both are the fork's to offer");
+    assert_eq!(migrate_legacy(&root), 0, "and then it is done");
+    let _ = std::fs::remove_dir_all(&root);
+}
