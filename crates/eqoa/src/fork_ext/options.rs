@@ -364,11 +364,13 @@ mod tests {
         );
         let cats = pages();
         let first = cats.len() - 2;
-        assert_eq!(cats[first - 1].name, "Chat");
-        assert_eq!(cats[first - 1].items, &[73]);
-        assert_eq!(cats[first - 2].name, "Combat");
-        assert_eq!(cats[first - 2].items, &[70, 71, 72]);
-        assert_eq!(cats[first - 4].items, &[41, 42, 43, 44, 45]);
+        assert_eq!(cats[first - 1].name, "HUD Layout");
+        assert_eq!(cats[first - 1].items, &[76, 77]);
+        assert_eq!(cats[first - 2].name, "Chat");
+        assert_eq!(cats[first - 2].items, &[73]);
+        assert_eq!(cats[first - 3].name, "Combat");
+        assert_eq!(cats[first - 3].items, &[70, 71, 72]);
+        assert_eq!(cats[first - 5].items, &[41, 42, 43, 44, 45]);
         assert_eq!(cats[3].items, &[22, 29, 30, 40, 49, 58]);
         for (index, category) in cats.iter().enumerate().skip(first) {
             w.cat_sel = index as i32;

@@ -19,6 +19,7 @@
     "eqoa.options.get",
     "eqoa.actions.assist",
     "eqoa.events.on",
-    "eqoa.imgui"
+    "eqoa.imgui",
+    "eqoa.hud.layout"
   ]
 }

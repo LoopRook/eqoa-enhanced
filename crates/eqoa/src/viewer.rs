@@ -3361,8 +3361,7 @@ impl App {
         #[cfg(not(target_arch = "wasm32"))]
         let forge_runtime = crate::fork_ext::addons::Runtime::from_env();
         self.gfx = Some(Gfx {
-            #[cfg(not(target_arch = "wasm32"))]
-            forge_runtime,
+            #[cfg(not(target_arch = "wasm32"))] forge_runtime,
             window, surface, offscreen, in_flight: None, device, queue, config, depth, renderer, models: Vec::new(), title: "EQOA".into(), present_modes: Vec::new(), resized: false, whole: None });
         // before the world there is nothing to load: the pregame draws
         if self.host.is_some() {
@@ -3498,7 +3497,7 @@ impl App {
         }
         let depth = render::depth_view(&device, config.width, config.height);
         let offscreen = surface.is_none().then(|| offscreen_target(&device, &config));
-        let mut g = Gfx { window, surface, offscreen, in_flight: None, device, queue, config, depth, renderer, models: Vec::new(), title, present_modes, resized: true, whole };
+        let mut g = Gfx { #[cfg(not(target_arch = "wasm32"))] forge_runtime: old.forge_runtime.for_new_device(), window, surface, offscreen, in_flight: None, device, queue, config, depth, renderer, models: Vec::new(), title, present_modes, resized: true, whole };
         // the character and the sky in their places (`load`'s order)
         if self.walker.is_some() {
             self.body_at = usize::MAX;

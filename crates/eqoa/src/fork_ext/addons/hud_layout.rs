@@ -8,7 +8,7 @@ pub const SCREEN_H: f32 = 448.0;
 static WINDOW_SIZE: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new((640u64 << 32) | 448u64);
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HudState {
     pub right_hud_up: bool,
     pub hud_up: bool,
@@ -29,7 +29,12 @@ impl Default for HudState {
     }
 }
 
+type LayoutKey = ((u32, u32), HudState, [[f32; 2]; 4]);
+
 thread_local! {
+    // JSON and Lua records stay reusable until a piece actually moves, the
+    // window changes size or the live HUD state changes.
+    static LAYOUT_CACHE: std::cell::RefCell<Option<(LayoutKey, std::rc::Rc<Json>)>> = const { std::cell::RefCell::new(None) };
     static HUD_STATE: std::cell::Cell<HudState> = const {
         std::cell::Cell::new(HudState {
             right_hud_up: true,
@@ -131,11 +136,29 @@ pub fn hud_frame_json(window_size: (u32, u32)) -> Json {
     })
 }
 
-pub fn hud_layout_json(window_size: (u32, u32)) -> Json {
+pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
     let m = frame_metrics(window_size);
     let state = get_hud_state();
+    use crate::hudlayout::Piece;
+    let shifts = [Piece::Player, Piece::Group, Piece::Target, Piece::Pet]
+        .map(|piece| crate::hudlayout::shift(piece, crate::hudlayout::Beyond::of(window_size)));
+    let key = (window_size, state, shifts);
+    if let Some(value) = LAYOUT_CACHE.with(|c| {
+        c.borrow()
+            .as_ref()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, j)| j.clone())
+    }) {
+        return value;
+    }
     let to_rect = |piece, x: f32, y: f32, w: f32, h: f32, anc: &str, vert: &str| {
-        let [dx, dy] = crate::hudlayout::shift(piece, crate::hudlayout::Beyond::of(window_size));
+        let [dx, dy] = shifts[match piece {
+            Piece::Player => 0,
+            Piece::Group => 1,
+            Piece::Target => 2,
+            Piece::Pet => 3,
+            _ => unreachable!("only the documented stock rectangles"),
+        }];
         let (x, y) = (x + dx, y + dy);
         let out = transform_rect([x, y, w, h], anc, vert, m);
         json!({
@@ -161,7 +184,7 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> Json {
         }));
     }
 
-    json!({
+    let result = std::rc::Rc::new(json!({
         "player": {
             "panel": to_rect(crate::hudlayout::Piece::Player, 10.0, 15.0, 190.0, 65.0, "left", "top"),
             "health": to_rect(crate::hudlayout::Piece::Player, 69.0, 36.0, 136.0, 8.0, "left", "top"),
@@ -177,7 +200,9 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> Json {
         "pet": {
             "panel": to_rect(crate::hudlayout::Piece::Pet, 20.0, state.pet_y as f32, 174.0, state.pet_h as f32, "left", "top"),
         },
-    })
+    }));
+    LAYOUT_CACHE.with(|c| *c.borrow_mut() = Some((key, result.clone())));
+    result
 }
 
 pub fn hud_element_visible(element: &str) -> bool {

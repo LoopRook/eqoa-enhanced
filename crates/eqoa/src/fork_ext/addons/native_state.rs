@@ -664,7 +664,7 @@ fn install_math(lua: &Lua) -> Result<()> {
                 _ => super::hud_layout::get_window_size(),
             };
             let j = super::hud_layout::hud_layout_json((w, h));
-            lua.pack_multi((record(lua, "eqoa.hud.Layout", &j)?, Value::Nil))
+            lua.pack_multi((super::native::record_cached(lua, "eqoa.hud.layout", "eqoa.hud.Layout", &j)?, Value::Nil))
         })?,
     )?;
     bind_fn(

@@ -56,7 +56,7 @@ class DevelopmentReleaseTests(unittest.TestCase):
         notes = (ROOT / "FORK-UPDATE-NOTES.md").read_text(encoding="utf-8")
         body = release.release_body(COMMIT, notes)
         self.assertNotIn("Same as Stable.", body)
-        self.assertIn("- Added the experimental native", body)
+        self.assertIn("- Added upstream Move HUD and Reset HUD.", body)
         self.assertNotIn("Enhanced 0.4.14", body)
         renamed = notes.replace("## Unreleased", "## 2026-11-09 · Enhanced dev build", 1)
         self.assertIn("Same as Stable.", release.release_body(COMMIT, renamed),

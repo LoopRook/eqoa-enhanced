@@ -425,6 +425,16 @@ impl Runtime {
             super::visibility::publish(false);
         }
     }
+    /// Device recovery drops every GPU object. Flush addon state before the
+    /// replacement runtime lazily attaches to the new device and reloads it.
+    pub fn for_new_device(mut self) -> Self {
+        self.shutdown();
+        let mut next = Self::new(self.paths.clone());
+        next.default_server = self.default_server.clone();
+        next.open = self.open;
+        next
+    }
+
     pub fn shutdown(&mut self) {
         self.pause_health();
         if self.stopped {
@@ -823,6 +833,29 @@ mod tests {
             );
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn device_recovery_keeps_paths_server_and_open_intent_but_releases_graphics() {
+        let root = Scratch::new();
+        let config = Scratch::new();
+        let paths = Paths::select(root.0.clone(), None, Some(config.0.clone()), None);
+        let mut old = Runtime::new(paths.clone());
+        old.default_server = "recovery-test".into();
+        old.request_open();
+        let next = old.for_new_device();
+        assert_eq!(next.paths.mods, paths.mods);
+        assert_eq!(next.paths.config, paths.config);
+        assert_eq!(next.default_server, "recovery-test");
+        assert!(next.open && !next.stopped && next.graphics.is_none());
+        assert_eq!(next.launch(next.open), Launch::Managed);
+        let idle = Runtime::new(Paths::select(root.0.clone(), None, None, None)).for_new_device();
+        assert!(!idle.open && idle.graphics.is_none());
+        assert_eq!(
+            idle.launch(false),
+            Launch::Dormant,
+            "negative control: an idle runtime stays lazy"
+        );
     }
 
     #[test]

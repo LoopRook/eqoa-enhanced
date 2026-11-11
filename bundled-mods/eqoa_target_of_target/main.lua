@@ -19,27 +19,30 @@ eqoa.events.on("render", function()
     local tot = eqoa.entities.find(target.target_id)
     if not tot or not tot.name or tot.name == "" or tot.name:match("^%s*$") then return end
 
+    local panel = eqoa.hud.layout().target.panel
+    local dx, dy = panel.frame_x - 20, panel.frame_y - 348
+
     -- 3-piece bar at [20, 300], width 174
-    hud_image({ ui_id = 25, x = 20, y = 300, w = 174, target_fade = true, vertical = "bottom" })
+    hud_image({ ui_id = 25, x = 20 + dx, y = 300 + dy, w = 174, target_fade = true, vertical = "bottom" })
 
     -- Centered black name text
-    hud_text({ x = 20 + 87, y = 300 + 12, text = tot.name, color = black, clip_width = 160, target_fade = true, vertical = "bottom" })
+    hud_text({ x = 20 + 87 + dx, y = 300 + 12 + dy, text = tot.name, color = black, clip_width = 160, target_fade = true, vertical = "bottom" })
 
     -- HP gauge (art 7)
     if tot.hp_fraction then
-        hud_gauge({ x = 30, y = 325, art = 7, fill = tot.hp_fraction, lit = true, vertical = "bottom" })
+        hud_gauge({ x = 30 + dx, y = 325 + dy, art = 7, fill = tot.hp_fraction, lit = true, vertical = "bottom" })
     end
 
     -- Power gauge (art 9), gated by the Mana Bars option
     if tot.power and eqoa.options.get("mana_bars", "eqoa_mana_bars") then
-        hud_gauge({ x = 30, y = 335, art = 9, fill = tot.power, lit = true, vertical = "bottom" })
+        hud_gauge({ x = 30 + dx, y = 335 + dy, art = 9, fill = tot.power, lit = true, vertical = "bottom" })
     end
 
     -- Clickable name bar to Assist, only while the HUD is in plain play.
     if eqoa.imgui and eqoa.hud.visible("plain_play") then
         local frame = eqoa.hud.frame()
-        local sx = frame.offset_x + (20 - frame.side) * frame.scale_x
-        local sy = frame.offset_y + (300 + frame.top) * frame.scale_y
+        local sx = frame.offset_x + (20 + dx - frame.side) * frame.scale_x
+        local sy = frame.offset_y + (300 + dy + frame.top) * frame.scale_y
         local sw = 174 * frame.scale_x
         local sh = 26 * frame.scale_y
         eqoa.imgui.SetNextWindowPos(sx, sy)

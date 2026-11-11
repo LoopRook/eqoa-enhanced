@@ -19,14 +19,17 @@ eqoa.events.on("render", function()
     local xp_on = eqoa.options.get("xp_details")
     local target_on = eqoa.options.get("target_hp_percent")
 
+    local layout = eqoa.hud.layout()
+    local px, py = layout.player.panel.frame_x - 10, layout.player.panel.frame_y - 15
+    local tx, ty = layout.target.panel.frame_x - 20, layout.target.panel.frame_y - 348
     local player = eqoa.player.get()
     if player then
         -- Player HP %
         if hud_on and eqoa.hud.visible("health") and player.hp_fraction ~= nil then
             local pct = math.floor(player.hp_fraction * 100 + 0.5)
             hud_text({
-                x = 99,
-                y = 35,
+                x = 99 + px,
+                y = 35 + py,
                 text = tostring(pct) .. "%",
                 color = white,
                 scale = 0.6,
@@ -39,8 +42,8 @@ eqoa.events.on("render", function()
         if hud_on and eqoa.hud.visible("power") and player.power and player.power.maximum and player.power.maximum > 0 then
             local txt = tostring(player.power.current) .. "/" .. tostring(player.power.maximum)
             hud_text({
-                x = 99,
-                y = 45,
+                x = 99 + px,
+                y = 45 + py,
                 text = txt,
                 color = blue,
                 scale = 0.6,
@@ -57,8 +60,8 @@ eqoa.events.on("render", function()
                 local pct = math.max(0, math.min(100, (cur / need) * 100))
                 local txt = string.format("%d/%d (%.1f%%)", cur, need, pct)
                 hud_text({
-                    x = 99,
-                    y = 55,
+                    x = 99 + px,
+                    y = 55 + py,
                     text = txt,
                     color = gold,
                     scale = 0.6,
@@ -79,8 +82,8 @@ eqoa.events.on("render", function()
             elseif pct > 20 then col = yellow end
 
             hud_text({
-                x = 60,
-                y = 397,
+                x = 60 + tx,
+                y = 397 + ty,
                 text = tostring(pct) .. "%",
                 color = col,
                 scale = 0.65,

@@ -232,24 +232,29 @@ pub(crate) fn round_minimap_border(
     width: f32,
 ) {
     for i in 0..96 {
-        let a = i as f32 * std::f32::consts::TAU / 96.0;
-        let b = (i + 1) as f32 * std::f32::consts::TAU / 96.0;
-        let at = |t: f32, r: f32| {
-            render::ui::frame_from_window(size, [circle[0] + r * t.cos(), circle[1] + r * t.sin()])
-        };
-        let inner = (circle[2] - width).max(0.0);
         ui.quads.push(render::ui::Quad {
             tex: white,
             blend: 3,
-            pos: [
-                at(a, inner),
-                at(a, circle[2]),
-                at(b, circle[2]),
-                at(b, inner),
-            ],
+            pos: ring_quad(size, circle, i, 96, width),
             uv: [[0.5, 0.5]; 4],
             color: crate::map::theme::BORDER,
             clip: Some(render::ui::WHOLE),
         });
     }
+}
+
+pub(crate) fn ring_quad(
+    size: (u32, u32),
+    c: [f32; 3],
+    i: usize,
+    n: usize,
+    width: f32,
+) -> [[f32; 2]; 4] {
+    let a = i as f32 * std::f32::consts::TAU / n as f32;
+    let b = (i + 1) as f32 * std::f32::consts::TAU / n as f32;
+    let at = |t: f32, r: f32| {
+        render::ui::frame_from_window(size, [c[0] + r * t.cos(), c[1] + r * t.sin()])
+    };
+    let inner = (c[2] - width).max(0.0);
+    [at(a, inner), at(a, c[2]), at(b, c[2]), at(b, inner)]
 }

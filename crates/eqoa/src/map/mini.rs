@@ -781,6 +781,7 @@ pub fn dot_radius(size: (u32, u32)) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fork_ext::map::ring_quad;
 
     #[test]
     fn minimap_stays_in_window_coordinates_at_render_scales() {

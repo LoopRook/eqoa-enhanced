@@ -85,7 +85,7 @@ fn moved_minimap_moves_circle_border_hover_and_search() {
         let c = map.mini.circle;
         assert!((c[0] - original[0] - delta[0]).abs() < 0.001);
         assert!((c[1] - original[1] - delta[1]).abs() < 0.001);
-        assert_eq!(c[2], original[2]);
+        assert!((c[2] - original[2]).abs() < 0.001);
         assert!(map.mini_contains([c[0], c[1]]));
         assert!(
             !map.mini_contains([original[0], original[1]]),
