@@ -1,10 +1,10 @@
 // Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 //! Mod-owned keybinds on the Controls page and binds file serialization.
-use std::sync::Mutex;
 use crate::bindpage::Column;
 use crate::binds::{self, Binds, ROWS, row_named};
 use crate::pointer::{Hits, rows_rect};
 use crate::settings::{read_config, write_config};
+use std::sync::Mutex;
 use vi::ui::{Raster, UI_COLORS, Vui, Window, wide};
 
 const KEYS_FILE: &str = "keys.opt";
@@ -83,8 +83,11 @@ pub fn get_key(addon: &str, id: &str) -> Option<String> {
 pub fn set_key(addon: &str, id: &str, key: &str) -> bool {
     let mut binds = MOD_BINDS.lock().unwrap();
     if let Some(b) = binds.iter_mut().find(|b| b.addon_id == addon && b.id == id) {
-        b.current_key = key.to_ascii_lowercase();
-        let _ = save_mod_bind(addon, id, &b.current_key);
+        let key = key.to_ascii_lowercase();
+        if save_mod_bind(addon, id, &key).is_err() {
+            return false;
+        }
+        b.current_key = key;
         true
     } else {
         false
@@ -134,8 +137,21 @@ pub fn draw(
     let c = UI_COLORS[on as usize];
     let (kx, px) = (width - KEY_X, width - PAD_X);
 
-    w.text_box(vui, r, &wide(&bind.description), 40, at, width - KEY_X - 48, 1, c, 2);
-    hits.push(rows_rect(w, vui, r, 40, at, width - KEY_X - 48, 1), entry * 4);
+    w.text_box(
+        vui,
+        r,
+        &wide(&bind.description),
+        40,
+        at,
+        width - KEY_X - 48,
+        1,
+        c,
+        2,
+    );
+    hits.push(
+        rows_rect(w, vui, r, 40, at, width - KEY_X - 48, 1),
+        entry * 4,
+    );
 
     let waiting = on && capture == Some(Column::Keyboard);
     let kt = if waiting {
@@ -152,7 +168,10 @@ pub fn draw(
         w.draw_frame(vui, r, x, at, cw, 1, if sel { 0x60 } else { 0x40 });
         let tc = if col == 0 { UI_COLORS[0] } else { dim };
         w.text_box(vui, r, &wide(&t), x, at, cw, 1, tc, 8);
-        hits.push(rows_rect(w, vui, r, x + 20, at, cw - 20, 1), entry * 4 + 1 + col);
+        hits.push(
+            rows_rect(w, vui, r, x + 20, at, cw - 20, 1),
+            entry * 4 + 1 + col,
+        );
     }
 
     true
@@ -184,11 +203,18 @@ pub fn capture_key(
     };
 
     let key_name = name.to_ascii_lowercase();
+    if let Err(error) = save_mod_bind(&bind.addon_id, &bind.id, &key_name) {
+        *note = Some(format!("Key not kept: {error}"));
+        return true;
+    }
     bind.current_key = key_name.clone();
-    let _ = save_mod_bind(&bind.addon_id, &bind.id, &key_name);
 
     *capture = None;
-    *note = Some(format!("{}: {}.", bind.description, binds::display(&key_name)));
+    *note = Some(format!(
+        "{}: {}.",
+        bind.description,
+        binds::display(&key_name)
+    ));
     cues.push(13);
     true
 }
@@ -285,9 +311,48 @@ mod tests {
         assert_eq!(get_key("test_addon", "toggle_window"), Some("m".into()));
 
         // Negative control: old key 'k' does NOTHING now!
-        assert_eq!(dispatch_keypress("k"), None, "old key does nothing after rebind");
+        assert_eq!(
+            dispatch_keypress("k"),
+            None,
+            "old key does nothing after rebind"
+        );
 
         // New key 'm' fires!
-        assert_eq!(dispatch_keypress("m"), Some(("test_addon".into(), "toggle_window".into())));
+        assert_eq!(
+            dispatch_keypress("m"),
+            Some(("test_addon".into(), "toggle_window".into()))
+        );
+    }
+    #[test]
+    fn retained_keys_round_trip_with_mod_key_and_restart() {
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+        crate::settings::testing::put("keys.opt", b"key.attack=q\nkey.hide_ui=z\n");
+        register("eqoa_stats_box", "toggle", "b", "Stats");
+        assert!(set_key("eqoa_stats_box", "toggle", "f8"));
+        reset_in_memory();
+        register("eqoa_stats_box", "toggle", "b", "Stats");
+        assert_eq!(get_key("eqoa_stats_box", "toggle"), Some("f8".into()));
+        let text = String::from_utf8(crate::settings::testing::kept("keys.opt").unwrap()).unwrap();
+        assert!(text.contains("key.attack=q") && text.contains("key.hide_ui=z"));
+        assert!(text.contains("mod.eqoa_stats_box.toggle=f8"));
+        assert_eq!(dispatch_keypress("b"), None);
+        assert_eq!(
+            dispatch_keypress("f8"),
+            Some(("eqoa_stats_box".into(), "toggle".into()))
+        );
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+    }
+
+    #[test]
+    fn rebind_write_failure_keeps_old_key_and_reports_failure() {
+        crate::settings::testing::reset(true);
+        reset_in_memory();
+        register("key_refusal", "toggle", "b", "Stats");
+        assert!(!set_key("key_refusal", "toggle", "f8"));
+        assert_eq!(get_key("key_refusal", "toggle"), Some("b".into()));
+        crate::settings::testing::reset(false);
+        reset_in_memory();
     }
 }

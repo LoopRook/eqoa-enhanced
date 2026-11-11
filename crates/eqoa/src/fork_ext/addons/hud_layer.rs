@@ -124,25 +124,13 @@ pub fn clear_addon(addon_id: &str) {
     });
 }
 
-struct StatLayout {
-    scale: f32,
-    lefts: [f32; 2],
-    rights: [f32; 2],
-    top: f32,
-    step: f32,
-}
+use crate::fork_ext::player_stats::Rows as StatLayout;
 
 fn compute_stat_layout(
     vui: &crate::ui::Vui,
     ui: &crate::ui::UiRaster<'_>,
     font: usize,
 ) -> StatLayout {
-    const FRAME: [i32; 4] = [200, 54, 348, 186];
-    const BORDER: [f32; 2] = [7.0, 9.0];
-    const PAD: [f32; 2] = [3.0, 2.0];
-    const GAP: f32 = 6.0;
-    const LEADING: f32 = 0.08;
-    const SCALE: f32 = 0.6;
     const ROOM: &[u16] = &[
         b' ' as u16,
         b'8' as u16,
@@ -170,25 +158,7 @@ fn compute_stat_layout(
             wide[col] = max_w + room;
         }
     });
-    let (x0, y0, x1, y1) = (
-        FRAME[0] as f32,
-        FRAME[1] as f32,
-        FRAME[2] as f32,
-        FRAME[3] as f32,
-    );
-    let (left, right) = (x0 + BORDER[0] + PAD[0], x1 - BORDER[0] - PAD[0]);
-    let (top, bottom) = (y0 + BORDER[1] + PAD[1], y1 - BORDER[1] - PAD[1]);
-    let by_height = (bottom - top) / (8.0 * font_h * (1.0 + LEADING));
-    let by_width = (right - left - GAP) / (wide[0] + wide[1]).max(1.0);
-    let scale = SCALE.min(by_height).min(by_width);
-    let step = (bottom - top) / 8.0;
-    StatLayout {
-        scale,
-        lefts: [left.round(), (right - wide[1] * scale).round()],
-        rights: [left + wide[0] * scale, right],
-        top: top + (step - font_h * scale) / 2.0,
-        step,
-    }
+    crate::fork_ext::player_stats::layout(font_h, wide)
 }
 
 /// Draw all queued mod HUD commands through the native `UiRaster` and `Vui`.
@@ -226,7 +196,11 @@ pub fn draw(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>) {
                             let l = stat_layout
                                 .get_or_insert_with(|| compute_stat_layout(vui, ui, font));
                             if col < 2 && row < 8 {
-                                x = if is_val { l.rights[col] } else { l.lefts[col] };
+                                x = if is_val {
+                                    l.rights[col]
+                                } else {
+                                    l.lefts[col].round()
+                                };
                                 y = l.top + row as f32 * l.step;
                                 scale = l.scale;
                             }
@@ -237,14 +211,7 @@ pub fn draw(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>) {
                             wtext.extend(text.encode_utf16());
                             if let Some(clip_w) = clip_width {
                                 let mut w = vi::ui::Window::default();
-                                w.init(
-                                    vui,
-                                    ui,
-                                    [x.round() as i32, y.round() as i32],
-                                    clip_w,
-                                    1,
-                                    0,
-                                );
+                                w.init(vui, ui, [x.round() as i32, y.round() as i32], clip_w, 1, 0);
                                 w.open(true);
                                 w.text_box(vui, ui, &wtext, 0, 0, clip_w, 1, color, 10);
                                 return;

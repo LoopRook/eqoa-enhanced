@@ -236,11 +236,14 @@ impl Runtime {
                     if let Some(code) = code {
                         super::input::record_key_event_only(code, is_down);
                     }
-                    if plain_play && !keyboard && !super::input::is_text_capture_active() {
-                        if let Some(name) = crate::binds::name_of(&event.logical_key) {
-                            super::input::emit_named_key_event(&name, is_down);
-                        }
-                    }
+                    super::input::route_mod_key(
+                        &event.logical_key,
+                        is_down,
+                        event.repeat,
+                        *is_synthetic,
+                        plain_play,
+                        keyboard,
+                    );
                 }
                 let wants_key_capture =
                     super::input::wants_key_capture(keyboard, code, *is_synthetic, plain_play);

@@ -4,7 +4,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
-- Four HUD extras (Stats Box, Target of Target, Mana Bars, and HUD numbers) are now bundled Lua mods (`eqoa_stats_box`, `eqoa_target_of_target`, `eqoa_mana_bars`, and `eqoa_hud_numbers`), enabled by default. Their look and feel, options on the Enhanced HUD page, and keybindings on the Controls page are preserved exactly, with existing player settings carried over automatically.
+- Four HUD extras (Stats Box, Target of Target, Mana Bars, and HUD numbers) are now bundled Lua mods (`eqoa_stats_box`, `eqoa_target_of_target`, `eqoa_mana_bars`, and `eqoa_hud_numbers`), enabled by default. Stats Box and Target of Target start off; Mana Bars and numeric readouts start on. Existing settings carry over, and the Stats Box key can be rebound on Controls. Disabling a mod removes its HUD options and key rows.
 - Added upstream raid leadership marks, loot-roll strips, raid menus and master-looter controls on servers that offer them. Hat D-pads and WebGL2 context-loss handling include upstream fixes.
 
 - Added vanilla's Number Colors, Pet Effects, optional server DPS meter and Macros page. Enhanced HUD and Mods & Addons follow every vanilla Extended page.

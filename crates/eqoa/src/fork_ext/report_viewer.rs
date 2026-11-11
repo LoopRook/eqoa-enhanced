@@ -15,7 +15,11 @@ fn claims_key(open: bool, key: &Key, play: Option<&crate::play::Play>) -> bool {
 pub(super) fn event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) -> bool {
     match event {
         WindowEvent::KeyboardInput { event, .. }
-            if claims_key(report::is_open_local(), &event.logical_key, app.play.as_ref()) =>
+            if claims_key(
+                report::is_open_local(),
+                &event.logical_key,
+                app.play.as_ref(),
+            ) =>
         {
             if event.state == ElementState::Pressed {
                 if report::is_open_local() {
@@ -117,8 +121,14 @@ mod tests {
     fn f3_is_supports_form_where_the_server_takes_bug_reports() {
         let (f3, f2) = (Key::Named(NamedKey::F3), Key::Named(NamedKey::F2));
         let mut p = play();
-        assert!(claims_key(false, &f3, None), "before the world: the local report");
-        assert!(claims_key(false, &f3, Some(&p)), "no offer: the local report");
+        assert!(
+            claims_key(false, &f3, None),
+            "before the world: the local report"
+        );
+        assert!(
+            claims_key(false, &f3, Some(&p)),
+            "no offer: the local report"
+        );
         assert!(!claims_key(false, &f2, Some(&p)), "another key passes");
 
         p.session.bug_reports = true;
@@ -127,5 +137,134 @@ mod tests {
         assert_eq!(p.mode, 31);
         assert!(claims_key(true, &f3, Some(&p)), "the open dialog keeps F3");
         assert!(claims_key(true, &f2, Some(&p)), "and every key");
+    }
+}
+
+/// Run Lua before the native HUD consumes its drawing, but record the ImGui
+/// overlay separately: submission stays after the scene's final scale resolve.
+pub(super) fn prepare_addons(
+    g: &mut Gfx,
+    frame: Option<&wgpu::SurfaceTexture>,
+    play: Option<&crate::play::Play>,
+    walker: Option<&crate::walker::Walker>,
+    server: Option<&str>,
+) -> Option<wgpu::CommandBuffer> {
+    let target = frame
+        .map(|f| &f.texture)
+        .or(g.offscreen.as_ref())?
+        .create_view(&Default::default());
+    let snapshot = play.map_or_else(Default::default, |p| p.forge_snapshot(walker));
+    let mut encoder = g.device.create_command_encoder(&Default::default());
+    g.forge_runtime.draw(
+        &g.window,
+        &g.device,
+        &g.queue,
+        g.config.format,
+        &mut encoder,
+        &target,
+        snapshot,
+        server,
+    );
+    Some(encoder.finish())
+}
+pub(super) fn submit_addons(
+    queue: &wgpu::Queue,
+    scene: wgpu::CommandEncoder,
+    overlay: Option<wgpu::CommandBuffer>,
+) -> wgpu::SubmissionIndex {
+    queue.submit(std::iter::once(scene.finish()).chain(overlay))
+}
+#[cfg(test)]
+mod addon_order_tests {
+    use super::*;
+    #[test]
+    fn addon_overlay_recorded_first_is_submitted_after_the_scene() {
+        let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let instance = wgpu::Instance::default();
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+            eprintln!("SKIP: no graphics adapter");
+            return;
+        };
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        let record = |color| {
+            let mut encoder = device.create_command_encoder(&Default::default());
+            {
+                let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(color),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+            }
+            encoder
+        };
+        let pixels = || {
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: 256,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            let mut encoder = device.create_command_encoder(&Default::default());
+            encoder.copy_texture_to_buffer(
+                texture.as_image_copy(),
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(256),
+                        rows_per_image: Some(1),
+                    },
+                },
+                texture.size(),
+            );
+            queue.submit([encoder.finish()]);
+            let (tx, rx) = std::sync::mpsc::channel();
+            buffer
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            rx.recv().unwrap().unwrap();
+            buffer.slice(..).get_mapped_range().unwrap()[..4].to_vec()
+        };
+        let overlay = record(wgpu::Color::BLUE).finish();
+        let scene = record(wgpu::Color::RED);
+        submit_addons(&queue, scene, Some(overlay));
+        assert_eq!(
+            pixels(),
+            [0, 0, 255, 255],
+            "overlay must remain above the later-recorded scene"
+        );
+        // Negative control: recording order submitted directly loses the overlay.
+        let overlay = record(wgpu::Color::BLUE).finish();
+        let scene = record(wgpu::Color::RED).finish();
+        queue.submit([overlay, scene]);
+        assert_eq!(pixels(), [255, 0, 0, 255]);
     }
 }

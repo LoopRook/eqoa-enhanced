@@ -826,12 +826,23 @@ fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.input.Pad", "raw_left" | "raw_right") => Some("eqoa.input.RawAxes"),
         ("eqoa.player.Stats", "rows" | "columns") => Some("eqoa.player.StatItem"),
         ("eqoa.player.Stats", "resists") => Some("eqoa.player.Stats"),
-        ("eqoa.player.Stats", "strength" | "stamina" | "agility" | "dexterity" | "wisdom" | "intelligence" | "charisma" | "armor" | "max_hp" | "hp_max" | "max_power" | "power" | "fire" | "cold" | "lightning" | "arcane" | "poison" | "disease") => Some("eqoa.player.StatItem"),
+        (
+            "eqoa.player.Stats",
+            "strength" | "stamina" | "agility" | "dexterity" | "wisdom" | "intelligence"
+            | "charisma" | "armor" | "max_hp" | "hp_max" | "max_power" | "power" | "fire" | "cold"
+            | "lightning" | "arcane" | "poison" | "disease",
+        ) => Some("eqoa.player.StatItem"),
         ("eqoa.hud.Layout", "player") => Some("eqoa.hud.PlayerLayout"),
         ("eqoa.hud.Layout", "group_members") => Some("eqoa.hud.GroupMemberLayout"),
         ("eqoa.hud.Layout", "target") => Some("eqoa.hud.TargetLayout"),
         ("eqoa.hud.Layout", "pet") => Some("eqoa.hud.SinglePanelLayout"),
-        ("eqoa.hud.PlayerLayout" | "eqoa.hud.TargetLayout" | "eqoa.hud.GroupMemberLayout" | "eqoa.hud.SinglePanelLayout", "panel" | "health" | "power" | "exp") => Some("eqoa.hud.Rect"),
+        (
+            "eqoa.hud.PlayerLayout"
+            | "eqoa.hud.TargetLayout"
+            | "eqoa.hud.GroupMemberLayout"
+            | "eqoa.hud.SinglePanelLayout",
+            "panel" | "health" | "power" | "exp",
+        ) => Some("eqoa.hud.Rect"),
         _ => None,
     }
 }
@@ -852,7 +863,7 @@ fn install_fields(lua: &Lua) {
         ("eqoa.client.DisplayMetrics", "width height render_scale"),
         (
             "eqoa.player.Player",
-            "entity id name class_id class_name race_id race_name level experience experience_debt hp power attributes armor resists position velocity speed horizontal_speed heading target_id pet_id auto_attacking dead has_pet fighting location",
+            "entity id name class_id class_name race_id race_name level experience experience_debt hp_fraction hp power attributes armor resists position velocity speed horizontal_speed heading target_id pet_id auto_attacking dead has_pet fighting location",
         ),
         ("eqoa.player.Vital", "current maximum base"),
         ("eqoa.player.Attributes", "base total"),
@@ -937,26 +948,11 @@ fn install_fields(lua: &Lua) {
             "eqoa.hud.Rect",
             "frame_x frame_y frame_width frame_height x y width height",
         ),
-        (
-            "eqoa.hud.Layout",
-            "player group_members target pet",
-        ),
-        (
-            "eqoa.hud.PlayerLayout",
-            "panel health power exp",
-        ),
-        (
-            "eqoa.hud.TargetLayout",
-            "panel health power",
-        ),
-        (
-            "eqoa.hud.GroupMemberLayout",
-            "index panel health power",
-        ),
-        (
-            "eqoa.hud.SinglePanelLayout",
-            "panel",
-        ),
+        ("eqoa.hud.Layout", "player group_members target pet"),
+        ("eqoa.hud.PlayerLayout", "panel health power exp"),
+        ("eqoa.hud.TargetLayout", "panel health power"),
+        ("eqoa.hud.GroupMemberLayout", "index panel health power"),
+        ("eqoa.hud.SinglePanelLayout", "panel"),
         ("eqoa.options.Toggle", "id label default value item_id"),
     ] {
         let round = if path.starts_with("eqoa.hud.")

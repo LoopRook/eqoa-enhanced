@@ -126,9 +126,9 @@
       "reason": "Map UI state and input integration plus one-line pub(crate) visibility on UiAssets.surfaces for fork-owned HUD tests."
     },
     "crates/eqoa/src/viewer.rs": {
-      "added": 102,
+      "added": 101,
       "deleted": 11,
-      "reason": "Existing fork integration plus native report adapter registration and one-line input, draw, screenshot/surface hooks; preserve upstream resize and Android code. Round 3 Stage C removes hardcoded B key for stats box, lowering added lines from 123 to 102 and deletions from 13 to 11."
+      "reason": "Existing fork integration plus native report adapter registration and one-line input, draw, screenshot/surface hooks; preserve upstream resize and Android code. Round 3 Stage C removes hardcoded B key for stats box, lowering added lines from 123 to 102 and deletions from 13 to 11. Fix audit moves Lua preparation before native HUD drawing and submits its separately recorded overlay after the scene; the two named hooks reduce added lines to 101."
     },
     "crates/net/src/session.rs": {
       "added": 218,
@@ -456,6 +456,18 @@
       "path": "crates/eqoa/src/options.rs",
       "name": "options category legend",
       "pattern": "\\bfork_options::category_legend\\b",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/viewer.rs",
+      "name": "addon HUD preparation",
+      "pattern": "fork_report::prepare_addons\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/viewer.rs",
+      "name": "addon overlay submission",
+      "pattern": "fork_report::submit_addons\\(",
       "count": 1
     }
   ]

@@ -218,7 +218,7 @@ All state getters read the frozen native core, not Forge tables. Unsupported R4 
 | Function | Return, availability and source |
 |---|---|
 | `eqoa.client.get()` | A: `Client={in_world:bool,phase:"pregame"\|"loading"\|"world"\|"disconnected",generation:uint,tick:uint,frame:uint,time:number,world_id:int?}`. Source `F:131`, `P:5423`, `frames.rs`. |
-| `eqoa.player.get()` | W: `Player?`; nil,not_in_world otherwise. Identity `N/session.rs:359`, `N/dump.rs:15`, stats `N/dump.rs:181`, native assembly `F:137`. |
+| `eqoa.player.get()` | W: `Player?`; nil,not_in_world otherwise. `Player.hp_fraction:number?` is the native HUD health byte divided by 255 (nil without the player entity), distinct from exact `hp.current/hp.maximum`. Identity `N/session.rs:359`, `N/dump.rs:15`, stats `N/dump.rs:181`, native assembly `F:137`. |
 | `eqoa.player.stats()` | W: `Stats?`; nil,not_in_world otherwise. Detailed summary stats computed from base, worn items, masteries and effects. Includes `rows` array and named keys with `current`, `base`, `change`, `shift` ("same"\|"raised"\|"lowered"). |
 | `eqoa.entities.list()` | W: `Entity[]`, all populated client-observed records, native slot order; no fixed 24/32 cap. Empty means none observed, not no spawns in the world. `N/entity.rs:298,333`. |
 | `eqoa.entities.get(ref:EntityRef)` | W: `Entity?`; stale_handle if expired. |
@@ -246,7 +246,7 @@ All state getters read the frozen native core, not Forge tables. Unsupported R4 
 
 ### Group
 
-`eqoa.group.get()` (W) returns `Group={in_group:bool,self_leader:bool?,members:Member[],raid:RaidMember[],invites:Invite[]}`. Not grouped is an available object with in_group=false and empty lists, self_leader=nil. `Member={entity:EntityRef?,id:uint,name:string,active:bool,hp_fraction:number?,position:Vec3?,world_id:int?}`; unknown HP remains nil until `hp_known!=0`. Position uses a current actor first, otherwise active channel-40 coordinates in that member's world. Expose world_id even if different; distance/guidance must check it. No fixed eight-member cap in the native API. `RaidMember={id:uint,name:string,hp_fraction:number?,power_fraction:number?}`, `Invite={id:uint,name:string}`. Sources `group.rs:11,29,63,88,113`, `P:2362,2366,2414,7738,8106`.
+`eqoa.group.get()` (W) returns `Group={in_group:bool,self_leader:bool?,members:Member[],raid:RaidMember[],invites:Invite[]}`. Not grouped is an available object with in_group=false and empty lists, self_leader=nil. `Member={entity:EntityRef?,id:uint,name:string,active:bool,hp_fraction:number?,position:Vec3?,world_id:int?}`; unknown HP remains nil until `hp_known!=0`. Position uses a current actor first, otherwise active channel-40 coordinates in that member's world. Expose world_id even if different; distance/guidance must check it. The members list excludes the local player and inactive slots, matching the native group HUD; raid roster remains separate. No fixed eight-member cap in the native API. `RaidMember={id:uint,name:string,hp_fraction:number?,power_fraction:number?}`, `Invite={id:uint,name:string}`. Sources `group.rs:11,29,63,88,113`, `P:2362,2366,2414,7738,8106`.
 
 **Resolved scout issues:** channel-40's s16 coordinates are cast directly to game-unit floats (`group.rs:121`); native map and HUD compare/subtract them directly against actor/camera positions (`P:7738,8112`). No /100 or /256 conversion. Leadership must be derived from the current roster's first member vs self ID; `Group.leader` currently can stay true after a transfer (`group.rs:93`). The adapter must use the roster derivation, not export that stale flag. Raid list uses server-provided bars and carries no invented coordinates.
 
@@ -765,3 +765,6 @@ Drawing support is the explicit bounded subset in §5, not every pinned ImGui bi
 ## Open questions
 
 None. The owner has already chosen naming, stability timing, Forge compatibility, automation and sandbox scope. Technical implementation checks (native reply correlation, seam footprint review, actual platform/media availability) are assigned above with defined fallback/error behavior; they are not owner policy decisions.
+
+
+Round 3: `player.stats_changed` is a notification with an empty data record whenever the native detailed Stats snapshot changes, including mastery/cap-only changes that do not change Player fields. Read `eqoa.player.stats()` after delivery. Consumers caching scalar drawing data must also invalidate on `state.reset`, `enabled`, and `events.dropped`.

@@ -158,7 +158,7 @@ impl Play {
         let attributes = stats_known
             .then(|| json!({"base":stats(&self.stats.base),"total":stats(&self.stats.stat)}));
         let resists=stats_known.then(||json!({"base":40+self.stats.stat[4].div_euclid(7),"poison":self.stats.stat[22],"disease":self.stats.stat[23],"fire":self.stats.stat[24],"cold":self.stats.stat[25],"lightning":self.stats.stat[26],"arcane":self.stats.stat[27]}));
-        let player = json!({"id":id,"name":self.player.name,"class_id":class,"class_name":usize::try_from(class).ok().and_then(|k|crate::fork_ext::addons::player::CLASSES.get(k)),"race_id":race,"race_name":usize::try_from(race).ok().and_then(|k|crate::fork_ext::addons::player::RACES.get(k)),"level":self.dump.player.level,"experience":self.dump.player.exp,"experience_debt":self.dump.player.p2c,"hp":hp,"power":power,"attributes":attributes,"armor":stats_known.then_some(self.stats.stat[14]),"resists":resists,"position":position,"velocity":velocity,"heading":heading,"speed":speed,"horizontal_speed":horizontal_speed,"target_id":valid_id(self.target),"pet_id":valid_id(self.pet_id),"auto_attacking":self.auto_attack,"dead":self.death.is_some(),"has_pet":valid_id(self.pet_id).is_some(),"fighting":fighting,"location":self.native_location(walker),"mastery":null});
+        let player = json!({"id":id,"name":self.player.name,"class_id":class,"class_name":usize::try_from(class).ok().and_then(|k|crate::fork_ext::addons::player::CLASSES.get(k)),"race_id":race,"race_name":usize::try_from(race).ok().and_then(|k|crate::fork_ext::addons::player::RACES.get(k)),"level":self.dump.player.level,"experience":self.dump.player.exp,"experience_debt":self.dump.player.p2c,"hp_fraction":self.entities.slots.iter().flatten().find(|e|Some(e.id)==id).map(|e|ee::div(e.p19 as f32,255.0)),"hp":hp,"power":power,"attributes":attributes,"armor":stats_known.then_some(self.stats.stat[14]),"resists":resists,"position":position,"velocity":velocity,"heading":heading,"speed":speed,"horizontal_speed":horizontal_speed,"target_id":valid_id(self.target),"pet_id":valid_id(self.pet_id),"auto_attacking":self.auto_attack,"dead":self.death.is_some(),"has_pet":valid_id(self.pet_id).is_some(),"fighting":fighting,"location":self.native_location(walker),"mastery":null});
         let members = if self.group.in_group {
             self.group.members[..self.group.count()]
                 .iter()
@@ -185,17 +185,19 @@ impl Play {
             json!({"index":index+1,"kind":match k {2=>"items",3=>"weapon_sets",_=>"abilities"},"selected":self.hud_menus.sel==k as i32,"selected_slot":(menu.sel>=0 && menu.sel<def.count).then_some(menu.sel+1),"slots":slots})
         }).collect();
         let effects=effects_known.then(||(0..self.effects.count.clamp(0,8) as usize).map(|i|json!({"index":i+1,"icon":(self.effects.icon[i]!=u32::MAX).then_some(self.effects.icon[i]),"name":String::from_utf16_lossy(&self.effects.name[i])})).collect());
-        let player_stats = stats_known.then(|| {
-            let m = &self.cm.m;
-            let src = crate::fork_ext::player_stats::Source {
-                stats: &self.stats,
-                inv: &self.dump.inventory,
-                mastery: &m.stats,
-                bonuses: &m.bonuses,
-                p44: self.dump.player.p44 as i32,
-            };
-            crate::fork_ext::player_stats::view(&src).map(|v| v.to_json())
-        }).flatten();
+        let player_stats = stats_known
+            .then(|| {
+                let m = &self.cm.m;
+                let src = crate::fork_ext::player_stats::Source {
+                    stats: &self.stats,
+                    inv: &self.dump.inventory,
+                    mastery: &m.stats,
+                    bonuses: &m.bonuses,
+                    p44: self.dump.player.p44 as i32,
+                };
+                crate::fork_ext::player_stats::view(&src).map(|v| v.to_json())
+            })
+            .flatten();
         View {
             in_world: true,
             phase,

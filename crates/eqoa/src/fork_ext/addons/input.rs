@@ -157,6 +157,23 @@ pub fn reset_input_state() {
     });
 }
 
+/// Routes a live logical key after native chat/menu and ImGui focus gating.
+/// Kept independent of WindowEvent so tests exercise exactly the live policy.
+pub(crate) fn route_mod_key(
+    key: &Key,
+    down: bool,
+    repeat: bool,
+    synthetic: bool,
+    plain_play: bool,
+    keyboard: bool,
+) {
+    if !synthetic && !repeat && plain_play && !keyboard && !is_text_capture_active() {
+        if let Some(name) = crate::binds::name_of(key) {
+            emit_named_key_event(&name, down);
+        }
+    }
+}
+
 pub fn emit_named_key_event(key_name: &str, is_down: bool) {
     let key_str = key_name.to_ascii_lowercase();
     super::native_core::defer(256, move |c| {

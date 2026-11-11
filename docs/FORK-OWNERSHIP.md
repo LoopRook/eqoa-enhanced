@@ -265,3 +265,11 @@ Round 2.5 options tidy: upstream UI and Map retain their own rows and IDs 41-45.
 The categories adapter appends Enhanced HUD and Mods & Addons;
 enhanced-only IDs are 1000+. First-run 64/650 defaults use fork_settings::migrate_defaults;
 ClientOptions::default and saved-file parsing retain upstream defaults.
+
+
+Round 3 HUD timing seam: viewer.rs calls `fork_report::prepare_addons` before
+`Play::hud` and `fork_report::submit_addons` at final queue submission. The
+fork-owned adapter records Lua/ImGui first so native HUD commands are consumed
+in the same frame, then submits ImGui after the scene's scale resolve. Each hook
+occurs once and is checked by fork-footprint.json; viewer's budget falls to
++101/-11. No upstream test is changed by this timing fix.

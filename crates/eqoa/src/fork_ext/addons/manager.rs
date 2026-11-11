@@ -2428,4 +2428,76 @@ mod tests {
             "failed migration must appear in manager diagnostics: {fail_diags:?}"
         );
     }
+    #[test]
+    fn disabled_bundled_hud_mod_removes_option_key_rows_and_drawing() {
+        let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        let ids = [
+            "eqoa_stats_box",
+            "eqoa_target_of_target",
+            "eqoa_mana_bars",
+            "eqoa_hud_numbers",
+        ];
+        for file in crate::fork_ext::bundled::EMBEDDED_FILES {
+            if ids
+                .iter()
+                .any(|id| file.path.starts_with(&format!("{id}/")))
+            {
+                let path = scripts.0.join(file.path);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, file.data).unwrap();
+            }
+        }
+        super::super::options::reset_in_memory();
+        crate::fork_ext::bindpage::reset_in_memory();
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        super::super::native_core::CORE.with(|c| c.borrow_mut().view.in_world = true);
+        super::super::hud_layout::set_hud_state(true, true, false, 93, 20);
+        gpu.frame(&mut manager);
+        assert_eq!(crate::fork_ext::bindpage::extra_rows(), 1);
+        for id in ids {
+            let items = super::super::options::BUNDLED_TOGGLES
+                .iter()
+                .filter(|t| t.0 == id)
+                .map(|t| t.3)
+                .collect::<Vec<_>>();
+            assert!(
+                items
+                    .iter()
+                    .all(|item| super::super::options::active_mod_item_ids().contains(item))
+            );
+            super::super::native_core::CORE.with(|c| c.borrow_mut().view.in_world = true);
+            lua(&manager, id)
+                .load("assert(eqoa.hud.panel({x=200,y=54,w=148,h=132}))")
+                .exec()
+                .unwrap();
+            super::super::hud_layer::MOD_QUEUES
+                .with(|q| assert!(!q.borrow()[id].is_empty(), "drawing before disable"));
+            manager.queue(Command::Enable(id.into(), false));
+            gpu.frame(&mut manager);
+            assert!(
+                items
+                    .iter()
+                    .all(|item| !super::super::options::active_mod_item_ids().contains(item))
+            );
+            super::super::hud_layer::MOD_QUEUES.with(|q| {
+                assert!(
+                    q.borrow().get(id).is_none_or(Vec::is_empty),
+                    "no drawing after disable"
+                )
+            });
+            if id == "eqoa_stats_box" {
+                assert_eq!(crate::fork_ext::bindpage::extra_rows(), 0);
+            }
+        }
+        assert!(
+            manager.diagnostics().is_empty(),
+            "{:?}",
+            manager.diagnostics()
+        );
+        manager.shutdown();
+        super::super::options::set_storage_root(None);
+    }
 }

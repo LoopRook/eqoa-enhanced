@@ -19,32 +19,26 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     _play.session.agree_power_bars(true);
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let me = _play.self_id32();
-        let other_members = if _play.group.in_group {
-            _play.group.members[.._play.group.count()]
-                .iter()
-                .filter(|m| Some(m.id) != me && m.active)
-                .count()
+        let has_pet = _play.pet_id != u32::MAX;
+        let effects_height = if has_pet {
+            crate::hud::pet_effects_height(_play.pet_effects().len())
         } else {
             0
         };
-        let pet_y = if _play.group.in_group {
-            if !_play.group.raid.is_empty() {
-                340
+        let pet_y = if _play.group.raid.is_empty() {
+            93 + ((_play.group.count() as i32 - 1) * 48).max(0)
+        } else {
+            let below = if has_pet {
+                crate::raidlist::PET_H + effects_height
             } else {
-                93 + 48 * other_members as i32
-            }
-        } else {
-            93
+                0
+            };
+            crate::raidlist::Fit::under(_play.group.raid.len(), below).bounds([20, 93])[3] + 2
         };
-        let pet_h = if _play.pet_id != u32::MAX && _play.pet_id != 0 {
-            28
-        } else {
-            20
-        };
+        let pet_h = if has_pet { 46 + effects_height } else { 0 };
         crate::fork_ext::addons::hud_layout::set_hud_state(
             _play.right_hud_up(),
-            !_play.loading_up() && _play.hud_ready(),
+            _play.right_hud_up(),
             _play.group.in_group && !_play.group.raid.is_empty(),
             pet_y,
             pet_h,
@@ -2224,4 +2218,3 @@ mod tests {
         );
     }
 }
-

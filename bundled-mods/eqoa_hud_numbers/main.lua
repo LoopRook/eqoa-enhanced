@@ -20,8 +20,8 @@ eqoa.events.on("render", function()
     local player = eqoa.player.get()
     if player then
         -- Player HP %
-        if hud_on and eqoa.hud.visible("health") and player.hp and player.hp.maximum and player.hp.maximum > 0 then
-            local pct = math.floor((player.hp.current / player.hp.maximum) * 100 + 0.5)
+        if hud_on and eqoa.hud.visible("health") and player.hp_fraction ~= nil then
+            local pct = math.floor(player.hp_fraction * 100 + 0.5)
             eqoa.hud.text({
                 x = 99,
                 y = 35,

@@ -86,6 +86,7 @@ const EVENTS: &[&str] = &[
     "world.entered",
     "state.reset",
     "player.changed",
+    "player.stats_changed",
     "target.changed",
     "entity.added",
     "entity.changed",
@@ -115,6 +116,7 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("world.entered", "world_id initial"),
         ("state.reset", "in_world initial"),
         ("player.changed", "before after changed"),
+        ("player.stats_changed", ""),
         ("target.changed", "before after"),
         ("entity.added", "ref before after changed"),
         ("entity.changed", "ref before after changed"),
@@ -211,7 +213,11 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
             lua,
             &format!("eqoa.events.{name}"),
             "supported",
-            Some(2),
+            Some(if *name == "player.stats_changed" {
+                3
+            } else {
+                2
+            }),
             "",
         );
     }

@@ -383,6 +383,10 @@ impl Core {
             self.emit("state.reset", json!({"in_world":true,"initial":false}));
         }
         let previous = std::mem::replace(&mut self.view, view);
+        if self.view.in_world && previous.player_stats != self.view.player_stats {
+            self.emit("player.stats_changed", json!({}));
+        }
+
         if !entered && self.view.in_world {
             if previous.player["target_id"] != self.view.player["target_id"] {
                 let before = previous
