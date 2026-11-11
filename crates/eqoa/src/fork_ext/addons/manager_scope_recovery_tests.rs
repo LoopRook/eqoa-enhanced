@@ -297,3 +297,78 @@ fn forge_recovery_modern_legacy_level59() {
 fn forge_recovery_modern_legacy_level60() {
     modern_recovery_matrix(false, 60);
 }
+
+#[test]
+fn failed_option_saves_reach_manager_and_error_log_without_changing_switch() {
+    crate::settings::testing::reset(false);
+    super::super::options::reset_in_memory();
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    root.package(
+        "save_failure",
+        true,
+        r#"
+        eqoa.options.toggle({id='switch',label='Save Test',default=false})
+        if attempt then
+            local ok,err=eqoa.options.set('switch',true)
+            assert(ok==nil and err.code=='io_error')
+            assert(eqoa.options.get('switch')==false)
+        end
+    "#,
+    );
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    gpu.frame(&mut manager);
+    let key = super::super::storage::Storage::key_for_addon_id("save_failure");
+    let blocked = config.0.join("addons").join(format!("{key}.json"));
+    fs::create_dir_all(&blocked).unwrap();
+    let (_, item) =
+        super::super::options::register_toggle("save_failure", "switch", "Save Test", false);
+    assert!(!super::super::options::toggle_by_item(item));
+    // Drain the Controls failure alone, before Lua can generate its own error.
+    gpu.frame(&mut manager);
+    assert_eq!(super::super::options::value_by_item(item), Some(false));
+    assert!(
+        manager
+            .diagnostics()
+            .iter()
+            .any(|d| d.id.as_deref() == Some("save_failure")
+                && d.message.contains("eqoa.options.set")
+                && d.message.contains("io_error"))
+    );
+    let log = fs::read_to_string(root.0.join("addons_error.log")).unwrap();
+    assert!(
+        log.contains("save_failure")
+            && log.contains("eqoa.options.set")
+            && log.contains("io_error")
+    );
+    assert_eq!(
+        manager.entries[0].status,
+        Status::Enabled,
+        "a reported save failure must not kill the addon"
+    );
+    lua(&manager, "save_failure")
+        .globals()
+        .set("attempt", true)
+        .unwrap();
+    gpu.frame(&mut manager);
+    assert_eq!(super::super::options::value_by_item(item), Some(false));
+    assert_eq!(manager.entries[0].status, Status::Enabled);
+    // Positive control uses the same registered UI row and persisted file.
+    fs::remove_dir(&blocked).unwrap();
+    lua(&manager, "save_failure")
+        .globals()
+        .set("attempt", false)
+        .unwrap();
+    assert!(super::super::options::toggle_by_item(item));
+    lua(&manager, "save_failure")
+        .load("assert(eqoa.options.get('switch')==true)")
+        .exec()
+        .unwrap();
+    assert!(blocked.is_file());
+    manager.shutdown();
+    super::super::options::set_storage_root(None);
+    crate::settings::testing::reset(false);
+}

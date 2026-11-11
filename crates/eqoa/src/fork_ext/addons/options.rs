@@ -2,7 +2,7 @@
 //! Mod option toggles for Enhanced HUD options and `eqoa.options.toggle`.
 use serde_json::{Value as Json, json};
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 pub const MOD_OPTION_BASE: i32 = 2000;
@@ -59,6 +59,7 @@ fn default_toggles() -> Vec<ModToggle> {
 thread_local! {
     static TOGGLES: RefCell<Vec<ModToggle>> = RefCell::new(default_toggles());
     static DISABLED_ADDONS: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    static DIAGNOSTICS: RefCell<HashMap<String, super::native::DiagnosticSink>> = RefCell::new(HashMap::new());
     static STORAGE_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
@@ -69,20 +70,44 @@ pub fn set_storage_root(root: Option<PathBuf>) {
 pub fn reset_in_memory() {
     TOGGLES.with(|t| *t.borrow_mut() = default_toggles());
     DISABLED_ADDONS.with(|d| d.borrow_mut().clear());
+    DIAGNOSTICS.with(|d| d.borrow_mut().clear());
 }
 
-fn resolve_addon_id<'a>(addon_id: &'a str, id: &str) -> &'a str {
-    if addon_id.is_empty() || addon_id == "mod" || addon_id == "test" {
-        if let Some((bundled_addon, _, _, _, _)) =
-            BUNDLED_TOGGLES.iter().find(|(_, tid, _, _, _)| *tid == id)
-        {
-            return bundled_addon;
+pub(crate) fn attach_diagnostics(addon_id: &str, sink: super::native::DiagnosticSink) {
+    DIAGNOSTICS.with(|d| {
+        d.borrow_mut().insert(addon_id.to_string(), sink);
+    });
+}
+
+fn save_error(addon_id: &str, id: &str, message: &str) {
+    DIAGNOSTICS.with(|d| {
+        if let Some(sink) = d.borrow().get(addon_id) {
+            sink.record(
+                "eqoa.options.set",
+                "io_error",
+                &format!("could not save {id}: {message}"),
+            );
         }
-        if addon_id.is_empty() || addon_id == "mod" {
-            return "test";
-        }
-    }
-    addon_id
+    });
+}
+
+/// Whether an addon is active, independently of its saved switches.
+pub fn is_addon_enabled(addon_id: &str) -> bool {
+    DISABLED_ADDONS.with(|d| !d.borrow().contains(addon_id))
+}
+
+/// The switch requests behavior only while its owning addon is enabled.
+pub fn effective_toggle(addon_id: &str, id: &str) -> bool {
+    // Registration/migration loads persisted values before gameplay. Network and
+    // frame consumers read only the cached value: no filesystem work in the loop.
+    is_addon_enabled(addon_id)
+        && TOGGLES.with(|toggles| {
+            toggles
+                .borrow()
+                .iter()
+                .find(|o| o.addon_id == addon_id && o.id == id)
+                .is_some_and(|o| o.enabled && o.current_value)
+        })
 }
 
 fn bundled_info(addon_id: &str, id: &str) -> Option<(i32, &'static str, bool)> {
@@ -170,12 +195,11 @@ fn persist_toggle(addon_id: &str, id: &str, value: bool) -> Result<(), String> {
     {
         let _ = (&rel_path, &bytes);
         if STORAGE_ROOT.with(|r| r.borrow().is_none()) {
-            if let Some(dir) = std::env::var_os("EQOA_CONFIG")
+            let dir = std::env::var_os("EQOA_CONFIG")
                 .map(PathBuf::from)
                 .or_else(crate::settings::config_dir)
-            {
-                super::storage::Storage::new(Some(dir)).save_encoded(&v2_key, &new_json)?;
-            }
+                .ok_or_else(|| "configuration directory is unavailable".to_string())?;
+            super::storage::Storage::new(Some(dir)).save_encoded(&v2_key, &new_json)?;
         }
     }
     Ok(())
@@ -200,7 +224,6 @@ pub fn set_addon_enabled(addon_id: &str, enabled: bool) {
 }
 
 pub fn register_toggle(addon_id: &str, id: &str, label: &str, default_value: bool) -> (bool, i32) {
-    let addon_id = resolve_addon_id(addon_id, id);
     let enabled = DISABLED_ADDONS.with(|d| !d.borrow().contains(addon_id));
     TOGGLES.with(|t| {
         let mut t = t.borrow_mut();
@@ -250,7 +273,6 @@ pub fn unregister_addon_toggles(addon_id: &str) {
 }
 
 pub fn get_toggle(addon_id: &str, id: &str) -> Option<bool> {
-    let addon_id = resolve_addon_id(addon_id, id);
     TOGGLES.with(|t| {
         let mut t = t.borrow_mut();
         if let Some(o) = t.iter_mut().find(|o| o.addon_id == addon_id && o.id == id) {
@@ -281,21 +303,11 @@ pub fn get_toggle(addon_id: &str, id: &str) -> Option<bool> {
         if let Some(persisted) = persisted {
             return Some(persisted);
         }
-        if let Some(o) = t.iter_mut().find(|o| o.id == id) {
-            if !o.explicit_in_memory {
-                if let Some(p) = load_persisted_toggle(&o.addon_id, &o.id) {
-                    o.current_value = p;
-                }
-                o.explicit_in_memory = true;
-            }
-            return Some(o.current_value && o.enabled);
-        }
         None
     })
 }
 
 pub fn set_toggle_persisted(addon_id: &str, id: &str, value: bool) -> Result<(), String> {
-    let addon_id = resolve_addon_id(addon_id, id);
     persist_toggle(addon_id, id, value)?;
     let enabled = DISABLED_ADDONS.with(|d| !d.borrow().contains(addon_id));
     TOGGLES.with(|t| {
@@ -329,62 +341,27 @@ pub fn set_toggle_persisted(addon_id: &str, id: &str, value: bool) -> Result<(),
 }
 
 pub fn set_toggle(addon_id: &str, id: &str, value: bool) -> bool {
-    let addon_id = resolve_addon_id(addon_id, id);
-    let _ = persist_toggle(addon_id, id, value);
-    let enabled = DISABLED_ADDONS.with(|d| !d.borrow().contains(addon_id));
-    TOGGLES.with(|t| {
-        let mut t = t.borrow_mut();
-        if let Some(o) = t.iter_mut().find(|o| o.addon_id == addon_id && o.id == id) {
-            o.current_value = value;
-            o.explicit_in_memory = true;
-            true
-        } else {
-            let next_id = t
-                .iter()
-                .map(|o| o.item_id)
-                .max()
-                .unwrap_or(MOD_OPTION_BASE + 5)
-                + 1;
-            let (item_id, label, def) = bundled_info(addon_id, id)
-                .map(|(i, l, d)| (i, l.to_string(), d))
-                .unwrap_or_else(|| (next_id, id.to_string(), false));
-            t.push(ModToggle {
-                item_id,
-                addon_id: addon_id.to_string(),
-                id: id.to_string(),
-                label,
-                default_value: def,
-                current_value: value,
-                enabled,
-                explicit_in_memory: true,
-            });
-            true
+    match set_toggle_persisted(addon_id, id, value) {
+        Ok(()) => true,
+        Err(message) => {
+            save_error(addon_id, id, &message);
+            false
         }
-    })
+    }
 }
 
 pub fn toggle_by_item(item_id: i32) -> bool {
-    let changed = TOGGLES.with(|t| {
-        let mut t = t.borrow_mut();
-        if let Some(o) = t.iter_mut().find(|o| o.item_id == item_id && o.enabled) {
-            if !o.explicit_in_memory {
-                if let Some(p) = load_persisted_toggle(&o.addon_id, &o.id) {
-                    o.current_value = p;
-                }
-            }
-            o.current_value = !o.current_value;
-            o.explicit_in_memory = true;
-            Some((o.addon_id.clone(), o.id.clone(), o.current_value))
-        } else {
-            None
-        }
+    let owner = TOGGLES.with(|t| {
+        t.borrow()
+            .iter()
+            .find(|o| o.item_id == item_id && o.enabled)
+            .map(|o| (o.addon_id.clone(), o.id.clone()))
     });
-    if let Some((addon_id, id, val)) = changed {
-        let _ = persist_toggle(&addon_id, &id, val);
-        true
-    } else {
-        false
-    }
+    let Some((addon_id, id)) = owner else {
+        return false;
+    };
+    let current = get_toggle(&addon_id, &id).unwrap_or(false);
+    set_toggle(&addon_id, &id, !current)
 }
 
 pub fn value_by_item(item_id: i32) -> Option<bool> {

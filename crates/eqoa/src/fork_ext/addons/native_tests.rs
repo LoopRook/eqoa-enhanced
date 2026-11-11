@@ -568,7 +568,7 @@ fn round_3_stage_a_hud_frame_and_layout_and_visible() {
 
 #[test]
 fn round_3_stage_a_options_toggle_and_get() {
-    let h = Host::new().unwrap();
+    let h = option_test_host("my_custom_mod");
 
     // Negative control: invalid argument
     h.execute(
@@ -582,7 +582,6 @@ fn round_3_stage_a_options_toggle_and_get() {
     .unwrap();
 
     // Valid registration under the caller's real addon ID
-    super::native::session(&h.lua).borrow_mut().addon = "my_custom_mod".to_string();
     h.execute(
         r#"
         local t, err = eqoa.options.toggle({ id = "test_opt", label = "Test Option", default = true })
@@ -609,8 +608,7 @@ fn round_3_stage_a_options_toggle_and_get() {
     .unwrap();
 
     // Second mod with the same toggle id ("test_opt") does not collide with my_custom_mod
-    let h2 = Host::new().unwrap();
-    super::native::session(&h2.lua).borrow_mut().addon = "other_custom_mod".to_string();
+    let h2 = option_test_host("other_custom_mod");
     h2.execute(
         r#"
         local t, err = eqoa.options.toggle({ id = "test_opt", label = "Other Option", default = true })
@@ -695,13 +693,32 @@ fn round_3_stage_a_controls_page_rebind_and_negative_control() {
     let entries_before = crate::bindpage::defaults();
     let _ = crate::fork_ext::bindpage::register("mod_test", "custom_key", "p", "Custom Action");
     let entries_after = crate::bindpage::defaults();
-    assert_eq!(entries_after, entries_before + 1, "ControlsPage defaults entry shifted down by 1 extra row");
+    assert_eq!(
+        entries_after,
+        entries_before + 1,
+        "ControlsPage defaults entry shifted down by 1 extra row"
+    );
 
     // Negative control: old key does not fire after rebind
-    assert!(crate::fork_ext::bindpage::set_key("mod_test", "custom_key", "z"));
-    assert_eq!(crate::fork_ext::bindpage::get_key("mod_test", "custom_key"), Some("z".into()));
-    assert_eq!(crate::fork_ext::bindpage::dispatch_keypress("p"), None, "old key does not fire");
-    assert_eq!(crate::fork_ext::bindpage::dispatch_keypress("z"), Some(("mod_test".into(), "custom_key".into())), "new key fires");
+    assert!(crate::fork_ext::bindpage::set_key(
+        "mod_test",
+        "custom_key",
+        "z"
+    ));
+    assert_eq!(
+        crate::fork_ext::bindpage::get_key("mod_test", "custom_key"),
+        Some("z".into())
+    );
+    assert_eq!(
+        crate::fork_ext::bindpage::dispatch_keypress("p"),
+        None,
+        "old key does not fire"
+    );
+    assert_eq!(
+        crate::fork_ext::bindpage::dispatch_keypress("z"),
+        Some(("mod_test".into(), "custom_key".into())),
+        "new key fires"
+    );
 }
 
 #[test]
@@ -764,9 +781,9 @@ fn round_3_stage_a_entity_and_group_power_fractions() {
 
 #[test]
 fn round_3_hud_layer_draw_calls_and_queue() {
-    use super::native_core::CORE;
     use super::hud_layer;
     use super::native::session;
+    use super::native_core::CORE;
 
     CORE.with(|c| {
         c.borrow_mut().view.in_world = true;
@@ -803,4 +820,180 @@ fn round_3_hud_layer_draw_calls_and_queue() {
     assert_eq!(count, 4, "all 4 commands queued");
 
     hud_layer::clear_all();
+}
+
+// Package metadata supplies identity exactly as discovery does in production.
+fn option_test_host(id: &str) -> Host {
+    use super::discovery::{DiscoveredAddon, EntryMode};
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../bundled-mods/eqoa_stats_box");
+    Host::for_addon(&DiscoveredAddon {
+        id: id.into(),
+        name: id.into(),
+        entry: root.join("main.lua"),
+        script_root: root.clone(),
+        package_root: root.clone(),
+        module_dirs: vec![root.clone()],
+        resource_dirs: vec![root],
+        api: Some("eqoa/1".into()),
+        entry_mode: EntryMode::Once,
+        requested_capabilities: Vec::new(),
+        initially_enabled: true,
+        mods_root: None,
+    })
+    .unwrap()
+}
+
+#[test]
+fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
+    super::options::set_storage_root(None);
+    crate::settings::testing::reset(true);
+    super::options::reset_in_memory();
+    let host = option_test_host("eqoa_stats_box");
+    host.execute(
+        r#"
+        eqoa.options.toggle({id='stats_box',default=false})
+        local ok,err = eqoa.options.set('stats_box',true)
+        assert(ok == nil and err.code == 'io_error')
+        assert(eqoa.options.get('stats_box') == false)
+        local state,action_err = eqoa.actions.toggle_stats_box()
+        assert(state == nil and action_err.code == 'io_error')
+        assert(eqoa.options.get('stats_box') == false)
+    "#,
+    )
+    .unwrap();
+    assert!(!super::options::toggle_by_item(2000));
+    assert_eq!(super::options::value_by_item(2000), Some(false));
+    assert!(!super::options::set_toggle(
+        "eqoa_stats_box",
+        "stats_box",
+        true
+    ));
+    assert_eq!(
+        super::options::get_toggle("eqoa_stats_box", "stats_box"),
+        Some(false)
+    );
+    let logs = host.drain_logs().unwrap();
+    assert!(
+        logs.iter()
+            .any(|line| line.contains("eqoa.options.set") && line.contains("io_error"))
+    );
+    assert!(logs.iter().any(|line| line.contains("eqoa.actions.toggle_stats_box") && line.contains("io_error")));
+
+    // Positive control: the same API and Controls row work once storage is writable.
+    crate::settings::testing::reset(false);
+    host.execute(
+        r#"
+        local state,err = eqoa.actions.toggle_stats_box()
+        assert(state == true and err == nil)
+        state,err = eqoa.actions.toggle_stats_box()
+        assert(state == false and err == nil)
+        local ok,save_err = eqoa.options.set('stats_box',true)
+        assert(ok == true and save_err == nil)
+    "#,
+    )
+    .unwrap();
+    assert!(super::options::toggle_by_item(2000));
+    assert_eq!(super::options::value_by_item(2000), Some(false));
+    super::options::reset_in_memory();
+    crate::settings::testing::reset(false);
+}
+
+#[test]
+fn option_and_bind_names_never_redirect_caller_identity() {
+    crate::settings::testing::reset(false);
+    super::options::set_storage_root(None);
+    super::options::reset_in_memory();
+    crate::fork_ext::bindpage::reset_in_memory();
+    for id in ["test", "mod", "third_party"] {
+        let host = option_test_host(id);
+        host.execute(
+            r#"
+            assert(eqoa.options.get('stats_box') == nil)
+            local toggle = eqoa.options.toggle({id='stats_box',default=true})
+            assert(toggle.value == true)
+            assert(eqoa.options.get('stats_box') == true)
+            assert(eqoa.options.set('stats_box',false))
+            local state,err = eqoa.actions.toggle_stats_box()
+            assert(state == nil and err.code == 'permission_denied')
+            assert(eqoa.options.get('stats_box') == false)
+            assert(eqoa.input.bind({id='toggle',label='Toggle Stats Box',default_key='b'}))
+            assert(eqoa.binds.get('toggle') == 'b')
+            assert(eqoa.binds.register('toggle','b','Toggle Stats Box'))
+        "#,
+        )
+        .unwrap();
+        assert_eq!(super::options::get_toggle(id, "stats_box"), Some(false));
+        assert!(crate::fork_ext::bindpage::get_key(id, "toggle").is_some());
+        assert_eq!(
+            super::options::get_toggle("eqoa_stats_box", "stats_box"),
+            Some(false)
+        );
+        assert_eq!(
+            crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle"),
+            None
+        );
+    }
+    assert_eq!(
+        super::options::get_toggle("unregistered", "stats_box"),
+        None
+    );
+    super::options::reset_in_memory();
+    crate::fork_ext::bindpage::reset_in_memory();
+    crate::settings::testing::reset(false);
+}
+
+#[test]
+fn explicit_foreign_option_reads_respect_enabled_state_without_fallback() {
+    crate::settings::testing::reset(false);
+    super::options::set_storage_root(None);
+    super::options::reset_in_memory();
+    let host = option_test_host("eqoa_target_of_target");
+    host.execute(
+        r#"
+        assert(eqoa.options.get('mana_bars') == nil)
+        assert(eqoa.options.get('mana_bars','eqoa_mana_bars') == true)
+        assert(eqoa.options.get('missing','eqoa_mana_bars') == nil)
+    "#,
+    )
+    .unwrap();
+    assert!(super::options::effective_toggle(
+        "eqoa_mana_bars",
+        "mana_bars"
+    ));
+    super::options::set_addon_enabled("eqoa_mana_bars", false);
+    assert!(!super::options::effective_toggle(
+        "eqoa_mana_bars",
+        "mana_bars"
+    ));
+    assert_eq!(
+        super::options::get_toggle("eqoa_mana_bars", "mana_bars"),
+        Some(true)
+    );
+    host.execute("assert(eqoa.options.get('mana_bars','eqoa_mana_bars') == false)")
+        .unwrap();
+    super::options::set_addon_enabled("eqoa_mana_bars", true);
+    assert!(super::options::set_toggle(
+        "eqoa_mana_bars",
+        "mana_bars",
+        false
+    ));
+    assert!(!super::options::effective_toggle(
+        "eqoa_mana_bars",
+        "mana_bars"
+    ));
+    super::options::reset_in_memory();
+    crate::settings::testing::reset(false);
+}
+
+#[test]
+fn stats_box_status_message_matches_the_saved_state() {
+    assert_eq!(
+        super::native_state::stats_box_message(true),
+        "stats box shown"
+    );
+    assert_eq!(
+        super::native_state::stats_box_message(false),
+        "stats box hidden"
+    );
 }

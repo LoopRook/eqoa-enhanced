@@ -258,14 +258,14 @@ fn readouts(s: &HudState, need: u32, flags: [bool; 3]) -> Vec<Readout> {
     out
 }
 
-pub(crate) fn draw(vui: &crate::ui::Vui, ui: &mut UiRaster<'_>, _s: &HudState) {
+pub(crate) fn draw(vui: &crate::ui::Vui, ui: &mut UiRaster<'_>, _s: &HudState, target_alpha: f32) {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        crate::fork_ext::addons::hud_layer::draw(vui, ui);
+        crate::fork_ext::addons::hud_layer::draw_with_target_alpha(vui, ui, target_alpha);
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (vui, ui);
+        let _ = (vui, ui, target_alpha);
     }
 }
 

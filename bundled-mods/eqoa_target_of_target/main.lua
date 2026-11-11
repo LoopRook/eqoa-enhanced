@@ -18,10 +18,10 @@ eqoa.events.on("render", function()
     if not tot or not tot.name or tot.name == "" or tot.name:match("^%s*$") then return end
 
     -- 3-piece bar at [20, 300], width 174
-    eqoa.hud.image({ ui_id = 25, x = 20, y = 300, w = 174, vertical = "bottom" })
+    eqoa.hud.image({ ui_id = 25, x = 20, y = 300, w = 174, target_fade = true, vertical = "bottom" })
 
     -- Centered black name text
-    eqoa.hud.text({ x = 20 + 87, y = 300 + 12, text = tot.name, color = black, clip_width = 160, vertical = "bottom" })
+    eqoa.hud.text({ x = 20 + 87, y = 300 + 12, text = tot.name, color = black, clip_width = 160, target_fade = true, vertical = "bottom" })
 
     -- HP gauge (art 7)
     if tot.hp_fraction then
@@ -29,12 +29,12 @@ eqoa.events.on("render", function()
     end
 
     -- Power gauge (art 9), gated by the Mana Bars option
-    if tot.power and eqoa.options.get("mana_bars") then
+    if tot.power and eqoa.options.get("mana_bars", "eqoa_mana_bars") then
         eqoa.hud.gauge({ x = 30, y = 335, art = 9, fill = tot.power, lit = true, vertical = "bottom" })
     end
 
     -- Clickable name bar to Assist, only while the HUD is in plain play.
-    if eqoa.imgui and eqoa.hud.visible("stats_box") then
+    if eqoa.imgui and eqoa.hud.visible("plain_play") then
         local frame = eqoa.hud.frame()
         local sx = frame.offset_x + (20 - frame.side) * frame.scale_x
         local sy = frame.offset_y + (300 + frame.top) * frame.scale_y

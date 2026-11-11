@@ -9,7 +9,7 @@
   "enabled": true,
   "capabilities": [
     "eqoa.target.get",
-    "eqoa.entities.list",
+    "eqoa.entities.find",
     "eqoa.hud.image",
     "eqoa.hud.gauge",
     "eqoa.hud.text",

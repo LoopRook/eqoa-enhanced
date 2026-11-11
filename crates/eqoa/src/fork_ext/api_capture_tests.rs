@@ -1777,3 +1777,46 @@ fn addon_actions_use_live_camera_assist_and_summary_overlay_gates() {
         "one queued request for each successful API call"
     );
 }
+
+#[test]
+fn mana_subscription_follows_enabled_mod_and_its_saved_switch_both_directions() {
+    use crate::fork_ext::addons::options;
+    crate::settings::testing::reset(false);
+    options::reset_in_memory();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    p.session.power_bars_offer = true;
+    let mut sends = p.session.sends_lost;
+    for (enabled, switched_on, expected_send, expected_keep) in [
+        (true, true, true, true),
+        (true, true, false, true),
+        (true, false, true, false),
+        (true, true, true, true),
+        (false, true, true, false),
+        (true, true, true, true),
+        (false, false, true, false),
+        (true, false, false, false),
+        (true, true, true, true),
+    ] {
+        options::set_addon_enabled("eqoa_mana_bars", enabled);
+        assert!(options::set_toggle(
+            "eqoa_mana_bars",
+            "mana_bars",
+            switched_on
+        ));
+        p.session.power_bars = vec![(42, 127)];
+        begin_iteration(&mut p, false);
+        assert_eq!(
+            p.session.sends_lost - sends,
+            u32::from(expected_send),
+            "enabled={enabled}, switch={switched_on}: actual native agreement send transition"
+        );
+        assert_eq!(
+            p.session.power_of(42).is_some(),
+            expected_keep,
+            "disabled agreement must clear the native received set"
+        );
+        sends = p.session.sends_lost;
+    }
+    options::reset_in_memory();
+}

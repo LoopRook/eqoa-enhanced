@@ -4,6 +4,8 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Rebound mod keys survive later changes to native controls. Failed HUD option saves report an error, and disabling Mana Bars stops requesting group power updates. Target of Target fades with the native target plate.
+
 - Four HUD extras (Stats Box, Target of Target, Mana Bars, and HUD numbers) are now bundled Lua mods (`eqoa_stats_box`, `eqoa_target_of_target`, `eqoa_mana_bars`, and `eqoa_hud_numbers`), enabled by default. Stats Box and Target of Target start off; Mana Bars and numeric readouts start on. Existing settings carry over, and the Stats Box key can be rebound on Controls. Disabling a mod removes its HUD options and key rows.
 - Added upstream raid leadership marks, loot-roll strips, raid menus and master-looter controls on servers that offer them. Hat D-pads and WebGL2 context-loss handling include upstream fixes.
 

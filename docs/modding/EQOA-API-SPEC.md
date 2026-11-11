@@ -70,7 +70,7 @@ This is the **normative capability spelling index**, not a list inferred from wh
 | `abilities` | list, get, find, in_range | §4 /2 |
 | `actions` | target_target, toggle_stats_box; status, cancel, target, cycle_target, assist, interact, attack, cast, use_hotbar, use_item, equip, destroy, swap_items, quick_slot, weapon_set, prepare_weapon_set, assign_ability, unmemorize_ability, unmemorize_all, arrange_ability, loot, loot_all, buy, sell, bank_move, bank_money, chat, command, move, look, autorun, follow, stop, camera, open_window, close_window, select_row, activate_row, dialog_answer, input_text, drop_quest, mastery_share, mastery_browse, mastery_buy, mastery_refund, buttons, menu_command | §8 /3 target_target/toggle_stats_box; /4 others |
 | `bank` | get | §6 /3 |
-| `binds` | register | §5 /3 |
+| `binds` | register, get | §5 /3 |
 | `camera` | get, compass | §7 /4 |
 | `capabilities` | get, list, has | §2 /2 |
 | `chat` | history, get_channel, channel_name | §4 /2 |
@@ -88,7 +88,7 @@ This is the **normative capability spelling index**, not a list inferred from wh
 | `hud` | hide, show, hidden_by; frame, layout, visible | §5 /2; frame/layout/visible /3 |
 | `icons` | resource, ui, info; class, disposition | §5 /2; class/disposition /4 |
 | `imgui` | vec2, vec4, plus **every individually named required ImGui function in §5** | §5 /2 and explicitly marked /4 additions |
-| `input` | get, claim, release, capture_text, rotate_dpad | §4 /2 |
+| `input` | get, claim, release, capture_text, rotate_dpad, bind | §4 /2 |
 | `inventory` | get | §6 /3 |
 | `items` | get, can_use, stat, slot_info, attack_name, stat_name | §6 /3 |
 | `log` | write | §5 /2 |
@@ -306,13 +306,15 @@ Hotbar.index is native carousel menu index+1 (1..number of returned menus); Hotb
 | `eqoa.hud.gauge(spec:{x:int,y:int,art:int,fill:number,lit?:bool,anchor?:string,vertical?:string})` | W: `bool`: queues a native gauge (e.g. art 9 mana, 7 health) with authentic frame 136, drawn by native gauge raster. Returns nil,not_in_world outside world. Native source: `fork_ext/addons/hud_layer.rs`. |
 | `eqoa.hud.image(spec:{ui_id:int|string,x:int,y:int,w?:int,h?:int,color?:number[],anchor?:string,vertical?:string})` | W: `bool`: queues a native UI texture blit in the HUD pass. `ui_id=25` is special-cased to the 3-piece bar (entries 25/26) so `eqoa.target_of_target` can draw its name bar; `ui_id="panel"` draws an authentic window backing/border; any other id is a plain blit (tinted by `color`). Returns nil,not_in_world outside world. Native source: `fork_ext/addons/hud_layer.rs`. |
 | `eqoa.hud.panel(spec:{x:int,y:int,w:int,h:int})` | W: `bool`: queues an authentic game window backing and border frame in the HUD pass. Returns nil,not_in_world outside world. Native source: `fork_ext/addons/hud_layer.rs`. |
-| `eqoa.options.get(id:string)` | A: `bool?`: reads the current value of a mod or client toggle setting. Native source: `fork_ext/addons/options.rs`. |
-| `eqoa.options.set(id:string,value:bool)` | A: `bool`: updates the value of a mod toggle setting. Native source: `fork_ext/addons/options.rs`. |
+| `eqoa.options.get(id:string,addon_id?:string)` | A: `bool?`: without an owner, reads only the calling addon's saved switch; unknown IDs return nil,nil. An explicit owner permits a read of that addon's switch and returns false while that addon is disabled. IDs and labels never redirect identity or search other addons. Native source: `fork_ext/addons/options.rs`. |
+| `eqoa.options.set(id:string,value:bool)` | A: `true,nil` after atomic persistence under the calling addon's identity. A failed save returns nil,io_error, leaves the switch unchanged, and reports through Addon Manager and addons_error.log. UI toggles use the same save-first behavior. Native source: `fork_ext/addons/options.rs`. |
 | `eqoa.options.toggle(spec:{id:string,label?:string,default?:bool})` | A: `Toggle={id:string,label:string,default:bool,value:bool,item_id:int}`: registers an options toggle. Native source: `fork_ext/addons/options.rs`. |
 | `eqoa.binds.register(id:string,default_key:string,description:string)` | A: `bool`: registers a mod-owned keybind on the Controls page under `mod.<addon>.<id>`. Native source: `fork_ext/bindpage.rs`. |
+| `eqoa.binds.get(id:string)` | A: `string?,nil`: current key for the calling addon's registered Controls row; nil when missing or disabled, empty string when explicitly unbound. No cross-addon lookup. |
+| `eqoa.input.bind(spec:{id:string,label?:string,default_key?:string,callback?:function},callback?:function)` | A: `bool,nil`: registers the caller's Controls row (default key `b`, label defaults to id) and optionally subscribes a callback to `input.key`. A second-argument callback takes precedence. Calls it on a matching key-down, excluding repeats, using the current registered key after rebinding. Missing, disabled and unbound rows never invoke it. Invalid spec/id/callback returns nil,invalid_argument. Uses the same binding registry as binds.register; labels and IDs never change addon identity. |
 | `eqoa.actions.target_target()` | W: `bool,nil`: assists the current target by targeting its target. Nil,not_in_world outside world. Native source: `fork_ext/addons/actions.rs`. |
 | `eqoa.actions.assist()` | W: `bool,nil`: same path as `target_target` (the Assist Target action), one request per call. Nil,not_in_world outside world, nil,busy when already queued this tick. Native source: `fork_ext/addons/actions.rs`. |
-| `eqoa.actions.toggle_stats_box()` | W: `bool,nil`: toggles the stats box option and prints the same "stats box shown"/"stats box hidden" line as the B key. Nil,not_in_world outside world. Native source: `fork_ext/addons/actions.rs`. |
+| `eqoa.actions.toggle_stats_box()` | A: compatibility action reserved for the `eqoa_stats_box` addon. Returns `bool,nil` with the new shown/hidden state after saving, then prints the matching status message through native `say` (stderr on desktop), as develop did. Failed save returns nil,io_error, preserves the state and emits no success message. Other addons get nil,permission_denied and should use their own options.get/set instead. |
 | `eqoa.windows.open(name:string)` | W: `bool,nil`: opens a native window; only `"summary"` (the Character Summary) is supported, through the same path as the Stats Box click. Nil,invalid_argument for any other name, nil,not_in_world outside world. Native source: `fork_ext/addons/actions.rs`. |
 | `eqoa.player.stats()` | W: `Stats={strength:StatItem,stamina:StatItem,agility:StatItem,dexterity:StatItem,wisdom:StatItem,intelligence:StatItem,charisma:StatItem,armor:StatItem,max_hp:StatItem,max_power:StatItem,fire:StatItem,cold:StatItem,lightning:StatItem,arcane:StatItem,poison:StatItem,disease:StatItem,rows:StatItem[]}` where `StatItem={name:string,base:int,current:int,change:int}`. Nil,not_in_world outside world. Native source: `fork_ext/addons/player_stats.rs`. |
 | `eqoa.icons.resource(hash:uint,options:IconOptions={})` | W/S: TextureInfo; direct live ESF cache, automatic ownership (no Acquire prerequisite). `A/icons.rs:667,1271`, `F:42`. |
@@ -327,6 +329,14 @@ Hotbar.index is native carousel menu index+1 (1..number of returned menus); Hotb
 | `eqoa.math.facing(position:Vec3,heading:number,destination:Vec3,tolerance:number)` | A: bool; shortest bearing difference ≤ tolerance radians, tolerance 0..π; same point true. |
 | `eqoa.math.is_bit_zero(value:uint,mask:uint)` | A: bool; inputs 0..0xffffffff, `(value & mask)==0`, no shifts/index adjustment. Safe equivalent of `R/util.lua:377`; native band implementation `A/bit.rs:85..105`. The existing global/require `bit` stays available with its existing BitOp normalization; it is not a new eqoa module. |
 | `eqoa.player.experience_for_level(level:uint)` | A: uint threshold or nil,nil outside 1..59; use **native** `hud.rs:124` including level≥51 branch. Forge retains pinned table formula (§11). |
+
+Mod keys persist in `mod-keys.opt`, separately from native `keys.opt`. On upgrade, existing
+`mod.*` lines and `key.stats_box` move out of `keys.opt`: write the new file first, then
+remove the legacy lines only after success. Explicit values in the new file win; a failed
+cleanup retries safely. Native Controls saves cannot overwrite mod bindings. Key conflicts
+against native controls or other mods remain a Round 7 API backlog item.
+
+`eqoa.hud.text` and `eqoa.hud.image` accept optional `target_fade:bool=false`. When true, their requested alpha is multiplied by the current native target-plate glow. This preserves target-change fade behavior without changing layout, visibility or gauge alpha.
 
 `IconOptions={trim:bool=false,trim_transparent:bool=false,trim_color:Color?}`. Existing crop/trim logic `A/icons.rs:46,123`; cache key includes options and art revision. `TextureInfo={texture:Texture,width:uint,height:uint}` in decoded source pixels. Source_format optional when decoder lacks original metadata. Class and disposition **ID lookup tables** can be present at round 2, but class/disposition TextureInfo capability is not supported until round 4. No second drawing helper API: render these textures with ImGui.Image.
 

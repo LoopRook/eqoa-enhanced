@@ -407,7 +407,7 @@ impl Hud {
         }
         self.draw_target(vui, ui, TARGET_AT, s);
         if let Some(rect) = crate::fork_ext::report_core::hud_button(vui, ui) { self.note(ui, rect, Pick::Report); }
-        fork_hud::draw(vui, ui, s);
+        fork_hud::draw(vui, ui, s, self.glow0);
         // the minimap's place, out at a wide window's right and up a tall
         // one's top with the quick menus (`map::mini::FRAME`)
         if s.minimap {

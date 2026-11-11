@@ -459,6 +459,87 @@ fn bundled_target_of_target_picture_comparison() {
 }
 
 #[test]
+fn target_plate_fade_and_name_clipping_match_native_drawing() {
+    let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+    let Some((mut native, mut actual, device, queue)) = layer_with_device() else {
+        eprintln!("SKIP: no graphics adapter");
+        return;
+    };
+    let native_assets = test_assets(&mut native, &device, &queue);
+    let actual_assets = test_assets(&mut actual, &device, &queue);
+    let vui = test_vui();
+    let tree = bundled_tree();
+    options::reset_in_memory();
+    let host = load_hud_mod(&tree, "eqoa_target_of_target");
+    host.execute("eqoa.options.set('target_of_target', true)")
+        .unwrap();
+    hud_layout::set_hud_state(true, true, false, 285, 20);
+    let size = (1280, 720);
+    for name in [
+        "Luck",
+        "A very long target name without enough room",
+        "One Two Three Four Five Six",
+        "First\nSecond",
+        "Caf\u{e9} \u{1f40a}",
+    ] {
+        native_core::CORE.with(|c| {
+            let mut c = c.borrow_mut();
+            c.view.in_world = true;
+            c.view.player = serde_json::json!({"id": 1, "target_id": 2});
+            c.view.entities = vec![
+                serde_json::json!({"id":2,"name":"Casil","target_id":3}),
+                serde_json::json!({"id":3,"name":name}),
+            ];
+        });
+        for alpha in [0.3, 0.62, 0.94, 1.0] {
+            native.begin(size);
+            let mut raster = native_assets.raster(&mut native);
+            raster.ui.anchor = render::ui::Anchor::Left;
+            raster.ui.vertical = render::ui::Vertical::Bottom;
+            vui.blit_bar(
+                &mut raster,
+                &[],
+                [0.0; 4],
+                [20, 300],
+                25,
+                26,
+                174,
+                3,
+                alpha,
+                0,
+                true,
+            );
+            let mut window = vi::ui::Window::default();
+            window.init(&vui, &raster, [107, 312], 160, 1, 0);
+            window.open(true);
+            let wide = name.encode_utf16().collect::<Vec<_>>();
+            window.text_box(
+                &vui,
+                &mut raster,
+                &wide,
+                0,
+                0,
+                160,
+                1,
+                [0.0, 0.0, 0.0, alpha],
+                10,
+            );
+            native.end();
+            actual.begin(size);
+            hud_layer::clear_all();
+            native_events::render(&host).unwrap();
+            hud_layer::draw_with_target_alpha(&vui, &mut actual_assets.raster(&mut actual), alpha);
+            actual.end();
+            assert_eq!(
+                render_ui_to_pixels(&native, &device, &queue, size),
+                render_ui_to_pixels(&actual, &device, &queue, size),
+                "native target fade and clipped name {name:?}, alpha {alpha}"
+            );
+        }
+    }
+}
+
+#[test]
 fn bundled_mana_bars_picture_comparison() {
     let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
     let Some((_, mut ui_mod, device, queue)) = layer_with_device() else {
@@ -713,20 +794,49 @@ fn round_3_all_four_mods_per_frame_performance_benchmark() {
     // Time the full per-frame cost of the four mods: Lua render callbacks
     // (which enqueue commands) plus the native HUD-layer draw (which drains
     // and draws them).
-    for _ in 0..iterations {
+    for frame in 0..iterations {
+        // Warm command/text/UTF-16 pools and Ui geometry before measuring storage reuse.
+        if frame == 16 {
+            hud_layer::observe_allocations(true);
+        }
         context.frame();
         hud_layer::clear_all();
         for (host, bridge) in hosts.iter().zip(&bridges) {
+            // Production starts a new event budget at every frame boundary.
+            native_events::dispatch(host).unwrap();
             bridge
                 .invoke(|| super::native_events::render(host))
                 .unwrap();
         }
+        hud_layer::MOD_QUEUES.with(|queues| {
+            let queues = queues.borrow();
+            for id in mod_ids {
+                assert!(
+                    queues.get(id).is_some_and(|q| !q.is_empty()),
+                    "benchmark feature {id} must remain visible on frame {frame}"
+                );
+            }
+        });
         ui.begin(size);
         hud_layer::draw(&vui, &mut assets.raster(&mut ui));
         ui.end();
         drop(context.render_legacy());
     }
 
+    let hud_allocations = hud_layer::observe_allocations(false);
+    assert_eq!(
+        &hud_allocations[..3],
+        &[0; 3],
+        "all four live Lua HUD mods must reuse UTF-8 text, command queues and text drawing storage after warmup"
+    );
+    println!(
+        "HUD allocations after warmup: UTF-8={} queues={} text_draw={} native_art={} ({:.1}/active frame)",
+        hud_allocations[0],
+        hud_allocations[1],
+        hud_allocations[2],
+        hud_allocations[3],
+        hud_allocations[3] as f64 / (iterations - 16) as f64
+    );
     let elapsed = start.elapsed();
     let per_frame_micros = elapsed.as_micros() as f64 / iterations as f64;
     let per_frame_millis = per_frame_micros / 1000.0;
@@ -943,6 +1053,11 @@ fn assert_mod_click(id: &str, option: &str, frame_rect: [f32; 4], vertical: &str
     let tree = bundled_tree();
     options::reset_in_memory();
     let host = load_hud_mod(&tree, id);
+    if !summary {
+        // These names are aliases today; distinguish them to guard the ToT's
+        // semantic dependency if their policies diverge in a later release.
+        host.execute("local visible=eqoa.hud.visible;eqoa.hud.visible=function(name) if name=='stats_box' then return false end return visible(name) end").unwrap();
+    }
     let bridge = bridge::Bridge::install(&host).unwrap();
     host.execute(&format!("eqoa.options.set('{option}',true)"))
         .unwrap();
