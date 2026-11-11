@@ -5061,7 +5061,7 @@ impl Play {
                 }
                 // the minimap: the map opened, as the compass opens it
                 Some(crate::hud::Pick::Minimap) => {
-                    if !self.map.mini_contains([x as f32,y as f32]) {return false;}
+                    if !crate::fork_ext::minimap_contains(&self.map, [x as f32,y as f32]) {return false;}
                     self.map.show();
                     return true;
                 }

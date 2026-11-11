@@ -49,3 +49,10 @@ mod touch_tests;
 pub(crate) mod map;
 
 pub(crate) mod bindpage;
+
+/// Stock minimap hit routing; addon replacement does not leave invisible click targets.
+pub(crate) fn minimap_contains(map: &crate::map::Map, point: [f32;2]) -> bool {
+    #[cfg(not(target_arch="wasm32"))]
+    if addons::visibility::effective_visibility().minimap { return false; }
+    map.mini_contains(point)
+}

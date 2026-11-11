@@ -1,4 +1,5 @@
 //! Circular minimap geometry retained alongside upstream rectangle placement.
+use render::wgpu;
 pub(crate) fn circular_rim(mid: [f32; 2], q: [f32; 2], r: [f32; 4]) -> [f32; 2] {
     let d = [q[0] - mid[0], q[1] - mid[1]];
     let half = [(r[2] - r[0]) / 2.0, (r[3] - r[1]) / 2.0];
@@ -257,4 +258,12 @@ pub(crate) fn ring_quad(
     };
     let inner = (c[2] - width).max(0.0);
     [at(a, inner), at(a, c[2]), at(b, c[2]), at(b, inner)]
+}
+
+/// Native minimap output routing. The underlying map preparation/draw remains upstream's.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_minimap(map: &crate::map::Map, device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, depth: &wgpu::TextureView, window: (u32,u32), size:(u32,u32), _format: wgpu::TextureFormat) {
+    #[cfg(not(target_arch="wasm32"))]
+    if crate::fork_ext::addons::visibility::effective_visibility().minimap {return;}
+    map.draw_mini(device,enc,target,depth,window,size);
 }

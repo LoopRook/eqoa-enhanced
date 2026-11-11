@@ -26,6 +26,7 @@ pub const ALL_UI_ELEMENTS: &[&str] = &[
     "hotbar_draw_compact",
     "hotbar_draw_expanded",
     "active_effects",
+    "minimap",
 ];
 
 /// Shared registry tracking suppression claims across all HUD elements.
@@ -564,6 +565,7 @@ pub(crate) fn install_managed_health_adapter(
 
 fn native_leaves(element: &str) -> Option<Vec<&'static str>> {
     Some(match element {
+        "minimap" => vec!["minimap"],
         "health" => vec!["health_bar"],
         "power" => vec!["power_bar"],
         "experience_main" => vec!["main_exp_bar"],
@@ -749,6 +751,7 @@ pub(crate) fn install_standalone_ui_adapter(host: &Host) -> mlua::Result<()> {
 
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct PublishedVisibility {
+    pub minimap: bool,
     pub health_bar: bool,
     pub power_bar: bool,
     pub main_exp_bar: bool,
@@ -766,7 +769,8 @@ pub struct PublishedVisibility {
 #[allow(dead_code)]
 impl PublishedVisibility {
     pub fn any_hidden(&self) -> bool {
-        self.health_bar
+        self.minimap
+            || self.health_bar
             || self.power_bar
             || self.main_exp_bar
             || self.secondary_exp_bar
@@ -785,6 +789,7 @@ thread_local! {
     static REPORT_CLAIMS: Cell<u16> = const { Cell::new(0) };
     static PLAY_READY: Cell<bool> = const { Cell::new(true) };
     static PUBLISHED_VIS: Cell<PublishedVisibility> = const { Cell::new(PublishedVisibility {
+        minimap: false,
         health_bar: false,
         power_bar: false,
         main_exp_bar: false,
@@ -820,6 +825,7 @@ pub(crate) fn publish_claims(claims: &HudClaimsRegistry) {
     );
     PLAY_READY.set(true);
     PUBLISHED_VIS.set(PublishedVisibility {
+        minimap: claims.is_hidden("minimap"),
         health_bar: claims.is_hidden("health_bar"),
         power_bar: claims.is_hidden("power_bar"),
         main_exp_bar: claims.is_hidden("main_exp_bar"),
@@ -1217,4 +1223,62 @@ mod tests {
             .execute("assert(#eqoa.hud.hidden_by('all')==0)")
             .unwrap();
     }
+}
+
+#[cfg(test)]
+mod round4_tests {
+    use super::*;
+    #[test]
+    fn round4_minimap_claim_uses_play_health_and_releases_without_hiding_compass() {
+        let mut p = crate::play::Play::bundled_ui_fixture();
+        p.map.mini.up = true;
+        p.map.mini.frame_px = [474.0, 50.0, 586.0, 162.0];
+        assert!(crate::fork_ext::minimap_contains(&p.map, [530.0, 106.0]));
+        let h = super::super::host::Host::new().unwrap();
+        let snapshot = p.forge_snapshot(None);
+        h.snapshot.set(snapshot);
+        let lease =
+            VisibilityLease::new(Rc::new(RefCell::new(HealthBarClaimsRegistry::new()))).unwrap();
+        lease.update(snapshot.health, true);
+        install_managed_health_adapter(&h, &lease).unwrap();
+        h.execute("claim=assert(eqoa.hud.hide('minimap'))").unwrap();
+        publish_claims(&lease.intent.borrow().hud_claims.borrow());
+        assert!(super::super::hud_layout::hud_element_visible("compass"));
+        assert!(!super::super::hud_layout::hud_element_visible("minimap"));
+        assert!(!crate::fork_ext::minimap_contains(&p.map, [530.0, 106.0]));
+        h.execute("assert(eqoa.hud.show(claim));local x,e=eqoa.hud.hide('bogus');assert(x==nil and e.code=='invalid_argument')").unwrap();
+        publish_claims(&lease.intent.borrow().hud_claims.borrow());
+        assert!(super::super::hud_layout::hud_element_visible("minimap"));
+        assert!(crate::fork_ext::minimap_contains(&p.map, [530.0, 106.0]));
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn round4_minimap_layout_tracks_upstream_drag_and_reset() {
+    use crate::hudlayout::{self, Beyond, Piece};
+    hudlayout::reset();
+    let before = super::hud_layout::hud_layout_json((640, 448));
+    assert_eq!(before["minimap"]["frame_x"], 474.0);
+    hudlayout::frame_begin();
+    hudlayout::note(Piece::Minimap, [474.0, 50.0, 586.0, 162.0], [0.0, 0.0]);
+    hudlayout::frame_end();
+    hudlayout::set_unlocked(true);
+    let b = Beyond::of((640, 448));
+    hudlayout::press([530.0, 106.0], b);
+    hudlayout::drag_to([500.0, 126.0], b);
+    assert!(hudlayout::release());
+    let moved = super::hud_layout::hud_layout_json((640, 448));
+    assert_eq!(moved["minimap"]["frame_x"], 444.0);
+    assert_eq!(moved["minimap"]["frame_y"], 70.0);
+    assert_eq!(
+        moved["player"], before["player"],
+        "moving minimap does not move player bars"
+    );
+    hudlayout::reset();
+    hudlayout::set_unlocked(false);
+    assert_eq!(
+        super::hud_layout::hud_layout_json((640, 448))["minimap"],
+        before["minimap"]
+    );
 }

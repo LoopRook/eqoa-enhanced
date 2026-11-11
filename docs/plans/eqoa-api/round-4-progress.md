@@ -14,3 +14,4 @@
 ## Lead continuation (2026-11-11)
 - Resume items 3-10 in this session. Record an individual block and proceed to the next; do not stop Part A.
 - Item 3 rescope: no arbitrary center/zoom; redirect the existing native minimap draw at its caller, sharing minimap hide routing. Native scale/indoor/wheel remain authoritative. Circle is a HUD image option. Offer all layers unless separately drawing map is feasible without a second native draw.
+- Item 5 implemented first as item 3 prerequisite: native minimap hide/show claims, caller draw/hit suppression, moved layout rectangle. Tests round4_minimap_claim_uses_play_health_and_releases_without_hiding_compass and round4_minimap_layout_tracks_upstream_drag_and_reset pass; controls show and unrelated HUD panel remain visible/unchanged. No mini.rs edits.

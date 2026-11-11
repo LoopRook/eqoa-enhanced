@@ -596,7 +596,7 @@ pub fn shot_with(
                 // the wheel over the minimap: its zoom, as the window's (`mini_wheel`)
                 let at = [mouse.cursor.0 as f32, mouse.cursor.1 as f32];
                 if let (Some(n), Some(p)) = (step.strip_prefix("wheel ").and_then(|n| n.trim().parse::<f32>().ok()), play.as_mut())
-                    && p.map.mini_contains(at)
+                    && crate::fork_ext::minimap_contains(&p.map, at)
                 {
                     p.map.mini_wheel(n);
                     eprintln!("mouse {step}: the minimap's zoom, {} units a frame pixel", p.map.mini.scale);
@@ -5648,7 +5648,7 @@ impl App {
                         .key(if steps > 0.0 { "up" } else { "down" }, None);
                 } else if let Some(p) = self.play.as_mut().filter(|p| p.map.open) {
                     p.map.wheel(steps, Some(at));
-                } else if let Some(p) = self.play.as_mut().filter(|p| p.map.mini_contains(at)) {
+                } else if let Some(p) = self.play.as_mut().filter(|p| crate::fork_ext::minimap_contains(&p.map, at)) {
                     // over the minimap: its zoom, not the camera's
                     p.map.mini_wheel(steps);
                 } else if self.walker.is_some() {
@@ -6388,7 +6388,7 @@ impl App {
                 let play = self.play.as_ref();
                 g.renderer.draw_text_around(&g.device, &mut enc, &f.color, &f.depth, f.size, |enc| {
                     if let Some(p) = play {
-                        p.map.draw_mini(&g.device, enc, &f.color, &f.depth, window, f.size);
+                        crate::fork_ext::map::draw_minimap(&p.map, &g.device, enc, &f.color, &f.depth, window, f.size, g.config.format);
                     }
                 });
                 // the map up, over the whole frame (laid out on the window
