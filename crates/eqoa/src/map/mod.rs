@@ -2077,6 +2077,7 @@ impl Map {
                 false,
             );
         }
+        crate::fork_ext::map::overlay(ui, white, w.index, |at| f(v.to_window(size, at)), [win[0][0],win[0][1],win[1][0],win[1][1]]);
         let mut r = l.assets.raster(ui).with_font(l.control_font,theme::FONT_SCALE);
         self.buttons = chrome::draw(&mut r, vui, &c);
         self.search.toolbar_top=Some(chrome::search_anchor(&r,vui,&c));

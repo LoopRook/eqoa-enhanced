@@ -1934,3 +1934,16 @@ fn round4_map_view_projects_native_player_scale_and_rejects_pregame() {
     CORE.with(|c|c.borrow_mut().reset("test"));
     h.execute("local v,e=eqoa.map.view{};assert(v==nil and e.code=='not_in_world')").unwrap();
 }
+
+#[test]
+fn round4_guide_follows_live_entity_and_lost_is_owner_scoped() {
+    let mut p=Play::bundled_ui_fixture();let h=Host::new().unwrap();let other=Host::new().unwrap();
+    let view=p.native_view(None);CORE.with(|c|c.borrow_mut().publish(view));
+    h.execute("lost=0;eqoa.events.on('guide.lost',function(e) lost=lost+1;assert(e.data.entity_id==2002) end);assert(eqoa.map.set_guide{world_id=0,entity_id=2002,dots={{x=10,z=20}},label='snake'})").unwrap();
+    other.execute("lost=0;eqoa.events.on('guide.lost',function() lost=lost+1 end)").unwrap();
+    p.entities.slots[1].as_mut().unwrap().pos=[300.0,0.0,400.0];let view=p.native_view(None);CORE.with(|c|c.borrow_mut().publish(view));
+    assert_eq!(crate::fork_ext::addons::guides::target_for(crate::fork_ext::addons::native_events::bus(&h.lua).borrow().vm),Some([300.0,400.0]));
+    native_events::dispatch(&h).unwrap();h.execute("assert(lost==0)").unwrap();
+    p.entities.slots[1]=None;let view=p.native_view(None);CORE.with(|c|c.borrow_mut().publish(view));
+    native_events::dispatch(&h).unwrap();native_events::dispatch(&other).unwrap();h.execute("assert(lost==1);assert(eqoa.map.clear_guide())").unwrap();other.execute("assert(lost==0)").unwrap();
+}

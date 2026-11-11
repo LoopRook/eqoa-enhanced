@@ -93,6 +93,7 @@ const EVENTS: &[&str] = &[
     "entity.removed",
     "group.changed",
     "map.changed",
+    "guide.lost",
     "abilities.changed",
     "hotbar.changed",
     "cooldown.started",
@@ -124,6 +125,7 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("entity.removed", "ref before after changed"),
         ("group.changed", "before after changed"),
         ("map.changed", "before after changed"),
+        ("guide.lost", "owner world_id entity_id label reason"),
         ("abilities.changed", "before after changed"),
         ("hotbar.changed", "before after changed"),
         ("effects.changed", "before after changed"),
@@ -584,6 +586,7 @@ pub(crate) fn clear(host: &Host) {
     super::input::native::release_vm(&host.lua);
     let vm = bus(&host.lua).borrow().vm;
     super::map_views::release_vm(vm);
+    super::guides::release_vm(vm);
     super::chat::cancel_vm(vm);
     super::weapon_sets::cancel_vm(vm);
     let b = bus(&host.lua);
@@ -692,7 +695,7 @@ pub(crate) fn publish(event: &Event) {
         for weak in registry.borrow().iter() {
             if let Some(shared) = weak.upgrade() {
                 let mut b = shared.borrow_mut();
-                if b.active {
+                if b.active && (event.name!="guide.lost" || event.data["owner"].as_u64()==Some(b.vm)) {
                     enqueue(&mut b, event.clone(), None);
                 }
             }

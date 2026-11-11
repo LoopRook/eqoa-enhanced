@@ -651,6 +651,7 @@ impl Map {
         for q in &mut ui.quads[guide_start..] {
             q.clip = cut;
         }
+        crate::fork_ext::map::overlay(ui, white, cx.world, |at| f(to_px(at)), [a[0],a[1],b[0],b[1]]);
         let mut r = l.assets.raster(ui);
         if let Some(vui) = cx.vui {
             // the border, a window's frame round it, placed as the HUD's right side is

@@ -298,6 +298,7 @@ impl Core {
         self.words = None;
         self.chat.clear();
         self.view = View::default();
+        super::guides::update(self);
         self.emit("state.reset", json!({"in_world":false,"initial":false}));
     }
     pub fn publish(&mut self, mut view: View) {
@@ -404,6 +405,7 @@ impl Core {
             self.emit("map.changed", json!({"before":self.view.map,"after":view.map,"changed":changed_fields(&before,&after)}));
         }
         let previous = std::mem::replace(&mut self.view, view);
+        super::guides::update(self);
         if self.view.in_world && previous.player_stats != self.view.player_stats {
             self.emit("player.stats_changed", json!({}));
         }

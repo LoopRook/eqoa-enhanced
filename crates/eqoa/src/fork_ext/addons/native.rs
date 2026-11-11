@@ -99,7 +99,7 @@ impl Session {
             ("loot", "get", 3),
             (
                 "map",
-                "get markers view images load_image set_waypoint clear_waypoint",
+                "get markers view set_guide clear_guide images load_image set_waypoint clear_waypoint",
                 4,
             ),
             ("mastery", "get skills selected", 4),
@@ -852,6 +852,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     install_fields(lua);
     super::native_state::install(host)?;
     super::map_views::install(host)?;
+    super::guides::install(host)?;
     let modules: Table = lua.named_registry_value("eqoa_modules")?;
     let scope = lua.create_table()?;
     for (id, name) in ["self", "target", "group", "pet", "corpse", "unknown"]

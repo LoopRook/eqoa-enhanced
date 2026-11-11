@@ -268,3 +268,11 @@ pub(crate) fn draw_minimap(map: &crate::map::Map, device: &wgpu::Device, enc: &m
     #[cfg(target_arch="wasm32")]
     map.draw_mini(device,enc,target,depth,window,size);
 }
+
+/// One neutral map overlay seam, called with each native map's own transform.
+pub(crate) fn overlay(ui:&mut render::ui::Ui,white:usize,world:i32,project:impl Fn([f32;2])->[f32;2],bounds:[f32;4]) {
+    #[cfg(not(target_arch="wasm32"))]
+    crate::fork_ext::addons::guides::draw(ui,white,world,project,bounds);
+    #[cfg(target_arch="wasm32")]
+    let _=(ui,white,world,project,bounds);
+}
