@@ -336,8 +336,10 @@ fn round4_owned_texture_circle_masks_corners_but_square_keeps_them() {
         red(150, 114) > 240,
         "physical circle top interior must render"
     );
-    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.superpowers/sdd/round4/circle-mask.png");
+    let out = std::env::temp_dir().join(format!(
+        "eqoa-round4-circle-mask-{}.png",
+        std::process::id()
+    ));
     std::fs::create_dir_all(out.parent().unwrap()).unwrap();
     let mut png = png::Encoder::new(std::fs::File::create(&out).unwrap(), width, height);
     png.set_color(png::ColorType::Rgba);

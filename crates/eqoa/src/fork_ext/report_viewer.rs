@@ -172,7 +172,6 @@ pub(super) fn prepare_addons(
         && let Some(ui) = g.renderer.ui.as_mut()
     {
         compose_map_addon_hud(p, ui, |ui| {
-        {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mod HUD over map"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -197,16 +196,21 @@ pub(super) fn prepare_addons(
                 multiview_mask: None,
             });
             ui.draw(&g.device, &mut pass, (g.config.width, g.config.height));
-        }
         });
     }
     Some(encoder.finish())
 }
-fn compose_map_addon_hud(p: &crate::play::Play, ui: &mut render::ui::Ui, draw: impl FnOnce(&mut render::ui::Ui)) {
+fn compose_map_addon_hud(
+    p: &crate::play::Play,
+    ui: &mut render::ui::Ui,
+    draw: impl FnOnce(&mut render::ui::Ui),
+) {
     let quads = std::mem::take(&mut ui.quads);
     let shift = std::mem::replace(&mut ui.shift, [0.0; 2]);
     p.draw_map_addon_hud(ui);
-    draw(ui);
+    if !ui.quads.is_empty() {
+        draw(ui);
+    }
     ui.quads = quads;
     ui.shift = shift;
 }
@@ -221,28 +225,47 @@ pub(super) fn submit_addons(
 mod addon_order_tests {
     #[test]
     fn round4_map_overlay_consumes_real_mod_commands_and_restores_native_ui() {
-        use crate::fork_ext::addons::{host::Host,hud_layer};
+        use crate::fork_ext::addons::{host::Host, hud_layer};
         use render::wgpu;
-        let instance=wgpu::Instance::default();
-        let adapter=pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
-        let (device,_)=pollster::block_on(adapter.request_device(&Default::default())).unwrap();
-        let mut ui=render::ui::Ui::new(&device,wgpu::TextureFormat::Rgba8Unorm,render::DEPTH_FORMAT);
-        let mut p=crate::play::Play::bundled_ui_fixture();p.map.open=true;
-        p.hud.as_mut().unwrap().1.white=Some(0);
-        let h=Host::new().unwrap();h.snapshot.set(p.forge_snapshot(None));
-        h.execute("assert(eqoa.hud.panel{x=100,y=100,w=80,h=40})").unwrap();
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let (device, _) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let mut ui = render::ui::Ui::new(
+            &device,
+            wgpu::TextureFormat::Rgba8Unorm,
+            render::DEPTH_FORMAT,
+        );
+        let mut p = crate::play::Play::bundled_ui_fixture();
+        p.map.open = true;
+        p.hud.as_mut().unwrap().1.white = Some(0);
+        let h = Host::new().unwrap();
+        h.snapshot.set(p.forge_snapshot(None));
+        h.execute("assert(eqoa.hud.panel{x=100,y=100,w=80,h=40})")
+            .unwrap();
         assert!(hud_layer::has_queued_commands());
-        ui.shift=[11.,22.];
-        let mut drew=false;
-        super::compose_map_addon_hud(&p,&mut ui,|ui| {
-            drew=true;assert_eq!(ui.shift,[0.,0.]);assert!(!ui.quads.is_empty(),"real panel reached final map overlay");
-            assert!(ui.quads.iter().any(|q|q.pos[0]==[102.,102.]));
+        ui.shift = [11., 22.];
+        let mut drew = false;
+        super::compose_map_addon_hud(&p, &mut ui, |ui| {
+            drew = true;
+            assert_eq!(ui.shift, [0., 0.]);
+            assert!(!ui.quads.is_empty(), "real panel reached final map overlay");
+            assert!(ui.quads.iter().any(|q| q.pos[0] == [102., 102.]));
         });
-        assert!(drew);assert!(!hud_layer::has_queued_commands());assert!(ui.quads.is_empty());assert_eq!(ui.shift,[11.,22.]);
-        p.map.open=false;
-        h.execute("assert(eqoa.hud.panel{x=100,y=100,w=80,h=40})").unwrap();
-        super::compose_map_addon_hud(&p,&mut ui,|ui|assert!(ui.quads.is_empty(),"closed-map control leaves commands for the stock HUD"));
-        assert!(hud_layer::has_queued_commands());hud_layer::clear_addon(&h.addon_id());
+        assert!(drew);
+        assert!(!hud_layer::has_queued_commands());
+        assert!(ui.quads.is_empty());
+        assert_eq!(ui.shift, [11., 22.]);
+        p.map.open = false;
+        h.execute("assert(eqoa.hud.panel{x=100,y=100,w=80,h=40})")
+            .unwrap();
+        let mut drew_closed = false;
+        super::compose_map_addon_hud(&p, &mut ui, |_| drew_closed = true);
+        assert!(
+            !drew_closed,
+            "no empty overlay pass when native composition is unavailable"
+        );
+        assert!(hud_layer::has_queued_commands());
+        hud_layer::clear_addon(&h.addon_id());
     }
     use super::*;
     // The GPU test below checks submission behavior. This source-level contract

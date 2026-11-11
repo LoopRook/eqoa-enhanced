@@ -18,7 +18,9 @@ fn ready() -> Play {
 // Shared bundled-UI fixture: populate the native client structures, then use
 // exactly the cached projection that Play supplies to the addon manager.
 impl Play {
-    pub(crate) fn bundled_ui_walker() -> crate::walker::Walker { perf_review_walker() }
+    pub(crate) fn bundled_ui_walker() -> crate::walker::Walker {
+        perf_review_walker()
+    }
     pub(crate) fn bundled_ui_fixture() -> Self {
         let mut p = ready();
         super::api_capture::updates::inactive();
@@ -1937,8 +1939,7 @@ fn round4_map_view_projects_native_player_scale_and_rejects_pregame() {
     walker.cam.walk.phys.position.y.0 = 50.0;
     walker.cam.walk.phys.position.z.0 = 200.0;
     let h = Host::new().unwrap();
-    let view = p.native_view(Some(&walker));
-    CORE.with(|c| c.borrow_mut().publish(view));
+    p.forge_snapshot(Some(&walker));
     h.execute("v=assert(eqoa.map.view{size=200});local x,y,inside=v.project(268,200);assert(math.abs(x-150)<0.01 and math.abs(y-100)<0.01 and inside);local x,z=v.unproject(100,100);assert(math.abs(x-100)<0.01 and math.abs(z-200)<0.01);local _,_,inside=v.project(99999,200);assert(not inside);local bad,e=eqoa.map.view{center={x=0,z=0}};assert(bad==nil and e.code=='invalid_argument')").unwrap();
     h.execute("local x,z=v.unproject(180,180);local _,_,inside=v.project(x,z);assert(not inside,'square corner is outside the visible circle')").unwrap();
     CORE.with(|c| c.borrow_mut().reset("test"));
@@ -1957,28 +1958,60 @@ fn round4_live_map_refreshes_waypoints_markers_projection_and_window() {
     w.cam.walk.phys.position.x.0 = 100.0;
     w.cam.walk.phys.position.z.0 = 200.0;
     let h = Host::new().unwrap();
-    h.execute("changes=0;eqoa.events.on('map.changed',function() changes=changes+1 end)").unwrap();
+    h.execute("changes=0;eqoa.events.on('map.changed',function() changes=changes+1 end)")
+        .unwrap();
     api_capture::updates::refresh(&p, Some(&w));
     native_events::dispatch(&h).unwrap();
-    h.execute("v=assert(eqoa.map.view{size=200});revision=eqoa.map.get().revision;assert(changes==1)").unwrap();
-    p.map.set_group_waypoint(crate::map::group_waypoint::GroupMark { world:0, at:[81.,82.], from:"Leader".into() });
-    p.map.quests.set(&[net::session::QuestMark { kind:1,world:0,x:12.,z:34.,npc:"Live quest".into(),quests:vec![] }]);
+    h.execute(
+        "v=assert(eqoa.map.view{size=200});revision=eqoa.map.get().revision;assert(changes==1)",
+    )
+    .unwrap();
+    p.map
+        .set_group_waypoint(crate::map::group_waypoint::GroupMark {
+            world: 0,
+            at: [81., 82.],
+            from: "Leader".into(),
+        });
+    p.map.quests.set(&[net::session::QuestMark {
+        kind: 1,
+        world: 0,
+        x: 12.,
+        z: 34.,
+        npc: "Live quest".into(),
+        quests: vec![],
+    }]);
     p.map.mini.scale = 12.0;
     w.cam.walk.phys.position.x.0 = 500.0;
     crate::fork_ext::addons::hud_layout::set_window_size(1920, 1080);
     api_capture::updates::refresh(&p, Some(&w));
     native_events::dispatch(&h).unwrap();
     h.execute("local x,z=v.unproject(100,100);assert(math.abs(x-500)<0.01 and math.abs(z-200)<0.01);local found=false;for _,m in ipairs(eqoa.map.markers(0)) do found=found or m.name=='Live quest' end;assert(found)").unwrap();
+    h.execute("local x,y=v.project(836,200);assert(math.abs(x-150)<0.01 and math.abs(y-100)<0.01,'live zoom uses the new scale')").unwrap();
+    let before = CORE.with(|c| c.borrow().view.minimap.unwrap());
+    assert_eq!(before.window, (1920, 1080));
+    crate::settings::save_hud_layout("minimap r -30 t 20\n");
+    crate::hudlayout::testing_reset();
+    api_capture::updates::refresh(&p, Some(&w));
+    let after = CORE.with(|c| c.borrow().view.minimap.unwrap());
+    assert_ne!(
+        before.outer, after.outer,
+        "Move HUD updates the live capture UV rectangle"
+    );
+    crate::settings::save_hud_layout("");
+    crate::hudlayout::testing_reset();
     p.map.open = true;
-    assert!(p.map.click([320.,224.], false));
+    assert!(p.map.click([320., 224.], false));
     p.map.open = false;
     api_capture::updates::refresh(&p, Some(&w));
     native_events::dispatch(&h).unwrap();
-    h.execute("assert(eqoa.map.get().waypoint~=nil and eqoa.map.get().revision>revision);before=changes").unwrap();
+    h.execute(
+        "assert(eqoa.map.get().waypoint~=nil and eqoa.map.get().revision>revision);before=changes",
+    )
+    .unwrap();
     api_capture::updates::refresh(&p, Some(&w));
     native_events::dispatch(&h).unwrap();
     h.execute("assert(changes==before)").unwrap();
-    crate::fork_ext::addons::hud_layout::set_window_size(640,448);
+    crate::fork_ext::addons::hud_layout::set_window_size(640, 448);
 }
 
 #[test]
@@ -2016,10 +2049,15 @@ fn round4_guide_follows_live_entity_and_lost_is_owner_scoped() {
 
 #[test]
 fn round4_point_guide_rejects_bad_coordinates_and_ends_on_world_loss() {
-    let mut p=Play::bundled_ui_fixture();let h=Host::new().unwrap();p.forge_snapshot(None);
+    let mut p = Play::bundled_ui_fixture();
+    let h = Host::new().unwrap();
+    p.forge_snapshot(None);
     h.execute("lost=false;eqoa.events.on('guide.lost',function(e) assert(e.data.reason=='world_left');lost=true end);local v,e=eqoa.map.set_guide{world_id=0,x=0/0,z=0};assert(v==nil and e.code=='invalid_argument');assert(eqoa.map.set_guide{world_id=0,x=1,z=2})").unwrap();
-    p.quit=true;p.forge_snapshot(None);native_events::dispatch(&h).unwrap();
-    h.execute("assert(lost)").unwrap();assert_eq!(crate::fork_ext::addons::guides::guide_count(),0);
+    p.quit = true;
+    p.forge_snapshot(None);
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(lost)").unwrap();
+    assert_eq!(crate::fork_ext::addons::guides::guide_count(), 0);
 }
 
 #[test]
@@ -2087,4 +2125,3 @@ fn round4_entity_journal_flags_are_protocol_values_and_corpse_delta_is_not_hp() 
     native_events::dispatch(&h).unwrap();
     h.execute("assert(not changed)").unwrap();
 }
-
