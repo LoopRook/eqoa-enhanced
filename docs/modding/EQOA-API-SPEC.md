@@ -895,3 +895,8 @@ Mods & Addons. Confirm/click queues the callback at the next VM boundary with a
 single player activation; left/right do not activate it. Rows and callbacks
 retire on disable, are limited to 32 per VM, and do not persist a toggle value.
 The returned record has `id`, `label`, and `item_id`.
+
+Export names must be one non-hidden filename with no leading/trailing whitespace,
+control characters, separators, reserved Windows device name, or trailing dot.
+Only `.json`, `.txt`, `.csv`, and `.png` extensions (case-insensitive) are accepted;
+invalid names return `nil,Error` with `invalid_argument` before spending the activation.

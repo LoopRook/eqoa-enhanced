@@ -396,5 +396,3 @@ pub fn active_mod_items() -> Vec<(i32, String)> {
 pub fn active_mod_item_ids() -> Vec<i32> {
     active_mod_items().into_iter().map(|(id,_)|id).collect()
 }
-
-

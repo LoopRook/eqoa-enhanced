@@ -310,7 +310,15 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     Ok(m) => m,
                     Err((c, e)) => return error(lua, "eqoa.files.export", c, e),
                 };
-                if name.is_empty()
+                let extension = Path::new(&name)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                if name.starts_with('.')
+                    || name.trim() != name
+                    || !matches!(extension.as_str(), "json" | "txt" | "csv" | "png")
+                    || name.is_empty()
                     || name.len() > 128
                     || name.contains(['/', '\\'])
                     || m.key(&format!("imports/{name}")).is_err()

@@ -621,6 +621,22 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn round4b_review_export_refuses_executable_and_reserved_names() {
+        use super::super::{options,player_files::TestIo,native_events};
+        let (dir,host,mut addon)=fixture();addon.extensions.permissions=vec!["export".into()];
+        install(&host,&addon,Some(dir.0.join("config"))).unwrap();
+        let desktop=dir.0.join("Desktop");host.lua.set_app_data(TestIo{pick:None,desktop:desktop.clone()});
+        host.execute("assert(eqoa.files.write('journal.json','{}'));rejected=false;done=false;button_id=assert(eqoa.options.button({id='export',label='Export journal'},function() for _,name in ipairs({'evil.bat','evil.lnk','evil.exe','desktop.ini','.hidden.json','.json','CON.txt','x/y.json','x'..string.char(92)..'y.json','file.json.'}) do local ok,e=eqoa.files.export('journal.json',name);assert(ok==nil and e.code=='invalid_argument',name) end;rejected=true;assert(eqoa.files.export('journal.json','Journal.JSON')) end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='export' then done=true end end)").unwrap();
+        assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));
+        native_events::dispatch(&host).unwrap();
+        assert!(host.lua.globals().get::<bool>("rejected").unwrap(),"unsafe export accepted: {:?}",super::super::native::finish(&host.lua));
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(5);
+        while !host.lua.globals().get::<bool>("done").unwrap(){assert!(std::time::Instant::now()<deadline);native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}
+        assert_eq!(fs::read_to_string(desktop.join("Journal.JSON")).unwrap(),"{}");
+        assert_eq!(fs::read_dir(&desktop).unwrap().count(),1);
+    }
+
+    #[test]
     fn round4b_option_buttons_are_player_activations_and_disable_cleanly() {
         use super::super::{options,player_files::TestIo,native_events};
         let (dir,host,mut addon)=fixture();
