@@ -9,6 +9,9 @@ mod api_capture;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "api_capture_tests.rs"]
 mod native_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "map_mod_tests.rs"]
+mod map_mod_tests;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use api_capture::{begin_game_event, end_game_event};
 #[cfg(target_arch = "wasm32")]

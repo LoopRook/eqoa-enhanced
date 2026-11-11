@@ -217,3 +217,5 @@ Upstream changes remain in UPDATE-NOTES.md.
 - After changing keys in Controls, the map's keyboard legend now shows the keys
   you chose, including zoom, waypoints, markers, towns, and quest markers.
 - A control with no keyboard key assigned is shown as unbound.
+
+- Creature recording now has an enabled-by-default Creature Journal addon, with its own import/export rows, bounded Forge journal imports, and quiet/periodic saves.

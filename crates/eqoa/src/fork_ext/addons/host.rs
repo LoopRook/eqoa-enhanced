@@ -360,6 +360,18 @@ impl Host {
     }
     pub const INSTRUCTION_BUDGET: u32 = INSTRUCTION_BUDGET;
 
+    #[cfg(test)]
+    pub(crate) fn test_player_files(&self, pick: Option<PathBuf>, desktop: PathBuf) {
+        self.lua
+            .set_app_data(super::player_files::TestIo { pick, desktop });
+    }
+    #[cfg(test)]
+    pub(crate) fn for_addon_with_files(addon: &DiscoveredAddon, data: PathBuf) -> Result<Self> {
+        let host = Self::for_addon(addon)?;
+        super::file_io::install(&host, addon, Some(data))?;
+        Ok(host)
+    }
+
     pub fn for_addon(addon: &DiscoveredAddon) -> Result<Self> {
         let base = create_base_host()?;
         let host_registry = Rc::new(RefCell::new(HashMap::new()));

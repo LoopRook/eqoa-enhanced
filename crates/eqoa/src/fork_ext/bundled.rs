@@ -31,6 +31,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_target_of_target",
     "eqoa_mana_bars",
     "eqoa_hud_numbers",
+    "eqoa_creature_journal",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -50,6 +51,21 @@ pub struct InstallResult {
 }
 
 pub const EMBEDDED_FILES: &[BundledFile] = &[
+    BundledFile {
+        path: "eqoa_creature_journal/mod.json",
+        package: "eqoa_creature_journal",
+        data: include_bytes!("../../../../bundled-mods/eqoa_creature_journal/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_creature_journal/main.lua",
+        package: "eqoa_creature_journal",
+        data: include_bytes!("../../../../bundled-mods/eqoa_creature_journal/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_creature_journal/README.md",
+        package: "eqoa_creature_journal",
+        data: include_bytes!("../../../../bundled-mods/eqoa_creature_journal/README.md"),
+    },
     BundledFile {
         path: "eqoa_example_hearts/mod.json",
         package: "eqoa_example_hearts",

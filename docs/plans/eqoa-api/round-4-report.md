@@ -286,3 +286,5 @@ migration on filesystems lacking hard-link support; real picker cancellation
 still requires closing the OS dialog; no live non-Windows file-backend claim.
 Migration and native removal must ship together so no intervening native-only
 sightings are omitted. Native removal is still pending at this checkpoint.
+
+Part B journal checkpoint: enabled bundled journal ports live creature filters, cross-world 30-unit same-level dedupe, the Forge name/id schema, bounded incremental validation/indexing, quiet30s/max120s saves and disable flush. `journal-max-green.log`: 4 passed, 0 failed/ignored/SKIP. Play/protocol fixtures cover rejected self/pets/corpses/flags/type/blank/nonfinite, disabled VM, large reload, Forge import invalid/collision controls, disk export and invalid original preservation. A continuous-discovery fixture initially reused channel1 for every added slot; corrected to the actual channel for each slot. Pending export snapshot RED then GREEN1/0/0; worker waits for accepted async save. Native removal and search remain pending.
