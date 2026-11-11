@@ -104,6 +104,7 @@ impl Session {
                 4,
             ),
             ("mastery", "get skills selected", 4),
+            ("mods", "send", 4),
             (
                 "math",
                 "bearing degrees radians normalize signed_angle facing is_bit_zero",
@@ -891,6 +892,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::async_json::install(host)?;
     super::json_save::install(host)?;
     super::exchange::register(lua);
+    super::exchange::install(host)?;
     super::native_settings::install(host)?;
     bind(
         lua,

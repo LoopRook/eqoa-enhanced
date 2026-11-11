@@ -68,3 +68,130 @@ pub(crate) fn saved(mounts: &Mounts, key: &Path) {
         native_events::shared_changed(&mounts.addon.id, &path);
     }
 }
+
+/// Copy a small JSON command payload before queueing; no Lua value crosses VMs.
+fn payload(
+    value: mlua::Value,
+    depth: usize,
+    left: &mut usize,
+) -> Result<serde_json::Value, String> {
+    use mlua::Value;
+    if depth > 8 || *left == 0 {
+        return Err("command payload exceeds depth/node quota".into());
+    }
+    *left -= 1;
+    Ok(match value {
+        Value::Nil => serde_json::Value::Null,
+        Value::Boolean(v) => v.into(),
+        Value::Integer(v) => v.into(),
+        Value::Number(v) => serde_json::Number::from_f64(v)
+            .ok_or("nonfinite command number")?
+            .into(),
+        Value::String(v) => {
+            if v.as_bytes().len() > 4096 {
+                return Err("command string exceeds quota".into());
+            }
+            v.to_str()
+                .map_err(|_| "command strings must be UTF-8")?
+                .to_string()
+                .into()
+        }
+        Value::Table(t) => {
+            let len = t.raw_len();
+            if len > *left {
+                return Err("command array exceeds quota".into());
+            }
+            if len > 0 {
+                let mut array = Vec::with_capacity(len);
+                for i in 1..=len {
+                    array.push(payload(
+                        t.raw_get(i).map_err(|e| e.to_string())?,
+                        depth + 1,
+                        left,
+                    )?);
+                }
+                let mut count = 0;
+                for pair in t.pairs::<Value, Value>() {
+                    let (k, _) = pair.map_err(|e| e.to_string())?;
+                    if !matches!(k, Value::Integer(i) if i>0 && i as usize<=len) {
+                        return Err("command arrays cannot have named keys".into());
+                    }
+                    count += 1;
+                    if count > len {
+                        return Err("invalid command array".into());
+                    }
+                }
+                array.into()
+            } else {
+                let mut object = serde_json::Map::new();
+                for pair in t.pairs::<Value, Value>() {
+                    let (key, value) = pair.map_err(|e| e.to_string())?;
+                    let Value::String(key) = key else {
+                        return Err("command object keys must be strings".into());
+                    };
+                    if key.as_bytes().len() > 256 {
+                        return Err("command key exceeds quota".into());
+                    }
+                    object.insert(
+                        key.to_str()
+                            .map_err(|_| "command key must be UTF-8")?
+                            .to_string(),
+                        payload(value, depth + 1, left)?,
+                    );
+                }
+                object.into()
+            }
+        }
+        _ => return Err("command arguments must be JSON values".into()),
+    })
+}
+pub(crate) fn install(host: &super::host::Host) -> mlua::Result<()> {
+    use super::native::{bind, error};
+    bind(
+        &host.lua,
+        "mods",
+        "send",
+        host.lua.create_function(
+            |lua, (target, command, args): (String, String, Option<mlua::Value>)| {
+                let Some(mounts) = lua.app_data_ref::<Mounts>().map(|m| m.clone()) else {
+                    return error(
+                        lua,
+                        "eqoa.mods.send",
+                        "unavailable",
+                        "mod identity unavailable",
+                    );
+                };
+                let args = match payload(args.unwrap_or(mlua::Value::Nil), 0, &mut 256) {
+                    Ok(args) => args,
+                    Err(e) => return error(lua, "eqoa.mods.send", "quota", &e),
+                };
+                let result = OWNERS.with(|owners| {
+                    let owners = owners.borrow();
+                    let owner = owners
+                        .iter()
+                        .rev()
+                        .find(|o| {
+                            o.mounts.addon.id == target
+                                && o.bus.upgrade().is_some_and(|b| b.borrow().active)
+                        })
+                        .ok_or(("unavailable", "target mod is missing or disabled"))?;
+                    if !owner.mounts.addon.extensions.commands.contains(&command) {
+                        return Err(("invalid_argument", "target did not declare this command"));
+                    }
+                    let data =
+                        serde_json::json!({"from":mounts.addon.id,"command":command,"args":args});
+                    let bus = owner
+                        .bus
+                        .upgrade()
+                        .ok_or(("unavailable", "target VM has ended"))?;
+                    native_events::command(&bus, data)
+                        .map_err(|_| ("quota", "target command queue is full"))
+                });
+                match result {
+                    Ok(()) => lua.pack_multi((true, mlua::Value::Nil)),
+                    Err((code, reason)) => error(lua, "eqoa.mods.send", code, reason),
+                }
+            },
+        )?,
+    )
+}

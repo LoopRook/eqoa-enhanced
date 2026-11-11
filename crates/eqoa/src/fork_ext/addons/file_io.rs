@@ -621,6 +621,23 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn round4b_mod_commands_are_declared_bounded_and_delayed() {
+        let (dir, receiver, mut addon) = fixture();
+        addon.id = "journal_receiver".into();
+        addon.extensions.commands = vec!["import_journal".into()];
+        install(&receiver, &addon, Some(dir.0.join("config"))).unwrap();
+        let (_dir, sender, _) = fixture();
+        receiver.execute("count=0;eqoa.events.on('mod.command',function(e) assert(e.data.from=='pack' and e.data.command=='import_journal' and e.data.args.value==42);count=count+1 end)").unwrap();
+        sender.execute("local args={value=42};assert(eqoa.mods.send('journal_receiver','import_journal',args));args.value=7;local ok,e=eqoa.mods.send('journal_receiver','undeclared');assert(ok==nil and e.code=='invalid_argument');assert(eqoa.mods.send('missing','import_journal')==nil)").unwrap();
+        assert_eq!(receiver.lua.globals().get::<u32>("count").unwrap(), 0);
+        super::super::native_events::dispatch(&receiver).unwrap();
+        assert_eq!(receiver.lua.globals().get::<u32>("count").unwrap(), 1);
+        sender.execute("for i=1,64 do assert(eqoa.mods.send('journal_receiver','import_journal',{value=42})) end;local ok,e=eqoa.mods.send('journal_receiver','import_journal',{value=42});assert(ok==nil and e.code=='quota');local huge={};for i=1,1024 do huge[i]=i end;assert(eqoa.mods.send('journal_receiver','import_journal',huge)==nil)").unwrap();
+        super::super::native_events::clear(&receiver);
+        sender.execute("local ok,e=eqoa.mods.send('journal_receiver','import_journal');assert(ok==nil and e.code=='unavailable')").unwrap();
+    }
+
+    #[test]
     fn round4b_shared_json_requires_running_owner_and_declared_path() {
         let (_owner_dir, owner, mut addon) = fixture();
         addon.id = "journal_owner".into();

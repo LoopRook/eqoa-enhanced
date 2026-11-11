@@ -94,6 +94,7 @@ const EVENTS: &[&str] = &[
     "group.changed",
     "map.changed",
     "shared.changed",
+    "mod.command",
     "guide.lost",
     "pointer.pressed",
     "pointer.wheel",
@@ -129,6 +130,7 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("group.changed", "before after changed"),
         ("map.changed", "before after changed"),
         ("shared.changed", "mod path"),
+        ("mod.command", "from command args"),
         ("guide.lost", "owner world_id entity_id label reason"),
         ("abilities.changed", "before after changed"),
         ("hotbar.changed", "before after changed"),
@@ -839,4 +841,15 @@ pub(super) fn shared_changed(owner: &str, path: &str) {
     let mut event = local("shared.changed", json!({"mod":owner,"path":path}));
     event.bytes = owner.len() + path.len() + 64;
     publish(&event);
+}
+
+pub(super) fn command(target: &Rc<RefCell<Bus>>, data: serde_json::Value) -> std::result::Result<(), ()> {
+    let mut target = target.borrow_mut();
+    if !target.active || target.pending.iter().filter(|(e,_)| e.name=="mod.command").count()>=64 {
+        return Err(());
+    }
+    let mut event=local("mod.command",data);
+    event.bytes=event.data.to_string().len();
+    enqueue(&mut target,event,None);
+    Ok(())
 }
