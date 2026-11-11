@@ -46,6 +46,29 @@ pub(crate) fn pending(
     sent
 }
 
+/// F3's server Support petition: the note sent just before it (play.rs
+/// `send_bug_note`) names this client as EQOA Enhanced, on its own `client:`
+/// line after upstream's `build:` line, so a GM or the vanilla client's
+/// maintainers read a fork's report as the fork's. Upstream's lines stay; the
+/// note stays within the wire's `BUG_NOTE_MAX` (the petition's own text, up to
+/// 2,047 characters, is not touched), the lines that no longer fit going from
+/// the end.
+pub(crate) fn bug_note(note: String) -> String {
+    let label = crate::fork_ext::report::enhanced_label();
+    if note.contains(&label) {
+        return note;
+    }
+    let (first, rest) = note.split_once('\n').unwrap_or((&note, ""));
+    let mut lines: Vec<&str> = rest.lines().collect();
+    let head = format!("{first}\nclient: {label}");
+    let join = |lines: &[&str]| lines.iter().fold(head.clone(), |all, l| format!("{all}\n{l}"));
+    let mut out = join(&lines);
+    while out.len() > net::session::BUG_NOTE_MAX && lines.pop().is_some() {
+        out = join(&lines);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -90,5 +113,28 @@ mod tests {
             );
         }
         assert!(super::pending(Vec::new(), usize::MAX).is_empty());
+    }
+
+    /// F3's note names EQOA Enhanced as the client, behind upstream's own
+    /// first line, and never past the wire's limit; upstream's lines stay.
+    /// The control: the note as `bugnote::compose` makes it says no such
+    /// thing.
+    #[test]
+    fn the_support_note_names_enhanced_within_its_limit() {
+        let label = super::enhanced_label();
+        let plain = crate::bugnote::compose(&[("place", "world 0 (1.0, 2.0, 3.0)".into())]);
+        assert!(!plain.contains("Enhanced"), "control: upstream's note is unlabelled");
+        let note = super::bug_note(plain.clone());
+        let lines: Vec<&str> = note.lines().collect();
+        assert!(lines[0].starts_with("build: "), "{note}");
+        assert_eq!(lines[1], format!("client: {label}"));
+        assert!(lines[2..].iter().copied().eq(plain.lines().skip(1)), "upstream's other lines stay: {note}");
+        assert_eq!(super::bug_note(note.clone()), note, "never twice");
+        // a long note: whole lines go from the end, the identity and build stay
+        let long = format!("{plain}\n{}", (0..40).map(|i| format!("line {i}: {}", "y".repeat(40))).collect::<Vec<_>>().join("\n"));
+        let cut = super::bug_note(long.clone());
+        assert!(cut.len() <= net::session::BUG_NOTE_MAX, "{}", cut.len());
+        assert!(cut.starts_with("build: ") && cut.contains(&label) && cut.contains("line 0:"));
+        assert!(!cut.contains("line 39:"), "the tail went, not the identity");
     }
 }

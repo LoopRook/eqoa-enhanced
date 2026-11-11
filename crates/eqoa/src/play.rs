@@ -5511,7 +5511,7 @@ impl Play {
     /// (`Session::bug_reports`), else nothing: sent just before the petition.
     pub(crate) fn send_bug_note(&mut self) {
         if self.session.bug_reports {
-            let note = self.bug_note();
+            let note = crate::fork_ext::report_label::bug_note(self.bug_note());
             self.session.send_bug_note(&note);
             // a page's last crash went with it: said once (`bugnote::last_crash`)
             crate::bugnote::crash_sent();

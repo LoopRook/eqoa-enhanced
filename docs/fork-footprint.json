@@ -117,8 +117,8 @@
     },
     "crates/eqoa/src/play.rs": {
       "added": 278,
-      "deleted": 61,
-      "reason": "Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus... Round 3 Stage C removes native Stats Box, ToT, and Mana Bars fields, lowering added lines from 381 to 278 and deletions from 62 to 61."
+      "deleted": 62,
+      "reason": "Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus... Round 3 Stage C removes native Stats Box, ToT, and Mana Bars fields, lowering added lines from 381 to 278 and deletions from 62 to 61. Sync 2026-11-11 fix round: send_bug_note wraps its note in fork_ext::report_label::bug_note (one line changed, +1/-1 against the measured 263/62) so F3's server Support note names EQOA Enhanced; deletions return to 62."
     },
     "crates/eqoa/src/settings.rs": {
       "added": 17,
@@ -467,6 +467,12 @@
       "path": "crates/eqoa/src/viewer.rs",
       "name": "addon HUD preparation",
       "pattern": "fork_report::prepare_addons\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/play.rs",
+      "name": "Enhanced Support note",
+      "pattern": "crate::fork_ext::report_label::bug_note\\(",
       "count": 1
     },
     {
