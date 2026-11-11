@@ -18,7 +18,7 @@ The upstream history also includes two merge commits; the brief's nine named non
 | `hud.rs` (3 hunks) | Every Move HUD begin/end, minimap rectangle note, moved picking, chat-strip placement | HUD visibility hooks, local report button, mod HUD submission after the Target end | The stock pieces move exactly as upstream; addon commands use their own reported coordinates rather than inheriting Target's shift. |
 | `map/mini.rs` (2 hunks) | Moved outer/inner window rectangles, frame shift for north and reset before world-space marks; indoor floors/lighting unchanged | Round terrain/UI mask, border, adjusted north label, search and hover cards | The circle is inscribed in the same moved upstream rectangle. Ring drawing moved into fork-owned `fork_ext/map.rs`; tests live in `fork_ext/map_move_tests.rs`. |
 | `play.rs` (6 hunks) | Compass/menu/chat moved hit coordinates, Effects/Chat/QuickMenus begin/end, HUD frame end and Move HUD overlay | Existing visibility, chat state and input hooks | Preserve both stock movement and addon suppression; no upstream implementation replaced. |
-| `viewer.rs` (2 hunks) | Device-loss recovery; removal of obsolete unconditional browser event exit; focus-loss HUD release | Local report and addon input routing | Upstream now owns recovery decisions. The obsolete fork browser guard would defeat recovery and was removed. |
+| `viewer.rs` (2 hunks) | Device-loss recovery; upstream's own `web::graphics_lost` exit removed (deleted upstream in bc7754c, not a fork guard); focus-loss HUD release | Local report and addon input routing | Upstream now owns recovery decisions. Upstream's old unconditional exit would defeat its own recovery; upstream deleted it in bc7754c and the fork takes that deletion. |
 | `viewer.rs` new recovery constructor | Upstream renderer/window/world/session reconstruction | Addon runtime recreated through a fork-owned hook after saving/shutting down the old runtime | GPU objects belonging to the lost device must be discarded with it. |
 
 `hudlayout.rs` is byte-identical (normalized line endings) to upstream. All 12 new or
@@ -46,7 +46,7 @@ The earlier sync report records their findings and follow-up fixes.
 `11aa5f088bb52d5f306b0224e37b782b1bf4503d` only after the script's footprint PASS.
 No budgets raised. New implementation and regressions live in fork-owned files.
 Upstream `CLAUDE.md` is unchanged across this range; the refreshed copy matches
-upstream and there are no new rules to adopt. The fork's `CLAUDE.md` was not edited.
+upstream and there are no new rules to adopt. The fork's `CLAUDE.md` rule on browser event loops was corrected afterwards (see Review and fixes).
 
 ## Validation
 
@@ -139,3 +139,37 @@ Owner playtest remains: mouse and touch Move HUD/Lock/Reset and per-window persi
 round minimap outdoors/indoors, hover cards and search after moving; addon replacements
 and HUD numbers following stock bars; real graphics-device recovery and browser reload
 fallback. The software tests do not establish those live workflows.
+
+## Review and fixes
+
+Independent review: `docs/plans/sync-2026-11-11b-review.md`, verdict APPROVE WITH CHANGES.
+Correction to this report: the `web::graphics_lost` exit removed from `viewer.rs` was upstream's
+own code (a3cedec), deleted upstream in bc7754c; it was never a fork browser guard, and HEAD's
+`viewer.rs` matches 11aa5f0 there. Upstream's own `docs/upstream/CLAUDE.md` still says each event loop
+ends on `web::graphics_lost`; that file stays verbatim and is stale on this point.
+
+Done:
+- MEDIUM 1, stale `CLAUDE.md` rule and misattributed report row: `CLAUDE.md` now says a lost graphics
+  device is made again in place (commit 4de3552); the report's viewer.rs rows are corrected above.
+- MEDIUM 2, weak recovery-hook test: replaced by
+  `device_recovery_flushes_a_changed_mod_option_and_the_new_runtime_reads_it_back` in
+  `fork_ext/addons/runtime.rs`. It launches an active runtime with a mod through `launch_headless`,
+  runs three frames (the mod changes its option on frame 3), calls `for_new_device`, and checks that the
+  old runtime flushed the option to the profile exactly once (the saved `saves` count is 1) and that a
+  new runtime, which only runs two frames, reads `changed` back and saves it. Negative control: with
+  `for_new_device` rewritten to skip shutdown and the flush (`std::mem::forget(self)`), the test fails at
+  "device recovery must flush the old runtime's addon state"; restored afterwards. Skipping only the
+  explicit `self.shutdown()` is not detectable, because `Drop` runs the same guarded shutdown when the
+  consumed value ends. The older test (paths, server, open intent, lazy attach) is kept.
+
+Not done (LOW):
+- Finding 3, no screenshot or GPU line in a local report after a native device recovery: recorded in
+  `docs/backlog.md`.
+- Finding 2b, a `FORK-UPDATE-NOTES.md` line saying recovery restarts addons' in-memory state: not done.
+- Finding 4, direct assertions for layout-cache hit and raid/pet invalidation: not done.
+- Finding 5, recording the pre-sync four-mod frame cost and skipping the JSON compare on a cache hit:
+  not done.
+- Finding 6, update-notes mention of an edited manifest with an unedited script: not done.
+- Finding 7, the two pre-existing fork-modified tests and the misplaced doc comment in `map/mini.rs`:
+  not done (not from this sync).
+- Finding 8, the `unreachable!()` in `hud_layout.rs::to_rect`: not done.
