@@ -8,6 +8,9 @@ use std::cell::{Cell, RefCell};
 
 #[derive(Clone, Debug, PartialEq)]
 struct EntityData {
+    entity_type: u8,
+    corpse: bool,
+    search_flags: Option<u8>,
     id: u32,
     name: String,
     level: Option<u8>,
@@ -36,6 +39,9 @@ impl EntityData {
             p.session.power_of(e.id).map(|pw| ee::div(pw as f32, 255.0))
         };
         Self {
+            entity_type: e.kind,
+            corpse: e.p18 & 2 != 0,
+            search_flags: creature.map(|c| c.p255),
             id: e.id,
             name: creature.map_or("", |c| c.name.as_str()).into(),
             level: creature.map(|c| c.level),
@@ -54,7 +60,7 @@ impl EntityData {
         }
     }
     fn value(&self) -> Json {
-        json!({"id":self.id,"name":self.name,"level":self.level,"position":vec3(self.position),"hp_fraction":(self.hp!=0 || self.is_target).then(||ee::div(self.hp as f32,255.)),"power":self.power,"kind":match self.code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":self.code,"target_id":self.target,"status_flags":self.flags,"poisoned":self.flags.map(|f|f&4!=0),"diseased":self.flags.map(|f|f&8!=0),"disposition":self.disposition,"disposition_name":self.disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
+        json!({"world_id":self.world,"entity_type":self.entity_type,"is_creature":self.entity_type==net::entity::TYPE_CREATURE,"corpse":self.corpse,"search_flags":self.search_flags,"id":self.id,"name":self.name,"level":self.level,"position":vec3(self.position),"hp_fraction":(self.hp!=0 || self.is_target).then(||ee::div(self.hp as f32,255.)),"power":self.power,"kind":match self.code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":self.code,"target_id":self.target,"status_flags":self.flags,"poisoned":self.flags.map(|f|f&4!=0),"diseased":self.flags.map(|f|f&8!=0),"disposition":self.disposition,"disposition_name":self.disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
     }
 }
 #[derive(Clone)]
@@ -712,6 +718,8 @@ pub(crate) fn fingerprint(play: &Play, kind: Kind) -> u64 {
             if let Some(Some(e)) = play.entities.slots.get(slot) {
                 e.id.hash(&mut h);
                 e.world.hash(&mut h);
+                e.kind.hash(&mut h);
+                e.p18.hash(&mut h);
                 e.pos.map(f32::to_bits).hash(&mut h);
                 e.p19.hash(&mut h);
                 play.session.power_of(e.id).hash(&mut h);
@@ -719,6 +727,7 @@ pub(crate) fn fingerprint(play: &Play, kind: Kind) -> u64 {
                     c.name.hash(&mut h);
                     c.level.hash(&mut h);
                     c.p256.hash(&mut h);
+                    c.p255.hash(&mut h);
                     c.target.hash(&mut h);
                     c.flags262.hash(&mut h);
                     c.p263.hash(&mut h);

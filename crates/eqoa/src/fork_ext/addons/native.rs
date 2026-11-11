@@ -1022,7 +1022,7 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.entities.Entity",
-            "ref id name level position hp_fraction power kind class_code target_id status_flags poisoned diseased disposition disposition_name",
+            "ref id name level position hp_fraction power kind world_id entity_type is_creature corpse search_flags class_code target_id status_flags poisoned diseased disposition disposition_name",
         ),
         (
             "eqoa.group.Group",

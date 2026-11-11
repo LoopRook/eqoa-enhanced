@@ -820,3 +820,12 @@ coalesced requests need not produce individual completions. The latest completio
 `resource.ready{kind="json_saved",request}` or `resource.failed` with request/error.
 Accepted writes drain when the VM is dropped; no Lua object crosses threads. Snapshot
 copying is synchronous and has no 2 ms latency guarantee.
+
+
+Journal entity fields: `Entity.world_id` is the protocol world byte,
+`entity_type` is the raw protocol kind, `is_creature` compares that kind to
+TYPE_CREATURE, `corpse` is protocol p18 bit 1 (mask 2), and `search_flags` is
+creature p255 or nil when no creature record is available. Existing name, id,
+level, position and class_code (p256) remain the other journal inputs. These
+fields participate in the existing entity before/after deltas. HP is independent
+of the corpse flag; unknown level/search/class fields remain nil.

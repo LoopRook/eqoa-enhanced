@@ -1993,6 +1993,12 @@ fn round4_addon_input_and_render_continue_over_map_but_not_chat_or_search() {
     p.search.open = true;
     assert!(!crate::fork_ext::is_plain_play(Some(&mut p)));
     p.search.open = false;
+    p.mode = 2;
+    assert!(
+        !crate::fork_ext::is_plain_play(Some(&mut p)),
+        "chat mode blocks addon input"
+    );
+    p.mode = 0;
     let h = Host::new().unwrap();
     let view = p.native_view(None);
     CORE.with(|c| c.borrow_mut().publish(view));
@@ -2001,4 +2007,39 @@ fn round4_addon_input_and_render_continue_over_map_but_not_chat_or_search() {
     native_events::render(&h).unwrap();
     h.execute("assert(rendered==1);assert(eqoa.input.capture_text(false))")
         .unwrap();
+}
+#[test]
+fn round4_entity_journal_flags_are_protocol_values_and_corpse_delta_is_not_hp() {
+    let mut p = Play::bundled_ui_fixture();
+    let e = p.entities.slots[1].as_mut().unwrap();
+    e.kind = net::entity::TYPE_CREATURE;
+    e.p19 = 0;
+    e.world = 0;
+    e.p18 = 0;
+    e.creature.as_mut().unwrap().p255 = 0;
+    p.entities.slots[2] = Some(net::entity::Entity {
+        id: 3003,
+        world: 1,
+        ..Default::default()
+    });
+    let h = Host::new().unwrap();
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    h.execute("local e=eqoa.entities.find(2002);assert(e.world_id==0 and e.is_creature and not e.corpse and e.search_flags==0 and e.name=='Moss Snake' and e.level==15);local e=eqoa.entities.find(3003);assert(e.world_id==1 and not e.is_creature and not e.corpse and e.search_flags==nil);changed=false;eqoa.events.on('entity.changed',function(e) if e.data.after.id==2002 then changed=e.data.after.corpse and e.data.after.search_flags==7 end end)").unwrap();
+    let event = net::session::Event::State {
+        channel: 1,
+        data: vec![],
+    };
+    let change = begin_game_event(&p, &event);
+    let e = p.entities.slots[1].as_mut().unwrap();
+    e.p18 |= 2;
+    e.creature.as_mut().unwrap().p255 = 7;
+    end_game_event(&p, change);
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(changed);changed=false;assert(eqoa.entities.find(2002).corpse)")
+        .unwrap();
+    let change = begin_game_event(&p, &event);
+    end_game_event(&p, change);
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(not changed)").unwrap();
 }
