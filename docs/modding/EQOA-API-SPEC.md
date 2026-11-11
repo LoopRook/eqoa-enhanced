@@ -919,3 +919,12 @@ are retained; older imports are pruned after a successful copy. `imports/` is
 readable/removable staging managed by native import, denies ordinary writes and
 JSON saves (including case aliases), and does not count against the mod's normal
 16 MiB private storage quota. Each import still has the 16 MiB read/copy cap.
+
+A physical key/pointer action authorizes at most one import or export across all
+observing mods. A direct handler may transfer that authority to one declared
+command; the receiver may use it once and cannot delegate it again. Unused delegated
+authority expires when that command finishes dispatch. Timers/render cannot use it.
+Each mod has at most one outstanding native dialog/file action. Disabling cancels
+its copy and drops completion delivery, but an OS picker may remain open until the
+player closes it; re-enabling cannot open another picker while that worker remains.
+Dialog titles begin with the mod's display name.

@@ -207,7 +207,7 @@ pub(crate) fn install(host: &super::host::Host) -> mlua::Result<()> {
                         .bus
                         .upgrade()
                         .ok_or(("unavailable", "target VM has ended"))?;
-                    native_events::command(&bus, data, || spend_player(lua, true))
+                    native_events::command(&bus, data, || delegate_player(lua))
                         .map_err(|_| ("quota", "target command queue is full"))
                 });
                 match result {
@@ -219,45 +219,95 @@ pub(crate) fn install(host: &super::host::Host) -> mlua::Result<()> {
     )
 }
 
-// A player activation is scoped to one native callback boundary. A delegated
-// command may spend it on a file action, but cannot delegate it again.
-thread_local! { static PLAYER: std::cell::Cell<(u64,u8)> = const { std::cell::Cell::new((0,0)) }; }
-pub(super) struct PlayerScope((u64, u8));
+// One physical activation is shared by all observing VMs. State 0 is direct,
+// 1 is transferred to a declared command, and 2 is spent/expired.
+type Action = std::sync::Arc<std::sync::atomic::AtomicU8>;
+#[derive(Default)]
+struct PlayerGrant {
+    vm: u64,
+    kind: u8,
+    action: Option<Action>,
+}
+thread_local! {static PLAYER:RefCell<PlayerGrant>=RefCell::new(PlayerGrant::default());}
+pub(super) struct PlayerScope(Option<PlayerGrant>);
 impl Drop for PlayerScope {
     fn drop(&mut self) {
-        PLAYER.with(|p| p.set(self.0));
+        let current = PLAYER.with(|p| p.replace(self.0.take().unwrap()));
+        if current.kind == 2 {
+            if let Some(action) = current.action {
+                let _ = action.compare_exchange(
+                    1,
+                    2,
+                    std::sync::atomic::Ordering::AcqRel,
+                    std::sync::atomic::Ordering::Acquire,
+                );
+            }
+        }
     }
 }
-pub(super) fn player_scope(vm: u64, direct: bool, delegated: bool) -> PlayerScope {
-    PlayerScope(PLAYER.with(|p| {
-        p.replace((
-            vm,
-            if direct {
-                1
-            } else if delegated {
-                2
-            } else {
-                0
-            },
-        ))
-    }))
+pub(super) fn player_scope(
+    vm: u64,
+    direct: bool,
+    delegated: bool,
+    action: Option<Action>,
+) -> PlayerScope {
+    let grant = PlayerGrant {
+        vm,
+        kind: if direct {
+            1
+        } else if delegated {
+            2
+        } else {
+            0
+        },
+        action,
+    };
+    PlayerScope(Some(PLAYER.with(|p| p.replace(grant))))
 }
 pub(super) fn has_player(lua: &mlua::Lua) -> bool {
     let vm = native_events::bus(lua).borrow().vm;
     PLAYER.with(|p| {
-        let (owner, kind) = p.get();
-        owner == vm && kind != 0
+        let p = p.borrow();
+        p.vm == vm
+            && p.kind != 0
+            && p.action.as_ref().is_some_and(|a| {
+                a.load(std::sync::atomic::Ordering::Acquire) == if p.kind == 1 { 0 } else { 1 }
+            })
     })
 }
-pub(super) fn spend_player(lua: &mlua::Lua, delegation: bool) -> bool {
+pub(super) fn spend_player(lua: &mlua::Lua, _delegation: bool) -> bool {
     let vm = native_events::bus(lua).borrow().vm;
     PLAYER.with(|p| {
-        let (owner, kind) = p.get();
-        if owner == vm && kind != 0 && (!delegation || kind == 1) {
-            p.set((vm, 0));
-            true
-        } else {
-            false
+        let p = p.borrow();
+        p.vm == vm
+            && p.kind != 0
+            && p.action.as_ref().is_some_and(|a| {
+                a.compare_exchange(
+                    if p.kind == 1 { 0 } else { 1 },
+                    2,
+                    std::sync::atomic::Ordering::AcqRel,
+                    std::sync::atomic::Ordering::Acquire,
+                )
+                .is_ok()
+            })
+    })
+}
+fn delegate_player(lua: &mlua::Lua) -> Option<Action> {
+    let vm = native_events::bus(lua).borrow().vm;
+    PLAYER.with(|p| {
+        let p = p.borrow();
+        if p.vm != vm || p.kind != 1 {
+            return None;
         }
+        let action = p.action.as_ref()?;
+        action
+            .compare_exchange(
+                0,
+                1,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .ok()
+            .map(|_| action.clone())
     })
 }

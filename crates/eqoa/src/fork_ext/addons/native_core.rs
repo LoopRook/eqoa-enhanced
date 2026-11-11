@@ -49,6 +49,7 @@ impl Default for View {
 #[derive(Clone)]
 pub(crate) struct Event {
     pub player_command: bool,
+    pub player_action: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     pub name: String,
     pub seq: u64,
     pub time: f64,
@@ -57,6 +58,13 @@ pub(crate) struct Event {
     pub generation: u64,
     pub data: Json,
     pub bytes: usize,
+}
+
+impl Event {
+    pub(super) fn expire_player(&mut self) {
+        if let Some(action)=self.player_action.take(){action.store(2,std::sync::atomic::Ordering::Release);}
+        self.player_command=false;
+    }
 }
 
 /// Forge consumers retain only their own source stream, with a local cursor.
@@ -206,6 +214,9 @@ impl Core {
         self.event_bytes += bytes;
         let event = Event {
             player_command: false,
+            player_action: ((name=="input.key" && data["down"]==true && data["synthetic"]!=true && data["repeat"]!=true)
+                || (name=="pointer.pressed" && data["inside_window"]==true))
+                .then(||std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0))),
             name: name.into(),
             seq: self.seq,
             time: self

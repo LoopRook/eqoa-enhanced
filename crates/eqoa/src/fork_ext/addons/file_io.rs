@@ -618,6 +618,49 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn round4b_review_disabled_dialog_stays_single_and_has_mod_title() {
+        use super::super::{options,player_files::{TestIo,BlockPick},native_events};
+        struct Release(Option<std::sync::mpsc::Sender<()>>);impl Drop for Release{fn drop(&mut self){if let Some(tx)=self.0.take(){let _=tx.send(());}}}
+        let (dir,host,mut addon)=fixture();addon.name="Journal addon".into();addon.extensions.permissions=vec!["import".into()];
+        let root=dir.0.join("config");install(&host,&addon,Some(root.clone())).unwrap();
+        let source=dir.0.join("picked.json");fs::write(&source,"{}").unwrap();host.lua.set_app_data(TestIo{pick:Some(source),desktop:dir.0.join("Desktop")});
+        let (entered,rx)=std::sync::mpsc::channel();let (tx,release_rx)=std::sync::mpsc::channel();let mut release=Release(Some(tx));
+        host.lua.set_app_data(BlockPick{entered,release:Rc::new(RefCell::new(Some(release_rx)))});
+        let setup=||host.execute("last=nil;done=false;code='';button_id=assert(eqoa.options.button({id='import',label='Import journal...'},function() local id,e=eqoa.files.import({title='Journal',extensions={'json'}});last=id;code=e and e.code or '' end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='import' then done=true end end)").unwrap();
+        setup();assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));native_events::dispatch(&host).unwrap();rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert_eq!(host.lua.named_registry_value::<String>("player_file_picker_title").unwrap(),"Journal addon: Journal");
+        native_events::clear(&host);install(&host,&addon,Some(root.clone())).unwrap();native_events::prime(&host);setup();
+        assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));native_events::dispatch(&host).unwrap();
+        assert_eq!(host.lua.globals().get::<String>("code").unwrap(),"busy","re-enable must not open a second dialog while the old OS dialog is open");
+        release.0.take().unwrap().send(()).unwrap();
+        let end=std::time::Instant::now()+std::time::Duration::from_secs(5);
+        while host.lua.globals().get::<Option<u64>>("last").unwrap().is_none(){assert!(std::time::Instant::now()<end);assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}
+        while !host.lua.globals().get::<bool>("done").unwrap(){assert!(std::time::Instant::now()<end);native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}
+        assert_eq!(fs::read_dir(root.join("files/data/imports")).unwrap().count(),1,"disabled dialog copied no file");
+    }
+
+    #[test]
+    fn round4b_review_one_physical_action_is_spent_across_vms() {
+        use super::super::{player_files::TestIo,native_events,native_core::CORE};
+        let (ad,a,mut aa)=fixture();aa.extensions.permissions=vec!["export".into()];install(&a,&aa,Some(ad.0.join("config"))).unwrap();
+        let (bd,b,mut ba)=fixture();ba.id="second".into();ba.extensions.permissions=vec!["export".into()];install(&b,&ba,Some(bd.0.join("config"))).unwrap();
+        a.lua.set_app_data(TestIo{pick:None,desktop:ad.0.join("Desktop")});b.lua.set_app_data(TestIo{pick:None,desktop:bd.0.join("Desktop")});
+        let setup="assert(eqoa.files.write('journal.json','{}'));accepted=false;done=false;local function attempt() local id,e=eqoa.files.export('journal.json','journal.json');accepted=id~=nil;code=e and e.code end;eqoa.events.on('input.key',attempt);eqoa.events.on('pointer.pressed',attempt);eqoa.events.on('resource.ready',function(e) if e.data.kind=='export' then done=true end end)";
+        a.execute(setup).unwrap();b.execute(setup).unwrap();
+        CORE.with(|c|c.borrow_mut().emit("input.key",serde_json::json!({"key":"f2","down":true,"synthetic":true,"repeat":false})));
+        native_events::dispatch(&a).unwrap();native_events::dispatch(&b).unwrap();
+        assert!(!a.lua.globals().get::<bool>("accepted").unwrap()&&!b.lua.globals().get::<bool>("accepted").unwrap());
+        CORE.with(|c|c.borrow_mut().emit("input.key",serde_json::json!({"key":"f2","down":true,"synthetic":false,"repeat":false})));
+        native_events::dispatch(&a).unwrap();native_events::dispatch(&b).unwrap();
+        let accepted=u32::from(a.lua.globals().get::<bool>("accepted").unwrap())+u32::from(b.lua.globals().get::<bool>("accepted").unwrap());
+        assert_eq!(accepted,1,"one native action must not authorize two mods' exports");
+        let end=std::time::Instant::now()+std::time::Duration::from_secs(5);while !a.lua.globals().get::<bool>("done").unwrap(){assert!(std::time::Instant::now()<end);native_events::dispatch(&a).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}
+        CORE.with(|c|c.borrow_mut().emit("pointer.pressed",serde_json::json!({"inside_window":false,"x":0,"y":0,"button":"left"})));
+        native_events::dispatch(&a).unwrap();native_events::dispatch(&b).unwrap();
+        assert!(!a.lua.globals().get::<bool>("accepted").unwrap()&&!b.lua.globals().get::<bool>("accepted").unwrap());
+    }
+
+    #[test]
     fn round4b_review_import_ids_survive_enable_and_staging_cannot_starve_saves() {
         use super::super::{options,player_files::TestIo,native_events};
         let (dir,host,mut addon)=fixture_with_large_data(true);addon.extensions.permissions=vec!["import".into()];

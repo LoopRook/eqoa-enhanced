@@ -102,9 +102,29 @@ fn context(lua: &Lua, kind: &str) -> std::result::Result<Mounts, (&'static str, 
     }
     Ok(m)
 }
+static REQUESTS: std::sync::Mutex<std::collections::BTreeSet<PathBuf>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+struct RequestGate(PathBuf);
+impl Drop for RequestGate {
+    fn drop(&mut self) {
+        REQUESTS.lock().unwrap().remove(&self.0);
+    }
+}
+fn request_gate(mut owner: PathBuf) -> Option<RequestGate> {
+    #[cfg(windows)]
+    {
+        owner = PathBuf::from(owner.to_string_lossy().to_lowercase());
+    }
+    REQUESTS
+        .lock()
+        .unwrap()
+        .insert(owner.clone())
+        .then(|| RequestGate(owner))
+}
 fn start(
     lua: &Lua,
     kind: &'static str,
+    owner: PathBuf,
     job: impl FnOnce(u64, Arc<AtomicBool>) -> std::result::Result<String, (&'static str, String)>
     + Send
     + 'static,
@@ -118,6 +138,14 @@ fn start(
             "one import/export request at a time",
         );
     }
+    let Some(gate) = request_gate(owner) else {
+        return error(
+            lua,
+            &format!("eqoa.files.{kind}"),
+            "busy",
+            "this mod still has a dialog or file action open",
+        );
+    };
     s.borrow_mut().next += 1;
     let id = s.borrow().next;
     let permit = Arc::new(AtomicBool::new(true));
@@ -134,6 +162,7 @@ fn start(
     thread::Builder::new()
         .name("addon-file-action".into())
         .spawn(move || {
+            let _gate = gate;
             let result = job(id, worker_permit);
             let _ = tx.send(Completion { id, kind, result });
         })
@@ -282,13 +311,32 @@ pub(super) struct TestIo {
     pub desktop: PathBuf,
 }
 #[cfg(test)]
+pub(super) struct BlockPick {
+    pub entered: mpsc::Sender<()>,
+    pub release: Rc<RefCell<Option<mpsc::Receiver<()>>>>,
+}
+#[cfg(test)]
 fn pick(
     lua: &Lua,
-    _title: String,
+    title: String,
     _ext: Vec<String>,
 ) -> Box<dyn FnOnce() -> Option<PathBuf> + Send> {
     let picked = lua.app_data_ref::<TestIo>().and_then(|t| t.pick.clone());
-    Box::new(move || picked)
+    lua.set_named_registry_value("player_file_picker_title", title)
+        .unwrap();
+    let blocked = lua.app_data_ref::<BlockPick>().and_then(|b| {
+        b.release
+            .borrow_mut()
+            .take()
+            .map(|r| (b.entered.clone(), r))
+    });
+    Box::new(move || {
+        if let Some((entered, release)) = blocked {
+            let _ = entered.send(());
+            let _ = release.recv();
+        }
+        picked
+    })
 }
 #[cfg(not(test))]
 fn pick(
@@ -351,8 +399,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     "private storage unavailable",
                 );
             };
+            let title = format!("{}: {}", m.addon.name, title);
             let picker = pick(lua, title, ext);
-            start(lua, "import", move |_id, permit| {
+            start(lua, "import", root.clone(), move |_id, permit| {
                 let path = picker().ok_or(("cancelled", "file selection cancelled".into()))?;
                 let run = || -> std::result::Result<String, String> {
                     active(&permit)?;
@@ -428,7 +477,15 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                         "Desktop folder unavailable",
                     );
                 };
-                start(lua, "export", move |_, permit| {
+                let Some(owner) = m.data.clone() else {
+                    return error(
+                        lua,
+                        "eqoa.files.export",
+                        "unavailable",
+                        "private storage unavailable",
+                    );
+                };
+                start(lua, "export", owner, move |_, permit| {
                     let run = || -> std::result::Result<String, String> {
                         active(&permit)?;
                         let bytes = super::sandbox::read_bounded(&source, CAP)?;

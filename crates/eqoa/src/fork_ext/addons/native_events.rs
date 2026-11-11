@@ -375,7 +375,7 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
         let command_limit = 64usize.min(256usize.saturating_sub(b.delivered + usize::from(b.once_mode) + if gap.is_some() {2} else {0}));
         let take = command_limit.min(b.commands.len());
         let boundary = b.boundary;
-        let commands = b.commands.drain(..take).map(|(mut event,expiry)| {if expiry < boundary {event.player_command=false;} event}).collect::<Vec<_>>();
+        let commands = b.commands.drain(..take).map(|(mut event,expiry)| {if expiry < boundary {event.expire_player();} event}).collect::<Vec<_>>();
         let limit = 256usize.saturating_sub(
             b.delivered + usize::from(b.once_mode) + commands.len() + if gap.is_some() { 2 } else { 0 },
         );
@@ -411,7 +411,7 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
         deliver_data(lua, &event, None, data)?;
     }
     for event in commands { deliver_data(lua, &event, None, None)?; }
-    {let mut b=shared.borrow_mut();let boundary=b.boundary;for (event,expiry) in &mut b.commands {if *expiry <= boundary {event.player_command=false;}}}
+    {let mut b=shared.borrow_mut();let boundary=b.boundary;for (event,expiry) in &mut b.commands {if *expiry <= boundary {event.expire_player();}}}
     let timer_budget = {
         let b = shared.borrow();
         256usize.saturating_sub(b.delivered + usize::from(b.once_mode))
@@ -442,6 +442,7 @@ fn local(name: &str, data: serde_json::Value) -> Event {
         c.seq += 1;
         Event {
             player_command: false,
+            player_action: None,
             name: name.into(),
             data,
             bytes: 0,
@@ -493,7 +494,7 @@ fn deliver_data(
         .collect::<Vec<_>>();
     let direct = e.name == "option.activated" || (e.name == "input.key" && e.data["down"] == true && e.data["synthetic"] != true && e.data["repeat"] != true)
         || (e.name == "pointer.pressed" && e.data["inside_window"] == true);
-    let _player = super::exchange::player_scope(shared.borrow().vm, direct, e.player_command);
+    let _player = super::exchange::player_scope(shared.borrow().vm, direct, e.player_command, e.player_action.clone());
     if e.name == "option.activated" {
         let callback = shared.borrow().buttons.get(e.data["id"].as_str().unwrap_or("")).cloned();
         if let Some(callback) = callback {
@@ -873,13 +874,13 @@ pub(super) fn shared_changed(owner: &str, path: &str) {
     publish(&event);
 }
 
-pub(super) fn command(target: &Rc<RefCell<Bus>>, data: serde_json::Value, player: impl FnOnce() -> bool) -> std::result::Result<(), ()> {
+pub(super) fn command(target: &Rc<RefCell<Bus>>, data: serde_json::Value, player: impl FnOnce() -> Option<std::sync::Arc<std::sync::atomic::AtomicU8>>) -> std::result::Result<(), ()> {
     let pending = target.borrow();
     let sender = data["from"].as_str().unwrap_or("");
     if !pending.active || pending.commands.len()>=64
         || pending.commands.iter().filter(|(e,_)|e.data["from"].as_str()==Some(sender)).count()>=4 {return Err(())}
     let expiry=pending.boundary+1;drop(pending);
-    let mut event=local("mod.command",data);event.player_command=player();
+    let mut event=local("mod.command",data);event.player_action=player();event.player_command=event.player_action.is_some();
     event.bytes=event.data.to_string().len();
     // Commands never enter or evict the native/resource event queue.
     target.borrow_mut().commands.push_back((event,expiry));Ok(())
@@ -904,6 +905,6 @@ pub(super) fn register_option(lua: &mlua::Lua,id: &str,callback: Function)->bool
 pub(super) fn activate_option(bus: &Rc<RefCell<Bus>>,id: &str)->bool {
     let mut bus=bus.borrow_mut();
     if !bus.active || !bus.buttons.contains_key(id) || bus.pending.len()>=64 {return false}
-    let mut event=local("option.activated",json!({"id":id}));event.bytes=id.len()+64;
+    let mut event=local("option.activated",json!({"id":id}));event.player_action=Some(std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)));event.bytes=id.len()+64;
     enqueue(&mut bus,event,None);true
 }
