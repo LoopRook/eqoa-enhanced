@@ -27,6 +27,10 @@ pub const PACKAGES: &[&str] = &[
     "arpg_ui",
     "avoids_modern_ui",
     "eqoa_example_hearts",
+    "eqoa_stats_box",
+    "eqoa_target_of_target",
+    "eqoa_mana_bars",
+    "eqoa_hud_numbers",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -60,6 +64,66 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_example_hearts/README.md",
         package: "eqoa_example_hearts",
         data: include_bytes!("../../../../bundled-mods/eqoa_example_hearts/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_stats_box/mod.json",
+        package: "eqoa_stats_box",
+        data: include_bytes!("../../../../bundled-mods/eqoa_stats_box/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_stats_box/main.lua",
+        package: "eqoa_stats_box",
+        data: include_bytes!("../../../../bundled-mods/eqoa_stats_box/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_stats_box/README.md",
+        package: "eqoa_stats_box",
+        data: include_bytes!("../../../../bundled-mods/eqoa_stats_box/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_target_of_target/mod.json",
+        package: "eqoa_target_of_target",
+        data: include_bytes!("../../../../bundled-mods/eqoa_target_of_target/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_target_of_target/main.lua",
+        package: "eqoa_target_of_target",
+        data: include_bytes!("../../../../bundled-mods/eqoa_target_of_target/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_target_of_target/README.md",
+        package: "eqoa_target_of_target",
+        data: include_bytes!("../../../../bundled-mods/eqoa_target_of_target/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_mana_bars/mod.json",
+        package: "eqoa_mana_bars",
+        data: include_bytes!("../../../../bundled-mods/eqoa_mana_bars/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_mana_bars/main.lua",
+        package: "eqoa_mana_bars",
+        data: include_bytes!("../../../../bundled-mods/eqoa_mana_bars/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_mana_bars/README.md",
+        package: "eqoa_mana_bars",
+        data: include_bytes!("../../../../bundled-mods/eqoa_mana_bars/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_hud_numbers/mod.json",
+        package: "eqoa_hud_numbers",
+        data: include_bytes!("../../../../bundled-mods/eqoa_hud_numbers/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_hud_numbers/main.lua",
+        package: "eqoa_hud_numbers",
+        data: include_bytes!("../../../../bundled-mods/eqoa_hud_numbers/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_hud_numbers/README.md",
+        package: "eqoa_hud_numbers",
+        data: include_bytes!("../../../../bundled-mods/eqoa_hud_numbers/README.md"),
     },
     BundledFile {
         path: "arpg_ui/arpg_ui.lua",
@@ -862,7 +926,11 @@ mod tests {
                 "wereoxxs_ui",
                 "arpg_ui",
                 "avoids_modern_ui",
-                "eqoa_example_hearts"
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1147,7 +1215,11 @@ mod tests {
                 "wereoxxs_ui",
                 "arpg_ui",
                 "avoids_modern_ui",
-                "eqoa_example_hearts"
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
             ]
         );
 
@@ -1165,7 +1237,7 @@ mod tests {
             ids.contains("avoids_modern_ui"),
             "avoids_modern_ui must be discovered on first start"
         );
-        assert_eq!(ids.len(), 4);
+        assert_eq!(ids.len(), 8);
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -1185,7 +1257,11 @@ mod tests {
                 "wereoxxs_ui",
                 "arpg_ui",
                 "avoids_modern_ui",
-                "eqoa_example_hearts"
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
             ]
         );
 
@@ -1197,7 +1273,11 @@ mod tests {
                 "wereoxxs_ui",
                 "arpg_ui",
                 "avoids_modern_ui",
-                "eqoa_example_hearts"
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1275,7 +1355,11 @@ mod tests {
                 "wereoxxs_ui",
                 "arpg_ui",
                 "avoids_modern_ui",
-                "eqoa_example_hearts"
+                "eqoa_example_hearts",
+                "eqoa_stats_box",
+                "eqoa_target_of_target",
+                "eqoa_mana_bars",
+                "eqoa_hud_numbers"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );

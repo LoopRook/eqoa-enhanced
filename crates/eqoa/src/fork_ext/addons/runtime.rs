@@ -231,10 +231,19 @@ impl Runtime {
             } => {
                 let button = Button::Key(event.physical_key);
                 let code = super::input::winit_key_to_code(event);
-                if let Some(code) = code {
-                    if !is_synthetic && !event.repeat {
-                        super::input::record_key_event(code, event.state == ElementState::Pressed);
+                if !is_synthetic && !event.repeat {
+                    let is_down = event.state == ElementState::Pressed;
+                    if let Some(code) = code {
+                        super::input::record_key_event_only(code, is_down);
                     }
+                    super::input::route_mod_key(
+                        &event.logical_key,
+                        is_down,
+                        event.repeat,
+                        *is_synthetic,
+                        plain_play,
+                        keyboard,
+                    );
                 }
                 let wants_key_capture =
                     super::input::wants_key_capture(keyboard, code, *is_synthetic, plain_play);
@@ -695,6 +704,8 @@ fn render_managed(
     let fault = plan.fault;
     let result = (|| {
         let extent = FramebufferExtent::from_texture(final_target.texture());
+        super::hud_layout::set_window_size(extent.width(), extent.height());
+        super::hud_layer::clear_all();
         context
             .io_mut()
             .set_display_size([extent.width() as f32, extent.height() as f32]);

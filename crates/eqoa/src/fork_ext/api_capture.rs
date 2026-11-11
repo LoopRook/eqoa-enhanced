@@ -144,7 +144,12 @@ impl Play {
         let entities=self.entities.slots.iter().flatten().map(|e|{
             let c=e.creature.as_ref();let code=c.map(|c|c.p256);
             let disposition=(e.id==self.target && CORE.with(|c|c.borrow().disposition_target==Some(self.target))).then_some(self.target_info).flatten();
-            json!({"id":e.id,"name":c.map_or("",|c|c.name.as_str()),"level":c.map(|c|c.level),"position":vec3(e.pos),"hp_fraction":(e.p19!=0).then(||ee::div(e.p19 as f32,255.0)),"kind":match code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":code,"target_id":c.and_then(|c|valid_id(c.target)),"status_flags":c.map(|c|c.flags262),"poisoned":c.map(|c|c.flags262&4!=0),"diseased":c.map(|c|c.flags262&8!=0),"disposition":disposition,"disposition_name":disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
+            let power_val = if Some(e.id) == id {
+                (self.stats.stat[10] > 0).then(|| ee::div(self.stats.stat[9].clamp(0, self.stats.stat[10]) as f32, self.stats.stat[10] as f32))
+            } else {
+                self.session.power_of(e.id).map(|p| ee::div(p as f32, 255.0))
+            };
+            json!({"id":e.id,"name":c.map_or("",|c|c.name.as_str()),"level":c.map(|c|c.level),"position":vec3(e.pos),"hp_fraction":(e.p19!=0 || Some(e.id)==valid_id(self.target)).then(||ee::div(e.p19 as f32,255.0)),"power":power_val,"kind":match code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":code,"target_id":c.and_then(|c|valid_id(c.target)),"status_flags":c.map(|c|c.flags262),"poisoned":c.map(|c|c.flags262&4!=0),"diseased":c.map(|c|c.flags262&8!=0),"disposition":disposition,"disposition_name":disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
         }).collect::<Vec<_>>();
         let fighting = id
             .and_then(|id| self.entities.slots.iter().flatten().find(|e| e.id == id))
@@ -153,11 +158,15 @@ impl Play {
         let attributes = stats_known
             .then(|| json!({"base":stats(&self.stats.base),"total":stats(&self.stats.stat)}));
         let resists=stats_known.then(||json!({"base":40+self.stats.stat[4].div_euclid(7),"poison":self.stats.stat[22],"disease":self.stats.stat[23],"fire":self.stats.stat[24],"cold":self.stats.stat[25],"lightning":self.stats.stat[26],"arcane":self.stats.stat[27]}));
-        let player = json!({"id":id,"name":self.player.name,"class_id":class,"class_name":usize::try_from(class).ok().and_then(|k|crate::fork_ext::addons::player::CLASSES.get(k)),"race_id":race,"race_name":usize::try_from(race).ok().and_then(|k|crate::fork_ext::addons::player::RACES.get(k)),"level":self.dump.player.level,"experience":self.dump.player.exp,"experience_debt":self.dump.player.p2c,"hp":hp,"power":power,"attributes":attributes,"armor":stats_known.then_some(self.stats.stat[14]),"resists":resists,"position":position,"velocity":velocity,"heading":heading,"speed":speed,"horizontal_speed":horizontal_speed,"target_id":valid_id(self.target),"pet_id":valid_id(self.pet_id),"auto_attacking":self.auto_attack,"dead":self.death.is_some(),"has_pet":valid_id(self.pet_id).is_some(),"fighting":fighting,"location":self.native_location(walker),"mastery":null});
+        let player = json!({"id":id,"name":self.player.name,"class_id":class,"class_name":usize::try_from(class).ok().and_then(|k|crate::fork_ext::addons::player::CLASSES.get(k)),"race_id":race,"race_name":usize::try_from(race).ok().and_then(|k|crate::fork_ext::addons::player::RACES.get(k)),"level":self.dump.player.level,"experience":self.dump.player.exp,"experience_debt":self.dump.player.p2c,"hp_fraction":self.entities.slots.iter().flatten().find(|e|Some(e.id)==id).map(|e|ee::div(e.p19 as f32,255.0)),"hp":hp,"power":power,"attributes":attributes,"armor":stats_known.then_some(self.stats.stat[14]),"resists":resists,"position":position,"velocity":velocity,"heading":heading,"speed":speed,"horizontal_speed":horizontal_speed,"target_id":valid_id(self.target),"pet_id":valid_id(self.pet_id),"auto_attacking":self.auto_attack,"dead":self.death.is_some(),"has_pet":valid_id(self.pet_id).is_some(),"fighting":fighting,"location":self.native_location(walker),"mastery":null});
         let members = if self.group.in_group {
-            self.group.members.iter().map(|m|{
+            self.group.members[..self.group.count()]
+                .iter()
+                .filter(|m| Some(m.id) != id && m.active)
+                .map(|m|{
             let actor=self.entities.slots.iter().flatten().find(|e|e.id==m.id);
-            json!({"id":m.id,"name":m.name,"active":m.active,"hp_fraction":(m.hp_known!=0).then(||ee::div(m.hp as f32,255.0)),"position":actor.map(|e|vec3(e.pos)).or_else(||m.active.then(||vec3(m.pos))),"world_id":actor.map(|e|e.world as i32).or_else(||m.active.then_some(m.x))})
+            let power_val = self.session.power_of(m.id).map(|p| ee::div(p as f32, 255.0));
+            json!({"id":m.id,"name":m.name,"active":m.active,"hp_fraction":(m.hp_known!=0).then(||ee::div(m.hp as f32,255.0)),"power":power_val,"position":actor.map(|e|vec3(e.pos)).or_else(||m.active.then(||vec3(m.pos))),"world_id":actor.map(|e|e.world as i32).or_else(||m.active.then_some(m.x))})
         }).collect::<Vec<_>>()
         } else {
             Vec::new()
@@ -176,11 +185,25 @@ impl Play {
             json!({"index":index+1,"kind":match k {2=>"items",3=>"weapon_sets",_=>"abilities"},"selected":self.hud_menus.sel==k as i32,"selected_slot":(menu.sel>=0 && menu.sel<def.count).then_some(menu.sel+1),"slots":slots})
         }).collect();
         let effects=effects_known.then(||(0..self.effects.count.clamp(0,8) as usize).map(|i|json!({"index":i+1,"icon":(self.effects.icon[i]!=u32::MAX).then_some(self.effects.icon[i]),"name":String::from_utf16_lossy(&self.effects.name[i])})).collect());
+        let player_stats = stats_known
+            .then(|| {
+                let m = &self.cm.m;
+                let src = crate::fork_ext::player_stats::Source {
+                    stats: &self.stats,
+                    inv: &self.dump.inventory,
+                    mastery: &m.stats,
+                    bonuses: &m.bonuses,
+                    p44: self.dump.player.p44 as i32,
+                };
+                crate::fork_ext::player_stats::view(&src).map(|v| v.to_json())
+            })
+            .flatten();
         View {
             in_world: true,
             phase,
             world_id: Some(self.world_id() as i32),
             player,
+            player_stats,
             entities,
             entity_slots: self
                 .entities

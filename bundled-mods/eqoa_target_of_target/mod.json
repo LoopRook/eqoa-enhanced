@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_target_of_target",
+  "name": "EQOA Target of Target",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": true,
+  "capabilities": [
+    "eqoa.target.get",
+    "eqoa.entities.find",
+    "eqoa.hud.image",
+    "eqoa.hud.gauge",
+    "eqoa.hud.text",
+    "eqoa.hud.frame",
+    "eqoa.hud.visible",
+    "eqoa.options.toggle",
+    "eqoa.options.get",
+    "eqoa.actions.assist",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}

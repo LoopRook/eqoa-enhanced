@@ -21,6 +21,9 @@
 //! the HUD's pieces keep to the target's top or bottom the same way
 //! (`Vertical`).
 
+#[path = "../../eqoa/src/fork_ext/render_font.rs"]
+mod enhanced_font;
+
 use bytemuck::{Pod, Zeroable};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
@@ -563,23 +566,8 @@ pub struct Font {
 }
 
 impl Font {
-    /// Keep atlas texels and UVs while changing only logical layout metrics.
-    fn at_height(mut self, height: u32) -> Self {
-        if height != self.height {
-            let height = height.max(1);
-            let source_height = self.height.max(1);
-            for (width, _) in self.glyphs.values_mut() {
-                *width = (u64::from(*width) * u64::from(height))
-                    .div_ceil(u64::from(source_height))
-                    .min(u64::from(u32::MAX)) as u32;
-            }
-            self.height = height;
-        }
-        self
-    }
-
     /// `FindChar`, with `'?'` for a character the font lacks.
-    fn find(&self, code: u16) -> Option<&(u32, [f32; 4])> {
+    pub fn find(&self, code: u16) -> Option<&(u32, [f32; 4])> {
         self.glyphs.get(&code).or_else(|| self.glyphs.get(&(b'?' as u16)))
     }
 
@@ -877,14 +865,8 @@ impl Ui {
     ) -> usize {
         let (atlas, ah, glyphs) = pack(font, 2048);
         let tex = self.add_texture_as(device, queue, (2048, ah), 2048, ah, &atlas, true);
-        self.fonts.push(
-            Font {
-                tex,
-                height: font.height,
-                glyphs,
-            }
-            .at_height(height),
-        );
+        self.fonts.push(Font { tex, height: font.height, glyphs });
+        enhanced_font::apply_last_height(self, height);
         self.fonts.len() - 1
     }
 

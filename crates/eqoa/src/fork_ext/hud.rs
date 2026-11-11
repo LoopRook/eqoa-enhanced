@@ -194,6 +194,7 @@ pub(crate) fn draw_hud_menus(
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug)]
 struct Readout {
     text: String,
@@ -202,6 +203,7 @@ struct Readout {
     color: [f32; 4],
     vertical: Vertical,
 }
+#[cfg_attr(not(test), allow(dead_code))]
 fn readouts(s: &HudState, need: u32, flags: [bool; 3]) -> Vec<Readout> {
     let [target_hp_percent, xp_details, hud_numbers] = flags;
     let mut out = Vec::with_capacity(4);
@@ -256,29 +258,15 @@ fn readouts(s: &HudState, need: u32, flags: [bool; 3]) -> Vec<Readout> {
     out
 }
 
-pub(super) fn draw(ui: &mut UiRaster<'_>, s: &HudState) {
-    let Some(font) = ui.assets.font else { return };
-    let c = crate::settings::client();
-    let labels = readouts(
-        s,
-        super::exp_for_level(s.level + 1),
-        [c.target_hp_percent, c.xp_details, c.hud_numbers],
-    );
-    let (anchor, vertical) = (ui.ui.anchor, ui.ui.vertical);
-    ui.ui.anchor = Anchor::Left;
-    for r in labels {
-        ui.ui.vertical = r.vertical;
-        let text = crate::ui::wide(&r.text);
-        let width = ui.ui.fonts[font].string_width(&text) as f32 * r.scale;
-        let x = (r.center[0] as f32 - width / 2.0).round();
-        let y = r.center[1] as f32;
-        for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
-            ui.ui
-                .text_scaled(font, x + dx, y + dy, r.scale, [0.0, 0.0, 0.0, 0.95], &text);
-        }
-        ui.ui.text_scaled(font, x, y, r.scale, r.color, &text);
+pub(crate) fn draw(vui: &crate::ui::Vui, ui: &mut UiRaster<'_>, _s: &HudState, target_alpha: f32) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        crate::fork_ext::addons::hud_layer::draw_with_target_alpha(vui, ui, target_alpha);
     }
-    (ui.ui.anchor, ui.ui.vertical) = (anchor, vertical);
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (vui, ui, target_alpha);
+    }
 }
 
 #[cfg(test)]
@@ -812,7 +800,7 @@ mod tests {
 
         let with_group = HudState {
             group_count: 2,
-            group: vec![MemberState { id: 2, name: "Ally".into(), is_target: false, hp: Some((128, false, false)), power: Some(128), marks: 0 }],
+            group: vec![MemberState { id: 2, name: "Ally".into(), is_target: false, hp: Some((128, false, false)), marks: 0 }],
             ..Default::default()
         };
         ui.begin(size);
@@ -891,11 +879,7 @@ mod tests {
         let with_target = HudState {
             target_name: Some("Casil".into()),
             target_hp: 128,
-            target_power: Some(128),
             target_info: Some(0),
-            target_of_target: Some("Luck".into()),
-            tot_hp: Some(200),
-            tot_power: Some(100),
             ..Default::default()
         };
 
@@ -1003,15 +987,11 @@ mod tests {
             heading: 0.5,
             chat_open: true,
             group_count: 2,
-            group: vec![MemberState { id: 2, name: "Ally".into(), is_target: false, hp: Some((200, false, false)), power: Some(150), marks: 0 }],
+            group: vec![MemberState { id: 2, name: "Ally".into(), is_target: false, hp: Some((200, false, false)), marks: 0 }],
             pet: Some(PetState { name: "Bub".into(), is_target: false, creature: Some((200, false, false)), effects: Vec::new() }),
             target_name: Some("Casil".into()),
             target_hp: 128,
-            target_power: Some(128),
             target_info: Some(0),
-            target_of_target: Some("Luck".into()),
-            tot_hp: Some(200),
-            tot_power: Some(100),
             patches: vec![PatchMember { index: 1, id: 2, pos: Some([0.0, 0.0, 100.0]) }],
             ..Default::default()
         };
@@ -1019,7 +999,9 @@ mod tests {
         let mut hud = Hud::new();
         hud.draw(&vui, &mut assets.raster(&mut ui), &full_state);
         let full_quads = ui.quads.len();
-        let expected_full = if crate::report_policy::enabled() { 40 } else { 38 };
+        // Removed hardcoded fork additions (target of target: 5 quads, target mana bar: 3 quads,
+        // member mana bar: 3 quads = 11 quads total) from stock Hud::draw in Stage C.
+        let expected_full = if crate::report_policy::enabled() { 29 } else { 27 };
         assert_eq!(full_quads, expected_full, "stock populated HUD quad count at 1280x720 with no addon");
 
         set_claims(crate::fork_ext::addons::visibility::ALL_UI_ELEMENTS);

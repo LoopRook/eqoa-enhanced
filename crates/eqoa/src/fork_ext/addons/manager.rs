@@ -122,6 +122,7 @@ impl Manager {
         queue: &wgpu::Queue,
         renderer: Rc<RefCell<WgpuRenderer>>,
     ) -> Self {
+        super::options::set_storage_root(storage_root.clone());
         let mut manager = Self {
             named: None,
             root,
@@ -293,6 +294,8 @@ impl Manager {
                     }
                 }
                 self.configure_native_settings(entry);
+                super::options::set_addon_enabled(&entry.metadata.id, true);
+                crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, true);
                 let instance = entry.instance.as_mut().unwrap();
                 instance.host.snapshot.set(snapshot);
                 instance.active = true;
@@ -676,6 +679,9 @@ impl Manager {
         if entry.status != Status::Failed {
             entry.status = Status::Disabled;
         }
+        super::options::set_addon_enabled(&entry.metadata.id, false);
+        crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, false);
+        super::hud_layer::clear_addon(&entry.metadata.id);
     }
 
     fn fail(&mut self, entry: &mut Entry, phase: &'static str, error: String, rendering: bool) {
@@ -760,6 +766,8 @@ impl Manager {
                     );
                 } else {
                     entry.enabled_intent = enabled;
+                    super::options::set_addon_enabled(&entry.metadata.id, enabled);
+                    crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, enabled);
                     let result = if let Some(s) = &mut self.named {
                         s.data.enabled.insert(entry.key.clone(), enabled);
                         s.dirty = true;
@@ -889,6 +897,11 @@ impl Manager {
                 }
             };
             let enabled_intent = intent.or(persisted).unwrap_or(metadata.initially_enabled);
+            super::options::set_addon_enabled(&metadata.id, enabled_intent);
+            crate::fork_ext::bindpage::set_addon_enabled(&metadata.id, enabled_intent);
+            if !enabled_intent {
+                super::hud_layer::clear_addon(&metadata.id);
+            }
             self.entries.push(Entry {
                 metadata,
                 key,
@@ -2414,5 +2427,97 @@ mod tests {
                 .any(|d| d.message.contains("failed to write migrated profile")),
             "failed migration must appear in manager diagnostics: {fail_diags:?}"
         );
+    }
+    #[test]
+    fn disabled_bundled_hud_mod_removes_option_key_rows_and_drawing() {
+        let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        let ids = [
+            "eqoa_stats_box",
+            "eqoa_target_of_target",
+            "eqoa_mana_bars",
+            "eqoa_hud_numbers",
+        ];
+        for file in crate::fork_ext::bundled::EMBEDDED_FILES {
+            if ids
+                .iter()
+                .any(|id| file.path.starts_with(&format!("{id}/")))
+            {
+                let path = scripts.0.join(file.path);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, file.data).unwrap();
+            }
+        }
+        super::super::options::reset_in_memory();
+        crate::fork_ext::bindpage::reset_in_memory();
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        super::super::native_core::CORE.with(|c| c.borrow_mut().view.in_world = true);
+        super::super::hud_layout::set_hud_state(true, true, false, 93, 20);
+        gpu.frame(&mut manager);
+        assert_eq!(crate::fork_ext::bindpage::extra_rows(), 1);
+        for (id, assertion) in [
+            (
+                "eqoa_stats_box",
+                "assert(eqoa.options.get('stats_box')==false)",
+            ),
+            (
+                "eqoa_target_of_target",
+                "assert(eqoa.options.get('target_of_target')==false)",
+            ),
+            (
+                "eqoa_mana_bars",
+                "assert(eqoa.options.get('mana_bars')==true)",
+            ),
+            (
+                "eqoa_hud_numbers",
+                "assert(eqoa.options.get('hud_numbers') and eqoa.options.get('xp_details') and eqoa.options.get('target_hp_percent'))",
+            ),
+        ] {
+            lua(&manager, id).load(assertion).exec().unwrap();
+        }
+        for id in ids {
+            let items = super::super::options::BUNDLED_TOGGLES
+                .iter()
+                .filter(|t| t.0 == id)
+                .map(|t| t.3)
+                .collect::<Vec<_>>();
+            assert!(
+                items
+                    .iter()
+                    .all(|item| super::super::options::active_mod_item_ids().contains(item))
+            );
+            super::super::native_core::CORE.with(|c| c.borrow_mut().view.in_world = true);
+            lua(&manager, id)
+                .load("assert(eqoa.hud.panel({x=200,y=54,w=148,h=132}))")
+                .exec()
+                .unwrap();
+            super::super::hud_layer::MOD_QUEUES
+                .with(|q| assert!(!q.borrow()[id].is_empty(), "drawing before disable"));
+            manager.queue(Command::Enable(id.into(), false));
+            gpu.frame(&mut manager);
+            assert!(
+                items
+                    .iter()
+                    .all(|item| !super::super::options::active_mod_item_ids().contains(item))
+            );
+            super::super::hud_layer::MOD_QUEUES.with(|q| {
+                assert!(
+                    q.borrow().get(id).is_none_or(Vec::is_empty),
+                    "no drawing after disable"
+                )
+            });
+            if id == "eqoa_stats_box" {
+                assert_eq!(crate::fork_ext::bindpage::extra_rows(), 0);
+            }
+        }
+        assert!(
+            manager.diagnostics().is_empty(),
+            "{:?}",
+            manager.diagnostics()
+        );
+        manager.shutdown();
+        super::super::options::set_storage_root(None);
     }
 }

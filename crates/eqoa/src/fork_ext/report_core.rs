@@ -10,6 +10,8 @@
 /// The account name and the password the game sent Station (its API's
 /// logins), taken out of every report.
 pub fn secret(account: &str, password: &str) {
+    #[cfg(target_arch = "wasm32")]
+    let _ = (account, password);
     #[cfg(not(target_arch = "wasm32"))]
     native::secret(account, password);
     #[cfg(not(target_arch = "wasm32"))]

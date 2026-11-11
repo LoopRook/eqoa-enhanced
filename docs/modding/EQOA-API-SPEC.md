@@ -68,8 +68,9 @@ This is the **normative capability spelling index**, not a list inferred from wh
 | Module | Functions (exact suffixes) | Section / round |
 |---|---|---|
 | `abilities` | list, get, find, in_range | §4 /2 |
-| `actions` | status, cancel, target, cycle_target, assist, interact, attack, cast, use_hotbar, use_item, equip, destroy, swap_items, quick_slot, weapon_set, prepare_weapon_set, assign_ability, unmemorize_ability, unmemorize_all, arrange_ability, loot, loot_all, buy, sell, bank_move, bank_money, chat, command, move, look, autorun, follow, stop, camera, open_window, close_window, select_row, activate_row, dialog_answer, input_text, drop_quest, mastery_share, mastery_browse, mastery_buy, mastery_refund, buttons, menu_command | §8 /4 |
+| `actions` | target_target, toggle_stats_box; status, cancel, target, cycle_target, assist, interact, attack, cast, use_hotbar, use_item, equip, destroy, swap_items, quick_slot, weapon_set, prepare_weapon_set, assign_ability, unmemorize_ability, unmemorize_all, arrange_ability, loot, loot_all, buy, sell, bank_move, bank_money, chat, command, move, look, autorun, follow, stop, camera, open_window, close_window, select_row, activate_row, dialog_answer, input_text, drop_quest, mastery_share, mastery_browse, mastery_buy, mastery_refund, buttons, menu_command | §8 /3 target_target/toggle_stats_box; /4 others |
 | `bank` | get | §6 /3 |
+| `binds` | register, get | §5 /3 |
 | `camera` | get, compass | §7 /4 |
 | `capabilities` | get, list, has | §2 /2 |
 | `chat` | history, get_channel, channel_name | §4 /2 |
@@ -80,14 +81,14 @@ This is the **normative capability spelling index**, not a list inferred from wh
 | `entities` | list, get, find, named, distance | §4 /2 |
 | `events` | on, off, once, after | §3 /2 |
 | `files` | read, write, remove; list | §5,9 /2; list /4 |
-| `fonts` | load, default, release | §5 /2 |
+| `fonts` | load, default, release; game | §5 /2; game /3 |
 | `gems` | get, is_gem, format | §6 /3 |
 | `group` | get | §4 /2 |
 | `hotbar` | list | §4 /2 |
-| `hud` | hide, show, hidden_by | §5 /2 |
+| `hud` | hide, show, hidden_by; frame, layout, visible | §5 /2; frame/layout/visible /3 |
 | `icons` | resource, ui, info; class, disposition | §5 /2; class/disposition /4 |
 | `imgui` | vec2, vec4, plus **every individually named required ImGui function in §5** | §5 /2 and explicitly marked /4 additions |
-| `input` | get, claim, release, capture_text, rotate_dpad | §4 /2 |
+| `input` | get, claim, release, capture_text, rotate_dpad, bind | §4 /2 |
 | `inventory` | get | §6 /3 |
 | `items` | get, can_use, stat, slot_info, attack_name, stat_name | §6 /3 |
 | `log` | write | §5 /2 |
@@ -96,7 +97,8 @@ This is the **normative capability spelling index**, not a list inferred from wh
 | `mastery` | get, skills, selected | §7 /4 |
 | `math` | bearing, degrees, radians, normalize, signed_angle, facing, is_bit_zero | §5 /2 |
 | `merchant` | get, price | §6 /3 |
-| `player` | get, experience_for_level | §4–5 /2; Player.mastery field /4 |
+| `options` | get, set, toggle | §5 /3 |
+| `player` | get, experience_for_level; stats | §4–5 /2; stats /3; Player.mastery field /4 |
 | `quests` | list, get | §7 /4 |
 | `settings` | load, save, on_save, on_load | §5 /2 |
 | `sound` | load, play, stop, set_volume, is_playing, release | §5 /2 if native backend exists |
@@ -216,7 +218,8 @@ All state getters read the frozen native core, not Forge tables. Unsupported R4 
 | Function | Return, availability and source |
 |---|---|
 | `eqoa.client.get()` | A: `Client={in_world:bool,phase:"pregame"\|"loading"\|"world"\|"disconnected",generation:uint,tick:uint,frame:uint,time:number,world_id:int?}`. Source `F:131`, `P:5423`, `frames.rs`. |
-| `eqoa.player.get()` | W: `Player?`; nil,not_in_world otherwise. Identity `N/session.rs:359`, `N/dump.rs:15`, stats `N/dump.rs:181`, native assembly `F:137`. |
+| `eqoa.player.get()` | W: `Player?`; nil,not_in_world otherwise. `Player.hp_fraction:number?` is the native HUD health byte divided by 255 (nil without the player entity), distinct from exact `hp.current/hp.maximum`. Identity `N/session.rs:359`, `N/dump.rs:15`, stats `N/dump.rs:181`, native assembly `F:137`. |
+| `eqoa.player.stats()` | W: `Stats?`; nil,not_in_world otherwise. Detailed summary stats computed from base, worn items, masteries and effects. Includes `rows` array and named keys with `current`, `base`, `change`, `shift` ("same"\|"raised"\|"lowered"). |
 | `eqoa.entities.list()` | W: `Entity[]`, all populated client-observed records, native slot order; no fixed 24/32 cap. Empty means none observed, not no spawns in the world. `N/entity.rs:298,333`. |
 | `eqoa.entities.get(ref:EntityRef)` | W: `Entity?`; stale_handle if expired. |
 | `eqoa.entities.find(id:uint)` | W: current `Entity?`, nil,nil if no visible record. Never searches historical map data. |
@@ -239,11 +242,11 @@ All state getters read the frozen native core, not Forge tables. Unsupported R4 
 | `location:Location?` | S grid/words: `{world_id:int,place_id:int?,compass_id:int?,name:string?,cell_x:int,cell_z:int}`. Cell coordinates are signed grid labels, not Lua array positions. `F:174`, `zones.rs:54`. |
 | `mastery:Mastery?` | Round 4, §7; separate capability `eqoa.player.Player.mastery`. |
 
-`Entity={ref:EntityRef,id:uint,name:string,level:uint?,position:Vec3?,hp_fraction:number?,kind:"player"|"npc"|"pet"|"other",class_code:uint?,target_id:uint?,status_flags:uint?,poisoned:bool?,diseased:bool?,disposition:uint?,disposition_name:string?}`. Source `N/entity.rs:69,112`, snapshot `F:368`. hp_fraction is p19/255 when known; p19=0 is ambiguous dead/out-of-range, so nil unless native metadata establishes a measured value. Do not assert death from zero. `class_code` is creature p256, **not player class**; player is 2, NPC <2, pet 3. Disposition is only known for current target after TargetInfo (0x0010), invalidated immediately on target change; for other entities it is nil. Status bits: `eqoa.entities.status={nameplate_hidden=1,poisoned=4,diseased=8}` (resource icon IDs are in icons, not status flags). kind unknown values preserve class_code and return other. Explicitly do not infer disposition from kind or map history.
+`Entity={ref:EntityRef,id:uint,name:string,level:uint?,position:Vec3?,hp_fraction:number?,power:number?,kind:"player"|"npc"|"pet"|"other",class_code:uint?,target_id:uint?,status_flags:uint?,poisoned:bool?,diseased:bool?,disposition:uint?,disposition_name:string?}`. Source `N/entity.rs:69,112`, snapshot `F:368`. hp_fraction is p19/255 when known; power is 0..1 fraction from power reader or self stats (nil when not sent). p19=0 is ambiguous dead/out-of-range, so nil unless native metadata establishes a measured value. Do not assert death from zero. `class_code` is creature p256, **not player class**; player is 2, NPC <2, pet 3. Disposition is only known for current target after TargetInfo (0x0010), invalidated immediately on target change; for other entities it is nil. Status bits: `eqoa.entities.status={nameplate_hidden=1,poisoned=4,diseased=8}` (resource icon IDs are in icons, not status flags). kind unknown values preserve class_code and return other. Explicitly do not infer disposition from kind or map history.
 
 ### Group
 
-`eqoa.group.get()` (W) returns `Group={in_group:bool,self_leader:bool?,members:Member[],raid:RaidMember[],invites:Invite[]}`. Not grouped is an available object with in_group=false and empty lists, self_leader=nil. `Member={entity:EntityRef?,id:uint,name:string,active:bool,hp_fraction:number?,position:Vec3?,world_id:int?}`; unknown HP remains nil until `hp_known!=0`. Position uses a current actor first, otherwise active channel-40 coordinates in that member's world. Expose world_id even if different; distance/guidance must check it. No fixed eight-member cap in the native API. `RaidMember={id:uint,name:string,hp_fraction:number?,power_fraction:number?}`, `Invite={id:uint,name:string}`. Sources `group.rs:11,29,63,88,113`, `P:2362,2366,2414,7738,8106`.
+`eqoa.group.get()` (W) returns `Group={in_group:bool,self_leader:bool?,members:Member[],raid:RaidMember[],invites:Invite[]}`. Not grouped is an available object with in_group=false and empty lists, self_leader=nil. `Member={entity:EntityRef?,id:uint,name:string,active:bool,hp_fraction:number?,position:Vec3?,world_id:int?}`; unknown HP remains nil until `hp_known!=0`. Position uses a current actor first, otherwise active channel-40 coordinates in that member's world. Expose world_id even if different; distance/guidance must check it. The members list excludes the local player and inactive slots, matching the native group HUD; raid roster remains separate. No fixed eight-member cap in the native API. `RaidMember={id:uint,name:string,hp_fraction:number?,power_fraction:number?}`, `Invite={id:uint,name:string}`. Sources `group.rs:11,29,63,88,113`, `P:2362,2366,2414,7738,8106`.
 
 **Resolved scout issues:** channel-40's s16 coordinates are cast directly to game-unit floats (`group.rs:121`); native map and HUD compare/subtract them directly against actor/camera positions (`P:7738,8112`). No /100 or /256 conversion. Leadership must be derived from the current roster's first member vs self ID; `Group.leader` currently can stay true after a transfer (`group.rs:93`). The adapter must use the roster derivation, not export that stale flag. Raid list uses server-provided bars and carries no invented coordinates.
 
@@ -296,6 +299,24 @@ Hotbar.index is native carousel menu index+1 (1..number of returned menus); Hotb
 | `eqoa.hud.hide(element:string)` | W: Token for this VM's hide claim; **outside W return nil,not_in_world and create no claim**. Native display projection applies while W; world loss revokes token/claim. `A/visibility.rs:31,240`, `fork_ext/hud.rs:21`. |
 | `eqoa.hud.show(token:Token)` | A: bool removed; does not release another mod's claim. |
 | `eqoa.hud.hidden_by(element:string)` | A: string[] of addon IDs sorted; no arbitrary Lua owner labels. |
+| `eqoa.hud.frame(custom_size?:{width:uint,height:uint})` | A: `Frame={width:640,height:448,offset_x:number,offset_y:number,scale_x:number,scale_y:number,side:number,top:number,window_width:uint,window_height:uint}`: 4:3 virtual frame transformation metrics for the current or custom window size. Native source: `fork_ext/addons/hud_layout.rs`. |
+| `eqoa.hud.layout(custom_size?:{width:uint,height:uint})` | A: `Layout={player:PlayerLayout,group_members:GroupMemberLayout[],target:TargetLayout,pet:SinglePanelLayout}`: bounding rects for stock HUD elements (`panel`, `health`, `power`, `exp`) transformed into screen coordinates. Native source: `fork_ext/addons/hud_layout.rs`. |
+| `eqoa.hud.visible(element?:string)` | W: `bool`: returns whether the specified HUD element (or HUD overall when omitted) is currently visible, respecting `hideui` and mod hide claims. Returns false outside world. Native source: `fork_ext/addons/hud_layout.rs`. |
+| `eqoa.hud.text(spec:{x:number,y:number,text:string,color?:number[],scale?:number,align?:"left"|"center"|"right",outline?:bool,shadow?:bool,anchor?:"left"|"center"|"right",vertical?:"top"|"center"|"bottom",col?:int,row?:int})` | W: `bool`: queues native HUD text using the game's authentic ArialUI bitmap font in the HUD pass. `outline` draws a 4-way 1px black outline, `shadow` a single (1,1) black drop shadow. `col`/`row` (1..2 / 1..8) lay the text out inside the Stats Box frame as `statbox.rs` did, overriding x/y/scale. `anchor`/`vertical` place the text as the native HUD's Anchor/Vertical do (default left/top). Bounded per-frame queue; returns nil,not_in_world outside world. Native source: `fork_ext/addons/hud_layer.rs`. |
+| `eqoa.hud.gauge(spec:{x:int,y:int,art:int,fill:number,lit?:bool,anchor?:string,vertical?:string})` | W: `bool`: queues a native gauge (e.g. art 9 mana, 7 health) with authentic frame 136, drawn by native gauge raster. Returns nil,not_in_world outside world. Native source: `fork_ext/addons/hud_layer.rs`. |
+| `eqoa.hud.image(spec:{ui_id:int|string,x:int,y:int,w?:int,h?:int,color?:number[],anchor?:string,vertical?:string})` | W: `bool`: queues a native UI texture blit in the HUD pass. `ui_id=25` is special-cased to the 3-piece bar (entries 25/26) so `eqoa.target_of_target` can draw its name bar; `ui_id="panel"` draws an authentic window backing/border; any other id is a plain blit (tinted by `color`). Returns nil,not_in_world outside world. Native source: `fork_ext/addons/hud_layer.rs`. |
+| `eqoa.hud.panel(spec:{x:int,y:int,w:int,h:int})` | W: `bool`: queues an authentic game window backing and border frame in the HUD pass. Returns nil,not_in_world outside world. Native source: `fork_ext/addons/hud_layer.rs`. |
+| `eqoa.options.get(id:string,addon_id?:string)` | A: `bool?`: without an owner, reads only the calling addon's saved switch; unknown IDs return nil,nil. An explicit owner permits a read of that addon's switch and returns false while that addon is disabled. IDs and labels never redirect identity or search other addons. Native source: `fork_ext/addons/options.rs`. |
+| `eqoa.options.set(id:string,value:bool)` | A: `true,nil` after atomic persistence under the calling addon's identity. A failed save returns nil,io_error, leaves the switch unchanged, and reports through Addon Manager and addons_error.log. UI toggles use the same save-first behavior. Native source: `fork_ext/addons/options.rs`. |
+| `eqoa.options.toggle(spec:{id:string,label?:string,default?:bool})` | A: `Toggle={id:string,label:string,default:bool,value:bool,item_id:int}`: registers an options toggle. Native source: `fork_ext/addons/options.rs`. |
+| `eqoa.binds.register(id:string,default_key:string,description:string)` | A: `bool`: registers a mod-owned keybind on the Controls page under `mod.<addon>.<id>`. Native source: `fork_ext/bindpage.rs`. |
+| `eqoa.binds.get(id:string)` | A: `string?,nil`: current key for the calling addon's registered Controls row; nil when missing or disabled, empty string when explicitly unbound. No cross-addon lookup. |
+| `eqoa.input.bind(spec:{id:string,label?:string,default_key?:string,callback?:function},callback?:function)` | A: `bool,nil`: registers the caller's Controls row (default key `b`, label defaults to id) and optionally subscribes a callback to `input.key`. A second-argument callback takes precedence. Calls it on a matching key-down, excluding repeats, using the current registered key after rebinding. Missing, disabled and unbound rows never invoke it. Invalid spec/id/callback returns nil,invalid_argument. Uses the same binding registry as binds.register; labels and IDs never change addon identity. |
+| `eqoa.actions.target_target()` | W: `bool,nil`: assists the current target by targeting its target. Nil,not_in_world outside world. Native source: `fork_ext/addons/actions.rs`. |
+| `eqoa.actions.assist()` | W: `bool,nil`: same path as `target_target` (the Assist Target action), one request per call. Nil,not_in_world outside world, nil,busy when already queued this tick. Native source: `fork_ext/addons/actions.rs`. |
+| `eqoa.actions.toggle_stats_box()` | A: compatibility action reserved for the `eqoa_stats_box` addon. Returns `bool,nil` with the new shown/hidden state after saving, then prints the matching status message through native `say` (stderr on desktop), as develop did. Failed save returns nil,io_error, preserves the state and emits no success message. Other addons get nil,permission_denied and should use their own options.get/set instead. |
+| `eqoa.windows.open(name:string)` | W: `bool,nil`: opens a native window; only `"summary"` (the Character Summary) is supported, through the same path as the Stats Box click. Nil,invalid_argument for any other name, nil,not_in_world outside world. Native source: `fork_ext/addons/actions.rs`. |
+| `eqoa.player.stats()` | W: `Stats={strength:StatItem,stamina:StatItem,agility:StatItem,dexterity:StatItem,wisdom:StatItem,intelligence:StatItem,charisma:StatItem,armor:StatItem,max_hp:StatItem,max_power:StatItem,fire:StatItem,cold:StatItem,lightning:StatItem,arcane:StatItem,poison:StatItem,disease:StatItem,rows:StatItem[]}` where `StatItem={name:string,base:int,current:int,change:int}`. Nil,not_in_world outside world. Native source: `fork_ext/addons/player_stats.rs`. |
 | `eqoa.icons.resource(hash:uint,options:IconOptions={})` | W/S: TextureInfo; direct live ESF cache, automatic ownership (no Acquire prerequisite). `A/icons.rs:667,1271`, `F:42`. |
 | `eqoa.icons.ui(id:uint)` | W/S: TextureInfo from current UI atlas (`V/ui.rs:131`, `A/icons.rs:1308`); missing IDs nil,not_found. |
 | `eqoa.icons.info(hash:uint)` | W/S: `{width:uint,height:uint,source_format:string?}`; only data actually decoded by ESF, never invented palette counts. |
@@ -308,6 +329,14 @@ Hotbar.index is native carousel menu index+1 (1..number of returned menus); Hotb
 | `eqoa.math.facing(position:Vec3,heading:number,destination:Vec3,tolerance:number)` | A: bool; shortest bearing difference ≤ tolerance radians, tolerance 0..π; same point true. |
 | `eqoa.math.is_bit_zero(value:uint,mask:uint)` | A: bool; inputs 0..0xffffffff, `(value & mask)==0`, no shifts/index adjustment. Safe equivalent of `R/util.lua:377`; native band implementation `A/bit.rs:85..105`. The existing global/require `bit` stays available with its existing BitOp normalization; it is not a new eqoa module. |
 | `eqoa.player.experience_for_level(level:uint)` | A: uint threshold or nil,nil outside 1..59; use **native** `hud.rs:124` including level≥51 branch. Forge retains pinned table formula (§11). |
+
+Mod keys persist in `mod-keys.opt`, separately from native `keys.opt`. On upgrade, existing
+`mod.*` lines and `key.stats_box` move out of `keys.opt`: write the new file first, then
+remove the legacy lines only after success. Explicit values in the new file win; a failed
+cleanup retries safely. Native Controls saves cannot overwrite mod bindings. Key conflicts
+against native controls or other mods remain a Round 7 API backlog item.
+
+`eqoa.hud.text` and `eqoa.hud.image` accept optional `target_fade:bool=false`. When true, their requested alpha is multiplied by the current native target-plate glow. This preserves target-change fade behavior without changing layout, visibility or gauge alpha.
 
 `IconOptions={trim:bool=false,trim_transparent:bool=false,trim_color:Color?}`. Existing crop/trim logic `A/icons.rs:46,123`; cache key includes options and art revision. `TextureInfo={texture:Texture,width:uint,height:uint}` in decoded source pixels. Source_format optional when decoder lacks original metadata. Class and disposition **ID lookup tables** can be present at round 2, but class/disposition TextureInfo capability is not supported until round 4. No second drawing helper API: render these textures with ImGui.Image.
 
@@ -746,3 +775,6 @@ Drawing support is the explicit bounded subset in §5, not every pinned ImGui bi
 ## Open questions
 
 None. The owner has already chosen naming, stability timing, Forge compatibility, automation and sandbox scope. Technical implementation checks (native reply correlation, seam footprint review, actual platform/media availability) are assigned above with defined fallback/error behavior; they are not owner policy decisions.
+
+
+Round 3: `player.stats_changed` is a notification with an empty data record whenever the native detailed Stats snapshot changes, including mastery/cap-only changes that do not change Player fields. Read `eqoa.player.stats()` after delivery. Consumers caching scalar drawing data must also invalidate on `state.reset`, `enabled`, and `events.dropped`.

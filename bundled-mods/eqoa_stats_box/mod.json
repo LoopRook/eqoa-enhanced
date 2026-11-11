@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_stats_box",
+  "name": "EQOA Stats Box",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": true,
+  "capabilities": [
+    "eqoa.player.stats",
+    "eqoa.hud.panel",
+    "eqoa.hud.text",
+    "eqoa.hud.frame",
+    "eqoa.hud.visible",
+    "eqoa.input.bind",
+    "eqoa.actions.toggle_stats_box",
+    "eqoa.text.localized",
+    "eqoa.options.toggle",
+    "eqoa.options.get",
+    "eqoa.windows.open",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}

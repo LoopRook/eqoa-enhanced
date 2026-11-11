@@ -3474,7 +3474,6 @@ impl Play {
         self.session.agree_pet_effects(crate::settings::pet_effects());
         self.agree_number_tags();
         self.agree_dps_meter();
-        self.session.agree_power_bars(crate::settings::client().mana_bars);
         self.agree_quests();
         self.guide_wait(now);
         self.record_menu(); // Character > Combat Record once the server offers it
@@ -4299,55 +4298,15 @@ impl Play {
         self.loading.up()
     }
 
-    /// The Controls page's "Target: the target's target" (F, the client's
-    /// own key) and a click on the Target of Target bar: the game's Assist
-    /// Target (`DoAction(0x0B0E0006)`, 0x00CB), the server answering whom to
+    /// The Controls page's "Assist Target" (F, the client's own key) and a
+    /// click on the Target of Target bar: the game's Assist Target
+    /// (`DoAction(0x0B0E0006)`, 0x00CB), the server answering whom to
     /// target (`Msg007B`). The server's answer, not the target's channel:
     /// an object id there is the target's own session's on a server that
     /// counts them per session (go-eqoa-server), and the server knows a
     /// creature's enemy, which the channel does not carry.
     pub fn assist_target(&mut self) {
         self.do_action(0x0B0E_0006, 0);
-    }
-
-    /// Target of Target (the Extended page's, off by default): the name of
-    /// whom the target's channel says it targets (`Creature::target`, its
-    /// state's bytes 58-61, which CLIENT reads into `m_p74` and never looks
-    /// at), when that is an entity in view other than the target. Sandstorm
-    /// fills it for players (their own target; the player's own channel too)
-    /// and leaves every NPC's 0 (its captures of 2026-02: no creature's moved
-    /// in a fight), so a creature shows none; go-eqoa-server counts object
-    /// ids per session, and there a player's is its own session's id.
-    pub fn target_of_target(&self) -> Option<String> {
-        let t = self.target_of_target_id()?;
-        self.entities.slots.iter().flatten().find(|e| e.id == t)?.creature.as_ref().map(|c| c.name.clone()).filter(|n| !n.trim().is_empty())
-    }
-
-    /// Whom the target targets, as its channel says (Target of Target's
-    /// entity): none with the option off, without a target, or naming none
-    /// or itself.
-    fn target_of_target_id(&self) -> Option<u32> {
-        if !crate::settings::client().target_of_target || self.target == u32::MAX {
-            return None;
-        }
-        let t = self.entities.slots.iter().flatten().find(|e| e.id == self.target)?.creature.as_ref()?.target;
-        (t != 0 && t != u32::MAX && t != self.target).then_some(t)
-    }
-
-    /// Mana Bars (the Extended page's, the client's own): entity `id`'s power
-    /// of 255 for a bar under its health, the player's own off the stat
-    /// channel and anyone else's as the server last sent it
-    /// (`net::session::OP_POWER_BARS`: none from a server that sends none,
-    /// Sandstorm); none with the option off.
-    fn bar_power(&self, id: u32) -> Option<u8> {
-        if !crate::settings::client().mana_bars {
-            return None;
-        }
-        if Some(id) == self.self_id32() {
-            let (p, top) = (self.stats.stat[9] as i64, self.stats.stat[10] as i64);
-            return (top > 0).then(|| (p.clamp(0, top) * 255 / top) as u8);
-        }
-        self.session.power_of(id)
     }
 
     /// `FindEntity(m_selfId)`: the player's own entity is in.
@@ -4773,19 +4732,6 @@ impl Play {
         self.entities.slots.iter().flatten().filter_map(|e| e.creature.as_ref().map(|c| c.name.trim().to_string())).collect()
     }
 
-    /// Looks up the name of an entity by its id.
-    pub fn entity_name(&self, id: u32) -> Option<String> {
-        if Some(id) == self.self_id32() {
-            return Some(self.player.name.clone());
-        }
-        if id == self.pet_id && !self.pet_name.is_empty() {
-            return Some(self.pet_name.clone());
-        }
-        self.entities.slots.iter().flatten().find(|e| e.id == id)
-            .and_then(|e| e.creature.as_ref())
-            .map(|c| c.name.trim().to_string())
-    }
-
     /// Targets the creature called `name` (as a click on it would), 0x0010.
     /// As 0x007E would: the creature named `name` becomes the player's pet
     /// (a test hook; no server here sends 0x007E).
@@ -4941,11 +4887,6 @@ impl Play {
                     crate::fork_ext::report_core::open();
                     return true;
                 }
-                // the Target of Target bar: the game's Assist Target
-                Some(crate::hud::Pick::TargetsTarget) => {
-                    self.assist_target();
-                    return true;
-                }
                 // the minimap: the map opened, as the compass opens it
                 Some(crate::hud::Pick::Minimap) => {
                     if !self.map.mini_contains([x as f32,y as f32]) {return false;}
@@ -4963,14 +4904,6 @@ impl Play {
                 // the DPS meter: its other view, Reset, a page on (`dpsmeter`)
                 Some(crate::hud::Pick::Meter(hit)) => {
                     self.meter_point(hit);
-                    return true;
-                }
-                // the Stats Box: the Character menu's Summary (OpenTrainer's
-                // mode 12), closed back to the world
-                Some(crate::hud::Pick::Stats) => {
-                    self.trainer_open = true;
-                    self.trainer_from_hud = true;
-                    self.mode = 12;
                     return true;
                 }
                 Some(crate::hud::Pick::Me) => self.self_id32(),
@@ -8594,16 +8527,6 @@ impl Play {
         (self.mode == 0 || self.mode == 30 || self.mode == 38 || crate::hud::fork_hud::chat_history_keeps_right_hud(self.mode)) && !self.search.open && !self.map.open && !self.loading.up() && self.hud.is_some()
     }
 
-    /// The Stats Box's rows while it is up (`statbox`): Stats Box on, where
-    /// the minimap could be, once the stat channel has come.
-    fn stats_box_view(&self) -> Option<crate::statbox::View> {
-        if !crate::settings::stats_box() || !self.right_hud_up() {
-            return None;
-        }
-        let m = &self.cm.m;
-        crate::statbox::view(&crate::statbox::Source { stats: &self.stats, inv: &self.dump.inventory, mastery: &m.stats, bonuses: &m.bonuses, p44: self.dump.player.p44 as i32 })
-    }
-
     /// The quest tracker's quests while it is up (`tracker`): the Quest
     /// Helper and its Quest Tracker on, where the minimap could be.
     fn tracker_quests(&self) -> Vec<net::session::TrackedQuest> {
@@ -8864,10 +8787,6 @@ impl Play {
             target_hp: target.map_or(0, |e| e.p19 as i32),
             target_info: self.target_info,
             self_targeted_flag: Some(self.target) == me && self.dump.player.p2c > 0,
-            target_of_target: self.target_of_target(),
-            target_power: target.and_then(|e| self.bar_power(e.id)),
-            tot_hp: self.target_of_target_id().and_then(|t| find(Some(t))).map(|e| e.p19),
-            tot_power: self.target_of_target_id().and_then(|t| self.bar_power(t)),
             pet,
             group_count: self.group.count() as i32,
             group: self.group.members[..self.group.count()]
@@ -8875,7 +8794,7 @@ impl Play {
                 .filter(|m| Some(m.id) != me && m.active)
                 .map(|m| {
                     let flags = find(Some(m.id)).and_then(|e| e.creature.as_ref()).map_or(0, |c| c.flags262);
-                    crate::hud::MemberState { id: m.id, name: m.name.clone(), is_target: m.id == self.target, hp: (m.hp_known != 0).then_some((m.hp, flags & 4 != 0, flags & 8 != 0)), power: self.bar_power(m.id), marks: self.raid_marks(m.id) }
+                    crate::hud::MemberState { id: m.id, name: m.name.clone(), is_target: m.id == self.target, hp: (m.hp_known != 0).then_some((m.hp, flags & 4 != 0, flags & 8 != 0)), marks: self.raid_marks(m.id) }
                 })
                 .collect(),
             raid: self
@@ -8906,7 +8825,6 @@ impl Play {
             minimap: self.minimap_up(),
             tracker: self.tracker_quests(),
             meter: self.meter_shown(),
-            stats_box: self.stats_box_view(),
         };
         let now = self.session.now();
         let dt = ((time_ms - self.hud_last).clamp(0, 250)) as f32 / 1000.0;
@@ -11932,37 +11850,5 @@ mod commands {
         assert!(!crate::hideui::hidden(), "a world entry shows it");
     }
 
-    /// Target of Target (the Extended page's): the name of whom the target's
-    /// channel says it targets, among the entities in view, the player's own
-    /// included; none with the option off (the control), no target, a
-    /// target's target of 0 or -1 (Sandstorm's NPCs), itself, or one not in
-    /// view.
-    #[test]
-    fn the_target_of_target_is_the_targets_channels() {
-        use net::entity::{Creature, Entity};
-        crate::settings::testing::reset(false);
-        let mut p = play();
-        let put = |p: &mut Play, k: usize, id: u32, name: &str, target: u32| {
-            p.entities.slots[k] = Some(Entity { id, kind: 130, creature: Some(Creature { name: name.into(), target, ..Default::default() }), ..Default::default() });
-        };
-        put(&mut p, 0, 0x100, "Lanelook", 0x200);
-        put(&mut p, 1, 0x200, "Casil", 0x300);
-        put(&mut p, 2, 0x300, "Luck", u32::MAX);
-        p.target = 0x200;
-        assert_eq!(p.target_of_target(), None, "the control: off, the game's bar alone");
-        crate::settings::set_client(crate::settings::ClientOptions { target_of_target: true, ..Default::default() });
-        assert_eq!(p.target_of_target().as_deref(), Some("Luck"));
-        put(&mut p, 1, 0x200, "Casil", 0x100);
-        assert_eq!(p.target_of_target().as_deref(), Some("Lanelook"), "the player's own");
-        for (t, why) in [(0, "0: an NPC on Sandstorm"), (u32::MAX, "-1"), (0x200, "itself"), (0x999, "not in view")] {
-            put(&mut p, 1, 0x200, "Casil", t);
-            assert_eq!(p.target_of_target(), None, "{why}");
-        }
-        p.target = 0x300;
-        assert_eq!(p.target_of_target(), None, "Luck targets none");
-        p.target = u32::MAX;
-        assert_eq!(p.target_of_target(), None, "no target");
-        crate::settings::testing::reset(false);
-    }
 }
 

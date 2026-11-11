@@ -200,6 +200,7 @@ fn native_effects_and_group_use_actual_channels_and_current_roster() {
         crate::group::Member {
             id: 0x200,
             name: "New leader".into(),
+            active: true,
             ..Default::default()
         },
         crate::group::Member {
@@ -212,7 +213,7 @@ fn native_effects_and_group_use_actual_channels_and_current_roster() {
     assert_eq!(snapshot.effects.count, 1);
     assert_eq!(snapshot.effects.effects[0].icon_ref, 123);
     assert!(!snapshot.group.is_leader);
-    host.execute("local e=eqoa.effects.list()[1];assert(e.index==1 and e.icon==123 and e.name=='An actual native effect');local g=eqoa.group.get();assert(g.self_leader==false and g.members[1].hp_fraction==nil and g.members[1].position==nil)").unwrap();
+    host.execute("local e=eqoa.effects.list()[1];assert(e.index==1 and e.icon==123 and e.name=='An actual native effect');local g=eqoa.group.get();assert(g.self_leader==false and #g.members==1 and g.members[1].name=='New leader' and g.members[1].hp_fraction==nil)").unwrap();
 }
 #[test]
 fn native_logical_chat_burst_keeps_source_order_and_full_text() {
@@ -787,6 +788,8 @@ fn performance_busy_world_disabled_vms_leave_packet_and_frame_capture_quiescent(
     };
     let mut report = crate::input::Report::default();
     crate::fork_ext::prepare_controls(&mut report, true, true);
+    // First read of the cached option state initialises its thread-locals; measure steady state.
+    begin_iteration(&mut p, true);
     let (_, elapsed, allocs, bytes) = measure(|| {
         for frame in 0..300 {
             p.mode = if frame % 2 == 0 { 0 } else { 13 };
@@ -1508,4 +1511,314 @@ fn live_regression_extended_carousel_keeps_stock_forge_and_native_bar_indices() 
     "#,
     )
     .unwrap();
+}
+#[test]
+fn group_capture_excludes_player_and_inactive_slots_before_lua() {
+    let mut p = ready();
+    p.session.self_id = Some(0x100);
+    p.group.in_group = true;
+    p.group.members = vec![
+        crate::group::Member {
+            id: 0x100,
+            name: "Self".into(),
+            active: true,
+            ..Default::default()
+        },
+        crate::group::Member {
+            id: 0x200,
+            name: "Other".into(),
+            active: true,
+            pos: [1., 2., 3.],
+            ..Default::default()
+        },
+        crate::group::Member {
+            id: 0x300,
+            name: "Inactive".into(),
+            active: false,
+            ..Default::default()
+        },
+    ];
+    p.forge_snapshot(None);
+    let host = Host::new().unwrap();
+    host.execute("local m=eqoa.group.get().members;assert(#m==1 and m[1].id==0x200);assert(m[1].position.x==1);assert(eqoa.player.get().position==nil)").unwrap();
+    p.group.in_group = false;
+    super::api_capture::updates::inactive();
+    p.forge_snapshot(None);
+    host.execute("assert(#eqoa.group.get().members==0)")
+        .unwrap();
+}
+#[test]
+fn mod_hud_visibility_tracks_live_menu_map_loading_and_hide_ui() {
+    use crate::fork_ext::addons::hud_layout::hud_element_visible as visible;
+    let mut p = ready();
+    crate::hideui::show();
+    p.mode = 0;
+    begin_iteration(&mut p, false);
+    assert!(visible("target") && visible("stats_box"));
+    p.mode = 13;
+    begin_iteration(&mut p, false);
+    assert!(
+        !visible("target") && !visible("group") && !visible("health"),
+        "menu hides mod HUD"
+    );
+    p.mode = 0;
+    p.map.open = true;
+    begin_iteration(&mut p, false);
+    assert!(
+        !visible("target") && !visible("stats_box"),
+        "full map hides mod HUD"
+    );
+    p.map.open = false;
+    begin_iteration(&mut p, false);
+    assert!(visible("target"), "plain play control");
+    crate::hideui::toggle();
+    assert!(!visible("target") && !visible("stats_box"));
+    crate::hideui::show();
+    p.hud = None;
+    begin_iteration(&mut p, false);
+    assert!(!visible("target"), "no HUD during loading");
+}
+#[test]
+fn live_pet_layout_follows_group_raid_and_native_effect_strip() {
+    use crate::fork_ext::addons::hud_layout::get_hud_state;
+    let mut p = ready();
+    p.mode = 0;
+    p.pet_id = 42;
+    p.group.in_group = true;
+    for members in [1, 2, 4] {
+        p.group.members = vec![crate::group::Member::default(); members];
+        begin_iteration(&mut p, false);
+        let state = get_hud_state();
+        assert_eq!(state.pet_y, 93 + (members as i32 - 1) * 48);
+        assert_eq!(state.pet_h, 46, "native panel without effects");
+    }
+    assert!(crate::settings::pet_effects());
+    p.session.pet_effects_at = p.session.now();
+    p.session.pet_effects = vec![net::session::PetEffect {
+        icon: 1,
+        left_ms: 60_000,
+        name: "Pet buff".into(),
+    }];
+    begin_iteration(&mut p, false);
+    assert_eq!(
+        get_hud_state().pet_h,
+        68,
+        "48px native offset plus 20px effects row"
+    );
+    for members in [1, 12, 50] {
+        p.group.raid = vec![net::session::RaidMember::default(); members];
+        begin_iteration(&mut p, false);
+        let native = crate::raidlist::Fit::under(members, crate::raidlist::PET_H + 20);
+        assert_eq!(get_hud_state().pet_y, native.bounds([20, 93])[3] + 2);
+        assert_eq!(get_hud_state().pet_h, 68);
+    }
+    p.pet_id = u32::MAX;
+    begin_iteration(&mut p, false);
+    assert_eq!(get_hud_state().pet_h, 0, "no phantom pet rectangle");
+    let native = crate::raidlist::Fit::under(50, 0);
+    assert_eq!(get_hud_state().pet_y, native.bounds([20, 93])[3] + 2);
+}
+#[test]
+fn player_numeric_hp_uses_native_gauge_byte_not_exact_stat_ratio() {
+    use crate::fork_ext::addons::{hud_layer, native};
+    let mut p = ready();
+    p.entities.slots = vec![Some(net::entity::Entity {
+        id: 0x100,
+        p19: 128,
+        kind: 130,
+        creature: Some(net::entity::Creature {
+            name: "Self".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })];
+    p.stats.stat[7] = 90;
+    p.stats.stat[8] = 100;
+    CORE.with(|c| c.borrow_mut().stats_received = true);
+    p.forge_snapshot(None);
+    begin_iteration(&mut p, false);
+    let host = Host::new().unwrap();
+    native::session(&host.lua).borrow_mut().addon = "eqoa_hud_numbers".into();
+    native_events::bus(&host.lua).borrow_mut().once_mode = true;
+    host.execute(include_str!(
+        "../../../../bundled-mods/eqoa_hud_numbers/main.lua"
+    ))
+    .unwrap();
+    hud_layer::clear_all();
+    native_events::render(&host).unwrap();
+    hud_layer::MOD_QUEUES.with(|q| {
+        let q = q.borrow();
+        let cmds = q.get("eqoa_hud_numbers").unwrap();
+        assert!(
+            cmds.iter().any(
+                |c| matches!(c,hud_layer::HudCommand::Text{y,text,..} if *y==35. && text=="50%")
+            ),
+            "128/255 rounds to 50%, not stat ratio 90%"
+        );
+    });
+}
+#[test]
+fn tot_mod_follows_the_targets_native_channels_including_the_player() {
+    use crate::fork_ext::addons::{hud_layer, native, options};
+    let mut p = ready();
+    p.session.self_id = Some(0x100);
+    p.entities.slots = vec![None; 3];
+    let put = |p: &mut Play, k: usize, id, name: &str, target| {
+        p.entities.slots[k] = Some(net::entity::Entity {
+            id,
+            kind: 130,
+            p19: 204,
+            creature: Some(net::entity::Creature {
+                name: name.into(),
+                target,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+    };
+    put(&mut p, 0, 0x100, "Lanelook", 0x200);
+    put(&mut p, 1, 0x200, "Casil", 0x300);
+    put(&mut p, 2, 0x300, "Luck", u32::MAX);
+    p.target = 0x200;
+    options::reset_in_memory();
+    let host = Host::new().unwrap();
+    native::session(&host.lua).borrow_mut().addon = "eqoa_target_of_target".into();
+    native_events::bus(&host.lua).borrow_mut().once_mode = true;
+    host.execute(include_str!(
+        "../../../../bundled-mods/eqoa_target_of_target/main.lua"
+    ))
+    .unwrap();
+    let render = |p: &mut Play| {
+        super::api_capture::updates::inactive();
+        p.forge_snapshot(None);
+        begin_iteration(p, false);
+        hud_layer::clear_all();
+        native_events::render(&host).unwrap();
+        hud_layer::MOD_QUEUES.with(|q| {
+            q.borrow()
+                .get("eqoa_target_of_target")
+                .cloned()
+                .unwrap_or_default()
+        })
+    };
+    assert!(render(&mut p).is_empty(), "off by default control");
+    host.execute("eqoa.options.set('target_of_target',true)")
+        .unwrap();
+    let named = |commands: Vec<hud_layer::HudCommand>, name: &str| {
+        commands
+            .iter()
+            .any(|c| matches!(c,hud_layer::HudCommand::Text{text,..} if text==name))
+    };
+    assert!(named(render(&mut p), "Luck"));
+    put(&mut p, 1, 0x200, "Casil", 0x100);
+    assert!(named(render(&mut p), "Lanelook"));
+    for target in [0, u32::MAX, 0x200, 0x999] {
+        put(&mut p, 1, 0x200, "Casil", target);
+        assert!(
+            render(&mut p).is_empty(),
+            "invalid channel target {target:#x}"
+        );
+    }
+    p.target = 0x300;
+    assert!(render(&mut p).is_empty(), "Luck targets none");
+    p.target = u32::MAX;
+    assert!(render(&mut p).is_empty(), "no selected target");
+}
+#[test]
+fn addon_actions_use_live_camera_assist_and_summary_overlay_gates() {
+    use crate::fork_ext::addons::actions;
+    let mut p = ready();
+    actions::clear_actions();
+    // The native transport counts attempts on a deliberately lost scratch
+    // connection; this observes the real Assist -> DoAction -> send path.
+    p.session.conn = Some(usize::MAX);
+    assert!(p.session.game_conn().is_none());
+    for (mode, sends) in [(38, 1), (13, 0), (0, 1)] {
+        p.mode = mode;
+        let before = p.session.sends_lost;
+        assert!(actions::queue_assist());
+        begin_iteration(&mut p, true);
+        assert_eq!(
+            p.session.sends_lost - before,
+            sends,
+            "assist dispatch in mode {mode}"
+        );
+    }
+    for case in 0..7 {
+        p.mode = 0;
+        p.map.open = false;
+        p.map.search.open = false;
+        p.search.open = false;
+        p.typing = None;
+        p.death = None;
+        match case {
+            0 => p.mode = 13,
+            1 => p.map.open = true,
+            2 => p.map.search.open = true,
+            3 => p.search.open = true,
+            4 => p.typing = Some(String::new()),
+            5 => p.death = Some(crate::death::DeathCam::new([0.; 3], [0., 0., 1.], [0.; 3])),
+            _ => {}
+        }
+        let mode = p.mode;
+        assert!(actions::queue_open_summary());
+        begin_iteration(&mut p, true);
+        assert_eq!(
+            p.mode,
+            if case == 6 { 12 } else { mode },
+            "Summary overlay case {case}"
+        );
+    }
+    actions::clear_actions();
+    CORE.with(|c| c.borrow_mut().view.in_world = true);
+    let host = Host::new().unwrap();
+    host.execute("for i=1,16 do assert(eqoa.actions.assist()) end;local v,e=eqoa.actions.assist();assert(v==nil and e.code=='busy')").unwrap();
+    assert_eq!(
+        actions::drain_actions().len(),
+        16,
+        "one queued request for each successful API call"
+    );
+}
+
+#[test]
+fn mana_subscription_follows_enabled_mod_and_its_saved_switch_both_directions() {
+    use crate::fork_ext::addons::options;
+    crate::settings::testing::reset(false);
+    options::reset_in_memory();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    p.session.power_bars_offer = true;
+    let mut sends = p.session.sends_lost;
+    for (enabled, switched_on, expected_send, expected_keep) in [
+        (true, true, true, true),
+        (true, true, false, true),
+        (true, false, true, false),
+        (true, true, true, true),
+        (false, true, true, false),
+        (true, true, true, true),
+        (false, false, true, false),
+        (true, false, false, false),
+        (true, true, true, true),
+    ] {
+        options::set_addon_enabled("eqoa_mana_bars", enabled);
+        assert!(options::set_toggle(
+            "eqoa_mana_bars",
+            "mana_bars",
+            switched_on
+        ));
+        p.session.power_bars = vec![(42, 127)];
+        begin_iteration(&mut p, false);
+        assert_eq!(
+            p.session.sends_lost - sends,
+            u32::from(expected_send),
+            "enabled={enabled}, switch={switched_on}: actual native agreement send transition"
+        );
+        assert_eq!(
+            p.session.power_of(42).is_some(),
+            expected_keep,
+            "disabled agreement must clear the native received set"
+        );
+        sends = p.session.sends_lost;
+    }
+    options::reset_in_memory();
 }

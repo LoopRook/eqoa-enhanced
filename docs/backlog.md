@@ -245,3 +245,12 @@ Do this last, before the release that carries round 2 and the sync into `enhance
   workflows now `--skip` the first (owner agreed, 2026-11-09). A worker should find out whether the
   assertions assume a particular GPU (plain grey 127 versus 128, a factor difference of 54 against
   a maximum of 6) and, if so, report it to upstream; then drop the skip.
+
+## Round 7 API: conflicts between mod and native key bindings (round 3 review NEW-M2)
+
+- Deferred by the lead on 2026-11-10. Round 3 retains independent mod bindings.
+- Define conflict handling across native controls and all enabled mods, including default keys,
+  rebound keys, and changes saved from either Controls section. Match native freed/swapped feedback
+  and ensure a single key press cannot unexpectedly both Jump and toggle the Stats Box.
+- Specify precedence and persistence before implementation; test both directions, multiple mods,
+  restart, disabling/re-enabling a mod, and chat/menu suppression. Do not silently steal native keys.

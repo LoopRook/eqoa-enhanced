@@ -4336,15 +4336,11 @@ impl App {
                     crate::hideui::toggle();
                     return;
                 }
-                // N and B: Extended's Minimap and Stats Box turned, kept (the
-                // client's own, `map::mini`, `statbox`; free in the game's
-                // keyboard table), in play and the manual camera
+                // N: Extended's Minimap turned, kept (the client's own,
+                // `map::mini`; free in the game's keyboard table), in play
+                // and the manual camera
                 (None, Key::Character(c)) if (p.mode == 0 || p.mode == 38) && c.eq_ignore_ascii_case("n") && !event.repeat && crate::settings::map() => {
                     crate::map::mini::toggle();
-                    return;
-                }
-                (None, Key::Character(c)) if (p.mode == 0 || p.mode == 38) && c.eq_ignore_ascii_case("b") && !event.repeat => {
-                    crate::statbox::toggle();
                     return;
                 }
                 // F: the target's target, the game's Assist Target asked
@@ -6004,6 +6000,8 @@ impl App {
                     None => self.camera.view(self.bounds, g.config.width as f32 / g.config.height as f32),
                 };
                 self.last_view = Some(view.view_proj);
+                #[cfg(not(target_arch = "wasm32"))]
+                let addon_overlay = fork_report::prepare_addons(g, frame.as_ref(), self.play.as_ref(), self.walker.as_ref(), self.booted.as_ref().and_then(|s| s.server.as_deref()));
                 if let (Some(p), Some(w)) = (&mut self.play, &self.walker) {
                     // Hide UI (`hideui`): a window up or the update's question
                     // shows it all again; the loading screen is never hidden
@@ -6142,13 +6140,10 @@ impl App {
                     p.map.draw(&g.device, &mut enc, &f.color, &f.depth, window, f.size);
                 }
                 g.renderer.scale.resolve(&mut enc, &target);
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    let snapshot = self.play.as_ref().map_or_else(Default::default, |p| p.forge_snapshot(self.walker.as_ref()));
-                    g.forge_runtime.draw(&g.window, &g.device, &g.queue, g.config.format, &mut enc, &target,
-                        snapshot, self.booted.as_ref().and_then(|s| s.server.as_deref()));
-                }
                 mark(&mut self.perf, 11);
+                #[cfg(not(target_arch = "wasm32"))]
+                let sent = fork_report::submit_addons(&g.queue, enc, addon_overlay);
+                #[cfg(target_arch = "wasm32")]
                 let sent = g.queue.submit([enc.finish()]);
                 #[cfg(not(target_arch = "wasm32"))]
                 fork_report::shot(g, frame.as_ref());

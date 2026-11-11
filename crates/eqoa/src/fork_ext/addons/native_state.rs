@@ -1,9 +1,9 @@
 use super::{
     host::Host,
-    native::{bind, error, record},
+    native::{bind, bind_fn, error, record},
     native_core::{CORE, View},
 };
-use mlua::{AnyUserData, Lua, MetaMethod, Result, Table, UserData, UserDataMethods, Value};
+use mlua::{AnyUserData, Lua, MetaMethod, Result, UserData, UserDataMethods, Value};
 use serde_json::{Value as Json, json};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -57,7 +57,7 @@ fn read(
         c.view.in_world.then(|| f(&c.view))
     });
     match value {
-        Some(v) => lua.pack_multi((record(lua, path, &v)?, Value::Nil)),
+        Some(v) => lua.pack_multi((super::native::record_cached(lua, symbol, path, &v)?, Value::Nil)),
         None => error(lua, symbol, "not_in_world", "enter a loaded world first"),
     }
 }
@@ -407,6 +407,21 @@ fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
         ee::mul(d[2], d[2]),
     ))
 }
+// Release the session borrow before the caller may emit a diagnostic.
+fn queue_hud_command(
+    lua: &Lua,
+    cmd: super::hud_layer::HudCommand,
+) -> std::result::Result<(), &'static str> {
+    let session = super::native::session(lua);
+    let session = session.borrow();
+    let addon = if session.addon.is_empty() {
+        "default"
+    } else {
+        session.addon.as_str()
+    };
+    super::hud_layer::queue_command(addon, cmd)
+}
+
 fn install_math(lua: &Lua) -> Result<()> {
     bind(
         lua,
@@ -546,5 +561,680 @@ fn install_math(lua: &Lua) -> Result<()> {
         let d=distance(a,b);let range=ability["range"].as_f64().unwrap_or(0.0) as f32;
         lua.pack_multi((record(lua,"eqoa.abilities.RangeResult",&json!({"in_range":range==0.0 || ability["scope"]==0 || ee::le(d,range),"distance":d}))?,Value::Nil))
     })?)?;
+    bind(
+        lua,
+        "player",
+        "stats",
+        lua.create_function(|lua, ()| {
+            read(lua, "eqoa.player.stats", "eqoa.player.Stats", |v| {
+                v.player_stats.clone().unwrap_or(Json::Null)
+            })
+        })?,
+    )?;
+    for action_name in ["assist", "target_target"] {
+        let sym = format!("eqoa.actions.{action_name}");
+        bind(
+            lua,
+            "actions",
+            action_name,
+            lua.create_function(move |lua, ()| {
+                let in_world = CORE.with(|c| c.borrow().view.in_world);
+                if !in_world {
+                    return error(lua, &sym, "not_in_world", "enter a loaded world first");
+                }
+                if !super::actions::queue_assist() {
+                    return error(lua, &sym, "busy", "assist already queued this tick");
+                }
+                lua.pack_multi((true, Value::Nil))
+            })?,
+        )?;
+    }
+    bind(
+        lua,
+        "windows",
+        "open",
+        lua.create_function(|lua, name: Value| {
+            let Some(name) = name
+                .as_string()
+                .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+            else {
+                return error(
+                    lua,
+                    "eqoa.windows.open",
+                    "invalid_argument",
+                    "window name must be a string",
+                );
+            };
+            if name != "summary" {
+                return error(
+                    lua,
+                    "eqoa.windows.open",
+                    "invalid_argument",
+                    "unsupported window name",
+                );
+            }
+            let in_world = CORE.with(|c| c.borrow().view.in_world);
+            if !in_world {
+                return error(
+                    lua,
+                    "eqoa.windows.open",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            if !super::actions::queue_open_summary() {
+                return error(
+                    lua,
+                    "eqoa.windows.open",
+                    "busy",
+                    "summary open already queued this tick",
+                );
+            }
+            lua.pack_multi((true, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "hud",
+        "frame",
+        lua.create_function(|lua, arg: Option<Value>| {
+            let (w, h) = match arg {
+                Some(Value::Table(t)) => {
+                    let w = t.get::<Option<u32>>("width")?.unwrap_or(640);
+                    let h = t.get::<Option<u32>>("height")?.unwrap_or(448);
+                    (w, h)
+                }
+                _ => super::hud_layout::get_window_size(),
+            };
+            let j = super::hud_layout::hud_frame_json((w, h));
+            lua.pack_multi((super::native::record_cached(lua, "eqoa.hud.frame", "eqoa.hud.Frame", &j)?, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "hud",
+        "layout",
+        lua.create_function(|lua, arg: Option<Value>| {
+            let (w, h) = match arg {
+                Some(Value::Table(t)) => {
+                    let w = t.get::<Option<u32>>("width")?.unwrap_or(640);
+                    let h = t.get::<Option<u32>>("height")?.unwrap_or(448);
+                    (w, h)
+                }
+                _ => super::hud_layout::get_window_size(),
+            };
+            let j = super::hud_layout::hud_layout_json((w, h));
+            lua.pack_multi((record(lua, "eqoa.hud.Layout", &j)?, Value::Nil))
+        })?,
+    )?;
+    bind_fn(
+        lua,
+        "hud",
+        "visible",
+        |lua, element: Option<String>| -> Result<mlua::MultiValue> {
+            let in_world = CORE.with(|c| c.borrow().view.in_world);
+            if !in_world {
+                return lua.pack_multi((false, Value::Nil));
+            }
+            let vis = match element {
+                Some(name) => super::hud_layout::hud_element_visible(&name),
+                None => super::hud_layout::hud_element_visible("hud"),
+            };
+            lua.pack_multi((vis, Value::Nil))
+        },
+    )?;
+    let parse_anchor_vert =
+        |t: &Spec| -> Result<(render::ui::Anchor, render::ui::Vertical)> {
+            let anchor_s: Option<mlua::String> = t.fget("anchor")?;
+            let anchor = match anchor_s.as_ref().map(|s| s.as_bytes()).as_deref() {
+                Some(b"right") => render::ui::Anchor::Right,
+                Some(b"center") => render::ui::Anchor::Middle,
+                _ => render::ui::Anchor::Left,
+            };
+            let vert_s: Option<mlua::String> = t.fget("vertical")?;
+            let vertical = match vert_s.as_ref().map(|s| s.as_bytes()).as_deref() {
+                Some(b"bottom") => render::ui::Vertical::Bottom,
+                Some(b"center") => render::ui::Vertical::Middle,
+                _ => render::ui::Vertical::Top,
+            };
+            Ok((anchor, vertical))
+        };
+    bind_fn(
+        lua,
+        "hud",
+        "text",
+        move |lua, spec: Value| -> Result<mlua::MultiValue> {
+            let in_world = CORE.with(|c| c.borrow().view.in_world);
+            if !in_world {
+                return error(
+                    lua,
+                    "eqoa.hud.text",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            let Value::Table(t) = spec else {
+                return error(
+                    lua,
+                    "eqoa.hud.text",
+                    "invalid_argument",
+                    "spec must be a table",
+                );
+            };
+            let t = Spec::new(lua, &t)?;
+            let col: Option<usize> = t.fget("col")?;
+            let row: Option<usize> = t.fget("row")?;
+            let has_cell = col
+                .zip(row)
+                .is_some_and(|(c, r)| (1..=2).contains(&c) && (1..=8).contains(&r));
+            let x: f32 = match t.fget::<Option<f32>>("x")? {
+                Some(v) => v,
+                None if has_cell => 0.0,
+                None => return error(lua, "eqoa.hud.text", "invalid_argument", "x required"),
+            };
+            let y: f32 = match t.fget::<Option<f32>>("y")? {
+                Some(v) => v,
+                None if has_cell => 0.0,
+                None => return error(lua, "eqoa.hud.text", "invalid_argument", "y required"),
+            };
+            let text: mlua::String = match t.fget::<mlua::String>("text") {
+                Ok(v) => v,
+                Err(_) => {
+                    return error(lua, "eqoa.hud.text", "invalid_argument", "text required");
+                }
+            };
+            let color = match t.fget::<Option<mlua::Table>>("color")? {
+                Some(c) if c.raw_len() >= 4 => {
+                    [c.raw_get(1)?, c.raw_get(2)?, c.raw_get(3)?, c.raw_get(4)?]
+                }
+                Some(c) if c.raw_len() == 3 => [c.raw_get(1)?, c.raw_get(2)?, c.raw_get(3)?, 1.0],
+                _ => [1.0, 1.0, 1.0, 1.0],
+            };
+            let scale: f32 = t.fget::<Option<f32>>("scale")?.unwrap_or(1.0);
+            let align_str: Option<mlua::String> = t.fget("align")?;
+            let align = match align_str.as_ref().map(|s| s.as_bytes()).as_deref() {
+                Some(b"center") => super::hud_layer::TextAlign::Center,
+                Some(b"right") => super::hud_layer::TextAlign::Right,
+                _ => super::hud_layer::TextAlign::Left,
+            };
+            let outline: bool = t.fget::<Option<bool>>("outline")?.unwrap_or(false);
+            let shadow: bool = t.fget::<Option<bool>>("shadow")?.unwrap_or(false);
+            let (anchor, vertical) = parse_anchor_vert(&t)?;
+            let clip_width: Option<i32> = t.fget("clip_width")?;
+            let stat_cell = col
+                .zip(row)
+                .filter(|&(c, r)| (1..=2).contains(&c) && (1..=8).contains(&r))
+                .map(|(c, r)| (c - 1, r - 1, align == super::hud_layer::TextAlign::Right));
+
+            let cmd = super::hud_layer::HudCommand::Text {
+                x,
+                y,
+                text: super::hud_layer::text_buffer(&text.to_str()?),
+                target_fade: t.fget::<Option<bool>>("target_fade")?.unwrap_or(false),
+                color,
+                scale,
+                align,
+                outline,
+                shadow,
+                anchor,
+                vertical,
+                clip_width,
+                stat_cell,
+            };
+            if let Err(e) = queue_hud_command(lua, cmd) {
+                return error(lua, "eqoa.hud.text", "limit_exceeded", e);
+            }
+            lua.pack_multi((true, Value::Nil))
+        },
+    )?;
+    bind_fn(
+        lua,
+        "hud",
+        "gauge",
+        move |lua, spec: Value| -> Result<mlua::MultiValue> {
+            let in_world = CORE.with(|c| c.borrow().view.in_world);
+            if !in_world {
+                return error(
+                    lua,
+                    "eqoa.hud.gauge",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            let Value::Table(t) = spec else {
+                return error(
+                    lua,
+                    "eqoa.hud.gauge",
+                    "invalid_argument",
+                    "spec must be a table",
+                );
+            };
+            let t = Spec::new(lua, &t)?;
+            let x: i32 = match t.fget::<i32>("x") {
+                Ok(v) => v,
+                Err(_) => {
+                    return error(lua, "eqoa.hud.gauge", "invalid_argument", "x required");
+                }
+            };
+            let y: i32 = match t.fget::<i32>("y") {
+                Ok(v) => v,
+                Err(_) => {
+                    return error(lua, "eqoa.hud.gauge", "invalid_argument", "y required");
+                }
+            };
+            let art: i32 = match t.fget::<i32>("art") {
+                Ok(v) => v,
+                Err(_) => {
+                    return error(lua, "eqoa.hud.gauge", "invalid_argument", "art required");
+                }
+            };
+            let fill: f32 = match t.fget::<f32>("fill") {
+                Ok(v) => v,
+                Err(_) => {
+                    return error(lua, "eqoa.hud.gauge", "invalid_argument", "fill required");
+                }
+            };
+            let lit: bool = t.fget::<Option<bool>>("lit")?.unwrap_or(true);
+            let (anchor, vertical) = parse_anchor_vert(&t)?;
+
+            let cmd = super::hud_layer::HudCommand::Gauge {
+                x,
+                y,
+                art,
+                fill,
+                lit,
+                anchor,
+                vertical,
+            };
+            if let Err(e) = queue_hud_command(lua, cmd) {
+                return error(lua, "eqoa.hud.gauge", "limit_exceeded", e);
+            }
+            lua.pack_multi((true, Value::Nil))
+        },
+    )?;
+    bind_fn(
+        lua,
+        "hud",
+        "image",
+        move |lua, spec: Value| -> Result<mlua::MultiValue> {
+            let in_world = CORE.with(|c| c.borrow().view.in_world);
+            if !in_world {
+                return error(
+                    lua,
+                    "eqoa.hud.image",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            let Value::Table(t) = spec else {
+                return error(
+                    lua,
+                    "eqoa.hud.image",
+                    "invalid_argument",
+                    "spec must be a table",
+                );
+            };
+            let t = Spec::new(lua, &t)?;
+            let x: i32 = match t.fget::<i32>("x") {
+                Ok(v) => v,
+                Err(_) => {
+                    return error(lua, "eqoa.hud.image", "invalid_argument", "x required");
+                }
+            };
+            let y: i32 = match t.fget::<i32>("y") {
+                Ok(v) => v,
+                Err(_) => {
+                    return error(lua, "eqoa.hud.image", "invalid_argument", "y required");
+                }
+            };
+            let w: Option<i32> = t.fget("w")?;
+            let h: Option<i32> = t.fget("h")?;
+            let color = match t.fget::<Option<mlua::Table>>("color")? {
+                Some(c) if c.raw_len() >= 4 => {
+                    Some([c.raw_get(1)?, c.raw_get(2)?, c.raw_get(3)?, c.raw_get(4)?])
+                }
+                Some(c) if c.raw_len() == 3 => {
+                    Some([c.raw_get(1)?, c.raw_get(2)?, c.raw_get(3)?, 1.0])
+                }
+                _ => None,
+            };
+            let (anchor, vertical) = parse_anchor_vert(&t)?;
+
+            let cmd = match t.fget::<Value>("ui_id")? {
+                Value::String(s) if s.to_str()? == "panel" => super::hud_layer::HudCommand::Panel {
+                    x,
+                    y,
+                    w: w.unwrap_or(148),
+                    h: h.unwrap_or(132),
+                    anchor,
+                    vertical,
+                },
+                Value::Integer(id) => super::hud_layer::HudCommand::Image {
+                    ui_id: id as i32,
+                    target_fade: t.fget::<Option<bool>>("target_fade")?.unwrap_or(false),
+                    x,
+                    y,
+                    w,
+                    h,
+                    color,
+                    anchor,
+                    vertical,
+                },
+                Value::Number(n) => super::hud_layer::HudCommand::Image {
+                    ui_id: n as i32,
+                    target_fade: t.fget::<Option<bool>>("target_fade")?.unwrap_or(false),
+                    x,
+                    y,
+                    w,
+                    h,
+                    color,
+                    anchor,
+                    vertical,
+                },
+                _ => return error(lua, "eqoa.hud.image", "invalid_argument", "ui_id required"),
+            };
+
+            if let Err(e) = queue_hud_command(lua, cmd) {
+                return error(lua, "eqoa.hud.image", "limit_exceeded", e);
+            }
+            lua.pack_multi((true, Value::Nil))
+        },
+    )?;
+    bind_fn(
+        lua,
+        "hud",
+        "panel",
+        move |lua, spec: Value| -> Result<mlua::MultiValue> {
+            let in_world = CORE.with(|c| c.borrow().view.in_world);
+            if !in_world {
+                return error(
+                    lua,
+                    "eqoa.hud.panel",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            let Value::Table(t) = spec else {
+                return error(
+                    lua,
+                    "eqoa.hud.panel",
+                    "invalid_argument",
+                    "spec must be a table",
+                );
+            };
+            let t = Spec::new(lua, &t)?;
+            let x: i32 = match t.fget::<i32>("x") {
+                Ok(v) => v,
+                Err(_) => {
+                    return error(lua, "eqoa.hud.panel", "invalid_argument", "x required");
+                }
+            };
+            let y: i32 = match t.fget::<i32>("y") {
+                Ok(v) => v,
+                Err(_) => {
+                    return error(lua, "eqoa.hud.panel", "invalid_argument", "y required");
+                }
+            };
+            let w: i32 = match t.fget::<i32>("w") {
+                Ok(v) => v,
+                Err(_) => {
+                    return error(lua, "eqoa.hud.panel", "invalid_argument", "w required");
+                }
+            };
+            let h: i32 = match t.fget::<i32>("h") {
+                Ok(v) => v,
+                Err(_) => {
+                    return error(lua, "eqoa.hud.panel", "invalid_argument", "h required");
+                }
+            };
+            let (anchor, vertical) = parse_anchor_vert(&t)?;
+
+            let cmd = super::hud_layer::HudCommand::Panel {
+                x,
+                y,
+                w,
+                h,
+                anchor,
+                vertical,
+            };
+            if let Err(e) = queue_hud_command(lua, cmd) {
+                return error(lua, "eqoa.hud.panel", "limit_exceeded", e);
+            }
+            lua.pack_multi((true, Value::Nil))
+        },
+    )?;
+    bind(
+        lua,
+        "actions",
+        "toggle_stats_box",
+        lua.create_function(|lua, ()| {
+            let addon = super::native::session(lua).borrow().addon.clone();
+            if addon != "eqoa_stats_box" {
+                return error(lua, "eqoa.actions.toggle_stats_box", "permission_denied",
+                    "this compatibility action belongs to eqoa_stats_box; use eqoa.options.set for your own toggles");
+            }
+            let cur = super::options::get_toggle(&addon, "stats_box").unwrap_or(false);
+            let next = !cur;
+            if let Err(message) = super::options::set_toggle_persisted(&addon, "stats_box", next) {
+                return error(lua, "eqoa.actions.toggle_stats_box", "io_error", &message);
+            }
+            crate::say(stats_box_message(next));
+            lua.pack_multi((next, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "options",
+        "toggle",
+        lua.create_function(|lua, spec: Value| {
+            let Value::Table(t) = spec else {
+                return error(
+                    lua,
+                    "eqoa.options.toggle",
+                    "invalid_argument",
+                    "spec must be a table",
+                );
+            };
+            let t = Spec::new(lua, &t)?;
+            let id: String = match t.fget("id") {
+                Ok(s) => s,
+                Err(_) => {
+                    return error(
+                        lua,
+                        "eqoa.options.toggle",
+                        "invalid_argument",
+                        "id is required",
+                    );
+                }
+            };
+            let label: String = t.fget("label").unwrap_or_else(|_| id.clone());
+            let default: bool = t.fget("default").unwrap_or(false);
+            let addon = super::native::session(lua).borrow().addon.clone();
+            super::options::attach_diagnostics(&addon, super::native::diagnostic_sink(lua));
+            let (val, item_id) = super::options::register_toggle(&addon, &id, &label, default);
+            let j = json!({
+                "id": id,
+                "label": label,
+                "default": default,
+                "value": val,
+                "item_id": item_id,
+            });
+            lua.pack_multi((record(lua, "eqoa.options.Toggle", &j)?, Value::Nil))
+        })?,
+    )?;
+    bind_fn(
+        lua,
+        "options",
+        "get",
+        |lua, (id, owner): (String, Option<String>)| -> Result<mlua::MultiValue> {
+            let addon = super::native::session(lua).borrow().addon.clone();
+            let val = if let Some(owner) = owner {
+                super::options::get_toggle(&owner, &id)
+                    .map(|value| value && super::options::is_addon_enabled(&owner))
+            } else {
+                super::options::get_toggle(&addon, &id)
+            };
+            lua.pack_multi((val, Value::Nil))
+        },
+    )?;
+    bind(
+        lua,
+        "options",
+        "set",
+        lua.create_function(|lua, (id, val): (String, bool)| {
+            let addon = super::native::session(lua).borrow().addon.clone();
+            super::options::attach_diagnostics(&addon, super::native::diagnostic_sink(lua));
+            match super::options::set_toggle_persisted(&addon, &id, val) {
+                Ok(()) => lua.pack_multi((true, Value::Nil)),
+                Err(message) => error(lua, "eqoa.options.set", "io_error", &message),
+            }
+        })?,
+    )?;
+    bind(
+        lua,
+        "binds",
+        "register",
+        lua.create_function(
+            |lua, (id, default_key, description): (String, String, String)| {
+                let addon = super::native::session(lua).borrow().addon.clone();
+                let ok =
+                    crate::fork_ext::bindpage::register(&addon, &id, &default_key, &description);
+                lua.pack_multi((ok, Value::Nil))
+            },
+        )?,
+    )?;
+    bind(
+        lua,
+        "binds",
+        "get",
+        lua.create_function(|lua, id: String| {
+            let addon = super::native::session(lua).borrow().addon.clone();
+            let key = crate::fork_ext::bindpage::get_key(&addon, &id);
+            lua.pack_multi((key, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "input",
+        "bind",
+        lua.create_function(|lua, (spec, callback): (Value, Option<Value>)| {
+            let Value::Table(t) = spec else {
+                return error(
+                    lua,
+                    "eqoa.input.bind",
+                    "invalid_argument",
+                    "spec must be a table",
+                );
+            };
+            let id: String = match t.get("id") {
+                Ok(s) => s,
+                Err(_) => {
+                    return error(lua, "eqoa.input.bind", "invalid_argument", "id is required");
+                }
+            };
+            let default_key: String = t.get("default_key").unwrap_or_else(|_| "b".into());
+            let label: String = t.get("label").unwrap_or_else(|_| id.clone());
+            let cb_fn = match callback.or_else(|| t.get::<Option<Value>>("callback").ok().flatten())
+            {
+                Some(Value::Function(f)) => Some(f),
+                Some(Value::Nil) | None => None,
+                Some(_) => {
+                    return error(
+                        lua,
+                        "eqoa.input.bind",
+                        "invalid_argument",
+                        "callback must be a function",
+                    );
+                }
+            };
+            let addon = super::native::session(lua).borrow().addon.clone();
+            let ok = crate::fork_ext::bindpage::register(&addon, &id, &default_key, &label);
+            if let Some(cb) = cb_fn {
+                let id_for_cb = id.clone();
+                let addon_for_cb = addon.clone();
+                let wrapper = lua.create_function(move |_, ev: Value| {
+                    if let Value::Table(et) = &ev {
+                        let data: mlua::Table = et.get("data")?;
+                        let down = data.get::<Option<bool>>("down")?.unwrap_or(false);
+                        let rep = data.get::<Option<bool>>("repeat")?.unwrap_or(false)
+                            || data.get::<Option<bool>>("repeat_")?.unwrap_or(false);
+                        let key = data.get::<Option<String>>("key")?.unwrap_or_default();
+                        if down && !rep {
+                            let bound =
+                                crate::fork_ext::bindpage::get_key(&addon_for_cb, &id_for_cb);
+                            if bound.is_some_and(|bound| {
+                                !bound.is_empty() && key.eq_ignore_ascii_case(&bound)
+                            }) {
+                                cb.call::<()>(ev)?;
+                            }
+                        }
+                    }
+                    Ok(())
+                })?;
+                let eqoa_tbl: mlua::Table = lua.globals().get("eqoa")?;
+                let events_tbl: mlua::Table = eqoa_tbl.get("events")?;
+                let on_fn: mlua::Function = events_tbl.get("on")?;
+                let _ = on_fn.call::<mlua::MultiValue>(("input.key", wrapper))?;
+            }
+            lua.pack_multi((ok, Value::Nil))
+        })?,
+    )?;
     Ok(())
+}
+
+/// The native Stats Box toggle's local diagnostic wording.
+pub(crate) fn stats_box_message(shown: bool) -> &'static str {
+    if shown {
+        "stats box shown"
+    } else {
+        "stats box hidden"
+    }
+}
+
+/// Spec-table fields the HUD and option calls read.
+const SPEC_KEYS: [&str; 23] = [
+    "col", "row", "x", "y", "text", "color", "scale", "align", "outline", "shadow", "anchor",
+    "vertical", "clip_width", "target_fade", "art", "fill", "lit", "w", "h", "ui_id", "id", "label",
+    "default",
+];
+
+/// One pass over a spec table instead of a protected lookup per field: drawing
+/// calls read ~13 optional fields, and absent-field lookups dominated their cost.
+/// A table with a metatable keeps full `get` semantics (defaults via __index).
+struct Spec {
+    lua: Lua,
+    slots: [Value; SPEC_KEYS.len()],
+}
+
+impl Spec {
+    fn new(lua: &Lua, t: &mlua::Table) -> Result<Self> {
+        let mut slots: [Value; SPEC_KEYS.len()] = std::array::from_fn(|_| Value::Nil);
+        if t.metatable().is_some() {
+            for (slot, key) in slots.iter_mut().zip(SPEC_KEYS) {
+                *slot = t.get(key)?;
+            }
+        } else {
+            t.for_each(|key: Value, value: Value| {
+                if let Value::String(key) = key {
+                    let bytes = key.as_bytes();
+                    if let Some(i) = SPEC_KEYS.iter().position(|k| k.as_bytes() == &*bytes) {
+                        slots[i] = value;
+                    }
+                }
+                Ok(())
+            })?;
+        }
+        Ok(Self {
+            lua: lua.clone(),
+            slots,
+        })
+    }
+
+    fn fget<V: mlua::FromLua>(&self, key: &str) -> Result<V> {
+        let i = SPEC_KEYS
+            .iter()
+            .position(|k| *k == key)
+            .expect("spec key is listed in SPEC_KEYS");
+        V::from_lua(self.slots[i].clone(), &self.lua)
+    }
 }

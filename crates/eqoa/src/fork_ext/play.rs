@@ -17,11 +17,66 @@ pub(crate) fn begin_game_event(_: &Play, _: &net::session::Event) {}
 pub(crate) fn end_game_event(_: &Play, _: ()) {}
 pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     #[cfg(not(target_arch = "wasm32"))]
+    let want_power =
+        crate::fork_ext::addons::options::effective_toggle("eqoa_mana_bars", "mana_bars");
+    #[cfg(target_arch = "wasm32")]
+    let want_power = false;
+    _play.session.agree_power_bars(want_power);
+    #[cfg(not(target_arch = "wasm32"))]
     {
+        let has_pet = _play.pet_id != u32::MAX;
+        let effects_height = if has_pet {
+            crate::hud::pet_effects_height(_play.pet_effects().len())
+        } else {
+            0
+        };
+        let pet_y = if _play.group.raid.is_empty() {
+            93 + ((_play.group.count() as i32 - 1) * 48).max(0)
+        } else {
+            let below = if has_pet {
+                crate::raidlist::PET_H + effects_height
+            } else {
+                0
+            };
+            crate::raidlist::Fit::under(_play.group.raid.len(), below).bounds([20, 93])[3] + 2
+        };
+        // Hud's effect strip begins at y=48; an unbuffed pet panel ends at 46.
+        let pet_h = if !has_pet {
+            0
+        } else if effects_height == 0 {
+            46
+        } else {
+            48 + effects_height
+        };
+        crate::fork_ext::addons::hud_layout::set_hud_state(
+            _play.right_hud_up(),
+            _play.right_hud_up(),
+            _play.group.in_group && !_play.group.raid.is_empty(),
+            pet_y,
+            pet_h,
+        );
         crate::fork_ext::addons::native_core::iteration(_game_step);
         if _game_step {
             let ready = _play.in_world_now();
             weapon_sets_requests(_play, ready);
+            let reqs = crate::fork_ext::addons::actions::take_action_requests();
+            if ready {
+                if reqs.assist && matches!(_play.mode, 0 | 38) {
+                    _play.assist_target();
+                }
+                if reqs.summary
+                    && _play.mode == 0
+                    && !_play.map.open
+                    && !_play.map.search.open
+                    && !_play.search.open
+                    && _play.typing.is_none()
+                    && _play.death.is_none()
+                {
+                    _play.trainer_open = true;
+                    _play.trainer_from_hud = true;
+                    _play.mode = 12;
+                }
+            }
             if !ready {
                 crate::fork_ext::addons::chat::cancel_outgoing_chat(
                     "world became unavailable before queued chat could be sent",
@@ -536,11 +591,20 @@ impl Play {
             let group = self.group.members[..self.group.count()]
                 .iter()
                 .map(|m| m.id);
+            let tot_id = self
+                .entities
+                .slots
+                .iter()
+                .flatten()
+                .find(|e| e.id == self.target)
+                .and_then(|e| e.creature.as_ref())
+                .map(|c| c.target)
+                .filter(|&t| t != 0 && t != u32::MAX && t != self.target);
             let followed = [Some(self.target), Some(self.pet_id), self.self_id32()]
                 .into_iter()
                 .flatten()
                 .chain(group)
-                .chain(self.target_of_target_id());
+                .chain(tot_id);
             for id in followed {
                 if next == snap_entities.len() {
                     break;
@@ -940,7 +1004,8 @@ pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) 
         };
         let hud_changed = play.forge_health.hud_changed(hidden);
         let vis_changed = play.forge_health.vis_changed(vis);
-        hud_changed || vis_changed || options_closed || step || loading_changed
+        let layer_dirty = crate::fork_ext::addons::hud_layer::take_dirty();
+        hud_changed || vis_changed || layer_dirty || options_closed || step || loading_changed
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -995,6 +1060,18 @@ fn snapshot(play: &Play, attacker: u32, amount: i32, defender: u32) -> CombatSna
     }
 }
 impl Play {
+    pub fn entity_name(&self, id: u32) -> Option<String> {
+        if id == 0 || id == u32::MAX {
+            return None;
+        }
+        self.entities
+            .slots
+            .iter()
+            .flatten()
+            .find(|e| e.id == id)
+            .and_then(|e| e.creature.as_ref())
+            .map(|c| c.name.clone())
+    }
     pub(super) fn fork_combat_event(
         &self,
         _attacker: u32,
@@ -2153,4 +2230,3 @@ mod tests {
         );
     }
 }
-
