@@ -662,7 +662,7 @@ pub fn save_report_to(
             }
         }
         Kind::Problem => {
-            let crashes_dir = cfg_dir.map(|d| d.join("crashes"));
+            let crashes_dir = cfg_dir.map(|d| super::report_crash_dir::in_config(&d));
             if let Some(crashes_d) = crashes_dir {
                 if let Ok(read_dir) = fs::read_dir(crashes_d) {
                     for entry in read_dir.flatten() {
@@ -959,7 +959,7 @@ pub(crate) mod tests {
         )
         .unwrap();
 
-        let crashes_dir = fake_config.join("crashes");
+        let crashes_dir = crate::fork_ext::report_crash_dir::in_config(&fake_config);
         fs::create_dir_all(&crashes_dir).unwrap();
         fs::write(
             crashes_dir.join("crash-20261026-100000.txt"),
@@ -1190,8 +1190,7 @@ pub(crate) mod tests {
         fs::create_dir_all(&fake_desktop).unwrap();
         fs::create_dir_all(&fake_config).unwrap();
 
-        let crash_file = fake_config
-            .join("crashes")
+        let crash_file = crate::fork_ext::report_crash_dir::in_config(&fake_config)
             .join("crash-20261026-123456.txt");
         fs::create_dir_all(crash_file.parent().unwrap()).unwrap();
         fs::write(&crash_file, "fatal crash log content").unwrap();
@@ -1433,7 +1432,7 @@ pub(crate) mod tests {
     #[test]
     fn log_with_enhanced_header_detected_as_ended_without_closing() {
         let temp_dir = test_dir("unclosed_test");
-        let crashes_dir = temp_dir.path().join("crashes");
+        let crashes_dir = crate::fork_ext::report_crash_dir::in_config(temp_dir.path());
         let prev = temp_dir.path().join("eqoa.prev.log");
         let run_id = "20261031-120000";
 

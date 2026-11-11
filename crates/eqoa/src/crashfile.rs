@@ -336,3 +336,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 }
+#[cfg(all(test, not(target_arch = "wasm32")))] #[path = "fork_ext/crashfile_dirs_tests.rs"] mod fork_dirs_tests;

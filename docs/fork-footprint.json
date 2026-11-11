@@ -86,9 +86,9 @@
       "reason": "Restored/map controls and saved binding defaults. Sync 2026-11-07: upstream's macro and alias tests use 'y' for the same reason (+7/-7). Round 2.5 review fix (MiniMax H1): upstream's a_layout_with_the_maps_rows_reads_them is restored verbatim plus one setup-hook line, so deletions fall 54 to 38 and the hook calls add 7. Round 3 Stage C removes stats_box row, lowering added lines from 62 to 55."
     },
     "crates/eqoa/src/crashfile.rs": {
-      "added": 1,
+      "added": 2,
       "deleted": 1,
-      "reason": "Sync 2026-11-11: send-boundary hook prefixes every native/browser/legacy crash report with fork-owned Enhanced identity; upstream persistence, wire protocol and tests retained."
+      "reason": "Sync 2026-11-11: send-boundary hook prefixes every native/browser/legacy crash report with fork-owned Enhanced identity; upstream persistence, wire protocol and tests retained. Fix round: one test-only #[path] line loads fork_ext/crashfile_dirs_tests.rs (it needs crashfile's private files_in/pending_in/write_in/answered_in; proves the fork's local crash folder and upstream's never mix)."
     },
     "crates/eqoa/src/hud.rs": {
       "added": 52,
