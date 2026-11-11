@@ -1,12 +1,10 @@
 # Enhanced fork update notes
 
-- Addon authors: native read-only map state/change events and world-filtered map markers are available. The remaining round 4 map APIs are pending.
-
-
 Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Addon authors: native read-only map state/change events and world-filtered map markers are available. The remaining round 4 map APIs are pending.
 - Added upstream Move HUD and Reset HUD. The round minimap, its hover cards and search control follow its saved position; HUD numbers, mana bars and Target of Target follow their stock bars. Upstream also restores a lost graphics device in place and improves mercenary tags.
 
 ## 2026-11-11 · Enhanced 0.5.0

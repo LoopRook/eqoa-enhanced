@@ -8,11 +8,19 @@ impl Map {
         zone: &Json,
         words: Option<&vi::strtab::StringTable>,
     ) -> Json {
-        let bounds = self.world.as_ref().filter(|w| w.index == world).map(|w| {
+        let cached = self
+            .world
+            .as_ref()
+            .filter(|w| w.index == world)
+            .or_else(|| self.home.as_ref().filter(|w| w.index == world));
+        let world_name = self
+            .world_title(world, words)
+            .or_else(|| cached.map(|w| title_case(w.name.split('.').next().unwrap_or(""))));
+        let bounds = cached.map(|w| {
             let c = &w.builder.cells;
             json!({"x_min":ee::mul(c.col0 as f32,CELL),"z_min":ee::mul(c.row0 as f32,CELL),"x_max":ee::mul((c.col0+c.cols) as f32,CELL),"z_max":ee::mul((c.row0+c.rows) as f32,CELL)})
         });
-        json!({"world_id":world,"world_name":self.world_title(world,words),"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
+        json!({"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
     }
 }
 
@@ -50,5 +58,24 @@ impl Map {
             out.push(json!({"world_id":m.world,"kind":"group_waypoint","name":m.from,"x":m.at[0],"z":m.at[1],"label":null}));
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod api_tests {
+    use super::*;
+    #[test]
+    fn map_state_keeps_player_world_calibration_while_browsing_places() {
+        let mut map = testing::up((640, 448));
+        let before = map.api_state(0, &Json::Null, None);
+        // Native Places transfers the player's world into home while showing another.
+        map.home = map.world.take();
+        let after = map.api_state(0, &Json::Null, None);
+        assert_eq!(before["bounds"], after["bounds"]);
+        assert_eq!(before["world_name"], after["world_name"]);
+        assert!(
+            map.api_state(1, &Json::Null, None)["bounds"].is_null(),
+            "other world is not fabricated"
+        );
     }
 }
