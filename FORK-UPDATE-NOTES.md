@@ -2,7 +2,7 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
-## Unreleased
+## 2026-11-11 · Enhanced 0.5.0
 
 - Added upstream item links, Q-tap monster information, map places and indoor minimap floors. Crash reports sent to a supporting game server identify EQOA Enhanced; the local crash-save offer remains available.
 
