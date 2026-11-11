@@ -224,73 +224,121 @@ is fork-owned. Final release build is run after this report's commit, as the las
 its outcome is recorded in the final six-line handoff and ignored fix-release-final.log.
 
 
-## Part B: journal and search mods (in progress)
+## Part B: bundled creature journal and map search
 
-The Part B brief was committed first (`5ced426`). Work remains on
-`feat/eqoa-api-r4`; no push, merge, tag or protected-branch change was made.
-The independent API review b1 is preserved unchanged in `a7f7c5f`.
+Part B replaces the native journal/search implementations with two bundled mods whose manifests default to enabled. Existing saved-profile enable migration remains a deferred B2 finding, so this is not a claim that every upgrading player automatically gets both mods enabled. The journal records protocol-shaped live creature observations, retains the Forge name/id schema, incrementally loads and indexes saved data, saves after quiet/max intervals and on disable, and provides import/export through both its options and the search footer. Search combines catalogue, shared journal, live entities, group and native places, with the rebindable F2/F4 keys, UTF-8 editor, native guides/dots and Space Mono presentation. The generic map-open action preserves F2 when the minimap is off and respects the Map master setting.
 
-Implemented checkpoints: manifest declarations (`2b6e947`); live shared JSON reads
-and successful-save notifications (`2b3c463`); bounded delayed commands (`bb6cddb`);
-player file actions (`b1989d0`); one-time journal/key migration (`fe996e3`); generic
-mod option action rows (`8a342dd`). The journal migration copies a >1 MiB fixture,
-keeps the original and existing destination, and does not resurrect deleted mod data.
+The catalogue, font and notices are packaged with search, with catalogue bytes pinned and bundled source hashes updated. One-time fork-owned migration preserves the legacy journal and rebound keys without replacing existing mod data or explicit mod bindings. Native `map/search.rs`, `map/journal.rs`, their hooks and old key rows are removed. The round minimap and its remaining theme dependency belong to Part C and are retained here.
 
-Review fixes committed: H1 export extension/name restrictions (`4d101b4`); M1
-separate command queues, four pending messages per sender and 4 KiB JSON arguments
-(`cafdd94`); M2 redirected Desktop/picked-file support with private junction denial
-(`25a1a02`); M3 three persistent-sequence imports outside save quota (`d60ac07`);
-M4 one shared activation across VMs, non-forwardable command authority and a request
-guard retained while a disabled mod's picker remains open (`36df7c6`).
+The API additions cover declared read-only shared mounts/change notifications, bounded delayed commands, player-initiated file actions, private staging and generic option buttons. The B1 review is committed unchanged. Its H1/M1-M4 and selected LOW fixes are included. The supplied B2 review remains uncommitted and unchanged for its assigned fix session; the pre-existing saved changes verified in this resume already cover some observations made against the older committed head. No additional B2 fix work was started.
 
-Most recent completed focused run: **15 passed / 0 failed / 0 ignored / 0 SKIP**
-(`review-m4-green2.log`, 3.38 s). All Cargo invocations used the shared foreground
-lock/cache and scratch config. A blocked-picker regression caught a guard Drop
-mutex deadlock; its verified test executable was stopped, Cargo/lock drained,
-and lazy guard construction fixed it before the successful rerun.
+### Regression evidence and negative controls
 
-Observed RED controls so far: missing shared loader; reserved shared-write path;
-missing command/file APIs; self-command RefCell borrow; hidden resource data from
-double guarding; absent journal/key migration; unsafe `.bat` export; >4 KiB
-command acceptance; redirected-folder rejection; imports exhausting private quota;
-two VMs exporting from one physical action; missing mod-name dialog prefix.
-Actual worker copies/collisions/cancellation, pointer/key authority, retained
-imports and near-14 MiB save use scratch data. Picker selection and Desktop
-resolution are injected; the junction fixture exercises real Windows redirection.
-No live native dialog, disc, oracle or owner playtest is claimed.
+All 34 Part B tests ran through the actual runtime, with Play/protocol-shaped data where applicable. These are simulated observations, not decoded capture or live-server evidence. Test names below are suffixes under `round4b_`; related cases are grouped so their controls can be read together. RED denotes an observed test failure before implementation or with the protection temporarily removed. Mutation sources were restored byte-for-byte before green verification.
 
-**Not complete:** LOW review controls/fixes are in progress. The bundled journal
-and search mods, native search/journal removal, moved catalogue/font packaging,
-PNG captures, parity/performance measurements, footprint tightening/dry-run
-comparison, broad addon/client/WASM gates and final release build remain pending.
-No full-suite or completion claim is made by the focused results above.
+| Tests / behavior | Negative controls actually run |
+|---|---|
+| `manifest_rejects_invalid_shares_commands_and_permissions`; `shared_json_requires_running_owner_and_declared_path` | Invalid declarations, disabled/missing owner, undeclared paths, traversal and reserved shared-write paths rejected. Missing shared loader and missing API paths observed RED. |
+| `mod_commands_are_declared_bounded_and_delayed`; `mod_command_can_target_its_own_vm` | Undeclared/missing/disabled targets and oversized arguments rejected; no synchronous dispatch. Original self-command borrow failure reproduced and fixed. |
+| `review_commands_preserve_other_events_and_sender_fairness` | 4 KiB arguments, separate 64-command queue and four pending messages per sender; command flooding preserves player/import events. Removing queue/sender protections produced expected RED. |
+| `file_actions_require_permission_and_player_activation`; `player_command_import_export_copy_files_and_cancel`; `option_buttons_are_player_activations_and_disable_cleanly` | Missing permission, uninitiated calls, arbitrary file paths, disabled VM and cancelled requests rejected; copied import and disk export verified. No real OS picker was opened. |
+| `review_export_refuses_executable_and_reserved_names` | `.bat`, `.lnk`, `desktop.ini`, Windows reserved names, leading dots and separators refused; unsafe export acceptance observed RED before the allowlist/sanitizer. Only JSON/TXT/CSV/PNG names accepted. |
+| `review_redirected_desktop_and_picked_file_keep_private_checks` | Actual Windows junction fixture: redirected Desktop/picked import succeed while a mod-storage junction is denied. Original blanket reparse refusal observed RED. Imports still use a private copy. |
+| `review_import_ids_survive_enable_and_staging_cannot_starve_saves` | Four 6 MiB imports across enables retain only the newest three, ids stay monotonic, and a near-14 MiB private save succeeds. Reset sequence/quota behavior observed RED before the fix; persistence mutation also failed. |
+| `review_one_physical_action_is_spent_across_vms`; `review_disabled_dialog_stays_single_and_has_mod_title`; `review_unused_delegated_action_expires_after_dispatch` | A second action from the same physical activation, recursive delegation, a second open dialog after disable/re-enable, and reuse of an expired mark are denied. Missing title prefix, double activation and removed request/expiry guards observed RED. |
+| `review_disconnect_reports_original_import_kind`; `review_export_has_no_partial_final_file`; `review_remove_notifies_shared_readers` | Baseline reproduced wrong operation kind, visible partial destination and missing removal notification. Paused export sees no final filename until synced atomic rename; disconnected worker retains import kind; deletion emits change. All then GREEN. |
+| `first_start_copies_legacy_journal_without_overwrite`; `migration_keeps_rebound_search_and_stop_keys`; `review_key_migration_keeps_existing_mod_collision` | >1 MiB copy keeps original; existing destination and deleted-data sentinel prevent overwrite/resurrection. Explicit mod binding/unbound values and colliding keys survive. Missing migration and migration mutations observed RED. |
+| `journal_records_play_entities_with_native_filters_and_dedupe` | Rejects self, pets, corpse/type/flags, blank/Unicode whitespace names and nonfinite positions; disabled VM records nothing. Known ids and same-level nearby cross-world duplicates excluded. Removing 30-unit dedupe produced RED. |
+| `journal_reloads_large_file_imports_forge_and_exports_current_snapshot`; `export_waits_for_accepted_async_snapshot_before_first_file_exists` | >1 MiB reload, real Forge-format import, invalid records, collisions and disk export checked. Pending first-save export originally failed with missing file (RED); accepted snapshot fence then passed. |
+| `journal_saves_after_quiet_and_preserves_invalid_existing_json`; `journal_max_interval_flushes_during_continuous_discoveries`; `journal_protects_existing_json_array_root`; `optional_json_missing_is_not_found_without_warning` | Before-deadline no-save controls, continuous sightings, malformed/array original preservation, quiet missing file and denied-path diagnostic controls. Array root and normal missing-file warning assertions observed RED before fixes. |
+| `journal_caps_total_and_import_and_export_truncated_view` | 80,001 initial spawns yield an 80,000-spawn exported view; 50,001 valid imported spawns yield at most 50,000. Assertions verify the boundary inputs actually ran. |
+| `search_selects_live_with_dots_follows_and_falls_back_to_known` | Nearest live vs recorded spawn, all known dots, moving live target, lost target fallback, shared reload and F4 clear. Removing guide creation produced RED. Metadata searches combine records; cross-world/level fixture observed RED before correction. |
+| `search_group_departure_places_and_unicode_editor_limit`; `search_lists_inactive_group_member_as_unavailable`; `search_f2_opens_map_with_minimap_off_and_obeys_map_master` | Group departure clears guide, inactive member is unavailable, native place selected, UTF-8 80-character bound, editor/navigation, Map-off and Minimap-off controls. Inactive member and F2/Minimap-off cases observed RED. |
+| `text_editor_receives_keys_and_releases_held_gameplay` | M/P/O/G typing reaches the editor without map shortcuts or gameplay movement; held combat/camera inputs released. Non-editor input path remains available. |
+| `manager_map_mods_large_journal_gpu_captures_and_frame_cost` | Real Manager, workers, loaded Space Mono, actual native map/minimap GPU drawing/readback, footer export/import disk results and completion receipts. Asserts both mods enabled, 23,000 loaded spawns and open search. Original uncached distance sorting exhausted the Lua instruction budget (RED); cached distances passed. |
+
+The focused API review restoration run passed 20 tests after a mutation batch produced seven expected failures and 13 passes. The journal/search mutation batch produced three expected failures and 25 passes; restored code passed 28. The later edge run reproduced five expected failures (27 passes), and the F2/metadata run two (two passes), before the final 34-case green run. These intentional RED controls are not unresolved gate failures.
+
+### Gates and measurements
+
+| Gate | Pass | Fail | Ignored | Explicit SKIP lines |
+|---|---:|---:|---:|---:|
+| Addon suite, single thread | 426 | 0 | 25 | 9 |
+| Full client suite, single thread; run once at the end | 2080 | 3 | 32 | 208 |
+| Corrected contract fixtures after full run | 3 | 0 | 0 | 0 |
+| Part B regressions within full client | 34 | 0 | 0 | 0 |
+| Bundled installer within full client | 23 | 0 | 1 | 0 |
+| Zero-addon allocation gate within full client | 1 | 0 | 0 | 0 |
+| Release Manager/frame-cost workload | 1 | 0 | 0 | 0 |
+| Player-release Python tools | 20 | 0 | 0 | 0 |
+| WASM check | PASS | 0 | n/a | 0 |
+| Footprint against reviewed base | PASS | 0 | n/a | 0 |
+| Diff whitespace against 9e7257a; CRLF notices preserved | PASS | 0 | n/a | 0 |
+
+Addon suite: 237.59 s; full client: 404.78 s; release workload: 19.99 s; WASM: 32.95 s; Python tools: 45.60 s. Rust ignored counts and explicit SKIP lines are different: neither proves its workload ran. The nine addon SKIPs are four Windows symlink privilege fixtures, two missing pinned-Forge prerequisites and three missing external reviewed UI goldens. The full suite additionally skips unavailable disc/module/live-S2 prerequisites.
+
+Current bundled Wereoxxs slot/weapon-bar and native bundled UI pipelines passed, as did ARPG/Modern load-save-load-disable and private migration, all four Round 3 HUD picture cases and their combined per-frame workload. The three external bundled-UI golden comparisons were skipped after producing actual captures. Pinned external Forge lifecycle/GPU tests remain ignored without `EQOA_FORGE_REFERENCE`; no success for that external suite is claimed.
+
+The single full-client run reported three stale test contracts, not a green full suite: `fixture_frees_f2_while_production_keeps_map_search_on_it` still unwrapped the deleted native bind row; `group_capture_excludes_player_and_inactive_slots_before_lua` contradicted the saved change retaining inactive members without positions; `report_state_includes_claimed_hud_elements_and_movement_flags` expected the old label rather than `player search open`. Only those tests were corrected, preserving self exclusion, inactive-position denial, HUD claims and movement-flag assertions. Their renamed `round4b_gate_` cases passed together in the focused rerun (3/0/0, no SKIP, 0.13 s; committed as 07ffc89). Production code did not change after the full run. The full suite was not repeated, respecting the brief's once-at-the-end instruction. These three original failures remain visible in the table rather than being reported as full-suite passes.
 
 
-Review LOW controls: the baseline run reproduced missing remove notifications,
-`kind="file"` on worker disconnect, and a visible partial final export name.
-The corrected focused run passed **20/0/0**, no SKIP, in 5.82 s. A subsequent
-five-protection mutation batch produced **7 expected failures / 13 passes**:
-ordinary command queue/sender guards, blocked-dialog guard, persistent import
-sequence, delegated-mark expiry, rebound-key migration and the key-collision
-fixture all detected their removed protection. The four mutated source files
-were restored automatically and verified byte-for-byte before the next green run.
+All Cargo runs use the shared foreground mkdir lock, shared target directory, scratch config and a 20-minute process timeout. The first resumed compile detected another worktree's stale renderer artifacts in the shared target; a renderer artifact refresh resolved the missing-method errors without a source fix.
 
-The native export now syncs a temporary file and uses a non-replacing atomic
-Windows rename; its pause fixture proves the final filename is absent before
-publication and complete afterward. Shared deletion notifies readers; disconnected
-workers retain their original operation kind. Key migration preserves both
-explicit assignments when they collide; Controls remains the place to rebind.
-The rfd reference is cfg-gated on targets that provide it. Remaining review LOWs:
-no per-pair cross-frame command rate limit; no retry/fallback policy for a legacy
-migration on filesystems lacking hard-link support; real picker cancellation
-still requires closing the OS dialog; no live non-Windows file-backend claim.
-Migration and native removal must ship together so no intervening native-only
-sightings are omitted. Native removal is still pending at this checkpoint.
+Resumed focused runs passed the other 33 cases but reproduced a Manager test deadline failure. Additional state confirmed that the import receipt arrived while shared reload had not finished; another run hit the separate initial-load deadline. Both large async waits now have a 60-second bound and exact workload assertions remain. The corrected Manager run passed 1/0/0/SKIP0 in 39.10 s: initial load 12.25 s, footer import/shared reload **20.47 s**, beyond the former 20-second deadline. The implementation and formatted test changes were committed as `6c47993` before the broad gates. No B2 runtime fix was made.
 
-Part B journal checkpoint: enabled bundled journal ports live creature filters, cross-world 30-unit same-level dedupe, the Forge name/id schema, bounded incremental validation/indexing, quiet30s/max120s saves and disable flush. `journal-max-green.log`: 4 passed, 0 failed/ignored/SKIP. Play/protocol fixtures cover rejected self/pets/corpses/flags/type/blank/nonfinite, disabled VM, large reload, Forge import invalid/collision controls, disk export and invalid original preservation. A continuous-discovery fixture initially reused channel1 for every added slot; corrected to the actual channel for each slot. Pending export snapshot RED then GREEN1/0/0; worker waits for accepted async save. Native removal and search remain pending.
+The first broad addon run reproduced one legacy compatibility regression: **425 passed / 1 failed / 25 ignored / 9 explicit SKIP lines**, 234.17 s. `fresh_hud_mod_load_defaults_and_live_stats_key_and_menu_wiring` detected F8 toggling the stats box while Forge chat owned text capture. The binding wrapper now permits callbacks only for the sole native editor owner while capture is active; legacy Forge chat and other VMs remain blocked. The existing test also verifies that the native editor retains its own control and another VM does not fire the same key. This observed RED is the negative control for the gate fix, committed as `76ba018` after its compatibility case passed. The broad gate then passed all 426 cases.
 
-Part B search checkpoint: bundled search ports catalogue/journal/live/group/place results, UTF-8 80-character editor/navigation, nearest live/known guide and dots, live follow/fallback, group departure, F4 and Space Mono presentation. `search-embedded-green.log`:2 passed/0 failed/ignored/SKIP; restored Part B subset28/0/0/SKIP0 (`mod-restored-green.log`). Temporary Lua mutations removed distance dedupe and guide creation:25 passed,3 expected failures; both files restored byte-for-byte before the green run. The Places fixture initially queried a name absent from the catalogue of camps; fixed to the actual Saltwater camp. Capture/performance and native removal gates still pending.
+Both mods were enabled, Space Mono was ready, search stayed open, the catalogue loaded and the journal contained **1,411,026 bytes / 23,000 spawn records under one creature name**. Assertions fail if that workload does not run. The 120-frame timings measure CPU time in `Manager.frame`, including mod callbacks/drawing preparation; they exclude GPU submission/readback, initial load and the later import/export waits. This is a frozen-world steady-state sample, not live FPS or a maximum-name-diversity benchmark.
 
-Part B native-removal checkpoint: deleted native map/search.rs and map/journal.rs and their input/feed/draw/exit hooks, including mapshot search fixtures. Native F2/F4 rows are gone; one-time fork-owned journal/key migration remains. Catalogue/font/licences moved under the search mod; round-minimap typography references that font until Part C. Part B subset28/0/0/SKIP0 after removal; bundled installer23 passed/0 failed/1 ignored (external pinned-reference prerequisite), SKIP0; player-release Python suite20 passed. Native map/play/viewer/binds divergence against reviewed11aa5f0 falls from +4523/-153 to +985/-144. Tightened13 shared budgets, including existing loose net/session and render/ui budgets; full table in final section pending. Footprint PASS. origin/master advanced independently to3439fb1, so reviewed-base accounting stays11aa5f0; dry-run upstream conflicts are recorded separately.
+- Release: `journal=1411026 bytes, 23000 loaded spawns; frames=120; mean=1.404 ms p50=1.092 ms p95=3.339 ms max=6.141 ms`
+- Debug, final full suite: `journal=1411026 bytes, 23000 loaded spawns; frames=120; mean=3.059 ms p50=2.913 ms p95=4.313 ms max=7.279 ms`
 
-Part B GPU checkpoint: real Manager, both default-on mods, actual Space Mono ready, native map/minimap draw passes and GPU readback now run with a1,411,026-byte/23,000-spawn journal. Initial unfiltered result sort exhausted4M Lua instructions; cached distances fixed it (observed RED then GREEN). Debug Manager.frame CPU120frames: mean3.065ms,p50 2.957ms,p95 4.175ms,max6.733ms; release measurement pending. `map-manager-font-green.log`:1/0/0/SKIP0; whole Part B29/0/0/SKIP0 in44.59s. PNGs r4-search-map/minimap.png inspected; native disc-free fixtures show real chrome/round minimap, with terrain absent because noISO is available. Release numbers/full gates remain pending.
+The zero-addon busy-world gate ran 300 frame/menu and 600 packet/chat iterations with **zero allocations and zero allocated bytes in all four paths**:
+
+- `menu_frame_us=12.396 allocs/menu_frame=0.0 bytes/menu_frame=0.0`
+- `frame_us=15.976 allocs/frame=0.0 bytes/frame=0.0; event_us=1.850 allocs/event=0.0 bytes/event=0.0; chat_us=0.140 allocs/chat=0.0 bytes/chat=0.0`
+
+
+Owner captures: [map search](r4-search-map.png) and [minimap search](r4-search-minimap.png). Both use real native map/minimap composition and mod GPU rendering, with no terrain art because no owned disc is available in this worktree. They are owner review images, not golden baselines.
+
+### Shared footprint and merge dry run
+
+Against the reviewed base `11aa5f088bb52d5f306b0224e37b782b1bf4503d`, map/play/viewer/binds divergence falls from **+4,523/-153** before native removal to **+985/-144** afterward. Every changed budget was tightened to its measured value, including two pre-existing loose allowances:
+
+| Shared file | Previous allowance + / - | Final allowance + / - |
+|---|---:|---:|
+| bindpage.rs | 10 / 5 | 9 / 5 |
+| binds.rs | 55 / 38 | 39 / 37 |
+| play.rs | 278 / 62 | 148 / 55 |
+| viewer.rs | 104 / 14 | 66 / 11 |
+| net/session.rs | 218 / 23 | 207 / 22 |
+| render/ui.rs | 85 / 2 | 67 / 2 |
+| map/chrome.rs | 304 / 19 | 184 / 12 |
+| map/journal.rs | 1,567 / 0 | 0 / 0 |
+| map/mini.rs | 313 / 44 | 242 / 14 |
+| map/mod.rs | 70 / 10 | 16 / 6 |
+| map/search.rs | 1,716 / 0 | 0 / 0 |
+| map/tests.rs | 116 / 0 | 71 / 0 |
+| map/tool.rs | 73 / 3 | 54 / 3 |
+
+The footprint gate passes against that reviewed base. `origin/master` advanced independently to `3439fb17b5e2b66acfddc33a5eb7f824da1890d5`; it was not merged. Dry-run `merge-tree --write-tree --name-only` conflicts against that pinned upstream fall from **two** at `d98edd4` (`play.rs`, `viewer.rs`) to **one** after removal at `e13b39c` (`play.rs`). This is conflict-count evidence, not a completed merge. Using the advanced upstream as the policy accounting base reports unrelated unreviewed upstream drift and is not substituted for the reviewed base.
+
+### Parity limits and not done
+
+No live disc/terrain/indoor/owner playtest, oracle run or live-server packet decode is claimed. Picker/Desktop selection is injected in tests; actual copy, reparse protection, retained imports, atomic export and cancellation are exercised on disk. The OS picker cannot be forcibly closed on disable; the request gate stays held until the player closes it. Capture and timing fixtures do not establish live-world FPS or worst-case GC/OS latency.
+
+The journal uses the public protocol-position snapshot rather than native actor dead-reckoning, as already recorded in Part A. JSON numeric decoding does not preserve the original distinction between an integer token and an integral floating-point token. These are parity limits, not claims of exact native equivalence.
+
+Remaining B2 review observations are deferred, not accepted behavior or passing live-world tests. The review used the older committed head; feedback, self exclusion, live bind labels, aggregate journal metadata matching and F2 with Minimap off were already in the saved work committed in this resume. Remaining concerns include:
+
+- Active entity/player updates can restart unfinished result builds; existing saved profiles can leave the new mods disabled. The benchmark reported above is a frozen-world steady-state fixture, not coverage of these paths.
+- Full-map header overlap, outside-click/wheel propagation, fractional wheel selection and result-offset clamping remain for the fix session.
+- Known-to-live guide upgrades, moved/removed waypoint tracking, cross-world status/group-zone retention, the dedicated Track waypoint control and native guide colors/dot/rim styles differ.
+- Native catalogue overrides (`EQOA_MAP_DATABASE` and an adjacent catalogue) are no longer the search source. Some old player docs/package contents still describe them. Search is now native-mod-only; the browser/non-mod builds lose the former native group/place/live search despite WASM compiling.
+- Names are stored trimmed; native retained the original name. Opening the editor cancels autorun/follow, controller navigation is absent, and composed dead-key/IME input is not supplied by the logical-key path.
+- Event refresh, choose/sort, per-key filtering, eager whole-journal reload and synchronous save snapshot costs need active-world/max-diversity measurements and the review's optimization work. The retained 80,000-spawn boundary test is not that performance evidence.
+- The review also flags save dirty-time bookkeeping, silent early export refusal, shared-journal retry after late owner enable, duplicate catalogue packaging and remaining theme dead code. Theme/minimap cleanup stays with Part C.
+
+Retained B1 LOWs: no per-pair command rate limit across frames beyond the pending per-sender quota; no migration retry/fallback on filesystems without hard-link support; no live non-Windows file-backend verification. Key collisions are preserved for the player to rebind in Controls. Migration and native removal must ship together. B2 review fixes and all Part C minimap/theme work are outside this completion scope.
+
+The native release build is run after this report/capture commit as the last gate. Its result is recorded in the six-line handoff and ignored `final-native-release.log`; no merge, push or tag is performed.
