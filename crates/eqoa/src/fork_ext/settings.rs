@@ -136,7 +136,9 @@ pub fn migrate_configs() {
         // mod storage FIRST, then strip them only after the write succeeds.
         for place in 0..crate::multibox::PLACES {
             let file = super::own_file("client", place);
-            let Some(bytes) = crate::settings::read_config(&file) else { continue };
+            let Some(bytes) = crate::settings::read_config(&file) else {
+                continue;
+            };
             let text = String::from_utf8_lossy(&bytes);
             let mut stripped_any = false;
             let mut cleaned_lines = Vec::new();
@@ -210,12 +212,8 @@ pub fn migrate_configs() {
             }
             if let Some(legacy_k) = stats_box_key {
                 let target_k = explicit_mod_key.unwrap_or(legacy_k);
-                if crate::fork_ext::bindpage::save_mod_bind(
-                    "eqoa_stats_box",
-                    "toggle",
-                    &target_k,
-                )
-                .is_ok()
+                if crate::fork_ext::bindpage::save_mod_bind("eqoa_stats_box", "toggle", &target_k)
+                    .is_ok()
                 {
                     crate::fork_ext::bindpage::register(
                         "eqoa_stats_box",
@@ -296,7 +294,6 @@ mod tests {
             );
         }
     }
-
 
     #[test]
     fn map_markers_kept_only_when_off() {
@@ -411,10 +408,7 @@ mod tests {
             Some(true)
         );
         assert_eq!(
-            crate::fork_ext::addons::options::get_toggle(
-                "eqoa_hud_numbers",
-                "target_hp_percent"
-            ),
+            crate::fork_ext::addons::options::get_toggle("eqoa_hud_numbers", "target_hp_percent"),
             Some(false)
         );
         assert_eq!(
@@ -578,6 +572,99 @@ mod tests {
         assert_eq!(fresh_keys, "key.attack=q\n");
 
         super::super::testing::reset(false);
+    }
+
+    #[test]
+    fn hud_migration_rejects_invalid_values_and_reloads_secondary_windows_in_real_lua() {
+        use crate::fork_ext::addons::{discovery, host::Host, options};
+        let root = std::env::temp_dir().join(format!(
+            "eqoa-r3-migrate-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let scripts = root.join("scripts");
+        let ids = [
+            "eqoa_stats_box",
+            "eqoa_target_of_target",
+            "eqoa_mana_bars",
+            "eqoa_hud_numbers",
+        ];
+        for file in crate::fork_ext::bundled::EMBEDDED_FILES {
+            if ids
+                .iter()
+                .any(|id| file.path.starts_with(&format!("{id}/")))
+            {
+                let path = scripts.join(file.path);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, file.data).unwrap();
+            }
+        }
+        let mods = discovery::discover(&scripts).addons;
+        assert_eq!(mods.len(), 4);
+        let check_lua = |migrated: bool, stats: bool| {
+            options::reset_in_memory();
+            for addon in &mods {
+                let host = Host::for_addon(addon).unwrap();
+                host.run_addon(addon).unwrap();
+                let assertion = match addon.id.as_str() {
+                    "eqoa_stats_box" => format!("assert(eqoa.options.get('stats_box')=={stats})"),
+                    "eqoa_target_of_target" => {
+                        format!("assert(eqoa.options.get('target_of_target')=={migrated})")
+                    }
+                    "eqoa_mana_bars" => {
+                        format!("assert(eqoa.options.get('mana_bars')=={})", !migrated)
+                    }
+                    "eqoa_hud_numbers" => format!(
+                        "assert(eqoa.options.get('hud_numbers')=={0} and eqoa.options.get('xp_details')=={0} and eqoa.options.get('target_hp_percent')=={0})",
+                        !migrated
+                    ),
+                    _ => unreachable!(),
+                };
+                host.execute(&assertion).unwrap();
+            }
+        };
+        for place in 1..crate::multibox::PLACES {
+            super::super::testing::reset(false);
+            options::reset_in_memory();
+            options::set_storage_root(Some(root.join(format!("config-{place}"))));
+            for invalid in ["yes", "0", "", "ON"] {
+                let bad = format!(
+                    "stats_box={0}\ntarget_of_target={0}\nmana_bars={0}\nhud_numbers={0}\nxp_details={0}\ntarget_hp_percent={0}\nunknown_mod=on\n",
+                    invalid
+                );
+                super::super::testing::put("client.opt", bad.as_bytes());
+                migrate_configs();
+                assert_eq!(
+                    super::super::testing::kept("client.opt").unwrap(),
+                    bad.as_bytes()
+                );
+                check_lua(false, false);
+            }
+            let file = super::super::own_file("client", place);
+            super::super::testing::put(&file, b"brightness=9\nstats_box=on\ntarget_of_target=on\nmana_bars=off\nhud_numbers=off\nxp_details=off\ntarget_hp_percent=off\n");
+            migrate_configs();
+            assert_eq!(
+                super::super::testing::kept(&file).unwrap(),
+                b"brightness=9\n"
+            );
+            check_lua(true, true);
+            // Real mod storage wins over old settings reappearing on another start.
+            options::set_toggle("eqoa_stats_box", "stats_box", false);
+            super::super::testing::put(&file, b"stats_box=on\n");
+            migrate_configs();
+            check_lua(true, false);
+            let before = super::super::testing::kept(&file);
+            migrate_configs();
+            assert_eq!(super::super::testing::kept(&file), before);
+        }
+        options::set_storage_root(None);
+        options::reset_in_memory();
+        super::super::testing::reset(false);
+        std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn first_run_and_legacy_omitted_defaults_migrate_once() {
