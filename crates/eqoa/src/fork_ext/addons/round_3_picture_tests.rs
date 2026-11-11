@@ -1402,3 +1402,85 @@ fn stats_box_updates_cached_rows_when_only_native_stat_bonuses_change() {
         "stat-only change must invalidate cached drawing"
     );
 }
+
+#[test]
+fn bundled_readouts_follow_moved_stock_parts_and_reset() {
+    crate::settings::testing::reset(false);
+    crate::hudlayout::testing_reset();
+    let tree = bundled_tree();
+    visibility::publish_claims(&visibility::HudClaimsRegistry::new());
+    hud_layout::set_hud_state(true, true, false, 93, 20);
+    native_core::CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.in_world = true;
+        c.view.player = serde_json::json!({"id":1,"target_id":2,"hp_fraction":0.7,"power":{"current":30,"maximum":100},"level":10,"experience":123});
+        c.view.group = serde_json::json!({"in_group":true,"members":[{"id":3,"power":0.5}]});
+        c.view.entities = vec![serde_json::json!({"id":2,"name":"Casil","target_id":3,"hp_fraction":0.8,"power":0.6}),serde_json::json!({"id":3,"name":"Luck","hp_fraction":0.4,"power":0.5})];
+    });
+    let positions = |commands: Vec<hud_layer::HudCommand>| {
+        commands
+            .into_iter()
+            .map(|c| match c {
+                hud_layer::HudCommand::Text { x, y, vertical, .. } => (x, y, vertical),
+                hud_layer::HudCommand::Gauge { x, y, vertical, .. }
+                | hud_layer::HudCommand::Image { x, y, vertical, .. } => {
+                    (x as f32, y as f32, vertical)
+                }
+                _ => panic!("unexpected readout command"),
+            })
+            .collect::<Vec<_>>()
+    };
+    for id in [
+        "eqoa_hud_numbers",
+        "eqoa_mana_bars",
+        "eqoa_target_of_target",
+    ] {
+        options::reset_in_memory();
+        let host = load_hud_mod(&tree, id);
+        if id == "eqoa_target_of_target" {
+            host.execute("eqoa.options.set('target_of_target',true)")
+                .unwrap();
+        }
+        let render = || {
+            hud_layer::clear_all();
+            native_events::render(&host).unwrap();
+            positions(queued(id))
+        };
+        for size in [(640, 480), (1280, 720), (768, 1024)] {
+            hud_layout::set_window_size(size.0, size.1);
+            crate::settings::save_hud_layout("");
+            crate::hudlayout::testing_reset();
+            let before = render();
+            assert!(!before.is_empty(), "{id} draws its control");
+            crate::settings::save_hud_layout(
+                "player l 35 t 28\ngroup l 60 t 50\ntarget l 80 b -40\n",
+            );
+            crate::hudlayout::testing_reset();
+            let after = render();
+            assert_eq!(before.len(), after.len());
+            for ((x, y, v), (mx, my, mv)) in before.iter().zip(after) {
+                assert_eq!(*v, mv);
+                let delta = if mv == render::ui::Vertical::Bottom {
+                    [80.0, -40.0]
+                } else if id == "eqoa_mana_bars" {
+                    [60.0, 50.0]
+                } else {
+                    [35.0, 28.0]
+                };
+                assert_eq!(
+                    [mx - x, my - y],
+                    delta,
+                    "{id} follows the corresponding stock piece"
+                );
+            }
+            crate::settings::save_hud_layout("");
+            crate::hudlayout::testing_reset();
+            assert_eq!(
+                render(),
+                before,
+                "negative control: Reset HUD restores {id}"
+            );
+        }
+    }
+    hud_layout::set_window_size(640, 448);
+}

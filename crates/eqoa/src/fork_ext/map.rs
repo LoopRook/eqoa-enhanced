@@ -221,3 +221,40 @@ pub(crate) fn keyboard_pieces(group: bool, quests: bool, travel: bool) -> Vec<St
     }
     labels
 }
+
+/// The circle already uses the moved window rectangle. Its border is emitted
+/// in that same space; the north label alone uses the HUD's frame shift.
+pub(crate) fn round_minimap_border(
+    ui: &mut render::ui::Ui,
+    white: usize,
+    size: (u32, u32),
+    circle: [f32; 3],
+    width: f32,
+) {
+    for i in 0..96 {
+        ui.quads.push(render::ui::Quad {
+            tex: white,
+            blend: 3,
+            pos: ring_quad(size, circle, i, 96, width),
+            uv: [[0.5, 0.5]; 4],
+            color: crate::map::theme::BORDER,
+            clip: Some(render::ui::WHOLE),
+        });
+    }
+}
+
+pub(crate) fn ring_quad(
+    size: (u32, u32),
+    c: [f32; 3],
+    i: usize,
+    n: usize,
+    width: f32,
+) -> [[f32; 2]; 4] {
+    let a = i as f32 * std::f32::consts::TAU / n as f32;
+    let b = (i + 1) as f32 * std::f32::consts::TAU / n as f32;
+    let at = |t: f32, r: f32| {
+        render::ui::frame_from_window(size, [c[0] + r * t.cos(), c[1] + r * t.sin()])
+    };
+    let inner = (c[2] - width).max(0.0);
+    [at(a, inner), at(a, c[2]), at(b, c[2]), at(b, inner)]
+}

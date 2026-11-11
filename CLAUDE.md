@@ -90,7 +90,7 @@ section there before changing a ported system (anything under `crates/vi`, `ee`,
   disc are not on this machine, so oracle tests skip here: say so in the report.
 - What the game counts in frames steps on `frames.rs`'s 30 Hz clock, never once per frame drawn.
 - Server worlds: keep the shared Disc/Sink composer streaming one zone at a time on native and browser; mirror composer changes to the server's Compose contract/CRC (see docs/upstream/CLAUDE.md).
-- Browser event loops must exit on web::graphics_lost after a lost WebGL2 context; unsupported WebGL2 lighting stays off through the renderer's guard. Hat D-pads combine mapped buttons, axes and raw hat codes; retain upstream's controller diagnostics and test paths.
+- A lost graphics device is made again in place (`gpulost`, `viewer::recover`; a page's new device from `web::remake`); the main loop ends only through `give_up_gfx`/`web::give_up`, so never add an unconditional exit on `web::graphics_lost` to it (only the `fxview` preview stops on it). Unsupported WebGL2 lighting stays off through the renderer's guard. Hat D-pads combine mapped buttons, axes and raw hat codes; retain upstream's controller diagnostics and test paths.
 - Android: platform inputs go through android::Event into App::finger/key_input;
   keep APK signing keys and their folder untracked. Enhanced currently publishes Windows only.
 - Windows: the main thread links an 8 MB stack (`crates/eqoa/build.rs`); the program is a GUI

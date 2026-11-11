@@ -7,6 +7,43 @@ is put on the page by `.github/workflows/notes.yml`.
 
 
 
+## 2026-11-11 · The installed page opens another window each time
+- On a computer where the page is installed as an app (Windows 11's Start menu or taskbar), opening it again now
+  starts another game window for multiboxing instead of bringing back (or reloading) the one already open.
+
+## 2026-11-11 · Move the HUD where you want it
+- You can now move the pieces of the HUD: your character's frame with the compass and bars, the group (or raid)
+  bars, the pet's bar, the target's bar, the chat box, your effects, the quick bars, the minimap, the quest
+  tracker, the DPS meter and the breath gauge. Turn on **Options > Extended > HUD Layout > Move HUD** (or type
+  **/hud**), leave the menu, and every piece shows an outline with its name: drag one with the mouse, or with
+  your finger on a phone or tablet. When you are done, press **Lock** in the bar at the top of the screen (or
+  type /hud again); while locked, the HUD works as it always did.
+- Where you put each piece is kept for next time, for each game window. A piece keeps its distance from the
+  side of the screen it is nearest, so it stays sensible when you resize the window, and it is always kept on
+  the screen.
+- **Reset HUD** (in the same menu, the bar's Reset button, or /hud reset) puts everything back where the game
+  puts it.
+- A piece that isn't showing right now (the group bars when you're alone, the breath gauge on dry land) can be
+  moved the next time it shows.
+
+## 2026-11-11 · The mercenary's tag above its name, follow anyone
+- A mercenary's "<Lonewulf's Mercenary>" line no longer covers its head: it now sits where the name used to be,
+  with the name one line above it.
+- You can now follow any player, not only members of your group: target them and use Follow (or type /follow). You
+  stop following when they leave your view or the zone, as with a group member. Creatures, pets and mercenaries
+  outside your group still can't be followed.
+
+## 2026-11-11 · The game survives the graphics card stopping
+- When the graphics card or its driver stops for a moment (Windows resets a driver that hangs, a computer wakes
+  from sleep, the browser restarts its graphics: in the browser this read "The graphics stopped: the graphics
+  device was lost"), the game no longer stops. The screen goes still for a moment while the game makes its
+  graphics again, and then you play on where you were: you stay logged in, in your group and in your fight. In
+  the browser a note at the top says it happened. This goes for every window or tab you have open, which all
+  lose their graphics together when it happens.
+- If the graphics card stops again within a minute, the game gives up as before: the program starts again by
+  itself, and the browser page says so and from then on uses WebGL2 on that computer, which can hold where
+  WebGPU keeps failing (the start card says so and has a **Try WebGPU again** button).
+
 ## 2026-11-11 · Hide the look of a worn item
 - In the start menu's Inventory, Equipment tab, a worn helm, chest piece, bracers, gloves, leggings, boots, robe,
   weapon, shield, held item or cape now has **Hide Look** in its menu, right under Unequip. The item stays worn
