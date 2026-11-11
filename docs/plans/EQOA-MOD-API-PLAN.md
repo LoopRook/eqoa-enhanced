@@ -189,12 +189,12 @@ the existing addon tests are the regression gate, and the owner's live test deci
 |---|---|---|
 | 2.5 Harden and tidy | Gates 1-2 built; options pages back to upstream's layout; footprint records corrected; fix PRs prepared for upstream | Owner live test of round 2 passes; dry-run merge conflicts counted |
 | 3 HUD extras as mods | Small API additions; Stats Box, Target of Target, Mana Bars, HUD numbers as bundled mods; inline code removed | The four mods on by default; nothing lost for players |
-| 3u Upstream seams | Branches from origin/master for PR 1-3, each with a vanilla use and tests | Owner sends them |
+| 3u Upstream seams | Folded into round 8 (owner, 2026-11-10): no separate seam PRs | — |
 | 4 Map API and map mods | Map data API; journal mod, then search and guidance, then round minimap and skin; fork map code removed from upstream's map files | Upstream's map files unchanged or behind one seam |
 | 5 Items | inventory, item, bank, loot, merchant, gems | A bag viewer with a loot log |
 | 6 Actions and the rest | Full automation, quests, camera, dialogs | Owner approves the new seams first |
 | 7 Finish | Audit, generated reference, support table, freeze eqoa/1 | Owner approves the release |
-| 8 Offer the mod API upstream | A branch from origin/master with the runtime, hooks and `eqoa` API (no fork mods), upstream's style and tests | The owner sends the PR |
+| 8 Offer the mod API upstream | A branch from origin/master with the hooks (the old round 3u seams), runtime and `eqoa` API (no fork mods), upstream's style and tests | The owner sends the PR |
 
 Leads and builders are chosen per round from the roster (`~/Paseo/Agent_Learning_Instructions.md`);
 the reviewer is a different model family from the builder.
@@ -245,6 +245,9 @@ four features; hud.rs, play.rs, settings.rs and binds.rs lose the matching lines
 the four mods move to their own repository (decision 9).
 
 ### Round 3u: offer the seams upstream
+
+Folded into round 8 on 2026-11-10 (owner: one combined offer). The text below now describes round 8's hook part.
+
 
 One branch from origin/master per PR, no Lua, no mod names, each with a use inside vanilla, tests
 with a negative control, and the vanilla test suite passing:
@@ -350,3 +353,6 @@ docs/modding/AGENT-GUIDE.md (one page for agents building mods from an owner bri
   tidy listed above; the sync resolved options.rs/binds.rs by hand (budgets rose: options +46/-142).
 - **Round 2.5 result, 2026-11-10.** Branches chore/r25-options-tidy and chore/r25-gates (a853297), not yet on develop. Items 1-6 and 8 done: zero-addon gate in CI, Play-shaped fixtures, picture tests (golden PNGs absent, comparison skips), options/touch/map files restored to reviewed upstream, 64/650 first-run migration, footprint records re-measured (fork lines in upstream files 7166 to about 6500; options-family 1286 to 1082; dry-run conflicts 8 to 7). Item 5's newer upstream touch controls (e8d7c7d) wait for the next sync. Item 7 dropped by the owner. Open: golden PNGs, M3/M4 notes in docs/plans/r25-options-tidy-report.md. Next: owner plays a branch build, then merge to develop, then a sync, then round 3.
 - **Round 2.5 picture tests, owner review 2026-11-10.** The owner looked at the three captures (r25-*.png): they look fine but are hard to read and do not show every UI element. They are not approved as references; the three golden comparisons stay skipped. Before approving, the fixtures would need to show each UI's full set of elements at a readable size (backlog; low priority, the owner's live test remains the real check).
+- **Upstream sync 2026-11-10 (develop dde6ecc).** 95 upstream commits to 5d54c0c (raids, Number Colors, Pet Effects, DPS meter, Macros, touch controls) by Sol high; MiniMax review: 1 HIGH (duplicated GM legend), 1 MEDIUM, fixed by free DeepSeek. Owner live test passed (Controls, map, ToT). Known GPU-only failures on the owner's PC, green on CI: two AO tests and upstream's particles16.
+- **Round 3 (HUD extras as mods), 2026-11-11.** Branch feat/eqoa-api-r3, merged into develop e31d280. Four bundled mods on by default (Stats Box and ToT start off, as before); new API: player.stats, power/target_id, actions.assist, windows.open("summary"), mod keys on Controls (own file), mod option rows, hud.frame/layout/visible and a native HUD layer (text/gauge/image in the game's HUD pass, for an identical look and layering). Route: Gemini Flash built (Argon REJECT: 12 HIGH; its fix round invented proving tests), DeepSeek Pro/Flash and Argon cut off by limits, Codex Sol proof round (native PNG references, real tests), Claude Sonnet final review (1 HIGH: mod keys lost on save) and final fixes; Sonnet found the benchmark measured nothing and fixed the real cost (1.2-1.9 ms to 0.38-0.40 ms for four mods). Gates: client 1987 passed, addons 374, net 87, tools 97, zero-addon gate, wasm, footprint PASS, dry-run clean. Owner live test passed 2026-11-11 (frame rate fine). Backlog: key-conflict handling (round 7). Owner: round 3u folded into round 8. Next: round 4 (map).
+
