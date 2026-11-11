@@ -1,6 +1,7 @@
 //! The fork's local crash reports and upstream's kept crash reports share
 //! no folder: a report of one side is never sent, offered, pruned,
-//! acknowledged or deleted by the other. (Loaded into `crashfile`'s tests by
+//! acknowledged or deleted by the other; and a report goes to a server only
+//! with the Enhanced label and a useful part of itself. (Loaded into `crashfile`'s tests by
 //! one `#[path]` line so the private `files_in`, `pending_in`, `write_in`,
 //! `answered_in` and `number_of` are the real ones.)
 use super::*;
@@ -103,4 +104,62 @@ fn pruning_or_answering_one_sides_reports_leaves_the_other() {
     }
     assert!(!theirs.exists(), "control: in one folder upstream's pruning deletes the fork's report");
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// What `send_pending` does, on the kept files of `d` (its `pending()` reads
+/// the config directory, which a unit test has none of): the labelled reports
+/// go through the real `Session::send_crash_report`; the datagrams that left.
+fn sent_with(d: &std::path::Path, most: usize) -> (usize, Vec<u8>) {
+    struct Rec(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+    impl net::session::Datagrams for Rec {
+        fn send_to(&mut self, d: &[u8], _: [u8; 4], _: u16) {
+            self.0.borrow_mut().extend_from_slice(d);
+        }
+        fn recv_from(&mut self) -> Option<(Vec<u8>, [u8; 4], u16)> {
+            None
+        }
+    }
+    let wire = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut s = net::session::Session::connect_with(Box::new(Rec(wire.clone())), ([127, 0, 0, 1], 5000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+    wire.borrow_mut().clear();
+    let kept = crate::fork_ext::report_label::pending(pending_in(d), most);
+    for k in &kept {
+        s.send_crash_report(k.number, &k.text, most);
+    }
+    s.flush();
+    let out = wire.borrow().clone();
+    (kept.len(), out)
+}
+
+fn has(hay: &[u8], needle: &str) -> bool {
+    hay.windows(needle.len()).any(|w| w == needle.as_bytes())
+}
+
+/// A server's limit just above the label's length gets no report (a label and
+/// a few bytes of body would be acknowledged and the crash let go with it):
+/// nothing leaves, the file stays kept; a limit that holds a useful body, and
+/// the usual 12,000, send it with the label. The controls: the larger limits
+/// do send, so the empty wire of the small ones is the rule, not the setup.
+#[test]
+fn a_limit_barely_over_the_label_sends_nothing_and_keeps_the_report() {
+    let d = scratch("limit");
+    let label = crate::fork_ext::report::enhanced_label();
+    write_in(&d, "20261111-080808-1700000000", &format!("EQOA client crash report\npanic: boom\n{}", "x".repeat(2000))).unwrap();
+    let (n, wire) = sent_with(&d, net::session::CRASH_REPORT_MOST);
+    assert_eq!(n, 1, "control: a usual offer sends it");
+    assert!(has(&wire, &label), "labelled on the wire");
+    let (n, wire) = sent_with(&d, label.len() + 1 + 256);
+    assert_eq!(n, 1, "control: room for the label and a useful body sends it");
+    assert!(has(&wire, &label) && has(&wire, "EQOA client crash report"));
+    for most in [label.len(), label.len() + 20, label.len() + 256] {
+        let (n, wire) = sent_with(&d, most);
+        assert_eq!(n, 0, "a limit of {most} bytes sends no report");
+        assert!(!has(&wire, "EQOA Enhanced") && !has(&wire, "crash report"), "nothing of it on the wire at {most}");
+        assert_eq!(files_in(&d).len(), 1, "the report stays kept");
+        assert_eq!(pending_in(&d).len(), 1);
+    }
+    // the hook is the send boundary's: send_pending asks the fork for the labelled reports
+    let source = include_str!("../crashfile.rs");
+    assert!(source.contains("let kept = crate::fork_ext::report_label::pending(pending(), most);"));
+    let _ = std::fs::remove_dir_all(&d);
 }
