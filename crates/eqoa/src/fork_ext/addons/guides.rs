@@ -16,7 +16,9 @@ struct Guide {
 }
 thread_local! {static GUIDES:RefCell<BTreeMap<u64,Guide>>=const{RefCell::new(BTreeMap::new())};}
 #[cfg(test)]
-pub(crate) fn guide_count()->usize { GUIDES.with(|g|g.borrow().len()) }
+pub(crate) fn guide_count() -> usize {
+    GUIDES.with(|g| g.borrow().len())
+}
 fn point(t: &Table) -> Result<[f32; 2]> {
     let p = [t.get::<f32>("x")?, t.get::<f32>("z")?];
     if !p.iter().all(|v| v.is_finite()) {
@@ -96,7 +98,17 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 },
             };
             let at = if entity.is_none() {
-                match point(&t) { Ok(p)=>Some(p), Err(e)=>return error(lua,"eqoa.map.set_guide","invalid_argument",&e.to_string()) }
+                match point(&t) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        return error(
+                            lua,
+                            "eqoa.map.set_guide",
+                            "invalid_argument",
+                            &e.to_string(),
+                        );
+                    }
+                }
             } else {
                 None
             };
@@ -130,7 +142,17 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     );
                 }
                 for p in ts.sequence_values::<Table>() {
-                    match point(&p?) {Ok(p)=>dots.push(p),Err(e)=>return error(lua,"eqoa.map.set_guide","invalid_argument",&e.to_string())}
+                    match point(&p?) {
+                        Ok(p) => dots.push(p),
+                        Err(e) => {
+                            return error(
+                                lua,
+                                "eqoa.map.set_guide",
+                                "invalid_argument",
+                                &e.to_string(),
+                            );
+                        }
+                    }
                 }
             }
             let vm = super::native_events::bus(lua).borrow().vm;

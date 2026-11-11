@@ -449,8 +449,14 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         let mut c = c.borrow_mut();
         let world = play.world_id() as i32;
         if changed || c.view.map["zone"] != c.view.player["location"] {
-            let mut after = play.map.api_state(world, &c.view.player["location"], play.words.as_ref());
-            let markers = if changed { play.map.api_markers() } else { c.view.map_markers.clone() };
+            let mut after =
+                play.map
+                    .api_state(world, &c.view.player["location"], play.words.as_ref());
+            let markers = if changed {
+                play.map.api_markers()
+            } else {
+                c.view.map_markers.clone()
+            };
             let mut before = c.view.map.clone();
             before.as_object_mut().map(|m| m.remove("revision"));
             let revision = c.view.map["revision"].as_u64().unwrap_or(0);
@@ -466,7 +472,12 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
             c.view.world_id = Some(world);
         }
         let p = &c.view.player["position"];
-        let projection = p["x"].as_f64().zip(p["z"].as_f64()).and_then(|(x,z)| play.map.api_minimap_transform([x as f32,z as f32], crate::fork_ext::addons::hud_layout::get_window_size()));
+        let projection = p["x"].as_f64().zip(p["z"].as_f64()).and_then(|(x, z)| {
+            play.map.api_minimap_transform(
+                [x as f32, z as f32],
+                crate::fork_ext::addons::hud_layout::get_window_size(),
+            )
+        });
         if c.view.minimap != projection {
             c.view.minimap = projection;
             dirty();
