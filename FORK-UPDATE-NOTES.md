@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## 2026-11-11 · Enhanced 0.5.3
+
+- Fix: bundled mods that are on by default (HUD numbers and Mana Bars) are now on for players who already had a mod profile.
+
 ## 2026-11-11 · Enhanced 0.5.2
 
 - The first published release since 0.4.14: it contains everything listed under 0.5.0 and 0.5.1 below (those two were prepared but not published, because a release check failed).

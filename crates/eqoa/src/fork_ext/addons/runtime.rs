@@ -137,8 +137,7 @@ impl Runtime {
             if let Some(profile) = &saved_profile {
                 return Storage::key(addon)
                     .ok()
-                    .and_then(|key| profile.enabled.get(&key).copied())
-                    .unwrap_or(false);
+                    .is_some_and(|key| profile.enabled_for(addon, &key));
             }
             Storage::key(addon)
                 .and_then(|key| storage.enabled(&key))
