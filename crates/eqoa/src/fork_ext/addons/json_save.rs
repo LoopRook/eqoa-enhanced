@@ -31,6 +31,7 @@ struct Job {
 }
 struct Done {
     id: u64,
+    key: PathBuf,
     result: std::result::Result<(), String>,
     worker: thread::ThreadId,
 }
@@ -222,6 +223,7 @@ fn service(lua: &Lua) -> Result<Shared> {
                         q.active = None;
                         q.done = Some(Done {
                             id: job.id,
+                            key: job.key.clone(),
                             result,
                             worker: thread::current().id(),
                         });
@@ -347,6 +349,11 @@ pub(crate) fn poll(lua: &Lua) -> Result<()> {
     let done = s.borrow().work.0.lock().unwrap().done.take();
     if let Some(done) = done {
         s.borrow_mut().last_worker = Some(done.worker);
+        if done.result.is_ok() {
+            if let Some(mounts) = lua.app_data_ref::<Mounts>() {
+                super::exchange::saved(&mounts, &done.key);
+            }
+        }
         super::native_events::json_saved(lua, done.id, done.result.err().as_deref())?;
     }
     Ok(())

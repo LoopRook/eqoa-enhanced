@@ -33,6 +33,7 @@ pub(crate) mod discovery;
 pub(crate) mod effects;
 pub(crate) mod entity;
 mod file_io;
+mod exchange;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod fonts;
 #[cfg(test)]

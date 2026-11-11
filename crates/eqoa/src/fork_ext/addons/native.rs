@@ -890,6 +890,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::file_io::install_native(host)?;
     super::async_json::install(host)?;
     super::json_save::install(host)?;
+    super::exchange::register(lua);
     super::native_settings::install(host)?;
     bind(
         lua,

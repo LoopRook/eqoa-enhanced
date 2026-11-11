@@ -98,6 +98,7 @@ impl Mounts {
         if deleted.exists() {
             fs::remove_file(&deleted).map_err(|e| e.to_string())?;
         }
+        super::exchange::saved(self, &key);
         Ok(())
     }
     pub fn remove(&self, path: &str) -> Result<bool, String> {

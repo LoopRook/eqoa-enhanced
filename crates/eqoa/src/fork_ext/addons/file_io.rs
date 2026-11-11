@@ -206,6 +206,7 @@ pub(super) fn relative(
     addon: &DiscoveredAddon,
     path: &str,
 ) -> std::result::Result<PathBuf, String> {
+    if path.starts_with('@') { return Err("shared paths are read-only JSON mounts".into()); }
     let path = path.replace("\\\\?\\", "").replace('\\', "/");
     if path.split('/').any(|part| part == "..") {
         return Err("parent traversal in addon resource path".into());
@@ -369,6 +370,7 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
         addon: addon.clone(),
         data: data.clone(),
     });
+    super::exchange::register(lua);
     let io = lua.create_table()?;
     let addon_open = addon.clone();
     let data_open = data.clone();
@@ -618,6 +620,37 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn round4b_shared_json_requires_running_owner_and_declared_path() {
+        let (_owner_dir, owner, mut addon) = fixture();
+        addon.id = "journal_owner".into();
+        addon.extensions.shares = vec!["data/journal.json".into()];
+        let root = _owner_dir.0.join("config");
+        install(&owner, &addon, Some(root.clone())).unwrap();
+        fs::create_dir_all(root.join("files/data")).unwrap();
+        fs::write(root.join("files/data/journal.json"), r#"{"Bat":{"42":{"world":0,"level":2,"pos":[1,2,3]}}}"#).unwrap();
+        fs::write(root.join("files/data/secret.json"), "{}").unwrap();
+        let (_reader_dir, reader, _) = fixture();
+        reader.execute("loaded=false;eqoa.events.on('resource.ready',function(e) if e.data.kind=='json' then loaded=e.data.value.Bat['42'].level==2 end end);local id,e=eqoa.files.load_json('@journal_owner/data/journal.json');assert(id,tostring(e));local no,e=eqoa.files.load_json('@journal_owner/data/secret.json');assert(no==nil and e.code=='permission_denied','undeclared read accepted');assert(eqoa.files.load_json('@journal_owner/data/../secret.json')==nil,'traversal accepted');assert(eqoa.files.write('@journal_owner/data/journal.json','{}')==nil,'shared write accepted')").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !reader.lua.globals().get::<bool>("loaded").unwrap() {
+            assert!(std::time::Instant::now() < deadline);
+            super::super::native_events::dispatch(&reader).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        reader.execute("changes=0;eqoa.events.on('shared.changed',function(e) assert(e.data.mod=='journal_owner' and e.data.path=='data/journal.json');changes=changes+1 end)").unwrap();
+        owner.execute("assert(eqoa.files.save_json_async('journal.json',{Bat={}}))").unwrap();
+        while reader.lua.globals().get::<u32>("changes").unwrap() == 0 {
+            assert!(std::time::Instant::now() < deadline);
+            super::super::native_events::dispatch(&owner).unwrap();
+            super::super::native_events::dispatch(&reader).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(fs::read_to_string(root.join("files/data/journal.json")).unwrap(), r#"{"Bat":{}}"#);
+        super::super::native_events::clear(&owner);
+        reader.execute("local id,e=eqoa.files.load_json('@journal_owner/data/journal.json');assert(id==nil and e.code=='permission_denied')").unwrap();
+    }
+
     #[test]
     fn live_regression_optional_forge_file_probe_is_not_a_visible_error() {
         let (_scratch, host, _addon) = fixture();

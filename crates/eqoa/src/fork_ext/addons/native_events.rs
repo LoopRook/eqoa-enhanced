@@ -39,7 +39,7 @@ pub(crate) struct Bus {
     diagnostics: super::native::DiagnosticSink,
     next: u64,
     subscriptions: Vec<Subscription>,
-    active: bool,
+    pub(super) active: bool,
     pub once_mode: bool,
     pub initialized: bool,
     last_render: Option<Instant>,
@@ -93,6 +93,7 @@ const EVENTS: &[&str] = &[
     "entity.removed",
     "group.changed",
     "map.changed",
+    "shared.changed",
     "guide.lost",
     "pointer.pressed",
     "pointer.wheel",
@@ -127,6 +128,7 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("entity.removed", "ref before after changed"),
         ("group.changed", "before after changed"),
         ("map.changed", "before after changed"),
+        ("shared.changed", "mod path"),
         ("guide.lost", "owner world_id entity_id label reason"),
         ("abilities.changed", "before after changed"),
         ("hotbar.changed", "before after changed"),
@@ -828,4 +830,13 @@ pub(crate) fn json_saved(lua: &mlua::Lua, request: u64, failure: Option<&str>) -
     event.bytes = 256;
     enqueue(&mut bus(lua).borrow_mut(), event, Some(data));
     Ok(())
+}
+
+pub(super) fn weak_bus(lua: &mlua::Lua) -> Option<std::rc::Weak<RefCell<Bus>>> {
+    lua.app_data_ref::<Shared>().map(|b| Rc::downgrade(&b))
+}
+pub(super) fn shared_changed(owner: &str, path: &str) {
+    let mut event = local("shared.changed", json!({"mod":owner,"path":path}));
+    event.bytes = owner.len() + path.len() + 64;
+    publish(&event);
 }

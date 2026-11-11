@@ -158,6 +158,7 @@ fn service(lua: &Lua) -> Result<Shared> {
     Ok(s)
 }
 fn resource_path(m: &Mounts, path: &str) -> std::result::Result<PathBuf, String> {
+    if path.starts_with('@') { return super::exchange::read(path); }
     if path.starts_with(['/', '\\']) || path.contains(':') {
         return Err("JSON loads require a relative resource path".into());
     }
