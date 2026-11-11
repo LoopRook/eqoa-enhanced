@@ -140,3 +140,66 @@ footprint evidence are archived at
 The worktree's script-created `target` held only logs/configuration, never Cargo
 artifacts; its evidence was archived and that temporary folder removed before
 handoff. No private game data or credentials are committed.
+
+
+## Fix round (review of 2026-11-11: APPROVE WITH CHANGES)
+
+The review is kept as `docs/plans/sync-2026-11-11-review.md`. Commits are on `sync/2026-11-11`
+after `e0fc130`; nothing was pushed, merged or tagged.
+
+| Finding | Fix | Commit |
+|---|---|---|
+| H1: upstream's kept-crash sender and the fork's local crash reports shared `<config>/crashes/crash-*.txt` | The fork's local crashes (panic, unclosed run, GPU lost) now go to `<config>/enhanced-crashes/` (`fork_ext/report_crash_dir.rs`; `report_core.rs` paths, offer, pruning; the Problem zip reads it). `report::start` calls `migrate_legacy` first, once (marker `.legacy-crashes-moved`): every `crash-*.txt` an older build left in `crashes/` moves to the fork's folder, so no old report with a log tail or state snapshot is sent at a login. Upstream's `crashfile` behaviour is untouched. | 28d8352 |
+| M2: a limit just above the label length sent the label plus a few bytes, and the file was let go | `report_label::pending` sends a report only if the limit holds label + newline + min(256, report length) bytes; else nothing goes and the file stays kept. L1 folded in: one log line says how many reports were withheld and why. | d6a2006 |
+| M1: F3's server Support note had no Enhanced label | One hook in `play.rs` `send_bug_note` wraps the note in `fork_ext::report_label::bug_note`: a `client: <label>` line directly after upstream's `build:` line (upstream's `support.rs` test passes unchanged: `starts_with("build: ")`). The note stays within `BUG_NOTE_MAX` (1000 bytes; whole lines go from the end if needed); the petition's own text and its 2,047-character limit are untouched. | cc502ef |
+| L4 (partly) and L7 | Removed the two fork-only duplicate comment blocks in `net/session.rs` (quest marks; the quest tracker's offer; upstream has each once, above its test). The stray doc comment above `the_info_window_says_a_race_label` in `play.rs` is upstream's own at a3cedec, so it stays. Footprint `review_state` refreshed. | 2a03f85 |
+| Owner decision (lead): the label says which upstream commit the build is synced to | `enhanced_label()` now reads "EQOA Enhanced X (abc1234), synced to upstream a3cedec, a fork of DabDavis's vanilla client: ..." with the 7-character `reviewed_base` taken at compile time by `include_str!` of `docs/fork-footprint.json` and a small parse (no build.rs, no network, no git at runtime). M2's minimum body applies to the longer label. | 1ab7f75 |
+
+### Tests added and their negative controls
+
+| Test | What it shows | Negative control |
+|---|---|---|
+| `crashfile::fork_dirs_tests::a_fork_crash_is_in_its_own_folder_and_never_pending_for_a_server` | a fork crash lands in `enhanced-crashes/`; upstream's `files_in`/`pending_in` see nothing; the fork's offer lists it | the same file placed in `crashes/` (the old layout) is pending for the server with its log tail; and with the folder name temporarily set back to `crashes` the test failed |
+| `crashfile::fork_dirs_tests::old_local_crash_files_move_out_of_the_senders_folder_once` | legacy files move, a non-crash file stays, a second start moves nothing, upstream's later report stays | before the move both files are pending; failed with the folder set back to `crashes` |
+| `crashfile::fork_dirs_tests::pruning_or_answering_one_sides_reports_leaves_the_other` | upstream's pruning and an acknowledgement leave the fork's files; the fork's pruning leaves upstream's | in one shared folder upstream's pruning deletes the fork's file; failed with the folder set back to `crashes` |
+| `crashfile::fork_dirs_tests::a_limit_barely_over_the_label_sends_nothing_and_keeps_the_report` | real kept file, real `Session::send_crash_report`, datagrams inspected: limits of label, label+20 and label+256 send nothing and keep the file; label+1+256 and 12,000 send it labelled; pins the one hook line in `send_pending` by source text | the larger limits do send; failed with the old rule restored |
+| `report_label::tests::every_kept_report_gets_the_enhanced_identity_before_its_body` (extended) | one byte short of label + useful body keeps the report | failed with the old rule |
+| `report_label::tests::the_support_note_names_enhanced_within_its_limit` | `client:` line second, upstream lines intact, never twice, within 1000 bytes, tail lines go first | `bugnote::compose` alone has no label |
+| `play::fork_hooks::tests::the_note_on_the_wire_is_labelled` | the F3 path sends the labelled note | no offer sends no note; failed with the `play.rs` hook line reverted |
+| `report_label::tests::the_label_says_the_upstream_commit_it_is_synced_to` | label contains `, synced to upstream <7 chars of reviewed_base>, a fork of ` | another or missing base gives another or no commit; failed with the label text reverted |
+
+Existing fork tests that named `crashes/` for the fork's files now name `enhanced-crashes/` (path updates only; assertions unchanged).
+`crashfile.rs` gained one test-only `#[path]` line so the new tests can reach its private functions (see Footprint).
+
+Limits of the tests: a unit test has no config directory, so `crashfile::send_pending` itself is not run end to end; the tests
+run its real pieces (`pending_in`, `report_label::pending`, `Session::send_crash_report`) and pin the hook line by source text.
+No live server crash transmission, real panic, upgrade from a build with old files, or owner playtest was done.
+
+### Test counts
+
+| Suite | Result | Passed | Failed | Ignored | SKIP messages |
+|---|---|---:|---:|---:|---:|
+| Script (`--continue --tests-only`), final run: eqoa binary | PASS | 2043 | 0 | 31 | 210 (client and net together) |
+| Script: net library / dump_capture / effects / newchar / selfstate_capture / doc | PASS | 92 / 1 / 4 / 3 / 1 / 0 | 0 | 0 | included above |
+| Script: Python tools | PASS | 97 | 0 | 0 | 0 |
+| `cargo test -p eqoa --bin eqoa fork_ext::` (scratch `EQOA_CONFIG`, 1 thread) | PASS | 468 | 0 | 25 | 0 |
+| `cargo check -p eqoa --target wasm32-unknown-unknown` | PASS | n/a | 0 | n/a | n/a |
+
+Script totals: 2144 passed / 0 failed / 31 ignored (2137 before this round plus 7 new test functions; the extended one is not counted).
+Rework recorded: the first script run of this round had 1 failure, `round_3_all_four_mods_per_frame_performance_benchmark`
+(5.034 ms against a 5 ms debug-mode limit; a timing test on a loaded machine, unrelated to these changes). The unchanged
+rerun passed with every test green, and the fork_ext run, which includes it, passed. No assertion was relaxed.
+
+### Footprint
+
+`check_fork_footprint.py --base a3cedec7d8bb2688cf8ed56d34a280f4a459b0ef`: PASS.
+- `crashfile.rs`: budget +1/-1 to +2/-1 (the test-only `#[path]` line).
+- `play.rs`: deletions 61 to 62 (`send_bug_note` line changed, +1/-1); added stays 278 (measured 263); new exactly-once hook "Enhanced Support note".
+- `net/session.rs`: shared lines fell (11 fork-only comment lines removed).
+- `review_state` text refreshed for this sync. `support.rs` unchanged.
+
+### Not done (LOW items skipped as asked)
+
+L2 (a loopback test through `send_pending` itself: partly met by the new wire test), L3 (viewer.rs upstream comment text and
+`chat_let_go` order), L5 (chrome.rs keyboard legend line), L6 (F2 beside the places list), L8 (F4 rebinding), and the `play.rs`
+stray doc comment (it is upstream's own, kept). Archived logs: `C:/Users/hocka/AppData/Local/Temp/fx-evidence` (script runs 1 to 3).
