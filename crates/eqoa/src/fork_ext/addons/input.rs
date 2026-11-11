@@ -236,6 +236,19 @@ pub fn is_text_capture_active() -> bool {
     })
 }
 
+/// Native editors retain their own controls, but typed keys must not activate
+/// another mod's binds or the legacy Forge chat owner's ordinary hotkeys.
+pub(crate) fn mod_binding_allowed(vm: u64) -> bool {
+    if !is_text_capture_active() {
+        return true;
+    }
+    let owner = format!("\u{1f}{vm}:native:text");
+    INPUT_STATE.with(|state| {
+        let state = state.borrow();
+        state.text_capture_owners.len() == 1 && state.text_capture_owners.contains_key(&owner)
+    })
+}
+
 pub fn is_key_suppressed(key: u8) -> bool {
     INPUT_STATE.with(|s| {
         let mut state = s.borrow_mut();
@@ -1260,4 +1273,13 @@ mod tests {
 }
 
 #[cfg(test)]
-pub(crate) fn testing_text_capture(active:bool){INPUT_STATE.with(|s|{let mut s=s.borrow_mut();if active{s.text_capture_owners.insert("test".into(),Instant::now());}else{s.text_capture_owners.remove("test");}});}
+pub(crate) fn testing_text_capture(active: bool) {
+    INPUT_STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        if active {
+            s.text_capture_owners.insert("test".into(), Instant::now());
+        } else {
+            s.text_capture_owners.remove("test");
+        }
+    });
+}

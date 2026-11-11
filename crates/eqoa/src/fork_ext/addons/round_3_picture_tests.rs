@@ -800,14 +800,35 @@ fn round_3_all_four_mods_per_frame_performance_benchmark() {
             ("options.get", "eqoa.options.get('stats_box')"),
             ("hud.frame", "eqoa.hud.frame()"),
             ("text.localized", "eqoa.text.localized(1)"),
-            ("hud.text", "eqoa.hud.text({col=1,row=1,text='x',color={1,1,1,1},shadow=true})"),
+            (
+                "hud.text",
+                "eqoa.hud.text({col=1,row=1,text='x',color={1,1,1,1},shadow=true})",
+            ),
             ("hud.text min", "eqoa.hud.text({x=1,y=1,text='x'})"),
-            ("hud.text color", "eqoa.hud.text({x=1,y=1,text='x',color={1,1,1,1}})"),
-            ("hud.text full", "eqoa.hud.text({x=1,y=1,text='x',color={1,1,1,1},shadow=true,align='right'})"),
-            ("hud.gauge", "eqoa.hud.gauge({x=30,y=325,art=7,fill=0.5,lit=true,vertical='bottom'})"),
-            ("hud.image", "eqoa.hud.image({ui_id=25,x=20,y=300,w=174,target_fade=true,vertical='bottom'})"),
-            ("imgui.Begin+End", "eqoa.imgui.Begin('w',nil,0) eqoa.imgui.End()"),
-            ("imgui.InvisibleButton", "eqoa.imgui.InvisibleButton('b',10,10)"),
+            (
+                "hud.text color",
+                "eqoa.hud.text({x=1,y=1,text='x',color={1,1,1,1}})",
+            ),
+            (
+                "hud.text full",
+                "eqoa.hud.text({x=1,y=1,text='x',color={1,1,1,1},shadow=true,align='right'})",
+            ),
+            (
+                "hud.gauge",
+                "eqoa.hud.gauge({x=30,y=325,art=7,fill=0.5,lit=true,vertical='bottom'})",
+            ),
+            (
+                "hud.image",
+                "eqoa.hud.image({ui_id=25,x=20,y=300,w=174,target_fade=true,vertical='bottom'})",
+            ),
+            (
+                "imgui.Begin+End",
+                "eqoa.imgui.Begin('w',nil,0) eqoa.imgui.End()",
+            ),
+            (
+                "imgui.InvisibleButton",
+                "eqoa.imgui.InvisibleButton('b',10,10)",
+            ),
             ("hud.panel", "eqoa.hud.panel({x=200,y=54,w=148,h=132})"),
             ("target.get", "eqoa.target.get()"),
             ("entities.find", "eqoa.entities.find(2)"),
@@ -820,7 +841,10 @@ fn round_3_all_four_mods_per_frame_performance_benchmark() {
             bridges[0]
                 .invoke(|| hosts[0].execute(&format!("for i=1,200 do {code} end")))
                 .unwrap();
-            println!("APICOST {name}: {:.2}us/call", t.elapsed().as_secs_f64() * 1e6 / 200.0);
+            println!(
+                "APICOST {name}: {:.2}us/call",
+                t.elapsed().as_secs_f64() * 1e6 / 200.0
+            );
             hud_layer::clear_all();
         }
         drop(context.render_legacy());
@@ -1006,6 +1030,17 @@ fn fresh_hud_mod_load_defaults_and_live_stats_key_and_menu_wiring() {
     input::route_mod_key(&f8, true, false, false, true, false);
     native_events::dispatch(&stats).unwrap();
     stats.execute("assert(eqoa.options.get('stats_box')==false);require('frontiers_forge.input').SetTextCaptureActive('chat',false)").unwrap();
+    // Search's native editor still receives its own F2/F4-style controls; the
+    // same key must not trigger a different VM's ordinary bound action.
+    tot.execute("other_hits=0;assert(eqoa.input.bind({id='editor_probe',default_key='f8'},function() other_hits=other_hits+1 end))").unwrap();
+    stats
+        .execute("assert(eqoa.input.capture_text(true))")
+        .unwrap();
+    input::route_mod_key(&f8, true, false, false, true, true);
+    native_events::dispatch(&stats).unwrap();
+    native_events::dispatch(&tot).unwrap();
+    stats.execute("assert(eqoa.options.get('stats_box')==true);assert(eqoa.input.capture_text(false));eqoa.options.set('stats_box',false)").unwrap();
+    tot.execute("assert(other_hits==0)").unwrap();
     for (repeat, synthetic, plain, keyboard) in [
         (false, false, false, false),
         (false, false, true, true),

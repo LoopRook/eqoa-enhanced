@@ -945,7 +945,10 @@ An export queued in the same player callback as an accepted asynchronous JSON sa
 waits up to two seconds on its file worker for that save before reading the file.
 This includes the first save when no older file exists; save failure fails export.
 
-During an active `capture_text` lease in plain play, `input.key` also delivers
+During an active `capture_text` lease in plain play, registered bind callbacks
+run only for the sole native editor owner. Forge text
+capture blocks ordinary registered bind callbacks, including its owner's.
+The raw `input.key` event also delivers
 logical navigation keys, repeats, and optional `text` (Unicode logical character
 text, preserving case). Native dialogs and synthetic keys remain excluded. The
 lease neutralises merged gameplay pad input and releases held combat/camera,
