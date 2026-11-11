@@ -1258,3 +1258,6 @@ mod tests {
         lua.load(back_in_game).exec().unwrap();
     }
 }
+
+#[cfg(test)]
+pub(crate) fn testing_text_capture(active:bool){INPUT_STATE.with(|s|{let mut s=s.borrow_mut();if active{s.text_capture_owners.insert("test".into(),Instant::now());}else{s.text_capture_owners.remove("test");}});}

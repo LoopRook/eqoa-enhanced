@@ -81,7 +81,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                 if reqs.summary
                     && _play.mode == 0
                     && !_play.map.open
-                    && !_play.map.search.open
+                    && !crate::fork_ext::addons::input::is_text_capture_active()
                     && !_play.search.open
                     && _play.typing.is_none()
                     && _play.death.is_none()
@@ -265,7 +265,7 @@ impl Play {
                 && (ui_mode != 0
                     || start_menu
                     || self.map.open
-                    || self.map.search.open
+                    || crate::fork_ext::addons::input::is_text_capture_active()
                     || self.search.open
                     || self.typing.is_some());
             return crate::fork_ext::addons::host::Snapshot {
@@ -869,7 +869,7 @@ impl Play {
             && (ui_mode != 0
                 || start_menu
                 || self.map.open
-                || self.map.search.open
+                || crate::fork_ext::addons::input::is_text_capture_active()
                 || self.search.open
                 || self.typing.is_some());
 
@@ -2022,12 +2022,12 @@ mod tests {
         );
         p.map.open = false;
 
-        p.map.search.open = true;
+        crate::fork_ext::addons::input::testing_text_capture(true);
         assert!(
             p.forge_snapshot(None).ui_busy,
-            "map.search.open must report ui_busy == true"
+            "mod text capture must report ui_busy == true"
         );
-        p.map.search.open = false;
+        crate::fork_ext::addons::input::reset_input_state();
 
         p.search.open = true;
         assert!(
@@ -2291,7 +2291,6 @@ impl Play {
             && self.info_window.open <= 0.0
             && !self.keyboard_typing()
             && !self.is_dead()
-            && !self.map.search.open
     }
     pub(crate) fn draw_map_addon_hud(&self, ui: &mut render::ui::Ui) {
         if !self.map.open || self.loading.up() {

@@ -592,7 +592,6 @@ mod tests {
         let mut cues = Vec::new();
         assert_eq!(ControlsPage::entries(), ROWS.len() as i32 + 1, "the rows and Defaults alone");
         let mut b = binds::Binds::default();
-        crate::fork_ext::bindpage::free_fixture_key(&mut b);
         let l3 = binds::bit_index(crate::input::bit::L3).unwrap();
         b.set_trigger(0, None, vec![Input::Key("y".into())]).unwrap();
         b.set_trigger(2, None, vec![Input::Key("y".into()), Input::Button(l3)]).unwrap();

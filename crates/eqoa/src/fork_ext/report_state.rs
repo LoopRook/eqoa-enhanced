@@ -120,8 +120,8 @@ pub(super) fn describe(play: &Play, walker: Option<&Walker>) -> String {
     );
     let _ = writeln!(
         text,
-        "Map open: {}; search open: {}; map search open: {}",
-        play.map.open, play.search.open, play.map.search.open
+        "Map open: {}; player search open: {}",
+        play.map.open, play.search.open
     );
     let _ = writeln!(
         text,

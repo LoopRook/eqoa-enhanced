@@ -332,7 +332,7 @@ pub(crate) fn key(play: &Play, walker: Option<&crate::walker::Walker>) -> FrameK
     }
     v[26] = play.typing.is_some() as u64;
     v[27] = play.map.open as u64;
-    v[28] = play.map.search.open as u64;
+    v[28] = crate::fork_ext::addons::input::is_text_capture_active() as u64;
     v[29] = play.search.open as u64;
     v[30] = play.start.as_ref().is_some_and(|s| s.menu.visible) as u64;
     use std::hash::{Hash, Hasher};

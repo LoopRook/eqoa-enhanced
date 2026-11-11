@@ -991,7 +991,9 @@ mod tests {
                 "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
-                "eqoa_hud_numbers"
+                "eqoa_hud_numbers",
+                "eqoa_creature_journal",
+                "eqoa_map_search"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1280,7 +1282,9 @@ mod tests {
                 "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
-                "eqoa_hud_numbers"
+                "eqoa_hud_numbers",
+                "eqoa_creature_journal",
+                "eqoa_map_search"
             ]
         );
 
@@ -1298,7 +1302,7 @@ mod tests {
             ids.contains("avoids_modern_ui"),
             "avoids_modern_ui must be discovered on first start"
         );
-        assert_eq!(ids.len(), 8);
+        assert_eq!(ids.len(), PACKAGES.len());
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -1322,7 +1326,9 @@ mod tests {
                 "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
-                "eqoa_hud_numbers"
+                "eqoa_hud_numbers",
+                "eqoa_creature_journal",
+                "eqoa_map_search"
             ]
         );
 
@@ -1338,7 +1344,9 @@ mod tests {
                 "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
-                "eqoa_hud_numbers"
+                "eqoa_hud_numbers",
+                "eqoa_creature_journal",
+                "eqoa_map_search"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1420,7 +1428,9 @@ mod tests {
                 "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
-                "eqoa_hud_numbers"
+                "eqoa_hud_numbers",
+                "eqoa_creature_journal",
+                "eqoa_map_search"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );

@@ -99,11 +99,11 @@ fn moved_minimap_moves_circle_border_hover_and_search() {
         assert_eq!(
             before.len(),
             after.len(),
-            "same dot card, border, north and search"
+            "same dot card, border and north"
         );
         assert!(
             before.len() > masked + 2,
-            "hover card and search were composed"
+            "hover card was composed"
         );
         for (old, new) in before.iter().zip(after) {
             for (a, z) in old.pos.iter().zip(new.pos) {
@@ -117,23 +117,6 @@ fn moved_minimap_moves_circle_border_hover_and_search() {
                 );
             }
         }
-        let old_button = frame_from_window(size, [outer[2], outer[3]]);
-        assert!(
-            !map.search
-                .pointer([old_button[0] - 10.0, old_button[1] + 12.0], false),
-            "old search location is inactive"
-        );
-        assert!(
-            map.search.pointer(
-                [
-                    old_button[0] - 10.0 + shift[0],
-                    old_button[1] + 12.0 + shift[1]
-                ],
-                false
-            ),
-            "search follows the moved rectangle"
-        );
-        assert!(map.search.open);
     }
     hudlayout::reset();
     hudlayout::testing_reset();

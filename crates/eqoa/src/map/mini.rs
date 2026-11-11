@@ -469,9 +469,6 @@ impl Map {
     /// Not drawn this frame (Minimap off, a window up, Hide UI, the map up):
     /// nothing composed, its tiles no longer kept for it.
     pub fn mini_off(&mut self) {
-        if !self.open {
-            self.search.hide();
-        }
         self.mini.up = false;
         self.mini.wanted.clear();
     }
@@ -645,12 +642,6 @@ impl Map {
                 plain(ui, white, diamond(q, rr).map(f), color, cut);
             }
         }
-        let guide_start = ui.quads.len();
-        self.search
-            .draw_guidance(ui, white, |at| f(to_px(at)), [a[0], a[1], b[0], b[1]], true);
-        for q in &mut ui.quads[guide_start..] {
-            q.clip = cut;
-        }
         crate::fork_ext::map::overlay(ui, white, cx.world, |at| f(to_px(at)), [a[0],a[1],b[0],b[1]]);
         let mut r = l.assets.raster(ui);
         if let Some(vui) = cx.vui {
@@ -723,22 +714,6 @@ impl Map {
                     q.clip = Some(render::ui::WHOLE);
                 }
             }
-        }
-        if let Some(vui) = cx.vui {
-            r.ui.anchor = Anchor::Middle;
-            r.ui.vertical = Vertical::Middle;
-            let tl = f([0.0, 0.0]);
-            let br = f([size.0 as f32, size.1 as f32]);
-            let m0 = f([outer[0], outer[1]]);
-            let m1 = f([outer[2], outer[3]]);
-            r=r.with_font(l.control_font,super::theme::FONT_SCALE);
-            let search_start=r.ui.quads.len();
-            self.search.hover = self.mini.cursor.map(f);
-            self.search
-                .draw(&mut r, vui, [tl, br], Some([m0[0], m0[1], m1[0], m1[1]]));
-            // UI coordinates extend past the central frame on wide/tall
-            // windows. Match the tooltip and full map's actual-window clip.
-            for q in &mut r.ui.quads[search_start..] { q.clip=Some(render::ui::WHOLE); }
         }
         self.mini.wanted = wanted;
         self.mini.frame_px = outer;

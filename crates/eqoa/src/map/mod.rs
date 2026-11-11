@@ -95,7 +95,6 @@ pub mod community;
 pub mod group_waypoint;
 // the minimap inside: the floors under the ceiling (`indoor`)
 pub mod indoor;
-pub mod journal;
 pub mod markers;
 mod markers_data;
 // the minimap, in play under the quick menus (`mini`)
@@ -104,7 +103,6 @@ pub mod picture;
 // the list of places another world or a town is shown from (`places`)
 pub mod places;
 pub mod quests;
-pub mod search;
 pub mod theme;
 pub mod store;
 // natively (a page has nothing to call it; it compiles there as main.rs's
@@ -277,7 +275,6 @@ struct Press {
 
 #[derive(Default)]
 pub struct Map {
-    pub search: search::Search,
     /// up, full screen, with the keys
     pub open: bool,
     view: Option<View>,
@@ -400,7 +397,6 @@ impl Map {
         // the player's own world's map again (`places`)
         self.unpick();
         self.open = false;
-        self.search.hide();
         self.held = [false; 6];
         self.press = None;
         self.square_hold = None;
@@ -489,13 +485,6 @@ impl Map {
     /// (a right click is △, as on every window).
     pub fn mouse_button(&mut self, right: bool, down: bool, at: [f32; 2]) -> Option<crate::mouse::Click> {
         self.cursor = at;
-        if self.search.open {
-            return (!down).then_some(if right {
-                crate::mouse::Click::Right(at[0] as f64, at[1] as f64)
-            } else {
-                crate::mouse::Click::Target(at[0] as f64, at[1] as f64)
-            });
-        }
         if down {
             if self.press.is_none() {
                 self.press = Some(Press { at, right, dragged: false });
@@ -516,9 +505,6 @@ impl Map {
         let d = [at[0] - self.cursor[0], at[1] - self.cursor[1]];
         self.cursor = at;
         self.pointer_seen = true;
-        if self.search.open {
-            return;
-        }
         if let Some(p) = self.press.as_mut() {
             if p.dragged {
                 self.drag(d);
@@ -544,7 +530,7 @@ impl Map {
     /// middle when none): the point under the pointer stays under it, so
     /// the map stops following the player unless the pointer is on it.
     pub fn wheel(&mut self, lines: f32, at: Option<[f32; 2]>) {
-        if self.search.open || lines == 0.0 {
+        if lines == 0.0 {
             return;
         }
         let size = self.size;
@@ -1201,7 +1187,6 @@ impl Map {
     fn set_waypoint(&mut self, world: i32, at: Option<[f32; 2]>) {
         self.read_waypoints();
         self.waypoint_fresh = at.is_some();
-        self.search.set_waypoint(world,at);
         match at {
             Some(p) => {
                 self.waypoints.insert(world, p);
@@ -1491,11 +1476,6 @@ impl Map {
         self.keyboard = cx.keyboard;
         self.target = cx.target;
         self.player_world = cx.world;
-        if self.search.open {
-            self.held = [false; 6];
-            self.press = None;
-            self.square_hold = None;
-        }
         if self.open {
             self.hold(cx.dt);
         }
@@ -1503,7 +1483,6 @@ impl Map {
         self.community.frame(self.open);
         self.read_waypoints();
         self.arrive(cx.player, cx.world);
-        self.search.set_waypoint(cx.world,self.waypoints.get(&cx.world).copied());
         let name = cx.lib.files.get(WORLD_FILE).map(|f| f.0.clone()).unwrap_or_default();
         let era = cx.lib.era_of(WORLD_FILE);
         let r = renew(self.layers.as_ref().map(|l| l.view), cx.lib.view(), self.home.as_ref().or(self.world.as_ref()).map(|w| (w.name.as_str(), w.era)), &name, era);
@@ -2068,20 +2047,9 @@ impl Map {
         } else if let Some(m) = card {
             markers::draw_card(ui, &l.assets, vui, white, m, f(v.to_window(size, m.at())), win);
         }
-        if cx.world == w.index {
-            self.search.draw_guidance(
-                ui,
-                white,
-                |at| f(v.to_window(size, at)),
-                [win[0][0], win[0][1], win[1][0], win[1][1]],
-                false,
-            );
-        }
         crate::fork_ext::map::overlay(ui, white, w.index, |at| f(v.to_window(size, at)), [win[0][0],win[0][1],win[1][0],win[1][1]]);
         let mut r = l.assets.raster(ui).with_font(l.control_font,theme::FONT_SCALE);
         self.buttons = chrome::draw(&mut r, vui, &c);
-        self.search.toolbar_top=Some(chrome::search_anchor(&r,vui,&c));
-        self.search.draw(&mut r, vui, c.corners, None);
         self.glyphs = r.glyphs;
         // laid out against the window: cut to it, not to the frame
         for q in &mut ui.quads {

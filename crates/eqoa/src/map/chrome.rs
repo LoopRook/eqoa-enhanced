@@ -168,8 +168,6 @@ pub fn clear_band(rects: &[[f32; 4]], corners: [[f32; 2]; 2]) -> [f32; 2] {
     [top, foot]
 }
 
-pub fn search_anchor(r:&dyn Raster,vui:&Vui,c:&Chrome)->i32 {clear_band(&footprint(r,vui,c),c.corners)[0].ceil()as i32+6}
-
 /// Draws the chrome over everything; where its buttons went, with their
 /// keys. In a window too narrow for a row, the title goes under the buttons
 /// and the legend onto as many lines as it needs, from the foot up.
@@ -526,15 +524,6 @@ mod tests {
             foot.iter().all(|p| p[2] <= 640 - 8 + 6),
             "rebound keyboard labels fit: {foot:?}"
         );
-    }
-
-    #[test]
-    fn search_toolbar_clears_coordinates_progress_and_notices() {
-        let c=Chrome{pointer:Some("x 25274, z 14430".into()),notice:Some("Marker sent for approval".into()),..chrome(true)};
-        let band=clear_band(&footprint(&NullRaster,&vui(),&c),c.corners);
-        assert!(search_anchor(&NullRaster,&vui(),&c)>=band[0].ceil()as i32+6,"toolbar must follow all header lines");
-        let empty=Chrome{progress:None,pointer:None,notice:None,..chrome(true)};
-        assert!(search_anchor(&NullRaster,&vui(),&empty)<search_anchor(&NullRaster,&vui(),&c));
     }
 
     fn chrome(keyboard: bool) -> Chrome {

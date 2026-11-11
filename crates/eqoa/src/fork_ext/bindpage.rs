@@ -26,13 +26,6 @@ pub struct ModBind {
 
 static MOD_BINDS: Mutex<Vec<ModBind>> = Mutex::new(Vec::new());
 
-pub(crate) fn free_fixture_key(b: &mut Binds) {
-    b.bind_key(
-        row_named("map_search").expect("Enhanced map search row"),
-        "f24",
-    );
-}
-
 pub fn register(addon: &str, id: &str, default_key: &str, description: &str) -> bool {
     let mut binds = MOD_BINDS.lock().unwrap();
     if let Some(existing) = binds.iter_mut().find(|b| b.addon_id == addon && b.id == id) {
@@ -450,7 +443,6 @@ mod tests {
         let row = row_named("map_search").unwrap();
         let mut fixture = Binds::default();
         assert_eq!(fixture.key(row), Some("f2"), "production default");
-        free_fixture_key(&mut fixture);
         assert_eq!(fixture.key(row), Some("f24"));
         assert_eq!(
             Binds::default().key(row),

@@ -32,7 +32,7 @@ pub fn is_plain_play(play: Option<&mut crate::play::Play>) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         Some(p) => p.addon_input_available(),
         #[cfg(target_arch = "wasm32")]
-        Some(p) => matches!(p.mode, 0 | 38) && !p.wants_ui() && !p.map.search.open,
+        Some(p) => matches!(p.mode, 0 | 38) && !p.wants_ui(),
         None => false,
     }
 }

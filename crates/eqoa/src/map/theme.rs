@@ -73,7 +73,7 @@ pub fn magnifier(r: &mut dyn Raster, b: [i32; 4], color: [f32; 4]) {
 
 pub fn font() -> Option<esf::font::Font> {
     use ab_glyph::{Font, FontArc, PxScale, ScaleFont, point};
-    let bundled = include_bytes!("../../resources/map-ui/SpaceMono-Regular.ttf");
+    let bundled = include_bytes!("../../../../bundled-mods/eqoa_map_search/resources/SpaceMono-Regular.ttf");
     #[cfg(not(target_arch = "wasm32"))]
     let custom = std::env::var_os("EQOA_MAP_FONT")
         .and_then(|p| std::fs::read(p).ok())

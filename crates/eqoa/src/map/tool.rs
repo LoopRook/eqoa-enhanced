@@ -68,18 +68,6 @@ pub fn shot(s: &Shot, out: &str) -> Result<(), Box<dyn std::error::Error>> {
         vec![super::mini::Dot{id:1,at:[s.at[0]+30.0,s.at[1]+40.0],color:super::theme::KNOWN,
             name:"Water Rat".into(),level:Some(7),kind:"NPC"}]
     } else { Vec::new() };
-    let live=samples.iter().map(|d|super::search::Live{name:d.name.clone(),world,at:d.at,level:d.level.unwrap_or(0)}).collect();
-    map.search.update(world, s.at, live, Vec::new());
-    if let Ok(value)=std::env::var("EQOA_MAP_WAYPOINT") {
-        if let Some((x,z))=value.split_once(',').and_then(|(x,z)|Some((x.parse::<f32>().ok()?,z.parse::<f32>().ok()?))) {map.set_waypoint(world,Some([x,z]));if std::env::var_os("EQOA_MAP_TRACK_PIN").is_some(){map.search.track_waypoint();}}
-    }
-    if let Ok(query) = std::env::var("EQOA_MAP_QUERY") {
-        map.search.query = query;
-        map.search.open = true;
-        if std::env::var_os("EQOA_MAP_TRACK").is_some() {
-            map.search.key("enter", None);
-        }
-    }
     // `EQOA_MAP_HOVER=<x>,<z>`: that world point taken as the mouse's, its
     // marker's card shown (`markers`)
     map.hover_world = std::env::var("EQOA_MAP_HOVER").ok().and_then(|v| {
@@ -107,11 +95,6 @@ pub fn shot(s: &Shot, out: &str) -> Result<(), Box<dyn std::error::Error>> {
         let cx = Context { lib: &lib, device: &device, queue: &queue, format: render::TARGET_FORMAT, size: s.size, dt: 1.0 / 60.0, player, world, origin: [1000.0, 1000.0], group: Vec::new(), in_group: false, target: None, sticks: [0.0; 4], keyboard: true, words: words.as_ref(), vui: Some(&vui), quest_marks: None };
         map.frame(&cx);
     }
-    if std::env::var_os("EQOA_MAP_PROFILE").is_some() {
-        let start=Instant::now();
-        for _ in 0..100 {std::hint::black_box(map.search.results());}
-        eprintln!("map search: {:.3} ms/query, 100 queries over actual loaded catalog",start.elapsed().as_secs_f64()*10.0);
-    }
     if let Some(w) = &map.world {
         let st = w.builder.stats;
         eprintln!(
@@ -124,9 +107,7 @@ pub fn shot(s: &Shot, out: &str) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     if std::env::var_os("EQOA_MAP_MINI").is_some() {
-        let search_open = map.search.open;
         map.close();
-        map.search.open = search_open;
         let cx = Context {
             lib: &lib,
             device: &device,

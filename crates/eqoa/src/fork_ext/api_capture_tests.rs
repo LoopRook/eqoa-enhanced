@@ -1750,14 +1750,14 @@ fn addon_actions_use_live_camera_assist_and_summary_overlay_gates() {
     for case in 0..7 {
         p.mode = 0;
         p.map.open = false;
-        p.map.search.open = false;
+        crate::fork_ext::addons::input::reset_input_state();
         p.search.open = false;
         p.typing = None;
         p.death = None;
         match case {
             0 => p.mode = 13,
             1 => p.map.open = true,
-            2 => p.map.search.open = true,
+            2 => crate::fork_ext::addons::input::testing_text_capture(true),
             3 => p.search.open = true,
             4 => p.typing = Some(String::new()),
             5 => p.death = Some(crate::death::DeathCam::new([0.; 3], [0., 0., 1.], [0.; 3])),
@@ -2069,9 +2069,6 @@ fn round4_addon_input_and_render_continue_over_map_but_not_chat_or_search() {
         "open map permits addon key/text route"
     );
     assert!(p.map.open, "eligibility must not close native map");
-    p.map.search.open = true;
-    assert!(!crate::fork_ext::is_plain_play(Some(&mut p)));
-    p.map.search.open = false;
     p.search.open = true;
     assert!(!crate::fork_ext::is_plain_play(Some(&mut p)));
     p.search.open = false;
