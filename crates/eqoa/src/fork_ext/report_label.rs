@@ -1,3 +1,20 @@
+/// The footprint manifest the build was made with: its `reviewed_base` is the
+/// upstream commit this tree is synced to.
+const FOOTPRINT: &str = include_str!("../../../../docs/fork-footprint.json");
+
+/// The first seven characters of the `reviewed_base` in `manifest`, if it has
+/// one that looks like a commit.
+fn synced_commit_in(manifest: &str) -> Option<&str> {
+    let rest = manifest.split_once("\"reviewed_base\"")?.1;
+    let sha = rest.split_once('"')?.1.split_once('"')?.0;
+    (sha.len() >= 7 && sha.bytes().all(|b| b.is_ascii_hexdigit())).then(|| &sha[..7])
+}
+
+/// The upstream commit (7 characters) this build is synced to.
+pub fn synced_commit() -> &'static str {
+    synced_commit_in(FOOTPRINT).unwrap_or("unknown")
+}
+
 /// Returns the Enhanced header label identifying this client fork.
 pub fn enhanced_label() -> String {
     let version = crate::fork_ext::version::current();
@@ -9,7 +26,8 @@ pub fn enhanced_label() -> String {
         format!("{version} ({commit})")
     };
     format!(
-        "EQOA Enhanced {build}, a fork of DabDavis's vanilla client: report to EQOA Enhanced (LoopRook), not to the vanilla client"
+        "EQOA Enhanced {build}, synced to upstream {}, a fork of DabDavis's vanilla client: report to EQOA Enhanced (LoopRook), not to the vanilla client",
+        synced_commit()
     )
 }
 
@@ -71,6 +89,25 @@ pub(crate) fn bug_note(note: String) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// The label says which upstream commit the build is synced to: the first
+    /// seven characters of the footprint's `reviewed_base`. The controls: a
+    /// manifest with another base gives another commit, and one with none (or
+    /// a base that is no commit) gives none, so the label's commit comes from
+    /// the manifest and not from a constant.
+    #[test]
+    fn the_label_says_the_upstream_commit_it_is_synced_to() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../docs/fork-footprint.json")).unwrap();
+        let base = manifest["reviewed_base"].as_str().unwrap();
+        let label = super::enhanced_label();
+        assert!(label.contains(&format!(", synced to upstream {}, a fork of ", &base[..7])), "{label}");
+        assert_eq!(super::synced_commit(), &base[..7]);
+        assert_eq!(super::synced_commit_in(r#"{"reviewed_base": "0123456789abcdef"}"#), Some("0123456"));
+        assert_ne!(super::synced_commit_in(r#"{"reviewed_base": "fedcba9876"}"#), Some(&base[..7]));
+        assert_eq!(super::synced_commit_in(r#"{"reviewed_base": "not a commit"}"#), None);
+        assert_eq!(super::synced_commit_in("{}"), None);
+    }
+
     #[test]
     fn every_kept_report_gets_the_enhanced_identity_before_its_body() {
         use crate::crashfile::Kept;
