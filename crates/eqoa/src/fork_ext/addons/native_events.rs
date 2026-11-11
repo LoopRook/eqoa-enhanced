@@ -50,6 +50,7 @@ pub(crate) struct Bus {
     delivered: usize,
     pending: std::collections::VecDeque<(Event, Option<mlua::Table>)>,
     pending_bytes: usize,
+    commands: std::collections::VecDeque<(Event,u64)>,
     retired: Vec<mlua::Table>,
     lost: std::collections::BTreeMap<String, u64>,
     first_lost: Option<u64>,
@@ -210,6 +211,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
         delivered: 0,
         pending: Default::default(),
         pending_bytes: 0,
+        commands: Default::default(),
         retired: Vec::new(),
         lost: Default::default(),
         first_lost: None,
@@ -360,7 +362,7 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
     if !host.iteration_in_progress() {
         start_iteration(lua);
     }
-    let (batch, gap) = {
+    let (batch, gap, commands) = {
         let mut b = shared.borrow_mut();
         b.boundary += 1;
         b.retired.clear();
@@ -370,8 +372,12 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
             let lost = std::mem::take(&mut b.lost);
             Some((b.first_lost.take().unwrap_or(0), b.last_lost, lost))
         };
+        let command_limit = 64usize.min(256usize.saturating_sub(b.delivered + usize::from(b.once_mode) + if gap.is_some() {2} else {0}));
+        let take = command_limit.min(b.commands.len());
+        let boundary = b.boundary;
+        let commands = b.commands.drain(..take).map(|(mut event,expiry)| {if expiry < boundary {event.player_command=false;} event}).collect::<Vec<_>>();
         let limit = 256usize.saturating_sub(
-            b.delivered + usize::from(b.once_mode) + if gap.is_some() { 2 } else { 0 },
+            b.delivered + usize::from(b.once_mode) + commands.len() + if gap.is_some() { 2 } else { 0 },
         );
         let n = b.pending.len().min(limit);
         let batch = b.pending.drain(..n).collect::<Vec<_>>();
@@ -381,7 +387,7 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
                 b.received += 1;
             }
         }
-        (batch, gap)
+        (batch, gap, commands)
     };
     if let Some((first, last, streams)) = gap {
         let count = streams.values().sum::<u64>();
@@ -404,6 +410,8 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
     for (event, data) in batch {
         deliver_data(lua, &event, None, data)?;
     }
+    for event in commands { deliver_data(lua, &event, None, None)?; }
+    {let mut b=shared.borrow_mut();let boundary=b.boundary;for (event,expiry) in &mut b.commands {if *expiry <= boundary {event.player_command=false;}}}
     let timer_budget = {
         let b = shared.borrow();
         256usize.saturating_sub(b.delivered + usize::from(b.once_mode))
@@ -625,6 +633,7 @@ pub(crate) fn clear(host: &Host) {
     b.subscriptions.clear();
     b.buttons.clear();
     b.pending.clear();
+    b.commands.clear();
     b.pending_bytes = 0;
     b.retired.clear();
     b.lost.clear();
@@ -716,6 +725,7 @@ pub(crate) fn prime(host: &Host) {
     let shared = bus(&host.lua);
     let mut b = shared.borrow_mut();
     b.pending.clear();
+    b.commands.clear();
     b.pending_bytes = 0;
     b.retired.clear();
     b.lost.clear();
@@ -865,15 +875,14 @@ pub(super) fn shared_changed(owner: &str, path: &str) {
 
 pub(super) fn command(target: &Rc<RefCell<Bus>>, data: serde_json::Value, player: impl FnOnce() -> bool) -> std::result::Result<(), ()> {
     let pending = target.borrow();
-    if !pending.active || pending.pending.iter().filter(|(e,_)| e.name=="mod.command").count()>=64 {
-        return Err(());
-    }
-    drop(pending);
-    let mut event=local("mod.command",data);
-    event.player_command=player();
+    let sender = data["from"].as_str().unwrap_or("");
+    if !pending.active || pending.commands.len()>=64
+        || pending.commands.iter().filter(|(e,_)|e.data["from"].as_str()==Some(sender)).count()>=4 {return Err(())}
+    let expiry=pending.boundary+1;drop(pending);
+    let mut event=local("mod.command",data);event.player_command=player();
     event.bytes=event.data.to_string().len();
-    enqueue(&mut target.borrow_mut(),event,None);
-    Ok(())
+    // Commands never enter or evict the native/resource event queue.
+    target.borrow_mut().commands.push_back((event,expiry));Ok(())
 }
 
 pub(super) fn file_action(lua: &mlua::Lua, data: serde_json::Value, failed: bool) -> Result<()> {

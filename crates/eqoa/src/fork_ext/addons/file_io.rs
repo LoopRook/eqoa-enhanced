@@ -621,6 +621,25 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn round4b_review_commands_preserve_other_events_and_sender_fairness() {
+        use super::super::{native_core::CORE,native_events};
+        let (rd,receiver,mut ra)=fixture();ra.id="receiver".into();ra.extensions.commands=vec!["ping".into()];
+        install(&receiver,&ra,Some(rd.0.join("config"))).unwrap();
+        let (ad,a,mut aa)=fixture();aa.id="sender_a".into();install(&a,&aa,Some(ad.0.join("config"))).unwrap();
+        let (bd,b,mut ba)=fixture();ba.id="sender_b".into();install(&b,&ba,Some(bd.0.join("config"))).unwrap();
+        receiver.execute("entity_seen=false;resource_seen=false;commands=0;eqoa.events.on('entity.added',function(e) entity_seen=e.data.after.name=='sentinel' end);eqoa.events.on('resource.ready',function(e) if e.data.kind=='json_saved' then resource_seen=e.data.request==19 end end);eqoa.events.on('mod.command',function(e) commands=commands+1 end)").unwrap();
+        native_events::json_saved(&receiver.lua,19,None).unwrap();
+        CORE.with(|c|c.borrow_mut().emit("entity.added",serde_json::json!({"after":{"name":"sentinel","padding":"x".repeat(2*1024*1024-2048)}})));
+        a.execute("local no,e=eqoa.mods.send('receiver','ping',{p=string.rep('x',4096)});assert(no==nil and e.code=='quota','4 KiB payload cap');for i=1,4 do assert(eqoa.mods.send('receiver','ping',{p=string.rep('a',1000)})) end;local no,e=eqoa.mods.send('receiver','ping',{});assert(no==nil and e.code=='quota','per-sender cap')").unwrap();
+        b.execute("assert(eqoa.mods.send('receiver','ping',{p='other sender'}))").unwrap();
+        native_events::dispatch(&receiver).unwrap();
+        assert!(receiver.lua.globals().get::<bool>("entity_seen").unwrap(),"command traffic evicted an entity event");
+        assert!(receiver.lua.globals().get::<bool>("resource_seen").unwrap(),"command traffic evicted an import/save completion");
+        assert_eq!(receiver.lua.globals().get::<u32>("commands").unwrap(),5);
+        a.execute("assert(eqoa.mods.send('receiver','ping',{}))").unwrap();
+    }
+
+    #[test]
     fn round4b_review_export_refuses_executable_and_reserved_names() {
         use super::super::{options,player_files::TestIo,native_events};
         let (dir,host,mut addon)=fixture();addon.extensions.permissions=vec!["export".into()];
@@ -739,7 +758,7 @@ mod tests {
         assert_eq!(receiver.lua.globals().get::<u32>("count").unwrap(), 0);
         super::super::native_events::dispatch(&receiver).unwrap();
         assert_eq!(receiver.lua.globals().get::<u32>("count").unwrap(), 1);
-        sender.execute("for i=1,64 do assert(eqoa.mods.send('journal_receiver','import_journal',{value=42})) end;local ok,e=eqoa.mods.send('journal_receiver','import_journal',{value=42});assert(ok==nil and e.code=='quota');local huge={};for i=1,1024 do huge[i]=i end;assert(eqoa.mods.send('journal_receiver','import_journal',huge)==nil)").unwrap();
+        sender.execute("for i=1,4 do assert(eqoa.mods.send('journal_receiver','import_journal',{value=42})) end;local ok,e=eqoa.mods.send('journal_receiver','import_journal',{value=42});assert(ok==nil and e.code=='quota');local huge={};for i=1,1024 do huge[i]=i end;assert(eqoa.mods.send('journal_receiver','import_journal',huge)==nil)").unwrap();
         super::super::native_events::clear(&receiver);
         sender.execute("local ok,e=eqoa.mods.send('journal_receiver','import_journal');assert(ok==nil and e.code=='unavailable')").unwrap();
     }

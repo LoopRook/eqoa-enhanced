@@ -900,3 +900,10 @@ Export names must be one non-hidden filename with no leading/trailing whitespace
 control characters, separators, reserved Windows device name, or trailing dot.
 Only `.json`, `.txt`, `.csv`, and `.png` extensions (case-insensitive) are accepted;
 invalid names return `nil,Error` with `invalid_argument` before spending the activation.
+
+Commands have a separate 64-entry queue per VM, with at most four pending commands
+from each sender. Arguments are JSON values with depth <=8, <=256 values, and
+<=4 KiB of serialized JSON. Quota failures return `quota` and do not spend a player
+activation. Command traffic cannot evict native events or resource completions.
+Player authority is offered only at the next receiver boundary and expires after
+that command's dispatch; an undelivered older command loses its player mark.

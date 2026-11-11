@@ -74,12 +74,16 @@ fn payload(
     value: mlua::Value,
     depth: usize,
     left: &mut usize,
+    bytes: &mut usize,
 ) -> Result<serde_json::Value, String> {
     use mlua::Value;
     if depth > 8 || *left == 0 {
         return Err("command payload exceeds depth/node quota".into());
     }
     *left -= 1;
+    *bytes = bytes
+        .checked_sub(1)
+        .ok_or("command payload exceeds 4 KiB")?;
     Ok(match value {
         Value::Nil => serde_json::Value::Null,
         Value::Boolean(v) => v.into(),
@@ -91,6 +95,9 @@ fn payload(
             if v.as_bytes().len() > 4096 {
                 return Err("command string exceeds quota".into());
             }
+            *bytes = bytes
+                .checked_sub(v.as_bytes().len())
+                .ok_or("command payload exceeds 4 KiB")?;
             v.to_str()
                 .map_err(|_| "command strings must be UTF-8")?
                 .to_string()
@@ -108,6 +115,7 @@ fn payload(
                         t.raw_get(i).map_err(|e| e.to_string())?,
                         depth + 1,
                         left,
+                        bytes,
                     )?);
                 }
                 let mut count = 0;
@@ -132,11 +140,14 @@ fn payload(
                     if key.as_bytes().len() > 256 {
                         return Err("command key exceeds quota".into());
                     }
+                    *bytes = bytes
+                        .checked_sub(key.as_bytes().len())
+                        .ok_or("command payload exceeds 4 KiB")?;
                     object.insert(
                         key.to_str()
                             .map_err(|_| "command key must be UTF-8")?
                             .to_string(),
-                        payload(value, depth + 1, left)?,
+                        payload(value, depth + 1, left, bytes)?,
                     );
                 }
                 object.into()
@@ -161,10 +172,22 @@ pub(crate) fn install(host: &super::host::Host) -> mlua::Result<()> {
                         "mod identity unavailable",
                     );
                 };
-                let args = match payload(args.unwrap_or(mlua::Value::Nil), 0, &mut 256) {
+                let args = match payload(args.unwrap_or(mlua::Value::Nil), 0, &mut 256, &mut 4096) {
                     Ok(args) => args,
                     Err(e) => return error(lua, "eqoa.mods.send", "quota", &e),
                 };
+                if serde_json::to_vec(&args)
+                    .map_err(mlua::Error::external)?
+                    .len()
+                    > 4096
+                {
+                    return error(
+                        lua,
+                        "eqoa.mods.send",
+                        "quota",
+                        "command payload exceeds 4 KiB",
+                    );
+                }
                 let result = OWNERS.with(|owners| {
                     let owners = owners.borrow();
                     let owner = owners
