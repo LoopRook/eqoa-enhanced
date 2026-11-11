@@ -912,3 +912,10 @@ The Desktop destination and the player-selected source use bounded native file
 I/O and support OS links, redirected folders and cloud-backed paths. Reparse/link
 checks remain mandatory on private mod storage and the private import copy.
 A missing Desktop folder is created; an unavailable Desktop returns `unavailable`.
+
+Imports use a persistent private sequence for `imports/import-N.json` names, so
+re-enabling or restarting cannot recycle a staging name. The three newest imports
+are retained; older imports are pruned after a successful copy. `imports/` is
+readable/removable staging managed by native import, denies ordinary writes and
+JSON saves (including case aliases), and does not count against the mod's normal
+16 MiB private storage quota. Each import still has the 16 MiB read/copy cap.

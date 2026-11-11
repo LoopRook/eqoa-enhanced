@@ -143,6 +143,55 @@ fn start(
     s.permit = Some(permit);
     lua.pack_multi((id, Value::Nil))
 }
+static IMPORTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn next_import(root: &Path) -> std::result::Result<u64, String> {
+    let counter = root.join("import-sequence");
+    let _guard = super::sandbox::lock_parents(&counter, true)?;
+    super::file_io::no_links(&counter)?;
+    let previous = if counter.exists() {
+        let bytes = super::sandbox::read_bounded(&counter, 64)?;
+        std::str::from_utf8(&bytes)
+            .map_err(|e| e.to_string())?
+            .trim()
+            .parse::<u64>()
+            .map_err(|e| e.to_string())?
+    } else {
+        0
+    };
+    let next = previous.checked_add(1).ok_or("import sequence exhausted")?;
+    super::storage::atomic_replace(&counter, next.to_string().as_bytes())
+        .map_err(|e| e.to_string())?;
+    Ok(next)
+}
+fn prune_imports(dir: &Path) -> std::result::Result<(), String> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        super::file_io::no_links(&path)?;
+        if !entry.file_type().map_err(|e| e.to_string())?.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if let Some(id) = name
+            .strip_prefix("import-")
+            .and_then(|s| s.strip_suffix(".json"))
+            .and_then(|s| s.split(' ').next())
+            .and_then(|s| s.parse::<u64>().ok())
+        {
+            let modified = entry.metadata().map_err(|e| e.to_string())?.modified().ok();
+            files.push((id, modified, path));
+        }
+        if files.len() > 10000 {
+            return Err("import staging entry limit exceeded".into());
+        }
+    }
+    files.sort_by(|a, b| b.cmp(a));
+    for (_, _, path) in files.into_iter().skip(3) {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 // The OS/player chose these endpoints. They may be cloud placeholders, links,
 // redirected profiles or UNC paths; only the copy into private storage is sandboxed.
 fn read_selected(path: &Path) -> std::result::Result<Vec<u8>, String> {
@@ -202,7 +251,9 @@ fn unique_copy(
             super::file_io::no_links(&path)?;
         }
         if let Some(root) = quota_root {
-            super::sandbox::check_quota(root, &path, bytes.len())?;
+            if !super::sandbox::import_path(root, &path) {
+                super::sandbox::check_quota(root, &path, bytes.len())?;
+            }
         }
         match OpenOptions::new().create_new(true).write(true).open(&path) {
             Ok(mut f) => {
@@ -301,17 +352,20 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 );
             };
             let picker = pick(lua, title, ext);
-            start(lua, "import", move |id, permit| {
+            start(lua, "import", move |_id, permit| {
                 let path = picker().ok_or(("cancelled", "file selection cancelled".into()))?;
                 let run = || -> std::result::Result<String, String> {
                     active(&permit)?;
                     let bytes = read_selected(&path)?;
                     let dir = root.join("files/data/imports");
-                    let name = format!("import-{id}.json");
+                    let _serial = IMPORTS.lock().unwrap();
+                    let sequence = next_import(&root)?;
+                    let name = format!("import-{sequence}.json");
                     let target = dir.join(&name);
                     let _guard = super::sandbox::lock_parents(&target, true)?;
-                    super::sandbox::check_quota(&root, &target, bytes.len())?;
+
                     let copied = unique_copy(&dir, &name, &bytes, &permit, Some(&root))?;
+                    prune_imports(&dir)?;
                     Ok(format!(
                         "imports/{}",
                         copied.file_name().unwrap().to_string_lossy()

@@ -344,6 +344,7 @@ fn overlay_room(
                 continue;
             }
             no_links(&entry.path())?;
+            if super::sandbox::import_path(root,&entry.path()) {continue}
             if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
                 pending.push(entry.path());
             } else if !entry.path().starts_with(root.join("removed")) {
@@ -403,6 +404,7 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
             let result = (|| -> std::result::Result<FileState, String> {
                 let rel = relative(&addon_open, &path)?;
                 let mode = mode.as_deref().unwrap_or("r");
+                if mode=="w" && super::sandbox::import_key(&rel) {return Err("imports staging is read-only".into())}
                 if !matches!(mode, "r" | "w") {
                     return Err("only text modes r and w are supported".into());
                 }
@@ -596,7 +598,7 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
                             &symbol,
                             if e.contains("not found") {
                                 "not_found"
-                            } else if e.contains("reparse point") || e.contains("symlink") {
+                            } else if e.contains("reparse point") || e.contains("symlink") || e.contains("imports staging") {
                                 "permission_denied"
                             } else if e.contains("quota") || e.contains("exceeds") {
                                 "quota"
@@ -615,6 +617,28 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn round4b_review_import_ids_survive_enable_and_staging_cannot_starve_saves() {
+        use super::super::{options,player_files::TestIo,native_events};
+        let (dir,host,mut addon)=fixture_with_large_data(true);addon.extensions.permissions=vec!["import".into()];
+        let root=dir.0.join("config");install(&host,&addon,Some(root.clone())).unwrap();
+        let picked=dir.0.join("large.json");fs::write(&picked,format!("{{\"payload\":\"{}\"}}","x".repeat(6*1024*1024))).unwrap();
+        host.lua.set_app_data(TestIo{pick:Some(picked),desktop:dir.0.join("Desktop")});
+        let setup=||host.execute("done=false;failure='';button_id=assert(eqoa.options.button({id='import',label='Import journal...'},function() req=assert(eqoa.files.import({title='Journal',extensions={'json'}})) end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='import' or e.data.kind=='json_saved' then assert(e.data.request==req);done=true;import_path=e.data.path end end);eqoa.events.on('resource.failed',function(e) failure=e.data.error.message end)").unwrap();
+        let wait=||{let end=std::time::Instant::now()+std::time::Duration::from_secs(10);while !host.lua.globals().get::<bool>("done").unwrap(){assert!(std::time::Instant::now()<end,"{:?}",host.lua.globals().get::<String>("failure"));native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}};
+        setup();let mut paths=Vec::new();
+        for i in 0..4 {
+            if i==2 {native_events::clear(&host);install(&host,&addon,Some(root.clone())).unwrap();native_events::prime(&host);setup();}
+            host.execute("done=false;failure=''").unwrap();
+            assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));wait();
+            paths.push(host.lua.globals().get::<String>("import_path").unwrap());
+        }
+        assert_eq!(paths,vec!["imports/import-1.json","imports/import-2.json","imports/import-3.json","imports/import-4.json"]);
+        let imports=root.join("files/data/imports");assert_eq!(fs::read_dir(&imports).unwrap().count(),3);assert!(!imports.join("import-1.json").exists());
+        host.execute("local ok,e=eqoa.files.write('imports/escape.json','{}');assert(ok==nil and e.code=='permission_denied');local ok,e=eqoa.files.save_json_async('imports/escape.json',{});assert(ok==nil and e.code=='permission_denied');done=false;req=assert(eqoa.files.save_json_async('journal.json',{payload=string.rep('j',14*1024*1024-128)}))").unwrap();wait();
+        assert!(fs::metadata(root.join("files/data/journal.json")).unwrap().len()>13*1024*1024);
+    }
+
     #[cfg(windows)]
     #[test]
     fn round4b_review_redirected_desktop_and_picked_file_keep_private_checks() {

@@ -11,6 +11,18 @@ pub(crate) struct Mounts {
     pub addon: DiscoveredAddon,
     pub data: Option<PathBuf>,
 }
+// Native imports are bounded read-only staging, separate from a mod's save quota.
+pub(super) fn import_key(key: &Path) -> bool {
+    let mut parts=key.iter();
+    parts.next().is_some_and(|s|s.to_string_lossy().eq_ignore_ascii_case("data"))
+        && parts.next().is_some_and(|s|s.to_string_lossy().eq_ignore_ascii_case("imports"))
+}
+pub(super) fn import_path(root: &Path,path: &Path) -> bool {
+    path.strip_prefix(root).ok().is_some_and(|relative| {
+        let mut parts=relative.iter();
+        parts.next().is_some_and(|s|s.to_string_lossy().eq_ignore_ascii_case("files")) && import_key(&parts.collect::<PathBuf>())
+    })
+}
 impl Mounts {
     pub fn key(&self, path: &str) -> Result<PathBuf, String> {
         super::file_io::relative(&self.addon, path)
@@ -80,6 +92,7 @@ impl Mounts {
         read_bounded(&self.read_path(&key)?, 1024 * 1024)
     }
     pub fn write(&self, path: &str, bytes: &[u8]) -> Result<(), String> {
+        if import_key(&self.key(path)?) {return Err("imports staging is read-only".into())}
         if bytes.len() > 1024 * 1024 {
             return Err("file exceeds 1 MiB".into());
         }
@@ -335,6 +348,7 @@ fn check_quota_inner(
             let e = e.map_err(|e| e.to_string())?;
             let path = e.path();
             super::file_io::no_links(&path)?;
+            if import_path(root,&path) {continue}
             count += 1;
             if count > 4096 {
                 return Err("addon storage entry quota exceeded".into());

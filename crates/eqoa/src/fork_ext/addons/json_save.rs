@@ -387,7 +387,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     );
                 }
                 let key = match m.key(&path) {
-                    Ok(k) if k.starts_with("data") => ordered_path(k),
+                    Ok(k) if k.starts_with("data") && !super::sandbox::import_key(&k) => ordered_path(k),
                     _ => {
                         return error(
                             lua,
