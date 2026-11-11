@@ -1924,3 +1924,13 @@ fn map_markers_use_native_quest_cache_and_filter_other_worlds() {
         local m,e=eqoa.map.markers('bad');assert(m==nil and e.code=='invalid_argument')
     "#).unwrap();
 }
+
+#[test]
+fn round4_map_view_projects_native_player_scale_and_rejects_pregame() {
+    let mut p=Play::bundled_ui_fixture();
+    p.map.mini.up=true;p.map.mini.scale=6.0;p.map.mini.frame_px=[474.0,50.0,586.0,162.0];
+    let mut walker=perf_review_walker();walker.cam.walk.phys.position.x.0=100.0;walker.cam.walk.phys.position.y.0=50.0;walker.cam.walk.phys.position.z.0=200.0;let h=Host::new().unwrap();let view=p.native_view(Some(&walker));CORE.with(|c|c.borrow_mut().publish(view));
+    h.execute("v=assert(eqoa.map.view{size=200});local x,y,inside=v.project(268,200);assert(math.abs(x-150)<0.01 and math.abs(y-100)<0.01 and inside);local x,z=v.unproject(100,100);assert(math.abs(x-100)<0.01 and math.abs(z-200)<0.01);local _,_,inside=v.project(99999,200);assert(not inside);local bad,e=eqoa.map.view{center={x=0,z=0}};assert(bad==nil and e.code=='invalid_argument')").unwrap();
+    CORE.with(|c|c.borrow_mut().reset("test"));
+    h.execute("local v,e=eqoa.map.view{};assert(v==nil and e.code=='not_in_world')").unwrap();
+}

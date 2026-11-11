@@ -209,6 +209,7 @@ impl Play {
                 &player["location"],
                 self.words.as_ref(),
             ),
+            minimap: player["position"]["x"].as_f64().zip(player["position"]["z"].as_f64()).and_then(|(x,z)|self.map.api_minimap_transform([x as f32,z as f32],crate::fork_ext::addons::hud_layout::get_window_size())),
             map_markers: self.map.api_markers(),
             entities,
             entity_slots: self

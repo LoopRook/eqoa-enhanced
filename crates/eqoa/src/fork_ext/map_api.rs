@@ -79,3 +79,34 @@ mod api_tests {
         );
     }
 }
+
+impl Map {
+    pub(crate) fn api_minimap_transform(
+        &self,
+        center: [f32; 2],
+        window: (u32, u32),
+    ) -> Option<crate::fork_ext::addons::map_views::Projection> {
+        if !self.mini.up || self.open {
+            return None;
+        }
+        let moved = crate::hudlayout::shift(
+            crate::hudlayout::Piece::Minimap,
+            crate::hudlayout::Beyond::of(window),
+        );
+        let outer = mini::window_rect_moved(window, mini::FRAME, moved);
+        let inner = mini::window_rect_moved(window, mini::inner(), moved);
+        let k = (inner[2] - inner[0]) / (mini::inner()[2] - mini::inner()[0]) as f32;
+        let scale = if self.indoor.inside() {
+            self.indoor.scale()
+        } else {
+            self.mini.scale
+        } / k;
+        Some(crate::fork_ext::addons::map_views::Projection {
+            center,
+            scale,
+            outer,
+            inner,
+            window,
+        })
+    }
+}

@@ -583,6 +583,7 @@ pub(crate) fn clear(host: &Host) {
     }
     super::input::native::release_vm(&host.lua);
     let vm = bus(&host.lua).borrow().vm;
+    super::map_views::release_vm(vm);
     super::chat::cancel_vm(vm);
     super::weapon_sets::cancel_vm(vm);
     let b = bus(&host.lua);

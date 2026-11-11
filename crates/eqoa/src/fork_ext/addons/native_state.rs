@@ -929,6 +929,7 @@ fn install_math(lua: &Lua) -> Result<()> {
                     "spec must be a table",
                 );
             };
+            if !t.get::<Value>("texture")?.is_nil() {return super::hud_textures::image(lua,&t);}
             let t = Spec::new(lua, &t)?;
             let x: i32 = match t.fget::<i32>("x") {
                 Ok(v) => v,

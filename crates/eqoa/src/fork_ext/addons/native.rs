@@ -99,7 +99,7 @@ impl Session {
             ("loot", "get", 3),
             (
                 "map",
-                "get markers images load_image set_waypoint clear_waypoint",
+                "get markers view images load_image set_waypoint clear_waypoint",
                 4,
             ),
             ("mastery", "get skills selected", 4),
@@ -851,6 +851,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_events::install(host, host.once_mode())?;
     install_fields(lua);
     super::native_state::install(host)?;
+    super::map_views::install(host)?;
     let modules: Table = lua.named_registry_value("eqoa_modules")?;
     let scope = lua.create_table()?;
     for (id, name) in ["self", "target", "group", "pet", "corpse", "unknown"]
@@ -953,6 +954,7 @@ fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.hud.Layout", "player") => Some("eqoa.hud.PlayerLayout"),
         ("eqoa.hud.Layout", "group_members") => Some("eqoa.hud.GroupMemberLayout"),
         ("eqoa.hud.Layout", "target") => Some("eqoa.hud.TargetLayout"),
+        ("eqoa.hud.Layout", "minimap") => Some("eqoa.hud.Rect"),
         ("eqoa.hud.Layout", "pet") => Some("eqoa.hud.SinglePanelLayout"),
         (
             "eqoa.hud.PlayerLayout"
@@ -1073,7 +1075,7 @@ fn install_fields(lua: &Lua) {
             "eqoa.hud.Rect",
             "frame_x frame_y frame_width frame_height x y width height",
         ),
-        ("eqoa.hud.Layout", "player group_members target pet"),
+        ("eqoa.hud.Layout", "player group_members target pet minimap"),
         ("eqoa.hud.PlayerLayout", "panel health power exp"),
         ("eqoa.hud.TargetLayout", "panel health power"),
         ("eqoa.hud.GroupMemberLayout", "index panel health power"),

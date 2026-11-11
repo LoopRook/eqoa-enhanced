@@ -48,6 +48,8 @@ pub(crate) mod icons;
 pub(crate) mod input;
 pub(crate) mod manager;
 pub(crate) mod named_profiles;
+pub(crate) mod map_views;
+mod hud_textures;
 pub(crate) mod native;
 pub(crate) mod native_core;
 pub(crate) mod native_events;
