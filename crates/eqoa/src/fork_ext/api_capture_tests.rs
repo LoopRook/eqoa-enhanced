@@ -788,6 +788,8 @@ fn performance_busy_world_disabled_vms_leave_packet_and_frame_capture_quiescent(
     };
     let mut report = crate::input::Report::default();
     crate::fork_ext::prepare_controls(&mut report, true, true);
+    // First read of the cached option state initialises its thread-locals; measure steady state.
+    begin_iteration(&mut p, true);
     let (_, elapsed, allocs, bytes) = measure(|| {
         for frame in 0..300 {
             p.mode = if frame % 2 == 0 { 0 } else { 13 };

@@ -370,3 +370,13 @@ All final gates run after the final report commit with shared target/lock, scrat
 The lead now accepts these known local GPU failures: particles_are_blended_as_the_gs_blends_them_into_a_16_bit_frame, the_foot_of_a_wall_darkened_and_open_ground_not, the_same_at_freeport_as_at_the_origin. They are unchanged and named skips in the workspace continuation; previous strict failures remain historical evidence. Disc/oracle/reference prerequisite SKIPs and ignored Forge fixtures remain separately counted.
 
 First corrected all-active release run: **1.418 ms/frame**, FAILED the unchanged 0.5 ms gate; UTF-8=0, queue=0, text drawing=0, native art=22 allocations/active frame. This compiled baseline is checkpointed before performance work; no passing performance claim is made for it.
+
+## Final review fixes: completion (builder pass)
+
+Sol's uncommitted work (guarded records resolve present fields in Lua; benchmark profiling) was committed after its tests passed. Two fixes were needed: the ToT click test patched `eqoa.hud.visible` through the now read-only proxy (now `rawset`), and `performance_busy_world_disabled_vms_...` counted 19 one-time thread-local initialisations of the cached option read added by NEW-M1 (negative control: 19 allocations without the warm-up call, 0 with it).
+
+Gate results (static CRT, shared target, scratch EQOA_CONFIG):
+- `fork_ext::addons::` after fixes: addon tests all pass except the benchmark.
+- Full `eqoa` bin suite: 1983 passed, 2 failed (before the disabled-VM fix; now 1 failed: the benchmark), 31 ignored, 0 SKIP prints.
+- `-p net`: all pass. Python tools: 97 OK. Zero-addon release gate: 1 passed. wasm32 check: 0 warnings. Footprint: PASS. merge-tree vs 5d54c0c: clean.
+- **Benchmark FAILS.** Release: 1.161 ms/frame against the 0.5 ms gate (was 1.418). Per frame: stats_box 500 us, ToT 192 us, mana_bars 188 us, hud_numbers 210 us (Lua render callbacks, each call crossing the native API), native draw 45 us, ImGui 22 us. HUD text/queue allocations are 0 in steady state. Debug build 5.75 ms against its 5 ms check. Not met; the brief called 0.5 ms an aim. Next lever: cut per-call API cost in the Lua-to-native bridge, or make the mods event-driven.
