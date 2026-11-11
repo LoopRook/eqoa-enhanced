@@ -377,10 +377,7 @@ mod tests {
         let bytes = include_bytes!("../../../../../mods/resources/map-entities.json");
         let hash = format!("{:x}", Sha256::digest(bytes));
         assert_eq!(hash, "37be57d7996fbf7e7ef936c3e6ced1c3a14f611462346bc204eba5929cce11ca");
-        assert_eq!(
-            bytes,
-            include_bytes!("../../../../../bundled-mods/eqoa_map_search/resources/map-entities.json")
-        );
+        assert!(bytes.as_slice() == include_bytes!("../../../../../bundled-mods/eqoa_map_search/resources/map-entities.json").as_slice());
         assert!(bytes.len() > 1024 * 1024);
         let mut bad = bytes.to_vec();
         bad[0] ^= 1;

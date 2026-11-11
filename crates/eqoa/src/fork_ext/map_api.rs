@@ -8,6 +8,7 @@ impl Map {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         world.hash(&mut h);
         self.open.hash(&mut h);
+        self.mini.up.hash(&mut h);
         for w in [&self.world, &self.home].into_iter().flatten() {
             w.index.hash(&mut h);
             w.name.hash(&mut h);
@@ -48,7 +49,7 @@ impl Map {
             let c = &w.builder.cells;
             json!({"x_min":ee::mul(c.col0 as f32,CELL),"z_min":ee::mul(c.row0 as f32,CELL),"x_max":ee::mul((c.col0+c.cols) as f32,CELL),"z_max":ee::mul((c.row0+c.rows) as f32,CELL)})
         });
-        json!({"open":self.open,"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
+        json!({"open":self.open,"minimap":self.mini.up,"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
     }
 }
 
@@ -153,3 +154,7 @@ impl Map {
         map
     }
 }
+
+#[cfg(test)]
+#[path = "map_render_tests.rs"]
+mod render_tests;

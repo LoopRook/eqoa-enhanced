@@ -55,7 +55,7 @@ end)
 local function draw()
     hits={}
     local map=eqoa.map.get();if not map then s.close();return end
-    local mini=not map.open and eqoa.hud.visible("minimap")
+    local mini=not map.open and map.minimap
     if not mini and not map.open then if s.open then s.close() end;return end
     if not eqoa.imgui then return end
     local ui=eqoa.imgui

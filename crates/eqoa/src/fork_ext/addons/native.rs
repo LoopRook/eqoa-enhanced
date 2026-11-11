@@ -982,7 +982,7 @@ fn install_fields(lua: &Lua) {
         ("eqoa.map.Marker", "kind name x z level_min level_max label"),
         (
             "eqoa.map.MapState",
-            "open world_id world_name zone bounds revision waypoint",
+            "open minimap world_id world_name zone bounds revision waypoint",
         ),
         ("eqoa.map.Bounds", "x_min z_min x_max z_max"),
         ("eqoa.map.Waypoint", "world_id x z label owner"),

@@ -103,7 +103,6 @@ pub mod picture;
 // the list of places another world or a town is shown from (`places`)
 pub mod places;
 pub mod quests;
-pub mod theme;
 pub mod store;
 // natively (a page has nothing to call it; it compiles there as main.rs's
 // commands do)
@@ -262,7 +261,6 @@ struct Layers {
     white: usize,
     ui: Ui,
     assets: crate::ui::UiAssets,
-    control_font: Option<usize>,
     view: esf::Era,
 }
 
@@ -426,9 +424,9 @@ impl Map {
     /// the cache (`store`). The waypoints, the group's waypoint and the
     /// worlds' names stay.
     pub fn off(&mut self) {
-        self.close();
-        self.travel_ask = None;
-        self.group_ask = None;
+        if self.open {
+            self.close();
+        }
         self.mini_off();
         if self.layers.is_some() || self.world.is_some() {
             crate::say("map: off, its pictures let go");
@@ -1575,11 +1573,7 @@ impl Map {
         if let Some(f) = font {
             assets.font = Some(ui.add_font(cx.device, cx.queue, &f));
         }
-        let control_font=theme::font().map(|f|{
-            assets.font=Some(ui.add_font_at_height(cx.device,cx.queue,&f,f.height.div_ceil(3)));
-            ui.add_font(cx.device,cx.queue,&f)
-        });
-        self.layers = Some(Layers { map, white, ui, assets, control_font, view: cx.lib.view() });
+        self.layers = Some(Layers { map, white, ui, assets, view: cx.lib.view() });
     }
 
     /// The world played in changed (or the first): its map begun, its
@@ -1854,7 +1848,7 @@ impl Map {
             }
         };
         // where the chrome will go, for what keeps clear of it
-        let footprint = chrome::footprint(&l.assets.raster(ui).with_font(l.control_font,theme::FONT_SCALE), vui, &c);
+        let footprint = chrome::footprint(&l.assets.raster(ui), vui, &c);
         // the names, then the group and the player over them, then the rest
         chrome::names(&mut l.assets.raster(ui), vui, &c);
         // the markers (`markers`): the coach routes, the coaches' horseshoes,
@@ -2047,8 +2041,8 @@ impl Map {
         } else if let Some(m) = card {
             markers::draw_card(ui, &l.assets, vui, white, m, f(v.to_window(size, m.at())), win);
         }
-        crate::fork_ext::map::overlay(ui, white, w.index, |at| f(v.to_window(size, at)), [win[0][0],win[0][1],win[1][0],win[1][1]]);
-        let mut r = l.assets.raster(ui).with_font(l.control_font,theme::FONT_SCALE);
+        crate::fork_ext::map::overlay(ui, white, w.index, |at| f(v.to_window(size, at)), [win[0][0], win[0][1], win[1][0], win[1][1]]);
+        let mut r = l.assets.raster(ui);
         self.buttons = chrome::draw(&mut r, vui, &c);
         self.glyphs = r.glyphs;
         // laid out against the window: cut to it, not to the frame

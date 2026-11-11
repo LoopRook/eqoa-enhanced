@@ -554,7 +554,7 @@ MenuRow.index and Window.selected_row are 1..#rows, `WndList.sel+1` only for dir
 
 | Function | Return / behavior / source |
 |---|---|
-| `eqoa.map.get()` | W/S: `MapState={world_id:int,world_name:string?,zone:Location?,bounds:Bounds?,revision:uint,waypoint:Waypoint?}`; world from `P:5423`, words/grid `F:174`, `map/mod.rs:694`, cells. |
+| `eqoa.map.get()` | W/S: `MapState={open:bool,minimap:bool,world_id:int,world_name:string?,zone:Location?,bounds:Bounds?,revision:uint,waypoint:Waypoint?}`; world from `P:5423`, words/grid `F:174`, `map/mod.rs:694`, cells. |
 | `eqoa.map.images(world_id:int)` | W/S: MapImage[] metadata for **already known** native world cells/overview; nil,unavailable if native map has not initialized that world. Never claims a cache miss is an empty world. `map/cells.rs:37,67,85`, `map/build.rs:207,619`. |
 | `eqoa.map.load_image(image_id:string)` | TextureInfo when decoded/uploaded, or nil,unavailable while queued; emits resource.ready/failed. ID from images() only; cannot use it as filesystem path. Uses fork-owned native map store (`map/store.rs:19,36`) and owned textures, not renderer's GPU slot cast to a Lua texture. |
 | `eqoa.map.set_waypoint(point:{world_id:int,x:number,z:number,label:string?})` | RequestId; same native personal-waypoint service as map click (`map/mod.rs:520,1094`), §8 results. Any logic can call it; no player-click restriction. Label ≤128 UTF-8 bytes, display metadata owned by mod; underlying native pin remains x/z. |
@@ -564,7 +564,7 @@ MenuRow.index and Window.selected_row are 1..#rows, `WndList.sel+1` only for dir
 | `eqoa.map.set_guide{world_id,x?,z?,entity_id?,dots?={{x,z},...},label?}` | Sets this mod's guide, separate from personal waypoint; dashed line and dots on M map, square minimap and views. Entity guides follow live entities and emit `guide.lost` when lost. Cleared on disable. |
 | `eqoa.map.clear_guide()` | Clears this mod's guide only. |
 
-`map.changed` reports native map-state changes. The map overlay uses one neutral seam called with the M map/minimap transform; drawing implementation is fork-owned.
+`MapState.open` is the M map; `MapState.minimap` is true while the stock minimap setting is on and it is in view (in play, map closed, HUD shown), whether or not a mod hides the stock picture. `map.changed` reports native map-state changes. The map overlay uses one neutral seam called with the M map/minimap transform; drawing implementation is fork-owned.
 
 `eqoa.hud.image{texture=TextureInfo,x,y,width?,height?,shape="square"|"circle"}` supports owned textures. Circle masks live in the fork-owned HUD pass; this does not modify native map shaders. No ring option is promised.
 
