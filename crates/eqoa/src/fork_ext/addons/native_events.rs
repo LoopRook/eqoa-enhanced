@@ -346,6 +346,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
 }
 pub(crate) fn dispatch(host: &Host) -> Result<()> {
     super::async_json::poll(&host.lua)?;
+    super::json_save::poll(&host.lua)?;
     super::native_core::flush_deferred();
     let lua = &host.lua;
     let shared = bus(lua);
@@ -803,6 +804,26 @@ pub(crate) fn json_resource(
         json!({}),
     );
     event.bytes = 256; // Bounded table reference; its storage is charged to the opt-in JSON VM heap.
+    enqueue(&mut bus(lua).borrow_mut(), event, Some(data));
+    Ok(())
+}
+
+pub(crate) fn json_saved(lua: &mlua::Lua, request: u64, failure: Option<&str>) -> Result<()> {
+    let data = lua.create_table()?;
+    data.set("kind", "json_saved")?;
+    data.set("request", request)?;
+    if let Some(message) = failure {
+        data.set("error",record(lua,"eqoa.Error",&json!({"code":"failed","message":message.chars().take(2048).collect::<String>(),"capability":"eqoa.files.save_json_async"}))?)?;
+    }
+    let mut event = local(
+        if failure.is_some() {
+            "resource.failed"
+        } else {
+            "resource.ready"
+        },
+        json!({}),
+    );
+    event.bytes = 256;
     enqueue(&mut bus(lua).borrow_mut(), event, Some(data));
     Ok(())
 }

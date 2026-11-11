@@ -783,6 +783,43 @@ mod tests {
         assert!(super::super::async_json::worked_off_thread(&h.lua));
     }
 
+    #[test]
+    fn round4_async_json_save_is_private_and_latest_value_wins() {
+        let (_scratch, h, addon) = fixture();
+        h.execute("saved=false;eqoa.events.on('resource.ready',function(e) if e.data.kind=='json_saved' and e.data.request==last then saved=true end end);assert(eqoa.files.save_json_async('journal.json',{stage=0}));payload=string.rep('x',14*1024*1024-128) ;local n,e=eqoa.files.save_json_async('../escape',{});assert(n==nil and e.code=='permission_denied');local n,e=eqoa.files.save_json_async('package_resources/no.json',{});assert(n==nil and e.code=='permission_denied');local c={};c.self=c;local n,e=eqoa.files.save_json_async('cycle.json',c);assert(n==nil and e.code=='invalid_argument')").unwrap();
+        let now = std::time::Instant::now();
+        h.execute("for i=1,3 do last=assert(eqoa.files.save_json_async('journal.json',{stage=i,payload=payload})) end").unwrap();
+        let caller_ms = now.elapsed().as_secs_f64() * 1000.0;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while !h.lua.globals().get::<bool>("saved").unwrap() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "save worker did not finish"
+            );
+            super::super::native_events::dispatch(&h).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let mounts = h
+            .lua
+            .app_data_ref::<super::super::sandbox::Mounts>()
+            .unwrap();
+        let key = mounts.key("journal.json").unwrap();
+        let file = mounts.data.as_ref().unwrap().join("files").join(key);
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(file).unwrap()).unwrap();
+        assert_eq!(saved["stage"], 3);
+        assert_eq!(
+            saved["payload"].as_str().unwrap().len(),
+            14 * 1024 * 1024 - 128
+        );
+        assert!(!addon.package_root.join("resources/no.json").exists());
+        assert!(super::super::json_save::worked_off_thread(&h.lua));
+        println!(
+            "ROUND4_ASYNC_SAVE snapshots=3 payload_bytes={} caller_ms={:.3}",
+            14 * 1024 * 1024 - 128,
+            caller_ms
+        );
+    }
+
     fn fixture() -> (Fixture, Host, DiscoveredAddon) {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(

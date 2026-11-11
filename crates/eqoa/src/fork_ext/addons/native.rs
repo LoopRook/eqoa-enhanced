@@ -78,7 +78,7 @@ impl Session {
             ("entities", "list get find named distance", 2),
             ("events", "on off once after", 2),
             ("files", "read write remove", 2),
-            ("files", "list load_json", 4),
+            ("files", "list load_json save_json_async", 4),
             ("fonts", "load default release", 2),
             ("gems", "get is_gem format", 3),
             ("group", "get", 2),
@@ -889,6 +889,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         .set("status", guard(lua, status, "eqoa.entities.status", None)?)?;
     super::file_io::install_native(host)?;
     super::async_json::install(host)?;
+    super::json_save::install(host)?;
     super::native_settings::install(host)?;
     bind(
         lua,

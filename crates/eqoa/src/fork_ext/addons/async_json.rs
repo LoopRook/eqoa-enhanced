@@ -232,4 +232,38 @@ mod tests {
         bad[0] ^= 1;
         assert_ne!(format!("{:x}", Sha256::digest(&bad)), hash);
     }
+
+    #[test]
+    fn round4_measure_lua_journal_save_14_mib() {
+        let lua = mlua::Lua::new();
+        let root =
+            std::env::temp_dir().join(format!("eqoa-journal-measure-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("journal.json");
+        lua.globals().set("path", file.to_str().unwrap()).unwrap();
+        lua.load(r#"journal={};for i=1,62000 do journal[string.rep('N',160)..i]={[tostring(i)]={world=0,level=15,pos={1,2,3}}} end"#).exec().unwrap();
+        let now = std::time::Instant::now();
+        lua.load(r#"local b={'{'};local first=true;for name,spawns in pairs(journal) do if not first then b[#b+1]=',' end;first=false;for id,s in pairs(spawns) do b[#b+1]=string.format('%q:{%q:{"world":%d,"level":%d,"pos":[%d,%d,%d]}}',name,id,s.world,s.level,s.pos[1],s.pos[2],s.pos[3]) end end;b[#b+1]='}';local text=table.concat(b);assert(#text<=14*1024*1024);text=text..string.rep(' ',14*1024*1024-#text);local f=assert(io.open(path,'wb'));assert(f:write(text));assert(f:close())"#).exec().unwrap();
+        let elapsed = now.elapsed();
+        let bytes = std::fs::read(&file).unwrap();
+        assert_eq!(bytes.len(), 14 * 1024 * 1024);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .len(),
+            62000
+        );
+        println!(
+            "ROUND4_LUA_SAVE entries=62000 bytes={} frame_ms={:.3}",
+            bytes.len(),
+            elapsed.as_secs_f64() * 1000.0
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+pub(super) fn is_null(v: &mlua::AnyUserData) -> bool {
+    v.is::<JsonNull>()
 }

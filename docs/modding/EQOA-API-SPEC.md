@@ -803,3 +803,20 @@ The worker reads and decodes; Lua table materialization occurs on the VM thread 
 dispatch. Calling the loader opts that VM into a 128 MiB heap (ordinary VMs retain their
 existing limit), so the bounded catalogue can coexist with journal tables. This is a
 memory allowance, not a guarantee that materializing a large table fits one frame.
+
+
+`files.save_json_async(path,value)` is enabled by the measured round 4 Lua save cost.
+It accepts a relative private name (for example `journal.json`), returns request,nil,
+and never writes package or shared resources. It copies a finite plain Lua object/array
+snapshot on the caller thread; native JSON encoding and atomic replacement occur on a
+worker. Dense positive numeric keys are arrays; empty ordinary tables are objects.
+JSON null and decoded array tags round-trip. Cycles, mixed/sparse array keys, handles,
+functions, non-finite values, depth over 32 and over two million values are rejected.
+Snapshot string/key bytes and encoded output are each capped at 14 MiB; existing total
+private storage remains capped at 16 MiB. Save also opts the VM into the 128 MiB heap.
+Each VM has one active write and one replaceable pending value for the same path.
+A different path returns quota until that stream drains. Latest pending value wins;
+coalesced requests need not produce individual completions. The latest completion is
+`resource.ready{kind="json_saved",request}` or `resource.failed` with request/error.
+Accepted writes drain when the VM is dropped; no Lua object crosses threads. Snapshot
+copying is synchronous and has no 2 ms latency guarantee.

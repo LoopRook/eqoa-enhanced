@@ -49,6 +49,7 @@ mod hud_textures;
 mod icon_tests;
 pub(crate) mod icons;
 pub(crate) mod input;
+mod json_save;
 pub(crate) mod manager;
 pub(crate) mod map_views;
 pub(crate) mod named_profiles;
