@@ -621,6 +621,31 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn round4b_option_buttons_are_player_activations_and_disable_cleanly() {
+        use super::super::{options,player_files::TestIo,native_events};
+        let (dir,host,mut addon)=fixture();
+        addon.extensions.permissions=vec!["export".into()];
+        install(&host,&addon,Some(dir.0.join("config"))).unwrap();
+        let desktop=dir.0.join("Desktop");host.lua.set_app_data(TestIo{pick:None,desktop:desktop.clone()});
+        host.execute("assert(eqoa.files.write('journal.json','{}'));clicked=0;done=false;local row=assert(eqoa.options.button({id='export',label='Export journal'},function() clicked=clicked+1;assert(eqoa.files.export('journal.json','journal.json')) end));button_id=row.item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='export' then done=true end end)").unwrap();
+        let id=host.lua.globals().get::<i32>("button_id").unwrap();
+        assert!(options::active_mod_items().contains(&(id,"Export journal".into())));
+        assert!(!options::toggle_by_item(id),"stepping over an action must not execute it");
+        assert_eq!(host.lua.globals().get::<u32>("clicked").unwrap(),0);
+        assert!(options::activate_button(id));
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(5);
+        while !host.lua.globals().get::<bool>("done").unwrap() {
+            assert!(std::time::Instant::now()<deadline);
+            native_events::dispatch(&host).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(fs::read_to_string(desktop.join("journal.json")).unwrap(),"{}");
+        native_events::clear(&host);
+        assert!(!options::activate_button(id));
+        assert!(!options::active_mod_items().iter().any(|(item,_)|*item==id));
+    }
+
+    #[test]
     fn round4b_mod_command_can_target_its_own_vm() {
         let (dir,host,mut addon)=fixture();
         addon.extensions.commands=vec!["self".into()];

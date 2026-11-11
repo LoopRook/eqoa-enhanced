@@ -889,3 +889,9 @@ copies run off the frame thread. Import copies to private `imports/` and emits
 `resource.failed` with code `cancelled`. Export copies to Desktop with collision
 suffixes ` (2)`, ` (3)`, etc.; it never replaces an existing destination. Paths
 outside the issuing mod's private mounts are denied.
+
+`eqoa.options.button({id,label}, callback)` registers a mod-owned action row in
+Mods & Addons. Confirm/click queues the callback at the next VM boundary with a
+single player activation; left/right do not activate it. Rows and callbacks
+retire on disable, are limited to 32 per VM, and do not persist a toggle value.
+The returned record has `id`, `label`, and `item_id`.

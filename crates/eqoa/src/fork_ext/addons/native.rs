@@ -111,7 +111,7 @@ impl Session {
                 2,
             ),
             ("merchant", "get price", 3),
-            ("options", "toggle get set", 3),
+            ("options", "toggle get set button", 3),
             ("player", "get experience_for_level", 2),
             ("player", "stats", 3),
             ("quests", "list get", 4),
@@ -894,6 +894,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::exchange::register(lua);
     super::exchange::install(host)?;
     super::player_files::install(host)?;
+    super::option_buttons::install(host)?;
     super::native_settings::install(host)?;
     bind(
         lua,

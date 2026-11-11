@@ -149,6 +149,8 @@ pub(super) fn items() -> impl Iterator<Item = &'static (i32, &'static str)> {
 /// The fork's toggles: the server and the
 /// frame follow their setting as upstream's rows do.
 pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    if crate::fork_ext::addons::options::is_button(item) { return false; }
     match item {
         // Independent saved marker toggle, in addition to Quest Helper.
         1045 => c.quest_markers = !c.quest_markers,
@@ -163,6 +165,8 @@ pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
     true
 }
 pub(super) fn activate(item: i32) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    if crate::fork_ext::addons::options::activate_button(item) { return true; }
     match item {
         1051 => crate::fork_ext::mods::open_mods_folder(),
         1052 => {
@@ -177,6 +181,8 @@ pub(super) fn activate(item: i32) -> bool {
     true
 }
 pub(super) fn value_text(vui: &Vui, item: i32, c: &ClientOptions) -> Option<Vec<u16>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if crate::fork_ext::addons::options::is_button(item) { return Some(wide("Open")); }
     let on_off = |on| wide(vui.words.get(if on { 551 } else { 552 }, vui.language));
     Some(match item {
         1045 => on_off(c.quest_markers),

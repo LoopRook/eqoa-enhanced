@@ -39,6 +39,7 @@ pub(crate) struct Bus {
     diagnostics: super::native::DiagnosticSink,
     next: u64,
     subscriptions: Vec<Subscription>,
+    buttons: std::collections::BTreeMap<String,Function>,
     pub(super) active: bool,
     pub once_mode: bool,
     pub initialized: bool,
@@ -198,6 +199,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
         diagnostics: super::native::diagnostic_sink(lua),
         next: 0,
         subscriptions: Vec::new(),
+        buttons: Default::default(),
         active: true,
         once_mode,
         initialized: false,
@@ -481,9 +483,19 @@ fn deliver_data(
         .filter(|s| s.name == e.name && s.deadline.is_none() && only.is_none_or(|t| *t == s.token))
         .map(|s| s.token.clone())
         .collect::<Vec<_>>();
-    let direct = (e.name == "input.key" && e.data["down"] == true && e.data["synthetic"] != true && e.data["repeat"] != true)
+    let direct = e.name == "option.activated" || (e.name == "input.key" && e.data["down"] == true && e.data["synthetic"] != true && e.data["repeat"] != true)
         || (e.name == "pointer.pressed" && e.data["inside_window"] == true);
     let _player = super::exchange::player_scope(shared.borrow().vm, direct, e.player_command);
+    if e.name == "option.activated" {
+        let callback = shared.borrow().buttons.get(e.data["id"].as_str().unwrap_or("")).cloned();
+        if let Some(callback) = callback {
+            if let Err(err) = callback.call::<()>(()) {
+                if super::native::fatal_memory(&err) { return Err(err); }
+                super::native::diagnose(lua,"eqoa.options.button","failed",&err.to_string());
+            }
+        }
+        return Ok(());
+    }
     for t in candidates {
         let call = {
             let mut b = shared.borrow_mut();
@@ -611,6 +623,7 @@ pub(crate) fn clear(host: &Host) {
     let b = bus(&host.lua);
     let mut b = b.borrow_mut();
     b.subscriptions.clear();
+    b.buttons.clear();
     b.pending.clear();
     b.pending_bytes = 0;
     b.retired.clear();
@@ -872,4 +885,16 @@ pub(super) fn file_action(lua: &mlua::Lua, data: serde_json::Value, failed: bool
     event.bytes=data.to_string().len();
     enqueue(&mut bus(lua).borrow_mut(),event,Some(table));
     Ok(())
+}
+
+pub(super) fn register_option(lua: &mlua::Lua,id: &str,callback: Function)->bool {
+    let bus=bus(lua);let mut bus=bus.borrow_mut();
+    if bus.buttons.len()>=32 && !bus.buttons.contains_key(id) {return false}
+    bus.buttons.insert(id.to_string(),callback);true
+}
+pub(super) fn activate_option(bus: &Rc<RefCell<Bus>>,id: &str)->bool {
+    let mut bus=bus.borrow_mut();
+    if !bus.active || !bus.buttons.contains_key(id) || bus.pending.len()>=64 {return false}
+    let mut event=local("option.activated",json!({"id":id}));event.bytes=id.len()+64;
+    enqueue(&mut bus,event,None);true
 }
