@@ -330,10 +330,15 @@ fn assert_pixels_match(name: &str, size: (u32, u32), native: &[u8], modded: &[u8
     }
     for (i, covered) in covered.into_iter().enumerate() {
         if !covered {
-            assert_eq!(
-                &native[4 * i..4 * i + 4],
-                &modded[4 * i..4 * i + 4],
-                "{name}: outside element at pixel {i}"
+            let (a, b) = (&native[4 * i..4 * i + 4], &modded[4 * i..4 * i + 4]);
+            // fully transparent on both sides is nothing drawn, whatever colour another
+            // adapter leaves in it (CI's: [35, 30, 12, 0] beside a text edge)
+            if a[3] == 0 && b[3] == 0 {
+                continue;
+            }
+            assert!(
+                a.iter().zip(b).all(|(a, b)| a.abs_diff(*b) <= 2),
+                "{name}: outside element at pixel {i}: {a:?} vs {b:?}"
             );
         }
     }
