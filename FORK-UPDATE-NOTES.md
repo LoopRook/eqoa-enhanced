@@ -2,9 +2,9 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
-## Unreleased
+## 2026-11-11 · Enhanced 0.5.3
 
-- Fix: bundled mods that are on by default (HUD numbers, Mana Bars and the new map mods) are now on for players who already had a mod profile.
+- Fix: bundled mods that are on by default (HUD numbers and Mana Bars) are now on for players who already had a mod profile.
 
 ## 2026-11-11 · Enhanced 0.5.2
 
