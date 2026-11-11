@@ -2,6 +2,33 @@
 use super::*;
 use serde_json::{Value as Json, json};
 impl Map {
+    /// Small allocation-free source key; dynamic records are rebuilt only on change.
+    pub(crate) fn api_key(&self, world: i32) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        world.hash(&mut h);
+        for w in [&self.world, &self.home].into_iter().flatten() {
+            w.index.hash(&mut h);
+            w.name.hash(&mut h);
+            let c = &w.builder.cells;
+            (c.col0, c.row0, c.cols, c.rows).hash(&mut h);
+        }
+        for m in &self.quests.marks {
+            (m.world, m.x.to_bits(), m.z.to_bits(), &m.npc).hash(&mut h);
+            m.quests.first().map(|q| q.levels).hash(&mut h);
+        }
+        for m in &self.community.marks {
+            (m.world, m.at.map(f32::to_bits), &m.name, &m.note).hash(&mut h);
+        }
+        for (world, p) in &self.waypoints {
+            (world, p.map(f32::to_bits)).hash(&mut h);
+        }
+        if let Some(m) = self.group_mark() {
+            (m.world, m.at.map(f32::to_bits), &m.from).hash(&mut h);
+        }
+        h.finish()
+    }
+
     pub(crate) fn api_state(
         &self,
         world: i32,

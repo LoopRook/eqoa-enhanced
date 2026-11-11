@@ -376,6 +376,7 @@ pub(crate) fn cache(key: FrameKey, snapshot: crate::fork_ext::addons::host::Snap
 }
 pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     thread_local! {static EPOCH:Cell<u64>=const{Cell::new(u64::MAX)};}
+    thread_local! {static MAP_KEY:Cell<Option<u64>>=const{Cell::new(None)};}
     let epoch_changed =
         EPOCH.with(|e| e.replace(native_core::capture_epoch())) != native_core::capture_epoch();
     let first = LIVE.with(|l| !l.replace(true)) || epoch_changed;
@@ -397,6 +398,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
                 .collect()
         });
         KEY.with(|k| k.set(Some(key(play, walker))));
+        MAP_KEY.with(|k| k.set(None));
         dirty();
         return;
     }
@@ -441,6 +443,36 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         });
         dirty();
     }
+    let map_key = play.map.api_key(play.world_id() as i32);
+    let changed = MAP_KEY.with(|k| k.replace(Some(map_key))) != Some(map_key);
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        let world = play.world_id() as i32;
+        if changed || c.view.map["zone"] != c.view.player["location"] {
+            let mut after = play.map.api_state(world, &c.view.player["location"], play.words.as_ref());
+            let markers = if changed { play.map.api_markers() } else { c.view.map_markers.clone() };
+            let mut before = c.view.map.clone();
+            before.as_object_mut().map(|m| m.remove("revision"));
+            let revision = c.view.map["revision"].as_u64().unwrap_or(0);
+            let differs = before != after || markers != c.view.map_markers;
+            after["revision"] = json!(revision + u64::from(differs));
+            if differs {
+                let event = json!({"before":c.view.map,"after":after,"changed":["map","markers"]});
+                c.emit("map.changed", event);
+                dirty();
+            }
+            c.view.map = after;
+            c.view.map_markers = markers;
+            c.view.world_id = Some(world);
+        }
+        let p = &c.view.player["position"];
+        let projection = p["x"].as_f64().zip(p["z"].as_f64()).and_then(|(x,z)| play.map.api_minimap_transform([x as f32,z as f32], crate::fork_ext::addons::hud_layout::get_window_size()));
+        if c.view.minimap != projection {
+            c.view.minimap = projection;
+            dirty();
+        }
+        crate::fork_ext::addons::guides::update(&mut c);
+    });
 }
 
 // Called after a packet mutation. Only the affected typed records are copied.

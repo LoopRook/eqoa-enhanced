@@ -1945,19 +1945,53 @@ fn round4_map_view_projects_native_player_scale_and_rejects_pregame() {
 }
 
 #[test]
+fn round4_live_map_refreshes_waypoints_markers_projection_and_window() {
+    let mut p = Play::bundled_ui_fixture();
+    p.map = crate::map::testing::up((640, 448));
+    p.map.open = false;
+    p.map.mini.up = true;
+    p.map.mini.scale = 6.0;
+    let mut w = perf_review_walker();
+    w.cam.walk.phys.position.x.0 = 100.0;
+    w.cam.walk.phys.position.z.0 = 200.0;
+    let h = Host::new().unwrap();
+    h.execute("changes=0;eqoa.events.on('map.changed',function() changes=changes+1 end)").unwrap();
+    api_capture::updates::refresh(&p, Some(&w));
+    native_events::dispatch(&h).unwrap();
+    h.execute("v=assert(eqoa.map.view{size=200});revision=eqoa.map.get().revision;assert(changes==1)").unwrap();
+    p.map.set_group_waypoint(crate::map::group_waypoint::GroupMark { world:0, at:[81.,82.], from:"Leader".into() });
+    p.map.quests.set(&[net::session::QuestMark { kind:1,world:0,x:12.,z:34.,npc:"Live quest".into(),quests:vec![] }]);
+    p.map.mini.scale = 12.0;
+    w.cam.walk.phys.position.x.0 = 500.0;
+    crate::fork_ext::addons::hud_layout::set_window_size(1920, 1080);
+    api_capture::updates::refresh(&p, Some(&w));
+    native_events::dispatch(&h).unwrap();
+    h.execute("local x,z=v.unproject(100,100);assert(math.abs(x-500)<0.01 and math.abs(z-200)<0.01);local found=false;for _,m in ipairs(eqoa.map.markers(0)) do found=found or m.name=='Live quest' end;assert(found)").unwrap();
+    p.map.open = true;
+    assert!(p.map.click([320.,224.], false));
+    p.map.open = false;
+    api_capture::updates::refresh(&p, Some(&w));
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(eqoa.map.get().waypoint~=nil and eqoa.map.get().revision>revision);before=changes").unwrap();
+    api_capture::updates::refresh(&p, Some(&w));
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(changes==before)").unwrap();
+    crate::fork_ext::addons::hud_layout::set_window_size(640,448);
+}
+
+#[test]
 fn round4_guide_follows_live_entity_and_lost_is_owner_scoped() {
     let mut p = Play::bundled_ui_fixture();
     let h = Host::new().unwrap();
     let other = Host::new().unwrap();
-    let view = p.native_view(None);
-    CORE.with(|c| c.borrow_mut().publish(view));
+    api_capture::updates::refresh(&p, None);
     h.execute("lost=0;eqoa.events.on('guide.lost',function(e) lost=lost+1;assert(e.data.entity_id==2002) end);assert(eqoa.map.set_guide{world_id=0,entity_id=2002,dots={{x=10,z=20}},label='snake'})").unwrap();
     other
         .execute("lost=0;eqoa.events.on('guide.lost',function() lost=lost+1 end)")
         .unwrap();
     p.entities.slots[1].as_mut().unwrap().pos = [300.0, 0.0, 400.0];
-    let view = p.native_view(None);
-    CORE.with(|c| c.borrow_mut().publish(view));
+    api_capture::updates::capture(&p, &api_capture::updates::Kind::Entity(1), None);
+    api_capture::updates::refresh(&p, None);
     assert_eq!(
         crate::fork_ext::addons::guides::target_for(
             crate::fork_ext::addons::native_events::bus(&h.lua)
@@ -1969,8 +2003,8 @@ fn round4_guide_follows_live_entity_and_lost_is_owner_scoped() {
     native_events::dispatch(&h).unwrap();
     h.execute("assert(lost==0)").unwrap();
     p.entities.slots[1] = None;
-    let view = p.native_view(None);
-    CORE.with(|c| c.borrow_mut().publish(view));
+    api_capture::updates::capture(&p, &api_capture::updates::Kind::Entity(1), None);
+    api_capture::updates::refresh(&p, None);
     native_events::dispatch(&h).unwrap();
     native_events::dispatch(&other).unwrap();
     h.execute("assert(lost==1);assert(eqoa.map.clear_guide())")
@@ -2043,3 +2077,4 @@ fn round4_entity_journal_flags_are_protocol_values_and_corpse_delta_is_not_hp() 
     native_events::dispatch(&h).unwrap();
     h.execute("assert(not changed)").unwrap();
 }
+

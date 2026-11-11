@@ -12,7 +12,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Projection {
     pub center: [f32; 2],
     pub scale: f32,
