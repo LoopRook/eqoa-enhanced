@@ -1649,3 +1649,107 @@ fn mod_profiles_role_setup_waits_for_concurrent_role_seeding() {
     assert_eq!(manager.profile_name(), Some("Healer"));
     assert!(!manager.profile_waiting_world());
 }
+
+/// The real 0.4 -> 0.5 update: the player's profile store (Default, the seeded
+/// roles, `.migrated` and `.roles-v1`) was made when only the older bundled UIs
+/// existed, so it has no key for the mods that shipped later.
+#[test]
+fn mod_profiles_update_enables_bundled_defaults_missing_from_an_older_store() {
+    use super::super::named_profiles::{Character, CharacterSnapshot, Store};
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    // Before the update: only the older bundled UIs are installed.
+    root.package("wereoxxs_ui", true, "");
+    root.package("arpg_ui", false, "");
+    let store = Store::new(Some(config.0.clone()));
+    {
+        // The production first start builds Default, the roles and both markers.
+        let mut first = gpu.manager(&root.0, Some(config.0.clone()));
+        first.enable_profiles(Some(config.0.clone()));
+        first.shutdown();
+    }
+    let dir = store.path("Default").unwrap().parent().unwrap().to_path_buf();
+    assert!(dir.join(".migrated").exists() && dir.join(".roles-v1").exists());
+    assert!(store.path("Tank").unwrap().exists());
+    assert!(
+        !fs::read_to_string(store.path("Default").unwrap())
+            .unwrap()
+            .contains("eqoa_hud_numbers")
+    );
+    // The update installs the round 3 bundled mods (their real mod.json files),
+    // a bundled mod that ships off, and the player's own mod.
+    for file in crate::fork_ext::bundled::EMBEDDED_FILES {
+        if ["eqoa_hud_numbers/", "eqoa_mana_bars/", "eqoa_stats_box/"]
+            .iter()
+            .any(|p| file.path.starts_with(p))
+        {
+            let path = root.0.join(file.path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, file.data).unwrap();
+        }
+    }
+    root.package("eqoa_example_hearts", false, "");
+    root.package("my_user_mod", true, "");
+    let addons = super::super::discovery::discover(&root.0).addons;
+    let key = |id: &str| Storage::key(addons.iter().find(|a| a.id == id).unwrap()).unwrap();
+    assert!(addons.iter().find(|a| a.id == "eqoa_hud_numbers").unwrap().initially_enabled);
+    // The player once switched Stats Box off by hand: an explicit false stays.
+    let mut default = store.read("Default").unwrap();
+    default.enabled.insert(key("eqoa_stats_box"), false);
+    store.write("Default", &default).unwrap();
+    let ari = CharacterSnapshot::new(true, "Ari", 3).unwrap();
+    store
+        .bind(&Character::new("server.example", ari).unwrap(), "Tank", false)
+        .unwrap();
+    let intent = |manager: &Manager, id: &str| {
+        manager
+            .entries
+            .iter()
+            .find(|e| e.metadata.id == id)
+            .unwrap()
+            .enabled_intent
+    };
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    assert!(intent(&manager, "wereoxxs_ui"), "an old recorded true stays on");
+    assert!(!intent(&manager, "arpg_ui"), "an old recorded false stays off");
+    assert!(
+        intent(&manager, "eqoa_hud_numbers"),
+        "bundled, on by default, missing from Default.json: must be on"
+    );
+    assert!(intent(&manager, "eqoa_mana_bars"), "bundled mana bars must be on");
+    assert!(
+        !intent(&manager, "eqoa_stats_box"),
+        "an explicit false in the document must be respected"
+    );
+    assert!(
+        !intent(&manager, "eqoa_example_hearts"),
+        "a bundled mod that ships off stays off"
+    );
+    assert!(
+        !intent(&manager, "my_user_mod"),
+        "a user-installed mod missing from the document stays off"
+    );
+    // The result is recorded, so later starts do not depend on the default.
+    manager.flush_profile(&mut gpu.context, false);
+    let saved = store.read("Default").unwrap();
+    assert_eq!(saved.enabled.get(&key("eqoa_hud_numbers")), Some(&true));
+    assert_eq!(saved.enabled.get(&key("eqoa_stats_box")), Some(&false));
+    assert_eq!(saved.enabled.get(&key("my_user_mod")), None);
+    // A character on the Tank role profile (seeded before these mods existed).
+    manager.profile_boundary(&mut gpu.context, Some(ari), "server.example");
+    assert_eq!(manager.profile_name(), Some("Tank"));
+    assert!(
+        intent(&manager, "eqoa_hud_numbers"),
+        "role profile: bundled default must be on"
+    );
+    assert!(intent(&manager, "eqoa_mana_bars"));
+    assert!(intent(&manager, "wereoxxs_ui"));
+    assert!(!intent(&manager, "arpg_ui"));
+    assert!(!intent(&manager, "my_user_mod"));
+    assert!(!intent(&manager, "eqoa_example_hearts"));
+    manager.shutdown();
+}

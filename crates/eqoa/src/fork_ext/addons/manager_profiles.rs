@@ -90,13 +90,21 @@ impl Manager {
                 (Document::empty(), false)
             }
         };
+        let mut data = data;
         for entry in &mut self.entries {
-            entry.enabled_intent = data.enabled.get(&entry.key).copied().unwrap_or(false);
+            entry.enabled_intent = data.enabled_for(&entry.metadata, &entry.key);
         }
+        // A store made before a bundled mod existed has no key for it: keep the
+        // mod's own default and write it down on the next save.
+        let recorded = data.record_bundled_defaults(
+            self.entries
+                .iter()
+                .map(|e| (&e.metadata, e.key.as_str())),
+        );
         self.named = Some(NamedSession {
             data,
             active: DEFAULT.into(),
-            dirty: false,
+            dirty: recorded && writable,
             writable,
             shutdown_save_failed: false,
             store,
@@ -338,7 +346,7 @@ impl Manager {
                 }
             }
             entry.instance = None;
-            entry.enabled_intent = data.enabled.get(&entry.key).copied().unwrap_or(false);
+            entry.enabled_intent = data.enabled_for(&entry.metadata, &entry.key);
             entry.status = Status::Disabled;
             entry.not_before = self.frame_number + 1;
         }
