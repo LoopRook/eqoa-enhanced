@@ -69,6 +69,44 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     bind(
         lua,
         "map",
+        "markers",
+        lua.create_function(|lua, value: Value| {
+            let world = match value {
+                Value::Integer(v) if (0..=255).contains(&v) => v as i32,
+                Value::Number(v)
+                    if v.is_finite() && v.fract() == 0.0 && (0.0..=255.0).contains(&v) =>
+                {
+                    v as i32
+                }
+                _ => {
+                    return error(
+                        lua,
+                        "eqoa.map.markers",
+                        "invalid_argument",
+                        "world_id must be an integer in 0..255",
+                    );
+                }
+            };
+            read(lua, "eqoa.map.markers", "eqoa.map.Marker", |v| {
+                let mut marks = (*crate::map::extension::static_markers(world)).clone();
+                marks.extend(
+                    v.map_markers
+                        .iter()
+                        .filter(|m| m["world_id"].as_i64() == Some(world as i64))
+                        .map(|m| {
+                            let mut m = m.clone();
+                            m.as_object_mut().unwrap().remove("world_id");
+                            m
+                        }),
+                );
+                Json::Array(marks)
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "map",
         "get",
         lua.create_function(|lua, ()| {
             read(lua, "eqoa.map.get", "eqoa.map.MapState", |v| v.map.clone())

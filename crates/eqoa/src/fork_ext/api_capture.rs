@@ -209,6 +209,7 @@ impl Play {
                 &player["location"],
                 self.words.as_ref(),
             ),
+            map_markers: self.map.api_markers(),
             entities,
             entity_slots: self
                 .entities

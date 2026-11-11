@@ -1847,3 +1847,80 @@ fn map_state_comes_from_play_and_changed_event_has_negative_control() {
     h.execute("local m,e=eqoa.map.get();assert(m==nil and e.code=='not_in_world')")
         .unwrap();
 }
+
+#[test]
+fn map_markers_use_native_quest_cache_and_filter_other_worlds() {
+    let mut p = ready();
+    p.map.quests.set(&[
+        net::session::QuestMark {
+            kind: 1,
+            world: 0,
+            x: 123.0,
+            z: 456.0,
+            npc: "Quest giver".into(),
+            quests: vec![],
+        },
+        net::session::QuestMark {
+            kind: 2,
+            world: 1,
+            x: 10.0,
+            z: 20.0,
+            npc: "Other world".into(),
+            quests: vec![],
+        },
+    ]);
+    p.map = crate::map::testing::up((640, 448));
+    // Restoring native quests after replacing the map with its calibrated fixture.
+    p.map.quests.set(&[
+        net::session::QuestMark {
+            kind: 1,
+            world: 0,
+            x: 123.0,
+            z: 456.0,
+            npc: "Quest giver".into(),
+            quests: vec![],
+        },
+        net::session::QuestMark {
+            kind: 2,
+            world: 1,
+            x: 10.0,
+            z: 20.0,
+            npc: "Other world".into(),
+            quests: vec![],
+        },
+    ]);
+    p.map.community.marks.push(crate::map::community::Mark {
+        id: 5,
+        world: 0,
+        at: [71.0, 72.0],
+        name: "Community camp".into(),
+        note: "Native cache".into(),
+        kind: crate::map::community::Kind::Camp,
+    });
+    p.map
+        .set_group_waypoint(crate::map::group_waypoint::GroupMark {
+            world: 0,
+            at: [81.0, 82.0],
+            from: "Group leader".into(),
+        });
+    assert!(p.map.click([320.0, 224.0], false));
+    let h = Host::new().unwrap();
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    h.execute(r#"
+        local marks=assert(eqoa.map.markers(0));local quest=false;local camp=false;local town=false;local coach=false;local community=false;local waypoint=false;local group=false
+        for _,m in ipairs(marks) do
+            assert(m.name~='Other world')
+            if m.kind=='quest' then quest=m.name=='Quest giver' and m.x==123 and m.z==456 end
+            if m.kind=='camp' then camp=m.level_min~=nil and m.level_max~=nil end
+            town=town or m.kind=='town';coach=coach or m.kind=='coach'
+            community=community or m.kind=='community' and m.name=='Community camp' and m.label=='Native cache'
+            waypoint=waypoint or m.kind=='waypoint'
+            group=group or m.kind=='group_waypoint' and m.name=='Group leader' and m.x==81
+            assert(not pcall(function() m.x=0 end))
+        end
+        assert(quest and camp and town and coach and community and waypoint and group)
+        for _,m in ipairs(eqoa.map.markers(1)) do assert(m.name~='Quest giver') end
+        local m,e=eqoa.map.markers('bad');assert(m==nil and e.code=='invalid_argument')
+    "#).unwrap();
+}

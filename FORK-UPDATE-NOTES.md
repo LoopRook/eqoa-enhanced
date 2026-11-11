@@ -1,5 +1,8 @@
 # Enhanced fork update notes
 
+- Addon authors: native read-only map state/change events and world-filtered map markers are available. The remaining round 4 map APIs are pending.
+
+
 Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased

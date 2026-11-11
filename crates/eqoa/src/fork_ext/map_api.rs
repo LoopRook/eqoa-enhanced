@@ -15,3 +15,40 @@ impl Map {
         json!({"world_id":world,"world_name":self.world_title(world,words),"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
     }
 }
+
+/// Static catalogue uses exactly the map's pinned marker arrays, built once per world.
+pub(crate) fn static_markers(world: i32) -> std::rc::Rc<Vec<Json>> {
+    thread_local! { static CACHE: std::cell::RefCell<BTreeMap<i32,std::rc::Rc<Vec<Json>>>> = const { std::cell::RefCell::new(BTreeMap::new()) }; }
+    CACHE.with(|c| c.borrow_mut().entry(world).or_insert_with(|| {
+        let mut out = Vec::new();
+        for m in markers::of_world(world) {
+            let at = m.at();
+            let (kind,name,lo,hi) = match m {
+                markers::Marker::Camp(i) => { let c = &markers_data::CAMPS[i]; ("camp",c.name,Some(c.levels.0),Some(c.levels.1)) },
+                markers::Marker::Coach(i) => ("coach",markers_data::COACHES[i].coachman,None,None),
+            };
+            out.push(json!({"kind":kind,"name":name,"x":at[0],"z":at[1],"level_min":lo,"level_max":hi,"label":null}));
+        }
+        for (_,t) in markers::towns_of(world) { out.push(json!({"kind":"town","name":t.name,"x":t.at[0],"z":t.at[1],"label":null})); }
+        std::rc::Rc::new(out)
+    }).clone())
+}
+impl Map {
+    pub(crate) fn api_markers(&self) -> Vec<Json> {
+        let mut out = Vec::new();
+        for m in &self.quests.marks {
+            let levels = m.quests.first().map(|q| q.levels);
+            out.push(json!({"world_id":m.world,"kind":"quest","name":m.npc,"x":m.x,"z":m.z,"level_min":levels.map(|x|x.0),"level_max":levels.map(|x|x.1),"label":null}));
+        }
+        for m in &self.community.marks {
+            out.push(json!({"world_id":m.world,"kind":"community","name":m.name,"x":m.at[0],"z":m.at[1],"label":m.note}));
+        }
+        for (&world, &p) in &self.waypoints {
+            out.push(json!({"world_id":world,"kind":"waypoint","name":"Waypoint","x":p[0],"z":p[1],"label":null}));
+        }
+        if let Some(m) = self.group_mark() {
+            out.push(json!({"world_id":m.world,"kind":"group_waypoint","name":m.from,"x":m.at[0],"z":m.at[1],"label":null}));
+        }
+        out
+    }
+}
