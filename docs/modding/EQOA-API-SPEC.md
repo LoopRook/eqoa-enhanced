@@ -550,7 +550,7 @@ MenuRow.index and Window.selected_row are 1..#rows, `WndList.sel+1` only for dir
 
 ### Map data and waypoints
 
-**Choice: expose calibrated native images and coordinates, not a new terrain rasterizer.** Native maps stay the defaults. No change to map theme, terrain generation, guide search, network submissions or route finding is authorized here. Read map handoff before implementing.
+**Round 4 addendum (owner, 2026-11-11).** Native maps remain the defaults. Mods may own search, journal and circular minimap presentation. The M map keeps upstream's colours, font and legend; skinning is deferred to round 8. Terrain generation, network submissions and route finding remain native. Read the map handoff before implementing.
 
 | Function | Return / behavior / source |
 |---|---|
@@ -559,6 +559,17 @@ MenuRow.index and Window.selected_row are 1..#rows, `WndList.sel+1` only for dir
 | `eqoa.map.load_image(image_id:string)` | TextureInfo when decoded/uploaded, or nil,unavailable while queued; emits resource.ready/failed. ID from images() only; cannot use it as filesystem path. Uses fork-owned native map store (`map/store.rs:19,36`) and owned textures, not renderer's GPU slot cast to a Lua texture. |
 | `eqoa.map.set_waypoint(point:{world_id:int,x:number,z:number,label:string?})` | RequestId; same native personal-waypoint service as map click (`map/mod.rs:520,1094`), §8 results. Any logic can call it; no player-click restriction. Label ≤128 UTF-8 bytes, display metadata owned by mod; underlying native pin remains x/z. |
 | `eqoa.map.clear_waypoint()` | RequestId; clears this VM's currently owned personal pin only; busy if user/another mod replaced it. No clearing group guidance as side effect. |
+
+| `eqoa.map.markers(world_id:int)` | Read-only array of `{kind="camp"|"coach"|"town"|"quest"|"community"|"waypoint"|"group_waypoint",name,x,z,level_min?,level_max?,label?}` from native map sources. |
+| `eqoa.map.view{center?,zoom,size,shape="square"|"circle",rim=bool}` | Owned view record with `texture:TextureInfo`, `project(x,z)` ? px,py,inside and `unproject(px,py)` ? x,z. Center defaults to player; zoom is world units per pixel; size is pixels. Native upstream minimap drawing supplies terrain, indoor view, marks, waypoints and group. Circle masking lives in a fork-owned render pipeline. Rim clamps offscreen marks. At most one render/view/frame, only while held; no views means no render work. |
+| `eqoa.map.set_guide{world_id,x?,z?,entity_id?,dots?={{x,z},...},label?}` | Sets this mod's guide, separate from personal waypoint; dashed line and dots on M map, square minimap and views. Entity guides follow live entities and emit `guide.lost` when lost. Cleared on disable. |
+| `eqoa.map.clear_guide()` | Clears this mod's guide only. |
+
+`map.changed` reports native map-state changes. The map overlay uses one neutral seam called with the M map/minimap transform; drawing implementation is fork-owned.
+
+`eqoa.hud.hide("minimap")` / `show` also hide native minimap clicks. `eqoa.hud.layout().minimap` reports its current rectangle, including upstream Move HUD changes. `eqoa.input.pointer()` returns `{x,y,inside_window:bool}` in HUD coordinates. `pointer.pressed` and `pointer.wheel` include coordinates; `eqoa.input.claim_pointer(rect)` consumes clicks/wheel inside the mod's rectangle. Claims belong to the VM and end on disable. Mod HUD/ImGui, keys and captured text continue over the open M map through the existing addon route.
+
+`eqoa.files.load_json(path)` queues native JSON decoding off the frame thread, from read-only package/resource mounts only (16 MiB cap); `resource.ready` has kind `"json"` and the decoded table. `eqoa.files.save_json_async(path,value)` writes only to the mod's private area; native encoding/writing is off the frame thread and pending values coalesce to the latest. The save function is implemented only if a measured 14 MiB Lua journal save exceeds 2 ms of frame time. Entity deltas carry journal data: id, name, world, level, position and native creature/corpse flags; unknown flags remain unknown.
 
 `Bounds={x_min:number,z_min:number,x_max:number,z_max:number}`. `MapImage={id:string,world_id:int,kind:"cell"|"overview",bounds:Bounds,width:uint,height:uint,revision:uint,available:bool}`; bounds are actual world calibration, pixels top-left correspond (x_min,z_min), u increases x, v increases z. IDs are opaque strings scoped to native cache/art revision; no raw directories or paths. `Waypoint={world_id:int,x:number,z:number,label:string?,owner:string?}`; nil owner means player-owned. Map image loading may request existing cached/generated native data using its current build budget; must not start full-world work in Lua callback. Decoded/uploaded image charged to normal per-addon texture quota; requests max 8 pending/VM and bounded native work (existing map builder budget). No promise of all-world images before those worlds have been loaded. Missing handmade art remains missing unless the mod ships its own PNG/JPEG. Changing waypoint invokes native persistence/search invalidation; the fork-owned adapter tracks owner and drops ownership on native user change, arrival, deletion, or disable. On disable clear only a still-owned mod pin; player pins survive. Group chat waypoint creation is an explicit game chat action, not an implied map operation.
 
