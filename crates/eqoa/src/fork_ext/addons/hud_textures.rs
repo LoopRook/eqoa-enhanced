@@ -57,10 +57,10 @@ pub(crate) fn image(lua: &Lua, t: &Table) -> Result<mlua::MultiValue> {
     let vertical = t
         .get::<Option<String>>("vertical")?
         .unwrap_or_else(|| "top".into());
-    let a = super::hud_layout::transform_point([x, y], &anchor, &vertical, m);
-    let b = super::hud_layout::transform_point([x + w, y + h], &anchor, &vertical, m);
+    let mut a = super::hud_layout::transform_point([x, y], &anchor, &vertical, m);
+    let mut b = super::hud_layout::transform_point([x + w, y + h], &anchor, &vertical, m);
     let uv = info.get::<Option<Table>>("uv")?;
-    let coords = if let Some(uv) = uv {
+    let mut coords = if let Some(uv) = uv {
         [uv.get(1)?, uv.get(2)?, uv.get(3)?, uv.get(4)?]
     } else {
         [0.0f32, 0.0, 1.0, 1.0]
@@ -75,6 +75,33 @@ pub(crate) fn image(lua: &Lua, t: &Table) -> Result<mlua::MultiValue> {
             "invalid_argument",
             "invalid texture UV rectangle",
         );
+    }
+    if shape == "circle" {
+        // HUD frame axes have different scales. Clip an inscribed physical square
+        // and crop its UVs by the same fraction, preserving project() alignment.
+        let w = b[0] - a[0];
+        let h = b[1] - a[1];
+        if w <= 0.0 || h <= 0.0 {
+            return error(
+                lua,
+                "eqoa.hud.image",
+                "unavailable",
+                "HUD frame has no area",
+            );
+        }
+        let d = w.min(h);
+        let dx = (w - d) * 0.5;
+        let dy = (h - d) * 0.5;
+        let du = (coords[2] - coords[0]) * dx / w;
+        let dv = (coords[3] - coords[1]) * dy / h;
+        coords[0] += du;
+        coords[2] -= du;
+        coords[1] += dv;
+        coords[3] -= dv;
+        a[0] += dx;
+        b[0] -= dx;
+        a[1] += dy;
+        b[1] -= dy;
     }
     let tex = Textures::raw(&ud)?;
     unsafe {

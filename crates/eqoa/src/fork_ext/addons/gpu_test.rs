@@ -201,3 +201,151 @@ fn forge_gpu_pinned_grid_and_texture_fixture() {
     }
     textures.borrow_mut().collect(true);
 }
+#[test]
+fn round4_owned_texture_circle_masks_corners_but_square_keeps_them() {
+    let instance = wgpu::Instance::default();
+    let adapter = match pollster::block_on(instance.request_adapter(&Default::default())) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("SKIP round4 circle GPU: {e}");
+            return;
+        }
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+    let mut context = Context::create();
+    context
+        .set_ini_filename::<std::path::PathBuf>(None)
+        .unwrap();
+    let renderer = Rc::new(RefCell::new(
+        WgpuRenderer::new(
+            WgpuInitInfo::new(
+                device.clone(),
+                queue.clone(),
+                wgpu::TextureFormat::Rgba8Unorm,
+            ),
+            &mut context,
+        )
+        .unwrap(),
+    ));
+    let host = Host::new().unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let textures = Textures::new(&device, &queue, renderer.clone());
+    host.lua.set_app_data(textures.clone());
+    let handle = textures
+        .borrow_mut()
+        .upload_rgba8(&textures, "round4 mask fixture", 2, 2, &[255; 16])
+        .unwrap();
+    let info = host.lua.create_table().unwrap();
+    info.set("texture", host.lua.create_userdata(handle).unwrap())
+        .unwrap();
+    info.set("width", 2).unwrap();
+    info.set("height", 2).unwrap();
+    host.lua.globals().set("texture", info).unwrap();
+    super::native_core::CORE.with(|c| c.borrow_mut().view.in_world = true);
+    let old_size = super::hud_layout::get_window_size();
+    super::hud_layout::set_window_size(640, 480);
+    let (width, height) = (640, 480);
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("round4 circle mask shot"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    for _ in 0..2 {
+        context
+            .io_mut()
+            .set_display_size([width as f32, height as f32]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context.frame();
+        bridge.invoke(||host.execute("assert(eqoa.hud.image{texture=texture,x=100,y=100,w=100,h=100,shape='circle'});assert(eqoa.hud.image{texture=texture,x=250,y=100,w=100,h=100,shape='square'})")).unwrap();
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut renderer = renderer.borrow_mut();
+            let frame = context.render(renderer.renderer_consumer().unwrap());
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("round4 circle shot"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target.create_view(&Default::default()),
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            renderer
+                .render(frame, &mut pass, FramebufferExtent::new(width, height))
+                .unwrap();
+        }
+        queue.submit([encoder.finish()]);
+    }
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: (width * height * 4) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&Default::default());
+    encoder.copy_texture_to_buffer(
+        target.as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+        },
+        target.size(),
+    );
+    queue.submit([encoder.finish()]);
+    let (tx, rx) = std::sync::mpsc::channel();
+    buffer
+        .slice(..)
+        .map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    rx.recv().unwrap().unwrap();
+    let pixels = buffer.slice(..).get_mapped_range().unwrap();
+    let red = |x: usize, y: usize| pixels[(y * width as usize + x) * 4];
+    assert!(red(150, 160) > 240, "circle center must render");
+    assert!(red(300, 160) > 240, "square center must render");
+    assert!(red(102, 110) < 10, "circle corner must be masked");
+    assert!(
+        red(252, 110) > 240,
+        "square negative control must keep corner"
+    );
+    assert!(red(20, 20) < 10, "background control");
+    assert!(
+        red(150, 108) < 10,
+        "physical circle top must exclude the extra vertical HUD scale"
+    );
+    assert!(
+        red(150, 114) > 240,
+        "physical circle top interior must render"
+    );
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../.superpowers/sdd/round4/circle-mask.png");
+    std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+    let mut png = png::Encoder::new(std::fs::File::create(&out).unwrap(), width, height);
+    png.set_color(png::ColorType::Rgba);
+    png.set_depth(png::BitDepth::Eight);
+    png.write_header()
+        .unwrap()
+        .write_image_data(&pixels)
+        .unwrap();
+    eprintln!("ROUND4_MASK_SHOT {}", out.display());
+    super::hud_layout::set_window_size(old_size.0, old_size.1);
+}

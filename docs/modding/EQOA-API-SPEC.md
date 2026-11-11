@@ -829,3 +829,7 @@ creature p255 or nil when no creature record is available. Existing name, id,
 level, position and class_code (p256) remain the other journal inputs. These
 fields participate in the existing entity before/after deltas. HP is independent
 of the corpse flag; unknown level/search/class fields remain nil.
+
+Circle HUD images inscribe a physical circle inside the transformed image bounds.
+Extra extent from unequal HUD X/Y scales is clipped with matching UVs, preserving
+projection alignment instead of stretching the texture.

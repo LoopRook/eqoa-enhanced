@@ -4,7 +4,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
-- Addon authors: native read-only map state/change events and world-filtered map markers are available. The remaining round 4 map APIs are pending.
+- Addon authors: map state, markers, native minimap views, owned guides, minimap visibility/layout and pointer claims are available. Addon drawing and input can run over the open map. Bounded packaged JSON loading and private asynchronous JSON saving support the coming search and journal mods.
 - Added upstream Move HUD and Reset HUD. The round minimap, its hover cards and search control follow its saved position; HUD numbers, mana bars and Target of Target follow their stock bars. Upstream also restores a lost graphics device in place and improves mercenary tags.
 
 ## 2026-11-11 · Enhanced 0.5.0

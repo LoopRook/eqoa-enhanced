@@ -131,9 +131,9 @@
       "reason": "Map UI state and input integration plus one-line pub(crate) visibility on UiAssets.surfaces for fork-owned HUD tests."
     },
     "crates/eqoa/src/viewer.rs": {
-      "added": 101,
-      "deleted": 11,
-      "reason": "Existing fork integration plus native report adapter registration and one-line input, draw, screenshot/surface hooks; preserve upstream resize and Android code. Round 3 Stage C removes hardcoded B key for stats box, lowering added lines from 123 to 102 and deletions from 13 to 11. Fix audit moves Lua preparation before native HUD drawing and submits its separately recorded overlay after the scene; the two named hooks reduce added lines to 101."
+      "added": 104,
+      "deleted": 14,
+      "reason": "Existing fork integration plus native report adapter registration and one-line input, draw, screenshot/surface hooks; preserve upstream resize and Android code. Round 3 Stage C removes hardcoded B key for stats box, lowering added lines from 123 to 102 and deletions from 13 to 11. Fix audit moves Lua preparation before native HUD drawing and submits its separately recorded overlay after the scene; the two named hooks reduce added lines to 101. Round 4 adds three caller replacements (+3/-3): native minimap wheel hit checks (scripted and live) honor the minimap hide lease, and the draw call redirects stock versus held offscreen view without editing the native minimap drawing."
     },
     "crates/net/src/session.rs": {
       "added": 218,
