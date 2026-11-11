@@ -753,6 +753,36 @@ mod tests {
             let _ = fs::remove_dir_all(&self.0);
         }
     }
+    #[test]
+    fn round4_async_json_loads_large_readonly_resource_and_reports_failure() {
+        let (scratch, h, addon) = fixture();
+        fs::write(
+            addon.package_root.join("resources/large.json"),
+            format!("{{\"payload\":\"{}\"}}", "x".repeat(1024 * 1024 + 64)),
+        )
+        .unwrap();
+        fs::write(addon.package_root.join("resources/bad.json"), b"not json").unwrap();
+        h.execute("loaded=false;failed=false;eqoa.events.on('resource.ready',function(e) if e.data.kind=='json' then assert(e.data.request==req);loaded=#e.data.value.payload==1048640 end end);eqoa.events.on('resource.failed',function(e) if e.data.kind=='json' then failed=true end end);req=assert(eqoa.files.load_json('package_resources/large.json'));local x,e=eqoa.files.load_json('../outside.json');assert(x==nil and e.code=='permission_denied');local x,e=eqoa.files.load_json('data/private.json');assert(x==nil and e.code=='permission_denied')").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !h.lua.globals().get::<bool>("loaded").unwrap() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "JSON worker did not finish"
+            );
+            super::super::native_events::dispatch(&h).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        h.execute("req=assert(eqoa.files.load_json('package_resources/bad.json'))")
+            .unwrap();
+        while !h.lua.globals().get::<bool>("failed").unwrap() {
+            assert!(std::time::Instant::now() < deadline);
+            super::super::native_events::dispatch(&h).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(scratch.0.exists());
+        assert!(super::super::async_json::worked_off_thread(&h.lua));
+    }
+
     fn fixture() -> (Fixture, Host, DiscoveredAddon) {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(

@@ -78,7 +78,7 @@ impl Session {
             ("entities", "list get find named distance", 2),
             ("events", "on off once after", 2),
             ("files", "read write remove", 2),
-            ("files", "list", 4),
+            ("files", "list load_json", 4),
             ("fonts", "load default release", 2),
             ("gems", "get is_gem format", 3),
             ("group", "get", 2),
@@ -89,7 +89,7 @@ impl Session {
             ("icons", "class disposition", 4),
             ("input", "get claim release capture_text rotate_dpad", 2),
             ("input", "bind", 3),
-            ("input", "pointer claim_pointer minimap_wheel",4),
+            ("input", "pointer claim_pointer minimap_wheel", 4),
             ("inventory", "get", 3),
             (
                 "items",
@@ -888,6 +888,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         .get::<Table>("entities")?
         .set("status", guard(lua, status, "eqoa.entities.status", None)?)?;
     super::file_io::install_native(host)?;
+    super::async_json::install(host)?;
     super::native_settings::install(host)?;
     bind(
         lua,

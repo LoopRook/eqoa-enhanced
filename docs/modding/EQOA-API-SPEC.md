@@ -790,3 +790,16 @@ None. The owner has already chosen naming, stability timing, Forge compatibility
 
 
 Round 3: `player.stats_changed` is a notification with an empty data record whenever the native detailed Stats snapshot changes, including mastery/cap-only changes that do not change Player fields. Read `eqoa.player.stats()` after delivery. Consumers caching scalar drawing data must also invalidate on `state.reset`, `enabled`, and `events.dropped`.
+
+
+Round 4 JSON resource details: `files.load_json(path)` returns a request integer and nil,
+or nil plus an Error. At most two loads per VM are in flight; size is at most 16 MiB,
+depth 32, two million JSON values, and root object/array. Paths must name read-only
+`resources/` or `package_resources/` mounts; private overlays are bypassed. Completion
+uses `resource.ready{kind="json",request,value,handle=value}` or
+`resource.failed{kind="json",request,error}`. Decoded tables are mutable. JSON null is
+`eqoa.files.null`; decoded arrays retain an internal array tag, including empty arrays.
+The worker reads and decodes; Lua table materialization occurs on the VM thread at
+dispatch. Calling the loader opts that VM into a 128 MiB heap (ordinary VMs retain their
+existing limit), so the bounded catalogue can coexist with journal tables. This is a
+memory allowance, not a guarantee that materializing a large table fits one frame.

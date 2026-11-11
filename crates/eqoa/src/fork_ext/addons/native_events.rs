@@ -147,8 +147,8 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("input.pad", "before after"),
         ("pointer.pressed", "x y inside_window button steps"),
         ("pointer.wheel", "x y inside_window button steps"),
-        ("resource.ready", "kind handle error"),
-        ("resource.failed", "kind handle error"),
+        ("resource.ready", "kind handle error request value"),
+        ("resource.failed", "kind handle error request value"),
         ("events.dropped", "first_seq last_seq count streams"),
     ] {
         for field in fields.split_whitespace() {
@@ -345,6 +345,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
     Ok(())
 }
 pub(crate) fn dispatch(host: &Host) -> Result<()> {
+    super::async_json::poll(&host.lua)?;
     super::native_core::flush_deferred();
     let lua = &host.lua;
     let shared = bus(lua);
@@ -664,6 +665,8 @@ fn readonly_envelope(lua: &mlua::Lua, event: mlua::Table) -> Result<mlua::Table>
                     "token".into(),
                     "kind".into(),
                     "handle".into(),
+                    "request".into(),
+                    "value".into(),
                     "error".into(),
                 ]),
             )?,
@@ -700,7 +703,9 @@ pub(crate) fn publish(event: &Event) {
         for weak in registry.borrow().iter() {
             if let Some(shared) = weak.upgrade() {
                 let mut b = shared.borrow_mut();
-                if b.active && (event.name!="guide.lost" || event.data["owner"].as_u64()==Some(b.vm)) {
+                if b.active
+                    && (event.name != "guide.lost" || event.data["owner"].as_u64() == Some(b.vm))
+                {
                     enqueue(&mut b, event.clone(), None);
                 }
             }
@@ -771,4 +776,33 @@ pub(crate) fn capture_diagnostic(code: &str, reason: &str) {
                 .record("eqoa.events", code, reason);
         }
     });
+}
+
+pub(crate) fn json_resource(
+    lua: &mlua::Lua,
+    request: u64,
+    value: Option<mlua::Value>,
+    failure: Option<&str>,
+) -> Result<()> {
+    let data = lua.create_table()?;
+    data.set("kind", "json")?;
+    data.set("request", request)?;
+    if let Some(value) = value {
+        data.set("value", value.clone())?;
+        data.set("handle", value)?;
+    }
+    if let Some(message) = failure {
+        data.set("error",record(lua,"eqoa.Error",&json!({"code":"failed","message":message.chars().take(2048).collect::<String>(),"capability":"eqoa.files.load_json"}))?)?;
+    }
+    let mut event = local(
+        if failure.is_some() {
+            "resource.failed"
+        } else {
+            "resource.ready"
+        },
+        json!({}),
+    );
+    event.bytes = 256; // Bounded table reference; its storage is charged to the opt-in JSON VM heap.
+    enqueue(&mut bus(lua).borrow_mut(), event, Some(data));
+    Ok(())
 }
