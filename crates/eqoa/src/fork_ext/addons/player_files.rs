@@ -25,10 +25,14 @@ struct Completion {
     kind: &'static str,
     result: std::result::Result<String, (&'static str, String)>,
 }
+struct Pending {
+    kind: &'static str,
+    rx: mpsc::Receiver<Completion>,
+}
 #[derive(Default)]
 struct Service {
     next: u64,
-    pending: Option<mpsc::Receiver<Completion>>,
+    pending: Option<Pending>,
     permit: Option<Arc<AtomicBool>>,
 }
 impl Drop for Service {
@@ -58,11 +62,11 @@ pub(crate) fn poll(lua: &Lua) -> Result<()> {
         .borrow()
         .pending
         .as_ref()
-        .and_then(|r| match r.try_recv() {
+        .and_then(|r| match r.rx.try_recv() {
             Ok(v) => Some(v),
             Err(mpsc::TryRecvError::Disconnected) => Some(Completion {
                 id: s.borrow().next,
-                kind: "file",
+                kind: r.kind,
                 result: Err(("failed", "file worker disconnected".into())),
             }),
             Err(mpsc::TryRecvError::Empty) => None,
@@ -168,7 +172,7 @@ fn start(
         })
         .map_err(mlua::Error::external)?;
     let mut s = s.borrow_mut();
-    s.pending = Some(rx);
+    s.pending = Some(Pending { kind, rx });
     s.permit = Some(permit);
     lua.pack_multi((id, Value::Nil))
 }
@@ -234,6 +238,42 @@ fn read_selected(path: &Path) -> std::result::Result<Vec<u8>, String> {
     }
     Ok(bytes)
 }
+#[cfg(test)]
+static COPY_PAUSE: std::sync::Mutex<Option<(PathBuf, mpsc::Sender<()>, mpsc::Receiver<()>)>> =
+    std::sync::Mutex::new(None);
+#[cfg(test)]
+pub(super) fn pause_copy(dir: PathBuf) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+    let (entered, rx) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    *COPY_PAUSE.lock().unwrap() = Some((dir, entered, wait));
+    (rx, release)
+}
+#[cfg(test)]
+fn paused_copy(dir: &Path) {
+    let pause = {
+        let mut p = COPY_PAUSE.lock().unwrap();
+        if p.as_ref().is_some_and(|p| p.0 == dir) {
+            p.take()
+        } else {
+            None
+        }
+    };
+    if let Some((_, entered, release)) = pause {
+        let _ = entered.send(());
+        let _ = release.recv();
+    }
+}
+#[cfg(test)]
+pub(super) fn disconnect_worker(lua: &Lua) {
+    let (tx, rx) = mpsc::sync_channel(1);
+    drop(tx);
+    service(lua)
+        .borrow_mut()
+        .pending
+        .as_mut()
+        .expect("file action pending")
+        .rx = rx;
+}
 fn active(permit: &AtomicBool) -> std::result::Result<(), String> {
     if permit.load(Ordering::Acquire) {
         Ok(())
@@ -241,7 +281,54 @@ fn active(permit: &AtomicBool) -> std::result::Result<(), String> {
         Err("file action cancelled because mod was disabled".into())
     }
 }
-// CreateNew preserves every existing file even under concurrent exports.
+// Publish a synced temporary file atomically, without replacing any destination.
+#[cfg(windows)]
+fn rename_new(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    fn wide(path: &Path) -> std::io::Result<Vec<u16>> {
+        let path = std::path::absolute(path)?;
+        let raw = path.as_os_str().encode_wide().collect::<Vec<_>>();
+        let mut out = if raw.starts_with(&[92, 92, 63, 92]) {
+            raw
+        } else if raw.starts_with(&[92, 92]) {
+            let mut v = vec![92, 92, 63, 92, 85, 78, 67, 92];
+            v.extend_from_slice(&raw[2..]);
+            v
+        } else {
+            let mut v = vec![92, 92, 63, 92];
+            v.extend(raw);
+            v
+        };
+        out.push(0);
+        Ok(out)
+    }
+    let from = wide(from)?;
+    let to = wide(to)?;
+    // Both buffers are terminated and remain live; no REPLACE_EXISTING flag.
+    let moved = unsafe {
+        windows_sys::Win32::Storage::FileSystem::MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            windows_sys::Win32::Storage::FileSystem::MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved != 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+#[cfg(not(windows))]
+fn rename_new(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::hard_link(from, to)?;
+    fs::remove_file(from)
+}
+struct Temporary(PathBuf);
+impl Drop for Temporary {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
 fn unique_copy(
     dir: &Path,
     name: &str,
@@ -253,6 +340,31 @@ fn unique_copy(
         super::file_io::no_links(dir)?;
     }
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let _guard = if quota_root.is_some() {
+        Some(super::sandbox::lock_parents(&dir.join(name), false)?)
+    } else {
+        None
+    };
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let (temporary, mut file) = loop {
+        active(permit)?;
+        let path = dir.join(format!(
+            ".eqoa-file-{}-{}.tmp",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        match OpenOptions::new().create_new(true).write(true).open(&path) {
+            Ok(file) => break (Temporary(path), file),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    };
+    file.write_all(bytes)
+        .and_then(|()| file.sync_all())
+        .map_err(|e| e.to_string())?;
+    drop(file);
+    #[cfg(test)]
+    paused_copy(dir);
     let source = Path::new(name);
     let stem = source
         .file_stem()
@@ -265,39 +377,19 @@ fn unique_copy(
         .unwrap_or_default();
     for n in 1..=10000 {
         active(permit)?;
-        let name = if n == 1 {
+        let path = dir.join(if n == 1 {
             name.to_owned()
         } else {
             format!("{stem} ({n}){ext}")
-        };
-        let path = dir.join(name);
-        let _guard = if quota_root.is_some() {
-            Some(super::sandbox::lock_parents(&path, false)?)
-        } else {
-            None
-        };
-        if quota_root.is_some() {
-            super::file_io::no_links(&path)?;
-        }
+        });
         if let Some(root) = quota_root {
+            super::file_io::no_links(&path)?;
             if !super::sandbox::import_path(root, &path) {
                 super::sandbox::check_quota(root, &path, bytes.len())?;
             }
         }
-        match OpenOptions::new().create_new(true).write(true).open(&path) {
-            Ok(mut f) => {
-                let result = f
-                    .write_all(bytes)
-                    .and_then(|()| f.sync_all())
-                    .map_err(|e| e.to_string())
-                    .and_then(|()| active(permit));
-                drop(f);
-                if let Err(e) = result {
-                    let _ = fs::remove_file(&path);
-                    return Err(e);
-                }
-                return Ok(path);
-            }
+        match rename_new(&temporary.0, &path) {
+            Ok(()) => return Ok(path),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e.to_string()),
         }
@@ -338,7 +430,7 @@ fn pick(
         picked
     })
 }
-#[cfg(not(test))]
+#[cfg(all(not(test), any(target_os = "linux", target_os = "macos", windows)))]
 fn pick(
     _lua: &Lua,
     title: String,
@@ -350,6 +442,14 @@ fn pick(
             .add_filter("Files", &ext)
             .pick_file()
     })
+}
+#[cfg(all(not(test), not(any(target_os = "linux", target_os = "macos", windows))))]
+fn pick(
+    _lua: &Lua,
+    _title: String,
+    _ext: Vec<String>,
+) -> Box<dyn FnOnce() -> Option<PathBuf> + Send> {
+    Box::new(|| None)
 }
 fn desktop(lua: &Lua) -> Option<PathBuf> {
     #[cfg(test)]

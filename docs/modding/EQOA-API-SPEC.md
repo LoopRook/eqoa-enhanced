@@ -928,3 +928,15 @@ Each mod has at most one outstanding native dialog/file action. Disabling cancel
 its copy and drops completion delivery, but an OS picker may remain open until the
 player closes it; re-enabling cannot open another picker while that worker remains.
 Dialog titles begin with the mod's display name.
+
+File actions return `permission_denied` without the declared permission,
+`requires_player` without unused activation, `busy` with an outstanding request,
+`invalid_argument` for invalid specs/names, `quota` for bounded resources,
+`unavailable` for absent endpoints, and correlated `resource.failed` errors for
+worker I/O/cancellation. Imports always use `.json` staging names; the OS extension
+filter is a hint and the chosen file is copied with a 16 MiB bounded read.
+Exports publish a synced temporary file by an atomic non-replacing rename;
+pre-existing files receive numbered collision suffixes. Worker disconnects retain
+the original `import`/`export` kind and request id. Removing a shared file emits
+`shared.changed` as saving does. Migrated key collisions preserve both explicit
+assignments for the player to resolve on Controls.

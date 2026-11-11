@@ -222,3 +222,67 @@ or worst-case allocation/GC promises.
 The accepted viewer budget is unchanged at +104/-14; all fix-round implementation
 is fork-owned. Final release build is run after this report's commit, as the last gate;
 its outcome is recorded in the final six-line handoff and ignored fix-release-final.log.
+
+
+## Part B: journal and search mods (in progress)
+
+The Part B brief was committed first (`5ced426`). Work remains on
+`feat/eqoa-api-r4`; no push, merge, tag or protected-branch change was made.
+The independent API review b1 is preserved unchanged in `a7f7c5f`.
+
+Implemented checkpoints: manifest declarations (`2b6e947`); live shared JSON reads
+and successful-save notifications (`2b3c463`); bounded delayed commands (`bb6cddb`);
+player file actions (`b1989d0`); one-time journal/key migration (`fe996e3`); generic
+mod option action rows (`8a342dd`). The journal migration copies a >1 MiB fixture,
+keeps the original and existing destination, and does not resurrect deleted mod data.
+
+Review fixes committed: H1 export extension/name restrictions (`4d101b4`); M1
+separate command queues, four pending messages per sender and 4 KiB JSON arguments
+(`cafdd94`); M2 redirected Desktop/picked-file support with private junction denial
+(`25a1a02`); M3 three persistent-sequence imports outside save quota (`d60ac07`);
+M4 one shared activation across VMs, non-forwardable command authority and a request
+guard retained while a disabled mod's picker remains open (`36df7c6`).
+
+Most recent completed focused run: **15 passed / 0 failed / 0 ignored / 0 SKIP**
+(`review-m4-green2.log`, 3.38 s). All Cargo invocations used the shared foreground
+lock/cache and scratch config. A blocked-picker regression caught a guard Drop
+mutex deadlock; its verified test executable was stopped, Cargo/lock drained,
+and lazy guard construction fixed it before the successful rerun.
+
+Observed RED controls so far: missing shared loader; reserved shared-write path;
+missing command/file APIs; self-command RefCell borrow; hidden resource data from
+double guarding; absent journal/key migration; unsafe `.bat` export; >4 KiB
+command acceptance; redirected-folder rejection; imports exhausting private quota;
+two VMs exporting from one physical action; missing mod-name dialog prefix.
+Actual worker copies/collisions/cancellation, pointer/key authority, retained
+imports and near-14 MiB save use scratch data. Picker selection and Desktop
+resolution are injected; the junction fixture exercises real Windows redirection.
+No live native dialog, disc, oracle or owner playtest is claimed.
+
+**Not complete:** LOW review controls/fixes are in progress. The bundled journal
+and search mods, native search/journal removal, moved catalogue/font packaging,
+PNG captures, parity/performance measurements, footprint tightening/dry-run
+comparison, broad addon/client/WASM gates and final release build remain pending.
+No full-suite or completion claim is made by the focused results above.
+
+
+Review LOW controls: the baseline run reproduced missing remove notifications,
+`kind="file"` on worker disconnect, and a visible partial final export name.
+The corrected focused run passed **20/0/0**, no SKIP, in 5.82 s. A subsequent
+five-protection mutation batch produced **7 expected failures / 13 passes**:
+ordinary command queue/sender guards, blocked-dialog guard, persistent import
+sequence, delegated-mark expiry, rebound-key migration and the key-collision
+fixture all detected their removed protection. The four mutated source files
+were restored automatically and verified byte-for-byte before the next green run.
+
+The native export now syncs a temporary file and uses a non-replacing atomic
+Windows rename; its pause fixture proves the final filename is absent before
+publication and complete afterward. Shared deletion notifies readers; disconnected
+workers retain their original operation kind. Key migration preserves both
+explicit assignments when they collide; Controls remains the place to rebind.
+The rfd reference is cfg-gated on targets that provide it. Remaining review LOWs:
+no per-pair cross-frame command rate limit; no retry/fallback policy for a legacy
+migration on filesystems lacking hard-link support; real picker cancellation
+still requires closing the OS dialog; no live non-Windows file-backend claim.
+Migration and native removal must ship together so no intervening native-only
+sightings are omitted. Native removal is still pending at this checkpoint.

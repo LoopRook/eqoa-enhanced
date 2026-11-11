@@ -143,6 +143,7 @@ impl Mounts {
         if target.exists() {
             fs::remove_file(&target).map_err(|e| e.to_string())?;
         }
+        super::exchange::saved(self, &key);
         Ok(true)
     }
 }

@@ -346,6 +346,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn round4b_review_key_migration_keeps_existing_mod_collision() {
+        let mut files=std::collections::HashMap::new();
+        migrate_key_text(b"key.map_search=f8\n",b"mod.third_party.open=f8\n",|name,bytes|{files.insert(name.to_string(),bytes.to_vec());Ok(())}).unwrap();
+        let saved=String::from_utf8(files[KEYS_FILE].clone()).unwrap();
+        assert!(saved.contains("mod.third_party.open=f8\n"),"another mod's explicit binding was overwritten");
+        assert!(saved.contains("mod.eqoa_map_search.open=f8\n"),"the player's rebound search key was lost");
+        assert_eq!(saved.lines().count(),2);assert!(files[LEGACY_KEYS_FILE].is_empty());
+    }
+
+    #[test]
     fn round4b_migration_keeps_rebound_search_and_stop_keys() {
         let legacy=b"key.map_search=f8\nkey.map_stop=f9\nkey.jump=space\n";
         let mut files=std::collections::HashMap::new();

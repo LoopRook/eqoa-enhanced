@@ -618,6 +618,46 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn round4b_review_remove_notifies_shared_readers() {
+        let (dir,owner,mut addon)=fixture();addon.id="owner_remove".into();addon.extensions.shares=vec!["data/journal.json".into()];install(&owner,&addon,Some(dir.0.join("config"))).unwrap();owner.execute("assert(eqoa.files.write('journal.json','{}'))").unwrap();
+        let (_dir,reader,_)=fixture();reader.execute("changed=false;eqoa.events.on('shared.changed',function(e) changed=e.data.mod=='owner_remove' and e.data.path=='data/journal.json' end)").unwrap();
+        owner.execute("assert(eqoa.files.remove('journal.json'))").unwrap();super::super::native_events::dispatch(&reader).unwrap();
+        assert!(reader.lua.globals().get::<bool>("changed").unwrap());
+    }
+
+    #[test]
+    fn round4b_review_disconnect_reports_original_import_kind() {
+        use super::super::{options,player_files::{self,TestIo},native_events};
+        let (dir,host,mut addon)=fixture();addon.extensions.permissions=vec!["import".into()];install(&host,&addon,Some(dir.0.join("config"))).unwrap();host.lua.set_app_data(TestIo{pick:None,desktop:dir.0.join("Desktop")});
+        host.execute("got_kind='';capability='';button_id=assert(eqoa.options.button({id='import',label='Import journal...'},function() req=assert(eqoa.files.import({title='Journal',extensions={'json'}})) end)).item_id;eqoa.events.on('resource.failed',function(e) assert(e.data.request==req);got_kind=e.data.kind;capability=e.data.error.capability end)").unwrap();
+        assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));native_events::dispatch(&host).unwrap();player_files::disconnect_worker(&host.lua);native_events::dispatch(&host).unwrap();
+        assert_eq!(host.lua.globals().get::<String>("got_kind").unwrap(),"import");assert_eq!(host.lua.globals().get::<String>("capability").unwrap(),"eqoa.files.import");
+    }
+
+    #[test]
+    fn round4b_review_export_has_no_partial_final_file() {
+        use super::super::{options,player_files::{self,TestIo},native_events};
+        struct Release(Option<std::sync::mpsc::Sender<()>>);impl Drop for Release{fn drop(&mut self){if let Some(tx)=self.0.take(){let _=tx.send(());}}}
+        let (dir,host,mut addon)=fixture();addon.extensions.permissions=vec!["export".into()];install(&host,&addon,Some(dir.0.join("config"))).unwrap();let desktop=dir.0.join("Desktop");host.lua.set_app_data(TestIo{pick:None,desktop:desktop.clone()});
+        let (rx,release)=player_files::pause_copy(desktop.clone());let mut release=Release(Some(release));
+        host.execute("assert(eqoa.files.write('journal.json','complete journal'));done=false;button_id=assert(eqoa.options.button({id='export',label='Export journal'},function() assert(eqoa.files.export('journal.json','journal.json')) end)).item_id;eqoa.events.on('resource.ready',function(e) if e.data.kind=='export' then done=true end end)").unwrap();
+        assert!(options::activate_button(host.lua.globals().get("button_id").unwrap()));native_events::dispatch(&host).unwrap();rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(!desktop.join("journal.json").exists(),"a final export name was visible before publication");
+        let temp=fs::read_dir(&desktop).unwrap().map(|e|e.unwrap().path()).find(|p|p.extension().is_some_and(|e|e=="tmp")).expect("synced temporary export");assert_eq!(fs::read_to_string(temp).unwrap(),"complete journal");
+        release.0.take().unwrap().send(()).unwrap();let end=std::time::Instant::now()+std::time::Duration::from_secs(5);while !host.lua.globals().get::<bool>("done").unwrap(){assert!(std::time::Instant::now()<end);native_events::dispatch(&host).unwrap();std::thread::sleep(std::time::Duration::from_millis(1));}
+        assert_eq!(fs::read_to_string(desktop.join("journal.json")).unwrap(),"complete journal");assert_eq!(fs::read_dir(desktop).unwrap().count(),1);
+    }
+
+    #[test]
+    fn round4b_review_unused_delegated_action_expires_after_dispatch() {
+        use super::super::{native_events,native_core::CORE};use std::sync::atomic::Ordering;
+        let (dir,receiver,mut addon)=fixture();addon.id="unused_receiver".into();addon.extensions.commands=vec!["noop".into()];install(&receiver,&addon,Some(dir.0.join("config"))).unwrap();receiver.execute("seen=false;eqoa.events.on('mod.command',function() seen=true end)").unwrap();
+        let (_dir,sender,_)=fixture();sender.execute("eqoa.events.on('input.key',function() assert(eqoa.mods.send('unused_receiver','noop')) end)").unwrap();
+        let action=CORE.with(|c|{let mut c=c.borrow_mut();c.emit("input.key",serde_json::json!({"key":"f2","down":true,"repeat":false,"synthetic":false}));c.events.back().unwrap().player_action.clone().unwrap()});
+        assert_eq!(action.load(Ordering::Acquire),0);native_events::dispatch(&sender).unwrap();assert_eq!(action.load(Ordering::Acquire),1);native_events::dispatch(&receiver).unwrap();assert!(receiver.lua.globals().get::<bool>("seen").unwrap());assert_eq!(action.load(Ordering::Acquire),2,"unused command authority survived its dispatch");
+    }
+
+    #[test]
     fn round4b_review_disabled_dialog_stays_single_and_has_mod_title() {
         use super::super::{options,player_files::{TestIo,BlockPick},native_events};
         struct Release(Option<std::sync::mpsc::Sender<()>>);impl Drop for Release{fn drop(&mut self){if let Some(tx)=self.0.take(){let _=tx.send(());}}}
