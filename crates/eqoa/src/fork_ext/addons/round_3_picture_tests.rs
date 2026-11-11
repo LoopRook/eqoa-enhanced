@@ -321,8 +321,10 @@ fn assert_pixels_match(name: &str, size: (u32, u32), native: &[u8], modded: &[u8
             }
         }
         assert!(painted > 0, "{name}: empty reference element {r:?}");
+        // 0.5% of an element: text edges rasterize a few pixels differently on another
+        // adapter (CI's: 17 of 9,000 at 1280x720); a missing or moved readout differs in hundreds.
         assert!(
-            different as f64 <= count as f64 * 0.001,
+            different as f64 <= count as f64 * 0.005,
             "{name} {size:?} element {r:?}: {different}/{count} differ"
         );
     }
