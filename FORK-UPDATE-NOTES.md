@@ -4,6 +4,9 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Creature recording now has an enabled-by-default Creature Journal addon, with its own import/export rows, bounded Forge journal imports, and quiet/periodic saves.
+- Map Search is an enabled-by-default addon with rebindable F2/F4, creature/group/place tabs, a minimap button that follows Move HUD, shared journal results, and live/known guidance.
+
 - Fixed live addon map updates and lost-guide notifications. Existing UI mods keep the minimap unless they hide it explicitly. Private journal JSON can reload and flushes on disable or quit; large Lua heaps require the declared `large_data` capability. Catalogue tables load in bounded slices.
 - Addon authors: map state, markers, native minimap views, owned guides, minimap visibility/layout and pointer claims are available. Addon drawing and input can run over the open map. Bounded packaged JSON loading and private asynchronous JSON saving support the coming search and journal mods.
 - Added upstream Move HUD and Reset HUD. The round minimap, its hover cards and search control follow its saved position; HUD numbers, mana bars and Target of Target follow their stock bars. Upstream also restores a lost graphics device in place and improves mercenary tags.
@@ -217,7 +220,3 @@ Upstream changes remain in UPDATE-NOTES.md.
 - After changing keys in Controls, the map's keyboard legend now shows the keys
   you chose, including zoom, waypoints, markers, towns, and quest markers.
 - A control with no keyboard key assigned is shown as unbound.
-
-- Creature recording now has an enabled-by-default Creature Journal addon, with its own import/export rows, bounded Forge journal imports, and quiet/periodic saves.
-
-- Map Search is an enabled-by-default addon with rebindable F2/F4, creature/group/place tabs, a minimap button that follows Move HUD, shared journal results, and live/known guidance.

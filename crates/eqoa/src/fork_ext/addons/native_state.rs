@@ -1212,8 +1212,7 @@ fn install_math(lua: &Lua) -> Result<()> {
                     if let Value::Table(et) = &ev {
                         let data: mlua::Table = et.get("data")?;
                         let down = data.get::<Option<bool>>("down")?.unwrap_or(false);
-                        let rep = data.get::<Option<bool>>("repeat")?.unwrap_or(false)
-                            || data.get::<Option<bool>>("repeat_")?.unwrap_or(false);
+                        let rep = data.get::<Option<bool>>("repeat")?.unwrap_or(false);
                         let key = data.get::<Option<String>>("key")?.unwrap_or_default();
                         if down && !rep {
                             let bound =

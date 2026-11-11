@@ -2302,3 +2302,8 @@ impl Play {
         }
     }
 }
+
+#[cfg(test)]
+impl Play {
+    pub(crate) fn test_map_search_surface(&mut self,open:bool){self.map.open=open;}
+}

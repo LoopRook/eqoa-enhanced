@@ -989,6 +989,7 @@ impl Manager {
 mod tests {
     include!("manager_profiles_tests.rs");
     include!("manager_scope_recovery_tests.rs");
+    include!("map_mod_manager_tests.rs");
     use super::*;
     use dear_imgui_rs::Context;
     use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo};

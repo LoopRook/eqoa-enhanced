@@ -138,3 +138,18 @@ impl Map {
         })
     }
 }
+
+#[cfg(test)]
+impl Map {
+    /// Disc-free native chrome/round-minimap scene used behind addon captures.
+    /// No terrain art is fabricated; tiles remain absent without a disc.
+    pub(crate) fn round4_fixture(device:&wgpu::Device,queue:&wgpu::Queue,size:(u32,u32),mini:bool)->Self{
+        let mut map=crate::map::testing::up(size);
+        map.open=!mini;
+        let lib=esf::Library::new();let vui=crate::pointer::testing::vui();
+        let cx=Context{lib:&lib,device,queue,format:wgpu::TextureFormat::Rgba8Unorm,size,dt:0.,player:Some(([25300.,0.,15200.],0.)),world:0,origin:[0.;2],group:Vec::new(),in_group:false,target:None,sticks:[0.;4],keyboard:true,words:None,vui:Some(&vui),quest_marks:None};
+        map.layers(&cx);
+        if mini {map.mini_frame(&cx,&mini::MiniView::default());} else {map.compose(&cx);}
+        map
+    }
+}

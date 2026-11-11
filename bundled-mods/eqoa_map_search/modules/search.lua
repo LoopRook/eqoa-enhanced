@@ -67,10 +67,11 @@ function M.clear() M.guide=nil;eqoa.map.clear_guide() end
 function M.toggle() M.open=not M.open;M.selected=1;M.offset=1;M.dirty=true;eqoa.input.capture_text(M.open) end
 function M.close() M.open=false;eqoa.input.capture_text(false) end
 local function sort_rows(rows)
+    -- Compute distances once. Recomputing square roots inside every comparison
+    -- exhausted the VM instruction budget on the unfiltered catalogue.
+    for _,r in ipairs(rows) do r.sort_distance=r.at and distance(r.at) or math.huge end
     table.sort(rows,function(a,b)
-        if (a.at==nil)~=(b.at==nil) then return a.at~=nil end
-        local da,db=a.at and distance(a.at) or 0,b.at and distance(b.at) or 0
-        if da~=db then return da<db end
+        if a.sort_distance~=b.sort_distance then return a.sort_distance<b.sort_distance end
         return a.name<b.name
     end)
 end
