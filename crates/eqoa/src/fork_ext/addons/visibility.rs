@@ -892,6 +892,7 @@ mod tests {
             api: None,
             entry_mode: Default::default(),
             requested_capabilities: vec![],
+            extensions: Default::default(),
             initially_enabled: true,
             mods_root: None,
         })

@@ -863,3 +863,29 @@ return nil,Error.
 Pointer comparison example: `local r=eqoa.hud.layout().minimap; local p=eqoa.input.pointer();
 local inside=p.x>=r.x and p.x<=r.x+r.width and p.y>=r.y and p.y<=r.y+r.height`.
 The same `r` can be passed directly to `eqoa.input.claim_pointer(r)`.
+
+
+### Round 4 Part B: shared journal and player file actions
+
+Native manifests may declare `shares: ["data/journal.json"]`, `commands:
+["import_journal", "export_journal"]` and `permissions: ["import", "export"]`.
+Declarations are bounded lists; shared paths must be contained private `data/`
+paths, commands use nonempty ASCII identifiers, and permissions are limited to
+`import` and `export`. Invalid declarations reject the package with a diagnostic.
+
+`eqoa.files.load_json("@mod_id/data/journal.json")` uses the existing 16 MiB
+worker and sliced materialisation limits. Only a running owner's explicitly
+shared file is readable. `shared.changed{mod,path}` follows a successful save.
+
+`eqoa.mods.send(mod_id, command, args?)` queues `mod.command{from,command,args}`
+for the next event boundary. Missing/disabled targets and undeclared commands
+return nil,Error. Queues and payloads are bounded. A player key/pointer activation
+may delegate its import/export authority through one command, once.
+
+`eqoa.files.import{title,extensions}` and `eqoa.files.export(private_path,file_name)`
+require their manifest permission and a player activation. Native dialogs and
+copies run off the frame thread. Import copies to private `imports/` and emits
+`resource.ready{kind="import",request,path}`; cancellation emits
+`resource.failed` with code `cancelled`. Export copies to Desktop with collision
+suffixes ` (2)`, ` (3)`, etc.; it never replaces an existing destination. Paths
+outside the issuing mod's private mounts are denied.

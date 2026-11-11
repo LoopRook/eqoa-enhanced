@@ -26,8 +26,63 @@ pub(crate) struct DiscoveredAddon {
     pub api: Option<String>,
     pub entry_mode: EntryMode,
     pub requested_capabilities: Vec<String>,
+    pub extensions: Extensions,
     pub initially_enabled: bool,
     pub mods_root: Option<PathBuf>,
+}
+
+/// Startup-only declarations; no host path or ambient filesystem authority.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Extensions {
+    pub shares: Vec<String>,
+    pub commands: Vec<String>,
+    pub permissions: Vec<String>,
+}
+fn extension_list(raw: &serde_json::Value, field: &str) -> Result<Vec<String>, String> {
+    let Some(value) = raw.get(field) else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .filter(|a| a.len() <= 32)
+        .ok_or_else(|| format!("Manifest '{field}' must be an array of at most 32 strings"))?;
+    let mut result = Vec::new();
+    for value in values {
+        let value = value
+            .as_str()
+            .filter(|s| s.len() <= 256)
+            .ok_or_else(|| format!("Invalid manifest '{field}' string"))?;
+        let valid = match field {
+            "shares" => {
+                value.starts_with("data/")
+                    && value.split('/').count() <= 8
+                    && value.split('/').all(|s| {
+                        !s.is_empty()
+                            && s != "."
+                            && s != ".."
+                            && !s.chars().any(|c| c.is_control() || "\\:*?<>|".contains(c))
+                    })
+                    && !value.ends_with(['.', ' '])
+            }
+            "commands" => is_valid_id(value),
+            "permissions" => matches!(value, "import" | "export"),
+            _ => false,
+        };
+        if !valid {
+            return Err(format!("Invalid manifest '{field}': {value:?}"));
+        }
+        if !result.iter().any(|s| s == value) {
+            result.push(value.to_string());
+        }
+    }
+    Ok(result)
+}
+fn extensions(raw: &serde_json::Value) -> Result<Extensions, String> {
+    Ok(Extensions {
+        shares: extension_list(raw, "shares")?,
+        commands: extension_list(raw, "commands")?,
+        permissions: extension_list(raw, "permissions")?,
+    })
 }
 
 impl DiscoveredAddon {
@@ -377,6 +432,7 @@ fn discover_script_root(script_root: &Path, canonical_root: &Path, ctx: &mut Dis
                     api: None,
                     entry_mode: Default::default(),
                     requested_capabilities: Vec::new(),
+                    extensions: Default::default(),
                     initially_enabled: false,
                     mods_root: Some(canonical_root.to_path_buf()),
                 });
@@ -684,6 +740,14 @@ fn parse_native_manifest(
         }
     }
 
+    let extensions = match extensions(&raw) {
+        Ok(value) => value,
+        Err(message) => {
+            ctx.add_diagnostic(manifest_path.to_path_buf(), message);
+            return;
+        }
+    };
+
     // Enabled
     let initially_enabled = match raw.get("enabled") {
         Some(serde_json::Value::Bool(b)) => *b,
@@ -746,6 +810,7 @@ fn parse_native_manifest(
         api: Some("eqoa/1".to_string()),
         entry_mode,
         requested_capabilities,
+        extensions,
         initially_enabled,
         mods_root: Some(canonical_root.to_path_buf()),
     });
@@ -845,6 +910,7 @@ fn parse_legacy_package(
         api: None,
         entry_mode: Default::default(),
         requested_capabilities: Vec::new(),
+        extensions: Default::default(),
         initially_enabled: false,
         mods_root: Some(canonical_root.to_path_buf()),
     });
@@ -871,6 +937,34 @@ mod tests {
     impl Drop for TempDir {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn round4b_manifest_rejects_invalid_shares_commands_and_permissions() {
+        let temp = TempDir::new("r4b_manifest");
+        let pkg = temp.path().join("journal");
+        fs::create_dir_all(&pkg).unwrap();
+        fs::write(pkg.join("main.lua"), "-- fixture").unwrap();
+        let base = serde_json::json!({"schemaVersion":1,"runtime":"lua","api":"eqoa/1",
+            "id":"journal","entry":"main.lua","shares":["data/journal.json"],
+            "commands":["import_journal"],"permissions":["import","export"]});
+        fs::write(pkg.join("mod.json"), base.to_string()).unwrap();
+        assert_eq!(discover(temp.path()).addons.len(), 1);
+        for (field, value) in [
+            ("shares", serde_json::json!(["../secret.json"])),
+            ("shares", serde_json::json!(["resources/private.json"])),
+            ("shares", serde_json::json!(["data/a:stream"])),
+            ("commands", serde_json::json!([""])),
+            ("permissions", serde_json::json!(["filesystem"])),
+            ("permissions", serde_json::json!("import")),
+        ] {
+            let mut bad = base.clone();
+            bad[field] = value;
+            fs::write(pkg.join("mod.json"), bad.to_string()).unwrap();
+            let result = discover(temp.path());
+            assert!(result.addons.is_empty(), "accepted invalid {field}");
+            assert!(result.diagnostics.iter().any(|d| d.message.contains(field)));
         }
     }
 

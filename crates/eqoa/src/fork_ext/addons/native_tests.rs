@@ -838,6 +838,7 @@ fn option_test_host(id: &str) -> Host {
         api: Some("eqoa/1".into()),
         entry_mode: EntryMode::Once,
         requested_capabilities: Vec::new(),
+        extensions: Default::default(),
         initially_enabled: true,
         mods_root: None,
     })

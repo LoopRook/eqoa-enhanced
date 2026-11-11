@@ -1123,6 +1123,7 @@ mod tests {
             } else {
                 vec![]
             },
+            extensions: Default::default(),
             initially_enabled: false,
             mods_root: Some(scripts.clone()),
         };
