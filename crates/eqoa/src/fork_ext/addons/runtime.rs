@@ -178,7 +178,10 @@ impl Runtime {
         self.error = None;
     }
     pub fn event(&mut self, window: &Window, event: &WindowEvent, plain_play: bool) -> bool {
-        let pointer_capture=super::pointer_api::observe(event,(window.inner_size().width,window.inner_size().height));
+        let pointer_capture = super::pointer_api::observe(
+            event,
+            (window.inner_size().width, window.inner_size().height),
+        );
         let (mut keyboard, mut mouse) = (false, false);
         match self.graphics.as_mut() {
             Some(Graphics::Managed(active)) => {
@@ -880,8 +883,8 @@ mod tests {
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let root = Scratch::new();
         let config = Scratch::new();
-        let mut p=crate::play::Play::bundled_ui_fixture();
-        p.map.mini.up=true;
+        let mut p = crate::play::Play::bundled_ui_fixture();
+        p.map.mini.up = true;
         p.forge_snapshot(None);
         // The mod's option is 'default' until its 3rd frame, then 'changed'.
         // Load restores a saved option; Save reports the option and how many
@@ -911,14 +914,26 @@ mod tests {
             if frames==3 then option='changed' end
         "#,
         );
-        let manifest=root.0.join("a/mod.json");
-        let mut meta:serde_json::Value=serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
-        meta["capabilities"]=serde_json::json!(["large_data"]);
-        fs::write(&manifest,serde_json::to_vec(&meta).unwrap()).unwrap();
+        let manifest = root.0.join("a/mod.json");
+        let mut meta: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        meta["capabilities"] = serde_json::json!(["large_data"]);
+        fs::write(&manifest, serde_json::to_vec(&meta).unwrap()).unwrap();
         let paths = Paths::select(root.0.clone(), None, Some(config.0.clone()), None);
-        let discovered=discover(&root.0).addons.remove(0);
-        assert_eq!(super::super::host::Host::for_addon(&discovered).unwrap().lua.set_memory_limit(128*1024*1024).unwrap(),128*1024*1024);
-        let journal=Storage::new(Some(config.0.clone())).data_dir(&discovered).unwrap().unwrap().join("files/data/journal.json");
+        let discovered = discover(&root.0).addons.remove(0);
+        assert_eq!(
+            super::super::host::Host::for_addon(&discovered)
+                .unwrap()
+                .lua
+                .set_memory_limit(128 * 1024 * 1024)
+                .unwrap(),
+            128 * 1024 * 1024
+        );
+        let journal = Storage::new(Some(config.0.clone()))
+            .data_dir(&discovered)
+            .unwrap()
+            .unwrap()
+            .join("files/data/journal.json");
         let addon_key = Storage::key(&discover(&root.0).addons.remove(0)).unwrap();
         let saved_addon = || {
             super::super::named_profiles::Store::new(Some(config.0.clone()))
@@ -979,19 +994,26 @@ mod tests {
         let mut old = Runtime::new(paths.clone());
         old.launch_headless(&device, &queue, format).unwrap();
         frames(&mut old, 3);
-        assert!(super::super::map_views::held_count()>0);
-        assert!(super::super::pointer_api::claim_count()>0);
-        assert!(super::super::guides::guide_count()>0);
+        assert!(super::super::map_views::held_count() > 0);
+        assert!(super::super::pointer_api::claim_count() > 0);
+        assert!(super::super::guides::guide_count() > 0);
         assert!(
             saved_addon().is_none(),
             "nothing is flushed while the old runtime is still running"
         );
         let mut next = old.for_new_device();
-        let doc:serde_json::Value=serde_json::from_slice(&fs::read(&journal).expect("runtime shutdown flushes JSON before returning")).unwrap();
-        assert_eq!(doc["stage"],42);assert_eq!(doc["payload"].as_str().unwrap().len(),14*1024*1024-128);
-        assert_eq!(super::super::map_views::held_count(),0);
-        assert_eq!(super::super::pointer_api::claim_count(),0);
-        assert_eq!(super::super::guides::guide_count(),0);
+        let doc: serde_json::Value = serde_json::from_slice(
+            &fs::read(&journal).expect("runtime shutdown flushes JSON before returning"),
+        )
+        .unwrap();
+        assert_eq!(doc["stage"], 42);
+        assert_eq!(
+            doc["payload"].as_str().unwrap().len(),
+            14 * 1024 * 1024 - 128
+        );
+        assert_eq!(super::super::map_views::held_count(), 0);
+        assert_eq!(super::super::pointer_api::claim_count(), 0);
+        assert_eq!(super::super::guides::guide_count(), 0);
         let flushed =
             saved_addon().expect("device recovery must flush the old runtime's addon state");
         assert_eq!(field(&flushed, "option"), "changed", "flushed: {flushed}");

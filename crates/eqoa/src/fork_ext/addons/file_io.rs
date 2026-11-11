@@ -358,7 +358,13 @@ fn overlay_room(
 
 pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf>) -> Result<()> {
     let lua = &host.lua;
-    if addon.requested_capabilities.iter().any(|c| c == "large_data") { lua.set_memory_limit(super::async_json::JSON_HEAP)?; }
+    if addon
+        .requested_capabilities
+        .iter()
+        .any(|c| c == "large_data")
+    {
+        lua.set_memory_limit(super::async_json::JSON_HEAP)?;
+    }
     lua.set_app_data(super::sandbox::Mounts {
         addon: addon.clone(),
         data: data.clone(),
@@ -756,129 +762,271 @@ mod tests {
     }
 
     fn drive_json(h: &Host, flag: &str) {
-        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(15);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
         while !h.lua.globals().get::<bool>(flag).unwrap() {
-            assert!(std::time::Instant::now()<deadline,"JSON completion timeout");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "JSON completion timeout"
+            );
             super::super::native_events::dispatch(h).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
     }
     #[test]
     fn round4_json_calls_keep_ordinary_heap_and_manifest_opt_in() {
-        let (_scratch,h,addon)=fixture();
-        fs::write(addon.package_root.join("resources/a.json"),b"{}").unwrap();
-        h.execute("assert(eqoa.files.load_json('package_resources/a.json'))").unwrap();
-        assert_eq!(h.lua.set_memory_limit(8*1024*1024).unwrap(),8*1024*1024,"ordinary mod may not raise its heap by calling JSON");
+        let (_scratch, h, addon) = fixture();
+        fs::write(addon.package_root.join("resources/a.json"), b"{}").unwrap();
+        h.execute("assert(eqoa.files.load_json('package_resources/a.json'))")
+            .unwrap();
+        assert_eq!(
+            h.lua.set_memory_limit(8 * 1024 * 1024).unwrap(),
+            8 * 1024 * 1024,
+            "ordinary mod may not raise its heap by calling JSON"
+        );
     }
     #[test]
     fn round4_json_memory_failure_delivers_failed_without_faulting_host() {
-        let (_scratch,h,addon)=fixture();
-        fs::write(addon.package_root.join("resources/nodes.json"),format!("[{}]",vec!["{\"name\":\"a long name\",\"pos\":[1,2,3]}";25000].join(","))).unwrap();
+        let (_scratch, h, addon) = fixture();
+        fs::write(
+            addon.package_root.join("resources/nodes.json"),
+            format!(
+                "[{}]",
+                vec!["{\"name\":\"a long name\",\"pos\":[1,2,3]}"; 25000].join(",")
+            ),
+        )
+        .unwrap();
         h.execute("finished=false;eqoa.events.on('resource.failed',function(e) assert(e.data.request==req and e.data.kind=='json');finished=true end);req=assert(eqoa.files.load_json('package_resources/nodes.json'))").unwrap();
-        h.lua.set_memory_limit(h.lua.used_memory()+256*1024).unwrap();
-        drive_json(&h,"finished");
+        h.lua
+            .set_memory_limit(h.lua.used_memory() + 256 * 1024)
+            .unwrap();
+        drive_json(&h, "finished");
         h.execute("assert(1+1==2)").unwrap();
     }
     #[test]
     fn round4_json_private_journal_flushes_on_drop_and_reloads() {
-        let (scratch,h,addon)=fixture();
-        h.lua.set_memory_limit(128*1024*1024).unwrap();
-        let data=h.lua.app_data_ref::<super::super::sandbox::Mounts>().unwrap().data.clone().unwrap();
+        let (scratch, h, addon) = fixture();
+        h.lua.set_memory_limit(128 * 1024 * 1024).unwrap();
+        let data = h
+            .lua
+            .app_data_ref::<super::super::sandbox::Mounts>()
+            .unwrap()
+            .data
+            .clone()
+            .unwrap();
         h.execute("assert(eqoa.files.save_json_async('journal.json',{stage=99,payload=string.rep('x',14*1024*1024-128)}))").unwrap();
         drop(h);
-        let file=data.join("files/data/journal.json");
-        let bytes=fs::read(&file).expect("shutdown must flush accepted save before returning");
-        assert!(bytes.len()>13*1024*1024);
-        let next=Host::new().unwrap();
-        next.lua.set_memory_limit(128*1024*1024).unwrap();
-        install(&next,&addon,Some(scratch.0.join("config"))).unwrap();
+        let file = data.join("files/data/journal.json");
+        let bytes = fs::read(&file).expect("shutdown must flush accepted save before returning");
+        assert!(bytes.len() > 13 * 1024 * 1024);
+        let next = Host::new().unwrap();
+        next.lua.set_memory_limit(128 * 1024 * 1024).unwrap();
+        install(&next, &addon, Some(scratch.0.join("config"))).unwrap();
         next.execute("finished=false;eqoa.events.on('resource.ready',function(e) assert(e.data.request==req and e.data.value.stage==99 and #e.data.value.payload==14*1024*1024-128);finished=true end);req=assert(eqoa.files.load_json('journal.json'))").unwrap();
-        drive_json(&next,"finished");
+        drive_json(&next, "finished");
     }
     #[test]
     fn round4_save_generations_reject_old_commit_and_disable_flushes() {
-        let (scratch,old,addon)=fixture();
-        let (started,release)=super::super::json_save::pause_next_commit();
+        let (scratch, old, addon) = fixture();
+        let (started, release) = super::super::json_save::pause_next_commit();
         old.execute("finished=false;eqoa.events.on('resource.failed',function(e) assert(e.data.request==req and e.data.kind=='json_saved');finished=true end);req=assert(eqoa.files.save_json_async('journal.json',{stage=1}))").unwrap();
-        started.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
-        let next=Host::new().unwrap();install(&next,&addon,Some(scratch.0.join("config"))).unwrap();
-        next.execute("assert(eqoa.files.save_json_async('journal.json',{stage=2}))").unwrap();
-        release.send(()).unwrap();drive_json(&old,"finished");drop(old);
-        let (started,release)=super::super::json_save::pause_next_commit();
-        next.execute("assert(eqoa.files.save_json_async('journal.json',{stage=3}))").unwrap();
-        started.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
-        let release_thread=std::thread::spawn(move || {std::thread::sleep(std::time::Duration::from_millis(50));release.send(()).unwrap();});
-        let data=next.lua.app_data_ref::<super::super::sandbox::Mounts>().unwrap().data.clone().unwrap();
+        started
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let next = Host::new().unwrap();
+        install(&next, &addon, Some(scratch.0.join("config"))).unwrap();
+        next.lua
+            .globals()
+            .set(
+                "new_path",
+                if cfg!(windows) {
+                    "JOURNAL.json"
+                } else {
+                    "journal.json"
+                },
+            )
+            .unwrap();
+        next.execute("assert(eqoa.files.save_json_async(new_path,{stage=2}))")
+            .unwrap();
+        release.send(()).unwrap();
+        drive_json(&old, "finished");
+        drop(old);
+        let (started, release) = super::super::json_save::pause_next_commit();
+        next.execute("assert(eqoa.files.save_json_async('journal.json',{stage=3}))")
+            .unwrap();
+        started
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let release_thread = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            release.send(()).unwrap();
+        });
+        let data = next
+            .lua
+            .app_data_ref::<super::super::sandbox::Mounts>()
+            .unwrap()
+            .data
+            .clone()
+            .unwrap();
         super::super::native_events::clear(&next);
-        let file=data.join("files/data/journal.json");
-        let v:serde_json::Value=serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();assert_eq!(v["stage"],3);
+        let file = data.join("files/data/journal.json");
+        let v: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        assert_eq!(v["stage"], 3);
         release_thread.join().unwrap();
-        fs::remove_file(&file).unwrap();std::thread::sleep(std::time::Duration::from_millis(50));assert!(!file.exists(),"no late write after disable");
+        fs::remove_file(&file).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(!file.exists(), "no late write after disable");
     }
     #[test]
     fn round4_save_timeout_is_bounded_and_cancels_late_rename() {
-        let (_scratch,h,_addon)=fixture();
-        let data=h.lua.app_data_ref::<super::super::sandbox::Mounts>().unwrap().data.clone().unwrap();
-        let (started,release)=super::super::json_save::pause_next_commit();
-        h.execute("assert(eqoa.files.save_json_async('timeout.json',{stage=1}))").unwrap();
-        started.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
-        let now=std::time::Instant::now();drop(h);let elapsed=now.elapsed();
-        assert!(elapsed>=std::time::Duration::from_secs(2) && elapsed<std::time::Duration::from_millis(2500),"bounded flush: {elapsed:?}");
-        release.send(()).unwrap();std::thread::sleep(std::time::Duration::from_millis(100));
-        assert!(!data.join("files/data/timeout.json").exists(),"timed out writer may not commit after disable");
+        let (_scratch, h, _addon) = fixture();
+        let data = h
+            .lua
+            .app_data_ref::<super::super::sandbox::Mounts>()
+            .unwrap()
+            .data
+            .clone()
+            .unwrap();
+        let (started, release) = super::super::json_save::pause_next_commit();
+        h.execute("assert(eqoa.files.save_json_async('timeout.json',{stage=1}))")
+            .unwrap();
+        started
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let now = std::time::Instant::now();
+        drop(h);
+        let elapsed = now.elapsed();
+        assert!(
+            elapsed >= std::time::Duration::from_secs(2)
+                && elapsed < std::time::Duration::from_millis(2500),
+            "bounded flush: {elapsed:?}"
+        );
+        release.send(()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(
+            !data.join("files/data/timeout.json").exists(),
+            "timed out writer may not commit after disable"
+        );
     }
     fn rejected_json(bytes: &[u8], message: &str) {
-        let (_scratch,h,addon)=fixture_with_large_data(true);
-        h.lua.globals().set("expected",message).unwrap();
-        fs::write(addon.package_root.join("resources/limit.json"),bytes).unwrap();
+        let (_scratch, h, addon) = fixture_with_large_data(true);
+        h.lua.globals().set("expected", message).unwrap();
+        fs::write(addon.package_root.join("resources/limit.json"), bytes).unwrap();
         h.execute("finished=false;eqoa.events.on('resource.failed',function(e) assert(e.data.request==req and e.data.kind=='json' and string.find(e.data.error.message,expected,1,true));finished=true end);req=assert(eqoa.files.load_json('package_resources/limit.json'))").unwrap();
-        drive_json(&h,"finished");
+        drive_json(&h, "finished");
     }
     #[test]
-    fn round4_json_read_cap_is_enforced() { rejected_json(format!("{{\"v\":\"{}\"}}","x".repeat(16*1024*1024)).as_bytes(),"byte limit"); }
+    fn round4_json_read_cap_is_enforced() {
+        rejected_json(
+            format!("{{\"v\":\"{}\"}}", "x".repeat(16 * 1024 * 1024)).as_bytes(),
+            "byte limit",
+        );
+    }
     #[test]
-    fn round4_json_root_is_enforced() { rejected_json(b"123","root"); }
+    fn round4_json_root_is_enforced() {
+        rejected_json(b"123", "root");
+    }
     #[test]
-    fn round4_json_depth_is_enforced() { rejected_json(format!("{}0{}","[".repeat(34),"]".repeat(34)).as_bytes(),"depth/node"); }
+    fn round4_json_depth_is_enforced() {
+        rejected_json(
+            format!("{}0{}", "[".repeat(34), "]".repeat(34)).as_bytes(),
+            "depth/node",
+        );
+    }
     #[test]
-    fn round4_json_nodes_are_enforced() { rejected_json(format!("[{}0]","0,".repeat(2_000_000)).as_bytes(),"depth/node"); }
+    fn round4_json_nodes_are_enforced() {
+        rejected_json(
+            format!("[{}0]", "0,".repeat(2_000_000)).as_bytes(),
+            "depth/node",
+        );
+    }
     #[test]
     fn round4_json_shared_mount_and_inflight_quota() {
-        let (_scratch,h,addon)=fixture();
-        fs::write(addon.script_root.join("resources/shared.json"),b"{\"shared\":true}").unwrap();
+        let (_scratch, h, addon) = fixture();
+        fs::write(
+            addon.script_root.join("resources/shared.json"),
+            b"{\"shared\":true}",
+        )
+        .unwrap();
         h.execute("finished=false;eqoa.events.on('resource.ready',function(e) assert(e.data.value.shared and (e.data.request==a or e.data.request==b));finished=true end);a=assert(eqoa.files.load_json('resources/shared.json'));b=assert(eqoa.files.load_json('resources/shared.json'));local v,e=eqoa.files.load_json('resources/shared.json');assert(v==nil and e.code=='quota')").unwrap();
-        drive_json(&h,"finished");
+        drive_json(&h, "finished");
     }
     #[test]
     fn round4_json_worker_save_quota_reports_correlated_failure() {
-        let (_scratch,h,_addon)=fixture();
-        let data=h.lua.app_data_ref::<super::super::sandbox::Mounts>().unwrap().data.clone().unwrap();
+        let (_scratch, h, _addon) = fixture();
+        let data = h
+            .lua
+            .app_data_ref::<super::super::sandbox::Mounts>()
+            .unwrap()
+            .data
+            .clone()
+            .unwrap();
         fs::create_dir_all(data.join("files/data")).unwrap();
-        fs::write(data.join("files/data/full"),vec![b'x';15*1024*1024]).unwrap();
+        fs::write(data.join("files/data/full"), vec![b'x'; 15 * 1024 * 1024]).unwrap();
         h.execute("finished=false;eqoa.events.on('resource.failed',function(e) assert(e.data.request==req and e.data.kind=='json_saved');finished=true end);req=assert(eqoa.files.save_json_async('journal.json',{payload=string.rep('x',2*1024*1024)}))").unwrap();
-        drive_json(&h,"finished");
+        drive_json(&h, "finished");
     }
     #[test]
     fn round4_catalogue_materialisation_benchmark_asserts_real_workload() {
-        let (_scratch,h,addon)=fixture();
-        h.lua.set_memory_limit(128*1024*1024).unwrap();
-        let bytes=include_bytes!("../../../../../mods/resources/map-entities.json");
-        let v:serde_json::Value=serde_json::from_slice(bytes).unwrap();
-        fn nodes(v:&serde_json::Value)->usize {1+match v {serde_json::Value::Array(a)=>a.iter().map(nodes).sum(),serde_json::Value::Object(o)=>o.values().map(nodes).sum(),_=>0}}
-        assert_eq!(nodes(&v),70579);assert!(bytes.len()>1_700_000);
-        fs::write(addon.package_root.join("resources/catalogue.json"),bytes).unwrap();
+        let (_scratch, h, addon) = fixture();
+        h.lua.set_memory_limit(128 * 1024 * 1024).unwrap();
+        let bytes = include_bytes!("../../../../../mods/resources/map-entities.json");
+        let v: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        fn nodes(v: &serde_json::Value) -> usize {
+            1 + match v {
+                serde_json::Value::Array(a) => a.iter().map(nodes).sum(),
+                serde_json::Value::Object(o) => o.values().map(nodes).sum(),
+                _ => 0,
+            }
+        }
+        assert_eq!(nodes(&v), 70579);
+        assert!(bytes.len() > 1_700_000);
+        fs::write(addon.package_root.join("resources/catalogue.json"), bytes).unwrap();
         h.execute("finished=false;eqoa.events.on('resource.ready',function(e) assert(e.data.request==req and type(e.data.value)=='table');finished=true end);req=assert(eqoa.files.load_json('package_resources/catalogue.json'))").unwrap();
-        let mut max=0.0f64; let mut frames=0;
-        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(15);
+        let mut max = 0.0f64;
+        let mut frames = 0;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
         while !h.lua.globals().get::<bool>("finished").unwrap() {
-            assert!(std::time::Instant::now()<deadline);
-            let now=std::time::Instant::now();super::super::native_events::dispatch(&h).unwrap();
-            max=max.max(now.elapsed().as_secs_f64()*1000.);frames+=1;
+            assert!(std::time::Instant::now() < deadline);
+            let now = std::time::Instant::now();
+            super::super::native_events::dispatch(&h).unwrap();
+            max = max.max(now.elapsed().as_secs_f64() * 1000.);
+            frames += 1;
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        println!("ROUND4_CATALOGUE bytes={} nodes=70579 frames={frames} max_dispatch_ms={max:.3} release={}",bytes.len(),!cfg!(debug_assertions));
-        assert!(frames>=70579_usize.div_ceil(512),"catalogue materialisation must span bounded slices");
-        if !cfg!(debug_assertions) { assert!(max<4.0,"catalogue dispatch exceeded 4 ms: {max}"); }
+        println!(
+            "ROUND4_CATALOGUE bytes={} nodes=70579 frames={frames} max_dispatch_ms={max:.3} release={}",
+            bytes.len(),
+            !cfg!(debug_assertions)
+        );
+        assert!(
+            frames >= 70579_usize.div_ceil(512),
+            "catalogue materialisation must span bounded slices"
+        );
+        if !cfg!(debug_assertions) {
+            assert!(max < 4.0, "catalogue dispatch exceeded 4 ms: {max}");
+        }
+    }
+
+    #[test]
+    fn round4_disabling_releases_a_partially_materialised_json_tree() {
+        let (_scratch, h, addon) = fixture_with_large_data(true);
+        fs::write(
+            addon.package_root.join("resources/pending.json"),
+            include_bytes!("../../../../../mods/resources/map-entities.json"),
+        )
+        .unwrap();
+        h.execute("eqoa.events.on('resource.ready',function() end);assert(eqoa.files.load_json('package_resources/pending.json'))").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !super::super::async_json::has_build(&h.lua) {
+            assert!(std::time::Instant::now() < deadline);
+            super::super::native_events::dispatch(&h).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        super::super::native_events::clear(&h);
+        assert!(
+            !super::super::async_json::has_service(&h.lua),
+            "disable drops the partial tree's Lua handles and worker channels"
+        );
     }
     #[test]
     fn round4_async_json_loads_large_readonly_resource_and_reports_failure() {
@@ -947,7 +1095,9 @@ mod tests {
         );
     }
 
-    fn fixture() -> (Fixture, Host, DiscoveredAddon) { fixture_with_large_data(false) }
+    fn fixture() -> (Fixture, Host, DiscoveredAddon) {
+        fixture_with_large_data(false)
+    }
     fn fixture_with_large_data(large_data: bool) -> (Fixture, Host, DiscoveredAddon) {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
@@ -968,7 +1118,11 @@ mod tests {
             resource_dirs: vec![],
             api: None,
             entry_mode: Default::default(),
-            requested_capabilities: if large_data { vec!["large_data".into()] } else { vec![] },
+            requested_capabilities: if large_data {
+                vec!["large_data".into()]
+            } else {
+                vec![]
+            },
             initially_enabled: false,
             mods_root: Some(scripts.clone()),
         };

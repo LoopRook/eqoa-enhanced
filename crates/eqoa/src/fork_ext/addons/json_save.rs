@@ -8,13 +8,17 @@ use mlua::{Lua, Result, Value};
 use serde_json::{Map, Value as Json};
 use std::{
     cell::RefCell,
+    collections::BTreeMap,
     io::Write,
     path::PathBuf,
     rc::Rc,
-    sync::{Arc, Condvar, Mutex, OnceLock, mpsc, atomic::{AtomicBool, AtomicU64, Ordering}},
-    collections::BTreeMap,
-    time::{Duration, Instant},
+    sync::{
+        Arc, Condvar, Mutex, OnceLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc,
+    },
     thread,
+    time::{Duration, Instant},
 };
 const CAP: usize = 14 * 1024 * 1024;
 struct Job {
@@ -52,9 +56,25 @@ impl Queue {
 type Work = Arc<(Mutex<Queue>, Condvar)>;
 // All VM generations share one writer and one per-path acceptance sequence.
 static NEXT: AtomicU64 = AtomicU64::new(1);
-static LATEST: OnceLock<Mutex<BTreeMap<PathBuf,u64>>> = OnceLock::new();
-fn latest() -> &'static Mutex<BTreeMap<PathBuf,u64>> { LATEST.get_or_init(Default::default) }
-struct Writer { tx: mpsc::Sender<Work>, join: thread::JoinHandle<()>, users: usize }
+static LATEST: OnceLock<Mutex<BTreeMap<PathBuf, u64>>> = OnceLock::new();
+fn latest() -> &'static Mutex<BTreeMap<PathBuf, u64>> {
+    LATEST.get_or_init(Default::default)
+}
+fn ordered_path(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        return PathBuf::from(path.to_string_lossy().to_lowercase());
+    }
+    #[cfg(not(windows))]
+    {
+        path
+    }
+}
+struct Writer {
+    tx: Option<mpsc::Sender<Work>>,
+    join: thread::JoinHandle<()>,
+    users: usize,
+}
 static WRITER: Mutex<Option<Writer>> = Mutex::new(None);
 struct Service {
     work: Work,
@@ -64,35 +84,49 @@ struct Service {
 }
 impl Drop for Service {
     fn drop(&mut self) {
-        let deadline=Instant::now()+Duration::from_secs(2);
-        let mut q=self.work.0.lock().unwrap();
-        q.closed=true;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut q = self.work.0.lock().unwrap();
+        q.closed = true;
         while q.active.is_some() || q.pending.is_some() {
-            let remaining=deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() { break; }
-            q=self.work.1.wait_timeout(q,remaining).unwrap().0;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            q = self.work.1.wait_timeout(q, remaining).unwrap().0;
         }
-        let drained=q.active.is_none() && q.pending.is_none();
-        q.pending=None;
+        let drained = q.active.is_none() && q.pending.is_none();
+        q.pending = None;
         drop(q);
         // Same gate as the final rename: after this boundary an old generation
         // cannot recreate a cleared file, even if encoding or sync was slow.
-        { let _gate=latest().lock().unwrap(); self.permit.store(false,Ordering::Release); }
-        if !drained { eprintln!("addon JSON save flush timed out after 2 s; pending commit cancelled"); }
-        let mut writer=WRITER.lock().unwrap();
-        if let Some(w)=writer.as_mut() {
-            w.users-=1;
-            if w.users==0 && drained {
-                let w=writer.take().unwrap();
-                drop(w.tx);
-                while !w.join.is_finished() && Instant::now()<deadline { thread::sleep(Duration::from_millis(1)); }
-                if w.join.is_finished() { let _=w.join.join(); }
-                else { eprintln!("addon JSON writer join timed out after 2 s"); }
+        {
+            let _gate = latest().lock().unwrap();
+            self.permit.store(false, Ordering::Release);
+        }
+        if !drained {
+            eprintln!("addon JSON save flush timed out after 2 s; pending commit cancelled");
+        }
+        let mut writer = WRITER.lock().unwrap();
+        if let Some(w) = writer.as_mut() {
+            w.users -= 1;
+            if w.users == 0 && drained {
+                w.tx.take();
+                while !w.join.is_finished() && Instant::now() < deadline {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                if w.join.is_finished() {
+                    let w = writer.take().unwrap();
+                    let _ = w.join.join();
+                } else {
+                    eprintln!("addon JSON writer join timed out after 2 s");
+                }
             }
         }
     }
 }
-pub(crate) fn close(lua: &Lua) { drop(lua.remove_app_data::<Shared>()); }
+pub(crate) fn close(lua: &Lua) {
+    drop(lua.remove_app_data::<Shared>());
+}
 type Shared = Rc<RefCell<Service>>;
 struct Limited(Vec<u8>);
 impl Write for Limited {
@@ -122,46 +156,87 @@ fn write(job: &Job) -> std::result::Result<(), String> {
         let _ = started.send(());
         let _ = release.recv_timeout(Duration::from_secs(5));
     }
-    super::storage::atomic_replace_with(&target, &out.0, |from,to| {
-        let gate=latest().lock().unwrap();
-        if !job.permit.load(Ordering::Acquire) || gate.get(&target)!=Some(&job.generation) {
+    super::storage::atomic_replace_with(&target, &out.0, |from, to| {
+        let gate = latest().lock().unwrap();
+        if !job.permit.load(Ordering::Acquire)
+            || gate.get(&ordered_path(target.clone())) != Some(&job.generation)
+        {
             return Err(std::io::Error::other("JSON save superseded or disabled"));
         }
-        std::fs::rename(from,to)?;
-        if deleted.exists() { std::fs::remove_file(&deleted)?; }
+        std::fs::rename(from, to)?;
+        if deleted.exists() {
+            std::fs::remove_file(&deleted)?;
+        }
         Ok(())
-    }).map_err(|e| e.to_string())?;
+    })
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 #[cfg(test)]
-static PAUSE:Mutex<Option<(mpsc::Sender<()>,mpsc::Receiver<()>)>>=Mutex::new(None);
+static PAUSE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);
 #[cfg(test)]
-pub(crate) fn pause_next_commit()->(mpsc::Receiver<()>,mpsc::Sender<()>) {
-    let (started,rx)=mpsc::channel();let (tx,release)=mpsc::channel();*PAUSE.lock().unwrap()=Some((started,release));(rx,tx)
+pub(crate) fn pause_next_commit() -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+    let (started, rx) = mpsc::channel();
+    let (tx, release) = mpsc::channel();
+    *PAUSE.lock().unwrap() = Some((started, release));
+    (rx, tx)
 }
 fn service(lua: &Lua) -> Result<Shared> {
     if let Some(s) = lua.app_data_ref::<Shared>() {
         return Ok(s.clone());
     }
     let work: Work = Arc::new((Mutex::new(Queue::default()), Condvar::new()));
-    let mut global=WRITER.lock().unwrap();
-    if global.is_none() {
-        let (tx,rx)=mpsc::channel::<Work>();
-        let join=thread::Builder::new().name("addon-json-save".into()).spawn(move || {
-            while let Ok(worker)=rx.recv() {
-                loop {
-                    let job={ let mut q=worker.0.lock().unwrap(); let Some(job)=q.pending.take() else { q.scheduled=false; break }; q.active=Some(job.key.clone()); job };
-                    let result=write(&job);
-                    let mut q=worker.0.lock().unwrap();
-                    q.active=None;
-                    q.done=Some(Done {id:job.id,result,worker:thread::current().id()});
-                    worker.1.notify_all();
-                }
-            }
-        }).map_err(mlua::Error::external)?;
-        *global=Some(Writer{tx,join,users:0});
+    let mut global = WRITER.lock().unwrap();
+    if global.as_ref().is_some_and(|w| w.tx.is_none()) {
+        if global.as_ref().unwrap().join.is_finished() {
+            let _ = global.take().unwrap().join.join();
+        } else {
+            return Err(mlua::Error::runtime("JSON writer is still shutting down"));
+        }
     }
-    global.as_mut().unwrap().users+=1;
+    if global.is_none() {
+        let (tx, rx) = mpsc::channel::<Work>();
+        let join = thread::Builder::new()
+            .name("addon-json-save".into())
+            .spawn(move || {
+                while let Ok(worker) = rx.recv() {
+                    loop {
+                        let job = {
+                            let mut q = worker.0.lock().unwrap();
+                            let Some(job) = q.pending.take() else {
+                                q.scheduled = false;
+                                break;
+                            };
+                            q.active = Some(job.key.clone());
+                            job
+                        };
+                        let result = write(&job);
+                        {
+                            let path = ordered_path(job.root.join("files").join(&job.key));
+                            let mut gate = latest().lock().unwrap();
+                            if gate.get(&path) == Some(&job.generation) {
+                                gate.remove(&path);
+                            }
+                        }
+                        let mut q = worker.0.lock().unwrap();
+                        q.active = None;
+                        q.done = Some(Done {
+                            id: job.id,
+                            result,
+                            worker: thread::current().id(),
+                        });
+                        worker.1.notify_all();
+                    }
+                }
+            })
+            .map_err(mlua::Error::external)?;
+        *global = Some(Writer {
+            tx: Some(tx),
+            join,
+            users: 0,
+        });
+    }
+    global.as_mut().unwrap().users += 1;
     drop(global);
     let s = Rc::new(RefCell::new(Service {
         work,
@@ -305,7 +380,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     );
                 }
                 let key = match m.key(&path) {
-                    Ok(k) if k.starts_with("data") => k,
+                    Ok(k) if k.starts_with("data") => ordered_path(k),
                     _ => {
                         return error(
                             lua,
@@ -326,9 +401,18 @@ pub(crate) fn install(host: &Host) -> Result<()> {
 
                 let s = service(lua)?;
                 {
-                    let s=s.borrow(); let q=s.work.0.lock().unwrap();
-                    if q.closed || q.active.as_ref().is_some_and(|p| *p!=key) || q.pending.as_ref().is_some_and(|j| j.key!=key) {
-                        return error(lua,"eqoa.files.save_json_async","quota","one JSON save path at a time");
+                    let s = s.borrow();
+                    let q = s.work.0.lock().unwrap();
+                    if q.closed
+                        || q.active.as_ref().is_some_and(|p| *p != key)
+                        || q.pending.as_ref().is_some_and(|j| j.key != key)
+                    {
+                        return error(
+                            lua,
+                            "eqoa.files.save_json_async",
+                            "quota",
+                            "one JSON save path at a time",
+                        );
                     }
                 }
                 let value = match snapshot(value) {
@@ -340,26 +424,39 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 let mut s = s.borrow_mut();
                 s.next += 1;
                 let id = s.next;
-                let generation=NEXT.fetch_add(1,Ordering::Relaxed);
-                let target=root.join("files").join(&key);
-                let mut gate=latest().lock().unwrap();
+                let generation = NEXT.fetch_add(1, Ordering::Relaxed);
+                let target = ordered_path(root.join("files").join(&key));
+                let mut gate = latest().lock().unwrap();
                 let notify = {
-                let mut q=s.work.0.lock().unwrap();
-                if let Err(e) = q.push(Job {
-                    id,
-                    key,
-                    root,
-                    value,
-                    generation,
-                    permit:s.permit.clone(),
-                }) {
-                    return error(lua, "eqoa.files.save_json_async", "quota", &e);
-                }
-                let notify=!q.scheduled; q.scheduled=true; notify
+                    let mut q = s.work.0.lock().unwrap();
+                    if let Err(e) = q.push(Job {
+                        id,
+                        key,
+                        root,
+                        value,
+                        generation,
+                        permit: s.permit.clone(),
+                    }) {
+                        return error(lua, "eqoa.files.save_json_async", "quota", &e);
+                    }
+                    let notify = !q.scheduled;
+                    q.scheduled = true;
+                    notify
                 };
-                gate.insert(target,generation);
+                gate.insert(target, generation);
                 drop(gate);
-                if notify { WRITER.lock().unwrap().as_ref().unwrap().tx.send(s.work.clone()).map_err(mlua::Error::external)?; }
+                if notify {
+                    WRITER
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
+                        .tx
+                        .as_ref()
+                        .unwrap()
+                        .send(s.work.clone())
+                        .map_err(mlua::Error::external)?;
+                }
                 lua.pack_multi((id, Value::Nil))
             })?,
     )
@@ -375,8 +472,8 @@ mod tests {
             key: key.into(),
             root: PathBuf::new(),
             value: Json::Object(Map::new()),
-            generation:id,
-            permit:Arc::new(AtomicBool::new(true)),
+            generation: id,
+            permit: Arc::new(AtomicBool::new(true)),
         };
         q.push(job(1, "data/journal")).unwrap();
         q.push(job(2, "data/journal")).unwrap();
