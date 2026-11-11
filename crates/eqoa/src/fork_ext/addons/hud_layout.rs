@@ -168,9 +168,10 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
         }];
         let (x, y) = (x + dx, y + dy);
         let out = transform_rect([x, y, w, h], anc, vert, m);
+        let frame = render::ui::frame_from_window(window_size, [out[0], out[1]]);
         json!({
-            "frame_x": x,
-            "frame_y": y,
+            "frame_x": frame[0],
+            "frame_y": frame[1],
             "frame_width": w,
             "frame_height": h,
             "x": out[0],
@@ -240,8 +241,7 @@ pub fn hud_element_visible(element: &str) -> bool {
         "stats_box" | "plain_play" => state.right_hud_up,
         "mana_bars" => true,
         "all" => {
-            !v.minimap
-                && !v.health_bar
+            !v.health_bar
                 && !v.power_bar
                 && !v.main_exp_bar
                 && !v.secondary_exp_bar
@@ -313,14 +313,12 @@ mod tests {
             }
             for key in ["player", "target", "pet"] {
                 for rect in after[key].as_object().unwrap().values() {
-                    let expected = transform_point(
+                    let expected = render::ui::window_from_frame(size,
                         [
                             rect["frame_x"].as_f64().unwrap() as f32,
                             rect["frame_y"].as_f64().unwrap() as f32,
                         ],
-                        "left",
-                        if key == "target" { "bottom" } else { "top" },
-                        frame_metrics(size),
+
                     );
                     assert!((rect["x"].as_f64().unwrap() - expected[0] as f64).abs() < 0.001);
                     assert!((rect["y"].as_f64().unwrap() - expected[1] as f64).abs() < 0.001);

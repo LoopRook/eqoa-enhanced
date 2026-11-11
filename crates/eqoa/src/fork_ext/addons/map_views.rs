@@ -29,10 +29,8 @@ impl Projection {
         (
             (p[0] - self.outer[0]) * size / (self.outer[2] - self.outer[0]),
             (p[1] - self.outer[1]) * size / (self.outer[3] - self.outer[1]),
-            p[0] >= self.inner[0]
-                && p[0] <= self.inner[2]
-                && p[1] >= self.inner[1]
-                && p[1] <= self.inner[3],
+            ((p[0] - (self.inner[0]+self.inner[2])*0.5) / ((self.inner[2]-self.inner[0])*0.5)).powi(2)
+                + ((p[1] - (self.inner[1]+self.inner[3])*0.5) / ((self.inner[3]-self.inner[1])*0.5)).powi(2) <= 1.0,
         )
     }
     fn unproject(self, size: f32, x: f32, y: f32) -> (f32, f32) {
@@ -136,10 +134,13 @@ fn info(lua: &Lua, lease: &Lease) -> Result<Value> {
         if let Some((_, h)) = cached.take() {
             h.owner.borrow_mut().mark_dead(h.id);
         }
-        let handle = bank
-            .borrow_mut()
-            .register_target(&bank, &canvas.texture)
-            .map_err(mlua::Error::runtime)?;
+        let handle = match bank.borrow_mut().register_target(&bank, &canvas.texture) {
+            Ok(h) => h,
+            Err(e) => {
+                super::native::diagnose(lua, "eqoa.map.view.texture", "quota", &e);
+                return Ok(Value::Nil);
+            }
+        };
         *cached = Some((canvas.id, handle));
     }
     let h = cached.as_ref().unwrap().1.clone();
@@ -293,6 +294,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     }
                 })?,
             )?;
+            let close = l.clone();
+            t.set("close", lua.create_function(move |_, _: Value| { close.active.set(false); if let Some((_, h)) = close.texture.borrow_mut().take() { h.owner.borrow_mut().mark_dead(h.id); } Ok(true) })?)?;
             let mt = lua.create_table()?;
             mt.set(
                 "__index",

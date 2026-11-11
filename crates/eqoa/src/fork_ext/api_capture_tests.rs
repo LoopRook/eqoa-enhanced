@@ -1939,6 +1939,7 @@ fn round4_map_view_projects_native_player_scale_and_rejects_pregame() {
     let view = p.native_view(Some(&walker));
     CORE.with(|c| c.borrow_mut().publish(view));
     h.execute("v=assert(eqoa.map.view{size=200});local x,y,inside=v.project(268,200);assert(math.abs(x-150)<0.01 and math.abs(y-100)<0.01 and inside);local x,z=v.unproject(100,100);assert(math.abs(x-100)<0.01 and math.abs(z-200)<0.01);local _,_,inside=v.project(99999,200);assert(not inside);local bad,e=eqoa.map.view{center={x=0,z=0}};assert(bad==nil and e.code=='invalid_argument')").unwrap();
+    h.execute("local x,z=v.unproject(180,180);local _,_,inside=v.project(x,z);assert(not inside,'square corner is outside the visible circle')").unwrap();
     CORE.with(|c| c.borrow_mut().reset("test"));
     h.execute("local v,e=eqoa.map.view{};assert(v==nil and e.code=='not_in_world')")
         .unwrap();

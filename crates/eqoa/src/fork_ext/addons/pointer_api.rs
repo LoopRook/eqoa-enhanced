@@ -223,6 +223,30 @@ pub(crate) fn install(host: &Host) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn round4_wide_pointer_layout_and_observed_press_share_coordinates() {
+        use winit::event::{DeviceId, WindowEvent, ElementState, MouseButton, MouseScrollDelta, TouchPhase};
+        let mut p = crate::play::Play::bundled_ui_fixture();
+        let h = Host::new().unwrap();
+        super::super::hud_layout::set_window_size(1920,1080);
+        h.snapshot.set(p.forge_snapshot(None));
+        h.execute("r=eqoa.hud.layout().minimap;assert(eqoa.input.claim_pointer(r))").unwrap();
+        let rect = super::super::hud_layout::hud_layout_json((1920,1080));
+        let r = &rect["minimap"];
+        let at = [r["x"].as_f64().unwrap()+10., r["y"].as_f64().unwrap()+10.];
+        let device_id = DeviceId::dummy();
+        observe(&WindowEvent::CursorMoved{device_id,position:winit::dpi::PhysicalPosition::new(at[0],at[1])},(1920,1080));
+        h.execute("local p=eqoa.input.pointer();local f=eqoa.hud.frame();assert(math.abs(p.x-r.frame_x-10/f.scale_x)<0.001 and math.abs(p.y-r.frame_y-10/f.scale_y)<0.001)").unwrap();
+        let mut capture = super::super::capture::Capture::default();
+        let press = WindowEvent::MouseInput{device_id,state:ElementState::Pressed,button:MouseButton::Left};
+        assert!(observe(&press,(1920,1080)));
+        assert_eq!(capture.press(super::super::capture::Button::Mouse(MouseButton::Left),observe(&press,(1920,1080))),super::super::capture::Owner::Addon);
+        assert!(observe(&WindowEvent::MouseWheel{device_id,delta:MouseScrollDelta::LineDelta(0.,1.),phase:TouchPhase::Moved},(1920,1080)));
+        observe(&WindowEvent::Focused(false),(1920,1080));
+        assert!(!observe(&press,(1920,1080)));
+        assert_eq!(capture.release(super::super::capture::Button::Mouse(MouseButton::Left)),super::super::capture::Owner::Addon);
+        super::super::hud_layout::set_window_size(640,448);
+    }
+    #[test]
     fn round4_pointer_claim_routes_window_coordinates_and_expires() {
         CORE.with(|c| {
             *c.borrow_mut() = super::super::native_core::Core::default();
