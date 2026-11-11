@@ -178,6 +178,7 @@ impl Runtime {
         self.error = None;
     }
     pub fn event(&mut self, window: &Window, event: &WindowEvent, plain_play: bool) -> bool {
+        let pointer_capture=super::pointer_api::observe(event,(window.inner_size().width,window.inner_size().height));
         let (mut keyboard, mut mouse) = (false, false);
         match self.graphics.as_mut() {
             Some(Graphics::Managed(active)) => {
@@ -223,6 +224,7 @@ impl Runtime {
         if let WindowEvent::Focused(focused) = event {
             super::input::focus(*focused);
         }
+        mouse |= pointer_capture;
         let consumed = match event {
             WindowEvent::KeyboardInput {
                 event,

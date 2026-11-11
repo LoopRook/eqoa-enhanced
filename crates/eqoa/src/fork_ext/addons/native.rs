@@ -89,6 +89,7 @@ impl Session {
             ("icons", "class disposition", 4),
             ("input", "get claim release capture_text rotate_dpad", 2),
             ("input", "bind", 3),
+            ("input", "pointer claim_pointer minimap_wheel",4),
             ("inventory", "get", 3),
             (
                 "items",
@@ -853,6 +854,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_state::install(host)?;
     super::map_views::install(host)?;
     super::guides::install(host)?;
+    super::pointer_api::install(host)?;
     let modules: Table = lua.named_registry_value("eqoa_modules")?;
     let scope = lua.create_table()?;
     for (id, name) in ["self", "target", "group", "pet", "corpse", "unknown"]
@@ -977,6 +979,7 @@ fn install_fields(lua: &Lua) {
         ),
         ("eqoa.map.Bounds", "x_min z_min x_max z_max"),
         ("eqoa.map.Waypoint", "world_id x z label owner"),
+        ("eqoa.input.Pointer", "x y inside_window"),
         ("eqoa.Vec2", "x y"),
         ("eqoa.Vec3", "x y z"),
         ("eqoa.Color", "r g b a"),

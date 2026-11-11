@@ -58,6 +58,8 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         crate::fork_ext::addons::native_core::iteration(_game_step);
         if _game_step {
             let ready = _play.in_world_now();
+            let wheel = crate::fork_ext::addons::pointer_api::take_wheel();
+            if ready && wheel != 0.0 { _play.map.mini_wheel(wheel); }
             weapon_sets_requests(_play, ready);
             let reqs = crate::fork_ext::addons::actions::take_action_requests();
             if ready {

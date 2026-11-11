@@ -94,6 +94,8 @@ const EVENTS: &[&str] = &[
     "group.changed",
     "map.changed",
     "guide.lost",
+    "pointer.pressed",
+    "pointer.wheel",
     "abilities.changed",
     "hotbar.changed",
     "cooldown.started",
@@ -143,6 +145,8 @@ fn install_event_fields(lua: &mlua::Lua) {
         ),
         ("input.key", "key down repeat synthetic"),
         ("input.pad", "before after"),
+        ("pointer.pressed", "x y inside_window button steps"),
+        ("pointer.wheel", "x y inside_window button steps"),
         ("resource.ready", "kind handle error"),
         ("resource.failed", "kind handle error"),
         ("events.dropped", "first_seq last_seq count streams"),
@@ -587,6 +591,7 @@ pub(crate) fn clear(host: &Host) {
     let vm = bus(&host.lua).borrow().vm;
     super::map_views::release_vm(vm);
     super::guides::release_vm(vm);
+    super::pointer_api::release_vm(vm);
     super::chat::cancel_vm(vm);
     super::weapon_sets::cancel_vm(vm);
     let b = bus(&host.lua);
