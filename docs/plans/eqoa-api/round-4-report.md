@@ -531,3 +531,56 @@ Conflicts and resolutions:
 - Part C's deletions (theme.rs, map_circle test, map_move/map_sync tests) stand.
 
 Gates: footprint PASS against 11aa5f0 (31 shared files, all at budget); `tools/test_player_release.py` 20 OK; `fork_ext::` 530 passed, 0 failed, 26 ignored, 0 SKIP; `map` filter 179 passed; full `eqoa --bin eqoa` 2086 passed, 0 failed, 32 ignored, 0 SKIP (first full run: 3 Part B search tests failed on the bare `map.minimap` gate, fixed as above and rerun); `cargo build --locked --release -p eqoa` OK. No frame-time benchmark run (the lead measures it).
+
+## Part C fix round (2026-11-12)
+
+Branch `feat/eqoa-api-r4` from d20328e. Sol's review and Terra's check are copied unchanged into `docs/plans/eqoa-api/round-4-review-c.md` and `round-4-check-c.md` (`d88a323`). Code and tests: `4de91e5` (harness), `eed2c5c` (fixes and tests), `37bad60` (README, hashes). No push, merge or tag.
+
+### Findings to fixes
+
+| Finding | Fix | Behaviour test (real Manager, GPU, Play-shaped entities) | Negative control (broken, RED, restored) |
+|---|---|---|---|
+| M1 hover read positions cached for 30 frames | `dot_under` reads `eqoa.entities.list()` each frame, only while the pointer is on the circle; nearest dot, lower id on a tie | `round_minimap_hover_follows_this_frames_creatures_and_picks_the_nearest_dot`: a rat that moves has no card at its old place and one at the new place (distance recomputed); a removed creature gives none; two dots 3 px apart pick the nearer whichever slot is first; equal distance picks the lower id; card per kind (Player, Pet, NPC, Level unknown); corpse and inactive give none; the native dot (magenta) is drawn under the hover position | cache the list once: RED "no card where the creature was". Tie compare flipped: RED "equal distance: the lower id" |
+| M2 marker hover not tied to what is drawn | The mod places marks as the native `place_marks` does: camps and coaches only with Map Markers on, offers where they lie, steps on the picture rim, no towns, topmost last, only inside the circle. API: `MapState.markers_on` and `Marker.step` (quests) added, spec and field lists updated, `api_key` hashes both | `round_minimap_marker_hover_follows_what_the_minimap_draws`: camp card; Map Markers off gives none, on gives it back; a quest over a camp wins; a step's rim mark has its card; a step past a corner (outside the circle) has none; an offer beyond the picture has none; a town with no camp or coach beside it has none | `markers_on` ignored: RED "no card for a camp the minimap does not draw". Order reversed: RED "the quest is the topmost mark". `step` always false: RED "the step's rim mark has its card" |
+| M3 card could leave the window | Lines wrapped at 260 frame px; card left of the circle, else right, then clamped on both axes to the window | `round_minimap_card_stays_inside_the_window_wherever_the_minimap_is_moved`: long name wrapped (card under 400 px); Move HUD to the far left and bottom: card inside the window and right of the circle | clamp removed: RED "left edge: card [-402, ...] is on the window" |
+| M4 benchmark workload and baseline | The native minimap now gets the 200 entities as dots (and quest marks) centred on the player; render targets made once; GPU completion waited for inside the timed window; the no-mod configuration is the stock square minimap with the same dots and is the native baseline; asserts 200 dots and one native minimap draw per frame in every configuration; `R4C_SAMPLES` sets the frames timed | `round4c_frame_time_with_all_map_mods_in_a_busy_world` ran once in debug with `R4C_SAMPLES=3` (workload ran in all 8 configurations) | n/a: workload assertions only |
+| M5 no render-scale coverage | `Rm` takes a window size and a render scale; mod-level matrix | `round_minimap_stays_in_window_coordinates_at_aspects_and_render_scales`: 1024x768 at 1x and 2x, 640x480 at 1x and 4x, 768x1024 at 1x and 2x (wide, tall, 4x); picture inside the circle, square corners cut, ring on the axes and diagonals at `r+1.5k`, nothing outside the ring, native dot under the hover, card inside the window, nothing hovered past the circle. The orange stand-in is a synthetic indoor-shaped picture (fills the whole square) in half the combinations | ring ignores scale: RED "ring at the diagonal". Real indoor terrain: unavailable (no disc) |
+| LOW group waypoint colour | orange `(1,0.5,0.05)` as `group_waypoint.rs` | `round_minimap_rim_arrows_keep_the_waypoint_colours`: a waypoint SE magenta, the group's SW orange, read from rendered pixels | blue again: RED "the group's arrow is orange: [62,150,202]" |
+| LOW pointer strips past the circle | each strip as wide as the circle is at the strip's end nearer the rim | same test: every 5 degrees a click 1.5 px outside the circle goes to the game and one inside is taken | strip width at the nearer-to-centre end: RED "a click just outside the circle at 15 degrees goes through" |
+| Found while testing | The mod used one scale for both axes; the HUD frame is not square at 1024x768 (1.6 across, 1.71 down), so dots and marks were found about 6 px high. Hover now uses the width scale across and the height scale down | hover and scale tests | `ky` replaced by `k`: RED in 4 tests |
+| Entity updates | The harness tells the API of each entity change as the session does (`Play::entity_slot_changed`, test only); the real runtime updates entities only then | | |
+
+### Coverage the deleted native tests gave, now at mod level
+
+Nearest-dot hover and card text per kind (player, pet, NPC, level unknown, corpse, inactive); circle border geometry at three aspects; rim placement of diagonal guidance (existing arrow test) with colours; render scales 1x, 2x, 4x; indoor-shaped picture clipped by the circle at the scales; hover, wheel and claim in window pixels; Move HUD (existing). Not re-added: the legend and badge restyle tests (those features were removed on purpose).
+
+### Counts
+
+| Suite | Passed | Failed | Ignored | SKIP lines |
+|---|---|---|---|---|
+| `round_minimap` filter | 10 | 0 | 0 | 0 |
+| Addons, `fork_ext::addons:: -- --test-threads=1`, scratch `EQOA_CONFIG` | 439 | 0 | 25 | 9 (symlink privilege, missing EQOA_FORGE_SPIKE and golden pictures: as before) |
+| Full client, `--bin eqoa -- --test-threads=1`, scratch `EQOA_CONFIG` | 2091 | 0 | 32 | disc, modules, server, Forge as before |
+| `tools/test_player_release.py` | 20 OK | | | |
+| wasm `cargo check --locked -p eqoa --target wasm32-unknown-unknown` | PASS | | | |
+| Footprint against 11aa5f0 | PASS, no budget raised | | | |
+| `bundled-mods/SOURCE.txt` | every hash matches the files (`main.lua`, `README.md` refreshed) | | | |
+| Release build (`enhanced-dev`, shared target) | PASS, 2 min 8 s, last | | | |
+
+A first full-suite attempt without `--test-threads=1` failed in the Forge ImGui bridge tests (they share one ImGui context); the suite is single-threaded by design and passed that way. The zero-addon allocation gate and the Wereoxxs, ARPG, Modern UI and round 3 and 4 mod tests are inside the addon run. The debug runs used `R4C_SAMPLES=3`.
+
+### Benchmark
+
+Timings pending: the lead runs them on an idle machine (the owner was playing on this PC, so none were taken here). The harness ran once in debug with 3 frames per configuration only to prove each workload runs: 200 dots drawn by the native minimap, one native minimap draw per frame, every wanted mod loaded. Command for the numbers:
+
+`cargo test --release --locked -p eqoa --bin eqoa round4c_frame_time_with_all_map_mods_in_a_busy_world -- --test-threads=1 --nocapture` (shared `CARGO_TARGET_DIR`, under the lock, scratch `EQOA_CONFIG`; 300 frames per configuration).
+
+Configurations: stock square minimap with no mods (the native baseline), round 3's four, creature journal, journal + search, round minimap with the pointer away, round minimap with the pointer on the circle, round 4's three, all seven. A frame is the native minimap's layout and drawing (with the 200 dots), the capture the mod asks for, the addons' callbacks and the ImGui pass, up to GPU completion. Develop's old native round minimap cannot run in this harness (its circle mask, dots and card are gone from the native files on this branch), so there is no number for it and none is estimated. Watch the "pointer on the circle" row: the hovered circle now builds the 200-entity list every frame (the old 30-frame cache was the staleness bug). If that row is too high, the fix is an entity delta source in the API, not a cache.
+
+### Not done
+
+- Clicking the circle still does not open the M map (no neutral map-open API); unchanged from Part C.
+- Quest steps pointing diagonally off the edge: hover correctly gives none there (the circle crops them); the mod still draws no rim mark for them.
+- A step's rim position uses a fixed 8 frame-px half glyph where the native uses the font's height; the hover can be about a pixel off the drawn glyph on the rim.
+- Real terrain, real indoor pictures and the native hover cards' extra text could not be checked (no disc); the owner's playtest confirms them.
+- Release timings (above).
