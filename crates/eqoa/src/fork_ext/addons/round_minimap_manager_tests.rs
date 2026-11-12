@@ -311,3 +311,50 @@ fn rm_wheel(steps: f32) {
         RM_SIZE,
     );
 }
+
+#[test]
+fn round_minimap_rim_arrow_only_where_the_circle_crops_the_square_mark() {
+    let Some(mut rm) = Rm::new(false) else { return };
+    let world = rm.play.player.world as i32;
+    rm.frames(4);
+    let (cx, cy, r) = rm.circle();
+    let arrows = |rm: &Rm| -> Vec<(f64, f64)> {
+        rm.lua().load("local t={} for _,a in ipairs(round_minimap.arrows) do t[#t+1]={a.x,a.y} end return t").eval::<Vec<Vec<f64>>>().unwrap().into_iter().map(|a| (a[0], a[1])).collect()
+    };
+    assert!(arrows(&rm).is_empty(), "no waypoint: no arrow");
+    // a waypoint far off to the south-east: the square picture puts its mark in a corner, which the circle crops
+    rm.play.map.round4_waypoint(world, Some([rm.me[0] + 3000.0, rm.me[2] + 3000.0]));
+    rm.frames(3);
+    let a = arrows(&rm);
+    assert_eq!(a.len(), 1, "one rim arrow for the diagonal waypoint: {a:?}");
+    let (dx, dy) = (a[0].0 - cx, a[0].1 - cy);
+    let ring = r + 6.0 * (rm_stock_rect(&rm)[2] - rm_stock_rect(&rm)[0]) as f64 / 112.0;
+    assert!((dx.hypot(dy) - ring).abs() < 1.0, "arrow sits just outside the ring: {} vs {ring}", dx.hypot(dy));
+    assert!(dx > 0.0 && dy > 0.0 && (dx / dy - 1.0).abs() < 0.3, "south-east of the centre: {dx} {dy}");
+    // control: straight east the square's own rim mark stays inside the circle, so the mod adds none
+    rm.play.map.round4_waypoint(world, Some([rm.me[0] + 3000.0, rm.me[2]]));
+    rm.frames(3);
+    assert!(arrows(&rm).is_empty(), "an axis-aligned waypoint keeps the native rim mark only: {:?}", arrows(&rm));
+    // control: a waypoint inside the circle is no rim mark
+    rm.play.map.round4_waypoint(world, Some([rm.me[0] + 20.0, rm.me[2] + 20.0]));
+    rm.frames(3);
+    assert!(arrows(&rm).is_empty());
+    rm.manager.shutdown();
+}
+
+#[test]
+fn round_minimap_carries_the_search_button_and_box_when_the_search_mod_is_on() {
+    use winit::keyboard::{Key, NamedKey};
+    let Some(mut rm) = Rm::new(true) else { return };
+    rm.frames(4);
+    assert!(rm.state::<bool>("round_minimap.shown"), "round minimap up beside the search mod");
+    super::super::input::route_mod_key(&Key::Named(NamedKey::F2), true, false, false, true, false);
+    let t = rm.frames(4);
+    let search = lua(&rm.manager, "eqoa_map_search");
+    assert!(search.load("return require('search').open").eval::<bool>().unwrap(), "F2 opens the search box over the round minimap (the stock one is hidden)");
+    let pixels = r4_pixels(&rm.gpu, &t);
+    assert!(pixels.chunks_exact(4).filter(|p| p[0] > 150 && p[1] < 80 && p[2] < 90).count() > 100, "the red search controls render");
+    rm_png(&pixels, "r4-minimap-search.png");
+    rm.manager.shutdown();
+    super::super::input::reset_input_state();
+}

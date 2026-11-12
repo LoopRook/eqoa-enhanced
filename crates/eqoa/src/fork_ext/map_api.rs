@@ -161,6 +161,8 @@ impl Map {
         map
     }
 
+    pub(crate) fn round4_waypoint(&mut self,world:i32,at:Option<[f32;2]>){self.set_waypoint(world,at);}
+
     /// A minimap frame as `Play::map_frame` makes it each frame (a moved or toggled minimap
     /// is laid out again), with the terrain stand-in.
     pub(crate) fn round4_mini_frame(&mut self,device:&wgpu::Device,queue:&wgpu::Queue,size:(u32,u32)){
