@@ -2,6 +2,13 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## Unreleased
+
+- Map Search finishes while nearby creatures move, keeps result order stable, and filters the previous results as you type. Closed search no longer scans the world or reloads a changing journal.
+- Search clears the full map header, consumes outside clicks while open, and scrolls whole rows only over its list. Group search excludes you and keeps unavailable members greyed out.
+- Known creature guides upgrade to live creatures; Track waypoint follows moved pins. Import/export report success, errors and the actual collision-safe filename for six seconds.
+- Creature Journal uses actor positions with the native protocol-position fallback, and new sightings after a save start a fresh save interval. Existing profiles receive the bundled map mods without overriding manual Off settings.
+
 ## 2026-11-11 · Enhanced 0.5.3
 
 - Fix: bundled mods that are on by default (HUD numbers and Mana Bars) are now on for players who already had a mod profile.
