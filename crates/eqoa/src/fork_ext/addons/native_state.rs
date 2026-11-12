@@ -132,7 +132,16 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         "map",
         "get",
         lua.create_function(|lua, ()| {
-            read(lua, "eqoa.map.get", "eqoa.map.MapState", |v| v.map.clone())
+            read(lua, "eqoa.map.get", "eqoa.map.MapState", |v| {
+                let mut map = v.map.clone();
+                if map.is_object() {
+                    map["search_anchor"] = json!(
+                        crate::fork_ext::map_toolbar::anchor()
+                            .map(|a| json!({"x":a[0],"y":a[1],"width":a[2],"height":a[3]}))
+                    );
+                }
+                map
+            })
         })?,
     )?;
 

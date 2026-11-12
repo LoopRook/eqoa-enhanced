@@ -945,6 +945,7 @@ fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.player.Player", "resists") => Some("eqoa.player.Resists"),
         ("eqoa.player.Player", "location") => Some("eqoa.player.Location"),
         (_, "position" | "actor_position" | "velocity") => Some("eqoa.Vec3"),
+        ("eqoa.map.MapState", "search_anchor") => Some("eqoa.hud.Rect"),
         ("eqoa.group.Group", "members") => Some("eqoa.group.Member"),
         ("eqoa.group.Group", "raid") => Some("eqoa.group.RaidMember"),
         ("eqoa.group.Group", "invites") => Some("eqoa.group.Invite"),
@@ -982,7 +983,7 @@ fn install_fields(lua: &Lua) {
         ("eqoa.map.Marker", "kind name x z level_min level_max label"),
         (
             "eqoa.map.MapState",
-            "enabled open world_id world_name zone bounds revision waypoint",
+            "enabled open world_id world_name zone bounds revision waypoint search_anchor",
         ),
         ("eqoa.map.Bounds", "x_min z_min x_max z_max"),
         ("eqoa.map.Waypoint", "world_id x z label owner"),
@@ -1103,7 +1104,9 @@ fn install_fields(lua: &Lua) {
         };
         describe(lua, path, "supported", round, "");
         for field in fields.split_whitespace() {
-            let field_round = if path=="eqoa.entities.Entity" && field=="actor_position" { Some(4) } else if matches!(
+            let field_round = if matches!((path,field),("eqoa.entities.Entity","actor_position") | ("eqoa.map.MapState","search_anchor")) {
+                Some(4)
+            } else if matches!(
                 (path, field),
                 ("eqoa.entities.Entity", "power") | ("eqoa.group.Member", "power")
             ) {

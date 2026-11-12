@@ -1304,3 +1304,50 @@ fn round4b_fix_shared_reload_is_lazy_and_retries_late_journal_owner() {
     native_events::clear(&j);
     input::reset_input_state();
 }
+
+#[test]
+fn round4b_fix_wheel_is_local_and_steps_whole_rows() {
+    use crate::fork_ext::addons::input;
+    input::reset_input_state();
+    crate::settings::testing::reset(false);
+    let mut p = Play::bundled_ui_fixture();
+    p.map.open = true;
+    p.forge_snapshot(None);
+    let scratch = Scratch::new();
+    let (h, a) = search_host(&scratch);
+    h.run_addon(&a).unwrap();
+    settle(&h);
+    // Drain the previously queued render; these deltas occur between draw frames.
+    native_events::dispatch(&h).unwrap();
+    h.execute("local s=require('search');s.open=true;s.dirty=false;s.build=nil;s.selected=8;s.offset=3;s.list_rect={x=10,y=100,w=300,h=200};s.rows={};for i=1,20 do s.rows[i]={name='Row '..i,detail='',kind='place',at={x=i,z=i}} end").unwrap();
+    CORE.with(|c| {
+        c.borrow_mut().emit(
+            "pointer.wheel",
+            serde_json::json!({"x":900,"y":700,"steps":0.3,"inside_window":true}),
+        )
+    });
+    h.begin_iteration();
+    native_events::dispatch(&h).unwrap();
+    h.end_iteration();
+    h.execute(
+        "assert(require('search').selected==8,'wheel outside the list must leave selection alone')",
+    )
+    .unwrap();
+    for n in [0.3, -0.3, -1.7, -0.2, -0.8] {
+        h.execute("require('search').list_rect={x=10,y=100,w=300,h=200}")
+            .unwrap();
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "pointer.wheel",
+                serde_json::json!({"x":20,"y":110,"steps":n,"inside_window":true}),
+            )
+        });
+        h.begin_iteration();
+        native_events::dispatch(&h).unwrap();
+        h.end_iteration();
+        h.execute("local s=require('search');assert(s.selected%1==0 and s.offset%1==0,'row indices must be integers')").unwrap();
+    }
+    h.execute("assert(require('search').selected==11)").unwrap();
+    native_events::clear(&h);
+    input::reset_input_state();
+}

@@ -65,12 +65,14 @@ eqoa.events.on("pointer.pressed",function(e)
     if s.open then s.close() end
 end)
 eqoa.events.on("pointer.wheel",function(e)
-    if s.open then
-        s.selected=math.max(1,math.min(#s.rows,s.selected-(e.data.steps or 0)));s.offset=math.max(1,s.selected-5)
+    if s.open and s.list_rect and inside(e.data,s.list_rect) then
+        local steps=e.data.steps or 0
+        if steps~=0 then s.selected=math.max(1,math.min(#s.rows,s.selected+(steps>0 and -1 or 1)));s.offset=math.max(1,s.selected-5) end
     end
 end)
 local function draw()
     hits={}
+    s.panel_rect=nil;s.list_rect=nil
     local map=eqoa.map.get();if not map or map.enabled==false then s.close();return end
     local mini=not map.open and eqoa.hud.visible("minimap")
     if not mini and not map.open then
@@ -82,10 +84,14 @@ local function draw()
     local ui=eqoa.imgui
     local w,h=ui.GetDisplaySize()
     local layout=eqoa.hud.layout();local m=layout.minimap
-    local x,y=map.open and 16 or m.x+m.width-20,map.open and 44 or m.y+m.height+2
-    local pw,ph=math.min(336,w-24),math.min(400,h-72)
+    local anchor=map.search_anchor
+    if map.open and not anchor then return end
+    local x,y=map.open and anchor.x or m.x+m.width-20,map.open and anchor.y or m.y+m.height+2
+    local pw,ph=math.min(336,w-24),math.min(400,map.open and anchor.height-26 or h-72)
     local px=map.open and 16 or math.max(12,m.x-pw-8)
-    local py=math.max(12,math.min(map.open and 70 or m.y,h-ph-12))
+    local py=math.max(12,math.min(map.open and y+26 or m.y,h-ph-12))
+    s.panel_rect={x=px,y=py,w=pw,h=ph}
+    s.list_rect={x=px+7,y=py+106,w=pw-14,h=math.max(0,ph-175)}
     ui.SetNextWindowPos(0,0);ui.SetNextWindowSize(w,h)
     local flags=ImGuiWindowFlags.NoTitleBar+ImGuiWindowFlags.NoBackground+ImGuiWindowFlags.NoMove+ImGuiWindowFlags.NoResize+ImGuiWindowFlags.NoScrollbar+ImGuiWindowFlags.NoSavedSettings+ImGuiWindowFlags.NoInputs
     ui.Begin("eqoa_map_search_layer",nil,flags)
@@ -100,7 +106,7 @@ local function draw()
         dl:AddText(v(x,y),color or c.text,value)
     end
     local function hit(x,y,w,h,click)
-        local r={x=x,y=y,w=w,h=h,click=click};hits[#hits+1]=r
+        local r={x=x,y=y,w=w,h=h,click=function() s.message=nil;s.message_until=nil;click() end};hits[#hits+1]=r
         eqoa.input.claim_pointer({x=x,y=y,width=w,height=h})
     end
     local function button(x,y,w,h,label,click,active)
@@ -112,7 +118,13 @@ local function draw()
     if s.guide then button(x-24,y,20,20,"X",s.clear) end
     local status=s.status()
     if status then text(math.max(12,x-300),y+25,status,c.text,320) end
+    if map.waypoint then
+        button(x+(mini and 24 or 106),y,136,20,"Track waypoint",function()
+            s.choose({name="Personal waypoint",kind="waypoint",at={x=map.waypoint.x,z=map.waypoint.z}})
+        end)
+    end
     if s.open then
+        eqoa.input.claim_pointer({x=0,y=0,width=w,height=h})
         fill(px,py,pw,ph,c.surface);dl:AddRect(v(px,py),v(px+pw,py+ph),c.border)
         hit(px,py,pw,ph,function() end)
         text(px+12,py+12,"FIND ON MAP",c.muted)

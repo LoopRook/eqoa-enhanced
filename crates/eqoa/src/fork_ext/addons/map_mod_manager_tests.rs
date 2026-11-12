@@ -294,6 +294,71 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
         .filter(|d| matches!(d.phase, "events" | "entry" | "imgui" | "frame"))
         .collect::<Vec<_>>();
     assert!(bad.is_empty(), "{bad:?}");
+    // A modal panel owns outside clicks and wheels before native map/world input.
+    use winit::event::{
+        DeviceId, ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
+    };
+    let selected = lua
+        .load("return require('search').selected")
+        .eval::<usize>()
+        .unwrap();
+    super::super::pointer_api::position([1000., 740.], true, (1024, 768));
+    let wheel = WindowEvent::MouseWheel {
+        device_id: DeviceId::dummy(),
+        delta: MouseScrollDelta::LineDelta(0., 0.3),
+        phase: TouchPhase::Moved,
+    };
+    assert!(
+        super::super::pointer_api::observe(&wheel, (1024, 768)),
+        "open search must consume an outside wheel"
+    );
+    for _ in 0..2 {
+        r4_begin(&mut gpu);
+        native_core::presentation();
+        manager.frame(snapshot);
+        r4_render(&mut gpu, &scene);
+        manager.after_render();
+    }
+    assert_eq!(
+        lua.load("return require('search').selected")
+            .eval::<usize>()
+            .unwrap(),
+        selected,
+        "outside wheel must not scroll the list"
+    );
+    let press = WindowEvent::MouseInput {
+        device_id: DeviceId::dummy(),
+        state: ElementState::Pressed,
+        button: MouseButton::Left,
+    };
+    assert!(
+        super::super::pointer_api::observe(&press, (1024, 768)),
+        "closing click must be consumed before native world input"
+    );
+    for _ in 0..3 {
+        r4_begin(&mut gpu);
+        native_core::presentation();
+        manager.frame(snapshot);
+        r4_render(&mut gpu, &scene);
+        manager.after_render();
+    }
+    assert!(
+        !lua.load("return require('search').open")
+            .eval::<bool>()
+            .unwrap()
+    );
+    assert!(
+        !super::super::pointer_api::observe(&wheel, (1024, 768)),
+        "closed search must release the world"
+    );
+    input::route_mod_key(&Key::Named(NamedKey::F2), true, false, false, true, false);
+    for _ in 0..3 {
+        r4_begin(&mut gpu);
+        native_core::presentation();
+        manager.frame(snapshot);
+        r4_render(&mut gpu, &scene);
+        manager.after_render();
+    }
     for mini in [true, false] {
         play.test_map_search_surface(!mini);
         snapshot = play.forge_snapshot(None);
@@ -307,6 +372,9 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
             manager.frame(snapshot);
             target = Some(r4_render(&mut gpu, &map));
             manager.after_render();
+        }
+        if !mini {
+            assert!(lua.load("local s=require('search');local a=eqoa.map.get().search_anchor;return a~=nil and s.panel_rect~=nil and s.panel_rect.y>=a.y+26").eval::<bool>().unwrap(),"rendered full-map search must clear the actual header");
         }
         let pixels = r4_pixels(&gpu, target.as_ref().unwrap());
         assert!(
@@ -348,9 +416,13 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
         .as_ref()
         .unwrap();
     j.host.test_player_files(None, desktop.clone());
+    let (px, py, ph) = lua
+        .load("local r=require('search').panel_rect;return r.x,r.y,r.h")
+        .eval::<(f32, f32, f32)>()
+        .unwrap();
     native_core::emit(
         "pointer.pressed",
-        serde_json::json!({"x":100.,"y":455.,"inside_window":true,"button":"left"}),
+        serde_json::json!({"x":px+84.,"y":py+ph-15.,"inside_window":true,"button":"left"}),
     );
     let exported = desktop.join("EQOA-Creature-Journal.json");
     for _ in 0..100 {
@@ -410,7 +482,7 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
     j.host.test_player_files(Some(forge), desktop.clone());
     native_core::emit(
         "pointer.pressed",
-        serde_json::json!({"x":180.,"y":455.,"inside_window":true,"button":"left"}),
+        serde_json::json!({"x":px+164.,"y":py+ph-15.,"inside_window":true,"button":"left"}),
     );
     let import_started = Instant::now();
     let deadline = import_started + Duration::from_secs(60);

@@ -66,3 +66,5 @@ pub(crate) fn minimap_contains(map: &crate::map::Map, point: [f32; 2]) -> bool {
     }
     map.mini_contains(point)
 }
+
+pub(crate) mod map_toolbar;

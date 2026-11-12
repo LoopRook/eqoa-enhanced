@@ -28,6 +28,7 @@ impl Map {
         if let Some(m) = self.group_mark() {
             (m.world, m.at.map(f32::to_bits), &m.from).hash(&mut h);
         }
+        crate::fork_ext::map_toolbar::anchor().map(|a| a.map(f32::to_bits)).hash(&mut h);
         h.finish()
     }
 
@@ -49,7 +50,7 @@ impl Map {
             let c = &w.builder.cells;
             json!({"x_min":ee::mul(c.col0 as f32,CELL),"z_min":ee::mul(c.row0 as f32,CELL),"x_max":ee::mul((c.col0+c.cols) as f32,CELL),"z_max":ee::mul((c.row0+c.rows) as f32,CELL)})
         });
-        json!({"enabled":crate::settings::map(),"open":self.open,"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
+        json!({"search_anchor":crate::fork_ext::map_toolbar::anchor().map(|a|json!({"x":a[0],"y":a[1],"width":a[2],"height":a[3]})),"enabled":crate::settings::map(),"open":self.open,"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
     }
 }
 

@@ -2047,7 +2047,7 @@ impl Map {
         } else if let Some(m) = card {
             markers::draw_card(ui, &l.assets, vui, white, m, f(v.to_window(size, m.at())), win);
         }
-        crate::fork_ext::map::overlay(ui, white, w.index, |at| f(v.to_window(size, at)), [win[0][0],win[0][1],win[1][0],win[1][1]]);
+        crate::fork_ext::map_toolbar::overlay(ui, white, w.index, |at| f(v.to_window(size, at)), [win[0][0],win[0][1],win[1][0],win[1][1]], (&footprint, c.corners, size));
         let mut r = l.assets.raster(ui).with_font(l.control_font,theme::FONT_SCALE);
         self.buttons = chrome::draw(&mut r, vui, &c);
         self.glyphs = r.glyphs;
