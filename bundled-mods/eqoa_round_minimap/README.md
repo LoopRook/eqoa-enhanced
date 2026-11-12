@@ -3,7 +3,7 @@
 Enabled by default. It hides the game's square minimap and shows a round one in the same
 place and size, with a ring. Move HUD moves it. N toggles it (the game's own setting) and
 the wheel zooms it. Hovering a creature, player or pet shows its name, level, kind and
-distance; hovering a camp, coach, town or quest mark shows its name. Disable the mod and
+distance; hovering a camp, coach or quest mark the minimap draws shows its name (not towns; camps and coaches follow Map Markers). Disable the mod and
 the game's square minimap returns untouched.
 
 The picture is the game's own minimap (terrain, indoor view, camps, coaches, quest marks,
