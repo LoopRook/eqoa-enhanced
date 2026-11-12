@@ -21,9 +21,6 @@
 //! the HUD's pieces keep to the target's top or bottom the same way
 //! (`Vertical`).
 
-#[path = "../../eqoa/src/fork_ext/render_font.rs"]
-mod enhanced_font;
-
 use bytemuck::{Pod, Zeroable};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
@@ -552,7 +549,6 @@ struct Vertex {
     /// The quad's texture rectangle (its corners' least and greatest uv):
     /// what the fragment keeps to (`ui.wgsl`).
     rect: [f32; 4],
-    circle: [f32;4],
 }
 
 /// One quad: its corners in screen pixels and texture coordinates, in fan
@@ -714,7 +710,7 @@ impl Ui {
                             buffers: &[Some(wgpu::VertexBufferLayout {
                                 array_stride: std::mem::size_of::<Vertex>() as u64,
                                 step_mode: wgpu::VertexStepMode::Vertex,
-                                attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4],
+                                attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Float32x4],
                             })],
                         },
                         primitive: Default::default(),
@@ -884,22 +880,9 @@ impl Ui {
 
     /// A font, packed into rows of a 2048-wide texture (`pack`). Its index.
     pub fn add_font(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, font: &esf::font::Font) -> usize {
-        self.add_font_at_height(device, queue, font, font.height)
-    }
-
-    /// Upload every source texel, using a separate logical height for layout.
-    /// Glyph widths round up as with a reduced bitmap; UVs retain full detail.
-    pub fn add_font_at_height(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        font: &esf::font::Font,
-        height: u32,
-    ) -> usize {
         let (atlas, ah, glyphs) = pack(font, 2048);
         let tex = self.add_texture_as(device, queue, (2048, ah), 2048, ah, &atlas, true);
         self.fonts.push(Font { tex, height: font.height, glyphs });
-        enhanced_font::apply_last_height(self, height);
         self.fonts.len() - 1
     }
 
@@ -1002,13 +985,6 @@ impl Ui {
 
     /// `draw`, for the quads in `range` only (around a window's 3D, `split`).
     pub fn draw_range<'a>(&'a self, device: &wgpu::Device, pass: &mut wgpu::RenderPass<'a>, size: (u32, u32), range: std::ops::Range<usize>) {
-        self.draw_range_masked(device,pass,size,range,None);
-    }
-    /// Mask only a content range; tooltips and controls can draw outside it.
-    pub fn draw_circle_range<'a>(&'a self,device:&wgpu::Device,pass:&mut wgpu::RenderPass<'a>,size:(u32,u32),range:std::ops::Range<usize>,circle:[f32;3]) {
-        self.draw_range_masked(device,pass,size,range,Some(circle));
-    }
-    fn draw_range_masked<'a>(&'a self,device:&wgpu::Device,pass:&mut wgpu::RenderPass<'a>,size:(u32,u32),range:std::ops::Range<usize>,circle:Option<[f32;3]>) {
         let range = range.start.min(self.quads.len())..range.end.min(self.quads.len());
         if range.is_empty() {
             return;
@@ -1035,7 +1011,6 @@ impl Ui {
                 uv: q.uv[i],
                 color: q.color,
                 rect,
-                circle:circle.filter(|c|c[2].is_finite()&&c[2]>0.0).map_or([0.0;4],|c|[c[0]/tw*2.0-1.0,1.0-c[1]/th*2.0,tw/(2.0*c[2]),th/(2.0*c[2])]),
             };
             v.extend([p(0), p(1), p(2), p(0), p(2), p(3)]);
         }
@@ -1096,46 +1071,6 @@ mod tests {
     fn ring_clear(atlas: &[u8], width: u32, r: [u32; 4]) -> bool {
         let a = |x: u32, y: u32| atlas[((y * width + x) * 4 + 3) as usize];
         (r[0] - 1..=r[2]).all(|x| a(x, r[1] - 1) == 0 && a(x, r[3]) == 0) && (r[1] - 1..=r[3]).all(|y| a(r[0] - 1, y) == 0 && a(r[2], y) == 0)
-    }
-
-    #[test]
-    fn high_resolution_font_keeps_detail_at_the_original_label_size() {
-        let source = esf::font::Font {
-            id: 1,
-            height: 36,
-            glyphs: vec![esf::font::Glyph {
-                code: 65,
-                width: 17,
-                rgba: vec![255; 17 * 36 * 4],
-            }],
-        };
-        let (_, _, glyphs) = pack(&source, 2048);
-        let original_uv = glyphs[&65].1;
-        let original = super::Font {
-            tex: 7,
-            height: source.height,
-            glyphs,
-        };
-        assert_eq!(original.height, 36);
-        assert_eq!(
-            original.string_width(&[65, 65]),
-            36,
-            "normal font metrics remain unchanged"
-        );
-        let font = original.at_height(12);
-        assert_eq!(font.height, 12, "layout must retain the old label height");
-        assert_eq!(
-            font.string_width(&[65, 65]),
-            14,
-            "wrapping retains rounded logical widths and spacing"
-        );
-        assert_eq!(font.tex, 7);
-        assert_eq!(
-            font.find(65).unwrap().1,
-            original_uv,
-            "UVs still cover the entire high-resolution glyph"
-        );
-        assert!(((original_uv[2] - original_uv[0]) * 2048.0 - 17.0).abs() < 0.01);
     }
 
     /// Each glyph is its own texels, at its rectangle, inside a clear ring

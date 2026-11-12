@@ -71,8 +71,6 @@ const ZOOM_STEP: f32 = 1.25;
 pub struct Mini {
     /// world units a frame pixel (`SCALE`, the wheel's)
     pub scale: f32,
-    pub circle:[f32;3],
-    pub masked_until:usize,
     /// drawn this frame (`Map::mini_frame` made its quads)
     pub up: bool,
     /// where its frame is in the window, pixels (`Map::mini_contains`)
@@ -92,7 +90,7 @@ pub struct Mini {
 
 impl Default for Mini {
     fn default() -> Self {
-        Mini { circle: [0.0; 3], masked_until: 0, scale: SCALE, up: false, frame_px: [0.0; 4], wanted: Vec::new(), cursor: None, map_marks: None, half: 0.0 }
+        Mini { scale: SCALE, up: false, frame_px: [0.0; 4], wanted: Vec::new(), cursor: None, map_marks: None, half: 0.0 }
     }
 }
 
@@ -185,91 +183,11 @@ impl Mark {
 pub const TIP_TITLE: [f32; 4] = [1.0, 0.86, 0.45, 1.0];
 pub const TIP_TEXT: [f32; 4] = [0.95, 0.93, 0.86, 1.0];
 
-/// One current scene observation; historical spawn records never become dots.
-#[derive(Clone, Debug)]
-pub struct Dot {
-    pub id: u32,
-    pub at: [f32; 2],
-    pub color: [f32; 4],
-    pub name: String,
-    pub level: Option<u8>,
-    /// What the card calls it: "Player", "Pet" or "NPC".
-    pub kind: &'static str,
-}
-impl Dot {
-    /// Canonical nameplate class; m_p255 alone is no player test.
-    pub(crate) fn kind(e: &net::entity::Entity) -> &'static str {
-        match e.creature.as_ref().map(|c| c.p256) {
-            Some(2) => "Player",
-            Some(3) => "Pet",
-            _ => "NPC",
-        }
-    }
-
-    /// A seen, targetable, named creature drawn in `color`. Its kind is
-    /// `m_p256`'s (2 a player character, 3 of a player's side, else an
-    /// NPC); `m_p255` is 0 for other players as for NPCs.
-    pub fn of(e: &net::entity::Entity, color: [f32; 4]) -> Option<Dot> {
-        let c = e.creature.as_ref()?;
-        (e.p19 != 0 && !c.name.trim().is_empty() && e.actor_pos.iter().all(|v| v.is_finite())).then(|| Dot {
-            id: e.id,
-            at: [e.actor_pos[0], e.actor_pos[2]],
-            color,
-            name: c.name.clone(),
-            level: (c.level > 0).then_some(c.level),
-            kind: Self::kind(e),
-        })
-    }
-    fn card(&self, from: [f32; 2]) -> Vec<(String, [f32; 4])> {
-        let level = self
-            .level
-            .filter(|l| *l > 0)
-            .map_or_else(|| "Level unknown".into(), |l| format!("Level {l}"));
-        vec![
-            (self.name.clone(), TIP_TITLE),
-            (
-                format!("{level} / {}", self.kind),
-                TIP_TEXT,
-            ),
-            (
-                format!(
-                    "{:.0} away / observed nearby",
-                    (self.at[0] - from[0]).hypot(self.at[1] - from[1])
-                ),
-                TIP_TEXT,
-            ),
-        ]
-    }
-}
-fn dot_under<'a>(
-    dots: &'a [Dot],
-    to: &dyn Fn([f32; 2]) -> [f32; 2],
-    cursor: [f32; 2],
-    circle: [f32; 3],
-    reach: f32,
-) -> Option<([f32; 2], &'a Dot)> {
-    let inside = |p: [f32; 2]| (p[0] - circle[0]).hypot(p[1] - circle[1]) <= circle[2];
-    if !inside(cursor) {
-        return None;
-    }
-    dots.iter()
-        .filter_map(|dot| {
-            let q = to(dot.at);
-            (inside(q) && (q[0] - cursor[0]).hypot(q[1] - cursor[1]) <= reach).then_some((q, dot))
-        })
-        .min_by(|(a, da), (b, db)| {
-            (a[0] - cursor[0])
-                .hypot(a[1] - cursor[1])
-                .total_cmp(&(b[0] - cursor[0]).hypot(b[1] - cursor[1]))
-                .then(da.id.cmp(&db.id))
-        })
-}
-
 /// What the minimap is given each frame besides what the map keeps.
 #[derive(Clone, Debug, Default)]
 pub struct MiniView {
     /// the creatures and players in view: (x, z) and their names' colour
-    pub dots: Vec<Dot>,
+    pub dots: Vec<([f32; 2], [f32; 4])>,
     /// the target's place (x, z), when it is in view
     pub target: Option<[f32; 2]>,
     /// marks of every kind (`Mark`): the XP camps and coach stops, the
@@ -435,8 +353,7 @@ impl Map {
     /// wheel's there: `mini_wheel`).
     pub fn mini_contains(&self, p: [f32; 2]) -> bool {
         let r = self.mini.frame_px;
-        let c=if self.mini.circle[2]>0.0 {self.mini.circle}else{[(r[0]+r[2])*0.5,(r[1]+r[3])*0.5,(r[2]-r[0]).min(r[3]-r[1])*0.5]};
-        self.mini.up && !self.open && (p[0]-c[0]).hypot(p[1]-c[1])<=c[2]
+        self.mini.up && !self.open && p[0] >= r[0] && p[0] < r[2] && p[1] >= r[1] && p[1] < r[3]
     }
 
     /// The wheel's `lines` over the minimap (up positive: in).
@@ -512,7 +429,6 @@ impl Map {
         let indoors = self.indoor.inside();
         let s = if indoors { self.indoor.scale() } else { self.mini.scale } / k;
         let mid = [(inside[0] + inside[2]) / 2.0, (inside[1] + inside[3]) / 2.0];
-        self.mini.circle=[mid[0],mid[1],(inside[2]-inside[0]).min(inside[3]-inside[1])*0.5];
         let c = [p[0], p[2]];
         let to_px = |q: [f32; 2]| [mid[0] + (q[0] - c[0]) / s, mid[1] + (q[1] - c[1]) / s];
         let shown = [c[0] - (mid[0] - inside[0]) * s, c[1] - (mid[1] - inside[1]) * s, c[0] + (inside[2] - mid[0]) * s, c[1] + (inside[3] - mid[1]) * s];
@@ -584,7 +500,6 @@ impl Map {
         let own = own_marks(&self.mini.map_marks, cx.world, crate::settings::map_markers());
         let all: Vec<&Mark> = own.iter().chain(&mv.marks).collect();
         let placed = place_marks(&all, cx.world, &to_px, inside, MARK_REACH * px_line, mid, edge);
-        let placed: Vec<_> = placed.into_iter().map(|(q, m)| (if m.kind.on_rim() { crate::fork_ext::map::circular_rim(mid, q, edge) } else { q }, m)).collect();
         let on = |q: [f32; 2], m: f32| q[0] >= inside[0] - m && q[0] <= inside[2] + m && q[1] >= inside[1] - m && q[1] <= inside[3] + m;
         // the coaches (the stable's horseshoe, the map's: off the disc), then
         // the camps' XP badges over them, as the map draws them, smaller;
@@ -603,10 +518,10 @@ impl Map {
         for q in &mut ui.quads[from..] {
             q.clip = cut;
         }
-        for entity in &mv.dots {
-            let q = to_px(entity.at);
+        for &(at, color) in &mv.dots {
+            let q = to_px(at);
             if on(q, dot + dot_o) {
-                square_dot(ui, white, cut, f(q), dot / px_line, dot_o / px_line, entity.color);
+                square_dot(ui, white, cut, f(q), dot / px_line, dot_o / px_line, color);
             }
         }
         // the target: a white ring round its dot
@@ -637,23 +552,23 @@ impl Map {
             let (r, o) = view::waypoint_radius(size);
             let (r, o) = (r * 0.8, o);
             let edge = [inside[0] + r + o, inside[1] + r + o, inside[2] - r - o, inside[3] - r - o];
-            let q = crate::fork_ext::map::circular_rim(mid, to_px(at), edge);
+            let q = to_rim(mid, to_px(at), edge);
             for (rr, color) in [(r + o * 1.5, OUTLINE), (r, color)] {
                 plain(ui, white, diamond(q, rr).map(f), color, cut);
             }
         }
-        crate::fork_ext::map::overlay(ui, white, cx.world, |at| f(to_px(at)), [a[0],a[1],b[0],b[1]]);
+        crate::fork_ext::map::overlay(ui, white, cx.world, |at| f(to_px(at)), [a[0], a[1], b[0], b[1]]);
         let mut r = l.assets.raster(ui);
         if let Some(vui) = cx.vui {
             // the border, a window's frame round it, placed as the HUD's right side is
             r.ui.anchor = Anchor::Right;
             r.ui.vertical = Vertical::Top;
-            crate::fork_ext::map::round_minimap_border(r.ui, white, size, self.mini.circle, px_line);
             r.ui.shift = moved;
+            vui.blit_frame(&mut r, [FRAME[0], FRAME[1]], [FRAME[2] - FRAME[0], FRAME[3] - FRAME[1]], &vi::ui::frame_sets()[0], 3, 1.0, true);
             // north, up: the compass turns with the camera, the minimap does not
             let i = inner();
             let h = vui.font_height(&r);
-            vui.draw_centered_string_ex(&mut r, &vi::ui::wide("N"), (i[0] + i[2]) / 2, i[1] + h / 2 + 5, [1.0, 1.0, 1.0, 0.95], 3, true);
+            vui.draw_centered_string_ex(&mut r, &vi::ui::wide("N"), (i[0] + i[2]) / 2, i[1] + h / 2, [1.0, 1.0, 1.0, 0.85], 3, true);
             r.ui.shift = [0.0; 2];
             // the quests' "!" and "?" over the other marks, where they were
             // placed in the window (cut to the pictures as the marks are)
@@ -675,18 +590,14 @@ impl Map {
         for (rr, color) in [(dr * 0.85 + o, OUTLINE), (dr * 0.85, super::MARKER)] {
             plain(r.ui, white, view::dart(mid, heading, rr).map(f), color, cut);
         }
-        self.mini.masked_until=r.ui.quads.len();
         // the card of the mark under the mouse's pointer, left of the frame,
         // drawn as the map's cards are
         let reach = (MARK_REACH * px_line).max(half) + px_line;
-        let hover = self.mini.cursor.filter(|c|(c[0]-mid[0]).hypot(c[1]-mid[1])<=self.mini.circle[2]);
-        let entity_tip = hover.and_then(|cursor| dot_under(&mv.dots, &to_px, cursor, self.mini.circle, (dot + dot_o + px_line).max(3.0*px_line)))
-            .map(|(q,d)| (q,d.card(c)));
-        let tip = entity_tip.or_else(|| hover.and_then(|cursor| mark_under(&placed,cursor,reach)).map(|(q,m)| (q,m.tip.clone())));
-        if let (Some(vui), Some((q, tip))) = (cx.vui, tip) {
+        if let (Some(vui), Some((q, m))) = (cx.vui, self.mini.cursor.and_then(|c| mark_under(&placed, c, reach))) {
             r.ui.anchor = Anchor::Middle;
             r.ui.vertical = Vertical::Middle;
-            let lines: Vec<(Vec<u16>, [f32; 4])> = tip
+            let lines: Vec<(Vec<u16>, [f32; 4])> = m
+                .tip
                 .iter()
                 .flat_map(|(l, c)| wrap(l, TIP_WIDTH, |s| vui.string_width(&r, s)).into_iter().map(move |l| (l, *c)))
                 .take(TIP_LINES)
@@ -735,14 +646,8 @@ impl Map {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        // Terrain and the stored circle use window pixels; the render target
-        // may be larger when supersampling. UI quads use frame coordinates,
-        // but their pixel-space mask must grow with the target.
-        let scale = size.0 as f32 / window.0.max(1) as f32;
-        let circle = self.mini.circle.map(|v| v * scale);
-        l.map.draw_circle(device, &mut pass, window, self.mini.circle);
-        l.ui.draw_circle_range(device, &mut pass, size, 0..self.mini.masked_until, circle);
-        l.ui.draw_range(device,&mut pass,size,self.mini.masked_until..l.ui.quads.len());
+        l.map.draw(device, &mut pass, window);
+        l.ui.draw(device, &mut pass, size);
     }
 }
 
@@ -757,115 +662,6 @@ pub fn dot_radius(size: (u32, u32)) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fork_ext::map::ring_quad;
-
-    #[test]
-    fn minimap_stays_in_window_coordinates_at_render_scales() {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
-            eprintln!("SKIP minimap render-scale GPU test: no adapter");
-            return;
-        };
-        let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default())) else {
-            eprintln!("SKIP minimap render-scale GPU test: no device");
-            return;
-        };
-        let lib = esf::Library::new();
-        let size = (64, 64);
-        let cx = Context { lib: &lib, device: &device, queue: &queue, format: render::TARGET_FORMAT, size, dt: 0.0, player: None, world: 0, origin: [0.0; 2], group: Vec::new(), in_group: false, target: None, sticks: [0.0; 4], keyboard: true, words: None, vui: None, quest_marks: None };
-        let mut map = Map::default();
-        map.size = size;
-        map.layers(&cx);
-        let layers = map.layers.as_mut().unwrap();
-        layers.map.quads.push(MapQuad::rect(layers.white, [30.0, 20.0, 50.0, 40.0], [0.0, 0.0, 1.0, 1.0], [1.0; 4]));
-        let points = corners([37.0, 27.0, 43.0, 33.0]).map(|p| frame_from_window(size, p));
-        plain(&mut layers.ui, layers.assets.white.unwrap(), points, [1.0, 0.0, 0.0, 1.0], Some(render::ui::WHOLE));
-        let control = corners([52.0, 27.0, 58.0, 33.0]).map(|p| frame_from_window(size, p));
-        plain(&mut layers.ui, layers.assets.white.unwrap(), control, [0.0, 0.0, 1.0, 1.0], Some(render::ui::WHOLE));
-        map.mini.circle = [40.0, 30.0, 10.0];
-        map.mini.masked_until = 1;
-        map.mini.up = true;
-        for k in [1, 2, 4, 2, 1] {
-            let target = (size.0 * k, size.1 * k);
-            let pixels = super::super::tool::capture(&map, &device, &queue, target).unwrap();
-            let pixel = |x: u32, y: u32| pixels[((y * target.0 + x) * 4) as usize];
-            assert!(pixel(40 * k, 30 * k) > 200, "center missing at scale {k}");
-            assert!(pixel(45 * k, 30 * k) > 200, "terrain missing at scale {k}");
-            assert!(pixel(20 * k, 15 * k) < 10, "terrain shifted at scale {k}");
-            assert!(pixels[((30 * k * target.0 + 40 * k) * 4 + 1) as usize] < 10, "UI marker masked at scale {k}");
-            assert!(pixel(31 * k, 21 * k) < 10, "circle corner visible at scale {k}");
-            assert!(pixels[((30 * k * target.0 + 55 * k) * 4 + 2) as usize] > 200, "control missing at scale {k}");
-            assert!(map.mini_contains([40.0, 30.0]));
-            assert!(!map.mini_contains([31.0, 21.0]));
-        }
-    }
-
-    #[test]
-    fn minimap_card_calls_other_players_players_and_pets_pets() {
-        // As the server sends them: other players walk with m_p255 0, as NPCs do
-        let seen = |p256| net::entity::Entity {
-            id: 9,
-            kind: net::entity::TYPE_CREATURE,
-            p19: 255,
-            actor_pos: [10.0, 0.0, 20.0],
-            creature: Some(net::entity::Creature { name: "Someone".into(), level: 45, p256, ..Default::default() }),
-            ..Default::default()
-        };
-        let line = |p256| Dot::of(&seen(p256), [1.0; 4]).expect("a dot").card([10.0, 20.0])[1].0.clone();
-        assert_eq!(line(2), "Level 45 / Player");
-        assert_eq!(line(3), "Level 45 / Pet");
-        assert_eq!(line(0), "Level 45 / NPC");
-        assert_eq!(line(1), "Level 45 / NPC");
-    }
-
-    #[test]
-    fn map_refinement_hover_chooses_the_nearest_visible_entity_and_keeps_level() {
-        let make = |id, at| Dot {
-            id,
-            at,
-            color: [1.0; 4],
-            name: "Rat".into(),
-            level: Some(7),
-            kind: "NPC",
-        };
-        let dots = vec![
-            make(2, [52.0, 50.0]),
-            make(1, [50.0, 50.0]),
-            make(3, [101.0, 50.0]),
-        ];
-        let circle = [50.0, 50.0, 50.0];
-        let (_, d) = dot_under(&dots, &|p| p, [50.0, 50.0], circle, 5.0)
-            .expect("entity at pointer has a tooltip");
-        assert_eq!(d.id, 1);
-        let tip = d
-            .card([50.0, 40.0])
-            .into_iter()
-            .map(|l| l.0)
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(
-            tip.contains("Rat")
-                && tip.contains("Level 7")
-                && tip.contains("NPC")
-                && tip.contains("10")
-        );
-        assert!(
-            dot_under(&dots, &|p| p, [101.0, 50.0], circle, 5.0).is_none(),
-            "masked corners must not hover"
-        );
-        assert!(
-            dot_under(&dots, &|p| p, [5.0, 50.0], circle, 5.0).is_none(),
-            "blank terrain has no entity tooltip"
-        );
-        let mut unknown = d.clone();
-        unknown.level = None;
-        assert!(
-            !unknown
-                .card([0.0; 2])
-                .iter()
-                .any(|l| l.0.contains("Level 0"))
-        );
-    }
 
     /// The frame sits under the quick menu's name plate (to y 53) and left of
     /// its column of icons (from x 589), in the HUD's right half, and clear
@@ -916,21 +712,6 @@ mod tests {
     /// along its way, and the quests' come after the rest, a step's last
     /// (drawn over them). The controls: another world's mark, a quest to take
     /// on the pictures and a step on them, which stay where they lie.
-    #[test]
-    fn border_outer_points_match_the_gpu_circle_at_every_aspect() {
-        for size in [(640,480),(1920,1080),(720,1280)] {
-            let r=window_rect(size,inner());let c=[(r[0]+r[2])*0.5,(r[1]+r[3])*0.5,(r[2]-r[0]).min(r[3]-r[1])*0.5];
-            for i in 0..96 {let q=ring_quad(size,c,i,96,1.5);for point in [q[1],q[2]] {let p=window_from_frame(size,point);assert!(((p[0]-c[0]).hypot(p[1]-c[1])-c[2]).abs()<0.002,"{size:?}: border must match the mask at every angle");}}
-        }
-    }
-
-    #[test]
-    fn diagonal_guidance_uses_a_circle_rim_and_corners_are_outside() {
-        let mid=[50.0,50.0];let q=crate::fork_ext::map::circular_rim(mid,[200.0,200.0],[0.0,0.0,100.0,100.0]);
-        assert!(((q[0]-50.0).hypot(q[1]-50.0)-50.0).abs()<0.01,"{q:?} is on the circle");
-        let mut m=Map::default();m.mini.up=true;m.mini.frame_px=[0.0,0.0,100.0,100.0];
-        assert!(m.mini_contains(mid));assert!(!m.mini_contains([1.0,1.0]));
-    }
     #[test]
     fn the_quests_steps_point_the_way_from_the_rim() {
         let mark = |kind, world, at: [f32; 2]| Mark { kind, world, at, tip: Vec::new() };
@@ -1056,11 +837,3 @@ mod tests {
         assert!(clip([2000.0, 0.0, 4000.0, 2000.0], shown, to_px).is_none(), "the control: a cell beside it");
     }
 }
-
-#[cfg(test)]
-#[path = "../fork_ext/map_sync_tests.rs"]
-mod fork_sync_tests;
-
-#[cfg(test)]
-#[path = "../fork_ext/map_move_tests.rs"]
-mod fork_move_tests;

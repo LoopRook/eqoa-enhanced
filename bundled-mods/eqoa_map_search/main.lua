@@ -22,7 +22,7 @@ end
 eqoa.input.bind({id="open",label="Map search",default_key="f2"},function()
     local map=eqoa.map.get()
     if not map or map.enabled==false then return end
-    if not map.open and not eqoa.hud.visible("minimap") then
+    if not map.open and not (map.minimap or eqoa.hud.visible("minimap")) then
         local ok=eqoa.map.open()
         if not ok then return end
         s.requested_open_until=(s.now or 0)+1
@@ -74,7 +74,7 @@ local function draw()
     hits={}
     s.panel_rect=nil;s.list_rect=nil
     local map=eqoa.map.get();if not map or map.enabled==false then s.close();return end
-    local mini=not map.open and eqoa.hud.visible("minimap")
+    local mini=not map.open and (map.minimap or eqoa.hud.visible("minimap"))
     if not mini and not map.open then
         if s.open and (not s.requested_open_until or (s.now or 0)>s.requested_open_until) then s.close() end
         return

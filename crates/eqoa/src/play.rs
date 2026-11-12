@@ -8903,7 +8903,7 @@ impl Play {
             .filter(|e| Some(e.id) != me && !group.contains(&e.id) && e.p18 & 2 == 0 && self.in_scene(e))
             .filter_map(|e| {
                 let c = e.creature.as_ref()?;
-                crate::map::mini::Dot::of(e, self.name_color(c))
+                Some(([e.actor_pos[0], e.actor_pos[2]], self.name_color(c)))
             })
             .collect();
         let target = self.actor_pos(self.target).filter(|_| Some(self.target) != me).map(|p| [p[0], p[2]]);
@@ -9989,58 +9989,6 @@ mod commands {
     /// on the session's clock past 2^31 (from 00:54 UTC) the u32 port kept
     /// the window open for good after the first cast; this holds on any
     /// clock. The control: that port, on that clock, never lets go.
-    #[test]
-    fn minimap_entity_tooltips_keep_server_names_levels_and_validity() {
-        let mut p = play();
-        p.player.world = 0;
-        let base = net::entity::Entity {
-            id: 9001,
-            world: 0,
-            p19: 1,
-            actor_pos: [10.0, 0.0, 20.0],
-            creature: Some(net::entity::Creature {
-                name: "A rare mob".into(),
-                level: 17,
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        let mut corpse = base.clone();
-        corpse.id = 9002;
-        corpse.p18 = 2;
-        let mut inactive = base.clone();
-        inactive.id = 9003;
-        inactive.p19 = 0;
-        let mut foreign = base.clone();
-        foreign.id = 9004;
-        foreign.world = 1;
-        let mut bad = base.clone();
-        bad.id = 9005;
-        bad.actor_pos[0] = f32::NAN;
-        let mut player = base.clone();
-        player.id = 9006;
-        let c = player.creature.as_mut().unwrap();
-        c.level = 0;
-        c.p256 = 2;
-        p.entities.slots = vec![
-            Some(base),
-            Some(corpse),
-            Some(inactive),
-            Some(foreign),
-            Some(bad),
-            Some(player),
-        ];
-        let mv = p.mini_view();
-        assert_eq!(mv.dots.len(), 2);
-        assert_eq!(
-            (&*mv.dots[0].name, mv.dots[0].level, mv.dots[0].at),
-            ("A rare mob", Some(17), [10.0, 20.0])
-        );
-        assert_eq!(mv.dots[0].kind, "NPC");
-        assert_eq!(mv.dots[1].kind, "Player");
-        assert_eq!(mv.dots[1].level, None);
-    }
-
     #[test]
     fn a_cast_walks_for_its_time_on_any_clock() {
         for now in [1_000i64, (1 << 31) - 500, (1 << 31) + 232_000, (1 << 32) - 900, 1 << 40] {

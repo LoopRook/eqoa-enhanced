@@ -68,7 +68,7 @@ pub(super) fn describe(play: &Play, walker: Option<&Walker>) -> String {
         })
     };
     let entity_line = |e: &net::entity::Entity| {
-        let kind = crate::map::mini::Dot::kind(e);
+        let kind = match e.creature.as_ref().map(|c| c.p256) { Some(2) => "Player", Some(3) => "Pet", _ => "NPC" };
         let name = e.creature.as_ref().map_or("unnamed", |c| c.name.as_str());
         let level = e.creature.as_ref().map_or(0, |c| c.level);
         format!(

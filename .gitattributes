@@ -5,6 +5,8 @@ CLAUDE.md merge=ours
 README.md merge=ours
 # The bundled mods vendor tree must keep its exact bytes on every checkout.
 bundled-mods/** -text
+# The shared packaged catalogue is hash-pinned: keep its exact bytes too.
+mods/resources/map-entities.json -text
 
 # Shadow shader assembly matches LF-terminated source lines on every host.
 crates/render/src/*.wgsl text eol=lf

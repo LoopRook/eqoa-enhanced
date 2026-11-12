@@ -8,6 +8,8 @@ Upstream changes remain in UPDATE-NOTES.md.
 - Search clears the full map header, consumes outside clicks while open, and scrolls whole rows only over its list. Group search excludes you and keeps unavailable members greyed out.
 - Known creature guides upgrade to live creatures; Track waypoint follows moved pins. Import/export report success, errors and the actual collision-safe filename for six seconds.
 - Creature Journal uses actor positions with the native protocol-position fallback, and new sightings after a save start a fresh save interval. Existing profiles receive the bundled map mods without overriding manual Off settings.
+- The round minimap is now a bundled mod, Round Minimap, on by default. It shows the game's own minimap (terrain, indoor view, camps, coaches, quest marks, waypoints, group) in a circle with a ring, in the same place and size, and follows Move HUD. N still toggles it, the wheel still zooms it, and hovering a creature, player or pet shows its name, level, kind and distance (marks show their names). Turn the mod off in Mods & Addons and the game's square minimap comes back. Clicking the round minimap does not open the map (press M). The player's and group's waypoints get an arrow outside the ring where the square picture's corner would have hidden them.
+- The M map now uses the game's own look and key legend. Creature search, the creature journal and their keys (F2 search, F4 clear guide) carry over unchanged as the bundled Map Search and Creature Journal mods; your journal file and key choices are kept.
 
 ## 2026-11-11 · Enhanced 0.5.3
 
