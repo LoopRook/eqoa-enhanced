@@ -342,3 +342,77 @@ Remaining B2 review observations are deferred, not accepted behavior or passing 
 Retained B1 LOWs: no per-pair command rate limit across frames beyond the pending per-sender quota; no migration retry/fallback on filesystems without hard-link support; no live non-Windows file-backend verification. Key collisions are preserved for the player to rebind in Controls. Migration and native removal must ship together. B2 review fixes and all Part C minimap/theme work are outside this completion scope.
 
 The native release build is run after this report/capture commit as the last gate. Its result is recorded in the six-line handoff and ignored `final-native-release.log`; no merge, push or tag is performed.
+
+
+## Part B fix round
+
+This section supersedes the open HIGH/MEDIUM findings and incomplete full-suite gate in the preceding Part B report. Scope is the B2 review and the owner's fix brief; Part C remains separate. Develop's released 0.5.3 default-on hotfix was merged first (`ac21584`); its production profile implementation was not duplicated here. No push, tag or merge into a protected branch was performed.
+
+### Findings, fixes and controls
+
+Test names below omit the common `round4b_` prefix. Tests use real Hosts or Manager/Runtime from Play-shaped snapshots, shipping Lua and actual asynchronous disk workers. Intentional negative runs are separate from acceptance gates.
+
+| Finding | Fix and commits | Runtime evidence and negative control |
+|---|---|---|
+| H1 | Query-owned source snapshot; movement refreshes existing row positions without restarting the build (`ea6e721`). | `fix_moving_world_finishes_search_and_enter`: moving entities every frame, bounded completion and Enter. Restoring pre-fix Lua fails ?moving entities must not restart a query build?. |
+| H2 | Merge develop; add actual pre-existing-profile launch and explicit-Off persistence regression (`b1d20f2`). | `fix_existing_profile?`: real `Runtime::new`/headless launch. Disabling missing-key bundled defaults and registration produces ?eqoa_map_search missing from an old profile must be on?; restored code passes. Journal/search are packaged here. The same test includes `eqoa_round_minimap` when packaged, but that third mod belongs to Part C and has NOT run on this branch. |
+| M1 | Visible early Import/Export refusals and timed status messages (`65def4f`); existing receipts/count/collision messages retained. | `fix_journal_reports_early_export_refusal` checks the paired search footer with an actual malformed/protected journal. Pre-fix Lua fails the visible refusal assertion. Manager physically activates footer actions and verifies saved/imported file results and suffix receipt. |
+| M2 | `eqoa.map.get().search_anchor` comes from the real full-map chrome footprint through the existing overlay hook (`423814f`). Recapture `ebd597b`. | `fix_search_toolbar?` tests occupied header bands. Replacing measured y with 44 fails on header `[4,30,324,60]`. Manager GPU capture and [full-map PNG](r4-search-map.png) place Search below progress; [minimap PNG](r4-search-minimap.png) was rendered again and is byte-identical. |
+| M3 | Retain self exclusion and inactive unavailable rows; strengthen fixture with an inactive actor that has valid coordinates and a raw protocol roster containing self (`41a0380`). | `search_lists_inactive_group_member_as_unavailable` asserts unavailable/non-selectable and self exclusion. Removing the active-position guard fails the unavailable-row assertion (0/1); restored code passes (1/0). |
+| M4 | Whole-window modal pointer claim while open; outside click closes and is consumed; wheel changes rows only over the list (`423814f`). | Real Manager asserts outside wheel/click claims; Host checks selection unaffected outside. Removing only the whole-window claim fails ?open search must consume an outside wheel? (0/1); restored shipping embedded code passes (1/0). The negative Manager fixture reads source Lua only under the test-only `EQOA_R4_TEST_SOURCE` flag; normal gates use embedded shipping bytes. |
+| M5 | Existing F2 opens full map when minimap is off/hidden and obeys Map master option. No new production fix required. | `search_f2_opens_map_with_minimap_off_and_obeys_map_master`, retained from Part B with its earlier recorded RED control; rerun in the fix-round gates. |
+| M6 | Indexed known-to-live reacquisition, waypoint move/removal tracking, world-aware status, clear rejected guides; full-map Track waypoint control within toolbar (`ca210e5`, `2b81d37`). | `fix_known_guide_upgrades_and_waypoint_tracks_changes` also checks world status and rejected set_guide. Pre-fix Lua leaves the line at `[100,200]` rather than live `[700,800]`. |
+| M7 | Closed observation does no work; places cached by world; per-name spawn indexes; cached searchable names and bounded 500-name filtering; growing query refines prior rows; shared reload lazy when closed and retries late owner (`ca210e5`). | `fix_closed_search_defers_observation_and_shared_reload`, `fix_shared_reload_is_lazy_and_retries_late_journal_owner`, and `fix_busy_world_max_journal_cost_and_incremental_queries`. Pre-fix Lua fails closed-observe, late-owner and missing-index assertions. Release workload/margins below. |
+| M8 | Wheel sign advances whole rows, offsets clamped after shrink (`423814f`). | `fix_wheel_is_local_and_steps_whole_rows`: fractional input, integer selection/offset, outside-list negative control. Pre-fix Lua changes selection outside the list. |
+| Leftovers | Journal records `actor_position` with protocol fallback; reset dirty deadline at accepted snapshot (`65def4f`). Restore upstream bind tests and Play parentheses; tighten budgets (`1fef6e3`). | `fix_journal_records_actor_position_and_protocol_fallback` and `fix_save_deadline_restarts_after_snapshot`: pre-fix Lua records `[10,0,20]` rather than actor `[110,5,120]` and immediately resaves newer sightings. `binds.rs` equals reviewed upstream `11aa5f0`; shared footprint passes. |
+
+The nine pre-fix-Lua controls produced **0 passed / 9 failed**, then byte-for-byte source restoration and the focused positive run produced **11 passed / 0 failed** (29.06 s). Separate Rust controls for H2 and M2 each produced **0 passed / 1 failed**. The busy-world control's missing-index failure proves the optimized workload structure is required; it is not a before/after timing measurement. All mutated sources were restored byte-for-byte before acceptance runs.
+
+SOURCE hashes, embedded module list, independent release packaging fixture, API schema documentation and player notes were refreshed (`398386d`, `c8b9945`, `cc7bd57`). Packaging continues to verify an independent exact allowlist. No shared budget increased: `binds.rs` tightened from +39/-37 to 0/0, `bindpage.rs` +9/-5 to +7/-3, `play.rs` +148/-55 to +147/-54; map/mod.rs remains +16/-6. There is no fix-round diff in theme.rs, mini.rs, fork_ext/map.rs or renderer files. Theme dead code and round-minimap work stay with Part C.
+
+### Final gates
+
+| Gate | Passed | Failed | Ignored | Explicit SKIP lines |
+|---|---:|---:|---:|---:|
+| Focused fix regressions | 11 | 0 | 0 | 0 |
+| Complete Part B debug | 48 | 0 | 0 | 0 |
+| Addons, single thread | 428 | 0 | 25 | 9 |
+| Complete Part B release | 48 | 0 | 0 | 0 |
+| Full client, one complete final run | **2,095** | **0** | 32 | 208 |
+| Player-release Python tools | 20 | 0 | 0 | 0 |
+| WASM | PASS | 0 | n/a | n/a |
+| Footprint against `11aa5f0` | PASS | 0 | n/a | n/a |
+| Diff whitespace against `0b12613` | PASS | 0 | n/a | n/a |
+
+WASM check passed in 47.37 s. Addon tests took 246.09 s; release Part B 70.88 s (452.18 s including compile); full client **456.17 s** (669.92 s including compile); Python tools 80.785 s. The full run has zero filtered tests and includes the three corrected Part B contract fixtures, both strengthened M3/M4 cases and all 48 round4b cases.
+
+Explicit SKIP lines are counted case-sensitively as `SKIP`, not test names containing ?skip?. The nine addon SKIPs are four Windows symlink-privilege fixtures, two pinned Forge prerequisites and three absent external reviewed UI goldens. The full run's 208 additionally include unavailable disc/module/live-S2 prerequisites. Ignored tests are separate: 25 addon cases include the historical unsandboxed benchmark and missing external pinned Forge suites; the full suite has seven additional external/package and survey/benchmark ignores. None is claimed as exercised.
+
+The zero-addon busy-world gate passed in that full run: 300 frame/menu and 600 packet/chat iterations, **zero allocations / zero bytes** in every measured path. `menu_frame_us=19.718`, `frame_us=21.763`, `event_us=1.510`, `chat_us=0.102`. Existing Wereoxxs/ARPG/Modern and Round 3 workloads also passed; external goldens/reference packages retain the skips above.
+
+All Cargo commands ran in the foreground under `C:/Users/hocka/Paseo/cargo-build.lock`, using the shared target, scratch `EQOA_CONFIG`, one test thread and a 20-minute per-command timeout. The runner waits/retries while another agent holds the lock and checks nonzero workload counts. Its own debug binary is preserved under the lock for controls; a zero-test invocation of a replaced shared binary was rejected as evidence.
+
+The first cap regression attempt failed because its fixed 5,000-frame loop clicked Export before async load finished. `39175ef` replaces that loop with a bounded 90-second readiness/export wait and real activation retries; exact 80,001?80,000 and 50,001?50,000 boundary assertions remain. The focused corrected run passed (31.70 s), and the entire 48-case Part B debug run passed (179.02 s). Shared debug/release renderer artifacts also produced missing-method compile errors; artifact-only cleaning rebuilt this worktree's renderer without source edits. Those failed attempts are not reported as passing gates.
+
+### Busy-world release frame cost
+
+| Release state | Mean ms | p95 ms | Maximum ms |
+|---|---:|---:|---:|
+| Closed | 5.520 | 16.777 | **74.620** |
+| Open while typing | 2.702 | 5.900 | **46.049** |
+
+Minimum search-VM instruction reserve across cache construction and sampled phases was **1,084,000 / 4,000,000 (27.1%)**, above the unchanged 20% floor. The older real-Manager 23,000-spawn fixture also ran in release: mean 1.332 / p95 3.165 / max 6.409 ms.
+
+**The busy-world release maxima exceed the supplied 18.97 ms baseline.** The structural M7 changes and budget checks pass, but these measurements do not demonstrate resolved hitches or a maximum-frame improvement. This is a remaining performance limitation for owner review, not a passing latency threshold; none was specified or weakened.
+
+The workload asserts **journal and search running, 200 moving entities, 80,000 loaded spawns, 10,000 distinct names and 4,441,112 journal bytes**, with eight indexed records for the selected name. It checks the same cached names survive typing, all 10,000 matching rows finish, and closed search has not observed the live list. Each phase samples 120 frames and moves all 200 actors every frame; open phase types `Perf creature 0` one character every eight frames. Cache construction also contributes to the instruction-margin check.
+
+These are CPU timings around both Hosts' frame callbacks/workers. Play snapshot conversion, GPU submission/readback, search initial load, first-open cache construction and scheduled 30/120-second full journal save-copy are outside the timed window. It is a bounded active-world typing measurement, not live FPS, a worst-case latency guarantee or a max-size save-hitch benchmark. The fatal Lua budget is 4,000,000 instructions; the test requires over 800,000 remaining. Report maxima explicitly: means alone hide GC/OS spikes.
+
+For context, the owner's independent pre-M7 Part C harness reported journal+search **mean 3.61 ms / max 18.97 ms**. Its setup differs from this two-Host fixture; the numbers are not a controlled speedup comparison. The final debug Part B run measured closed mean 0.578 / p95 1.091 / max 1.661 ms and open-typing mean 3.016 / p95 4.043 / max **66.139 ms**. The final full-client debug run additionally measured closed mean 0.558 / p95 0.876 / max 1.707 ms and typing mean 3.144 / p95 5.942 / max 56.354 ms. Release results above are the requested acceptance measurement; spikes remain visible rather than being averaged away.
+
+### Not done
+
+No live disc/terrain/server, physical Desktop picker, controller, IME, non-Windows backend or oracle result is claimed. Captures use real GPU composition with synthetic map data and no disc terrain. Tests exercise actual files with injected selection. Part C's mod/profile integration and round minimap remain untested here. LOW guide styling, browser/non-mod search availability, autorun/follow capture behavior, trimmed names, external catalogue overrides and remaining B1 LOWs retain the documented limits. Actor-position journal sampling is now fixed; the earlier protocol-only journal limitation above is superseded. No new features were added beyond the specified parity fixes.
+
+The final native gate is `cargo build --release --locked -p eqoa`, run after this report commit under the same shared lock/target protocol. Its outcome is recorded in the six-line handoff and ignored `run/r4-fix/final-native-release.log`. No build or test is left running at handoff.
