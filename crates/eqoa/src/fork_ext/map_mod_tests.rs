@@ -843,3 +843,136 @@ fn round4b_fix_moving_world_finishes_search_and_enter() {
     input::reset_input_state();
 }
 
+
+#[test]
+fn round4b_fix_journal_reports_early_export_refusal() {
+    let mut p = Play::bundled_ui_fixture();
+    p.forge_snapshot(None);
+    let (scratch, h, path) = journal();
+    let (search, search_addon) = search_host(&scratch);
+    search.run_addon(&search_addon).unwrap();
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, "[]").unwrap();
+    let a =
+        discovery::discover(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods"))
+            .addons
+            .into_iter()
+            .find(|a| a.id == "eqoa_creature_journal")
+            .unwrap();
+    h.run_addon(&a).unwrap();
+    for _ in 0..100 {
+        step(&h, 1.);
+        step(&search, 1.);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let export = crate::fork_ext::addons::options::active_mod_items()
+        .into_iter()
+        .find(|(_, s)| s == "Export journal")
+        .unwrap()
+        .0;
+    assert!(crate::fork_ext::addons::options::activate_button(export));
+    for _ in 0..3 {
+        step(&h, 1.);
+        step(&search, 1.);
+    }
+    search.execute("local s=require('search');assert(s.message and s.message:find('Export:',1,true) and s.message:find('protect',1,true),tostring(s.message))").unwrap();
+    assert_eq!(fs::read_to_string(path).unwrap(), "[]");
+    native_events::clear(&h);
+    native_events::clear(&search);
+}
+
+#[test]
+fn round4b_fix_journal_records_actor_position_and_protocol_fallback() {
+    let mut p = Play::bundled_ui_fixture();
+    let mut a = creature(6000, "Actor bat", 15, [10., 0., 20.]);
+    a.actor_pos = [110., 5., 120.];
+    let mut b = creature(6001, "Fallback bat", 15, [210., 0., 220.]);
+    b.actor_pos = [0.; 3];
+    p.entities.slots = vec![Some(a), Some(b)];
+    p.forge_snapshot(None);
+    let (_scratch, h, path) = journal();
+    let a =
+        discovery::discover(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods"))
+            .addons
+            .into_iter()
+            .find(|a| a.id == "eqoa_creature_journal")
+            .unwrap();
+    h.run_addon(&a).unwrap();
+    for _ in 0..100 {
+        step(&h, 1.);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    native_events::lifecycle(&h, "disabling").unwrap();
+    native_events::clear(&h);
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    assert_eq!(
+        saved["Actor bat"]["6000"]["pos"],
+        serde_json::json!([110, 5, 120])
+    );
+    assert_eq!(
+        saved["Fallback bat"]["6001"]["pos"],
+        serde_json::json!([210, 0, 220])
+    );
+}
+
+#[test]
+fn round4b_fix_save_deadline_restarts_after_snapshot() {
+    let mut p = Play::bundled_ui_fixture();
+    p.entities.slots.clear();
+    p.forge_snapshot(None);
+    let (_scratch, h, path) = journal();
+    let a =
+        discovery::discover(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods"))
+            .addons
+            .into_iter()
+            .find(|a| a.id == "eqoa_creature_journal")
+            .unwrap();
+    h.run_addon(&a).unwrap();
+    for _ in 0..80 {
+        step(&h, 1.);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let packet = net::session::Event::State {
+        channel: 0,
+        data: vec![],
+    };
+    let before = super::begin_game_event(&p, &packet);
+    p.entities.slots.push(Some(creature(
+        6000,
+        "Before snapshot",
+        15,
+        [100., 0., 100.],
+    )));
+    super::end_game_event(&p, before);
+    step(&h, 2.);
+    step(&h, 121.); // maximum dirty interval snapshots revision 1
+    let packet = net::session::Event::State {
+        channel: 1,
+        data: vec![],
+    };
+    let before = super::begin_game_event(&p, &packet);
+    p.entities
+        .slots
+        .push(Some(creature(6001, "After snapshot", 15, [200., 0., 200.])));
+    super::end_game_event(&p, before);
+    for _ in 0..150 {
+        step(&h, 122.);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert!(saved.get("Before snapshot").is_some());
+    assert!(
+        saved.get("After snapshot").is_none(),
+        "new sightings must start a new 120-second window, not immediately resave"
+    );
+    for _ in 0..150 {
+        step(&h, 152.);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert!(
+        saved.get("After snapshot").is_some(),
+        "quiet deadline still flushes later changes"
+    );
+    native_events::clear(&h);
+}

@@ -944,7 +944,7 @@ fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.player.Attributes", "base" | "total") => Some("eqoa.player.SevenStats"),
         ("eqoa.player.Player", "resists") => Some("eqoa.player.Resists"),
         ("eqoa.player.Player", "location") => Some("eqoa.player.Location"),
-        (_, "position" | "velocity") => Some("eqoa.Vec3"),
+        (_, "position" | "actor_position" | "velocity") => Some("eqoa.Vec3"),
         ("eqoa.group.Group", "members") => Some("eqoa.group.Member"),
         ("eqoa.group.Group", "raid") => Some("eqoa.group.RaidMember"),
         ("eqoa.group.Group", "invites") => Some("eqoa.group.Invite"),
@@ -1027,7 +1027,7 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.entities.Entity",
-            "ref id name level position hp_fraction power kind world_id entity_type is_creature corpse search_flags class_code target_id status_flags poisoned diseased disposition disposition_name",
+            "ref id name level position actor_position hp_fraction power kind world_id entity_type is_creature corpse search_flags class_code target_id status_flags poisoned diseased disposition disposition_name",
         ),
         (
             "eqoa.group.Group",
@@ -1103,7 +1103,7 @@ fn install_fields(lua: &Lua) {
         };
         describe(lua, path, "supported", round, "");
         for field in fields.split_whitespace() {
-            let field_round = if matches!(
+            let field_round = if path=="eqoa.entities.Entity" && field=="actor_position" { Some(4) } else if matches!(
                 (path, field),
                 ("eqoa.entities.Entity", "power") | ("eqoa.group.Member", "power")
             ) {

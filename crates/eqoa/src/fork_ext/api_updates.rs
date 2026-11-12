@@ -15,6 +15,7 @@ struct EntityData {
     name: String,
     level: Option<u8>,
     position: [f32; 3],
+    actor_position: [f32; 3],
     hp: u8,
     is_target: bool,
     power: Option<f32>,
@@ -46,6 +47,7 @@ impl EntityData {
             name: creature.map_or("", |c| c.name.as_str()).into(),
             level: creature.map(|c| c.level),
             position: e.pos,
+            actor_position: actor_position(e),
             hp: e.p19,
             is_target: Some(e.id) == valid_id(p.target),
             power,
@@ -60,7 +62,7 @@ impl EntityData {
         }
     }
     fn value(&self) -> Json {
-        json!({"world_id":self.world,"entity_type":self.entity_type,"is_creature":self.entity_type==net::entity::TYPE_CREATURE,"corpse":self.corpse,"search_flags":self.search_flags,"id":self.id,"name":self.name,"level":self.level,"position":vec3(self.position),"hp_fraction":(self.hp!=0 || self.is_target).then(||ee::div(self.hp as f32,255.)),"power":self.power,"kind":match self.code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":self.code,"target_id":self.target,"status_flags":self.flags,"poisoned":self.flags.map(|f|f&4!=0),"diseased":self.flags.map(|f|f&8!=0),"disposition":self.disposition,"disposition_name":self.disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
+        json!({"world_id":self.world,"entity_type":self.entity_type,"is_creature":self.entity_type==net::entity::TYPE_CREATURE,"corpse":self.corpse,"search_flags":self.search_flags,"id":self.id,"name":self.name,"level":self.level,"position":vec3(self.position),"actor_position":vec3(self.actor_position),"hp_fraction":(self.hp!=0 || self.is_target).then(||ee::div(self.hp as f32,255.)),"power":self.power,"kind":match self.code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":self.code,"target_id":self.target,"status_flags":self.flags,"poisoned":self.flags.map(|f|f&4!=0),"diseased":self.flags.map(|f|f&8!=0),"disposition":self.disposition,"disposition_name":self.disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
     }
 }
 #[derive(Clone)]

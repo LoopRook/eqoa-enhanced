@@ -64,7 +64,7 @@ local function record(e)
     if p and (e.id == p.id or e.id == p.pet_id) then return end
     if not e.is_creature or e.corpse or not e.class_code or e.class_code >= 2 or e.search_flags ~= 0 then return end
     local name = trim_name(e.name or "")
-    local pos = e.position
+    local pos = e.actor_position or e.position
     if name == "" or not pos or not finite(pos.x) or not finite(pos.y) or not finite(pos.z) then return end
     if near(name, e.level, pos.x, pos.z) then return end
     if put(name, tostring(e.id), {world=e.world_id or 0, level=e.level, pos={pos.x,pos.y,pos.z}}) then changed() end
@@ -72,7 +72,7 @@ end
 local function save(force)
     if protected or not ready or merge_job or (not force and revision == saved_revision) then return end
     local request, err = eqoa.files.save_json_async("journal.json", records)
-    if request then saving = {id=request, revision=revision} else print("Journal save: " .. err.message) end
+    if request then saving = {id=request, revision=revision};first_dirty=nil else notify((force and "Export: " or "Journal save: ") .. (err and err.message or "snapshot unavailable")) end
     return request
 end
 local function valid(name, id, v)
@@ -131,14 +131,15 @@ local function import_journal()
     if not ready or merge_job or importing then notify("Journal is loading"); return end
     if protected then notify("Journal is disabled to protect existing file"); return end
     local request, err = eqoa.files.import{title="Import creature journal", extensions={"json"}}
-    if request then importing = request else print("Journal import: " .. err.message) end
+    if request then importing = request else notify("Import: " .. err.message) end
 end
 local function export_journal()
-    if not ready or protected or merge_job then return end
+    if protected then notify("Export: Journal is disabled to protect existing file");return end
+    if not ready or merge_job then notify("Export: Journal is loading");return end
     -- Flush the current snapshot in the player's callback; export waits on its worker.
     if not save(true) then return end
     local request, err = eqoa.files.export("journal.json", "EQOA-Creature-Journal.json")
-    if not request then print("Journal export: " .. err.message) end
+    if not request then notify("Export: " .. err.message) end
 end
 eqoa.options.button({id="import",label="Import journal..."}, import_journal)
 eqoa.options.button({id="export",label="Export journal"}, export_journal)
@@ -152,7 +153,7 @@ eqoa.events.on("resource.ready", function(e)
     elseif d.kind == "import" and d.request == importing then
         importing = nil
         local request, err = eqoa.files.load_json(d.path)
-        if request then importing = {load=request} else print("Journal import: " .. err.message) end
+        if request then importing = {load=request} else notify("Import: " .. err.message) end
     elseif d.kind == "json" and type(importing) == "table" and d.request == importing.load then
         importing = nil; merge(d.value, false)
     elseif d.kind == "export" then notify("Saved to " .. d.path)
@@ -165,7 +166,7 @@ eqoa.events.on("resource.failed", function(e)
     local d = e.data
     if d.kind == "json" and d.request == loading then
         loading = nil; protected = true; print("Journal load failed; preserving existing file")
-    elseif saving and d.kind == "json_saved" and d.request == saving.id then saving = nil
+    elseif saving and d.kind == "json_saved" and d.request == saving.id then saving = nil;if revision~=saved_revision then first_dirty=first_dirty or now;last_change=last_change or now end;notify("Export: " .. (d.error and d.error.message or "save failed"))
     elseif d.kind == "import" or (type(importing) == "table" and d.request == importing.load) then
         importing = nil; notify("Import: " .. (d.error and d.error.message or "failed"))
     elseif d.kind == "export" then notify("Export: " .. (d.error and d.error.message or "failed")) end
