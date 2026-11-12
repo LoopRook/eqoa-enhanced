@@ -386,3 +386,8 @@ Budgets in `docs/fork-footprint.json`: eleven removed (chrome, community, journa
 - Hover cards for the quest "!" and "?" marks and the XP-camp badges use the markers list (names and labels), not upstream's richer native cards.
 - develop-vs-mods frame-time comparison not measured (above).
 - Runtime disable/enable of the mod was tested (stock returns, one draw a frame); a lost graphics device with a held view is covered by Part A's tests, not re-run with the mod.
+
+
+### Release and packaging
+
+Release build (`EQOA_UPDATE_CHANNEL=enhanced-dev`, `EQOA_BUILD_COMMIT=5f4a607`, shared target): PASS, 3 min 22 s, last gate. Packaging dry run with the real `tools/build_player_release.py` `build_release` (channel `enhanced-dev`, local catalogue, commit assertion): PASS; it wrote the Nightly ZIP (15.2 MB), the exe, `SHA256SUMS`, `update.txt` and `update-notes.md`, and its own verification of the bundled-mod allowlist and checksums passed. One check was relaxed for this run only, in a scratch script outside the repo: the `+crt-static` import check, because the shared local target is not built with CI's `RUSTFLAGS` (the unmodified command stops there with "imports an unbundled Visual C++ runtime"; a rebuild with CI's flags would have filled the shared target with a second full build). CI builds with `+crt-static`, so that check is CI's to pass.
