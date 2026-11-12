@@ -976,3 +976,331 @@ fn round4b_fix_save_deadline_restarts_after_snapshot() {
     );
     native_events::clear(&h);
 }
+
+#[test]
+fn round4b_fix_known_guide_upgrades_and_waypoint_tracks_changes() {
+    use crate::fork_ext::addons::{guides, input, native_core};
+    input::reset_input_state();
+    crate::settings::testing::reset(false);
+    let mut p = Play::bundled_ui_fixture();
+    p.entities.slots.clear();
+    p.map.open = true;
+    p.forge_snapshot(None);
+    let scratch = Scratch::new();
+    let (h, a) = search_host(&scratch);
+    h.run_addon(&a).unwrap();
+    settle(&h);
+    h.execute("local s=require('search');s.load({['Upgrade bat']={world={0},pos={{100,0,200}}}},'catalog')").unwrap();
+    settle(&h);
+    h.execute("local s=require('search');s.toggle();s.query='Upgrade bat';s.dirty=true")
+        .unwrap();
+    settle(&h);
+    key(
+        &h,
+        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter),
+    );
+    let vm = native_events::bus(&h.lua).borrow().vm;
+    assert_eq!(guides::target_for(vm), Some([100., 200.]));
+    let packet = net::session::Event::State {
+        channel: 0,
+        data: vec![],
+    };
+    let before = super::begin_game_event(&p, &packet);
+    let mut e = creature(6010, "Upgrade bat", 15, [700., 0., 800.]);
+    e.p19 = 255;
+    p.entities.slots = vec![Some(e)];
+    super::end_game_event(&p, before);
+    p.forge_snapshot(None);
+    step(&h, 1.);
+    step(&h, 1.);
+    assert_eq!(
+        guides::target_for(vm),
+        Some([700., 800.]),
+        "known guide must upgrade when its creature appears"
+    );
+    native_core::CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.map["waypoint"] = serde_json::json!({"world_id":0,"x":300,"z":400});
+        c.emit("map.changed", serde_json::json!({}));
+    });
+    step(&h, 1.);
+    step(&h, 1.);
+    h.execute("local s=require('search');s.choose({name='Personal waypoint',kind='waypoint',at={x=300,z=400}})").unwrap();
+    assert_eq!(guides::target_for(vm), Some([300., 400.]));
+    native_core::CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.map["waypoint"] = serde_json::json!({"world_id":0,"x":900,"z":950});
+        c.emit("map.changed", serde_json::json!({}));
+    });
+    step(&h, 1.);
+    step(&h, 1.);
+    assert_eq!(guides::target_for(vm), Some([900., 950.]));
+    native_core::CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.map["waypoint"] = serde_json::Value::Null;
+        c.emit("map.changed", serde_json::json!({}));
+    });
+    step(&h, 1.);
+    step(&h, 1.);
+    assert_eq!(
+        guides::target_for(vm),
+        None,
+        "deleted waypoint must stop guidance"
+    );
+    h.execute("require('search').choose({name='Upgrade bat',kind='npc',key='upgrade bat',at={x=700,z=800}})").unwrap();
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.world_id = Some(1);
+        c.view.map["world_id"] = serde_json::json!(1);
+        c.emit("map.changed", serde_json::json!({}));
+    });
+    step(&h, 1.);
+    step(&h, 1.);
+    h.execute("assert(require('search').status()=='Unavailable here: Upgrade bat')")
+        .unwrap();
+    CORE.with(|c| c.borrow_mut().view.in_world = false);
+    h.execute("local s=require('search');s.choose({name='Rejected guide',kind='place',at={x=10,z=20}});assert(s.guide==nil,'failed set_guide must leave no guide')").unwrap();
+    assert_eq!(guides::target_for(vm), None);
+    native_events::clear(&h);
+    input::reset_input_state();
+}
+
+#[test]
+fn round4b_fix_closed_search_defers_observation_and_shared_reload() {
+    use crate::fork_ext::addons::input;
+    input::reset_input_state();
+    crate::settings::testing::reset(false);
+    let mut p = Play::bundled_ui_fixture();
+    p.forge_snapshot(None);
+    let scratch = Scratch::new();
+    let (h, a) = search_host(&scratch);
+    h.run_addon(&a).unwrap();
+    settle(&h);
+    h.execute("local s=require('search');assert(not s.open);s.live={};s.refresh=true;s.observe();assert(s.refresh and #s.live==0,'closed observe must do nothing')").unwrap();
+    native_events::clear(&h);
+    input::reset_input_state();
+}
+
+#[test]
+fn round4b_fix_busy_world_max_journal_cost_and_incremental_queries() {
+    use crate::fork_ext::addons::input;
+    use std::time::{Duration, Instant};
+    input::reset_input_state();
+    crate::settings::testing::reset(false);
+    let mut p = Play::bundled_ui_fixture();
+    p.entities.slots = (0..200)
+        .map(|i| {
+            let mut e = creature(
+                700000 + i,
+                &format!("Moving fixture {i}"),
+                15,
+                [i as f32 * 40., 0., 100.],
+            );
+            e.p19 = 255;
+            Some(e)
+        })
+        .collect();
+    p.forge_snapshot(None);
+    let (scratch, j, path) = journal();
+    let mut value = serde_json::Map::new();
+    for name in 0..10000 {
+        let mut ids = serde_json::Map::new();
+        for n in 0..8 {
+            let id = name * 8 + n;
+            ids.insert(
+                id.to_string(),
+                serde_json::json!({"world":0,"level":15,"pos":[id*40,0,100]}),
+            );
+        }
+        value.insert(
+            format!("Perf creature {name:05}"),
+            serde_json::Value::Object(ids),
+        );
+    }
+    let bytes = serde_json::to_vec(&value).unwrap();
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, &bytes).unwrap();
+    let ja =
+        discovery::discover(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods"))
+            .addons
+            .into_iter()
+            .find(|a| a.id == "eqoa_creature_journal")
+            .unwrap();
+    j.run_addon(&ja).unwrap();
+    let (h, a) = search_host(&scratch);
+    h.run_addon(&a).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(90);
+    let mut loaded = false;
+    while Instant::now() < deadline {
+        step(&j, 1.);
+        step(&h, 1.);
+        loaded=h.lua.load("local s=require('search');return #s.journal==80000 and #s.catalog>1000 and #s.jobs==0").eval::<bool>().unwrap();
+        if loaded {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(loaded, "80,000-spawn workload did not load");
+    h.execute("assert(#eqoa.entities.list()==200);local s=require('search');assert(s.by_name.journal['perf creature 00000'] and #s.by_name.journal['perf creature 00000']==8)").unwrap();
+    let mut closed = Vec::new();
+    let mut open = Vec::new();
+    let mut minimum = u32::MAX;
+    for phase in 0..2 {
+        if phase == 1 {
+            key(
+                &h,
+                winit::keyboard::Key::Named(winit::keyboard::NamedKey::F2),
+            );
+            for _ in 0..160 {
+                step(&h, 1.);
+                minimum = minimum.min(h.instructions_remaining());
+            }
+            h.execute("local s=require('search');assert(s.open and not s.build and #s.npc_cache>=10000);cached_rows=s.npc_cache").unwrap();
+        }
+        for frame in 0..120 {
+            for e in p.entities.slots.iter_mut().flatten() {
+                e.pos[0] += 1.;
+                e.actor_pos = e.pos;
+            }
+            p.forge_snapshot(None);
+            if phase == 1 && frame % 8 == 0 {
+                let c = "Perf creature 0".chars().nth(frame / 8).unwrap();
+                crate::fork_ext::addons::input::route_mod_key(
+                    &winit::keyboard::Key::Character(c.to_string().into()),
+                    true,
+                    false,
+                    false,
+                    true,
+                    false,
+                );
+            }
+            let start = Instant::now();
+            step(&j, 1.);
+            step(&h, 1.);
+            let ms = start.elapsed().as_secs_f64() * 1000.;
+            minimum = minimum.min(h.instructions_remaining());
+            if phase == 0 {
+                closed.push(ms)
+            } else {
+                open.push(ms)
+            }
+        }
+        if phase == 0 {
+            h.execute("local s=require('search');assert(not s.open and #s.live==0 and s.refresh)")
+                .unwrap();
+        } else {
+            for _ in 0..60 {
+                step(&h, 1.);
+            }
+            h.execute("local s=require('search');assert(s.npc_cache==cached_rows and not s.build and #s.rows==10000 and #s.live==200);assert(s.query=='Perf creature 0')").unwrap();
+        }
+    }
+    for (name, mut values) in [("closed", closed), ("open typing", open)] {
+        values.sort_by(f64::total_cmp);
+        eprintln!(
+            "R4 B2 {} {}: 200 moving entities, 80000 spawns / 10000 names / {} bytes, 120 frames mean={:.3}ms p95={:.3}ms max={:.3}ms; minimum instructions remaining={minimum}",
+            if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "release"
+            },
+            name,
+            bytes.len(),
+            values.iter().sum::<f64>() / 120.,
+            values[114],
+            values[119]
+        );
+    }
+    assert!(
+        minimum > 800000,
+        "busy callbacks must retain at least 20% of the fatal instruction budget: {minimum}"
+    );
+    native_events::clear(&h);
+    native_events::clear(&j);
+    input::reset_input_state();
+}
+
+#[test]
+fn round4b_fix_shared_reload_is_lazy_and_retries_late_journal_owner() {
+    use crate::fork_ext::addons::input;
+    input::reset_input_state();
+    crate::settings::testing::reset(false);
+    let mut p = Play::bundled_ui_fixture();
+    p.map.open = true;
+    p.forge_snapshot(None);
+    let (scratch, j, path) = journal();
+    let (h, a) = search_host(&scratch);
+    h.run_addon(&a).unwrap();
+    for _ in 0..10 {
+        step(&h, 1.);
+    }
+    h.execute("assert(#require('search').journal==0)").unwrap();
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        &path,
+        r#"{"Lazy bat":{"1":{"world":0,"level":15,"pos":[100,0,200]}}}"#,
+    )
+    .unwrap();
+    let ja =
+        discovery::discover(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods"))
+            .addons
+            .into_iter()
+            .find(|a| a.id == "eqoa_creature_journal")
+            .unwrap();
+    j.run_addon(&ja).unwrap();
+    key(
+        &h,
+        winit::keyboard::Key::Named(winit::keyboard::NamedKey::F2),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        step(&j, 3.);
+        step(&h, 3.);
+        if h.lua
+            .load("return #require('search').journal==1")
+            .eval::<bool>()
+            .unwrap()
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    h.execute("assert(#require('search').journal==1,'opening must retry a late shared owner')")
+        .unwrap();
+    key(
+        &h,
+        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape),
+    );
+    h.execute("shared_seen=0;eqoa.events.on('shared.changed',function(e) if e.data.mod=='eqoa_creature_journal' then shared_seen=shared_seen+1 end end)").unwrap();
+    j.execute("assert(eqoa.files.save_json_async('journal.json',{['Lazy bat']={['1']={world=0,level=15,pos={100,0,200}},['2']={world=0,level=15,pos={500,0,600}}}}))").unwrap();
+    for _ in 0..250 {
+        step(&j, 4.);
+        step(&h, 4.);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    h.execute("local s=require('search');assert(shared_seen>0,'shared save workload did not run');assert(not s.open and #s.journal==1,'closed shared change must not reload the journal')").unwrap();
+    key(
+        &h,
+        winit::keyboard::Key::Named(winit::keyboard::NamedKey::F2),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        step(&j, 5.);
+        step(&h, 5.);
+        if h.lua
+            .load("return #require('search').journal==2")
+            .eval::<bool>()
+            .unwrap()
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    h.execute(
+        "assert(#require('search').journal==2,'next open must load the new shared snapshot')",
+    )
+    .unwrap();
+    native_events::clear(&h);
+    native_events::clear(&j);
+    input::reset_input_state();
+}

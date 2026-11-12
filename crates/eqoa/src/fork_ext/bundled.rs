@@ -63,6 +63,11 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         data: include_bytes!("../../../../bundled-mods/eqoa_map_search/main.lua"),
     },
     BundledFile {
+        path: "eqoa_map_search/modules/spawns.lua",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/modules/spawns.lua"),
+    },
+    BundledFile {
         path: "eqoa_map_search/modules/search.lua",
         package: "eqoa_map_search",
         data: include_bytes!("../../../../bundled-mods/eqoa_map_search/modules/search.lua"),

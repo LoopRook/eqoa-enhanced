@@ -4,17 +4,20 @@ local s=require("search")
 local hits={}
 local requests={}
 local reload=false
+local retry_at=0
 local function load_journal()
     if requests.journal then reload=true;return end
     requests.journal=eqoa.files.load_json("@eqoa_creature_journal/data/journal.json")
+    if not requests.journal then reload=true;retry_at=(s.now or 0)+1 end
 end
 requests.catalog=eqoa.files.load_json("package_resources/map-entities.json")
 load_journal()
 local font_info=eqoa.fonts.load("package_resources/SpaceMono-Regular.ttf",13)
 local font=font_info and font_info.font
 local function command(name)
+    s.message=nil;s.message_until=nil
     local ok,err=eqoa.mods.send("eqoa_creature_journal",name)
-    s.message=ok and nil or (err and err.message or "Journal unavailable")
+    s.message=ok and nil or (err and err.message or "Journal unavailable");s.message_until=(s.now or 0)+6
 end
 eqoa.input.bind({id="open",label="Map search",default_key="f2"},function()
     local map=eqoa.map.get()
@@ -37,21 +40,21 @@ for _,name in ipairs({"entity.added","entity.changed","entity.removed","group.ch
     eqoa.events.on(name,function() s.refresh=true end)
 end
 eqoa.events.on("shared.changed",function(e)
-    if e.data.mod=="eqoa_creature_journal" and e.data.path=="data/journal.json" then load_journal() end
+    if e.data.mod=="eqoa_creature_journal" and e.data.path=="data/journal.json" then if s.open then load_journal() else reload=true end end
 end)
 eqoa.events.on("resource.ready",function(e)
     local d=e.data
     if d.kind=="json" then
         for _,kind in ipairs({"catalog","journal"}) do if d.request==requests[kind] then requests[kind]=nil;s.load(d.value,kind) end end
-        if reload and not requests.journal then reload=false;load_journal() end
+        if reload and s.open and not requests.journal then reload=false;load_journal() end
     end
 end)
 eqoa.events.on("resource.failed",function(e)
     local d=e.data
-    if d.kind=="json" then for _,kind in ipairs({"catalog","journal"}) do if d.request==requests[kind] then requests[kind]=nil end end end
+    if d.kind=="json" then for _,kind in ipairs({"catalog","journal"}) do if d.request==requests[kind] then requests[kind]=nil;if kind=="journal" then reload=true;retry_at=(s.now or 0)+1 end end end end
 end)
 eqoa.events.on("guide.lost",function(e)
-    if s.guide and s.guide.kind=="npc" then s.reacquire=true;s.refresh=true else s.clear() end
+    if s.guide then s.refresh=true end
 end)
 eqoa.events.on("disabling",function() s.close();s.clear() end)
 local function inside(d,r) return d.x>=r.x and d.x<=r.x+r.w and d.y>=r.y and d.y<=r.y+r.h end
@@ -141,7 +144,8 @@ local function draw()
 end
 eqoa.events.on("render",function(e)
     s.now=e.time
+    if s.message_until and e.time>=s.message_until then s.message=nil;s.message_until=nil end
+    if s.open and reload and e.time>=retry_at and not requests.journal then reload=false;load_journal() end
     s.step()
-    if s.reacquire and not s.build then s.reacquire=false;if s.guide then s.choose(s.guide) end end
     draw()
 end)
