@@ -61,18 +61,39 @@ local function refresh_markers(world)
 end
 
 -- Dots as the stock minimap draws them: the creatures in view but the player and the group.
-local function dot_under(g, p, mx, my)
+-- eqoa.entities.list() builds a table per creature, so the hovered circle reads it a few times a
+-- second and every frame tests only the creatures near the pointer, found in world units.
+local RESCAN = 30
+local scan, scan_age = {}, RESCAN
+local function rescan()
+    scan_age = 0
+    scan = {}
     local player = eqoa.player.get()
     local group = eqoa.group.get()
     local skip = {}
     if player and player.id then skip[player.id] = true end
     if group and group.members then for _, m in ipairs(group.members) do skip[m.id] = true end end
-    local reach, best, bd = 4 * g.k, nil, nil
     for _, e in ipairs(eqoa.entities.list()) do
         local pos = e.position
         local name = e.name and e.name:match("^%s*(.-)%s*$") or ""
         if pos and name ~= "" and e.is_creature and not e.corpse and not skip[e.id] and e.hp_fraction then
-            local px, py = view.project(pos.x, pos.z)
+            scan[#scan + 1] = { id = e.id, name = e.name, level = e.level, kind = e.kind, x = pos.x, z = pos.z }
+        end
+    end
+end
+
+local function dot_under(g, mx, my)
+    scan_age = scan_age + 1
+    if scan_age >= RESCAN then rescan() end
+    local wx0, wz0 = view.unproject((mx - view_x) / g.k, (my - view_y) / g.k)
+    if not wx0 then return nil end
+    local ux, uz = view.unproject((mx - view_x) / g.k + 1, (my - view_y) / g.k)
+    local per_px = ux and math.abs(ux - wx0) or 6 -- world units across one view pixel
+    local reach, best, bd = 4 * g.k, nil, nil
+    local near = (reach / g.k + 2) * per_px
+    for _, e in ipairs(scan) do
+        if math.abs(e.x - wx0) <= near and math.abs(e.z - wz0) <= near then
+            local px, py = view.project(e.x, e.z)
             if px then
                 local wx, wy = view_x + px * g.k, view_y + py * g.k
                 local d = math.sqrt((wx - mx) ^ 2 + (wy - my) ^ 2)
@@ -84,9 +105,10 @@ local function dot_under(g, p, mx, my)
     end
     if not best then return nil end
     local e = best.e
+    local player = eqoa.player.get()
     local kind = e.kind == "player" and "Player" or e.kind == "pet" and "Pet" or "NPC"
     local level = (e.level and e.level > 0) and ("Level " .. e.level) or "Level unknown"
-    local away = player and player.position and math.sqrt((e.position.x - player.position.x) ^ 2 + (e.position.z - player.position.z) ^ 2) or 0
+    local away = player and player.position and math.sqrt((e.x - player.position.x) ^ 2 + (e.z - player.position.z) ^ 2) or 0
     return { x = best.x, y = best.y, lines = { { e.name, "title" }, { level .. " / " .. kind, "text" },
         { string.format("%.0f away / observed nearby", away), "text" } } }
 end
@@ -188,8 +210,9 @@ local function draw()
     local world = map and map.world_id
     local pointer = eqoa.input.pointer()
     card = nil
+    if not (pointer and pointer.inside_window and inside_circle(g, pointer.x, pointer.y)) then scan_age = RESCAN end
     if pointer and pointer.inside_window and inside_circle(g, pointer.x, pointer.y) then
-        card = dot_under(g, pointer, pointer.x, pointer.y) or (world and mark_under(g, pointer.x, pointer.y, world))
+        card = dot_under(g, pointer.x, pointer.y) or (world and mark_under(g, pointer.x, pointer.y, world))
     end
     local w, h = ui.GetDisplaySize()
     ui.SetNextWindowPos(0, 0); ui.SetNextWindowSize(w, h)

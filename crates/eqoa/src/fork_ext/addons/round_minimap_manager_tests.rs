@@ -382,18 +382,31 @@ fn round4c_frame_time_with_all_map_mods_in_a_busy_world() {
     const ROUND3: [&str; 4] = ["eqoa_stats_box", "eqoa_target_of_target", "eqoa_mana_bars", "eqoa_hud_numbers"];
     const ROUND4: [&str; 3] = ["eqoa_creature_journal", "eqoa_map_search", "eqoa_round_minimap"];
     let mut results = Vec::new();
-    for (label, on) in [("all mods off", false), ("round 3 (4) + round 4 (3) mods on", true)] {
-        let Some(mut rm) = Rm::with(|p| on && (ROUND3.contains(&p) || ROUND4.contains(&p)), 200) else { return };
+    let configs: [(&str, Vec<&str>); 8] = [
+        ("all mods off", vec![]),
+        ("round 3 mods (4)", ROUND3.to_vec()),
+        ("creature journal", vec!["eqoa_creature_journal"]),
+        ("journal + map search", vec!["eqoa_creature_journal", "eqoa_map_search"]),
+        ("round minimap, pointer away", vec!["eqoa_round_minimap"]),
+        ("round minimap, pointer on circle", vec!["eqoa_round_minimap"]),
+        ("round 4 mods (3)", ROUND4.to_vec()),
+        ("round 3 (4) + round 4 (3)", ROUND3.iter().chain(ROUND4.iter()).copied().collect()),
+    ];
+    for (label, packages) in configs {
+        let on = packages.contains(&"eqoa_round_minimap");
+        let Some(mut rm) = Rm::with(|p| packages.contains(&p), 200) else { return };
         rm.frames(30);
         if on {
-            assert!(rm.manager.entries.iter().all(|e| e.status == Status::Enabled), "{:?}", rm.manager.diagnostics());
-            assert_eq!(rm.manager.entries.len(), 7, "all seven mods loaded");
             assert!(rm.state::<bool>("round_minimap.shown"));
             assert!(rm.lua().load("return #eqoa.entities.list()").eval::<usize>().unwrap() >= 200, "200 entities in the world");
             // the pointer rests on the circle's centre, so the hover scan runs every frame
             let (cx, cy, _) = rm.circle();
-            rm.at(cx as f32, cy as f32);
+            if !label.contains("away") {
+                rm.at(cx as f32, cy as f32);
+            }
         }
+        assert!(rm.manager.entries.iter().all(|e| e.status == Status::Enabled), "{:?}", rm.manager.diagnostics());
+        assert_eq!(rm.manager.entries.len(), packages.len(), "every wanted mod loaded");
         let n = 300;
         let mut whole = Vec::with_capacity(n);
         for _ in 0..n {
@@ -415,5 +428,5 @@ fn round4c_frame_time_with_all_map_mods_in_a_busy_world() {
         results.push(mean);
         rm.manager.shutdown();
     }
-    assert!(results[1].is_finite() && results[0].is_finite());
+    assert!(results.iter().all(|m| m.is_finite()));
 }
