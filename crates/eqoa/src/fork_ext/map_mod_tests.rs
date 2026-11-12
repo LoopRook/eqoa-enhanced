@@ -768,27 +768,40 @@ fn round4b_journal_caps_total_and_import_and_export_truncated_view() {
                 .0;
             assert!(options::activate_button(id));
         }
-        for _ in 0..5000 {
-            step(&host, 0.5);
-            std::thread::sleep(std::time::Duration::from_millis(1));
-            if !initial && path.exists() {
-                break;
+        let started = std::time::Instant::now();
+        if !initial {
+            let deadline = started + std::time::Duration::from_secs(90);
+            while !path.exists() && std::time::Instant::now() < deadline {
+                step(&host, 0.5);
+                std::thread::sleep(std::time::Duration::from_millis(1));
             }
+            assert!(
+                path.exists(),
+                "capped import did not save its completed snapshot"
+            );
         }
         let id = options::active_mod_items()
             .iter()
             .find(|(_, label)| label == "Export journal")
             .unwrap()
             .0;
-        assert!(options::activate_button(id));
         let exported = desktop.join("EQOA-Creature-Journal.json");
-        for _ in 0..500 {
-            step(&host, 0.5);
-            if exported.exists() {
-                break;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+        let mut next_action = std::time::Instant::now();
+        while !exported.exists() && std::time::Instant::now() < deadline {
+            // Export reports loading until the bounded JSON/merge jobs finish.
+            // Retry a real player action instead of assuming 5,000 frames sufficed.
+            if std::time::Instant::now() >= next_action {
+                assert!(options::activate_button(id));
+                next_action = std::time::Instant::now() + std::time::Duration::from_secs(1);
             }
-            std::thread::sleep(std::time::Duration::from_millis(2));
+            step(&host, 0.5);
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
+        eprintln!(
+            "R4 capped journal initial={initial}, input={n}, exported limit={limit}, elapsed={:?}",
+            started.elapsed()
+        );
         let bytes = fs::read(&exported).unwrap_or_else(|e| {
             panic!(
                 "capped export missing initial={initial}: {e}; {:?}",
@@ -842,7 +855,6 @@ fn round4b_fix_moving_world_finishes_search_and_enter() {
     native_events::clear(&h);
     input::reset_input_state();
 }
-
 
 #[test]
 fn round4b_fix_journal_reports_early_export_refusal() {
