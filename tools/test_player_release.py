@@ -57,6 +57,7 @@ BUNDLED_MOD_FILES = [
     "eqoa_map_search/main.lua",
     "eqoa_map_search/mod.json",
     "eqoa_map_search/modules/search.lua",
+    "eqoa_map_search/modules/spawns.lua",
     "eqoa_map_search/README.md",
     "eqoa_map_search/resources/map-entities.json",
     "eqoa_map_search/resources/OFL.txt",
