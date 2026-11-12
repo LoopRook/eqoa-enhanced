@@ -1900,6 +1900,83 @@ mod tests {
     }
 
     #[test]
+    fn round4b_fix_existing_profile_enables_packaged_map_mods_and_keeps_manual_off() {
+        use super::super::named_profiles::{Document, Store};
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let root = Scratch::new();
+        let config = Scratch::new();
+        let store = Store::new(Some(config.0.clone()));
+        store.create("Default", &Document::empty()).unwrap();
+        let ids = [
+            "eqoa_creature_journal",
+            "eqoa_map_search",
+            "eqoa_round_minimap",
+        ];
+        // Part C's minimap joins this same check as soon as it is packaged.
+        let mut installed = Vec::new();
+        for file in crate::fork_ext::bundled::EMBEDDED_FILES {
+            if ids.contains(&file.package) {
+                let path = root.0.join(file.path);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, file.data).unwrap();
+                if file.path.ends_with("/mod.json") {
+                    installed.push(file.package);
+                }
+            }
+        }
+        assert!(installed.contains(&ids[0]) && installed.contains(&ids[1]));
+        let paths = Paths::select(root.0.clone(), None, Some(config.0.clone()), None);
+        let mut runtime = Runtime::new(paths.clone());
+        runtime
+            .launch_headless(&device, &queue, wgpu::TextureFormat::Rgba8Unorm)
+            .unwrap();
+        let Some(Graphics::Managed(active)) = runtime.graphics.as_mut() else {
+            panic!("managed runtime missing")
+        };
+        for id in &installed {
+            assert!(
+                active
+                    .manager
+                    .entries()
+                    .iter()
+                    .find(|e| e.metadata.id == *id)
+                    .unwrap()
+                    .enabled_intent,
+                "{id} missing from an old profile must be on"
+            );
+        }
+        runtime.shutdown();
+        let mut doc = store.read("Default").unwrap();
+        for id in &installed {
+            doc.enabled.insert(Storage::key_for_addon_id(id), false);
+        }
+        store.write("Default", &doc).unwrap();
+        let mut runtime = Runtime::new(paths);
+        runtime
+            .launch_headless(&device, &queue, wgpu::TextureFormat::Rgba8Unorm)
+            .unwrap();
+        let Some(Graphics::Managed(active)) = runtime.graphics.as_ref() else {
+            panic!("managed runtime missing")
+        };
+        for id in &installed {
+            assert!(
+                !active
+                    .manager
+                    .entries()
+                    .iter()
+                    .find(|e| e.metadata.id == *id)
+                    .unwrap()
+                    .enabled_intent,
+                "{id}: manual Off must persist"
+            );
+        }
+        runtime.shutdown();
+    }
+
+    #[test]
     fn forge_runtime_imgui_ini_window_settings_persistence() {
         let instance = wgpu::Instance::default();
         let adapter = match pollster::block_on(instance.request_adapter(&Default::default())) {
