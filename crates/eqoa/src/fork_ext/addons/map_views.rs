@@ -395,7 +395,8 @@ pub(crate) fn draw(
                             dimension: wgpu::TextureDimension::D2,
                             format,
                             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                                | wgpu::TextureUsages::TEXTURE_BINDING,
+                                | wgpu::TextureUsages::TEXTURE_BINDING
+                                | if cfg!(test) { wgpu::TextureUsages::COPY_SRC } else { wgpu::TextureUsages::empty() },
                             view_formats: &[],
                         }),
                         depth: render::depth_view(device, dims.0, dims.1),
@@ -414,7 +415,9 @@ pub(crate) fn draw(
                             depth_slice: None,
                             resolve_target: None,
                             ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                // The native pipelines write colour only, so an opaque clear keeps the
+                                // texture's alpha 1 for the HUD image to blend; unmapped ground is black.
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                 store: wgpu::StoreOp::Store,
                             },
                         })],
@@ -438,6 +441,14 @@ pub(crate) fn draw(
 }
 #[cfg(test)]
 thread_local! {static DRAW_CALLS:Cell<usize>=const{Cell::new(0)};}
+#[cfg(test)]
+pub(crate) fn canvas() -> Option<(wgpu::Texture, (u32, u32))> {
+    STATE.with(|s| s.borrow().canvas.as_ref().map(|c| (c.texture.clone(), c.size)))
+}
+#[cfg(test)]
+pub(crate) fn draw_calls() -> usize {
+    DRAW_CALLS.with(Cell::get)
+}
 fn native_draw(
     map: &crate::map::Map,
     device: &wgpu::Device,

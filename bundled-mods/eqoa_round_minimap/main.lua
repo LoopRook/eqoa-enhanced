@@ -7,6 +7,7 @@ local hide_token, view, shown = nil, nil, false
 local view_x, view_y = 0, 0 -- the stock rectangle's window position this frame
 local markers, markers_world, markers_stale = {}, nil, true
 local card
+round_minimap = { arrows = {} } -- what the mod last worked out; read by its tests
 local font_info = eqoa.fonts.load("package_resources/SpaceMono-Regular.ttf", 13)
 local font = font_info and font_info.font
 
@@ -25,7 +26,7 @@ end)
 -- The stock minimap is hidden and one held view carries its picture; both need a world.
 local function ensure()
     if not hide_token then hide_token = eqoa.hud.hide("minimap") end
-    if hide_token and not view then view = eqoa.map.view({ size = FRAME }) end
+    if hide_token and not view then view = eqoa.map.view({ size = FRAME }); round_minimap.view = view end
     return hide_token and view
 end
 
@@ -109,6 +110,7 @@ end
 
 local function waypoint_arrows(g, ui, dl, v, world)
     refresh_markers(world)
+    round_minimap.arrows = {}
     for _, m in ipairs(markers) do
         if (m.kind == "waypoint" or m.kind == "group_waypoint") and (m.world_id == nil or m.world_id == world) then
             local px, py, inside = view.project(m.x, m.z)
@@ -123,6 +125,7 @@ local function waypoint_arrows(g, ui, dl, v, world)
                     local rr = g.r + 6 * g.k
                     local ax, ay = g.cx + cx / n * rr, g.cy + cy / n * rr
                     local s = 4.5 * g.k
+                    round_minimap.arrows[#round_minimap.arrows + 1] = { x = ax, y = ay, kind = m.kind }
                     local color = m.kind == "waypoint" and ui.GetColorU32(1, 0.3, 0.85, 1) or ui.GetColorU32(0.3, 0.75, 1, 1)
                     local dark = ui.GetColorU32(0, 0, 0, 1)
                     local function diamond(r, c)
@@ -161,6 +164,7 @@ local function draw()
     if not ensure() then return end
     local info = view.texture
     shown = info ~= nil
+    round_minimap.shown, round_minimap.card, round_minimap.arrows = shown, nil, {}
     if not info then return end
     local lay = eqoa.hud.layout().minimap
     local g = geometry(lay)
@@ -168,13 +172,16 @@ local function draw()
     -- upstream's picture without its square frame, cut to the circle
     local uv = info.uv
     local du, dv = (uv[3] - uv[1]) * INSET / FRAME, (uv[4] - uv[2]) * INSET / FRAME
-    eqoa.hud.image({
+    local ok, err = eqoa.hud.image({
         texture = { texture = info.texture, width = info.width, height = info.height,
             uv = { uv[1] + du, uv[2] + dv, uv[3] - du, uv[4] - dv } },
         x = lay.frame_x + INSET, y = lay.frame_y + INSET, w = SIZE, h = SIZE,
         anchor = "right", vertical = "top", shape = "circle",
     })
+    round_minimap.image_error = not ok and err and err.message or nil
+    if round_minimap_debug then eqoa.hud.image({texture=info,x=0,y=0,w=320,h=224}) end
     claim(g)
+    round_minimap.circle = g
     if not eqoa.imgui then return end
     local ui = eqoa.imgui
     local map = eqoa.map.get()
@@ -194,6 +201,7 @@ local function draw()
     -- the ring just outside the picture (the picture is drawn over the window layer)
     dl:AddCircle(v(g.cx, g.cy), g.r + 1.5 * g.k, ui.GetColorU32(0.2, 0.2, 0.2, 1), 96, 3 * g.k)
     if world then waypoint_arrows(g, ui, dl, v, world) end
+    round_minimap.card = card
     if card then draw_card(ui, dl, v, g, card) end
     ui.End()
 end

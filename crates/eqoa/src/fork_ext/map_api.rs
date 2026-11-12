@@ -150,8 +150,28 @@ impl Map {
         let lib=esf::Library::new();let vui=crate::pointer::testing::vui();
         let cx=Context{lib:&lib,device,queue,format:wgpu::TextureFormat::Rgba8Unorm,size,dt:0.,player:Some(([25300.,0.,15200.],0.)),world:0,origin:[0.;2],group:Vec::new(),in_group:false,target:None,sticks:[0.;4],keyboard:true,words:None,vui:Some(&vui),quest_marks:None};
         map.layers(&cx);
-        if mini {map.mini_frame(&cx,&mini::MiniView::default());} else {map.compose(&cx);}
+        if mini {
+            map.mini_frame(&cx,&mini::MiniView::default());
+            // Terrain stand-in: the minimap's whole frame green, as the picture would be.
+            let r=mini::window_rect(size,mini::FRAME);
+            let l=map.layers.as_mut().unwrap();
+            let white=l.white;
+            l.map.quads.push(render::map::MapQuad::rect(white,r,[0.0,0.0,1.0,1.0],[0.1,0.6,0.2,1.0]));
+        } else {map.compose(&cx);}
         map
+    }
+
+    /// A minimap frame as `Play::map_frame` makes it each frame (a moved or toggled minimap
+    /// is laid out again), with the terrain stand-in.
+    pub(crate) fn round4_mini_frame(&mut self,device:&wgpu::Device,queue:&wgpu::Queue,size:(u32,u32)){
+        let lib=esf::Library::new();let vui=crate::pointer::testing::vui();
+        let cx=Context{lib:&lib,device,queue,format:wgpu::TextureFormat::Rgba8Unorm,size,dt:0.,player:Some(([25300.,0.,15200.],0.)),world:0,origin:[0.;2],group:Vec::new(),in_group:false,target:None,sticks:[0.;4],keyboard:true,words:None,vui:Some(&vui),quest_marks:None};
+        self.mini_frame(&cx,&mini::MiniView::default());
+        let moved=crate::hudlayout::shift(crate::hudlayout::Piece::Minimap,crate::hudlayout::Beyond::of(size));
+        let r=mini::window_rect_moved(size,mini::FRAME,moved);
+        let l=self.layers.as_mut().unwrap();
+        let white=l.white;
+        l.map.quads.push(render::map::MapQuad::rect(white,r,[0.0,0.0,1.0,1.0],[0.1,0.6,0.2,1.0]));
     }
 }
 
