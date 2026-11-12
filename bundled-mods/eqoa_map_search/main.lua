@@ -115,11 +115,11 @@ local function draw()
     end
     button(x,y,mini and 20 or 100,20,mini and "" or ("Search  "..((eqoa.binds.get("open") or ""):upper())),s.toggle,s.open)
     if mini then dl:AddCircle(v(x+8,y+8),5,c.text,24,1);dl:AddLine(v(x+12,y+12),v(x+17,y+17),c.text,1) end
-    if s.guide then button(x-24,y,20,20,"X",s.clear) end
+    if s.guide then button(mini and x-24 or x+106,y,20,20,"X",s.clear) end
     local status=s.status()
     if status then text(math.max(12,x-300),y+25,status,c.text,320) end
-    if map.waypoint then
-        button(x+(mini and 24 or 106),y,136,20,"Track waypoint",function()
+    if map.open and map.waypoint then
+        button(x+(s.guide and 130 or 106),y,136,20,"Track waypoint",function()
             s.choose({name="Personal waypoint",kind="waypoint",at={x=map.waypoint.x,z=map.waypoint.z}})
         end)
     end
