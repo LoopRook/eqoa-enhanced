@@ -662,7 +662,9 @@ fn round4b_search_lists_inactive_group_member_as_unavailable() {
     input::reset_input_state();
     crate::settings::testing::reset(false);
     let mut p = Play::bundled_ui_fixture();
+    p.session.self_id = Some(5000);
     p.group.in_group = true;
+    p.entities.slots = vec![Some(creature(77, "Absent Friend", 15, [700., 0., 800.]))];
     p.group.members = vec![crate::group::Member {
         id: 77,
         name: "Absent Friend".into(),
@@ -677,6 +679,30 @@ fn round4b_search_lists_inactive_group_member_as_unavailable() {
     key(&h, Key::Named(NamedKey::Tab));
     type_text(&h, "Absent Friend");
     settle(&h);
+    let packet = net::session::Event::State {
+        channel: 0x40,
+        data: vec![],
+    };
+    let before = super::begin_game_event(&p, &packet);
+    p.group.members.insert(
+        0,
+        crate::group::Member {
+            id: 5000,
+            name: "Self".into(),
+            active: true,
+            ..Default::default()
+        },
+    );
+    super::end_game_event(&p, before);
+    step(&h, 0.5);
+    step(&h, 0.5);
+    assert_eq!(
+        p.group.members.len(),
+        2,
+        "the protocol-shaped roster includes self and inactive friend"
+    );
+    h.execute("assert(#require('search').group==1,'search must exclude self after roster deltas')")
+        .unwrap();
     h.execute("local s=require('search');assert(#s.rows==1 and s.rows[1].detail=='Position unavailable' and s.rows[1].at==nil)").unwrap();
     key(&h, Key::Named(NamedKey::Enter));
     assert_eq!(

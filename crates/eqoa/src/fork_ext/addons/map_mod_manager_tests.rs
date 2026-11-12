@@ -144,7 +144,19 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
     {
         let path = root.0.join(file.path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, file.data).unwrap();
+        // Normal runs use the embedded shipping bytes. Negative controls can
+        // opt into the same package's edited Lua files without changing assets.
+        if std::env::var_os("EQOA_R4_TEST_SOURCE").is_some() && file.path.ends_with(".lua") {
+            fs::copy(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../bundled-mods")
+                    .join(file.path),
+                &path,
+            )
+            .unwrap();
+        } else {
+            fs::write(path, file.data).unwrap();
+        }
     }
     let journal = super::super::discovery::discover(&root.0)
         .addons
