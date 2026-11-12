@@ -464,6 +464,7 @@ fn round4b_search_selects_live_with_dots_follows_and_falls_back_to_known() {
     input::reset_input_state();
     crate::settings::testing::reset(false);
     let mut p = Play::bundled_ui_fixture();
+    p.map.mini.up = true; // the stock minimap setting is on; search follows it
     let mut bat = creature(6000, "MPOG Bat", 15, [200., 2., 300.]);
     bat.p19 = 255;
     let mut bat2 = creature(6001, "MPOG Bat", 16, [500., 2., 800.]);
@@ -553,6 +554,7 @@ fn round4b_search_group_departure_places_and_unicode_editor_limit() {
     input::reset_input_state();
     crate::settings::testing::reset(false);
     let mut p = Play::bundled_ui_fixture();
+    p.map.mini.up = true; // the stock minimap setting is on; search follows it
     p.group.in_group = true;
     p.group.members = vec![crate::group::Member {
         id: 77,

@@ -439,16 +439,10 @@ mod tests {
     }
 
     #[test]
-    fn fixture_frees_f2_while_production_keeps_map_search_on_it() {
-        let row = row_named("map_search").unwrap();
-        let mut fixture = Binds::default();
-        assert_eq!(fixture.key(row), Some("f2"), "production default");
-        assert_eq!(fixture.key(row), Some("f24"));
-        assert_eq!(
-            Binds::default().key(row),
-            Some("f2"),
-            "only this fixture moved"
-        );
+    fn controls_no_longer_list_the_map_search_keys_natively() {
+        // F2 and F4 belong to the bundled Map Search mod now (mod.eqoa_map_search.*)
+        assert!(row_named("map_search").is_none());
+        assert!(row_named("map_stop").is_none());
     }
 
     #[test]

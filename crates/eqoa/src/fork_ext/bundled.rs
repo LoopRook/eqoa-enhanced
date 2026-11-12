@@ -1019,7 +1019,8 @@ mod tests {
                 "eqoa_mana_bars",
                 "eqoa_hud_numbers",
                 "eqoa_creature_journal",
-                "eqoa_map_search"
+                "eqoa_map_search",
+                "eqoa_round_minimap"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1310,7 +1311,8 @@ mod tests {
                 "eqoa_mana_bars",
                 "eqoa_hud_numbers",
                 "eqoa_creature_journal",
-                "eqoa_map_search"
+                "eqoa_map_search",
+                "eqoa_round_minimap"
             ]
         );
 
@@ -1354,7 +1356,8 @@ mod tests {
                 "eqoa_mana_bars",
                 "eqoa_hud_numbers",
                 "eqoa_creature_journal",
-                "eqoa_map_search"
+                "eqoa_map_search",
+                "eqoa_round_minimap"
             ]
         );
 
@@ -1372,7 +1375,8 @@ mod tests {
                 "eqoa_mana_bars",
                 "eqoa_hud_numbers",
                 "eqoa_creature_journal",
-                "eqoa_map_search"
+                "eqoa_map_search",
+                "eqoa_round_minimap"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1456,7 +1460,8 @@ mod tests {
                 "eqoa_mana_bars",
                 "eqoa_hud_numbers",
                 "eqoa_creature_journal",
-                "eqoa_map_search"
+                "eqoa_map_search",
+                "eqoa_round_minimap"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );

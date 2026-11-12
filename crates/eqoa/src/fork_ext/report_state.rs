@@ -264,7 +264,7 @@ mod tests {
         let text = describe(&p, None);
         for item in [
             "Addon HUD claims: compass_back, hotbar_draw_compact",
-            "Map open: true; search open: true",
+            "Map open: true; player search open: true",
             "Autorun: true; following: true; follow id: 0x00000001",
         ] {
             assert!(text.contains(item), "missing {item}");
