@@ -410,6 +410,16 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     }
     native_core::flush_deferred();
     CORE.with(|c| c.borrow_mut().flush_player_motion());
+    // `eqoa.entities.dots()` reads the view directly rather than a snapshot, and a hover frame
+    // often reuses the cached snapshot (creatures move while the player and camera stand still),
+    // so this frame's dots are refreshed on every pass.
+    let dots = minimap_dots(play);
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.view.dots != dots {
+            c.view.dots = dots;
+        }
+    });
     let now = key(play, walker);
     let previous = KEY.with(|k| k.replace(Some(now)));
     if previous != Some(now) {

@@ -4,6 +4,8 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Round minimap hover reads compact current-frame dot positions, avoiding a full creature-record list each frame.
+
 - Map Search finishes while nearby creatures move, keeps result order stable, and filters the previous results as you type. Closed search no longer scans the world or reloads a changing journal.
 - Search clears the full map header, consumes outside clicks while open, and scrolls whole rows only over its list. Group search excludes you and keeps unavailable members greyed out.
 - Known creature guides upgrade to live creatures; Track waypoint follows moved pins. Import/export report success, errors and the actual collision-safe filename for six seconds.

@@ -18,6 +18,9 @@ pub(crate) struct View {
     pub player_stats: Option<Json>,
     pub entities: Vec<Json>,
     pub entity_slots: Vec<Option<u32>>,
+    /// The entities the native minimap draws as dots, at this frame's drawn positions
+    /// `(id, x, z)`: what a minimap hover walks without a record per creature.
+    pub dots: Vec<(u32, f32, f32)>,
     pub abilities: Vec<Json>,
     pub group: Json,
     pub hotbar: Vec<Json>,
@@ -37,6 +40,7 @@ impl Default for View {
             player_stats: None,
             entities: Vec::new(),
             entity_slots: Vec::new(),
+            dots: Vec::new(),
             abilities: Vec::new(),
             group: json!({"in_group":false,"self_leader":null,"members":[],"raid":[],"invites":[]}),
             hotbar: Vec::new(),
@@ -62,8 +66,10 @@ pub(crate) struct Event {
 
 impl Event {
     pub(super) fn expire_player(&mut self) {
-        if let Some(action)=self.player_action.take(){action.store(2,std::sync::atomic::Ordering::Release);}
-        self.player_command=false;
+        if let Some(action) = self.player_action.take() {
+            action.store(2, std::sync::atomic::Ordering::Release);
+        }
+        self.player_command = false;
     }
 }
 
@@ -214,9 +220,12 @@ impl Core {
         self.event_bytes += bytes;
         let event = Event {
             player_command: false,
-            player_action: ((name=="input.key" && data["down"]==true && data["synthetic"]!=true && data["repeat"]!=true)
-                || (name=="pointer.pressed" && data["inside_window"]==true))
-                .then(||std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0))),
+            player_action: ((name == "input.key"
+                && data["down"] == true
+                && data["synthetic"] != true
+                && data["repeat"] != true)
+                || (name == "pointer.pressed" && data["inside_window"] == true))
+                .then(|| std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0))),
             name: name.into(),
             seq: self.seq,
             time: self

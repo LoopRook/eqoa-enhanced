@@ -1110,6 +1110,56 @@ fn record_reuse_returns_fresh_values_after_a_change_and_the_same_table_when_unch
 }
 
 #[test]
+fn record_reuse_caches_lists_with_fresh_tables_and_this_frames_records() {
+    use super::native_core::CORE;
+    let h = Host::new().unwrap();
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.in_world = true;
+        c.view.entities = serde_json::json!([
+            {"id": 7, "name": "Rat", "kind": "npc", "position": {"x": 1.0, "y": 0.0, "z": 2.0}},
+            {"id": 8, "name": "Bat", "kind": "npc", "position": {"x": 3.0, "y": 0.0, "z": 4.0}}
+        ])
+        .as_array()
+        .unwrap()
+        .clone();
+    });
+    h.execute(
+        r#"
+        local a = eqoa.entities.list()
+        assert(#a == 2 and a[1].name == 'Rat' and a[2].name == 'Bat')
+        local b = eqoa.entities.list()
+        -- a list is the caller's own table (as before), its records are this frame's read-only ones
+        assert(not rawequal(a, b), 'a list is a fresh table each call')
+        assert(rawequal(a[1], b[1]), 'an unchanged record is reused instead of rebuilt')
+        assert(not pcall(function() b[1].name = 'changed' end), 'reused records stay read-only')
+        a[1] = false
+        table.insert(a, 'extra')
+        local c = eqoa.entities.list()
+        assert(#c == 2 and c[1].name == 'Rat' and c[2].name == 'Bat', 'a caller edits only its own list')
+    "#,
+    )
+    .unwrap();
+    // One creature moves and the other despawns: the very next read has the new place, not a cache.
+    CORE.with(|c| {
+        c.borrow_mut().view.entities = serde_json::json!([
+            {"id": 7, "name": "Rat", "kind": "npc", "position": {"x": 9.0, "y": 0.0, "z": 2.0}}
+        ])
+        .as_array()
+        .unwrap()
+        .clone();
+    });
+    h.execute(
+        r#"
+        local a = eqoa.entities.list()
+        assert(#a == 1, 'a despawned creature is gone')
+        assert(a[1].position.x == 9.0, 'a moved creature is read where it is now, not cached')
+    "#,
+    )
+    .unwrap();
+}
+
+#[test]
 fn hud_specs_with_metatable_defaults_and_plain_specs_both_read_their_fields() {
     use super::{hud_layer, native_core::CORE};
     let h = Host::new().unwrap();
@@ -1125,15 +1175,24 @@ fn hud_specs_with_metatable_defaults_and_plain_specs_both_read_their_fields() {
     "#,
     )
     .unwrap();
-    let queued = hud_layer::MOD_QUEUES.with(|q| q.borrow().values().flatten().cloned().collect::<Vec<_>>());
+    let queued =
+        hud_layer::MOD_QUEUES.with(|q| q.borrow().values().flatten().cloned().collect::<Vec<_>>());
     let texts = queued
         .iter()
         .filter_map(|c| match c {
-            hud_layer::HudCommand::Text { x, y, text, scale, .. } => Some((*x, *y, text.clone(), *scale)),
+            hud_layer::HudCommand::Text {
+                x, y, text, scale, ..
+            } => Some((*x, *y, text.clone(), *scale)),
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert!(texts.contains(&(7.0, 9.0, "from defaults".to_string(), 1.0)), "{texts:?}");
-    assert!(texts.contains(&(1.0, 2.0, "plain".to_string(), 2.0)), "{texts:?}");
+    assert!(
+        texts.contains(&(7.0, 9.0, "from defaults".to_string(), 1.0)),
+        "{texts:?}"
+    );
+    assert!(
+        texts.contains(&(1.0, 2.0, "plain".to_string(), 2.0)),
+        "{texts:?}"
+    );
     hud_layer::clear_all();
 }

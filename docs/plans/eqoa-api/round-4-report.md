@@ -584,3 +584,57 @@ Configurations: stock square minimap with no mods (the native baseline), round 3
 - A step's rim position uses a fixed 8 frame-px half glyph where the native uses the font's height; the hover can be about a pixel off the drawn glyph on the rim.
 - Real terrain, real indoor pictures and the native hover cards' extra text could not be checked (no disc); the owner's playtest confirms them.
 - Release timings (above).
+
+
+## Hover cost fix (2026-11-12)
+
+Cause: the current-frame hover correction built the entire guarded Lua entity list on every hovered frame. The lead measured about 0.7 ms with the pointer away and 8.9?10 ms on the circle (200 creatures, release, idle PC). Those before numbers are supplied measurements, not rerun here.
+
+Kept the inherited compact current-frame dot capture, list-record reuse (fresh list containers, read-only cached elements), and regression coverage. Removed the unfinished profiling hooks. Compact dot columns alone measured 1.557 ms mean / 4.186 ms max; batching projection into those columns measured 1.800 / 3.919. These intermediate results did not meet the goal.
+
+The final mod calls `eqoa.entities.pick_dot(query)`: one native pass over current actor positions using this frame's minimap projection, player/group exclusions, circle clipping, nearest distance and lower-ID tie breaking. Only the selected ID needs a full entity lookup for its name/level/kind. There is no position or hover-result cache. `eqoa.entities.dots()` also exposes the compact world-position columns for addon authors; both helpers are documented. All implementation remains fork-owned.
+
+### Final release benchmark runs
+
+Required command, run twice sequentially on unchanged final code, 300 frames per configuration:
+`cargo test --release --locked -p eqoa --bin eqoa round4c_frame_time_with_all_map_mods_in_a_busy_world -- --test-threads=1 --nocapture`
+
+Each cargo command used `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`, a fresh empty temporary `EQOA_CONFIG`, the shared `cargo-build.lock` directory (wait/retry, remove in finally), and a foreground subprocess with a 30-minute timeout. No other build/test workload ran during either measurement. No worktree target directory was created.
+
+Run 1:
+
+```text
+R4C frame time (release, stock square minimap, no mods (native baseline)): frames=300 mean=0.363 ms p50=0.316 p95=0.643 max=1.880
+R4C frame time (release, round 3 mods (4)): frames=300 mean=0.863 ms p50=0.773 p95=1.345 max=2.498
+R4C frame time (release, creature journal): frames=300 mean=0.475 ms p50=0.417 p95=0.778 max=1.099
+R4C frame time (release, journal + map search): frames=300 mean=1.595 ms p50=1.585 p95=3.737 max=5.220
+R4C frame time (release, round minimap, pointer away): frames=300 mean=1.270 ms p50=1.206 p95=1.904 max=2.417
+R4C frame time (release, round minimap, pointer on circle): frames=300 mean=1.528 ms p50=1.493 p95=2.217 max=3.350
+R4C frame time (release, round 4 mods (3)): frames=300 mean=2.224 ms p50=2.215 p95=4.049 max=8.285
+R4C frame time (release, round 3 (4) + round 4 (3)): frames=300 mean=2.928 ms p50=2.802 p95=5.038 max=9.179
+```
+
+Run 2:
+
+```text
+R4C frame time (release, stock square minimap, no mods (native baseline)): frames=300 mean=0.321 ms p50=0.282 p95=0.511 max=1.061
+R4C frame time (release, round 3 mods (4)): frames=300 mean=1.198 ms p50=1.122 p95=1.854 max=3.118
+R4C frame time (release, creature journal): frames=300 mean=0.484 ms p50=0.427 p95=0.764 max=1.387
+R4C frame time (release, journal + map search): frames=300 mean=1.648 ms p50=1.607 p95=3.709 max=6.239
+R4C frame time (release, round minimap, pointer away): frames=300 mean=1.072 ms p50=1.019 p95=1.629 max=2.201
+R4C frame time (release, round minimap, pointer on circle): frames=300 mean=1.236 ms p50=1.131 p95=2.006 max=2.546
+R4C frame time (release, round 4 mods (3)): frames=300 mean=2.494 ms p50=2.406 p95=4.451 max=8.438
+R4C frame time (release, round 3 (4) + round 4 (3)): frames=300 mean=3.227 ms p50=3.083 p95=5.584 max=9.110
+```
+
+Pointer-on-circle means: **1.528 / 1.236 ms**, maxima **3.350 / 2.546 ms**. The combined 600-frame mean is **1.382 ms** (about 84?86% below the supplied before range). Both maxima meet <4 ms; run 2 meets <1.5 ms mean, while run 1 misses it by 0.028 ms. The overall mean meets the target; two independent per-run passes are not established. Pointer-away means were 1.270 / 1.072 ms, so the final hover increment was 0.258 / 0.164 ms.
+
+### Validation
+
+- Final required `fork_ext:: -- --test-threads=1`: **536 passed, 0 failed, 26 ignored**, including all **10 round-minimap tests** (current-frame motion/despawn, nearest/ties, cards, markers, scales, clipping and Move HUD).
+- Native helper test `round4_entity_dots_are_plain_columns_of_the_creatures_the_native_minimap_draws`: final release **1 passed**. Covers drawn-creature eligibility, actor-position fallback, independent column copies, per-frame refresh without snapshot reconstruction, projection/picking, excluded IDs, no hit and invalid scales.
+- Negative controls: disabling corpse filtering fails the eligibility assertion; disabling the picker's exclusion check fails `excluded dots cannot be picked`. Both restored, positive tests pass.
+- Full client suite before the final native-picker refinement: **2,093 passed, 0 failed, 32 ignored**. The final picker was subsequently checked by the complete fork suite and the focused native-helper test; the full client suite was not repeated after that refinement. Disc/oracle/golden-fixture coverage is not claimed; ignored tests remain ignored.
+- `python -X utf8 tools/test_player_release.py`: **20 passed** on final code; bundled Lua SHA-256 refreshed in `bundled-mods/SOURCE.txt`.
+- `python tools/check_fork_footprint.py --base 11aa5f088bb52d5f306b0224e37b782b1bf4503d`: **PASS**, 31 shared files, no budget changes.
+- `cargo build --locked --release -p eqoa`: **PASS**, final native client, 1m 49s (shared target). All bundled SHA-256 entries independently verified: **88 match**. Diff whitespace check passed with CRLF-aware settings.

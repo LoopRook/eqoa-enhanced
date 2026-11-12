@@ -224,6 +224,8 @@ All state getters read the frozen native core, not Forge tables. Unsupported R4 
 | `eqoa.entities.get(ref:EntityRef)` | W: `Entity?`; stale_handle if expired. |
 | `eqoa.entities.find(id:uint)` | W: current `Entity?`, nil,nil if no visible record. Never searches historical map data. |
 | `eqoa.entities.named(name:string,exact:bool=true)` | W: `Entity[]`, literal case-insensitive UTF-8 name match (substring when false); no regex/pattern execution. |
+| `eqoa.entities.dots()` | W: `{ids:uint[],xs:number[],zs:number[]}`, plain values (not records) for the creatures the native minimap draws as dots, at this frame's drawn positions: creatures, not corpses, active (or the target) and named. Parallel columns, in native slot order, so a per-frame scan builds no table per creature; it is rebuilt on every call, so read it each frame rather than keeping it. Use `eqoa.entities.find(id)` for the record. |
+| `eqoa.entities.pick_dot(query)` | W: nearest current minimap dot `{id,x,y,world_x,world_z}?`, or nil,nil. Query: `x,y` pointer and `center_x,center_y,radius` circle in pixels relative to the view origin; `scale_x,scale_y` positive pixel scale per 112-unit view frame; `reach` nonnegative hit radius; optional `exclude:uint[]`. Native current-frame projection and dot scan, lower ID breaks ties. Returns projected relative pixels and world position. `unavailable` until minimap prepared; `invalid_argument` for nonfinite values or invalid scales/radii. |
 | `eqoa.entities.distance(a:Vec3,b:Vec3)` | A: `number,nil`, Euclidean 3D game units. Pure calculation; `A/entity.rs:226` equivalent. |
 | `eqoa.target.get()` | W: current `Entity?`; nil,nil for no target or no observed entity. Use player.target_id for a selected ID with no record. Source `P:4181,5000,2329`. |
 

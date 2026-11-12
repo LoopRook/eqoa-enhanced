@@ -424,24 +424,48 @@ fn signature<'a>(path: &str, has_keys: bool, keys: impl Iterator<Item = &'a str>
 }
 
 /// `record`, reusing the previous result of `slot` while the native value is unchanged.
+///
+/// Lists (the entity and ability records, map markers) are the expensive case: one full
+/// record per element with its guarded tables. They are cached too, so a caller that reads
+/// the list every frame (a minimap hover, a search) pays only the comparison while the
+/// native data is the same. A list is handed out as a fresh table each call, as before, so
+/// a caller may insert, remove or reorder its own copy; its elements are the shared
+/// read-only records.
 pub(crate) fn record_cached(lua: &Lua, slot: &str, path: &str, value: &Json) -> Result<Value> {
-    if !matches!(value, Json::Object(_)) {
+    let list = matches!(value, Json::Array(_));
+    if !list && !matches!(value, Json::Object(_)) {
         return record(lua, path, value);
     }
     let session_rc = session(lua);
     if let Ok(s) = session_rc.try_borrow() {
         if let Some((json, table)) = s.record_cache.get(slot) {
             if json == value {
-                return Ok(Value::Table(table.clone()));
+                return copy_list(lua, list, table);
             }
         }
     }
     let built = record(lua, path, value)?;
-    if let (Value::Table(table), Ok(mut s)) = (&built, session_rc.try_borrow_mut()) {
+    let Value::Table(table) = &built else {
+        return Ok(built);
+    };
+    if let Ok(mut s) = session_rc.try_borrow_mut() {
         s.record_cache
             .insert(slot.to_string(), (value.clone(), table.clone()));
     }
-    Ok(built)
+    copy_list(lua, list, table)
+}
+
+/// A cached list's fresh top-level table (its records are shared and read-only); an object
+/// record is handed out as it is.
+fn copy_list(lua: &Lua, list: bool, table: &Table) -> Result<Value> {
+    if !list {
+        return Ok(Value::Table(table.clone()));
+    }
+    let copy = lua.create_table_with_capacity(table.raw_len(), 0)?;
+    for i in 1..=table.raw_len() {
+        copy.raw_set(i, table.raw_get::<Value>(i)?)?;
+    }
+    Ok(Value::Table(copy))
 }
 
 pub(crate) fn guard(
@@ -980,7 +1004,10 @@ fn nested_type(path: &str, key: &str) -> Option<&'static str> {
 fn install_fields(lua: &Lua) {
     for (path, fields) in [
         ("eqoa.Error", "code message capability retry_after"),
-        ("eqoa.map.Marker", "kind name x z level_min level_max label step"),
+        (
+            "eqoa.map.Marker",
+            "kind name x z level_min level_max label step",
+        ),
         (
             "eqoa.map.MapState",
             "enabled open minimap markers_on world_id world_name zone bounds revision waypoint search_anchor",
@@ -1104,7 +1131,10 @@ fn install_fields(lua: &Lua) {
         };
         describe(lua, path, "supported", round, "");
         for field in fields.split_whitespace() {
-            let field_round = if matches!((path,field),("eqoa.entities.Entity","actor_position") | ("eqoa.map.MapState","search_anchor")) {
+            let field_round = if matches!(
+                (path, field),
+                ("eqoa.entities.Entity", "actor_position") | ("eqoa.map.MapState", "search_anchor")
+            ) {
                 Some(4)
             } else if matches!(
                 (path, field),

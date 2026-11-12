@@ -60,36 +60,24 @@ local function refresh_markers(world)
     markers = eqoa.map.markers(world) or {}
 end
 
--- Dots as the stock minimap draws them: the creatures in view but the player and the group, at
--- the positions of this frame. Only the hovered circle reads the list, so the table per creature
--- it builds costs nothing while the pointer is elsewhere.
+-- Pick from this frame's native dot positions and projection in one pass. Only the
+-- selected creature needs a full entity record; no per-creature Lua tables or calls.
 local function dot_under(g, mx, my)
     local player = eqoa.player.get()
     local group = eqoa.group.get()
     local skip = {}
-    if player and player.id then skip[player.id] = true end
-    if group and group.members then for _, m in ipairs(group.members) do skip[m.id] = true end end
-    local reach, best, bd = 4 * g.k, nil, nil
-    for _, e in ipairs(eqoa.entities.list()) do
-        local pos = e.position
-        local name = e.name and e.name:match("^%s*(.-)%s*$") or ""
-        if pos and name ~= "" and e.is_creature and not e.corpse and not skip[e.id] and e.hp_fraction then
-            local px, py = view.project(pos.x, pos.z)
-            if px then
-                local wx, wy = view_x + px * g.k, view_y + py * g.ky
-                local d = math.sqrt((wx - mx) ^ 2 + (wy - my) ^ 2)
-                if d <= reach and inside_circle(g, wx, wy) and (not bd or d < bd or (d == bd and e.id < best.e.id)) then
-                    best, bd = { e = e, x = wx, y = wy, pos = pos }, d
-                end
-            end
-        end
-    end
+    if player and player.id then skip[#skip + 1] = player.id end
+    if group and group.members then for _, m in ipairs(group.members) do skip[#skip + 1] = m.id end end
+    local best = eqoa.entities.pick_dot({ x = mx - view_x, y = my - view_y,
+        scale_x = g.k, scale_y = g.ky, center_x = g.cx - view_x, center_y = g.cy - view_y,
+        radius = g.r, reach = 4 * g.k, exclude = skip })
     if not best then return nil end
-    local e = best.e
+    local e = eqoa.entities.find(best.id)
+    if not e then return nil end
     local kind = e.kind == "player" and "Player" or e.kind == "pet" and "Pet" or "NPC"
     local level = (e.level and e.level > 0) and ("Level " .. e.level) or "Level unknown"
-    local away = player and player.position and math.sqrt((best.pos.x - player.position.x) ^ 2 + (best.pos.z - player.position.z) ^ 2) or 0
-    return { x = best.x, y = best.y, lines = { { e.name, "title" }, { level .. " / " .. kind, "text" },
+    local away = player and player.position and math.sqrt((best.world_x - player.position.x) ^ 2 + (best.world_z - player.position.z) ^ 2) or 0
+    return { x = view_x + best.x, y = view_y + best.y, lines = { { e.name, "title" }, { level .. " / " .. kind, "text" },
         { string.format("%.0f away / observed nearby", away), "text" } } }
 end
 
@@ -258,8 +246,11 @@ local function draw()
     dl:AddCircle(v(g.cx, g.cy), g.r + 1.5 * g.k, ui.GetColorU32(0.2, 0.2, 0.2, 1), 96, 3 * g.k)
     if world then waypoint_arrows(g, ui, dl, v, world) end
     round_minimap.card = card
-    if card then draw_card(ui, dl, v, g, card, w, h) end
+    if card then
+        draw_card(ui, dl, v, g, card, w, h)
+    end
     ui.End()
+
 end
 
 eqoa.events.on("pointer.wheel", function(e)

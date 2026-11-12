@@ -2126,3 +2126,93 @@ fn round4_entity_journal_flags_are_protocol_values_and_corpse_delta_is_not_hp() 
     native_events::dispatch(&h).unwrap();
     h.execute("assert(not changed)").unwrap();
 }
+
+#[test]
+fn round4_entity_dots_are_plain_columns_of_the_creatures_the_native_minimap_draws() {
+    use crate::fork_ext::addons::native_core::{CORE, Core};
+    CORE.with(|c| *c.borrow_mut() = Core::default());
+    let h = Host::new().unwrap();
+    h.execute("local d,e=eqoa.entities.dots();assert(d==nil and e.code=='not_in_world','dots need a loaded world')")
+        .unwrap();
+    let mut p = Play::bundled_ui_fixture();
+    let creature = |id: u32, name: &str, p19: u8, at: [f32; 3]| net::entity::Entity {
+        id,
+        kind: net::entity::TYPE_CREATURE,
+        p19,
+        pos: at,
+        creature: Some(net::entity::Creature {
+            name: name.into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut live = creature(2002, "Moss Snake", 180, [10.0, 0.0, 20.0]);
+    live.actor_pos = [11.0, 0.0, 21.0];
+    p.entities.slots[1] = Some(live);
+    let mut corpse = creature(3003, "Someone", 180, [1.0, 0.0, 1.0]);
+    corpse.p18 = 2;
+    p.entities.slots[2] = Some(corpse);
+    p.entities.slots[3] = Some(creature(3004, "Inactive", 0, [2.0, 0.0, 2.0]));
+    p.entities.slots[4] = Some(creature(3005, "   ", 180, [3.0, 0.0, 3.0]));
+    p.entities.slots[5] = Some(net::entity::Entity {
+        id: 3006,
+        p19: 180,
+        pos: [4.0, 0.0, 4.0],
+        creature: Some(net::entity::Creature {
+            name: "Rock".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    p.entities.slots[6] = Some(creature(3007, "Bat", 90, [30.0, 0.0, 40.0]));
+    let mut view = p.native_view(None);
+    view.minimap = Some(crate::fork_ext::addons::map_views::Projection {
+        center: [0.0, 0.0],
+        scale: 1.0,
+        outer: [0.0, 0.0, 100.0, 100.0],
+        inner: [0.0, 0.0, 100.0, 100.0],
+        window: (100, 100),
+    });
+    CORE.with(|c| c.borrow_mut().publish(view));
+    h.execute(
+        r#"
+        local d = eqoa.entities.dots()
+        assert(#d.ids == 2, 'a dot per drawn creature only: live ones, not corpses, unnamed or scenery')
+        assert(d.ids[1] == 2002 and d.xs[1] == 11.0 and d.zs[1] == 21.0, 'the place its dot is drawn')
+        local q = {x=68.32,y=79.52,scale_x=1,scale_y=1,center_x=56,center_y=56,radius=50,reach=4}
+        local picked = eqoa.entities.pick_dot(q)
+        assert(picked.id == 2002 and picked.world_x == 11 and picked.world_z == 21, 'pick current dot with native projection')
+        q.exclude = {2002}
+        assert(eqoa.entities.pick_dot(q) == nil, 'excluded dots cannot be picked')
+        q.exclude = {}; q.x = 0; q.y = 0
+        assert(eqoa.entities.pick_dot(q) == nil, 'nothing outside hit radius')
+        q.scale_x = 0
+        local bad, err = eqoa.entities.pick_dot(q)
+        assert(bad == nil and err.code == 'invalid_argument')
+        assert(d.ids[2] == 3007 and d.xs[2] == 30.0 and d.zs[2] == 40.0, 'the place it stands when it has no actor place')
+        assert(getmetatable(d) == nil and getmetatable(d.ids) == nil, 'bare values, not guarded records')
+        d.ids[1] = 1
+        assert(eqoa.entities.dots().ids[1] == 2002, 'a caller edits only its own columns')
+    "#,
+    )
+    .unwrap();
+    // The target shows its dot even at no health; a move is read where it is now, a despawn is gone.
+    p.target = 3004;
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    let e = p.entities.slots[1].as_mut().unwrap();
+    e.actor_pos = [0.0; 3];
+    e.pos = [50.0, 0.0, 60.0];
+    p.entities.slots[6] = None;
+    // Motion can advance without rebuilding the frozen entity snapshot. The per-frame
+    // refresh must update the compact dots even while that snapshot is reused.
+    api_capture::updates::refresh(&p, None);
+    h.execute(
+        r#"
+        local d = eqoa.entities.dots()
+        assert(#d.ids == 2 and d.ids[2] == 3004, 'the target has a dot even at zero health')
+        assert(d.xs[1] == 50.0 and d.zs[1] == 60.0, 'the very next frame is where it is now')
+    "#,
+    )
+    .unwrap();
+}

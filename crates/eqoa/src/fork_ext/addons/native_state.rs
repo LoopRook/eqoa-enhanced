@@ -3,7 +3,7 @@ use super::{
     native::{bind, bind_fn, error, record},
     native_core::{CORE, View},
 };
-use mlua::{AnyUserData, Lua, MetaMethod, Result, UserData, UserDataMethods, Value};
+use mlua::{AnyUserData, Lua, MetaMethod, Result, Table, UserData, UserDataMethods, Value};
 use serde_json::{Value as Json, json};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -212,6 +212,119 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             })
         })?,
     )?;
+    // Pick directly from this frame's compact dots: no per-creature Lua allocation or call.
+    super::native::describe(lua, "eqoa.entities.pick_dot", "supported", Some(4), "");
+    bind_fn(lua, "entities", "pick_dot", |lua, q: Table| {
+        let x: f32 = q.get("x")?;
+        let y: f32 = q.get("y")?;
+        let sx: f32 = q.get("scale_x")?;
+        let sy: f32 = q.get("scale_y")?;
+        let cx: f32 = q.get("center_x")?;
+        let cy: f32 = q.get("center_y")?;
+        let radius: f32 = q.get("radius")?;
+        let reach: f32 = q.get("reach")?;
+        if ![x, y, sx, sy, cx, cy, radius, reach]
+            .iter()
+            .all(|v| v.is_finite())
+            || sx <= 0.0
+            || sy <= 0.0
+            || radius < 0.0
+            || reach < 0.0
+        {
+            return error(
+                lua,
+                "eqoa.entities.pick_dot",
+                "invalid_argument",
+                "finite coordinates and positive scales required",
+            );
+        }
+        let exclude: Vec<u32> = q
+            .get::<Option<Table>>("exclude")?
+            .map(|t| t.sequence_values().collect::<Result<Vec<u32>>>())
+            .transpose()?
+            .unwrap_or_default();
+        CORE.with(|c| {
+            let c = c.borrow();
+            if !c.view.in_world {
+                return error(
+                    lua,
+                    "eqoa.entities.pick_dot",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            let Some(p) = c.view.minimap else {
+                return error(
+                    lua,
+                    "eqoa.entities.pick_dot",
+                    "unavailable",
+                    "native minimap has not been prepared",
+                );
+            };
+            let mut best: Option<(u32, f32, f32, f32, f32, f32)> = None;
+            for &(id, wx, wz) in &c.view.dots {
+                if exclude.contains(&id) {
+                    continue;
+                }
+                let (px, py, _) = p.project(112.0, wx, wz);
+                let (px, py) = (px * sx, py * sy);
+                let dist = (px - x) * (px - x) + (py - y) * (py - y);
+                if dist <= reach * reach
+                    && (px - cx) * (px - cx) + (py - cy) * (py - cy) <= radius * radius
+                    && best.is_none_or(|b| dist < b.5 || (dist == b.5 && id < b.0))
+                {
+                    best = Some((id, px, py, wx, wz, dist));
+                }
+            }
+            let value = if let Some((id, px, py, wx, wz, _)) = best {
+                let t = lua.create_table()?;
+                t.set("id", id)?;
+                t.set("x", px)?;
+                t.set("y", py)?;
+                t.set("world_x", wx)?;
+                t.set("world_z", wz)?;
+                Value::Table(t)
+            } else {
+                Value::Nil
+            };
+            lua.pack_multi((value, Value::Nil))
+        })
+    })?;
+    // `eqoa.entities.dots()`: what the native minimap draws, as bare values. A caller that
+    // hit-tests or maps the dots every frame cannot afford a guarded record per creature per
+    // frame, so this returns plain columns built from the frame's own list.
+    super::native::describe(lua, "eqoa.entities.dots", "supported", Some(4), "");
+    bind_fn(lua, "entities", "dots", |lua, ()| {
+        let dots = CORE.with(|c| {
+            let c = c.borrow();
+            c.view
+                .in_world
+                .then(|| c.view.dots.clone())
+        });
+        let Some(dots) = dots else {
+            return error(
+                lua,
+                "eqoa.entities.dots",
+                "not_in_world",
+                "enter a loaded world first",
+            );
+        };
+        let list = lua.create_table_with_capacity(0, 3)?;
+        // columns rather than a table per dot: a per-frame scan allocates three tables, not one
+        // per creature
+        let ids = lua.create_table_with_capacity(dots.len(), 0)?;
+        let xs = lua.create_table_with_capacity(dots.len(), 0)?;
+        let zs = lua.create_table_with_capacity(dots.len(), 0)?;
+        for (i, (id, x, z)) in dots.into_iter().enumerate() {
+            ids.raw_set(i + 1, id)?;
+            xs.raw_set(i + 1, x)?;
+            zs.raw_set(i + 1, z)?;
+        }
+        list.raw_set("ids", ids)?;
+        list.raw_set("xs", xs)?;
+        list.raw_set("zs", zs)?;
+        lua.pack_multi((Value::Table(list), Value::Nil))
+    })?;
     bind(
         lua,
         "entities",
