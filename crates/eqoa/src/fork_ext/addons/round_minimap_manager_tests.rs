@@ -196,9 +196,9 @@ impl Rm {
     /// Window pixels of world point (x, z) on the round minimap, by the view's own projection.
     fn dot_at(&self, x: f32, z: f32) -> (f64, f64) {
         let lay = self.stock_rect();
-        let k = (lay[2] - lay[0]) as f64 / 112.0;
+        let (kx, ky) = ((lay[2] - lay[0]) as f64 / 112.0, (lay[3] - lay[1]) as f64 / 112.0);
         let (px, py, _): (f64, f64, bool) = self.lua().load(format!("return round_minimap.view.project({x},{z})")).eval().unwrap();
-        (lay[0] as f64 + px * k, lay[1] as f64 + py * k)
+        (lay[0] as f64 + px * kx, lay[1] as f64 + py * ky)
     }
     /// The card's lines as the mod built them, if it shows one.
     fn card_lines(&self) -> Option<Vec<String>> {
@@ -220,13 +220,27 @@ impl Rm {
         p.z.0 = z;
         self.me = [x, self.me[1], z];
     }
-    /// Puts creature `e` in the world, in its slot if it has one.
+    /// Puts creature `e` in the world, in its slot if it has one, and tells the API of it as the
+    /// session's packet handling does.
     fn put(&mut self, e: net::entity::Entity) {
         let slots = &mut self.play.entities.slots;
-        match slots.iter_mut().find(|s| s.as_ref().is_some_and(|o| o.id == e.id)) {
-            Some(s) => *s = Some(e),
-            None => slots.push(Some(e)),
-        }
+        let slot = match slots.iter().position(|s| s.as_ref().is_some_and(|o| o.id == e.id)) {
+            Some(i) => {
+                slots[i] = Some(e);
+                i
+            }
+            None => {
+                slots.push(Some(e));
+                slots.len() - 1
+            }
+        };
+        self.play.entity_slot_changed(slot);
+    }
+    /// A creature goes, as the session's packet handling tells the API of it.
+    fn remove(&mut self, id: u32) {
+        let slot = self.play.entities.slots.iter().position(|s| s.as_ref().is_some_and(|o| o.id == id)).unwrap();
+        self.play.entities.slots[slot] = None;
+        self.play.entity_slot_changed(slot);
     }
 }
 fn rm_creature(id: u32, name: &str, at: [f32; 3], p256: u8, level: u8) -> net::entity::Entity {
@@ -310,13 +324,6 @@ fn round_minimap_hides_stock_blocks_its_clicks_and_returns_when_off() {
     rm.manager.shutdown();
 }
 
-fn rm_stock_rect(rm: &Rm) -> [f32; 4] {
-    let r = super::super::hud_layout::hud_layout_json(RM_SIZE);
-    let m = &r["minimap"];
-    let f = |k: &str| m[k].as_f64().unwrap() as f32;
-    [f("x"), f("y"), f("x") + f("width"), f("y") + f("height")].map(|v| { let _ = rm; v })
-}
-
 const RM_BG: [u8; 4] = [51, 51, 102, 255];
 fn rm_is_picture(p: [u8; 4]) -> bool {
     p[1] > 120 && p[0] < 80 && p[2] < 90
@@ -332,7 +339,7 @@ fn round_minimap_circle_follows_move_hud_and_clips_to_a_circle() {
     rm_png(&pixels, "r4-minimap-outdoors.png");
     assert_eq!(rm.state::<Option<String>>("round_minimap.image_error"), None);
     let (cx, cy, r) = rm.circle();
-    let stock = rm_stock_rect(&rm);
+    let stock = rm.stock_rect();
     assert!((cx - (stock[0] + stock[2]) as f64 / 2.0).abs() < 1.0 && (cy - (stock[1] + stock[3]) as f64 / 2.0).abs() < 1.0, "circle sits in the stock rectangle");
     assert!(rm_is_picture(rm_px(&pixels, cx + r * 0.5, cy + r * 0.5)), "the picture shows inside the circle");
     assert!(rm_is_picture(rm_px(&pixels, cx - r * 0.5, cy - r * 0.5)));
@@ -354,7 +361,7 @@ fn round_minimap_circle_follows_move_hud_and_clips_to_a_circle() {
     hudlayout::drag_to([470.0, 156.0], b);
     assert!(hudlayout::release());
     hudlayout::set_unlocked(false);
-    let moved = rm_stock_rect(&rm);
+    let moved = rm.stock_rect();
     assert!((moved[0] - stock[0]).abs() > 20.0, "Move HUD moved the stock rectangle");
     rm.frames(4);
     let t = rm.frames(2);
@@ -384,16 +391,8 @@ fn round_minimap_dot_card_wheel_zoom_and_n_toggle() {
     let Some(mut rm) = Rm::new(false) else { return };
     rm.frames(4);
     // Test Rat stands 40 east, 30 south of the player
-    let lay = rm_stock_rect(&rm);
     let (cx, cy, r) = rm.circle();
-    let k = (lay[2] - lay[0]) as f64 / 112.0;
-    let (px, py, inside): (f64, f64, bool) = rm
-        .lua()
-        .load(format!("return round_minimap.view.project({},{})", rm.me[0] + 40.0, rm.me[2] + 30.0))
-        .eval()
-        .unwrap();
-    assert!(inside, "the creature projects inside the circle");
-    let (dx, dy) = (lay[0] as f64 + px * k, lay[1] as f64 + py * k);
+    let (dx, dy) = rm.dot_at(rm.me[0] + 40.0, rm.me[2] + 30.0);
     assert!(((dx - cx).powi(2) + (dy - cy).powi(2)).sqrt() < r, "the creature is within the circle");
     // pointer away: no card (control)
     rm.at((cx - r * 0.6) as f32, (cy - r * 0.6) as f32);
@@ -457,7 +456,7 @@ fn round_minimap_rim_arrow_only_where_the_circle_crops_the_square_mark() {
     let a = arrows(&rm);
     assert_eq!(a.len(), 1, "one rim arrow for the diagonal waypoint: {a:?}");
     let (dx, dy) = (a[0].0 - cx, a[0].1 - cy);
-    let ring = r + 6.0 * (rm_stock_rect(&rm)[2] - rm_stock_rect(&rm)[0]) as f64 / 112.0;
+    let ring = r + 6.0 * (rm.stock_rect()[2] - rm.stock_rect()[0]) as f64 / 112.0;
     assert!((dx.hypot(dy) - ring).abs() < 1.0, "arrow sits just outside the ring: {} vs {ring}", dx.hypot(dy));
     assert!(dx > 0.0 && dy > 0.0 && (dx / dy - 1.0).abs() < 0.3, "south-east of the centre: {dx} {dy}");
     // control: straight east the square's own rim mark stays inside the circle, so the mod adds none
@@ -488,8 +487,295 @@ fn round_minimap_carries_the_search_button_and_box_when_the_search_mod_is_on() {
     super::super::input::reset_input_state();
 }
 
-/// Per-frame cost in a busy world: all mods off, then the three round 4 mods and round 3's four on.
-/// Debug builds only prove the workload ran; the recorded numbers come from `--release`.
+/// Hover picks from this frame's positions: a creature that moved or went is found where it is
+/// now, the nearest dot wins (the lower id on a tie), and the card says what kind it is.
+#[test]
+fn round_minimap_hover_follows_this_frames_creatures_and_picks_the_nearest_dot() {
+    let Some(mut rm) = Rm::new(false) else { return };
+    rm.frames(4);
+    let me = rm.me;
+    let (dx, dy) = rm.dot_at(me[0] + 40.0, me[2] + 30.0);
+    // the native dot is drawn where the mod's hit test looks for it
+    let t = rm.frames(1);
+    let pixels = rm_pixels(&rm.gpu, &t);
+    let near = |p: [u8; 4]| p[0] > 200 && p[1] < 120 && p[2] > 200;
+    let found = (-3..=3).any(|ox| (-3..=3).any(|oy| near(rm_px(&pixels, dx + ox as f64, dy + oy as f64))));
+    assert!(found, "the native dot is drawn under the hover position");
+    assert_eq!(rm.hover(dx, dy).as_deref(), Some("Test Rat"));
+    // the creature walks on: its old place has no card now, its new place has one, at once
+    let (nx, nz) = (me[0] - 30.0, me[2] + 30.0);
+    let (mx, my) = rm.dot_at(nx, nz);
+    assert!((mx - dx).hypot(my - dy) > 10.0, "the move is wide enough to tell apart");
+    rm.put(rm_creature(3003, "Test Rat", [nx, me[1], nz], 0, 7));
+    rm.at(dx as f32, dy as f32);
+    rm.frames(2);
+    assert!(rm.card_lines().is_none(), "no card where the creature was");
+    rm.at(mx as f32, my as f32);
+    rm.frames(2);
+    let lines = rm.card_lines().expect("a card where the creature is");
+    assert_eq!(lines[0], "Test Rat");
+    assert!(lines[2].starts_with("42 away"), "the distance is to where it stands now: {lines:?}");
+    // it goes: no card (a vanished creature is not remembered)
+    rm.remove(3003);
+    rm.frames(2);
+    assert!(rm.card_lines().is_none(), "no card for a creature that left");
+    // two dots 3 pixels apart: the nearer to the pointer, whatever the order
+    let (ax, ay) = rm.dot_at(me[0] - 20.0, me[2] + 20.0);
+    let (bx, by) = rm.dot_at(me[0] - 20.0 + 1.0, me[2] + 20.0);
+    let per_px = ((bx - ax).hypot(by - ay)).max(1e-6); // pixels per world unit
+    let apart = 3.0 / per_px as f32;
+    rm.put(rm_creature(4002, "Second", [me[0] - 20.0 + apart, me[1], me[2] + 20.0], 0, 3));
+    rm.put(rm_creature(4001, "First", [me[0] - 20.0, me[1], me[2] + 20.0], 0, 3));
+    let (ax, ay) = rm.dot_at(me[0] - 20.0, me[2] + 20.0);
+    let (bx, by) = rm.dot_at(me[0] - 20.0 + apart, me[2] + 20.0);
+    assert!((bx - ax).hypot(by - ay) > 2.0 && (bx - ax).hypot(by - ay) < 4.0, "3 pixels apart: {}", (bx - ax).hypot(by - ay));
+    assert_eq!(rm.hover(ax, ay).as_deref(), Some("First"));
+    assert_eq!(rm.hover(bx, by).as_deref(), Some("Second"), "the second dot is nearer to its own place");
+    // the same place: the lower id
+    rm.put(rm_creature(4900, "Aaa Higher Id", [me[0] + 20.0, me[1], me[2] - 20.0], 0, 9));
+    rm.put(rm_creature(4100, "Zzz Lower Id", [me[0] + 20.0, me[1], me[2] - 20.0], 0, 9));
+    let (tx, ty) = rm.dot_at(me[0] + 20.0, me[2] - 20.0);
+    assert_eq!(rm.hover(tx, ty).as_deref(), Some("Zzz Lower Id"), "equal distance: the lower id");
+    // the card per kind: players, pets, NPCs, an unknown level; corpses and the inactive show none
+    let at = [me[0] - 30.0, me[1], me[2] - 25.0];
+    let (kx, ky) = rm.dot_at(at[0], at[2]);
+    for (p256, level, line) in [(2, 45, "Level 45 / Player"), (3, 45, "Level 45 / Pet"), (0, 45, "Level 45 / NPC"), (1, 45, "Level 45 / NPC"), (2, 0, "Level unknown / Player")] {
+        rm.put(rm_creature(4500, "Someone", at, p256, level));
+        rm.at(kx as f32, ky as f32);
+        rm.frames(1);
+        assert_eq!(rm.card_lines().expect("a card")[1], line);
+    }
+    let mut corpse = rm_creature(4500, "Someone", at, 0, 45);
+    corpse.p18 = 2;
+    rm.put(corpse);
+    rm.frames(1);
+    assert!(rm.card_lines().is_none(), "a corpse has no dot, so no card");
+    let mut inactive = rm_creature(4500, "Someone", at, 0, 45);
+    inactive.p19 = 0;
+    rm.put(inactive);
+    rm.frames(1);
+    assert!(rm.card_lines().is_none(), "an inactive creature has no dot, so no card");
+    rm.manager.shutdown();
+}
+
+/// Moved with Move HUD to a window edge, the card stays on the window (beside the circle on the
+/// other side when the near side has no room), long names wrapped.
+#[test]
+fn round_minimap_card_stays_inside_the_window_wherever_the_minimap_is_moved() {
+    use crate::hudlayout::{self, Beyond, Piece};
+    let Some(mut rm) = Rm::new(false) else { return };
+    let long = "A Very Long Server Provided Creature Name That Would Never Fit Beside A Minimap Without Wrapping Onto Several Lines Of Text";
+    rm.put(rm_creature(3003, long, [rm.me[0] + 40.0, rm.me[1], rm.me[2] + 30.0], 0, 7));
+    let inside = |rm: &Rm, label: &str| {
+        let r: [f64; 4] = rm.state("(function() local c = round_minimap.card_rect return {c.x, c.y, c.w, c.h} end)()");
+        assert!(r[0] >= 0.0 && r[1] >= 0.0 && r[0] + r[2] <= rm.win.0 as f64 && r[1] + r[3] <= rm.win.1 as f64, "{label}: card {r:?} is on the {:?} window", rm.win);
+        r
+    };
+    rm.frames(4);
+    let (dx, dy) = rm.dot_at(rm.me[0] + 40.0, rm.me[2] + 30.0);
+    assert!(rm.hover(dx, dy).is_some());
+    let home = inside(&rm, "home");
+    assert!(home[2] < 400.0, "the long name is wrapped: card {} wide", home[2]);
+    // Move HUD: far left and down
+    hudlayout::frame_begin();
+    hudlayout::note(Piece::Minimap, [474.0, 50.0, 586.0, 162.0], [0.0, 0.0]);
+    hudlayout::frame_end();
+    hudlayout::set_unlocked(true);
+    let b = Beyond::of(RM_SIZE);
+    hudlayout::press([530.0, 106.0], b);
+    hudlayout::drag_to([-400.0, 900.0], b);
+    assert!(hudlayout::release());
+    hudlayout::set_unlocked(false);
+    rm.frames(4);
+    let moved = rm.stock_rect();
+    assert!(moved[0] < 60.0, "the minimap sits at the left edge: {moved:?}");
+    let (dx, dy) = rm.dot_at(rm.me[0] + 40.0, rm.me[2] + 30.0);
+    assert!(rm.hover(dx, dy).is_some(), "a card on the dot at the left edge");
+    let edge = inside(&rm, "left edge");
+    let (cx, _, r) = rm.circle();
+    assert!(edge[0] >= cx + r, "no room on the left: the card goes to the right of the circle ({edge:?}, circle at {cx} r {r})");
+    assert!(moved[3] > rm.win.1 as f32 - 130.0, "and it sits low: {moved:?}");
+    hudlayout::reset();
+    rm.manager.shutdown();
+}
+
+/// The marks the hover finds are the marks the minimap draws: Map Markers on, no towns, the
+/// topmost of overlapping marks, quest steps on the rim and only where the circle shows them.
+#[test]
+fn round_minimap_marker_hover_follows_what_the_minimap_draws() {
+    use net::session::QuestMark;
+    let Some(mut rm) = Rm::new(false) else { return };
+    let world = rm.play.player.world as i32;
+    let all = crate::map::extension::static_markers(world);
+    let first = |kind: &str| all.iter().find(|m| m["kind"] == kind).unwrap_or_else(|| panic!("a {kind} in world {world}")).clone();
+    let camp = first("camp");
+    let (camp_x, camp_z) = (camp["x"].as_f64().unwrap() as f32, camp["z"].as_f64().unwrap() as f32);
+    rm.stand_at(camp_x - 12.0, camp_z - 9.0);
+    rm.frames(4);
+    let (kx, ky) = rm.dot_at(camp_x, camp_z);
+    let (cx, cy, r) = rm.circle();
+    assert!((kx - cx).hypot(ky - cy) < r - 6.0, "the camp lies in the circle");
+    let label = rm.hover(kx, ky).expect("a card on a camp");
+    assert!(label.ends_with("(XP camp)"), "{label}");
+    // Map Markers off: the minimap draws no camps, so there is nothing to hover
+    crate::settings::set_map_markers(false).unwrap();
+    rm.frames(3);
+    assert_eq!(rm.hover(kx, ky), None, "no card for a camp the minimap does not draw");
+    crate::settings::set_map_markers(true).unwrap();
+    rm.frames(3);
+    assert!(rm.hover(kx, ky).is_some(), "Map Markers back on: the camp's card is back");
+    // a quest to take over the camp is drawn on top of it: its card wins
+    rm.play.map.quests.set(&[QuestMark { kind: 1, world: world as u8, x: camp_x, z: camp_z, npc: "Quest Giver".into(), quests: Vec::new() }]);
+    rm.frames(3);
+    assert_eq!(rm.hover(kx, ky).as_deref(), Some("Quest Giver"), "the quest is the topmost mark");
+    // a quest step beyond the picture is drawn on its rim: hover finds it there; a step past a corner
+    // is cropped by the circle, an offer beyond the picture is not drawn at all
+    let lay = rm.stock_rect();
+    let (kx, ky) = ((lay[2] - lay[0]) as f64 / 112.0, (lay[3] - lay[1]) as f64 / 112.0);
+    let (x0, y0) = (lay[0] as f64 + 6.0 * kx, lay[1] as f64 + 6.0 * ky);
+    let (x1, y1) = (x0 + 100.0 * kx, y0 + 100.0 * ky);
+    let mid_y = (y0 + y1) / 2.0;
+    let half = 8.0 * ky;
+    let step = |x: f32, z: f32| QuestMark { kind: 2, world: world as u8, x, z, npc: "Far Step".into(), quests: Vec::new() };
+    rm.play.map.quests.set(&[step(rm.me[0] + 3000.0, rm.me[2])]);
+    rm.frames(3);
+    assert_eq!(rm.hover(x1 - half * 0.6, mid_y).as_deref(), Some("Far Step"), "the step's rim mark has its card");
+    rm.play.map.quests.set(&[step(rm.me[0] + 3000.0, rm.me[2] + 3000.0)]);
+    rm.frames(3);
+    assert_eq!(rm.hover(x1 - half * 0.6, y1 - half), None, "the corner is outside the circle: not drawn, no card");
+    rm.play.map.quests.set(&[QuestMark { kind: 1, world: world as u8, x: rm.me[0] + 3000.0, z: rm.me[2], npc: "Far Offer".into(), quests: Vec::new() }]);
+    rm.frames(3);
+    assert_eq!(rm.hover(x1 - half * 0.6, mid_y), None, "an offer beyond the picture has no rim mark");
+    // a town's name is not drawn on the minimap: standing at one, hovering it gives nothing
+    rm.play.map.quests.set(&[]);
+    let near = |m: &serde_json::Value, x: f64, z: f64| (m["x"].as_f64().unwrap() - x).hypot(m["z"].as_f64().unwrap() - z) < 60.0;
+    let town = all
+        .iter()
+        .filter(|m| m["kind"] == "town")
+        .find(|t| {
+            let (x, z) = (t["x"].as_f64().unwrap(), t["z"].as_f64().unwrap());
+            !all.iter().any(|m| m["kind"] != "town" && near(m, x, z))
+        })
+        .expect("a town with no camp or coach beside it")
+        .clone();
+    let (town_x, town_z) = (town["x"].as_f64().unwrap() as f32, town["z"].as_f64().unwrap() as f32);
+    rm.stand_at(town_x - 12.0, town_z - 9.0);
+    rm.frames(4);
+    let (tx, ty) = rm.dot_at(town_x, town_z);
+    assert!((tx - cx).hypot(ty - cy) < r - 6.0, "the town lies in the circle");
+    assert_eq!(rm.hover(tx, ty), None, "no card for a town");
+    rm.manager.shutdown();
+}
+
+/// The picture, the ring, the hover and the pointer claim line up on the window at any aspect and
+/// render scale: window coordinates all through. The picture is a synthetic stand-in (no disc is
+/// on this machine); the orange ones stand in for an indoor picture, which fills the whole square
+/// as terrain does.
+#[test]
+fn round_minimap_stays_in_window_coordinates_at_aspects_and_render_scales() {
+    let combos: [((u32, u32), u32, [f32; 4]); 6] = [
+        ((1024, 768), 1, RM_GREEN),
+        ((1024, 768), 2, RM_ORANGE),
+        ((640, 480), 1, RM_ORANGE),
+        ((640, 480), 4, RM_GREEN),
+        ((768, 1024), 2, RM_GREEN),
+        ((768, 1024), 1, RM_ORANGE),
+    ];
+    for (win, scale, color) in combos {
+        let Some(mut rm) = Rm::sized(|p| p == "eqoa_round_minimap", 0, win, scale) else { return };
+        rm.stand_in = color;
+        let note = format!("window {win:?} at {scale}x");
+        rm.frames(4);
+        let t = rm.frames(2);
+        assert_eq!((t.width(), t.height()), (win.0 * scale, win.1 * scale));
+        let pixels = rm_pixels(&rm.gpu, &t);
+        let px = |x: f64, y: f64| rm_px_in(&pixels, t.width(), x * scale as f64, y * scale as f64);
+        let (cx, cy, r) = rm.circle();
+        let k = r / 50.0;
+        let picture = |p: [u8; 4]| {
+            let c = color.map(|c| (c * 255.0) as i32);
+            (0..3).all(|i| (p[i] as i32 - c[i]).abs() < 12)
+        };
+        assert_eq!(rm.state::<Option<String>>("round_minimap.image_error"), None, "{note}");
+        for (sx, sy) in [(0.5, 0.5), (-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5)] {
+            assert!(picture(px(cx + sx * r, cy + sy * r)), "{note}: picture at ({sx}, {sy}) r {:?}", px(cx + sx * r, cy + sy * r));
+        }
+        // the picture's square corners are cut by the circle, and the ring sits at its edge
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        for (sx, sy) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
+            assert_eq!(px(cx + sx * r * 0.95, cy + sy * r * 0.95), RM_BG, "{note}: corner ({sx}, {sy}) cut off");
+            let ring = px(cx + sx * s * (r + 1.5 * k), cy + sy * s * (r + 1.5 * k));
+            assert!((0..3).all(|i| (ring[i] as i32 - 51).abs() < 14), "{note}: ring at the diagonal ({sx}, {sy}): {ring:?}");
+        }
+        for (sx, sy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+            let ring = px(cx + sx * (r + 1.5 * k), cy + sy * (r + 1.5 * k));
+            assert!((0..3).all(|i| (ring[i] as i32 - 51).abs() < 14), "{note}: ring on the axis ({sx}, {sy}): {ring:?}");
+            assert!(picture(px(cx + sx * (r - 2.0 * k), cy + sy * (r - 2.0 * k))), "{note}: picture up to the ring ({sx}, {sy})");
+            assert_eq!(px(cx + sx * (r + 5.0 * k), cy + sy * (r + 5.0 * k)), RM_BG, "{note}: nothing outside the ring");
+        }
+        // the hover and the claim work in the same window pixels
+        let (dx, dy) = rm.dot_at(rm.me[0] + 40.0, rm.me[2] + 30.0);
+        let dot = |p: [u8; 4]| p[0] > 200 && p[1] < 120 && p[2] > 200;
+        assert!((-3..=3).any(|ox| (-3..=3).any(|oy| dot(px(dx + ox as f64, dy + oy as f64)))), "{note}: the native dot is where the hit test looks");
+        assert_eq!(rm.hover(dx, dy).as_deref(), Some("Test Rat"), "{note}");
+        let card: [f64; 4] = rm.state("(function() local c = round_minimap.card_rect return {c.x, c.y, c.w, c.h} end)()");
+        assert!(card[0] >= 0.0 && card[1] >= 0.0 && card[0] + card[2] <= win.0 as f64 && card[1] + card[3] <= win.1 as f64, "{note}: card {card:?} in the window");
+        assert_eq!(rm.hover(cx + r * 0.98 * s + 2.0, cy + r * 0.98 * s + 2.0), None, "{note}: nothing past the circle");
+        rm.manager.shutdown();
+    }
+}
+
+/// A waypoint cropped by the circle gets a rim arrow in its own colour: a personal one magenta, the
+/// group's orange as on the stock minimap, whichever corner.
+#[test]
+fn round_minimap_rim_arrows_keep_the_waypoint_colours() {
+    let Some(mut rm) = Rm::new(false) else { return };
+    let world = rm.play.player.world as i32;
+    rm.frames(4);
+    rm.play.map.round4_waypoint(world, Some([rm.me[0] + 3000.0, rm.me[2] + 3000.0]));
+    rm.play.map.round4_group_waypoint(world, [rm.me[0] - 3000.0, rm.me[2] + 3000.0]);
+    let t = rm.frames(3);
+    let pixels = rm_pixels(&rm.gpu, &t);
+    let arrows: Vec<(String, f64, f64)> = rm
+        .lua()
+        .load("local t={} for _,a in ipairs(round_minimap.arrows) do t[#t+1]={a.kind,a.x,a.y} end return t")
+        .eval::<Vec<mlua::Table>>()
+        .unwrap()
+        .into_iter()
+        .map(|a| (a.get(1).unwrap(), a.get(2).unwrap(), a.get(3).unwrap()))
+        .collect();
+    assert_eq!(arrows.len(), 2, "{arrows:?}");
+    for (kind, x, y) in arrows {
+        let p = rm_px(&pixels, x, y).map(|c| c as i32);
+        match kind.as_str() {
+            "waypoint" => assert!(p[0] > 150 && p[2] > 130 && p[1] * 2 < p[2], "a waypoint's arrow is magenta: {p:?}"),
+            "group_waypoint" => assert!(p[0] > 150 && p[1] * 10 > p[0] * 3 && p[1] * 10 < p[0] * 7 && p[2] * 5 < p[1], "the group's arrow is orange: {p:?}"),
+            other => panic!("{other}"),
+        }
+    }
+    // the pointer claim stays inside the circle: nowhere just outside it does the minimap take the pointer
+    let (cx, cy, r) = rm.circle();
+    for deg in (0..360).step_by(5) {
+        let a = (deg as f64).to_radians();
+        let at = |rr: f64| [(cx + a.cos() * rr) as f32, (cy + a.sin() * rr) as f32];
+        assert!(!rm_claims(&rm, at(r + 1.5)), "a click just outside the circle at {deg} degrees goes through");
+        assert!(rm_claims(&rm, at(r * 0.8)), "a click inside the circle at {deg} degrees is taken");
+    }
+    rm.manager.shutdown();
+}
+
+/// Whether the pointer at `at` is taken by a claim of the mods (the game does not get the click).
+fn rm_claims(rm: &Rm, at: [f32; 2]) -> bool {
+    use winit::dpi::PhysicalPosition;
+    use winit::event::{DeviceId, WindowEvent};
+    super::super::pointer_api::observe(&WindowEvent::CursorMoved { device_id: DeviceId::dummy(), position: PhysicalPosition::new(at[0] as f64, at[1] as f64) }, rm.win)
+}
+
+/// Per-frame cost in a busy world: the stock square minimap with no mods as the native baseline,
+/// then the mods. A frame is the whole of it: the native minimap's layout and drawing with 200 dots,
+/// the capture the round minimap asks for, the addons' callbacks and the ImGui pass, to the GPU's
+/// completion. Debug builds only prove the workload ran (`R4C_SAMPLES` sets the frames timed per
+/// configuration, 300 by default); the recorded numbers come from `--release`.
 #[test]
 fn round4c_frame_time_with_all_map_mods_in_a_busy_world() {
     use std::time::Instant;
@@ -497,7 +783,7 @@ fn round4c_frame_time_with_all_map_mods_in_a_busy_world() {
     const ROUND4: [&str; 3] = ["eqoa_creature_journal", "eqoa_map_search", "eqoa_round_minimap"];
     let mut results = Vec::new();
     let configs: [(&str, Vec<&str>); 8] = [
-        ("all mods off", vec![]),
+        ("stock square minimap, no mods (native baseline)", vec![]),
         ("round 3 mods (4)", ROUND3.to_vec()),
         ("creature journal", vec!["eqoa_creature_journal"]),
         ("journal + map search", vec!["eqoa_creature_journal", "eqoa_map_search"]),
@@ -510,6 +796,11 @@ fn round4c_frame_time_with_all_map_mods_in_a_busy_world() {
         let on = packages.contains(&"eqoa_round_minimap");
         let Some(mut rm) = Rm::with(|p| packages.contains(&p), 200) else { return };
         rm.frames(30);
+        // the native minimap is drawing the busy world's dots in every configuration
+        assert!(rm.mini_view().dots.len() >= 200, "200 dots for the native minimap");
+        rm.draws = 0;
+        rm.frame();
+        assert_eq!(rm.draws, 1, "the native minimap is drawn once a frame ({label})");
         if on {
             assert!(rm.state::<bool>("round_minimap.shown"));
             assert!(rm.lua().load("return #eqoa.entities.list()").eval::<usize>().unwrap() >= 200, "200 entities in the world");
@@ -521,11 +812,12 @@ fn round4c_frame_time_with_all_map_mods_in_a_busy_world() {
         }
         assert!(rm.manager.entries.iter().all(|e| e.status == Status::Enabled), "{:?}", rm.manager.diagnostics());
         assert_eq!(rm.manager.entries.len(), packages.len(), "every wanted mod loaded");
-        let n = 300;
+        let n: usize = std::env::var("R4C_SAMPLES").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
         let mut whole = Vec::with_capacity(n);
         for _ in 0..n {
             let t = Instant::now();
             let tex = rm.frame();
+            rm.gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
             whole.push(t.elapsed().as_secs_f64() * 1000.0);
             drop(tex);
         }
@@ -535,7 +827,7 @@ fn round4c_frame_time_with_all_map_mods_in_a_busy_world() {
             "R4C frame time ({}, {label}): frames={n} mean={mean:.3} ms p50={:.3} p95={:.3} max={:.3}",
             if cfg!(debug_assertions) { "debug" } else { "release" },
             whole[n / 2],
-            whole[n * 95 / 100],
+            whole[(n * 95 / 100).min(n - 1)],
             whole[n - 1]
         );
         assert_eq!(whole.len(), n, "the workload ran");

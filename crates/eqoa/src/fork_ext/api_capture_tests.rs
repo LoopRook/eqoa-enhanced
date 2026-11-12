@@ -18,6 +18,10 @@ fn ready() -> Play {
 // Shared bundled-UI fixture: populate the native client structures, then use
 // exactly the cached projection that Play supplies to the addon manager.
 impl Play {
+    /// Tells the API that entity slot `slot` changed, as the session's packet handling does.
+    pub(crate) fn entity_slot_changed(&self, slot: usize) {
+        api_capture::updates::capture(self, &api_capture::updates::Kind::Entity(slot), None);
+    }
     pub(crate) fn bundled_ui_walker() -> crate::walker::Walker {
         perf_review_walker()
     }

@@ -32,12 +32,12 @@ end
 
 -- The circle in window pixels: centre, radius, and the picture's square.
 local function geometry(lay)
-    local k = lay.width / FRAME
+    local k, ky = lay.width / FRAME, lay.height / FRAME -- window pixels per frame pixel, across and down
     local inner = SIZE * k
     local w, h = lay.width * SIZE / FRAME, lay.height * SIZE / FRAME
     local x, y = lay.x + INSET * k, lay.y + INSET * lay.height / FRAME
     local r = math.min(w, h) / 2
-    return { k = k, cx = x + w / 2, cy = y + h / 2, r = r, inner = inner }
+    return { k = k, ky = ky, cx = x + w / 2, cy = y + h / 2, r = r, inner = inner }
 end
 
 local function claim(g)
@@ -76,7 +76,7 @@ local function dot_under(g, mx, my)
         if pos and name ~= "" and e.is_creature and not e.corpse and not skip[e.id] and e.hp_fraction then
             local px, py = view.project(pos.x, pos.z)
             if px then
-                local wx, wy = view_x + px * g.k, view_y + py * g.k
+                local wx, wy = view_x + px * g.k, view_y + py * g.ky
                 local d = math.sqrt((wx - mx) ^ 2 + (wy - my) ^ 2)
                 if d <= reach and inside_circle(g, wx, wy) and (not bd or d < bd or (d == bd and e.id < best.e.id)) then
                     best, bd = { e = e, x = wx, y = wy, pos = pos }, d
@@ -99,9 +99,10 @@ end
 local function placed_marks(g, world, map)
     refresh_markers(world)
     local k = g.k
-    local x0, y0 = view_x + INSET * k, view_y + INSET * k
-    local x1, y1 = x0 + SIZE * k, y0 + SIZE * k
-    local r, half = 6 * k, 8 * k
+    local ky = g.ky
+    local x0, y0 = view_x + INSET * k, view_y + INSET * ky
+    local x1, y1 = x0 + SIZE * k, y0 + SIZE * ky
+    local r, half = 6 * ky, 8 * ky
     local ex0, ey0, ex1, ey1 = x0 + half * 0.6, y0 + half, x1 - half * 0.6, y1 - half
     local mx, my = (x0 + x1) / 2, (y0 + y1) / 2
     local function lies(q) return q.x >= x0 - r and q.x <= x1 + r and q.y >= y0 - r and q.y <= y1 + r end
@@ -110,7 +111,7 @@ local function placed_marks(g, world, map)
         if m.world_id == nil or m.world_id == world then
             local px, py = view.project(m.x, m.z)
             if px then
-                local q = { x = view_x + px * k, y = view_y + py * k, m = m }
+                local q = { x = view_x + px * k, y = view_y + py * ky, m = m }
                 if m.kind == "camp" or m.kind == "coach" then
                     if map.markers_on and lies(q) then table.insert(groups[1], q) end
                 elseif m.kind == "quest" and not m.step then
@@ -131,7 +132,7 @@ end
 
 local function mark_under(g, mx, my, world, map)
     local placed = placed_marks(g, world, map)
-    local reach = 6 * g.k
+    local reach = 6 * g.ky
     for i = #placed, 1, -1 do
         local q = placed[i]
         -- only what the circle leaves visible
@@ -151,7 +152,7 @@ local function waypoint_arrows(g, ui, dl, v, world)
             if px and not inside then
                 -- the square picture puts its own rim mark at the nearest edge; draw ours only where
                 -- the circle would crop it
-                local cx, cy = view_x + px * g.k - g.cx, view_y + py * g.k - g.cy
+                local cx, cy = view_x + px * g.k - g.cx, view_y + py * g.ky - g.cy
                 local n = math.sqrt(cx * cx + cy * cy)
                 local square = math.max(math.abs(cx), math.abs(cy))
                 local cropped = n * (g.r * 0.92) / math.max(square, 1e-6) > g.r * 0.97
