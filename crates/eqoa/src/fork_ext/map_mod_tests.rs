@@ -804,3 +804,42 @@ fn round4b_journal_caps_total_and_import_and_export_truncated_view() {
         native_events::clear(&host);
     }
 }
+
+#[test]
+fn round4b_fix_moving_world_finishes_search_and_enter() {
+    use crate::fork_ext::addons::{guides, input};
+    use winit::keyboard::{Key, NamedKey};
+    input::reset_input_state();
+    crate::settings::testing::reset(false);
+    let mut p = Play::bundled_ui_fixture();
+    let mut bat = creature(6000, "Moving test bat", 15, [200., 2., 300.]);
+    bat.p19 = 255;
+    p.entities.slots = vec![Some(bat)];
+    p.forge_snapshot(None);
+    let scratch = Scratch::new();
+    let (h, a) = search_host(&scratch);
+    h.run_addon(&a).unwrap();
+    settle(&h);
+    // Inject a catalogue large enough to require several bounded build slices.
+    h.execute("local s=require('search'); local v={};for i=1,8000 do v['Fixture '..i]={world={0},pos={{i,0,i}}} end;s.load(v,'catalog')").unwrap();
+    settle(&h);
+    key(&h, Key::Named(NamedKey::F2));
+    type_text(&h, "Moving test bat");
+    key(&h, Key::Named(NamedKey::Enter));
+    for i in 0..40 {
+        let packet = net::session::Event::State {
+            channel: 0,
+            data: vec![],
+        };
+        let before = super::begin_game_event(&p, &packet);
+        p.entities.slots[0].as_mut().unwrap().pos[0] = 250. + i as f32;
+        super::end_game_event(&p, before);
+        step(&h, 0.5);
+    }
+    h.execute("local s=require('search');assert(not s.open, 'moving entities must not restart a query build');assert(s.guide and s.guide.name=='Moving test bat')").unwrap();
+    let vm = native_events::bus(&h.lua).borrow().vm;
+    assert_eq!(guides::target_for(vm), Some([289., 300.]));
+    native_events::clear(&h);
+    input::reset_input_state();
+}
+

@@ -61,7 +61,12 @@ function M.observe()
         local marks=eqoa.map.markers(world)
         if marks then for _,m in ipairs(marks) do if m.kind=="camp" or m.kind=="coach" then M.places[#M.places+1]={name=m.label or m.name,x=m.x,z=m.z,world=world} end end end
     end
-    M.refresh=false;M.dirty=true
+    M.refresh=false
+    -- A query owns its snapshot and order until the next query/tab/open.
+    -- Movement refreshes positions without invalidating an unfinished build.
+    for _,r in ipairs(M.rows) do if r.kind=="npc" then
+        for _,e in ipairs(M.live) do if e.key==r.key and e.world==M.world then r.at=e;break end end
+    end end
     if M.guide and M.guide.kind=="group" then
         local found=false;for _,g in ipairs(M.group) do if g.id==M.guide.id then found=true end end
         if not found then M.clear() end
@@ -81,11 +86,11 @@ local function sort_rows(rows)
 end
 local world_names={[0]="tunaria",[1]="odus",[2]="plane of sky",[3]="lavastorm"}
 local function build_start()
-    M.build={words=words(),names={},source=1,index=1,rows={}}
+    M.build={words=words(),names={},source=1,index=1,rows={},sources={M.catalog,M.journal,M.live}}
     M.dirty=false
 end
 local function npc_step(b)
-    local sources={M.catalog,M.journal,M.live}
+    local sources=b.sources
     for _=1,1000 do
         local source=sources[b.source]
         if not source then return true end
