@@ -41,12 +41,12 @@ local function geometry(lay)
 end
 
 local function claim(g)
-    -- the pointer, the wheel and clicks over the circle only: strips that follow its edge
+    -- the pointer, the wheel and clicks over the circle only: strips that follow its edge, each as
+    -- wide as the circle is at the strip's end nearer the rim (never past the circle)
     for i = 0, STRIPS - 1 do
         local y0 = g.cy - g.r + 2 * g.r * i / STRIPS
         local y1 = y0 + 2 * g.r / STRIPS
-        local ym = math.min(math.abs(y0 - g.cy), math.abs(y1 - g.cy))
-        if y0 < g.cy and y1 > g.cy then ym = 0 end
+        local ym = math.max(math.abs(y0 - g.cy), math.abs(y1 - g.cy))
         local half = math.sqrt(math.max(0, g.r * g.r - ym * ym))
         eqoa.input.claim_pointer({ x = g.cx - half, y = y0, width = 2 * half, height = y1 - y0 })
     end
@@ -60,72 +60,84 @@ local function refresh_markers(world)
     markers = eqoa.map.markers(world) or {}
 end
 
--- Dots as the stock minimap draws them: the creatures in view but the player and the group.
--- eqoa.entities.list() builds a table per creature, so the hovered circle reads it a few times a
--- second and every frame tests only the creatures near the pointer, found in world units.
-local RESCAN = 30
-local scan, scan_age = {}, RESCAN
-local function rescan()
-    scan_age = 0
-    scan = {}
+-- Dots as the stock minimap draws them: the creatures in view but the player and the group, at
+-- the positions of this frame. Only the hovered circle reads the list, so the table per creature
+-- it builds costs nothing while the pointer is elsewhere.
+local function dot_under(g, mx, my)
     local player = eqoa.player.get()
     local group = eqoa.group.get()
     local skip = {}
     if player and player.id then skip[player.id] = true end
     if group and group.members then for _, m in ipairs(group.members) do skip[m.id] = true end end
+    local reach, best, bd = 4 * g.k, nil, nil
     for _, e in ipairs(eqoa.entities.list()) do
         local pos = e.position
         local name = e.name and e.name:match("^%s*(.-)%s*$") or ""
         if pos and name ~= "" and e.is_creature and not e.corpse and not skip[e.id] and e.hp_fraction then
-            scan[#scan + 1] = { id = e.id, name = e.name, level = e.level, kind = e.kind, x = pos.x, z = pos.z }
-        end
-    end
-end
-
-local function dot_under(g, mx, my)
-    scan_age = scan_age + 1
-    if scan_age >= RESCAN then rescan() end
-    local wx0, wz0 = view.unproject((mx - view_x) / g.k, (my - view_y) / g.k)
-    if not wx0 then return nil end
-    local ux, uz = view.unproject((mx - view_x) / g.k + 1, (my - view_y) / g.k)
-    local per_px = ux and math.abs(ux - wx0) or 6 -- world units across one view pixel
-    local reach, best, bd = 4 * g.k, nil, nil
-    local near = (reach / g.k + 2) * per_px
-    for _, e in ipairs(scan) do
-        if math.abs(e.x - wx0) <= near and math.abs(e.z - wz0) <= near then
-            local px, py = view.project(e.x, e.z)
+            local px, py = view.project(pos.x, pos.z)
             if px then
                 local wx, wy = view_x + px * g.k, view_y + py * g.k
                 local d = math.sqrt((wx - mx) ^ 2 + (wy - my) ^ 2)
-                if inside_circle(g, wx, wy) and d <= reach and (not bd or d < bd or (d == bd and e.id < best.e.id)) then
-                    best, bd = { e = e, x = wx, y = wy }, d
+                if d <= reach and inside_circle(g, wx, wy) and (not bd or d < bd or (d == bd and e.id < best.e.id)) then
+                    best, bd = { e = e, x = wx, y = wy, pos = pos }, d
                 end
             end
         end
     end
     if not best then return nil end
     local e = best.e
-    local player = eqoa.player.get()
     local kind = e.kind == "player" and "Player" or e.kind == "pet" and "Pet" or "NPC"
     local level = (e.level and e.level > 0) and ("Level " .. e.level) or "Level unknown"
-    local away = player and player.position and math.sqrt((e.x - player.position.x) ^ 2 + (e.z - player.position.z) ^ 2) or 0
+    local away = player and player.position and math.sqrt((best.pos.x - player.position.x) ^ 2 + (best.pos.z - player.position.z) ^ 2) or 0
     return { x = best.x, y = best.y, lines = { { e.name, "title" }, { level .. " / " .. kind, "text" },
         { string.format("%.0f away / observed nearby", away), "text" } } }
 end
 
-local function mark_under(g, mx, my, world)
+-- The marks the stock minimap draws, where it draws them (its own place_marks): camps and coaches
+-- with Map Markers on, quests to take where they lie, quest steps where they lie or on the
+-- picture's rim; none of the towns, community notes or waypoints. The last placed is the topmost.
+local function placed_marks(g, world, map)
     refresh_markers(world)
-    local reach = 6 * g.k
+    local k = g.k
+    local x0, y0 = view_x + INSET * k, view_y + INSET * k
+    local x1, y1 = x0 + SIZE * k, y0 + SIZE * k
+    local r, half = 6 * k, 8 * k
+    local ex0, ey0, ex1, ey1 = x0 + half * 0.6, y0 + half, x1 - half * 0.6, y1 - half
+    local mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+    local function lies(q) return q.x >= x0 - r and q.x <= x1 + r and q.y >= y0 - r and q.y <= y1 + r end
+    local groups = { {}, {}, {} } -- camps and coaches, quests to take, steps
     for _, m in ipairs(markers) do
         if m.world_id == nil or m.world_id == world then
             local px, py = view.project(m.x, m.z)
             if px then
-                local wx, wy = view_x + px * g.k, view_y + py * g.k
-                if inside_circle(g, wx, wy) and (wx - mx) ^ 2 + (wy - my) ^ 2 <= reach * reach then
-                    local title = m.label or m.name
-                    if title and title ~= "" then return { x = wx, y = wy, lines = { { title, "title" } } } end
+                local q = { x = view_x + px * k, y = view_y + py * k, m = m }
+                if m.kind == "camp" or m.kind == "coach" then
+                    if map.markers_on and lies(q) then table.insert(groups[1], q) end
+                elseif m.kind == "quest" and not m.step then
+                    if lies(q) then table.insert(groups[2], q) end
+                elseif m.kind == "quest" then
+                    local dx, dy = q.x - mx, q.y - my
+                    local f = math.max(math.abs(dx) / math.max((ex1 - ex0) / 2, 1e-6), math.abs(dy) / math.max((ey1 - ey0) / 2, 1e-6))
+                    if f > 1 then q.x, q.y = mx + dx / f, my + dy / f end
+                    table.insert(groups[3], q)
                 end
             end
+        end
+    end
+    local out = {}
+    for _, grp in ipairs(groups) do for _, q in ipairs(grp) do out[#out + 1] = q end end
+    return out
+end
+
+local function mark_under(g, mx, my, world, map)
+    local placed = placed_marks(g, world, map)
+    local reach = 6 * g.k
+    for i = #placed, 1, -1 do
+        local q = placed[i]
+        -- only what the circle leaves visible
+        if inside_circle(g, q.x, q.y) and (q.x - mx) ^ 2 + (q.y - my) ^ 2 <= reach * reach then
+            local title = q.m.label or q.m.name
+            if title and title ~= "" then return { x = q.x, y = q.y, lines = { { title, "title" } } } end
         end
     end
 end
@@ -148,7 +160,8 @@ local function waypoint_arrows(g, ui, dl, v, world)
                     local ax, ay = g.cx + cx / n * rr, g.cy + cy / n * rr
                     local s = 4.5 * g.k
                     round_minimap.arrows[#round_minimap.arrows + 1] = { x = ax, y = ay, kind = m.kind }
-                    local color = m.kind == "waypoint" and ui.GetColorU32(1, 0.3, 0.85, 1) or ui.GetColorU32(0.3, 0.75, 1, 1)
+                    -- the waypoint's magenta, the group waypoint's orange (as the stock minimap's)
+                    local color = m.kind == "waypoint" and ui.GetColorU32(1, 0.3, 0.85, 1) or ui.GetColorU32(1, 0.5, 0.05, 1)
                     local dark = ui.GetColorU32(0, 0, 0, 1)
                     local function diamond(r, c)
                         dl:AddTriangleFilled(v(ax, ay - r), v(ax + r, ay), v(ax, ay + r), c)
@@ -162,18 +175,38 @@ local function waypoint_arrows(g, ui, dl, v, world)
     end
 end
 
-local function draw_card(ui, dl, v, g, c)
+-- `text` cut at its spaces into lines no wider than `most`; a word wider than that stays whole
+local function wrap(ui, text, most)
+    local lines, cur = {}, ""
+    for word in tostring(text):gmatch("%S+") do
+        local try = cur == "" and word or (cur .. " " .. word)
+        if cur ~= "" and ui.CalcTextSize(try) > most then lines[#lines + 1] = cur; cur = word else cur = try end
+    end
+    if cur ~= "" then lines[#lines + 1] = cur end
+    return lines
+end
+
+local function draw_card(ui, dl, v, g, c, win_w, win_h)
     if font then ui.PushFont(font) end
+    local most = 260 * g.k
+    local lines = {}
+    for _, l in ipairs(c.lines) do
+        for _, piece in ipairs(wrap(ui, l[1], most)) do lines[#lines + 1] = { piece, l[2] } end
+    end
     local w, h = 0, 0
-    for _, l in ipairs(c.lines) do local tw, th = ui.CalcTextSize(l[1]); w = math.max(w, tw); h = h + th + 2 end
+    for _, l in ipairs(lines) do local tw, th = ui.CalcTextSize(l[1]); w = math.max(w, tw); h = h + th + 2 end
     w, h = w + 16, h + 10
+    -- beside the circle (left, else right), inside the window wherever Move HUD put it
     local x = g.cx - g.r - w - 14
-    local y = math.max(6, c.y - h / 2)
+    if x < 6 then x = g.cx + g.r + 14 end
+    x = math.max(6, math.min(x, win_w - w - 6))
+    local y = math.max(6, math.min(c.y - h / 2, win_h - h - 6))
+    round_minimap.card_rect = { x = x, y = y, w = w, h = h }
     local surface, border = ui.GetColorU32(0.067, 0.067, 0.067, 1), ui.GetColorU32(0.2, 0.2, 0.2, 1)
     dl:AddRectFilled(v(x, y), v(x + w, y + h), surface)
     dl:AddRect(v(x, y), v(x + w, y + h), border)
     local yy = y + 5
-    for _, l in ipairs(c.lines) do
+    for _, l in ipairs(lines) do
         local col = l[2] == "title" and ui.GetColorU32(1, 0.86, 0.45, 1) or ui.GetColorU32(0.95, 0.93, 0.86, 1)
         dl:AddText(v(x + 8, yy), col, l[1])
         local _, th = ui.CalcTextSize(l[1])
@@ -186,7 +219,7 @@ local function draw()
     if not ensure() then return end
     local info = view.texture
     shown = info ~= nil
-    round_minimap.shown, round_minimap.card, round_minimap.arrows = shown, nil, {}
+    round_minimap.shown, round_minimap.card, round_minimap.card_rect, round_minimap.arrows = shown, nil, nil, {}
     if not info then return end
     local lay = eqoa.hud.layout().minimap
     local g = geometry(lay)
@@ -210,9 +243,8 @@ local function draw()
     local world = map and map.world_id
     local pointer = eqoa.input.pointer()
     card = nil
-    if not (pointer and pointer.inside_window and inside_circle(g, pointer.x, pointer.y)) then scan_age = RESCAN end
     if pointer and pointer.inside_window and inside_circle(g, pointer.x, pointer.y) then
-        card = dot_under(g, pointer.x, pointer.y) or (world and mark_under(g, pointer.x, pointer.y, world))
+        card = dot_under(g, pointer.x, pointer.y) or (world and map and mark_under(g, pointer.x, pointer.y, world, map))
     end
     local w, h = ui.GetDisplaySize()
     ui.SetNextWindowPos(0, 0); ui.SetNextWindowSize(w, h)
@@ -225,7 +257,7 @@ local function draw()
     dl:AddCircle(v(g.cx, g.cy), g.r + 1.5 * g.k, ui.GetColorU32(0.2, 0.2, 0.2, 1), 96, 3 * g.k)
     if world then waypoint_arrows(g, ui, dl, v, world) end
     round_minimap.card = card
-    if card then draw_card(ui, dl, v, g, card) end
+    if card then draw_card(ui, dl, v, g, card, w, h) end
     ui.End()
 end
 

@@ -9,20 +9,33 @@ struct Rm {
     me: [f32; 3],
     scene: crate::map::Map,
     draws: usize,
+    /// the window in logical pixels, and the render scale of the target it is drawn to
+    win: (u32, u32),
+    scale: u32,
+    /// the colour of the terrain stand-in the native minimap is drawn over
+    stand_in: [f32; 4],
+    target: Option<(wgpu::Texture, wgpu::TextureView)>,
 }
 const RM_SIZE: (u32, u32) = (1024, 768);
+const RM_GREEN: [f32; 4] = [0.1, 0.6, 0.2, 1.0];
+const RM_ORANGE: [f32; 4] = [0.9, 0.45, 0.1, 1.0];
+/// the colour the native minimap's dots are drawn in, so a test can find them
+const RM_DOT: [f32; 4] = [1.0, 0.2, 1.0, 1.0];
 impl Rm {
     fn new(with_search: bool) -> Option<Rm> {
         Rm::with(|p| p == "eqoa_round_minimap" || (with_search && p == "eqoa_map_search"), 0)
     }
     fn with(want: impl Fn(&str) -> bool, extra_entities: usize) -> Option<Rm> {
+        Rm::sized(want, extra_entities, RM_SIZE, 1)
+    }
+    fn sized(want: impl Fn(&str) -> bool, extra_entities: usize, win: (u32, u32), scale: u32) -> Option<Rm> {
         let gpu = Gpu::new()?;
         crate::settings::testing::reset(false);
         crate::hudlayout::reset();
         crate::hudlayout::set_unlocked(false);
         crate::hideui::show();
         super::super::input::reset_input_state();
-        super::super::hud_layout::set_window_size(RM_SIZE.0, RM_SIZE.1);
+        super::super::hud_layout::set_window_size(win.0, win.1);
         super::super::hud_layout::set_hud_state(true, true, false, 93, 0);
         let root = Scratch::new();
         let config = Scratch::new();
@@ -37,60 +50,77 @@ impl Rm {
         let at = walker.cam.walk.phys.position;
         let me = [at.x.0, at.y.0, at.z.0];
         // a creature 40 units east and 30 south of the player at (100, 200)
-        play.entities.slots[2] = Some(net::entity::Entity {
-            id: 3003,
-            kind: net::entity::TYPE_CREATURE,
-            p19: 255,
-            pos: [me[0] + 40.0, me[1], me[2] + 30.0],
-            actor_pos: [me[0] + 40.0, me[1], me[2] + 30.0],
-            creature: Some(net::entity::Creature { name: "Test Rat".into(), level: 7, ..Default::default() }),
-            ..Default::default()
-        });
+        play.entities.slots[2] = Some(rm_creature(3003, "Test Rat", [me[0] + 40.0, me[1], me[2] + 30.0], 0, 7));
         for i in 0..extra_entities {
             let a = i as f32 * 2.399_963;
             let d = 20.0 + (i % 40) as f32 * 5.0;
             let at = [me[0] + a.cos() * d, me[1], me[2] + a.sin() * d];
-            play.entities.slots.push(Some(net::entity::Entity {
-                id: 5000 + i as u32,
-                kind: net::entity::TYPE_CREATURE,
-                p19: 255,
-                pos: at,
-                actor_pos: at,
-                creature: Some(net::entity::Creature { name: format!("Busy Creature {i}"), level: 1 + (i % 50) as u8, ..Default::default() }),
-                ..Default::default()
-            }));
+            play.entities.slots.push(Some(rm_creature(5000 + i as u32, &format!("Busy Creature {i}"), at, 0, 1 + (i % 50) as u8)));
         }
         let manager = gpu.manager(&root.0, Some(config.0.clone()));
-        let scene = crate::map::Map::round4_fixture(&gpu.device, &gpu.queue, RM_SIZE, true);
-        Some(Rm { gpu, _root: root, _config: config, manager, play, walker, me, scene, draws: 0 })
+        let scene = crate::map::Map::round4_fixture(&gpu.device, &gpu.queue, win, true);
+        Some(Rm { gpu, _root: root, _config: config, manager, play, walker, me, scene, draws: 0, win, scale, stand_in: RM_GREEN, target: None })
+    }
+    /// What the native minimap shows of the entities: a dot per creature but corpses and the inactive.
+    fn mini_view(&self) -> crate::map::mini::MiniView {
+        let dots: Vec<([f32; 2], [f32; 4])> = self
+            .play
+            .entities
+            .slots
+            .iter()
+            .flatten()
+            .filter(|e| e.p18 & 2 == 0 && e.p19 != 0 && e.creature.is_some())
+            .map(|e| ([e.actor_pos[0], e.actor_pos[2]], RM_DOT))
+            .collect();
+        let marks = crate::map::quests::mini_marks(&self.play.map.quests.marks);
+        crate::map::mini::MiniView { dots, target: None, marks }
+    }
+    /// The target's pixel size: the window at the render scale.
+    fn target_size(&self) -> (u32, u32) {
+        (self.win.0 * self.scale, self.win.1 * self.scale)
     }
     /// One whole frame: the addons' callbacks, the native minimap draw routed as the viewer
     /// routes it, then the shared ImGui pass over it.
     fn frame(&mut self) -> wgpu::Texture {
         let mut snapshot = self.play.forge_snapshot(Some(&self.walker));
         snapshot.capture_pending = false;
+        let at = self.walker.cam.walk.phys.position;
+        let at = [at.x.0, at.y.0, at.z.0];
         if self.play.map.mini.up {
-            self.scene.round4_mini_frame(&self.gpu.device, &self.gpu.queue, RM_SIZE);
+            let view = self.mini_view();
+            self.scene.round4_mini_frame(&self.gpu.device, &self.gpu.queue, self.win, at, &view, self.stand_in);
         } else {
             self.scene.mini_off();
         }
         self.manager.flush_pending_fonts(&mut self.gpu.context);
-        r4_begin(&mut self.gpu);
+        {
+            let io = self.gpu.context.io_mut();
+            io.set_display_size([self.win.0 as f32, self.win.1 as f32]);
+            io.set_display_framebuffer_scale([self.scale as f32; 2]);
+            io.set_delta_time(1. / 60.);
+        }
+        self.gpu.context.frame();
         super::super::native_core::presentation();
         self.manager.frame(snapshot);
-        let size = RM_SIZE;
+        let size = self.target_size();
+        let win = self.win;
         let gpu = &mut self.gpu;
-        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("round minimap frame"),
-            size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let depth = render::depth_view(&gpu.device, size.0, size.1);
+        // the render targets are made once, as the viewer keeps its own
+        if self.target.as_ref().is_none_or(|(t, _)| (t.width(), t.height()) != size) {
+            let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("round minimap frame"),
+                size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let depth = render::depth_view(&gpu.device, size.0, size.1);
+            self.target = Some((target, depth));
+        }
+        let (target, depth) = self.target.as_ref().unwrap();
         let view = target.create_view(&Default::default());
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
         {
@@ -103,7 +133,7 @@ impl Rm {
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.2, g: 0.2, b: 0.4, a: 1.0 }), store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &depth,
+                    view: depth,
                     depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
                     stencil_ops: None,
                 }),
@@ -113,7 +143,7 @@ impl Rm {
             });
         }
         let before = super::super::map_views::draw_calls();
-        crate::fork_ext::map::draw_minimap(&self.scene, &gpu.device, &mut encoder, &view, &depth, size, size, wgpu::TextureFormat::Rgba8Unorm);
+        crate::fork_ext::map::draw_minimap(&self.scene, &gpu.device, &mut encoder, &view, depth, win, size, wgpu::TextureFormat::Rgba8Unorm);
         self.draws += super::super::map_views::draw_calls() - before;
         {
             let mut renderer = gpu.renderer.borrow_mut();
@@ -135,7 +165,7 @@ impl Rm {
         }
         gpu.queue.submit([encoder.finish()]);
         self.manager.after_render();
-        target
+        self.target.as_ref().unwrap().0.clone()
     }
     fn frames(&mut self, n: usize) -> wgpu::Texture {
         let mut t = self.frame();
@@ -151,15 +181,99 @@ impl Rm {
         self.lua().load(format!("return {expr}")).eval().unwrap()
     }
     fn at(&self, x: f32, y: f32) {
-        super::super::pointer_api::position([x, y], true, RM_SIZE);
+        super::super::pointer_api::position([x, y], true, self.win);
     }
     fn circle(&self) -> (f64, f64, f64) {
         (self.state("round_minimap.circle.cx"), self.state("round_minimap.circle.cy"), self.state("round_minimap.circle.r"))
     }
+    /// The stock minimap's rectangle in window pixels (x0, y0, x1, y1).
+    fn stock_rect(&self) -> [f32; 4] {
+        let r = super::super::hud_layout::hud_layout_json(self.win);
+        let m = &r["minimap"];
+        let f = |k: &str| m[k].as_f64().unwrap() as f32;
+        [f("x"), f("y"), f("x") + f("width"), f("y") + f("height")]
+    }
+    /// Window pixels of world point (x, z) on the round minimap, by the view's own projection.
+    fn dot_at(&self, x: f32, z: f32) -> (f64, f64) {
+        let lay = self.stock_rect();
+        let k = (lay[2] - lay[0]) as f64 / 112.0;
+        let (px, py, _): (f64, f64, bool) = self.lua().load(format!("return round_minimap.view.project({x},{z})")).eval().unwrap();
+        (lay[0] as f64 + px * k, lay[1] as f64 + py * k)
+    }
+    /// The card's lines as the mod built them, if it shows one.
+    fn card_lines(&self) -> Option<Vec<String>> {
+        self.lua()
+            .load("if not round_minimap.card then return nil end local t={} for _,l in ipairs(round_minimap.card.lines) do t[#t+1]=l[1] end return t")
+            .eval()
+            .unwrap()
+    }
+    /// Hover window pixel (x, y) for two frames and give the card's first line.
+    fn hover(&mut self, x: f64, y: f64) -> Option<String> {
+        self.at(x as f32, y as f32);
+        self.frames(2);
+        self.card_lines().map(|l| l[0].clone())
+    }
+    /// Where the player stands: the walker, and with it the minimap's centre.
+    fn stand_at(&mut self, x: f32, z: f32) {
+        let p = &mut self.walker.cam.walk.phys.position;
+        p.x.0 = x;
+        p.z.0 = z;
+        self.me = [x, self.me[1], z];
+    }
+    /// Puts creature `e` in the world, in its slot if it has one.
+    fn put(&mut self, e: net::entity::Entity) {
+        let slots = &mut self.play.entities.slots;
+        match slots.iter_mut().find(|s| s.as_ref().is_some_and(|o| o.id == e.id)) {
+            Some(s) => *s = Some(e),
+            None => slots.push(Some(e)),
+        }
+    }
+}
+fn rm_creature(id: u32, name: &str, at: [f32; 3], p256: u8, level: u8) -> net::entity::Entity {
+    net::entity::Entity {
+        id,
+        kind: net::entity::TYPE_CREATURE,
+        p19: 255,
+        pos: at,
+        actor_pos: at,
+        creature: Some(net::entity::Creature { name: name.into(), level, p256, ..Default::default() }),
+        ..Default::default()
+    }
 }
 fn rm_px(pixels: &[u8], x: f64, y: f64) -> [u8; 4] {
-    let i = ((y as usize) * RM_SIZE.0 as usize + x as usize) * 4;
+    rm_px_in(pixels, RM_SIZE.0, x, y)
+}
+fn rm_px_in(pixels: &[u8], width: u32, x: f64, y: f64) -> [u8; 4] {
+    let i = ((y as usize) * width as usize + x as usize) * 4;
     [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+}
+/// A target's pixels at any size (rows padded to the copy alignment).
+fn rm_pixels(gpu: &Gpu, target: &wgpu::Texture) -> Vec<u8> {
+    let (w, h) = (target.width() as usize, target.height() as usize);
+    let row = (w * 4).next_multiple_of(256);
+    let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: (row * h) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = gpu.device.create_command_encoder(&Default::default());
+    encoder.copy_texture_to_buffer(
+        target.as_image_copy(),
+        wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row as u32), rows_per_image: Some(h as u32) } },
+        target.size(),
+    );
+    gpu.queue.submit([encoder.finish()]);
+    let (tx, rx) = std::sync::mpsc::channel();
+    buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+    gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    rx.recv().unwrap().unwrap();
+    let padded = buffer.slice(..).get_mapped_range().unwrap().to_vec();
+    let mut out = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        out.extend_from_slice(&padded[y * row..y * row + w * 4]);
+    }
+    out
 }
 
 #[test]

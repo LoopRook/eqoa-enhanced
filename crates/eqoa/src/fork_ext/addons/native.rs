@@ -980,10 +980,10 @@ fn nested_type(path: &str, key: &str) -> Option<&'static str> {
 fn install_fields(lua: &Lua) {
     for (path, fields) in [
         ("eqoa.Error", "code message capability retry_after"),
-        ("eqoa.map.Marker", "kind name x z level_min level_max label"),
+        ("eqoa.map.Marker", "kind name x z level_min level_max label step"),
         (
             "eqoa.map.MapState",
-            "enabled open minimap world_id world_name zone bounds revision waypoint search_anchor",
+            "enabled open minimap markers_on world_id world_name zone bounds revision waypoint search_anchor",
         ),
         ("eqoa.map.Bounds", "x_min z_min x_max z_max"),
         ("eqoa.map.Waypoint", "world_id x z label owner"),

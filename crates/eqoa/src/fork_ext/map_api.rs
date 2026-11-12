@@ -9,6 +9,7 @@ impl Map {
         world.hash(&mut h);
         self.open.hash(&mut h);
         crate::settings::map().hash(&mut h);
+        crate::settings::map_markers().hash(&mut h);
         self.mini.up.hash(&mut h);
         for w in [&self.world, &self.home].into_iter().flatten() {
             w.index.hash(&mut h);
@@ -17,7 +18,7 @@ impl Map {
             (c.col0, c.row0, c.cols, c.rows).hash(&mut h);
         }
         for m in &self.quests.marks {
-            (m.world, m.x.to_bits(), m.z.to_bits(), &m.npc).hash(&mut h);
+            (m.world, m.x.to_bits(), m.z.to_bits(), &m.npc, m.kind).hash(&mut h);
             m.quests.first().map(|q| q.levels).hash(&mut h);
         }
         for m in &self.community.marks {
@@ -51,7 +52,7 @@ impl Map {
             let c = &w.builder.cells;
             json!({"x_min":ee::mul(c.col0 as f32,CELL),"z_min":ee::mul(c.row0 as f32,CELL),"x_max":ee::mul((c.col0+c.cols) as f32,CELL),"z_max":ee::mul((c.row0+c.rows) as f32,CELL)})
         });
-        json!({"search_anchor":crate::fork_ext::map_toolbar::anchor().map(|a|json!({"x":a[0],"y":a[1],"width":a[2],"height":a[3]})),"enabled":crate::settings::map(),"open":self.open,"minimap":self.mini.up,"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
+        json!({"search_anchor":crate::fork_ext::map_toolbar::anchor().map(|a|json!({"x":a[0],"y":a[1],"width":a[2],"height":a[3]})),"enabled":crate::settings::map(),"open":self.open,"minimap":self.mini.up,"markers_on":crate::settings::map_markers(),"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
     }
 }
 
@@ -77,7 +78,7 @@ impl Map {
         let mut out = Vec::new();
         for m in &self.quests.marks {
             let levels = m.quests.first().map(|q| q.levels);
-            out.push(json!({"world_id":m.world,"kind":"quest","name":m.npc,"x":m.x,"z":m.z,"level_min":levels.map(|x|x.0),"level_max":levels.map(|x|x.1),"label":null}));
+            out.push(json!({"world_id":m.world,"kind":"quest","step":m.kind != 1,"name":m.npc,"x":m.x,"z":m.z,"level_min":levels.map(|x|x.0),"level_max":levels.map(|x|x.1),"label":null}));
         }
         for m in &self.community.marks {
             out.push(json!({"world_id":m.world,"kind":"community","name":m.name,"x":m.at[0],"z":m.at[1],"label":m.note}));
@@ -190,16 +191,21 @@ impl Map {
     pub(crate) fn round4_waypoint(&mut self,world:i32,at:Option<[f32;2]>){self.set_waypoint(world,at);}
 
     /// A minimap frame as `Play::map_frame` makes it each frame (a moved or toggled minimap
-    /// is laid out again), with the terrain stand-in.
-    pub(crate) fn round4_mini_frame(&mut self,device:&wgpu::Device,queue:&wgpu::Queue,size:(u32,u32)){
+    /// is laid out again), centred on `at` with `view`'s dots and marks, over a terrain
+    /// stand-in of `color` (a picture without a disc).
+    pub(crate) fn round4_mini_frame(&mut self,device:&wgpu::Device,queue:&wgpu::Queue,size:(u32,u32),at:[f32;3],view:&mini::MiniView,color:[f32;4]){
         let lib=esf::Library::new();let vui=crate::pointer::testing::vui();
-        let cx=Context{lib:&lib,device,queue,format:wgpu::TextureFormat::Rgba8Unorm,size,dt:0.,player:Some(([25300.,0.,15200.],0.)),world:0,origin:[0.;2],group:Vec::new(),in_group:false,target:None,sticks:[0.;4],keyboard:true,words:None,vui:Some(&vui),quest_marks:None};
-        self.mini_frame(&cx,&mini::MiniView::default());
+        let cx=Context{lib:&lib,device,queue,format:wgpu::TextureFormat::Rgba8Unorm,size,dt:0.,player:Some((at,0.)),world:0,origin:[0.;2],group:Vec::new(),in_group:false,target:None,sticks:[0.;4],keyboard:true,words:None,vui:Some(&vui),quest_marks:None};
+        self.mini_frame(&cx,view);
         let moved=crate::hudlayout::shift(crate::hudlayout::Piece::Minimap,crate::hudlayout::Beyond::of(size));
         let r=mini::window_rect_moved(size,mini::FRAME,moved);
         let l=self.layers.as_mut().unwrap();
         let white=l.white;
-        l.map.quads.push(render::map::MapQuad::rect(white,r,[0.0,0.0,1.0,1.0],[0.1,0.6,0.2,1.0]));
+        l.map.quads.push(render::map::MapQuad::rect(white,r,[0.0,0.0,1.0,1.0],color));
+    }
+
+    pub(crate) fn round4_group_waypoint(&mut self,world:i32,at:[f32;2]){
+        self.set_group_waypoint(group_waypoint::GroupMark{world,at,from:"Mate".into()});
     }
 }
 
