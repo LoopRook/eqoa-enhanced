@@ -13,6 +13,9 @@ struct Rm {
 const RM_SIZE: (u32, u32) = (1024, 768);
 impl Rm {
     fn new(with_search: bool) -> Option<Rm> {
+        Rm::with(|p| p == "eqoa_round_minimap" || (with_search && p == "eqoa_map_search"), 0)
+    }
+    fn with(want: impl Fn(&str) -> bool, extra_entities: usize) -> Option<Rm> {
         let gpu = Gpu::new()?;
         crate::settings::testing::reset(false);
         crate::hudlayout::reset();
@@ -23,9 +26,7 @@ impl Rm {
         super::super::hud_layout::set_hud_state(true, true, false, 93, 0);
         let root = Scratch::new();
         let config = Scratch::new();
-        for file in crate::fork_ext::bundled::EMBEDDED_FILES.iter().filter(|f| {
-            f.package == "eqoa_round_minimap" || (with_search && f.package == "eqoa_map_search")
-        }) {
+        for file in crate::fork_ext::bundled::EMBEDDED_FILES.iter().filter(|f| want(f.package)) {
             let path = root.0.join(file.path);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, file.data).unwrap();
@@ -45,6 +46,20 @@ impl Rm {
             creature: Some(net::entity::Creature { name: "Test Rat".into(), level: 7, ..Default::default() }),
             ..Default::default()
         });
+        for i in 0..extra_entities {
+            let a = i as f32 * 2.399_963;
+            let d = 20.0 + (i % 40) as f32 * 5.0;
+            let at = [me[0] + a.cos() * d, me[1], me[2] + a.sin() * d];
+            play.entities.slots.push(Some(net::entity::Entity {
+                id: 5000 + i as u32,
+                kind: net::entity::TYPE_CREATURE,
+                p19: 255,
+                pos: at,
+                actor_pos: at,
+                creature: Some(net::entity::Creature { name: format!("Busy Creature {i}"), level: 1 + (i % 50) as u8, ..Default::default() }),
+                ..Default::default()
+            }));
+        }
         let manager = gpu.manager(&root.0, Some(config.0.clone()));
         let scene = crate::map::Map::round4_fixture(&gpu.device, &gpu.queue, RM_SIZE, true);
         Some(Rm { gpu, _root: root, _config: config, manager, play, walker, me, scene, draws: 0 })
@@ -357,4 +372,48 @@ fn round_minimap_carries_the_search_button_and_box_when_the_search_mod_is_on() {
     rm_png(&pixels, "r4-minimap-search.png");
     rm.manager.shutdown();
     super::super::input::reset_input_state();
+}
+
+/// Per-frame cost in a busy world: all mods off, then the three round 4 mods and round 3's four on.
+/// Debug builds only prove the workload ran; the recorded numbers come from `--release`.
+#[test]
+fn round4c_frame_time_with_all_map_mods_in_a_busy_world() {
+    use std::time::Instant;
+    const ROUND3: [&str; 4] = ["eqoa_stats_box", "eqoa_target_of_target", "eqoa_mana_bars", "eqoa_hud_numbers"];
+    const ROUND4: [&str; 3] = ["eqoa_creature_journal", "eqoa_map_search", "eqoa_round_minimap"];
+    let mut results = Vec::new();
+    for (label, on) in [("all mods off", false), ("round 3 (4) + round 4 (3) mods on", true)] {
+        let Some(mut rm) = Rm::with(|p| on && (ROUND3.contains(&p) || ROUND4.contains(&p)), 200) else { return };
+        rm.frames(30);
+        if on {
+            assert!(rm.manager.entries.iter().all(|e| e.status == Status::Enabled), "{:?}", rm.manager.diagnostics());
+            assert_eq!(rm.manager.entries.len(), 7, "all seven mods loaded");
+            assert!(rm.state::<bool>("round_minimap.shown"));
+            assert!(rm.lua().load("return #eqoa.entities.list()").eval::<usize>().unwrap() >= 200, "200 entities in the world");
+            // the pointer rests on the circle's centre, so the hover scan runs every frame
+            let (cx, cy, _) = rm.circle();
+            rm.at(cx as f32, cy as f32);
+        }
+        let n = 300;
+        let mut whole = Vec::with_capacity(n);
+        for _ in 0..n {
+            let t = Instant::now();
+            let tex = rm.frame();
+            whole.push(t.elapsed().as_secs_f64() * 1000.0);
+            drop(tex);
+        }
+        whole.sort_by(f64::total_cmp);
+        let mean = whole.iter().sum::<f64>() / n as f64;
+        eprintln!(
+            "R4C frame time ({}, {label}): frames={n} mean={mean:.3} ms p50={:.3} p95={:.3} max={:.3}",
+            if cfg!(debug_assertions) { "debug" } else { "release" },
+            whole[n / 2],
+            whole[n * 95 / 100],
+            whole[n - 1]
+        );
+        assert_eq!(whole.len(), n, "the workload ran");
+        results.push(mean);
+        rm.manager.shutdown();
+    }
+    assert!(results[1].is_finite() && results[0].is_finite());
 }
