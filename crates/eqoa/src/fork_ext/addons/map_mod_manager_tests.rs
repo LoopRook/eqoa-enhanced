@@ -175,6 +175,7 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
     hud_layout::set_window_size(1024, 768);
     hud_layout::set_hud_state(true, true, false, 93, 0);
     let mut play = crate::play::Play::bundled_ui_fixture();
+    play.map.mini.up = true; // the stock minimap setting is on; search follows it
     let mut snapshot = play.forge_snapshot(None);
     snapshot.capture_pending = false;
     let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
@@ -289,6 +290,7 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
     assert!(bad.is_empty(), "{bad:?}");
     for mini in [true, false] {
         play.test_map_search_surface(!mini);
+        play.map.mini.up = mini;
         snapshot = play.forge_snapshot(None);
         snapshot.capture_pending = false;
         let map = crate::map::Map::round4_fixture(&gpu.device, &gpu.queue, (1024, 768), mini);

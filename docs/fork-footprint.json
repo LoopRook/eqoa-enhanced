@@ -208,6 +208,11 @@
       "added": 4,
       "deleted": 0,
       "reason": "Round 4 Part C: upstream's text plus the private-accessor module declaration (fork_ext/map_api.rs, native only) and one neutral map overlay call."
+    },
+    "crates/render/src/ui.rs": {
+      "added": 1,
+      "deleted": 1,
+      "reason": "Round 4 Part C: upstream's text but for `Font::find` made pub, which the addon HUD text path (fork_ext/addons/hud_layer.rs) needs to stream glyph quads without upstream's per-string Vec (the zero-allocation gate)."
     }
   },
   "immutable": [

@@ -585,7 +585,7 @@ pub struct Font {
 
 impl Font {
     /// `FindChar`, with `'?'` for a character the font lacks.
-    fn find(&self, code: u16) -> Option<&(u32, [f32; 4])> {
+    pub fn find(&self, code: u16) -> Option<&(u32, [f32; 4])> {
         self.glyphs.get(&code).or_else(|| self.glyphs.get(&(b'?' as u16)))
     }
 

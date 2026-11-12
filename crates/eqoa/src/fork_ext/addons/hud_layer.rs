@@ -236,9 +236,40 @@ fn compute_stat_layout(
     crate::fork_ext::player_stats::layout(font_h, wide)
 }
 
-/// Upstream's `Ui::text_scaled`: a missing glyph rejects the whole string.
-fn text_scaled(ui: &mut render::ui::Ui, font: usize, x: f32, y: f32, scale: f32, color: [f32; 4], text: &[u16]) {
-    ui.text_scaled(font, x, y, scale, color, text);
+/// The native text_scaled geometry, streamed directly after validating the
+/// complete string. Missing glyphs still reject the entire command atomically.
+fn text_scaled(
+    ui: &mut render::ui::Ui,
+    font: usize,
+    x: f32,
+    y: f32,
+    scale: f32,
+    color: [f32; 4],
+    text: &[u16],
+) {
+    if text.iter().any(|&c| ui.fonts[font].find(c).is_none()) {
+        return;
+    }
+    let (tex, h) = (ui.fonts[font].tex, ui.fonts[font].height as f32 * scale);
+    let mut x0 = x;
+    for &c in text {
+        let &(width, uv) = ui.fonts[font].find(c).expect("validated glyph");
+        let x1 = x0 + width as f32 * scale;
+        ui.push(render::ui::Quad {
+            tex,
+            blend: 3,
+            pos: [[x0, y], [x1, y], [x1, y + h], [x0, y + h]],
+            uv: [
+                [uv[0], uv[1]],
+                [uv[2], uv[1]],
+                [uv[2], uv[3]],
+                [uv[0], uv[3]],
+            ],
+            color,
+            clip: None,
+        });
+        x0 = x1 + scale;
+    }
 }
 
 /// `Window::text_box(..., rows=1, flags=10)` without its temporary Vecs for

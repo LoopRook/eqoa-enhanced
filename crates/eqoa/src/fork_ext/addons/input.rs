@@ -236,6 +236,16 @@ pub fn is_text_capture_active() -> bool {
     })
 }
 
+/// Whether a text editor owned by another mod (or Forge hook) holds the keyboard, so a key bind
+/// of VM `vm` must not fire on the typed key. The VM's own editor still sees its keys.
+pub(crate) fn text_capture_blocks(vm: u64) -> bool {
+    if !is_text_capture_active() {
+        return false;
+    }
+    let own = format!("\u{1f}{vm}:native:text");
+    INPUT_STATE.with(|s| !s.borrow().text_capture_owners.contains_key(&own))
+}
+
 pub fn is_key_suppressed(key: u8) -> bool {
     INPUT_STATE.with(|s| {
         let mut state = s.borrow_mut();

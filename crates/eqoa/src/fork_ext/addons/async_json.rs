@@ -332,7 +332,11 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             };
             let path = match resource_path(&m, &path) {
                 Ok(p) => p,
-                Err(e) => return error(lua, "eqoa.files.load_json", "permission_denied", &e),
+                // A file a mod has not written yet (the journal, first run) is an answer, not a fault.
+                Err(e) => {
+                    let code = if e.starts_with("file not found") { "not_found" } else { "permission_denied" };
+                    return error(lua, "eqoa.files.load_json", code, &e);
+                }
             };
             let shared = service(lua)?;
             let mut s = shared.borrow_mut();

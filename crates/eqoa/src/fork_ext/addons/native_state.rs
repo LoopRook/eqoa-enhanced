@@ -1208,13 +1208,15 @@ fn install_math(lua: &Lua) -> Result<()> {
             if let Some(cb) = cb_fn {
                 let id_for_cb = id.clone();
                 let addon_for_cb = addon.clone();
+                let vm = super::native_events::bus(lua).borrow().vm;
                 let wrapper = lua.create_function(move |_, ev: Value| {
                     if let Value::Table(et) = &ev {
                         let data: mlua::Table = et.get("data")?;
                         let down = data.get::<Option<bool>>("down")?.unwrap_or(false);
                         let rep = data.get::<Option<bool>>("repeat")?.unwrap_or(false);
                         let key = data.get::<Option<String>>("key")?.unwrap_or_default();
-                        if down && !rep {
+                        // While a text editor owns the keyboard, other mods' key binds stay quiet.
+                        if down && !rep && !super::input::text_capture_blocks(vm) {
                             let bound =
                                 crate::fork_ext::bindpage::get_key(&addon_for_cb, &id_for_cb);
                             if bound.is_some_and(|bound| {
