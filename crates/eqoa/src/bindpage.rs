@@ -640,8 +640,8 @@ mod tests {
         page.row = binds::row_named("hide_ui").unwrap() as i32;
         page.col = 0;
         page.key(key::CROSS, true, 0, &mut cues);
-        page.capture_key(&vui, "f10", &mut cues);
-        assert_eq!(page.note.as_deref(), Some("Hide UI: F10. H does nothing now."));
+        page.capture_key(&vui, "f2", &mut cues);
+        assert_eq!(page.note.as_deref(), Some("Hide UI: F2. H does nothing now."));
         // △'s row, which the game gives no key, takes one; Talk's, given it,
         // is left with none
         page.row = binds::row_named("clear_target").unwrap() as i32;

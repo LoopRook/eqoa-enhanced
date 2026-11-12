@@ -8694,7 +8694,7 @@ impl Play {
             self.map.off();
             return;
         }
-        if (self.map.open) && (self.mode != 0 || self.is_dead()) {
+        if self.map.open && (self.mode != 0 || self.is_dead()) {
             self.map.close();
         }
         // a community marker the map asked to suggest: the edit box for its

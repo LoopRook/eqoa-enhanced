@@ -1519,9 +1519,7 @@ mod tests {
             "Insert" => NamedKey::Insert,
             "Shift" => NamedKey::Shift,
             "F1" => NamedKey::F1,
-            "F2" => NamedKey::F2,
             "F3" => NamedKey::F3,
-            "F4" => NamedKey::F4,
             "F5" => NamedKey::F5,
             "F6" => NamedKey::F6,
             "F7" => NamedKey::F7,
@@ -1603,8 +1601,8 @@ mod tests {
         b.bind_key(talk, "q");
         assert!(b.is_default(), "{b:?}");
         // the L1 row's ` and ~ go together
-        b.bind_key(cycle, "f10");
-        assert_eq!((b.alias("`"), b.alias("~"), b.alias("f10")), (Alias::Nothing, Alias::Nothing, Alias::To("`")));
+        b.bind_key(cycle, "f2");
+        assert_eq!((b.alias("`"), b.alias("~"), b.alias("f2")), (Alias::Nothing, Alias::Nothing, Alias::To("`")));
         // a row moved onto another's alternate takes it; the other keeps its
         // first key (no swap: it is not on ~)
         let mut c = Binds::default();
@@ -1687,8 +1685,8 @@ mod tests {
         assert_eq!(frame(&mut f, bit::SQUARE, false), (bit::SQUARE, None));
     }
 
-    /// F3 20261024-145732: the map on R3. A button put on a row of the
-    /// client's keys leaves the field it drove with none; one the row had
+    /// F3 20261024-145732 (a key of the client's on R3). A button put on a row
+    /// of the client's keys leaves the field it drove with none; one the row had
     /// goes to that field; a button taken from another such row leaves it
     /// the one this row had, or none; a field given a row's button gives the
     /// row its own. The rows the game has a button or a stick for take none.
@@ -1696,20 +1694,20 @@ mod tests {
     #[test]
     fn a_button_on_a_row_of_the_clients_keys() {
         let (r3, l3, cross) = (bit_index(bit::R3).unwrap(), bit_index(bit::L3).unwrap(), bit_index(bit::CROSS).unwrap());
-        let (map, art, chat) = (row_named("map").unwrap(), row_named("art").unwrap(), row_named("chat").unwrap());
+        let (hide, art, chat) = (row_named("hide_ui").unwrap(), row_named("art").unwrap(), row_named("chat").unwrap());
         let mut b = Binds::default();
-        assert_eq!(b.bind_row_button(map, r3), Moved::Swapped(r3 as usize));
-        assert_eq!((b.row_button(map), b.button(r3), b.field_of(r3), b.row_of_button(r3)), (Some(r3), NO_BUTTON, None, Some(map)));
-        assert_eq!(b.remap(bit::R3), 0, "R3 is the map's: no field of the game's");
+        assert_eq!(b.bind_row_button(hide, r3), Moved::Swapped(r3 as usize));
+        assert_eq!((b.row_button(hide), b.button(r3), b.field_of(r3), b.row_of_button(r3)), (Some(r3), NO_BUTTON, None, Some(hide)));
+        assert_eq!(b.remap(bit::R3), 0, "R3 is Hide UI's: no field of the game's");
         assert_eq!(b.remap(bit::CROSS | bit::R3), bit::CROSS);
         assert_eq!(ROWS[chat].pad, Pad::Button(bit::R3), "the chat line's field is the one left with none");
-        // the map moved to L3: R3 goes back to the field L3 leaves (a swap)
-        assert_eq!(b.bind_row_button(map, l3), Moved::Swapped(l3 as usize));
-        assert_eq!((b.button(l3), b.row_button(map)), (r3, Some(l3)));
+        // Hide UI moved to L3: R3 goes back to the field L3 leaves (a swap)
+        assert_eq!(b.bind_row_button(hide, l3), Moved::Swapped(l3 as usize));
+        assert_eq!((b.button(l3), b.row_button(hide)), (r3, Some(l3)));
         assert_eq!(b.remap(bit::R3), bit::L3, "the physical R3 is autorun's now");
-        // the art takes L3 off the map, which had none to give
-        assert_eq!(b.bind_row_button(art, l3), Moved::SwappedRow(map));
-        assert_eq!((b.row_button(art), b.row_button(map)), (Some(l3), None));
+        // the art takes L3 off Hide UI, which had none to give
+        assert_eq!(b.bind_row_button(art, l3), Moved::SwappedRow(hide));
+        assert_eq!((b.row_button(art), b.row_button(hide)), (Some(l3), None));
         // the field takes its button back off the row: the row gets the
         // field's (R3), as a swap
         assert_eq!(b.bind_button(l3, l3), Moved::SwappedRow(art));
@@ -1821,19 +1819,19 @@ mod tests {
     #[test]
     fn a_rows_button_presses_its_key() {
         let (r3, l3) = (bit_index(bit::R3).unwrap(), bit_index(bit::L3).unwrap());
-        let (map, art) = (row_named("map").unwrap(), row_named("art").unwrap());
+        let (hide, art) = (row_named("hide_ui").unwrap(), row_named("art").unwrap());
         let mut b = Binds::default();
-        b.bind_row_button(map, r3);
+        b.bind_row_button(hide, r3);
         let mut e = PadEdge::default();
         let f = e.frame(bit::R3 | bit::CROSS, false, &b);
-        assert_eq!((f.fields, f.took, f.rows), (bit::CROSS, None, vec![(map, true)]));
+        assert_eq!((f.fields, f.took, f.rows), (bit::CROSS, None, vec![(hide, true)]));
         assert_eq!(e.frame(bit::R3, false, &b).rows, vec![], "held: once");
-        // moved while held (the map to L3, the art onto R3): let go as the map
-        b.bind_row_button(map, l3);
+        // moved while held (Hide UI to L3, the art onto R3): let go as Hide UI
+        b.bind_row_button(hide, l3);
         b.bind_row_button(art, r3);
-        assert_eq!(e.frame(0, false, &b).rows, vec![(map, false)]);
-        assert_eq!(e.frame(bit::R3 | bit::L3, false, &b).rows, vec![(map, true), (art, true)], "in the buttons' order");
-        assert_eq!(e.frame(0, false, &b).rows, vec![(map, false), (art, false)]);
+        assert_eq!(e.frame(0, false, &b).rows, vec![(hide, false)]);
+        assert_eq!(e.frame(bit::R3 | bit::L3, false, &b).rows, vec![(hide, true), (art, true)], "in the buttons' order");
+        assert_eq!(e.frame(0, false, &b).rows, vec![(hide, false), (art, false)]);
         // a capture's press is the capture's
         let f = e.frame(bit::R3, true, &b);
         assert_eq!((f.took, f.rows), (Some(r3), vec![]));
@@ -1857,11 +1855,11 @@ mod tests {
         assert_eq!(old, want);
         assert_eq!(old.to_text(), "key.talk=e\nkey.use=q\npad.circle=cross\npad.cross=circle\n", "written as before");
         let mut b = Binds::default();
-        b.bind_row_button(row_named("map").unwrap(), bit_index(bit::R3).unwrap());
-        assert_eq!(b.to_text(), "button.map=r3\n");
-        assert_eq!(Binds::from_text("button.map=r3\n"), b);
-        assert_eq!(b.describe(), "map on button r3, pad r3 on nothing");
-        assert!(Binds::from_text("button.attack=r3\nbutton.map=nope\nbutton.nope=r3\n").is_default());
+        b.bind_row_button(row_named("hide_ui").unwrap(), bit_index(bit::R3).unwrap());
+        assert_eq!(b.to_text(), "button.hide_ui=r3\n");
+        assert_eq!(Binds::from_text("button.hide_ui=r3\n"), b);
+        assert_eq!(b.describe(), "hide_ui on button r3, pad r3 on nothing");
+        assert!(Binds::from_text("button.attack=r3\nbutton.hide_ui=nope\nbutton.nope=r3\n").is_default());
     }
 
     /// The keyboard's edge: a moved key is its row's default key at the
@@ -1880,7 +1878,7 @@ mod tests {
         assert_eq!(e.key("up", false, false, true, &b), key("w"), "let go while typing: still w, so the walk stops");
         assert_eq!(e.key("w", true, false, false, &b), key("up"), "W took the arrow's place: the quick menu's up");
         assert_eq!(e.key("w", false, false, false, &b), key("up"));
-        b.bind_key(row_named("menu_up").unwrap(), "f10");
+        b.bind_key(row_named("menu_up").unwrap(), "f2");
         assert_eq!(e.key("w", true, false, false, &b), None, "W's rows both moved off it: nothing");
         assert_eq!(e.key("w", false, false, false, &b), None);
         // typing: as it is
@@ -1888,8 +1886,8 @@ mod tests {
         assert_eq!(e.key("up", false, false, false, &b), key("up"), "let go as pressed");
         assert_eq!(e.key("w", true, false, true, &b), key("w"));
         // a capture's key
-        e.hold_back("f10");
-        assert_eq!(e.key("f10", false, false, false, &b), None);
+        e.hold_back("f2");
+        assert_eq!(e.key("f2", false, false, false, &b), None);
         // △'s row, which has no key in the game, given B: B presses △
         b.bind_key(row_named("clear_target").unwrap(), "b");
         assert_eq!(e.key("b", true, false, false, &b), Some(Sent::Button(bit::TRIANGLE)));
@@ -2192,8 +2190,8 @@ mod tests {
         assert!(space_is_jumps(&b));
         assert_eq!((default_row("space"), default_row("v"), default_row("g")), (Some(jump), Some(jump), Some(attack)));
         let mut moved = Binds::default();
-        assert_eq!(moved.bind_key(jump, "y"), Moved::Freed(Some("space".into())));
-        assert_eq!((moved.alias("y"), moved.alias("space"), moved.alias("v")), (Alias::To("space"), Alias::Nothing, Alias::Nothing));
+        assert_eq!(moved.bind_key(jump, "b"), Moved::Freed(Some("space".into())));
+        assert_eq!((moved.alias("b"), moved.alias("space"), moved.alias("v")), (Alias::To("space"), Alias::Nothing, Alias::Nothing));
         assert!(!space_is_jumps(&moved), "Space left with nothing");
         let mut taken = Binds::default();
         assert_eq!(taken.bind_key(row_named("talk").unwrap(), "space"), Moved::Swapped(jump));
@@ -2237,9 +2235,9 @@ mod tests {
         }
         // the jump's row moved onto B: B is the jump's everywhere, Space nothing
         let mut moved = Binds::default();
-        moved.bind_key(row_named("jump").unwrap(), "y");
-        assert_eq!(e.key("y", true, false, false, &moved), key("space"));
-        e.key("y", false, false, false, &moved);
+        moved.bind_key(row_named("jump").unwrap(), "b");
+        assert_eq!(e.key("b", true, false, false, &moved), key("space"));
+        e.key("b", false, false, false, &moved);
         assert_eq!(e.key("space", true, false, false, &moved), None);
         e.key("space", false, false, false, &moved);
         // Talk on Space: Talk's
@@ -2264,8 +2262,8 @@ mod tests {
         assert_eq!((b.key(attack), b.key(talk), b.key(jump)), (Some("q"), Some("space"), Some("g")));
         let b = Binds::from_text("key.hide_ui=g\n");
         assert_eq!((b.key(hide), b.key(attack), b.key(jump)), (Some("g"), Some("h"), Some("space")));
-        let b = Binds::from_text("key.jump=y\n");
-        assert_eq!((b.key(jump), b.alias("space"), b.alias("v"), b.alias("y")), (Some("y"), Alias::Nothing, Alias::Nothing, Alias::To("space")));
+        let b = Binds::from_text("key.jump=b\n");
+        assert_eq!((b.key(jump), b.alias("space"), b.alias("v"), b.alias("b")), (Some("b"), Alias::Nothing, Alias::Nothing, Alias::To("space")));
         let b = Binds::from_text("macro.3.key=g\nmacro.3.buttons=cross+circle\n");
         assert_eq!((b.macros[2].triggers.clone(), b.alias("g"), b.key(attack)), (vec![vec![Input::Key("g".into())]], Alias::Macro, Some("")));
         assert_eq!(b.alias("space"), Alias::Same, "Space still the jump's");
