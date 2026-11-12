@@ -294,3 +294,95 @@ Part B search checkpoint: bundled search ports catalogue/journal/live/group/plac
 Part B native-removal checkpoint: deleted native map/search.rs and map/journal.rs and their input/feed/draw/exit hooks, including mapshot search fixtures. Native F2/F4 rows are gone; one-time fork-owned journal/key migration remains. Catalogue/font/licences moved under the search mod; round-minimap typography references that font until Part C. Part B subset28/0/0/SKIP0 after removal; bundled installer23 passed/0 failed/1 ignored (external pinned-reference prerequisite), SKIP0; player-release Python suite20 passed. Native map/play/viewer/binds divergence against reviewed11aa5f0 falls from +4523/-153 to +985/-144. Tightened13 shared budgets, including existing loose net/session and render/ui budgets; full table in final section pending. Footprint PASS. origin/master advanced independently to3439fb1, so reviewed-base accounting stays11aa5f0; dry-run upstream conflicts are recorded separately.
 
 Part B GPU checkpoint: real Manager, both default-on mods, actual Space Mono ready, native map/minimap draw passes and GPU readback now run with a1,411,026-byte/23,000-spawn journal. Initial unfiltered result sort exhausted4M Lua instructions; cached distances fixed it (observed RED then GREEN). Debug Manager.frame CPU120frames: mean3.065ms,p50 2.957ms,p95 4.175ms,max6.733ms; release measurement pending. `map-manager-font-green.log`:1/0/0/SKIP0; whole Part B29/0/0/SKIP0 in44.59s. PNGs r4-search-map/minimap.png inspected; native disc-free fixtures show real chrome/round minimap, with terrain absent because noISO is available. Release numbers/full gates remain pending.
+
+
+## Part C: round minimap mod and upstream's map files back (2026-11-11)
+
+Branch `feat/eqoa-api-r4c` (from `feat/eqoa-api-r4` at d9f177a; develop merged first, 3a096b7). Not pushed or merged. Independent review and the owner's playtest are pending.
+
+### What changed
+
+- **New bundled mod `eqoa_round_minimap`** (on by default; `bundled-mods/eqoa_round_minimap/`, about 230 lines of Lua). It claims `eqoa.hud.hide("minimap")`, holds one `eqoa.map.view{size=112}` and shows the picture (cropped by the frame border) with `eqoa.hud.image{shape="circle"}` in the rectangle from `eqoa.hud.layout().minimap` (so it follows Move HUD), with a ring. The content is upstream's own minimap drawing: terrain, indoor view, camps, coaches, quest marks, waypoints, group, and the creature/player/pet dots in their name colours. Hovering a creature, player or pet gives the card (name, level, Player/Pet/NPC, distance; Space Mono, gold title); hovering a camp/coach/town/quest/waypoint mark gives its name. The wheel inside the circle goes to `eqoa.input.minimap_wheel`; clicks, wheel and pointer over the circle are claimed with 14 strips that follow the circle's edge. N works because the view is empty while the stock setting is off. Mod off = upstream's square minimap, untouched.
+- **Rim arrows**: upstream's own rim marks (waypoint, group waypoint, quest steps) are clamped to the square's edge, so the circle crops the ones that point diagonally. The view offers only `layers="all"`, so the mod draws its own arrow just outside the ring for the player's waypoint and the group waypoint, only where the square's mark would be cropped. A quest step pointing diagonally off the edge is still cropped (see gaps).
+- **API additions** (neutral, in fork-owned files): `eqoa.map.get()` now has `minimap` (stock setting on and in view, whether or not a mod hides it), also in the map-change fingerprint; documented in the spec. The Map Search mod follows `map.minimap` instead of `hud.visible("minimap")`, which is false while another mod hides the stock minimap (without this its button and box vanished: observed RED).
+- **Capture bug fixed (Part A's view)**: the native map pipelines write colour only, so the captured texture was cleared to transparent and stayed alpha 0 everywhere; `hud.image` drew nothing (found by reading the canvas back: 34,560 non-zero RGB pixels, 0 non-zero alpha). The canvas now clears to opaque black (ground with no art is black). Part A's synthetic-texture check could not have seen this.
+- **Removed from upstream's files**: circle mask, `Dot` and hover card, masked draws, ring, theme font, badge restyle, the binding-aware legend (the M map has upstream's key legend), the `Map::off` change, fixtures in `tool.rs`/`tests.rs`/`community.rs`, `theme.rs`, the circle and legend code in `fork_ext/map.rs`, and in `render`: `map.rs`, `map.wgsl`, `ui.wgsl`, `ui.rs` (circle mask, `add_font_at_height`, `draw_range`, `draw_circle_range`) and `tests/map_circle.rs`; also the two circle test files (`map_sync_tests.rs`, `map_move_tests.rs`). `play.rs` feeds upstream's dot tuples again.
+- **Two defects found by the full suites and fixed** (both came in with Part B; neither was in my brief): other mods' `eqoa.input.bind` callbacks fired on typed keys while another mod's text editor owned the keyboard (F8 toggled Stats Box while typing in a chat editor; `text_capture_blocks(vm)` now keeps them quiet, the editor's own VM still sees its keys); and `eqoa.files.load_json` of a file a mod has not written yet (the journal on first run) recorded a diagnostic in the Addon Manager (it is `not_found` now, which is silent). Both were observed RED before and GREEN after in existing tests.
+- Release notes: `FORK-UPDATE-NOTES.md` Unreleased. Spec: section 7, `MapState.minimap`.
+
+### Tests (real Manager, bundled mod files, GPU readback)
+
+Fixture: Play fixture + a disc-free native scene (`Map::round4_fixture`/`round4_mini_frame`, a green stand-in for terrain: no disc here) + the route the viewer uses (`fork_ext::map::draw_minimap`). Negative controls were run by mutating the mod (or the search mod) and watching the named test fail, then restoring.
+
+| Requirement | Test | Negative control (run) |
+|---|---|---|
+| stock minimap hidden and its clicks blocked while on, back when off; one native draw per frame | `round_minimap_hides_stock_blocks_its_clicks_and_returns_when_off` (stock takes clicks before the mod runs; 5 frames = 5 draws; mod off = 3 frames, 3 draws) | `hud.hide` removed: FAIL "the mod hides the stock minimap" |
+| circle follows a Move HUD move; picture cut to a circle | `round_minimap_circle_follows_move_hud_and_clips_to_a_circle` (corner outside the circle is background while the stock square draws that corner; after the drag the picture is at the new place and gone from the old one) | image placed at a fixed rectangle instead of the layout: FAIL "picture at the new place" |
+| dot under the pointer gives the right card | `round_minimap_dot_card_wheel_zoom_and_n_toggle`: Test Rat at (+40,+30) shows "Test Rat / Level 7 / NPC / 50 away"; no card away from it | hit test disabled: FAIL "a card on the dot" |
+| wheel zooms the native minimap; outside the circle does not | same test: `take_wheel()` outside = 0, inside > 0, `mini_wheel` lowers the scale | `minimap_wheel` call removed: FAIL "inside the circle: a zoom request" |
+| N toggles | same test: stock setting off = no round minimap, on = back | the on/off/on sequence is its own control |
+| rim mark position for an off-edge marker | `round_minimap_rim_arrow_only_where_the_circle_crops_the_square_mark`: a south-east waypoint 3000 away gives one arrow just outside the ring on the south-east diagonal; an east waypoint and a near one give none | crop test forced false: FAIL "one rim arrow for the diagonal waypoint: []" |
+| search button and box on the round minimap | `round_minimap_carries_the_search_button_and_box_when_the_search_mod_is_on` (F2 opens the box, red controls render) | search mod back on `hud.visible("minimap")`: FAIL "F2 opens the search box" |
+| world map keeps window coordinates at Render Scale 1/2/4 | `world_map_stays_in_window_coordinates_at_render_scales` (moved from `map/tests.rs` to `fork_ext/map_render_tests.rs`; the old one relied on a fork-only capture) | runs at 3 scales x 2 sizes |
+
+Captures for the owner (disc-free scene, green stands in for terrain; no indoor fixture without the disc): `r4-minimap-outdoors.png`, `r4-minimap-moved.png`, `r4-minimap-hover-card.png`, `r4-minimap-search.png` in this folder.
+
+### Suites
+
+| Run | Pass | Fail | Ignored | Explicit SKIP lines |
+|---|---:|---:|---:|---:|
+| `cargo test -p eqoa --bin eqoa fork_ext::addons:: -- --test-threads=1` | 432 | 0 | 25 | 9 |
+| `cargo test -p eqoa --bin eqoa -- --test-threads=1` (once, at the end) | 2070 | 0 | 32 | 208 |
+| `cargo test -p render --lib` | 47 | 0 | 0 | 0 |
+| `cargo check -p eqoa --target wasm32-unknown-unknown` | PASS | | | |
+| `python -X utf8 tools/test_player_release.py` | 20 | 0 | | |
+| footprint `--base 11aa5f0` | PASS | | | |
+
+The zero-addon allocation gate and round 3's four-mod allocation gate pass (the latter only after `hud_layer.rs`'s allocation-free text path was kept: see `ui.rs` below). The SKIPs are the missing disc, modules, live server, Forge reference and Windows symlink privilege as before. Bundled Wereoxxs, ARPG, Modern UI and the round 3 and 4 mods pass in the addon suite.
+
+### Frame time (release, busy world: 200 extra creatures near the player, 300 frames each, whole frame including the fixture's native minimap and the ImGui pass)
+
+| Mods on | mean ms | p50 | p95 | max |
+|---|---:|---:|---:|---:|
+| none | 1.20 | 0.78 | 3.68 | 7.25 |
+| round 3's four | 2.83 | 2.40 | 5.99 | 9.31 |
+| creature journal | 1.80 | 1.27 | 5.36 | 8.49 |
+| journal + map search | 3.61 | 3.18 | 6.77 | 18.97 |
+| round minimap, pointer away | 2.84 | 2.23 | 6.53 | 12.22 |
+| round minimap, pointer on the circle | 2.91 | 2.13 | 6.30 | 25.63 |
+| round 4's three | 5.30 | 4.17 | 14.82 | 49.33 |
+| round 3's four + round 4's three | 5.98 | 5.23 | 11.96 | 29.64 |
+
+The workload ran: the test asserts every wanted mod loaded and enabled, the circle was showing and the world held at least 200 entities. The machine was shared with other builds, so p95 and max are noisy (the same configuration moved by a few ms between runs); read the means. The first version of the hover scan called `eqoa.entities.list()` (200 tables) every frame and cost 12-13 ms a frame while the pointer was on the circle; it now reads the list every 30 frames and tests only the creatures near the pointer in between (about 12 ms once per 30 frames while hovering, nothing otherwise). Not measured: develop's native round minimap plus search in the same harness (it needs a second build of develop with a matching benchmark). The native round minimap's own cost is replaced by one extra full-window capture draw; the mods' share is the difference from the "none" row.
+
+### Footprint before/after (start of round = develop 9e7257a vs this branch, against upstream 11aa5f0)
+
+| | start of round | now |
+|---|---:|---:|
+| fork lines in shared (upstream) files, added / deleted | 5,417 / 269 | 1,007 / 209 |
+| dry-run merge conflicts with origin/master (`git merge-tree`) | 5 files (options, play, settings, viewer, net/session) | 4 files (options, play, settings, net/session) |
+
+Budgets in `docs/fork-footprint.json`: eleven removed (chrome, community, journal, markers, search, tests, theme, tool, render `map.rs`, `map.wgsl`, `ui.wgsl`); `map/mini.rs` 242/14 to 1/0, `map/mod.rs` 16/6 to 4/0, `play.rs` 148/55 to 95/54, `render/ui.rs` 67/2 to 1/1. No budget raised.
+
+### What still differs from upstream in the map family (`git diff 11aa5f0 --`)
+
+| File | +/- | Reason | Sync cost |
+|---|---|---|---|
+| `map/mini.rs` | +1/0 | the neutral map overlay call (guides) | one line next to `let mut r = ...raster(ui)`; conflicts only if upstream rewrites that spot |
+| `map/mod.rs` | +4/0 | `#[path] mod extension` (private-accessor module `fork_ext/map_api.rs`, native only) and the overlay call in the M map draw | two small hunks |
+| `render/src/ui.rs` | +1/-1 | `Font::find` made `pub` so addon HUD text streams glyph quads without upstream's per-string Vec | one word; can go if upstream exposes glyph lookup |
+| everything else in `map/**`, `tracker.rs`, `groupmark.rs`, `mapsuggest.rs`, `render/src/map.rs`, `map.wgsl`, `ui.wgsl` | 0 | equal to upstream | none |
+
+### Packaging
+
+`bundled-mods/SOURCE.txt`, `BUNDLED_MOD_FILES` and the test list in `tools/`, and the embedded list in `fork_ext/bundled.rs` carry the five new files and refreshed hashes (including the changed `eqoa_map_search/main.lua`). `.gitattributes` keeps `mods/resources/map-entities.json` byte-exact (autocrlf made its pinned hash fail on Windows). The real packaging dry run is recorded under "Release and packaging" below.
+
+### Parity gaps and not done
+
+- Clicking the round minimap does not open the M map (no mod API opens the map; M works). The stock square did.
+- Quest steps that point diagonally off the minimap edge are cropped by the circle (only waypoint and group waypoint get rim arrows); a `layers="map"` view option would let the mod draw every rim mark itself.
+- Ground with no map art is opaque black in the circle (upstream's square shows the 3D world through it).
+- No indoor capture (no disc). Terrain, tiles, real dots and real marks were never drawn in this PC's tests (green stand-in); the owner's playtest must confirm them.
+- Hover cards for the quest "!" and "?" marks and the XP-camp badges use the markers list (names and labels), not upstream's richer native cards.
+- develop-vs-mods frame-time comparison not measured (above).
+- Runtime disable/enable of the mod was tested (stock returns, one draw a frame); a lost graphics device with a held view is covered by Part A's tests, not re-run with the mod.
