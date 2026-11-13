@@ -49,7 +49,7 @@ the isolated GPU test. The additional widgets fixture is authored for this spike
 
 ## Verification commands and evidence
 
-PowerShell prerequisite: prepend `C:/Users/hocka/.cargo/bin` to PATH.
+PowerShell prerequisite: prepend `%USERPROFILE%/.cargo/bin` to PATH.
 
 1. `cargo fetch` — passed through authorized escalation; fourteen lock additions.
 2. `cargo test --locked -p eqoa forge_host -- --test-threads=1` — red: three

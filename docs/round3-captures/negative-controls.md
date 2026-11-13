@@ -168,15 +168,15 @@ E
 ERROR: test_exact_player_archive_and_hash_bound_update_assets (tools.test_player_release.PlayerReleaseTests.test_exact_player_archive_and_hash_bound_update_assets)
 ----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "C:\Users\hocka\.paseo\worktrees\1usktejc\eqoa-api-r3\tools\test_player_release.py", line 203, in test_exact_player_archive_and_hash_bound_update_assets
+  File "<worktree:eqoa-api-r3>\tools\test_player_release.py", line 203, in test_exact_player_archive_and_hash_bound_update_assets
     self.build()
     ~~~~~~~~~~^^
-  File "C:\Users\hocka\.paseo\worktrees\1usktejc\eqoa-api-r3\tools\test_player_release.py", line 200, in build
+  File "<worktree:eqoa-api-r3>\tools\test_player_release.py", line 200, in build
     return self.packager.build_release(**options)
            ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
-  File "C:\Users\hocka\.paseo\worktrees\1usktejc\eqoa-api-r3\tools\build_player_release.py", line 318, in build_release
+  File "<worktree:eqoa-api-r3>\tools\build_player_release.py", line 318, in build_release
     expected_mod_hashes = load_bundled_mod_sources(bundled_dir)
-  File "C:\Users\hocka\.paseo\worktrees\1usktejc\eqoa-api-r3\tools\build_player_release.py", line 161, in load_bundled_mod_sources
+  File "<worktree:eqoa-api-r3>\tools\build_player_release.py", line 161, in load_bundled_mod_sources
     raise ValueError("SOURCE.txt file allowlist mismatch with expected bundled mods")
 ValueError: SOURCE.txt file allowlist mismatch with expected bundled mods
 
@@ -194,7 +194,7 @@ F
 FAIL: test_tampered_bundled_mod_file_fails (tools.test_player_release.PlayerReleaseTests.test_tampered_bundled_mod_file_fails)
 ----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "C:\Users\hocka\.paseo\worktrees\1usktejc\eqoa-api-r3\tools\test_player_release.py", line 416, in test_tampered_bundled_mod_file_fails
+  File "<worktree:eqoa-api-r3>\tools\test_player_release.py", line 416, in test_tampered_bundled_mod_file_fails
     with self.assertRaisesRegex(ValueError, "checksum|tampered|mismatch"):
          ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 AssertionError: ValueError not raised

@@ -23,7 +23,7 @@ Report results in a player's terms, with what was tested and what was not.
    requests. Direction and the order of work (owner, 2026-11-09): `docs/plans/EQOA-MOD-API-PLAN.md`.
    The fork is heading for "upstream plus mods": neutral hooks are offered upstream, the fork's own
    features move into mods, and each round runs in the order that plan gives (2.5, 3, 3u, 4 to 7).
-3. Read `C:\Users\hocka\Paseo\Agent_Learning_Instructions.md` and the experience log beside it. Add an
+3. Read `%USERPROFILE%\Paseo\Agent_Learning_Instructions.md` and the experience log beside it. Add an
    entry there after each meaningful task, and update the existing entry when the owner's test
    results arrive.
 4. Check `git status`, the branch, and `git worktree list` before touching anything.
@@ -39,7 +39,7 @@ Report results in a player's terms, with what was tested and what was not.
 
 - A **worktree** is a separate folder with its own branch checked out, sharing one repository. Give
   each concurrent agent its own Paseo worktree (`create_workspace`, isolation `worktree`) so agents
-  never edit the same folder. The main checkout (`C:/Users/hocka/Github Projects/EQOA Native Rust`)
+  never edit the same folder. The main checkout (`<repo>`)
   stays on `develop`.
 - A feature merges into `develop` after its tests pass, the footprint check passes and an independent
   review is done. `develop` merges into `enhanced` only for a release the owner approved, after the
@@ -68,7 +68,7 @@ workers. Read `list_profiles` and pick by each profile's notes. Defaults:
   branch, tell it to commit only there (no push, merge, tag, or other folders), and review its diff
   before anything merges.
 
-One cargo build at a time across all agents: builds are slow and share the CPU. All agents share ONE `CARGO_TARGET_DIR`, `C:/Users/hocka/Paseo/targets/shared` (the builds are serial
+One cargo build at a time across all agents: builds are slow and share the CPU. All agents share ONE `CARGO_TARGET_DIR`, `%USERPROFILE%/Paseo/targets/shared` (the builds are serial
 behind the lock anyway, so one cache serves every branch; separate folders cost about 10-15 GB each and
 filled the owner's SSD on 2026-11-09). Never create a per-worktree or per-task target folder. Before you
 finish, delete any `target` folder you made inside a worktree, and the lead deletes a retired worktree's
@@ -116,6 +116,6 @@ section there before changing a ported system (anything under `crates/vi`, `ee`,
 
 ## Platform
 
-Windows 11, PowerShell and Git Bash. Rust in `C:/Users/hocka/.cargo/bin`, Python at
+Windows 11, PowerShell and Git Bash. Rust in `%USERPROFILE%/.cargo/bin`, Python at
 `C:/Python314/python.exe`. Managed worktrees need `git -c safe.directory=*` per command; leave global
-git config alone. The owner's disc: `C:\Users\hocka\Documents\PS2 Games\`.
+git config alone. The owner's disc: `$EQOA_ISO`.

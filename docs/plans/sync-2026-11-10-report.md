@@ -4,7 +4,7 @@
 
 Merged `82e64c86df07fcdac9cba39e4cc6c5020032953d` into `sync/2026-11-10` from develop `abd47db`.
 Merge: `724e7fa`; follow-ups: `ef3c265`, tested source `b237316`.
-Worktree: `C:/Users/hocka/Github Projects/eqoa-sync-2026-11-10`.
+Worktree: `<repo:eqoa-sync-2026-11-10>`.
 No push, tag or merge into develop/enhanced/master.
 
 Client/net, addon, WASM, tools, notes, optimized allocation, release and packaging
@@ -104,8 +104,8 @@ Physical-device and live browser touch were not tested.
 
 **Batch 1 verification and footprint**
 
-Every cargo command used `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`,
-an atomic mkdir lock at `C:/Users/hocka/Paseo/cargo-build.lock`, 30-second retries,
+Every cargo command used `CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/shared`,
+an atomic mkdir lock at `%USERPROFILE%/Paseo/cargo-build.lock`, 30-second retries,
 a bounded lock wait, per-command timeout (1,200?3,600 seconds) and scratch
 EQOA_CONFIG. The sync script uses its own scratch target/sync-config, one thread.
 CI-style Windows workspace/optimized/release use Rust 1.99.1, explicit
@@ -180,7 +180,7 @@ CLAUDE.md: native/browser server-world composition streams one zone through
 Disc/Sink at a time and preserves parity with server Compose/CRC.
 
 Evidence and temporary local packages:
-`C:/Users/hocka/AppData/Local/Temp/eqoa-sync-2026-11-10-gates`.
+`%LOCALAPPDATA%/Temp/eqoa-sync-2026-11-10-gates`.
 Includes command/exit JSON, detailed logs, source audit, rerere record, footprint
 metrics, untouched-upstream control and both dry runs. The worktree target folder
 contains only sync logs/config, no Cargo cache; it will be archived and removed
@@ -310,7 +310,7 @@ build, with EQOA_UPDATE_CHANNEL=enhanced-dev and EQOA_BUILD_COMMIT equal to its
 full HEAD. Because that gate must postdate this file's commit, its authoritative
 receipt is **release-final.json/log**, and the final package's independent
 allowlist/PE/source-SHA/checksum verification is **packaging-final.json/log** in
-`C:/Users/hocka/AppData/Local/Temp/eqoa-sync-2026-11-10-gates`. The final response states their actual outcome. The package
+`%LOCALAPPDATA%/Temp/eqoa-sync-2026-11-10-gates`. The final response states their actual outcome. The package
 is local only; no publication/push/tag/protected-branch merge is authorized.
 
 After that gate, sync logs/config are archived as target-archive, and the

@@ -1,6 +1,6 @@
 # Native addon sound stage — requirements and review ledger
 
-Owner authorized resuming the next bounded step on 2026-10-29 using Paseo profiles; Claude unavailable. Base: forge-compatibility 5757646. Worktree C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility is already isolated and clean. This file is the task brief. No broad full compatibility/release claim.
+Owner authorized resuming the next bounded step on 2026-10-29 using Paseo profiles; Claude unavailable. Base: forge-compatibility 5757646. Worktree <worktree:forge-compatibility> is already isolated and clean. This file is the task brief. No broad full compatibility/release claim.
 
 ## Binding scope
 Read worktree FORK.md, AGENTS.md and docs/FORGE-COMPATIBILITY-HANDOFF.md first. Implement sound only, native-owned addons modules; no maps/engine/shared audio.rs/snd/Session/dependency/policy changes. Local commits allowed after tests, no push/release. No subagents. You are the sole implementation editor/compiler. Existing profile/disc/account files must remain untouched; use scratch paths.
@@ -22,7 +22,7 @@ Close failures retain counted records and diagnostics with bounded retries; term
 3. Filesystem containment incl canonical symlink escape where privileges available (explicit skip), Unicode/space/native paths, legacy absolute resources, system media allowlist, zero-size/corrupt file failure. Scope skips honestly.
 4. Manager lifecycle tests exercise production integration: enable, ordinary disable/re-enable same handles, inactive callback playback blocked, failed reload preserves state; successful reload/failure/remove/shutdown including throwing and allocating final callbacks disposes. Runtime error/pause stops; successful recovery permits NEW playback without automatically replaying. Use existing GPU test harness if needed; serialize ImGui tests.
 5. Real Windows generated quiet short PCM WAV test verifies native load/cached id/play/query/stop/volume/release, with exact device/codec unavailability skip reason only for genuine environmental prerequisite failures. A successful open alone is not proof of playback. Never hide assertions behind blanket skip. User listening is a later manual gate.
-6. Focused RED->GREEN, then one pinned serial addon suite --locked --nocapture --test-threads=1 with EQOA_FORGE_SPIKE=C:/Users/hocka/Github Projects/EQOA Native Rust/run/forge-compat-reference/scripts/screen_grid.lua. Native build and WASM check appropriate after cfg/OS-link changes. Do not run exhaustive workspace. Same target cache/worktree/toolchain; no competing compiler. Run rustfmt touched Rust and diff --check. Record exact commands and every SKIP.
+6. Focused RED->GREEN, then one pinned serial addon suite --locked --nocapture --test-threads=1 with EQOA_FORGE_SPIKE=<repo>/run/forge-compat-reference/scripts/screen_grid.lua. Native build and WASM check appropriate after cfg/OS-link changes. Do not run exhaustive workspace. Same target cache/worktree/toolchain; no competing compiler. Run rustfmt touched Rust and diff --check. Record exact commands and every SKIP.
 
 ## Files and delivery
 Allowed implementation files: addons/sound.rs and its owned child/tests; addons/manager.rs, addons/runtime.rs, addons/mod.rs; docs/FORGE-SOUND-REPORT.md, FORK-UPDATE-NOTES.md. If additional seam required, stop and describe exact need; lead owns status/handoff updates. No fonts, unrelated cleanup or other game APIs.
@@ -52,7 +52,7 @@ Add actual regression RED evidence before fixes for containment and negative Lua
 Record round1/5, exact changed tests/commands/results, source-negative or RED evidence and fixed-vs-deferred findings. No merge/push/release or fonts.
 
 ## Round1 result and fix round2/5 ruling (base ada9092)
-Round1 NOT ACCEPTED: C1/I2 and M6/M7 remain, I4 partial; I3/I5/M8/aggregate/close assertions addressed. New N1 ungated aggregate test and N2 relative containment widening are critical, N3 short playing test races. Full findings: ABSOLUTE C:/Users/hocka/Github Projects/EQOA Native Rust/run/forge-sound-stage/minimax-review.md rev3. Files are NOT in Forge/run. Read this exact file; if inaccessible STOP and report rather than guessing from abbreviated instructions.
+Round1 NOT ACCEPTED: C1/I2 and M6/M7 remain, I4 partial; I3/I5/M8/aggregate/close assertions addressed. New N1 ungated aggregate test and N2 relative containment widening are critical, N3 short playing test races. Full findings: ABSOLUTE <repo>/run/forge-sound-stage/minimax-review.md rev3. Files are NOT in Forge/run. Read this exact file; if inaccessible STOP and report rather than guessing from abbreviated instructions.
 
 Required minimal fixes:
 1. Put actual #[cfg(windows)] on forge_sound_monotonic_id_exhaustion_guard, forge_sound_handle_and_file_size_limits, forge_sound_aggregate_budget_rejects_before_os_open. Use created temp files, no tada.wav dependency. Add non-Windows-only UnsupportedPlatform assertion; do not claim Linux execution.

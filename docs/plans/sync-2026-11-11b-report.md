@@ -7,7 +7,7 @@ Status: required automated gates PASS; independent lead review and owner playtes
 Started from develop `b1d277f` (the 0.5.0 preparation commit after `acafc33`).
 Merged all 11 commits through upstream `11aa5f088bb52d5f306b0224e37b782b1bf4503d`
 with a two-parent merge, `5ae723d`, on `sync/2026-11-11b` in
-`C:/Users/hocka/Github Projects/eqoa-sync-2026-11-11b`.
+`<repo:eqoa-sync-2026-11-11b>`.
 Used `python tools/sync_upstream.py --date 2026-11-11b` and the script's continue path.
 The upstream history also includes two merge commits; the brief's nine named non-merge commits remain intact.
 
@@ -87,7 +87,7 @@ unchanged: HUD +52/-14, mini +266/-14, Play +262/-60 and viewer +101/-11 fit the
 existing maxima. No crash-report path changed relative to develop's starting commit.
 
 The separate addon suite is a repeated subset, not 377 additional unique tests.
-Evidence: `C:/Users/hocka/AppData/Local/Temp/eqoa-sync-2026-11-11b-gates`
+Evidence: `%LOCALAPPDATA%/Temp/eqoa-sync-2026-11-11b-gates`
 (`script-7.json`, `script-7-cargo.log`, `addons.json/log`, `wasm.json/log`,
 `footprint-final.log`, `source-audit.json`, `test-skips.json`). Earlier measured
 failures are retained in script receipts and the archived cargo logs where available.

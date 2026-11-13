@@ -729,17 +729,8 @@ fn forge_icon_get_ui_texture() {
 
 #[test]
 fn forge_icon_real_disc_ui_and_item_icon_pixel_match() {
-    let iso_path = std::env::var("EQOA_ISO").ok().or_else(|| {
-        let p = "C:/Users/hocka/Documents/PS2 Games/EverQuest - Online Adventures - Frontiers (USA).iso";
-        if std::path::Path::new(p).exists() {
-            Some(p.to_string())
-        } else {
-            None
-        }
-    });
-
-    let Some(path) = iso_path else {
-        eprintln!("SKIP forge_icon: disc ISO not found");
+    let Some(path) = std::env::var("EQOA_ISO").ok().filter(|p| !p.is_empty()) else {
+        eprintln!("SKIP forge_icon: EQOA_ISO not set");
         return;
     };
 
@@ -1114,9 +1105,11 @@ fn forge_icon_lazy_fallback_queues_and_resolves_on_next_frame() {
 
 #[test]
 fn forge_icon_real_disc_enumerated_ability_icons_resolve() {
-    let iso_path =
-        "C:/Users/hocka/Documents/PS2 Games/EverQuest - Online Adventures - Frontiers (USA).iso";
-    let mut iso = match iso::Iso::open(iso_path) {
+    let Ok(iso_path) = std::env::var("EQOA_ISO") else {
+        eprintln!("SKIP forge_icon: EQOA_ISO not set");
+        return;
+    };
+    let mut iso = match iso::Iso::open(&iso_path) {
         Ok(iso) => iso,
         Err(e) => {
             eprintln!("SKIP forge_icon: failed to open disc {iso_path}: {e}");

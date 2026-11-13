@@ -109,7 +109,7 @@ Following independent review in [`docs/FORGE-DISCOVERY-REVIEW.md`](FORGE-DISCOVE
 
 Command:
 ```powershell
-$env:PATH = "C:\Users\hocka\.cargo\bin;$env:PATH"
+$env:PATH = "%USERPROFILE%\.cargo\bin;$env:PATH"
 cargo test --locked -p eqoa addon_discovery -- --nocapture
 ```
 

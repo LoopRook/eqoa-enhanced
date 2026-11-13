@@ -74,7 +74,7 @@ Commands used VS18 BuildTools process-local environment and worktree target cach
 cargo test --locked -p eqoa forge_drawlist_ -- --nocapture --test-threads=1
 cargo test --locked -p eqoa forge_drawlist_child_clip_differs_from_background_gpu -- --nocapture --test-threads=1
 cargo test --locked -p eqoa forge_drawlist_all_shape_families_have_distinct_fill_outline_exterior_gpu -- --nocapture --test-threads=1
-$env:EQOA_FORGE_SPIKE='C:/Users/hocka/Github Projects/EQOA Native Rust/run/forge-compat-reference/scripts/screen_grid.lua'
+$env:EQOA_FORGE_SPIKE='<repo>/run/forge-compat-reference/scripts/screen_grid.lua'
 cargo test --locked -p eqoa fork_ext::addons:: -- --nocapture --test-threads=1
 git diff --check
 ```

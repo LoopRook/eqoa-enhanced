@@ -3,8 +3,8 @@
 Checker: independent review of `feat/eqoa-api-r3` (HEAD `9bdb80d`) against
 `docs/plans/eqoa-api/round-3-brief.md` and `round-3-report.md`.
 Every number below comes from a rerun in this worktree with
-`CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`, a scratch `EQOA_CONFIG`,
-the `C:/Users/hocka/Paseo/cargo-build.lock` protocol, and the shared target dir only.
+`CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/shared`, a scratch `EQOA_CONFIG`,
+the `%USERPROFILE%/Paseo/cargo-build.lock` protocol, and the shared target dir only.
 
 ## Verdict: DISCREPANCIES FOUND
 

@@ -55,7 +55,7 @@ atlas; blank ability icons are an explicit fixture limit, not verified game-art 
 ## Validation
 
 Final integrated checks at `c7a5498` (the options merge), all run in this worktree with
-`CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared` and a scratch `EQOA_CONFIG`:
+`CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/shared` and a scratch `EQOA_CONFIG`:
 
 | Check | Result |
 | --- | --- |
@@ -190,6 +190,6 @@ held `merge.ours.driver=true`, so `git merge --no-commit --no-ff origin/master`
 immediately; HEAD stayed at `c7a5498` and `git status` is clean. No merge into develop or
 upstream was performed.
 
-All Cargo commands use `C:/Users/hocka/Paseo/targets/shared`, one at a time, with a scratch
+All Cargo commands use `%USERPROFILE%/Paseo/targets/shared`, one at a time, with a scratch
 `EQOA_CONFIG`; no worktree target directory was created. The packaging check wrote only to
 `%TEMP%`. The dry-run merge changed no protected branch.

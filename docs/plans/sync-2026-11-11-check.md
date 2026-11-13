@@ -27,7 +27,7 @@ Other test changes add new tests or test-only helpers; net changes remove commen
 
 ## 5. Reruns
 
-Each Cargo command used a freshly created empty `EQOA_CONFIG`, `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`, a separately acquired atomic `C:/Users/hocka/Paseo/cargo-build.lock`, foreground execution and a 3,600-second timeout; lock removed after each. Counts:
+Each Cargo command used a freshly created empty `EQOA_CONFIG`, `CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/shared`, a separately acquired atomic `%USERPROFILE%/Paseo/cargo-build.lock`, foreground execution and a 3,600-second timeout; lock removed after each. Counts:
 
 | Filter | Passed | Failed | Ignored | Exit |
 |---|---:|---:|---:|---:|
@@ -37,4 +37,4 @@ Each Cargo command used a freshly created empty `EQOA_CONFIG`, `CARGO_TARGET_DIR
 | `the_label_says_the_upstream_commit_it_is_synced_to` | 1 | 0 | 0 | 0 |
 | `the_note_on_the_wire_is_labelled` | 1 | 0 | 0 | 0 |
 
-Rust's default test capture hides output of passing tests, so these counts do not establish how many prerequisite-based early returns occurred. The separate negative-control invocation used the same lock/target/timeout and its own fresh configuration. `python tools/check_fork_footprint.py --base a3cedec7d8bb2688cf8ed56d34a280f4a459b0ef` exited 0, PASS; all hooks met their recorded counts. No worktree `target` directory was created. Logs: `C:/Users/hocka/AppData/Local/Temp/eqoa-check-nfdi7_xt/`.
+Rust's default test capture hides output of passing tests, so these counts do not establish how many prerequisite-based early returns occurred. The separate negative-control invocation used the same lock/target/timeout and its own fresh configuration. `python tools/check_fork_footprint.py --base a3cedec7d8bb2688cf8ed56d34a280f4a459b0ef` exited 0, PASS; all hooks met their recorded counts. No worktree `target` directory was created. Logs: `%LOCALAPPDATA%/Temp/eqoa-check-nfdi7_xt/`.

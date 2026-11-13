@@ -28,7 +28,7 @@ Measured against `8435f2c8a00c631d716771f8189fa0011a1fbf50`: `play.rs +759/-53`,
 
 ## Verification
 
-All Cargo commands use `C:/Users/hocka/Paseo/targets/eqoa-api-r2`, the shared mkdir lock with timeout, and a scratch `EQOA_CONFIG` under the system temporary directory. Tests use one thread. No game assets, credentials, run directory or Testing Resources content are committed.
+All Cargo commands use `%USERPROFILE%/Paseo/targets/eqoa-api-r2`, the shared mkdir lock with timeout, and a scratch `EQOA_CONFIG` under the system temporary directory. Tests use one thread. No game assets, credentials, run directory or Testing Resources content are committed.
 
 | Gate | Result |
 |---|---|

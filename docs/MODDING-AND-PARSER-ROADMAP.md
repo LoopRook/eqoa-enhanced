@@ -34,7 +34,7 @@ The user selected external integration with [LoopRook/EQOA-Parser](https://githu
 Evidence from the October 28 review:
 
 - The desktop launcher invokes `eqoa_parser/app.py` directly. Reproducing this command fails with `ImportError: attempted relative import with no known parent package`. The package entry point is `python -m eqoa_parser --client`.
-- Desktop, batch, in-game, and manifest launch paths disagree. Several hard-code `C:\Users\hocka\Github Projects\EQOA Parser`; Python discovery is also machine-specific. A successful process spawn does not prove parser readiness.
+- Desktop, batch, in-game, and manifest launch paths disagree. Several hard-code `<repo:eqoa-parser>`; Python discovery is also machine-specific. A successful process spawn does not prove parser readiness.
 - `ClientSocketSource` reports active traffic unconditionally. It cannot currently distinguish waiting for a client from receiving combat events.
 - The Rust event hook is in `Play::damage_indication`; ability is always `melee`. JSON is assembled manually. Ability attribution, group damage classification, and multibox session separation need explicit validation and contracts.
 - Existing CI archives omit the enhanced launcher, mods folder, and companion dependencies. Local startup scripts are not a portable distribution.

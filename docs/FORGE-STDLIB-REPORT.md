@@ -109,7 +109,7 @@ To prove that the `pcall` wrapper actively defends against instruction budget sw
 
 Executed the full serial addons test suite with command-local `EQOA_FORGE_SPIKE`:
 ```cmd
-set EQOA_FORGE_SPIKE=C:\Users\hocka\Github Projects\EQOA Native Rust\run\forge-compat-reference\scripts\screen_grid.lua&& cargo test --locked -p eqoa fork_ext::addons -- --test-threads=1 --nocapture
+set EQOA_FORGE_SPIKE=<repo>\run\forge-compat-reference\scripts\screen_grid.lua&& cargo test --locked -p eqoa fork_ext::addons -- --test-threads=1 --nocapture
 ```
 
 ### Results:

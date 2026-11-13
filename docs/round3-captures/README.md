@@ -14,7 +14,7 @@ Procedure (2026-11-10, Windows, GPU available):
    worktree; append a test-only child module to `hud.rs`:
    `#[cfg(test)] #[path="round3_native_capture.rs"] mod round3_native_capture;`
 3. With `EQOA_NATIVE_CAPTURE_OUT=%TEMP%/eqoa-r3-native-png`, scratch `EQOA_CONFIG`,
-   and `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`, acquire the shared
+   and `CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/shared`, acquire the shared
    mkdir lock and run (1800-second timeout):
    `cargo test --locked -p eqoa --bin eqoa capture_develop_native_round3 -- --test-threads=1 --nocapture`
 4. Copy the PNGs here. Remove the temporary worktree with

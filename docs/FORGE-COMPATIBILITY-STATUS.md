@@ -6,7 +6,7 @@ Last updated: 2026-10-28
 
 - User approved the Forge compatibility initiative on 2026-10-28.
 - Plan: [Forge Compatibility plan](superpowers/plans/2026-10-28-forge-compatibility.md).
-- Implementation worktree: `C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility`, branch `forge-compatibility`.
+- Implementation worktree: `<worktree:forge-compatibility>`, branch `forge-compatibility`.
 - Planned base: enhanced commit `63cdc77d96ba00de720e50aaffb7b06897479b96`.
 - Root agent owns reviews and future assignments. No production implementation or runtime success is claimed in this ledger.
 
@@ -68,7 +68,7 @@ Input release bookkeeping is retained for the spike; per-mod press/release owner
 
 User requested a local fix-only playtest before any enhanced merge/release. Clean branch fix/minimap-render-scale at a7feb4d72a2f4602766412ea7c826715d51f1c2f contains only minimap fix/tests/callers/notes. Antigravity built the release executable and package; 13 minimap tests and broader 113 map tests passed, with one no-disc fixture skip. Preview footprint check passed. Full exhaustive workspace suite and live gameplay were not run.
 
-Preview directory: C:/Users/hocka/.paseo/worktrees/1usktejc/minimap-scale-fix-preview/run/minimap-scale-fix-preview. Launcher: Play Map Preview.cmd (isolated profile). ZIP: map-preview-c8b84f50e2b9.zip. Root independently verified clean manifest source commit, no private/profile/disc ZIP paths, executable SHA256 c8b84f50e2b95a0ac01e827785156d7ef3788e6916e2d5179afc7796d8b9af7f and ZIP SHA256 238131c0f2483ac4e692eef7fe9414621e2af02a975b4922a49bac1eda44a87c. No merge/push/tag/release yet; publication awaits user's playtest approval.
+Preview directory: <worktree:minimap-scale-fix-preview>/run/minimap-scale-fix-preview. Launcher: Play Map Preview.cmd (isolated profile). ZIP: map-preview-c8b84f50e2b9.zip. Root independently verified clean manifest source commit, no private/profile/disc ZIP paths, executable SHA256 c8b84f50e2b95a0ac01e827785156d7ef3788e6916e2d5179afc7796d8b9af7f and ZIP SHA256 238131c0f2483ac4e692eef7fe9414621e2af02a975b4922a49bac1eda44a87c. No merge/push/tag/release yet; publication awaits user's playtest approval.
 
 Forge spike's reviewed footprint checker also passed against 7912c7393df7d85655d5816980fae1217cc48a32 after explicit dependency/hook review. Next compatibility work is Stage2 discovery/lifecycle via staggered Antigravity implementation; retain native maps and report current spike limits.
 
@@ -88,7 +88,7 @@ Updater answer: official0.1.0 CI builds embed enhanced channel and exact commit,
 
 Release recovery: cef1254c provider errored during tooling tests with a Windows taskkill unsupported-operation error. Root checked both worktrees: no metadata edits/commits/merge/push/tag had occurred, enhanced still63cdc77 and fixbranch773674e/VERSION0.1.0. Fresh Antigravity9ee7c0d9-3719-4927-95e7-d50647458a71 now owns release preparation from that verified state; do not steer/interrrupt it while active. Await its PREPARE report, root scope review, then sendPUBLISH NOW under existing explicit owner authorization.
 
-User supplied texture-pack reference C:/Users/hocka/Github Projects/EQOA Native Rust/Testing Resources/eqoa-hd-pack-v2.7.zip (2,217,985,448bytes). Only filename/size inventory performed; no extraction, content change or feature work. User explicitly says keep current priorities; investigate after release/Forge unless a small compatible addition. Preserve this known untracked folder, do not stage/delete/stash it. Run release footprint checks from clean fixworktree. DiscoveryStage2A reported6tests green/buildlockfree and remains idle pending later review; current priority is publication.
+User supplied texture-pack reference <repo>/Testing Resources/eqoa-hd-pack-v2.7.zip (2,217,985,448bytes). Only filename/size inventory performed; no extraction, content change or feature work. User explicitly says keep current priorities; investigate after release/Forge unless a small compatible addition. Preserve this known untracked folder, do not stage/delete/stash it. Run release footprint checks from clean fixworktree. DiscoveryStage2A reported6tests green/buildlockfree and remains idle pending later review; current priority is publication.
 
 Release PREPARE reviewed: metadata58fdbac selected0.1.1 after live latest0.1.0/tagunused check. OriginalenhancedFFmerged to58fdbac; only11mapfix/tests/release-docfiles changed from63cdc77, noCargo/Forgechanges, knownTestingResources untracked. FootprintPASS,41Python toolingtests green,22updater/releasetests green,114maptests previousgreen. Root reviewed exactdiff and sent PUBLISH NOW toAntigravity9ee7c0d9 with tinyplayernoteswordingcleanup allowed beforetag. It now owns pushenhanced+immutablev0.1.1, existingCI fullsuite/build/publication, publicZIP/checksum/manifestverification. Awaitactualcompletion; don'tduplicatepush/tag or claimreleasepublished beforeverified. Followupdocpolish may change exactreleasehead from58fdbac. Old0.1.0annotatedtagobject187ceda mustnotbeconfusedwith peeledsourcec7fddfc.
 

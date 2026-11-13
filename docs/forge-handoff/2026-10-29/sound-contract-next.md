@@ -5,7 +5,7 @@
 - Source Implementation: `target/forge-preview-prep/sound.rs`
 - Specification & Review Log: `target/forge-preview-prep/sound-contract-next.md`
 **Referenced Worktrees**:
-- Forge Compatibility: `C:\Users\hocka\.paseo\worktrees\1usktejc\forge-compatibility`
+- Forge Compatibility: `<worktree:forge-compatibility>`
 - Pinned FrontiersForge Reference: `run/forge-compat-reference/UiForge/src/core/audio_manager.cpp` & `core.cpp`
 - Pinned Script Fixture: `run/forge-compat-reference/scripts/uiforge_example/uiforge_example.lua`
 

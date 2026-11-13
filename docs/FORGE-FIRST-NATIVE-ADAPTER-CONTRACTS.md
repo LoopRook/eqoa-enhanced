@@ -8,8 +8,8 @@ This document specifies the audited source contract for the first adapter slice 
 
 * **FrontiersForge (pinned):** [mmvest/FrontiersForge@4026d5c](https://github.com/mmvest/FrontiersForge/tree/4026d5cebcede24943ece8dc34833e584f46cd90)
 * **UiForge (submodule):** [mmvest/UiForge@6f2d125](https://github.com/mmvest/User-Interface-Forge/tree/6f2d125cc686cbc882f8098a939cc03cc23a59a1)
-* **Local Reference Tree:** `C:/Users/hocka/Github Projects/EQOA Native Rust/run/forge-compat-reference`
-* **Native Worktree:** `C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility`
+* **Local Reference Tree:** `<repo>/run/forge-compat-reference`
+* **Native Worktree:** `<worktree:forge-compatibility>`
 
 ---
 

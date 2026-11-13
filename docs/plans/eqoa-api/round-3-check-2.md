@@ -4,7 +4,7 @@
 
 ## Gates
 
-All Cargo commands use `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`, a fresh scratch `EQOA_CONFIG`, the requested lock and per-command timeout. Results below are independent reruns; pending means no result was available at report time.
+All Cargo commands use `CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/shared`, a fresh scratch `EQOA_CONFIG`, the requested lock and per-command timeout. Results below are independent reruns; pending means no result was available at report time.
 
 | Gate | Independent result | Builder claim |
 |---|---|---|

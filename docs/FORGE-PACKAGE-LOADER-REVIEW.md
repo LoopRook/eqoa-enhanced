@@ -1,6 +1,6 @@
 # Independent Review: Forge Addon Package Loader & Resource Resolver (Stage 2B)
 
-**Worktree**: `C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility`
+**Worktree**: `<worktree:forge-compatibility>`
 **Target Code**:
 - [`crates/eqoa/src/fork_ext/addons/package.rs`](../crates/eqoa/src/fork_ext/addons/package.rs)
 - [`crates/eqoa/src/fork_ext/addons/host.rs`](../crates/eqoa/src/fork_ext/addons/host.rs)
