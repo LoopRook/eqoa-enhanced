@@ -394,6 +394,10 @@ fn round_minimap_dot_card_wheel_zoom_and_n_toggle() {
     rm.frames(4);
     // Test Rat stands 40 east, 30 south of the player
     let (cx, cy, r) = rm.circle();
+    let inside: bool = rm.state(&format!("select(3, round_minimap.view.project({}, {}))", rm.me[0] + 40.0, rm.me[2] + 30.0));
+    assert!(inside, "the creature projects inside the circle (the view's own answer)");
+    let far: bool = rm.state(&format!("select(3, round_minimap.view.project({}, {}))", rm.me[0] + 40_000.0, rm.me[2]));
+    assert!(!far, "control: a point far away projects outside it");
     let (dx, dy) = rm.dot_at(rm.me[0] + 40.0, rm.me[2] + 30.0);
     assert!(((dx - cx).powi(2) + (dy - cy).powi(2)).sqrt() < r, "the creature is within the circle");
     // pointer away: no card (control)
@@ -1078,4 +1082,73 @@ fn round_minimap_search_button_and_box_keep_the_native_sizes_at_every_scale() {
         rm.manager.shutdown();
         super::super::input::reset_input_state();
     }
+}
+
+/// A creature name that is one word wider than any card (no space to wrap at) is cut with an
+/// ellipsis: the card stays narrower than its limit and on the window. The control: the same name
+/// with spaces wraps whole and needs no ellipsis.
+#[test]
+fn round_minimap_card_cuts_a_single_oversized_word_with_an_ellipsis() {
+    let Some(mut rm) = Rm::new(false) else { return };
+    let word = "Supercalifragilisticexpialidocious".repeat(8);
+    rm.put(rm_creature(3003, &word, [rm.me[0] + 40.0, rm.me[1], rm.me[2] + 30.0], 0, 7));
+    rm.frames(4);
+    let (dx, dy) = rm.dot_at(rm.me[0] + 40.0, rm.me[2] + 30.0);
+    assert!(rm.hover(dx, dy).is_some(), "a card on the dot");
+    let card: [f64; 4] = rm.state("(function() local c = round_minimap.card_rect return {c.x, c.y, c.w, c.h} end)()");
+    let (_, _, r) = rm.circle();
+    let k = r / 50.0;
+    assert!(card[2] <= 260.0 * k + 16.0 + 1.0, "the card is no wider than its limit: {card:?}");
+    assert!(card[0] >= 0.0 && card[0] + card[2] <= rm.win.0 as f64, "and it is on the window: {card:?}");
+    let drawn: Vec<String> = rm.state("round_minimap.card_text");
+    let first = drawn[0].clone();
+    assert!(first.ends_with("..."), "the word is cut with an ellipsis: {first}");
+    assert!(first.len() < word.len());
+    // control: spaced words wrap and keep every word
+    rm.put(rm_creature(3003, &"Supercali ".repeat(30), [rm.me[0] + 40.0, rm.me[1], rm.me[2] + 30.0], 0, 7));
+    rm.frames(3);
+    assert!(rm.hover(dx, dy).is_some());
+    let spaced: Vec<String> = rm.state("round_minimap.card_text");
+    assert!(spaced.iter().take(spaced.len() - 2).all(|l| !l.ends_with("...")), "wrapped words are not cut: {spaced:?}");
+    rm.manager.shutdown();
+}
+
+/// Move HUD places the round minimap where the player put it at render scales 2x and 4x too: the
+/// circle follows the moved stock rectangle, the picture is there and no longer at the old place.
+#[test]
+fn round_minimap_follows_move_hud_at_render_scales_two_and_four() {
+    use crate::hudlayout::{self, Beyond, Piece};
+    for (win, scale) in [((1024u32, 768u32), 2u32), ((640, 480), 4), ((1024, 768), 4)] {
+        let Some(mut rm) = Rm::sized(|p| p == "eqoa_round_minimap", 0, win, scale) else { return };
+        let note = format!("window {win:?} at {scale}x");
+        rm.frames(4);
+        let (ox, oy, r) = rm.circle();
+        let home = rm.stock_rect();
+        hudlayout::frame_begin();
+        hudlayout::note(Piece::Minimap, [474.0, 50.0, 586.0, 162.0], [0.0, 0.0]);
+        hudlayout::frame_end();
+        hudlayout::set_unlocked(true);
+        let b = Beyond::of(win);
+        hudlayout::press([530.0, 106.0], b);
+        hudlayout::drag_to([420.0, 200.0], b);
+        assert!(hudlayout::release(), "{note}: the drag took");
+        hudlayout::set_unlocked(false);
+        rm.frames(4);
+        let t = rm.frames(2);
+        let moved = rm.stock_rect();
+        assert!((moved[0] - home[0]).abs() > 20.0 && (moved[1] - home[1]).abs() > 20.0, "{note}: Move HUD moved the stock rectangle {home:?} -> {moved:?}");
+        let (nx, ny, nr) = rm.circle();
+        assert!((nx - (moved[0] + moved[2]) as f64 / 2.0).abs() < 1.0 && (ny - (moved[1] + moved[3]) as f64 / 2.0).abs() < 1.0, "{note}: the circle follows the rectangle");
+        assert!((nr - r).abs() < 0.5, "{note}: same size");
+        let pixels = rm_pixels(&rm.gpu, &t);
+        let px = |x: f64, y: f64| rm_px_in(&pixels, t.width(), x * scale as f64, y * scale as f64);
+        assert!(rm_is_picture_of(px(nx + nr * 0.5, ny + nr * 0.5), rm.stand_in), "{note}: the picture at the new place");
+        assert_eq!(px(ox + r * 0.5, oy + r * 0.5), RM_BG, "{note}: nothing at the old place");
+        hudlayout::reset();
+        rm.manager.shutdown();
+    }
+}
+fn rm_is_picture_of(p: [u8; 4], color: [f32; 4]) -> bool {
+    let c = color.map(|c| (c * 255.0) as i32);
+    (0..3).all(|i| (p[i] as i32 - c[i]).abs() < 12)
 }

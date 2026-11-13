@@ -179,13 +179,31 @@ local function wrap(ui, text, most)
     return lines
 end
 
+-- the last UTF-8 character, to cut
+local utf8_last = "^(.*)[%z" .. string.char(1) .. "-" .. string.char(127, 194) .. "-" .. string.char(244) .. "][" .. string.char(128) .. "-" .. string.char(191) .. "]*$"
+
 local function draw_card(ui, dl, v, g, c, win_w, win_h)
     if font then ui.PushFont(font) end
     local most = 260 * g.k
     local lines = {}
     for _, l in ipairs(c.lines) do
-        for _, piece in ipairs(wrap(ui, l[1], most)) do lines[#lines + 1] = { piece, l[2] } end
+        for _, piece in ipairs(wrap(ui, l[1], most)) do
+            -- a single word wider than the card is cut, with an ellipsis
+            if ui.CalcTextSize(piece) > most then
+                while #piece > 0 and ui.CalcTextSize(piece .. "...") > most do
+                    piece = piece:match(utf8_last) or ""
+                end
+                piece = piece .. "..."
+            end
+            lines[#lines + 1] = { piece, l[2] }
+        end
     end
+    -- never taller than the window: the lines that do not fit are dropped
+    local _, line_h = ui.CalcTextSize("Ag")
+    local room = math.max(1, math.floor((win_h - 22) / (line_h + 2)))
+    while #lines > room do table.remove(lines) end
+    round_minimap.card_text = {} -- what is drawn, line by line; read by its tests
+    for i, l in ipairs(lines) do round_minimap.card_text[i] = l[1] end
     local w, h = 0, 0
     for _, l in ipairs(lines) do local tw, th = ui.CalcTextSize(l[1]); w = math.max(w, tw); h = h + th + 2 end
     w, h = w + 16, h + 10
