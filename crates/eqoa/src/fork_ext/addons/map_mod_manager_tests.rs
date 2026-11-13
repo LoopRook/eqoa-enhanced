@@ -430,13 +430,14 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
         .as_ref()
         .unwrap();
     j.host.test_player_files(None, desktop.clone());
-    let (px, py, ph) = lua
-        .load("local r=require('search').panel_rect;return r.x,r.y,r.h")
-        .eval::<(f32, f32, f32)>()
+    let (px, py, ph, k) = lua
+        .load("local s=require('search');local r=s.panel_rect;return r.x,r.y,r.h,s.scale")
+        .eval::<(f32, f32, f32, f32)>()
         .unwrap();
+    // the Export button's middle: after Prev (44 wide and a 4 gap), 58 wide, 13 up from the foot
     native_core::emit(
         "pointer.pressed",
-        serde_json::json!({"x":px+84.,"y":py+ph-15.,"inside_window":true,"button":"left"}),
+        serde_json::json!({"x":px+(8.+44.+4.+29.)*k,"y":py+ph-13.*k,"inside_window":true,"button":"left"}),
     );
     let exported = desktop.join("EQOA-Creature-Journal.json");
     for _ in 0..100 {
@@ -496,7 +497,7 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
     j.host.test_player_files(Some(forge), desktop.clone());
     native_core::emit(
         "pointer.pressed",
-        serde_json::json!({"x":px+164.,"y":py+ph-15.,"inside_window":true,"button":"left"}),
+        serde_json::json!({"x":px+(8.+44.+4.+58.+4.+29.)*k,"y":py+ph-13.*k,"inside_window":true,"button":"left"}), // the Import button's middle
     );
     let import_started = Instant::now();
     let deadline = import_started + Duration::from_secs(60);
