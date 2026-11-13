@@ -88,8 +88,9 @@ section there before changing a ported system (anything under `crates/vi`, `ee`,
 - Game-logic floats and compares go through `ee::*`. `vi` structs stay `#[repr(C)]` in the EE layout.
 - Port game behaviour from the decomp, line by line. The decomp and eqoa-port's oracle are not on
   this machine, so oracle tests skip here: say so in the report. The owner's Frontiers disc IS here:
-  set `EQOA_ISO` to its path (kept in the lead's local notes, never in the repository) for every test
-  run and every worker brief; without it about 200 disc tests skip.
+  hard-link it as `run/eqoa.iso` in each checkout or worktree (git-ignored; no extra space) and set
+  `EQOA_ISO` to it; its real path stays in the lead's local notes, never in the repository. Without
+  it about 200 disc tests skip.
 - What the game counts in frames steps on `frames.rs`'s 30 Hz clock, never once per frame drawn.
 - Server worlds: keep the shared Disc/Sink composer streaming one zone at a time on native and browser; mirror composer changes to the server's Compose contract/CRC (see docs/upstream/CLAUDE.md).
 - A lost graphics device is made again in place (`gpulost`, `viewer::recover`; a page's new device from `web::remake`); the main loop ends only through `give_up_gfx`/`web::give_up`, so never add an unconditional exit on `web::graphics_lost` to it (only the `fxview` preview stops on it). Unsupported WebGL2 lighting stays off through the renderer's guard. Hat D-pads combine mapped buttons, axes and raw hat codes; retain upstream's controller diagnostics and test paths.

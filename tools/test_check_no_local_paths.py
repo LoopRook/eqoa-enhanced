@@ -45,6 +45,30 @@ class LocalPathGuardTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_upstreams_own_lines_are_not_ours_to_rewrite(self):
+        # A fixture line upstream's reviewed base already holds passes; the same
+        # path added by the fork in another line is still reported.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run = lambda *a: subprocess.run(["git", "-C", str(root), *a], check=True, capture_output=True, text=True)
+            subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            run("config", "user.email", "t@example.invalid")
+            run("config", "user.name", "t")
+            src = root / "src.rs"
+            src.write_text(f'scrub("open {PROFILE_PATH} failed")\n', encoding="utf-8")
+            run("add", "src.rs")
+            run("commit", "-q", "-m", "upstream")
+            base = run("rev-parse", "HEAD").stdout.strip()
+            (root / "docs").mkdir()
+            (root / "docs/fork-footprint.json").write_text(f'{{"reviewed_base": "{base}"}}', encoding="utf-8")
+            run("add", "docs/fork-footprint.json")
+            result = subprocess.run([sys.executable, str(SCRIPT), str(root)], text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            src.write_text(src.read_text(encoding="utf-8") + f"// fork: {PROFILE_PATH}\n", encoding="utf-8")
+            result = subprocess.run([sys.executable, str(SCRIPT), str(root)], text=True, capture_output=True)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("src.rs:2:", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
