@@ -1048,3 +1048,34 @@ fn the_zero_diagnostics_gate_fails_on_a_deliberately_bad_call() {
     );
     rm.manager.shutdown();
 }
+
+/// The search button and box are the native search's size, in HUD frame pixels scaled as the HUD
+/// is: a 20 square button, a 252 by 300 panel (the native search's `panel`), at every window size
+/// and render scale. The control: the sizes the mod drew before (a fixed 20 and 336 by 400) are
+/// not these at a window where the HUD scale is not one.
+#[test]
+fn round_minimap_search_button_and_box_keep_the_native_sizes_at_every_scale() {
+    use winit::keyboard::{Key, NamedKey};
+    for (win, scale) in [((640u32, 480u32), 1u32), ((1024, 768), 1), ((1024, 768), 2), ((1920, 1080), 1)] {
+        let Some(mut rm) = Rm::sized(|p| p == "eqoa_round_minimap" || p == "eqoa_map_search", 0, win, scale) else { return };
+        rm.frames(4);
+        let search = lua(&rm.manager, "eqoa_map_search");
+        let get = |expr: &str| -> f64 { search.load(format!("return {expr}")).eval().unwrap() };
+        let k = rm.stock_rect()[3] as f64 - rm.stock_rect()[1] as f64;
+        let k = k / 112.0;
+        let note = format!("window {win:?} at {scale}x (k {k:.3})");
+        assert!((get("require('search').button_rect.w") - 20.0 * k).abs() < 0.6, "{note}: button width");
+        assert!((get("require('search').button_rect.h") - 20.0 * k).abs() < 0.6, "{note}: button height");
+        super::super::input::route_mod_key(&Key::Named(NamedKey::F2), true, false, false, true, false);
+        rm.frames(4);
+        assert!(search.load("return require('search').open").eval::<bool>().unwrap(), "{note}: opened");
+        let (w, h) = (get("require('search').panel_rect.w"), get("require('search').panel_rect.h"));
+        assert!((w - 252.0 * k).abs() < 0.6, "{note}: panel width {w}");
+        assert!((h - (300.0 * k).min(win.1 as f64 - 70.0 * k)).abs() < 0.6, "{note}: panel height {h}");
+        if k != 1.0 && win.1 as f64 - 70.0 * k >= 300.0 * k {
+            assert!((w - 336.0).abs() > 1.0 && (h - 400.0).abs() > 1.0, "{note}: control: not the old fixed size");
+        }
+        rm.manager.shutdown();
+        super::super::input::reset_input_state();
+    }
+}
