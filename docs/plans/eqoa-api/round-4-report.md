@@ -638,3 +638,62 @@ Pointer-on-circle means: **1.528 / 1.236 ms**, maxima **3.350 / 2.546 ms**. The 
 - `python -X utf8 tools/test_player_release.py`: **20 passed** on final code; bundled Lua SHA-256 refreshed in `bundled-mods/SOURCE.txt`.
 - `python tools/check_fork_footprint.py --base 11aa5f088bb52d5f306b0224e37b782b1bf4503d`: **PASS**, 31 shared files, no budget changes.
 - `cargo build --locked --release -p eqoa`: **PASS**, final native client, 1m 49s (shared target). All bundled SHA-256 entries independently verified: **88 match**. Diff whitespace check passed with CRLF-aware settings.
+
+## Owner-test fix round (2026-11-13)
+
+Owner's live test found seven things. Work on `feat/eqoa-api-r4` as LoopRook; no push, merge or tag. develop was merged in
+for its privacy guard (`tools/check_no_local_paths.py`: exits 0 here; the tools tests pass); round 4 docs now use
+placeholders. The disc was used through `$EQOA_ISO` (and, for the suites, a hard link at the ignored `run/eqoa.iso`, removed after).
+
+| # | Fix | Test and negative control |
+|---|---|---|
+| 1 | Square inside the circle. Cause (measured on the disc's own art, not the stand-in the earlier tests used): upstream's frame art reaches 5 frame pixels farther in at the sides and 2 at top and bottom than the 6-pixel border, so it covers the picture's edge. A held view's capture now leaves the frame art out (two hook lines around upstream's untouched `blit_frame`, `fork_ext/map.rs::capture_without_frame`); stock draws keep it. | `round_minimap_shows_no_square_frame_inside_the_circle_with_the_discs_art`: real UI.CSF art and the SUPPORT atlas from the disc; every 3 degrees round the circle but the "N", 1/2/4 pixels in, must be the terrain colour. RED before (grey frame pixels at the left/right tangents), GREEN after; control: the stock square's own frame edge is found by the same sampling. Outdoors only: an indoor capture was not made (the capture and frame removal do not depend on indoors, but no indoor world is available to a test). |
+| 2 | Zoom. The mod forwards every notch whole; both ends of upstream's range are reached (outdoors 6 to 2 units a pixel in five notches, out to 25 in twelve, the limits hold; five notches in one frame arrive as five). The limits are upstream's. Backlog entry added (`docs/backlog.md`), nothing built. | `round_minimap_wheel_reaches_both_ends_of_upstreams_zoom_in_whole_steps`, control: one notch short is still above the limit. Not covered: indoors (its limits are `indoor::SCALE_LIMITS`; the same forwarded value reaches the same `mini_wheel`, but a test cannot enter upstream's private indoor state). |
+| 3 | Addon Manager errors. Round minimap: no claim for the zero-wide top/bottom strips or an unready rectangle; no `Marker.world_id` (markers are already one world's). | Zero-diagnostics gate `every_bundled_mod_runs_a_play_session_with_zero_manager_diagnostics`: all 11 bundled packages (the eight `eqoa_*` and the three Forge UIs), each through the real Manager on Play-shaped data: entry, minimap hidden/shown, Move HUD, pointer and wheel, map open/closed, zoning, disable/enable. Run against the previous round minimap it fails with exactly the owner's two messages (44 and 1,818 occurrences in that session); control `the_zero_diagnostics_gate_fails_on_a_deliberately_bad_call`. |
+| 4 | Search box and button sizes: native 20 square button, 252 by 300 panel, 28-pixel rows, 12-pixel font, all times the HUD scale (minimap height over 112), as the native search drew them. | `round_minimap_search_button_and_box_keep_the_native_sizes_at_every_scale` at 640x480, 1024x768 (1x, 2x) and 1920x1080; control: not the old fixed 336 by 400. The journal footer test now clicks Export/Import where the scaled buttons are. |
+| 5 | One Options page, **Enhanced**, after upstream's last: Enhanced HUD rows first, then Mods & Addons rows; same row ids and saved keys; `fork_ext/options.rs` only. Player text now says Options -> Extended -> Enhanced -> Addon Manager. | `the_fork_pages_and_rows` walk (every row, toggle and action) on the one page; controls: no second fork page, the page is taller than a game page, upstream's pages still fit. Window assertions (page and list of pages on the 448-high screen) use the test font (16 points); the real font's size was not measured. |
+| 6 | Frame rate, below. | |
+| 7 | Terra's leftovers: hover card cuts a single oversized word with "..." (and never grows taller than the window); Move HUD placement at 2x and 4x; the `view.project` inside assertion is back (with a far-point control). | `round_minimap_card_cuts_a_single_oversized_word_with_an_ellipsis` (control: spaced words wrap uncut), `round_minimap_follows_move_hud_at_render_scales_two_and_four` (three window/scale cases, moved and old places). No separate mutation run for the Move HUD test. |
+
+### Frame rate (item 6)
+
+What could and could not be measured. There is no scripted scene runner that draws a real world with the minimap and mods: `playshot`
+needs a live server and `mapshot` draws only the map. So this is the existing benchmark harness (a Play-shaped session through the
+real Manager, 200 creatures, the native minimap chrome from the disc's own UI art over a terrain stand-in, 1024x768, the whole frame to
+the GPU's completion, 300 frames, release, alone, twice). It has no 3D world, so the absolute times are small; compare the rows.
+develop's 0.5.3 native round minimap was **not** measured: that tree has no addon harness and there is no runner to put it in.
+The GPU cost of the offscreen capture is the difference in "GPU wait" between the stock row and any round-minimap row.
+
+| Configuration (mean ms per frame; CPU to submit + GPU wait) | Run 1 | Run 2 |
+|---|---|---|
+| All mods off (upstream square minimap) | 0.47 (0.32 + 0.15) | 0.27 (0.17 + 0.09) |
+| Round minimap only, pointer away | 1.09 (0.90 + 0.19) | 0.93 (0.77 + 0.16) |
+| Round minimap only, pointer on circle | 1.24 (1.05 + 0.19) | 1.04 (0.89 + 0.16) |
+| Round 4's three mods (journal, search, round minimap) | 2.71 (2.46 + 0.25) | 2.05 (1.87 + 0.18) |
+| All seven (round 3's four + round 4's three) | 3.39 (3.16 + 0.23) | 2.78 (2.59 + 0.19) |
+
+p95 at the all-seven row: 5.7 and 4.4 ms; max 14.4 and 8.6 ms. Plainly: the offscreen capture itself costs about 0.05 to 0.1 ms of GPU
+time here; the rest of the round minimap's cost is Lua and ImGui on the CPU (about 0.6 ms), and **Map Search is the largest single mod**
+(journal plus search alone is 1.6 ms). The runs differ by 0.2 to 0.7 ms from machine noise; none of this is a real-world fps claim.
+
+### Gates
+
+All cargo runs foreground-equivalent under the shared lock and `CARGO_TARGET_DIR`, one test thread, scratch `EQOA_CONFIG`, `EQOA_ISO` set.
+
+| Suite | Pass | Fail | Ignored | SKIP lines |
+|---|---:|---:|---:|---:|
+| Addons `fork_ext::addons::` | 447 | 0 | 25 | 9 (four symlink-privilege, pinned Forge grid and hearts, three bundled picture goldens) |
+| Full client, `EQOA_ISO` only | 2100 | 0 | 32 | 208 |
+| Full client, also `run/eqoa.iso` (hard link to the same disc) | 2100 | 0 | 32 | 49 |
+
+Finding: **`EQOA_ISO` alone unlocks none of the 208 disc tests**; they read the checkout's `run/eqoa.iso`. With that file present (a hard link,
+no copy, git-ignored) 159 more disc tests ran and passed (25 minutes); the 49 left need a 2002 disc, `run/client.bin`, live S2 files or
+a save state. `cargo check --target wasm32-unknown-unknown`: PASS. Release build: PASS, last. Footprint: PASS, with two budget rises that
+need review: `map/mini.rs` +1 to +3 (this round's frame-art hook) and `crashfile.rs` +2/-1 to +8/-2 (develop's privacy commit, brought by the
+merge; develop's own manifest needs the same change), plus the two new privacy-tool files listed as fork-owned.
+`python -X utf8 tools/test_player_release.py`: 20 passed; `SOURCE.txt` hashes refreshed for the three edited files.
+
+### Not done
+
+Indoor capture and indoor zoom were not tested; the real world scene and develop 0.5.3 comparison could not be run; the Move HUD 2x/4x and
+ellipsis tests had no separate mutation run; Options window height was checked with the test font only.
