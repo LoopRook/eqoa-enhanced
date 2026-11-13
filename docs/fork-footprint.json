@@ -34,6 +34,8 @@
     "tools/test_parser_launch.py",
     "tools/check_fork_footprint.py",
     "tools/test_fork_footprint.py",
+    "tools/check_no_local_paths.py",
+    "tools/test_check_no_local_paths.py",
     "VERSION",
     "tools/build_player_release.py",
     "tools/test_player_release.py",
