@@ -41,6 +41,7 @@ local function geometry(lay)
 end
 
 local function claim(g)
+    if not (g.r > 1 and g.r < 1e5) then return end -- layout not ready: no empty rectangle
     -- the pointer, the wheel and clicks over the circle only: strips that follow its edge, each as
     -- wide as the circle is at the strip's end nearer the rim (never past the circle)
     for i = 0, STRIPS - 1 do
@@ -48,7 +49,10 @@ local function claim(g)
         local y1 = y0 + 2 * g.r / STRIPS
         local ym = math.max(math.abs(y0 - g.cy), math.abs(y1 - g.cy))
         local half = math.sqrt(math.max(0, g.r * g.r - ym * ym))
-        eqoa.input.claim_pointer({ x = g.cx - half, y = y0, width = 2 * half, height = y1 - y0 })
+        -- the strips at the very top and bottom are zero-wide at their rim end: claim nothing there
+        if half > 0.5 and y1 > y0 then
+            eqoa.input.claim_pointer({ x = g.cx - half, y = y0, width = 2 * half, height = y1 - y0 })
+        end
     end
 end
 
@@ -96,7 +100,7 @@ local function placed_marks(g, world, map)
     local function lies(q) return q.x >= x0 - r and q.x <= x1 + r and q.y >= y0 - r and q.y <= y1 + r end
     local groups = { {}, {}, {} } -- camps and coaches, quests to take, steps
     for _, m in ipairs(markers) do
-        if m.world_id == nil or m.world_id == world then
+        do -- eqoa.map.markers(world) already holds this world's marks only
             local px, py = view.project(m.x, m.z)
             if px then
                 local q = { x = view_x + px * k, y = view_y + py * ky, m = m }
@@ -135,7 +139,7 @@ local function waypoint_arrows(g, ui, dl, v, world)
     refresh_markers(world)
     round_minimap.arrows = {}
     for _, m in ipairs(markers) do
-        if (m.kind == "waypoint" or m.kind == "group_waypoint") and (m.world_id == nil or m.world_id == world) then
+        if (m.kind == "waypoint" or m.kind == "group_waypoint") then
             local px, py, inside = view.project(m.x, m.z)
             if px and not inside then
                 -- the square picture puts its own rim mark at the nearest edge; draw ours only where

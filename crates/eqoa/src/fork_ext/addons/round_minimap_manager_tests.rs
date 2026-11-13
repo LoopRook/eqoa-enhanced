@@ -836,3 +836,60 @@ fn round4c_frame_time_with_all_map_mods_in_a_busy_world() {
     }
     assert!(results.iter().all(|m| m.is_finite()));
 }
+
+/// Every pixel in the picture's last two pixels inside the circle, round its whole edge but the
+/// "N" at the top and the player's dart (which sit inside it), is the terrain's: no part of
+/// upstream's square frame shows in the circle.
+fn rm_frame_free(rm: &Rm, pixels: &[u8], width: u32, scale: u32, note: &str) -> Vec<String> {
+    let (cx, cy, r) = rm.circle();
+    let k = r / 50.0;
+    let c = rm.stand_in.map(|c| (c * 255.0) as i32);
+    let picture = |p: [u8; 4]| (0..3).all(|i| (p[i] as i32 - c[i]).abs() < 12);
+    let mut bad = Vec::new();
+    for deg in (0..360).step_by(3) {
+        // the "N" sits at the top
+        if (deg as i32 - 270).abs() < 14 {
+            continue;
+        }
+        let a = (deg as f64).to_radians();
+        for inset in [1.0, 2.0, 4.0] {
+            let rr = r - inset * k;
+            let (x, y) = ((cx + a.cos() * rr) * scale as f64, (cy + a.sin() * rr) * scale as f64);
+            let p = rm_px_in(pixels, width, x, y);
+            if !picture(p) {
+                bad.push(format!("{note}: {deg} deg, {inset} px in: {p:?}"));
+            }
+        }
+    }
+    bad
+}
+
+/// With the disc's own frame art (`$EQOA_ISO`; a SKIP without it) the round minimap shows only the
+/// map picture: none of upstream's square frame inside the circle. The control reads the stock
+/// square minimap, whose frame the same check must find.
+#[test]
+fn round_minimap_shows_no_square_frame_inside_the_circle_with_the_discs_art() {
+    if !crate::map::extension::use_real_ui(true) {
+        return;
+    }
+    let Some(mut rm) = Rm::new(false) else {
+        crate::map::extension::use_real_ui(false);
+        return;
+    };
+    rm.frames(4);
+    let t = rm.frames(2);
+    let pixels = rm_pixels(&rm.gpu, &t);
+    rm_png(&pixels, "r4-minimap-real-art.png");
+    let bad = rm_frame_free(&rm, &pixels, t.width(), 1, "outdoors");
+    // control: the stock square's own edge (the frame) is found by the same sampling, one picture
+    // pixel past where the circle ends, at the four tangent points
+    let (cx, cy, _r) = rm.circle();
+    let stock = rm.stock_rect().map(f64::from);
+    let is_frame = |x: f64, y: f64| !rm_is_picture(rm_px(&pixels, x, y));
+    let control = [(stock[0] + 2.0, cy), (stock[2] - 2.0, cy), (cx, stock[1] + 2.0), (cx, stock[3] - 2.0)];
+    let found = control.iter().filter(|(x, y)| is_frame(*x, *y)).count();
+    crate::map::extension::use_real_ui(false);
+    rm.manager.shutdown();
+    assert!(found >= 3, "control: the frame's own edge is not picture ({found}/4) ");
+    assert!(bad.is_empty(), "frame pixels inside the circle: {bad:?}");
+}

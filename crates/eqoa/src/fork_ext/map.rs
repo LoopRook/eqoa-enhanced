@@ -17,3 +17,15 @@ pub(crate) fn overlay(ui:&mut render::ui::Ui,white:usize,world:i32,project:impl 
     #[cfg(target_arch="wasm32")]
     let _=(ui,white,world,project,bounds);
 }
+
+/// The minimap's frame art, taken back out of the layer's quads while a mod's view holds the
+/// minimap: the art reaches farther in than the border `INSET` gives the picture (it covers the
+/// picture's edge), so a circle cut from the capture would show it. Stock draws keep it.
+pub(crate) fn capture_without_frame(quads: &mut Vec<render::ui::Quad>, from: usize) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if crate::fork_ext::addons::map_views::capturing() {
+        quads.truncate(from);
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = (quads, from);
+}

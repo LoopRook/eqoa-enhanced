@@ -564,7 +564,9 @@ impl Map {
             r.ui.anchor = Anchor::Right;
             r.ui.vertical = Vertical::Top;
             r.ui.shift = moved;
+            let framed = r.ui.quads.len();
             vui.blit_frame(&mut r, [FRAME[0], FRAME[1]], [FRAME[2] - FRAME[0], FRAME[3] - FRAME[1]], &vi::ui::frame_sets()[0], 3, 1.0, true);
+            crate::fork_ext::map::capture_without_frame(&mut r.ui.quads, framed);
             // north, up: the compass turns with the camera, the minimap does not
             let i = inner();
             let h = vui.font_height(&r);

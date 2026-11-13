@@ -143,6 +143,54 @@ impl Map {
     }
 }
 
+
+/// The disc's own HUD art (`$EQOA_ISO`): UI.CSF's surfaces and SUPPORT's atlas, as `attach_ui`
+/// builds the real HUD from them. None (a SKIP the caller reports) without the disc.
+#[cfg(test)]
+pub(crate) struct RealUi {
+    pub lib: esf::Library,
+    pub vui: crate::ui::Vui,
+}
+#[cfg(test)]
+thread_local! {static REAL_UI:std::cell::RefCell<Option<std::rc::Rc<RealUi>>>=const{std::cell::RefCell::new(None)};}
+#[cfg(test)]
+pub(crate) fn real_ui() -> Option<std::rc::Rc<RealUi>> {
+    REAL_UI.with(|r| r.borrow().clone())
+}
+#[cfg(test)]
+pub(crate) fn use_real_ui(on: bool) -> bool {
+    if !on {
+        REAL_UI.with(|r| *r.borrow_mut() = None);
+        return true;
+    }
+    if real_ui().is_some() {
+        return true;
+    }
+    let Some(path) = std::env::var_os("EQOA_ISO") else {
+        eprintln!("SKIP real HUD art: EQOA_ISO is not set");
+        return false;
+    };
+    let built = (|| {
+        let mut disc = iso::Iso::open(std::path::Path::new(&path)).ok()?;
+        let mut lib = esf::Library::new();
+        lib.add("UI.CSF", esf::Container::open(disc.read("UI.CSF").ok()?).ok()?);
+        let textures = vi::strtab::StringTable::parse(&disc.read("TEXTURES.TXT").ok()?)?;
+        let support = crate::modules::load_now(crate::modules::Module::Support, std::path::Path::new(&path))?;
+        let atlas = vi::ui::read_atlas(&support)?;
+        Some(RealUi { lib, vui: crate::ui::Vui::new(Default::default(), textures, atlas) })
+    })();
+    match built {
+        Some(r) => {
+            REAL_UI.with(|c| *c.borrow_mut() = Some(std::rc::Rc::new(r)));
+            true
+        }
+        None => {
+            eprintln!("SKIP real HUD art: the disc's UI.CSF, TEXTURES.TXT or SUPPORT did not load");
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 impl Map {
     /// Disc-free native chrome/round-minimap scene used behind addon captures.
@@ -155,10 +203,12 @@ impl Map {
     ) -> Self {
         let mut map = crate::map::testing::up(size);
         map.open = !mini;
-        let lib = esf::Library::new();
-        let vui = crate::pointer::testing::vui();
+        let real = real_ui();
+        let blank = esf::Library::new();
+        let vui_blank = crate::pointer::testing::vui();
+        let (lib, vui) = real.as_ref().map_or((&blank, &vui_blank), |r| (&r.lib, &r.vui));
         let cx = Context {
-            lib: &lib,
+            lib,
             device,
             queue,
             format: wgpu::TextureFormat::Rgba8Unorm,
@@ -173,7 +223,7 @@ impl Map {
             sticks: [0.; 4],
             keyboard: true,
             words: None,
-            vui: Some(&vui),
+            vui: Some(vui),
             quest_marks: None,
         };
         map.layers(&cx);
@@ -194,8 +244,9 @@ impl Map {
     /// is laid out again), centred on `at` with `view`'s dots and marks, over a terrain
     /// stand-in of `color` (a picture without a disc).
     pub(crate) fn round4_mini_frame(&mut self,device:&wgpu::Device,queue:&wgpu::Queue,size:(u32,u32),at:[f32;3],view:&mini::MiniView,color:[f32;4]){
-        let lib=esf::Library::new();let vui=crate::pointer::testing::vui();
-        let cx=Context{lib:&lib,device,queue,format:wgpu::TextureFormat::Rgba8Unorm,size,dt:0.,player:Some((at,0.)),world:0,origin:[0.;2],group:Vec::new(),in_group:false,target:None,sticks:[0.;4],keyboard:true,words:None,vui:Some(&vui),quest_marks:None};
+        let real=real_ui();let blank=esf::Library::new();let vui_blank=crate::pointer::testing::vui();
+        let (lib,vui)=real.as_ref().map_or((&blank,&vui_blank),|r|(&r.lib,&r.vui));
+        let cx=Context{lib,device,queue,format:wgpu::TextureFormat::Rgba8Unorm,size,dt:0.,player:Some((at,0.)),world:0,origin:[0.;2],group:Vec::new(),in_group:false,target:None,sticks:[0.;4],keyboard:true,words:None,vui:Some(vui),quest_marks:None};
         self.mini_frame(&cx,view);
         let moved=crate::hudlayout::shift(crate::hudlayout::Piece::Minimap,crate::hudlayout::Beyond::of(size));
         let r=mini::window_rect_moved(size,mini::FRAME,moved);

@@ -96,6 +96,11 @@ pub(crate) fn route(hidden: bool, held: bool, ready: bool) -> Route {
         Route::None
     }
 }
+/// Whether a held view has the minimap now (the stock one hidden): the layer is drawn for the
+/// capture, not the window.
+pub(crate) fn capturing() -> bool {
+    super::visibility::effective_visibility().minimap && STATE.with(|s| s.borrow().leases.iter().any(|l| l.upgrade().is_some_and(|l| l.active.get())))
+}
 pub(crate) fn release_vm(vm: u64) {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
