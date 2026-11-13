@@ -24,6 +24,7 @@
     "eqoa.map.set_guide",
     "eqoa.map.clear_guide",
     "eqoa.entities.list",
+    "eqoa.entities.named",
     "eqoa.player.get",
     "eqoa.group.get",
     "eqoa.imgui",

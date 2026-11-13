@@ -477,6 +477,7 @@ fn deliver_data(
     only: Option<&Token>,
     data: Option<mlua::Table>,
 ) -> Result<()> {
+    let _timed = super::addon_perf::section("events.deliver");
     let shared = bus(lua);
     {
         let mut b = shared.borrow_mut();

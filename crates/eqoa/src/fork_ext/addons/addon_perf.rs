@@ -53,6 +53,8 @@ struct Slot {
 
 struct State {
     slots: BTreeMap<String, Slot>,
+    /// native work shared by all addons, by name: how many times and how long (not exclusive of one another)
+    sections: BTreeMap<&'static str, (u32, Duration)>,
     /// the addon whose Lua is running
     current: Option<String>,
     /// a native call or bridge call is open (the outermost one is timed)
@@ -64,7 +66,7 @@ struct State {
 
 impl State {
     fn new() -> State {
-        State { slots: BTreeMap::new(), current: None, open: false, imgui: Duration::ZERO, frames: 0, since: Instant::now() }
+        State { slots: BTreeMap::new(), sections: BTreeMap::new(), current: None, open: false, imgui: Duration::ZERO, frames: 0, since: Instant::now() }
     }
 }
 
@@ -166,6 +168,28 @@ impl Drop for CallTimer {
     }
 }
 
+/// A named stretch of shared native work (`core:` in the line), timed until this drops.
+pub(crate) struct SectionTimer {
+    name: &'static str,
+    start: Instant,
+}
+
+pub(crate) fn section(name: &'static str) -> Option<SectionTimer> {
+    enabled().then(|| SectionTimer { name, start: Instant::now() })
+}
+
+impl Drop for SectionTimer {
+    fn drop(&mut self) {
+        let took = self.start.elapsed();
+        let _ = STATE.try_with(|s| {
+            let mut s = s.borrow_mut();
+            let e = s.sections.entry(self.name).or_default();
+            e.0 += 1;
+            e.1 += took;
+        });
+    }
+}
+
 /// The native HUD layer drew an addon's queue in `took`.
 pub(crate) fn add_draw(id: &str, took: Duration) {
     if !enabled() {
@@ -258,6 +282,12 @@ fn format_lines(s: &State) -> Vec<String> {
         .collect();
     parts.push(format!("imgui {:.2}", ms(s.imgui, n)));
     let mut lines = vec![format!("addons: {}", parts.join(", "))];
+    if !s.sections.is_empty() {
+        let mut shared: Vec<(&&str, &(u32, Duration))> = s.sections.iter().collect();
+        shared.sort_by_key(|(_, (_, d))| std::cmp::Reverse(*d));
+        let parts: Vec<String> = shared.iter().map(|(name, (count, d))| format!("{name} {:.1}x {:.3}", *count as f64 / n.max(1) as f64, ms(*d, n))).collect();
+        lines.push(format!("core: {}", parts.join(", ")));
+    }
     for (id, v) in rows {
         let mut calls: Vec<(&String, &(u32, Duration))> = v.calls.iter().collect();
         calls.sort_by_key(|(_, (_, d))| std::cmp::Reverse(*d));
@@ -286,6 +316,24 @@ pub(crate) fn force_for_test(on: bool) {
 pub(crate) fn is_empty_for_test() -> bool {
     STATE.with(|s| {
         let s = s.borrow();
-        s.slots.is_empty() && s.imgui == Duration::ZERO && s.current.is_none()
+        s.slots.is_empty() && s.sections.is_empty() && s.imgui == Duration::ZERO && s.current.is_none()
+    })
+}
+
+/// Test hook: an addon's mean ms a frame in the period so far (all of lua, api, bridge and draw).
+#[cfg(test)]
+pub(crate) fn peek_addon_ms(id: &str) -> f64 {
+    STATE.with(|s| {
+        let s = s.borrow();
+        s.slots.get(id).map_or(0.0, |v| ms(v.lua + v.api + v.bridge + v.draw, s.frames))
+    })
+}
+
+/// Test hook: a shared section's mean ms a frame in the period so far.
+#[cfg(test)]
+pub(crate) fn peek_section_ms(name: &str) -> f64 {
+    STATE.with(|s| {
+        let s = s.borrow();
+        s.sections.get(name).map_or(0.0, |v| ms(v.1, s.frames))
     })
 }

@@ -36,7 +36,8 @@ eqoa.events.on("mod.command",function(e)
         s.message=e.data.args.message;s.message_until=e.time+6
     end
 end)
-for _,name in ipairs({"entity.added","entity.changed","entity.removed","group.changed","map.changed","player.changed","state.reset","events.dropped"}) do
+-- Not the entity or player streams: a record per creature per event; the panel reads on a timer instead.
+for _,name in ipairs({"group.changed","map.changed","state.reset","events.dropped"}) do
     eqoa.events.on(name,function() s.refresh=true end)
 end
 eqoa.events.on("shared.changed",function(e)

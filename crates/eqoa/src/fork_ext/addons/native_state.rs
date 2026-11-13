@@ -52,10 +52,12 @@ fn read(
     path: &str,
     f: impl FnOnce(&View) -> Json,
 ) -> Result<mlua::MultiValue> {
+    let cloned = super::addon_perf::section("read.clone");
     let value = CORE.with(|c| {
         let c = c.borrow();
         c.view.in_world.then(|| f(&c.view))
     });
+    drop(cloned);
     match value {
         Some(v) => lua.pack_multi((
             super::native::record_cached(lua, symbol, path, &v)?,

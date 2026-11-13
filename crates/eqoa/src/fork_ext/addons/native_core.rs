@@ -201,6 +201,7 @@ impl Core {
     }
 
     pub fn emit(&mut self, name: &str, data: Json) {
+        let _timed = super::addon_perf::section("events.emit");
         *self.stream_counts.entry(name.into()).or_default() += 1;
         if name == "combat.hit" {
             self.combat_total += 1;
@@ -609,6 +610,7 @@ fn generation_loss(c: &mut Core, count: u64) {
     }
 }
 pub(crate) fn flush_deferred() {
+    let _timed = super::addon_perf::section("deferred.flush");
     let batch = DEFERRED.with(|d| {
         let mut d = d.borrow_mut();
         if d.flushing {

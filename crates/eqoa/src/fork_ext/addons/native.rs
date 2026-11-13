@@ -394,12 +394,24 @@ pub(crate) fn record(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
             super::native_state::make_ref(lua, value)?
         }
         Json::Object(fields) => {
-            let backing = lua.create_table()?;
+            // Leaves go onto the stack as they are, with no Lua value made for them first
+            // (a record is built per entity per frame and per `entity.*` event).
+            let backing = lua.create_table_with_capacity(0, fields.len())?;
             for (k, v) in fields {
-                backing.set(
-                    k.as_str(),
-                    record(lua, nested_type(path, k).unwrap_or(path), v)?,
-                )?;
+                match v {
+                    Json::Null => {}
+                    Json::Bool(b) => backing.raw_set(k.as_str(), *b)?,
+                    Json::Number(n) => backing.raw_set(
+                        k.as_str(),
+                        n.as_f64()
+                            .ok_or_else(|| mlua::Error::runtime("invalid native number"))?,
+                    )?,
+                    Json::String(s) => backing.raw_set(k.as_str(), s.as_str())?,
+                    _ => backing.raw_set(
+                        k.as_str(),
+                        record(lua, nested_type(path, k).unwrap_or(path), v)?,
+                    )?,
+                }
             }
             Value::Table(guard_keyed(
                 lua,
@@ -437,13 +449,17 @@ pub(crate) fn record_cached(lua: &Lua, slot: &str, path: &str, value: &Json) -> 
         return record(lua, path, value);
     }
     let session_rc = session(lua);
+    let compared = super::addon_perf::section("record.compare");
     if let Ok(s) = session_rc.try_borrow() {
         if let Some((json, table)) = s.record_cache.get(slot) {
             if json == value {
+                drop(compared);
                 return copy_list(lua, list, table);
             }
         }
     }
+    drop(compared);
+    let _built = super::addon_perf::section("record.build");
     let built = record(lua, path, value)?;
     let Value::Table(table) = &built else {
         return Ok(built);
@@ -494,6 +510,12 @@ fn guard_keyed(
     // A bare Lua (no session) or a session in use higher up the stack just
     // builds uncached: the cache is an optimisation, never a requirement.
     let session_rc = lua.app_data_ref::<Shared>().map(|s| s.clone());
+    // The common case, a shape seen before: one borrow, the shared tables used by reference.
+    if let Some(s) = session_rc.as_ref().and_then(|rc| rc.try_borrow().ok())
+        && let (Some(missing), Some(readonly)) = (s.guard_missing.get(&sig), s.guard_readonly.as_ref())
+    {
+        return guard_proxy(lua, backing, missing, readonly);
+    }
     let (cached_missing, cached_readonly) = session_rc
         .as_ref()
         .and_then(|rc| rc.try_borrow().ok())
@@ -557,12 +579,18 @@ fn guard_keyed(
             f
         }
     };
+    guard_proxy(lua, backing, &missing, &readonly)
+}
+
+/// The read-only proxy over `backing`: reads fall to the backing table, whose own metatable
+/// reports a missing field; writes raise.
+fn guard_proxy(lua: &Lua, backing: Table, missing: &Table, readonly: &Function) -> Result<Table> {
     let proxy = lua.create_table()?;
     let mt = lua.create_table_with_capacity(0, 3)?;
-    backing.set_metatable(Some(missing))?;
-    mt.set("__index", backing)?;
-    mt.set("__newindex", readonly)?;
-    mt.set("__metatable", false)?;
+    backing.set_metatable(Some(missing.clone()))?;
+    mt.raw_set("__index", backing)?;
+    mt.raw_set("__newindex", readonly)?;
+    mt.raw_set("__metatable", false)?;
     proxy.set_metatable(Some(mt))?;
     Ok(proxy)
 }

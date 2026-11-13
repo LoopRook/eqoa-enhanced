@@ -56,6 +56,7 @@ pub(crate) fn release_vm(vm: u64) {
     });
 }
 pub(crate) fn update(c: &mut Core) {
+    let _timed = super::addon_perf::section("guide.update");
     GUIDES.with(|g|{let mut g=g.borrow_mut();let lost=g.iter().filter_map(|(vm,v)|(!c.view.in_world||v.entity.is_some_and(|id|entity_point(c,id,v.world).is_none())).then_some(*vm)).collect::<Vec<_>>();for vm in lost{let v=g.remove(&vm).unwrap();c.emit("guide.lost",json!({"owner":vm,"world_id":v.world,"entity_id":v.entity,"label":v.label,"reason":if c.view.in_world {"entity_left"}else{"world_left"}}));}});
 }
 pub(crate) fn install(host: &Host) -> Result<()> {
@@ -181,7 +182,21 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         })?,
     )
 }
+#[cfg(test)]
+thread_local! {static QUADS:std::cell::Cell<usize>=const{std::cell::Cell::new(0)};}
+/// Quads the guides have pushed on this thread (test evidence that the guide is drawn).
+#[cfg(test)]
+pub(crate) fn quads_drawn() -> usize {
+    QUADS.with(|q| q.get())
+}
+/// The dots of the one guide set, whichever VM owns it.
+#[cfg(test)]
+pub(crate) fn dots_for_any() -> usize {
+    GUIDES.with(|g| g.borrow().values().map(|g| g.dots.len()).max().unwrap_or(0))
+}
 fn quad(ui: &mut render::ui::Ui, white: usize, p: [[f32; 2]; 4], clip: [f32; 4]) {
+    #[cfg(test)]
+    QUADS.with(|q| q.set(q.get() + 1));
     ui.quads.push(render::ui::Quad {
         tex: white,
         blend: 3,
@@ -228,6 +243,7 @@ pub(crate) fn draw(
     project: impl Fn([f32; 2]) -> [f32; 2],
     bounds: [f32; 4],
 ) {
+    let _timed = super::addon_perf::section("guide.draw");
     GUIDES.with(|guides| {
         CORE.with(|c| {
             let c = c.borrow();

@@ -48,6 +48,29 @@ end
 local function live_valid(e)
     return e.is_creature and not e.corpse and e.hp_fraction and e.hp_fraction>0 and e.search_flags==0 and e.class_code and e.class_code<2 and e.name and not e.name:match("^%s*$") and e.position and valid(e.position.x,e.position.z)
 end
+-- Keeps the guide on its target: the nearest live creature of its name, the group member, the waypoint.
+local function follow_guide()
+    local guide=M.guide
+    if guide then
+        if guide.kind=="npc" then
+            local nearest
+            for _,e in ipairs(M.live) do if e.key==guide.key and e.world==M.world and (not nearest or distance(e)<distance(nearest)) then nearest=e end end
+            if (nearest and nearest.id or nil)~=guide.live_id or (guide.last_player and distance(guide.last_player)>=30) then M.choose(guide,true) end
+        elseif guide.kind=="group" then
+            for _,g in ipairs(M.group) do if g.id==guide.id then
+                if g.active and g.position and g.world_id==M.world then
+                    guide.world=M.world;guide.at=g.position;M.choose(guide,true)
+                else eqoa.map.clear_guide() end
+            end end
+        elseif guide.kind=="waypoint" then
+            local w=M.waypoint
+            if not w then M.clear()
+            elseif w.world_id==M.world and (not guide.at or guide.at.x~=w.x or guide.at.z~=w.z) then
+                guide.at={x=w.x,z=w.z};M.choose(guide,true)
+            end
+        end
+    end
+end
 local function observe_state()
     local p,map=eqoa.player.get(),eqoa.map.get()
     if not p or not map then M.in_world=false;M.live={};M.group={};M.places={};M.refresh=false;return end
@@ -73,32 +96,39 @@ local function observe_state()
         if marks then for _,m in ipairs(marks) do if m.kind=="camp" or m.kind=="coach" then M.places[#M.places+1]={name=m.label or m.name,x=m.x,z=m.z,world=world} end end end
     end
     end
-    local guide=M.guide
-    if guide then
-        if guide.kind=="npc" then
-            local nearest
-            for _,e in ipairs(M.live) do if e.key==guide.key and e.world==M.world and (not nearest or distance(e)<distance(nearest)) then nearest=e end end
-            if (nearest and nearest.id or nil)~=guide.live_id or (guide.last_player and distance(guide.last_player)>=30) then M.choose(guide,true) end
-        elseif guide.kind=="group" then
-            for _,g in ipairs(M.group) do if g.id==guide.id then
-                if g.active and g.position and g.world_id==M.world then
-                    guide.world=M.world;guide.at=g.position;M.choose(guide,true)
-                else eqoa.map.clear_guide() end
-            end end
-        elseif guide.kind=="waypoint" then
-            local w=M.waypoint
-            if not w then M.clear()
-            elseif w.world_id==M.world and (not guide.at or guide.at.x~=w.x or guide.at.z~=w.z) then
-                guide.at={x=w.x,z=w.z};M.choose(guide,true)
-            end
-        end
-    end
+    follow_guide()
     M.refresh=false
     -- A query owns its snapshot and order until the next query/tab/open.
     -- Movement refreshes positions without invalidating an unfinished build.
     local nearest={}
     for _,e in ipairs(M.live) do if e.world==M.world and (not nearest[e.key] or distance(e)<distance(nearest[e.key])) then nearest[e.key]=e end end
     for key,e in pairs(nearest) do local r=M.row_by_key and M.row_by_key[key];if r then r.at=e end end
+    if M.guide and M.guide.kind=="group" then
+        local found=false;for _,g in ipairs(M.group) do if g.id==M.guide.id then found=true end end
+        if not found then M.clear() end
+    end
+end
+-- With a guide set and the panel closed only the guide's own target is read: the player, the map's
+-- waypoint, the group for a member, and the creatures of the guide's name (`entities.named`), never the
+-- whole entity list (a record per creature, rebuilt whenever one moves).
+local function observe_guide()
+    local guide=M.guide
+    local p,map=eqoa.player.get(),eqoa.map.get()
+    if not p or not map then M.in_world=false;M.live={};M.group={};M.refresh=false;return end
+    M.in_world=true
+    M.world=map.world_id;M.player=p.position or M.player;M.waypoint=map.waypoint
+    if guide.kind=="npc" then
+        M.live={}
+        local named=eqoa.entities.named(guide.name,true)
+        if named then for _,e in ipairs(named) do if live_valid(e) then
+            M.live[#M.live+1]={name=e.name,key=e.name:lower(),world=e.world_id,x=e.position.x,z=e.position.z,level=e.level,id=e.id}
+        end end end
+    elseif guide.kind=="group" then
+        local group=eqoa.group.get();M.group={}
+        if group and group.members then for _,g in ipairs(group.members) do if g.id~=p.id then M.group[#M.group+1]=g end end end
+    end
+    follow_guide()
+    M.refresh=false
     if M.guide and M.guide.kind=="group" then
         local found=false;for _,g in ipairs(M.group) do if g.id==M.guide.id then found=true end end
         if not found then M.clear() end
@@ -249,9 +279,14 @@ function M.status()
     end
     return at and string.format("%s %.0f: %s",kind,distance(at),r.name) or "Unavailable here: "..r.name
 end
+-- The open panel re-reads the world when something changed and at least this often (seconds).
+local OPEN_REFRESH=0.25
 function M.step()
     load_step()
-    if M.refresh then if M.open then M.observe() elseif M.guide then observe_state() end end
+    local now=M.now or 0
+    if M.open then
+        if M.refresh or now>=(M.next_observe or 0) then M.next_observe=now+OPEN_REFRESH;M.observe() end
+    elseif M.guide then observe_guide() end
     if M.open then eqoa.input.capture_text(true);build_step() end
 end
 return M
