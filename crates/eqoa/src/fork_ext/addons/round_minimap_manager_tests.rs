@@ -15,6 +15,8 @@ struct Rm {
     /// the colour of the terrain stand-in the native minimap is drawn over
     stand_in: [f32; 4],
     target: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// between worlds: the frame carries no game, as a zoning player's do
+    zoning: bool,
 }
 const RM_SIZE: (u32, u32) = (1024, 768);
 const RM_GREEN: [f32; 4] = [0.1, 0.6, 0.2, 1.0];
@@ -59,7 +61,7 @@ impl Rm {
         }
         let manager = gpu.manager(&root.0, Some(config.0.clone()));
         let scene = crate::map::Map::round4_fixture(&gpu.device, &gpu.queue, win, true);
-        Some(Rm { gpu, _root: root, _config: config, manager, play, walker, me, scene, draws: 0, win, scale, stand_in: RM_GREEN, target: None })
+        Some(Rm { gpu, _root: root, _config: config, manager, play, walker, me, scene, draws: 0, win, scale, stand_in: RM_GREEN, target: None, zoning: false })
     }
     /// What the native minimap shows of the entities: a dot per creature but corpses and the inactive.
     fn mini_view(&self) -> crate::map::mini::MiniView {
@@ -82,7 +84,7 @@ impl Rm {
     /// One whole frame: the addons' callbacks, the native minimap draw routed as the viewer
     /// routes it, then the shared ImGui pass over it.
     fn frame(&mut self) -> wgpu::Texture {
-        let mut snapshot = self.play.forge_snapshot(Some(&self.walker));
+        let mut snapshot = if self.zoning { Snapshot::default() } else { self.play.forge_snapshot(Some(&self.walker)) };
         snapshot.capture_pending = false;
         let at = self.walker.cam.walk.phys.position;
         let at = [at.x.0, at.y.0, at.z.0];
@@ -892,4 +894,157 @@ fn round_minimap_shows_no_square_frame_inside_the_circle_with_the_discs_art() {
     rm.manager.shutdown();
     assert!(found >= 3, "control: the frame's own edge is not picture ({found}/4) ");
     assert!(bad.is_empty(), "frame pixels inside the circle: {bad:?}");
+}
+
+/// The mod's wheel forwarding loses no notch: each one over the circle reaches the native minimap
+/// as one whole step (a 1.25 change of zoom), the wheel runs the whole of upstream's range
+/// (2 to 25 world units a frame pixel outdoors) and stops at its ends, and several notches within
+/// one frame all arrive. Indoors takes the same forwarded value through the same `mini_wheel`
+/// with its own limits (`indoor::SCALE_LIMITS`), which a test cannot enter without upstream's
+/// private indoor state: not covered here.
+#[test]
+fn round_minimap_wheel_reaches_both_ends_of_upstreams_zoom_in_whole_steps() {
+    use crate::map::mini::SCALE_LIMITS;
+    let Some(mut rm) = Rm::new(false) else { return };
+    rm.frames(4);
+    let (cx, cy, _) = rm.circle();
+    rm.at(cx as f32, cy as f32);
+    let mut notch = |rm: &mut Rm, n: f32| -> f32 {
+        rm_wheel(n);
+        rm.frames(1);
+        let got = super::super::pointer_api::take_wheel();
+        assert_eq!(got, n, "one notch of {n} arrives whole");
+        rm.scene.mini_wheel(got);
+        rm.scene.mini.scale
+    };
+    let start = rm.scene.mini.scale;
+    // in: every notch is one step until the limit takes it
+    let mut now = start;
+    let mut in_notches = 0;
+    while now > SCALE_LIMITS.0 {
+        let next = notch(&mut rm, 1.0);
+        in_notches += 1;
+        assert!((next - (now / 1.25).max(SCALE_LIMITS.0)).abs() < 1e-4, "notch {in_notches}: {now} -> {next}");
+        now = next;
+        assert!(in_notches < 20, "the zoom never reached its limit");
+    }
+    assert_eq!(now, SCALE_LIMITS.0, "zoomed all the way in");
+    assert_eq!(in_notches, 5, "6 units a pixel to the limit of 2 is five notches (control: four are not enough)");
+    assert!(start / 1.25f32.powi(4) > SCALE_LIMITS.0, "control: one notch short is still above the limit");
+    // out: all the way, the limit holds
+    let mut out_notches = 0;
+    while now < SCALE_LIMITS.1 {
+        let next = notch(&mut rm, -1.0);
+        out_notches += 1;
+        assert!((next - (now * 1.25).min(SCALE_LIMITS.1)).abs() < 1e-3, "out notch {out_notches}: {now} -> {next}");
+        now = next;
+        assert!(out_notches < 30, "the zoom never reached its limit");
+    }
+    assert_eq!((now, out_notches), (SCALE_LIMITS.1, 12));
+    assert_eq!(notch(&mut rm, -1.0), SCALE_LIMITS.1, "one past the limit changes nothing");
+    // several notches in one frame all arrive, as one request
+    for _ in 0..5 {
+        rm_wheel(1.0);
+    }
+    rm.frames(1);
+    assert_eq!(super::super::pointer_api::take_wheel(), 5.0, "five notches in a frame");
+    rm.manager.shutdown();
+}
+
+/// One bundled mod through the real Manager on Play-shaped data: world entry, the minimap hidden
+/// and shown, Move HUD, the map open and closed, zoning, disable and enable, and a stretch of
+/// plain frames after each. Returns what the Manager recorded as diagnostics.
+fn rm_session(packages: &[&str]) -> Vec<String> {
+    use crate::hudlayout::{self, Beyond, Piece};
+    let want: Vec<String> = packages.iter().map(|p| p.to_string()).collect();
+    let Some(mut rm) = Rm::with(|p| want.iter().any(|w| w == p), 0) else { return vec!["SKIP".into()] };
+    rm.frames(6);
+    // the minimap hidden (N), then shown
+    rm.play.map.mini.up = false;
+    rm.frames(4);
+    rm.play.map.mini.up = true;
+    rm.frames(4);
+    // Move HUD: drag the minimap and put it back
+    hudlayout::frame_begin();
+    hudlayout::note(Piece::Minimap, [474.0, 50.0, 586.0, 162.0], [0.0, 0.0]);
+    hudlayout::frame_end();
+    hudlayout::set_unlocked(true);
+    let b = Beyond::of(RM_SIZE);
+    hudlayout::press([530.0, 106.0], b);
+    hudlayout::drag_to([470.0, 156.0], b);
+    hudlayout::release();
+    hudlayout::set_unlocked(false);
+    rm.frames(4);
+    hudlayout::reset();
+    rm.frames(2);
+    // the pointer over the minimap and a wheel notch
+    let r = rm.stock_rect();
+    rm.at((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0);
+    rm_wheel(1.0);
+    rm.frames(3);
+    // the map open, then closed
+    rm.play.map.open = true;
+    rm.frames(4);
+    rm.play.map.open = false;
+    rm.frames(3);
+    // zoning: no game for a while, then the world again
+    rm.zoning = true;
+    rm.frames(3);
+    rm.zoning = false;
+    rm.frames(5);
+    // disable and enable, each mod
+    for id in packages.iter().filter(|p| **p != "resources") {
+        rm.manager.queue(Command::Enable(id.to_string(), false));
+        rm.frames(3);
+        rm.manager.queue(Command::Enable(id.to_string(), true));
+        rm.frames(4);
+    }
+    let found: Vec<String> = rm.manager.diagnostics().iter().map(|d| format!("{}: [{}] {}", d.id.as_deref().unwrap_or("-"), d.phase, d.message)).collect();
+    rm.manager.shutdown();
+    hudlayout::reset();
+    found
+}
+
+/// Every bundled mod, alone, runs that session with the Manager recording nothing.
+#[test]
+fn every_bundled_mod_runs_a_play_session_with_zero_manager_diagnostics() {
+    let mut packages: Vec<&str> = crate::fork_ext::bundled::EMBEDDED_FILES.iter().map(|f| f.package).collect();
+    packages.sort();
+    packages.dedup();
+    packages.retain(|p| *p != "resources");
+    assert_eq!(packages.len(), 11, "the bundled set (eight eqoa_* mods and the three Forge UIs): {packages:?}");
+    let mut failed = Vec::new();
+    let mut ran = 0;
+    for p in &packages {
+        // the map search reads the journal mod's saved file
+        let with: Vec<&str> = if *p == "eqoa_map_search" { vec![p, "eqoa_creature_journal", "resources"] } else { vec![p, "resources"] };
+        let found = rm_session(&with);
+        if found == ["SKIP"] {
+            eprintln!("SKIP zero-diagnostics gate: no graphics device");
+            return;
+        }
+        ran += 1;
+        if !found.is_empty() {
+            failed.push(format!("{p}: {found:?}"));
+        }
+    }
+    assert_eq!(ran, packages.len());
+    assert!(failed.is_empty(), "Manager diagnostics in a Play-shaped session:\n{}", failed.join("\n"));
+}
+
+/// The control: a bad call from a mod (the empty rectangle the round minimap used to claim) is
+/// recorded by the same Manager, so the gate above would have failed on it.
+#[test]
+fn the_zero_diagnostics_gate_fails_on_a_deliberately_bad_call() {
+    let Some(mut rm) = Rm::new(false) else { return };
+    rm.frames(4);
+    assert!(rm.manager.diagnostics().is_empty(), "clean first: {:?}", rm.manager.diagnostics());
+    rm.lua().load("local ok = eqoa.input.claim_pointer({ x = 0, y = 0, width = 0, height = 0 }) assert(ok == nil)").exec().unwrap();
+    rm.frames(3);
+    assert!(
+        rm.manager.diagnostics().iter().any(|d| d.message.contains("claim_pointer")),
+        "a bad claim is recorded: {:?}",
+        rm.manager.diagnostics().iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    rm.manager.shutdown();
 }
