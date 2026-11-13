@@ -51,7 +51,9 @@
     "tools/test_dev_release.py",
     ".github/workflows/enhanced-dev.yml",
     "tools/sync_upstream.py",
-    "tools/test_sync_upstream.py"
+    "tools/test_sync_upstream.py",
+    "tools/check_no_local_paths.py",
+    "tools/test_check_no_local_paths.py"
   ],
   "shared": {
     ".gitignore": {
@@ -85,9 +87,9 @@
       "reason": "Part B fix round: restore upstream test lines and the native map-open condition; tightened to measured. Restored/map controls and saved binding defaults. Sync 2026-11-07: upstream's macro and alias tests use 'y' for the same reason (+7/-7). Round 2.5 review fix (MiniMax H1): upstream's a_layout_with_the_maps_rows_reads_them is restored verbatim plus one setup-hook line, so deletions fall 54 to 38 and the hook calls add 7. Round 3 Stage C removes stats_box row, lowering added lines from 62 to 55. Round 4 Part B: tightened to measured divergence after replacing native search/journal with bundled mods."
     },
     "crates/eqoa/src/crashfile.rs": {
-      "added": 2,
-      "deleted": 1,
-      "reason": "Sync 2026-11-11: send-boundary hook prefixes every native/browser/legacy crash report with fork-owned Enhanced identity; upstream persistence, wire protocol and tests retained. Fix round: one test-only #[path] line loads fork_ext/crashfile_dirs_tests.rs (it needs crashfile's private files_in/pending_in/write_in/answered_in; proves the fork's local crash folder and upstream's never mix)."
+      "added": 8,
+      "deleted": 2,
+      "reason": "Merge of develop 2026-11-13 (privacy guard): the profile-shaped scrub fixture is built from split pieces so the source holds no user path (+6/-1, develop 755a0aa8); budget follows the measured diff. Sync 2026-11-11: send-boundary hook prefixes every native/browser/legacy crash report with fork-owned Enhanced identity; upstream persistence, wire protocol and tests retained. Fix round: one test-only #[path] line loads fork_ext/crashfile_dirs_tests.rs (it needs crashfile's private files_in/pending_in/write_in/answered_in; proves the fork's local crash folder and upstream's never mix)."
     },
     "crates/eqoa/src/hud.rs": {
       "added": 52,
@@ -200,9 +202,9 @@
       "reason": "Sync 2026-11-09 Windows CI fixture correction only: synthesize drive-qualified absolute fixture paths on Windows so upstream AppImage absolute-path and negative controls run there; production code is unchanged."
     },
     "crates/eqoa/src/map/mini.rs": {
-      "added": 1,
+      "added": 3,
       "deleted": 0,
-      "reason": "Round 4 Part C: upstream's text plus one neutral map overlay call (the guide drawing seam)."
+      "reason": "Round 4 Part C: upstream's text plus one neutral map overlay call (the guide drawing seam). Owner-test fix round 2026-11-13: two more added lines around upstream's own frame-art blit, which stays untouched, so a held view's capture can leave the frame art out (it covers the picture's edge, and a circle cut from it showed square frame edges)."
     },
     "crates/eqoa/src/map/mod.rs": {
       "added": 4,
