@@ -1751,7 +1751,7 @@ mod tests {
         p.forge_health.receive(&bytes);
         assert!(!health_redraw(&mut p, false, false));
 
-        // Simulate opening Start Menu -> Options -> Extended -> Mods & Addons (Play.mode == 34),
+        // Simulate opening Start Menu -> Options -> Extended -> Enhanced (Play.mode == 34),
         // where ability bars and active effects are suppressed by Play::draw_hud's mode checks.
         p.mode = 34;
         p.apply_camera = false;
