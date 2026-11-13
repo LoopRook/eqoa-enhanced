@@ -1,6 +1,6 @@
 # EQOA round 4 Part B: journal and search mods (fresh Sol, medium)
 
-Worktree `C:/Users/hocka/.paseo/worktrees/1usktejc/eqoa-api-r4`, branch `feat/eqoa-api-r4`.
+Worktree `<worktree:eqoa-api-r4>`, branch `feat/eqoa-api-r4`.
 `git -c safe.directory=*` on git. Read: `docs/plans/eqoa-api/round-4-brief.md` (owner-approved
 specs of mods 1 and 2, the Gates), `docs/plans/eqoa-api/round-4-report.md` (Part A and its fix round:
 the API you build on), round 3's mods in `bundled-mods/` (eqoa_stats_box etc.: how a bundled mod,
@@ -94,8 +94,8 @@ release-mode per-frame cost with both mods on and a 1.4 MB journal (assert the w
 
 Gates as in the brief (addon suite, full client suite once at the end, wasm check, release build
 last, footprint PASS, zero-addon gate, bundled Wereoxxs/ARPG/Modern UI and round 3 mods still pass).
-Shared `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`, mkdir lock
-`C:/Users/hocka/Paseo/cargo-build.lock`, cargo in the foreground with a timeout, one build at a time.
+Shared `CARGO_TARGET_DIR=%USERPROFILE%\Paseo\targets/shared`, mkdir lock
+`%USERPROFILE%\Paseo\cargo-build.lock`, cargo in the foreground with a timeout, one build at a time.
 Long output to a file; read summaries. Commit after each step; LoopRook; no push/merge/tag.
 
 Report: add a "Part B" section to `docs/plans/eqoa-api/round-4-report.md`: what changed, each test

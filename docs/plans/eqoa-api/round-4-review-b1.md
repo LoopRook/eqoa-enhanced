@@ -76,7 +76,7 @@ junction-redirected profile folders, and UNC folder redirection (`\\server\share
 opened as a directory by `lock_parents`). The error text the mod sees is "reparse point in addon
 file path", which the player never sees explained.
 
-On this machine the Desktop is plain (`C:\Users\hocka\Desktop`, no reparse attribute) and the
+On this machine the Desktop is plain (`%USERPROFILE%\Desktop`, no reparse attribute) and the
 OneDrive root is also not a reparse point, so I could not reproduce it here; I mark it MEDIUM
 because it is likely on OneDrive-backed Desktops and it is untested: the tests only use a temp
 `TestIo.desktop`, and `#[cfg(test)]` replaces both `pick()` and `desktop()`, so neither the real

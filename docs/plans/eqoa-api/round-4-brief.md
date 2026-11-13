@@ -1,6 +1,6 @@
 # EQOA round 4: map API and map mods (brief, Opus lead, 2026-11-11)
 
-Repository `C:/Users/hocka/Github Projects/EQOA Native Rust`. Branch `feat/eqoa-api-r4` from `develop`
+Repository `<repo>`. Branch `feat/eqoa-api-r4` from `develop`
 (after the 2026-11-11 upstream sync merges). Plan: `docs/plans/EQOA-MOD-API-PLAN.md` "Round 4" and
 "Rules for every worker brief" (paste-in rules; obey all). Spec: `docs/modding/EQOA-API-SPEC.md`
 (§5 HUD, §7 "Map data and waypoints", §9 sandbox, §10 hooks). Round 3's report
@@ -118,8 +118,8 @@ Not in Part A: removing native search/journal/minimap code, writing the mods.
   Part A may add the overlay seam and the `minimap` hide check; Parts B/C must bring map files down.
 - A benchmark asserts its workload ran. No test that logs SKIP and returns Ok counts as proof.
 - Known GPU-only failures on this PC, green on CI: two AO tests, upstream particles16.
-- Shared `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`, mkdir lock
-  `C:/Users/hocka/Paseo/cargo-build.lock` with a timeout, one build at a time, cargo in the
+- Shared `CARGO_TARGET_DIR=%USERPROFILE%\Paseo\targets/shared`, mkdir lock
+  `%USERPROFILE%\Paseo\cargo-build.lock` with a timeout, one build at a time, cargo in the
   foreground. Long output to a file; read only summaries.
 - Commit on your branch only, as LoopRook. No push, merge or tag. `git -c safe.directory=*` in managed
   worktrees.

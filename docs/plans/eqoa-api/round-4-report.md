@@ -50,7 +50,7 @@ The shared catalogue pin remains `37be57d7996fbf7e7ef936c3e6ced1c3a14f611462346b
 
 ### Validation
 
-All cargo commands ran in the foreground under the shared mkdir lock (20-minute acquisition timeout), `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`, and scratch `EQOA_CONFIG`. Long logs remain under ignored `.superpowers/sdd/round4/`. Explicit SKIP lines are counted separately from Rust ignored tests and are not evidence that those workloads ran.
+All cargo commands ran in the foreground under the shared mkdir lock (20-minute acquisition timeout), `CARGO_TARGET_DIR=%USERPROFILE%\Paseo\targets/shared`, and scratch `EQOA_CONFIG`. Long logs remain under ignored `.superpowers/sdd/round4/`. Explicit SKIP lines are counted separately from Rust ignored tests and are not evidence that those workloads ran.
 
 | Final suite/check | Pass | Fail | Ignored | Explicit SKIP |
 |---|---:|---:|---:|---:|
@@ -392,7 +392,7 @@ Explicit SKIP lines are counted case-sensitively as `SKIP`, not test names conta
 
 The zero-addon busy-world gate passed in that full run: 300 frame/menu and 600 packet/chat iterations, **zero allocations / zero bytes** in every measured path. `menu_frame_us=19.718`, `frame_us=21.763`, `event_us=1.510`, `chat_us=0.102`. Existing Wereoxxs/ARPG/Modern and Round 3 workloads also passed; external goldens/reference packages retain the skips above.
 
-All Cargo commands ran in the foreground under `C:/Users/hocka/Paseo/cargo-build.lock`, using the shared target, scratch `EQOA_CONFIG`, one test thread and a 20-minute per-command timeout. The runner waits/retries while another agent holds the lock and checks nonzero workload counts. Its own debug binary is preserved under the lock for controls; a zero-test invocation of a replaced shared binary was rejected as evidence.
+All Cargo commands ran in the foreground under `%USERPROFILE%\Paseo\cargo-build.lock`, using the shared target, scratch `EQOA_CONFIG`, one test thread and a 20-minute per-command timeout. The runner waits/retries while another agent holds the lock and checks nonzero workload counts. Its own debug binary is preserved under the lock for controls; a zero-test invocation of a replaced shared binary was rejected as evidence.
 
 The first cap regression attempt failed because its fixed 5,000-frame loop clicked Export before async load finished. `39175ef` replaces that loop with a bounded 90-second readiness/export wait and real activation retries; exact 80,001?80,000 and 50,001?50,000 boundary assertions remain. The focused corrected run passed (31.70 s), and the entire 48-case Part B debug run passed (179.02 s). Shared debug/release renderer artifacts also produced missing-method compile errors; artifact-only cleaning rebuilt this worktree's renderer without source edits. Those failed attempts are not reported as passing gates.
 
@@ -599,7 +599,7 @@ The final mod calls `eqoa.entities.pick_dot(query)`: one native pass over curren
 Required command, run twice sequentially on unchanged final code, 300 frames per configuration:
 `cargo test --release --locked -p eqoa --bin eqoa round4c_frame_time_with_all_map_mods_in_a_busy_world -- --test-threads=1 --nocapture`
 
-Each cargo command used `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`, a fresh empty temporary `EQOA_CONFIG`, the shared `cargo-build.lock` directory (wait/retry, remove in finally), and a foreground subprocess with a 30-minute timeout. No other build/test workload ran during either measurement. No worktree target directory was created.
+Each cargo command used `CARGO_TARGET_DIR=%USERPROFILE%\Paseo\targets/shared`, a fresh empty temporary `EQOA_CONFIG`, the shared `cargo-build.lock` directory (wait/retry, remove in finally), and a foreground subprocess with a 30-minute timeout. No other build/test workload ran during either measurement. No worktree target directory was created.
 
 Run 1:
 
