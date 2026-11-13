@@ -374,7 +374,8 @@ fn draw_commands(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>, target_
 
     MOD_QUEUES.with(|queues| {
         let mut map = queues.borrow_mut();
-        for queue in map.values_mut() {
+        for (id, queue) in map.iter_mut() {
+            let timing = super::addon_perf::enabled().then(std::time::Instant::now);
             for cmd in queue.drain(..) {
                 let phase = if matches!(&cmd, HudCommand::Text { .. }) {
                     2
@@ -558,6 +559,9 @@ fn draw_commands(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>, target_
                         );
                     }
                 });
+            }
+            if let Some(started) = timing {
+                super::addon_perf::add_draw(id, started.elapsed());
             }
         }
     });

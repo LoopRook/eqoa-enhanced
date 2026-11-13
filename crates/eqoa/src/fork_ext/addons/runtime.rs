@@ -753,6 +753,7 @@ fn render_managed(
                 .prepare_render(ui, window)
                 .map_err(|e| e.to_string())?;
         }
+        let imgui_started = super::addon_perf::enabled().then(std::time::Instant::now);
         let mut renderer = renderer.borrow_mut();
         #[cfg(test)]
         if fault == Some(RenderFault::RendererConsumer) {
@@ -780,6 +781,9 @@ fn render_managed(
         renderer
             .render(frame, &mut pass, extent)
             .map_err(|e| e.to_string())?;
+        if let Some(started) = imgui_started {
+            super::addon_perf::add_imgui(started.elapsed());
+        }
         #[cfg(test)]
         if fault == Some(RenderFault::AfterRender) {
             return Err("injected post-render failure".into());

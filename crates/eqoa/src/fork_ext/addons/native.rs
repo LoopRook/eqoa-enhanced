@@ -651,6 +651,7 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
                     "this function takes no arguments",
                 );
             }
+            let _timed = super::addon_perf::api(&symbol);
             super::native_core::flush_deferred();
             match function.call::<MultiValue>(args) {
                 Ok(value) => Ok(value),
@@ -675,6 +676,7 @@ where
     table.set(
         name,
         lua.create_function(move |lua, args: A| {
+            let _timed = super::addon_perf::api(&symbol);
             super::native_core::flush_deferred();
             match f(lua, args) {
                 Ok(value) => Ok(value),

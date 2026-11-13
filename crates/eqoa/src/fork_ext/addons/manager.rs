@@ -308,17 +308,22 @@ impl Manager {
                 let first = !instance.initialized;
                 // An entry that throws can still have registered cleanup callbacks.
                 instance.initialized = true;
-                match instance
+                let timing = super::addon_perf::lua_scope(&entry.metadata.id);
+                let called = instance
                     .bridge
-                    .invoke(|| instance.host.frame_entry(&instance.function))
-                {
+                    .invoke(|| instance.host.frame_entry(&instance.function));
+                drop(timing);
+                match called {
                     Ok(()) => {
                         entry.status = Status::Enabled;
                         if first {
                             self.load(entry, true);
                         }
                         if let Some(i) = entry.instance.as_ref() {
-                            if let Err(e) = i.bridge.invoke(|| i.host.finish_frame(enabling)) {
+                            let timing = super::addon_perf::lua_scope(&entry.metadata.id);
+                            let finished = i.bridge.invoke(|| i.host.finish_frame(enabling));
+                            drop(timing);
+                            if let Err(e) = finished {
                                 self.fail(entry, "events", e.to_string(), true);
                             }
                         }
@@ -391,6 +396,7 @@ impl Manager {
         }
         self.awaiting_render = false;
         super::visibility::publish_claims(&self.hud_claims.borrow());
+        super::addon_perf::tick();
     }
     pub fn shutdown(&mut self) {
         super::native_core::manager_demand(false);

@@ -83,6 +83,7 @@ impl DrawList {
         auto_radius: Option<f32>,
         draw: impl FnOnce(*mut sys::ImDrawList),
     ) -> Result<()> {
+        let _timed = super::super::addon_perf::bridge("DrawList");
         let mut frame = self.frame.borrow_mut();
         frame.check()?;
         if frame.epoch != self.epoch || frame.context as usize != self.context {

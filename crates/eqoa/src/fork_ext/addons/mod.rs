@@ -21,6 +21,7 @@ pub(crate) fn take_close_options_on_open() -> bool {
     CLOSE_OPTIONS_ON_OPEN.swap(false, std::sync::atomic::Ordering::AcqRel)
 }
 pub(crate) mod ability;
+pub(crate) mod addon_perf;
 pub(crate) mod actions;
 mod async_json;
 pub(crate) mod bit;

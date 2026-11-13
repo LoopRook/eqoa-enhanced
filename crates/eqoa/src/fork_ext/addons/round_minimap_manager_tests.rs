@@ -1162,3 +1162,38 @@ fn rm_is_picture_of(p: [u8; 4], color: [f32; 4]) -> bool {
     let c = color.map(|c| (c * 255.0) as i32);
     (0..3).all(|i| (p[i] as i32 - c[i]).abs() < 12)
 }
+
+/// `EQOA_PERF`: the addon timing line names each enabled addon with its Lua, its native calls and
+/// the shared ImGui pass, and the costliest `eqoa.*` calls beneath. With the timers off (no
+/// `EQOA_PERF`) nothing is timed or stored.
+#[test]
+fn addon_perf_line_splits_each_addons_lua_from_its_native_calls() {
+    super::super::addon_perf::force_for_test(false);
+    let Some(mut rm) = Rm::with(|p| p == "eqoa_round_minimap" || p == "eqoa_creature_journal", 50) else { return };
+    rm.frames(8);
+    assert!(super::super::addon_perf::is_empty_for_test(), "control: with EQOA_PERF unset nothing is timed or stored");
+    assert!(super::super::addon_perf::take_report().is_empty());
+    rm.manager.shutdown();
+    drop(rm);
+    super::super::addon_perf::force_for_test(true);
+    let Some(mut rm) = Rm::with(|p| p == "eqoa_round_minimap" || p == "eqoa_creature_journal", 50) else { return };
+    rm.frames(8);
+    super::super::addon_perf::force_for_test(true);
+    for _ in 0..20 {
+        rm.frame();
+    }
+    let lines = super::super::addon_perf::take_report();
+    let all = lines.join("\n");
+    assert!(lines[0].starts_with("addons: "), "{all}");
+    for id in ["eqoa_round_minimap", "eqoa_creature_journal"] {
+        assert!(lines[0].contains(&format!("{id} ")), "{id} is named: {all}");
+    }
+    assert!(lines.iter().any(|l| l.starts_with("addon-api: eqoa_round_minimap ")), "its native calls are named: {all}");
+    assert!(lines[0].contains("lua ") && lines[0].contains("api ") && lines[0].contains("bridge ") && lines[0].contains("imgui "), "{all}");
+    assert!(lines.iter().any(|l| l.contains("hud.layout ")), "the minimap's layout call shows: {all}");
+    // the mean is per frame: the numbers are plausible milliseconds, not totals
+    let imgui: f64 = lines[0].rsplit("imgui ").next().unwrap().trim().parse().unwrap();
+    assert!((0.0..200.0).contains(&imgui), "{all}");
+    rm.manager.shutdown();
+    super::super::addon_perf::force_for_test(false);
+}
