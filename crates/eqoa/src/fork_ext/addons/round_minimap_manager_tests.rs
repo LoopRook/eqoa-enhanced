@@ -785,6 +785,9 @@ fn rm_claims(rm: &Rm, at: [f32; 2]) -> bool {
 #[test]
 fn round4c_frame_time_with_all_map_mods_in_a_busy_world() {
     use std::time::Instant;
+    // the disc's own HUD art when `$EQOA_ISO` is set (the frame, the font): the real minimap chrome
+    let real_art = crate::map::extension::use_real_ui(true);
+    eprintln!("R4C art: {}", if real_art { "the disc's UI.CSF and SUPPORT atlas" } else { "stand-in (no disc)" });
     const ROUND3: [&str; 4] = ["eqoa_stats_box", "eqoa_target_of_target", "eqoa_mana_bars", "eqoa_hud_numbers"];
     const ROUND4: [&str; 3] = ["eqoa_creature_journal", "eqoa_map_search", "eqoa_round_minimap"];
     let mut results = Vec::new();
@@ -820,18 +823,24 @@ fn round4c_frame_time_with_all_map_mods_in_a_busy_world() {
         assert_eq!(rm.manager.entries.len(), packages.len(), "every wanted mod loaded");
         let n: usize = std::env::var("R4C_SAMPLES").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
         let mut whole = Vec::with_capacity(n);
+        let (mut cpu, mut wait) = (0.0f64, 0.0f64);
         for _ in 0..n {
             let t = Instant::now();
             let tex = rm.frame();
+            let submitted = t.elapsed().as_secs_f64() * 1000.0;
             rm.gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-            whole.push(t.elapsed().as_secs_f64() * 1000.0);
+            let total = t.elapsed().as_secs_f64() * 1000.0;
+            (cpu, wait) = (cpu + submitted, wait + (total - submitted));
+            whole.push(total);
             drop(tex);
         }
         whole.sort_by(f64::total_cmp);
         let mean = whole.iter().sum::<f64>() / n as f64;
         eprintln!(
-            "R4C frame time ({}, {label}): frames={n} mean={mean:.3} ms p50={:.3} p95={:.3} max={:.3}",
+            "R4C frame time ({}, {label}): frames={n} mean={mean:.3} ms (CPU to submit {:.3}, then GPU wait {:.3}) p50={:.3} p95={:.3} max={:.3}",
             if cfg!(debug_assertions) { "debug" } else { "release" },
+            cpu / n as f64,
+            wait / n as f64,
             whole[n / 2],
             whole[(n * 95 / 100).min(n - 1)],
             whole[n - 1]
@@ -841,6 +850,7 @@ fn round4c_frame_time_with_all_map_mods_in_a_busy_world() {
         rm.manager.shutdown();
     }
     assert!(results.iter().all(|m| m.is_finite()));
+    crate::map::extension::use_real_ui(false);
 }
 
 /// Every pixel in the picture's last two pixels inside the circle, round its whole edge but the

@@ -5,6 +5,9 @@ Upstream changes remain in UPDATE-NOTES.md.
 ## Unreleased
 
 - Round minimap hover reads compact current-frame dot positions, avoiding a full creature-record list each frame.
+- The round minimap is now a clean circle: the game's square frame no longer shows inside it. Its hover card cuts a single very long word with "...", and its mod no longer reports errors in the Addon Manager.
+- Map Search's button and box are back at the sizes the built-in search had, scaled with the HUD at any window size or Render Scale.
+- Options: Enhanced HUD and Mods & Addons are now one page named **Enhanced** (Enhanced HUD rows first), placed after Extended's last page, so the list of pages is one row shorter. Every row keeps its saved setting. The path to the Addon Manager is Options -> Extended -> Enhanced -> Addon Manager.
 
 - Map Search finishes while nearby creatures move, keeps result order stable, and filters the previous results as you type. Closed search no longer scans the world or reloads a changing journal.
 - Search clears the full map header, consumes outside clicks while open, and scrolls whole rows only over its list. Group search excludes you and keeps unavailable members greyed out.
