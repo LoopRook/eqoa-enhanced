@@ -1,6 +1,6 @@
 # Upstream sync ? 2026-11-11
 
-Prepared on `sync/2026-11-11` in `C:/Users/hocka/Github Projects/eqoa-sync-2026-11-11`.
+Prepared on `sync/2026-11-11` in `<repo:eqoa-sync-2026-11-11>`.
 Starting develop: `cbcf86b`. Pinned upstream: `a3cedec7d8bb2688cf8ed56d34a280f4a459b0ef`
 (41 commits since reviewed base `5d54c0c`). Merge: `3419bce`; tested adapter fixes:
 `7f13540`. Full upstream ancestry retained. Main checkout stays on develop;
@@ -69,8 +69,8 @@ net remain inherited; this sync removes or weakens no new upstream test.
 ## Verification
 
 Every Cargo invocation ran in the foreground behind the atomic shared mkdir lock
-`C:/Users/hocka/Paseo/cargo-build.lock`, with a bounded lock wait and 3,600-second
-command timeout. All used `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`.
+`%USERPROFILE%/Paseo/cargo-build.lock`, with a bounded lock wait and 3,600-second
+command timeout. All used `CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/shared`.
 The script ran client/net and Python tests serially through
 `--continue --tests-only`, with its scratch configuration and one test thread.
 The required addon run used a separate scratch EQOA_CONFIG and one thread.
@@ -136,7 +136,7 @@ diff adds feature scope descriptions and two rules worth carrying forward:
 
 No changes to our CLAUDE.md were made. Logs, command/exit JSON, source audit and
 footprint evidence are archived at
-`C:/Users/hocka/AppData/Local/Temp/eqoa-sync-2026-11-11-gates`.
+`%LOCALAPPDATA%/Temp/eqoa-sync-2026-11-11-gates`.
 The worktree's script-created `target` held only logs/configuration, never Cargo
 artifacts; its evidence was archived and that temporary folder removed before
 handoff. No private game data or credentials are committed.
@@ -202,7 +202,7 @@ rerun passed with every test green, and the fork_ext run, which includes it, pas
 
 L2 (a loopback test through `send_pending` itself: partly met by the new wire test), L3 (viewer.rs upstream comment text and
 `chat_let_go` order), L5 (chrome.rs keyboard legend line), L6 (F2 beside the places list), L8 (F4 rebinding), and the `play.rs`
-stray doc comment (it is upstream's own, kept). Archived logs: `C:/Users/hocka/AppData/Local/Temp/fx-evidence` (script runs 1 to 3).
+stray doc comment (it is upstream's own, kept). Archived logs: `%LOCALAPPDATA%/Temp/fx-evidence` (script runs 1 to 3).
 
 ## Check and lead fix
 

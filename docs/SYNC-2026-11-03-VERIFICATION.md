@@ -6,7 +6,7 @@ the end records the current source and refreshed validation.
 Source: sync/2026-11-03, Enhanced e3964ff + upstream b8e02cd781aac6a1b9e9906f09896956c77afcd6.
 Commands ran in this worktree with CARGO_TARGET_DIR=target and scratch
 EQOA_CONFIG=target/sync-test-config. Every cargo invocation acquired the shared
-C:/Users/hocka/Paseo/cargo-build.lock in Git Bash and released it on exit.
+%USERPROFILE%/Paseo/cargo-build.lock in Git Bash and released it on exit.
 
 ## Final workspace result
 

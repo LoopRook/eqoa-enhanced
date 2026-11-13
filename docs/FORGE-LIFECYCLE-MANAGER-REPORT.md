@@ -150,7 +150,7 @@ atomicity/durability for every remote filesystem or multi-process registry locki
 
 ## Verification
 
-PowerShell PATH was prepended with `C:/Users/hocka/.cargo/bin`.
+PowerShell PATH was prepended with `%USERPROFILE%/.cargo/bin`.
 
 - RED: `cargo test --locked -p eqoa forge_storage_ -- --nocapture --test-threads=1`
   observed five expected stub failures; the corresponding manager command with

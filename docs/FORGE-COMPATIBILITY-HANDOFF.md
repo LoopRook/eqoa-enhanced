@@ -13,7 +13,7 @@ what to do next.
 
 ## Where the work is
 
-- Branch `forge-compatibility`, worktree `C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility`
+- Branch `forge-compatibility`, worktree `<worktree:forge-compatibility>`
   (Paseo workspace `wks_12cecc2d0898f767`). It now contains the Wereoxxs overnight work (fast-forwarded
   from `forge-wereoxxs-overnight-20261030`, which is retired) and is merged into `develop`.
 - `develop` holds the same work. `enhanced` (stable) is released **0.1.2** (built-in NPC catalog, search
@@ -154,13 +154,13 @@ The sections below record how the hide fix was built (2026-10-30), kept for refe
 From the Forge worktree, one cargo build at a time on the machine:
 
 ```powershell
-$env:CARGO_TARGET_DIR='C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility/target'
+$env:CARGO_TARGET_DIR='<worktree:forge-compatibility>/target'
 cargo test --locked -p eqoa --bin eqoa fork_ext::addons:: -- --test-threads=1
 cargo test --locked -p eqoa --bin eqoa forge_ -- --test-threads=1
 cargo check --locked -p eqoa --target wasm32-unknown-unknown
 python tools/check_fork_footprint.py --base 7912c7393df7d85655d5816980fae1217cc48a32
 cargo build --release --locked -p eqoa
-& "$env:CARGO_TARGET_DIR\release\eqoa.exe" "C:\Users\hocka\Documents\PS2 Games\EverQuest - Online Adventures - Frontiers (USA).iso"
+& "$env:CARGO_TARGET_DIR\release\eqoa.exe" "$env:EQOA_ISO"
 ```
 
 Four Windows symlink-privilege tests skip (error 1314); count them. GPU, disc and source fixtures can

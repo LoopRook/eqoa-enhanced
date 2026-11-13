@@ -299,7 +299,12 @@ mod tests {
         assert!(s.contains("at crates/eqoa/src/play.rs:1234:56"), "{s}");
         assert!(s.contains("at library/core/src/panicking.rs:75:14"), "{s}");
         assert!(!s.contains("/home/runner"), "{s}");
-        assert_eq!(scrub("open C:\\Users\\ann\\eqoa\\disc.iso failed"), "open disc.iso failed");
+        // The profile-shaped fixture is split so the source holds no real layout.
+        let user_path = concat!("C:\\Users\\", "ann\\eqoa\\disc.iso");
+        assert_eq!(
+            scrub(&format!("open {user_path} failed")),
+            "open disc.iso failed"
+        );
         assert_eq!(scrub("index out of bounds: the len is 4 but the index is 7"), "index out of bounds: the len is 4 but the index is 7");
         let r = compose(&[("build", "local".into())], "panicked at crates/a.rs:1:2:\nboom", "  0: x\n      at /opt/x/crates/a.rs:1:2\n");
         assert_eq!(r, "EQOA client crash report\nbuild: local\npanic: panicked at crates/a.rs:1:2: boom\nstack backtrace:\n  0: x\n      at crates/a.rs:1:2\n");

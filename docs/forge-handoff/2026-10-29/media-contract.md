@@ -3,7 +3,7 @@
 **Status**: Specification / Prep (Read-Only Stage)
 **Target Path**: `target/forge-preview-prep/media-contract.md`
 **Referenced Worktrees**:
-- Forge Implementation: `C:\Users\hocka\.paseo\worktrees\1usktejc\forge-compatibility`
+- Forge Implementation: `<worktree:forge-compatibility>`
 - Pinned FrontiersForge C++: `run/forge-compat-reference/UiForge`
 - Pinned Script: `run/forge-compat-reference/scripts/uiforge_example/uiforge_example.lua`
 - Pinned ImGui Header: `imgui-37b7a7a9.h`

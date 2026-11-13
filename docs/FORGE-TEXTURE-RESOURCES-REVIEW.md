@@ -1,7 +1,7 @@
 # Forge Addon UI PNG Texture Resources (Stage 2C) Review
 
 **Date**: 2026-10-28
-**Worktree**: `C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility`
+**Worktree**: `<worktree:forge-compatibility>`
 **Review Target**: [`crates/eqoa/src/fork_ext/addons/textures.rs`](../crates/eqoa/src/fork_ext/addons/textures.rs) & [`docs/FORGE-TEXTURE-RESOURCES-REPORT.md`](FORGE-TEXTURE-RESOURCES-REPORT.md)
 **Primary Authorities**:
 - Upstream UiForge implementation: `run/forge-compat-reference/UiForge/src/core/core.cpp` and `graphics_api.cpp`

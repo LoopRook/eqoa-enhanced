@@ -16,7 +16,7 @@ The lead explicitly deferred upstream's newer touch commit `e8d7c7d` on 2026-11-
 
 ## Validation
 
-All Cargo commands used `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`, the mkdir build lock (with a 40-minute acquisition timeout), two build jobs, one test thread and a scratch `EQOA_CONFIG`. Native builds/tests used `RUSTFLAGS="-C target-feature=+crt-static"`; WASM used its ordinary target flags. No worktree `target` directory was created.
+All Cargo commands used `CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/shared`, the mkdir build lock (with a 40-minute acquisition timeout), two build jobs, one test thread and a scratch `EQOA_CONFIG`. Native builds/tests used `RUSTFLAGS="-C target-feature=+crt-static"`; WASM used its ordinary target flags. No worktree `target` directory was created.
 
 | Check | Result |
 |---|---|
@@ -113,4 +113,4 @@ Dry-run `git merge-tree --write-tree --name-only <revision> origin/master`: **8 
 
 Pending: independent integration review, owner live input/UI check, and the explicitly deferred newer upstream touch sync. The known AO failures remain outstanding upstream. Items 1, 3 and upstream fix PR preparation are outside this worker's scope. Review item M4 (the refusing-store assertion depends on a fork test hook) remains open.
 
-Raw validation logs are at `C:/Users/hocka/AppData/Local/Temp/opencode/r25-workspace-test.log`; the source worktree contains only the final report, not these temporary logs.
+Raw validation logs are at `%LOCALAPPDATA%/Temp/opencode/r25-workspace-test.log`; the source worktree contains only the final report, not these temporary logs.

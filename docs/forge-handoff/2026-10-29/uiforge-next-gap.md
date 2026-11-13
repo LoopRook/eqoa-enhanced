@@ -3,7 +3,7 @@
 **Date:** 2026-10-29
 **Status:** Read-Only Source Audit (Corrected against `forge-compatibility` HEAD)
 **Target:** Pinned reference `uiforge_example` (`uiforge_example.lua`), private module (`modules/click_tally.lua`), and resource asset (`resources/gear-icon.png`).
-**Audited Forge Source:** `C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility`
+**Audited Forge Source:** `<worktree:forge-compatibility>`
 - `crates/eqoa/src/fork_ext/addons/bridge.rs` (SHA256: `d8cee6c61f6d2ff452a64a2e12d0e55aef3ad8478ce9ca83dff0a8481fbc23d7`)
 - `crates/eqoa/src/fork_ext/addons/host.rs` (SHA256: `bca8494b266c335c832c8f03ad0d7c35ed041fd9e9f8a897cc6bb2c270edb500`)
 - `crates/eqoa/src/fork_ext/addons/textures.rs` (SHA256: `c42e4d33c5d2e74a524a5303a5890afdb1b0f8ec1b220165e42d1b93de17bca4`)

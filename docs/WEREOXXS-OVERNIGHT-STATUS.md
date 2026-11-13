@@ -3,7 +3,7 @@
 ## Executive Status
 
 - **Lead Agent:** Antigravity `161daabb-f8a9-450c-aefd-a7460c3aad92` (Gemini 3.8 Flash High)
-- **Worktree:** `C:/Users/hocka/.paseo/worktrees/1usktejc/wereoxxs-overnight-20261030`
+- **Worktree:** `<worktree:wereoxxs-overnight-20261030>`
 - **Branch:** `forge-wereoxxs-overnight-20261030`
 - **Base Commit:** `039bbff`
 - **Current Phase:** Stage 9 (Morning Checkpoint & Handoff)

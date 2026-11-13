@@ -82,8 +82,8 @@ its measured value. Dry-run conflicts vs origin/master must stay 0.
   must PASS; report any budget change with its reason. Never reformat or reorder upstream's lines;
   never delete or weaken an upstream test (diff your branch's tests against the upstream sha).
 - Game-logic floats through `ee::*`; game counters step on `frames.rs`'s 30 Hz clock.
-- Builds: ONE shared target `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared` (never a
-  per-worktree target). Take the lock `mkdir C:/Users/hocka/Paseo/cargo-build.lock` before every cargo
+- Builds: ONE shared target `CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/shared` (never a
+  per-worktree target). Take the lock `mkdir %USERPROFILE%/Paseo/cargo-build.lock` before every cargo
   command (wait/retry if it exists), give every cargo command a timeout, remove the lock after.
 - Tests: `cargo test --locked -p eqoa --bin eqoa fork_ext::addons:: -- --test-threads=1` with a scratch
   `EQOA_CONFIG`; the zero-addon allocation gate (CI); `cargo check --locked -p eqoa --target

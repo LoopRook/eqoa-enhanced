@@ -6,7 +6,7 @@ Owner decisions are in [the plan](../plans/EQOA-MOD-API-PLAN.md). The Lua global
 
 ## 1. Conventions, types and availability
 
-This specification is normative for the resulting API, not the current implementation. Sources refer to branch base `11e036f`; line numbers identify a symbol at that revision, not an ABI. `P` = `crates/eqoa/src/play.rs`, `F` = `crates/eqoa/src/fork_ext/play.rs`, `A` = `crates/eqoa/src/fork_ext/addons/`, `N` = `crates/net/src/`, `V` = `crates/vi/src/`. Other paths below are relative to `crates/eqoa/src/`. `R` is the read-only Forge reference at `C:/Users/hocka/Github Projects/EQOA Native Rust/run/forge-compat-reference/`, modules under `scripts/modules/frontiers_forge/` at `4026d5c`, UiForge at `6f2d125`.
+This specification is normative for the resulting API, not the current implementation. Sources refer to branch base `11e036f`; line numbers identify a symbol at that revision, not an ABI. `P` = `crates/eqoa/src/play.rs`, `F` = `crates/eqoa/src/fork_ext/play.rs`, `A` = `crates/eqoa/src/fork_ext/addons/`, `N` = `crates/net/src/`, `V` = `crates/vi/src/`. Other paths below are relative to `crates/eqoa/src/`. `R` is the read-only Forge reference at `<repo>/run/forge-compat-reference/`, modules under `scripts/modules/frontiers_forge/` at `4026d5c`, UiForge at `6f2d125`.
 
 **Choice: immutable snapshots for reads, ordered events for changes, queued native actions for writes.** One native core feeds both API families; Lua never receives Rust references or memory addresses. A getter is for initial state, drawing, or recovery, not detecting changes by repeated comparison.
 

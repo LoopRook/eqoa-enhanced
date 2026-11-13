@@ -6,7 +6,7 @@ Owner request: support old FrontiersForge mods and new native-client mods by dro
 ## Workspace and evidence
 
 - Paseo workspace: Forge Compatibility, wks_12cecc2d0898f767.
-- Worktree: C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility.
+- Worktree: <worktree:forge-compatibility.>
 - Branch: forge-compatibility, based on enhanced at 63cdc77d96ba00de720e50aaffb7b06897479b96.
 - FrontiersForge source: [4026d5cebcede24943ece8dc34833e584f46cd90](https://github.com/mmvest/FrontiersForge/tree/4026d5cebcede24943ece8dc34833e584f46cd90).
 - UiForge host source: [6f2d125cc686cbc882f8098a939cc03cc23a59a1](https://github.com/mmvest/User-Interface-Forge/tree/6f2d125cc686cbc882f8098a939cc03cc23a59a1).

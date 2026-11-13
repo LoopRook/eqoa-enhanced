@@ -57,7 +57,7 @@ Branch: `feat/eqoa-api-r3`, from `develop`. Implementation follows `docs/plans/e
 
 ## Verification & Test Results
 
-All tests run using `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared` with lock acquisition protocol and scratch `EQOA_CONFIG`.
+All tests run using `CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/shared` with lock acquisition protocol and scratch `EQOA_CONFIG`.
 
 | Test Command | Result |
 |---|---|
@@ -199,7 +199,7 @@ Budgets fell overall; bindpage.rs has the explicitly approved +3 added lines (7 
   - Removed `stats_box` row fixture from `defaults_stay_in_their_slots` test.
 
 ### 5. Final Stage C Test Results
-All commands run with lock acquisition protocol, scratch `EQOA_CONFIG`, and target dir `C:/Users/hocka/Paseo/targets/shared`:
+All commands run with lock acquisition protocol, scratch `EQOA_CONFIG`, and target dir `%USERPROFILE%/Paseo/targets/shared`:
 
 | Test Command | Result |
 |---|---|
@@ -305,7 +305,7 @@ Review M1 / check-2 HIGH: original upstream assertions remain different in inher
 
 ### Final commands and measured results
 
-Every Cargo command uses `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`, atomic `mkdir C:/Users/hocka/Paseo/cargo-build.lock` (60s retry), removal in finally, scratch EQOA_CONFIG and 1800s timeout. Native final gates use `cargo +1.99.1`, `--locked`, `--target x86_64-pc-windows-msvc`, `RUSTFLAGS=-C target-feature=+crt-static`. Wasm unsets native RUSTFLAGS. Tests use `--test-threads=1 --nocapture`; counts below include actual printed SKIPs, not only ignored tests.
+Every Cargo command uses `CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/shared`, atomic `mkdir %USERPROFILE%/Paseo/cargo-build.lock` (60s retry), removal in finally, scratch EQOA_CONFIG and 1800s timeout. Native final gates use `cargo +1.99.1`, `--locked`, `--target x86_64-pc-windows-msvc`, `RUSTFLAGS=-C target-feature=+crt-static`. Wasm unsets native RUSTFLAGS. Tests use `--test-threads=1 --nocapture`; counts below include actual printed SKIPs, not only ignored tests.
 
 - `test -p eqoa --bin eqoa (after all source mutants restored)`: **1972/0/31 passed/failed/ignored**, **204 printed SKIPs** (`eqoa-r3-client-post-controls-green.log`).
 - `test -p eqoa --bin eqoa fork_ext::addons::`: **362/0/24 passed/failed/ignored**, **9 printed SKIPs** (`eqoa-r3-addons-proof-final.log`).
@@ -324,7 +324,7 @@ Every Cargo command uses `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/shared`,
 - `python -X utf8 tools/check_fork_footprint.py --base 5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd`: PASS, 382 fork-owned / 42 shared; no increased budget in this audit.
 - Static-CRT development release build before this report commit: **77 warnings** from eqoa (78 warning lines including Cargo summary); Finished `release` profile [optimized] target(s) in 2m 47s. Warnings are reported, not claimed zero.
 
-- Exact static-CRT packaging completed and independently verified for **0295ddce966e06e22f192154630f6fecb2cac315**, channel enhanced-dev, sourceModified=false: **81 ZIP members**, 15011402 bytes, SHA256 `ee51b26fc53d165c4fda5cb0c8688643178d6477b2fbd6bb41115ed43e5ace9f`. Command: `python -X utf8 tools/build_player_release.py --executable C:/Users/hocka/Paseo/targets/shared/x86_64-pc-windows-msvc/release/eqoa.exe --output %TEMP%/eqoa-r3-release-pre-report-2aw_vdno --channel enhanced-dev`. Five runtime assets emitted; no publication.
+- Exact static-CRT packaging completed and independently verified for **0295ddce966e06e22f192154630f6fecb2cac315**, channel enhanced-dev, sourceModified=false: **81 ZIP members**, 15011402 bytes, SHA256 `ee51b26fc53d165c4fda5cb0c8688643178d6477b2fbd6bb41115ed43e5ace9f`. Command: `python -X utf8 tools/build_player_release.py --executable %USERPROFILE%/Paseo/targets/shared/x86_64-pc-windows-msvc/release/eqoa.exe --output %TEMP%/eqoa-r3-release-pre-report-2aw_vdno --channel enhanced-dev`. Five runtime assets emitted; no publication.
 - Pre-report `git -c safe.directory=* merge-tree --write-tree --name-only HEAD 5d54c0c859f6956c27bb71a1ffb0bfddbd31fddd`: **clean**, tree `24a2a213ad5eb2df92578efc4f16d4afad5d1d0e`. Repeated after the final report commit.
 
 Exact workspace invocations (static CRT and shared target/lock as above):
@@ -338,7 +338,7 @@ cargo +1.99.1 test --locked --workspace --exclude eqoa --target x86_64-pc-window
 
 No manual server play was performed; gameplay/input proofs use native Play projections, real Lua/ImGui paths, GPU readbacks and deterministic game-shaped fixtures.
 
-The final report commit is followed by another `cargo +1.99.1 build --release --locked -p eqoa --target x86_64-pc-windows-msvc` with `EQOA_UPDATE_CHANNEL=enhanced-dev`, `EQOA_BUILD_COMMIT=<final HEAD>`, static RUSTFLAGS, shared target/lock/scratch config. The exact CI packager then runs `python -X utf8 tools/build_player_release.py --executable C:/Users/hocka/Paseo/targets/shared/x86_64-pc-windows-msvc/release/eqoa.exe --output %TEMP%/<fresh directory> --channel enhanced-dev`. The post-commit build/package logs are external to the checkout so recording them does not create another commit or dirty the package provenance; final reply reports that outcome. No release is published.
+The final report commit is followed by another `cargo +1.99.1 build --release --locked -p eqoa --target x86_64-pc-windows-msvc` with `EQOA_UPDATE_CHANNEL=enhanced-dev`, `EQOA_BUILD_COMMIT=<final HEAD>`, static RUSTFLAGS, shared target/lock/scratch config. The exact CI packager then runs `python -X utf8 tools/build_player_release.py --executable %USERPROFILE%/Paseo/targets/shared/x86_64-pc-windows-msvc/release/eqoa.exe --output %TEMP%/<fresh directory> --channel enhanced-dev`. The post-commit build/package logs are external to the checkout so recording them does not create another commit or dirty the package provenance; final reply reports that outcome. No release is published.
 
 ## Final review fixes
 

@@ -23,7 +23,7 @@ Report results in a player's terms, with what was tested and what was not.
    requests. Direction and the order of work (owner, 2026-11-09): `docs/plans/EQOA-MOD-API-PLAN.md`.
    The fork is heading for "upstream plus mods": neutral hooks are offered upstream, the fork's own
    features move into mods, and each round runs in the order that plan gives (2.5, 3, 3u, 4 to 7).
-3. Read `C:\Users\hocka\Paseo\Agent_Learning_Instructions.md` and the experience log beside it. Add an
+3. Read `%USERPROFILE%\Paseo\Agent_Learning_Instructions.md` and the experience log beside it. Add an
    entry there after each meaningful task, and update the existing entry when the owner's test
    results arrive.
 4. Check `git status`, the branch, and `git worktree list` before touching anything.
@@ -39,7 +39,7 @@ Report results in a player's terms, with what was tested and what was not.
 
 - A **worktree** is a separate folder with its own branch checked out, sharing one repository. Give
   each concurrent agent its own Paseo worktree (`create_workspace`, isolation `worktree`) so agents
-  never edit the same folder. The main checkout (`C:/Users/hocka/Github Projects/EQOA Native Rust`)
+  never edit the same folder. The main checkout (`<repo>`)
   stays on `develop`.
 - A feature merges into `develop` after its tests pass, the footprint check passes and an independent
   review is done. `develop` merges into `enhanced` only for a release the owner approved, after the
@@ -68,7 +68,7 @@ workers. Read `list_profiles` and pick by each profile's notes. Defaults:
   branch, tell it to commit only there (no push, merge, tag, or other folders), and review its diff
   before anything merges.
 
-One cargo build at a time across all agents: builds are slow and share the CPU. All agents share ONE `CARGO_TARGET_DIR`, `C:/Users/hocka/Paseo/targets/shared` (the builds are serial
+One cargo build at a time across all agents: builds are slow and share the CPU. All agents share ONE `CARGO_TARGET_DIR`, `%USERPROFILE%/Paseo/targets/shared` (the builds are serial
 behind the lock anyway, so one cache serves every branch; separate folders cost about 10-15 GB each and
 filled the owner's SSD on 2026-11-09). Never create a per-worktree or per-task target folder. Before you
 finish, delete any `target` folder you made inside a worktree, and the lead deletes a retired worktree's
@@ -86,8 +86,10 @@ section there before changing a ported system (anything under `crates/vi`, `ee`,
   rewriting upstream code in a shared file means the design is wrong: keep upstream's code and
   route around it with a hook. Put this in every worker's instructions.
 - Game-logic floats and compares go through `ee::*`. `vi` structs stay `#[repr(C)]` in the EE layout.
-- Port game behaviour from the decomp, line by line. The decomp, eqoa-port's oracle and the 2002
-  disc are not on this machine, so oracle tests skip here: say so in the report.
+- Port game behaviour from the decomp, line by line. The decomp and eqoa-port's oracle are not on
+  this machine, so oracle tests skip here: say so in the report. The owner's Frontiers disc IS here:
+  set `EQOA_ISO` to its path (kept in the lead's local notes, never in the repository) for every test
+  run and every worker brief; without it about 200 disc tests skip.
 - What the game counts in frames steps on `frames.rs`'s 30 Hz clock, never once per frame drawn.
 - Server worlds: keep the shared Disc/Sink composer streaming one zone at a time on native and browser; mirror composer changes to the server's Compose contract/CRC (see docs/upstream/CLAUDE.md).
 - A lost graphics device is made again in place (`gpulost`, `viewer::recover`; a page's new device from `web::remake`); the main loop ends only through `give_up_gfx`/`web::give_up`, so never add an unconditional exit on `web::graphics_lost` to it (only the `fxview` preview stops on it). Unsupported WebGL2 lighting stays off through the renderer's guard. Hat D-pads combine mapped buttons, axes and raw hat codes; retain upstream's controller diagnostics and test paths.
@@ -114,6 +116,6 @@ section there before changing a ported system (anything under `crates/vi`, `ee`,
 
 ## Platform
 
-Windows 11, PowerShell and Git Bash. Rust in `C:/Users/hocka/.cargo/bin`, Python at
+Windows 11, PowerShell and Git Bash. Rust in `%USERPROFILE%/.cargo/bin`, Python at
 `C:/Python314/python.exe`. Managed worktrees need `git -c safe.directory=*` per command; leave global
-git config alone. The owner's disc: `C:\Users\hocka\Documents\PS2 Games\`.
+git config alone. The owner's disc: `$EQOA_ISO`.

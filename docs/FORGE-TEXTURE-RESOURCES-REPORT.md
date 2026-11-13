@@ -82,7 +82,7 @@ test result: FAILED. 0 passed; 6 failed; 0 ignored; 0 measured; 1008 filtered ou
 ### GREEN State (Focused Texture Suite)
 Command:
 ```powershell
-$env:PATH = "C:\Users\hocka\.cargo\bin;$env:PATH"
+$env:PATH = "%USERPROFILE%\.cargo\bin;$env:PATH"
 cargo test --locked -p eqoa forge_texture_ -- --nocapture --test-threads=1
 ```
 Output:
@@ -180,8 +180,8 @@ To conclusively verify that `forge_texture_post_upload_userdata_failure_rolls_ba
 ### Full Serial Addons Suite (Post-Remediation with Stage 2D Suite and Pinned GPU Fixture)
 Command:
 ```powershell
-$env:PATH = "C:\Users\hocka\.cargo\bin;$env:PATH"
-$env:EQOA_FORGE_SPIKE = "C:/Users/hocka/Github Projects/EQOA Native Rust/run/forge-compat-reference/scripts/screen_grid.lua"
+$env:PATH = "%USERPROFILE%\.cargo\bin;$env:PATH"
+$env:EQOA_FORGE_SPIKE = "<repo>/run/forge-compat-reference/scripts/screen_grid.lua"
 cargo test --locked -p eqoa fork_ext::addons:: -- --nocapture --test-threads=1
 ```
 Output:
@@ -203,7 +203,7 @@ test fork_ext::addons::discovery::tests::addon_discovery_manifest_diagnostics_an
 test fork_ext::addons::discovery::tests::addon_discovery_manifest_schema_type_and_absolute_path_failures ... ok
 test fork_ext::addons::discovery::tests::addon_discovery_missing_root_returns_diagnostic ... ok
 test fork_ext::addons::discovery::tests::addon_discovery_native_manifest_success_and_companion_skip ... ok
-test fork_ext::addons::gpu_test::forge_gpu_pinned_grid_and_texture_fixture ... Forge GPU fixture captured C:\Users\hocka\.paseo\worktrees\1usktejc\forge-compatibility\crates\eqoa\../../target/forge-spike-grid.png
+test fork_ext::addons::gpu_test::forge_gpu_pinned_grid_and_texture_fixture ... Forge GPU fixture captured <worktree:forge-compatibility>\crates\eqoa\../../target/forge-spike-grid.png
 ok
 test fork_ext::addons::host::tests::forge_host_keeps_globals_and_replaces_callbacks ... ok
 test fork_ext::addons::host::tests::forge_host_limits_memory_and_rejects_native_modules ... ok

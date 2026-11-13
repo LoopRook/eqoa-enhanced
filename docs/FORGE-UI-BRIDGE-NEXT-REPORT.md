@@ -98,7 +98,7 @@ readback and real post-upload allocator rollback all executed. `git diff --check
 passed with line-ending notices only.
 
 ```powershell
-$env:EQOA_FORGE_SPIKE='C:/Users/hocka/Github Projects/EQOA Native Rust/run/forge-compat-reference/scripts/screen_grid.lua'
+$env:EQOA_FORGE_SPIKE='<repo>/run/forge-compat-reference/scripts/screen_grid.lua'
 cargo test --locked -p eqoa fork_ext::addons:: -- --nocapture --test-threads=1
 git diff --check
 ```

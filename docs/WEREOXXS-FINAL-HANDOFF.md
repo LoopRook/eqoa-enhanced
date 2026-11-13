@@ -3,7 +3,7 @@
 **Author:** Antigravity Autonomous Overnight Lead  
 **Date:** 2026-10-30T12:15:00-04:00 (12:15 PM EDT)  
 **Branch:** `forge-wereoxxs-overnight-20261030`  
-**Worktree:** `C:/Users/hocka/.paseo/worktrees/1usktejc/wereoxxs-overnight-20261030`  
+**Worktree:** `<worktree:wereoxxs-overnight-20261030>`  
 **Base Commit:** `7912c7393df7d85655d5816980fae1217cc48a32`  
 **Latest Commits:**
 - `c769a71`: `fix(addons): hook outgoing chat to play.chat_line, suppress stock HUD quads on hide claims, and append diagnostics to addons_error.log`
@@ -20,7 +20,7 @@ Full compatibility for the reference `wereoxxs_ui` mod has been implemented in t
 
 - **Test Suite Status:** 185 tests in `fork_ext::addons` pass (`cargo test --locked -p eqoa --bin eqoa fork_ext::addons:: -- --test-threads=1`).
 - **Fork Footprint Status:** 100% compliant (33 shared files, 0 budget violations). Checked via `python tools/check_fork_footprint.py --base 7912c7393df7d85655d5816980fae1217cc48a32`.
-- **Release Executable:** Compiled and ready at `C:\Users\hocka\.paseo\worktrees\1usktejc\forge-compatibility\target\release\eqoa.exe` with mod files synced to `mods\wereoxxs_ui\`.
+- **Release Executable:** Compiled and ready at `<worktree:forge-compatibility>\target\release\eqoa.exe` with mod files synced to `mods\wereoxxs_ui\`.
 
 ---
 
@@ -87,7 +87,7 @@ Full compatibility for the reference `wereoxxs_ui` mod has been implemented in t
 
 ## 5. Verification Commands
 
-Always run with `$env:CARGO_TARGET_DIR = 'C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility/target'`:
+Always run with `$env:CARGO_TARGET_DIR = '<worktree:forge-compatibility>/target'`:
 ```powershell
 # 1. Run wereoxxs-focused integration suite:
 cargo test --locked -p eqoa wereoxxs -- --test-threads=1
@@ -99,5 +99,5 @@ cargo test --locked -p eqoa --bin eqoa fork_ext::addons:: -- --test-threads=1
 python tools/check_fork_footprint.py --base 7912c7393df7d85655d5816980fae1217cc48a32
 
 # 4. Launch the game:
-& "C:\Users\hocka\.paseo\worktrees\1usktejc\forge-compatibility\target\release\eqoa.exe" "C:\Users\hocka\Documents\PS2 Games\EverQuest - Online Adventures - Frontiers (USA).iso"
+& "<worktree:forge-compatibility>\target\release\eqoa.exe" "$env:EQOA_ISO"
 ```

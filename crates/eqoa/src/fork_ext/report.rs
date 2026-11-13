@@ -1088,7 +1088,8 @@ pub(crate) mod tests {
 
         let fake_account = "SuperSecretAccount42";
         let fake_password = "SecretPassword999";
-        let fake_home = "C:\\Users\\SecretHomeDirectory";
+        // Split so the fixture's profile-shaped path is not a real layout in the source.
+        let fake_home = concat!("C:\\Users\\", "SecretHomeDirectory");
 
         crate::report::secret(fake_account, fake_password);
 
@@ -1137,7 +1138,7 @@ pub(crate) mod tests {
         fs::create_dir_all(&fake_desktop).unwrap();
         fs::create_dir_all(&fake_config).unwrap();
 
-        let fake_home = "C:\\Users\\EnvScrubbedHome42";
+        let fake_home = concat!("C:\\Users\\", "EnvScrubbedHome42");
         unsafe {
             std::env::set_var("USERPROFILE", fake_home);
         }

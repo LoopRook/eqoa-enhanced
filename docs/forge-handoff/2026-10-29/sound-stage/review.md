@@ -574,7 +574,7 @@ Windows-specific tests/MCI and `#[cfg(not(windows))]` for the unsupported backen
 tests are **not** gated (C1) and the new aggregate test is **not** gated (N1), so the claim is false; only the
 MCI test and the new absolute-path test carry `#[cfg(windows)]`. The report also still gives no head sha
 (line 15: "local commit on `forge-compatibility` after this report"), cites its logs under
-`C:\Users\hocka\AppData\Local\Temp\opencode\` rather than the durable copies in the stage directory, and
+`%LOCALAPPDATA%\Temp\opencode\` rather than the durable copies in the stage directory, and
 contains no fixed-vs-deferred findings table (ruling line 52). The MCI-close limitation ("Explicitly report
 inability to guarantee OS release if MCI itself fails") is still absent from Concerns.
 

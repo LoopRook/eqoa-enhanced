@@ -70,8 +70,8 @@ no GPU):
 
 ## Validation (CI-equivalent)
 
-All run from the worktree with `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/tab-opens-chat`
-and the shared `C:/Users/hocka/Paseo/cargo-build.lock` held for cargo commands.
+All run from the worktree with `CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/tab-opens-chat`
+and the shared `%USERPROFILE%/Paseo/cargo-build.lock` held for cargo commands.
 
 - `python -X utf8 tools/check_fork_footprint.py --base 8435f2c8a00c631d716771f8189fa0011a1fbf50`
   - **PASS**. Shared budgets unchanged; only fork-owned files changed.

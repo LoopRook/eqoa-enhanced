@@ -56,7 +56,7 @@ build version, so there was nothing to change there.
 - `python tools/check_fork_footprint.py --base 8435f2c8a00c631d716771f8189fa0011a1fbf50` — PASS.
 - `python -X utf8 -m unittest discover -s tools -p "test_*.py"` — 94 passed.
 - `cargo test --locked --workspace --target x86_64-pc-windows-msvc -- --test-threads=1`
-  with scratch `EQOA_CONFIG`, `CARGO_TARGET_DIR=C:/Users/hocka/Paseo/targets/nightly-labels`
+  with scratch `EQOA_CONFIG`, `CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/nightly-labels`
   and `RUSTFLAGS=-C target-feature=+crt-static` — 1,939 passed, 0 failed,
   27 ignored (26 in the workspace plus the existing ignored `fog16` GPU test).
 - Focused rerun after the final notes edit: `update::tests::` 21 passed;

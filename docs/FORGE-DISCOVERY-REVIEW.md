@@ -1,6 +1,6 @@
 # Independent Review: Forge Addon Discovery Engine (Stage 2A)
 
-**Worktree**: `C:/Users/hocka/.paseo/worktrees/1usktejc/forge-compatibility`
+**Worktree**: `<worktree:forge-compatibility>`
 **Target Code**: [`crates/eqoa/src/fork_ext/addons/discovery.rs`](../crates/eqoa/src/fork_ext/addons/discovery.rs)
 **Contract Specification**: `.superpowers/sdd/2026-10-28-forge-compatibility/discovery-brief.md`
 **Report Reviewed**: [`docs/FORGE-DISCOVERY-REPORT.md`](FORGE-DISCOVERY-REPORT.md)

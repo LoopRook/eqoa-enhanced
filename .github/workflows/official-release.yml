@@ -61,6 +61,8 @@ jobs:
           git update-ref refs/remotes/origin/master $base
       - name: Install toolchain
         run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Check for local paths
+        run: python -X utf8 tools/check_no_local_paths.py
       - name: Check fork integration policy
         run: python -X utf8 tools/check_fork_footprint.py
       - name: Test release tooling

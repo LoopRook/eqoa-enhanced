@@ -99,7 +99,7 @@ pub fn install_health_adapter(
 
 ## 3. Test Verification & Evidence
 
-PowerShell PATH was prepended with `C:\Users\hocka\.cargo\bin`.
+PowerShell PATH was prepended with `%USERPROFILE%\.cargo\bin`.
 
 ### A. RED Phase (Stubs)
 Command:
@@ -132,7 +132,7 @@ Output:
 ### C. Full Serial Addon Suite with Pinned Fixture
 Command:
 ```powershell
-$env:EQOA_FORGE_SPIKE = "C:\Users\hocka\Github Projects\EQOA Native Rust\run\forge-compat-reference\scripts\screen_grid.lua"
+$env:EQOA_FORGE_SPIKE = "<repo>\run\forge-compat-reference\scripts\screen_grid.lua"
 cargo test --locked --manifest-path Cargo.toml -p eqoa fork_ext::addons:: -- --nocapture --test-threads=1
 ```
 Output:

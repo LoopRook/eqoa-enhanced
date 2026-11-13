@@ -79,7 +79,7 @@ query, bounded diagnostics, and old-bank cleanup oracle.
 **Command:**
 
 ```powershell
-$env:EQOA_FORGE_SPIKE='C:/Users/hocka/Github Projects/EQOA Native Rust/run/forge-compat-reference/scripts/screen_grid.lua'
+$env:EQOA_FORGE_SPIKE='<repo>/run/forge-compat-reference/scripts/screen_grid.lua'
 cargo test --locked -p eqoa fork_ext::addons -- --nocapture --test-threads=1
 ```
 
@@ -140,7 +140,7 @@ test result: ok. 133 passed; 0 failed; 0 ignored; 0 measured; 987 filtered out; 
 
 ```powershell
 $env:EQOA_SOUND_NATIVE_REQUIRED='1'
-$env:EQOA_FORGE_SPIKE='C:/Users/hocka/Github Projects/EQOA Native Rust/run/forge-compat-reference/scripts/screen_grid.lua'
+$env:EQOA_FORGE_SPIKE='<repo>/run/forge-compat-reference/scripts/screen_grid.lua'
 cargo test --locked -p eqoa forge_sound_real_mci -- --nocapture --test-threads=1
 ```
 
@@ -202,7 +202,7 @@ WAV: `open`, cached `load_sound`, `play` (looping), `status … mode` returned
 ## Durable Log Paths
 
 All logs are copied to:
-`C:/Users/hocka/Github Projects/EQOA Native Rust/run/forge-sound-stage/`
+`<repo>/run/forge-sound-stage/`
 
 - `forge-addons-fix2.log` — full pinned addon suite.
 - `forge-sound-native-required-fix2.log` — focused required-native MCI run.
