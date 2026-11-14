@@ -1196,3 +1196,98 @@ fn hud_specs_with_metatable_defaults_and_plain_specs_both_read_their_fields() {
     );
     hud_layer::clear_all();
 }
+
+/// What a Lua value reads back as, driven by the JSON it was built from (a record's own fields are
+/// hidden behind its proxy, so it is read key by key, as an addon reads it).
+fn read_back(value: &mlua::Value, shape: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value as J;
+    match (value, shape) {
+        (mlua::Value::Table(t), J::Object(fields)) => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in fields {
+                let got: mlua::Value = t.get(k.as_str()).unwrap();
+                if !matches!(got, mlua::Value::Nil) {
+                    out.insert(k.clone(), read_back(&got, v));
+                }
+            }
+            J::Object(out)
+        }
+        (mlua::Value::Table(t), J::Array(items)) => J::Array(
+            items
+                .iter()
+                .enumerate()
+                .map(|(i, v)| match t.raw_get::<mlua::Value>(i + 1).unwrap() {
+                    mlua::Value::Nil => J::Null,
+                    got => read_back(&got, v),
+                })
+                .collect(),
+        ),
+        (mlua::Value::Boolean(b), _) => J::Bool(*b),
+        (mlua::Value::Number(n), _) => serde_json::json!(*n),
+        (mlua::Value::Integer(n), _) => serde_json::json!(*n as f64),
+        (mlua::Value::String(s), _) => J::String(s.to_str().unwrap().to_string()),
+        (mlua::Value::UserData(_), _) => J::String("<userdata>".into()),
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+/// The one-call record build gives what the call-by-call one gives: the same fields, nested records,
+/// arrays with a hole, `$ref` userdata and empty objects; read-only all through; a missing field
+/// diagnosed. A record deeper than the build takes is left to the slow path (the control), and the
+/// build is the one that ran for the rest (a counter, not an assumption).
+#[test]
+fn raw_record_build_matches_the_call_by_call_build() {
+    use super::{native, record_raw};
+    use serde_json::json;
+    let h = Host::new().unwrap();
+    let lua = &h.lua;
+    let sample = json!({
+        "id": 4294967295u64, "name": "Zu\u{f1}iga \u{1F409} Dragon", "level": 51, "hp_fraction": 0.5, "dead": false, "gone": null,
+        "position": {"x": 1.5, "y": -2.0, "z": 1e9}, "empty": {}, "tags": ["a", null, "c"],
+        "ref": {"$ref": "entity", "key": "7", "generation": 3, "incarnation": 9},
+        "nested": [{"deep": {"x": 1}}, {"deep": {"x": 2}}],
+    });
+    let before = record_raw::builds();
+    let fast = native::record(lua, "eqoa.entities.Entity", &sample).unwrap();
+    assert_eq!(record_raw::builds(), before + 1, "the one-call build made it");
+    let slow = native::record_slow(lua, "eqoa.entities.Entity", &sample).unwrap();
+    let (a, b) = (read_back(&fast, &sample), read_back(&slow, &sample));
+    assert_eq!(a, b);
+    assert_eq!(a["name"], "Zu\u{f1}iga \u{1F409} Dragon");
+    assert_eq!(a["position"]["z"], 1e9);
+    assert_eq!(a["tags"], json!(["a", null, "c"]));
+    assert_eq!(a["nested"][1]["deep"]["x"], 2.0);
+    assert!(a.get("gone").is_none(), "a null field is absent");
+    lua.globals().set("rec", fast.clone()).unwrap();
+    h.execute(
+        r#"
+        assert(getmetatable(rec) == false, 'the metatable is hidden')
+        assert(type(rec.ref) == 'userdata')
+        assert(not pcall(function() rec.id = 1 end), 'a record is read-only')
+        assert(not pcall(function() rec.position.x = 1 end), 'so is a nested one')
+        assert(not pcall(function() rec.nested[1].deep.x = 5 end))
+        assert(rec.tags[3] == 'c' and #rec.tags >= 1)
+        local ok = pcall(function() return rec.misspelled end)
+        assert(ok and rec.misspelled == nil)
+        assert(rec.position.misspelled == nil)
+    "#,
+    )
+    .unwrap();
+    let logs = h.drain_logs().unwrap();
+    assert!(logs.iter().any(|s| s.contains("eqoa.entities.Entity.misspelled")), "a missing field is diagnosed: {logs:?}");
+    // control: past the depth the build takes, the call-by-call build makes it and the counter stays
+    let mut deep = json!({"x": 1.0});
+    for _ in 0..16 {
+        deep = json!({ "in": deep });
+    }
+    let before = record_raw::builds();
+    let value = native::record(lua, "eqoa.Deep", &deep).unwrap();
+    assert_eq!(record_raw::builds(), before, "too deep for the one-call build");
+    assert_eq!(read_back(&value, &deep), deep, "and still built");
+    // arrays of plain values
+    let numbers = json!([1, 2.5, "x", true]);
+    let before = record_raw::builds();
+    let value = native::record(lua, "eqoa.List", &numbers).unwrap();
+    assert_eq!(record_raw::builds(), before + 1);
+    assert_eq!(read_back(&value, &numbers), json!([1.0, 2.5, "x", true]));
+}

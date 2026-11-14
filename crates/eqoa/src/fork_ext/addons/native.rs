@@ -379,6 +379,16 @@ pub(crate) fn error(lua: &Lua, symbol: &str, code: &str, message: &str) -> Resul
 }
 
 pub(crate) fn record(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
+    if matches!(value, Json::Array(_)) || matches!(value, Json::Object(f) if !f.contains_key("$ref")) {
+        if let Some(built) = super::record_raw::build(lua, path, value)? {
+            return Ok(built);
+        }
+    }
+    record_slow(lua, path, value)
+}
+
+/// `record` one Lua call at a time (the build `record_raw` does in a single protected call).
+pub(super) fn record_slow(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
     Ok(match value {
         Json::Null => Value::Nil,
         Json::Bool(v) => Value::Boolean(*v),
@@ -390,7 +400,7 @@ pub(crate) fn record(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
         Json::Array(values) => {
             let table = lua.create_table()?;
             for (i, v) in values.iter().enumerate() {
-                table.raw_set(i + 1, record(lua, path, v)?)?;
+                table.raw_set(i + 1, record_slow(lua, path, v)?)?;
             }
             Value::Table(table)
         }
@@ -413,7 +423,7 @@ pub(crate) fn record(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
                     Json::String(s) => backing.raw_set(k.as_str(), s.as_str())?,
                     _ => backing.raw_set(
                         k.as_str(),
-                        record(lua, nested_type(path, k).unwrap_or(path), v)?,
+                        record_slow(lua, nested_type(path, k).unwrap_or(path), v)?,
                     )?,
                 }
             }
@@ -428,15 +438,21 @@ pub(crate) fn record(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
     })
 }
 
-fn signature<'a>(path: &str, has_keys: bool, keys: impl Iterator<Item = &'a str>) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    path.hash(&mut h);
-    has_keys.hash(&mut h);
+/// FNV-1a over the path and the keys (a record is shaped per object built, so this is hot).
+pub(super) fn signature<'a>(path: &str, has_keys: bool, keys: impl Iterator<Item = &'a str>) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut feed = |bytes: &[u8]| {
+        for &b in bytes {
+            h = (h ^ b as u64).wrapping_mul(0x0100_0000_01b3);
+        }
+        h = (h ^ 0xff).wrapping_mul(0x0100_0000_01b3);
+    };
+    feed(path.as_bytes());
+    feed(&[has_keys as u8]);
     for k in keys {
-        k.hash(&mut h);
+        feed(k.as_bytes());
     }
-    h.finish()
+    h
 }
 
 /// `record`, reusing the previous result of `slot` while the native value is unchanged.
@@ -542,6 +558,19 @@ fn guard_keyed(
     {
         return guard_proxy(lua, backing, missing, readonly);
     }
+    let (missing, readonly) = guard_parts(lua, sig, path, known)?;
+    guard_proxy(lua, backing, &missing, &readonly)
+}
+
+/// The shared pieces of a guarded record of shape `sig`: the missing-field metatable (made the
+/// first time the shape is seen) and the read-only guard.
+pub(super) fn guard_parts(
+    lua: &Lua,
+    sig: u64,
+    path: &str,
+    known: impl FnOnce() -> Option<Vec<String>>,
+) -> Result<(Table, Function)> {
+    let session_rc = lua.app_data_ref::<Shared>().map(|s| s.clone());
     let (cached_missing, cached_readonly) = session_rc
         .as_ref()
         .and_then(|rc| rc.try_borrow().ok())
@@ -605,7 +634,7 @@ fn guard_keyed(
             f
         }
     };
-    guard_proxy(lua, backing, &missing, &readonly)
+    Ok((missing, readonly))
 }
 
 /// The read-only proxy over `backing`: reads fall to the backing table, whose own metatable
@@ -1017,7 +1046,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     Ok(())
 }
 
-fn nested_type(path: &str, key: &str) -> Option<&'static str> {
+pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
     match (path, key) {
         ("eqoa.player.Player", "hp" | "power") => Some("eqoa.player.Vital"),
         ("eqoa.player.Player", "attributes") => Some("eqoa.player.Attributes"),
