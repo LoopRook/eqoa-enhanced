@@ -199,7 +199,12 @@ impl Default for AbilitiesSnapshot {
     }
 }
 
+/// An ability's object: the same table while its snapshot is unchanged (`object_cache`).
 pub(crate) fn create_ability_object(lua: &Lua, snap: &AbilitySnapshot) -> LuaResult<Table> {
+    super::object_cache::memo(lua, "ability", snap.id as u64, snap, || build_ability_object(lua, snap))
+}
+
+fn build_ability_object(lua: &Lua, snap: &AbilitySnapshot) -> LuaResult<Table> {
     let t = lua.create_table()?;
     let valid = snap.valid;
     t.set("IsValid", lua.create_function(move |_, ()| Ok(valid))?)?;
@@ -347,7 +352,12 @@ pub(crate) fn create_ability_object(lua: &Lua, snap: &AbilitySnapshot) -> LuaRes
     Ok(t)
 }
 
+/// An item's object: the same table while its snapshot is unchanged (`object_cache`).
 pub(crate) fn create_item_object(lua: &Lua, snap: &ItemSnapshot) -> LuaResult<Table> {
+    super::object_cache::memo(lua, "item", snap.slot_id as u64, snap, || build_item_object(lua, snap))
+}
+
+fn build_item_object(lua: &Lua, snap: &ItemSnapshot) -> LuaResult<Table> {
     let t = lua.create_table()?;
     let name = snap.name;
     let name_len = snap.name_len as usize;
@@ -956,7 +966,7 @@ pub fn install_ability_bar_adapter(host: &Host) -> LuaResult<()> {
     )?;
 
     // Helper: create AbilityBarSlot object
-    let make_slot_object = |lua: &Lua,
+    let build_slot_object = |lua: &Lua,
                             slot: AbilityBarSlotSnapshot,
                             snap_abilities: &AbilitiesSnapshot|
      -> LuaResult<Table> {
@@ -1038,6 +1048,27 @@ pub fn install_ability_bar_adapter(host: &Host) -> LuaResult<()> {
         )?;
 
         Ok(t)
+    };
+    // The same object while the slot and what it points at are unchanged (`object_cache`).
+    let make_slot_object = move |lua: &Lua,
+                                 slot: AbilityBarSlotSnapshot,
+                                 snap_abilities: &AbilitiesSnapshot|
+          -> LuaResult<Table> {
+        let ability = (slot.source_type == ABILITY_SOURCE_TAG
+            && slot.source_index >= 1
+            && (slot.source_index as usize) <= snap_abilities.ability_count as usize)
+            .then(|| snap_abilities.abilities[slot.source_index as usize - 1]);
+        let item = (slot.source_type == ITEM_SOURCE_TAG
+            && (slot.source_index as usize) < snap_abilities.items.len())
+        .then(|| snap_abilities.items[slot.source_index as usize])
+        .filter(|it| it.populated && it.slot_id != 0);
+        super::object_cache::memo(
+            lua,
+            "slot",
+            ((slot.source_type as u64) << 32) | slot.source_index as u64,
+            &(slot, ability, item),
+            || build_slot_object(lua, slot, snap_abilities),
+        )
     };
 
     // GetAbilitySlot(bar_index, slot_index)

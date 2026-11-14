@@ -730,6 +730,18 @@ pub fn install_entity_adapter(host: &Host) -> LuaResult<()> {
     Ok(())
 }
 
+/// `frontiers_forge.entity`'s `new`, found once per VM (it was compiled from source on every call).
+fn entity_new(lua: &mlua::Lua) -> LuaResult<Function> {
+    const KEY: &str = "eqoa.forge.entity.new";
+    if let Ok(f) = lua.named_registry_value::<Function>(KEY) {
+        return Ok(f);
+    }
+    let module: Table = lua.load("return require('frontiers_forge.entity')").eval()?;
+    let new_fn: Function = module.get("new")?;
+    lua.set_named_registry_value(KEY, new_fn.clone())?;
+    Ok(new_fn)
+}
+
 pub fn install_entity_list_adapter(host: &Host) -> LuaResult<()> {
     let lua = &host.lua;
     let entity_list = lua.create_table()?;
@@ -746,10 +758,7 @@ pub fn install_entity_list_adapter(host: &Host) -> LuaResult<()> {
                     )));
                 }
                 // Fetch Entity.new from frontiers_forge.entity module
-                let entity_mod: Table = lua_ctx
-                    .load("return require('frontiers_forge.entity')")
-                    .eval()?;
-                let new_fn: Function = entity_mod.get("new")?;
+                let new_fn = entity_new(lua_ctx)?;
                 new_fn.call::<Value>(index as usize)
             })?,
         )?;
@@ -764,10 +773,7 @@ pub fn install_entity_list_adapter(host: &Host) -> LuaResult<()> {
                 let snap = s.get().entities;
                 for i in 0..snap.entities.len() {
                     if searchable(&snap, i) && snap.entities[i].id == target_id {
-                        let entity_mod: Table = lua_ctx
-                            .load("return require('frontiers_forge.entity')")
-                            .eval()?;
-                        let new_fn: Function = entity_mod.get("new")?;
+                        let new_fn = entity_new(lua_ctx)?;
                         return new_fn.call::<Value>(i);
                     }
                 }
@@ -785,10 +791,7 @@ pub fn install_entity_list_adapter(host: &Host) -> LuaResult<()> {
                 let snap = s.get().entities;
                 let matches = lua_ctx.create_table()?;
                 let mut match_count = 0;
-                let entity_mod: Table = lua_ctx
-                    .load("return require('frontiers_forge.entity')")
-                    .eval()?;
-                let new_fn: Function = entity_mod.get("new")?;
+                let new_fn = entity_new(lua_ctx)?;
 
                 for i in 0..snap.entities.len() {
                     if searchable(&snap, i) {
@@ -819,10 +822,7 @@ pub fn install_entity_list_adapter(host: &Host) -> LuaResult<()> {
             "GetFirstEntityWithName",
             lua.create_function(move |lua_ctx, target_name: String| {
                 let snap = s.get().entities;
-                let entity_mod: Table = lua_ctx
-                    .load("return require('frontiers_forge.entity')")
-                    .eval()?;
-                let new_fn: Function = entity_mod.get("new")?;
+                let new_fn = entity_new(lua_ctx)?;
 
                 for i in 0..snap.entities.len() {
                     if searchable(&snap, i) {
@@ -845,10 +845,7 @@ pub fn install_entity_list_adapter(host: &Host) -> LuaResult<()> {
             "GetAllEntities",
             lua.create_function(move |lua_ctx, ()| {
                 let all = lua_ctx.create_table()?;
-                let entity_mod: Table = lua_ctx
-                    .load("return require('frontiers_forge.entity')")
-                    .eval()?;
-                let new_fn: Function = entity_mod.get("new")?;
+                let new_fn = entity_new(lua_ctx)?;
                 for i in 0..24 {
                     let ent_obj = new_fn.call::<Value>(i)?;
                     all.raw_set(i + 1, ent_obj)?;

@@ -268,3 +268,69 @@ fn round4_seven_mods_in_a_real_shaped_scene() {
     }
     crate::map::extension::use_real_ui(false);
 }
+
+/// The bundled Forge UIs in the same scene, their time split into the Forge layer (the `ImGui` bridge, the
+/// draw lists, the `frontiers_forge.*` adapters) and their own Lua. Printed; the workload is asserted
+/// (each UI ran and drew).
+#[test]
+fn round4_forge_uis_split_between_our_layer_and_their_lua() {
+    use super::super::addon_perf;
+    let real = crate::map::extension::use_real_ui(true);
+    eprintln!("R4P art: {}", if real { "the disc's atlas and strings" } else { "stand-ins (no disc)" });
+    let samples: usize = std::env::var("R4C_SAMPLES").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
+    let mut base = None;
+    for package in ["", "wereoxxs_ui", "arpg_ui", "avoids_modern_ui"] {
+        // on before the addon is made: the ImGui and adapter wrappers are put in at install time
+        addon_perf::force_for_test(true);
+        let Some(rm) = Rm::with(|p| !package.is_empty() && (p == package || p == "resources"), 200) else {
+            crate::map::extension::use_real_ui(false);
+            return;
+        };
+        let mut rm = rm.with_hud();
+        rm.frames(4);
+        if !package.is_empty() {
+            rm.manager.queue(Command::Enable(package.to_string(), true));
+        }
+        rm.frames(10);
+        if package == "wereoxxs_ui" {
+            // his windows start off until the player turns them on in his settings: all on, as the owner runs it
+            lua(&rm.manager, package)
+                .load("for _, k in ipairs({'bars','casting','player','target','group','compass','meter','chat'}) do windows[k] = true end")
+                .exec()
+                .unwrap();
+        }
+        rm.frames(30);
+        if !package.is_empty() {
+            assert!(rm.manager.entries.iter().all(|e| e.status == Status::Enabled), "{package}: {:?}", rm.manager.diagnostics());
+            assert_eq!(rm.manager.entries.len(), 1, "{package} loaded");
+        }
+        let _ = addon_perf::take_report();
+        let (mean, p95, cpu) = rm.timed_frames(samples);
+        let label = if package.is_empty() { "no mods" } else { package };
+        eprintln!("R4P [{label}] frames={samples} mean={mean:.3} ms (CPU {cpu:.3}) p95={p95:.3}");
+        for line in addon_perf::take_report() {
+            eprintln!("R4P     {line}");
+        }
+        addon_perf::force_for_test(false);
+        match base {
+            None => base = Some(mean),
+            Some(b) => eprintln!("R4P   over no mods: {:+.3} ms", mean - b),
+        }
+        rm.manager.shutdown();
+    }
+    crate::map::extension::use_real_ui(false);
+}
+
+/// What one Forge adapter call pays to read the snapshot: the cell hands out a copy of the whole struct.
+#[test]
+fn round4_snapshot_read_cost_micro() {
+    let cell = std::rc::Rc::new(std::cell::Cell::new(Snapshot::default()));
+    let n = 20_000;
+    let t = std::time::Instant::now();
+    let mut acc = 0u64;
+    for _ in 0..n {
+        let snap = cell.get();
+        acc += snap.abilities.ability_count as u64;
+    }
+    eprintln!("R4P Snapshot is {} bytes; Cell::get + one field: {:.2} us ({acc})", std::mem::size_of::<Snapshot>(), t.elapsed().as_secs_f64() * 1e6 / n as f64);
+}

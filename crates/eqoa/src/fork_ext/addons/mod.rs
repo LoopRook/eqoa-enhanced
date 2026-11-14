@@ -22,6 +22,7 @@ pub(crate) fn take_close_options_on_open() -> bool {
 }
 pub(crate) mod ability;
 pub(crate) mod addon_perf;
+mod object_cache;
 mod record_raw;
 pub(crate) mod actions;
 mod async_json;

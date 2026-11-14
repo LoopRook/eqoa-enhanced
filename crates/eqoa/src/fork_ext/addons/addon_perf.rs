@@ -228,6 +228,26 @@ pub(crate) fn wrap_imgui(lua: &mlua::Lua, imgui: &mlua::Table) -> mlua::Result<(
     Ok(())
 }
 
+/// Wraps each function of a Forge host module (`frontiers_forge.*`, the native adapters) so its time
+/// counts as a native call, named `<module>.<function>`.
+pub(crate) fn wrap_module(lua: &mlua::Lua, module: &mlua::Table, name: &str) -> mlua::Result<()> {
+    if !enabled() {
+        return Ok(());
+    }
+    let pairs: Vec<(mlua::Value, mlua::Value)> = module.pairs::<mlua::Value, mlua::Value>().collect::<mlua::Result<_>>()?;
+    for (key, value) in pairs {
+        if let (mlua::Value::Function(f), mlua::Value::String(k)) = (value, &key) {
+            let symbol = format!("eqoa.{name}.{}", k.to_string_lossy());
+            let wrapped = lua.create_function(move |_, args: mlua::MultiValue| {
+                let _t = api(&symbol);
+                f.call::<mlua::MultiValue>(args)
+            })?;
+            module.raw_set(key, wrapped)?;
+        }
+    }
+    Ok(())
+}
+
 /// One manager frame ended: counts it, and prints once the period is over.
 pub(crate) fn tick() {
     if !enabled() {

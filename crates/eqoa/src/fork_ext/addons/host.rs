@@ -505,7 +505,13 @@ impl Host {
     }
 
     pub fn register_host_module(&self, name: impl Into<String>, value: Value) -> Result<()> {
-        self.host_registry.borrow_mut().insert(name.into(), value);
+        let name = name.into();
+        if let Value::Table(table) = &value
+            && name.starts_with("frontiers_forge.")
+        {
+            super::addon_perf::wrap_module(&self.lua, table, &name)?;
+        }
+        self.host_registry.borrow_mut().insert(name, value);
         Ok(())
     }
 
