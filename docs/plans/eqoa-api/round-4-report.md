@@ -697,3 +697,69 @@ merge; develop's own manifest needs the same change), plus the two new privacy-t
 
 Indoor capture and indoor zoom were not tested; the real world scene and develop 0.5.3 comparison could not be run; the Move HUD 2x/4x and
 ellipsis tests had no separate mutation run; Options window height was checked with the test font only.
+
+## Performance round (2026-11-13)
+
+Branch `feat/eqoa-api-r4`, five steps, one commit each (plus fixes). Not pushed, merged or tagged. **Timings: the owner's PC was busy with a game for most of the round, and the lead asked for no release timing numbers until it is idle. Every number below was taken earlier, on a PC that was not quiet (run to run they differ by 20-30 %), so read them as order of magnitude. A clean before/after batch is pending ("timings pending (owner's PC busy)") and will replace this table.** The code, tests and the tiny-sample runs of every benchmark are done.
+
+### How it is measured (step 1)
+
+`EQOA_PERF` now also prints, from fork-owned code (`fork_ext/addons/addon_perf.rs`), every 5 seconds:
+
+```
+addons: <id> <ms> (lua x, api x, bridge x, draw x), ..., imgui x
+core: <shared native work> <calls per frame>x <ms>, ...
+addon-api: <id> <call> <calls per frame>x <ms>, ...   (the costliest eqoa.* / frontiers_forge.* calls)
+```
+
+`lua` is the addon's own Lua (callbacks and render events) with its native calls taken out; `api` the `eqoa.*` / `frontiers_forge.*` calls; `bridge` the Forge `ImGui` table and draw lists; `draw` the native HUD layer drawing the addon's queue; `core` the shared work (deferred capture flush, event emit/deliver, record builds, guide update/draw). Nothing is timed, stored or wrapped with `EQOA_PERF` unset (the ImGui and adapter wrappers are put in at addon load only when it is set). Test: `addon_perf_line_splits_each_addons_lua_from_its_native_calls` (control inside it: timers off, nothing stored).
+
+### Step 2: the guide (about 8 ms)
+
+Cause, found with the new line in a scene where creatures' updates reach the API (the earlier benchmark had none, so no event ever fired): with a guide set the search mod re-read the world on every `entity.*`/`player.changed` event, i.e. every frame, and its `observe_state` called `eqoa.entities.list()`. That list was cached whole: any creature moving rebuilt all 200 guarded records (about 12-17 ms measured). The native side was not the cause (420 dots, one dashed line: 0.03 ms). Fix, in the mod only: no subscription to the entity and player streams (they also cost a record per event); with a guide set and the panel closed only the guide's own target is read (`player.get`, `map.get`, `group.get` for a member, `entities.named(name)` for a creature); the open panel re-reads on a 0.25 s timer or when something changed. Capability `eqoa.entities.named` added to the mod. Before: guide cost 7.2 and 21.2 ms a frame (two runs). After: 0.19 ms (map search 0.92 ms against 0.76 without a guide, native 0.03). Test `round4_guide_costs_under_half_a_millisecond` (release: asserts < 0.5 ms; guide of 420 spawns; asserts the guide is set, its dots drawn on the minimap, and 200 creatures walking with events). Its red run was the same test against the old Lua (failed at 7.2 ms). The existing search and journal tests (23) pass.
+
+### Step 3: the seven mods in a real-shaped scene
+
+Harness (`perf_round_tests.rs`, `round4_seven_mods_in_a_real_shaped_scene`): real Manager, 200 creatures moving every frame with the session's update reaching the API for 1 in 8 per frame (`R4P_CHURN`, about 25 events a frame; the earlier runs used 1 in 4), the player running (so the snapshot cannot be reused), the stock minimap chrome from the disc's art, the native HUD layer drawn through a `Ui` to the GPU (the disc's atlas and strings; the surfaces and font are stand-ins), the ImGui pass, to the GPU's completion. The two Round 3 toggles (`stats_box`, `target_of_target`) are on; it asserts 200 dots and that the HUD commands were drawn (stats box 33 a frame, numbers 3).
+
+Causes found and fixed (all fork-owned):
+
+| Cause | Fix | Measured |
+|---|---|---|
+| Every record (creature, player, event payload, list element) was built with about 50 protected `mlua` calls (the VM runs under a memory limit) | `record_raw.rs`: the whole record in one protected call, tested equal to the old build (`raw_record_build_matches_the_call_by_call_build`, with a depth-fallback control and a counter that proves the fast path ran) | creature record 27-38 us to 8 us |
+| `entities.list` rebuilt every element when any one changed | per-element reuse by id | with the guide fix, 12-17 ms to about 1 ms at 25 changes of 200 |
+| Each event published to every addon deep-copied its JSON (7 addons, 7 copies); `Core::emit` 92 us | payload is an `Arc` | emit 92 us to 9 us |
+| Journal asked `player.get()` on every entity event, before its cheap checks | checks first, player read once a frame | about 25 us an event |
+
+Before/after (provisional, mean ms a frame from the new line; "own" is the addon's lua+api+bridge+draw):
+
+| | before | after |
+|---|---:|---:|
+| Guide (420 spawns) | 7-21 | 0.19 |
+| Creature journal, own (50 events a frame) | 6.3-8.3 | 3.3 |
+| Creature journal, own (25 events a frame) | 3.3-3.8 | 1.05-1.2 |
+| Map search, own, no guide | 0.72 | 0.18-0.22 |
+| Round minimap, own | 0.38 | 0.27 |
+| Stats box / HUD numbers / mana bars / target of target, own | 0.25 / 0.32 / 0.14 / 0.09 | 0.23 / 0.23 / 0.10 / 0.07 |
+| All seven over no mods (25 events a frame) | +13.3 (+19 to +23 at 50) | +5.6 |
+
+What is left: about 1.7 ms of shared capture (`api.refresh`: deferred entity updates 1.3 ms for about 25 updates, the player's record 0.4) that exists whenever any mod is on, the journal (1.1 ms, mostly event delivery) and about 0.1-0.3 ms each for the other mods' own Lua. The goal (1-2 ms of hud time for the seven in total) is met by the mods' own cost (about 2 ms) but not by the total with the shared capture; a clean batch will say. Not done: lazy event payloads (a handler reading only `after` still pays for `before`), an index for the deferred entity patch (a linear `position` scan of the list).
+
+### Step 4: the Forge layer against Wereoxxs
+
+Harness `round4_forge_uis_split_between_our_layer_and_their_lua` (same scene, one UI at a time; Wereoxxs with all eight of his windows turned on, as the owner runs it; ARPG and Modern UI as shipped). Before the fix, per frame: Wereoxxs 2.4 ms = his Lua 1.6, our adapters (`frontiers_forge.*`) 0.54, our `ImGui` bridge and draw lists 0.25; ARPG 1.8 = Lua 1.2, adapters 0.45, bridge 0.18; Modern UI 2.7 = Lua 1.5, adapters 0.93, bridge 0.29. So about a third of the Forge UIs' cost was ours. The scene is a fixture (few abilities, an empty chat), so the owner's 15 ms of Wereoxxs is mostly his Lua and scene size, which this does not reproduce.
+
+Fixed in our layer (`fork_ext/addons/`, no Forge mod file touched): the ability, item and bar-slot objects were tables of about 20 closures each, rebuilt on every `GetAbility`/`GetAbilitySlot`/`GetItem` call (about 25 us a call, 10-16 calls a frame); they are now reused while the `Copy` snapshot they came from is unchanged (`object_cache.rs`). `entity_list.*` compiled `require('frontiers_forge.entity')` from source on every call; it is now found once per VM. After: `GetAbility` x14 0.32 to 0.03 ms, `GetEntityById` x7 0.12 to 0.03; adapters 0.54 to 0.18-0.24 (Wereoxxs), 0.45 to 0.10-0.18 (ARPG), 0.93 to 0.35-0.43 (Modern). Remaining in his Lua, not fixed: 1.4-1.6 ms each; for Modern UI also `GetAllEntities` (0.15 ms, 24 `Entity.new` calls through Lua). Test `forge_adapter_objects_are_reused_only_while_their_snapshot_is_unchanged` (the same object while unchanged; a changed cooldown or icon gives a new object with the new values); the existing Forge suites (adapter surface, picture and icon tests, ability bar tests) pass unchanged. One behaviour change to know: a script that stored its own field on an ability object would now find it on the next call while the snapshot is the same.
+
+### Step 5: "play" 13 ms with all mods off
+
+Test `round4_play_phase_hooks_do_nothing_when_no_addon_is_enabled` (busy fixture, 200 creatures, no addon): `forge_snapshot` (inactive path), `begin/end_game_event`, `frame_library`, `begin_iteration`, `health_redraw` and `health_hidden` each run a warmed loop and print their mean; it asserts nothing was captured or queued (no entity records, empty deferred queue). Debug build, 200 frames, indicative only: 0.008, 0.001, 0.002, 0.002, 0.0002 and 0.0001 ms a frame, together far under the 0.3 ms line, so no change was made: the fork's hooks are lazy already (`capture_requested()` gates the capture; the inactive paths only reset a few thread-locals). The 13 ms is upstream's own play phase (movement, poses, entity updates); not touched. The release number for these hooks is pending the timing batch.
+
+### Gates
+
+| Suite | Pass | Fail | Ignored | SKIP lines |
+|---|---:|---:|---:|---:|
+| Addons `fork_ext::addons::`, one thread, `R4C_SAMPLES=5` | 455 | 0 | 25 | not counted (output not captured) |
+| Full client, one thread, `R4C_SAMPLES=5`, `EQOA_ISO` and `run/eqoa.iso` | 2109 | 0 | 32 | 0 (the full run had no SKIP lines printed) |
+
+Footprint PASS (no shared file touched, no budget changed); `check_no_local_paths.py` clean. wasm check PASS; release build PASS (3m52s, last); `test_player_release.py` 20 passed; `SOURCE.txt` hashes current.
