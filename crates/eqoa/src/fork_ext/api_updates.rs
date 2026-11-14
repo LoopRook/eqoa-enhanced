@@ -71,7 +71,7 @@ struct PlayerData {
     name: String,
     player: net::dump::Player,
     stats: net::dump::Stats,
-    player_stats: Option<Json>,
+    player_stats: Option<std::rc::Rc<Json>>,
     known: bool,
     health: crate::fork_ext::addons::health::HealthSnapshot,
     target: Option<u32>,
@@ -98,7 +98,7 @@ impl PlayerData {
                     bonuses: &m.bonuses,
                     p44: p.dump.player.p44 as i32,
                 };
-                crate::fork_ext::player_stats::view(&src).map(|v| v.to_json())
+                crate::fork_ext::player_stats::view_json(&src)
             })
             .flatten();
         Self {
@@ -137,6 +137,13 @@ impl PlayerData {
             value[field] = c.view.player[field].clone();
         }
         value
+    }
+}
+/// The stat view the record was read with, stored only when it differs from the one held (it
+/// usually does not: the player's record is rebuilt every frame for its position).
+fn set_player_stats(c: &mut Core, stats: &Option<std::rc::Rc<Json>>) {
+    if c.view.player_stats.as_ref() != stats.as_deref() {
+        c.view.player_stats = stats.as_deref().cloned();
     }
 }
 fn interested(name: &str) -> bool {
@@ -458,7 +465,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         drop(timed);
         CORE.with(|c| {
             let mut c = c.borrow_mut();
-            c.view.player_stats = player.player_stats.clone();
+            set_player_stats(&mut c, &player.player_stats);
             let timed = crate::fork_ext::addons::addon_perf::section("player.value");
             let mut after = player.value(&c);
             drop(timed);
@@ -558,7 +565,7 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
             );
             if let Some(player) = player {
                 native_core::defer(2048 + player.name.len(), move |c| {
-                    c.view.player_stats = player.player_stats.clone();
+                    set_player_stats(c, &player.player_stats);
                     let value = player.value(c);
                     patch_player(c, value);
                 });
@@ -570,7 +577,7 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
         Kind::Player => {
             let player = PlayerData::read(play);
             native_core::defer(2048 + player.name.len(), move |c| {
-                c.view.player_stats = player.player_stats.clone();
+                set_player_stats(c, &player.player_stats);
                 let value = player.value(c);
                 patch_player(c, value)
             });

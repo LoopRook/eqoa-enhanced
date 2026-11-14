@@ -239,6 +239,64 @@ pub fn view(s: &Source) -> Option<View> {
     Some(out)
 }
 
+/// What `view` reads, flattened: the stat channel's totals and bases, the masteries, the stat cap
+/// and its bonuses, and the stats of every worn item (carried ones count for nothing). `view` is a
+/// pure function of these numbers, so the same numbers give the same view.
+fn inputs(s: &Source, key: &mut Vec<i64>, worn_items: bool) {
+    key.clear();
+    key.extend(s.stats.stat.iter().map(|&v| v as i64));
+    key.extend(s.stats.base.iter().map(|&v| v as i64));
+    key.extend_from_slice(s.mastery);
+    key.extend_from_slice(s.bonuses);
+    key.push(s.p44 as i64);
+    if worn_items {
+        for it in s.inv.items.iter().filter(|it| it.equip_slot != -1) {
+            key.push(i64::MIN);
+            for stat in &it.item.stats {
+                key.push(stat.id);
+                key.push(stat.value);
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct Memo {
+    key: Vec<i64>,
+    scratch: Vec<i64>,
+    out: Option<std::rc::Rc<Json>>,
+    seen: bool,
+    #[cfg(test)]
+    hits: u64,
+}
+thread_local! {static MEMO: std::cell::RefCell<Memo> = std::cell::RefCell::new(Memo::default());}
+
+/// `view(s)` as the API's JSON, worked out again only when something it reads changed: the player
+/// runs every frame and the record is rebuilt each time, but the stat channel, the worn items and
+/// the masteries change a few times an hour. The same `Rc` comes back while the inputs stand.
+pub fn view_json(s: &Source) -> Option<std::rc::Rc<Json>> {
+    view_json_with(s, true)
+}
+
+fn view_json_with(s: &Source, worn_items: bool) -> Option<std::rc::Rc<Json>> {
+    MEMO.with(|m| {
+        let mut m = m.borrow_mut();
+        let m = &mut *m;
+        inputs(s, &mut m.scratch, worn_items);
+        if m.seen && m.key == m.scratch {
+            #[cfg(test)]
+            {
+                m.hits += 1;
+            }
+            return m.out.clone();
+        }
+        m.out = view(s).map(|v| std::rc::Rc::new(v.to_json()));
+        std::mem::swap(&mut m.key, &mut m.scratch);
+        m.seen = true;
+        m.out.clone()
+    })
+}
+
 pub const FRAME: [i32; 4] = [200, 54, 348, 186];
 const BORDER: [f32; 2] = [7., 9.];
 const PAD: [f32; 2] = [3., 2.];
@@ -683,5 +741,71 @@ mod tests {
                 > l.rights[1] - l.lefts[1] + 1e-3,
             "the control must fail"
         );
+    }
+
+    /// The memoised JSON is what a direct build gives, through every kind of change to what the view
+    /// reads (a total, a base, a mastery, a bonus, the cap, a worn item's stat, wearing and taking off
+    /// an item, a carried item that counts for nothing, no stat channel yet), and is the same value
+    /// again, unbuilt, while nothing changed. The control: a key that leaves the worn items out
+    /// serves a stale view after an item's stat changes, which this test would fail on.
+    #[test]
+    fn the_stat_view_memo_gives_what_a_direct_build_gives() {
+        let direct = |s: &Source| view(s).map(|v| v.to_json());
+        let mut stats = channel(&[(0, 7)], &[]);
+        let mut inv = gear(&[(0, 7), (14, 40)]);
+        let mut mastery = [0i64; 29];
+        let mut bonuses = [0i64; 7];
+        let mut p44 = 0i32;
+        macro_rules! src {
+            () => {
+                Source { stats: &stats, inv: &inv, mastery: &mastery, bonuses: &bonuses, p44 }
+            };
+        }
+        let hits = || MEMO.with(|m| m.borrow().hits);
+        let check = |s: &Source, hit: bool| {
+            let before = hits();
+            let got = view_json(s);
+            assert_eq!(got.as_deref().cloned(), direct(s), "memo and direct build differ");
+            assert_eq!(hits() - before, u64::from(hit), "hit expected: {hit}");
+        };
+        MEMO.with(|m| *m.borrow_mut() = Memo::default());
+        check(&src!(), false);
+        check(&src!(), true);
+        check(&src!(), true);
+        stats.stat[0] += 1;
+        check(&src!(), false);
+        stats.base[2] += 3;
+        check(&src!(), false);
+        mastery[1] = 5;
+        check(&src!(), false);
+        bonuses[3] = 2;
+        p44 = 40;
+        check(&src!(), false);
+        check(&src!(), true);
+        // a worn item's stat changes: the total moved with it, the base and every other input did not
+        inv.items[0].item.stats[1].value = 55;
+        check(&src!(), false);
+        // a carried item changing counts for nothing, and the view stays
+        inv.items[1].item.stats[0].value = 999;
+        check(&src!(), true);
+        // wearing it: the view moves
+        inv.items[1].equip_slot = 4;
+        check(&src!(), false);
+        inv.items[1].equip_slot = -1;
+        check(&src!(), false);
+        // no maximum hit points yet: no view, and it is not remembered as one
+        stats.stat[8] = 0;
+        check(&src!(), false);
+        assert!(view_json(&src!()).is_none());
+        stats.stat[8] = 300;
+        check(&src!(), false);
+        // the control: without the worn items in the key, an item's stat change is missed
+        let (a, b) = (view_json_with(&src!(), false), {
+            inv.items[0].item.stats[1].value += 9; // armour: not under the trainable stats' cap
+            view_json_with(&src!(), false)
+        });
+        assert_eq!(a, b, "the flawed key serves the old view");
+        assert_ne!(b.as_deref().cloned(), direct(&src!()), "so it is stale, and the real key must not be");
+        assert_eq!(view_json(&src!()).as_deref().cloned(), direct(&src!()), "the real key follows the item");
     }
 }
