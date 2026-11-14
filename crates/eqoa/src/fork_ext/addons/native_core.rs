@@ -122,6 +122,9 @@ pub(crate) struct Core {
     pub stats_received: bool,
     pub effects_received: bool,
     pub entity_worlds: BTreeMap<u32, i32>,
+    /// Where an entity was last found in `view.entities`: a hint, checked before it is used, so the
+    /// list is scanned only when the hint is wrong.
+    pub entity_hint: std::collections::HashMap<u32, usize>,
     pub entity_versions: BTreeMap<u32, u64>,
     pub ability_versions: BTreeMap<String, u64>,
     pub cooldown_edges: BTreeMap<String, (f64, f64, f64)>,
@@ -154,6 +157,7 @@ impl Default for Core {
             stats_received: false,
             effects_received: false,
             entity_worlds: BTreeMap::new(),
+            entity_hint: std::collections::HashMap::new(),
             entity_versions: BTreeMap::new(),
             ability_versions: BTreeMap::new(),
             cooldown_edges: BTreeMap::new(),
@@ -311,6 +315,7 @@ impl Core {
         self.forge_cooldowns.clear();
         self.forge_combat.clear();
         self.entity_worlds.clear();
+        self.entity_hint.clear();
         self.entity_versions.clear();
         self.ability_versions.clear();
         self.cooldown_edges.clear();
@@ -459,13 +464,15 @@ pub(crate) fn changed_fields(before: &Json, after: &Json) -> Vec<String> {
     if before.is_array() || after.is_array() {
         return vec!["records".into()];
     }
-    let mut keys = std::collections::BTreeSet::new();
+    let mut keys: Vec<&String> = Vec::new();
     for value in [before, after] {
         if let Some(o) = value.as_object() {
-            keys.extend(o.keys().cloned());
+            keys.extend(o.keys());
         }
     }
-    keys.into_iter().filter(|k| before[k] != after[k]).collect()
+    keys.sort_unstable();
+    keys.dedup();
+    keys.into_iter().filter(|k| before[*k] != after[*k]).cloned().collect()
 }
 
 pub(crate) fn observe_text(text: &str, color: [f32; 4]) {

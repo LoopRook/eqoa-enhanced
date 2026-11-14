@@ -13,7 +13,9 @@ end
 -- Rust str::trim uses Unicode White_Space, beyond Lua's ASCII %s class.
 local spaces = {}
 for c in ("\194\133\194\160\225\154\128\226\128\128\226\128\129\226\128\130\226\128\131\226\128\132\226\128\133\226\128\134\226\128\135\226\128\136\226\128\137\226\128\138\226\128\168\226\128\169\226\128\175\226\129\159\227\128\128"):gmatch("[%z\1-\127\194-\244][\128-\191]*") do spaces[c] = true end
-local function trim_name(name)
+-- Creatures repeat their names thousands of times: each name is trimmed once.
+local trimmed, trimmed_count = {}, 0
+local function trim_name_uncached(name)
     local chars = {}
     for c in name:gmatch("[%z\1-\127\194-\244][\128-\191]*") do chars[#chars+1] = c end
     local first,last = 1,#chars
@@ -21,21 +23,43 @@ local function trim_name(name)
     while last >= first and (spaces[chars[last]] or chars[last]:match("^%s$")) do last=last-1 end
     return first > last and "" or table.concat(chars,"",first,last)
 end
+local function trim_name(name)
+    local t = trimmed[name]
+    if t then return t end
+    t = trim_name_uncached(name)
+    if trimmed_count >= 4096 then trimmed, trimmed_count = {}, 0 end
+    trimmed[name] = t; trimmed_count = trimmed_count + 1
+    return t
+end
 local function finite(n) return type(n) == "number" and n == n and math.abs(n) <= 3.4028234663852886e38 end
 local function changed()
     revision = revision + 1
     first_dirty = first_dirty or now
     last_change = now
 end
+-- The grid is name, level, then 30-unit cell column and row: numbers, not strings built per lookup.
+local keys = {}
+local function grid_key(name, level)
+    local by_level = keys[name]
+    local key = by_level and by_level[level]
+    if key then return key end
+    key = name .. "\0" .. level
+    if not by_level then by_level = {}; keys[name] = by_level end
+    by_level[level] = key
+    return key
+end
 local function index(name, id, info)
     local numeric = tonumber(id)
     if numeric and numeric >= 0 and numeric <= 4294967295 then known[numeric] = true end
-    local key = name .. "\0" .. info.level
+    local key = grid_key(name, info.level)
     local cells = grid[key]
     if not cells then cells = {}; grid[key] = cells end
-    local cell = math.floor(info.pos[1] / 30) .. ":" .. math.floor(info.pos[3] / 30)
-    local points = cells[cell]
-    if not points then points = {}; cells[cell] = points end
+    local column = math.floor(info.pos[1] / 30)
+    local rows = cells[column]
+    if not rows then rows = {}; cells[column] = rows end
+    local row = math.floor(info.pos[3] / 30)
+    local points = rows[row]
+    if not points then points = {}; rows[row] = points end
     points[#points + 1] = info.pos
 end
 local function put(name, id, info)
@@ -47,15 +71,18 @@ local function put(name, id, info)
     return true
 end
 local function near(name, level, x, z)
-    local cells = grid[name .. "\0" .. level]
+    local cells = grid[grid_key(name, level)]
     if not cells then return false end
     local cx, cz = math.floor(x / 30), math.floor(z / 30)
-    for dx = -1, 1 do for dz = -1, 1 do
-        local points = cells[(cx + dx) .. ":" .. (cz + dz)]
-        if points then for _, p in ipairs(points) do
-            if (p[1] - x)^2 + (p[3] - z)^2 <= 900 then return true end
+    for dx = -1, 1 do
+        local rows = cells[cx + dx]
+        if rows then for dz = -1, 1 do
+            local points = rows[cz + dz]
+            if points then for _, p in ipairs(points) do
+                if (p[1] - x)^2 + (p[3] - z)^2 <= 900 then return true end
+            end end
         end end
-    end end
+    end
     return false
 end
 -- The player is read at most once a frame: an event per moving creature each asked for it.

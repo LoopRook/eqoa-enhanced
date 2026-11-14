@@ -1291,3 +1291,51 @@ fn raw_record_build_matches_the_call_by_call_build() {
     assert_eq!(record_raw::builds(), before + 1);
     assert_eq!(read_back(&value, &numbers), json!([1.0, 2.5, "x", true]));
 }
+
+/// A change event's `before` and `after` records are built when a handler reads them, not on delivery:
+/// a handler reading only `after` leaves `before` unbuilt (the build counter, the control), and a
+/// later read gives the same values as an eager build, the same table each time, read-only, an
+/// absent record (`entity.added`) nil, a missing field still diagnosed.
+#[test]
+fn change_event_before_and_after_are_built_only_when_read() {
+    use super::{
+        native_core::{CORE, Core},
+        native_events, record_raw,
+    };
+    use serde_json::json;
+    CORE.with(|c| *c.borrow_mut() = Core::default());
+    let h = Host::new().unwrap();
+    h.execute("seen = {}; eqoa.events.on('entity.changed', function(e) seen[#seen+1] = e; read_id = e.data.after.id end); eqoa.events.on('entity.added', function(e) added = e end)").unwrap();
+    let rec = |name: &str, x: f64| json!({"id": 7, "name": name, "position": {"x": x, "y": 0.0, "z": 2.0}, "ref": {"$ref": "entity", "key": "7", "generation": 1, "incarnation": 1}});
+    let emit = |name: &str, before: serde_json::Value, after: serde_json::Value| {
+        CORE.with(|c| c.borrow_mut().emit(name, json!({"ref": after["ref"], "before": before, "after": after, "changed": ["position"]})))
+    };
+    emit("entity.changed", rec("Rat", 1.0), rec("Rat", 5.0));
+    let before = record_raw::builds();
+    native_events::dispatch(&h).unwrap();
+    let delivered = record_raw::builds() - before;
+    h.execute("assert(read_id == 7)").unwrap();
+    // read-only handler of `after`: the data's other fields and `after` are built, `before` is not
+    let read_before = record_raw::builds();
+    h.execute("assert(seen[1].data.before.name == 'Rat' and seen[1].data.before.position.x == 1)").unwrap();
+    assert_eq!(record_raw::builds() - read_before, 1, "reading `before` built it then (control: it was {delivered} builds to deliver)");
+    let again = record_raw::builds();
+    h.execute(
+        r#"
+        local d = seen[1].data
+        assert(rawequal(d.before, d.before) and rawequal(d.after, d.after), 'the same table each time')
+        assert(d.after.position.x == 5 and d.changed[1] == 'position' and type(d.ref) == 'userdata')
+        assert(not pcall(function() d.before = 1 end), 'read-only')
+        assert(not pcall(function() d.before.name = 'x' end), 'and its record too')
+        assert(d.nope == nil)
+    "#,
+    )
+    .unwrap();
+    assert_eq!(record_raw::builds(), again, "no further builds for what was built");
+    assert!(h.drain_logs().unwrap().iter().any(|s| s.contains("data.nope")), "a missing field is still diagnosed");
+    // an entity.added has no `before`: nil, and no diagnostic for it
+    emit("entity.added", json!(null), rec("Fox", 3.0));
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(added.data.before == nil and added.data.after.name == 'Fox')").unwrap();
+    assert!(!h.drain_logs().unwrap().iter().any(|s| s.contains("data.before")), "an absent `before` is not a missing field");
+}

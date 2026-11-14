@@ -2273,3 +2273,52 @@ fn round4_play_phase_hooks_do_nothing_when_no_addon_is_enabled() {
     let (entities, queued) = CORE.with(|c| (c.borrow().view.entities.len(), native_core::deferred_len()));
     assert_eq!((entities, queued), (0, 0), "no capture ran");
 }
+
+/// An entity update finds its record through the place remembered for it, and a wrong place (a removal
+/// shifts the ones after it) costs only a scan: the list stays right, each id once, the moved creature at
+/// its new position, the removed one gone. Also `changed_fields` names exactly the keys that differ, sorted.
+#[test]
+fn entity_updates_keep_the_list_right_through_removals_and_the_changed_keys_are_exact() {
+    use crate::fork_ext::addons::native_core::{self, CORE};
+    let mut p = Play::bundled_ui_fixture();
+    let _ = p.forge_snapshot(None);
+    let creature = |id: u32, x: f32| net::entity::Entity {
+        id,
+        kind: net::entity::TYPE_CREATURE,
+        p19: 255,
+        pos: [x, 0.0, 0.0],
+        actor_pos: [x, 0.0, 0.0],
+        creature: Some(net::entity::Creature { name: format!("C{id}"), level: 3, ..Default::default() }),
+        ..Default::default()
+    };
+    p.entities.slots.resize(40, None);
+    for i in 0..5u32 {
+        p.entities.slots[30 + i as usize] = Some(creature(7000 + i, i as f32));
+        p.entity_slot_changed(30 + i as usize);
+    }
+    native_core::flush_deferred();
+    let ids = || CORE.with(|c| c.borrow().view.entities.iter().filter_map(|e| e["id"].as_u64()).filter(|i| *i >= 7000).collect::<Vec<_>>());
+    assert_eq!(ids(), [7000, 7001, 7002, 7003, 7004]);
+    // the middle one leaves: the ones after it move up a place in the list
+    p.entities.slots[32] = None;
+    p.entity_slot_changed(32);
+    native_core::flush_deferred();
+    assert_eq!(ids(), [7000, 7001, 7003, 7004]);
+    // the last one moves: found although its remembered place is now one too far
+    p.entities.slots[34].as_mut().unwrap().pos = [99.0, 0.0, 0.0];
+    p.entities.slots[34].as_mut().unwrap().actor_pos = [99.0, 0.0, 0.0];
+    p.entity_slot_changed(34);
+    native_core::flush_deferred();
+    let x_of = |id: u64| CORE.with(|c| c.borrow().view.entities.iter().find(|e| e["id"] == id).map(|e| e["position"]["x"].as_f64().unwrap()));
+    assert_eq!(x_of(7004), Some(99.0));
+    assert_eq!(x_of(7003), Some(3.0), "its neighbour is untouched");
+    assert_eq!(x_of(7002), None);
+    assert_eq!(ids(), [7000, 7001, 7003, 7004], "no duplicate was made");
+    // the changed keys: the union of both records' keys that differ, sorted
+    use serde_json::json;
+    let changed = native_core::changed_fields;
+    assert_eq!(changed(&json!({"b": 1, "a": 1, "c": 1}), &json!({"b": 2, "a": 1, "d": 4})), ["b", "c", "d"]);
+    assert_eq!(changed(&json!(null), &json!({"x": 1, "a": null})), ["x"], "a null is the same as a missing key");
+    assert_eq!(changed(&json!([1]), &json!({"x": 1})), ["records"]);
+    assert!(changed(&json!({"a": 1}), &json!({"a": 1})).is_empty());
+}

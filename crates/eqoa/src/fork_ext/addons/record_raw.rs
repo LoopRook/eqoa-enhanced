@@ -178,3 +178,26 @@ unsafe fn push(state: *mut ffi::lua_State, value: &Json, at: &mut Walk) {
         }
     }
 }
+
+/// An event's envelope table (`name`, `seq`, `time`, `tick`, `frame`, `generation`, `data`) in one
+/// protected call, where `set` made seven.
+pub(super) fn envelope_table(lua: &Lua, name: &str, numbers: [f64; 4], seq: f64, data: Value) -> mlua::Result<Table> {
+    // SAFETY: as in `build`: only Lua stack functions on `state`, no value with a destructor held
+    // across a call that can raise, one result left.
+    unsafe {
+        lua.exec_raw(data, |state| {
+            ffi::lua_createtable(state, 0, 7);
+            ffi::lua_pushlstring_(state, c"name".as_ptr(), 4);
+            ffi::lua_pushlstring_(state, name.as_ptr().cast(), name.len());
+            ffi::lua_rawset(state, -3);
+            for (key, value) in [(c"seq", seq), (c"time", numbers[0]), (c"tick", numbers[1]), (c"frame", numbers[2]), (c"generation", numbers[3])] {
+                ffi::lua_pushnumber(state, value);
+                ffi::lua_setfield(state, -2, key.as_ptr());
+            }
+            ffi::lua_pushvalue(state, 1);
+            ffi::lua_setfield(state, -2, c"data".as_ptr());
+            ffi::lua_replace(state, 1);
+            ffi::lua_settop(state, 1);
+        })
+    }
+}

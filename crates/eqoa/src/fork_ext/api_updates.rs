@@ -87,6 +87,7 @@ impl PlayerData {
             .forge_health
             .snapshot(p.session.self_id.is_some(), p.in_world_now());
         let known = CORE.with(|c| c.borrow().stats_received) || health.available;
+        let _stats = crate::fork_ext::addons::addon_perf::section("player.stats_view");
         let player_stats = known
             .then(|| {
                 let m = &p.cm.m;
@@ -175,7 +176,20 @@ fn patch_player(c: &mut Core, mut after: Json) {
     }
     c.player_changed(before);
 }
+/// Where entity `id` is in the view's list: the remembered place when it still holds it, else a scan.
+fn entity_index(c: &mut Core, id: u32) -> Option<usize> {
+    let want = Some(id as u64);
+    if let Some(&at) = c.entity_hint.get(&id)
+        && c.view.entities.get(at).is_some_and(|e| e["id"].as_u64() == want)
+    {
+        return Some(at);
+    }
+    let at = c.view.entities.iter().position(|e| e["id"].as_u64() == want)?;
+    c.entity_hint.insert(id, at);
+    Some(at)
+}
 fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
+    let _timed = crate::fork_ext::addons::addon_perf::section("patch.entity");
     while c.view.entity_slots.len() <= slot {
         c.view.entity_slots.push(None);
     }
@@ -185,6 +199,7 @@ fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
         if let Some(old) = old_id {
             c.entity_versions.remove(&old);
             c.entity_worlds.remove(&old);
+            c.entity_hint.remove(&old);
             if let Some(index) = c
                 .view
                 .entities
@@ -206,7 +221,9 @@ fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
         return;
     };
     c.entity_worlds.insert(entity.id, entity.world);
+    let timed = crate::fork_ext::addons::addon_perf::section("patch.value");
     let mut after = entity.value();
+    drop(timed);
     let version = if let Some(v) = c.entity_versions.get(&entity.id) {
         *v
     } else {
@@ -215,45 +232,48 @@ fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
         v
     };
     after["ref"] = json!({"$ref":"entity","key":entity.id.to_string(),"generation":c.generation,"incarnation":version});
-    let index = c
-        .view
-        .entities
-        .iter()
-        .position(|e| e["id"].as_u64() == Some(entity.id as u64));
-    let before = if let Some(index) = index {
-        if c.view.entities[index] == after {
-            return;
-        }
-        Some(std::mem::replace(
-            &mut c.view.entities[index],
-            after.clone(),
-        ))
-    } else {
-        c.view.entities.push(after.clone());
-        None
-    };
-    let name = if before.is_some() {
+    let timed = crate::fork_ext::addons::addon_perf::section("patch.scan+compare+clone");
+    let index = entity_index(c, entity.id);
+    let name = if index.is_some() {
         "entity.changed"
     } else {
         "entity.added"
     };
-    if interested(name) {
+    // the event's copy of the record is made only when an addon listens for the event
+    let wanted = interested(name);
+    let after_ref = after["ref"].clone();
+    let for_event = wanted.then(|| after.clone());
+    let before = if let Some(index) = index {
+        if c.view.entities[index] == after {
+            return;
+        }
+        Some(std::mem::replace(&mut c.view.entities[index], after))
+    } else {
+        c.entity_hint.insert(entity.id, c.view.entities.len());
+        c.view.entities.push(after);
+        None
+    };
+    drop(timed);
+    if let Some(after) = for_event {
+        let timed = crate::fork_ext::addons::addon_perf::section("patch.changed_fields");
         let changed = crate::fork_ext::addons::native_core::changed_fields(
             before.as_ref().unwrap_or(&Json::Null),
             &after,
         );
-        c.emit(
-            name,
-            json!({"ref":after["ref"],"before":before,"after":after,"changed":changed}),
-        );
+        drop(timed);
+        let timed = crate::fork_ext::addons::addon_perf::section("patch.event json");
+        let data = json!({"ref":after_ref,"before":before,"after":after,"changed":changed});
+        drop(timed);
+        c.emit(name, data);
     }
+    let timed = crate::fork_ext::addons::addon_perf::section("patch.group");
     let old_group = interested("group.changed").then(|| c.view.group.clone());
     if let Some(members) = c.view.group["members"].as_array_mut() {
         for member in members {
             if member["id"].as_u64() == Some(entity.id as u64) {
                 member["position"] = vec3(entity.position);
                 member["world_id"] = json!(entity.world);
-                member["entity"] = after["ref"].clone();
+                member["entity"] = after_ref.clone();
             }
         }
     }
@@ -266,7 +286,7 @@ fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
         }
     }
     if c.view.player["id"].as_u64() == Some(entity.id as u64) {
-        c.view.player["entity"] = after["ref"].clone();
+        c.view.player["entity"] = after_ref.clone();
     }
 }
 fn ability_value(a: &net::dump::Ability) -> Json {
@@ -433,11 +453,16 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
             CORE.with(|c| patch_hotbars(&mut c.borrow_mut(), bars));
         }
         let _timed_player = crate::fork_ext::addons::addon_perf::section("api.refresh.player");
+        let timed = crate::fork_ext::addons::addon_perf::section("player.read");
         let player = PlayerData::read(play);
+        drop(timed);
         CORE.with(|c| {
             let mut c = c.borrow_mut();
             c.view.player_stats = player.player_stats.clone();
+            let timed = crate::fork_ext::addons::addon_perf::section("player.value");
             let mut after = player.value(&c);
+            drop(timed);
+            let _patch = crate::fork_ext::addons::addon_perf::section("player.patch");
             if let Some(w) = walker {
                 let p = w.cam.walk.phys.position;
                 let v = w.cam.walk.phys.velocity;
@@ -509,6 +534,7 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
     dirty();
     match event {
         Kind::Entity(slot) => {
+            let _timed = crate::fork_ext::addons::addon_perf::section("capture.entity (play phase)");
             let slot = *slot;
             let entity = play
                 .entities

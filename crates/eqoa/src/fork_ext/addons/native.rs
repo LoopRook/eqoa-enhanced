@@ -526,6 +526,12 @@ fn record_list_cached(lua: &Lua, slot: &str, path: &str, items: &[Json]) -> Resu
     Ok(Value::Table(table))
 }
 
+/// `guard` for a record whose known keys are a fixed list (no list is built unless a shape is new).
+pub(super) fn guard_lazy(lua: &Lua, backing: Table, path: &str, keys: &[&str]) -> Result<Table> {
+    let sig = signature(path, true, keys.iter().copied());
+    guard_keyed(lua, backing, path, sig, || Some(keys.iter().map(|s| s.to_string()).collect()))
+}
+
 pub(crate) fn guard(
     lua: &Lua,
     backing: Table,
