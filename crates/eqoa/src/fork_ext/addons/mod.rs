@@ -71,6 +71,8 @@ mod native_state;
 mod native_tests;
 #[cfg(test)]
 mod perf_delta_tests;
+#[cfg(test)]
+mod perf_delta_event_tests;
 pub(crate) mod options;
 pub(crate) mod package;
 pub(crate) mod player;

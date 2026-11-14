@@ -1319,6 +1319,8 @@ fn change_event_before_and_after_are_built_only_when_read() {
     let read_before = record_raw::builds();
     h.execute("assert(seen[1].data.before.name == 'Rat' and seen[1].data.before.position.x == 1)").unwrap();
     assert_eq!(record_raw::builds() - read_before, 1, "reading `before` built it then (control: it was {delivered} builds to deliver)");
+    // `ref` and `changed` are built on first read too: read them once before counting
+    h.execute("local d = seen[1].data; assert(type(d.ref) == 'userdata' and d.changed[1] == 'position')").unwrap();
     let again = record_raw::builds();
     h.execute(
         r#"

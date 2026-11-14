@@ -454,7 +454,7 @@ fn local(name: &str, data: serde_json::Value) -> Event {
         }
     })
 }
-fn envelope(lua: &mlua::Lua, e: &Event) -> Result<mlua::Table> {
+pub(super) fn envelope(lua: &mlua::Lua, e: &Event) -> Result<mlua::Table> {
     let path = format!("eqoa.events.{}.data", e.name);
     let timed = super::addon_perf::section("env.data");
     let data = match lazy_data(lua, e, &path)? {
@@ -465,10 +465,11 @@ fn envelope(lua: &mlua::Lua, e: &Event) -> Result<mlua::Table> {
     super::record_raw::envelope_table(lua, &e.name, [e.time, e.tick as f64, e.frame as f64, e.generation as f64], e.seq as f64, data)
 }
 
-/// A change event's data (`before` and `after` records) with those two records built only when a
-/// handler reads them: the first read builds the record, keeps it in the data (so it is the same
-/// table every time) and every other field is as `record` makes it, a missing one diagnosed as before.
-/// A creature moving 25 times a frame is delivered with two full records each; the journal reads one.
+/// A change event's data (`ref`, `before`, `after`, `changed`) as a read-only record whose fields
+/// are built when a handler first reads them: the first read builds the field as `record` makes it,
+/// keeps it in the data (so it is the same value every time), and a missing field is diagnosed as
+/// before. A creature moving 25 times a frame is delivered with two full records each; the journal
+/// reads one field of one.
 fn lazy_data(lua: &mlua::Lua, e: &Event, path: &str) -> Result<Option<Value>> {
     let Json::Object(fields) = &*e.data else {
         return Ok(None);
@@ -476,37 +477,39 @@ fn lazy_data(lua: &mlua::Lua, e: &Event, path: &str) -> Result<Option<Value>> {
     if !(fields.contains_key("before") && fields.contains_key("after")) {
         return Ok(None);
     }
-    let rest: serde_json::Map<String, Json> = fields.iter().filter(|(k, _)| *k != "before" && *k != "after").map(|(k, v)| (k.clone(), v.clone())).collect();
-    let Value::Table(proxy) = record(lua, path, &Json::Object(rest))? else {
-        return Ok(None);
-    };
-    // the proxy's own metatable (hidden from Lua) holds the backing table, whose metatable reports a missing field
-    let Some(backing) = proxy.metatable().and_then(|m| m.raw_get::<Table>("__index").ok()) else {
-        return Ok(None);
-    };
-    let Some(missing) = backing.metatable() else {
-        return Ok(None);
-    };
-    let (data, path) = (e.data.clone(), path.to_owned());
-    let lazy = lua.create_table_with_capacity(0, 1)?;
-    lazy.raw_set(
-        "__index",
-        lua.create_function(move |lua, (table, key): (Table, Value)| {
-            if let Value::String(k) = &key {
-                let k = k.to_str()?;
-                if k == "before" || k == "after" {
-                    let built = record(lua, &path, &data[&*k])?;
-                    if !matches!(built, Value::Nil) {
-                        table.raw_set(&*k, built.clone())?;
-                    }
-                    return Ok(built);
-                }
+    let sig = super::native::signature(path, true, fields.keys().map(String::as_str));
+    let (missing, readonly) = super::native::guard_parts(lua, sig, path, || Some(fields.keys().cloned().collect()))?;
+    let (data, path, shape) = (e.data.clone(), path.to_owned(), missing);
+    let lazy = lua.create_function(move |lua, (table, key): (Table, Value)| {
+        if let Value::String(k) = &key {
+            let k = k.to_str()?;
+            if let Some(value) = data.get(&*k).filter(|v| !v.is_null()) {
+                let built = record(lua, super::native::nested_type(&path, &k).unwrap_or(&path), value)?;
+                table.raw_set(&*k, built.clone())?;
+                return Ok(built);
             }
-            missing.get::<Function>("__index")?.call::<Value>((table, key))
-        })?,
-    )?;
-    backing.set_metatable(Some(lazy))?;
-    Ok(Some(Value::Table(proxy)))
+        }
+        shape.get::<Function>("__index")?.call::<Value>((table, key))
+    })?;
+    super::record_raw::lazy_object(lua, lazy, &readonly).map(|t| Some(Value::Table(t)))
+}
+
+/// The event as a handler gets it: its envelope behind the read-only guard, the data as `lazy_data`
+/// or `record` makes it. The names whose data the guard also covers (`readonly_envelope`) and an
+/// event delivered with its data made already take the longer way.
+pub(super) fn envelope_readonly(lua: &mlua::Lua, e: &Event) -> Result<mlua::Table> {
+    const KEYS: [&str; 7] = ["name", "seq", "time", "tick", "frame", "generation", "data"];
+    let path = format!("eqoa.events.{}.data", e.name);
+    let timed = super::addon_perf::section("env.data");
+    let data = match lazy_data(lua, e, &path)? {
+        Some(data) => data,
+        None => record(lua, &path, &e.data)?,
+    };
+    drop(timed);
+    let _timed = super::addon_perf::section("env.readonly");
+    let sig = super::native::signature("eqoa.events.Event", true, KEYS.into_iter());
+    let guard = super::native::guard_parts(lua, sig, "eqoa.events.Event", || Some(KEYS.iter().map(|k| k.to_string()).collect()))?;
+    super::record_raw::event_proxy(lua, &e.name, [e.time, e.tick as f64, e.frame as f64, e.generation as f64], e.seq as f64, data, guard)
 }
 fn deliver(lua: &mlua::Lua, e: &Event, only: Option<&Token>) -> Result<()> {
     deliver_data(lua, e, only, None)
@@ -533,6 +536,10 @@ fn deliver_data(
         .filter(|s| s.name == e.name && s.deadline.is_none() && only.is_none_or(|t| *t == s.token))
         .map(|s| s.token.clone())
         .collect::<Vec<_>>();
+    if candidates.is_empty() && e.name != "option.activated" {
+        // nothing here listens for it: it counted against the frame's delivery budget and that is all
+        return Ok(());
+    }
     let direct = e.name == "option.activated" || (e.name == "input.key" && e.data["down"] == true && e.data["synthetic"] != true && e.data["repeat"] != true)
         || (e.name == "pointer.pressed" && e.data["inside_window"] == true);
     let _player = super::exchange::player_scope(shared.borrow().vm, direct, e.player_command, e.player_action.clone());
@@ -560,13 +567,18 @@ fn deliver_data(
             callback
         };
         let timed = super::addon_perf::section("deliver.envelope");
-        let event = envelope(lua, e)?;
-        if let Some(data) = &data {
-            event.set("data", data.clone())?;
-        }
-        let timed_ro = super::addon_perf::section("env.readonly");
-        let envelope_ready = readonly_envelope(lua, event)?;
-        drop(timed_ro);
+        let envelope_ready = if data.is_none() && !matches!(e.name.as_str(), "timer" | "resource.ready" | "resource.failed") {
+            envelope_readonly(lua, e)?
+        } else {
+            let event = envelope(lua, e)?;
+            if let Some(data) = &data {
+                event.set("data", data.clone())?;
+            }
+            let timed_ro = super::addon_perf::section("env.readonly");
+            let ready = readonly_envelope(lua, event)?;
+            drop(timed_ro);
+            ready
+        };
         drop(timed);
         let _phase = super::native::phase(lua, &e.name);
         let _drawing =
@@ -731,7 +743,7 @@ pub(crate) fn resource(
     Ok(())
 }
 
-fn readonly_envelope(lua: &mlua::Lua, event: mlua::Table) -> Result<mlua::Table> {
+pub(super) fn readonly_envelope(lua: &mlua::Lua, event: mlua::Table) -> Result<mlua::Table> {
     let name: String = event.get("name")?;
     let data: mlua::Table = event.get("data")?;
     if matches!(

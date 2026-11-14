@@ -201,3 +201,71 @@ pub(super) fn envelope_table(lua: &Lua, name: &str, numbers: [f64; 4], seq: f64,
         })
     }
 }
+
+/// A read-only record whose fields come from `lazy` when read: the empty proxy over a backing table
+/// whose metatable's `__index` is `lazy` (called with the backing table and the key), made in one
+/// protected call. `lazy` is what a change event's data is made of: its fields are built the first
+/// time a handler reads them.
+pub(super) fn lazy_object(lua: &Lua, lazy: Function, readonly: &Function) -> mlua::Result<Table> {
+    // SAFETY: as in `build`: only Lua stack functions on `state`, the stack slots the arguments gave
+    // it (1 `lazy`, 2 the guard), no value with a destructor held across a call that can raise, and
+    // one result left.
+    unsafe {
+        lua.exec_raw((lazy, readonly.clone()), |state| {
+            // 3: the backing table, whose metatable reads through `lazy`
+            ffi::lua_createtable(state, 0, 0);
+            ffi::lua_createtable(state, 0, 1);
+            ffi::lua_pushvalue(state, 1);
+            ffi::lua_setfield(state, -2, c"__index".as_ptr());
+            ffi::lua_setmetatable(state, 3);
+            // 4: the proxy: reads go to the backing table, writes raise
+            ffi::lua_createtable(state, 0, 0);
+            ffi::lua_createtable(state, 0, 3);
+            ffi::lua_pushvalue(state, 3);
+            ffi::lua_setfield(state, -2, c"__index".as_ptr());
+            ffi::lua_pushvalue(state, 2);
+            ffi::lua_setfield(state, -2, c"__newindex".as_ptr());
+            ffi::lua_pushboolean(state, 0);
+            ffi::lua_setfield(state, -2, c"__metatable".as_ptr());
+            ffi::lua_setmetatable(state, 4);
+            ffi::lua_replace(state, 1);
+            ffi::lua_settop(state, 1);
+        })
+    }
+}
+
+/// An event as a handler gets it, read-only: `envelope_table`'s table behind `guard_lazy`'s proxy,
+/// the backing table reporting a missing field through `missing`, in one protected call where the
+/// two took about a dozen.
+pub(super) fn event_proxy(lua: &Lua, name: &str, numbers: [f64; 4], seq: f64, data: Value, guard: (Table, Function)) -> mlua::Result<Table> {
+    // SAFETY: as in `build`; stack: 1 the data, 2 the missing-field metatable, 3 the read-only guard.
+    unsafe {
+        lua.exec_raw((data, guard.0, guard.1), |state| {
+            // 4: the backing table
+            ffi::lua_createtable(state, 0, 7);
+            ffi::lua_pushlstring_(state, c"name".as_ptr(), 4);
+            ffi::lua_pushlstring_(state, name.as_ptr().cast(), name.len());
+            ffi::lua_rawset(state, -3);
+            for (key, value) in [(c"seq", seq), (c"time", numbers[0]), (c"tick", numbers[1]), (c"frame", numbers[2]), (c"generation", numbers[3])] {
+                ffi::lua_pushnumber(state, value);
+                ffi::lua_setfield(state, -2, key.as_ptr());
+            }
+            ffi::lua_pushvalue(state, 1);
+            ffi::lua_setfield(state, -2, c"data".as_ptr());
+            ffi::lua_pushvalue(state, 2);
+            ffi::lua_setmetatable(state, 4);
+            // 5: the proxy
+            ffi::lua_createtable(state, 0, 0);
+            ffi::lua_createtable(state, 0, 3);
+            ffi::lua_pushvalue(state, 4);
+            ffi::lua_setfield(state, -2, c"__index".as_ptr());
+            ffi::lua_pushvalue(state, 3);
+            ffi::lua_setfield(state, -2, c"__newindex".as_ptr());
+            ffi::lua_pushboolean(state, 0);
+            ffi::lua_setfield(state, -2, c"__metatable".as_ptr());
+            ffi::lua_setmetatable(state, 5);
+            ffi::lua_replace(state, 1);
+            ffi::lua_settop(state, 1);
+        })
+    }
+}
