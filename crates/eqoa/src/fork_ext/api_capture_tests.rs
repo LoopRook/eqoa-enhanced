@@ -2216,3 +2216,60 @@ fn round4_entity_dots_are_plain_columns_of_the_creatures_the_native_minimap_draw
     )
     .unwrap();
 }
+
+/// With no addon enabled the fork's per-frame hooks in the play phase stay lazy: nothing is captured,
+/// queued or built (the work counters stay at zero), whatever the scene. Under `R4P_PLAY_SAMPLES` (a
+/// small count by default; the timing batch raises it) each hook's mean cost is printed.
+#[test]
+fn round4_play_phase_hooks_do_nothing_when_no_addon_is_enabled() {
+    use crate::fork_ext::addons::native_core::{self, CORE};
+    let mut p = Play::bundled_ui_fixture();
+    let walker = Play::bundled_ui_walker();
+    native_core::manager_demand(false);
+    native_core::fixture_demand(false);
+    assert!(!native_core::capture_requested(), "no addon wants the capture");
+    let me = walker.cam.walk.phys.position;
+    for i in 0..200u32 {
+        let a = i as f32 * 2.4;
+        let at = [me.x.0 + a.cos() * 40.0, me.y.0, me.z.0 + a.sin() * 40.0];
+        p.entities.slots.push(Some(net::entity::Entity {
+            id: 9000 + i,
+            kind: net::entity::TYPE_CREATURE,
+            p19: 255,
+            pos: at,
+            actor_pos: at,
+            creature: Some(net::entity::Creature { name: format!("Busy {i}"), level: 5, ..Default::default() }),
+            ..Default::default()
+        }));
+    }
+    let lib = esf::Library::new();
+    let n: usize = std::env::var("R4P_PLAY_SAMPLES").ok().and_then(|v| v.parse().ok()).unwrap_or(20);
+    let time = |label: &str, f: &mut dyn FnMut()| {
+        f(); // the first call builds what later ones reuse (an atlas, a library)
+        let t = std::time::Instant::now();
+        for _ in 0..n {
+            f();
+        }
+        eprintln!("R4P play hook (addons off) {label}: {:.4} ms/frame", t.elapsed().as_secs_f64() * 1e3 / n as f64);
+    };
+    time("forge_snapshot", &mut || {
+        let s = p.forge_snapshot(Some(&walker));
+        assert!(s.capture_pending, "the inactive snapshot says capture is pending");
+    });
+    time("begin/end_game_event", &mut || {
+        let e = net::session::Event::State { channel: 1, data: vec![] };
+        let c = begin_game_event(&p, &e);
+        end_game_event(&p, c);
+    });
+    time("frame_library", &mut || frame_library(&p, &lib, Some(&walker)));
+    time("begin_iteration", &mut || begin_iteration(&mut p, true));
+    time("health_redraw", &mut || {
+        health_redraw(&mut p, true, false);
+    });
+    time("health_hidden", &mut || {
+        health_hidden(&p);
+    });
+    // nothing was built for the API: no entity records, no queued updates
+    let (entities, queued) = CORE.with(|c| (c.borrow().view.entities.len(), native_core::deferred_len()));
+    assert_eq!((entities, queued), (0, 0), "no capture ran");
+}

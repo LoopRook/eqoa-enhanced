@@ -649,6 +649,10 @@ pub(crate) fn flush_deferred() {
     });
     DEFERRED.with(|d| d.borrow_mut().flushing = false);
 }
+#[cfg(test)]
+pub(crate) fn deferred_len() -> usize {
+    DEFERRED.with(|d| d.borrow().queue.len())
+}
 pub(crate) fn discard_deferred() {
     let has_queue = DEFERRED.with(|d| !d.borrow().queue.is_empty());
     let stale = if has_queue {
