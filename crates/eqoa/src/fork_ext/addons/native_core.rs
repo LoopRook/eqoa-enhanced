@@ -207,7 +207,12 @@ impl Core {
 
     pub fn emit(&mut self, name: &str, data: Json) {
         let _timed = super::addon_perf::section("events.emit");
-        *self.stream_counts.entry(name.into()).or_default() += 1;
+        match self.stream_counts.get_mut(name) {
+            Some(n) => *n += 1,
+            None => {
+                self.stream_counts.insert(name.into(), 1);
+            }
+        }
         if name == "combat.hit" {
             self.combat_total += 1;
         }

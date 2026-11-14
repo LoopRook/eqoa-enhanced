@@ -469,7 +469,7 @@ pub(super) fn envelope(lua: &mlua::Lua, e: &Event) -> Result<mlua::Table> {
 /// are built when a handler first reads them: the first read builds the field as `record` makes it,
 /// keeps it in the data (so it is the same value every time), and a missing field is diagnosed as
 /// before. A creature moving 25 times a frame is delivered with two full records each; the journal
-/// reads one field of one.
+/// reads one field of one. The `before` and `after` records are the same, a field at a time.
 fn lazy_data(lua: &mlua::Lua, e: &Event, path: &str) -> Result<Option<Value>> {
     let Json::Object(fields) = &*e.data else {
         return Ok(None);
@@ -477,21 +477,46 @@ fn lazy_data(lua: &mlua::Lua, e: &Event, path: &str) -> Result<Option<Value>> {
     if !(fields.contains_key("before") && fields.contains_key("after")) {
         return Ok(None);
     }
+    Ok(lazy_fields(lua, path, &e.data, None)?.map(Value::Table))
+}
+
+/// The object `at` in `root` (or `root` itself) as a read-only record whose fields are built from the
+/// native value when first read. None when it is not a plain object (a `$ref`, an array: those are
+/// built whole by `record`).
+fn lazy_fields(lua: &mlua::Lua, path: &str, root: &std::sync::Arc<Json>, at: Option<&str>) -> Result<Option<Table>> {
+    let object = match at {
+        Some(key) => &root[key],
+        None => &**root,
+    };
+    let Json::Object(fields) = object else {
+        return Ok(None);
+    };
+    if fields.contains_key("$ref") {
+        return Ok(None);
+    }
     let sig = super::native::signature(path, true, fields.keys().map(String::as_str));
     let (missing, readonly) = super::native::guard_parts(lua, sig, path, || Some(fields.keys().cloned().collect()))?;
-    let (data, path, shape) = (e.data.clone(), path.to_owned(), missing);
+    let (root, path, at) = (root.clone(), path.to_owned(), at.map(str::to_owned));
     let lazy = lua.create_function(move |lua, (table, key): (Table, Value)| {
         if let Value::String(k) = &key {
             let k = k.to_str()?;
-            if let Some(value) = data.get(&*k).filter(|v| !v.is_null()) {
-                let built = record(lua, super::native::nested_type(&path, &k).unwrap_or(&path), value)?;
+            let object = match &at {
+                Some(at) => &root[at.as_str()],
+                None => &*root,
+            };
+            if let Some(value) = object.get(&*k).filter(|v| !v.is_null()) {
+                let nested = if at.is_none() && (&*k == "before" || &*k == "after") { lazy_fields(lua, &path, &root, Some(&k))? } else { None };
+                let built = match nested {
+                    Some(table) => Value::Table(table),
+                    None => record(lua, super::native::nested_type(&path, &k).unwrap_or(&path), value)?,
+                };
                 table.raw_set(&*k, built.clone())?;
                 return Ok(built);
             }
         }
-        shape.get::<Function>("__index")?.call::<Value>((table, key))
+        missing.get::<Function>("__index")?.call::<Value>((table, key))
     })?;
-    super::record_raw::lazy_object(lua, lazy, &readonly).map(|t| Some(Value::Table(t)))
+    super::record_raw::lazy_object(lua, lazy, &readonly).map(Some)
 }
 
 /// The event as a handler gets it: its envelope behind the read-only guard, the data as `lazy_data`
