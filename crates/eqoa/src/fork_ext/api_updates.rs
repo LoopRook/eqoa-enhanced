@@ -269,12 +269,22 @@ fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
         );
         drop(timed);
         let timed = crate::fork_ext::addons::addon_perf::section("patch.event json");
-        let data = json!({"ref":after_ref,"before":before,"after":after,"changed":changed});
+        // built by moving the two records in (`json!` would copy each a second time)
+        let mut data = serde_json::Map::new();
+        data.insert("ref".into(), after_ref.clone());
+        data.insert("before".into(), before.unwrap_or(Json::Null));
+        data.insert("after".into(), after);
+        data.insert("changed".into(), Json::Array(changed.into_iter().map(Json::String).collect()));
+        let data = Json::Object(data);
         drop(timed);
         c.emit(name, data);
     }
     let timed = crate::fork_ext::addons::addon_perf::section("patch.group");
-    let old_group = interested("group.changed").then(|| c.view.group.clone());
+    // the group only moves when the entity is one of its members: no copy of it otherwise
+    let member = c.view.group["members"]
+        .as_array()
+        .is_some_and(|m| m.iter().any(|m| m["id"].as_u64() == Some(entity.id as u64)));
+    let old_group = (member && interested("group.changed")).then(|| c.view.group.clone());
     if let Some(members) = c.view.group["members"].as_array_mut() {
         for member in members {
             if member["id"].as_u64() == Some(entity.id as u64) {

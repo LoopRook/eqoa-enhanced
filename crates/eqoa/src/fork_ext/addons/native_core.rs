@@ -212,7 +212,7 @@ impl Core {
             self.combat_total += 1;
         }
         self.seq += 1;
-        let bytes = serde_json::to_vec(&data).map_or(1024 * 1024 + 1, |v| v.len()) + 128;
+        let bytes = json_len(&data) + 128;
         while self.events.len() >= 2048 || self.event_bytes.saturating_add(bytes) > 4 * 1024 * 1024
         {
             let Some(old) = self.events.pop_front() else {
@@ -464,15 +464,51 @@ pub(crate) fn changed_fields(before: &Json, after: &Json) -> Vec<String> {
     if before.is_array() || after.is_array() {
         return vec!["records".into()];
     }
-    let mut keys: Vec<&String> = Vec::new();
-    for value in [before, after] {
-        if let Some(o) = value.as_object() {
-            keys.extend(o.keys());
+    // the keys whose value differs (a missing one reads as null), sorted
+    let empty = serde_json::Map::new();
+    let (b, a) = (before.as_object().unwrap_or(&empty), after.as_object().unwrap_or(&empty));
+    let mut keys: Vec<&String> = a.iter().filter(|(k, v)| b.get(*k).unwrap_or(&Json::Null) != *v).map(|(k, _)| k).collect();
+    keys.extend(b.iter().filter(|(k, v)| !a.contains_key(*k) && !v.is_null()).map(|(k, _)| k));
+    keys.sort_unstable();
+    keys.into_iter().cloned().collect()
+}
+
+/// The length `serde_json` writes for `value`, worked out without writing it (every event's size is
+/// counted for the queue limits, and an entity event is two whole records).
+pub(crate) fn json_len(value: &Json) -> usize {
+    use std::fmt::Write;
+    struct Count(usize);
+    impl Write for Count {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            self.0 += s.len();
+            Ok(())
         }
     }
-    keys.sort_unstable();
-    keys.dedup();
-    keys.into_iter().filter(|k| before[*k] != after[*k]).cloned().collect()
+    fn string(s: &str) -> usize {
+        2 + s
+            .bytes()
+            .map(|b| match b {
+                b'"' | b'\\' | 0x08 | 0x09 | 0x0a | 0x0c | 0x0d => 2,
+                0..=0x1f => 6,
+                _ => 1,
+            })
+            .sum::<usize>()
+    }
+    match value {
+        Json::Null => 4,
+        Json::Bool(true) => 4,
+        Json::Bool(false) => 5,
+        Json::Number(n) => {
+            let mut c = Count(0);
+            let _ = write!(c, "{n}");
+            c.0
+        }
+        Json::String(s) => string(s),
+        Json::Array(items) => 2 + items.len().saturating_sub(1) + items.iter().map(json_len).sum::<usize>(),
+        Json::Object(fields) => {
+            2 + fields.len().saturating_sub(1) + fields.iter().map(|(k, v)| string(k) + 1 + json_len(v)).sum::<usize>()
+        }
+    }
 }
 
 pub(crate) fn observe_text(text: &str, color: [f32; 4]) {

@@ -69,6 +69,8 @@ pub(crate) mod native_settings;
 mod native_state;
 #[cfg(test)]
 mod native_tests;
+#[cfg(test)]
+mod perf_delta_tests;
 pub(crate) mod options;
 pub(crate) mod package;
 pub(crate) mod player;
