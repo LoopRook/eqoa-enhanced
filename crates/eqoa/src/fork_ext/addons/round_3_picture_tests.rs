@@ -66,7 +66,7 @@ fn layer_with_device() -> Option<(
     Some((ui_native, ui_mod, device, queue))
 }
 
-fn test_assets(
+pub(super) fn test_assets(
     ui: &mut render::ui::Ui,
     device: &render::wgpu::Device,
     queue: &render::wgpu::Queue,
@@ -198,7 +198,7 @@ fn render_ui_to_pixels(
     buffer.slice(..).get_mapped_range().unwrap().to_vec()
 }
 
-fn test_vui() -> crate::ui::Vui {
+pub(super) fn test_vui() -> crate::ui::Vui {
     let mut atlas = vec![vi::ui::UiTexEntry::default(); 256];
     atlas[7].uv1 = [136, 6];
     atlas[7].x00 = 7;

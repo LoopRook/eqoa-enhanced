@@ -58,15 +58,21 @@ local function near(name, level, x, z)
     end end
     return false
 end
-local function record(e)
+-- The player is read at most once a frame: an event per moving creature each asked for it.
+local player, player_at
+local function the_player(frame)
+    if frame == nil or frame ~= player_at then player = eqoa.player.get(); player_at = frame end
+    return player
+end
+local function record(e, frame)
     if not ready or protected or not e or not e.id or e.id == 0 or known[e.id] then return end
-    local p = eqoa.player.get()
-    if p and (e.id == p.id or e.id == p.pet_id) then return end
     if not e.is_creature or e.corpse or not e.class_code or e.class_code >= 2 or e.search_flags ~= 0 then return end
     local name = trim_name(e.name or "")
     local pos = e.actor_position or e.position
     if name == "" or not pos or not finite(pos.x) or not finite(pos.y) or not finite(pos.z) then return end
     if near(name, e.level, pos.x, pos.z) then return end
+    local p = the_player(frame)
+    if p and (e.id == p.id or e.id == p.pet_id) then return end
     if put(name, tostring(e.id), {world=e.world_id or 0, level=e.level, pos={pos.x,pos.y,pos.z}}) then changed() end
 end
 local function save(force)
@@ -172,7 +178,7 @@ eqoa.events.on("resource.failed", function(e)
     elseif d.kind == "export" then notify("Export: " .. (d.error and d.error.message or "failed")) end
 end)
 for _, name in ipairs({"entity.added","entity.changed"}) do
-    eqoa.events.on(name, function(e) record(e.data.after) end)
+    eqoa.events.on(name, function(e) record(e.data.after, e.frame) end)
 end
 for _, name in ipairs({"state.reset","events.dropped"}) do eqoa.events.on(name,function() scan = true end) end
 eqoa.events.on("render", function(e)

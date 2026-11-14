@@ -377,6 +377,7 @@ pub(crate) fn cache(key: FrameKey, snapshot: crate::fork_ext::addons::host::Snap
     SNAPSHOT.with(|s| *s.borrow_mut() = Some((key, revision(), snapshot)));
 }
 pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
+    let _timed = crate::fork_ext::addons::addon_perf::section("api.refresh");
     thread_local! {static EPOCH:Cell<u64>=const{Cell::new(u64::MAX)};}
     thread_local! {static MAP_KEY:Cell<Option<u64>>=const{Cell::new(None)};}
     let epoch_changed =
@@ -413,20 +414,25 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     // `eqoa.entities.dots()` reads the view directly rather than a snapshot, and a hover frame
     // often reuses the cached snapshot (creatures move while the player and camera stand still),
     // so this frame's dots are refreshed on every pass.
+    let timed_dots = crate::fork_ext::addons::addon_perf::section("api.refresh.dots");
     let dots = minimap_dots(play);
+    drop(timed_dots);
     CORE.with(|c| {
         let mut c = c.borrow_mut();
         if c.view.dots != dots {
             c.view.dots = dots;
         }
     });
+    let timed_key = crate::fork_ext::addons::addon_perf::section("api.refresh.key");
     let now = key(play, walker);
+    drop(timed_key);
     let previous = KEY.with(|k| k.replace(Some(now)));
     if previous != Some(now) {
         if previous.is_none_or(|k| k.0[7..18] != now.0[7..18] || k.0[31] != now.0[31]) {
             let bars = hotbars(play);
             CORE.with(|c| patch_hotbars(&mut c.borrow_mut(), bars));
         }
+        let _timed_player = crate::fork_ext::addons::addon_perf::section("api.refresh.player");
         let player = PlayerData::read(play);
         CORE.with(|c| {
             let mut c = c.borrow_mut();

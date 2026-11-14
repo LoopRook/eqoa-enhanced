@@ -17,6 +17,16 @@ struct Rm {
     target: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// between worlds: the frame carries no game, as a zoning player's do
     zoning: bool,
+    /// the native HUD layer's pass (the mods' `eqoa.hud.*` commands drawn to the target), when asked for
+    hud: Option<RmHud>,
+}
+/// What the viewer's HUD pass has that the harness did not: the HUD layer drawn through a `Ui` to the GPU.
+struct RmHud {
+    ui: render::ui::Ui,
+    assets: crate::ui::UiAssets,
+    /// the disc's atlas and strings, when the disc is there
+    real: Option<std::rc::Rc<crate::map::extension::RealUi>>,
+    stand_in: crate::ui::Vui,
 }
 const RM_SIZE: (u32, u32) = (1024, 768);
 const RM_GREEN: [f32; 4] = [0.1, 0.6, 0.2, 1.0];
@@ -61,7 +71,19 @@ impl Rm {
         }
         let manager = gpu.manager(&root.0, Some(config.0.clone()));
         let scene = crate::map::Map::round4_fixture(&gpu.device, &gpu.queue, win, true);
-        Some(Rm { gpu, _root: root, _config: config, manager, play, walker, me, scene, draws: 0, win, scale, stand_in: RM_GREEN, target: None, zoning: false })
+        Some(Rm { gpu, _root: root, _config: config, manager, play, walker, me, scene, draws: 0, win, scale, stand_in: RM_GREEN, target: None, zoning: false, hud: None })
+    }
+    /// Adds the viewer's HUD pass to every frame: the HUD layer drawn through a `Ui` to the GPU (the disc's
+    /// atlas and strings when `$EQOA_ISO` is set; the surfaces and the font are stand-ins).
+    fn with_hud(mut self) -> Rm {
+        let mut ui = render::ui::Ui::new(&self.gpu.device, render::TARGET_FORMAT, render::DEPTH_FORMAT);
+        let assets = super::super::round_3_picture_tests::test_assets(&mut ui, &self.gpu.device, &self.gpu.queue);
+        self.hud = Some(RmHud { ui, assets, real: crate::map::extension::real_ui(), stand_in: super::super::round_3_picture_tests::test_vui() });
+        self
+    }
+    /// How many dots the native minimap is drawing.
+    fn state_len_dots(&self) -> usize {
+        self.mini_view().dots.len()
     }
     /// What the native minimap shows of the entities: a dot per creature but corpses and the inactive.
     fn mini_view(&self) -> crate::map::mini::MiniView {
@@ -84,8 +106,11 @@ impl Rm {
     /// One whole frame: the addons' callbacks, the native minimap draw routed as the viewer
     /// routes it, then the shared ImGui pass over it.
     fn frame(&mut self) -> wgpu::Texture {
+        let phase = super::super::addon_perf::section("frame.snapshot");
         let mut snapshot = if self.zoning { Snapshot::default() } else { self.play.forge_snapshot(Some(&self.walker)) };
         snapshot.capture_pending = false;
+        drop(phase);
+        let phase = super::super::addon_perf::section("frame.native minimap");
         let at = self.walker.cam.walk.phys.position;
         let at = [at.x.0, at.y.0, at.z.0];
         if self.play.map.mini.up {
@@ -94,6 +119,7 @@ impl Rm {
         } else {
             self.scene.mini_off();
         }
+        drop(phase);
         self.manager.flush_pending_fonts(&mut self.gpu.context);
         {
             let io = self.gpu.context.io_mut();
@@ -103,7 +129,10 @@ impl Rm {
         }
         self.gpu.context.frame();
         super::super::native_core::presentation();
+        let phase = super::super::addon_perf::section("frame.manager");
         self.manager.frame(snapshot);
+        drop(phase);
+        let phase = super::super::addon_perf::section("frame.gpu encode");
         let size = self.target_size();
         let win = self.win;
         let gpu = &mut self.gpu;
@@ -147,6 +176,35 @@ impl Rm {
         let before = super::super::map_views::draw_calls();
         crate::fork_ext::map::draw_minimap(&self.scene, &gpu.device, &mut encoder, &view, depth, win, size, wgpu::TextureFormat::Rgba8Unorm);
         self.draws += super::super::map_views::draw_calls() - before;
+        drop(phase);
+        let phase = super::super::addon_perf::section("frame.hud pass");
+        if let Some(h) = &mut self.hud {
+            // the viewer's HUD pass: the layer's commands drawn through a `Ui`, to the GPU
+            h.ui.begin(win);
+            let vui = h.real.as_ref().map_or(&h.stand_in, |r| &r.vui);
+            super::super::hud_layer::draw(vui, &mut h.assets.raster(&mut h.ui));
+            h.ui.end();
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("hud layer"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            h.ui.draw(&gpu.device, &mut pass, size);
+        }
+        drop(phase);
+        let phase = super::super::addon_perf::section("frame.imgui render");
         {
             let mut renderer = gpu.renderer.borrow_mut();
             let frame = gpu.context.render(renderer.renderer_consumer().unwrap());
@@ -165,8 +223,13 @@ impl Rm {
             });
             renderer.render(frame, &mut pass, FramebufferExtent::new(size.0, size.1)).unwrap();
         }
+        drop(phase);
+        let phase = super::super::addon_perf::section("frame.submit");
         gpu.queue.submit([encoder.finish()]);
+        drop(phase);
+        let phase = super::super::addon_perf::section("frame.after_render");
         self.manager.after_render();
+        drop(phase);
         self.target.as_ref().unwrap().0.clone()
     }
     fn frames(&mut self, n: usize) -> wgpu::Texture {

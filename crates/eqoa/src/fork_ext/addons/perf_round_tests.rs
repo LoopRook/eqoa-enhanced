@@ -9,9 +9,13 @@ impl Rm {
         fs::write(path, serde_json::to_vec(journal).unwrap()).unwrap();
     }
     /// The 200-odd creatures walk: every one moves a little each frame, and the session tells the API
-    /// of a quarter of them each frame, as the server's updates do (`entity.changed`).
+    /// of an eighth of them each frame (`R4P_CHURN`), as the server's updates do (`entity.changed`).
     fn walk_creatures(&mut self, tick: usize) {
+        // the player runs: the position moves every frame, so the snapshot cannot be reused
+        self.walker.cam.walk.phys.position.x.0 += 0.15;
         let me = self.me;
+        // a creature's update reaches the API every `churn`th frame: 8 is about four a second at 30 frames a second
+        let churn: usize = std::env::var("R4P_CHURN").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
         for i in 3..self.play.entities.slots.len() {
             let Some(e) = self.play.entities.slots[i].as_mut() else { continue };
             let a = i as f32 * 2.399_963 + tick as f32 * 0.01;
@@ -19,7 +23,7 @@ impl Rm {
             let at = [me[0] + a.cos() * d, me[1], me[2] + a.sin() * d];
             e.pos = at;
             e.actor_pos = at;
-            if (tick + i) % 4 == 0 {
+            if (tick + i) % churn == 0 {
                 self.play.entity_slot_changed(i);
             }
         }
@@ -203,4 +207,64 @@ fn round4_record_build_micro() {
     }
     eprintln!("R4P   one create_table: {:.2} us", t.elapsed().as_secs_f64() * 1e6 / n as f64);
     rm.manager.shutdown();
+}
+
+/// The seven mods' costs in a scene shaped like the real game: 200 creatures walking with the session's
+/// updates reaching the API, the stock minimap's art, the native HUD layer drawn through a `Ui` to the
+/// GPU, the ImGui pass, to the GPU's completion. Printed per mod (`addons:`, `core:`, `addon-api:`).
+#[test]
+fn round4_seven_mods_in_a_real_shaped_scene() {
+    use super::super::{addon_perf, hud_layer};
+    let real = crate::map::extension::use_real_ui(true);
+    eprintln!("R4P art: {}", if real { "the disc's atlas and strings (surfaces and font are stand-ins)" } else { "stand-ins (no disc)" });
+    const SEVEN: [&str; 7] = ["eqoa_stats_box", "eqoa_target_of_target", "eqoa_mana_bars", "eqoa_hud_numbers", "eqoa_creature_journal", "eqoa_map_search", "eqoa_round_minimap"];
+    let samples: usize = std::env::var("R4C_SAMPLES").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
+    let mut rows: Vec<(String, Vec<&str>)> = vec![("no mods".into(), vec![])];
+    for m in SEVEN {
+        rows.push((m.into(), vec![m]));
+    }
+    rows.push(("all seven".into(), SEVEN.to_vec()));
+    let mut means = Vec::new();
+    for (label, mods) in rows {
+        addon_perf::force_for_test(false);
+        let Some(rm) = Rm::with(|p| mods.contains(&p) || (p == "eqoa_creature_journal" && mods.contains(&"eqoa_map_search")), 200) else {
+            crate::map::extension::use_real_ui(false);
+            return;
+        };
+        let mut rm = rm.with_hud();
+        let world = rm.play.player.world as i64;
+        if mods.contains(&"eqoa_creature_journal") || mods.contains(&"eqoa_map_search") {
+            rm.write_journal(&perf_journal(world, rm.me, 420));
+        }
+        rm.frames(6);
+        if mods.contains(&"eqoa_stats_box") {
+            lua(&rm.manager, "eqoa_stats_box").load("eqoa.options.set('stats_box', true)").exec().unwrap();
+        }
+        if mods.contains(&"eqoa_target_of_target") {
+            lua(&rm.manager, "eqoa_target_of_target").load("eqoa.options.set('target_of_target', true)").exec().unwrap();
+        }
+        if mods.contains(&"eqoa_map_search") {
+            perf_wait_for_loads(&mut rm);
+        }
+        rm.frames(30);
+        assert!(rm.manager.entries.iter().all(|e| e.status == Status::Enabled), "{label}: {:?}", rm.manager.diagnostics());
+        assert!(rm.state_len_dots() >= 200, "200 dots for the native minimap");
+        addon_perf::force_for_test(true);
+        let before: Vec<usize> = mods.iter().map(|m| hud_layer::drawn_commands(m)).collect();
+        let (mean, p95, cpu) = rm.timed_frames(samples);
+        let drawn: Vec<(String, usize)> = mods.iter().zip(&before).map(|(m, b)| (m.to_string(), hud_layer::drawn_commands(m) - b)).collect();
+        let hud: String = drawn.iter().filter(|(_, n)| *n > 0).map(|(m, n)| format!("{m} {:.1}", *n as f64 / samples as f64)).collect::<Vec<_>>().join(", ");
+        eprintln!("R4P [{label}] frames={samples} mean={mean:.3} ms (CPU {cpu:.3}) p95={p95:.3}; HUD commands/frame: {hud}");
+        for line in addon_perf::take_report() {
+            eprintln!("R4P     {line}");
+        }
+        addon_perf::force_for_test(false);
+        means.push((label, mean));
+        rm.manager.shutdown();
+    }
+    let base = means[0].1;
+    for (label, mean) in &means {
+        eprintln!("R4P over no mods: {label}: {:+.3} ms", mean - base);
+    }
+    crate::map::extension::use_real_ui(false);
 }

@@ -287,8 +287,10 @@ impl Play {
             };
         }
         api_capture::updates::refresh(self, walker);
+        let timed_build = crate::fork_ext::addons::addon_perf::section("snapshot.build");
         let key = api_capture::updates::key(self, walker);
         if let Some(mut snapshot) = api_capture::updates::cached(key) {
+            drop(timed_build);
             snapshot.input = crate::fork_ext::addons::input::live_snapshot();
             return snapshot;
         }

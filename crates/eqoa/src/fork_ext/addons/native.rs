@@ -38,6 +38,9 @@ pub(crate) struct Session {
     /// Last record built per call site: records are read-only, so an unchanged
     /// native value is handed back as the same table instead of being rebuilt.
     record_cache: std::collections::HashMap<String, (Json, Table)>,
+    /// Last element records of each list call site, by element id (or position without one): a list
+    /// that changed in a few elements rebuilds only those.
+    list_cache: std::collections::HashMap<String, std::collections::HashMap<u64, (Json, Value)>>,
 }
 
 impl Session {
@@ -56,6 +59,7 @@ impl Session {
             guard_missing: std::collections::HashMap::new(),
             guard_readonly: None,
             record_cache: std::collections::HashMap::new(),
+            list_cache: std::collections::HashMap::new(),
         };
         // Normative function index (§2). Registration does not imply implementation.
         for (module, names, round) in [
@@ -438,14 +442,16 @@ fn signature<'a>(path: &str, has_keys: bool, keys: impl Iterator<Item = &'a str>
 /// `record`, reusing the previous result of `slot` while the native value is unchanged.
 ///
 /// Lists (the entity and ability records, map markers) are the expensive case: one full
-/// record per element with its guarded tables. They are cached too, so a caller that reads
-/// the list every frame (a minimap hover, a search) pays only the comparison while the
-/// native data is the same. A list is handed out as a fresh table each call, as before, so
-/// a caller may insert, remove or reorder its own copy; its elements are the shared
-/// read-only records.
+/// record per element with its guarded tables. They are cached per element (`record_list_cached`),
+/// so a caller that reads the list every frame (a minimap hover, a search) pays only the
+/// comparison for the elements that did not change. A list is handed out as a fresh table each
+/// call, as before, so a caller may insert, remove or reorder its own copy; its elements are the
+/// shared read-only records.
 pub(crate) fn record_cached(lua: &Lua, slot: &str, path: &str, value: &Json) -> Result<Value> {
-    let list = matches!(value, Json::Array(_));
-    if !list && !matches!(value, Json::Object(_)) {
+    if let Json::Array(items) = value {
+        return record_list_cached(lua, slot, path, items);
+    }
+    if !matches!(value, Json::Object(_)) {
         return record(lua, path, value);
     }
     let session_rc = session(lua);
@@ -454,7 +460,7 @@ pub(crate) fn record_cached(lua: &Lua, slot: &str, path: &str, value: &Json) -> 
         if let Some((json, table)) = s.record_cache.get(slot) {
             if json == value {
                 drop(compared);
-                return copy_list(lua, list, table);
+                return Ok(Value::Table(table.clone()));
             }
         }
     }
@@ -468,20 +474,40 @@ pub(crate) fn record_cached(lua: &Lua, slot: &str, path: &str, value: &Json) -> 
         s.record_cache
             .insert(slot.to_string(), (value.clone(), table.clone()));
     }
-    copy_list(lua, list, table)
+    Ok(Value::Table(table.clone()))
 }
 
-/// A cached list's fresh top-level table (its records are shared and read-only); an object
-/// record is handed out as it is.
-fn copy_list(lua: &Lua, list: bool, table: &Table) -> Result<Value> {
-    if !list {
-        return Ok(Value::Table(table.clone()));
+/// The key a list element is remembered by: its `id` when it has a whole-number one, else its position.
+fn element_key(item: &Json, index: usize) -> u64 {
+    item.get("id").and_then(Json::as_u64).unwrap_or((1 << 63) | index as u64)
+}
+
+/// `record_cached` for a list: a fresh top-level table of element records, an element unchanged since
+/// the last call keeping the record it had (read-only and shared, as a whole cached list's were), the
+/// changed and new ones built. A list in which a few creatures moved rebuilds a few records, not all.
+fn record_list_cached(lua: &Lua, slot: &str, path: &str, items: &[Json]) -> Result<Value> {
+    let _timed = super::addon_perf::section("record.list");
+    let session_rc = session(lua);
+    let mut previous = session_rc
+        .try_borrow_mut()
+        .ok()
+        .and_then(|mut s| s.list_cache.remove(slot))
+        .unwrap_or_default();
+    let table = lua.create_table_with_capacity(items.len(), 0)?;
+    let mut kept = std::collections::HashMap::with_capacity(items.len());
+    for (i, item) in items.iter().enumerate() {
+        let key = element_key(item, i);
+        let (json, record) = match previous.remove(&key) {
+            Some((json, record)) if json == *item => (json, record),
+            _ => (item.clone(), record(lua, path, item)?),
+        };
+        table.raw_set(i + 1, record.clone())?;
+        kept.insert(key, (json, record));
     }
-    let copy = lua.create_table_with_capacity(table.raw_len(), 0)?;
-    for i in 1..=table.raw_len() {
-        copy.raw_set(i, table.raw_get::<Value>(i)?)?;
+    if let Ok(mut s) = session_rc.try_borrow_mut() {
+        s.list_cache.insert(slot.to_string(), kept);
     }
-    Ok(Value::Table(copy))
+    Ok(Value::Table(table))
 }
 
 pub(crate) fn guard(
