@@ -353,10 +353,13 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
     Ok(())
 }
 pub(crate) fn dispatch(host: &Host) -> Result<()> {
+    let polls = super::addon_perf::section("dispatch.polls");
     super::async_json::poll(&host.lua)?;
     super::json_save::poll(&host.lua)?;
     super::player_files::poll(&host.lua)?;
     super::native_core::flush_deferred();
+    drop(polls);
+    let _drain = super::addon_perf::section("dispatch.drain");
     let lua = &host.lua;
     let shared = bus(lua);
     if !host.iteration_in_progress() {

@@ -145,3 +145,26 @@ fn delivered_events_read_as_the_eager_build_reads_for_every_shape() {
     }
     assert!(checked > 150, "{checked} places read");
 }
+
+/// An event no handler of the VM listens for is skipped cheaply, but still counts against the frame's
+/// delivery budget (256 a frame): a handler's event waiting behind 256 others is delivered next frame,
+/// as before. (Control, run by hand: counting after the skip instead of before it makes this fail.)
+#[test]
+fn an_event_nobody_listens_for_still_spends_the_delivery_budget() {
+    CORE.with(|c| *c.borrow_mut() = Core::default());
+    let h = Host::new().unwrap();
+    h.execute("heard = 0; eqoa.events.on('world.entered', function() heard = heard + 1 end)").unwrap();
+    let _ = h.drain_logs();
+    let heard = || h.lua.globals().get::<i64>("heard").unwrap();
+    h.begin_iteration();
+    for _ in 0..256 {
+        CORE.with(|c| c.borrow_mut().emit("state.reset", json!({"in_world": false, "initial": false})));
+    }
+    CORE.with(|c| c.borrow_mut().emit("world.entered", json!({"world_id": 1, "initial": false})));
+    native_events::dispatch(&h).unwrap();
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(heard(), 0, "the budget went on the 256 before it");
+    h.end_iteration();
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(heard(), 1, "and it is delivered in the next frame");
+}

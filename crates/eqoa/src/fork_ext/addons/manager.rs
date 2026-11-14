@@ -219,6 +219,7 @@ impl Manager {
             return;
         }
         self.frame_number = self.frame_number.saturating_add(1);
+        let _prologue = super::addon_perf::section("mgr.prologue");
         if !snapshot.in_game && self.snapshot.in_game {
             super::native_core::CORE
                 .with(|c| c.borrow_mut().publish(super::native_core::View::default()));
@@ -265,6 +266,7 @@ impl Manager {
                         && (bootstrap_due || staged_next)
                 }),
         );
+        drop(_prologue);
         let mut entries = std::mem::take(&mut self.entries);
         let mut count = entries.iter().filter(|e| e.instance.is_some()).count();
         for entry in &mut entries {
@@ -333,6 +335,7 @@ impl Manager {
                 self.collect_native_settings(entry);
             }
             if let Some(i) = entry.instance.as_ref() {
+                let _drains = super::addon_perf::section("mgr.drains");
                 for message in i.bridge.drain_diagnostics() {
                     self.diagnostic(Some(&entry.metadata.id), "imgui", message);
                 }
