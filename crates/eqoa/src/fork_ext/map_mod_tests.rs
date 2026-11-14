@@ -61,7 +61,7 @@ fn step(host: &Host, time: f64) {
             tick: c.tick,
             frame: c.frame,
             generation: c.generation,
-            data: serde_json::json!({"dt":1.0/60.0}),
+            data: std::sync::Arc::new(serde_json::json!({"dt":1.0/60.0})),
             bytes: 128,
             player_command: false,
             player_action: None,

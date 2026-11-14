@@ -431,7 +431,7 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
         let mut e = local("timer", json!({}));
         let table = lua.create_table()?;
         table.set("token", lua.create_userdata(t.clone())?)?;
-        e.data = json!({});
+        e.data = std::sync::Arc::new(json!({}));
         deliver_timer(lua, &e, &t, table)?;
     }
     Ok(())
@@ -444,7 +444,7 @@ fn local(name: &str, data: serde_json::Value) -> Event {
             player_command: false,
             player_action: None,
             name: name.into(),
-            data,
+            data: std::sync::Arc::new(data),
             bytes: 0,
             seq: c.seq,
             time: super::native_core::time_unborrowed(&c),

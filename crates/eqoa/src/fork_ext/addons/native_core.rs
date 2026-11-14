@@ -60,7 +60,8 @@ pub(crate) struct Event {
     pub tick: u64,
     pub frame: u64,
     pub generation: u64,
-    pub data: Json,
+    /// shared by every VM the event is published to (a copy of it is a count, not a tree)
+    pub data: std::sync::Arc<Json>,
     pub bytes: usize,
 }
 
@@ -235,7 +236,7 @@ impl Core {
             tick: self.tick,
             frame: self.frame,
             generation: self.generation,
-            data,
+            data: std::sync::Arc::new(data),
             bytes,
         };
         if event.name.starts_with("cooldown.") {
