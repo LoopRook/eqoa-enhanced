@@ -783,3 +783,27 @@ fn round5_a_kept_corpse_and_a_shop_behind_another_window_are_closed() {
     )
     .unwrap();
 }
+
+#[test]
+fn round5_a_frame_sees_a_window_closed_and_tunar_changed_with_no_event_of_their_own() {
+    let (mut p, h) = world();
+    // from here the live path: one full publish was made, the frames after it are incremental
+    native_core::fixture_demand(false);
+    apply(&mut p, opcode(0x124D, vec![]));
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(#log == 1 and log[1].cause == 'open'); log = {}").unwrap();
+    // the bank window is closed by its own key (no packet), and a sale's tunar lands without a packet here
+    p.mode = 0;
+    p.forge_snapshot(None);
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(#log == 1, #log); assert(log[1].name == 'bank.changed' and log[1].cause == 'close' and log[1].changed == 'open'); assert(eqoa.bank.get().open == false); log = {}").unwrap();
+    p.dump.player.p34 = 4321;
+    p.forge_snapshot(None);
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(#log == 1 and log[1].name == 'inventory.changed' and log[1].cause == 'frame' and log[1].changed == 'money'); assert(eqoa.inventory.get().money == 4321)").unwrap();
+    // a frame in which nothing moved says nothing
+    p.forge_snapshot(None);
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(#log == 1)").unwrap();
+    native_core::fixture_demand(true);
+}
