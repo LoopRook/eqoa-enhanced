@@ -5417,7 +5417,7 @@ impl Play {
         // the buff window (`buffwnd`, petition 1809): a left click on a buff
         // selects it or lets it go, a right click takes it off (a left click
         // off it lets go and is still the world's)
-        if matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && self.buff_point(f, matches!(c, Click::Right(..)), finger) {
+        if matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && crate::hud::fork_hud::active_effects_visible() && self.buff_point(f, matches!(c, Click::Right(..)), finger) {
             return true;
         }
         // the item links' windows (`itemlink`): a click on one is theirs, on
@@ -5447,7 +5447,7 @@ impl Play {
             if matches!(c, Click::Right(..)) {
                 let chat = moved(crate::hudlayout::Piece::Chat);
                 let bars_at = if self.hud_menus.stacked { [f[0] - side - chat[0], f[1] - up - chat[1]] } else { [f[0] - side - menus[0], f[1] + up - menus[1]] };
-                return self.auto_point(bars_at);
+                return crate::hud::fork_hud::hud_menu_visible(&self.hud_menus) && self.auto_point(bars_at);
             }
             // the compass opens the map, with the Map on (the touch screen's
             // way to it)

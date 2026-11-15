@@ -280,3 +280,10 @@ mod-owned zoom the capture honours. Not built; propose it before building.
 
 Wereoxxs: not maintained for now (owner 2026-11-15). Separately, the owner noticed our map in 0.5.3 (live)
 zooms in a bit further than round 4's, which keeps upstream's zoom limits; see the zoom item above. Later.
+
+## One home for the fork's options (owner, 2026-11-15)
+
+- **Status:** Backlog; fold into round 8's option-rows seam.
+- **Now:** since sync 2026-11-15 upstream's Options > Extended is five groups (Graphics, UI, Other, Touch Controls, Multi-boxing). The fork's Enhanced page (HUD toggles, Mods & Addons) sits in the UI group because a top-level entry would mean rewriting upstream's fixed `GROUPS` table.
+- **Owner's preference:** everything from the fork in one place.
+- **Plan:** the round 8 seam "option rows declared in one table; ids 1000+ reserved for other builds" also lets another build add its own group. Once upstream has it, Enhanced becomes its own top-level entry with no upstream line changed.

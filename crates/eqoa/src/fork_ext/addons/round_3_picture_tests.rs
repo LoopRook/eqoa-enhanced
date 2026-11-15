@@ -289,11 +289,9 @@ fn assert_pixels_match(name: &str, size: (u32, u32), native: &[u8], modded: &[u8
             ([28., 323., 140., 10.], "left", "bottom"),
             ([28., 333., 140., 10.], "left", "bottom"),
         ],
-        "mana_bars" => &[
-            ([28., 126., 140., 10.], "left", "top"),
-            ([28., 174., 140., 10.], "left", "top"),
-            ([28., 406., 140., 10.], "left", "bottom"),
-        ],
+        // the target's bar; the group's are upstream's own since sync 2026-11-15
+        // (`MANA_GROUP_BANDS`, cleared from the capture)
+        "mana_bars" => &[([28., 406., 140., 10.], "left", "bottom")],
         "hud_numbers" => &[
             ([0., 33., 200., 12.], "left", "top"),
             ([0., 43., 200., 12.], "left", "top"),
@@ -546,6 +544,25 @@ fn target_plate_fade_and_name_clipping_match_native_drawing() {
     }
 }
 
+/// The capture's two group power gauges (the native Mana Bars of round 3). Since sync 2026-11-15
+/// upstream draws the group's power bars itself and the mod no longer does: they are cleared from
+/// the reference, so the blank-background check proves the mod draws nothing there.
+const MANA_GROUP_BANDS: [([f32; 4], &str, &str); 2] =
+    [([28., 126., 140., 10.], "left", "top"), ([28., 174., 140., 10.], "left", "top")];
+
+fn without_group_mana(mut pixels: Vec<u8>, size: (u32, u32)) -> Vec<u8> {
+    for (r, anchor, vertical) in MANA_GROUP_BANDS {
+        let r = hud_layout::transform_rect(r, anchor, vertical, hud_layout::frame_metrics(size));
+        for y in (r[1].floor().max(0.) as u32)..((r[1] + r[3]).ceil().min(size.1 as f32) as u32) {
+            for x in (r[0].floor().max(0.) as u32)..((r[0] + r[2]).ceil().min(size.0 as f32) as u32) {
+                let i = (y * size.0 + x) as usize;
+                pixels[4 * i..4 * i + 4].fill(0);
+            }
+        }
+    }
+    pixels
+}
+
 #[test]
 fn bundled_mana_bars_picture_comparison() {
     let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
@@ -585,7 +602,7 @@ fn bundled_mana_bars_picture_comparison() {
     host.execute("eqoa.options.set('mana_bars', true)").unwrap();
 
     for size in [(640, 480), (1280, 720)] {
-        let native_pixels = reference("mana_bars", size);
+        let native_pixels = without_group_mana(reference("mana_bars", size), size);
 
         ui_mod.begin(size);
         hud_layer::clear_all();
@@ -1309,7 +1326,8 @@ fn round3_capabilities_and_stats_records_match_public_contract() {
     );
 }
 #[test]
-fn group_mana_does_not_draw_over_raid_or_claimed_stock_panel() {
+fn mana_mod_leaves_group_power_to_upstream_and_keeps_the_target_bar() {
+    // since sync 2026-11-15 upstream draws the group's and the pet's power bars (Power Bars)
     let tree = bundled_tree();
     options::reset_in_memory();
     let host = load_hud_mod(&tree, "eqoa_mana_bars");
@@ -1326,23 +1344,14 @@ fn group_mana_does_not_draw_over_raid_or_claimed_stock_panel() {
         queued("eqoa_mana_bars")
     };
     hud_layout::set_hud_state(true, true, false, 93, 20);
-    assert_eq!(render().len(), 1, "plain group control");
-    hud_layout::set_hud_state(true, true, true, 340, 20);
-    assert!(render().is_empty(), "raid already has native mana gauges");
-    hud_layout::set_hud_state(true, true, false, 93, 20);
-    let mut claims = visibility::HudClaimsRegistry::new();
-    claims.disable(
-        "group_member_panel",
-        health::InstanceToken::next().unwrap(),
-        "replacement UI",
-    );
-    visibility::publish_claims(&claims);
-    assert!(
-        render().is_empty(),
-        "a replacement UI hides the attached mana gauge"
-    );
-    visibility::publish_claims(&visibility::HudClaimsRegistry::new());
-    assert_eq!(render().len(), 1);
+    assert!(render().is_empty(), "no group gauge from the mod");
+    // control: a target with power gets the mod's one gauge
+    native_core::CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.player = serde_json::json!({"id":1,"target_id":3});
+        c.view.entities = vec![serde_json::json!({"id":3,"name":"Boss","hp_fraction":0.5,"power":0.6,"kind":"npc"})];
+    });
+    assert_eq!(render().len(), 1, "control: the target's gauge");
 }
 #[test]
 fn hud_layout_uses_native_wide_tall_transforms_and_dynamic_pet_rect() {

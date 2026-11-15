@@ -378,15 +378,25 @@ mod tests {
         assert_eq!(cats[first].name, "Enhanced", "one fork page, after upstream's last");
         assert_eq!(&cats[first].items[..6], &[2000, 2001, 2002, 2003, 2004, 2005], "Enhanced HUD rows first");
         assert_eq!(&cats[first].items[6..9], &[1045, 1051, 1052], "then the Mods & Addons rows");
-        assert_eq!(cats[first - 1].name, "HUD Layout");
-        assert_eq!(cats[first - 1].items, &[76, 77]);
-        assert_eq!(cats[first - 2].name, "Chat");
-        assert_eq!(cats[first - 2].items, &[73]);
-        assert_eq!(cats[first - 3].name, "Combat");
-        assert_eq!(cats[first - 3].items, &[70, 71, 72]);
-        assert_eq!(cats[first - 5].items, &[41, 42, 43, 44, 45]);
-        assert_eq!(cats[3].items, &[22, 29, 30, 40, 49, 58]);
-        for (index, category) in cats.iter().enumerate().skip(first) {
+        // Extended's groups (upstream, sync 2026-11-15): the Enhanced page closes the UI group's
+        // menu and is in no other group's
+        let groups = &super::super::GROUPS;
+        let ui = groups.iter().position(|g| g.0 == super::super::Group::Ui).unwrap();
+        let in_ui = super::super::group_categories(ui);
+        assert_eq!(in_ui.last(), Some(&first), "Enhanced last in the UI group's menu");
+        assert!((0..groups.len()).filter(|&g| g != ui).all(|g| !super::super::group_categories(g).contains(&first)), "in no other group");
+        w.grp_sel = ui as i32;
+        w.key(
+            &vui,
+            &mut NullRaster,
+            &mut o,
+            key::CROSS,
+            0,
+            &mut cues,
+            &mut ups,
+        );
+        assert_eq!(w.grp, Some(ui), "the UI group's menu open");
+        for (index, category) in [(in_ui.len() - 1, &cats[first])] {
             w.cat_sel = index as i32;
             w.key(
                 &vui,
@@ -401,8 +411,8 @@ mod tests {
             // with two fork pages); the window past eight rows has no title bar
             let (top, bottom) = (w.window2.top_left()[1], w.window2.top_left()[1] + w.window2.size[1]);
             assert!(top >= 0 && bottom <= 448, "the page's window on the screen: {top}..{bottom}");
-            let list = w.window4.top_left()[1];
-            assert!(list >= 0 && list + w.window4.size[1] <= 448, "the list of pages on the screen: {list}");
+            let list = w.window5.top_left()[1];
+            assert!(list >= 0 && list + w.window5.size[1] <= 448, "the list of pages on the screen: {list}");
             for &item in category.items {
                 w.draw(&vui, &mut NullRaster, &o, &mut ups);
                 assert_eq!(w.item, item);
@@ -486,7 +496,7 @@ mod tests {
         );
         assert_eq!(
             (w.cat_sel, cues.last()),
-            (cats.len() as i32 - 1, Some(&9)),
+            (in_ui.len() as i32 - 1, Some(&9)),
             "fork category end stops"
         );
         assert!(

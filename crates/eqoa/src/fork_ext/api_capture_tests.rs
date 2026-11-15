@@ -1788,45 +1788,30 @@ fn addon_actions_use_live_camera_assist_and_summary_overlay_gates() {
 }
 
 #[test]
-fn mana_subscription_follows_enabled_mod_and_its_saved_switch_both_directions() {
+fn power_subscription_is_upstreams_row_alone_whatever_the_mana_mod_says() {
+    // since sync 2026-11-15 upstream's Power Bars row asks the server for others' power
+    // (`settings::power_bars`, every frame); the fork's hook must never ask too, or the two
+    // would contradict each other every frame
     use crate::fork_ext::addons::options;
     crate::settings::testing::reset(false);
     options::reset_in_memory();
     let mut p = ready();
     p.session.conn = Some(usize::MAX);
     p.session.power_bars_offer = true;
-    let mut sends = p.session.sends_lost;
-    for (enabled, switched_on, expected_send, expected_keep) in [
-        (true, true, true, true),
-        (true, true, false, true),
-        (true, false, true, false),
-        (true, true, true, true),
-        (false, true, true, false),
-        (true, true, true, true),
-        (false, false, true, false),
-        (true, false, false, false),
-        (true, true, true, true),
-    ] {
+    for (enabled, switched_on) in [(true, true), (true, false), (false, true), (false, false), (true, true)] {
         options::set_addon_enabled("eqoa_mana_bars", enabled);
-        assert!(options::set_toggle(
-            "eqoa_mana_bars",
-            "mana_bars",
-            switched_on
-        ));
+        assert!(options::set_toggle("eqoa_mana_bars", "mana_bars", switched_on));
         p.session.power_bars = vec![(42, 127)];
+        let sends = p.session.sends_lost;
         begin_iteration(&mut p, false);
-        assert_eq!(
-            p.session.sends_lost - sends,
-            u32::from(expected_send),
-            "enabled={enabled}, switch={switched_on}: actual native agreement send transition"
-        );
-        assert_eq!(
-            p.session.power_of(42).is_some(),
-            expected_keep,
-            "disabled agreement must clear the native received set"
-        );
-        sends = p.session.sends_lost;
+        assert_eq!(p.session.sends_lost, sends, "enabled={enabled}, switch={switched_on}: the hook sends nothing");
+        assert_eq!(p.session.power_of(42), Some(127), "enabled={enabled}, switch={switched_on}: received power kept");
     }
+    // control: upstream's own path does send and clear, so the counter above would see a send
+    let sends = p.session.sends_lost;
+    p.session.agree_power_bars(false);
+    assert_eq!(p.session.sends_lost - sends, 1, "control: an agreement is counted");
+    assert_eq!(p.session.power_of(42), None, "control: switching off clears the set");
     options::reset_in_memory();
 }
 
