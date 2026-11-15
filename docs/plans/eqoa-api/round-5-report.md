@@ -94,10 +94,10 @@ merchant and bank open from their real opcodes (`npcw_opcode`, `bank_opcode`).
 | Gate | Result |
 |---|---|
 | `cargo test --locked -p eqoa --bin eqoa fork_ext::addons:: -- --test-threads=1` (scratch `EQOA_CONFIG`) | 461 passed, 0 failed, 25 ignored, 9 SKIP lines |
-| Full client suite, same flags, skipping the timing tests (`--skip round4_ --skip frame_time --skip benchmark --skip scrollback_10000 --skip measure`) | 2295 passed, 0 failed, 30 ignored, 50 SKIP lines (the 50 skipped by name are the timing tests) |
+| Full client suite, same flags, skipping the timing tests (`--skip round4_ --skip frame_time --skip benchmark --skip scrollback_10000 --skip measure`) | 2295 passed, 0 failed, 30 ignored, 50 SKIP lines (50 further tests were filtered out by name: the timing tests) |
 | round 5 tests (`round5_`) | 17 passed, plus `items_forge::tests::every_function_of_each_forge_item_module_is_listed` |
 | Zero-addon gate (optimized frame, menu, entity packet, chat tests, in the full run) | passed; the item hooks run only after the "an addon wants state" check, and `no_addon_means_no_item_copies_and_no_events` asserts it |
-| Bundled Wereoxxs/ARPG/Modern UI, round 3 and round 4 mods | their tests are in the 461/2295 above and pass; no bundled-mod session reported an Addon Manager diagnostic (the new `not_yet` fields are only reported when a mod reads them, and none does) |
+| Bundled Wereoxxs/ARPG/Modern UI, round 3 and round 4 mods | their existing tests are in the 461/2295 above and pass (those that assert zero Addon Manager diagnostics still do); I added no new bundled-mod session test |
 | `cargo check --locked -p eqoa --target wasm32-unknown-unknown` | PASS |
 | `python tools/check_fork_footprint.py --base a76d8d27...` | PASS; 31 shared files before and after, no upstream file touched (`git diff` of upstream files is empty); 456 to 461 fork-owned files |
 | `git merge-tree --write-tree --name-only HEAD origin/master` | clean before and after (no conflicts) |
