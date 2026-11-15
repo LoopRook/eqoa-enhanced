@@ -278,4 +278,5 @@ mod-owned zoom the capture honours. Not built; propose it before building.
 
 ## Wereoxxs not maintained for now (owner, 2026-11-15)
 
-Wereoxxs: not maintained for now (owner 2026-11-15); its map zooms in further than ours (see zoom beyond upstream's range).
+Wereoxxs: not maintained for now (owner 2026-11-15). Separately, the owner noticed our map in 0.5.3 (live)
+zooms in a bit further than round 4's, which keeps upstream's zoom limits; see the zoom item above. Later.
