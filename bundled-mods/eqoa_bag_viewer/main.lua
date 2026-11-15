@@ -108,8 +108,8 @@ function draw()
     B.tab_hits = tab_hits
     local tx = PAD
     for i, t in ipairs(B.TABS) do
-        local tw = ui.CalcTextSize(t.label) / k + 14
-        text(tx + 7, 25, t.label, B.tab == i and c.text or c.muted)
+        local tw = ui.CalcTextSize(t.label) / k + 8
+        text(tx + 4, 25, t.label, B.tab == i and c.text or c.muted)
         if B.tab == i then fill(tx, 39, tw, 2, c.red) end
         tab_hits[#tab_hits + 1] = {x = x0 + tx * k, y = y0 + 22 * k, w = tw * k, h = 19 * k, tab = i}
         tx = tx + tw + 2

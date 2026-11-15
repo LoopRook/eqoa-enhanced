@@ -44,6 +44,8 @@ struct Spec {
     max_stack: i64,
     stats: Vec<(i64, i64)>,
     icon: i64,
+    p4c: i64,
+    p54: i64,
 }
 impl Spec {
     fn new(id: i64, name: &'static str, key: u32) -> Self {
@@ -65,6 +67,8 @@ impl Spec {
             max_stack: 1,
             stats: vec![],
             icon: 4001,
+            p4c: 0,
+            p54: 0,
         }
     }
     /// `ReadNetItem`'s bytes: the slot's six words, the item's 23 words, name, description, stats.
@@ -73,7 +77,7 @@ impl Spec {
         w.signed(self.quantity).signed(self.cur_hp).signed(0).signed(self.equip_slot).signed(self.quick_slot).u32(self.key);
         for v in [
             self.id, self.value, 0, self.icon, 0, self.wear, 0, 0, self.rent, 0, 0, 0, 0, self.level, self.max_stack,
-            self.max_hp, 0, self.class_mask, self.race_mask, 0, 0, 0, 0,
+            self.max_hp, 0, self.class_mask, self.race_mask, self.p4c, 0, 0, self.p54,
         ] {
             w.signed(v);
         }
@@ -924,6 +928,8 @@ impl Spec {
         s.value = int("value", 10);
         s.max_stack = int("max_stack", 1);
         s.icon = int("icon", 4001);
+        s.p4c = int("p4c", 0);
+        s.p54 = int("p54", 0);
         if let Some(stats) = v.get("stats").and_then(|x| x.as_array()) {
             s.stats = stats.iter().map(|p| (p[0].as_i64().unwrap(), p[1].as_i64().unwrap())).collect();
         }
@@ -945,6 +951,16 @@ impl Play {
         self.dump.player.class = class;
         self.dump.player.race = race;
         self.dump.player.level = level;
+    }
+    /// A corpse in the world and targeted, as when the player presses attack on it (the loot request names it).
+    pub(crate) fn bags_target_corpse(&mut self, id: u32, name: &str) {
+        let creature = net::entity::Creature { name: name.into(), ..Default::default() };
+        self.entities.slots.push(Some(net::entity::Entity { id, p18: 2, creature: Some(creature), ..Default::default() }));
+        self.target = id;
+    }
+    /// The player targets another entity (the fixture's living Moss Snake is 2002).
+    pub(crate) fn bags_target(&mut self, id: u32) {
+        self.target = id;
     }
     /// 0x0018: a corpse's list arrives and its window opens.
     pub(crate) fn bags_corpse(&mut self, items: &serde_json::Value) {

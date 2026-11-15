@@ -376,9 +376,9 @@ fn round5b_equipment_follows_the_games_own_tab_and_the_bank_reads_away_from_a_ba
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
     bv.open();
-    // the tab strip: All, Equipment, Bank (Usable, Charged and Misc need item fields the API does not give)
-    assert_eq!(bv.eval::<Vec<String>>("(function() local t = {} for _, tab in ipairs(require('bags').TABS) do t[#t + 1] = tab.label end return t end)()"), ["All", "Equipment", "Bank"]);
-    let tab = bv.tab(2);
+    // the tab strip: the game's four item-page tabs between All and the bank
+    assert_eq!(bv.eval::<Vec<String>>("(function() local t = {} for _, tab in ipairs(require('bags').TABS) do t[#t + 1] = tab.label end return t end)()"), ["All", "Usable", "Equipment", "Charged", "Misc", "Bank"]);
+    let tab = bv.tab(3);
     bv.click(tab);
     bv.frames(2);
     // what the game's own item page lists under Equipment, computed from the same pack by its predicates
@@ -389,7 +389,7 @@ fn round5b_equipment_follows_the_games_own_tab_and_the_bank_reads_away_from_a_ba
     assert_eq!(bv.eval::<u32>("require('bags').grid.used"), 8, "used/capacity still counts the whole pack");
     // the bank: its items and its tunar, with no banker near (the bank window is closed)
     assert!(!bv.eval::<bool>("eqoa.bank.get().open"));
-    let tab = bv.tab(3);
+    let tab = bv.tab(6);
     bv.click(tab);
     bv.frames(2);
     assert_eq!(bv.names(), ["Moonstone", "Spare Dagger"]);
@@ -439,8 +439,14 @@ fn round5b_the_loot_log_is_fed_by_pickups_newest_first_and_keeps_fifty() {
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
     // the window stays closed: the log is the one thing that listens
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
     bv.play.bags_corpse(&bv_corpse());
     bv.frames(2);
+    // the loot window knows which corpse it belongs to, and keeps it when the target moves on
+    assert_eq!(bv.eval::<(u32, String)>("(function() local s = eqoa.loot.get().source return s.entity_id, s.name end)()"), (5001, "a decaying skeleton".to_string()));
+    bv.play.bags_target(2002);
+    bv.frames(2);
+    assert_eq!(bv.eval::<String>("eqoa.loot.get().source.name"), "a decaying skeleton");
     bv.play.bags_loot_one(0);
     bv.frames(2);
     bv.play.bags_loot_one(0);
@@ -453,14 +459,22 @@ fn round5b_the_loot_log_is_fed_by_pickups_newest_first_and_keeps_fifty() {
         let (stamp, rest) = l.split_at(5);
         stamp.chars().enumerate().all(|(i, c)| if i == 2 { c == ':' } else { c.is_ascii_digit() }) && rest == format!(" {name}")
     };
-    assert!(shaped(&log[0], "Bone Chip x2") && shaped(&log[1], "Spider Silk x4") && shaped(&log[2], "Rat Pelt x1"), "newest first: {log:?}");
+    let from = ", from a decaying skeleton";
+    assert!(
+        shaped(&log[0], &format!("Bone Chip x2{from}")) && shaped(&log[1], &format!("Spider Silk x4{from}")) && shaped(&log[2], &format!("Rat Pelt x1{from}")),
+        "newest first, from the corpse that was targeted: {log:?}"
+    );
     assert_eq!(bv.eval::<u32>("require('bags').builds"), 0, "a closed window reads nothing");
-    // "Leave All": the window closes with items still on the corpse, and nothing is logged
+    // a corpse no one targeted (the target is a living snake): the line has no "from"
+    bv.play.bags_target(2002);
     bv.play.bags_corpse(&serde_json::json!([{"name":"Moss Cap","id":2010,"key":41,"qty":1,"max_stack":10},{"name":"Torn Rag","id":2011,"key":42,"qty":1,"max_stack":10}]));
     bv.frames(2);
     bv.play.bags_loot_one(0);
     bv.frames(2);
     assert_eq!(bv.log().len(), 4);
+    assert!(bv.log()[0].ends_with(" Moss Cap x1"), "no corpse known, no from: {:?}", bv.log()[0]);
+    assert_eq!(bv.eval::<bool>("eqoa.loot.get().source == nil"), true);
+    // "Leave All": the window closes with items still on the corpse, and nothing is logged
     bv.play.bags_loot_close();
     bv.frames(2);
     assert_eq!(bv.log().len(), 4, "Leave All adds nothing");
@@ -583,7 +597,7 @@ fn round5b_picture_the_window_is_drawn_where_it_says_and_closed_it_is_not() {
     let log_row = bv.at(30., 46. + 5. * 34. + 5. + 38. + 6.);
     assert!(bv_near(&calm_px, w, log_row, 40, [232, 232, 232, 255], 30), "a log line's text");
     // the Bank tab, nothing hovered
-    let tab = bv.tab(3);
+    let tab = bv.tab(6);
     bv.click(tab);
     bv.point((1., 1.));
     let bank = bv.frames(3);
@@ -594,5 +608,54 @@ fn round5b_picture_the_window_is_drawn_where_it_says_and_closed_it_is_not() {
     bv.point((1., 1.));
     let log_pic = bv.frames(3);
     bv_png(&rm_pixels(&bv.gpu, &log_pic), bv.win, "r5-bags-loot.png");
+    bv.clean();
+}
+
+#[test]
+fn round5b_every_stack_has_the_tabs_the_games_item_page_gives_it_and_each_tab_lists_exactly_those() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    bv.open();
+    bv.play.bags_set(&serde_json::json!({
+        "pack": [
+            {"name":"Rusty Sword","id":900001,"key":11,"wear":12,"equip":0,"icon":4001},
+            {"name":"Healing Potion","id":900002,"key":12,"qty":5,"max_stack":20,"p4c":2,"icon":4002},
+            {"name":"Mana Potion","id":900003,"key":13,"qty":2,"max_stack":20,"p4c":7,"icon":4003},
+            {"name":"Fire Wand","id":900004,"key":14,"p4c":3,"p54":5,"icon":4004},
+            {"name":"Charged Ring","id":900005,"key":15,"wear":8,"p54":3,"icon":4005},
+            {"name":"Tool Kit","id":900006,"key":16,"p4c":8,"p54":2,"icon":4006},
+            {"name":"Rat Pelt","id":900007,"key":17,"qty":3,"max_stack":100,"icon":4007},
+            {"name":"Odd Thing","id":900008,"key":18,"wear":0,"icon":4008},
+            {"name":"Plain Bead","id":900009,"key":19,"icon":4009}
+        ],
+        "tunar": 10
+    }));
+    bv.frames(3);
+    // every stack's `tabs` is the native predicates' answer for it, in the page's order
+    let all: Vec<String> = bv.names();
+    assert_eq!(all.len(), 9);
+    for name in &all {
+        let want: Vec<&str> = ["usable", "equipment", "charged", "misc"].into_iter().filter(|k| bv.play.bags_native_tab(k).contains(name)).collect();
+        let got: String = bv.eval(&format!(
+            "(function() for _, e in ipairs(require('bags').grid.items) do if e.item.name == '{name}' then return table.concat(e.item.tabs, ',') end end end)()"
+        ));
+        assert_eq!(got, want.join(","), "{name}");
+    }
+    // the fixture has every kind: a worn charged-looking ring is not Charged, a wear-slot-0 item is Equipment
+    assert_eq!(bv.play.bags_native_tab("usable"), ["Healing Potion", "Mana Potion", "Tool Kit"]);
+    assert_eq!(bv.play.bags_native_tab("charged"), ["Fire Wand"]);
+    assert!(bv.play.bags_native_tab("equipment").contains(&"Charged Ring".to_string()) && bv.play.bags_native_tab("equipment").contains(&"Odd Thing".to_string()));
+    assert_eq!(bv.play.bags_native_tab("misc"), ["Rat Pelt", "Plain Bead"]);
+    // each of the mod's tabs lists exactly what the game's page lists under it
+    for (n, key) in [(2, "usable"), (3, "equipment"), (4, "charged"), (5, "misc")] {
+        let tab = bv.tab(n);
+        bv.click(tab);
+        bv.frames(2);
+        assert_eq!(bv.names(), bv.play.bags_native_tab(key), "{key}");
+    }
+    let tab = bv.tab(1);
+    bv.click(tab);
+    bv.frames(2);
+    assert_eq!(bv.names(), all);
     bv.clean();
 }

@@ -4,18 +4,21 @@
 local M = {open = false, tab = 1, grid = nil, log = {}, scroll = 0, hover = nil, builds = 0, draws = 0, rect = nil}
 
 M.COLUMNS, M.MAX_ROWS, M.LOG_MAX = 8, 8, 50
--- Item.wear_slot of a stack nothing wears (the game's -1): `wearable` is wear_slot ~= -1.
-local NO_SLOT = 4294967295
+-- The game's item-page tabs, in its order, with All first and the bank last. A stack is under a tab when the
+-- game's own rule for that tab says so: `Item.tabs` lists the keys, the rule is not copied here.
 M.TABS = {
     {key = "all", label = "All"},
+    {key = "usable", label = "Usable"},
     {key = "equipment", label = "Equipment"},
+    {key = "charged", label = "Charged"},
+    {key = "misc", label = "Misc"},
     {key = "bank", label = "Bank"},
 }
-local keep = {
-    all = function() return true end,
-    equipment = function(it) return it.wear_slot ~= NO_SLOT end,
-    bank = function() return true end,
-}
+local function keeps(key, it)
+    if key == "all" or key == "bank" then return true end
+    for _, k in ipairs(it.tabs) do if k == key then return true end end
+    return false
+end
 
 -- The grid for the tab on show: the items it keeps in the container's own order, with the numbers under it.
 function M.rebuild()
@@ -24,9 +27,9 @@ function M.rebuild()
     local c
     if key == "bank" then c = eqoa.bank.get() else c = eqoa.inventory.get() end
     if not c then M.grid = false; return false end
-    local keeps, items = keep[key], {}
+    local items = {}
     for _, it in ipairs(c.items) do
-        if keeps(it) then
+        if keeps(key, it) then
             local info = it.icon and eqoa.icons.resource(it.icon)
             items[#items + 1] = {item = it, texture = info and info.texture}
         end
@@ -78,10 +81,14 @@ function M.log_loot(data)
     local left = {}
     for _, it in ipairs(data.after.items) do left[it.inventory_key] = it.quantity end
     local stamp = os.date("%H:%M")
+    -- the corpse the window belongs to, when the client knows which it asked for
+    local source = data.before.source
     for _, it in ipairs(data.before.items) do
         local taken = it.quantity - (left[it.inventory_key] or 0)
         if taken > 0 then
-            table.insert(M.log, 1, {text = string.format("%s %s x%d", stamp, it.name, taken)})
+            local text = string.format("%s %s x%d", stamp, it.name, taken)
+            if source then text = text .. ", from " .. source.name end
+            table.insert(M.log, 1, {text = text})
             if #M.log > M.LOG_MAX then table.remove(M.log) end
         end
     end

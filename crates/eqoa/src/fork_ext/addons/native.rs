@@ -1076,6 +1076,7 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.group.Group", "invites") => Some("eqoa.group.Invite"),
         ("eqoa.items.Container", "items") => Some("eqoa.items.Item"),
         ("eqoa.items.Container", "merchant") => Some("eqoa.items.MerchantState"),
+        ("eqoa.items.Container", "source") => Some("eqoa.items.LootSource"),
         ("eqoa.items.Item", "stats") => Some("eqoa.items.ItemStat"),
         ("eqoa.hotbar.Hotbar", "slots") => Some("eqoa.hotbar.HotbarSlot"),
         ("eqoa.chat.ChatMessage", "color") => Some("eqoa.Color"),

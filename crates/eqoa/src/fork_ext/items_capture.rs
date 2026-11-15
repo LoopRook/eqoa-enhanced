@@ -21,6 +21,18 @@ fn bits(mask: i64, count: usize) -> Vec<usize> {
     (0..count).filter(|b| (mask as u64 >> b) & 1 == 1).collect()
 }
 
+/// The item page's tab keys this stack appears under, by the same four predicates `itemmenu.rs` sorts with
+/// (spec section 6, `Tab.key`, in the page's order).
+fn tab_keys(it: &NetItem) -> Vec<&'static str> {
+    let tabs: [(&str, fn(&NetItem) -> bool); 4] = [
+        ("usable", crate::infotext::is_usable),
+        ("equipment", crate::infotext::is_wearable),
+        ("charged", crate::infotext::is_charged),
+        ("misc", crate::infotext::is_misc),
+    ];
+    tabs.into_iter().filter(|(_, has)| has(it)).map(|(key, _)| key).collect()
+}
+
 /// One stack as the API's `Item` record (without its handle, which the core gives).
 fn item_json(it: &NetItem, list: &str, index: usize, flags: u32, attack_words: &[(i32, i64)]) -> Json {
     let i = &it.item;
@@ -65,6 +77,7 @@ fn item_json(it: &NetItem, list: &str, index: usize, flags: u32, attack_words: &
         "no_rent": i.rent == 0,
         "lore": i.lore != 0,
         "stats": stats,
+        "tabs": tab_keys(it),
     })
 }
 
@@ -127,7 +140,11 @@ pub(super) fn build(play: &Play) -> [Json; 4] {
         &ctx,
     );
     let loot = match (play.mode == 1, play.npcw.corpse.as_ref()) {
-        (true, Some(corpse)) => container("loot", corpse, true, Some(LOOT_CAPACITY), None, Json::Null, &ctx),
+        (true, Some(corpse)) => {
+            let mut loot = container("loot", corpse, true, Some(LOOT_CAPACITY), None, Json::Null, &ctx);
+            loot["source"] = SOURCE.with(|s| s.borrow().clone()).map_or(Json::Null, |(id, name)| json!({"entity_id":id,"name":name}));
+            loot
+        }
         _ => Json::Null,
     };
     let shop = &play.npcw.shop;
@@ -173,6 +190,16 @@ pub(super) fn take_builds() -> usize {
 }
 
 thread_local! {static KEY: Cell<Option<u64>> = const { Cell::new(None) };}
+// The corpse the open loot window belongs to: the entity the player had targeted when the corpse's list
+// arrived (0x0018), when that entity is a corpse. The loot request (0x0015) names the target, and the
+// window follows it, so this is the corpse asked for; with no corpse targeted it stays unknown.
+thread_local! {static SOURCE: std::cell::RefCell<Option<(u32, String)>> = const { std::cell::RefCell::new(None) };}
+
+fn note_source(play: &Play) {
+    let corpse = play.entities.slots.iter().flatten().find(|e| e.id == play.target && e.p18 & 2 != 0);
+    let named = corpse.and_then(|e| e.creature.as_ref()).map(|c| c.name.clone()).filter(|n| !n.is_empty());
+    SOURCE.with(|s| *s.borrow_mut() = named.map(|n| (play.target, n)));
+}
 
 /// The key the containers were last read with: set by a full publish, and forgotten when the
 /// addon side lets go or the world ends (`forget`).
@@ -186,6 +213,11 @@ pub(super) fn forget() {
 /// Read the four lists now and apply them to the view when the core next flushes (`cause` names the
 /// native event for subscribers).
 pub(super) fn capture(play: &Play, cause: &'static str) {
+    match cause {
+        "loot_open" => note_source(play),
+        "loot_close" => SOURCE.with(|s| *s.borrow_mut() = None),
+        _ => {}
+    }
     let lists = build(play);
     let bytes = lists.iter().map(native_core::json_len).sum::<usize>() + 512;
     note(play);
