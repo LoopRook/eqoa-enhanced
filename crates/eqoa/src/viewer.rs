@@ -482,7 +482,7 @@ pub fn shot_with(
             {
                 p.map.show();
             }
-            touch.window = play.as_ref().is_some_and(|p| p.window_up() || p.map.open || p.map.search.open);
+            touch.window = play.as_ref().is_some_and(|p| p.window_up() || p.map.open);
             touch.opts = crate::settings::touch_options();
             for (_, id, phase, at) in touch_script.iter().filter(|e| e.0 == t) {
                 touch.touch(*id, *phase, *at, Instant::now(), (w, h));
@@ -596,7 +596,7 @@ pub fn shot_with(
                 // the wheel over the minimap: its zoom, as the window's (`mini_wheel`)
                 let at = [mouse.cursor.0 as f32, mouse.cursor.1 as f32];
                 if let (Some(n), Some(p)) = (step.strip_prefix("wheel ").and_then(|n| n.trim().parse::<f32>().ok()), play.as_mut())
-                    && p.map.mini_contains(at)
+                    && crate::fork_ext::minimap_contains(&p.map, at)
                 {
                     p.map.mini_wheel(n);
                     eprintln!("mouse {step}: the minimap's zoom, {} units a frame pixel", p.map.mini.scale);
@@ -3868,37 +3868,6 @@ impl App {
         {
             self.held.remove(&n);
         }
-        // A map query owns text before any global gameplay shortcut.
-        if let Some(p) = self.play.as_mut().filter(|p| p.map.search.open) {
-            p.release_map_search_holds();
-            if event.state == ElementState::Pressed {
-                let name = crate::binds::name_of(&event.logical_key).unwrap_or_default();
-                p.map.search.key(&name, event.text.as_deref());
-            }
-            return;
-        }
-        if event.state == ElementState::Pressed && !event.repeat {
-            if let Some(p) = self.play.as_mut() {
-                if p.mode == 0 && !p.keyboard_typing() {
-                    match event.logical_key {
-                        Key::Named(NamedKey::F2) if crate::settings::map() => {
-                            if !p.minimap_up() && !p.map.open {
-                                p.map.show();
-                            }
-                            p.map.search.toggle();
-                            if p.map.search.open { p.release_map_search_holds(); }
-                            self.held.clear();
-                            return;
-                        }
-                        Key::Named(NamedKey::F4) => {
-                            p.map.search.stop();
-                            return;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
         // F9 (`era`): the art swapped, whatever window is up
         if event.state == ElementState::Pressed && !event.repeat && event.logical_key == Key::Named(NamedKey::F9) {
             self.toggle_era();
@@ -5642,13 +5611,9 @@ impl App {
                     MouseScrollDelta::PixelDelta(p) => (p.y as f32 / 40.0, p.y as f32 / 100.0),
                 };
                 let at = [self.cursor.0 as f32, self.cursor.1 as f32];
-                if let Some(p) = self.play.as_mut().filter(|p| p.map.search.open) {
-                    p.map
-                        .search
-                        .key(if steps > 0.0 { "up" } else { "down" }, None);
-                } else if let Some(p) = self.play.as_mut().filter(|p| p.map.open) {
+                if let Some(p) = self.play.as_mut().filter(|p| p.map.open) {
                     p.map.wheel(steps, Some(at));
-                } else if let Some(p) = self.play.as_mut().filter(|p| p.map.mini_contains(at)) {
+                } else if let Some(p) = self.play.as_mut().filter(|p| crate::fork_ext::minimap_contains(&p.map, at)) {
                     // over the minimap: its zoom, not the camera's
                     p.map.mini_wheel(steps);
                 } else if self.walker.is_some() {
@@ -5883,7 +5848,7 @@ impl App {
                     }
                 }
                 self.touch.holds = self.play.as_ref().is_some_and(|p| p.map.open);
-                self.touch.window = self.play.as_ref().is_some_and(|p| p.window_up() || p.map.open || p.map.search.open);
+                self.touch.window = self.play.as_ref().is_some_and(|p| p.window_up() || p.map.open);
                 self.touch.opts = crate::settings::touch_options();
                 mark(&mut self.perf, 17);
                 self.grab_pointer(true);
@@ -6388,7 +6353,7 @@ impl App {
                 let play = self.play.as_ref();
                 g.renderer.draw_text_around(&g.device, &mut enc, &f.color, &f.depth, f.size, |enc| {
                     if let Some(p) = play {
-                        p.map.draw_mini(&g.device, enc, &f.color, &f.depth, window, f.size);
+                        crate::fork_ext::map::draw_minimap(&p.map, &g.device, enc, &f.color, &f.depth, window, f.size, g.config.format);
                     }
                 });
                 // the map up, over the whole frame (laid out on the window

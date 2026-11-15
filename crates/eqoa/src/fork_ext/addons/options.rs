@@ -5,6 +5,8 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+pub(crate) use super::option_buttons::{activate_button, is_button};
+
 pub const MOD_OPTION_BASE: i32 = 2000;
 
 #[derive(Clone, Debug)]
@@ -68,6 +70,7 @@ pub fn set_storage_root(root: Option<PathBuf>) {
 }
 
 pub fn reset_in_memory() {
+    super::option_buttons::reset();
     TOGGLES.with(|t| *t.borrow_mut() = default_toggles());
     DISABLED_ADDONS.with(|d| d.borrow_mut().clear());
     DIAGNOSTICS.with(|d| d.borrow_mut().clear());
@@ -379,21 +382,17 @@ pub fn value_by_item(item_id: i32) -> Option<bool> {
 }
 
 pub fn active_mod_items() -> Vec<(i32, String)> {
-    TOGGLES.with(|t| {
+    let mut rows = TOGGLES.with(|t| {
         t.borrow()
             .iter()
             .filter(|o| o.enabled)
             .map(|o| (o.item_id, o.label.clone()))
-            .collect()
-    })
+            .collect::<Vec<_>>()
+    });
+    rows.extend(super::option_buttons::items());
+    rows
 }
 
 pub fn active_mod_item_ids() -> Vec<i32> {
-    TOGGLES.with(|t| {
-        t.borrow()
-            .iter()
-            .filter(|o| o.enabled)
-            .map(|o| o.item_id)
-            .collect()
-    })
+    active_mod_items().into_iter().map(|(id,_)|id).collect()
 }

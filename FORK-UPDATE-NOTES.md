@@ -2,6 +2,20 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## Unreleased
+
+- Round minimap hover reads compact current-frame dot positions, avoiding a full creature-record list each frame.
+- The round minimap is now a clean circle: the game's square frame no longer shows inside it. Its hover card cuts a single very long word with "...", and its mod no longer reports errors in the Addon Manager.
+- Map Search's button and box are back at the sizes the built-in search had, scaled with the HUD at any window size or Render Scale.
+- Options: Enhanced HUD and Mods & Addons are now one page named **Enhanced** (Enhanced HUD rows first), placed after Extended's last page, so the list of pages is one row shorter. Every row keeps its saved setting. The path to the Addon Manager is Options -> Extended -> Enhanced -> Addon Manager.
+
+- Map Search finishes while nearby creatures move, keeps result order stable, and filters the previous results as you type. Closed search no longer scans the world or reloads a changing journal.
+- Search clears the full map header, consumes outside clicks while open, and scrolls whole rows only over its list. Group search excludes you and keeps unavailable members greyed out.
+- Known creature guides upgrade to live creatures; Track waypoint follows moved pins. Import/export report success, errors and the actual collision-safe filename for six seconds.
+- Creature Journal uses actor positions with the native protocol-position fallback, and new sightings after a save start a fresh save interval. Existing profiles receive the bundled map mods without overriding manual Off settings.
+- The round minimap is now a bundled mod, Round Minimap, on by default. It shows the game's own minimap (terrain, indoor view, camps, coaches, quest marks, waypoints, group) in a circle with a ring, in the same place and size, and follows Move HUD. N still toggles it, the wheel still zooms it, and hovering a creature, player or pet shows its name, level, kind and distance (marks show their names). Turn the mod off in Mods & Addons and the game's square minimap comes back. Clicking the round minimap does not open the map (press M). The player's and group's waypoints get an arrow outside the ring where the square picture's corner would have hidden them.
+- The M map now uses the game's own look and key legend. Creature search, the creature journal and their keys (F2 search, F4 clear guide) carry over unchanged as the bundled Map Search and Creature Journal mods; your journal file and key choices are kept.
+
 ## 2026-11-11 · Enhanced 0.5.3
 
 - Fix: bundled mods that are on by default (HUD numbers and Mana Bars) are now on for players who already had a mod profile.
@@ -12,6 +26,11 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## 2026-11-11 · Enhanced 0.5.1
 
+- Creature recording now has an enabled-by-default Creature Journal addon, with its own import/export rows, bounded Forge journal imports, and quiet/periodic saves.
+- Map Search is an enabled-by-default addon with rebindable F2/F4, creature/group/place tabs, a minimap button that follows Move HUD, shared journal results, and live/known guidance.
+
+- Fixed live addon map updates and lost-guide notifications. Existing UI mods keep the minimap unless they hide it explicitly. Private journal JSON can reload and flushes on disable or quit; large Lua heaps require the declared `large_data` capability. Catalogue tables load in bounded slices.
+- Addon authors: map state, markers, native minimap views, owned guides, minimap visibility/layout and pointer claims are available. Addon drawing and input can run over the open map. Bounded packaged JSON loading and private asynchronous JSON saving support the coming search and journal mods.
 - Added upstream Move HUD and Reset HUD. The round minimap, its hover cards and search control follow its saved position; HUD numbers, mana bars and Target of Target follow their stock bars. Upstream also restores a lost graphics device in place and improves mercenary tags.
 
 ## 2026-11-11 · Enhanced 0.5.0

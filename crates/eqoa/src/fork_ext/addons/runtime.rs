@@ -127,6 +127,11 @@ impl Runtime {
         runtime
     }
     pub(super) fn new(paths: Paths) -> Self {
+        if let Some(config) = &paths.config {
+            if let Err(error) = super::map_migration::migrate(config) {
+                eprintln!("journal migration: {error}");
+            }
+        }
         super::visibility::publish(false);
         let discovery = super::discovery::discover(&paths.mods);
         let storage = Storage::new(paths.config.clone());
@@ -177,6 +182,10 @@ impl Runtime {
         self.error = None;
     }
     pub fn event(&mut self, window: &Window, event: &WindowEvent, plain_play: bool) -> bool {
+        let pointer_capture = super::pointer_api::observe(
+            event,
+            (window.inner_size().width, window.inner_size().height),
+        );
         let (mut keyboard, mut mouse) = (false, false);
         match self.graphics.as_mut() {
             Some(Graphics::Managed(active)) => {
@@ -222,6 +231,7 @@ impl Runtime {
         if let WindowEvent::Focused(focused) = event {
             super::input::focus(*focused);
         }
+        mouse |= pointer_capture;
         let consumed = match event {
             WindowEvent::KeyboardInput {
                 event,
@@ -235,15 +245,15 @@ impl Runtime {
                     if let Some(code) = code {
                         super::input::record_key_event_only(code, is_down);
                     }
-                    super::input::route_mod_key(
-                        &event.logical_key,
-                        is_down,
-                        event.repeat,
-                        *is_synthetic,
-                        plain_play,
-                        keyboard,
-                    );
                 }
+                super::input::route_mod_key(
+                    &event.logical_key,
+                    event.state == ElementState::Pressed,
+                    event.repeat,
+                    *is_synthetic,
+                    plain_play,
+                    keyboard,
+                );
                 let wants_key_capture =
                     super::input::wants_key_capture(keyboard, code, *is_synthetic, plain_play);
                 match event.state {
@@ -678,6 +688,7 @@ fn controls(
         for entry in entries {
             ui.separator();ui.text(format!("{} ({})",entry.metadata.name,entry.metadata.id));
             ui.text(match entry.status {super::manager::Status::Disabled=>"Disabled",super::manager::Status::Enabled=>"Enabled",super::manager::Status::Failed=>"Failed — reload to retry"});
+            if !entry.metadata.extensions.permissions.is_empty() {ui.text(format!("Permissions: {}",entry.metadata.extensions.permissions.join(", ")));}
             let id=&entry.metadata.id;
             let warnings=manager.diagnostics().iter().filter(|d|d.id.as_ref()==Some(id)).count();
             if warnings>0 {ui.same_line();ui.text(format!("[Warnings: {warnings}]"));}
@@ -742,6 +753,7 @@ fn render_managed(
                 .prepare_render(ui, window)
                 .map_err(|e| e.to_string())?;
         }
+        let imgui_started = super::addon_perf::enabled().then(std::time::Instant::now);
         let mut renderer = renderer.borrow_mut();
         #[cfg(test)]
         if fault == Some(RenderFault::RendererConsumer) {
@@ -769,6 +781,9 @@ fn render_managed(
         renderer
             .render(frame, &mut pass, extent)
             .map_err(|e| e.to_string())?;
+        if let Some(started) = imgui_started {
+            super::addon_perf::add_imgui(started.elapsed());
+        }
         #[cfg(test)]
         if fault == Some(RenderFault::AfterRender) {
             return Err("injected post-render failure".into());
@@ -835,6 +850,34 @@ mod tests {
     }
 
     #[test]
+    fn round4b_first_start_copies_legacy_journal_without_overwrite() {
+        let mods = Scratch::new();
+        let config = Scratch::new();
+        let original = config.0.join("journal.json");
+        let text = format!("{{\"payload\":\"{}\"}}", "x".repeat(1024 * 1024 + 64));
+        fs::write(&original, &text).unwrap();
+        let paths = Paths::select(mods.0.clone(), None, Some(config.0.clone()), None);
+        let _runtime = Runtime::new(paths.clone());
+        let key = Storage::key_for_addon_id("eqoa_creature_journal");
+        let target = config
+            .0
+            .join("addons")
+            .join(format!("{key}-files/files/data/journal.json"));
+        assert_eq!(fs::read_to_string(&target).unwrap(), text);
+        assert_eq!(fs::read_to_string(&original).unwrap(), text);
+        fs::write(&target, "{\"new\":{}}").unwrap();
+        let _runtime = Runtime::new(paths.clone());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "{\"new\":{}}");
+        fs::remove_file(&target).unwrap();
+        let _runtime = Runtime::new(paths);
+        assert!(
+            !target.exists(),
+            "a one-time migration must not resurrect a deleted journal"
+        );
+        assert_eq!(fs::read_to_string(&original).unwrap(), text);
+    }
+
+    #[test]
     fn device_recovery_keeps_paths_server_and_open_intent_but_releases_graphics() {
         let root = Scratch::new();
         let config = Scratch::new();
@@ -861,7 +904,7 @@ mod tests {
     /// flush the mod's changed option to the profile before the GPU objects go,
     /// and the replacement runtime must read that option back on its new device.
     #[test]
-    fn device_recovery_flushes_a_changed_mod_option_and_the_new_runtime_reads_it_back() {
+    fn round4_device_recovery_flushes_json_and_releases_views_claims_guides_and_options() {
         let instance = wgpu::Instance::default();
         let adapter = match pollster::block_on(instance.request_adapter(&Default::default())) {
             Ok(a) => a,
@@ -877,6 +920,9 @@ mod tests {
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let root = Scratch::new();
         let config = Scratch::new();
+        let mut p = crate::play::Play::bundled_ui_fixture();
+        p.map.mini.up = true;
+        p.forge_snapshot(None);
         // The mod's option is 'default' until its 3rd frame, then 'changed'.
         // Load restores a saved option; Save reports the option and how many
         // times this Lua state was asked to save (a second shutdown would
@@ -888,6 +934,12 @@ mod tests {
                 registered=true
                 option='default'
                 saves=0
+                held=assert(eqoa.map.view{})
+                assert(eqoa.input.claim_pointer{x=1,y=1,width=10,height=10})
+                assert(eqoa.map.set_guide{world_id=0,entity_id=2002})
+                eqoa.events.on('disabling',function()
+                    assert(eqoa.files.save_json_async('journal.json',{stage=42,payload=string.rep('x',14*1024*1024-128)}))
+                end)
                 UiForge.RegisterCallback(UiForge.CallbackType.Load,function(t)
                     if t and t.option then option=t.option end
                 end)
@@ -899,7 +951,26 @@ mod tests {
             if frames==3 then option='changed' end
         "#,
         );
+        let manifest = root.0.join("a/mod.json");
+        let mut meta: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        meta["capabilities"] = serde_json::json!(["large_data"]);
+        fs::write(&manifest, serde_json::to_vec(&meta).unwrap()).unwrap();
         let paths = Paths::select(root.0.clone(), None, Some(config.0.clone()), None);
+        let discovered = discover(&root.0).addons.remove(0);
+        assert_eq!(
+            super::super::host::Host::for_addon(&discovered)
+                .unwrap()
+                .lua
+                .set_memory_limit(128 * 1024 * 1024)
+                .unwrap(),
+            128 * 1024 * 1024
+        );
+        let journal = Storage::new(Some(config.0.clone()))
+            .data_dir(&discovered)
+            .unwrap()
+            .unwrap()
+            .join("files/data/journal.json");
         let addon_key = Storage::key(&discover(&root.0).addons.remove(0)).unwrap();
         let saved_addon = || {
             super::super::named_profiles::Store::new(Some(config.0.clone()))
@@ -960,11 +1031,26 @@ mod tests {
         let mut old = Runtime::new(paths.clone());
         old.launch_headless(&device, &queue, format).unwrap();
         frames(&mut old, 3);
+        assert!(super::super::map_views::held_count() > 0);
+        assert!(super::super::pointer_api::claim_count() > 0);
+        assert!(super::super::guides::guide_count() > 0);
         assert!(
             saved_addon().is_none(),
             "nothing is flushed while the old runtime is still running"
         );
         let mut next = old.for_new_device();
+        let doc: serde_json::Value = serde_json::from_slice(
+            &fs::read(&journal).expect("runtime shutdown flushes JSON before returning"),
+        )
+        .unwrap();
+        assert_eq!(doc["stage"], 42);
+        assert_eq!(
+            doc["payload"].as_str().unwrap().len(),
+            14 * 1024 * 1024 - 128
+        );
+        assert_eq!(super::super::map_views::held_count(), 0);
+        assert_eq!(super::super::pointer_api::claim_count(), 0);
+        assert_eq!(super::super::guides::guide_count(), 0);
         let flushed =
             saved_addon().expect("device recovery must flush the old runtime's addon state");
         assert_eq!(field(&flushed, "option"), "changed", "flushed: {flushed}");
@@ -1815,6 +1901,83 @@ mod tests {
         );
 
         manager.shutdown();
+    }
+
+    #[test]
+    fn round4b_fix_existing_profile_enables_packaged_map_mods_and_keeps_manual_off() {
+        use super::super::named_profiles::{Document, Store};
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let root = Scratch::new();
+        let config = Scratch::new();
+        let store = Store::new(Some(config.0.clone()));
+        store.create("Default", &Document::empty()).unwrap();
+        let ids = [
+            "eqoa_creature_journal",
+            "eqoa_map_search",
+            "eqoa_round_minimap",
+        ];
+        // Part C's minimap joins this same check as soon as it is packaged.
+        let mut installed = Vec::new();
+        for file in crate::fork_ext::bundled::EMBEDDED_FILES {
+            if ids.contains(&file.package) {
+                let path = root.0.join(file.path);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, file.data).unwrap();
+                if file.path.ends_with("/mod.json") {
+                    installed.push(file.package);
+                }
+            }
+        }
+        assert!(installed.contains(&ids[0]) && installed.contains(&ids[1]));
+        let paths = Paths::select(root.0.clone(), None, Some(config.0.clone()), None);
+        let mut runtime = Runtime::new(paths.clone());
+        runtime
+            .launch_headless(&device, &queue, wgpu::TextureFormat::Rgba8Unorm)
+            .unwrap();
+        let Some(Graphics::Managed(active)) = runtime.graphics.as_mut() else {
+            panic!("managed runtime missing")
+        };
+        for id in &installed {
+            assert!(
+                active
+                    .manager
+                    .entries()
+                    .iter()
+                    .find(|e| e.metadata.id == *id)
+                    .unwrap()
+                    .enabled_intent,
+                "{id} missing from an old profile must be on"
+            );
+        }
+        runtime.shutdown();
+        let mut doc = store.read("Default").unwrap();
+        for id in &installed {
+            doc.enabled.insert(Storage::key_for_addon_id(id), false);
+        }
+        store.write("Default", &doc).unwrap();
+        let mut runtime = Runtime::new(paths);
+        runtime
+            .launch_headless(&device, &queue, wgpu::TextureFormat::Rgba8Unorm)
+            .unwrap();
+        let Some(Graphics::Managed(active)) = runtime.graphics.as_ref() else {
+            panic!("managed runtime missing")
+        };
+        for id in &installed {
+            assert!(
+                !active
+                    .manager
+                    .entries()
+                    .iter()
+                    .find(|e| e.metadata.id == *id)
+                    .unwrap()
+                    .enabled_intent,
+                "{id}: manual Off must persist"
+            );
+        }
+        runtime.shutdown();
     }
 
     #[test]

@@ -18,6 +18,13 @@ fn ready() -> Play {
 // Shared bundled-UI fixture: populate the native client structures, then use
 // exactly the cached projection that Play supplies to the addon manager.
 impl Play {
+    /// Tells the API that entity slot `slot` changed, as the session's packet handling does.
+    pub(crate) fn entity_slot_changed(&self, slot: usize) {
+        api_capture::updates::capture(self, &api_capture::updates::Kind::Entity(slot), None);
+    }
+    pub(crate) fn bundled_ui_walker() -> crate::walker::Walker {
+        perf_review_walker()
+    }
     pub(crate) fn bundled_ui_fixture() -> Self {
         let mut p = ready();
         super::api_capture::updates::inactive();
@@ -1513,7 +1520,7 @@ fn live_regression_extended_carousel_keeps_stock_forge_and_native_bar_indices() 
     .unwrap();
 }
 #[test]
-fn group_capture_excludes_player_and_inactive_slots_before_lua() {
+fn round4b_gate_group_excludes_player_and_keeps_inactive_members_unpositioned() {
     let mut p = ready();
     p.session.self_id = Some(0x100);
     p.group.in_group = true;
@@ -1540,7 +1547,7 @@ fn group_capture_excludes_player_and_inactive_slots_before_lua() {
     ];
     p.forge_snapshot(None);
     let host = Host::new().unwrap();
-    host.execute("local m=eqoa.group.get().members;assert(#m==1 and m[1].id==0x200);assert(m[1].position.x==1);assert(eqoa.player.get().position==nil)").unwrap();
+    host.execute("local m=eqoa.group.get().members;assert(#m==2 and m[1].id==0x200 and m[2].id==0x300);assert(m[1].position.x==1);assert(m[2].position==nil and not m[2].active);assert(eqoa.player.get().position==nil)").unwrap();
     p.group.in_group = false;
     super::api_capture::updates::inactive();
     p.forge_snapshot(None);
@@ -1747,14 +1754,14 @@ fn addon_actions_use_live_camera_assist_and_summary_overlay_gates() {
     for case in 0..7 {
         p.mode = 0;
         p.map.open = false;
-        p.map.search.open = false;
+        crate::fork_ext::addons::input::reset_input_state();
         p.search.open = false;
         p.typing = None;
         p.death = None;
         match case {
             0 => p.mode = 13,
             1 => p.map.open = true,
-            2 => p.map.search.open = true,
+            2 => crate::fork_ext::addons::input::testing_text_capture(true),
             3 => p.search.open = true,
             4 => p.typing = Some(String::new()),
             5 => p.death = Some(crate::death::DeathCam::new([0.; 3], [0., 0., 1.], [0.; 3])),
@@ -1821,4 +1828,497 @@ fn mana_subscription_follows_enabled_mod_and_its_saved_switch_both_directions() 
         sends = p.session.sends_lost;
     }
     options::reset_in_memory();
+}
+
+#[test]
+fn map_state_comes_from_play_and_changed_event_has_negative_control() {
+    let mut p = ready();
+    p.map = crate::map::testing::up((640, 448));
+    let h = Host::new().unwrap();
+    h.execute("maps=0;eqoa.events.on('map.changed',function(e) maps=maps+1;last=e.data.after end)")
+        .unwrap();
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    native_events::dispatch(&h).unwrap();
+    h.execute("local m=assert(eqoa.map.get());assert(m.world_id==0 and m.revision>0);assert(m.bounds.x_min==2000 and m.bounds.z_max==34000);assert(m.waypoint==nil);assert(maps==1)").unwrap();
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(maps==1)").unwrap();
+    p.map = crate::map::Map::default();
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(maps==2 and last.bounds==nil)").unwrap();
+    CORE.with(|c| c.borrow_mut().reset("test"));
+    h.execute("local m,e=eqoa.map.get();assert(m==nil and e.code=='not_in_world')")
+        .unwrap();
+}
+
+#[test]
+fn map_markers_use_native_quest_cache_and_filter_other_worlds() {
+    let mut p = ready();
+    p.map.quests.set(&[
+        net::session::QuestMark {
+            kind: 1,
+            world: 0,
+            x: 123.0,
+            z: 456.0,
+            npc: "Quest giver".into(),
+            quests: vec![],
+        },
+        net::session::QuestMark {
+            kind: 2,
+            world: 1,
+            x: 10.0,
+            z: 20.0,
+            npc: "Other world".into(),
+            quests: vec![],
+        },
+    ]);
+    p.map = crate::map::testing::up((640, 448));
+    // Restoring native quests after replacing the map with its calibrated fixture.
+    p.map.quests.set(&[
+        net::session::QuestMark {
+            kind: 1,
+            world: 0,
+            x: 123.0,
+            z: 456.0,
+            npc: "Quest giver".into(),
+            quests: vec![],
+        },
+        net::session::QuestMark {
+            kind: 2,
+            world: 1,
+            x: 10.0,
+            z: 20.0,
+            npc: "Other world".into(),
+            quests: vec![],
+        },
+    ]);
+    p.map.community.marks.push(crate::map::community::Mark {
+        id: 5,
+        world: 0,
+        at: [71.0, 72.0],
+        name: "Community camp".into(),
+        note: "Native cache".into(),
+        kind: crate::map::community::Kind::Camp,
+    });
+    p.map
+        .set_group_waypoint(crate::map::group_waypoint::GroupMark {
+            world: 0,
+            at: [81.0, 82.0],
+            from: "Group leader".into(),
+        });
+    assert!(p.map.click([320.0, 224.0], false));
+    let h = Host::new().unwrap();
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    h.execute(r#"
+        local marks=assert(eqoa.map.markers(0));local quest=false;local camp=false;local town=false;local coach=false;local community=false;local waypoint=false;local group=false
+        for _,m in ipairs(marks) do
+            assert(m.name~='Other world')
+            if m.kind=='quest' then quest=m.name=='Quest giver' and m.x==123 and m.z==456 end
+            if m.kind=='camp' then camp=m.level_min~=nil and m.level_max~=nil end
+            town=town or m.kind=='town';coach=coach or m.kind=='coach'
+            community=community or m.kind=='community' and m.name=='Community camp' and m.label=='Native cache'
+            waypoint=waypoint or m.kind=='waypoint'
+            group=group or m.kind=='group_waypoint' and m.name=='Group leader' and m.x==81
+            assert(not pcall(function() m.x=0 end))
+        end
+        assert(quest and camp and town and coach and community and waypoint and group)
+        for _,m in ipairs(eqoa.map.markers(1)) do assert(m.name~='Quest giver') end
+        local m,e=eqoa.map.markers('bad');assert(m==nil and e.code=='invalid_argument')
+    "#).unwrap();
+}
+
+#[test]
+fn round4_map_view_projects_native_player_scale_and_rejects_pregame() {
+    let mut p = Play::bundled_ui_fixture();
+    p.map.mini.up = true;
+    p.map.mini.scale = 6.0;
+    p.map.mini.frame_px = [474.0, 50.0, 586.0, 162.0];
+    let mut walker = perf_review_walker();
+    walker.cam.walk.phys.position.x.0 = 100.0;
+    walker.cam.walk.phys.position.y.0 = 50.0;
+    walker.cam.walk.phys.position.z.0 = 200.0;
+    let h = Host::new().unwrap();
+    p.forge_snapshot(Some(&walker));
+    h.execute("v=assert(eqoa.map.view{size=200});local x,y,inside=v.project(268,200);assert(math.abs(x-150)<0.01 and math.abs(y-100)<0.01 and inside);local x,z=v.unproject(100,100);assert(math.abs(x-100)<0.01 and math.abs(z-200)<0.01);local _,_,inside=v.project(99999,200);assert(not inside);local bad,e=eqoa.map.view{center={x=0,z=0}};assert(bad==nil and e.code=='invalid_argument')").unwrap();
+    h.execute("local x,z=v.unproject(180,180);local _,_,inside=v.project(x,z);assert(not inside,'square corner is outside the visible circle')").unwrap();
+    CORE.with(|c| c.borrow_mut().reset("test"));
+    h.execute("local v,e=eqoa.map.view{};assert(v==nil and e.code=='not_in_world')")
+        .unwrap();
+}
+
+#[test]
+fn round4_live_map_refreshes_waypoints_markers_projection_and_window() {
+    let mut p = Play::bundled_ui_fixture();
+    p.map = crate::map::testing::up((640, 448));
+    p.map.open = false;
+    p.map.mini.up = true;
+    p.map.mini.scale = 6.0;
+    let mut w = perf_review_walker();
+    w.cam.walk.phys.position.x.0 = 100.0;
+    w.cam.walk.phys.position.z.0 = 200.0;
+    let h = Host::new().unwrap();
+    h.execute("changes=0;eqoa.events.on('map.changed',function() changes=changes+1 end)")
+        .unwrap();
+    api_capture::updates::refresh(&p, Some(&w));
+    native_events::dispatch(&h).unwrap();
+    h.execute(
+        "v=assert(eqoa.map.view{size=200});revision=eqoa.map.get().revision;assert(changes==1)",
+    )
+    .unwrap();
+    p.map
+        .set_group_waypoint(crate::map::group_waypoint::GroupMark {
+            world: 0,
+            at: [81., 82.],
+            from: "Leader".into(),
+        });
+    p.map.quests.set(&[net::session::QuestMark {
+        kind: 1,
+        world: 0,
+        x: 12.,
+        z: 34.,
+        npc: "Live quest".into(),
+        quests: vec![],
+    }]);
+    p.map.mini.scale = 12.0;
+    w.cam.walk.phys.position.x.0 = 500.0;
+    crate::fork_ext::addons::hud_layout::set_window_size(1920, 1080);
+    api_capture::updates::refresh(&p, Some(&w));
+    native_events::dispatch(&h).unwrap();
+    h.execute("local x,z=v.unproject(100,100);assert(math.abs(x-500)<0.01 and math.abs(z-200)<0.01);local found=false;for _,m in ipairs(eqoa.map.markers(0)) do found=found or m.name=='Live quest' end;assert(found)").unwrap();
+    h.execute("local x,y=v.project(836,200);assert(math.abs(x-150)<0.01 and math.abs(y-100)<0.01,'live zoom uses the new scale')").unwrap();
+    let before = CORE.with(|c| c.borrow().view.minimap.unwrap());
+    assert_eq!(before.window, (1920, 1080));
+    crate::settings::save_hud_layout("minimap r -30 t 20\n");
+    crate::hudlayout::testing_reset();
+    api_capture::updates::refresh(&p, Some(&w));
+    let after = CORE.with(|c| c.borrow().view.minimap.unwrap());
+    assert_ne!(
+        before.outer, after.outer,
+        "Move HUD updates the live capture UV rectangle"
+    );
+    crate::settings::save_hud_layout("");
+    crate::hudlayout::testing_reset();
+    p.map.open = true;
+    assert!(p.map.click([320., 224.], false));
+    p.map.open = false;
+    api_capture::updates::refresh(&p, Some(&w));
+    native_events::dispatch(&h).unwrap();
+    h.execute(
+        "assert(eqoa.map.get().waypoint~=nil and eqoa.map.get().revision>revision);before=changes",
+    )
+    .unwrap();
+    api_capture::updates::refresh(&p, Some(&w));
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(changes==before)").unwrap();
+    crate::fork_ext::addons::hud_layout::set_window_size(640, 448);
+}
+
+#[test]
+fn round4_guide_follows_live_entity_and_lost_is_owner_scoped() {
+    let mut p = Play::bundled_ui_fixture();
+    let h = Host::new().unwrap();
+    let other = Host::new().unwrap();
+    api_capture::updates::refresh(&p, None);
+    h.execute("lost=0;eqoa.events.on('guide.lost',function(e) lost=lost+1;assert(e.data.entity_id==2002) end);assert(eqoa.map.set_guide{world_id=0,entity_id=2002,dots={{x=10,z=20}},label='snake'})").unwrap();
+    other
+        .execute("lost=0;eqoa.events.on('guide.lost',function() lost=lost+1 end)")
+        .unwrap();
+    p.entities.slots[1].as_mut().unwrap().pos = [300.0, 0.0, 400.0];
+    api_capture::updates::capture(&p, &api_capture::updates::Kind::Entity(1), None);
+    api_capture::updates::refresh(&p, None);
+    assert_eq!(
+        crate::fork_ext::addons::guides::target_for(
+            crate::fork_ext::addons::native_events::bus(&h.lua)
+                .borrow()
+                .vm
+        ),
+        Some([300.0, 400.0])
+    );
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(lost==0)").unwrap();
+    p.entities.slots[1] = None;
+    api_capture::updates::capture(&p, &api_capture::updates::Kind::Entity(1), None);
+    api_capture::updates::refresh(&p, None);
+    native_events::dispatch(&h).unwrap();
+    native_events::dispatch(&other).unwrap();
+    h.execute("assert(lost==1);assert(eqoa.map.clear_guide())")
+        .unwrap();
+    other.execute("assert(lost==0)").unwrap();
+}
+
+#[test]
+fn round4_point_guide_rejects_bad_coordinates_and_ends_on_world_loss() {
+    let mut p = Play::bundled_ui_fixture();
+    let h = Host::new().unwrap();
+    p.forge_snapshot(None);
+    h.execute("lost=false;eqoa.events.on('guide.lost',function(e) assert(e.data.reason=='world_left');lost=true end);local v,e=eqoa.map.set_guide{world_id=0,x=0/0,z=0};assert(v==nil and e.code=='invalid_argument');assert(eqoa.map.set_guide{world_id=0,x=1,z=2})").unwrap();
+    p.quit = true;
+    p.forge_snapshot(None);
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(lost)").unwrap();
+    assert_eq!(crate::fork_ext::addons::guides::guide_count(), 0);
+}
+
+#[test]
+fn round4_addon_input_and_render_continue_over_map_but_not_chat_or_search() {
+    let mut p = ready();
+    p.map.open = true;
+    assert!(
+        crate::fork_ext::is_plain_play(Some(&mut p)),
+        "open map permits addon key/text route"
+    );
+    assert!(p.map.open, "eligibility must not close native map");
+    p.search.open = true;
+    assert!(!crate::fork_ext::is_plain_play(Some(&mut p)));
+    p.search.open = false;
+    p.mode = 2;
+    assert!(
+        !crate::fork_ext::is_plain_play(Some(&mut p)),
+        "chat mode blocks addon input"
+    );
+    p.mode = 0;
+    let h = Host::new().unwrap();
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    native_events::bus(&h.lua).borrow_mut().once_mode = true;
+    h.execute("rendered=0;assert(eqoa.events.on('render',function() rendered=rendered+1 end));assert(eqoa.input.capture_text(true))").unwrap();
+    native_events::render(&h).unwrap();
+    h.execute("assert(rendered==1);assert(eqoa.input.capture_text(false))")
+        .unwrap();
+}
+#[test]
+fn round4_entity_journal_flags_are_protocol_values_and_corpse_delta_is_not_hp() {
+    let mut p = Play::bundled_ui_fixture();
+    let e = p.entities.slots[1].as_mut().unwrap();
+    e.kind = net::entity::TYPE_CREATURE;
+    e.p19 = 0;
+    e.world = 0;
+    e.p18 = 0;
+    e.creature.as_mut().unwrap().p255 = 0;
+    p.entities.slots[2] = Some(net::entity::Entity {
+        id: 3003,
+        world: 1,
+        ..Default::default()
+    });
+    let h = Host::new().unwrap();
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    h.execute("local e=eqoa.entities.find(2002);assert(e.world_id==0 and e.is_creature and not e.corpse and e.search_flags==0 and e.name=='Moss Snake' and e.level==15);local e=eqoa.entities.find(3003);assert(e.world_id==1 and not e.is_creature and not e.corpse and e.search_flags==nil);changed=false;eqoa.events.on('entity.changed',function(e) if e.data.after.id==2002 then changed=e.data.after.corpse and e.data.after.search_flags==7 end end)").unwrap();
+    let event = net::session::Event::State {
+        channel: 1,
+        data: vec![],
+    };
+    let change = begin_game_event(&p, &event);
+    let e = p.entities.slots[1].as_mut().unwrap();
+    e.p18 |= 2;
+    e.creature.as_mut().unwrap().p255 = 7;
+    end_game_event(&p, change);
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(changed);changed=false;assert(eqoa.entities.find(2002).corpse)")
+        .unwrap();
+    let change = begin_game_event(&p, &event);
+    end_game_event(&p, change);
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(not changed)").unwrap();
+}
+
+#[test]
+fn round4_entity_dots_are_plain_columns_of_the_creatures_the_native_minimap_draws() {
+    use crate::fork_ext::addons::native_core::{CORE, Core};
+    CORE.with(|c| *c.borrow_mut() = Core::default());
+    let h = Host::new().unwrap();
+    h.execute("local d,e=eqoa.entities.dots();assert(d==nil and e.code=='not_in_world','dots need a loaded world')")
+        .unwrap();
+    let mut p = Play::bundled_ui_fixture();
+    let creature = |id: u32, name: &str, p19: u8, at: [f32; 3]| net::entity::Entity {
+        id,
+        kind: net::entity::TYPE_CREATURE,
+        p19,
+        pos: at,
+        creature: Some(net::entity::Creature {
+            name: name.into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut live = creature(2002, "Moss Snake", 180, [10.0, 0.0, 20.0]);
+    live.actor_pos = [11.0, 0.0, 21.0];
+    p.entities.slots[1] = Some(live);
+    let mut corpse = creature(3003, "Someone", 180, [1.0, 0.0, 1.0]);
+    corpse.p18 = 2;
+    p.entities.slots[2] = Some(corpse);
+    p.entities.slots[3] = Some(creature(3004, "Inactive", 0, [2.0, 0.0, 2.0]));
+    p.entities.slots[4] = Some(creature(3005, "   ", 180, [3.0, 0.0, 3.0]));
+    p.entities.slots[5] = Some(net::entity::Entity {
+        id: 3006,
+        p19: 180,
+        pos: [4.0, 0.0, 4.0],
+        creature: Some(net::entity::Creature {
+            name: "Rock".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    p.entities.slots[6] = Some(creature(3007, "Bat", 90, [30.0, 0.0, 40.0]));
+    let mut view = p.native_view(None);
+    view.minimap = Some(crate::fork_ext::addons::map_views::Projection {
+        center: [0.0, 0.0],
+        scale: 1.0,
+        outer: [0.0, 0.0, 100.0, 100.0],
+        inner: [0.0, 0.0, 100.0, 100.0],
+        window: (100, 100),
+    });
+    CORE.with(|c| c.borrow_mut().publish(view));
+    h.execute(
+        r#"
+        local d = eqoa.entities.dots()
+        assert(#d.ids == 2, 'a dot per drawn creature only: live ones, not corpses, unnamed or scenery')
+        assert(d.ids[1] == 2002 and d.xs[1] == 11.0 and d.zs[1] == 21.0, 'the place its dot is drawn')
+        local q = {x=68.32,y=79.52,scale_x=1,scale_y=1,center_x=56,center_y=56,radius=50,reach=4}
+        local picked = eqoa.entities.pick_dot(q)
+        assert(picked.id == 2002 and picked.world_x == 11 and picked.world_z == 21, 'pick current dot with native projection')
+        q.exclude = {2002}
+        assert(eqoa.entities.pick_dot(q) == nil, 'excluded dots cannot be picked')
+        q.exclude = {}; q.x = 0; q.y = 0
+        assert(eqoa.entities.pick_dot(q) == nil, 'nothing outside hit radius')
+        q.scale_x = 0
+        local bad, err = eqoa.entities.pick_dot(q)
+        assert(bad == nil and err.code == 'invalid_argument')
+        assert(d.ids[2] == 3007 and d.xs[2] == 30.0 and d.zs[2] == 40.0, 'the place it stands when it has no actor place')
+        assert(getmetatable(d) == nil and getmetatable(d.ids) == nil, 'bare values, not guarded records')
+        d.ids[1] = 1
+        assert(eqoa.entities.dots().ids[1] == 2002, 'a caller edits only its own columns')
+    "#,
+    )
+    .unwrap();
+    // The target shows its dot even at no health; a move is read where it is now, a despawn is gone.
+    p.target = 3004;
+    let view = p.native_view(None);
+    CORE.with(|c| c.borrow_mut().publish(view));
+    let e = p.entities.slots[1].as_mut().unwrap();
+    e.actor_pos = [0.0; 3];
+    e.pos = [50.0, 0.0, 60.0];
+    p.entities.slots[6] = None;
+    // Motion can advance without rebuilding the frozen entity snapshot. The per-frame
+    // refresh must update the compact dots even while that snapshot is reused.
+    api_capture::updates::refresh(&p, None);
+    h.execute(
+        r#"
+        local d = eqoa.entities.dots()
+        assert(#d.ids == 2 and d.ids[2] == 3004, 'the target has a dot even at zero health')
+        assert(d.xs[1] == 50.0 and d.zs[1] == 60.0, 'the very next frame is where it is now')
+    "#,
+    )
+    .unwrap();
+}
+
+/// With no addon enabled the fork's per-frame hooks in the play phase stay lazy: nothing is captured,
+/// queued or built (the work counters stay at zero), whatever the scene. Under `R4P_PLAY_SAMPLES` (a
+/// small count by default; the timing batch raises it) each hook's mean cost is printed.
+#[test]
+fn round4_play_phase_hooks_do_nothing_when_no_addon_is_enabled() {
+    use crate::fork_ext::addons::native_core::{self, CORE};
+    let mut p = Play::bundled_ui_fixture();
+    let walker = Play::bundled_ui_walker();
+    native_core::manager_demand(false);
+    native_core::fixture_demand(false);
+    assert!(!native_core::capture_requested(), "no addon wants the capture");
+    let me = walker.cam.walk.phys.position;
+    for i in 0..200u32 {
+        let a = i as f32 * 2.4;
+        let at = [me.x.0 + a.cos() * 40.0, me.y.0, me.z.0 + a.sin() * 40.0];
+        p.entities.slots.push(Some(net::entity::Entity {
+            id: 9000 + i,
+            kind: net::entity::TYPE_CREATURE,
+            p19: 255,
+            pos: at,
+            actor_pos: at,
+            creature: Some(net::entity::Creature { name: format!("Busy {i}"), level: 5, ..Default::default() }),
+            ..Default::default()
+        }));
+    }
+    let lib = esf::Library::new();
+    let n: usize = std::env::var("R4P_PLAY_SAMPLES").ok().and_then(|v| v.parse().ok()).unwrap_or(20);
+    let time = |label: &str, f: &mut dyn FnMut()| {
+        f(); // the first call builds what later ones reuse (an atlas, a library)
+        let t = std::time::Instant::now();
+        for _ in 0..n {
+            f();
+        }
+        eprintln!("R4P play hook (addons off) {label}: {:.4} ms/frame", t.elapsed().as_secs_f64() * 1e3 / n as f64);
+    };
+    time("forge_snapshot", &mut || {
+        let s = p.forge_snapshot(Some(&walker));
+        assert!(s.capture_pending, "the inactive snapshot says capture is pending");
+    });
+    time("begin/end_game_event", &mut || {
+        let e = net::session::Event::State { channel: 1, data: vec![] };
+        let c = begin_game_event(&p, &e);
+        end_game_event(&p, c);
+    });
+    time("frame_library", &mut || frame_library(&p, &lib, Some(&walker)));
+    time("begin_iteration", &mut || begin_iteration(&mut p, true));
+    time("health_redraw", &mut || {
+        health_redraw(&mut p, true, false);
+    });
+    time("health_hidden", &mut || {
+        health_hidden(&p);
+    });
+    // nothing was built for the API: no entity records, no queued updates
+    let (entities, queued) = CORE.with(|c| (c.borrow().view.entities.len(), native_core::deferred_len()));
+    assert_eq!((entities, queued), (0, 0), "no capture ran");
+}
+
+/// An entity update finds its record through the place remembered for it, and a wrong place (a removal
+/// shifts the ones after it) costs only a scan: the list stays right, each id once, the moved creature at
+/// its new position, the removed one gone. Also `changed_fields` names exactly the keys that differ, sorted.
+#[test]
+fn entity_updates_keep_the_list_right_through_removals_and_the_changed_keys_are_exact() {
+    use crate::fork_ext::addons::native_core::{self, CORE};
+    let mut p = Play::bundled_ui_fixture();
+    let _ = p.forge_snapshot(None);
+    let creature = |id: u32, x: f32| net::entity::Entity {
+        id,
+        kind: net::entity::TYPE_CREATURE,
+        p19: 255,
+        pos: [x, 0.0, 0.0],
+        actor_pos: [x, 0.0, 0.0],
+        creature: Some(net::entity::Creature { name: format!("C{id}"), level: 3, ..Default::default() }),
+        ..Default::default()
+    };
+    p.entities.slots.resize(40, None);
+    for i in 0..5u32 {
+        p.entities.slots[30 + i as usize] = Some(creature(7000 + i, i as f32));
+        p.entity_slot_changed(30 + i as usize);
+    }
+    native_core::flush_deferred();
+    let ids = || CORE.with(|c| c.borrow().view.entities.iter().filter_map(|e| e["id"].as_u64()).filter(|i| *i >= 7000).collect::<Vec<_>>());
+    assert_eq!(ids(), [7000, 7001, 7002, 7003, 7004]);
+    // the middle one leaves: the ones after it move up a place in the list
+    p.entities.slots[32] = None;
+    p.entity_slot_changed(32);
+    native_core::flush_deferred();
+    assert_eq!(ids(), [7000, 7001, 7003, 7004]);
+    // the last one moves: found although its remembered place is now one too far
+    p.entities.slots[34].as_mut().unwrap().pos = [99.0, 0.0, 0.0];
+    p.entities.slots[34].as_mut().unwrap().actor_pos = [99.0, 0.0, 0.0];
+    p.entity_slot_changed(34);
+    native_core::flush_deferred();
+    let x_of = |id: u64| CORE.with(|c| c.borrow().view.entities.iter().find(|e| e["id"] == id).map(|e| e["position"]["x"].as_f64().unwrap()));
+    assert_eq!(x_of(7004), Some(99.0));
+    assert_eq!(x_of(7003), Some(3.0), "its neighbour is untouched");
+    assert_eq!(x_of(7002), None);
+    assert_eq!(ids(), [7000, 7001, 7003, 7004], "no duplicate was made");
+    // the changed keys: the union of both records' keys that differ, sorted
+    use serde_json::json;
+    let changed = native_core::changed_fields;
+    assert_eq!(changed(&json!({"b": 1, "a": 1, "c": 1}), &json!({"b": 2, "a": 1, "d": 4})), ["b", "c", "d"]);
+    assert_eq!(changed(&json!(null), &json!({"x": 1, "a": null})), ["x"], "a null is the same as a missing key");
+    assert_eq!(changed(&json!([1]), &json!({"x": 1})), ["records"]);
+    assert!(changed(&json!({"a": 1}), &json!({"a": 1})).is_empty());
 }

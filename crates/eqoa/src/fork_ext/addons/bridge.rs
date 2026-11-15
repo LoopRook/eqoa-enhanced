@@ -766,6 +766,7 @@ impl Bridge {
                 Ok(())
             })?,
         )?;
+        super::addon_perf::wrap_imgui(lua, &imgui)?;
         lua.globals().set("ImGui", imgui.clone())?;
         let flags = lua.create_table()?;
         flags.set("NoTitleBar", sys::ImGuiWindowFlags_NoTitleBar)?;

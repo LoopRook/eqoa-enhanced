@@ -537,7 +537,7 @@ mod auto_create_tests {
         let readme = mods.join("README.txt");
         assert!(readme.is_file(), "README.txt must be written in newly created folder");
         let text = fs::read_to_string(&readme).unwrap();
-        assert!(text.contains("Options -> Extended -> Mods & Addons -> Addon Manager"));
+        assert!(text.contains("Options -> Extended -> Enhanced -> Addon Manager"));
         assert!(text.contains("addons_error.log"));
 
         let _ = fs::remove_dir_all(&parent);

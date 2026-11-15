@@ -6,11 +6,40 @@ use serde_json::{Value as Json, json};
 fn vec3(p: [f32; 3]) -> Json {
     json!({"x":p[0],"y":p[1],"z":p[2]})
 }
+fn actor_position(e: &net::entity::Entity) -> [f32; 3] {
+    if e.actor_pos.iter().all(|x| x.is_finite()) && e.actor_pos.iter().any(|&x| x != 0.) {
+        e.actor_pos
+    } else {
+        e.pos
+    }
+}
 fn stats(s: &[i32; 29]) -> Json {
     json!({"strength":s[0],"stamina":s[1],"agility":s[2],"dexterity":s[3],"wisdom":s[4],"intelligence":s[5],"charisma":s[6]})
 }
 fn valid_id(id: u32) -> Option<u32> {
     (!matches!(id, 0 | u32::MAX)).then_some(id)
+}
+/// What the minimap draws, from the slots rather than from the records: a hover of the round
+/// minimap walks these every frame, and a guarded record per creature is far too much.
+fn minimap_dots(play: &Play) -> Vec<(u32, f32, f32)> {
+    play.entities
+        .slots
+        .iter()
+        .flatten()
+        .filter(|e| {
+            e.kind == net::entity::TYPE_CREATURE
+                && e.p18 & 2 == 0
+                && (e.p19 != 0 || Some(e.id) == valid_id(play.target))
+        })
+        .filter_map(|e| {
+            let name = e.creature.as_ref()?.name.trim();
+            if name.is_empty() {
+                return None;
+            }
+            let at = actor_position(e);
+            Some((e.id, at[0], at[2]))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -149,8 +178,9 @@ impl Play {
             } else {
                 self.session.power_of(e.id).map(|p| ee::div(p as f32, 255.0))
             };
-            json!({"id":e.id,"name":c.map_or("",|c|c.name.as_str()),"level":c.map(|c|c.level),"position":vec3(e.pos),"hp_fraction":(e.p19!=0 || Some(e.id)==valid_id(self.target)).then(||ee::div(e.p19 as f32,255.0)),"power":power_val,"kind":match code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":code,"target_id":c.and_then(|c|valid_id(c.target)),"status_flags":c.map(|c|c.flags262),"poisoned":c.map(|c|c.flags262&4!=0),"diseased":c.map(|c|c.flags262&8!=0),"disposition":disposition,"disposition_name":disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
+            json!({"world_id":e.world,"entity_type":e.kind,"is_creature":e.kind==net::entity::TYPE_CREATURE,"corpse":e.p18&2!=0,"search_flags":c.map(|c|c.p255),"id":e.id,"name":c.map_or("",|c|c.name.as_str()),"level":c.map(|c|c.level),"position":vec3(e.pos),"actor_position":vec3(actor_position(e)),"hp_fraction":(e.p19!=0 || Some(e.id)==valid_id(self.target)).then(||ee::div(e.p19 as f32,255.0)),"power":power_val,"kind":match code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":code,"target_id":c.and_then(|c|valid_id(c.target)),"status_flags":c.map(|c|c.flags262),"poisoned":c.map(|c|c.flags262&4!=0),"diseased":c.map(|c|c.flags262&8!=0),"disposition":disposition,"disposition_name":disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
         }).collect::<Vec<_>>();
+        let dots = minimap_dots(self);
         let fighting = id
             .and_then(|id| self.entities.slots.iter().flatten().find(|e| e.id == id))
             .and_then(|e| e.creature.as_ref())
@@ -162,7 +192,7 @@ impl Play {
         let members = if self.group.in_group {
             self.group.members[..self.group.count()]
                 .iter()
-                .filter(|m| Some(m.id) != id && m.active)
+                .filter(|m| Some(m.id) != id)
                 .map(|m|{
             let actor=self.entities.slots.iter().flatten().find(|e|e.id==m.id);
             let power_val = self.session.power_of(m.id).map(|p| ee::div(p as f32, 255.0));
@@ -202,9 +232,25 @@ impl Play {
             in_world: true,
             phase,
             world_id: Some(self.world_id() as i32),
-            player,
+            player: player.clone(),
             player_stats,
+            map: self.map.api_state(
+                self.world_id() as i32,
+                &player["location"],
+                self.words.as_ref(),
+            ),
+            minimap: player["position"]["x"]
+                .as_f64()
+                .zip(player["position"]["z"].as_f64())
+                .and_then(|(x, z)| {
+                    self.map.api_minimap_transform(
+                        [x as f32, z as f32],
+                        crate::fork_ext::addons::hud_layout::get_window_size(),
+                    )
+                }),
+            map_markers: self.map.api_markers(),
             entities,
+            dots,
             entity_slots: self
                 .entities
                 .slots

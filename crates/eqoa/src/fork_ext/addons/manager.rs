@@ -219,6 +219,7 @@ impl Manager {
             return;
         }
         self.frame_number = self.frame_number.saturating_add(1);
+        let _prologue = super::addon_perf::section("mgr.prologue");
         if !snapshot.in_game && self.snapshot.in_game {
             super::native_core::CORE
                 .with(|c| c.borrow_mut().publish(super::native_core::View::default()));
@@ -265,6 +266,7 @@ impl Manager {
                         && (bootstrap_due || staged_next)
                 }),
         );
+        drop(_prologue);
         let mut entries = std::mem::take(&mut self.entries);
         let mut count = entries.iter().filter(|e| e.instance.is_some()).count();
         for entry in &mut entries {
@@ -308,17 +310,22 @@ impl Manager {
                 let first = !instance.initialized;
                 // An entry that throws can still have registered cleanup callbacks.
                 instance.initialized = true;
-                match instance
+                let timing = super::addon_perf::lua_scope(&entry.metadata.id);
+                let called = instance
                     .bridge
-                    .invoke(|| instance.host.frame_entry(&instance.function))
-                {
+                    .invoke(|| instance.host.frame_entry(&instance.function));
+                drop(timing);
+                match called {
                     Ok(()) => {
                         entry.status = Status::Enabled;
                         if first {
                             self.load(entry, true);
                         }
                         if let Some(i) = entry.instance.as_ref() {
-                            if let Err(e) = i.bridge.invoke(|| i.host.finish_frame(enabling)) {
+                            let timing = super::addon_perf::lua_scope(&entry.metadata.id);
+                            let finished = i.bridge.invoke(|| i.host.finish_frame(enabling));
+                            drop(timing);
+                            if let Err(e) = finished {
                                 self.fail(entry, "events", e.to_string(), true);
                             }
                         }
@@ -328,6 +335,7 @@ impl Manager {
                 self.collect_native_settings(entry);
             }
             if let Some(i) = entry.instance.as_ref() {
+                let _drains = super::addon_perf::section("mgr.drains");
                 for message in i.bridge.drain_diagnostics() {
                     self.diagnostic(Some(&entry.metadata.id), "imgui", message);
                 }
@@ -391,6 +399,7 @@ impl Manager {
         }
         self.awaiting_render = false;
         super::visibility::publish_claims(&self.hud_claims.borrow());
+        super::addon_perf::tick();
     }
     pub fn shutdown(&mut self) {
         super::native_core::manager_demand(false);
@@ -989,6 +998,9 @@ impl Manager {
 mod tests {
     include!("manager_profiles_tests.rs");
     include!("manager_scope_recovery_tests.rs");
+    include!("map_mod_manager_tests.rs");
+    include!("round_minimap_manager_tests.rs");
+    include!("perf_round_tests.rs");
     use super::*;
     use dear_imgui_rs::Context;
     use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo};

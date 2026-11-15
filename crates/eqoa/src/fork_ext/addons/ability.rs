@@ -199,7 +199,12 @@ impl Default for AbilitiesSnapshot {
     }
 }
 
+/// An ability's object: the same table while its snapshot is unchanged (`object_cache`).
 pub(crate) fn create_ability_object(lua: &Lua, snap: &AbilitySnapshot) -> LuaResult<Table> {
+    super::object_cache::memo(lua, "ability", snap.id as u64, snap, || build_ability_object(lua, snap))
+}
+
+fn build_ability_object(lua: &Lua, snap: &AbilitySnapshot) -> LuaResult<Table> {
     let t = lua.create_table()?;
     let valid = snap.valid;
     t.set("IsValid", lua.create_function(move |_, ()| Ok(valid))?)?;
@@ -347,7 +352,12 @@ pub(crate) fn create_ability_object(lua: &Lua, snap: &AbilitySnapshot) -> LuaRes
     Ok(t)
 }
 
+/// An item's object: the same table while its snapshot is unchanged (`object_cache`).
 pub(crate) fn create_item_object(lua: &Lua, snap: &ItemSnapshot) -> LuaResult<Table> {
+    super::object_cache::memo(lua, "item", snap.slot_id as u64, snap, || build_item_object(lua, snap))
+}
+
+fn build_item_object(lua: &Lua, snap: &ItemSnapshot) -> LuaResult<Table> {
     let t = lua.create_table()?;
     let name = snap.name;
     let name_len = snap.name_len as usize;
@@ -956,7 +966,7 @@ pub fn install_ability_bar_adapter(host: &Host) -> LuaResult<()> {
     )?;
 
     // Helper: create AbilityBarSlot object
-    let make_slot_object = |lua: &Lua,
+    let build_slot_object = |lua: &Lua,
                             slot: AbilityBarSlotSnapshot,
                             snap_abilities: &AbilitiesSnapshot|
      -> LuaResult<Table> {
@@ -1038,6 +1048,27 @@ pub fn install_ability_bar_adapter(host: &Host) -> LuaResult<()> {
         )?;
 
         Ok(t)
+    };
+    // The same object while the slot and what it points at are unchanged (`object_cache`).
+    let make_slot_object = move |lua: &Lua,
+                                 slot: AbilityBarSlotSnapshot,
+                                 snap_abilities: &AbilitiesSnapshot|
+          -> LuaResult<Table> {
+        let ability = (slot.source_type == ABILITY_SOURCE_TAG
+            && slot.source_index >= 1
+            && (slot.source_index as usize) <= snap_abilities.ability_count as usize)
+            .then(|| snap_abilities.abilities[slot.source_index as usize - 1]);
+        let item = (slot.source_type == ITEM_SOURCE_TAG
+            && (slot.source_index as usize) < snap_abilities.items.len())
+        .then(|| snap_abilities.items[slot.source_index as usize])
+        .filter(|it| it.populated && it.slot_id != 0);
+        super::object_cache::memo(
+            lua,
+            "slot",
+            ((slot.source_type as u64) << 32) | slot.source_index as u64,
+            &(slot, ability, item),
+            || build_slot_object(lua, slot, snap_abilities),
+        )
     };
 
     // GetAbilitySlot(bar_index, slot_index)
@@ -1370,6 +1401,7 @@ mod tests {
             api: Some("eqoa/1".to_string()),
             entry_mode: Default::default(),
             requested_capabilities: vec![],
+            extensions: Default::default(),
             initially_enabled: true,
             mods_root: Some(root.to_path_buf()),
         }
@@ -1514,6 +1546,56 @@ mod tests {
             "#,
         );
         chunk.exec().unwrap();
+    }
+
+    /// An ability, an item and a bar slot are tables of closures; the adapter hands out the same table
+    /// while the snapshot it was made from is unchanged and a new one, with the new values, the moment
+    /// it differs (what the Forge UIs' per-frame `GetAbility` calls were paying to rebuild).
+    #[test]
+    fn forge_adapter_objects_are_reused_only_while_their_snapshot_is_unchanged() {
+        let dir = temp_test_dir("object_reuse");
+        let addon = test_addon(&dir);
+        let host = Host::for_addon(&addon).unwrap();
+        let mut name = [0u8; 32];
+        name[..4].copy_from_slice(b"Heal");
+        let mut snap = AbilitiesSnapshot::default();
+        snap.ability_count = 1;
+        snap.abilities[0] = AbilitySnapshot { id: 101, level: 5, name, name_len: 4, valid: true, ..AbilitySnapshot::default() };
+        snap.bars[0].slot_count = 5;
+        snap.bars[0].slots[0] = AbilityBarSlotSnapshot { source_type: ABILITY_SOURCE_TAG, source_index: 1, ability_icon_ref: 7 };
+        host.snapshot.set(Snapshot { in_game: true, abilities: snap, ..Default::default() });
+        host.lua
+            .load(
+                r#"
+                AB = require("frontiers_forge.ability_bar")
+                a1 = AB.GetAbility(0, 0); a2 = AB.GetAbility(0, 0)
+                s1 = AB.GetAbilitySlot(0, 0); s2 = AB.GetAbilitySlot(0, 0)
+                assert(rawequal(a1, a2), "an unchanged ability is the same object")
+                assert(rawequal(s1, s2), "an unchanged slot is the same object")
+                assert(a1:GetName() == "Heal" and a1:GetLevel() == 5 and not a1:IsOnCooldown())
+                assert(s1:GetIconRef() == 7)
+                "#,
+            )
+            .exec()
+            .unwrap();
+        // the ability's cooldown starts, and the slot's icon changes: new objects with the new values
+        snap.abilities[0].cooldown_lockout_ms = 500;
+        snap.bars[0].slots[0].ability_icon_ref = 9;
+        host.snapshot.set(Snapshot { in_game: true, abilities: snap, ..Default::default() });
+        host.lua
+            .load(
+                r#"
+                local b = AB.GetAbility(0, 0)
+                assert(not rawequal(a1, b), "a changed ability is a new object")
+                assert(b:IsOnCooldown() and b:GetCooldownLockoutMs() == 500, "with the new cooldown")
+                assert(a1:IsOnCooldown() == false, "the old object still says what it did")
+                local t = AB.GetAbilitySlot(0, 0)
+                assert(not rawequal(s1, t) and t:GetIconRef() == 9, "a changed slot is a new object")
+                assert(rawequal(b, AB.GetAbility(0, 0)), "and it is reused from then on")
+                "#,
+            )
+            .exec()
+            .unwrap();
     }
 
     #[test]

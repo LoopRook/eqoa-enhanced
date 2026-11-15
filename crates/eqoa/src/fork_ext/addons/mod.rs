@@ -21,7 +21,11 @@ pub(crate) fn take_close_options_on_open() -> bool {
     CLOSE_OPTIONS_ON_OPEN.swap(false, std::sync::atomic::Ordering::AcqRel)
 }
 pub(crate) mod ability;
+pub(crate) mod addon_perf;
+mod object_cache;
+mod record_raw;
 pub(crate) mod actions;
+mod async_json;
 pub(crate) mod bit;
 pub(crate) mod chat;
 pub(crate) mod chat_history;
@@ -32,21 +36,29 @@ pub(crate) mod discovery;
 pub(crate) mod effects;
 pub(crate) mod entity;
 mod file_io;
+mod exchange;
+mod player_files;
+mod map_migration;
+mod option_buttons;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod fonts;
 #[cfg(test)]
 mod gpu_test;
 pub(crate) mod group;
+pub(crate) mod guides;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod health;
 pub(crate) mod host;
-pub(crate) mod hud_layout;
 pub(crate) mod hud_layer;
+pub(crate) mod hud_layout;
+mod hud_textures;
 #[cfg(test)]
 mod icon_tests;
 pub(crate) mod icons;
 pub(crate) mod input;
+mod json_save;
 pub(crate) mod manager;
+pub(crate) mod map_views;
 pub(crate) mod named_profiles;
 pub(crate) mod native;
 pub(crate) mod native_core;
@@ -57,11 +69,18 @@ pub(crate) mod native_settings;
 mod native_state;
 #[cfg(test)]
 mod native_tests;
+#[cfg(test)]
+mod perf_delta_tests;
+#[cfg(test)]
+mod perf_delta_event_tests;
 pub(crate) mod options;
 pub(crate) mod package;
 pub(crate) mod player;
+pub(crate) mod pointer_api;
 mod profile;
 pub(crate) mod quest_log;
+#[cfg(test)]
+mod round_3_picture_tests;
 mod sandbox;
 mod spike;
 pub(crate) mod storage;
@@ -69,8 +88,6 @@ mod textures;
 pub(crate) mod weapon_sets;
 #[cfg(test)]
 mod weapon_sets_tests;
-#[cfg(test)]
-mod round_3_picture_tests;
 #[cfg(test)]
 mod wereoxxs_test;
 #[cfg(test)]

@@ -167,9 +167,21 @@ pub(crate) fn route_mod_key(
     plain_play: bool,
     keyboard: bool,
 ) {
-    if !synthetic && !repeat && plain_play && !keyboard && !is_text_capture_active() {
+    let editor = is_text_capture_active();
+    if !synthetic && plain_play && (editor || (!repeat && !keyboard)) {
         if let Some(name) = crate::binds::name_of(key) {
-            emit_named_key_event(&name, down);
+            let text = if editor && down {
+                match key {
+                    Key::Character(s) => Some(s.to_string()),
+                    Key::Named(NamedKey::Space) => Some(" ".into()),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            super::native_core::defer(256 + text.as_ref().map_or(0, String::len), move |c| {
+                c.emit("input.key", serde_json::json!({"key":name,"down":down,"repeat":repeat,"synthetic":false,"text":text}));
+            });
         }
     }
 }
@@ -221,6 +233,19 @@ pub fn is_text_capture_active() -> bool {
             .retain(|_, t| now.duration_since(*t).as_secs_f32() <= TEXT_CAPTURE_LAPSE_SECS);
         state.text_capture = !state.text_capture_owners.is_empty();
         state.text_capture
+    })
+}
+
+/// Native editors retain their own controls, but typed keys must not activate
+/// another mod's binds or the legacy Forge chat owner's ordinary hotkeys.
+pub(crate) fn mod_binding_allowed(vm: u64) -> bool {
+    if !is_text_capture_active() {
+        return true;
+    }
+    let owner = format!("\u{1f}{vm}:native:text");
+    INPUT_STATE.with(|state| {
+        let state = state.borrow();
+        state.text_capture_owners.len() == 1 && state.text_capture_owners.contains_key(&owner)
     })
 }
 
@@ -962,6 +987,7 @@ mod tests {
             api: Some("eqoa/1".to_string()),
             entry_mode: Default::default(),
             requested_capabilities: vec![],
+            extensions: Default::default(),
             initially_enabled: true,
             mods_root: Some(root.to_path_buf()),
         }
@@ -1244,4 +1270,16 @@ mod tests {
         "#;
         lua.load(back_in_game).exec().unwrap();
     }
+}
+
+#[cfg(test)]
+pub(crate) fn testing_text_capture(active: bool) {
+    INPUT_STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        if active {
+            s.text_capture_owners.insert("test".into(), Instant::now());
+        } else {
+            s.text_capture_owners.remove("test");
+        }
+    });
 }

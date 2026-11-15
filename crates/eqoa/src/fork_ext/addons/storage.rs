@@ -587,7 +587,7 @@ pub(crate) fn atomic_replace(target: &Path, bytes: &[u8]) -> std::io::Result<()>
 }
 
 // Private fault seam: production passes std::fs::rename. No public IO framework.
-fn atomic_replace_with(
+pub(super) fn atomic_replace_with(
     target: &Path,
     bytes: &[u8],
     rename: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
@@ -659,6 +659,7 @@ mod tests {
                 api: None,
                 entry_mode: Default::default(),
                 requested_capabilities: vec![],
+                extensions: Default::default(),
                 initially_enabled: true,
                 mods_root: Some(self.0.clone()),
             }
@@ -709,6 +710,7 @@ mod tests {
             api: None,
             entry_mode: Default::default(),
             requested_capabilities: vec![],
+            extensions: Default::default(),
             initially_enabled: true,
             mods_root: Some(scratch1.0.clone()),
         };
@@ -724,6 +726,7 @@ mod tests {
             api: None,
             entry_mode: Default::default(),
             requested_capabilities: vec![],
+            extensions: Default::default(),
             initially_enabled: true,
             mods_root: Some(scratch2.0.clone()),
         };
@@ -923,6 +926,7 @@ mod tests {
             api: None,
             entry_mode: Default::default(),
             requested_capabilities: vec![],
+            extensions: Default::default(),
             initially_enabled: true,
             mods_root: Some(mods_dir.clone()),
         };
@@ -938,6 +942,7 @@ mod tests {
             api: None,
             entry_mode: Default::default(),
             requested_capabilities: vec![],
+            extensions: Default::default(),
             initially_enabled: true,
             mods_root: Some(mods_dir.clone()),
         };
@@ -987,6 +992,7 @@ mod tests {
             api: None,
             entry_mode: Default::default(),
             requested_capabilities: vec![],
+            extensions: Default::default(),
             initially_enabled: true,
             mods_root: Some(sib_a.join("mods")),
         };
@@ -1002,6 +1008,7 @@ mod tests {
             api: None,
             entry_mode: Default::default(),
             requested_capabilities: vec![],
+            extensions: Default::default(),
             initially_enabled: true,
             mods_root: Some(sib_b.join("mods")),
         };
@@ -1038,6 +1045,7 @@ mod tests {
             api: None,
             entry_mode: Default::default(),
             requested_capabilities: vec![],
+            extensions: Default::default(),
             initially_enabled: true,
             mods_root: Some(current.join("mods")),
         };
@@ -1053,6 +1061,7 @@ mod tests {
             api: None,
             entry_mode: Default::default(),
             requested_capabilities: vec![],
+            extensions: Default::default(),
             initially_enabled: true,
             mods_root: Some(current.join("mods")),
         };
@@ -1154,6 +1163,7 @@ mod tests {
             api: None,
             entry_mode: Default::default(),
             requested_capabilities: vec![],
+            extensions: Default::default(),
             initially_enabled: true,
             mods_root: Some(scratch.0.clone()),
         };
@@ -1169,6 +1179,7 @@ mod tests {
             api: None,
             entry_mode: Default::default(),
             requested_capabilities: vec![],
+            extensions: Default::default(),
             initially_enabled: true,
             mods_root: Some(scratch.0.clone()),
         };

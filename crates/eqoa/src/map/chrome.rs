@@ -17,7 +17,7 @@ pub const BUTTONS: [(&str, i32); 6] = [("Close", key::TRIANGLE), ("+", key::R1),
 /// The legend for the pad: the inline glyphs (△ 65, ✕ 66, □ 67, ○ 68, L1
 /// 185, R1 187, L3 214) and what each does.
 const PAD_LEGEND: [(i32, &str); 11] = [(65, "Close"), (66, "Center"), (67, "Waypoint"), (68, "Markers"), (189, "Towns"), (190, "Places"), (214, "Suggest"), (185, ""), (187, "Zoom"), (-1, "Sticks, drag, pinch: pan and zoom"), (-1, "Tap: waypoint")];
-pub(crate) const KEY_LEGEND: [&str; 9] = ["M Close", "Space Center", "+ - or wheel Zoom", "Arrows, WASD or drag Pan", "Click or Q Waypoint", "X Markers", "T Towns", "P Places", "N Suggest"];
+const KEY_LEGEND: [&str; 9] = ["M Close", "Space Center", "+ - or wheel Zoom", "Arrows, WASD or drag Pan", "Click or Q Waypoint", "X Markers", "T Towns", "P Places", "N Suggest"];
 /// The legend while the list of places is up (`places`), in place of the
 /// map's: how it is moved through, taken from and closed.
 const PAD_LEGEND_PLACES: [(i32, &str); 3] = [(-1, "Up, down: a place"), (66, "Show it"), (65, "Close the list")];
@@ -27,7 +27,7 @@ const KEY_LEGEND_PLACES: [&str; 3] = ["Up, down: a place", "Enter or click Show 
 /// with Shift.
 const PAD_LEGEND_GROUP: (i32, &str) = (67, "Waypoint, held: the group's");
 const TAP_LEGEND_GROUP: &str = "Tap: waypoint, hold: the group's";
-pub(crate) const KEY_LEGEND_GROUP: &str = "O, Q held or Shift+click Group waypoint";
+const KEY_LEGEND_GROUP: &str = "O, Q held or Shift+click Group waypoint";
 /// A GM's, while the server offers travel by the map (`Map::travel`): the
 /// click that asks for it, ⌘ on a Mac.
 #[cfg(target_os = "macos")]
@@ -35,17 +35,12 @@ pub const LEGEND_TRAVEL: &str = "Cmd+click Travel here";
 #[cfg(not(target_os = "macos"))]
 pub const LEGEND_TRAVEL: &str = "Ctrl+click Travel here";
 
-use crate::fork_ext::map::wrap_keyboard_label;
-#[cfg(test)]
-use crate::fork_ext::map::keyboard_legend;
-
-
-pub const NAME: [f32; 4] = super::theme::TEXT;
+pub const NAME: [f32; 4] = [1.0, 0.97, 0.85, 1.0];
 /// The community list's answer under the title: the game's gold words.
 const NOTICE: [f32; 4] = [1.0, 0.82, 0.25, 1.0];
 /// A button's words while what it shows is hidden.
 const DIM: [f32; 4] = [0.55, 0.53, 0.48, 1.0];
-
+const PANEL: i32 = 61;
 
 /// What the chrome shows.
 pub struct Chrome {
@@ -92,7 +87,7 @@ const CURRENT: [f32; 4] = [0.6, 0.9, 1.0, 1.0];
 
 /// A panel the size of `w` x `h` at `at` (VIWndGoto's).
 pub fn panel(vui: &Vui, r: &mut dyn Raster, at: [i32; 2], w: i32, h: i32) {
-    let _=vui;super::theme::panel(r,[at[0],at[1],at[0]+w,at[1]+h]);
+    vui.stretch_blit_ex(r, PANEL, at, [w, h], 3, 0.75);
 }
 
 
@@ -168,8 +163,6 @@ pub fn clear_band(rects: &[[f32; 4]], corners: [[f32; 2]; 2]) -> [f32; 2] {
     [top, foot]
 }
 
-pub fn search_anchor(r:&dyn Raster,vui:&Vui,c:&Chrome)->i32 {clear_band(&footprint(r,vui,c),c.corners)[0].ceil()as i32+6}
-
 /// Draws the chrome over everything; where its buttons went, with their
 /// keys. In a window too narrow for a row, the title goes under the buttons
 /// and the legend onto as many lines as it needs, from the foot up.
@@ -185,7 +178,7 @@ pub fn draw(r: &mut dyn Raster, vui: &Vui, c: &Chrome) -> Vec<Button> {
         let bw = (r.string_width(&s).max(0) + 16).max(line + 4);
         let at = [x - bw, tl[1] + m];
         panel(vui, r, at, bw, line);
-        vui.draw_centered_string_ex(r, &s, at[0] + bw / 2, at[1] + line / 2, NAME, 0, false);
+        vui.draw_centered_string_ex(r, &s, at[0] + bw / 2, at[1] + line / 2, NAME, 0, true);
         hits.push(([at[0], at[1], at[0] + bw, at[1] + line], k));
         x = at[0] - 6;
     }
@@ -208,7 +201,7 @@ pub fn draw(r: &mut dyn Raster, vui: &Vui, c: &Chrome) -> Vec<Button> {
         y += line + 4;
     }
     panel(vui, r, [tl[0] + m, y], tw + 12, line);
-    vui.draw_string_ex(r, &s, tl[0] + m + 6, y + 3, NAME, false);
+    vui.draw_string_ex(r, &s, tl[0] + m + 6, y + 3, NAME, true);
     let mut y = y;
     let lines = [c.progress.map(|(done, of)| format!("Drawing the map: {done} of {of} areas")), c.pointer.clone()].into_iter().flatten().map(|w| (w, NAME));
     for (words, color) in lines.chain(c.notice.clone().map(|n| (n, NOTICE))) {
@@ -280,31 +273,8 @@ pub fn draw(r: &mut dyn Raster, vui: &Vui, c: &Chrome) -> Vec<Button> {
     if c.quests.is_some() && c.places.is_none() {
         // after the towns' key (R3's glyph, 215, inline)
         let at = pieces.iter().position(|p| p.1.ends_with("Towns")).map_or(pieces.len(), |i| i + 1);
-            pieces.insert(at, (215, "Quests"));
+        pieces.insert(at, if c.keyboard { (-1, "J Quests") } else { (215, "Quests") });
     }
-    let keyboard = if c.keyboard && c.places.is_none() {
-        crate::fork_ext::map::keyboard_pieces(c.group, c.quests.is_some(), c.travel)
-    } else { Vec::new() };
-    if c.keyboard && c.places.is_none() {
-        pieces = keyboard.iter().map(|s| (-1, s.as_str())).collect();
-    }
-    let wrapped: Vec<(i32, String)> = pieces
-        .into_iter()
-        .flat_map(|(glyph, label)| {
-            if glyph < 0 {
-                wrap_keyboard_label(r, label, (avail - 12).max(1))
-                    .into_iter()
-                    .map(|part| (-1, part))
-                    .collect()
-            } else {
-                vec![(glyph, label.to_string())]
-            }
-        })
-        .collect();
-    let pieces: Vec<(i32, &str)> = wrapped
-        .iter()
-        .map(|(glyph, label)| (*glyph, label.as_str()))
-        .collect();
     let width = |r: &dyn Raster, (g, s): (i32, &str)| if g >= 0 { vui.entry(g).uv1[0] + 2 } else { 0 } + r.string_width(&wide(s)).max(0) + 12;
     let mut lines: Vec<Vec<(i32, &str)>> = vec![Vec::new()];
     let mut used = 0;
@@ -329,7 +299,7 @@ pub fn draw(r: &mut dyn Raster, vui: &Vui, c: &Chrome) -> Vec<Button> {
                 x += e.uv1[0] + 2;
             }
             let s = wide(label);
-            vui.draw_string_ex(r, &s, x, y + 3, NAME, false);
+            vui.draw_string_ex(r, &s, x, y + 3, NAME, true);
             x += r.string_width(&s).max(0) + 12;
         }
     }
@@ -339,114 +309,6 @@ pub fn draw(r: &mut dyn Raster, vui: &Vui, c: &Chrome) -> Vec<Button> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_claimed_shifted_alternate_is_not_advertised_for_zoom() {
-        let mut b = crate::binds::Binds::default();
-        b.bind_key(crate::binds::row_named("map").unwrap(), "+");
-        assert!(matches!(b.alias("+"), crate::binds::Alias::To("m")));
-        assert!(matches!(b.alias("="), crate::binds::Alias::Same));
-        let hints = keyboard_legend(&b, false, false);
-        assert!(hints.iter().any(|s| s == "+ Close"), "{hints:?}");
-        assert!(
-            hints.iter().any(|s| s == "= - or wheel Zoom"),
-            "zoom must show its surviving primary key: {hints:?}"
-        );
-    }
-
-    #[test]
-    fn keyboard_hints_follow_the_controls_bindings() {
-        let mut b = crate::binds::Binds::default();
-        let defaults = keyboard_legend(&b, false, false);
-        assert_eq!(defaults, KEY_LEGEND.map(str::to_string));
-        for (action, key) in [
-            ("map", "v"),
-            ("talk", "u"),
-            ("map_group_waypoint", "f10"),
-            ("autorun", "y"),
-            ("tell", "o"),
-            ("minimap", "f2"),
-            ("look_left", "f4"),
-            ("map_in", "insert"),
-            ("map_out", "delete"),
-            ("walk_forward", "8"),
-        ] {
-            b.bind_key(crate::binds::row_named(action).unwrap(), key);
-        }
-        let hints = keyboard_legend(&b, true, true);
-        for expected in [
-            "V Close",
-            "Click or U Waypoint",
-            "F10, U held or Shift+click Group waypoint",
-            "Y Markers",
-            "O Towns",
-            "F2 Suggest",
-            "F4 Quests",
-            "Insert Delete or wheel Zoom",
-        ] {
-            assert!(
-                hints.iter().any(|s| s == expected),
-                "missing {expected}: {hints:?}"
-            );
-        }
-        assert!(
-            hints.iter().any(|s| s.contains("8/S/A/D")),
-            "panning uses the moved movement keys: {hints:?}"
-        );
-        assert!(
-            !hints.iter().any(|s| s == "M Close" || s == "J Quests"),
-            "defaults are no longer advertised"
-        );
-        b.bind_key(crate::binds::row_named("map").unwrap(), "");
-        assert!(
-            keyboard_legend(&b, false, false)
-                .iter()
-                .any(|s| s == "Unbound Close")
-        );
-    }
-
-    #[test]
-    fn center_legend_follows_the_space_row_after_attack_moves_to_g() {
-        use crate::binds::{Binds, KeyEdge, Sent};
-        let mut binds = Binds::default();
-        let stock = keyboard_legend(&binds, true, false);
-        assert!(stock.iter().any(|s| s == "Space Center"));
-        assert!(stock.iter().any(|s| s == KEY_LEGEND_GROUP));
-        assert_eq!(super::super::keyboard("g"), None);
-        binds.bind_key(crate::binds::row_named("jump").unwrap(), "y");
-        let rebound = keyboard_legend(&binds, true, false);
-        assert!(rebound.iter().any(|s| s == "Y Center"));
-        let mut edge = KeyEdge::default();
-        let Some(Sent::Key(name)) = edge.key("y", true, false, false, &binds) else {
-            panic!("the rebound center key must reach the map");
-        };
-        assert_eq!(
-            super::super::keyboard(&name),
-            Some((key::CROSS, super::super::Hold::Once))
-        );
-    }
-
-    #[test]
-    fn rebound_map_key_dispatches_the_advertised_action_but_typing_stays_text() {
-        use crate::binds::{Binds, KeyEdge, Sent};
-        let mut b = Binds::default();
-        b.bind_key(crate::binds::row_named("map").unwrap(), "v");
-        let mut edge = KeyEdge::default();
-        let Some(Sent::Key(key_name)) = edge.key("v", true, false, false, &b) else {
-            panic!("the rebound map key must reach the keyboard dispatch");
-        };
-        assert_eq!(
-            super::super::keyboard(&key_name),
-            Some((key::TRIANGLE, super::super::Hold::Once))
-        );
-        assert!(
-            edge.key("m", true, false, false, &b).is_none(),
-            "old map key is released"
-        );
-        let mut typing = KeyEdge::default();
-        assert!(matches!(typing.key("v", true, false, true, &b), Some(Sent::Key(k)) if k == "v"));
-    }
-
     use crate::pointer::testing::{NullRaster, mid, vui};
 
     /// In a phone's tall window (frame units 640 wide) the legend breaks into
@@ -463,7 +325,7 @@ mod tests {
             fn stretch_blit(&mut self, _: u32, _: u32, at: [i32; 2], size: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {
                 self.0.push([at[0], at[1], at[0] + size[0], at[1] + size[1]]);
             }
-            fn fill_fan(&mut self, color: [f32; 4], c: [[i32; 2]; 4]) { if color==super::super::theme::SURFACE {self.0.push([c[0][0],c[0][1],c[2][0],c[2][1]]);} }
+            fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
             fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
             fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) {}
             fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) {}
@@ -494,47 +356,6 @@ mod tests {
         let one: Vec<&[i32; 4]> = w.0.iter().filter(|p| p[1] > 380).collect();
         assert_eq!(one.len(), 1, "a wide window's one line");
         assert!(one[0][2] - one[0][0] > 640 - 16, "the control: wider than the narrow window");
-        crate::settings::testing::reset(true);
-        let mut b = crate::binds::Binds::default();
-        for (id, name) in [
-            ("menu_up", "backspace"),
-            ("menu_down", "pagedown"),
-            ("menu_prev", "pageup"),
-            ("menu_next", "delete"),
-            ("walk_forward", "insert"),
-            ("walk_back", "space"),
-            ("walk_left", "enter"),
-            ("walk_right", "home"),
-        ] {
-            b.bind_key(crate::binds::row_named(id).unwrap(), name);
-        }
-        crate::settings::set_binds(b);
-        let mut rebound = Panels::default();
-        draw(
-            &mut rebound,
-            &v,
-            &Chrome {
-                keyboard: true,
-                group: true,
-                quests: Some(true),
-                ..tall
-            },
-        );
-        crate::settings::testing::reset(false);
-        let foot: Vec<_> = rebound.0.iter().filter(|p| p[1] > 450).collect();
-        assert!(
-            foot.iter().all(|p| p[2] <= 640 - 8 + 6),
-            "rebound keyboard labels fit: {foot:?}"
-        );
-    }
-
-    #[test]
-    fn search_toolbar_clears_coordinates_progress_and_notices() {
-        let c=Chrome{pointer:Some("x 25274, z 14430".into()),notice:Some("Marker sent for approval".into()),..chrome(true)};
-        let band=clear_band(&footprint(&NullRaster,&vui(),&c),c.corners);
-        assert!(search_anchor(&NullRaster,&vui(),&c)>=band[0].ceil()as i32+6,"toolbar must follow all header lines");
-        let empty=Chrome{progress:None,pointer:None,notice:None,..chrome(true)};
-        assert!(search_anchor(&NullRaster,&vui(),&empty)<search_anchor(&NullRaster,&vui(),&c));
     }
 
     fn chrome(keyboard: bool) -> Chrome {
@@ -549,9 +370,7 @@ mod tests {
     fn the_chrome_says_where_it_goes() {
         let c = chrome(true);
         let rects = footprint(&NullRaster, &vui(), &c);
-        let at = |x: f32, y: f32| {
-            rects.iter().any(|r| (r[0]..r[2]).contains(&x) && (r[1]..r[3]).contains(&y))
-        };
+        let at = |x: f32, y: f32| rects.iter().any(|r| (r[0]..r[2]).contains(&x) && (r[1]..r[3]).contains(&y));
         // the title's words at (-90, 11), "Close" right, "M Close" at the foot
         assert!(at(-80.0, 16.0) && at(730.0, 16.0) && at(-80.0, 430.0), "title, buttons, legend: {rects:?}");
         assert!(!at(320.0, 224.0), "nothing in the middle");
@@ -596,9 +415,7 @@ mod tests {
         let with = Chrome { notice: Some("Sent for a GM's approval.".into()), pointer: Some("x 1, z 2".into()), ..chrome(true) };
         let rects = footprint(&NullRaster, &vui(), &with);
         let without = footprint(&NullRaster, &vui(), &Chrome { pointer: Some("x 1, z 2".into()), ..chrome(true) });
-        let low = |rs: &[[f32; 4]]| {
-            rs.iter().filter(|r| r[0] < 0.0 && r[1] < 224.0).map(|r| r[3]).fold(0.0, f32::max)
-        };
+        let low = |rs: &[[f32; 4]]| rs.iter().filter(|r| r[0] < 0.0 && r[1] < 224.0).map(|r| r[3]).fold(0.0, f32::max);
         assert!(low(&rects) > low(&without) + 10.0, "a line more under the title: {} {}", low(&rects), low(&without));
         assert!(KEY_LEGEND.contains(&"N Suggest") && PAD_LEGEND.contains(&(214, "Suggest")));
         assert!(BUTTONS.contains(&("Suggest", key::L3)));

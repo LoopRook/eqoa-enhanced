@@ -7,26 +7,26 @@ use super::{Category, Note};
 use crate::settings::ClientOptions;
 use vi::ui::{Vui, wide};
 
-pub(super) const HUD_CATEGORY: Category = Category {
-    name: "Enhanced HUD",
-    items: &[2000, 2001, 2002, 2003, 2004, 2005],
-    note: Note::None,
-};
+/// The fork's one page, after upstream's last: the Enhanced HUD rows first, then the Mods & Addons
+/// rows (the page was two until 2026-11-13: the Options list ran off the screen).
 const fn categories<const M: usize>(upstream: &[Category]) -> [Category; M] {
     let n = upstream.len();
-    assert!(M == n + 2);
-    let mut all = [HUD_CATEGORY; M];
+    assert!(M == n + 1);
+    let mut all = [CATEGORY; M];
     let mut i = 0;
     while i < n {
         all[i] = upstream[i];
         i += 1;
     }
-    all[n] = HUD_CATEGORY;
-    all[n + 1] = CATEGORY;
+    all[n] = CATEGORY;
     all
 }
-const PAGES: [Category; super::CATEGORIES.len() + 2] = categories(super::CATEGORIES);
-const _: () = assert!(super::fits(&PAGES));
+const PAGES: [Category; super::CATEGORIES.len() + 1] = categories(super::CATEGORIES);
+// upstream's pages keep their own rule (none scrolls); the fork's page is taller than a game page
+// and drawn without its title bar (`WndOptions::page_window`)
+const _: () = assert!(super::fits(super::CATEGORIES));
+/// The rows of the Enhanced page ahead of the Mods & Addons rows: one per Enhanced HUD toggle.
+const HUD_ROWS: usize = 6;
 #[cfg(test)]
 thread_local! { static FORK_PAGES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 #[cfg(not(target_arch = "wasm32"))]
@@ -56,16 +56,11 @@ fn dynamic_hud_tables() -> (&'static [Category], &'static [(i32, &'static str)])
         if let Some((_, pages, items)) = cache.iter().find(|(k, _, _)| *k == active) {
             return (*pages, *items);
         }
-        let item_ids: &'static [i32] = Box::leak(
-            active
-                .iter()
-                .map(|(id, _)| *id)
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
-        );
         let mut pages_vec = PAGES.to_vec();
-        let hud_idx = pages_vec.len() - 2;
-        pages_vec[hud_idx].items = item_ids;
+        let hud_idx = pages_vec.len() - 1;
+        // the Enhanced HUD rows the active mods offer, then the Mods & Addons rows
+        let page: Vec<i32> = active.iter().map(|(id, _)| *id).chain(CATEGORY.items[HUD_ROWS..].iter().copied()).collect();
+        pages_vec[hud_idx].items = Box::leak(page.into_boxed_slice());
         let pages_slice: &'static [Category] = Box::leak(pages_vec.into_boxed_slice());
         let mut items_vec = ITEMS[..4].to_vec();
         for (id, label) in &active {
@@ -128,8 +123,14 @@ pub(super) const ITEMS: &[(i32, &str)] = &[
     (2005, "XP Details"),
 ];
 pub(super) const CATEGORY: Category = Category {
-    name: "Mods & Addons",
+    name: "Enhanced",
     items: &[
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
         1045,
         1051,
         1052,
@@ -149,6 +150,8 @@ pub(super) fn items() -> impl Iterator<Item = &'static (i32, &'static str)> {
 /// The fork's toggles: the server and the
 /// frame follow their setting as upstream's rows do.
 pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    if crate::fork_ext::addons::options::is_button(item) { return false; }
     match item {
         // Independent saved marker toggle, in addition to Quest Helper.
         1045 => c.quest_markers = !c.quest_markers,
@@ -163,6 +166,8 @@ pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
     true
 }
 pub(super) fn activate(item: i32) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    if crate::fork_ext::addons::options::activate_button(item) { return true; }
     match item {
         1051 => crate::fork_ext::mods::open_mods_folder(),
         1052 => {
@@ -177,6 +182,8 @@ pub(super) fn activate(item: i32) -> bool {
     true
 }
 pub(super) fn value_text(vui: &Vui, item: i32, c: &ClientOptions) -> Option<Vec<u16>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if crate::fork_ext::addons::options::is_button(item) { return Some(wide("Open")); }
     let on_off = |on| wide(vui.words.get(if on { 551 } else { 552 }, vui.language));
     Some(match item {
         1045 => on_off(c.quest_markers),
@@ -327,7 +334,13 @@ mod tests {
         let count = listed.len();
         listed.dedup();
         assert_eq!(listed.len(), count);
-        assert!(super::super::fits(pages()));
+        // upstream's pages fit as ever; the fork's one page is taller (HUD rows, then Mods & Addons rows)
+        let (fork, upstream_pages) = pages().split_last().unwrap();
+        assert!(super::super::fits(upstream_pages));
+        assert_eq!(fork.name, "Enhanced");
+        assert_eq!(fork.items.len(), if cfg!(target_arch = "wasm32") { 9 } else { 10 }, "six HUD rows and the Mods & Addons rows");
+        assert_eq!(pages().iter().filter(|c| c.name == "Enhanced HUD" || c.name == "Mods & Addons").count(), 0, "no second fork page");
+        assert!(!super::super::fits(pages()), "control: the fork's page is more than a game page's rows");
         assert!(
             items().all(|&(id, label)| !label.is_empty() && super::super::label_of(id) == label)
         );
@@ -363,7 +376,10 @@ mod tests {
             &mut ups,
         );
         let cats = pages();
-        let first = cats.len() - 2;
+        let first = cats.len() - 1;
+        assert_eq!(cats[first].name, "Enhanced", "one fork page, after upstream's last");
+        assert_eq!(&cats[first].items[..6], &[2000, 2001, 2002, 2003, 2004, 2005], "Enhanced HUD rows first");
+        assert_eq!(&cats[first].items[6..9], &[1045, 1051, 1052], "then the Mods & Addons rows");
         assert_eq!(cats[first - 1].name, "HUD Layout");
         assert_eq!(cats[first - 1].items, &[76, 77]);
         assert_eq!(cats[first - 2].name, "Chat");
@@ -383,6 +399,12 @@ mod tests {
                 &mut cues,
                 &mut ups,
             );
+            // the page and the list of pages stay on the 448-high screen (the list ran off it
+            // with two fork pages); the window past eight rows has no title bar
+            let (top, bottom) = (w.window2.top_left()[1], w.window2.top_left()[1] + w.window2.size[1]);
+            assert!(top >= 0 && bottom <= 448, "the page's window on the screen: {top}..{bottom}");
+            let list = w.window4.top_left()[1];
+            assert!(list >= 0 && list + w.window4.size[1] <= 448, "the list of pages on the screen: {list}");
             for &item in category.items {
                 w.draw(&vui, &mut NullRaster, &o, &mut ups);
                 assert_eq!(w.item, item);

@@ -3,11 +3,10 @@
 CLAUDE.md merge=ours
 # README.md is the fork's landing page (fork-owned); upstream edits theirs with most features.
 README.md merge=ours
-# The embedded NPC catalog must keep its exact bytes (pinned SHA-256) on every checkout.
-crates/eqoa/resources/map-data/map-entities.json -text
-
 # The bundled mods vendor tree must keep its exact bytes on every checkout.
 bundled-mods/** -text
+# The shared packaged catalogue is hash-pinned: keep its exact bytes too.
+mods/resources/map-entities.json -text
 
 # Shadow shader assembly matches LF-terminated source lines on every host.
 crates/render/src/*.wgsl text eol=lf

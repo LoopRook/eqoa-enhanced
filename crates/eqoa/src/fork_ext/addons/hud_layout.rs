@@ -29,7 +29,7 @@ impl Default for HudState {
     }
 }
 
-type LayoutKey = ((u32, u32), HudState, [[f32; 2]; 4]);
+type LayoutKey = ((u32, u32), HudState, [[f32; 2]; 5]);
 
 thread_local! {
     // JSON and Lua records stay reusable until a piece actually moves, the
@@ -140,8 +140,14 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
     let m = frame_metrics(window_size);
     let state = get_hud_state();
     use crate::hudlayout::Piece;
-    let shifts = [Piece::Player, Piece::Group, Piece::Target, Piece::Pet]
-        .map(|piece| crate::hudlayout::shift(piece, crate::hudlayout::Beyond::of(window_size)));
+    let shifts = [
+        Piece::Player,
+        Piece::Group,
+        Piece::Target,
+        Piece::Pet,
+        Piece::Minimap,
+    ]
+    .map(|piece| crate::hudlayout::shift(piece, crate::hudlayout::Beyond::of(window_size)));
     let key = (window_size, state, shifts);
     if let Some(value) = LAYOUT_CACHE.with(|c| {
         c.borrow()
@@ -157,6 +163,7 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
             Piece::Group => 1,
             Piece::Target => 2,
             Piece::Pet => 3,
+            Piece::Minimap => 4,
             _ => unreachable!("only the documented stock rectangles"),
         }];
         let (x, y) = (x + dx, y + dy);
@@ -191,6 +198,7 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
             "power": to_rect(crate::hudlayout::Piece::Player, 69.0, 46.0, 136.0, 8.0, "left", "top"),
             "exp": to_rect(crate::hudlayout::Piece::Player, 69.0, 56.0, 136.0, 8.0, "left", "top"),
         },
+        "minimap": to_rect(Piece::Minimap, crate::map::mini::FRAME[0] as f32, crate::map::mini::FRAME[1] as f32, (crate::map::mini::FRAME[2]-crate::map::mini::FRAME[0]) as f32, (crate::map::mini::FRAME[3]-crate::map::mini::FRAME[1]) as f32, "right", "top"),
         "group_members": members,
         "target": {
             "panel": to_rect(crate::hudlayout::Piece::Target, 20.0, 348.0, 174.0, 75.0, "left", "bottom"),
@@ -216,6 +224,7 @@ pub fn hud_element_visible(element: &str) -> bool {
     let v = super::visibility::effective_visibility();
     match element {
         "hud" => true,
+        "minimap" => crate::settings::minimap() && !v.minimap,
         "health" | "health_bar" => !v.health_bar,
         "power" | "power_bar" => !v.power_bar,
         "experience_main" | "exp" | "main_exp_bar" => !v.main_exp_bar,

@@ -592,7 +592,6 @@ mod tests {
         let mut cues = Vec::new();
         assert_eq!(ControlsPage::entries(), ROWS.len() as i32 + 1, "the rows and Defaults alone");
         let mut b = binds::Binds::default();
-        crate::fork_ext::bindpage::free_fixture_key(&mut b);
         let l3 = binds::bit_index(crate::input::bit::L3).unwrap();
         b.set_trigger(0, None, vec![Input::Key("y".into())]).unwrap();
         b.set_trigger(2, None, vec![Input::Key("y".into()), Input::Button(l3)]).unwrap();
@@ -641,8 +640,8 @@ mod tests {
         page.row = binds::row_named("hide_ui").unwrap() as i32;
         page.col = 0;
         page.key(key::CROSS, true, 0, &mut cues);
-        page.capture_key(&vui, "f10", &mut cues);
-        assert_eq!(page.note.as_deref(), Some("Hide UI: F10. H does nothing now."));
+        page.capture_key(&vui, "f2", &mut cues);
+        assert_eq!(page.note.as_deref(), Some("Hide UI: F2. H does nothing now."));
         // △'s row, which the game gives no key, takes one; Talk's, given it,
         // is left with none
         page.row = binds::row_named("clear_target").unwrap() as i32;

@@ -7,7 +7,7 @@ native map fixes, and a separate profile. Use the preview package's launcher
 and README for disc setup and live checks. This is not a public release or full
 Forge compatibility; FF_Example and larger UI suites remain pending.
 
-1. Open **Options → Mods & Addons → Open Mods Folder**. This folder is beside
+1. Open **Options → Extended → Enhanced → Open Mods Folder**. This folder is beside
    the client executable, regardless of the directory used to launch it.
 2. Add a legacy `.lua` file or a complete addon folder. Native packages include
    a `mod.json` manifest. Preserve private `modules` and `resources` folders.

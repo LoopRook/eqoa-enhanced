@@ -38,6 +38,9 @@ pub(crate) struct Session {
     /// Last record built per call site: records are read-only, so an unchanged
     /// native value is handed back as the same table instead of being rebuilt.
     record_cache: std::collections::HashMap<String, (Json, Table)>,
+    /// Last element records of each list call site, by element id (or position without one): a list
+    /// that changed in a few elements rebuilds only those.
+    list_cache: std::collections::HashMap<String, std::collections::HashMap<u64, (Json, Value)>>,
 }
 
 impl Session {
@@ -56,6 +59,7 @@ impl Session {
             guard_missing: std::collections::HashMap::new(),
             guard_readonly: None,
             record_cache: std::collections::HashMap::new(),
+            list_cache: std::collections::HashMap::new(),
         };
         // Normative function index (§2). Registration does not imply implementation.
         for (module, names, round) in [
@@ -78,7 +82,7 @@ impl Session {
             ("entities", "list get find named distance", 2),
             ("events", "on off once after", 2),
             ("files", "read write remove", 2),
-            ("files", "list", 4),
+            ("files", "list load_json save_json_async import export", 4),
             ("fonts", "load default release", 2),
             ("gems", "get is_gem format", 3),
             ("group", "get", 2),
@@ -89,6 +93,7 @@ impl Session {
             ("icons", "class disposition", 4),
             ("input", "get claim release capture_text rotate_dpad", 2),
             ("input", "bind", 3),
+            ("input", "pointer claim_pointer minimap_wheel", 4),
             ("inventory", "get", 3),
             (
                 "items",
@@ -99,17 +104,18 @@ impl Session {
             ("loot", "get", 3),
             (
                 "map",
-                "get images load_image set_waypoint clear_waypoint",
+                "get open markers view set_guide clear_guide images load_image set_waypoint clear_waypoint",
                 4,
             ),
             ("mastery", "get skills selected", 4),
+            ("mods", "send", 4),
             (
                 "math",
                 "bearing degrees radians normalize signed_angle facing is_bit_zero",
                 2,
             ),
             ("merchant", "get price", 3),
-            ("options", "toggle get set", 3),
+            ("options", "toggle get set button", 3),
             ("player", "get experience_for_level", 2),
             ("player", "stats", 3),
             ("quests", "list get", 4),
@@ -373,6 +379,16 @@ pub(crate) fn error(lua: &Lua, symbol: &str, code: &str, message: &str) -> Resul
 }
 
 pub(crate) fn record(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
+    if matches!(value, Json::Array(_)) || matches!(value, Json::Object(f) if !f.contains_key("$ref")) {
+        if let Some(built) = super::record_raw::build(lua, path, value)? {
+            return Ok(built);
+        }
+    }
+    record_slow(lua, path, value)
+}
+
+/// `record` one Lua call at a time (the build `record_raw` does in a single protected call).
+pub(super) fn record_slow(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
     Ok(match value {
         Json::Null => Value::Nil,
         Json::Bool(v) => Value::Boolean(*v),
@@ -384,7 +400,7 @@ pub(crate) fn record(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
         Json::Array(values) => {
             let table = lua.create_table()?;
             for (i, v) in values.iter().enumerate() {
-                table.raw_set(i + 1, record(lua, path, v)?)?;
+                table.raw_set(i + 1, record_slow(lua, path, v)?)?;
             }
             Value::Table(table)
         }
@@ -392,12 +408,24 @@ pub(crate) fn record(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
             super::native_state::make_ref(lua, value)?
         }
         Json::Object(fields) => {
-            let backing = lua.create_table()?;
+            // Leaves go onto the stack as they are, with no Lua value made for them first
+            // (a record is built per entity per frame and per `entity.*` event).
+            let backing = lua.create_table_with_capacity(0, fields.len())?;
             for (k, v) in fields {
-                backing.set(
-                    k.as_str(),
-                    record(lua, nested_type(path, k).unwrap_or(path), v)?,
-                )?;
+                match v {
+                    Json::Null => {}
+                    Json::Bool(b) => backing.raw_set(k.as_str(), *b)?,
+                    Json::Number(n) => backing.raw_set(
+                        k.as_str(),
+                        n.as_f64()
+                            .ok_or_else(|| mlua::Error::runtime("invalid native number"))?,
+                    )?,
+                    Json::String(s) => backing.raw_set(k.as_str(), s.as_str())?,
+                    _ => backing.raw_set(
+                        k.as_str(),
+                        record_slow(lua, nested_type(path, k).unwrap_or(path), v)?,
+                    )?,
+                }
             }
             Value::Table(guard_keyed(
                 lua,
@@ -410,36 +438,98 @@ pub(crate) fn record(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
     })
 }
 
-fn signature<'a>(path: &str, has_keys: bool, keys: impl Iterator<Item = &'a str>) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    path.hash(&mut h);
-    has_keys.hash(&mut h);
+/// FNV-1a over the path and the keys (a record is shaped per object built, so this is hot).
+pub(super) fn signature<'a>(path: &str, has_keys: bool, keys: impl Iterator<Item = &'a str>) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut feed = |bytes: &[u8]| {
+        for &b in bytes {
+            h = (h ^ b as u64).wrapping_mul(0x0100_0000_01b3);
+        }
+        h = (h ^ 0xff).wrapping_mul(0x0100_0000_01b3);
+    };
+    feed(path.as_bytes());
+    feed(&[has_keys as u8]);
     for k in keys {
-        k.hash(&mut h);
+        feed(k.as_bytes());
     }
-    h.finish()
+    h
 }
 
 /// `record`, reusing the previous result of `slot` while the native value is unchanged.
+///
+/// Lists (the entity and ability records, map markers) are the expensive case: one full
+/// record per element with its guarded tables. They are cached per element (`record_list_cached`),
+/// so a caller that reads the list every frame (a minimap hover, a search) pays only the
+/// comparison for the elements that did not change. A list is handed out as a fresh table each
+/// call, as before, so a caller may insert, remove or reorder its own copy; its elements are the
+/// shared read-only records.
 pub(crate) fn record_cached(lua: &Lua, slot: &str, path: &str, value: &Json) -> Result<Value> {
+    if let Json::Array(items) = value {
+        return record_list_cached(lua, slot, path, items);
+    }
     if !matches!(value, Json::Object(_)) {
         return record(lua, path, value);
     }
     let session_rc = session(lua);
+    let compared = super::addon_perf::section("record.compare");
     if let Ok(s) = session_rc.try_borrow() {
         if let Some((json, table)) = s.record_cache.get(slot) {
             if json == value {
+                drop(compared);
                 return Ok(Value::Table(table.clone()));
             }
         }
     }
+    drop(compared);
+    let _built = super::addon_perf::section("record.build");
     let built = record(lua, path, value)?;
-    if let (Value::Table(table), Ok(mut s)) = (&built, session_rc.try_borrow_mut()) {
+    let Value::Table(table) = &built else {
+        return Ok(built);
+    };
+    if let Ok(mut s) = session_rc.try_borrow_mut() {
         s.record_cache
             .insert(slot.to_string(), (value.clone(), table.clone()));
     }
-    Ok(built)
+    Ok(Value::Table(table.clone()))
+}
+
+/// The key a list element is remembered by: its `id` when it has a whole-number one, else its position.
+fn element_key(item: &Json, index: usize) -> u64 {
+    item.get("id").and_then(Json::as_u64).unwrap_or((1 << 63) | index as u64)
+}
+
+/// `record_cached` for a list: a fresh top-level table of element records, an element unchanged since
+/// the last call keeping the record it had (read-only and shared, as a whole cached list's were), the
+/// changed and new ones built. A list in which a few creatures moved rebuilds a few records, not all.
+fn record_list_cached(lua: &Lua, slot: &str, path: &str, items: &[Json]) -> Result<Value> {
+    let _timed = super::addon_perf::section("record.list");
+    let session_rc = session(lua);
+    let mut previous = session_rc
+        .try_borrow_mut()
+        .ok()
+        .and_then(|mut s| s.list_cache.remove(slot))
+        .unwrap_or_default();
+    let table = lua.create_table_with_capacity(items.len(), 0)?;
+    let mut kept = std::collections::HashMap::with_capacity(items.len());
+    for (i, item) in items.iter().enumerate() {
+        let key = element_key(item, i);
+        let (json, record) = match previous.remove(&key) {
+            Some((json, record)) if json == *item => (json, record),
+            _ => (item.clone(), record(lua, path, item)?),
+        };
+        table.raw_set(i + 1, record.clone())?;
+        kept.insert(key, (json, record));
+    }
+    if let Ok(mut s) = session_rc.try_borrow_mut() {
+        s.list_cache.insert(slot.to_string(), kept);
+    }
+    Ok(Value::Table(table))
+}
+
+/// `guard` for a record whose known keys are a fixed list (no list is built unless a shape is new).
+pub(super) fn guard_lazy(lua: &Lua, backing: Table, path: &str, keys: &[&str]) -> Result<Table> {
+    let sig = signature(path, true, keys.iter().copied());
+    guard_keyed(lua, backing, path, sig, || Some(keys.iter().map(|s| s.to_string()).collect()))
 }
 
 pub(crate) fn guard(
@@ -467,6 +557,25 @@ fn guard_keyed(
 ) -> Result<Table> {
     // A bare Lua (no session) or a session in use higher up the stack just
     // builds uncached: the cache is an optimisation, never a requirement.
+    let session_rc = lua.app_data_ref::<Shared>().map(|s| s.clone());
+    // The common case, a shape seen before: one borrow, the shared tables used by reference.
+    if let Some(s) = session_rc.as_ref().and_then(|rc| rc.try_borrow().ok())
+        && let (Some(missing), Some(readonly)) = (s.guard_missing.get(&sig), s.guard_readonly.as_ref())
+    {
+        return guard_proxy(lua, backing, missing, readonly);
+    }
+    let (missing, readonly) = guard_parts(lua, sig, path, known)?;
+    guard_proxy(lua, backing, &missing, &readonly)
+}
+
+/// The shared pieces of a guarded record of shape `sig`: the missing-field metatable (made the
+/// first time the shape is seen) and the read-only guard.
+pub(super) fn guard_parts(
+    lua: &Lua,
+    sig: u64,
+    path: &str,
+    known: impl FnOnce() -> Option<Vec<String>>,
+) -> Result<(Table, Function)> {
     let session_rc = lua.app_data_ref::<Shared>().map(|s| s.clone());
     let (cached_missing, cached_readonly) = session_rc
         .as_ref()
@@ -531,12 +640,18 @@ fn guard_keyed(
             f
         }
     };
+    Ok((missing, readonly))
+}
+
+/// The read-only proxy over `backing`: reads fall to the backing table, whose own metatable
+/// reports a missing field; writes raise.
+fn guard_proxy(lua: &Lua, backing: Table, missing: &Table, readonly: &Function) -> Result<Table> {
     let proxy = lua.create_table()?;
     let mt = lua.create_table_with_capacity(0, 3)?;
-    backing.set_metatable(Some(missing))?;
-    mt.set("__index", backing)?;
-    mt.set("__newindex", readonly)?;
-    mt.set("__metatable", false)?;
+    backing.set_metatable(Some(missing.clone()))?;
+    mt.raw_set("__index", backing)?;
+    mt.raw_set("__newindex", readonly)?;
+    mt.raw_set("__metatable", false)?;
     proxy.set_metatable(Some(mt))?;
     Ok(proxy)
 }
@@ -625,6 +740,7 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
                     "this function takes no arguments",
                 );
             }
+            let _timed = super::addon_perf::api(&symbol);
             super::native_core::flush_deferred();
             match function.call::<MultiValue>(args) {
                 Ok(value) => Ok(value),
@@ -649,6 +765,7 @@ where
     table.set(
         name,
         lua.create_function(move |lua, args: A| {
+            let _timed = super::addon_perf::api(&symbol);
             super::native_core::flush_deferred();
             match f(lua, args) {
                 Ok(value) => Ok(value),
@@ -851,6 +968,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_events::install(host, host.once_mode())?;
     install_fields(lua);
     super::native_state::install(host)?;
+    super::map_views::install(host)?;
+    super::guides::install(host)?;
+    super::pointer_api::install(host)?;
     let modules: Table = lua.named_registry_value("eqoa_modules")?;
     let scope = lua.create_table()?;
     for (id, name) in ["self", "target", "group", "pet", "corpse", "unknown"]
@@ -884,6 +1004,12 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         .get::<Table>("entities")?
         .set("status", guard(lua, status, "eqoa.entities.status", None)?)?;
     super::file_io::install_native(host)?;
+    super::async_json::install(host)?;
+    super::json_save::install(host)?;
+    super::exchange::register(lua);
+    super::exchange::install(host)?;
+    super::player_files::install(host)?;
+    super::option_buttons::install(host)?;
     super::native_settings::install(host)?;
     bind(
         lua,
@@ -926,14 +1052,15 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     Ok(())
 }
 
-fn nested_type(path: &str, key: &str) -> Option<&'static str> {
+pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
     match (path, key) {
         ("eqoa.player.Player", "hp" | "power") => Some("eqoa.player.Vital"),
         ("eqoa.player.Player", "attributes") => Some("eqoa.player.Attributes"),
         ("eqoa.player.Attributes", "base" | "total") => Some("eqoa.player.SevenStats"),
         ("eqoa.player.Player", "resists") => Some("eqoa.player.Resists"),
         ("eqoa.player.Player", "location") => Some("eqoa.player.Location"),
-        (_, "position" | "velocity") => Some("eqoa.Vec3"),
+        (_, "position" | "actor_position" | "velocity") => Some("eqoa.Vec3"),
+        ("eqoa.map.MapState", "search_anchor") => Some("eqoa.hud.Rect"),
         ("eqoa.group.Group", "members") => Some("eqoa.group.Member"),
         ("eqoa.group.Group", "raid") => Some("eqoa.group.RaidMember"),
         ("eqoa.group.Group", "invites") => Some("eqoa.group.Invite"),
@@ -953,6 +1080,7 @@ fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.hud.Layout", "player") => Some("eqoa.hud.PlayerLayout"),
         ("eqoa.hud.Layout", "group_members") => Some("eqoa.hud.GroupMemberLayout"),
         ("eqoa.hud.Layout", "target") => Some("eqoa.hud.TargetLayout"),
+        ("eqoa.hud.Layout", "minimap") => Some("eqoa.hud.Rect"),
         ("eqoa.hud.Layout", "pet") => Some("eqoa.hud.SinglePanelLayout"),
         (
             "eqoa.hud.PlayerLayout"
@@ -967,6 +1095,17 @@ fn nested_type(path: &str, key: &str) -> Option<&'static str> {
 fn install_fields(lua: &Lua) {
     for (path, fields) in [
         ("eqoa.Error", "code message capability retry_after"),
+        (
+            "eqoa.map.Marker",
+            "kind name x z level_min level_max label step",
+        ),
+        (
+            "eqoa.map.MapState",
+            "enabled open minimap markers_on world_id world_name zone bounds revision waypoint search_anchor",
+        ),
+        ("eqoa.map.Bounds", "x_min z_min x_max z_max"),
+        ("eqoa.map.Waypoint", "world_id x z label owner"),
+        ("eqoa.input.Pointer", "x y inside_window"),
         ("eqoa.Vec2", "x y"),
         ("eqoa.Vec3", "x y z"),
         ("eqoa.Color", "r g b a"),
@@ -1007,7 +1146,7 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.entities.Entity",
-            "ref id name level position hp_fraction power kind class_code target_id status_flags poisoned diseased disposition disposition_name",
+            "ref id name level position actor_position hp_fraction power kind world_id entity_type is_creature corpse search_flags class_code target_id status_flags poisoned diseased disposition disposition_name",
         ),
         (
             "eqoa.group.Group",
@@ -1066,7 +1205,7 @@ fn install_fields(lua: &Lua) {
             "eqoa.hud.Rect",
             "frame_x frame_y frame_width frame_height x y width height",
         ),
-        ("eqoa.hud.Layout", "player group_members target pet"),
+        ("eqoa.hud.Layout", "player group_members target pet minimap"),
         ("eqoa.hud.PlayerLayout", "panel health power exp"),
         ("eqoa.hud.TargetLayout", "panel health power"),
         ("eqoa.hud.GroupMemberLayout", "index panel health power"),
@@ -1084,6 +1223,11 @@ fn install_fields(lua: &Lua) {
         describe(lua, path, "supported", round, "");
         for field in fields.split_whitespace() {
             let field_round = if matches!(
+                (path, field),
+                ("eqoa.entities.Entity", "actor_position") | ("eqoa.map.MapState", "search_anchor")
+            ) {
+                Some(4)
+            } else if matches!(
                 (path, field),
                 ("eqoa.entities.Entity", "power") | ("eqoa.group.Member", "power")
             ) {

@@ -31,6 +31,9 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_target_of_target",
     "eqoa_mana_bars",
     "eqoa_hud_numbers",
+    "eqoa_creature_journal",
+    "eqoa_map_search",
+    "eqoa_round_minimap",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -50,6 +53,95 @@ pub struct InstallResult {
 }
 
 pub const EMBEDDED_FILES: &[BundledFile] = &[
+    BundledFile {
+        path: "eqoa_round_minimap/main.lua",
+        package: "eqoa_round_minimap",
+        data: include_bytes!("../../../../bundled-mods/eqoa_round_minimap/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_round_minimap/mod.json",
+        package: "eqoa_round_minimap",
+        data: include_bytes!("../../../../bundled-mods/eqoa_round_minimap/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_round_minimap/README.md",
+        package: "eqoa_round_minimap",
+        data: include_bytes!("../../../../bundled-mods/eqoa_round_minimap/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_round_minimap/resources/OFL.txt",
+        package: "eqoa_round_minimap",
+        data: include_bytes!("../../../../bundled-mods/eqoa_round_minimap/resources/OFL.txt"),
+    },
+    BundledFile {
+        path: "eqoa_round_minimap/resources/SpaceMono-Regular.ttf",
+        package: "eqoa_round_minimap",
+        data: include_bytes!("../../../../bundled-mods/eqoa_round_minimap/resources/SpaceMono-Regular.ttf"),
+    },
+    BundledFile {
+        path: "eqoa_map_search/mod.json",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_map_search/main.lua",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_map_search/modules/spawns.lua",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/modules/spawns.lua"),
+    },
+    BundledFile {
+        path: "eqoa_map_search/modules/search.lua",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/modules/search.lua"),
+    },
+    BundledFile {
+        path: "eqoa_map_search/README.md",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_map_search/resources/map-entities.json",
+        package: "eqoa_map_search",
+        data: include_bytes!(
+            "../../../../bundled-mods/eqoa_map_search/resources/map-entities.json"
+        ),
+    },
+    BundledFile {
+        path: "eqoa_map_search/resources/README.txt",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/resources/README.txt"),
+    },
+    BundledFile {
+        path: "eqoa_map_search/resources/SpaceMono-Regular.ttf",
+        package: "eqoa_map_search",
+        data: include_bytes!(
+            "../../../../bundled-mods/eqoa_map_search/resources/SpaceMono-Regular.ttf"
+        ),
+    },
+    BundledFile {
+        path: "eqoa_map_search/resources/OFL.txt",
+        package: "eqoa_map_search",
+        data: include_bytes!("../../../../bundled-mods/eqoa_map_search/resources/OFL.txt"),
+    },
+    BundledFile {
+        path: "eqoa_creature_journal/mod.json",
+        package: "eqoa_creature_journal",
+        data: include_bytes!("../../../../bundled-mods/eqoa_creature_journal/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_creature_journal/main.lua",
+        package: "eqoa_creature_journal",
+        data: include_bytes!("../../../../bundled-mods/eqoa_creature_journal/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_creature_journal/README.md",
+        package: "eqoa_creature_journal",
+        data: include_bytes!("../../../../bundled-mods/eqoa_creature_journal/README.md"),
+    },
     BundledFile {
         path: "eqoa_example_hearts/mod.json",
         package: "eqoa_example_hearts",
@@ -930,7 +1022,10 @@ mod tests {
                 "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
-                "eqoa_hud_numbers"
+                "eqoa_hud_numbers",
+                "eqoa_creature_journal",
+                "eqoa_map_search",
+                "eqoa_round_minimap"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1219,7 +1314,10 @@ mod tests {
                 "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
-                "eqoa_hud_numbers"
+                "eqoa_hud_numbers",
+                "eqoa_creature_journal",
+                "eqoa_map_search",
+                "eqoa_round_minimap"
             ]
         );
 
@@ -1237,7 +1335,7 @@ mod tests {
             ids.contains("avoids_modern_ui"),
             "avoids_modern_ui must be discovered on first start"
         );
-        assert_eq!(ids.len(), 8);
+        assert_eq!(ids.len(), PACKAGES.len());
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -1261,7 +1359,10 @@ mod tests {
                 "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
-                "eqoa_hud_numbers"
+                "eqoa_hud_numbers",
+                "eqoa_creature_journal",
+                "eqoa_map_search",
+                "eqoa_round_minimap"
             ]
         );
 
@@ -1277,7 +1378,10 @@ mod tests {
                 "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
-                "eqoa_hud_numbers"
+                "eqoa_hud_numbers",
+                "eqoa_creature_journal",
+                "eqoa_map_search",
+                "eqoa_round_minimap"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1359,7 +1463,10 @@ mod tests {
                 "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
-                "eqoa_hud_numbers"
+                "eqoa_hud_numbers",
+                "eqoa_creature_journal",
+                "eqoa_map_search",
+                "eqoa_round_minimap"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );

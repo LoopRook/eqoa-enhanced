@@ -8,10 +8,14 @@ use std::cell::{Cell, RefCell};
 
 #[derive(Clone, Debug, PartialEq)]
 struct EntityData {
+    entity_type: u8,
+    corpse: bool,
+    search_flags: Option<u8>,
     id: u32,
     name: String,
     level: Option<u8>,
     position: [f32; 3],
+    actor_position: [f32; 3],
     hp: u8,
     is_target: bool,
     power: Option<f32>,
@@ -36,10 +40,14 @@ impl EntityData {
             p.session.power_of(e.id).map(|pw| ee::div(pw as f32, 255.0))
         };
         Self {
+            entity_type: e.kind,
+            corpse: e.p18 & 2 != 0,
+            search_flags: creature.map(|c| c.p255),
             id: e.id,
             name: creature.map_or("", |c| c.name.as_str()).into(),
             level: creature.map(|c| c.level),
             position: e.pos,
+            actor_position: actor_position(e),
             hp: e.p19,
             is_target: Some(e.id) == valid_id(p.target),
             power,
@@ -54,7 +62,7 @@ impl EntityData {
         }
     }
     fn value(&self) -> Json {
-        json!({"id":self.id,"name":self.name,"level":self.level,"position":vec3(self.position),"hp_fraction":(self.hp!=0 || self.is_target).then(||ee::div(self.hp as f32,255.)),"power":self.power,"kind":match self.code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":self.code,"target_id":self.target,"status_flags":self.flags,"poisoned":self.flags.map(|f|f&4!=0),"diseased":self.flags.map(|f|f&8!=0),"disposition":self.disposition,"disposition_name":self.disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
+        json!({"world_id":self.world,"entity_type":self.entity_type,"is_creature":self.entity_type==net::entity::TYPE_CREATURE,"corpse":self.corpse,"search_flags":self.search_flags,"id":self.id,"name":self.name,"level":self.level,"position":vec3(self.position),"actor_position":vec3(self.actor_position),"hp_fraction":(self.hp!=0 || self.is_target).then(||ee::div(self.hp as f32,255.)),"power":self.power,"kind":match self.code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":self.code,"target_id":self.target,"status_flags":self.flags,"poisoned":self.flags.map(|f|f&4!=0),"diseased":self.flags.map(|f|f&8!=0),"disposition":self.disposition,"disposition_name":self.disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
     }
 }
 #[derive(Clone)]
@@ -63,7 +71,7 @@ struct PlayerData {
     name: String,
     player: net::dump::Player,
     stats: net::dump::Stats,
-    player_stats: Option<Json>,
+    player_stats: Option<std::rc::Rc<Json>>,
     known: bool,
     health: crate::fork_ext::addons::health::HealthSnapshot,
     target: Option<u32>,
@@ -79,6 +87,7 @@ impl PlayerData {
             .forge_health
             .snapshot(p.session.self_id.is_some(), p.in_world_now());
         let known = CORE.with(|c| c.borrow().stats_received) || health.available;
+        let _stats = crate::fork_ext::addons::addon_perf::section("player.stats_view");
         let player_stats = known
             .then(|| {
                 let m = &p.cm.m;
@@ -89,7 +98,7 @@ impl PlayerData {
                     bonuses: &m.bonuses,
                     p44: p.dump.player.p44 as i32,
                 };
-                crate::fork_ext::player_stats::view(&src).map(|v| v.to_json())
+                crate::fork_ext::player_stats::view_json(&src)
             })
             .flatten();
         Self {
@@ -130,6 +139,13 @@ impl PlayerData {
         value
     }
 }
+/// The stat view the record was read with, stored only when it differs from the one held (it
+/// usually does not: the player's record is rebuilt every frame for its position).
+fn set_player_stats(c: &mut Core, stats: &Option<std::rc::Rc<Json>>) {
+    if c.view.player_stats.as_ref() != stats.as_deref() {
+        c.view.player_stats = stats.as_deref().cloned();
+    }
+}
 fn interested(name: &str) -> bool {
     native_events::interested(name)
 }
@@ -167,7 +183,20 @@ fn patch_player(c: &mut Core, mut after: Json) {
     }
     c.player_changed(before);
 }
+/// Where entity `id` is in the view's list: the remembered place when it still holds it, else a scan.
+fn entity_index(c: &mut Core, id: u32) -> Option<usize> {
+    let want = Some(id as u64);
+    if let Some(&at) = c.entity_hint.get(&id)
+        && c.view.entities.get(at).is_some_and(|e| e["id"].as_u64() == want)
+    {
+        return Some(at);
+    }
+    let at = c.view.entities.iter().position(|e| e["id"].as_u64() == want)?;
+    c.entity_hint.insert(id, at);
+    Some(at)
+}
 fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
+    let _timed = crate::fork_ext::addons::addon_perf::section("patch.entity");
     while c.view.entity_slots.len() <= slot {
         c.view.entity_slots.push(None);
     }
@@ -177,6 +206,7 @@ fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
         if let Some(old) = old_id {
             c.entity_versions.remove(&old);
             c.entity_worlds.remove(&old);
+            c.entity_hint.remove(&old);
             if let Some(index) = c
                 .view
                 .entities
@@ -198,7 +228,9 @@ fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
         return;
     };
     c.entity_worlds.insert(entity.id, entity.world);
+    let timed = crate::fork_ext::addons::addon_perf::section("patch.value");
     let mut after = entity.value();
+    drop(timed);
     let version = if let Some(v) = c.entity_versions.get(&entity.id) {
         *v
     } else {
@@ -207,45 +239,58 @@ fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
         v
     };
     after["ref"] = json!({"$ref":"entity","key":entity.id.to_string(),"generation":c.generation,"incarnation":version});
-    let index = c
-        .view
-        .entities
-        .iter()
-        .position(|e| e["id"].as_u64() == Some(entity.id as u64));
-    let before = if let Some(index) = index {
-        if c.view.entities[index] == after {
-            return;
-        }
-        Some(std::mem::replace(
-            &mut c.view.entities[index],
-            after.clone(),
-        ))
-    } else {
-        c.view.entities.push(after.clone());
-        None
-    };
-    let name = if before.is_some() {
+    let timed = crate::fork_ext::addons::addon_perf::section("patch.scan+compare+clone");
+    let index = entity_index(c, entity.id);
+    let name = if index.is_some() {
         "entity.changed"
     } else {
         "entity.added"
     };
-    if interested(name) {
+    // the event's copy of the record is made only when an addon listens for the event
+    let wanted = interested(name);
+    let after_ref = after["ref"].clone();
+    let for_event = wanted.then(|| after.clone());
+    let before = if let Some(index) = index {
+        if c.view.entities[index] == after {
+            return;
+        }
+        Some(std::mem::replace(&mut c.view.entities[index], after))
+    } else {
+        c.entity_hint.insert(entity.id, c.view.entities.len());
+        c.view.entities.push(after);
+        None
+    };
+    drop(timed);
+    if let Some(after) = for_event {
+        let timed = crate::fork_ext::addons::addon_perf::section("patch.changed_fields");
         let changed = crate::fork_ext::addons::native_core::changed_fields(
             before.as_ref().unwrap_or(&Json::Null),
             &after,
         );
-        c.emit(
-            name,
-            json!({"ref":after["ref"],"before":before,"after":after,"changed":changed}),
-        );
+        drop(timed);
+        let timed = crate::fork_ext::addons::addon_perf::section("patch.event json");
+        // built by moving the two records in (`json!` would copy each a second time)
+        let mut data = serde_json::Map::new();
+        data.insert("ref".into(), after_ref.clone());
+        data.insert("before".into(), before.unwrap_or(Json::Null));
+        data.insert("after".into(), after);
+        data.insert("changed".into(), Json::Array(changed.into_iter().map(Json::String).collect()));
+        let data = Json::Object(data);
+        drop(timed);
+        c.emit(name, data);
     }
-    let old_group = interested("group.changed").then(|| c.view.group.clone());
+    let timed = crate::fork_ext::addons::addon_perf::section("patch.group");
+    // the group only moves when the entity is one of its members: no copy of it otherwise
+    let member = c.view.group["members"]
+        .as_array()
+        .is_some_and(|m| m.iter().any(|m| m["id"].as_u64() == Some(entity.id as u64)));
+    let old_group = (member && interested("group.changed")).then(|| c.view.group.clone());
     if let Some(members) = c.view.group["members"].as_array_mut() {
         for member in members {
             if member["id"].as_u64() == Some(entity.id as u64) {
                 member["position"] = vec3(entity.position);
                 member["world_id"] = json!(entity.world);
-                member["entity"] = after["ref"].clone();
+                member["entity"] = after_ref.clone();
             }
         }
     }
@@ -258,7 +303,7 @@ fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
         }
     }
     if c.view.player["id"].as_u64() == Some(entity.id as u64) {
-        c.view.player["entity"] = after["ref"].clone();
+        c.view.player["entity"] = after_ref.clone();
     }
 }
 fn ability_value(a: &net::dump::Ability) -> Json {
@@ -326,7 +371,7 @@ pub(crate) fn key(play: &Play, walker: Option<&crate::walker::Walker>) -> FrameK
     }
     v[26] = play.typing.is_some() as u64;
     v[27] = play.map.open as u64;
-    v[28] = play.map.search.open as u64;
+    v[28] = crate::fork_ext::addons::input::is_text_capture_active() as u64;
     v[29] = play.search.open as u64;
     v[30] = play.start.as_ref().is_some_and(|s| s.menu.visible) as u64;
     use std::hash::{Hash, Hasher};
@@ -369,7 +414,9 @@ pub(crate) fn cache(key: FrameKey, snapshot: crate::fork_ext::addons::host::Snap
     SNAPSHOT.with(|s| *s.borrow_mut() = Some((key, revision(), snapshot)));
 }
 pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
+    let _timed = crate::fork_ext::addons::addon_perf::section("api.refresh");
     thread_local! {static EPOCH:Cell<u64>=const{Cell::new(u64::MAX)};}
+    thread_local! {static MAP_KEY:Cell<Option<u64>>=const{Cell::new(None)};}
     let epoch_changed =
         EPOCH.with(|e| e.replace(native_core::capture_epoch())) != native_core::capture_epoch();
     let first = LIVE.with(|l| !l.replace(true)) || epoch_changed;
@@ -391,6 +438,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
                 .collect()
         });
         KEY.with(|k| k.set(Some(key(play, walker))));
+        MAP_KEY.with(|k| k.set(None));
         dirty();
         return;
     }
@@ -400,18 +448,38 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     }
     native_core::flush_deferred();
     CORE.with(|c| c.borrow_mut().flush_player_motion());
+    // `eqoa.entities.dots()` reads the view directly rather than a snapshot, and a hover frame
+    // often reuses the cached snapshot (creatures move while the player and camera stand still),
+    // so this frame's dots are refreshed on every pass.
+    let timed_dots = crate::fork_ext::addons::addon_perf::section("api.refresh.dots");
+    let dots = minimap_dots(play);
+    drop(timed_dots);
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.view.dots != dots {
+            c.view.dots = dots;
+        }
+    });
+    let timed_key = crate::fork_ext::addons::addon_perf::section("api.refresh.key");
     let now = key(play, walker);
+    drop(timed_key);
     let previous = KEY.with(|k| k.replace(Some(now)));
     if previous != Some(now) {
         if previous.is_none_or(|k| k.0[7..18] != now.0[7..18] || k.0[31] != now.0[31]) {
             let bars = hotbars(play);
             CORE.with(|c| patch_hotbars(&mut c.borrow_mut(), bars));
         }
+        let _timed_player = crate::fork_ext::addons::addon_perf::section("api.refresh.player");
+        let timed = crate::fork_ext::addons::addon_perf::section("player.read");
         let player = PlayerData::read(play);
+        drop(timed);
         CORE.with(|c| {
             let mut c = c.borrow_mut();
-            c.view.player_stats = player.player_stats.clone();
+            set_player_stats(&mut c, &player.player_stats);
+            let timed = crate::fork_ext::addons::addon_perf::section("player.value");
             let mut after = player.value(&c);
+            drop(timed);
+            let _patch = crate::fork_ext::addons::addon_perf::section("player.patch");
             if let Some(w) = walker {
                 let p = w.cam.walk.phys.position;
                 let v = w.cam.walk.phys.velocity;
@@ -435,6 +503,47 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         });
         dirty();
     }
+    let map_key = play.map.api_key(play.world_id() as i32);
+    let changed = MAP_KEY.with(|k| k.replace(Some(map_key))) != Some(map_key);
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        let world = play.world_id() as i32;
+        if changed || c.view.map["zone"] != c.view.player["location"] {
+            let mut after =
+                play.map
+                    .api_state(world, &c.view.player["location"], play.words.as_ref());
+            let markers = if changed {
+                play.map.api_markers()
+            } else {
+                c.view.map_markers.clone()
+            };
+            let mut before = c.view.map.clone();
+            before.as_object_mut().map(|m| m.remove("revision"));
+            let revision = c.view.map["revision"].as_u64().unwrap_or(0);
+            let differs = before != after || markers != c.view.map_markers;
+            after["revision"] = json!(revision + u64::from(differs));
+            if differs {
+                let event = json!({"before":c.view.map,"after":after,"changed":["map","markers"]});
+                c.emit("map.changed", event);
+                dirty();
+            }
+            c.view.map = after;
+            c.view.map_markers = markers;
+            c.view.world_id = Some(world);
+        }
+        let p = &c.view.player["position"];
+        let projection = p["x"].as_f64().zip(p["z"].as_f64()).and_then(|(x, z)| {
+            play.map.api_minimap_transform(
+                [x as f32, z as f32],
+                crate::fork_ext::addons::hud_layout::get_window_size(),
+            )
+        });
+        if c.view.minimap != projection {
+            c.view.minimap = projection;
+            dirty();
+        }
+        crate::fork_ext::addons::guides::update(&mut c);
+    });
 }
 
 // Called after a packet mutation. Only the affected typed records are copied.
@@ -442,6 +551,7 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
     dirty();
     match event {
         Kind::Entity(slot) => {
+            let _timed = crate::fork_ext::addons::addon_perf::section("capture.entity (play phase)");
             let slot = *slot;
             let entity = play
                 .entities
@@ -465,7 +575,7 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
             );
             if let Some(player) = player {
                 native_core::defer(2048 + player.name.len(), move |c| {
-                    c.view.player_stats = player.player_stats.clone();
+                    set_player_stats(c, &player.player_stats);
                     let value = player.value(c);
                     patch_player(c, value);
                 });
@@ -477,7 +587,7 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
         Kind::Player => {
             let player = PlayerData::read(play);
             native_core::defer(2048 + player.name.len(), move |c| {
-                c.view.player_stats = player.player_stats.clone();
+                set_player_stats(c, &player.player_stats);
                 let value = player.value(c);
                 patch_player(c, value)
             });
@@ -712,6 +822,8 @@ pub(crate) fn fingerprint(play: &Play, kind: Kind) -> u64 {
             if let Some(Some(e)) = play.entities.slots.get(slot) {
                 e.id.hash(&mut h);
                 e.world.hash(&mut h);
+                e.kind.hash(&mut h);
+                e.p18.hash(&mut h);
                 e.pos.map(f32::to_bits).hash(&mut h);
                 e.p19.hash(&mut h);
                 play.session.power_of(e.id).hash(&mut h);
@@ -719,6 +831,7 @@ pub(crate) fn fingerprint(play: &Play, kind: Kind) -> u64 {
                     c.name.hash(&mut h);
                     c.level.hash(&mut h);
                     c.p256.hash(&mut h);
+                    c.p255.hash(&mut h);
                     c.target.hash(&mut h);
                     c.flags262.hash(&mut h);
                     c.p263.hash(&mut h);

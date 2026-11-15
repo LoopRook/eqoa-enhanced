@@ -18,7 +18,9 @@ mod report_background;
 pub mod report_crash_dir;
 pub mod report_label;
 #[cfg(target_arch = "wasm32")]
-pub mod report { pub use super::report_label::enhanced_label; }
+pub mod report {
+    pub use super::report_label::enhanced_label;
+}
 pub mod report_core;
 pub mod telemetry;
 pub mod version;
@@ -27,7 +29,10 @@ pub mod version;
 /// with no dialog, menu, map, editor, or search claiming keyboard input).
 pub fn is_plain_play(play: Option<&mut crate::play::Play>) -> bool {
     match play {
-        Some(p) => (p.mode == 0 || p.mode == 38) && !p.wants_ui() && !p.map.search.open,
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(p) => p.addon_input_available(),
+        #[cfg(target_arch = "wasm32")]
+        Some(p) => matches!(p.mode, 0 | 38) && !p.wants_ui(),
         None => false,
     }
 }
@@ -40,6 +45,9 @@ pub(crate) fn prepare_controls(
     {
         addons::native_core::presentation();
         addons::input::observe_report(_report, _connected, _gameplay);
+        if _gameplay && addons::input::is_text_capture_active() {
+            *_report = crate::input::Report::default();
+        }
     }
 }
 
@@ -49,3 +57,14 @@ mod touch_tests;
 pub(crate) mod map;
 
 pub(crate) mod bindpage;
+
+/// Stock minimap hit routing; addon replacement does not leave invisible click targets.
+pub(crate) fn minimap_contains(map: &crate::map::Map, point: [f32; 2]) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    if addons::visibility::effective_visibility().minimap {
+        return false;
+    }
+    map.mini_contains(point)
+}
+
+pub(crate) mod map_toolbar;

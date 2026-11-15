@@ -15,7 +15,7 @@ HOW TO INSTALL A MOD:
          fonts/
 
 2. Launch the game and go to:
-     Options -> Extended -> Mods & Addons -> Addon Manager
+     Options -> Extended -> Enhanced -> Addon Manager
 
 3. New mods are turned off by default. Select your mod in the Addon Manager
    and click "Enable" to activate it.

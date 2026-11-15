@@ -12,9 +12,15 @@ pub(crate) struct View {
     pub phase: &'static str,
     pub world_id: Option<i32>,
     pub player: Json,
+    pub minimap: Option<super::map_views::Projection>,
+    pub map: Json,
+    pub map_markers: Vec<Json>,
     pub player_stats: Option<Json>,
     pub entities: Vec<Json>,
     pub entity_slots: Vec<Option<u32>>,
+    /// The entities the native minimap draws as dots, at this frame's drawn positions
+    /// `(id, x, z)`: what a minimap hover walks without a record per creature.
+    pub dots: Vec<(u32, f32, f32)>,
     pub abilities: Vec<Json>,
     pub group: Json,
     pub hotbar: Vec<Json>,
@@ -28,9 +34,13 @@ impl Default for View {
             phase: "pregame",
             world_id: None,
             player: Json::Null,
+            minimap: None,
+            map: Json::Null,
+            map_markers: Vec::new(),
             player_stats: None,
             entities: Vec::new(),
             entity_slots: Vec::new(),
+            dots: Vec::new(),
             abilities: Vec::new(),
             group: json!({"in_group":false,"self_leader":null,"members":[],"raid":[],"invites":[]}),
             hotbar: Vec::new(),
@@ -42,14 +52,26 @@ impl Default for View {
 
 #[derive(Clone)]
 pub(crate) struct Event {
+    pub player_command: bool,
+    pub player_action: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     pub name: String,
     pub seq: u64,
     pub time: f64,
     pub tick: u64,
     pub frame: u64,
     pub generation: u64,
-    pub data: Json,
+    /// shared by every VM the event is published to (a copy of it is a count, not a tree)
+    pub data: std::sync::Arc<Json>,
     pub bytes: usize,
+}
+
+impl Event {
+    pub(super) fn expire_player(&mut self) {
+        if let Some(action) = self.player_action.take() {
+            action.store(2, std::sync::atomic::Ordering::Release);
+        }
+        self.player_command = false;
+    }
 }
 
 /// Forge consumers retain only their own source stream, with a local cursor.
@@ -100,6 +122,9 @@ pub(crate) struct Core {
     pub stats_received: bool,
     pub effects_received: bool,
     pub entity_worlds: BTreeMap<u32, i32>,
+    /// Where an entity was last found in `view.entities`: a hint, checked before it is used, so the
+    /// list is scanned only when the hint is wrong.
+    pub entity_hint: std::collections::HashMap<u32, usize>,
     pub entity_versions: BTreeMap<u32, u64>,
     pub ability_versions: BTreeMap<String, u64>,
     pub cooldown_edges: BTreeMap<String, (f64, f64, f64)>,
@@ -132,6 +157,7 @@ impl Default for Core {
             stats_received: false,
             effects_received: false,
             entity_worlds: BTreeMap::new(),
+            entity_hint: std::collections::HashMap::new(),
             entity_versions: BTreeMap::new(),
             ability_versions: BTreeMap::new(),
             cooldown_edges: BTreeMap::new(),
@@ -180,12 +206,18 @@ impl Core {
     }
 
     pub fn emit(&mut self, name: &str, data: Json) {
-        *self.stream_counts.entry(name.into()).or_default() += 1;
+        let _timed = super::addon_perf::section("events.emit");
+        match self.stream_counts.get_mut(name) {
+            Some(n) => *n += 1,
+            None => {
+                self.stream_counts.insert(name.into(), 1);
+            }
+        }
         if name == "combat.hit" {
             self.combat_total += 1;
         }
         self.seq += 1;
-        let bytes = serde_json::to_vec(&data).map_or(1024 * 1024 + 1, |v| v.len()) + 128;
+        let bytes = json_len(&data) + 128;
         while self.events.len() >= 2048 || self.event_bytes.saturating_add(bytes) > 4 * 1024 * 1024
         {
             let Some(old) = self.events.pop_front() else {
@@ -198,6 +230,13 @@ impl Core {
         }
         self.event_bytes += bytes;
         let event = Event {
+            player_command: false,
+            player_action: ((name == "input.key"
+                && data["down"] == true
+                && data["synthetic"] != true
+                && data["repeat"] != true)
+                || (name == "pointer.pressed" && data["inside_window"] == true))
+                .then(|| std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0))),
             name: name.into(),
             seq: self.seq,
             time: self
@@ -206,7 +245,7 @@ impl Core {
             tick: self.tick,
             frame: self.frame,
             generation: self.generation,
-            data,
+            data: std::sync::Arc::new(data),
             bytes,
         };
         if event.name.starts_with("cooldown.") {
@@ -281,6 +320,7 @@ impl Core {
         self.forge_cooldowns.clear();
         self.forge_combat.clear();
         self.entity_worlds.clear();
+        self.entity_hint.clear();
         self.entity_versions.clear();
         self.ability_versions.clear();
         self.cooldown_edges.clear();
@@ -292,6 +332,7 @@ impl Core {
         self.words = None;
         self.chat.clear();
         self.view = View::default();
+        super::guides::update(self);
         self.emit("state.reset", json!({"in_world":false,"initial":false}));
     }
     pub fn publish(&mut self, mut view: View) {
@@ -382,7 +423,23 @@ impl Core {
             );
             self.emit("state.reset", json!({"in_world":true,"initial":false}));
         }
+        let mut before = self.view.map.clone();
+        let mut after = view.map.clone();
+        if let Some(m) = before.as_object_mut() {
+            m.remove("revision");
+        }
+        if let Some(m) = after.as_object_mut() {
+            m.remove("revision");
+        }
+        let revision = self.view.map["revision"].as_u64().unwrap_or(0);
+        if view.map.is_object() {
+            view.map["revision"] = json!(revision + u64::from(before != after));
+        }
+        if before != after {
+            self.emit("map.changed", json!({"before":self.view.map,"after":view.map,"changed":changed_fields(&before,&after)}));
+        }
         let previous = std::mem::replace(&mut self.view, view);
+        super::guides::update(self);
         if self.view.in_world && previous.player_stats != self.view.player_stats {
             self.emit("player.stats_changed", json!({}));
         }
@@ -412,13 +469,51 @@ pub(crate) fn changed_fields(before: &Json, after: &Json) -> Vec<String> {
     if before.is_array() || after.is_array() {
         return vec!["records".into()];
     }
-    let mut keys = std::collections::BTreeSet::new();
-    for value in [before, after] {
-        if let Some(o) = value.as_object() {
-            keys.extend(o.keys().cloned());
+    // the keys whose value differs (a missing one reads as null), sorted
+    let empty = serde_json::Map::new();
+    let (b, a) = (before.as_object().unwrap_or(&empty), after.as_object().unwrap_or(&empty));
+    let mut keys: Vec<&String> = a.iter().filter(|(k, v)| b.get(*k).unwrap_or(&Json::Null) != *v).map(|(k, _)| k).collect();
+    keys.extend(b.iter().filter(|(k, v)| !a.contains_key(*k) && !v.is_null()).map(|(k, _)| k));
+    keys.sort_unstable();
+    keys.into_iter().cloned().collect()
+}
+
+/// The length `serde_json` writes for `value`, worked out without writing it (every event's size is
+/// counted for the queue limits, and an entity event is two whole records).
+pub(crate) fn json_len(value: &Json) -> usize {
+    use std::fmt::Write;
+    struct Count(usize);
+    impl Write for Count {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            self.0 += s.len();
+            Ok(())
         }
     }
-    keys.into_iter().filter(|k| before[k] != after[k]).collect()
+    fn string(s: &str) -> usize {
+        2 + s
+            .bytes()
+            .map(|b| match b {
+                b'"' | b'\\' | 0x08 | 0x09 | 0x0a | 0x0c | 0x0d => 2,
+                0..=0x1f => 6,
+                _ => 1,
+            })
+            .sum::<usize>()
+    }
+    match value {
+        Json::Null => 4,
+        Json::Bool(true) => 4,
+        Json::Bool(false) => 5,
+        Json::Number(n) => {
+            let mut c = Count(0);
+            let _ = write!(c, "{n}");
+            c.0
+        }
+        Json::String(s) => string(s),
+        Json::Array(items) => 2 + items.len().saturating_sub(1) + items.iter().map(json_len).sum::<usize>(),
+        Json::Object(fields) => {
+            2 + fields.len().saturating_sub(1) + fields.iter().map(|(k, v)| string(k) + 1 + json_len(v)).sum::<usize>()
+        }
+    }
 }
 
 pub(crate) fn observe_text(text: &str, color: [f32; 4]) {
@@ -564,6 +659,7 @@ fn generation_loss(c: &mut Core, count: u64) {
     }
 }
 pub(crate) fn flush_deferred() {
+    let _timed = super::addon_perf::section("deferred.flush");
     let batch = DEFERRED.with(|d| {
         let mut d = d.borrow_mut();
         if d.flushing {
@@ -596,9 +692,14 @@ pub(crate) fn flush_deferred() {
             c.source_time = Some(pending.time);
             (pending.apply)(&mut c);
         }
+        super::guides::update(&mut c);
         (c.tick, c.frame, c.source_time) = saved;
     });
     DEFERRED.with(|d| d.borrow_mut().flushing = false);
+}
+#[cfg(test)]
+pub(crate) fn deferred_len() -> usize {
+    DEFERRED.with(|d| d.borrow().queue.len())
 }
 pub(crate) fn discard_deferred() {
     let has_queue = DEFERRED.with(|d| !d.borrow().queue.is_empty());

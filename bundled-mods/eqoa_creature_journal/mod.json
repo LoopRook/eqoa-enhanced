@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_creature_journal",
+  "name": "EQOA Creature Journal",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": true,
+  "capabilities": [
+    "large_data",
+    "eqoa.entities.list",
+    "eqoa.player.get",
+    "eqoa.events.on",
+    "eqoa.files.load_json",
+    "eqoa.files.save_json_async",
+    "eqoa.files.import",
+    "eqoa.files.export",
+    "eqoa.options.button",
+    "eqoa.mods.send"
+  ],
+  "shares": [
+    "data/journal.json"
+  ],
+  "commands": [
+    "import_journal",
+    "export_journal"
+  ],
+  "permissions": [
+    "import",
+    "export"
+  ]
+}

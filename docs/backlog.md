@@ -263,3 +263,15 @@ Do this last, before the release that carries round 2 and the sync into `enhance
   saved F3/crash report has no picture and still shows the pre-loss GPU name (it degrades quietly, no
   crash). Fix needs one more hook line in `remake`, a shared-file budget check, and a test that a
   recovered surface still captures; low priority until seen.
+
+## Skinnable map (owner, 2026-11-11)
+
+Upstream's map reads its colours and font from one table a skin mod can set (about 30 constants in 6 upstream map files). A neutral seam to offer upstream in round 8; no skin mod until then.
+
+## Zoom the round minimap in further than upstream's limit (2026-11-13)
+
+Owner: zoom felt very limited. The limits are upstream's (`map/mini.rs` `SCALE_LIMITS` 2 to 25 world
+units a frame pixel outdoors, `map/indoor.rs` 0.5 to 6 inside), and the mod forwards every wheel
+notch whole (`round_minimap_wheel_reaches_both_ends_of_upstreams_zoom_in_whole_steps`). Going
+closer than upstream would need a neutral zoom-limit seam (a held view asking for a lower floor) or a
+mod-owned zoom the capture honours. Not built; propose it before building.

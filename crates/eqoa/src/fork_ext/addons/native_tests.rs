@@ -838,6 +838,7 @@ fn option_test_host(id: &str) -> Host {
         api: Some("eqoa/1".into()),
         entry_mode: EntryMode::Once,
         requested_capabilities: Vec::new(),
+        extensions: Default::default(),
         initially_enabled: true,
         mods_root: None,
     })
@@ -1109,6 +1110,56 @@ fn record_reuse_returns_fresh_values_after_a_change_and_the_same_table_when_unch
 }
 
 #[test]
+fn record_reuse_caches_lists_with_fresh_tables_and_this_frames_records() {
+    use super::native_core::CORE;
+    let h = Host::new().unwrap();
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.in_world = true;
+        c.view.entities = serde_json::json!([
+            {"id": 7, "name": "Rat", "kind": "npc", "position": {"x": 1.0, "y": 0.0, "z": 2.0}},
+            {"id": 8, "name": "Bat", "kind": "npc", "position": {"x": 3.0, "y": 0.0, "z": 4.0}}
+        ])
+        .as_array()
+        .unwrap()
+        .clone();
+    });
+    h.execute(
+        r#"
+        local a = eqoa.entities.list()
+        assert(#a == 2 and a[1].name == 'Rat' and a[2].name == 'Bat')
+        local b = eqoa.entities.list()
+        -- a list is the caller's own table (as before), its records are this frame's read-only ones
+        assert(not rawequal(a, b), 'a list is a fresh table each call')
+        assert(rawequal(a[1], b[1]), 'an unchanged record is reused instead of rebuilt')
+        assert(not pcall(function() b[1].name = 'changed' end), 'reused records stay read-only')
+        a[1] = false
+        table.insert(a, 'extra')
+        local c = eqoa.entities.list()
+        assert(#c == 2 and c[1].name == 'Rat' and c[2].name == 'Bat', 'a caller edits only its own list')
+    "#,
+    )
+    .unwrap();
+    // One creature moves and the other despawns: the very next read has the new place, not a cache.
+    CORE.with(|c| {
+        c.borrow_mut().view.entities = serde_json::json!([
+            {"id": 7, "name": "Rat", "kind": "npc", "position": {"x": 9.0, "y": 0.0, "z": 2.0}}
+        ])
+        .as_array()
+        .unwrap()
+        .clone();
+    });
+    h.execute(
+        r#"
+        local a = eqoa.entities.list()
+        assert(#a == 1, 'a despawned creature is gone')
+        assert(a[1].position.x == 9.0, 'a moved creature is read where it is now, not cached')
+    "#,
+    )
+    .unwrap();
+}
+
+#[test]
 fn hud_specs_with_metatable_defaults_and_plain_specs_both_read_their_fields() {
     use super::{hud_layer, native_core::CORE};
     let h = Host::new().unwrap();
@@ -1124,15 +1175,170 @@ fn hud_specs_with_metatable_defaults_and_plain_specs_both_read_their_fields() {
     "#,
     )
     .unwrap();
-    let queued = hud_layer::MOD_QUEUES.with(|q| q.borrow().values().flatten().cloned().collect::<Vec<_>>());
+    let queued =
+        hud_layer::MOD_QUEUES.with(|q| q.borrow().values().flatten().cloned().collect::<Vec<_>>());
     let texts = queued
         .iter()
         .filter_map(|c| match c {
-            hud_layer::HudCommand::Text { x, y, text, scale, .. } => Some((*x, *y, text.clone(), *scale)),
+            hud_layer::HudCommand::Text {
+                x, y, text, scale, ..
+            } => Some((*x, *y, text.clone(), *scale)),
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert!(texts.contains(&(7.0, 9.0, "from defaults".to_string(), 1.0)), "{texts:?}");
-    assert!(texts.contains(&(1.0, 2.0, "plain".to_string(), 2.0)), "{texts:?}");
+    assert!(
+        texts.contains(&(7.0, 9.0, "from defaults".to_string(), 1.0)),
+        "{texts:?}"
+    );
+    assert!(
+        texts.contains(&(1.0, 2.0, "plain".to_string(), 2.0)),
+        "{texts:?}"
+    );
     hud_layer::clear_all();
+}
+
+/// What a Lua value reads back as, driven by the JSON it was built from (a record's own fields are
+/// hidden behind its proxy, so it is read key by key, as an addon reads it).
+fn read_back(value: &mlua::Value, shape: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value as J;
+    match (value, shape) {
+        (mlua::Value::Table(t), J::Object(fields)) => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in fields {
+                let got: mlua::Value = t.get(k.as_str()).unwrap();
+                if !matches!(got, mlua::Value::Nil) {
+                    out.insert(k.clone(), read_back(&got, v));
+                }
+            }
+            J::Object(out)
+        }
+        (mlua::Value::Table(t), J::Array(items)) => J::Array(
+            items
+                .iter()
+                .enumerate()
+                .map(|(i, v)| match t.raw_get::<mlua::Value>(i + 1).unwrap() {
+                    mlua::Value::Nil => J::Null,
+                    got => read_back(&got, v),
+                })
+                .collect(),
+        ),
+        (mlua::Value::Boolean(b), _) => J::Bool(*b),
+        (mlua::Value::Number(n), _) => serde_json::json!(*n),
+        (mlua::Value::Integer(n), _) => serde_json::json!(*n as f64),
+        (mlua::Value::String(s), _) => J::String(s.to_str().unwrap().to_string()),
+        (mlua::Value::UserData(_), _) => J::String("<userdata>".into()),
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+/// The one-call record build gives what the call-by-call one gives: the same fields, nested records,
+/// arrays with a hole, `$ref` userdata and empty objects; read-only all through; a missing field
+/// diagnosed. A record deeper than the build takes is left to the slow path (the control), and the
+/// build is the one that ran for the rest (a counter, not an assumption).
+#[test]
+fn raw_record_build_matches_the_call_by_call_build() {
+    use super::{native, record_raw};
+    use serde_json::json;
+    let h = Host::new().unwrap();
+    let lua = &h.lua;
+    let sample = json!({
+        "id": 4294967295u64, "name": "Zu\u{f1}iga \u{1F409} Dragon", "level": 51, "hp_fraction": 0.5, "dead": false, "gone": null,
+        "position": {"x": 1.5, "y": -2.0, "z": 1e9}, "empty": {}, "tags": ["a", null, "c"],
+        "ref": {"$ref": "entity", "key": "7", "generation": 3, "incarnation": 9},
+        "nested": [{"deep": {"x": 1}}, {"deep": {"x": 2}}],
+    });
+    let before = record_raw::builds();
+    let fast = native::record(lua, "eqoa.entities.Entity", &sample).unwrap();
+    assert_eq!(record_raw::builds(), before + 1, "the one-call build made it");
+    let slow = native::record_slow(lua, "eqoa.entities.Entity", &sample).unwrap();
+    let (a, b) = (read_back(&fast, &sample), read_back(&slow, &sample));
+    assert_eq!(a, b);
+    assert_eq!(a["name"], "Zu\u{f1}iga \u{1F409} Dragon");
+    assert_eq!(a["position"]["z"], 1e9);
+    assert_eq!(a["tags"], json!(["a", null, "c"]));
+    assert_eq!(a["nested"][1]["deep"]["x"], 2.0);
+    assert!(a.get("gone").is_none(), "a null field is absent");
+    lua.globals().set("rec", fast.clone()).unwrap();
+    h.execute(
+        r#"
+        assert(getmetatable(rec) == false, 'the metatable is hidden')
+        assert(type(rec.ref) == 'userdata')
+        assert(not pcall(function() rec.id = 1 end), 'a record is read-only')
+        assert(not pcall(function() rec.position.x = 1 end), 'so is a nested one')
+        assert(not pcall(function() rec.nested[1].deep.x = 5 end))
+        assert(rec.tags[3] == 'c' and #rec.tags >= 1)
+        local ok = pcall(function() return rec.misspelled end)
+        assert(ok and rec.misspelled == nil)
+        assert(rec.position.misspelled == nil)
+    "#,
+    )
+    .unwrap();
+    let logs = h.drain_logs().unwrap();
+    assert!(logs.iter().any(|s| s.contains("eqoa.entities.Entity.misspelled")), "a missing field is diagnosed: {logs:?}");
+    // control: past the depth the build takes, the call-by-call build makes it and the counter stays
+    let mut deep = json!({"x": 1.0});
+    for _ in 0..16 {
+        deep = json!({ "in": deep });
+    }
+    let before = record_raw::builds();
+    let value = native::record(lua, "eqoa.Deep", &deep).unwrap();
+    assert_eq!(record_raw::builds(), before, "too deep for the one-call build");
+    assert_eq!(read_back(&value, &deep), deep, "and still built");
+    // arrays of plain values
+    let numbers = json!([1, 2.5, "x", true]);
+    let before = record_raw::builds();
+    let value = native::record(lua, "eqoa.List", &numbers).unwrap();
+    assert_eq!(record_raw::builds(), before + 1);
+    assert_eq!(read_back(&value, &numbers), json!([1.0, 2.5, "x", true]));
+}
+
+/// A change event's `before` and `after` records are built when a handler reads them, not on delivery:
+/// a handler reading only `after` leaves `before` unbuilt (the build counter, the control), and a
+/// later read gives the same values as an eager build, the same table each time, read-only, an
+/// absent record (`entity.added`) nil, a missing field still diagnosed.
+#[test]
+fn change_event_before_and_after_are_built_only_when_read() {
+    use super::{
+        native_core::{CORE, Core},
+        native_events, record_raw,
+    };
+    use serde_json::json;
+    CORE.with(|c| *c.borrow_mut() = Core::default());
+    let h = Host::new().unwrap();
+    h.execute("seen = {}; eqoa.events.on('entity.changed', function(e) seen[#seen+1] = e; read_id = e.data.after.id end); eqoa.events.on('entity.added', function(e) added = e end)").unwrap();
+    let rec = |name: &str, x: f64| json!({"id": 7, "name": name, "position": {"x": x, "y": 0.0, "z": 2.0}, "ref": {"$ref": "entity", "key": "7", "generation": 1, "incarnation": 1}});
+    let emit = |name: &str, before: serde_json::Value, after: serde_json::Value| {
+        CORE.with(|c| c.borrow_mut().emit(name, json!({"ref": after["ref"], "before": before, "after": after, "changed": ["position"]})))
+    };
+    emit("entity.changed", rec("Rat", 1.0), rec("Rat", 5.0));
+    let before = record_raw::builds();
+    native_events::dispatch(&h).unwrap();
+    let delivered = record_raw::builds() - before;
+    h.execute("assert(read_id == 7)").unwrap();
+    // read-only handler of `after`: the data's other fields and `after` are built, `before` is not
+    let read_before = record_raw::builds();
+    h.execute("assert(seen[1].data.before.name == 'Rat' and seen[1].data.before.position.x == 1)").unwrap();
+    assert_eq!(record_raw::builds() - read_before, 1, "reading `before` built it then (control: it was {delivered} builds to deliver)");
+    // `ref`, `changed` and the nested records of `after` are built on first read too (a field at a
+    // time): read them once before counting
+    h.execute("local d = seen[1].data; assert(type(d.ref) == 'userdata' and d.changed[1] == 'position' and d.after.position.x == 5)").unwrap();
+    let again = record_raw::builds();
+    h.execute(
+        r#"
+        local d = seen[1].data
+        assert(rawequal(d.before, d.before) and rawequal(d.after, d.after), 'the same table each time')
+        assert(d.after.position.x == 5 and d.changed[1] == 'position' and type(d.ref) == 'userdata')
+        assert(not pcall(function() d.before = 1 end), 'read-only')
+        assert(not pcall(function() d.before.name = 'x' end), 'and its record too')
+        assert(d.nope == nil)
+    "#,
+    )
+    .unwrap();
+    assert_eq!(record_raw::builds(), again, "no further builds for what was built");
+    assert!(h.drain_logs().unwrap().iter().any(|s| s.contains("data.nope")), "a missing field is still diagnosed");
+    // an entity.added has no `before`: nil, and no diagnostic for it
+    emit("entity.added", json!(null), rec("Fox", 3.0));
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(added.data.before == nil and added.data.after.name == 'Fox')").unwrap();
+    assert!(!h.drain_logs().unwrap().iter().any(|s| s.contains("data.before")), "an absent `before` is not a missing field");
 }

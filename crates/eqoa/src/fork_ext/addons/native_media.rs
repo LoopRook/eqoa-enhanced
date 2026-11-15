@@ -96,6 +96,7 @@ pub(crate) fn imgui(lua: &Lua, imgui: &Table) -> Result<()> {
     Ok(())
 }
 pub(crate) fn textures(lua: &Lua, bank: &Rc<RefCell<Textures>>) -> Result<()> {
+    lua.set_app_data(bank.clone());
     if lua.named_registry_value::<Table>("eqoa_root").is_err() {
         return Ok(());
     }

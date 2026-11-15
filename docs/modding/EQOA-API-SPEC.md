@@ -224,6 +224,8 @@ All state getters read the frozen native core, not Forge tables. Unsupported R4 
 | `eqoa.entities.get(ref:EntityRef)` | W: `Entity?`; stale_handle if expired. |
 | `eqoa.entities.find(id:uint)` | W: current `Entity?`, nil,nil if no visible record. Never searches historical map data. |
 | `eqoa.entities.named(name:string,exact:bool=true)` | W: `Entity[]`, literal case-insensitive UTF-8 name match (substring when false); no regex/pattern execution. |
+| `eqoa.entities.dots()` | W: `{ids:uint[],xs:number[],zs:number[]}`, plain values (not records) for the creatures the native minimap draws as dots, at this frame's drawn positions: creatures, not corpses, active (or the target) and named. Parallel columns, in native slot order, so a per-frame scan builds no table per creature; it is rebuilt on every call, so read it each frame rather than keeping it. Use `eqoa.entities.find(id)` for the record. |
+| `eqoa.entities.pick_dot(query)` | W: nearest current minimap dot `{id,x,y,world_x,world_z}?`, or nil,nil. Query: `x,y` pointer and `center_x,center_y,radius` circle in pixels relative to the view origin; `scale_x,scale_y` positive pixel scale per 112-unit view frame; `reach` nonnegative hit radius; optional `exclude:uint[]`. Native current-frame projection and dot scan, lower ID breaks ties. Returns projected relative pixels and world position. `unavailable` until minimap prepared; `invalid_argument` for nonfinite values or invalid scales/radii. |
 | `eqoa.entities.distance(a:Vec3,b:Vec3)` | A: `number,nil`, Euclidean 3D game units. Pure calculation; `A/entity.rs:226` equivalent. |
 | `eqoa.target.get()` | W: current `Entity?`; nil,nil for no target or no observed entity. Use player.target_id for a selected ID with no record. Source `P:4181,5000,2329`. |
 
@@ -242,11 +244,11 @@ All state getters read the frozen native core, not Forge tables. Unsupported R4 
 | `location:Location?` | S grid/words: `{world_id:int,place_id:int?,compass_id:int?,name:string?,cell_x:int,cell_z:int}`. Cell coordinates are signed grid labels, not Lua array positions. `F:174`, `zones.rs:54`. |
 | `mastery:Mastery?` | Round 4, §7; separate capability `eqoa.player.Player.mastery`. |
 
-`Entity={ref:EntityRef,id:uint,name:string,level:uint?,position:Vec3?,hp_fraction:number?,power:number?,kind:"player"|"npc"|"pet"|"other",class_code:uint?,target_id:uint?,status_flags:uint?,poisoned:bool?,diseased:bool?,disposition:uint?,disposition_name:string?}`. Source `N/entity.rs:69,112`, snapshot `F:368`. hp_fraction is p19/255 when known; power is 0..1 fraction from power reader or self stats (nil when not sent). p19=0 is ambiguous dead/out-of-range, so nil unless native metadata establishes a measured value. Do not assert death from zero. `class_code` is creature p256, **not player class**; player is 2, NPC <2, pet 3. Disposition is only known for current target after TargetInfo (0x0010), invalidated immediately on target change; for other entities it is nil. Status bits: `eqoa.entities.status={nameplate_hidden=1,poisoned=4,diseased=8}` (resource icon IDs are in icons, not status flags). kind unknown values preserve class_code and return other. Explicitly do not infer disposition from kind or map history.
+`Entity={ref:EntityRef,id:uint,name:string,level:uint?,position:Vec3?,actor_position:Vec3?,hp_fraction:number?,power:number?,kind:"player"|"npc"|"pet"|"other",class_code:uint?,target_id:uint?,status_flags:uint?,poisoned:bool?,diseased:bool?,disposition:uint?,disposition_name:string?}`. Source `N/entity.rs:69,112`, snapshot `F:368`. hp_fraction is p19/255 when known; power is 0..1 fraction from power reader or self stats (nil when not sent). p19=0 is ambiguous dead/out-of-range, so nil unless native metadata establishes a measured value. Do not assert death from zero. `class_code` is creature p256, **not player class**; player is 2, NPC <2, pet 3. Disposition is only known for current target after TargetInfo (0x0010), invalidated immediately on target change; for other entities it is nil. Status bits: `eqoa.entities.status={nameplate_hidden=1,poisoned=4,diseased=8}` (resource icon IDs are in icons, not status flags). kind unknown values preserve class_code and return other. Explicitly do not infer disposition from kind or map history.
 
 ### Group
 
-`eqoa.group.get()` (W) returns `Group={in_group:bool,self_leader:bool?,members:Member[],raid:RaidMember[],invites:Invite[]}`. Not grouped is an available object with in_group=false and empty lists, self_leader=nil. `Member={entity:EntityRef?,id:uint,name:string,active:bool,hp_fraction:number?,position:Vec3?,world_id:int?}`; unknown HP remains nil until `hp_known!=0`. Position uses a current actor first, otherwise active channel-40 coordinates in that member's world. Expose world_id even if different; distance/guidance must check it. The members list excludes the local player and inactive slots, matching the native group HUD; raid roster remains separate. No fixed eight-member cap in the native API. `RaidMember={id:uint,name:string,hp_fraction:number?,power_fraction:number?}`, `Invite={id:uint,name:string}`. Sources `group.rs:11,29,63,88,113`, `P:2362,2366,2414,7738,8106`.
+`eqoa.group.get()` (W) returns `Group={in_group:bool,self_leader:bool?,members:Member[],raid:RaidMember[],invites:Invite[]}`. Not grouped is an available object with in_group=false and empty lists, self_leader=nil. `Member={entity:EntityRef?,id:uint,name:string,active:bool,hp_fraction:number?,position:Vec3?,world_id:int?}`; unknown HP remains nil until `hp_known!=0`. Position uses a current actor first, otherwise active channel-40 coordinates in that member's world. Expose world_id even if different; distance/guidance must check it. The initial members snapshot excludes the local player; consumers also exclude the local ID on roster deltas. Inactive members remain present with unavailable position unless an actor supplies one; raid roster remains separate. No fixed eight-member cap in the native API. `RaidMember={id:uint,name:string,hp_fraction:number?,power_fraction:number?}`, `Invite={id:uint,name:string}`. Sources `group.rs:11,29,63,88,113`, `P:2362,2366,2414,7738,8106`.
 
 **Resolved scout issues:** channel-40's s16 coordinates are cast directly to game-unit floats (`group.rs:121`); native map and HUD compare/subtract them directly against actor/camera positions (`P:7738,8112`). No /100 or /256 conversion. Leadership must be derived from the current roster's first member vs self ID; `Group.leader` currently can stay true after a transfer (`group.rs:93`). The adapter must use the roster derivation, not export that stale flag. Raid list uses server-provided bars and carries no invented coordinates.
 
@@ -550,15 +552,27 @@ MenuRow.index and Window.selected_row are 1..#rows, `WndList.sel+1` only for dir
 
 ### Map data and waypoints
 
-**Choice: expose calibrated native images and coordinates, not a new terrain rasterizer.** Native maps stay the defaults. No change to map theme, terrain generation, guide search, network submissions or route finding is authorized here. Read map handoff before implementing.
+**Round 4 addendum (owner, 2026-11-11).** Native maps remain the defaults. Mods may own search, journal and circular minimap presentation. The M map keeps upstream's colours, font and legend; skinning is deferred to round 8. Terrain generation, network submissions and route finding remain native. Read the map handoff before implementing.
 
 | Function | Return / behavior / source |
 |---|---|
-| `eqoa.map.get()` | W/S: `MapState={world_id:int,world_name:string?,zone:Location?,bounds:Bounds?,revision:uint,waypoint:Waypoint?}`; world from `P:5423`, words/grid `F:174`, `map/mod.rs:694`, cells. |
+| `eqoa.map.get()` | W/S: `MapState={enabled:bool,open:bool,minimap:bool,markers_on:bool,world_id:int,world_name:string?,zone:Location?,bounds:Bounds?,revision:uint,waypoint:Waypoint?,search_anchor:Rect?}`; world from `P:5423`, words/grid `F:174`, `map/mod.rs:694`, cells. |
 | `eqoa.map.images(world_id:int)` | W/S: MapImage[] metadata for **already known** native world cells/overview; nil,unavailable if native map has not initialized that world. Never claims a cache miss is an empty world. `map/cells.rs:37,67,85`, `map/build.rs:207,619`. |
 | `eqoa.map.load_image(image_id:string)` | TextureInfo when decoded/uploaded, or nil,unavailable while queued; emits resource.ready/failed. ID from images() only; cannot use it as filesystem path. Uses fork-owned native map store (`map/store.rs:19,36`) and owned textures, not renderer's GPU slot cast to a Lua texture. |
 | `eqoa.map.set_waypoint(point:{world_id:int,x:number,z:number,label:string?})` | RequestId; same native personal-waypoint service as map click (`map/mod.rs:520,1094`), §8 results. Any logic can call it; no player-click restriction. Label ≤128 UTF-8 bytes, display metadata owned by mod; underlying native pin remains x/z. |
 | `eqoa.map.clear_waypoint()` | RequestId; clears this VM's currently owned personal pin only; busy if user/another mod replaced it. No clearing group guidance as side effect. |
+| `eqoa.map.markers(world_id:int)` | Read-only array of `{kind="camp"\|"coach"\|"town"\|"quest"\|"community"\|"waypoint"\|"group_waypoint",name,x,z,level_min?,level_max?,label?,step?:bool}` from native map sources (`step` on quests: a "?" step to do, else a "!" offer to take). `MapState.markers_on` is the native Map Markers setting (camps and coaches show on the maps). |
+| `eqoa.map.view{size?}` | Held, player-centered native minimap view. The picture is the native minimap without upstream's frame art (the frame is drawn only for the stock minimap), so a mod may cut it to any shape. `texture:TextureInfo?` is available after native preparation; `project(x,z)` -> px,py,inside and `unproject(px,py)` -> x,z use the native transform. Size defaults to the stock minimap size. No center/zoom override: upstream's zoom, wheel and indoor view apply. Requires the stock minimap hidden. The native draw is redirected at its call site, at most once/frame for stock or held views. `layers="all"` initially; corner marks may be cropped by a circular HUD image. |
+| `eqoa.map.set_guide{world_id,x?,z?,entity_id?,dots?={{x,z},...},label?}` | Sets this mod's guide, separate from personal waypoint; dashed line and dots on M map, square minimap and views. Entity guides follow live entities and emit `guide.lost` when lost. Cleared on disable. |
+| `eqoa.map.clear_guide()` | Clears this mod's guide only. |
+
+`MapState.open` is the M map; `MapState.minimap` is true while the stock minimap setting is on and it is in view (in play, map closed, HUD shown), whether or not a mod hides the stock picture. `map.changed` reports native map-state changes. The map overlay uses one neutral seam called with the M map/minimap transform; drawing implementation is fork-owned.
+
+`eqoa.hud.image{texture=TextureInfo,x,y,width?,height?,shape="square"|"circle"}` supports owned textures. Circle masks live in the fork-owned HUD pass; this does not modify native map shaders. No ring option is promised.
+
+`eqoa.hud.hide("minimap")` / `show` also hide native minimap clicks. `eqoa.hud.layout().minimap` reports its current rectangle, including upstream Move HUD changes. `eqoa.input.pointer()` returns `{x,y,inside_window:bool}` in physical window pixels. `pointer.pressed` and `pointer.wheel` include coordinates; `eqoa.input.claim_pointer(rect)` consumes clicks/wheel inside the mod's rectangle. Claims belong to the VM, are refreshed each render frame (32 rectangles/VM/frame), expire after one additional frame, and end on disable/focus loss. Move HUD drag takes precedence. A native `hud.layout()` rectangle may be passed directly; all pointer rectangles use physical window pixels, matching layout x/y/width/height. `eqoa.input.minimap_wheel(steps)` forwards a claimed wheel to the same native minimap zoom path, including indoor zoom. Mod HUD/ImGui, keys and captured text continue over the open M map through the existing addon route.
+
+`eqoa.files.load_json(path)` queues native JSON decoding off the frame thread, from package/resource mounts or the mod's own private data (16 MiB cap); `resource.ready` has kind `"json"` and the decoded table. `eqoa.files.save_json_async(path,value)` writes only to the mod's private area; native encoding/writing is off the frame thread and pending values coalesce to the latest. The save function is implemented only if a measured 14 MiB Lua journal save exceeds 2 ms of frame time. Entity deltas carry journal data: id, name, world, level, position and native creature/corpse flags; unknown flags remain unknown.
 
 `Bounds={x_min:number,z_min:number,x_max:number,z_max:number}`. `MapImage={id:string,world_id:int,kind:"cell"|"overview",bounds:Bounds,width:uint,height:uint,revision:uint,available:bool}`; bounds are actual world calibration, pixels top-left correspond (x_min,z_min), u increases x, v increases z. IDs are opaque strings scoped to native cache/art revision; no raw directories or paths. `Waypoint={world_id:int,x:number,z:number,label:string?,owner:string?}`; nil owner means player-owned. Map image loading may request existing cached/generated native data using its current build budget; must not start full-world work in Lua callback. Decoded/uploaded image charged to normal per-addon texture quota; requests max 8 pending/VM and bounded native work (existing map builder budget). No promise of all-world images before those worlds have been loaded. Missing handmade art remains missing unless the mod ships its own PNG/JPEG. Changing waypoint invokes native persistence/search invalidation; the fork-owned adapter tracks owner and drops ownership on native user change, arrival, deletion, or disable. On disable clear only a still-owned mod pin; player pins survive. Group chat waypoint creation is an explicit game chat action, not an implied map operation.
 
@@ -778,3 +792,180 @@ None. The owner has already chosen naming, stability timing, Forge compatibility
 
 
 Round 3: `player.stats_changed` is a notification with an empty data record whenever the native detailed Stats snapshot changes, including mastery/cap-only changes that do not change Player fields. Read `eqoa.player.stats()` after delivery. Consumers caching scalar drawing data must also invalidate on `state.reset`, `enabled`, and `events.dropped`.
+
+
+Round 4 JSON resource details: `files.load_json(path)` returns a request integer and nil,
+or nil plus an Error. At most two loads per VM are in flight; size is at most 16 MiB,
+depth 32, two million JSON values, and root object/array. Structural preflight also
+counts object keys against the node cap before allocating the decoded tree.
+`resources/` and `package_resources/` read packaged copies, bypassing overlays.
+Relative private names such as `journal.json` read only that mod's own data area,
+including tombstones. Completion
+uses `resource.ready{kind="json",request,value,handle=value}` or
+`resource.failed{kind="json",request,error}`. Decoded tables are mutable. JSON null is
+`eqoa.files.null`; decoded arrays retain an internal array tag, including empty arrays.
+The worker reads and decodes; Lua table materialization occurs on the VM thread at
+dispatch, in slices of at most 512 values or 1 ms per dispatch, one completion at a
+time. A native manifest must declare `"capabilities": ["large_data"]` to receive a
+128 MiB Lua heap at startup. Other mods retain 8 MiB; JSON calls never raise the
+heap. A materialisation memory failure delivers `resource.failed` with the request
+id and a memory/capability message; it does not disable the mod. The slice budget
+is cooperative: a single allocation or GC can exceed it.
+
+
+`files.save_json_async(path,value)` is enabled by the measured round 4 Lua save cost.
+It accepts a relative private name (for example `journal.json`), returns request,nil,
+and never writes package or shared resources. It copies a finite plain Lua object/array
+snapshot on the caller thread; native JSON encoding and atomic replacement occur on a
+worker. Dense positive numeric keys are arrays; empty ordinary tables are objects.
+JSON null and decoded array tags round-trip. Cycles, mixed/sparse array keys, handles,
+functions, non-finite values, depth over 32 and over two million values are rejected.
+Snapshot string/key bytes and encoded output are each capped at 14 MiB; existing total
+private storage remains capped at 16 MiB. Save never raises the VM heap allowance.
+Each VM has one active write and one replaceable pending value for the same path.
+A different path returns quota until that stream drains. Latest pending value wins;
+coalesced requests need not produce individual completions. The latest completion is
+`resource.ready{kind="json_saved",request}` or `resource.failed` with request/error.
+Track only the latest request id for a coalesced save stream. A process-wide writer
+serialises paths across VM generations and checks acceptance generations before
+rename: older data cannot overwrite a newer accepted value. Disable, runtime
+shutdown, device recovery and VM drop flush accepted saves and join the idle writer,
+with a 2 s wait. A timeout is diagnosed and cancels pending commits, preventing a
+late commit from recreating cleared data after disable. No Lua object crosses
+threads. Snapshot copying is synchronous and has no 2 ms latency guarantee.
+
+
+Journal entity fields: `Entity.world_id` is the protocol world byte,
+`entity_type` is the raw protocol kind, `is_creature` compares that kind to
+TYPE_CREATURE, `corpse` is protocol p18 bit 1 (mask 2), and `search_flags` is
+creature p255 or nil when no creature record is available. Existing name, id,
+level, position and class_code (p256) remain the other journal inputs. These
+fields participate in the existing entity before/after deltas. HP is independent
+of the corpse flag; unknown level/search/class fields remain nil.
+
+Circle HUD images inscribe a physical circle inside the transformed image bounds.
+Extra extent from unequal HUD X/Y scales is clipped with matching UVs, preserving
+projection alignment instead of stretching the texture.
+
+
+Round 4 view lifecycle: `view:close()` releases the capture lease immediately; discarded
+views are otherwise released by Lua GC. Views share one capture draw per frame.
+`view.texture` is nil until a usable capture exists, after resize until recapture,
+and after close/disable/device loss. Quota exhaustion returns nil and records a visible
+diagnostic; `view.error` contains the Error and `view.get_texture()` returns nil,Error
+without throwing. `project` tests `inside` against the visible physical circle.
+`hide("all")`, Forge `DisableUI` and their ownership queries exclude the minimap;
+hide it explicitly by name. Pointer x/y, claims, and layout x/y/width/height share physical window pixels.
+Legacy frame_x/frame_y remain native anchored HUD drawing coordinates for existing
+HUD commands; use the primary x/y fields for pointer comparisons. Pressed/wheel notifications go to all subscribers for mouse
+input anywhere in the window, including unclaimed positions. Touch is not translated
+into this mouse-only API. Point guides end on world loss; invalid guide coordinates
+return nil,Error.
+
+Pointer comparison example: `local r=eqoa.hud.layout().minimap; local p=eqoa.input.pointer();
+local inside=p.x>=r.x and p.x<=r.x+r.width and p.y>=r.y and p.y<=r.y+r.height`.
+The same `r` can be passed directly to `eqoa.input.claim_pointer(r)`.
+
+
+### Round 4 Part B: shared journal and player file actions
+
+Native manifests may declare `shares: ["data/journal.json"]`, `commands:
+["import_journal", "export_journal"]` and `permissions: ["import", "export"]`.
+Declarations are bounded lists; shared paths must be contained private `data/`
+paths, commands use nonempty ASCII identifiers, and permissions are limited to
+`import` and `export`. Invalid declarations reject the package with a diagnostic.
+
+`eqoa.files.load_json("@mod_id/data/journal.json")` uses the existing 16 MiB
+worker and sliced materialisation limits. Only a running owner's explicitly
+shared file is readable. `shared.changed{mod,path}` follows a successful save.
+
+`eqoa.mods.send(mod_id, command, args?)` queues `mod.command{from,command,args}`
+for the next event boundary. Missing/disabled targets and undeclared commands
+return nil,Error. Queues and payloads are bounded. A player key/pointer activation
+may delegate its import/export authority through one command, once.
+
+`eqoa.files.import{title,extensions}` and `eqoa.files.export(private_path,file_name)`
+require their manifest permission and a player activation. Native dialogs and
+copies run off the frame thread. Import copies to private `imports/` and emits
+`resource.ready{kind="import",request,path}`; cancellation emits
+`resource.failed` with code `cancelled`. Export copies to Desktop with collision
+suffixes ` (2)`, ` (3)`, etc.; it never replaces an existing destination. Paths
+outside the issuing mod's private mounts are denied.
+
+`eqoa.options.button({id,label}, callback)` registers a mod-owned action row in
+Mods & Addons. Confirm/click queues the callback at the next VM boundary with a
+single player activation; left/right do not activate it. Rows and callbacks
+retire on disable, are limited to 32 per VM, and do not persist a toggle value.
+The returned record has `id`, `label`, and `item_id`.
+
+Export names must be one non-hidden filename with no leading/trailing whitespace,
+control characters, separators, reserved Windows device name, or trailing dot.
+Only `.json`, `.txt`, `.csv`, and `.png` extensions (case-insensitive) are accepted;
+invalid names return `nil,Error` with `invalid_argument` before spending the activation.
+
+Commands have a separate 64-entry queue per VM, with at most four pending commands
+from each sender. Arguments are JSON values with depth <=8, <=256 values, and
+<=4 KiB of serialized JSON. Quota failures return `quota` and do not spend a player
+activation. Command traffic cannot evict native events or resource completions.
+Player authority is offered only at the next receiver boundary and expires after
+that command's dispatch; an undelivered older command loses its player mark.
+
+The Desktop destination and the player-selected source use bounded native file
+I/O and support OS links, redirected folders and cloud-backed paths. Reparse/link
+checks remain mandatory on private mod storage and the private import copy.
+A missing Desktop folder is created; an unavailable Desktop returns `unavailable`.
+
+Imports use a persistent private sequence for `imports/import-N.json` names, so
+re-enabling or restarting cannot recycle a staging name. The three newest imports
+are retained; older imports are pruned after a successful copy. `imports/` is
+readable/removable staging managed by native import, denies ordinary writes and
+JSON saves (including case aliases), and does not count against the mod's normal
+16 MiB private storage quota. Each import still has the 16 MiB read/copy cap.
+
+A physical key/pointer action authorizes at most one import or export across all
+observing mods. A direct handler may transfer that authority to one declared
+command; the receiver may use it once and cannot delegate it again. Unused delegated
+authority expires when that command finishes dispatch. Timers/render cannot use it.
+Each mod has at most one outstanding native dialog/file action. Disabling cancels
+its copy and drops completion delivery, but an OS picker may remain open until the
+player closes it; re-enabling cannot open another picker while that worker remains.
+Dialog titles begin with the mod's display name.
+
+File actions return `permission_denied` without the declared permission,
+`requires_player` without unused activation, `busy` with an outstanding request,
+`invalid_argument` for invalid specs/names, `quota` for bounded resources,
+`unavailable` for absent endpoints, and correlated `resource.failed` errors for
+worker I/O/cancellation. Imports always use `.json` staging names; the OS extension
+filter is a hint and the chosen file is copied with a 16 MiB bounded read.
+Exports publish a synced temporary file by an atomic non-replacing rename;
+pre-existing files receive numbered collision suffixes. Worker disconnects retain
+the original `import`/`export` kind and request id. Removing a shared file emits
+`shared.changed` as saving does. Migrated key collisions preserve both explicit
+assignments for the player to resolve on Controls.
+
+An export queued in the same player callback as an accepted asynchronous JSON save
+waits up to two seconds on its file worker for that save before reading the file.
+This includes the first save when no older file exists; save failure fails export.
+
+During an active `capture_text` lease in plain play, registered bind callbacks
+run only for the sole native editor owner. Forge text
+capture blocks ordinary registered bind callbacks, including its owner's.
+The raw `input.key` event also delivers
+logical navigation keys, repeats, and optional `text` (Unicode logical character
+text, preserving case). Native dialogs and synthetic keys remain excluded. The
+lease neutralises merged gameplay pad input and releases held combat/camera,
+autorun and follow state. Mods renew the lease while their editor remains open.
+
+`eqoa.map.get().open` reports whether the native M map is open, including map
+change invalidation. Static camp/coach markers include their native search label
+in `label` (XP-camp suffix or town/coach name); `name` stays the source name.
+
+`eqoa.map.get().enabled` reports the native Map master switch. `eqoa.map.open()`
+queues an M-map opening through the bounded native action queue, applied only in
+eligible play. It returns true or nil,Error (`not_in_world`, `unavailable` while
+Map is off, or `busy`). This supports F2 search when Minimap is off. Native
+minimap visibility also honours the player's Map/Minimap switches. Missing private
+JSON files return `not_found` without a warning; denied paths still diagnose.
+Group snapshots retain inactive roster members with unknown positions.
+
+Round 4 Part B fix: `MapState.search_anchor` is the free toolbar band in window pixels (`x/y/width/height`), computed from the actual composed header footprint, including coordinates, notices and progress. It is nil before the first full-map composition. `Entity.actor_position` supplies the dead-reckoned actor location, falling back to the finite protocol location when the actor is zero/unavailable, for native journal parity; `position` retains protocol semantics.

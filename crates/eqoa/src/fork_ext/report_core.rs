@@ -353,7 +353,6 @@ mod native {
                 crate::gpulost::why()
             ));
         }
-        crate::map::journal::clean_exit();
     }
 
     pub(crate) fn tail(n: usize) -> Vec<String> {

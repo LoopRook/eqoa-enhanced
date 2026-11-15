@@ -3,7 +3,7 @@ use super::{
     native::{bind, bind_fn, error, record},
     native_core::{CORE, View},
 };
-use mlua::{AnyUserData, Lua, MetaMethod, Result, UserData, UserDataMethods, Value};
+use mlua::{AnyUserData, Lua, MetaMethod, Result, Table, UserData, UserDataMethods, Value};
 use serde_json::{Value as Json, json};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -52,17 +52,101 @@ fn read(
     path: &str,
     f: impl FnOnce(&View) -> Json,
 ) -> Result<mlua::MultiValue> {
+    let cloned = super::addon_perf::section("read.clone");
     let value = CORE.with(|c| {
         let c = c.borrow();
         c.view.in_world.then(|| f(&c.view))
     });
+    drop(cloned);
     match value {
-        Some(v) => lua.pack_multi((super::native::record_cached(lua, symbol, path, &v)?, Value::Nil)),
+        Some(v) => lua.pack_multi((
+            super::native::record_cached(lua, symbol, path, &v)?,
+            Value::Nil,
+        )),
         None => error(lua, symbol, "not_in_world", "enter a loaded world first"),
     }
 }
 pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
+    bind(
+        lua,
+        "map",
+        "markers",
+        lua.create_function(|lua, value: Value| {
+            let world = match value {
+                Value::Integer(v) if (0..=255).contains(&v) => v as i32,
+                Value::Number(v)
+                    if v.is_finite() && v.fract() == 0.0 && (0.0..=255.0).contains(&v) =>
+                {
+                    v as i32
+                }
+                _ => {
+                    return error(
+                        lua,
+                        "eqoa.map.markers",
+                        "invalid_argument",
+                        "world_id must be an integer in 0..255",
+                    );
+                }
+            };
+            read(lua, "eqoa.map.markers", "eqoa.map.Marker", |v| {
+                let mut marks = (*crate::map::extension::static_markers(world)).clone();
+                marks.extend(
+                    v.map_markers
+                        .iter()
+                        .filter(|m| m["world_id"].as_i64() == Some(world as i64))
+                        .map(|m| {
+                            let mut m = m.clone();
+                            m.as_object_mut().unwrap().remove("world_id");
+                            m
+                        }),
+                );
+                Json::Array(marks)
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "map",
+        "open",
+        lua.create_function(|lua, ()| {
+            if !CORE.with(|c| c.borrow().view.in_world) {
+                return error(
+                    lua,
+                    "eqoa.map.open",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            if !crate::settings::map() {
+                return error(lua, "eqoa.map.open", "unavailable", "Map is turned off");
+            }
+            if !super::actions::queue_open_map() {
+                return error(lua, "eqoa.map.open", "busy", "native action queue is full");
+            }
+            lua.pack_multi((true, Value::Nil))
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "map",
+        "get",
+        lua.create_function(|lua, ()| {
+            read(lua, "eqoa.map.get", "eqoa.map.MapState", |v| {
+                let mut map = v.map.clone();
+                if map.is_object() {
+                    map["search_anchor"] = json!(
+                        crate::fork_ext::map_toolbar::anchor()
+                            .map(|a| json!({"x":a[0],"y":a[1],"width":a[2],"height":a[3]}))
+                    );
+                }
+                map
+            })
+        })?,
+    )?;
+
     bind(lua,"client","get",lua.create_function(|lua,()| CORE.with(|c| {let c=c.borrow();record(lua,"eqoa.client.Client",&json!({"in_world":c.view.in_world,"phase":c.view.phase,"generation":c.generation,"tick":c.tick,"frame":c.frame,"time":super::native_core::time_unborrowed(&c),"world_id":c.view.world_id}))}))?)?;
     for (module, name, path) in [
         ("player", "get", "eqoa.player.Player"),
@@ -130,6 +214,119 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             })
         })?,
     )?;
+    // Pick directly from this frame's compact dots: no per-creature Lua allocation or call.
+    super::native::describe(lua, "eqoa.entities.pick_dot", "supported", Some(4), "");
+    bind_fn(lua, "entities", "pick_dot", |lua, q: Table| {
+        let x: f32 = q.get("x")?;
+        let y: f32 = q.get("y")?;
+        let sx: f32 = q.get("scale_x")?;
+        let sy: f32 = q.get("scale_y")?;
+        let cx: f32 = q.get("center_x")?;
+        let cy: f32 = q.get("center_y")?;
+        let radius: f32 = q.get("radius")?;
+        let reach: f32 = q.get("reach")?;
+        if ![x, y, sx, sy, cx, cy, radius, reach]
+            .iter()
+            .all(|v| v.is_finite())
+            || sx <= 0.0
+            || sy <= 0.0
+            || radius < 0.0
+            || reach < 0.0
+        {
+            return error(
+                lua,
+                "eqoa.entities.pick_dot",
+                "invalid_argument",
+                "finite coordinates and positive scales required",
+            );
+        }
+        let exclude: Vec<u32> = q
+            .get::<Option<Table>>("exclude")?
+            .map(|t| t.sequence_values().collect::<Result<Vec<u32>>>())
+            .transpose()?
+            .unwrap_or_default();
+        CORE.with(|c| {
+            let c = c.borrow();
+            if !c.view.in_world {
+                return error(
+                    lua,
+                    "eqoa.entities.pick_dot",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            let Some(p) = c.view.minimap else {
+                return error(
+                    lua,
+                    "eqoa.entities.pick_dot",
+                    "unavailable",
+                    "native minimap has not been prepared",
+                );
+            };
+            let mut best: Option<(u32, f32, f32, f32, f32, f32)> = None;
+            for &(id, wx, wz) in &c.view.dots {
+                if exclude.contains(&id) {
+                    continue;
+                }
+                let (px, py, _) = p.project(112.0, wx, wz);
+                let (px, py) = (px * sx, py * sy);
+                let dist = (px - x) * (px - x) + (py - y) * (py - y);
+                if dist <= reach * reach
+                    && (px - cx) * (px - cx) + (py - cy) * (py - cy) <= radius * radius
+                    && best.is_none_or(|b| dist < b.5 || (dist == b.5 && id < b.0))
+                {
+                    best = Some((id, px, py, wx, wz, dist));
+                }
+            }
+            let value = if let Some((id, px, py, wx, wz, _)) = best {
+                let t = lua.create_table()?;
+                t.set("id", id)?;
+                t.set("x", px)?;
+                t.set("y", py)?;
+                t.set("world_x", wx)?;
+                t.set("world_z", wz)?;
+                Value::Table(t)
+            } else {
+                Value::Nil
+            };
+            lua.pack_multi((value, Value::Nil))
+        })
+    })?;
+    // `eqoa.entities.dots()`: what the native minimap draws, as bare values. A caller that
+    // hit-tests or maps the dots every frame cannot afford a guarded record per creature per
+    // frame, so this returns plain columns built from the frame's own list.
+    super::native::describe(lua, "eqoa.entities.dots", "supported", Some(4), "");
+    bind_fn(lua, "entities", "dots", |lua, ()| {
+        let dots = CORE.with(|c| {
+            let c = c.borrow();
+            c.view
+                .in_world
+                .then(|| c.view.dots.clone())
+        });
+        let Some(dots) = dots else {
+            return error(
+                lua,
+                "eqoa.entities.dots",
+                "not_in_world",
+                "enter a loaded world first",
+            );
+        };
+        let list = lua.create_table_with_capacity(0, 3)?;
+        // columns rather than a table per dot: a per-frame scan allocates three tables, not one
+        // per creature
+        let ids = lua.create_table_with_capacity(dots.len(), 0)?;
+        let xs = lua.create_table_with_capacity(dots.len(), 0)?;
+        let zs = lua.create_table_with_capacity(dots.len(), 0)?;
+        for (i, (id, x, z)) in dots.into_iter().enumerate() {
+            ids.raw_set(i + 1, id)?;
+            xs.raw_set(i + 1, x)?;
+            zs.raw_set(i + 1, z)?;
+        }
+        list.raw_set("ids", ids)?;
+        list.raw_set("xs", xs)?;
+        list.raw_set("zs", zs)?;
+        lua.pack_multi((Value::Table(list), Value::Nil))
+    })?;
     bind(
         lua,
         "entities",
@@ -647,7 +844,10 @@ fn install_math(lua: &Lua) -> Result<()> {
                 _ => super::hud_layout::get_window_size(),
             };
             let j = super::hud_layout::hud_frame_json((w, h));
-            lua.pack_multi((super::native::record_cached(lua, "eqoa.hud.frame", "eqoa.hud.Frame", &j)?, Value::Nil))
+            lua.pack_multi((
+                super::native::record_cached(lua, "eqoa.hud.frame", "eqoa.hud.Frame", &j)?,
+                Value::Nil,
+            ))
         })?,
     )?;
     bind(
@@ -664,7 +864,10 @@ fn install_math(lua: &Lua) -> Result<()> {
                 _ => super::hud_layout::get_window_size(),
             };
             let j = super::hud_layout::hud_layout_json((w, h));
-            lua.pack_multi((super::native::record_cached(lua, "eqoa.hud.layout", "eqoa.hud.Layout", &j)?, Value::Nil))
+            lua.pack_multi((
+                super::native::record_cached(lua, "eqoa.hud.layout", "eqoa.hud.Layout", &j)?,
+                Value::Nil,
+            ))
         })?,
     )?;
     bind_fn(
@@ -683,22 +886,21 @@ fn install_math(lua: &Lua) -> Result<()> {
             lua.pack_multi((vis, Value::Nil))
         },
     )?;
-    let parse_anchor_vert =
-        |t: &Spec| -> Result<(render::ui::Anchor, render::ui::Vertical)> {
-            let anchor_s: Option<mlua::String> = t.fget("anchor")?;
-            let anchor = match anchor_s.as_ref().map(|s| s.as_bytes()).as_deref() {
-                Some(b"right") => render::ui::Anchor::Right,
-                Some(b"center") => render::ui::Anchor::Middle,
-                _ => render::ui::Anchor::Left,
-            };
-            let vert_s: Option<mlua::String> = t.fget("vertical")?;
-            let vertical = match vert_s.as_ref().map(|s| s.as_bytes()).as_deref() {
-                Some(b"bottom") => render::ui::Vertical::Bottom,
-                Some(b"center") => render::ui::Vertical::Middle,
-                _ => render::ui::Vertical::Top,
-            };
-            Ok((anchor, vertical))
+    let parse_anchor_vert = |t: &Spec| -> Result<(render::ui::Anchor, render::ui::Vertical)> {
+        let anchor_s: Option<mlua::String> = t.fget("anchor")?;
+        let anchor = match anchor_s.as_ref().map(|s| s.as_bytes()).as_deref() {
+            Some(b"right") => render::ui::Anchor::Right,
+            Some(b"center") => render::ui::Anchor::Middle,
+            _ => render::ui::Anchor::Left,
         };
+        let vert_s: Option<mlua::String> = t.fget("vertical")?;
+        let vertical = match vert_s.as_ref().map(|s| s.as_bytes()).as_deref() {
+            Some(b"bottom") => render::ui::Vertical::Bottom,
+            Some(b"center") => render::ui::Vertical::Middle,
+            _ => render::ui::Vertical::Top,
+        };
+        Ok((anchor, vertical))
+    };
     bind_fn(
         lua,
         "hud",
@@ -874,6 +1076,9 @@ fn install_math(lua: &Lua) -> Result<()> {
                     "spec must be a table",
                 );
             };
+            if !t.get::<Value>("texture")?.is_nil() {
+                return super::hud_textures::image(lua, &t);
+            }
             let t = Spec::new(lua, &t)?;
             let x: i32 = match t.fget::<i32>("x") {
                 Ok(v) => v,
@@ -1152,14 +1357,14 @@ fn install_math(lua: &Lua) -> Result<()> {
             if let Some(cb) = cb_fn {
                 let id_for_cb = id.clone();
                 let addon_for_cb = addon.clone();
+                let vm_for_cb = super::native_events::bus(lua).borrow().vm;
                 let wrapper = lua.create_function(move |_, ev: Value| {
                     if let Value::Table(et) = &ev {
                         let data: mlua::Table = et.get("data")?;
                         let down = data.get::<Option<bool>>("down")?.unwrap_or(false);
-                        let rep = data.get::<Option<bool>>("repeat")?.unwrap_or(false)
-                            || data.get::<Option<bool>>("repeat_")?.unwrap_or(false);
+                        let rep = data.get::<Option<bool>>("repeat")?.unwrap_or(false);
                         let key = data.get::<Option<String>>("key")?.unwrap_or_default();
-                        if down && !rep {
+                        if down && !rep && super::input::mod_binding_allowed(vm_for_cb) {
                             let bound =
                                 crate::fork_ext::bindpage::get_key(&addon_for_cb, &id_for_cb);
                             if bound.is_some_and(|bound| {
@@ -1193,8 +1398,28 @@ pub(crate) fn stats_box_message(shown: bool) -> &'static str {
 
 /// Spec-table fields the HUD and option calls read.
 const SPEC_KEYS: [&str; 23] = [
-    "col", "row", "x", "y", "text", "color", "scale", "align", "outline", "shadow", "anchor",
-    "vertical", "clip_width", "target_fade", "art", "fill", "lit", "w", "h", "ui_id", "id", "label",
+    "col",
+    "row",
+    "x",
+    "y",
+    "text",
+    "color",
+    "scale",
+    "align",
+    "outline",
+    "shadow",
+    "anchor",
+    "vertical",
+    "clip_width",
+    "target_fade",
+    "art",
+    "fill",
+    "lit",
+    "w",
+    "h",
+    "ui_id",
+    "id",
+    "label",
     "default",
 ];
 

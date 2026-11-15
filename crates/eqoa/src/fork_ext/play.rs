@@ -7,6 +7,9 @@ use super::Play;
 #[path = "api_capture.rs"]
 mod api_capture;
 #[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "map_mod_tests.rs"]
+mod map_mod_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "api_capture_tests.rs"]
 mod native_tests;
 #[cfg(not(target_arch = "wasm32"))]
@@ -24,6 +27,13 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     _play.session.agree_power_bars(want_power);
     #[cfg(not(target_arch = "wasm32"))]
     {
+        if crate::fork_ext::addons::input::is_text_capture_active() {
+            _play.attack_release();
+            _play.info_up = false;
+            _play.aim_hold = false;
+            _play.autorun = false;
+            _play.following = false;
+        }
         let has_pet = _play.pet_id != u32::MAX;
         let effects_height = if has_pet {
             crate::hud::pet_effects_height(_play.pet_effects().len())
@@ -58,16 +68,23 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         crate::fork_ext::addons::native_core::iteration(_game_step);
         if _game_step {
             let ready = _play.in_world_now();
+            let wheel = crate::fork_ext::addons::pointer_api::take_wheel();
+            if ready && wheel != 0.0 {
+                _play.map.mini_wheel(wheel);
+            }
             weapon_sets_requests(_play, ready);
             let reqs = crate::fork_ext::addons::actions::take_action_requests();
             if ready {
+                if reqs.map && crate::settings::map() && _play.addon_input_available() {
+                    _play.map.show();
+                }
                 if reqs.assist && matches!(_play.mode, 0 | 38) {
                     _play.assist_target();
                 }
                 if reqs.summary
                     && _play.mode == 0
                     && !_play.map.open
-                    && !_play.map.search.open
+                    && !crate::fork_ext::addons::input::is_text_capture_active()
                     && !_play.search.open
                     && _play.typing.is_none()
                     && _play.death.is_none()
@@ -251,7 +268,7 @@ impl Play {
                 && (ui_mode != 0
                     || start_menu
                     || self.map.open
-                    || self.map.search.open
+                    || crate::fork_ext::addons::input::is_text_capture_active()
                     || self.search.open
                     || self.typing.is_some());
             return crate::fork_ext::addons::host::Snapshot {
@@ -270,8 +287,10 @@ impl Play {
             };
         }
         api_capture::updates::refresh(self, walker);
+        let timed_build = crate::fork_ext::addons::addon_perf::section("snapshot.build");
         let key = api_capture::updates::key(self, walker);
         if let Some(mut snapshot) = api_capture::updates::cached(key) {
+            drop(timed_build);
             snapshot.input = crate::fork_ext::addons::input::live_snapshot();
             return snapshot;
         }
@@ -855,7 +874,7 @@ impl Play {
             && (ui_mode != 0
                 || start_menu
                 || self.map.open
-                || self.map.search.open
+                || crate::fork_ext::addons::input::is_text_capture_active()
                 || self.search.open
                 || self.typing.is_some());
 
@@ -1349,7 +1368,15 @@ mod tests {
         p.send_bug_note();
         let sent = notes(&mut p);
         assert_eq!(sent.len(), 1);
-        assert!(sent[0].starts_with("build: ") && sent[0].contains(&format!("\nclient: {}\n", crate::fork_ext::report_label::enhanced_label())), "{}", sent[0]);
+        assert!(
+            sent[0].starts_with("build: ")
+                && sent[0].contains(&format!(
+                    "\nclient: {}\n",
+                    crate::fork_ext::report_label::enhanced_label()
+                )),
+            "{}",
+            sent[0]
+        );
     }
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
@@ -1726,7 +1753,7 @@ mod tests {
         p.forge_health.receive(&bytes);
         assert!(!health_redraw(&mut p, false, false));
 
-        // Simulate opening Start Menu -> Options -> Extended -> Mods & Addons (Play.mode == 34),
+        // Simulate opening Start Menu -> Options -> Extended -> Enhanced (Play.mode == 34),
         // where ability bars and active effects are suppressed by Play::draw_hud's mode checks.
         p.mode = 34;
         p.apply_camera = false;
@@ -2000,12 +2027,12 @@ mod tests {
         );
         p.map.open = false;
 
-        p.map.search.open = true;
+        crate::fork_ext::addons::input::testing_text_capture(true);
         assert!(
             p.forge_snapshot(None).ui_busy,
-            "map.search.open must report ui_busy == true"
+            "mod text capture must report ui_busy == true"
         );
-        p.map.search.open = false;
+        crate::fork_ext::addons::input::reset_input_state();
 
         p.search.open = true;
         assert!(
@@ -2256,5 +2283,34 @@ mod tests {
             p.minimap_up(),
             "releasing the chat claim keeps the minimap up in mode 33"
         );
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Play {
+    pub(crate) fn addon_input_available(&mut self) -> bool {
+        matches!(self.mode, 0 | 38)
+            && !self.window_up()
+            && !self.search.open
+            && !self.info_wanted()
+            && self.info_window.open <= 0.0
+            && !self.keyboard_typing()
+            && !self.is_dead()
+    }
+    pub(crate) fn draw_map_addon_hud(&self, ui: &mut render::ui::Ui) {
+        if !self.map.open || self.loading.up() {
+            return;
+        }
+        if let Some((vui, assets, _)) = &self.hud {
+            let mut r = assets.raster(ui);
+            crate::fork_ext::addons::hud_layer::draw(vui, &mut r);
+        }
+    }
+}
+
+#[cfg(test)]
+impl Play {
+    pub(crate) fn test_map_search_surface(&mut self, open: bool) {
+        self.map.open = open;
     }
 }

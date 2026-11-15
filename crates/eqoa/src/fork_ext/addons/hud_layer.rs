@@ -76,6 +76,16 @@ thread_local! {
     static DIRTY: Cell<bool> = const { Cell::new(false) };
 }
 
+#[cfg(test)]
+thread_local! {
+    static DRAWN: RefCell<BTreeMap<String, usize>> = const { RefCell::new(BTreeMap::new()) };
+}
+/// Commands the layer has drawn on this thread, per addon (test evidence that a mod's HUD was drawn).
+#[cfg(test)]
+pub(crate) fn drawn_commands(id: &str) -> usize {
+    DRAWN.with(|d| d.borrow().get(id).copied().unwrap_or(0))
+}
+
 pub fn take_dirty() -> bool {
     DIRTY.with(|d| d.replace(false))
 }
@@ -374,7 +384,10 @@ fn draw_commands(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>, target_
 
     MOD_QUEUES.with(|queues| {
         let mut map = queues.borrow_mut();
-        for queue in map.values_mut() {
+        for (id, queue) in map.iter_mut() {
+            let timing = super::addon_perf::enabled().then(std::time::Instant::now);
+            #[cfg(test)]
+            DRAWN.with(|d| *d.borrow_mut().entry(id.clone()).or_default() += queue.len());
             for cmd in queue.drain(..) {
                 let phase = if matches!(&cmd, HudCommand::Text { .. }) {
                     2
@@ -559,6 +572,9 @@ fn draw_commands(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>, target_
                     }
                 });
             }
+            if let Some(started) = timing {
+                super::addon_perf::add_draw(id, started.elapsed());
+            }
         }
     });
 
@@ -690,4 +706,8 @@ mod tests {
         );
         clear_all();
     }
+}
+
+pub(crate) fn has_queued_commands() -> bool {
+    MOD_QUEUES.with(|q| q.borrow().values().any(|v| !v.is_empty()))
 }

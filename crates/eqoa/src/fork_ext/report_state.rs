@@ -68,7 +68,7 @@ pub(super) fn describe(play: &Play, walker: Option<&Walker>) -> String {
         })
     };
     let entity_line = |e: &net::entity::Entity| {
-        let kind = crate::map::mini::Dot::kind(e);
+        let kind = match e.creature.as_ref().map(|c| c.p256) { Some(2) => "Player", Some(3) => "Pet", _ => "NPC" };
         let name = e.creature.as_ref().map_or("unnamed", |c| c.name.as_str());
         let level = e.creature.as_ref().map_or(0, |c| c.level);
         format!(
@@ -120,8 +120,8 @@ pub(super) fn describe(play: &Play, walker: Option<&Walker>) -> String {
     );
     let _ = writeln!(
         text,
-        "Map open: {}; search open: {}; map search open: {}",
-        play.map.open, play.search.open, play.map.search.open
+        "Map open: {}; player search open: {}",
+        play.map.open, play.search.open
     );
     let _ = writeln!(
         text,
@@ -241,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn report_state_includes_claimed_hud_elements_and_movement_flags() {
+    fn round4b_gate_report_includes_claimed_hud_elements_and_movement_flags() {
         use crate::fork_ext::addons::health::InstanceToken;
         struct Reset;
         impl Drop for Reset {
@@ -264,7 +264,7 @@ mod tests {
         let text = describe(&p, None);
         for item in [
             "Addon HUD claims: compass_back, hotbar_draw_compact",
-            "Map open: true; search open: true",
+            "Map open: true; player search open: true",
             "Autorun: true; following: true; follow id: 0x00000001",
         ] {
             assert!(text.contains(item), "missing {item}");

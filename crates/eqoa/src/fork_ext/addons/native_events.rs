@@ -4,8 +4,8 @@ use super::{
     native::{bind, error, record},
     native_core::{CORE, Event},
 };
-use mlua::{AnyUserData, Function, MetaMethod, Result, UserData, UserDataMethods, Value};
-use serde_json::json;
+use mlua::{AnyUserData, Function, MetaMethod, Result, Table, UserData, UserDataMethods, Value};
+use serde_json::{Value as Json, json};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -39,7 +39,8 @@ pub(crate) struct Bus {
     diagnostics: super::native::DiagnosticSink,
     next: u64,
     subscriptions: Vec<Subscription>,
-    active: bool,
+    buttons: std::collections::BTreeMap<String,Function>,
+    pub(super) active: bool,
     pub once_mode: bool,
     pub initialized: bool,
     last_render: Option<Instant>,
@@ -49,6 +50,7 @@ pub(crate) struct Bus {
     delivered: usize,
     pending: std::collections::VecDeque<(Event, Option<mlua::Table>)>,
     pending_bytes: usize,
+    commands: std::collections::VecDeque<(Event,u64)>,
     retired: Vec<mlua::Table>,
     lost: std::collections::BTreeMap<String, u64>,
     first_lost: Option<u64>,
@@ -92,6 +94,12 @@ const EVENTS: &[&str] = &[
     "entity.changed",
     "entity.removed",
     "group.changed",
+    "map.changed",
+    "shared.changed",
+    "mod.command",
+    "guide.lost",
+    "pointer.pressed",
+    "pointer.wheel",
     "abilities.changed",
     "hotbar.changed",
     "cooldown.started",
@@ -122,6 +130,10 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("entity.changed", "ref before after changed"),
         ("entity.removed", "ref before after changed"),
         ("group.changed", "before after changed"),
+        ("map.changed", "before after changed"),
+        ("shared.changed", "mod path"),
+        ("mod.command", "from command args"),
+        ("guide.lost", "owner world_id entity_id label reason"),
         ("abilities.changed", "before after changed"),
         ("hotbar.changed", "before after changed"),
         ("effects.changed", "before after changed"),
@@ -137,10 +149,12 @@ fn install_event_fields(lua: &mlua::Lua) {
             "combat.hit",
             "attacker_id defender_id amount kind color outgoing incoming from_pet to_pet",
         ),
-        ("input.key", "key down repeat synthetic"),
+        ("input.key", "key down repeat synthetic text"),
         ("input.pad", "before after"),
-        ("resource.ready", "kind handle error"),
-        ("resource.failed", "kind handle error"),
+        ("pointer.pressed", "x y inside_window button steps"),
+        ("pointer.wheel", "x y inside_window button steps"),
+        ("resource.ready", "kind handle error request value path"),
+        ("resource.failed", "kind handle error request value path"),
         ("events.dropped", "first_seq last_seq count streams"),
     ] {
         for field in fields.split_whitespace() {
@@ -160,7 +174,7 @@ fn install_event_fields(lua: &mlua::Lua) {
         ),
         (
             4,
-            "quests.changed camera.changed windows.changed map.changed mastery.changed action.result",
+            "quests.changed camera.changed windows.changed mastery.changed action.result",
         ),
     ] {
         for name in names.split_whitespace() {
@@ -186,6 +200,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
         diagnostics: super::native::diagnostic_sink(lua),
         next: 0,
         subscriptions: Vec::new(),
+        buttons: Default::default(),
         active: true,
         once_mode,
         initialized: false,
@@ -196,6 +211,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
         delivered: 0,
         pending: Default::default(),
         pending_bytes: 0,
+        commands: Default::default(),
         retired: Vec::new(),
         lost: Default::default(),
         first_lost: None,
@@ -337,13 +353,19 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
     Ok(())
 }
 pub(crate) fn dispatch(host: &Host) -> Result<()> {
+    let polls = super::addon_perf::section("dispatch.polls");
+    super::async_json::poll(&host.lua)?;
+    super::json_save::poll(&host.lua)?;
+    super::player_files::poll(&host.lua)?;
     super::native_core::flush_deferred();
+    drop(polls);
+    let _drain = super::addon_perf::section("dispatch.drain");
     let lua = &host.lua;
     let shared = bus(lua);
     if !host.iteration_in_progress() {
         start_iteration(lua);
     }
-    let (batch, gap) = {
+    let (batch, gap, commands) = {
         let mut b = shared.borrow_mut();
         b.boundary += 1;
         b.retired.clear();
@@ -353,8 +375,12 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
             let lost = std::mem::take(&mut b.lost);
             Some((b.first_lost.take().unwrap_or(0), b.last_lost, lost))
         };
+        let command_limit = 64usize.min(256usize.saturating_sub(b.delivered + usize::from(b.once_mode) + if gap.is_some() {2} else {0}));
+        let take = command_limit.min(b.commands.len());
+        let boundary = b.boundary;
+        let commands = b.commands.drain(..take).map(|(mut event,expiry)| {if expiry < boundary {event.expire_player();} event}).collect::<Vec<_>>();
         let limit = 256usize.saturating_sub(
-            b.delivered + usize::from(b.once_mode) + if gap.is_some() { 2 } else { 0 },
+            b.delivered + usize::from(b.once_mode) + commands.len() + if gap.is_some() { 2 } else { 0 },
         );
         let n = b.pending.len().min(limit);
         let batch = b.pending.drain(..n).collect::<Vec<_>>();
@@ -364,7 +390,7 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
                 b.received += 1;
             }
         }
-        (batch, gap)
+        (batch, gap, commands)
     };
     if let Some((first, last, streams)) = gap {
         let count = streams.values().sum::<u64>();
@@ -387,6 +413,8 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
     for (event, data) in batch {
         deliver_data(lua, &event, None, data)?;
     }
+    for event in commands { deliver_data(lua, &event, None, None)?; }
+    {let mut b=shared.borrow_mut();let boundary=b.boundary;for (event,expiry) in &mut b.commands {if *expiry <= boundary {event.expire_player();}}}
     let timer_budget = {
         let b = shared.borrow();
         256usize.saturating_sub(b.delivered + usize::from(b.once_mode))
@@ -406,7 +434,7 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
         let mut e = local("timer", json!({}));
         let table = lua.create_table()?;
         table.set("token", lua.create_userdata(t.clone())?)?;
-        e.data = json!({});
+        e.data = std::sync::Arc::new(json!({}));
         deliver_timer(lua, &e, &t, table)?;
     }
     Ok(())
@@ -416,8 +444,10 @@ fn local(name: &str, data: serde_json::Value) -> Event {
         let mut c = c.borrow_mut();
         c.seq += 1;
         Event {
+            player_command: false,
+            player_action: None,
             name: name.into(),
-            data,
+            data: std::sync::Arc::new(data),
             bytes: 0,
             seq: c.seq,
             time: super::native_core::time_unborrowed(&c),
@@ -427,19 +457,87 @@ fn local(name: &str, data: serde_json::Value) -> Event {
         }
     })
 }
-fn envelope(lua: &mlua::Lua, e: &Event) -> Result<mlua::Table> {
-    let table = lua.create_table()?;
-    table.set("name", e.name.as_str())?;
-    table.set("seq", e.seq)?;
-    table.set("time", e.time)?;
-    table.set("tick", e.tick)?;
-    table.set("frame", e.frame)?;
-    table.set("generation", e.generation)?;
-    table.set(
-        "data",
-        record(lua, &format!("eqoa.events.{}.data", e.name), &e.data)?,
-    )?;
-    Ok(table)
+pub(super) fn envelope(lua: &mlua::Lua, e: &Event) -> Result<mlua::Table> {
+    let path = format!("eqoa.events.{}.data", e.name);
+    let timed = super::addon_perf::section("env.data");
+    let data = match lazy_data(lua, e, &path)? {
+        Some(data) => data,
+        None => record(lua, &path, &e.data)?,
+    };
+    drop(timed);
+    super::record_raw::envelope_table(lua, &e.name, [e.time, e.tick as f64, e.frame as f64, e.generation as f64], e.seq as f64, data)
+}
+
+/// A change event's data (`ref`, `before`, `after`, `changed`) as a read-only record whose fields
+/// are built when a handler first reads them: the first read builds the field as `record` makes it,
+/// keeps it in the data (so it is the same value every time), and a missing field is diagnosed as
+/// before. A creature moving 25 times a frame is delivered with two full records each; the journal
+/// reads one field of one. The `before` and `after` records are the same, a field at a time.
+fn lazy_data(lua: &mlua::Lua, e: &Event, path: &str) -> Result<Option<Value>> {
+    let Json::Object(fields) = &*e.data else {
+        return Ok(None);
+    };
+    if !(fields.contains_key("before") && fields.contains_key("after")) {
+        return Ok(None);
+    }
+    Ok(lazy_fields(lua, path, &e.data, None)?.map(Value::Table))
+}
+
+/// The object `at` in `root` (or `root` itself) as a read-only record whose fields are built from the
+/// native value when first read. None when it is not a plain object (a `$ref`, an array: those are
+/// built whole by `record`).
+fn lazy_fields(lua: &mlua::Lua, path: &str, root: &std::sync::Arc<Json>, at: Option<&str>) -> Result<Option<Table>> {
+    let object = match at {
+        Some(key) => &root[key],
+        None => &**root,
+    };
+    let Json::Object(fields) = object else {
+        return Ok(None);
+    };
+    if fields.contains_key("$ref") {
+        return Ok(None);
+    }
+    let sig = super::native::signature(path, true, fields.keys().map(String::as_str));
+    let (missing, readonly) = super::native::guard_parts(lua, sig, path, || Some(fields.keys().cloned().collect()))?;
+    let (root, path, at) = (root.clone(), path.to_owned(), at.map(str::to_owned));
+    let lazy = lua.create_function(move |lua, (table, key): (Table, Value)| {
+        if let Value::String(k) = &key {
+            let k = k.to_str()?;
+            let object = match &at {
+                Some(at) => &root[at.as_str()],
+                None => &*root,
+            };
+            if let Some(value) = object.get(&*k).filter(|v| !v.is_null()) {
+                let nested = if at.is_none() && (&*k == "before" || &*k == "after") { lazy_fields(lua, &path, &root, Some(&k))? } else { None };
+                let built = match nested {
+                    Some(table) => Value::Table(table),
+                    None => record(lua, super::native::nested_type(&path, &k).unwrap_or(&path), value)?,
+                };
+                table.raw_set(&*k, built.clone())?;
+                return Ok(built);
+            }
+        }
+        missing.get::<Function>("__index")?.call::<Value>((table, key))
+    })?;
+    super::record_raw::lazy_object(lua, lazy, &readonly).map(Some)
+}
+
+/// The event as a handler gets it: its envelope behind the read-only guard, the data as `lazy_data`
+/// or `record` makes it. The names whose data the guard also covers (`readonly_envelope`) and an
+/// event delivered with its data made already take the longer way.
+pub(super) fn envelope_readonly(lua: &mlua::Lua, e: &Event) -> Result<mlua::Table> {
+    const KEYS: [&str; 7] = ["name", "seq", "time", "tick", "frame", "generation", "data"];
+    let path = format!("eqoa.events.{}.data", e.name);
+    let timed = super::addon_perf::section("env.data");
+    let data = match lazy_data(lua, e, &path)? {
+        Some(data) => data,
+        None => record(lua, &path, &e.data)?,
+    };
+    drop(timed);
+    let _timed = super::addon_perf::section("env.readonly");
+    let sig = super::native::signature("eqoa.events.Event", true, KEYS.into_iter());
+    let guard = super::native::guard_parts(lua, sig, "eqoa.events.Event", || Some(KEYS.iter().map(|k| k.to_string()).collect()))?;
+    super::record_raw::event_proxy(lua, &e.name, [e.time, e.tick as f64, e.frame as f64, e.generation as f64], e.seq as f64, data, guard)
 }
 fn deliver(lua: &mlua::Lua, e: &Event, only: Option<&Token>) -> Result<()> {
     deliver_data(lua, e, only, None)
@@ -450,6 +548,7 @@ fn deliver_data(
     only: Option<&Token>,
     data: Option<mlua::Table>,
 ) -> Result<()> {
+    let _timed = super::addon_perf::section("events.deliver");
     let shared = bus(lua);
     {
         let mut b = shared.borrow_mut();
@@ -465,6 +564,23 @@ fn deliver_data(
         .filter(|s| s.name == e.name && s.deadline.is_none() && only.is_none_or(|t| *t == s.token))
         .map(|s| s.token.clone())
         .collect::<Vec<_>>();
+    if candidates.is_empty() && e.name != "option.activated" {
+        // nothing here listens for it: it counted against the frame's delivery budget and that is all
+        return Ok(());
+    }
+    let direct = e.name == "option.activated" || (e.name == "input.key" && e.data["down"] == true && e.data["synthetic"] != true && e.data["repeat"] != true)
+        || (e.name == "pointer.pressed" && e.data["inside_window"] == true);
+    let _player = super::exchange::player_scope(shared.borrow().vm, direct, e.player_command, e.player_action.clone());
+    if e.name == "option.activated" {
+        let callback = shared.borrow().buttons.get(e.data["id"].as_str().unwrap_or("")).cloned();
+        if let Some(callback) = callback {
+            if let Err(err) = callback.call::<()>(()) {
+                if super::native::fatal_memory(&err) { return Err(err); }
+                super::native::diagnose(lua,"eqoa.options.button","failed",&err.to_string());
+            }
+        }
+        return Ok(());
+    }
     for t in candidates {
         let call = {
             let mut b = shared.borrow_mut();
@@ -478,14 +594,25 @@ fn deliver_data(
             }
             callback
         };
-        let event = envelope(lua, e)?;
-        if let Some(data) = &data {
-            event.set("data", data.clone())?;
-        }
+        let timed = super::addon_perf::section("deliver.envelope");
+        let envelope_ready = if data.is_none() && !matches!(e.name.as_str(), "timer" | "resource.ready" | "resource.failed") {
+            envelope_readonly(lua, e)?
+        } else {
+            let event = envelope(lua, e)?;
+            if let Some(data) = &data {
+                event.set("data", data.clone())?;
+            }
+            let timed_ro = super::addon_perf::section("env.readonly");
+            let ready = readonly_envelope(lua, event)?;
+            drop(timed_ro);
+            ready
+        };
+        drop(timed);
         let _phase = super::native::phase(lua, &e.name);
         let _drawing =
             super::bridge::drawing(matches!(e.name.as_str(), "render" | "settings.render"));
-        if let Err(err) = call.call::<()>(readonly_envelope(lua, event)?) {
+        let _handler = super::addon_perf::section("deliver.handler");
+        if let Err(err) = call.call::<()>(envelope_ready) {
             if super::native::fatal_memory(&err) {
                 return Err(err);
             }
@@ -576,17 +703,25 @@ pub(crate) fn render(host: &Host) -> Result<()> {
     deliver(&host.lua, &local("render", json!({"dt":dt})), None)
 }
 pub(crate) fn clear(host: &Host) {
+    super::player_files::close(&host.lua);
+    super::json_save::close(&host.lua);
+    super::async_json::close(&host.lua);
     if host.lua.app_data_ref::<Shared>().is_none() {
         return;
     }
     super::input::native::release_vm(&host.lua);
     let vm = bus(&host.lua).borrow().vm;
+    super::map_views::release_vm(vm);
+    super::guides::release_vm(vm);
+    super::pointer_api::release_vm(vm);
     super::chat::cancel_vm(vm);
     super::weapon_sets::cancel_vm(vm);
     let b = bus(&host.lua);
     let mut b = b.borrow_mut();
     b.subscriptions.clear();
+    b.buttons.clear();
     b.pending.clear();
+    b.commands.clear();
     b.pending_bytes = 0;
     b.retired.clear();
     b.lost.clear();
@@ -636,7 +771,7 @@ pub(crate) fn resource(
     Ok(())
 }
 
-fn readonly_envelope(lua: &mlua::Lua, event: mlua::Table) -> Result<mlua::Table> {
+pub(super) fn readonly_envelope(lua: &mlua::Lua, event: mlua::Table) -> Result<mlua::Table> {
     let name: String = event.get("name")?;
     let data: mlua::Table = event.get("data")?;
     if matches!(
@@ -645,36 +780,22 @@ fn readonly_envelope(lua: &mlua::Lua, event: mlua::Table) -> Result<mlua::Table>
     ) {
         event.set(
             "data",
-            super::native::guard(
+            super::native::guard_lazy(
                 lua,
                 data,
                 &format!("eqoa.events.{name}.data"),
-                Some(vec![
-                    "token".into(),
-                    "kind".into(),
-                    "handle".into(),
-                    "error".into(),
-                ]),
+                &["token", "kind", "handle", "request", "value", "path", "error"],
             )?,
         )?;
     }
-    super::native::guard(
-        lua,
-        event,
-        "eqoa.events.Event",
-        Some(
-            ["name", "seq", "time", "tick", "frame", "generation", "data"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-        ),
-    )
+    super::native::guard_lazy(lua, event, "eqoa.events.Event", &["name", "seq", "time", "tick", "frame", "generation", "data"])
 }
 
 pub(crate) fn prime(host: &Host) {
     let shared = bus(&host.lua);
     let mut b = shared.borrow_mut();
     b.pending.clear();
+    b.commands.clear();
     b.pending_bytes = 0;
     b.retired.clear();
     b.lost.clear();
@@ -689,7 +810,9 @@ pub(crate) fn publish(event: &Event) {
         for weak in registry.borrow().iter() {
             if let Some(shared) = weak.upgrade() {
                 let mut b = shared.borrow_mut();
-                if b.active {
+                if b.active
+                    && (event.name != "guide.lost" || event.data["owner"].as_u64() == Some(b.vm))
+                {
                     enqueue(&mut b, event.clone(), None);
                 }
             }
@@ -760,4 +883,97 @@ pub(crate) fn capture_diagnostic(code: &str, reason: &str) {
                 .record("eqoa.events", code, reason);
         }
     });
+}
+
+pub(crate) fn json_resource(
+    lua: &mlua::Lua,
+    request: u64,
+    value: Option<mlua::Value>,
+    failure: Option<&str>,
+) -> Result<()> {
+    let data = lua.create_table()?;
+    data.set("kind", "json")?;
+    data.set("request", request)?;
+    if let Some(value) = value {
+        data.set("value", value.clone())?;
+        data.set("handle", value)?;
+    }
+    if let Some(message) = failure {
+        data.set("error",record(lua,"eqoa.Error",&json!({"code":"failed","message":message.chars().take(2048).collect::<String>(),"capability":"eqoa.files.load_json"}))?)?;
+    }
+    let mut event = local(
+        if failure.is_some() {
+            "resource.failed"
+        } else {
+            "resource.ready"
+        },
+        json!({}),
+    );
+    event.bytes = 256; // Bounded table reference; its storage is charged to the opt-in JSON VM heap.
+    enqueue(&mut bus(lua).borrow_mut(), event, Some(data));
+    Ok(())
+}
+
+pub(crate) fn json_saved(lua: &mlua::Lua, request: u64, failure: Option<&str>) -> Result<()> {
+    let data = lua.create_table()?;
+    data.set("kind", "json_saved")?;
+    data.set("request", request)?;
+    if let Some(message) = failure {
+        data.set("error",record(lua,"eqoa.Error",&json!({"code":"failed","message":message.chars().take(2048).collect::<String>(),"capability":"eqoa.files.save_json_async"}))?)?;
+    }
+    let mut event = local(
+        if failure.is_some() {
+            "resource.failed"
+        } else {
+            "resource.ready"
+        },
+        json!({}),
+    );
+    event.bytes = 256;
+    enqueue(&mut bus(lua).borrow_mut(), event, Some(data));
+    Ok(())
+}
+
+pub(super) fn weak_bus(lua: &mlua::Lua) -> Option<std::rc::Weak<RefCell<Bus>>> {
+    lua.app_data_ref::<Shared>().map(|b| Rc::downgrade(&b))
+}
+pub(super) fn shared_changed(owner: &str, path: &str) {
+    let mut event = local("shared.changed", json!({"mod":owner,"path":path}));
+    event.bytes = owner.len() + path.len() + 64;
+    publish(&event);
+}
+
+pub(super) fn command(target: &Rc<RefCell<Bus>>, data: serde_json::Value, player: impl FnOnce() -> Option<std::sync::Arc<std::sync::atomic::AtomicU8>>) -> std::result::Result<(), ()> {
+    let pending = target.borrow();
+    let sender = data["from"].as_str().unwrap_or("");
+    if !pending.active || pending.commands.len()>=64
+        || pending.commands.iter().filter(|(e,_)|e.data["from"].as_str()==Some(sender)).count()>=4 {return Err(())}
+    let expiry=pending.boundary+1;drop(pending);
+    let mut event=local("mod.command",data);event.player_action=player();event.player_command=event.player_action.is_some();
+    event.bytes=event.data.to_string().len();
+    // Commands never enter or evict the native/resource event queue.
+    target.borrow_mut().commands.push_back((event,expiry));Ok(())
+}
+
+pub(super) fn file_action(lua: &mlua::Lua, data: serde_json::Value, failed: bool) -> Result<()> {
+    let table=lua.create_table()?;
+    for (key,value) in data.as_object().expect("file action record") {
+        table.set(key.as_str(),record(lua,if key=="error" {"eqoa.Error"} else {"eqoa.files.Result"},value)?)?;
+    }
+    let mut event=local(if failed {"resource.failed"} else {"resource.ready"},json!({}));
+    event.bytes=data.to_string().len();
+    enqueue(&mut bus(lua).borrow_mut(),event,Some(table));
+    Ok(())
+}
+
+pub(super) fn register_option(lua: &mlua::Lua,id: &str,callback: Function)->bool {
+    let bus=bus(lua);let mut bus=bus.borrow_mut();
+    if bus.buttons.len()>=32 && !bus.buttons.contains_key(id) {return false}
+    bus.buttons.insert(id.to_string(),callback);true
+}
+pub(super) fn activate_option(bus: &Rc<RefCell<Bus>>,id: &str)->bool {
+    let mut bus=bus.borrow_mut();
+    if !bus.active || !bus.buttons.contains_key(id) || bus.pending.len()>=64 {return false}
+    let mut event=local("option.activated",json!({"id":id}));event.player_action=Some(std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)));event.bytes=id.len()+64;
+    enqueue(&mut bus,event,None);true
 }

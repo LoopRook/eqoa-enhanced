@@ -1041,6 +1041,7 @@ fn forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_el
     gpu.frame(&mut manager, snap.clone());
 
     let all_hidden = PublishedVisibility {
+        minimap: false,
         health_bar: true,
         power_bar: true,
         main_exp_bar: true,

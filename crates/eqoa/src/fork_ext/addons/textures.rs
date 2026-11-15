@@ -156,6 +156,42 @@ impl Textures {
         }
     }
 
+    /// Charge an externally rendered target to the same per-VM texture quota.
+    pub(crate) fn register_target(
+        &mut self,
+        owner: &Rc<RefCell<Self>>,
+        texture: &wgpu::Texture,
+    ) -> std::result::Result<Handle, String> {
+        let bytes = texture.width() as usize * texture.height() as usize * 4;
+        if texture.width() > self.budget.max_dimension
+            || texture.height() > self.budget.max_dimension
+            || self.entries.len() >= self.budget.max_count
+            || self.allocated_bytes.saturating_add(bytes) > self.budget.max_total_bytes
+        {
+            return Err("native view exceeds texture quota".into());
+        }
+        self.next = self.next.checked_add(1).ok_or("texture id exhausted")?;
+        let external = self
+            .renderer
+            .borrow_mut()
+            .register_external_texture(&texture.create_view(&Default::default()))
+            .map_err(|e| e.to_string())?;
+        self.allocated_bytes += bytes;
+        self.entries.insert(
+            self.next,
+            TextureEntry {
+                external,
+                texture: texture.clone(),
+                alive: true,
+                byte_size: bytes,
+            },
+        );
+        Ok(Handle {
+            owner: owner.clone(),
+            id: self.next,
+            token: None,
+        })
+    }
     pub(crate) fn upload_rgba8(
         &mut self,
         owner: &Rc<RefCell<Self>>,
