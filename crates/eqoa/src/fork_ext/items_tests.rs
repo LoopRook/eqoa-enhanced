@@ -763,3 +763,23 @@ fn round5_forge_item_modules_follow_the_pinned_shapes() {
     )
     .unwrap();
 }
+
+#[test]
+fn round5_a_kept_corpse_and_a_shop_behind_another_window_are_closed() {
+    let (mut p, h) = world();
+    // the world-entry dump's corpse is kept by the client but its window is not up (`npcw_world_entry`)
+    p.npcw.corpse = Some(list(&[Spec::new(2001, "Rat Pelt", 31)]));
+    // a merchant's 0x00B7 that arrives while another window is open is stored, not shown
+    p.npcw.shop = crate::merchant::read_shop(&shop_bytes(7001, 90, 110, &[Spec::new(3002, "Bread", 42)], "Hi"));
+    assert_eq!(p.mode, 0);
+    p.forge_snapshot(None);
+    native_events::dispatch(&h).unwrap();
+    h.execute(
+        r#"
+        local v, e = eqoa.loot.get(); assert(v == nil and e == nil, 'a cached closed corpse is not given')
+        local v, e = eqoa.merchant.get(); assert(v == nil and e == nil, 'wares of a window that is not up are not given')
+        assert(#log == 0)
+        "#,
+    )
+    .unwrap();
+}
