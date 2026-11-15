@@ -440,6 +440,8 @@ fn round5b_the_loot_log_is_fed_by_pickups_newest_first_and_keeps_fifty() {
     bv.enable();
     // the window stays closed: the log is the one thing that listens
     bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.frames(2);
+    bv.play.bags_advance_clock(1500);
     bv.play.bags_corpse(&bv_corpse());
     bv.frames(2);
     // the loot window knows which corpse it belongs to, and keeps it when the target moves on
@@ -703,6 +705,8 @@ fn round5b_captures_for_the_owner_draw_the_discs_own_item_art_and_the_corpse_in_
         item["icon"] = serde_json::json!(ids[8 + i]);
     }
     bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.frames(2);
+    bv.play.bags_advance_clock(1500);
     bv.play.bags_corpse(&corpse);
     bv.frames(2);
     bv.play.bags_loot_one(0);

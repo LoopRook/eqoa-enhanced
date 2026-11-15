@@ -908,6 +908,71 @@ fn round5_forge_is_valid_needs_a_slot_id_as_the_reference_does() {
     .unwrap();
 }
 
+// ---- Round 5 Part B fix round: which corpse a loot window belongs to (`Container.source`).
+fn pelt() -> Vec<u8> {
+    list_bytes(&[Spec::new(2001, "Rat Pelt", 31)])
+}
+const SOURCE: &str = "local s = eqoa.loot.get().source if s then return s.entity_id .. ':' .. s.name end return 'nil'";
+
+#[test]
+fn round5b_a_corpse_targeted_steadily_is_the_source_of_its_loot_window() {
+    let (mut p, h) = world();
+    p.bags_target_corpse(5001, "a decaying skeleton");
+    items::refresh(&p); // a frame sees the target
+    p.bags_advance_clock(1500);
+    apply(&mut p, opcode(0x0018, pelt()));
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "5001:a decaying skeleton");
+    // the window going away takes the source with it
+    apply(&mut p, opcode(0x0016, vec![]));
+    native_events::dispatch(&h).unwrap();
+    h.execute("local v, e = eqoa.loot.get() assert(v == nil and e == nil)").unwrap();
+}
+
+#[test]
+fn round5b_a_target_that_changed_before_the_reply_is_not_the_source() {
+    let (mut p, h) = world();
+    p.bags_target_corpse(5001, "a decaying skeleton");
+    items::refresh(&p);
+    p.bags_advance_clock(1500);
+    // the loot request went out for the skeleton; the player targets another corpse just before the reply
+    p.bags_target_corpse(5002, "a rat's corpse");
+    apply(&mut p, opcode(0x0018, pelt()));
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil");
+    // a target that is not a corpse is no source either, however long it has been steady
+    apply(&mut p, opcode(0x0016, vec![]));
+    p.bags_target(2002);
+    items::refresh(&p);
+    p.bags_advance_clock(1500);
+    apply(&mut p, opcode(0x0018, pelt()));
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil");
+}
+
+#[test]
+fn round5b_a_repeated_reply_after_a_recent_target_change_is_not_the_source() {
+    let (mut p, h) = world();
+    p.bags_target_corpse(5001, "a decaying skeleton");
+    items::refresh(&p);
+    p.bags_advance_clock(1500);
+    apply(&mut p, opcode(0x0018, pelt()));
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "5001:a decaying skeleton");
+    // the player targets another corpse, a frame sees it, and a second reply comes 200 ms later
+    p.bags_target_corpse(5002, "a rat's corpse");
+    items::refresh(&p);
+    p.bags_advance_clock(200);
+    apply(&mut p, opcode(0x0018, pelt()));
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil", "the target changed 200 ms ago");
+    // the same target a second and a half later, the reply repeated: now it is certain
+    p.bags_advance_clock(1500);
+    apply(&mut p, opcode(0x0018, pelt()));
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "5002:a rat's corpse");
+}
+
 // ---- Round 5 Part B: the bag viewer's fixtures. The manager's tests (`addons::manager`) cannot name this
 // module, so they drive the same native paths through these methods and plain JSON.
 impl Spec {
@@ -957,6 +1022,10 @@ impl Play {
         let creature = net::entity::Creature { name: name.into(), ..Default::default() };
         self.entities.slots.push(Some(net::entity::Entity { id, p18: 2, creature: Some(creature), ..Default::default() }));
         self.target = id;
+    }
+    /// The game's clock moves on by `ms` (a steady target is told by it).
+    pub(crate) fn bags_advance_clock(&self, ms: u32) {
+        items::advance_clock(ms);
     }
     /// The player targets another entity (the fixture's living Moss Snake is 2002).
     pub(crate) fn bags_target(&mut self, id: u32) {
