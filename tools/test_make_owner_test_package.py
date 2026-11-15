@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 """Unit tests for make_owner_test_package.py."""
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -22,15 +23,19 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
         self.fake_exe = self.base / "eqoa.exe"
         self.fake_exe.write_bytes(b"MZfake-exe")
 
-        self.fake_config = self.base / "appdata" / "eqoa-rs"
+        self.fake_appdata = self.base / "fake_appdata"
+        self.fake_config = self.fake_appdata / "eqoa-rs"
         self.fake_config.mkdir(parents=True)
         (self.fake_config / "eqoa.ini").write_text("volume=100\n", encoding="utf-8")
         (self.fake_config / "binds.txt").write_text("bind 1 attack\n", encoding="utf-8")
 
+        self.env_patch = mock.patch.dict(os.environ, {"APPDATA": str(self.fake_appdata)})
+        self.env_patch.start()
+        self.addCleanup(self.env_patch.stop)
+
         self.output_dir = self.base / "Downloads" / "EQOA-Enhanced-Round4-Test"
 
     def _fake_build_release(self, *, root, executable, output, channel="enhanced-dev", **kwargs):
-        # Create a fake zip in output and return it
         stage = Path(output)
         stage.mkdir(parents=True, exist_ok=True)
         zip_path = stage / "release.zip"
@@ -119,6 +124,50 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
                     config_source=self.fake_config,
                 )
 
+    def test_refusal_when_output_overlaps_live_config(self):
+        # 1. output_dir equals live config
+        with self.assertRaises(make_owner_test_package.LiveConfigOverlapError):
+            make_owner_test_package.make_package(
+                name="Round4",
+                exe=self.fake_exe,
+                output_dir=self.fake_config,
+                root=self.fake_root,
+            )
+
+        # 2. output_dir inside live config
+        nested_in_live = self.fake_config / "subfolder" / "pkg"
+        with self.assertRaises(make_owner_test_package.LiveConfigOverlapError):
+            make_owner_test_package.make_package(
+                name="Round4",
+                exe=self.fake_exe,
+                output_dir=nested_in_live,
+                root=self.fake_root,
+            )
+
+        # 3. output_dir contains live config (ancestor)
+        with self.assertRaises(make_owner_test_package.LiveConfigOverlapError):
+            make_owner_test_package.make_package(
+                name="Round4",
+                exe=self.fake_exe,
+                output_dir=self.fake_appdata,
+                root=self.fake_root,
+            )
+
+    def test_refusal_when_config_is_symlink(self):
+        self.output_dir.mkdir(parents=True)
+        config_dir = self.output_dir / "config"
+        config_dir.mkdir(parents=True)
+
+        with mock.patch("make_owner_test_package.is_symlink_or_junction", return_value=True):
+            with self.assertRaises(make_owner_test_package.LiveConfigOverlapError):
+                make_owner_test_package.make_package(
+                    name="Round4",
+                    exe=self.fake_exe,
+                    output_dir=self.output_dir,
+                    root=self.fake_root,
+                    force=True,
+                )
+
     def test_force_keeps_config_unless_fresh(self):
         # First creation
         with mock.patch("make_owner_test_package.build_player_release.build_release", side_effect=self._fake_build_release):
@@ -162,6 +211,39 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
 
         self.assertFalse(custom_file.is_file(), "--fresh-config should overwrite existing config")
         self.assertTrue((self.output_dir / "config" / "eqoa.ini").is_file())
+
+    def test_force_staging_failure_leaves_existing_play_untouched(self):
+        # Create an existing working package
+        with mock.patch("make_owner_test_package.build_player_release.build_release", side_effect=self._fake_build_release):
+            make_owner_test_package.make_package(
+                name="Round4",
+                exe=self.fake_exe,
+                output_dir=self.output_dir,
+                root=self.fake_root,
+                config_source=self.fake_config,
+            )
+
+        sentinel = self.output_dir / "play" / "previous_working_build.txt"
+        sentinel.write_text("owner working build state", encoding="utf-8")
+
+        # Now simulate a broken build with --force
+        def _failing_build(**kwargs):
+            raise RuntimeError("Build compilation error or missing asset")
+
+        with mock.patch("make_owner_test_package.build_player_release.build_release", side_effect=_failing_build):
+            with self.assertRaises(RuntimeError):
+                make_owner_test_package.make_package(
+                    name="Round4",
+                    exe=self.fake_exe,
+                    output_dir=self.output_dir,
+                    root=self.fake_root,
+                    force=True,
+                    config_source=self.fake_config,
+                )
+
+        # The previous play/ directory and sentinel MUST remain untouched!
+        self.assertTrue(sentinel.is_file())
+        self.assertEqual(sentinel.read_text("utf-8"), "owner working build state")
 
 
 if __name__ == "__main__":
