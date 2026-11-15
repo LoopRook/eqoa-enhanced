@@ -807,3 +807,97 @@ fn round5_a_frame_sees_a_window_closed_and_tunar_changed_with_no_event_of_their_
     h.execute("assert(#log == 1)").unwrap();
     native_core::fixture_demand(true);
 }
+
+#[test]
+fn round5_a_corpse_opened_again_with_the_same_wire_keys_is_a_new_session() {
+    let (mut p, h) = world();
+    apply(&mut p, opcode(0x0018, list_bytes(&[Spec::new(2001, "Rat Pelt", 31)])));
+    native_events::dispatch(&h).unwrap();
+    h.execute("old = eqoa.loot.get().items[1].ref; assert(eqoa.items.get(old).name == 'Rat Pelt')").unwrap();
+    // a second 0x0018 while the window is up: the client replaces the corpse; the key 31 is reused
+    assert_eq!(p.mode, 1);
+    apply(&mut p, opcode(0x0018, list_bytes(&[Spec::new(2002, "Snake Fang", 31)])));
+    native_events::dispatch(&h).unwrap();
+    h.execute(
+        r#"
+        local v, e = eqoa.items.get(old); assert(v == nil and e.code == 'stale_handle', 'the old corpse item must be stale')
+        local new = eqoa.loot.get().items[1]
+        assert(new.name == 'Snake Fang' and new.ref ~= old and eqoa.items.get(new.ref).name == 'Snake Fang')
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round5_a_merchant_sent_again_by_the_same_merchant_is_a_new_session() {
+    let (mut p, h) = world();
+    let wares = [Spec::new(3001, "Bronze Axe", 41)];
+    apply(&mut p, opcode(0x00B7, shop_bytes(7001, 90, 110, &wares, "Hi")));
+    native_events::dispatch(&h).unwrap();
+    h.execute("old = eqoa.merchant.get().items[1].ref").unwrap();
+    assert_eq!(p.mode, 10);
+    let again = [Spec::new(3009, "Steel Axe", 41)];
+    apply(&mut p, opcode(0x00B7, shop_bytes(7001, 90, 110, &again, "Hi again")));
+    native_events::dispatch(&h).unwrap();
+    h.execute(
+        r#"
+        local v, e = eqoa.items.get(old); assert(v == nil and e.code == 'stale_handle')
+        local new = eqoa.merchant.get().items[1]
+        assert(new.name == 'Steel Axe' and new.ref ~= old and eqoa.items.get(new.ref).name == 'Steel Axe')
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round5_a_quiet_frame_does_no_stack_work_and_events_fire_once() {
+    let (mut p, h) = world();
+    native_core::fixture_demand(false);
+    p.forge_snapshot(None);
+    items::take_builds();
+    for _ in 0..5 {
+        p.forge_snapshot(None);
+    }
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(items::take_builds(), 0, "frames with nothing changed copy no stacks");
+    h.execute("assert(#log == 0)").unwrap();
+    // hit points arrive by their event: one copy, one event; the frames after copy nothing
+    apply(&mut p, Event::ItemHp { id: 11, hp: 7 });
+    assert_eq!(items::take_builds(), 1);
+    p.forge_snapshot(None);
+    p.forge_snapshot(None);
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(items::take_builds(), 0);
+    h.execute("assert(#log == 1 and log[1].cause == 'item_hp' and eqoa.inventory.get().items[1].current_hp == 7)").unwrap();
+    // a window closed by a key: one close event, no more
+    apply(&mut p, opcode(0x124D, vec![]));
+    p.mode = 0;
+    p.forge_snapshot(None);
+    p.forge_snapshot(None);
+    native_events::dispatch(&h).unwrap();
+    h.execute("local n = 0; for _, e in ipairs(log) do if e.cause == 'close' then n = n + 1 end end; assert(n == 1, n)").unwrap();
+    // a catch (0x0F02) adds to the pack with no inventory event: its own cause
+    assert_eq!(items::cause(&opcode(0x0F02, vec![])), Some("fishing"));
+    native_core::fixture_demand(true);
+}
+
+#[test]
+fn round5_forge_is_valid_needs_a_slot_id_as_the_reference_does() {
+    let mut p = ready();
+    let h = Host::new().unwrap();
+    let mut odd = Spec::new(900_009, "Odd Thing", 51);
+    odd.wear = 0;
+    p.dump.inventory = list(&[odd, sword()]);
+    p.forge_snapshot(None);
+    let mods = h.registered_modules();
+    h.lua.globals().set("inventory", mods.get("frontiers_forge.inventory").unwrap().clone()).unwrap();
+    h.execute(
+        r#"
+        local odd, sword = inventory.GetItem(1), inventory.GetItem(2)
+        assert(odd.name == 'Odd Thing' and odd.slot == 0)
+        assert(odd:IsValid() == false, 'slot id 0 is an empty record')
+        assert(sword:IsValid() == true)
+        "#,
+    )
+    .unwrap();
+}

@@ -181,8 +181,10 @@ function methods:GetSlotName() return Item.GetSlotName(Item.GetSlotId(self.recor
 function methods:GetStat(stat_id) return Item.GetStat(self.record, stat_id) end
 function methods:IsUsableByClass(class_id) return Item.IsUsableByClass(self.record, class_id) end
 function methods:IsUsableByRace(race_id) return Item.IsUsableByRace(self.record, race_id) end
--- true while the handle still names the same stack and it still holds the item this object was made from
-function methods:IsValid() return fetch(self.record) ~= nil and Item.GetName(self.record) == self._name end
+-- as item.lua:539: the record has an item (slot id not 0) and still the name this object was made with; a handle that no longer resolves reads as an empty record
+function methods:IsValid()
+    return fetch(self.record) ~= nil and Item.GetSlotId(self.record) ~= 0 and Item.GetName(self.record) == self._name
+end
 
 local properties = {
     slot = Item.GetSlotId, name = Item.GetName, description = Item.GetDescription, amount = Item.GetAmount,

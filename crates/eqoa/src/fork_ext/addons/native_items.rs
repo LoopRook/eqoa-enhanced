@@ -107,10 +107,14 @@ impl Core {
         self.next_incarnation()
     }
 
-    fn items_session_is_new(before: &Json, after: &Json) -> bool {
+    /// A new session of a list: it was closed, or the client replaced it (a corpse's or a merchant's
+    /// open packet while one is already up, with the same wire keys and the same merchant): the
+    /// native open causes say so, and every handle of the earlier list goes stale.
+    fn items_session_is_new(name: &str, before: &Json, after: &Json, native_cause: &str) -> bool {
         before.is_null()
             || (after["merchant"].is_object()
                 && before["merchant"]["entity_id"] != after["merchant"]["entity_id"])
+            || matches!((name, native_cause), ("loot", "loot_open") | ("merchant", "merchant_open"))
     }
 
     /// The containers of a full view, given their handles and revisions, and what differs from the
@@ -121,7 +125,7 @@ impl Core {
             let before = peek(&self.view, name).clone();
             let after = slot(view, name);
             if after.is_object() {
-                let new_session = Self::items_session_is_new(&before, after);
+                let new_session = Self::items_session_is_new(name, &before, after, "");
                 self.assign_item_refs(name, after, new_session);
             }
             let rev = self.item_revisions.get(name).copied().unwrap_or(0);
@@ -168,7 +172,7 @@ impl Core {
     pub(crate) fn items_patch(&mut self, name: &'static str, mut after: Json, native_cause: &str) {
         let before = peek(&self.view, name).clone();
         if after.is_object() {
-            let new_session = Self::items_session_is_new(&before, &after);
+            let new_session = Self::items_session_is_new(name, &before, &after, native_cause);
             self.assign_item_refs(name, &mut after, new_session);
         }
         let rev = self.item_revisions.get(name).copied().unwrap_or(0);

@@ -102,6 +102,8 @@ fn greeting(wide: &[u16]) -> String {
 
 /// The four containers, in `LISTS` order; `Null` for a corpse or merchant window that is not up.
 pub(super) fn build(play: &Play) -> [Json; 4] {
+    #[cfg(test)]
+    BUILDS.with(|n| n.set(n.get() + 1));
     let ctx = Context {
         flags: play.session.expansion & net::session::EXPANSION_FLAGS,
         attack_words: play.start.as_ref().map_or(&[][..], |s| s.attack_words.as_slice()),
@@ -145,26 +147,29 @@ pub(super) fn build(play: &Play) -> [Json; 4] {
     [inventory, bank, loot, merchant]
 }
 
-/// What a frame compares to see that a list moved without a game event naming it: the windows'
-/// state, the money, and a hash of every stack's changing fields.
+/// What a frame compares to see that a window opened or closed with no event of its own (a key
+/// closed it) or tunar moved: scalars only. A stack's contents change through the native events in
+/// `cause`, never by polling them; list lengths are here to catch a list replaced behind an event.
 fn key(play: &Play) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     (play.mode == 1, play.mode == 10, play.mode == 11, play.npcw.shop.id, play.npcw.shop.pending).hash(&mut h);
     (play.dump.player.p34, play.dump.player.p38).hash(&mut h);
-    let corpse = play.npcw.corpse.as_ref();
-    let lists = [
-        Some(&play.dump.inventory),
-        Some(&play.dump.bank.items),
-        corpse,
-        Some(&play.npcw.shop.wares),
-    ];
-    for list in lists {
-        list.map(|l| l.items.len()).hash(&mut h);
-        for it in list.into_iter().flat_map(|l| &l.items) {
-            (it.inv_index, it.quantity, it.cur_hp, it.charges, it.equip_slot, it.quick_slot).hash(&mut h);
-        }
-    }
+    (
+        play.dump.inventory.items.len(),
+        play.dump.bank.items.items.len(),
+        play.npcw.corpse.as_ref().map(|l| l.items.len()),
+        play.npcw.shop.wares.items.len(),
+    )
+        .hash(&mut h);
     h.finish()
+}
+
+#[cfg(test)]
+thread_local! {static BUILDS: Cell<usize> = const { Cell::new(0) };}
+/// How many times the containers were copied since the last call (a test's measure of stack work).
+#[cfg(test)]
+pub(super) fn take_builds() -> usize {
+    BUILDS.with(|n| n.replace(0))
 }
 
 thread_local! {static KEY: Cell<Option<u64>> = const { Cell::new(None) };}
@@ -226,6 +231,8 @@ pub(super) fn cause(event: &net::session::Event) -> Option<&'static str> {
             0x1251 => "bank_added",
             0x1253 => "bank_money",
             0x1206 => "auction",
+            // a catch (`fishing_caught`) adds to the pack with no inventory event of its own
+            0x0F02 => "fishing",
             _ => return None,
         },
         _ => return None,
