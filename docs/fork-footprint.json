@@ -55,7 +55,13 @@
     "tools/sync_upstream.py",
     "tools/test_sync_upstream.py",
     "tools/check_no_local_paths.py",
-    "tools/test_check_no_local_paths.py"
+    "tools/test_check_no_local_paths.py",
+    "tools/run_gates.py",
+    "tools/test_run_gates.py",
+    "tools/update_bundled_manifest.py",
+    "tools/test_update_bundled_manifest.py",
+    "tools/make_owner_test_package.py",
+    "tools/test_make_owner_test_package.py"
   ],
   "shared": {
     ".gitignore": {
