@@ -4,7 +4,7 @@ local ui = eqoa.imgui
 local B = require("bags")
 
 -- Sizes are in HUD frame pixels (640x448), scaled as the HUD is.
-local W, PAD, SLOT, GAP, LINE, LOG_LINES = 286, 8, 32, 2, 12, 6
+local W, PAD, SLOT, GAP, LINE, LOG_LINES = 318, 8, 36, 2, 12, 6
 local tokens, escape, tab_hits, log_rect, last = {}, nil, {}, nil, nil
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
@@ -129,7 +129,7 @@ function draw()
                 dl:AddImage(entry.texture, at(sx + 2, sy + 2), at(sx + SLOT - 2, sy + SLOT - 2),
                     ImVec2.new(0, 0), ImVec2.new(1, 1), c.white)
             else
-                text(sx + 11, sy + 9, it.name:sub(1, 1), c.muted)
+                text(sx + 14, sy + 11, it.name:sub(1, 1), c.muted)
             end
             if it.equipped then border = c.worn; fill(sx + 2, sy + 2, 9, 11, c.shadow); text(sx + 4, sy + 2, "E", c.worn) end
             if it.quantity > 1 then

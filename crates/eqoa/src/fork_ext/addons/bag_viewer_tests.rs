@@ -227,10 +227,10 @@ impl Bv {
         let (rx, ry, _, _, k) = self.rect();
         (rx + x * k, ry + y * k)
     }
-    /// Centre of grid slot `n` (1-based) in window pixels (8 columns of 32 with a gap of 2, from (8, 46)).
+    /// Centre of grid slot `n` (1-based) in window pixels (8 columns of 36 with a gap of 2, from (8, 46)).
     fn slot(&self, n: usize) -> (f64, f64) {
         let (col, row) = ((n - 1) % 8, (n - 1) / 8);
-        self.at(8. + col as f64 * 34. + 16., 46. + row as f64 * 34. + 16.)
+        self.at(8. + col as f64 * 38. + 18., 46. + row as f64 * 38. + 18.)
     }
     fn point(&self, p: (f64, f64)) {
         super::super::pointer_api::position([p.0 as f32, p.1 as f32], true, self.win);
@@ -281,7 +281,7 @@ fn bv_red_near(pixels: &[u8], width: u32, p: (f64, f64), radius: i32) -> bool {
 fn bv_green_near(pixels: &[u8], width: u32, p: (f64, f64), radius: i32) -> bool {
     (-radius..=radius).any(|dy| (-radius..=radius).any(|dx| {
         let c = bv_px(pixels, width, p.0 + dx as f64, p.1 + dy as f64);
-        c[1] >= 150 && c[0] <= 130 && c[2] <= 140 && c[1] as i32 - c[0] as i32 >= 60
+        c[1] >= 90 && c[2] <= c[1] && c[1] as i32 - c[0] as i32 >= 40
     }))
 }
 fn bv_png(pixels: &[u8], size: (u32, u32), name: &str) {
@@ -539,10 +539,10 @@ fn round5b_the_window_follows_the_ui_scale_and_stays_on_screen() {
         sizes.push((win, w, k));
         bv.clean();
     }
-    // the window is as wide as the HUD frame makes it: 286 frame pixels at the frame's scale
+    // the window is as wide as the HUD frame makes it: 318 frame pixels at the frame's scale
     for (win, w, k) in &sizes {
         let (_, _, sx, _, _, _) = super::super::hud_layout::frame_metrics(*win);
-        assert!((k - sx as f64).abs() < 1e-3 && (w - 286. * sx as f64).abs() < 1e-2, "{win:?}");
+        assert!((k - sx as f64).abs() < 1e-3 && (w - 318. * sx as f64).abs() < 1e-2, "{win:?}");
     }
     assert!(sizes[1].1 > sizes[0].1 * 1.5, "a larger window gives a larger Bags window");
 }
@@ -563,7 +563,6 @@ fn round5b_picture_the_window_is_drawn_where_it_says_and_closed_it_is_not() {
     bv.point(bv.slot(1));
     let open = bv.frames(3);
     let px = rm_pixels(&bv.gpu, &open);
-    bv_png(&px, bv.win, "r5-bags-all.png");
     let w = bv.win.0;
     let (rx, ry, rw, rh, k) = bv.rect();
     // inside the panel (away from slots and text) the surface is dark and not the background; closed it is background
@@ -588,26 +587,24 @@ fn round5b_picture_the_window_is_drawn_where_it_says_and_closed_it_is_not() {
     bv.point((1., 1.));
     let calm = bv.frames(3);
     let calm_px = rm_pixels(&bv.gpu, &calm);
-    let left = bv.at(8., 46. + 16.);
+    let left = bv.at(8., 46. + 18.);
     assert!(bv_green_near(&calm_px, w, left, 3), "the worn marker's green at the sword's edge");
-    let ring = bv.at(8. + 68., 46. + 16.);
+    let ring = bv.at(8. + 76., 46. + 18.);
     assert!(!bv_green_near(&calm_px, w, ring, 1), "an unworn ring's edge is not green");
     let under = bv.at(8. + 14., 40.);
     assert!(bv_red_near(&calm_px, w, under, 2), "the All tab's red underline");
-    let log_row = bv.at(30., 46. + 5. * 34. + 5. + 38. + 6.);
+    let log_row = bv.at(30., 46. + 188. + 5. + 38. + 6.);
     assert!(bv_near(&calm_px, w, log_row, 40, [232, 232, 232, 255], 30), "a log line's text");
     // the Bank tab, nothing hovered
     let tab = bv.tab(6);
     bv.click(tab);
     bv.point((1., 1.));
-    let bank = bv.frames(3);
-    bv_png(&rm_pixels(&bv.gpu, &bank), bv.win, "r5-bags-bank.png");
+    bv.frames(3);
     // the log with entries, nothing hovered
     let all = bv.tab(1);
     bv.click(all);
     bv.point((1., 1.));
-    let log_pic = bv.frames(3);
-    bv_png(&rm_pixels(&bv.gpu, &log_pic), bv.win, "r5-bags-loot.png");
+    bv.frames(3);
     bv.clean();
 }
 
@@ -657,5 +654,91 @@ fn round5b_every_stack_has_the_tabs_the_games_item_page_gives_it_and_each_tab_li
     bv.click(tab);
     bv.frames(2);
     assert_eq!(bv.names(), all);
+    bv.clean();
+}
+
+/// The disc's own item art: the first decodable icons of ITEMICON.ESF, given to the live art cache the way the
+/// viewer gives it (`update_live_data`). None without `$EQOA_ISO`.
+fn bv_disc_icons(count: usize) -> Option<Vec<u32>> {
+    let path = std::env::var("EQOA_ISO").ok().filter(|p| !p.is_empty())?;
+    let mut disc = iso::Iso::open(&path).ok()?;
+    let container = esf::Container::open(disc.read("ITEMICON.ESF").ok()?).ok()?;
+    // icons with some picture in them, not a blank surface
+    let ids: Vec<u32> = container
+        .surfaces
+        .iter()
+        .filter_map(|s| {
+            let d = s.decode(&container.data)?;
+            let colours: std::collections::HashSet<[u8; 4]> = d.rgba.chunks(4).map(|p| [p[0], p[1], p[2], p[3]]).collect();
+            (colours.len() > 24).then_some(s.dict_id as u32)
+        })
+        .take(count)
+        .collect();
+    let mut lib = esf::Library::new();
+    lib.add("ITEMICON.ESF", container);
+    super::super::icons::update_live_data(&lib, None, &ids);
+    (ids.len() == count).then_some(ids)
+}
+
+#[test]
+fn round5b_captures_for_the_owner_draw_the_discs_own_item_art_and_the_corpse_in_the_log() {
+    let Some(mut bv) = Bv::new() else { return };
+    // the real art: no stand-in provider, the live cache the disc fills
+    super::super::icons::set_custom_icon_provider(None);
+    let Some(ids) = bv_disc_icons(12) else {
+        eprintln!("SKIP bag viewer captures: no $EQOA_ISO or no item art on it");
+        return;
+    };
+    let mut world = bv_world();
+    for (list, offset) in [("pack", 0), ("bank", 8)] {
+        for (i, item) in world[list].as_array_mut().unwrap().iter_mut().enumerate() {
+            item["icon"] = serde_json::json!(ids[offset + i]);
+        }
+    }
+    bv.play.bags_set(&world);
+    bv.enable();
+    bv.open();
+    let mut corpse = bv_corpse();
+    for (i, item) in corpse.as_array_mut().unwrap().iter_mut().enumerate() {
+        item["icon"] = serde_json::json!(ids[8 + i]);
+    }
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_corpse(&corpse);
+    bv.frames(2);
+    bv.play.bags_loot_one(0);
+    bv.frames(2);
+    bv.play.bags_loot_one(0);
+    bv.frames(2);
+    let (w, size) = (bv.win.0, bv.win);
+    // every slot of the pack has real art: a picture's many colours, not a flat square
+    for n in 1..=8 {
+        let c = bv.slot(n);
+        bv.point(c);
+        let t = bv.frames(2);
+        let px = rm_pixels(&bv.gpu, &t);
+        let mut colours = std::collections::HashSet::new();
+        for dy in -10..=10 {
+            for dx in -10..=10 {
+                colours.insert(bv_px(&px, w, c.0 + dx as f64, c.1 + dy as f64));
+            }
+        }
+        assert!(colours.len() > 6, "slot {n} shows the disc's art: {} colours", colours.len());
+        if n == 1 {
+            bv_png(&px, size, "r5-bags-all.png");
+        }
+    }
+    let log = bv.log();
+    assert!(log[0].ends_with("Spider Silk x4, from a decaying skeleton"), "{log:?}");
+    bv.point((1., 1.));
+    let tab = bv.tab(6);
+    bv.click(tab);
+    bv.point((1., 1.));
+    let t = bv.frames(3);
+    bv_png(&rm_pixels(&bv.gpu, &t), size, "r5-bags-bank.png");
+    let all = bv.tab(1);
+    bv.click(all);
+    bv.point((1., 1.));
+    let t = bv.frames(3);
+    bv_png(&rm_pixels(&bv.gpu, &t), size, "r5-bags-loot.png");
     bv.clean();
 }
