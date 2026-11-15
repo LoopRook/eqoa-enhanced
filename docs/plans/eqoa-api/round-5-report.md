@@ -109,3 +109,23 @@ SKIP lines (50 in the full run): 14 no `run/client.bin`; 8 + 3 + 1 no 2002 or Fr
 1 no live save state; 1 no `ss-art.csf`. The 9 in the addon suite are the same set as round 4 (Windows symlink privilege, pinned Forge fixtures,
 reviewed picture goldens). No item test skips: none needs the disc or the decomp oracle (oracle tests skip on this machine as before).
 
+
+## Fix round (review `round-5-review-a.md`, Terra; the lead's triage)
+
+| Finding | Fix (commit "round 5 fix round...") | Test | Negative control (run) |
+|---|---|---|---|
+| H1: a second 0x0018 while a corpse is up, or a re-sent 0x00B7 from the same merchant, kept old ItemRefs alive when the wire keys repeated | `items_session_is_new` also returns true for the native open causes `loot_open` (loot) and `merchant_open` (merchant), so every earlier handle of that list is `stale_handle`. The bank's `bank_open` only flips the window; the bank's stacks are not replaced, so its handles stay | `round5_a_corpse_opened_again_with_the_same_wire_keys_is_a_new_session`, `round5_a_merchant_sent_again_by_the_same_merchant_is_a_new_session` (real 0x0018 / 0x00B7 bytes; old ref stale, new ref resolves to the new list's item) | the open-cause clause removed: both FAILED |
+| H2 (MEDIUM): the frame check hashed every stack | `items_capture::key` is O(1) scalars: window modes 1/10/11, shop id and pending, the two money values, the four list lengths. No stack is read per frame. Stack contents change only through the events in `cause()`. One content change had no event of its own and is handled narrowly: a fishing catch (`fishplay.rs` `fishing_caught`, opcode 0x0F02, `add_item` into the pack) is now cause `fishing`. Other writers of `dump.inventory` (crafting, trade, auction 0x1206, loot 0x0019/0x001A, bank 0x1250/0x1251) already arrive as events in `cause()` | `round5_a_quiet_frame_does_no_stack_work_and_events_fire_once`: five frames with nothing changed copy no stacks (a test-build counter, `items::take_builds`), item HP by its event is one copy and one event, a window closed by a key is exactly one `close`, 0x0F02 maps to `fishing`. The earlier `a_frame_sees_a_window_closed_and_tunar_changed...` still passes | frame refresh made to copy every frame: FAILED |
+| M5: Forge `IsValid` | `GetSlotId(record) ~= 0 and GetName(record) == self._name`, with the fetch-nil guard kept (`item.lua:539`) | `round5_forge_is_valid_needs_a_slot_id_as_the_reference_does` (a record whose wear slot is 0) | the slot test removed: FAILED |
+| M3, M4 | No change (per the lead): `Container.view` and merchant mode/selection stay `not_yet` pending the owner's decision on the two seams above; `pack_cap`/`bank_cap` stay as the native rules | - | - |
+
+Test-file changes: only additions (4 tests in `items_tests.rs`); no existing test changed or removed in this round.
+
+The exact filter that runs every round 5 test (they sit outside `fork_ext::addons::`):
+`cargo test --locked -p eqoa --bin eqoa -- round5_ every_function_of_each_forge --test-threads=1` (22 tests).
+
+Gates after the fix round: round 5 filter above 22 passed; addon suite 461 passed, 0 failed, 25 ignored, 9 SKIP; full client suite
+(timing skips as before) 2299 passed, 0 failed, 30 ignored; wasm check PASS; footprint PASS (31 shared files, no upstream file
+touched); `tools/test_player_release.py` 20 OK; release build PASS after the last code commit. SKIP lines are the same set as Part A
+(no disc oracle, sibling S2 files, `run/client.bin`).
+
