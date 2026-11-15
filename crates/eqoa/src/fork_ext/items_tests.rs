@@ -43,6 +43,7 @@ struct Spec {
     value: i64,
     max_stack: i64,
     stats: Vec<(i64, i64)>,
+    icon: i64,
 }
 impl Spec {
     fn new(id: i64, name: &'static str, key: u32) -> Self {
@@ -63,6 +64,7 @@ impl Spec {
             value: 10,
             max_stack: 1,
             stats: vec![],
+            icon: 4001,
         }
     }
     /// `ReadNetItem`'s bytes: the slot's six words, the item's 23 words, name, description, stats.
@@ -70,7 +72,7 @@ impl Spec {
         let mut w = Writer::default();
         w.signed(self.quantity).signed(self.cur_hp).signed(0).signed(self.equip_slot).signed(self.quick_slot).u32(self.key);
         for v in [
-            self.id, self.value, 0, 4001, 0, self.wear, 0, 0, self.rent, 0, 0, 0, 0, self.level, self.max_stack,
+            self.id, self.value, 0, self.icon, 0, self.wear, 0, 0, self.rent, 0, 0, 0, 0, self.level, self.max_stack,
             self.max_hp, 0, self.class_mask, self.race_mask, 0, 0, 0, 0,
         ] {
             w.signed(v);
@@ -900,4 +902,106 @@ fn round5_forge_is_valid_needs_a_slot_id_as_the_reference_does() {
         "#,
     )
     .unwrap();
+}
+
+// ---- Round 5 Part B: the bag viewer's fixtures. The manager's tests (`addons::manager`) cannot name this
+// module, so they drive the same native paths through these methods and plain JSON.
+impl Spec {
+    fn from_json(v: &serde_json::Value) -> Spec {
+        let int = |k: &str, d: i64| v.get(k).and_then(|x| x.as_i64()).unwrap_or(d);
+        let name: &'static str = Box::leak(v["name"].as_str().unwrap().to_string().into_boxed_str());
+        let mut s = Spec::new(int("id", 0), name, int("key", 0) as u32);
+        s.quantity = int("qty", 1);
+        s.cur_hp = int("cur_hp", 0);
+        s.equip_slot = int("equip", -1);
+        s.quick_slot = int("quick", -1);
+        s.wear = int("wear", -1);
+        s.class_mask = int("class_mask", -1);
+        s.race_mask = int("race_mask", -1);
+        s.rent = int("rent", 1);
+        s.level = int("level", 1);
+        s.max_hp = int("max_hp", 0);
+        s.value = int("value", 10);
+        s.max_stack = int("max_stack", 1);
+        s.icon = int("icon", 4001);
+        if let Some(stats) = v.get("stats").and_then(|x| x.as_array()) {
+            s.stats = stats.iter().map(|p| (p[0].as_i64().unwrap(), p[1].as_i64().unwrap())).collect();
+        }
+        s
+    }
+}
+fn specs(v: &serde_json::Value) -> Vec<Spec> {
+    v.as_array().map(|a| a.iter().map(Spec::from_json).collect()).unwrap_or_default()
+}
+impl Play {
+    /// The zone-in dump's pack, bank and both tunar (`{pack, bank, tunar, bank_tunar}`, items as `Spec::from_json`).
+    pub(crate) fn bags_set(&mut self, world: &serde_json::Value) {
+        self.dump.inventory = list(&specs(&world["pack"]));
+        self.dump.bank.items = list(&specs(&world["bank"]));
+        self.dump.player.p34 = world["tunar"].as_i64().unwrap_or(0);
+        self.dump.player.p38 = world["bank_tunar"].as_i64().unwrap_or(0);
+    }
+    pub(crate) fn bags_player(&mut self, class: i64, race: i64, level: i64) {
+        self.dump.player.class = class;
+        self.dump.player.race = race;
+        self.dump.player.level = level;
+    }
+    /// 0x0018: a corpse's list arrives and its window opens.
+    pub(crate) fn bags_corpse(&mut self, items: &serde_json::Value) {
+        apply(self, opcode(0x0018, list_bytes(&specs(items))));
+    }
+    /// 0x0019: the server's answer to taking the corpse's item in `slot`.
+    pub(crate) fn bags_loot_one(&mut self, slot: u8) {
+        let mut w = Writer::default();
+        w.u8(slot).signed(0);
+        apply(self, opcode(0x0019, w.data));
+    }
+    /// 0x001A: every corpse item into the pack, as far as it goes.
+    pub(crate) fn bags_loot_all(&mut self) {
+        apply(self, opcode(0x001A, vec![]));
+    }
+    /// 0x0016: the loot window closes (Leave All, or the window's own close).
+    pub(crate) fn bags_loot_close(&mut self) {
+        apply(self, opcode(0x0016, vec![]));
+    }
+    /// 0x003C: `n` of the pack's stack at `slot` gone.
+    pub(crate) fn bags_took(&mut self, slot: i32, n: i32) {
+        apply(self, Event::InvTook { slot: slot as _, sound: 0, n: n as _ });
+    }
+    /// An item added to the pack (0x003B).
+    pub(crate) fn bags_added(&mut self, item: &serde_json::Value) {
+        apply(self, Event::InvAdd(Box::new(Spec::from_json(item).net())));
+    }
+    /// 0x0052: the carried tunar.
+    pub(crate) fn bags_tunar(&mut self, v: i64) {
+        apply(self, opcode(0x0052, signed_bytes(v)));
+    }
+    /// The game's words, as far as the viewer reads them: a wear slot's and two stats' names (the rest "word N").
+    pub(crate) fn bags_words(&mut self) {
+        let named = |i: usize| match i {
+            226 => "Strength".to_string(),
+            242 => "Armor".to_string(),
+            338 => "Primary".to_string(),
+            i => format!("word {i}"),
+        };
+        let table = vi::strtab::StringTable::parse((1..=1600).map(named).collect::<Vec<_>>().join("
+").as_bytes()).unwrap();
+        CORE.with(|c| c.borrow_mut().words = Some(table));
+    }
+    /// The names the game's own item page lists under one of its tabs (`itemmenu.rs`'s four predicates).
+    pub(crate) fn bags_native_tab(&self, tab: &str) -> Vec<String> {
+        let has: fn(&NetItem) -> bool = match tab {
+            "usable" => crate::infotext::is_usable,
+            "equipment" => crate::infotext::is_wearable,
+            "charged" => crate::infotext::is_charged,
+            _ => crate::infotext::is_misc,
+        };
+        self.dump.inventory.items.iter().filter(|it| has(it)).map(|it| it.item.name.clone()).collect()
+    }
+    /// The server moves the player to another world; the next `bags_set` is the entry dump of the new one.
+    pub(crate) fn bags_zone(&mut self) {
+        CORE.with(|c| c.borrow_mut().reset("zone"));
+        self.mode = 0;
+        self.npcw.corpse = None;
+    }
 }

@@ -34,6 +34,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_creature_journal",
     "eqoa_map_search",
     "eqoa_round_minimap",
+    "eqoa_bag_viewer",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -141,6 +142,26 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_creature_journal/README.md",
         package: "eqoa_creature_journal",
         data: include_bytes!("../../../../bundled-mods/eqoa_creature_journal/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_bag_viewer/mod.json",
+        package: "eqoa_bag_viewer",
+        data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_bag_viewer/main.lua",
+        package: "eqoa_bag_viewer",
+        data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_bag_viewer/modules/bags.lua",
+        package: "eqoa_bag_viewer",
+        data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/modules/bags.lua"),
+    },
+    BundledFile {
+        path: "eqoa_bag_viewer/README.md",
+        package: "eqoa_bag_viewer",
+        data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/README.md"),
     },
     BundledFile {
         path: "eqoa_example_hearts/mod.json",
@@ -1025,7 +1046,8 @@ mod tests {
                 "eqoa_hud_numbers",
                 "eqoa_creature_journal",
                 "eqoa_map_search",
-                "eqoa_round_minimap"
+                "eqoa_round_minimap",
+                "eqoa_bag_viewer"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1317,7 +1339,8 @@ mod tests {
                 "eqoa_hud_numbers",
                 "eqoa_creature_journal",
                 "eqoa_map_search",
-                "eqoa_round_minimap"
+                "eqoa_round_minimap",
+                "eqoa_bag_viewer"
             ]
         );
 
@@ -1362,7 +1385,8 @@ mod tests {
                 "eqoa_hud_numbers",
                 "eqoa_creature_journal",
                 "eqoa_map_search",
-                "eqoa_round_minimap"
+                "eqoa_round_minimap",
+                "eqoa_bag_viewer"
             ]
         );
 
@@ -1381,7 +1405,8 @@ mod tests {
                 "eqoa_hud_numbers",
                 "eqoa_creature_journal",
                 "eqoa_map_search",
-                "eqoa_round_minimap"
+                "eqoa_round_minimap",
+                "eqoa_bag_viewer"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1466,7 +1491,8 @@ mod tests {
                 "eqoa_hud_numbers",
                 "eqoa_creature_journal",
                 "eqoa_map_search",
-                "eqoa_round_minimap"
+                "eqoa_round_minimap",
+                "eqoa_bag_viewer"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );
