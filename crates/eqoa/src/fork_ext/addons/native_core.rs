@@ -25,6 +25,12 @@ pub(crate) struct View {
     pub group: Json,
     pub hotbar: Vec<Json>,
     pub effects: Option<Vec<Json>>,
+    /// The four item containers (`eqoa.inventory/bank/loot/merchant.get`), as the client holds
+    /// them; `Null` where the container is unavailable (loot and merchant while closed).
+    pub inventory: Json,
+    pub bank: Json,
+    pub loot: Json,
+    pub merchant: Json,
     pub channel: &'static str,
 }
 impl Default for View {
@@ -45,6 +51,10 @@ impl Default for View {
             group: json!({"in_group":false,"self_leader":null,"members":[],"raid":[],"invites":[]}),
             hotbar: Vec::new(),
             effects: None,
+            inventory: Json::Null,
+            bank: Json::Null,
+            loot: Json::Null,
+            merchant: Json::Null,
             channel: "other",
         }
     }
@@ -127,6 +137,12 @@ pub(crate) struct Core {
     pub entity_hint: std::collections::HashMap<u32, usize>,
     pub entity_versions: BTreeMap<u32, u64>,
     pub ability_versions: BTreeMap<String, u64>,
+    /// Per item list, the incarnation of each stack by its wire key (`native_items`).
+    pub item_versions: BTreeMap<&'static str, BTreeMap<u32, u64>>,
+    /// Per item list, the revision the container last published with.
+    pub item_revisions: BTreeMap<&'static str, u64>,
+    /// `gAttackWords` (the start menu's data), for the attack-type names.
+    pub attack_words: Vec<(i32, i64)>,
     pub cooldown_edges: BTreeMap<String, (f64, f64, f64)>,
     pub unknown_lockouts: BTreeMap<u8, (f64, f64, f64)>,
     pub disposition_target: Option<u32>,
@@ -160,6 +176,9 @@ impl Default for Core {
             entity_hint: std::collections::HashMap::new(),
             entity_versions: BTreeMap::new(),
             ability_versions: BTreeMap::new(),
+            item_versions: BTreeMap::new(),
+            item_revisions: BTreeMap::new(),
+            attack_words: Vec::new(),
             cooldown_edges: BTreeMap::new(),
             unknown_lockouts: BTreeMap::new(),
             disposition_target: None,
@@ -314,6 +333,7 @@ impl Core {
                 json!({"reason":reason,"world_id":self.view.world_id}),
             );
         }
+        self.items_reset_events();
         self.generation += 1;
         self.pending_player_before = None;
         self.motion_tick = u64::MAX;
@@ -323,6 +343,8 @@ impl Core {
         self.entity_hint.clear();
         self.entity_versions.clear();
         self.ability_versions.clear();
+        self.item_versions.clear();
+        self.item_revisions.clear();
         self.cooldown_edges.clear();
         self.unknown_lockouts.clear();
         self.disposition_target = None;
@@ -438,7 +460,9 @@ impl Core {
         if before != after {
             self.emit("map.changed", json!({"before":self.view.map,"after":view.map,"changed":changed_fields(&before,&after)}));
         }
+        let item_changes = self.items_prepare(&mut view, entered);
         let previous = std::mem::replace(&mut self.view, view);
+        self.items_emit(item_changes);
         super::guides::update(self);
         if self.view.in_world && previous.player_stats != self.view.player_stats {
             self.emit("player.stats_changed", json!({}));

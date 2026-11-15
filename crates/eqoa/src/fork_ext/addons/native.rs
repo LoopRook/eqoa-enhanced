@@ -334,6 +334,15 @@ pub(crate) fn annotate_host(host: &Host) -> Result<()> {
     ] {
         describe(lua, path, "not_yet", Some(4), "scheduled for round 4");
     }
+    for path in super::items_forge::DEFERRED {
+        describe(
+            lua,
+            path,
+            "not_yet",
+            Some(6),
+            "needs read access to the item or merchant window's private selection state (a seam the owner approves first)",
+        );
+    }
     let forge: Table = lua.globals().get("UiForge")?;
     for pair in forge.pairs::<String, Value>() {
         let (name, _) = pair?;
@@ -968,6 +977,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_events::install(host, host.once_mode())?;
     install_fields(lua);
     super::native_state::install(host)?;
+    super::native_items::install(host)?;
     super::map_views::install(host)?;
     super::guides::install(host)?;
     super::pointer_api::install(host)?;
@@ -1064,6 +1074,9 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.group.Group", "members") => Some("eqoa.group.Member"),
         ("eqoa.group.Group", "raid") => Some("eqoa.group.RaidMember"),
         ("eqoa.group.Group", "invites") => Some("eqoa.group.Invite"),
+        ("eqoa.items.Container", "items") => Some("eqoa.items.Item"),
+        ("eqoa.items.Container", "merchant") => Some("eqoa.items.MerchantState"),
+        ("eqoa.items.Item", "stats") => Some("eqoa.items.ItemStat"),
         ("eqoa.hotbar.Hotbar", "slots") => Some("eqoa.hotbar.HotbarSlot"),
         ("eqoa.chat.ChatMessage", "color") => Some("eqoa.Color"),
         ("eqoa.input.InputState", "pad") => Some("eqoa.input.Pad"),
@@ -1255,8 +1268,8 @@ fn install_fields(lua: &Lua) {
         lua,
         "eqoa.hotbar.HotbarSlot.item",
         "not_yet",
-        Some(3),
-        "item handles arrive in round 3",
+        Some(6),
+        "hotbar item slots are not linked to item handles yet",
     );
 }
 

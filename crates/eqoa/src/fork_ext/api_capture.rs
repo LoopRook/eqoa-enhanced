@@ -228,6 +228,7 @@ impl Play {
                 crate::fork_ext::player_stats::view(&src).map(|v| v.to_json())
             })
             .flatten();
+        let [inventory, bank, loot, merchant] = items::build(self);
         View {
             in_world: true,
             phase,
@@ -261,6 +262,10 @@ impl Play {
             group,
             hotbar,
             effects,
+            inventory,
+            bank,
+            loot,
+            merchant,
             channel: match self.channel {
                 0 => "say",
                 2 => "shout",
@@ -279,6 +284,8 @@ pub(crate) struct ChangeCapture {
     pub kind: updates::Kind,
     pub before: u64,
     pub previous_channel: &'static str,
+    /// The native event's name when it changes an item list (`items::cause`).
+    pub item_cause: Option<&'static str>,
 }
 impl Drop for ChangeCapture {
     fn drop(&mut self) {
@@ -309,6 +316,9 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
                     c.generation += 1;
                     c.entity_versions.clear();
                     c.ability_versions.clear();
+                    c.item_versions.clear();
+                    c.item_revisions.clear();
+                    items::forget();
                     c.cooldown_edges.clear();
                     c.unknown_lockouts.clear();
                     c.entity_worlds.clear();
@@ -328,6 +338,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
             cooldown_before: None,
             unknown_lockout: None,
             previous_channel: "system",
+            item_cause: None,
         };
     }
     let kind = updates::kind(play, event);
@@ -360,6 +371,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
     });
     ChangeCapture {
         interested,
+        item_cause: items::cause(event),
         kind,
         before,
         previous_channel: CORE.with(|c| {
@@ -406,6 +418,10 @@ pub(crate) fn end_game_event(play: &Play, capture: ChangeCapture) {
     if let Some((key, lockout)) = capture.unknown_lockout {
         crate::fork_ext::addons::native_core::unknown_lockout(key, lockout);
     }
+    if let Some(cause) = capture.item_cause {
+        items::capture(play, cause);
+        updates::dirty();
+    }
     if matches!(capture.kind, updates::Kind::Legacy) {
         updates::dirty();
     }
@@ -423,3 +439,9 @@ pub(crate) fn end_game_event(play: &Play, capture: ChangeCapture) {
 
 #[path = "api_updates.rs"]
 pub(super) mod updates;
+
+#[path = "items_capture.rs"]
+pub(super) mod items;
+#[cfg(test)]
+#[path = "items_tests.rs"]
+mod items_tests;
