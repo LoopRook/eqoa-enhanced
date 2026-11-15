@@ -19,12 +19,14 @@ struct Vertex {
 }
 
 /// One string to draw: centred on `at` (clip space after the divide: x, y
-/// in -1..1, z the depth), in `color`.
+/// in -1..1, z the depth), in `color`, at `size` of the list's scale (1:
+/// the font's own height; a merc's tag under its name is smaller).
 #[derive(Clone, Debug)]
 pub struct Label {
     pub at: [f32; 3],
     pub color: [f32; 4],
     pub text: String,
+    pub size: f32,
 }
 
 struct Glyph {
@@ -55,6 +57,8 @@ pub struct Text {
     /// A texel of the atlas in uv, across and down: each glyph's quad is
     /// drawn a texel wider all round, onto its clear ring (`ui::pack`).
     texel: [f32; 2],
+    /// The frames' vertex buffers, destroyed a few frames on (`Retire`).
+    retire: crate::Retire,
 }
 
 impl Text {
@@ -144,7 +148,7 @@ impl Text {
             })
         };
         let (sharp, smooth) = (make("fs_sharp"), make("fs_smooth"));
-        Text { sharp, smooth, bg, glyphs, height: font.height, labels: Vec::new(), plates: Vec::new(), plate_scale: 1.0, texel }
+        Text { sharp, smooth, bg, glyphs, height: font.height, labels: Vec::new(), plates: Vec::new(), plate_scale: 1.0, texel, retire: Default::default() }
     }
 
     /// `GetStringWidth`, in PS2 pixels.
@@ -163,6 +167,7 @@ impl Text {
         let k = th / SCREEN_H * scale;
         let mut out = Vec::new();
         for l in labels {
+            let k = k * l.size;
             // The centre in target pixels, then the string's left edge.
             let cx = (l.at[0] * 0.5 + 0.5) * tw;
             let cy = (-l.at[1] * 0.5 + 0.5) * th;
@@ -215,5 +220,6 @@ impl Text {
         pass.set_bind_group(0, &self.bg, &[]);
         pass.set_vertex_buffer(0, buf.slice(..));
         pass.draw(0..v.len() as u32, 0..1);
+        self.retire.keep(buf);
     }
 }

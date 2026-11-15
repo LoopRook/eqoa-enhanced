@@ -167,6 +167,153 @@ pub fn hidden_tick() {
     });
 }
 
+thread_local! {
+    /// How many of the event loop's calls into the client are under way
+    /// (`Guarded`): 0 between them, so one left over once they have all
+    /// returned is a call that never did.
+    static IN_EVENT: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// The outermost call under way (`Guarded`): what it is and when it
+    /// began (`performance.now()`, ms), for the page's word on a loop left
+    /// dead (`event_loop_stuck_in`).
+    static IN_EVENT_WHAT: std::cell::Cell<(&'static str, f64)> = const { std::cell::Cell::new(("", 0.0)) };
+}
+
+/// The client as the event loop calls it (`viewer`'s and `fxview`'s `App`),
+/// each call counted in `IN_EVENT` while it runs. A JavaScript exception
+/// thrown inside one (the engine's own stack overflowing is a `RangeError`,
+/// not a trap; or any call of the browser's that throws) unwinds through the
+/// wasm frames with no Rust code run on the way, winit's runner's among them:
+/// its `RefCell` stays borrowed, every event after is queued and never
+/// handled (the game stands still, no panic), and the page's `pagehide`
+/// panics in winit (`runner.rs:683:69: RefCell already borrowed`, petitions
+/// 1618 and 1664: all their notes said, the cause gone). Counted, the page
+/// asks after such an error (`event_loop_stuck`) and stops the client with
+/// the exception's own words.
+///
+/// A call can end with no exception at all, nothing for the page to catch:
+/// the browser stops the page's script where it is (Firefox cancels a
+/// running script when the player navigates away, by the address bar, a
+/// bookmark or Back, so that the navigation is not held up; its "this page
+/// is slowing down Firefox" Stop; an out-of-memory it does not throw). That
+/// was petitions 1618, 1664, 5003 and 5004 too (three of the four on
+/// Firefox, 5004 on a build with the count): the page left mid-frame, and its
+/// `pagehide` reached winit's runner still borrowed. The page now looks for
+/// a call left over every second as well (web/notices.js's watch), and its
+/// own `pagehide` (main.js, before winit's) keeps winit's from running on a
+/// loop left dead: the panic it would raise is no crash of the client's, and
+/// was kept and sent as one (`crashfile::is_unload_panic`).
+pub struct Guarded<A>(pub A);
+
+/// One call's count (`Guarded`): taken back as the call returns, never when
+/// an exception unwinds past it.
+struct InEvent;
+
+impl InEvent {
+    fn enter(what: &'static str) -> InEvent {
+        IN_EVENT.with(|n| {
+            if n.get() == 0 {
+                IN_EVENT_WHAT.with(|w| w.set((what, now_ms())));
+            }
+            n.set(n.get() + 1)
+        });
+        InEvent
+    }
+}
+
+impl Drop for InEvent {
+    fn drop(&mut self) {
+        IN_EVENT.with(|n| n.set(n.get().saturating_sub(1)));
+    }
+}
+
+/// `performance.now()`, 0 without one.
+fn now_ms() -> f64 {
+    web_sys::window().and_then(|w| w.performance()).map_or(0.0, |p| p.now())
+}
+
+/// A window event's name for `IN_EVENT_WHAT` (no data of it: a key typed is
+/// not said).
+fn window_event_name(e: &winit::event::WindowEvent) -> &'static str {
+    use winit::event::WindowEvent as W;
+    match e {
+        W::RedrawRequested => "a frame (RedrawRequested)",
+        W::Resized(_) => "a resize",
+        W::ScaleFactorChanged { .. } => "a scale change",
+        W::Focused(_) => "a focus change",
+        W::KeyboardInput { .. } => "a key",
+        W::ModifiersChanged(_) => "a modifier key",
+        W::Ime(_) => "typed text",
+        W::CursorMoved { .. } | W::CursorEntered { .. } | W::CursorLeft { .. } => "the mouse moving",
+        W::MouseWheel { .. } => "the mouse wheel",
+        W::MouseInput { .. } => "a mouse button",
+        W::Touch(_) => "a touch",
+        W::Occluded(_) => "the page hidden or shown",
+        W::CloseRequested | W::Destroyed => "the window closing",
+        _ => "a window event",
+    }
+}
+
+impl<A: winit::application::ApplicationHandler> winit::application::ApplicationHandler for Guarded<A> {
+    fn new_events(&mut self, el: &winit::event_loop::ActiveEventLoop, cause: winit::event::StartCause) {
+        let _g = InEvent::enter("the loop's wake (NewEvents)");
+        self.0.new_events(el, cause);
+    }
+    fn resumed(&mut self, el: &winit::event_loop::ActiveEventLoop) {
+        let _g = InEvent::enter("the start (Resumed)");
+        self.0.resumed(el);
+    }
+    fn user_event(&mut self, el: &winit::event_loop::ActiveEventLoop, event: ()) {
+        let _g = InEvent::enter("a hidden page's frame (a user event)");
+        self.0.user_event(el, event);
+    }
+    fn window_event(&mut self, el: &winit::event_loop::ActiveEventLoop, id: winit::window::WindowId, event: winit::event::WindowEvent) {
+        let _g = InEvent::enter(window_event_name(&event));
+        self.0.window_event(el, id, event);
+    }
+    fn device_event(&mut self, el: &winit::event_loop::ActiveEventLoop, id: winit::event::DeviceId, event: winit::event::DeviceEvent) {
+        let _g = InEvent::enter("a device event");
+        self.0.device_event(el, id, event);
+    }
+    fn about_to_wait(&mut self, el: &winit::event_loop::ActiveEventLoop) {
+        let _g = InEvent::enter("the game's step (AboutToWait)");
+        self.0.about_to_wait(el);
+    }
+    fn suspended(&mut self, el: &winit::event_loop::ActiveEventLoop) {
+        let _g = InEvent::enter("a suspend");
+        self.0.suspended(el);
+    }
+    fn exiting(&mut self, el: &winit::event_loop::ActiveEventLoop) {
+        let _g = InEvent::enter("the loop's end (LoopExiting)");
+        self.0.exiting(el);
+    }
+    fn memory_warning(&mut self, el: &winit::event_loop::ActiveEventLoop) {
+        let _g = InEvent::enter("a memory warning");
+        self.0.memory_warning(el);
+    }
+}
+
+/// Whether a call of the event loop's into the client never returned
+/// (`Guarded`): asked by the page in a task of its own (web/notices.js: after
+/// an uncaught error, and every second), when no call is under way, so a
+/// count left is a call that ended with no return. The loop is dead then:
+/// the page stops the client. Its `pagehide` asks too (main.js), and keeps
+/// winit's from running on a dead loop.
+#[wasm_bindgen]
+pub fn event_loop_stuck() -> bool {
+    IN_EVENT.with(|n| n.get() > 0)
+}
+
+/// The call that never returned (`event_loop_stuck`) and how long ago it
+/// began, for the page's notice: "a frame (RedrawRequested), 3.2 s ago";
+/// none while the loop lives.
+#[wasm_bindgen]
+pub fn event_loop_stuck_in() -> Option<String> {
+    event_loop_stuck().then(|| {
+        let (what, at) = IN_EVENT_WHAT.with(|w| w.get());
+        format!("{what}, {:.1} s ago", (now_ms() - at).max(0.0) / 1000.0)
+    })
+}
+
 /// The tab's title (the window's, `viewer::title`: winit names only the
 /// canvas).
 pub fn set_title(t: &str) {
@@ -267,9 +414,40 @@ pub fn start() {
     net::session::set_debug_sink(log);
     std::panic::set_hook(Box::new(|info| {
         console_error_panic_hook::hook(info);
+        // the page stopped the client already (an exception that left the
+        // event loop dead, `Guarded`): that cause is the report it keeps,
+        // not this panic after it (winit's at the page's unload)
+        if page_dead() {
+            return;
+        }
+        // winit's at the page's unload on a loop the browser stopped (a
+        // navigation away in Firefox): the page was going, no crash
+        // (petitions 1618, 1664, 5003, 5004)
+        if crate::crashfile::is_unload_panic(&format!("{info}")) {
+            log("the page left in the middle of the game's frame: winit's unload panic let go");
+            return;
+        }
         keep_crash(info);
-        crash("The client stopped", &info.to_string());
+        // a WebGPU call the browser threw from on its lost device that
+        // gpuguard.js did not stand in for: the graphics stopped, not the
+        // client's own fault, and a reload brings them back
+        let text = info.to_string();
+        if crate::gpulost::browser_threw(&text) {
+            crash("The graphics stopped", &crate::gpulost::threw_detail(&text));
+            return;
+        }
+        crash("The client stopped", &text);
     }));
+}
+
+/// Whether the page has said the client stopped (`eqoaNotices.dead`,
+/// web/notices.js).
+fn page_dead() -> bool {
+    web_sys::window()
+        .and_then(|w| js_sys::Reflect::get(&w, &"eqoaNotices".into()).ok())
+        .filter(|n| n.is_object())
+        .and_then(|n| js_sys::Reflect::get(&n, &"dead".into()).ok())
+        .is_some_and(|d| d.is_truthy())
 }
 
 /// A panic kept as a crash report for the server, sent at the next login
@@ -303,6 +481,15 @@ pub(crate) fn crash(title: &str, detail: &str) {
 pub fn problem(key: &str, text: &str) {
     log(text);
     call_page("eqoaProblem", &js_sys::Array::of2(&key.into(), &text.into()));
+}
+
+/// A web page opened from the game (`openurl::open`) in a new tab
+/// (`window.eqoaOpenLink`, web/notices.js): a press's key or touch is the
+/// browser's gesture for it; a tab the browser holds back (a pad's press is
+/// none) becomes a notice with the link to open.
+pub fn open_link(url: &str) {
+    log(&format!("opening {url}"));
+    call_page("eqoaOpenLink", &JsValue::from_str(url));
 }
 
 /// The server ended the connection in the world (`Play::disconnected`): the
@@ -564,12 +751,13 @@ enum Remake {
 /// browser has a working adapter, else WebGL2 (whose adapter is the canvas's
 /// own context, so the surface comes first).
 async fn gfx(canvas: web_sys::HtmlCanvasElement) -> Result<viewer::PendingGfx, String> {
-    gfx_on(canvas, None).await
+    gfx_on(canvas, None, false).await
 }
 
 /// `gfx`, or with `again` a new device on that backend in place of a lost
-/// one (`remake`).
-async fn gfx_on(canvas: web_sys::HtmlCanvasElement, again: Option<wgpu::Backend>) -> Result<viewer::PendingGfx, String> {
+/// one (`remake`); `fresh`, on a canvas put in the lost one's place
+/// (`fresh_canvas`), which the window is made again on.
+async fn gfx_on(canvas: web_sys::HtmlCanvasElement, again: Option<wgpu::Backend>, fresh: bool) -> Result<viewer::PendingGfx, String> {
     use winit::platform::web::WindowAttributesExtWebSys;
     let dpr = web_sys::window().map_or(1.0, |w| w.device_pixel_ratio());
     let (w, h) = (((canvas.client_width() as f64) * dpr).max(1.0) as u32, ((canvas.client_height() as f64) * dpr).max(1.0) as u32);
@@ -616,7 +804,7 @@ async fn gfx_on(canvas: web_sys::HtmlCanvasElement, again: Option<wgpu::Backend>
     // a new one is made (`gpulost`, `viewer`'s `recover`). `Destroyed` is the
     // page closing, or a device let go.
     crate::gpulost::watch(&device, again.is_some());
-    if info.backend == wgpu::Backend::Gl && again.is_none() {
+    if info.backend == wgpu::Backend::Gl && (again.is_none() || fresh) {
         watch_webgl(&canvas);
     }
     let mut config = surface.get_default_config(&adapter, w, h).ok_or("the surface cannot be configured")?;
@@ -625,7 +813,7 @@ async fn gfx_on(canvas: web_sys::HtmlCanvasElement, again: Option<wgpu::Backend>
     surface.configure(&device, &config);
     let attrs = winit::window::Window::default_attributes().with_canvas(Some(canvas)).with_title("EQOA");
     let ps2_sums = render::fog16::supported(&adapter);
-    Ok(viewer::PendingGfx { attrs, surface, config, device, queue, ps2_sums })
+    Ok(viewer::PendingGfx { attrs, surface, config, device, queue, ps2_sums, new_window: fresh })
 }
 
 thread_local! {
@@ -674,17 +862,53 @@ fn watch_webgl(canvas: &web_sys::HtmlCanvasElement) {
     }
 }
 
-/// How long a lost device's page waits for a new one in all (each try's
-/// pause first, `remake`): the browser restarts its graphics process
-/// meanwhile, for every page of it at once.
-const REMAKE_PAUSES_MS: [i32; 8] = [100, 250, 500, 1000, 2000, 3000, 4000, 5000];
 /// How long a WebGL2 page waits for its context back.
 const WEBGL_BACK_MS: i32 = 10_000;
 
+thread_local! {
+    /// The page fell back from WebGPU to WebGL2 (`remake`), for
+    /// `recovered`'s notice and `give_up`'s.
+    static FELL_BACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// `remake` went on to WebGL2 after WebGPU's tries.
+    static TRIED_FALLBACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// A fresh canvas in the page's in place of its own, for WebGL2 after
+/// WebGPU (a canvas that has had a "webgpu" context never gives a "webgl2"
+/// one): its attributes copied (the id, so the page's stylesheet sizes it as
+/// it did the old, and the tabindex), the focus moved to it if the old had
+/// it, and the page told (main.js's `eqoaCanvasNew`, which puts its own
+/// listeners on it). winit's are put on it as the window is made again on it
+/// (`viewer`'s `recover`); the old one's go with the old window.
+fn fresh_canvas() -> Result<web_sys::HtmlCanvasElement, String> {
+    let old = canvas()?;
+    let doc = web_sys::window().and_then(|w| w.document()).ok_or("no document")?;
+    let new: web_sys::HtmlCanvasElement = doc.create_element("canvas").map_err(|_| "no canvas made")?.dyn_into().map_err(|_| "not a canvas")?;
+    for name in old.get_attribute_names().iter() {
+        if let Some(name) = name.as_string()
+            && let Some(v) = old.get_attribute(&name)
+        {
+            let _ = new.set_attribute(&name, &v);
+        }
+    }
+    let focused = doc.active_element().is_some_and(|e| JsValue::from(e) == JsValue::from(old.clone()));
+    old.replace_with_with_node_1(&new).map_err(|e| format!("the canvas not replaced: {e:?}"))?;
+    if focused {
+        let _ = new.focus();
+    }
+    call_page("eqoaCanvasNew", &new);
+    log("graphics: a fresh canvas in place of WebGPU's, for WebGL2");
+    Ok(new)
+}
+
 /// A new device in place of the lost one (`viewer`'s `recover`, each frame
-/// while it is lost): asked for the first time (on the backend drawn on),
-/// then `None` until the browser's answer, then the device, or why none
-/// could be had after `REMAKE_PAUSES_MS`.
+/// while it is lost): asked for the first time, then `None` until the
+/// browser's answer, then the device, or why none could be had. The way to
+/// it is `gpulost::page::plan`'s: on WebGPU, WebGPU again for about 50 s
+/// (each try a new instance and a fresh adapter: `navigator.gpu.
+/// requestAdapter()` again, never the lost device's), then WebGL2 on a fresh
+/// canvas (`fresh_canvas`), kept for the rest of the page's life; on WebGL2,
+/// WebGL2 again once the browser gives its context back.
 pub fn remake() -> Option<Result<viewer::PendingGfx, String>> {
     let asked = REMAKE.with(|r| {
         let mut r = r.borrow_mut();
@@ -706,25 +930,47 @@ pub fn remake() -> Option<Result<viewer::PendingGfx, String>> {
     status(&format!("graphics: the device was lost ({}): asking the browser for a new one", crate::gpulost::why()));
     wasm_bindgen_futures::spawn_local(async move {
         let r = async {
-            if backend == wgpu::Backend::Gl {
-                let mut waited = 0;
-                while !WEBGL_BACK.with(std::cell::Cell::get) {
-                    if waited >= WEBGL_BACK_MS {
-                        return Err(format!("the browser did not give the WebGL2 context back within {} s", WEBGL_BACK_MS / 1000));
-                    }
-                    sleep(100).await;
-                    waited += 100;
-                }
-                WEBGL_LOST.with(|l| l.set(false));
-            }
             let mut last = String::new();
-            for (k, pause) in REMAKE_PAUSES_MS.iter().enumerate() {
-                sleep(*pause).await;
-                match gfx_on(canvas()?, Some(backend)).await {
-                    Ok(p) => return Ok(p),
-                    Err(e) => {
-                        log(&format!("graphics: try {} for a new device: {e}", k + 1));
-                        last = e;
+            for leg in crate::gpulost::page::plan(backend) {
+                let canvas = if leg.fresh_canvas {
+                    TRIED_FALLBACK.with(|t| t.set(true));
+                    status(&format!(
+                        "graphics: no new WebGPU device within {} s ({last}): trying WebGL2",
+                        crate::gpulost::page::total_ms(&crate::gpulost::page::WEBGPU_PAUSES_MS) / 1000
+                    ));
+                    // WebGL2's own losses on the old canvas are not this one's
+                    WEBGL_LOST.with(|l| l.set(false));
+                    fresh_canvas()?
+                } else {
+                    if leg.backend == wgpu::Backend::Gl {
+                        let mut waited = 0;
+                        while !WEBGL_BACK.with(std::cell::Cell::get) {
+                            if waited >= WEBGL_BACK_MS {
+                                return Err(format!("the browser did not give the WebGL2 context back within {} s", WEBGL_BACK_MS / 1000));
+                            }
+                            sleep(100).await;
+                            waited += 100;
+                        }
+                        WEBGL_LOST.with(|l| l.set(false));
+                    }
+                    canvas()?
+                };
+                for (k, pause) in leg.pauses_ms.iter().enumerate() {
+                    sleep(*pause).await;
+                    // each try a new instance and adapter (a failed try's
+                    // surface let go); the fresh canvas's window is made by
+                    // `recover` on the device that comes
+                    match gfx_on(canvas.clone(), Some(leg.backend), leg.fresh_canvas).await {
+                        Ok(p) => {
+                            if leg.fresh_canvas {
+                                FELL_BACK.with(|f| f.set(true));
+                            }
+                            return Ok(p);
+                        }
+                        Err(e) => {
+                            log(&format!("graphics: try {} for a new {:?} device: {e}", k + 1, leg.backend));
+                            last = e;
+                        }
                     }
                 }
             }
@@ -739,7 +985,13 @@ pub fn remake() -> Option<Result<viewer::PendingGfx, String>> {
 /// A new device is in place of the lost one (`viewer`'s `reattach`): said on
 /// the page, the game having gone on.
 pub fn recovered() {
-    call_page("eqoaGraphicsBack", &JsValue::from_str(&format!("The graphics card stopped for a moment ({}). The game made its graphics again and went on: you are still where you were.", short_why())));
+    let webgl = if FELL_BACK.with(|f| f.replace(false)) {
+        TRIED_FALLBACK.with(|t| t.set(false));
+        " WebGPU could not be had again, so the game now draws with WebGL2 until the page is reloaded."
+    } else {
+        ""
+    };
+    call_page("eqoaGraphicsBack", &JsValue::from_str(&format!("The graphics card stopped for a moment ({}). The game made its graphics again and went on: you are still where you were.{webgl}", short_why())));
 }
 
 /// The loss's reason, its first line, for a notice.
@@ -755,7 +1007,7 @@ fn short_why() -> String {
 /// process that keeps losing WebGPU's devices may still draw on.
 pub fn give_up(why: &str) {
     let backend = BACKEND.with(std::cell::Cell::get);
-    if backend == Some(wgpu::Backend::BrowserWebGpu) {
+    if backend == Some(wgpu::Backend::BrowserWebGpu) || TRIED_FALLBACK.with(std::cell::Cell::get) {
         call_page("eqoaWebglKeep", &JsValue::from_str(why));
         crash("The graphics stopped", &format!("{why}. This page will use WebGL2 from now on in this browser (the start card says so, and can go back to WebGPU)."));
         return;
@@ -775,6 +1027,15 @@ pub fn give_up(why: &str) {
 #[wasm_bindgen]
 pub fn lose_device() {
     crate::gpulost::ask_loss();
+}
+
+/// The browser threw from a WebGPU call on the client's device (web/gpuguard.js,
+/// Safari's InvalidStateError once its graphics process has gone): the
+/// device taken as lost, and a new one made in its place (`gpulost`,
+/// `remake`), the game going on.
+#[wasm_bindgen]
+pub fn gpu_threw(what: String) {
+    crate::gpulost::mark(&crate::gpulost::threw_why(&what));
 }
 
 /// Files every scene loads after its own (main.rs's `SHARED`).
@@ -1125,6 +1386,9 @@ fn world_loader(disc: &WebDisc) -> crate::pregame::host::WorldLoader {
                         Err(e) => log(&format!("s2: {}: {e:?}", rules.art_file)),
                     }
                 }
+                // the disc's art that draws everywhere (`discart`), as natively
+                let art = d.disc_art(&lib).await;
+                crate::discart::add(&mut lib, &art);
                 // the 2002 disc's art while it is the art drawn (`era`, F9):
                 // its files in place of their namesakes, read with the world's
                 if crate::era::current() == esf::Era::Y2002

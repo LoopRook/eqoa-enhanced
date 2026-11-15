@@ -52,6 +52,7 @@ mod cape;
 mod chat;
 mod dialog;
 mod attackclock;
+mod aura;
 mod auction;
 mod admin;
 mod buffpc;
@@ -71,6 +72,7 @@ mod arrival;
 mod craft;
 mod craftwnd;
 mod death;
+mod discart;
 mod discs;
 // the program's icon: the drawn disc it carries, then the game's own save
 // icon off the player's disc (natively; a page has its favicon)
@@ -101,10 +103,14 @@ mod jump;
 mod livewords;
 mod hud;
 mod raidlist;
+mod readywnd;
+mod buffwnd;
+mod tips;
 mod rollwnd;
 mod masterloot;
 mod damage;
 mod numcolor;
+mod autocast;
 mod dpsmeter;
 mod npctint;
 mod display;
@@ -151,6 +157,7 @@ mod tracker;
 mod quickchat;
 mod racebody;
 mod raceemote;
+mod seabody;
 mod racelabel;
 mod raceopts;
 mod wisp;
@@ -162,12 +169,16 @@ mod trade;
 mod trainer;
 mod trails;
 mod options;
+// a web page opened from the game (Station's Forgot Password on our server):
+// the system's browser, a page's new tab, Android's intent
+mod openurl;
 mod settings;
 mod fork_ext;
 mod texpack;
 mod social;
 mod wholist;
 mod zones;
+mod skyisles;
 mod flora;
 mod fx;
 mod fxview;
@@ -489,7 +500,7 @@ fn run(args: &[String]) -> Result<()> {
         Some("rumble") => input::check_motors(10_000)?,
         Some("view") | Some("shot") => {
             let shot = args[0] == "shot";
-            let usage = "usage: eqoa view <file> [model] [tint=RRGGBBAA] | eqoa view <world> zone <n> | eqoa shot <same> <out.png> [camera...]";
+            let usage = "usage: eqoa view <file> [model] [tint=RRGGBBAA] [glow=RRGGBBAA] | eqoa view <world> zone <n> | eqoa shot <same> <out.png> [camera...]";
             let file = args.get(1).ok_or(usage)?;
             // `tint=RRGGBBAA`: the model in a server's body tint, as an NPC of
             // a tinted name is drawn (`npctint`)
@@ -576,7 +587,7 @@ fn run(args: &[String]) -> Result<()> {
         // in a look, standing, from four sides (`dressview`)
         #[cfg(not(target_arch = "wasm32"))]
         Some("dress") => {
-            let usage = "usage: eqoa dress <body DictID> <out.png> [set=N armor=a,b,c,d,e tint=T robe=R rtint=T dye=RRGGBB hair=c,l,s face=F helm=N helmfit=0 main=ID off=ID shield=ID race=1 action=N at=ms size=WxH cape=N capecolor=RRGGBB era=2002]";
+            let usage = "usage: eqoa dress <body DictID> <out.png> [set=N armor=a,b,c,d,e tint=T robe=R rtint=T dye=RRGGBB hair=c,l,s face=F helm=N helmfit=0 main=ID off=ID shield=ID race=1 action=N at=ms size=WxH cape=N capecolor=RRGGBB maincolor=RRGGBB offcolor=RRGGBB shieldcolor=RRGGBB trim=RRGGBB night=1 era=2002 npctint=RRGGBBAA npcglow=RRGGBBAA aura=default|none|shell|particles|both aurasrc=DictID auranodes=N pieceaura=slot:RRGGBBAA[:kind[:DictID[:nodes]]]]";
             let model = args.get(1).and_then(|m| fxview::parse_visual(m)).ok_or(usage)? as i32;
             let out = args.get(2).filter(|o| o.ends_with(".png")).ok_or(usage)?;
             let words = dressview::parse(&args[3..])?;
@@ -585,6 +596,8 @@ fn run(args: &[String]) -> Result<()> {
             for f in dressview::FILES {
                 lib.add(*f, esf::Container::open(iso.read(f)?)?);
             }
+            // set 9's art (go-eqoa-server's armour, Sandstorm's S2)
+            s2::get().register_art(&mut lib);
             // the 2002 disc's copies standing in, as the world has them with F9
             if words.y2002 {
                 let path = era::disc().ok_or("era=2002 needs the 2002 disc (EQOA_2002_ISO)")?;
@@ -791,6 +804,11 @@ pub fn world_library(player: &net::session::Player) -> Result<(esf::Library, vie
             Err(e) => eprintln!("s2: {}: {e}", path.display()),
         }
     }
+    // the disc's art that draws everywhere (`discart`: Highpass's papered
+    // board), after every file the game reads: it fills only what they lack
+    // (a page reads it in its own world loader, `web::disc`)
+    #[cfg(not(target_arch = "wasm32"))]
+    discart::add(&mut lib, &discart::records(std::path::Path::new(&disc_path(None))));
     // the 2002 disc's art while it is the art drawn (`era`, F9): its files in
     // place of their namesakes, read with the world's
     #[cfg(not(target_arch = "wasm32"))]
@@ -1017,11 +1035,11 @@ fn source(file: &str, rest: &[String]) -> Result<(esf::Library, viewer::Source)>
 }
 
 /// A model in a tint (`tint=`, `npctint`); a zone or a walk takes none.
-fn tinted(mut src: viewer::Source, tint: Option<u32>) -> Result<viewer::Source> {
+fn tinted(mut src: viewer::Source, tint: Option<npctint::Tint>) -> Result<viewer::Source> {
     match (&mut src, tint) {
         (_, None) => {}
         (viewer::Source::Models { tint: t, .. }, Some(c)) => *t = Some(c),
-        _ => return Err("tint= is a model's: eqoa shot <file> <model> <out.png> tint=RRGGBBAA".into()),
+        _ => return Err("tint= and glow= are a model's: eqoa shot <file> <model> <out.png> tint=RRGGBBAA glow=RRGGBBAA".into()),
     }
     Ok(src)
 }

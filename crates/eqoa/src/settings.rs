@@ -160,7 +160,7 @@ impl GameOptions {
 /// (Compact: a keyboard is at hand), which `EQOA_SOFT_KEYBOARD` turns off
 /// whatever was kept (a test's).
 pub fn game_options() -> GameOptions {
-    let mut o = game_card().and_then(|b| GameOptions::from_card(&b)).unwrap_or(GameOptions { compact: 1, ..Default::default() });
+    let mut o = account_read("game").or_else(game_card).and_then(|b| GameOptions::from_card(&b)).unwrap_or(GameOptions { compact: 1, ..Default::default() });
     if std::env::var_os("EQOA_SOFT_KEYBOARD").is_some() {
         o.compact = 0;
     }
@@ -177,7 +177,7 @@ pub fn save(o: &GameOptions) -> bool {
     if let Some(b) = game_card() {
         card[HOME_SHARD..HOME_SHARD + HOME_SHARD_LEN].copy_from_slice(&b[HOME_SHARD..HOME_SHARD + HOME_SHARD_LEN]);
     }
-    let game = write_game(&card);
+    let game = write_game(&card).and(account_write("game", &o.to_card()));
     let client = save_client();
     let keys = save_binds();
     for (what, r) in [("the options", &game), ("the client's options", &client), ("the keys and buttons", &keys)] {
@@ -270,12 +270,12 @@ pub fn save_waypoints(w: &[(i32, [f32; 2])]) -> bool {
 /// was moved. The client's own, kept the moment a drag ends or Reset HUD is
 /// chosen, never sent anywhere.
 pub fn hud_layout() -> String {
-    store::read(&own_file("hud", place())).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
+    account_read("hud").or_else(|| store::read(&own_file("hud", place()))).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
 }
 
 /// Keeps this window's HUD layout (`hud_layout`): whether it was kept.
 pub fn save_hud_layout(text: &str) -> bool {
-    match store::write(&own_file("hud", place()), text.as_bytes()) {
+    match store::write(&own_file("hud", place()), text.as_bytes()).and(account_write("hud", text.as_bytes())) {
         Ok(()) => true,
         Err(e) => {
             crate::say(&format!("the HUD's layout was not kept: {e}"));
@@ -308,6 +308,199 @@ pub fn save_quest_guide(text: &str) -> bool {
         }
     }
 }
+
+// ---- the auto slots (`autocast`) --------------------------------------------------
+
+/// The auto slots' file as text (empty when there is none): a line a
+/// character, one file for every window, read again before each write (as
+/// the quest guide's).
+pub fn auto_cast_file() -> String {
+    store::read(crate::autocast::FILE).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
+}
+
+/// Keeps the auto slots' file: whether it was kept.
+pub fn save_auto_cast_file(text: &str) -> bool {
+    match store::write(crate::autocast::FILE, text.as_bytes()) {
+        Ok(()) => true,
+        Err(e) => {
+            crate::say(&format!("the auto slots were not kept: {e}"));
+            false
+        }
+    }
+}
+
+// ---- the account's options (petition 1621) --------------------------------------------
+
+/// The options are the ACCOUNT's (the GM Jibrish's petition 1621, "account
+/// bound, not just character bound"): once a login names one
+/// (`set_account`: the server and the login name, the pregame's STATION),
+/// the Options window's settings (game.opt's), the Extended rows (client.opt's
+/// own rows) and the HUD's layout are read from and kept in the account's
+/// files, `acct_<server>+<login>.game.opt`, `.client.opt` and `.hud.opt`, so
+/// every character of the account, in any window, plays with the same.
+/// The window's own files are written as well (the title before a login,
+/// and a build before this one, read them). What stays as it was: the keys,
+/// buttons and macros (`keys.opt`, the computer's: every account's), the
+/// saved login and home shard (game.opt's, the window's), each window's
+/// Controller Focus and the settings every window shares (client.opt), the
+/// window's place and size, the map's waypoints (the window's), and what
+/// is a character's own: its quick bars (the server's), its auto slots and
+/// its quest guide record (a line a character).
+///
+/// A window remembers the account it last logged into (`account.opt`,
+/// window n's `account-<n>.opt`), so the title shows and keeps that
+/// account's options too. The account's first login on a client of this
+/// build makes its files from the window's set most recently kept (`migrate`).
+fn account_key() -> Option<String> {
+    account_now().or_else(|| store::read(&own_file("account", place())).map(|b| String::from_utf8_lossy(&b).trim().to_string()).filter(|k| !k.is_empty()))
+}
+
+/// The account's key, a store name's part: the server and the login,
+/// lower case, anything but letters, digits, `.`, `-` and `_` as `_`.
+pub fn account_name(server: &str, user: &str) -> String {
+    let clean = |t: &str| t.trim().to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' }).collect::<String>();
+    format!("{}+{}", clean(server), clean(user))
+}
+
+/// The account's file `what` (`game`, `client`, `hud`).
+fn account_file(key: &str, what: &str) -> String {
+    format!("acct_{key}.{what}.opt")
+}
+
+/// The account's file `what`, when an account is known and it was kept.
+fn account_read(what: &str) -> Option<Vec<u8>> {
+    store::read(&account_file(&account_key()?, what))
+}
+
+/// Keeps the account's file `what` (nothing with no account known).
+fn account_write(what: &str, b: &[u8]) -> Result<(), String> {
+    match account_key() {
+        Some(k) => store::write(&account_file(&k, what), b),
+        None => Ok(()),
+    }
+}
+
+/// A login (`server`, the login name): from now the options are this
+/// account's, the account's files made first if it has none (`migrate`);
+/// the options read again (`client`'s cache, the game's options at the
+/// world's entry, the HUD's layout).
+pub fn set_account(server: &str, user: &str) {
+    if user.trim().is_empty() {
+        return;
+    }
+    let key = account_name(server, user);
+    if account_now().as_deref() == Some(key.as_str()) {
+        return;
+    }
+    let had = ["game", "client", "hud"].iter().any(|w| store::read(&account_file(&key, w)).is_some());
+    set_account_now(Some(key.clone()));
+    let _ = store::write(&own_file("account", place()), format!("{key}\n").as_bytes());
+    if !had {
+        migrate(&key);
+    }
+    bump_generation();
+}
+
+/// The account's files made from the window's set kept most recently (the
+/// newest of each window's game, client and HUD files; in a page, whose
+/// storage keeps no times, this window's own): the settings, never the
+/// login or the home shard.
+fn migrate(key: &str) {
+    let files = |p: usize| ["game", "client", "hud"].map(|w| own_file(w, p));
+    let newest = (0..crate::multibox::PLACES).filter_map(|p| files(p).iter().filter_map(|f| store::modified(f)).max().map(|t| (t, p))).max().map(|(_, p)| p);
+    let from = newest.unwrap_or_else(place);
+    if let Some(o) = store::read(&own_file("game", from)).and_then(|b| GameOptions::from_card(&b)) {
+        let _ = store::write(&account_file(key, "game"), &o.to_card());
+    }
+    if let Some(b) = store::read(&own_file("client", from)) {
+        let _ = store::write(&account_file(key, "client"), ClientOptions::from_text(&String::from_utf8_lossy(&b)).rows_text().as_bytes());
+    }
+    if let Some(b) = store::read(&own_file("hud", from)) {
+        let _ = store::write(&account_file(key, "hud"), &b);
+    }
+    crate::say(&format!("options: kept for the account from now on (from window {}'s)", from + 1));
+}
+
+/// The notice the Save Changes box carries (petition 1621: "warn them this
+/// will now save for all characters on the account") until the player has
+/// said Yes to it once (`account_notice_seen`), when an account is known.
+pub const ACCOUNT_NOTICE: &str = "Options now save for every character on this account.";
+const NOTICE_FILE: &str = "account-notice.opt";
+
+pub fn account_notice_due() -> bool {
+    account_key().is_some() && !noticed() && store::read(NOTICE_FILE).is_none()
+}
+
+/// The notice seen: kept, and not shown again this run even if keeping failed.
+pub fn account_notice_seen() {
+    set_noticed();
+    let _ = store::write(NOTICE_FILE, b"seen\n");
+}
+
+/// `client`'s cache key: the window's place and the account's generation
+/// (a login reads the options again, on every thread that cached them).
+fn cache_key() -> usize {
+    place() + crate::multibox::PLACES * generation()
+}
+
+#[cfg(not(test))]
+mod account_state {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    static ACCOUNT: Mutex<Option<String>> = Mutex::new(None);
+    static GENERATION: AtomicUsize = AtomicUsize::new(0);
+    static NOTICED: AtomicBool = AtomicBool::new(false);
+    pub fn account_now() -> Option<String> {
+        ACCOUNT.lock().map(|a| a.clone()).unwrap_or(None)
+    }
+    pub fn set_account_now(k: Option<String>) {
+        if let Ok(mut a) = ACCOUNT.lock() {
+            *a = k;
+        }
+    }
+    pub fn generation() -> usize {
+        GENERATION.load(Ordering::Relaxed)
+    }
+    pub fn bump_generation() {
+        GENERATION.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn noticed() -> bool {
+        NOTICED.load(Ordering::Relaxed)
+    }
+    pub fn set_noticed() {
+        NOTICED.store(true, Ordering::Relaxed);
+    }
+}
+
+/// The tests': each thread's own, as their store is.
+#[cfg(test)]
+mod account_state {
+    use std::cell::{Cell, RefCell};
+    thread_local! {
+        pub static ACCOUNT: RefCell<Option<String>> = const { RefCell::new(None) };
+        pub static GENERATION: Cell<usize> = const { Cell::new(0) };
+        pub static NOTICED: Cell<bool> = const { Cell::new(false) };
+    }
+    pub fn account_now() -> Option<String> {
+        ACCOUNT.with(|a| a.borrow().clone())
+    }
+    pub fn set_account_now(k: Option<String>) {
+        ACCOUNT.with(|a| *a.borrow_mut() = k);
+    }
+    pub fn generation() -> usize {
+        GENERATION.with(|g| g.get())
+    }
+    pub fn bump_generation() {
+        GENERATION.with(|g| g.set(g.get() + 1));
+    }
+    pub fn noticed() -> bool {
+        NOTICED.with(|n| n.get())
+    }
+    pub fn set_noticed() {
+        NOTICED.with(|n| n.set(true));
+    }
+}
+use account_state::{account_now, bump_generation, generation, noticed, set_account_now, set_noticed};
 
 // ---- game.opt's home shard (`VIGameOptions::m_homeShard`) ---------------------------
 
@@ -580,6 +773,66 @@ impl Focus {
     }
 }
 
+/// The Profanity Filter's tier (Options > Interface; the GM Jibrish's
+/// petition 1625): the server's filter of what the player hears.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Profanity {
+    /// Nothing masked.
+    Off,
+    /// Only racial slurs masked, no swears ("retarded" not either).
+    Medium,
+    /// Every profane word and slur masked: the game's at every login, and
+    /// what On was before the tiers.
+    #[default]
+    High,
+}
+
+impl Profanity {
+    /// The row's order, which left and right step through (and round).
+    pub const ALL: [Profanity; 3] = [Profanity::Off, Profanity::Medium, Profanity::High];
+
+    /// As `client.opt` spells it; "on" (before the tiers) reads as High.
+    pub fn key(self) -> &'static str {
+        match self {
+            Profanity::Off => "off",
+            Profanity::Medium => "medium",
+            Profanity::High => "high",
+        }
+    }
+
+    pub fn from_key(s: &str) -> Option<Profanity> {
+        if s == "on" {
+            return Some(Profanity::High);
+        }
+        Profanity::ALL.into_iter().find(|p| p.key() == s)
+    }
+
+    /// The row's value, the client's words.
+    pub fn label(self) -> &'static str {
+        match self {
+            Profanity::Off => "Off",
+            Profanity::Medium => "Medium",
+            Profanity::High => "High",
+        }
+    }
+
+    /// As go-eqoa-server's 0x7E60 takes it (`net::session::PROFANITY_*`).
+    pub fn wire(self) -> u8 {
+        match self {
+            Profanity::Off => net::session::PROFANITY_OFF,
+            Profanity::Medium => net::session::PROFANITY_MEDIUM,
+            Profanity::High => net::session::PROFANITY_HIGH,
+        }
+    }
+
+    /// The next tier along the row, `d` < 0 back, rounding at the ends.
+    pub fn step(self, d: i32) -> Profanity {
+        let n = Profanity::ALL.len();
+        let at = Profanity::ALL.iter().position(|&p| p == self).unwrap_or(n - 1);
+        Profanity::ALL[(at + if d < 0 { n - 1 } else { 1 }) % n]
+    }
+}
+
 /// The most bytes of an output device's name Output Device keeps.
 pub const DEVICE_NAME_MAX: usize = 200;
 
@@ -643,6 +896,12 @@ pub struct ClientOptions {
     pub screen_shake: bool,
     /// Controller Focus, each window's by its place (`focus`)
     pub controller: [Focus; crate::multibox::PLACES],
+    /// Slow When Not Focused (the GM Jibrish's petition 1634), each window's
+    /// by its place as Controller Focus is: on, a window the system reports
+    /// covered or minimised takes its frames at the game's 30 a second
+    /// (`viewer`'s `HIDDEN_GAP`); off, the default, at its Frame Rate as in
+    /// front, so a box in the back keeps its pace
+    pub slow_unfocused: [bool; crate::multibox::PLACES],
     /// Capture Controller, one setting for every window: a Pad that several
     /// windows open share is read only by the one in front (`input::captured`)
     pub capture: bool,
@@ -684,12 +943,52 @@ pub struct ClientOptions {
     /// under its bar, where the server sends them (`Session::agree_pet_effects`);
     /// off, none, as the game shows them nowhere. On by default.
     pub pet_effects: bool,
+    /// Buff Window (`buffwnd`; the GM Jibrish's petition 1761): on a server that
+    /// offers it (`Session::agree_buffs`), the player's effects in two rows and
+    /// its pet's in a third, each with its name and time left and a beneficial
+    /// one taken off by a click or the pad; off, or on any other server, the
+    /// game's strip (`influence`). On by default.
+    pub buff_window: bool,
+    /// Quest Markers over the heads (Extended > UI > Name Plates; the GM
+    /// Jibrish's petition 1813): on a server that sends them
+    /// (`Session::agree_head_marks`), a yellow "!" over an NPC with a quest
+    /// the player may take now and a "?" over one where a quest can be moved
+    /// on now, above its name; off, or on any other server, none. On by
+    /// default. (The map's quest marks are `quest_markers`, the Quest
+    /// Helper's.)
+    pub head_marks: bool,
+    /// Target Level (Extended > UI > Name Plates; Live petition 5130, the owner
+    /// 2026-11-15: "yes lets allow"): on a server that offers it
+    /// (`Session::con_level_offer`, go-eqoa-server's 0x7E70), the target's
+    /// level after "Target" over its name in the target box; off, or on any
+    /// other server, the box the game's. On by default.
+    pub target_level: bool,
+    /// Power Bars (Extended > UI > HUD; the server owner's of 2026-11-12, "lets
+    /// add power bars to group/raid display"): a thin blue bar of each member's
+    /// power under its health in the group's bars (a server's others' power,
+    /// `Session::agree_power_bars`: go-eqoa-server's 0x7E01/0x7E02, players and
+    /// mercs, and the pet's under its bar) and in the raid list's rows (0x7E1A's
+    /// power, which the roster has always carried). Off, or on a server that
+    /// sends none, the game's bars. On by default.
+    pub power_bars: bool,
+    /// Raid Mercenaries (Extended > UI > Group & Raid; the owner, 2026-11-13:
+    /// "lets hide mercs from raid group display"): false, Hidden (the
+    /// default), the raid list draws its players' rows alone; true, Shown, the
+    /// raid's mercs' rows too, each with its coin (`raidlist::row_role`), as
+    /// go-eqoa-server's roster sends them (0x7E1A's kind byte). Either way a
+    /// merc is targeted in the world and by L1's group cycle.
+    pub raid_mercs: bool,
+    /// Loading Tips (`tips`; the GM Jibrish's petition 1778): a tip
+    /// line on every loading screen. On by default.
+    pub loading_tips: bool,
     /// Number Colors (`numcolor`; the server owner's of 2026-11-09: "we can add
     /// the number colors to extended menu"): each row's colour for the floating
     /// numbers of the player's own figures and its pet's, by what made them, on a
     /// server that says so (go-eqoa-server's tags), in `numcolor::ROWS`' order:
     /// 0 Default (the game's own colour), else `numcolor::PALETTE[n - 1]`. Every
-    /// row Default by default, so nothing changes until one is chosen.
+    /// row Default by default but the merc's two (Merc Colors, petition 1613:
+    /// `numcolor::DEFAULTS`), so only a merc's numbers change until one is
+    /// chosen.
     pub number_colors: [crate::numcolor::Choice; crate::numcolor::ROWS],
     /// DPS Meter (`dpsmeter`; the server owner's of 2026-11-10: "lets add dps
     /// meters, will work solo, group, raid"): the HUD's damage meter of the
@@ -707,12 +1006,69 @@ pub struct ClientOptions {
     /// that offers them (`Session::agree_item_links`); off, none, and the server
     /// sends the plain names a PS2 is sent. On by default.
     pub item_links: bool,
+    /// Auto-Cast (`autocast`; the server owner's of 2026-11-11: "lets add
+    /// auto-cast to abilities to fire off cooldown/timer/buff gone/pet's die
+    /// similar to the mercs"): the quick bars' slots marked auto used by the
+    /// client itself; off, none is, whatever is marked. On by default: no slot
+    /// is auto until the player marks one.
+    pub auto_cast: bool,
+    /// Auto Target (`autocast`, the same day's "also auto targeting"): with no
+    /// target or a dead one, the nearest creature fighting the player (else
+    /// its pet or group) targeted. Off by default.
+    pub auto_target: bool,
+    /// Chat Always Shown (Jibwiz's ticket 1914: "allows your chat box to stay
+    /// fully visible without auto collapse"): the chat box open at its five
+    /// rows with the last lines in it, never sliding away (`chat::WndChat::
+    /// always`). Off by default, the game's box.
+    pub chat_always: bool,
+    /// Stacked Spell Bars (Jibwiz's ticket 1913): on a computer, the first two
+    /// ability bars drawn as two rows of five stacked above the chat box at
+    /// 95%, with no name bar, each slot a key of its own on the Controls page
+    /// (`hudmenu::Stacked`, `binds`' bar rows). Off by default, the game's
+    /// carousel; a controller or a touch screen keeps the carousel.
+    pub stacked_bars: bool,
+    /// Spell Bar Opacity (Jibwiz's ticket 1953: "the horizontal spell bars need
+    /// opacity as a setting for the non spell icon portion of the bar"): the
+    /// stacked bars' cell frames drawn at this percent (0 to 100 in tens), the
+    /// icons always whole (`hudmenu::HudMenus::draw_stacked`). 100 by default,
+    /// the frames as before.
+    pub spell_bar_opacity: u8,
+    /// Chat Tabs (Jibwiz's ticket 1951): which of the chat box's tabs each
+    /// kind of line goes to (`chat::Kind`, by its index): 0 the box's own,
+    /// Main; 1 to 3 a tab of its own, which exists while a kind goes to it and
+    /// whose lines Main no longer shows. Every kind Main's by default: no tabs.
+    pub chat_tabs: [u8; crate::chat::KINDS],
+    /// The tabs' names (`/tabname`), eight characters at most, NUL past the
+    /// end; none, the tab is called after the first kind that goes to it.
+    pub chat_tab_names: [[char; crate::chat::TAB_NAME_MOST]; crate::chat::TABS],
+    /// Pets Pass Through (Thorinoak's ticket 1977, "can we make pets auto
+    /// ignored, the clipping on them is terrible"): a pet's or a merc's
+    /// (a player's side's: the plate colour 3) capsule collides with no one, as
+    /// an ignored player's (`Play::place_actors`). On by default; off, the
+    /// game's: every creature is solid.
+    pub pets_pass: bool,
+    /// Same Shortcuts on Every Character (Piedpiper's ticket 1987): the
+    /// quick-chat menus (L2's, `quickchat`) kept for the account, every
+    /// character of it given them at its world entry, an edit on any kept
+    /// for all (`Play::sync_shortcuts`); turned on, the character in the
+    /// world gives the account its menus once. Off by default, the game's:
+    /// each character its own, as the server keeps them.
+    pub shared_shortcuts: bool,
+    /// Auto Save Options (Waldorf's ticket 2002: "A toggle that autosaves
+    /// changes to your options instead of having to go back to the 'Save
+    /// Changes'"): every step back in the Options window keeps what was
+    /// changed as Save Changes keeps it, and Triangle on its menu saves
+    /// instead of putting the settings back (`options::WndOptions::keep`).
+    /// Off by default, the game's: only Save Changes keeps them.
+    pub auto_save: bool,
     /// Profanity Filter (the GM Jibrish's petition 1490: "Under options then
     /// interface add an option to turn the profanity filter on or off"): the
     /// server's filter of what this player hears, told to a server that asks
     /// for it (`Session::agree_profanity_filter`, go-eqoa-server's 0x7E60);
-    /// on by default, as the game has it at every login. Options > Interface.
-    pub profanity_filter: bool,
+    /// High by default, as the game has it at every login. Options >
+    /// Interface. Three tiers since the GM Jibrish's petition 1625: Off,
+    /// Medium (only racial slurs) and High (every word, the old On).
+    pub profanity_filter: Profanity,
     /// Map (the user, 2026-11-09: "also add the map and quest helper we had
     /// in a former update"; on by default): the client's own map (M, the
     /// compass's click, `map`), the minimap, the waypoints on the compass and
@@ -725,6 +1081,18 @@ pub struct ClientOptions {
     /// Minimap (on by default): the map's pictures round the player under
     /// the quick menus' name plate (`map::mini`); off, none.
     pub minimap: bool,
+    /// Minimap Scroll Frame (the owner, 2026-11-13: "make the minimap have
+    /// the borders like the spell bar the scroll, with the rollers on top and
+    /// bottom"; on by default): the minimap framed as the quick menu's
+    /// scroll, its parchment round the pictures and a roller across its top
+    /// and its bottom (`map::mini::draw_scroll`); off, the window's frame it
+    /// had before.
+    pub minimap_scroll: bool,
+    /// Map Pointer (petition 1848; the owner: "add as a toggle"): what the
+    /// player's dart on the minimap and the map turns with, Facing (the way
+    /// the character faces, as it always was; the default) or Camera (the
+    /// way the camera looks, as the compass turns): `map::Pointer`.
+    pub map_pointer: crate::map::Pointer,
     /// Map Markers: on, the map (M) marks EQOA-Data's XP camps and every
     /// coach (`map::markers`), each with a card of what it is under the
     /// pointer (the user, F3 pass 18: "mark popular xp camps on map with an XP
@@ -887,6 +1255,15 @@ pub struct ClientOptions {
     /// pad keeps, percent of the window's shorter side, 0 to
     /// `TOUCH_EDGE_MAX` (`touch::layout`).
     pub touch_edge: u8,
+    /// Move Touch Pad's moves (`touch::Opts::moves`): the pad's left side,
+    /// right side and middle, each across and down, thousandths of the
+    /// window's shorter side, `TOUCH_MOVE_MOST` at most either way (the
+    /// server owner's of 2026-11-14: "the apk client cant resize or move touch
+    /// pad display"). Kept the moment a drag or a pinch ends.
+    pub touch_moves: [[i16; 2]; 3],
+    /// Button Layout: Bottom (Select and Start low between the sticks,
+    /// `touch::Opts::low_start`; the GM Jibcrotwo's petition 2084), or Classic.
+    pub touch_low_start: bool,
     /// Texture Packs, natively (the user, 2026-11-08: PCSX2's replacement
     /// packs read as they are, "an Extended page row turns packs on and
     /// off"): on, a texture a pack in `textures/SLUS-20744/replacements`
@@ -918,6 +1295,8 @@ pub const TOUCH_OPACITY_STEP: u8 = 10;
 /// Touch Edge's most (percent of the window's shorter side) and its step.
 pub const TOUCH_EDGE_MAX: u8 = (crate::touch::EDGE_MOST * 100.0 + 0.5) as u8;
 pub const TOUCH_EDGE_STEP: u8 = 1;
+/// Move Touch Pad's farthest move, in thousandths (`touch::MOVE_MOST`).
+pub const TOUCH_MOVE_MOST: i16 = (crate::touch::MOVE_MOST * 1000.0) as i16;
 
 /// Shadow Distance's ends and step (`ClientOptions::shadow_distance`).
 pub const SHADOW_DISTANCE_GAME: u16 = 250;
@@ -940,7 +1319,34 @@ impl ClientOptions {
     /// Its touch rows as the pad takes them (`touch::Opts`).
     pub fn touch_opts(&self) -> crate::touch::Opts {
         let share = |v: u8| v as f32 / 100.0;
-        crate::touch::Opts { stick: share(self.touch_stick), buttons: share(self.touch_buttons), opacity: share(self.touch_opacity), edge: share(self.touch_edge) }
+        let moves = self.touch_moves.map(|m| m.map(|v| v as f32 / 1000.0));
+        crate::touch::Opts { stick: share(self.touch_stick), buttons: share(self.touch_buttons), opacity: share(self.touch_opacity), edge: share(self.touch_edge), moves, low_start: self.touch_low_start }
+    }
+
+    /// The touch rows as `o` has them (Move Touch Pad's edit): the sizes to
+    /// their rows' steps and range, the moves to thousandths; the opacity and
+    /// the Button Layout as they were (an edit changes neither), and the edge
+    /// as `o`'s.
+    pub fn with_touch_opts(self, o: &crate::touch::Opts) -> ClientOptions {
+        let size = |v: f32| ((v * 100.0 / TOUCH_SIZE_STEP as f32).round() * TOUCH_SIZE_STEP as f32).clamp(TOUCH_SIZE_MIN as f32, TOUCH_SIZE_MAX as f32) as u8;
+        let edge = (o.edge * 100.0).round().clamp(0.0, TOUCH_EDGE_MAX as f32) as u8;
+        let moves = o.moves.map(|m| m.map(|v| if v.is_nan() { 0 } else { (v * 1000.0).round().clamp(-TOUCH_MOVE_MOST as f32, TOUCH_MOVE_MOST as f32) as i16 }));
+        ClientOptions { touch_stick: size(o.stick), touch_buttons: size(o.buttons), touch_edge: edge, touch_moves: moves, ..self }
+    }
+}
+
+/// Keeps the touch pad as Move Touch Pad's edit left it (`TouchPad::take_edited`):
+/// this window's settings changed so and written at once, as Move HUD keeps
+/// a drag (outside the menu, so nothing else of it is pending). Whether it
+/// was kept.
+pub fn keep_touch_options(o: &crate::touch::Opts) -> bool {
+    set_client(client().with_touch_opts(o));
+    match save_client() {
+        Ok(()) => true,
+        Err(e) => {
+            crate::say(&format!("the touch pad's place was not kept: {e}"));
+            false
+        }
     }
 }
 
@@ -990,6 +1396,7 @@ impl Default for ClientOptions {
             camera_turn: TURN_GAME,
             screen_shake: true,
             controller: [Focus::Auto; crate::multibox::PLACES],
+            slow_unfocused: [false; crate::multibox::PLACES],
             capture: false,
             background_sound: true,
             ability_bars: ABILITY_BARS_GAME,
@@ -999,13 +1406,31 @@ impl Default for ClientOptions {
             overlapping_names: false,
             raid_list: true,
             pet_effects: true,
-            number_colors: [0; crate::numcolor::ROWS],
+            buff_window: true,
+            head_marks: true,
+            target_level: true,
+            power_bars: true,
+            raid_mercs: false,
+            loading_tips: true,
+            number_colors: crate::numcolor::DEFAULTS,
             dps_meter: false,
             dps_view: crate::dpsmeter::View::Fight,
             item_links: true,
-            profanity_filter: true,
+            auto_cast: true,
+            auto_target: false,
+            chat_always: false,
+            stacked_bars: false,
+            spell_bar_opacity: 100,
+            chat_tabs: [0; crate::chat::KINDS],
+            chat_tab_names: [['\0'; crate::chat::TAB_NAME_MOST]; crate::chat::TABS],
+            pets_pass: true,
+            shared_shortcuts: false,
+            auto_save: false,
+            profanity_filter: Profanity::High,
             map: true,
             minimap: true,
+            minimap_scroll: true,
+            map_pointer: crate::map::Pointer::Facing,
             map_markers: true,
             map_towns: true,
             quest_helper: true,
@@ -1035,6 +1460,8 @@ impl Default for ClientOptions {
             touch_buttons: TOUCH_SIZE_WAS,
             touch_opacity: TOUCH_OPACITY_WAS,
             touch_edge: 0,
+            touch_moves: [[0; 2]; 3],
+            touch_low_start: false,
             texture_packs: false,
             dump_textures: false,
         }
@@ -1045,7 +1472,8 @@ impl ClientOptions {
     /// `client.opt`: a line a setting, `name=value`; Camera Turn Speed and
     /// Fog only when they are not the game's, Screen Shake only when off, a
     /// window's Controller Focus as `controller.<window>` (from 1) only when
-    /// it is not Auto, Capture Controller only when on, Sound in Background
+    /// it is not Auto, a window's Slow When Not Focused as
+    /// `slow_unfocused.<window>=on` only when on, Capture Controller only when on, Sound in Background
     /// only when off, Ability Bars, NPC/PC Display, NPC/PC Distance and
     /// Name Distance only when not the game's, Overlapping Names only when
     /// Show, each Number Colors row only when not Default
@@ -1076,6 +1504,9 @@ impl ClientOptions {
         for (k, f) in self.controller.iter().enumerate().filter(|(_, f)| **f != Focus::Auto) {
             s.push_str(&format!("controller.{}={}\n", k + 1, f.key()));
         }
+        for (k, _) in self.slow_unfocused.iter().enumerate().filter(|(_, on)| **on) {
+            s.push_str(&format!("slow_unfocused.{}=on\n", k + 1));
+        }
         if self.capture {
             s.push_str("capture_controller=on\n");
         }
@@ -1103,10 +1534,31 @@ impl ClientOptions {
         if !self.pet_effects {
             s.push_str("pet_effects=off\n");
         }
-        // Number Colors only where a row is not Default
-        for (key, &c) in crate::numcolor::KEYS.iter().zip(&self.number_colors) {
-            if let Some(p) = crate::numcolor::paint(c) {
-                s.push_str(&format!("number_color.{key}={}\n", p.key));
+        if !self.buff_window {
+            s.push_str("buff_window=off\n");
+        }
+        if !self.head_marks {
+            s.push_str("head_marks=off\n");
+        }
+        if !self.target_level {
+            s.push_str("target_level=off\n");
+        }
+        if !self.power_bars {
+            s.push_str("power_bars=off\n");
+        }
+        // Raid Mercenaries only when Shown
+        if self.raid_mercs {
+            s.push_str("raid_mercs=shown\n");
+        }
+        if !self.loading_tips {
+            s.push_str("loading_tips=off\n");
+        }
+        // Number Colors only where a row is not as it came (Default, or a
+        // merc row's colour: `numcolor::DEFAULTS`), a row chosen Default as
+        // `default`
+        for ((key, &c), d) in crate::numcolor::KEYS.iter().zip(&self.number_colors).zip(crate::numcolor::DEFAULTS) {
+            if c != d {
+                s.push_str(&format!("number_color.{key}={}\n", crate::numcolor::paint(c).map_or("default", |p| p.key)));
             }
         }
         // the DPS Meter only when on, what it shows only when Overall
@@ -1117,17 +1569,56 @@ impl ClientOptions {
             s.push_str(&format!("dps_meter_shows={}\n", self.dps_view.key()));
         }
         // Item Links only when off
+        // Auto-Cast only when off, Auto Target only when on
+        if !self.auto_cast {
+            s.push_str("auto_cast=off\n");
+        }
+        if self.auto_target {
+            s.push_str("auto_target=on\n");
+        }
+        // Chat Always Shown and Stacked Spell Bars only when on
+        if self.chat_always {
+            s.push_str("chat_always=on\n");
+        }
+        if self.stacked_bars {
+            s.push_str("stacked_bars=on\n");
+        }
+        if self.spell_bar_opacity != 100 {
+            s.push_str(&format!("spell_bar_opacity={}\n", self.spell_bar_opacity));
+        }
+        for (k, &t) in self.chat_tabs.iter().enumerate() {
+            if t != 0 {
+                s.push_str(&format!("chat_tab.{}={t}\n", crate::chat::Kind::ALL[k].key()));
+            }
+        }
+        for (n, name) in self.chat_tab_names.iter().enumerate() {
+            let name: String = name.iter().take_while(|&&c| c != '\0').collect();
+            if !name.is_empty() {
+                s.push_str(&format!("chat_tab_name.{}={name}\n", n + 1));
+            }
+        }
+        if !self.pets_pass {
+            s.push_str("pets_pass=off\n");
+        }
+        if self.shared_shortcuts {
+            s.push_str("shared_shortcuts=on\n");
+        }
+        // Auto Save Options only when on
+        if self.auto_save {
+            s.push_str("auto_save_options=on\n");
+        }
         if !self.item_links {
             s.push_str("item_links=off\n");
         }
-        // the Profanity Filter only when off
-        if !self.profanity_filter {
-            s.push_str("profanity_filter=off\n");
+        // the Profanity Filter only when not High
+        if self.profanity_filter != Profanity::High {
+            s.push_str(&format!("profanity_filter={}\n", self.profanity_filter.key()));
         }
         // the map's and the quests' only when off
         for (on, key) in [
             (self.map, "map"),
             (self.minimap, "minimap"),
+            (self.minimap_scroll, "minimap_scroll"),
             (self.map_markers, "map_markers"),
             (self.map_towns, "map_towns"),
             (self.quest_helper, "quest_helper"),
@@ -1137,6 +1628,10 @@ impl ClientOptions {
             if !on {
                 s.push_str(&format!("{key}=off\n"));
             }
+        }
+        // Map Pointer only when Camera
+        if self.map_pointer != crate::map::Pointer::Facing {
+            s.push_str(&format!("map_pointer={}\n", self.map_pointer.key()));
         }
         if self.art == esf::Era::Y2002 {
             s.push_str("art=2002\n");
@@ -1222,6 +1717,15 @@ impl ClientOptions {
                 s.push_str(&format!("{key}={v}\n"));
             }
         }
+        // Move Touch Pad's moves only when one is moved, Button Layout only
+        // when Bottom
+        if self.touch_moves != [[0; 2]; 3] {
+            let m: Vec<String> = self.touch_moves.iter().flatten().map(|v| v.to_string()).collect();
+            s.push_str(&format!("touch_moves={}\n", m.join(",")));
+        }
+        if self.touch_low_start {
+            s.push_str("touch_layout=bottom\n");
+        }
         // Texture Packs and Dump Textures only when on
         if self.texture_packs {
             s.push_str("texture_packs=on\n");
@@ -1284,18 +1788,70 @@ impl ClientOptions {
                 ("raid_list", "off") => c.raid_list = false,
                 ("pet_effects", "on") => c.pet_effects = true,
                 ("pet_effects", "off") => c.pet_effects = false,
+                ("buff_window", "on") => c.buff_window = true,
+                ("buff_window", "off") => c.buff_window = false,
+                ("head_marks", "on") => c.head_marks = true,
+                ("head_marks", "off") => c.head_marks = false,
+                ("target_level", "on") => c.target_level = true,
+                ("target_level", "off") => c.target_level = false,
+                ("power_bars", "on") => c.power_bars = true,
+                ("power_bars", "off") => c.power_bars = false,
+                ("raid_mercs", "shown") => c.raid_mercs = true,
+                ("raid_mercs", "hidden") => c.raid_mercs = false,
+                ("loading_tips", "on") => c.loading_tips = true,
+                ("loading_tips", "off") => c.loading_tips = false,
                 ("dps_meter", "on") => c.dps_meter = true,
                 ("dps_meter", "off") => c.dps_meter = false,
                 ("dps_meter_shows", "fight") => c.dps_view = crate::dpsmeter::View::Fight,
                 ("dps_meter_shows", "overall") => c.dps_view = crate::dpsmeter::View::Overall,
                 ("item_links", "on") => c.item_links = true,
                 ("item_links", "off") => c.item_links = false,
-                ("profanity_filter", "on") => c.profanity_filter = true,
-                ("profanity_filter", "off") => c.profanity_filter = false,
+                ("auto_cast", "on") => c.auto_cast = true,
+                ("auto_cast", "off") => c.auto_cast = false,
+                ("auto_target", "on") => c.auto_target = true,
+                ("auto_target", "off") => c.auto_target = false,
+                ("chat_always", "on") => c.chat_always = true,
+                ("chat_always", "off") => c.chat_always = false,
+                ("stacked_bars", "on") => c.stacked_bars = true,
+                ("stacked_bars", "off") => c.stacked_bars = false,
+                ("spell_bar_opacity", v) => {
+                    if let Some(o) = v.parse::<u8>().ok().filter(|o| *o <= 100 && o % 10 == 0) {
+                        c.spell_bar_opacity = o;
+                    }
+                }
+                ("pets_pass", "on") => c.pets_pass = true,
+                ("pets_pass", "off") => c.pets_pass = false,
+                ("shared_shortcuts", "on") => c.shared_shortcuts = true,
+                ("shared_shortcuts", "off") => c.shared_shortcuts = false,
+                ("auto_save_options", "on") => c.auto_save = true,
+                ("auto_save_options", "off") => c.auto_save = false,
+                (k, v) if k.starts_with("chat_tab.") => {
+                    let kind = crate::chat::Kind::ALL.iter().position(|x| Some(x.key()) == k.strip_prefix("chat_tab."));
+                    if let (Some(kind), Some(t)) = (kind, v.parse::<u8>().ok().filter(|t| (1..=crate::chat::TABS as u8).contains(t))) {
+                        c.chat_tabs[kind] = t;
+                    }
+                }
+                (k, v) if k.starts_with("chat_tab_name.") => {
+                    if let Some(n) = k.strip_prefix("chat_tab_name.").and_then(|n| n.parse::<usize>().ok()).filter(|n| (1..=crate::chat::TABS).contains(n)) {
+                        c.chat_tab_names[n - 1] = crate::chat::tab_name(v);
+                    }
+                }
+                ("profanity_filter", v) => {
+                    if let Some(p) = Profanity::from_key(v) {
+                        c.profanity_filter = p;
+                    }
+                }
                 ("map", "on") => c.map = true,
                 ("map", "off") => c.map = false,
                 ("minimap", "on") => c.minimap = true,
                 ("minimap", "off") => c.minimap = false,
+                ("minimap_scroll", "on") => c.minimap_scroll = true,
+                ("minimap_scroll", "off") => c.minimap_scroll = false,
+                ("map_pointer", v) => {
+                    if let Some(p) = crate::map::Pointer::from_key(v) {
+                        c.map_pointer = p;
+                    }
+                }
                 ("map_markers", "on") => c.map_markers = true,
                 ("map_markers", "off") => c.map_markers = false,
                 ("map_towns", "on") => c.map_towns = true,
@@ -1382,6 +1938,14 @@ impl ClientOptions {
                         c.touch_edge = t;
                     }
                 }
+                ("touch_moves", v) => {
+                    let m: Vec<i16> = v.split(',').filter_map(|n| n.trim().parse::<i16>().ok().filter(|n| n.abs() <= TOUCH_MOVE_MOST)).collect();
+                    if m.len() == 6 && v.split(',').count() == 6 {
+                        c.touch_moves = [[m[0], m[1]], [m[2], m[3]], [m[4], m[5]]];
+                    }
+                }
+                ("touch_layout", "bottom") => c.touch_low_start = true,
+                ("touch_layout", "classic") => c.touch_low_start = false,
                 (k, v) if k.starts_with("number_color.") => {
                     let row = crate::numcolor::KEYS.iter().position(|&r| r == &k["number_color.".len()..]);
                     if let (Some(row), Some(choice)) = (row, crate::numcolor::from_key(v)) {
@@ -1392,6 +1956,12 @@ impl ClientOptions {
                     let window = k["controller.".len()..].parse::<usize>().ok().filter(|w| (1..=crate::multibox::PLACES).contains(w));
                     if let (Some(w), Some(f)) = (window, Focus::from_key(v)) {
                         c.controller[w - 1] = f;
+                    }
+                }
+                (k, v) if k.starts_with("slow_unfocused.") => {
+                    let window = k["slow_unfocused.".len()..].parse::<usize>().ok().filter(|w| (1..=crate::multibox::PLACES).contains(w));
+                    if let (Some(w), "on" | "off") = (window, v) {
+                        c.slow_unfocused[w - 1] = v == "on";
                     }
                 }
                 (k, v) => fork_settings::parse(&mut c, k, v),
@@ -1408,7 +1978,7 @@ impl ClientOptions {
     /// the lines the windows share (Controller Focus, Capture Controller,
     /// Sound in Background, Update Notices) left to client.opt.
     fn rows_text(self) -> String {
-        ClientOptions { controller: [Focus::Auto; crate::multibox::PLACES], capture: false, background_sound: true, update_notices: true, ..self }.to_text()
+        ClientOptions { controller: [Focus::Auto; crate::multibox::PLACES], slow_unfocused: [false; crate::multibox::PLACES], capture: false, background_sound: true, update_notices: true, ..self }.to_text()
     }
 }
 
@@ -1424,8 +1994,8 @@ fn read_shared() -> ClientOptions {
 fn read_client() -> ClientOptions {
     let shared = read_shared();
     let me = place();
-    match store::read(&own_file("client", me)).filter(|_| me > 0) {
-        Some(b) => ClientOptions { controller: shared.controller, capture: shared.capture, background_sound: shared.background_sound, update_notices: shared.update_notices, ..ClientOptions::from_text(&String::from_utf8_lossy(&b)) },
+    match account_read("client").or_else(|| store::read(&own_file("client", me)).filter(|_| me > 0)) {
+        Some(b) => ClientOptions { controller: shared.controller, slow_unfocused: shared.slow_unfocused, capture: shared.capture, background_sound: shared.background_sound, update_notices: shared.update_notices, ..ClientOptions::from_text(&String::from_utf8_lossy(&b)) },
         None => shared,
     }
 }
@@ -1441,17 +2011,18 @@ fn save_client() -> Result<(), String> {
     let mine = client();
     let mut shared = read_shared();
     shared.controller[me] = mine.controller[me];
+    shared.slow_unfocused[me] = mine.slow_unfocused[me];
     shared.capture = mine.capture;
     shared.background_sound = mine.background_sound;
     shared.update_notices = mine.update_notices;
     if me == 0 {
-        store::write(CLIENT_FILE, ClientOptions { controller: shared.controller, ..mine }.to_text().as_bytes())?;
+        store::write(CLIENT_FILE, ClientOptions { controller: shared.controller, slow_unfocused: shared.slow_unfocused, ..mine }.to_text().as_bytes())?;
     } else {
         store::write(&own_file("client", me), mine.rows_text().as_bytes())?;
         store::write(CLIENT_FILE, shared.to_text().as_bytes())?;
     }
     FILE_SHARED.with(|f| f.set(Some((shared.capture, shared.background_sound, shared.update_notices))));
-    Ok(())
+    account_write("client", mine.rows_text().as_bytes())
 }
 
 thread_local! {
@@ -1474,7 +2045,7 @@ thread_local! {
 /// The client's settings now: what this window kept (`read_client`), as the
 /// page changed them since.
 pub fn client() -> ClientOptions {
-    let me = place();
+    let me = cache_key();
     CLIENT.with(|c| match c.get() {
         Some((p, v)) if p == me => v,
         _ => {
@@ -1489,7 +2060,7 @@ pub fn client() -> ClientOptions {
 /// Changes them (the Extended page, as its rows move); kept only by Save
 /// Changes (`save`).
 pub fn set_client(v: ClientOptions) {
-    let me = place();
+    let me = cache_key();
     CLIENT.with(|c| c.set(Some((me, v))));
 }
 
@@ -1583,6 +2154,40 @@ pub fn pet_effects() -> bool {
     client().pet_effects
 }
 
+/// Buff Window: the client's own effects window (`buffwnd`).
+pub fn buff_window() -> bool {
+    client().buff_window
+}
+
+/// Quest Markers over the heads: the "!" and "?" over quest NPCs' names
+/// (`Play::plates`).
+pub fn head_marks() -> bool {
+    client().head_marks
+}
+
+/// Target Level: the target's level in the target box where the server
+/// offers it (`hud::draw_target`).
+pub fn target_level() -> bool {
+    client().target_level
+}
+
+/// Power Bars: others' power under their health in the group's bars, the
+/// pet's bar and the raid list (`hud`, `raidlist`).
+pub fn power_bars() -> bool {
+    client().power_bars
+}
+
+/// Raid Mercenaries: the raid list draws the raid's mercs' rows (Shown) or
+/// its players' alone (Hidden, the default).
+pub fn raid_mercs() -> bool {
+    client().raid_mercs
+}
+
+/// Loading Tips: a tip on every loading screen (`tips`).
+pub fn loading_tips() -> bool {
+    client().loading_tips
+}
+
 /// Number Colors now: each row's choice (`numcolor`).
 pub fn number_colors() -> [crate::numcolor::Choice; crate::numcolor::ROWS] {
     client().number_colors
@@ -1598,9 +2203,57 @@ pub fn item_links() -> bool {
     client().item_links
 }
 
+/// Auto-Cast (`autocast`).
+pub fn auto_cast() -> bool {
+    client().auto_cast
+}
+
+/// Auto Target (`autocast`).
+pub fn auto_target() -> bool {
+    client().auto_target
+}
+
+/// Chat Always Shown (Extended > UI > Chat; ticket 1914).
+pub fn chat_always() -> bool {
+    client().chat_always
+}
+
+/// Auto Save Options (Extended > Other > General; ticket 2002).
+pub fn auto_save() -> bool {
+    client().auto_save
+}
+
+/// The account's quick-chat menus as `quickchat::shared_text` keeps them (Same
+/// Shortcuts on Every Character, ticket 1987): None with no account known or
+/// none kept.
+pub fn account_shortcuts() -> Option<Vec<u8>> {
+    account_read("shortcuts")
+}
+
+/// Keeps the account's quick-chat menus (nothing with no account known).
+pub fn set_account_shortcuts(b: &[u8]) -> Result<(), String> {
+    account_write("shortcuts", b)
+}
+
+/// Whether an account is known, whose files `account_shortcuts` reads.
+pub fn account_known() -> bool {
+    account_key().is_some()
+}
+
+/// Stacked Spell Bars (Extended > UI > HUD; ticket 1913).
+pub fn stacked_bars() -> bool {
+    client().stacked_bars
+}
+
 /// Profanity Filter (Options > Interface).
-pub fn profanity_filter() -> bool {
+pub fn profanity_filter() -> Profanity {
     client().profanity_filter
+}
+
+/// Map Pointer: what the player's dart on the minimap and the map turns
+/// with (`map::Pointer`).
+pub fn map_pointer() -> crate::map::Pointer {
+    client().map_pointer
 }
 
 /// What the DPS Meter shows (`dpsmeter::View`).
@@ -1652,6 +2305,17 @@ pub fn set_art(art: esf::Era) -> Result<(), String> {
     save_client()
 }
 
+/// Chat tab `n`'s name (1 to 3; `/tabname`), kept at once as F9's Art is (a
+/// typed command, no page's row that Save Changes keeps).
+pub fn set_chat_tab_name(n: usize, name: &str) -> Result<(), String> {
+    let mut c = client();
+    if let Some(slot) = n.checked_sub(1).and_then(|i| c.chat_tab_names.get_mut(i)) {
+        *slot = crate::chat::tab_name(name);
+    }
+    set_client(c);
+    save_client()
+}
+
 /// Whether shouts are heard: Restore Shouts, or Ignore Shouts kept
 /// (`ClientOptions::shouts`).
 pub fn shouts() -> bool {
@@ -1679,6 +2343,12 @@ pub fn map() -> bool {
 pub fn minimap() -> bool {
     let c = client();
     c.map && c.minimap
+}
+
+/// Whether the minimap is framed as the quick menu's scroll (Minimap Scroll
+/// Frame), else the window's frame.
+pub fn minimap_scroll() -> bool {
+    client().minimap_scroll
 }
 
 /// Whether the map marks the XP camps and the coaches (Map Markers).
@@ -1755,6 +2425,28 @@ pub fn update_notices() -> bool {
 /// Screens: Longer), or it comes down at once (Instant).
 pub fn loading_longer() -> bool {
     client().loading_longer
+}
+
+/// This window's Slow When Not Focused (petition 1634): its place's, off
+/// unless chosen.
+pub fn slow_unfocused() -> bool {
+    client().slow_unfocused[place()]
+}
+
+/// Changes it (the Extended page); kept only by Save Changes, beside the
+/// other windows' own.
+pub fn set_slow_unfocused(on: bool) {
+    let mut c = client();
+    c.slow_unfocused[place()] = on;
+    set_client(c);
+}
+
+/// The gap a covered or minimised window's frames keep with Slow When Not
+/// Focused off: its Frame Rate's, else the display's refresh, so a window
+/// with nothing to draw on never spins.
+pub fn awake_gap() -> std::time::Duration {
+    let g = frame_gap();
+    std::time::Duration::from_secs_f64(if g > 0.0 { g } else { DISPLAY_GAP.with(|d| d.get()) } / 1000.0)
 }
 
 /// This window's Controller Focus: its place's (`multibox::place`).
@@ -1896,6 +2588,9 @@ mod store {
         pub static FILES: RefCell<HashMap<String, Vec<u8>>> = RefCell::new(HashMap::new());
         /// a store that refuses (a private window)
         pub static REFUSE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// each write's turn, for `modified`
+        pub static CLOCK: std::cell::Cell<u128> = const { std::cell::Cell::new(0) };
+        pub static STAMPS: RefCell<HashMap<String, u128>> = RefCell::new(HashMap::new());
     }
     pub static USER_DIR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -1920,7 +2615,17 @@ mod store {
             return Err("refused".into());
         }
         FILES.with(|f| f.borrow_mut().insert(name.to_string(), b.to_vec()));
+        let t = CLOCK.with(|c| {
+            c.set(c.get() + 1);
+            c.get()
+        });
+        STAMPS.with(|s| s.borrow_mut().insert(name.to_string(), t));
         Ok(())
+    }
+
+    /// When `name` was last written (the writes' order).
+    pub fn modified(name: &str) -> Option<u128> {
+        STAMPS.with(|s| s.borrow().get(name).copied())
     }
 
     pub fn available() -> bool {
@@ -1977,6 +2682,12 @@ mod store {
         };
         go().map_err(|e| format!("{}: {e}", d.join(name).display()))
     }
+
+    /// When `name` was last written (ns since 1970).
+    pub fn modified(name: &str) -> Option<u128> {
+        let t = std::fs::metadata(dir()?.join(name)).ok()?.modified().ok()?;
+        Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos())
+    }
 }
 
 /// In a page: the origin's localStorage, every access allowed to fail.
@@ -2002,6 +2713,11 @@ mod store {
         let hex: String = b.iter().map(|v| format!("{v:02x}")).collect();
         s.set_item(&format!("eqoa.{name}"), &hex).map_err(|e| format!("{e:?}"))
     }
+
+    /// localStorage keeps no times: `migrate` takes this window's set.
+    pub fn modified(_name: &str) -> Option<u128> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -2011,6 +2727,11 @@ pub mod testing {
         super::store::FILES.with(|f| f.borrow_mut().clear());
         super::store::REFUSE.with(|r| r.set(refuse));
         super::CLIENT.with(|c| c.set(None));
+        super::account_state::ACCOUNT.with(|a| *a.borrow_mut() = None);
+        super::account_state::GENERATION.with(|g| g.set(0));
+        super::account_state::NOTICED.with(|n| n.set(false));
+        super::store::CLOCK.with(|c| c.set(0));
+        super::store::STAMPS.with(|f| f.borrow_mut().clear());
         super::BINDS.with(|c| *c.borrow_mut() = None);
         super::BINDS_KEPT.with(|c| *c.borrow_mut() = None);
         crate::multibox::testing::set_place(None);
@@ -2024,6 +2745,16 @@ pub mod testing {
     /// Writes `name` in the store as another window's save would.
     pub fn put(name: &str, b: &[u8]) {
         super::store::FILES.with(|f| f.borrow_mut().insert(name.to_string(), b.to_vec()));
+        let t = super::store::CLOCK.with(|c| {
+            c.set(c.get() + 1);
+            c.get()
+        });
+        super::store::STAMPS.with(|s| s.borrow_mut().insert(name.to_string(), t));
+    }
+
+    /// Drops `name` from the store, so a test sees whether it is written again.
+    pub fn forget(name: &str) {
+        super::store::FILES.with(|f| f.borrow_mut().remove(name));
     }
 
     /// What the store holds under `name`.
@@ -2459,7 +3190,7 @@ mod tests {
         let c = ClientOptions { touch_stick: 150, touch_buttons: 55, touch_opacity: 40, touch_edge: 6, ..Default::default() };
         assert_eq!(c.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\ntouch_stick=150\ntouch_buttons=55\ntouch_opacity=40\ntouch_edge=6\n");
         assert!(ClientOptions::from_text(&c.to_text()) == c);
-        assert_eq!(c.touch_opts(), crate::touch::Opts { stick: 1.5, buttons: 0.55, opacity: 0.4, edge: 0.06 });
+        assert_eq!(c.touch_opts(), crate::touch::Opts { stick: 1.5, buttons: 0.55, opacity: 0.4, edge: 0.06, ..Default::default() });
         for (line, want) in [("touch_stick=200", (200, 100, 100, 0)), ("touch_buttons=50", (100, 50, 100, 0)), ("touch_opacity=10", (100, 100, 10, 0)), ("touch_edge=10", (100, 100, 100, 10))] {
             let c = ClientOptions::from_text(line);
             assert_eq!((c.touch_stick, c.touch_buttons, c.touch_opacity, c.touch_edge), want, "{line}");
@@ -2482,6 +3213,31 @@ mod tests {
             let c = ClientOptions::from_text(bad);
             assert_eq!((c.touch_stick, c.touch_buttons), (100, 100), "{bad}: the control, as it was");
         }
+    }
+
+    /// Move Touch Pad's moves and Button Layout (petition 2084): written only
+    /// when moved or Bottom, read back as written; an edit's options come back
+    /// in the rows' steps (a pinch's size to fives, a move to thousandths) with
+    /// the opacity and the layout left. The controls: a line of five numbers,
+    /// one past the farthest move, or a layout not named is nothing.
+    #[test]
+    fn the_touch_pads_moves_and_layout_are_kept() {
+        let d = ClientOptions::default();
+        assert_eq!((d.touch_moves, d.touch_low_start), ([[0; 2]; 3], false));
+        let c = ClientOptions { touch_moves: [[120, -340], [0, 0], [-5, 2999]], touch_low_start: true, ..Default::default() };
+        assert_eq!(c.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\ntouch_moves=120,-340,0,0,-5,2999\ntouch_layout=bottom\n");
+        assert!(ClientOptions::from_text(&c.to_text()) == c);
+        let o = c.touch_opts();
+        assert_eq!((o.moves, o.low_start), ([[0.12, -0.34], [0.0, 0.0], [-0.005, 2.999]], true));
+        let mut e = o;
+        (e.stick, e.buttons, e.moves[1], e.opacity, e.low_start) = (1.234, 0.5, [0.0004, -9.0], 0.3, false);
+        let k = ClientOptions { touch_opacity: 70, ..c }.with_touch_opts(&e);
+        assert_eq!((k.touch_stick, k.touch_buttons, k.touch_moves[1], k.touch_opacity, k.touch_low_start), (125, 50, [0, -3000], 70, true));
+        for bad in ["touch_moves=1,2,3,4,5", "touch_moves=1,2,3,4,5,3001", "touch_moves=1,2,3,4,5,x", "touch_layout=low"] {
+            let c = ClientOptions::from_text(bad);
+            assert_eq!((c.touch_moves, c.touch_low_start), ([[0; 2]; 3], false), "{bad}");
+        }
+        assert!(ClientOptions::from_text("touch_layout=bottom\ntouch_layout=classic").touch_opts() == crate::touch::Opts::default());
     }
 
     /// Flora and Environment, on by default, each kept only when off;
@@ -2587,8 +3343,8 @@ mod tests {
     #[test]
     fn the_map_and_the_quest_helper_kept_only_when_off() {
         let d = ClientOptions::default();
-        assert!(d.map && d.minimap && d.map_markers && d.map_towns && d.quest_helper && d.quest_markers && d.quest_tracker, "on by default");
-        for key in ["map", "minimap", "map_markers", "map_towns", "quest_helper", "quest_markers", "quest_tracker"] {
+        assert!(d.map && d.minimap && d.minimap_scroll && d.map_markers && d.map_towns && d.quest_helper && d.quest_markers && d.quest_tracker, "on by default");
+        for key in ["map", "minimap", "minimap_scroll", "map_markers", "map_towns", "quest_helper", "quest_markers", "quest_tracker"] {
             let off = ClientOptions::from_text(&format!("{key}=off"));
             assert_ne!(off, d, "{key}=off read");
             assert_eq!(off.to_text(), format!("lod=on\nbrightness=5\ncamera_distance=11\n{key}=off\n"), "{key}: only when off");
@@ -2661,6 +3417,61 @@ mod tests {
     /// file), and window 1 reads it back. The control: this window's own
     /// brightness stays as it read it.
     #[test]
+    fn buff_window_and_loading_tips_are_kept_only_when_off() {
+        let d = ClientOptions::default();
+        assert!(d.buff_window && d.loading_tips, "on by default");
+        assert!(!d.to_text().contains("buff_window") && !d.to_text().contains("loading_tips"));
+        let off = ClientOptions { buff_window: false, loading_tips: false, ..Default::default() }.to_text();
+        assert!(off.contains("buff_window=off\n") && off.contains("loading_tips=off\n"));
+        let back = ClientOptions::from_text(&off);
+        assert!(!back.buff_window && !back.loading_tips);
+        assert!(ClientOptions::from_text("buff_window=maybe").buff_window, "the default");
+    }
+
+    #[test]
+    fn raid_mercs_are_kept_only_when_shown() {
+        assert!(!ClientOptions::default().raid_mercs, "Hidden by default");
+        assert!(!ClientOptions::default().to_text().contains("raid_mercs"), "the default writes nothing");
+        let t = ClientOptions { raid_mercs: true, ..Default::default() }.to_text();
+        assert!(t.contains("raid_mercs=shown\n"), "{t}");
+        assert!(ClientOptions::from_text(&t).raid_mercs, "read back");
+        assert!(!ClientOptions::from_text("raid_mercs=hidden").raid_mercs);
+        assert!(!ClientOptions::from_text("raid_mercs=maybe").raid_mercs, "anything else: the default");
+    }
+
+    #[test]
+    fn power_bars_are_kept_only_when_off() {
+        assert!(ClientOptions::default().power_bars, "on by default");
+        assert!(!ClientOptions::default().to_text().contains("power_bars"));
+        assert!(ClientOptions { power_bars: false, ..Default::default() }.to_text().contains("power_bars=off\n"));
+        assert!(!ClientOptions::from_text("power_bars=off").power_bars);
+        assert!(ClientOptions::from_text("power_bars=on").power_bars);
+        assert!(ClientOptions::from_text("power_bars=maybe").power_bars, "the default");
+        assert!(ClientOptions::from_text("mana_bars=off").power_bars, "the control: the old Mana Bars' key is not this");
+    }
+
+    #[test]
+    fn target_level_is_kept_only_when_off() {
+        assert!(ClientOptions::default().target_level, "on by default");
+        assert!(!ClientOptions::default().to_text().contains("target_level"));
+        assert!(ClientOptions { target_level: false, ..Default::default() }.to_text().contains("target_level=off\n"));
+        assert!(!ClientOptions::from_text("target_level=off").target_level);
+        assert!(ClientOptions::from_text("target_level=maybe").target_level, "the default");
+    }
+
+    #[test]
+    fn head_marks_are_kept_only_when_off() {
+        assert!(ClientOptions::default().head_marks, "on by default");
+        assert!(!ClientOptions::default().to_text().contains("head_marks"));
+        assert!(ClientOptions { head_marks: false, ..Default::default() }.to_text().contains("head_marks=off\n"));
+        let back = ClientOptions::from_text("head_marks=off\nquest_markers=on");
+        assert!(!back.head_marks && back.quest_markers, "the map's Quest Markers its own");
+        assert!(ClientOptions::from_text("head_marks=on").head_marks);
+        assert!(ClientOptions::from_text("head_marks=maybe").head_marks, "the default");
+        assert!(ClientOptions::from_text("quest_markers=off").head_marks, "the control: the map's row is not this");
+    }
+
+    #[test]
     fn pet_effects_are_kept_only_when_off() {
         assert!(ClientOptions::default().pet_effects, "on by default");
         assert!(!ClientOptions::default().to_text().contains("pet_effects"));
@@ -2674,15 +3485,71 @@ mod tests {
     /// written only when off.
     #[test]
     fn the_profanity_filter_is_kept_only_when_off() {
-        assert!(ClientOptions::default().profanity_filter, "on by default");
+        assert_eq!(ClientOptions::default().profanity_filter, Profanity::High, "High by default");
         assert!(!ClientOptions::default().to_text().contains("profanity"));
-        assert!(ClientOptions { profanity_filter: false, ..Default::default() }.to_text().contains("profanity_filter=off\n"));
-        assert!(!ClientOptions::from_text("profanity_filter=off").profanity_filter);
-        assert!(ClientOptions::from_text("profanity_filter=on").profanity_filter);
-        assert!(ClientOptions::from_text("profanity_filter=maybe").profanity_filter, "the default");
+        assert!(ClientOptions { profanity_filter: Profanity::Off, ..Default::default() }.to_text().contains("profanity_filter=off\n"));
+        assert!(ClientOptions { profanity_filter: Profanity::Medium, ..Default::default() }.to_text().contains("profanity_filter=medium\n"));
+        assert_eq!(ClientOptions::from_text("profanity_filter=off").profanity_filter, Profanity::Off);
+        assert_eq!(ClientOptions::from_text("profanity_filter=medium").profanity_filter, Profanity::Medium);
+        assert_eq!(ClientOptions::from_text("profanity_filter=high").profanity_filter, Profanity::High);
+        assert_eq!(ClientOptions::from_text("profanity_filter=on").profanity_filter, Profanity::High, "the old On");
+        assert_eq!(ClientOptions::from_text("profanity_filter=maybe").profanity_filter, Profanity::High, "the default");
+        // the row's steps, round at both ends
+        assert_eq!(Profanity::Off.step(1), Profanity::Medium);
+        assert_eq!(Profanity::High.step(1), Profanity::Off);
+        assert_eq!(Profanity::Off.step(-1), Profanity::High);
+    }
+
+    /// Auto Save Options (ticket 2002): off by default and written only when
+    /// on.
+    #[test]
+    fn auto_save_options_is_kept_only_when_on() {
+        let d = ClientOptions::default();
+        assert!(!d.auto_save, "off by default");
+        assert!(!d.to_text().contains("auto_save"));
+        let t = ClientOptions { auto_save: true, ..Default::default() }.to_text();
+        assert!(t.contains("auto_save_options=on\n"), "{t}");
+        assert!(ClientOptions::from_text(&t).auto_save, "round trip");
+        assert!(!ClientOptions::from_text("auto_save_options=off").auto_save);
+        assert!(!ClientOptions::from_text("auto_save_options=maybe").auto_save, "the default");
+    }
+
+    /// The rows of tickets 1951, 1953, 1977 and 1987: kept only when changed,
+    /// read back as kept, a value out of range left at its default.
+    #[test]
+    fn the_tickets_rows_of_2026_11_13_are_kept_only_when_changed() {
+        let d = ClientOptions::default();
+        assert!(d.pets_pass && !d.shared_shortcuts && d.spell_bar_opacity == 100 && d.chat_tabs == [0; crate::chat::KINDS], "the defaults");
+        let t = d.to_text();
+        for k in ["pets_pass", "shared_shortcuts", "spell_bar_opacity", "chat_tab"] {
+            assert!(!t.contains(k), "{k} not kept at its default: {t}");
+        }
+        let mut c = ClientOptions { pets_pass: false, shared_shortcuts: true, spell_bar_opacity: 40, ..d };
+        c.chat_tabs[crate::chat::Kind::Loot.index()] = 3;
+        c.chat_tabs[crate::chat::Kind::Tells.index()] = 1;
+        c.chat_tab_names[2] = crate::chat::tab_name("Loot");
+        let t = c.to_text();
+        assert!(t.contains("chat_tab.loot=3\n") && t.contains("chat_tab_name.3=Loot\n") && t.contains("spell_bar_opacity=40\n"), "{t}");
+        assert_eq!(ClientOptions::from_text(&t), c, "round trip");
+        // out of range: left at the default
+        let bad = ClientOptions::from_text("spell_bar_opacity=45\nchat_tab.loot=4\nchat_tab.nonsense=1\nchat_tab_name.4=x");
+        assert_eq!(bad, d);
     }
 
     /// Item Links: on by default and written only when off.
+    #[test]
+    fn chat_always_and_stacked_bars_are_kept_only_when_on() {
+        let d = ClientOptions::default();
+        assert!(!d.chat_always && !d.stacked_bars, "off by default");
+        assert!(!d.to_text().contains("chat_always") && !d.to_text().contains("stacked_bars"));
+        let t = ClientOptions { chat_always: true, stacked_bars: true, ..Default::default() }.to_text();
+        assert!(t.contains("chat_always=on\n") && t.contains("stacked_bars=on\n"), "{t}");
+        let back = ClientOptions::from_text(&t);
+        assert!(back.chat_always && back.stacked_bars, "round trip");
+        assert!(!ClientOptions::from_text("chat_always=off").chat_always);
+        assert!(!ClientOptions::from_text("stacked_bars=maybe").stacked_bars, "the default");
+    }
+
     #[test]
     fn item_links_are_kept_only_when_off() {
         assert!(ClientOptions::default().item_links, "on by default");
@@ -2700,8 +3567,8 @@ mod tests {
     #[test]
     fn number_colors_are_kept_only_when_chosen() {
         let d = ClientOptions::default();
-        assert_eq!(d.number_colors, [0; crate::numcolor::ROWS], "Default by default");
-        assert!(!d.to_text().contains("number_color"), "nothing written for Default");
+        assert_eq!(d.number_colors, [0, 0, 0, 0, 0, 0, 8, 6], "Default by default, the merc's Light Blue and Purple");
+        assert!(!d.to_text().contains("number_color"), "nothing written as they came");
         let mut c = ClientOptions::default();
         c.number_colors[1] = crate::numcolor::from_key("red").unwrap();
         c.number_colors[5] = crate::numcolor::from_key("light_blue").unwrap();
@@ -2711,8 +3578,31 @@ mod tests {
         assert_eq!(ClientOptions::from_text(&text).number_colors, c.number_colors, "read back");
         assert_eq!(ClientOptions::from_text(&text), c, "and nothing else changed");
         let odd = ClientOptions::from_text("number_color.procs=mauve\nnumber_color.elbows=red\nnumber_color.heals=default");
-        assert_eq!(odd.number_colors, [0; crate::numcolor::ROWS], "not understood: Default");
-        assert_eq!(ClientOptions::from_text("number_color.pet_damage=orange").number_colors, [0, 0, 0, 3, 0, 0]);
+        assert_eq!(odd.number_colors, crate::numcolor::DEFAULTS, "not understood: as they came");
+        assert_eq!(ClientOptions::from_text("number_color.pet_damage=orange").number_colors, [0, 0, 0, 3, 0, 0, 8, 6]);
+        // a merc row chosen Default is kept as `default`, another colour as its key
+        let mut m = ClientOptions::default();
+        m.number_colors[6] = 0;
+        m.number_colors[7] = crate::numcolor::from_key("green").unwrap();
+        let text = m.to_text();
+        assert!(text.contains("number_color.merc_damage=default\n") && text.contains("number_color.merc_heals=green\n"), "{text}");
+        assert_eq!(ClientOptions::from_text(&text).number_colors, m.number_colors, "read back");
+    }
+
+    /// Map Pointer: Facing by default and then written nothing; Camera
+    /// kept and read back; anything else the default.
+    #[test]
+    fn the_map_pointer_is_kept_only_when_camera() {
+        use crate::map::Pointer;
+        let d = ClientOptions::default();
+        assert_eq!(d.map_pointer, Pointer::Facing, "Facing by default");
+        assert!(!d.to_text().contains("map_pointer"), "the default writes nothing");
+        let c = ClientOptions { map_pointer: Pointer::Camera, ..Default::default() };
+        let t = c.to_text();
+        assert!(t.contains("map_pointer=camera\n"), "{t}");
+        assert_eq!(ClientOptions::from_text(&t), c, "round trip");
+        assert_eq!(ClientOptions::from_text("map_pointer=facing"), d);
+        assert_eq!(ClientOptions::from_text("map_pointer=sideways"), d, "anything else: the default");
     }
 
     #[test]
@@ -2801,6 +3691,33 @@ mod tests {
     /// (here the first: no place taken) and keeps another window's as the
     /// file has it, though this one read the file before that window saved
     /// (its own copy says Auto there: written as it is, it would be lost).
+    /// Slow When Not Focused (petition 1634) is each window's, as Controller
+    /// Focus is: off by default and no line, `slow_unfocused.<window>=on` in
+    /// client.opt beside the other windows' own (one saved meanwhile kept),
+    /// never in a window's own file or the account's (the control: a
+    /// window's rows are). A line that is not on or off reads as off.
+    #[test]
+    fn each_window_keeps_its_own_slow_when_not_focused() {
+        testing::reset(false);
+        assert!(!slow_unfocused(), "off by default");
+        assert!(!ClientOptions::default().to_text().contains("slow_unfocused"), "no line while off");
+        set_slow_unfocused(true);
+        store::write(CLIENT_FILE, b"lod=on\nbrightness=5\ncamera_distance=11\nslow_unfocused.3=on\n").unwrap();
+        assert!(save(&GameOptions::default()));
+        let kept = String::from_utf8(testing::kept(CLIENT_FILE).unwrap()).unwrap();
+        assert_eq!(kept, "lod=on\nbrightness=5\ncamera_distance=11\nslow_unfocused.1=on\nslow_unfocused.3=on\n");
+        let both = ClientOptions::from_text(&kept);
+        assert_eq!((both.slow_unfocused[0], both.slow_unfocused[1], both.slow_unfocused[2]), (true, false, true));
+        assert!(!both.rows_text().contains("slow_unfocused"), "a window's own file and the account's: never");
+        assert!(both.rows_text().contains("brightness=5"), "the control: its rows are");
+        assert!(!ClientOptions::from_text("slow_unfocused.1=yes\nslow_unfocused.0=on\nslow_unfocused.99=on").slow_unfocused.iter().any(|&on| on), "odd lines: off");
+        set_slow_unfocused(false);
+        assert!(save(&GameOptions::default()));
+        let kept = String::from_utf8(testing::kept(CLIENT_FILE).unwrap()).unwrap();
+        assert_eq!(kept, "lod=on\nbrightness=5\ncamera_distance=11\nslow_unfocused.3=on\n", "this window's line gone, the other's kept");
+        testing::reset(false);
+    }
+
     #[test]
     fn each_window_keeps_its_own_controller_focus() {
         testing::reset(false);
@@ -3252,5 +4169,82 @@ mod tests {
         assert_eq!((step_name_distance(22, -1), step_name_distance(200, 1)), (None, None), "its ends");
         let from_22 = |v: u8| v + NAME_DISTANCE_STEP;
         assert_ne!(from_22(NAME_DISTANCE_GAME), up[1], "the control must fail");
+    }
+
+    /// Petition 1621: a login makes the options the account's. Its first
+    /// login takes the window's set kept most recently (here window 2's,
+    /// written after window 1's), never the saved login; a save keeps them
+    /// for the account, so another window (a character of the same account)
+    /// plays with them, and another account keeps its own. What the windows
+    /// share stays client.opt's. The control: before any login, window 1's.
+    #[test]
+    fn options_are_the_accounts() {
+        use crate::multibox::testing::set_place;
+        testing::reset(false);
+        let mut one = GameOptions { battle: 1, ..changed() };
+        let mut card = one.to_card();
+        card[0x10..0x13].copy_from_slice(b"dab");
+        testing::put(GAME_FILE, &card);
+        testing::put(CLIENT_FILE, b"brightness=3\ncapture_controller=on\n");
+        let two = GameOptions { battle: 2, ..changed() };
+        testing::put("game-2.opt", &two.to_card());
+        testing::put("client-2.opt", b"brightness=7\n");
+        set_place(Some(0));
+        assert_eq!((game_options().battle, client().brightness), (1, 3), "the control: no login, window 1's");
+        assert!(!account_notice_due(), "no account, no notice");
+        set_account("eqoaclassic.com", "Dab");
+        assert_eq!(game_options().battle, 2, "window 2's, the newest set");
+        assert_eq!(client().brightness, 7);
+        assert!(client().capture, "what the windows share: client.opt's");
+        let acct = account_file("eqoaclassic.com+dab", "game");
+        assert!(testing::kept(&acct).unwrap()[0x10..0x91].iter().all(|&b| b == 0), "never the login");
+        assert_eq!(saved_login().0, "dab", "the window's saved login stays");
+        // a change saved: the account's
+        one.battle = 5;
+        let mut c = client();
+        c.brightness = 9;
+        set_client(c);
+        assert!(save(&one));
+        // another window, the same account (a second character)
+        set_place(Some(3));
+        set_account_now(None);
+        set_account("eqoaclassic.com", "DAB");
+        assert_eq!((game_options().battle, client().brightness), (5, 9), "the account's, in any window");
+        // another account: its own, from the newest set (the save just made)
+        set_account("eqoaclassic.com", "other");
+        assert_eq!(client().brightness, 9);
+        let mut c = client();
+        c.brightness = 1;
+        set_client(c);
+        assert!(save(&GameOptions { battle: 6, ..one }));
+        set_account("eqoaclassic.com", "dab");
+        assert_eq!((game_options().battle, client().brightness), (5, 9), "the first account's untouched");
+        // a new run of window 4: the title reads the account it last logged into
+        set_account_now(None);
+        bump_generation();
+        assert_eq!((game_options().battle, client().brightness), (5, 9));
+        testing::reset(false);
+    }
+
+    /// The notice: due once an account is known, until a Yes; the Yes is kept.
+    #[test]
+    fn the_account_notice_until_seen() {
+        testing::reset(false);
+        crate::multibox::testing::set_place(Some(0));
+        assert!(!account_notice_due());
+        set_account("s", "u");
+        assert!(account_notice_due());
+        account_notice_seen();
+        assert!(!account_notice_due());
+        account_state::NOTICED.with(|n| n.set(false));
+        assert!(!account_notice_due(), "kept for later runs");
+        testing::reset(false);
+    }
+
+    /// An account's name is a safe store name, case folded.
+    #[test]
+    fn account_names() {
+        assert_eq!(account_name("EQOAclassic.com:9735", " Dab "), "eqoaclassic.com_9735+dab");
+        assert_eq!(account_name("a/b", "..\\x"), "a_b+.._x");
     }
 }

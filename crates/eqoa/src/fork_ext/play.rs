@@ -19,12 +19,8 @@ pub(crate) fn begin_game_event(_: &Play, _: &net::session::Event) {}
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn end_game_event(_: &Play, _: ()) {}
 pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
-    #[cfg(not(target_arch = "wasm32"))]
-    let want_power =
-        crate::fork_ext::addons::options::effective_toggle("eqoa_mana_bars", "mana_bars");
-    #[cfg(target_arch = "wasm32")]
-    let want_power = false;
-    _play.session.agree_power_bars(want_power);
+    // others' power is asked for by upstream's Power Bars row alone (`settings::power_bars`);
+    // a second request here would contradict it every frame
     #[cfg(not(target_arch = "wasm32"))]
     {
         if crate::fork_ext::addons::input::is_text_capture_active() {

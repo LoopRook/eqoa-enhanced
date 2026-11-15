@@ -72,6 +72,23 @@
 //! character in such a body, on a server with races of its own, as the
 //! emotes: the swimmer's own and every other player's on this client; a PS2
 //! still shows them as before.
+//!
+//! The monk's moves, the same way (the owner, 2026-11-15: "the monk abilites
+//! have kicks,etc. but not all the races are able to show them yet, lets
+//! borrow from human like we did for emotes so all races can use"). A monk's
+//! ability plays an entry on its caster through its effect's set-action event
+//! (SPELLFX.CSF, `VISpellEventDriver`): 43 the kick, 50 to 53 the monk's own
+//! (`MOVES`). Of every body a player wears only the human's two play lists
+//! have 50 to 53; `SetDefaultEntries` fills an empty one with the body's 23,
+//! the main hand's punch, so an elf's, an ogre's or a hill giant's Flame Kick
+//! or Lunging Mantis was a punch, and the Jal'Raeth's and the merfolk's (which
+//! have no punch, nor a kick) their idle once. Here each such entry takes the
+//! human's carried onto the body's skeleton (`put_moves`, `retarget`), keeping
+//! the entry's sound, sync and priority, on a player's character in a player
+//! race's body or a race's (`moves_body`; the pixie, fairy and fungusman keep
+//! their own strike, `MOVES_OWN`), on a server with races of its own
+//! (`grant_moves`): the caster's own and every other player's on this client.
+//! A PS2 still shows the punch.
 
 use esf::Library;
 use glam::{Quat as GQuat, Vec3};
@@ -155,6 +172,12 @@ pub const TABLE: &[(u32, [Pose; 4])] = &[
     // its upper body and its crossed legs keep their float (the channeler's and
     // knight's bodies take these by `poses_of`)
     (0xF51B_AB09, H),
+    // the merfolk (2026-11-11: race 32, the Mermaid), treading water: the human's
+    // names given their spine and arms (`MERFOLK_NAMES`), so the human's emote
+    // moves their upper body and the tail keeps its tread (the sirens take these
+    // by `poses_of`)
+    (0xA316_EB78, H), // merman
+    (0x74BA_7C3D, H), // mermaid
 ];
 
 /// What `model` plays for each emote, if `TABLE` lists it.
@@ -206,6 +229,42 @@ pub fn poses_of(model: u32) -> Option<[Pose; 4]> {
     race_of(model).and_then(poses)
 }
 
+/// The merfolk's skeleton (go-eqoa-server's race 32, the Mermaid, petition
+/// 1620: the merman's, the mermaid's and the two sirens' bodies, one skeleton
+/// of 24 nodes, `racebody::MERFOLK`) shares four bone names with the human's
+/// (the root, the neck 19, the head 20 and a lock of hair 21): its spine and
+/// arms have names of their own, though they run as a human's do (every node
+/// with the model's axes in the bind pose, the right arm at -x). They are
+/// given the human's names here (`Rig`), node by node by place, so what is
+/// carried onto a skeleton by its bone names (the human's emotes, `retarget`;
+/// the human's chest, bracers and gloves, `slotless::named_shell_of`) moves
+/// and dresses their upper body as the human's; the tail (1-5), the collars
+/// (9, 14) and the top of the spine (8) keep their own. Each is (the merfolk's
+/// node, the ref id of HumanMale's node of that place, HumanFemale's alike):
+/// the spine 6 and 7 the human's 1 and 2, as far under the shoulders as the
+/// human's are (the merfolk's arms and neck hang from 8, a node over 7 the
+/// human lacks: named after the human's 2, its chest armour rose 0.14 and
+/// its collar covered the face); the right shoulder, elbow, wrist and
+/// fingertips 15 to 18 the human's 11 to 14; the left 10 to 13 the human's 20
+/// to 23.
+const MERFOLK_NAMES: &[(usize, i32)] = &[
+    (6, -984_000_983),
+    (7, -984_000_982),
+    (15, -1_594_476_141),
+    (16, 2_004_749_100),
+    (17, -1_270_577_720),
+    (18, -1_005_697_820),
+    (10, 1_541_305_384),
+    (11, 124_337_851),
+    (12, 1_143_978_327),
+    (13, 1_641_120_235),
+];
+
+/// The merfolk's skeleton is told by its node count and its node 6's own ref
+/// id (its spine's).
+const MERFOLK_NODES: usize = 24;
+const MERFOLK_MARK: (usize, i32) = (6, -1_197_703_574);
+
 /// One body's skeleton as its 0x2700 record has it: each node's parent,
 /// its bind pose in its parent's space (`rest`: the hierarchy's frames are
 /// the model's, `SetNodeBindPose`, and `rest` the parent's taken off), and
@@ -216,8 +275,12 @@ pub struct Rig {
     pub rest: Vec<Frame<Ee>>,
     /// The node a ref id names.
     pub by_ref: HashMap<i32, usize>,
-    /// Each node's ref id (the least the map names it by).
+    /// Each node's ref id (the least the map names it by; a merfolk node given
+    /// a human's name, `MERFOLK_NAMES`, that name).
     pub refs: Vec<Option<i32>>,
+    /// Each node's own ref id, as its sprite's clips name it (`refs` before
+    /// `MERFOLK_NAMES`): what a clip made for the body names its nodes by.
+    pub own: Vec<Option<i32>>,
 }
 
 impl Rig {
@@ -232,7 +295,15 @@ impl Rig {
                 by_ref.insert(k, n as usize);
             }
         }
-        Rig { parent: h.nodes.iter().map(|n| n.parent).collect(), rest: h.nodes.iter().map(|n| n.rest).collect(), by_ref, refs }
+        let own = refs.clone();
+        // the merfolk's spine and arms take the human's names (`MERFOLK_NAMES`)
+        if refs.len() == MERFOLK_NODES && refs[MERFOLK_MARK.0] == Some(MERFOLK_MARK.1) {
+            for &(n, r) in MERFOLK_NAMES {
+                refs[n] = Some(r);
+                by_ref.insert(r, n);
+            }
+        }
+        Rig { parent: h.nodes.iter().map(|n| n.parent).collect(), rest: h.nodes.iter().map(|n| n.rest).collect(), by_ref, refs, own }
     }
 
     /// A sprite's, with its ref map.
@@ -406,7 +477,18 @@ fn first_frames(rig: &Rig, clips: &[&Anim<Ee>]) -> Vec<Frame<Ee>> {
 /// the human's below it (a spine of other names bends as the human's), and
 /// one with nothing of the human's below it (a tail, a wing, a third finger)
 /// keeps the body's idle's first frame.
-pub fn retarget(human: &Rig, human_idle: &[Anim<Ee>], clips: &[Anim<Ee>], body: &Rig, idle: [&Anim<Ee>; 2], base: Base) -> [Anim<Ee>; 2] {
+/// `hover` (an emote's: the idle's frames to one of the clip's): when the
+/// body hovers (`hovers`: its idle holds every node clear of the ground, a
+/// merfolk treading water, a gargoyle on its wings, a Jal'Raeth floating
+/// cross-legged), its root keeps the idle's place under the emote, frame by
+/// frame as the idle plays on, at the human's move across but none up or down,
+/// and every node with nothing of the human's below it (the tail, the
+/// wings, the crossed legs) plays on as the idle plays it: the owner,
+/// 2026-11-12, "when mermaid, gargoyle, floating models emote they sink to
+/// the ground while they do it, lets keep them in the air" (the root was the
+/// bind pose's, at the ground, the hover being the idle's). A body on the
+/// ground, or `hover` false (the fall, the landing, the swim), is as before.
+pub fn retarget(human: &Rig, human_idle: &[Anim<Ee>], clips: &[Anim<Ee>], body: &Rig, idle: [&Anim<Ee>; 2], base: Base, hover: Option<f32>) -> [Anim<Ee>; 2] {
     let n = clips.iter().map(|a| a.num_frames).max().unwrap_or(1).max(1);
     // which clip node drives each human node
     let mut drives: HashMap<usize, (usize, i32)> = HashMap::new();
@@ -423,6 +505,28 @@ pub fn retarget(human: &Rig, human_idle: &[Anim<Ee>], clips: &[Anim<Ee>], body: 
         Base::Idle => (first_frames(human, &human_idle.iter().collect::<Vec<_>>()), first_frames(body, &idle)),
     };
     let bidle_l = first_frames(body, &idle);
+    // a hovering body: each of its nodes the idle drives, at the idle's frame
+    // `f` emote frames in (looping)
+    let hover = hover.filter(|_| hovers(body, &bidle_l));
+    let mut idle_drives: Vec<Option<(usize, i32)>> = vec![None; body.parent.len()];
+    for (k, a) in idle.iter().enumerate() {
+        for &(rid, first) in &a.nodes {
+            if let Some(&b) = body.by_ref.get(&rid)
+                && idle_drives[b].is_none()
+            {
+                idle_drives[b] = Some((k, first));
+            }
+        }
+    }
+    let idle_at = |b: usize, f: i32| -> Frame<Ee> {
+        match (hover, idle_drives[b]) {
+            (Some(r), Some((k, first))) => {
+                let n = idle[k].num_frames.max(1);
+                frame_of(idle[k], first, ((f as f32 * r) as i32).rem_euclid(n))
+            }
+            _ => bidle_l[b],
+        }
+    };
     let hbase = human.world(&hbase_l.iter().map(|f| gq(&f.rot)).collect::<Vec<_>>());
     let bbase = body.world(&bbase_l.iter().map(|f| gq(&f.rot)).collect::<Vec<_>>());
     // the human node each body node turns as: its own, or the one holding
@@ -481,7 +585,8 @@ pub fn retarget(human: &Rig, human_idle: &[Anim<Ee>], clips: &[Anim<Ee>], body: 
         for &b in &order {
             let p = body.parent[b];
             let pg = if p >= 0 && (p as usize) != b { bg[p as usize] } else { GQuat::IDENTITY };
-            let own = bidle_l[b];
+            let own = idle_at(b, f);
+            let root = !(p >= 0 && (p as usize) != b);
             let (local, g) = match (mine[b], held[b]) {
                 (Some(h), _) => {
                     let g = (hg[h] * hbase[h].inverse()) * bbase[b];
@@ -490,7 +595,12 @@ pub fn retarget(human: &Rig, human_idle: &[Anim<Ee>], clips: &[Anim<Ee>], body: 
                     let hp = human.parent[h];
                     let hpg = if hp >= 0 && (hp as usize) != h { hg[hp as usize] } else { GQuat::IDENTITY };
                     let moved = hpg * (gv(&hl[h].trans) - gv(&hbase_l[h].trans));
-                    let t = gv(&bbase_l[b].trans) + pg.inverse() * moved * k;
+                    let t = if hover.is_some() && root {
+                        // hovering: the idle's place, the human's move across only
+                        gv(&own.trans) + (moved * k).with_y(0.0)
+                    } else {
+                        gv(&bbase_l[b].trans) + pg.inverse() * moved * k
+                    };
                     (Frame { rot: eq(pg.inverse() * g), scale: own.scale, trans: ev(t) }, g)
                 }
                 (None, Some(h)) => {
@@ -509,7 +619,7 @@ pub fn retarget(human: &Rig, human_idle: &[Anim<Ee>], clips: &[Anim<Ee>], body: 
         let mut full = Vec::with_capacity(nodes.len() * n as usize);
         let mut list = Vec::with_capacity(nodes.len());
         for (j, &b) in nodes.iter().enumerate() {
-            list.push((body.refs[b].unwrap_or(0), j as i32 * n));
+            list.push((body.own[b].unwrap_or(0), j as i32 * n));
             full.extend_from_slice(&frames[b]);
         }
         Anim { num_nodes: list.len() as i32, num_frames: n, play_rate: rate, play_speed: F::ONE, playback_type: ONCE, nodes: list, frames: Frames::Full(full), triggers: Vec::new() }
@@ -537,6 +647,33 @@ fn size_ratio(human: &Rig, body: &Rig) -> f32 {
     r[r.len() / 2]
 }
 
+/// How far clear of the ground (model units) every node of a body's idle
+/// must be for the body to hover: the merfolk's lowest node is 0.84 to 0.98
+/// up, the gargoyles' 0.83, the Jal'Raeth's crossed legs 0.27 (its bob
+/// at its lowest 0.20); every body on its feet has one within 0.07 of it.
+pub const HOVER_CLEAR: f32 = 0.15;
+
+/// Each node's place in the model, the local frames `local` taken down from
+/// the root (`ProcessHierarchy`: rotation, scale and place, a node's world its
+/// parent's times its own).
+fn places(rig: &Rig, local: &[Frame<Ee>]) -> Vec<Vec3> {
+    let mut world: Vec<Option<glam::Mat4>> = vec![None; rig.parent.len()];
+    for b in rig.order() {
+        let l = &local[b];
+        let m = glam::Mat4::from_scale_rotation_translation(Vec3::splat(l.scale.0), gq(&l.rot), gv(&l.trans));
+        let p = rig.parent[b];
+        let pm = if p >= 0 && (p as usize) != b { world[p as usize].unwrap_or(glam::Mat4::IDENTITY) } else { glam::Mat4::IDENTITY };
+        world[b] = Some(pm * m);
+    }
+    world.iter().map(|m| m.map_or(Vec3::ZERO, |m| m.w_axis.truncate())).collect()
+}
+
+/// Whether a body hovers: in its idle's first frame (`idle`, local) every node
+/// is `HOVER_CLEAR` or more off the ground.
+pub fn hovers(rig: &Rig, idle: &[Frame<Ee>]) -> bool {
+    places(rig, idle).iter().all(|p| p.y >= HOVER_CLEAR)
+}
+
 /// The human whose emotes a body borrows: its skeleton and its idle's
 /// clips (what `Base::Idle` measures from).
 pub struct Human {
@@ -554,7 +691,8 @@ impl Human {
     /// The human's `action` carried onto `cs` (its clips in `sc`): the two
     /// layers' clips and the play speed, or `None` where the human or the
     /// sprite lacks what it takes.
-    pub fn carry(&self, lib: &Library, action: i32, cs: &CSprite<Ee>, sc: &AnimScene<Ee>, base: Base) -> Option<([Anim<Ee>; 2], F<Ee>)> {
+    /// `hover`: an emote, which a hovering body plays in the air (`retarget`).
+    pub fn carry(&self, lib: &Library, action: i32, cs: &CSprite<Ee>, sc: &AnimScene<Ee>, base: Base, hover: bool) -> Option<([Anim<Ee>; 2], F<Ee>)> {
         let row = row(lib, HUMAN, action)?;
         let clips: Vec<Anim<Ee>> = row.clips.iter().filter_map(|&c| clip(lib, c)).collect();
         let idle = cs.entries[0].animation;
@@ -564,7 +702,12 @@ impl Human {
             return None;
         }
         let body = Rig::of(cs, &sc.ref_maps[cs.h.ref_map]);
-        Some((retarget(&self.rig, &self.idle, &clips, &body, [&sc.anims[i0], &sc.anims[i1]], base), row.weight))
+        // the idle's frames to one of the emote's: each clip's rate times
+        // its entry's speed
+        let rate = |a: &Anim<Ee>, w: F<Ee>| a.play_rate.0 * a.play_speed.0 * w.0;
+        let r = rate(&sc.anims[i0], cs.entries[0].weight) / rate(&clips[0], row.weight);
+        let hover = (hover && r.is_finite() && r > 0.0).then_some(r);
+        Some((retarget(&self.rig, &self.idle, &clips, &body, [&sc.anims[i0], &sc.anims[i1]], base, hover), row.weight))
     }
 }
 
@@ -593,7 +736,7 @@ pub fn put(lib: &Library, cs: &mut CSprite<Ee>, sc: &mut AnimScene<Ee>, poses: [
             }
             Pose::Human => {
                 let human = human.get_or_insert_with(|| Human::load(lib));
-                let Some(([a, b], weight)) = human.as_ref().and_then(|h| h.carry(lib, e as i32, cs, sc, BASE)) else { continue };
+                let Some(([a, b], weight)) = human.as_ref().and_then(|h| h.carry(lib, e as i32, cs, sc, BASE, true)) else { continue };
                 sc.anims.push(a);
                 let ia = sc.anims.len() as i32 - 1;
                 let ib = if cs.skel_type == 1 {
@@ -634,9 +777,7 @@ fn put_over(lib: &Library, cs: &mut CSprite<Ee>, sc: &mut AnimScene<Ee>, entries
     if entries.iter().any(|&e| cs.entries[e as usize].animation != cs.entries[0].animation) {
         return false;
     }
-    let mut human: Option<Option<Human>> = None;
-    // the human's rows carried so far (their clips), to what they made
-    let mut carried: Vec<([i32; 2], [i32; 2], F<Ee>)> = Vec::new();
+    let mut carrier = Carrier::default();
     for ((&e, &pose), &sync) in entries.iter().zip(poses).zip(syncs) {
         let e = e as usize;
         match pose {
@@ -649,26 +790,7 @@ fn put_over(lib: &Library, cs: &mut CSprite<Ee>, sc: &mut AnimScene<Ee>, entries
                 dst.sync = sync;
             }
             Pose::Human => {
-                let clips = row(lib, HUMAN, e as i32).map(|r| r.clips);
-                let (animation, weight) = match carried.iter().find(|c| Some(c.0) == clips) {
-                    Some(&(_, animation, weight)) => (animation, weight),
-                    None => {
-                        let human = human.get_or_insert_with(|| Human::load(lib));
-                        let Some(([a, b], weight)) = human.as_ref().and_then(|h| h.carry(lib, e as i32, cs, sc, BASE)) else { continue };
-                        sc.anims.push(a);
-                        let ia = sc.anims.len() as i32 - 1;
-                        let ib = if cs.skel_type == 1 {
-                            sc.anims.push(b);
-                            sc.anims.len() as i32 - 1
-                        } else {
-                            -1
-                        };
-                        if let Some(c) = clips {
-                            carried.push((c, [ia, ib], weight));
-                        }
-                        ([ia, ib], weight)
-                    }
-                };
+                let Some((animation, weight)) = carrier.carry(lib, cs, sc, e as i32, false) else { continue };
                 let dst = &mut cs.entries[e];
                 dst.animation = animation;
                 dst.weight = weight;
@@ -678,6 +800,44 @@ fn put_over(lib: &Library, cs: &mut CSprite<Ee>, sc: &mut AnimScene<Ee>, entries
         }
     }
     true
+}
+
+/// The human's rows carried onto one sprite (`Human::carry`), each added to
+/// its clips once: the human loaded at the first, and a row whose clips were
+/// carried already (the human's fall and landing, two entries of one clip)
+/// given what the first made.
+#[derive(Default)]
+struct Carrier {
+    human: Option<Option<Human>>,
+    /// the human's rows carried so far (their clips), to what they made
+    carried: Vec<([i32; 2], [i32; 2], F<Ee>)>,
+}
+
+impl Carrier {
+    /// The human's `action` carried onto `cs` (`hover`: as an emote, in the
+    /// air on a hovering body, `retarget`), its clips added to `sc`: the
+    /// entry's two clips and its play speed, or `None` where the human or the
+    /// sprite lacks what it takes.
+    fn carry(&mut self, lib: &Library, cs: &CSprite<Ee>, sc: &mut AnimScene<Ee>, action: i32, hover: bool) -> Option<([i32; 2], F<Ee>)> {
+        // a row the human lacks (in the 2002 art, say) is nothing to carry:
+        // the human is not loaded for it (a puppet is granted every frame)
+        let clips = row(lib, HUMAN, action)?.clips;
+        if let Some(&(_, animation, weight)) = self.carried.iter().find(|c| c.0 == clips) {
+            return Some((animation, weight));
+        }
+        let human = self.human.get_or_insert_with(|| Human::load(lib));
+        let ([a, b], weight) = human.as_ref()?.carry(lib, action, cs, sc, BASE, hover)?;
+        sc.anims.push(a);
+        let ia = sc.anims.len() as i32 - 1;
+        let ib = if cs.skel_type == 1 {
+            sc.anims.push(b);
+            sc.anims.len() as i32 - 1
+        } else {
+            -1
+        };
+        self.carried.push((clips, [ia, ib], weight));
+        Some(([ia, ib], weight))
+    }
 }
 
 /// The swim's entries: the gait `UpdateLocomotion` gives a body in liquid
@@ -733,6 +893,90 @@ pub fn grant_swim(lib: &Library, cs: &mut CSprite<Ee>, sc: &mut AnimScene<Ee>, m
 pub fn grant_air(lib: &Library, cs: &mut CSprite<Ee>, sc: &mut AnimScene<Ee>, model: u32, player: bool, jumps: bool) -> bool {
     let Some(p) = air_poses(model).filter(|_| player && jumps) else { return false };
     put_air(lib, cs, sc, p);
+    true
+}
+
+/// The monk's moves: the play list's entries its abilities play on their
+/// caster (SPELLFX.CSF's set-action events, `VISpellEventDriver`): 43 the kick
+/// (Kick, Pouncing Tiger, Roaring Dragon; the warrior's and the ranger's Kick,
+/// Boot, Punt and Stomp too), 50 to 53 the monk's own (50 every Punch and
+/// Strike, 51 the Lunging Mantis and Swooping Eagle, 52 every Kick of a name,
+/// Flame, Spinning, Lightning and Force; 53 none on eqoaclassic, but a monk's
+/// slot as the others).
+pub const MOVES: [i32; 5] = [43, 50, 51, 52, 53];
+
+/// The player races' bodies (races 0 to 9, male and female: the 0x002C model
+/// ids). Of them only the human's two play lists have the monk's 50 to 53
+/// (HumanFemale's the same clips as HumanMale's); every other race's has none,
+/// so `SetDefaultEntries` fills them with its 23, the main hand's punch: an
+/// elf's or an ogre's Flame Kick was a punch. Every one has a kick (43).
+pub const PLAYER_BODIES: &[u32] = &[
+    0x70D8_98C6, 0x0D53_7335, // human
+    0xD8D5_6FF8, 0xE189_19F7, // elf
+    0x7ED8_9DAA, 0x8C9B_4B39, // dark elf
+    0xA99C_6B15, 0x4C40_84FC, // gnome
+    0xAA5B_0447, 0x350B_FDBE, // dwarf
+    0x4C6F_A532, 0x4DE3_2701, // troll
+    0x61CA_3EDF, 0xC44A_D516, // barbarian
+    0xA3DB_3FE2, 0x8A27_A731, // halfling
+    0x320C_0B47, 0x4F1A_3CBE, // erudite
+    0x8480_7490, 0xACC0_0B4F, // ogre
+];
+
+/// The bodies `TABLE` lists that keep the game's moves: the pixie's, the
+/// fairy's and the fungusman's, which share one bone with the human (carried,
+/// a kick would only nod the head; their emotes are their own nearest too),
+/// and whose fill is a strike of their own (their 23).
+pub const MOVES_OWN: &[u32] = &[0x94BA_77CD, 0x7A85_646C, 0x4A4D_88FB];
+
+/// Whether `model` (the body worn) takes the human's moves where it lacks
+/// them: a player race's body, or a body `TABLE` lists or another its race's
+/// options offer (`race_of`), but `MOVES_OWN`'s.
+pub fn moves_body(model: u32) -> bool {
+    let race = if PLAYER_BODIES.contains(&model) { Some(model) } else { race_of(model) };
+    race.is_some_and(|r| !MOVES_OWN.contains(&r))
+}
+
+/// Whether `cs` lacks move `e`: its entry is still `SetDefaultEntries`' fill,
+/// the body's 23 (the main hand's punch; itself the idle, played once, on a
+/// body with no punch either), not a clip of its own.
+pub fn lacks_move(cs: &CSprite<Ee>, e: i32) -> bool {
+    e != 23 && cs.entries[e as usize].animation == cs.entries[23].animation
+}
+
+/// Puts the human's moves (`MOVES`) carried onto `cs`'s skeleton (`retarget`,
+/// as its emotes are; a hovering body's in the air) on each of them it lacks
+/// (`lacks_move`), its clips added to `sc`; each entry keeps its priority, its
+/// channel, its sync and its sound (the body's own punch's: its own swing and
+/// voice), and plays at the human's speed. A move the body has is left as it
+/// is. How many it put.
+pub fn put_moves(lib: &Library, cs: &mut CSprite<Ee>, sc: &mut AnimScene<Ee>) -> usize {
+    let mut carrier = Carrier::default();
+    let mut put = 0;
+    for e in MOVES {
+        if !lacks_move(cs, e) {
+            continue;
+        }
+        let Some((animation, weight)) = carrier.carry(lib, cs, sc, e, true) else { continue };
+        let dst = &mut cs.entries[e as usize];
+        dst.animation = animation;
+        dst.weight = weight;
+        put += 1;
+    }
+    put
+}
+
+/// The human's moves (`put_moves`) on `cs` (made of `model`, its clips in
+/// `sc`) when it is a player's character (`player`) on a server with races of
+/// its own (`races`, `server_has_races`) in a body that takes them
+/// (`moves_body`); anything else (an NPC, a form or an illusion into another
+/// body, any body on Sandstorm or eqoa.live) is left as the game made it.
+/// Whether it is such a character.
+pub fn grant_moves(lib: &Library, cs: &mut CSprite<Ee>, sc: &mut AnimScene<Ee>, model: u32, player: bool, races: Option<&net::creation::Creation>) -> bool {
+    if !(player && moves_body(model) && server_has_races(races)) {
+        return false;
+    }
+    put_moves(lib, cs, sc);
     true
 }
 
@@ -978,8 +1222,9 @@ mod tests {
                 match pose {
                     Pose::Own(s) => assert!(row(&lib, id, s).is_some(), "{id:#010x} has no slot {s} of its own"),
                     Pose::Human => {
-                        let map = &sc.ref_maps[cs.h.ref_map];
-                        assert!(arms.iter().all(|r| map.contains_key(r)), "{id:#010x}: the human's arms");
+                        // by the names its rig gives it (the merfolk's, `MERFOLK_NAMES`)
+                        let rig = Rig::of(&cs, &sc.ref_maps[cs.h.ref_map]);
+                        assert!(arms.iter().all(|r| rig.by_ref.contains_key(r)), "{id:#010x}: the human's arms");
                     }
                 }
             }
@@ -1034,7 +1279,7 @@ mod tests {
     fn against(lib: &Library, human: &Human, body: u32, action: i32, against: i32, moved: bool) -> (bool, bool, usize) {
         let (cs, sc) = load(lib, body);
         let rig = Rig::of(&cs, &sc.ref_maps[cs.h.ref_map]);
-        let ([a, b], _) = human.carry(lib, action, &cs, &sc, Base::Bind).unwrap();
+        let ([a, b], _) = human.carry(lib, action, &cs, &sc, Base::Bind, false).unwrap();
         let want: Vec<Anim<Ee>> = row(lib, HUMAN, against).unwrap().clips.iter().map(|&c| clip(lib, c).unwrap()).collect();
         let (mut rots, mut trans, mut n) = (true, true, 0);
         for carried in [&a, &b] {
@@ -1174,7 +1419,7 @@ mod tests {
             for pose in p {
                 match pose {
                     Pose::Own(s) => assert!(row(&lib, id, s).is_some(), "{id:#010x} has no slot {s} of its own"),
-                    Pose::Human => assert!(arms.iter().all(|r| sc.ref_maps[cs.h.ref_map].contains_key(r)), "{id:#010x}: the human's arms"),
+                    Pose::Human => assert!(arms.iter().all(|r| Rig::of(&cs, &sc.ref_maps[cs.h.ref_map]).by_ref.contains_key(r)), "{id:#010x}: the human's arms"),
                 }
             }
             assert!(put_air(&lib, &mut cs, &mut sc, p), "{id:#010x}");
@@ -1293,8 +1538,9 @@ mod tests {
 
     /// Every body a server's race wears (each one the table lists and every
     /// other its options offer, the helm seats' families with the fungusmen's
-    /// and the Jal'Raeth's), on the disc, through `put_swim`: 129 have a swim
-    /// and a treading of their own (entries 12 and 13), left as they are; the
+    /// and the Jal'Raeth's), on the disc, through `put_swim`: 134 have a swim
+    /// and a treading of their own (entries 12 and 13), left as they are (the
+    /// merfolk's five among them, sea creatures' bodies); the
     /// gargoyles' six, the Jal'Raeth's three, the pixie's and the fairy's have
     /// neither (each is the idle), and but the last two (`SWIM_NONE`) take the
     /// human's carried, one clip looping for both, the human's swim. The
@@ -1338,7 +1584,7 @@ mod tests {
         let mut want: Vec<u32> = GARGOYLES.iter().chain(&JALRAETH).chain(SWIM_NONE).copied().collect();
         want.sort_unstable();
         assert_eq!(none, want, "the bodies with no swim");
-        assert_eq!(own, 129, "the bodies with their own");
+        assert_eq!(own, 134, "the bodies with their own");
         let (h12, h13) = (row(&lib, HUMAN, 12).unwrap(), row(&lib, HUMAN, 13).unwrap());
         assert_eq!(h12.clips, h13.clips, "the control: the human's swim and treading, one clip");
     }
@@ -1483,5 +1729,239 @@ mod tests {
         let (granted, idle, changed, _) = falls(ELDER, true);
         assert!(granted && !idle && !changed, "the brownie elder: its own fall and landing, left as they are");
         crate::raceopts::set_options(None);
+    }
+
+    /// The bodies that hover in their idles: the merfolk's five (treading
+    /// water), the gargoyles' six (on their wings), the Jal'Raeth's three
+    /// (floating cross-legged), the pixie and the fairy (flying; their emotes
+    /// are their own slots, which fly).
+    const HOVERING: [u32; 16] = [
+        0xA316_EB78, 0x74BA_7C3D, 0xBF21_FEF5, 0x1740_427C, 0xD275_EE8F, 0xB4D2_D132, 0x4E2A_945C, 0xAEC5_D9F6, 0x0013_55C8, 0x6D95_9FD9, 0x9304_BAB5, 0xF51B_AB09, 0x4B24_FF7E, 0x491F_6347, PIXIE, 0x7A85_646C,
+    ];
+
+    /// Root and lowest node heights every 16 ms: the idle for `lead` ms,
+    /// then `action` (if any) over it, for `ms` more.
+    fn heights_over(cs: &mut CSprite<Ee>, sc: &mut AnimScene<Ee>, action: Option<i32>, lead: i64, ms: i64) -> Vec<(i64, f32, f32)> {
+        let mut rand = Rand(1);
+        let mut out = Vec::new();
+        let mut t = 0;
+        while t <= lead + ms {
+            sc.time = t;
+            match action.filter(|_| t == lead) {
+                Some(a) => {
+                    cs.set_action(a, sc, &mut rand);
+                }
+                None => cs.set_locomotion(0, sc, &mut rand),
+            }
+            cs.h.process(0, sc);
+            if t >= lead {
+                let low = cs.h.nodes.iter().map(|n| n.world.m[3].y.0).fold(f32::MAX, f32::min);
+                out.push((t - lead, cs.h.nodes[0].world.m[3].y.0, low));
+            }
+            t += 16;
+        }
+        out
+    }
+
+    /// Which bodies hover (`hovers`, from the idle's first frame): those of
+    /// `HOVERING`, and none of the other bodies the table lists or the races'
+    /// options offer that are on their feet (the giants, goblins, kerrans,
+    /// kobolds, frogloks, the brownie, the human). Needs `run/eqoa.iso`.
+    #[test]
+    fn the_hovering_bodies() {
+        let Some(lib) = disc() else { return };
+        let ground = [HUMAN, 0x0D53_7335, BROWNIE, SKELETON, DRYAD, HILL_GIANT, 0x8117_C627, 0x6C13_08E0, 0x2F34_B867, 0x2217_6258, 0x78FA_8F20, 0xCFC4_78EE, 0x141B_FE0C, 0x0F23_9012, 0x3151_DF13, 0x9112_20E2, 0x31A1_5F17, 0xCF41_5561, 0x8214_A32D, 0xC5CB_F4CF, 0xBADC_25C9, 0xBE10_226F, 0x4A4D_88FB];
+        let judge = |id: u32| {
+            let (cs, sc) = load(&lib, id);
+            let rig = Rig::of(&cs, &sc.ref_maps[cs.h.ref_map]);
+            let idle = cs.entries[0].animation;
+            let clips: Vec<&Anim<Ee>> = idle.iter().filter_map(|&i| usize::try_from(i).ok().and_then(|i| sc.anims.get(i))).collect();
+            hovers(&rig, &first_frames(&rig, &clips))
+        };
+        for id in HOVERING {
+            assert!(judge(id), "{id:#010x} hovers");
+        }
+        for id in ground {
+            assert!(!judge(id), "{id:#010x} stands on the ground");
+        }
+    }
+
+    /// The owner's "when mermaid, gargoyle, floating models emote they sink to
+    /// the ground while they do it, lets keep them in the air" (2026-11-12):
+    /// every hovering body that borrows the human's emotes keeps its idle's
+    /// height through each of the four, its root within the idle's own bob
+    /// (and 0.1 of it) at every moment and its mean within 0.08 of the idle's;
+    /// the merfolk's and gargoyles' lowest node stays more than half a metre
+    /// up, the Jal'Raeth's crossed legs over 0.15. The control: carried as
+    /// before (`hover` off), the merfolk's root fell 1.4 and the gargoyles'
+    /// 0.8. Needs `run/eqoa.iso`.
+    #[test]
+    fn hovering_bodies_emote_in_the_air() {
+        let Some(lib) = disc() else { return };
+        // the pixie and the fairy play their own slots, which fly
+        for id in HOVERING.into_iter().filter(|id| ![PIXIE, 0x7A85_646C].contains(id)) {
+            let (mut cs, mut sc) = load(&lib, id);
+            let idle = heights_over(&mut cs, &mut sc, None, 0, 3000);
+            let (lo, hi) = idle.iter().fold((f32::MAX, f32::MIN), |a, x| (a.0.min(x.1), a.1.max(x.1)));
+            let mean = idle.iter().map(|x| x.1).sum::<f32>() / idle.len() as f32;
+            let clear = if [0xF51B_AB09, 0x4B24_FF7E, 0x491F_6347].contains(&id) { 0.15 } else { 0.5 };
+            for (k, &e) in EMOTES.iter().enumerate() {
+                let (mut cs, mut sc) = load(&lib, id);
+                assert!(put(&lib, &mut cs, &mut sc, [Pose::Human; 4]), "{id:#010x}");
+                let tr = heights_over(&mut cs, &mut sc, Some(e), 480, 2000);
+                for &(t, root, low) in &tr {
+                    assert!(root > lo - 0.1 && root < hi + 0.1, "{id:#010x} {} at {t} ms: root {root} out of the idle's {lo}..{hi}", NAMES[k]);
+                    assert!(low > clear, "{id:#010x} {} at {t} ms: lowest node {low}", NAMES[k]);
+                }
+                let m = tr.iter().map(|x| x.1).sum::<f32>() / tr.len() as f32;
+                assert!((m - mean).abs() < 0.08, "{id:#010x} {}: mean root {m} against the idle's {mean}", NAMES[k]);
+            }
+        }
+        // the control: the emote carried as before sank the merfolk and the gargoyle
+        let human = Human::load(&lib).unwrap();
+        for (id, fell) in [(0x74BA_7C3D, 1.2), (0xB4D2_D132, 0.6)] {
+            let (mut cs, mut sc) = load(&lib, id);
+            let ([a, b], w) = human.carry(&lib, 56, &cs, &sc, BASE, false).unwrap();
+            sc.anims.push(a);
+            sc.anims.push(b);
+            let n = sc.anims.len() as i32;
+            let entry = &mut cs.entries[56];
+            entry.animation = [n - 2, if cs.skel_type == 1 { n - 1 } else { -1 }];
+            entry.weight = w;
+            entry.sync = ONCE;
+            let tr = heights_over(&mut cs, &mut sc, Some(56), 480, 2000);
+            let m = tr[20..60].iter().map(|x| x.1).sum::<f32>() / 40.0;
+            let (mut cs, mut sc) = load(&lib, id);
+            let idle = heights_over(&mut cs, &mut sc, None, 0, 3000);
+            let mean = idle.iter().map(|x| x.1).sum::<f32>() / idle.len() as f32;
+            assert!(mean - m > fell, "the control, {id:#010x}: the old carry sank the root from {mean} to {m}");
+        }
+    }
+
+    /// A body on its feet plays the human's emotes exactly as before: with
+    /// `hover` asked for, every carried clip is frame for frame the one made
+    /// without it (the hill giant, goblin, kerran, kobold, froglok, gnoll,
+    /// minotaur, lizardman, aviak, satyr, kappa, ratman, orc, dryad).
+    /// Needs `run/eqoa.iso`.
+    #[test]
+    fn a_body_on_its_feet_is_unchanged() {
+        let Some(lib) = disc() else { return };
+        let human = Human::load(&lib).unwrap();
+        let frames = |a: &Anim<Ee>| -> Vec<(f32, f32, f32, f32, f32, f32, f32, f32)> {
+            let v: Vec<Frame<Ee>> = match &a.frames {
+                Frames::Full(v) => v.clone(),
+                Frames::Pack(v) => v.iter().map(unpack).collect(),
+            };
+            v.iter().map(|f| (f.rot.x.0, f.rot.y.0, f.rot.z.0, f.rot.w.0, f.scale.0, f.trans.x.0, f.trans.y.0, f.trans.z.0)).collect()
+        };
+        for id in [HILL_GIANT, 0x6C13_08E0, 0x2217_6258, 0xCFC4_78EE, 0x141B_FE0C, 0xCF41_5561, 0xC5CB_F4CF, 0x9112_20E2, 0x3151_DF13, 0xBE10_226F, 0x31A1_5F17, 0xBADC_25C9, 0x8214_A32D, DRYAD] {
+            let (cs, sc) = load(&lib, id);
+            for e in EMOTES {
+                let (on, _) = human.carry(&lib, e, &cs, &sc, BASE, true).unwrap();
+                let (off, _) = human.carry(&lib, e, &cs, &sc, BASE, false).unwrap();
+                for l in 0..2 {
+                    assert_eq!(on[l].nodes, off[l].nodes, "{id:#010x} {e}");
+                    assert!(frames(&on[l]) == frames(&off[l]), "{id:#010x} emote {e} layer {l}: changed");
+                }
+            }
+        }
+    }
+
+    /// The monk's moves on the disc: of the player races' bodies only the
+    /// human's two play lists have 50 to 53 (the same clips), and every one
+    /// has a kick (43); the ogre's and the troll's lack 50 to 53 (their 23,
+    /// the punch, `SetDefaultEntries`' fill) and take the human's carried onto
+    /// them, each a clip of its own, 43 left as it was (their own kick); the
+    /// human (the control) has them all and is left as it is, entry for entry;
+    /// the Jal'Raeth's lacks the kick too and takes all five; a second put
+    /// puts none. The pixie's keeps the game's (`MOVES_OWN`). Needs
+    /// `run/eqoa.iso`.
+    #[test]
+    fn the_monks_moves_on_a_body_that_lacks_them() {
+        let Some(lib) = disc() else { return };
+        const OGRE: u32 = 0x8480_7490;
+        const TROLL_F: u32 = 0x4DE3_2701;
+        const JAL_RAETH: u32 = 0xF51B_AB09;
+        let hrow = |e| row(&lib, HUMAN, e).unwrap().clips;
+        for e in [50, 51, 52, 53] {
+            assert_eq!(row(&lib, 0x0D53_7335, e).map(|r| r.clips), Some(hrow(e)), "HumanFemale's {e} is HumanMale's");
+        }
+        for &id in PLAYER_BODIES {
+            assert!(row(&lib, id, 43).is_some(), "{id:#010x} has a kick");
+            let human = id == HUMAN || id == 0x0D53_7335;
+            for e in [50, 51, 52, 53] {
+                assert_eq!(row(&lib, id, e).is_some(), human, "{id:#010x}: move {e} its own only on the human");
+                let (cs, _) = load(&lib, id);
+                assert_eq!(lacks_move(&cs, e), !human, "{id:#010x}: move {e} the fill");
+            }
+            assert!(moves_body(id));
+        }
+        let (mut cs, mut sc) = load(&lib, HUMAN);
+        let had = entries(&cs);
+        assert_eq!(put_moves(&lib, &mut cs, &mut sc), 0, "the human's own");
+        assert_eq!(entries(&cs), had, "the human: as the game made it");
+        for (id, want) in [(OGRE, 4), (TROLL_F, 4), (JAL_RAETH, 5)] {
+            let (mut cs, mut sc) = load(&lib, id);
+            let had = cs.entries;
+            assert!(lacks_move(&cs, 52), "{id:#010x} lacks 52");
+            assert_eq!(put_moves(&lib, &mut cs, &mut sc), want, "{id:#010x}");
+            for e in MOVES {
+                let (got, old) = (cs.entries[e as usize], had[e as usize]);
+                if want == 4 && e == 43 {
+                    assert_eq!(got.animation, old.animation, "{id:#010x}: its own kick");
+                    continue;
+                }
+                assert_ne!(got.animation, cs.entries[23].animation, "{id:#010x}: move {e} no longer the punch");
+                assert!(got.animation[0] >= 0 && (got.animation[0] as usize) < sc.anims.len(), "{id:#010x}: move {e} a clip");
+                assert_eq!((got.sync, got.sound, got.priority, got.channel), (old.sync, old.sound, old.priority, old.channel), "{id:#010x}: move {e} keeps its entry's");
+            }
+            let distinct: std::collections::HashSet<[i32; 2]> = [50, 51, 52, 53].iter().map(|&e| cs.entries[e].animation).collect();
+            assert_eq!(distinct.len(), 4, "{id:#010x}: four moves, four clips");
+            let again = cs.entries;
+            assert_eq!(put_moves(&lib, &mut cs, &mut sc), 0, "{id:#010x}: put already");
+            assert!(again.iter().zip(cs.entries.iter()).all(|(a, b)| a.animation == b.animation));
+        }
+        assert!(!moves_body(PIXIE) && !moves_body(0x4A4D_88FB), "their own");
+    }
+
+    /// Carried onto the elf's skeleton (HumanMale's bones: its 22 to 44 are
+    /// HumanMale's clips), the monk's 50 to 53 turn as the human's clips do,
+    /// node for node, frame for frame. Needs `run/eqoa.iso`.
+    #[test]
+    fn the_monks_moves_on_the_elf_are_the_humans() {
+        let Some(lib) = disc() else { return };
+        let human = Human::load(&lib).unwrap();
+        for e in [50, 51, 52, 53] {
+            let (rots, _, n) = against(&lib, &human, 0xD8D5_6FF8, e, e, true);
+            assert!(rots && n >= 100, "move {e} on the elf: the human's turns ({rots} {n})");
+        }
+    }
+
+    /// The moves go on a player's character in a player race's body or one the
+    /// table lists, on a server with races of its own, and nothing else: not an
+    /// NPC, not with no races, not a body no race wears, not the pixie
+    /// (`MOVES_OWN`). The control: a sprite (no disc: nothing to carry) is
+    /// left as it was whatever is granted.
+    #[test]
+    fn the_moves_go_on_a_races_players() {
+        let lib = Library::new();
+        crate::racelabel::clear();
+        let listed = races(&[HILL_GIANT]);
+        let grants = |model: u32, player: bool, list: Option<&Creation>| {
+            let mut cs = creature();
+            let had = entries(&cs);
+            let g = grant_moves(&lib, &mut cs, &mut AnimScene::default(), model, player, list);
+            assert_eq!(entries(&cs), had);
+            g
+        };
+        assert!(grants(0x8480_7490, true, Some(&listed)), "an ogre player");
+        assert!(grants(HILL_GIANT, true, Some(&listed)), "a hill giant player");
+        assert!(!grants(0x8480_7490, false, Some(&listed)), "an NPC");
+        assert!(!grants(0x8480_7490, true, None), "a server with no races");
+        assert!(!grants(0x1234_5678, true, Some(&listed)), "a body no race wears");
+        assert!(!grants(PIXIE, true, Some(&races(&[PIXIE]))), "the pixie's own");
+        let cs = creature();
+        assert!(MOVES.iter().all(|&e| lacks_move(&cs, e)), "the creature's moves are its punch");
+        assert!(!lacks_move(&cs, 23));
     }
 }

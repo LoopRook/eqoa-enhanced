@@ -20,6 +20,25 @@
 //! (`Let::Link`); with the history held (mode 33) left walks up through them and
 //! right back down (`walk_older`, `walk_newer`), the one lit washed, and the
 //! history let go forgets the walk.
+//!
+//! Chat Always Shown (Extended > UI > Chat, Jibwiz's ticket 1914: "allows your
+//! chat box to stay fully visible without auto collapse") is the client's too
+//! (`always`): the box stays open at its five rows as the fixed mode keeps it,
+//! the last five lines in it whatever their age, with no backdrop strip (the
+//! fixed mode's, a window's). Off, the game's box exactly.
+//!
+//! Chat Tabs are the client's too (Jibwiz's ticket 1951: "optional chat tabs
+//! ... Up to 3. Each tab loads a new chat and can be set to filter all of a
+//! certain type of chat to that tab. The tab should be nameable as well, up to
+//! 8 characters"): each kind of line (`Kind`, told by `kind_of` from its words
+//! and its colour, as the server sends them) goes to Main, the box's own, or to
+//! one of three tabs (Extended > UI > Chat Tabs, `settings::ClientOptions::
+//! chat_tabs`); a tab is there while a kind goes to it, each its own ring of
+//! lines (`Tabs`), named by `/tabname` or after its first kind. With a tab the
+//! box's open view shows the tabs' names over it, the one shown lit and one
+//! with lines unread green; a click shows another (`click_tab`), as `/tab`
+//! does. With every kind Main's, as by default, nothing is drawn or kept apart:
+//! the game's box.
 
 use std::cell::RefCell;
 use vi::ui::{Raster, Vui, Window};
@@ -395,6 +414,182 @@ pub fn is_shout(text: &str, color: [f32; 4], own: &str) -> bool {
     !name.is_empty() && !name.contains(':') && !name.eq_ignore_ascii_case(own)
 }
 
+/// The chat tabs besides Main (ticket 1951).
+pub const TABS: usize = 3;
+/// A tab's name's most characters.
+pub const TAB_NAME_MOST: usize = 8;
+/// How many kinds of line there are (`Kind`).
+pub const KINDS: usize = 10;
+
+/// What a line in the chat box is, for the tabs (ticket 1951).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// someone's say, an NPC's words ("Name: text")
+    Say,
+    /// tells and whispers, to the player and from it
+    Tells,
+    /// the group's chat and the raid's
+    Group,
+    Guild,
+    Shouts,
+    /// what hits, misses, resists and slays
+    Combat,
+    Loot,
+    /// /roll's and the loot rolls'
+    Rolls,
+    Experience,
+    /// the rest: the server's notices, the client's own lines
+    System,
+}
+
+impl Kind {
+    pub const ALL: [Kind; KINDS] = [Kind::Say, Kind::Tells, Kind::Group, Kind::Guild, Kind::Shouts, Kind::Combat, Kind::Loot, Kind::Rolls, Kind::Experience, Kind::System];
+
+    /// Its name in client.opt (`chat_tab.<key>`).
+    pub fn key(self) -> &'static str {
+        match self {
+            Kind::Say => "say",
+            Kind::Tells => "tells",
+            Kind::Group => "group",
+            Kind::Guild => "guild",
+            Kind::Shouts => "shouts",
+            Kind::Combat => "combat",
+            Kind::Loot => "loot",
+            Kind::Rolls => "rolls",
+            Kind::Experience => "experience",
+            Kind::System => "system",
+        }
+    }
+
+    /// Its name as the options' rows and a tab show it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Kind::Say => "Say",
+            Kind::Tells => "Tells",
+            Kind::Group => "Group",
+            Kind::Guild => "Guild",
+            Kind::Shouts => "Shouts",
+            Kind::Combat => "Combat",
+            Kind::Loot => "Loot",
+            Kind::Rolls => "Rolls",
+            Kind::Experience => "Experience",
+            Kind::System => "System",
+        }
+    }
+
+    pub fn index(self) -> usize {
+        Kind::ALL.iter().position(|&k| k == self).unwrap_or(KINDS - 1)
+    }
+}
+
+/// A tab's name as kept: its first `TAB_NAME_MOST` characters (control
+/// characters out, spaces at its ends trimmed), NUL past its end.
+pub fn tab_name(s: &str) -> [char; TAB_NAME_MOST] {
+    let mut out = ['\0'; TAB_NAME_MOST];
+    for (i, c) in s.trim().chars().filter(|c| !c.is_control()).take(TAB_NAME_MOST).enumerate() {
+        out[i] = c;
+    }
+    out
+}
+
+/// A kept name as a string.
+pub fn tab_name_text(n: &[char; TAB_NAME_MOST]) -> String {
+    n.iter().take_while(|&&c| c != '\0').collect::<String>().trim_end().to_string()
+}
+
+/// A colour's three bytes.
+fn rgb(c: [f32; 4]) -> [u8; 3] {
+    [0, 1, 2].map(|i| (c[i].clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
+/// What kind of line `text` in colour `color` is (`Kind`), as the server words
+/// and colours them (go-eqoa-server's and Sandstorm's: a tell in (255, 127,
+/// 255), the group's in (.5, .5, 1), the guild's in (.25, 1, .8), a shout
+/// "<name> shouts: ", a roll "<name> rolls N (a to b)." in gold or orange; a
+/// say "<name>: "), the rest by their words.
+pub fn kind_of(text: &str, color: [f32; 4]) -> Kind {
+    let c = rgb(color);
+    let low = text.to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| low.contains(w));
+    if c == [255, 127, 255] || has(&[" tells you, '", " whispers, '"]) || low.starts_with("you told ") || low.starts_with("you whisper to ") {
+        return Kind::Tells;
+    }
+    if c == [128, 128, 255] || has(&[" tells the group", " tells the raid"]) {
+        return Kind::Group;
+    }
+    if c == [64, 255, 204] || has(&[" tells the guild"]) {
+        return Kind::Guild;
+    }
+    if text.split_once(" shouts: ").is_some_and(|(n, _)| !n.is_empty() && !n.contains(':')) {
+        return Kind::Shouts;
+    }
+    if c == [255, 215, 64] || c == [255, 140, 0] || has(&[" rolls ", "you roll ", " roll for ", " need roll", " greed roll", " rolled "]) {
+        return Kind::Rolls;
+    }
+    if has(&[" xp", "experience"]) {
+        return Kind::Experience;
+    }
+    if has(&["loot", "you receive ", "you have received ", " receives "]) {
+        return Kind::Loot;
+    }
+    if has(&[" hits you", "you hit ", " hit you", " hits ", "damage", " slain", " slays ", " misses", "you miss", "resist", "has died", " dies.", " critical", "stunned", "interrupted", "out of range", "too far away"]) {
+        return Kind::Combat;
+    }
+    if c == [255, 255, 255]
+        && let Some((name, _)) = text.split_once(": ")
+        && !name.is_empty()
+        && name.len() <= 40
+        && name.split(' ').count() <= 4
+        && name.chars().all(|ch| ch.is_alphabetic() || matches!(ch, ' ' | '\'' | '-' | '`' | '.'))
+    {
+        return Kind::Say;
+    }
+    Kind::System
+}
+
+/// The tabs: the rings of the tabs not shown (the one shown is `WndChat::text`),
+/// which is shown, which have lines unread, where the last frame drew each name.
+struct Tabs {
+    parked: Vec<Option<ChatText>>,
+    active: usize,
+    unread: [bool; TABS + 1],
+    hits: Vec<([i32; 4], usize)>,
+    /// each kind's tab (0 Main) and the tabs' names, as the settings have them
+    routes: [u8; KINDS],
+    names: [[char; TAB_NAME_MOST]; TABS],
+}
+
+impl Default for Tabs {
+    fn default() -> Self {
+        Tabs { parked: (0..=TABS).map(|_| None).collect(), active: 0, unread: [false; TABS + 1], hits: Vec::new(), routes: [0; KINDS], names: [['\0'; TAB_NAME_MOST]; TABS] }
+    }
+}
+
+impl Tabs {
+    /// Whether tab `t` is there: Main always, another while a kind goes to it.
+    fn exists(&self, t: usize) -> bool {
+        t == 0 || self.routes.iter().any(|&r| r as usize == t)
+    }
+
+    /// The tabs there, in order, Main first.
+    fn shown(&self) -> Vec<usize> {
+        (0..=TABS).filter(|&t| self.exists(t)).collect()
+    }
+
+    /// Tab `t`'s name: Main; its own; else its first kind's.
+    fn name(&self, t: usize) -> String {
+        if t == 0 {
+            return "Main".into();
+        }
+        let own = tab_name_text(&self.names[t - 1]);
+        if !own.is_empty() {
+            return own;
+        }
+        let first = self.routes.iter().position(|&r| r as usize == t).map_or("Tab", |k| Kind::ALL[k].label());
+        first.chars().take(TAB_NAME_MOST).collect()
+    }
+}
+
 /// `VIWndChat`.
 pub struct WndChat {
     /// Nonzero: the fixed box, every line.
@@ -432,6 +627,10 @@ pub struct WndChat {
     link_hits: Vec<LinkHit>,
     pub show_links: bool,
     walk: Option<u64>,
+    /// Chat Always Shown (the module's doc): open at five rows, every line.
+    pub always: bool,
+    /// The chat tabs (the module's doc).
+    tabs: Tabs,
 }
 
 impl WndChat {
@@ -444,13 +643,115 @@ impl WndChat {
 
     /// `Init`: the window is 462 wide and lines wrap at its width less 45.
     pub fn new() -> Self {
-        WndChat { mode: 0, height: 0, target: 0, lines: 0, text: ChatText::new(462 - 45), window: Window::default(), scroll: 0, top: 0, bottom: 0, held: 0, repeat: 0.0, cues: Vec::new(), shown: Vec::new(), sel: None, drag: None, told: None, wheel: 0.0, following: false, link_hits: Vec::new(), show_links: true, walk: None }
+        WndChat { mode: 0, height: 0, target: 0, lines: 0, text: ChatText::new(462 - 45), window: Window::default(), scroll: 0, top: 0, bottom: 0, held: 0, repeat: 0.0, cues: Vec::new(), shown: Vec::new(), sel: None, drag: None, told: None, wheel: 0.0, following: false, link_hits: Vec::new(), show_links: true, walk: None, always: false, tabs: Tabs::default() }
+    }
+
+    /// The tabs as the settings have them now (each kind's tab, the names):
+    /// a tab no kind goes to any more is not drawn, and shown, Main is.
+    pub fn set_tabs(&mut self, routes: [u8; KINDS], names: [[char; TAB_NAME_MOST]; TABS]) {
+        self.tabs.routes = routes.map(|r| if (r as usize) <= TABS { r } else { 0 });
+        self.tabs.names = names;
+        if !self.tabs.exists(self.tabs.active) {
+            self.show_tab(0);
+        }
+    }
+
+    /// A line for the box (`add_text_linked`), into the tab its kind goes to;
+    /// one not shown is marked unread.
+    pub fn add_line(&mut self, text: &str, c: [f32; 4], now: u32, width: impl Fn(&[u16]) -> i32, links: &[net::itemlink::ChatLink]) {
+        let t = self.tabs.routes[kind_of(text, c).index()] as usize;
+        let wide: Vec<u16> = text.encode_utf16().collect();
+        if t == self.tabs.active {
+            self.text.add_text_linked(&wide, c, now, width, links);
+        } else {
+            let ring = self.tabs.parked[t].get_or_insert_with(|| ChatText::new(462 - 45));
+            ring.add_text_linked(&wide, c, now, width, links);
+            self.tabs.unread[t] = true;
+        }
+    }
+
+    /// The tab shown (0 Main).
+    pub fn tab(&self) -> usize {
+        self.tabs.active
+    }
+
+    /// The tabs there and their names, Main first, and whether each has lines unread.
+    pub fn tab_names(&self) -> Vec<(usize, String, bool)> {
+        self.tabs.shown().into_iter().map(|t| (t, self.tabs.name(t), self.tabs.unread[t])).collect()
+    }
+
+    /// Shows tab `t` (one not there: nothing, false): its lines in the box, the
+    /// selection and the walk let go, the history's view on its newest lines.
+    pub fn show_tab(&mut self, t: usize) -> bool {
+        if t > TABS || !self.tabs.exists(t) {
+            return false;
+        }
+        self.tabs.unread[t] = false;
+        if t == self.tabs.active {
+            return true;
+        }
+        let into = self.tabs.parked[t].take().unwrap_or_else(|| ChatText::new(462 - 45));
+        let out = std::mem::replace(&mut self.text, into);
+        self.tabs.parked[self.tabs.active] = Some(out);
+        self.tabs.active = t;
+        self.sel = None;
+        self.drag = None;
+        self.walk = None;
+        self.told = None;
+        self.shown.clear();
+        self.link_hits.clear();
+        if self.scroll == 1 {
+            self.set_scroll(1);
+        }
+        true
+    }
+
+    /// A click at point `p` (as `contains` takes one): on a tab's name, that
+    /// tab shown (sound 11).
+    pub fn click_tab(&mut self, p: [f32; 2]) -> bool {
+        let (x, y) = (p[0] as i32, p[1] as i32);
+        let Some(&(_, t)) = self.tabs.hits.iter().find(|(r, _)| x >= r[0] && x < r[2] && y >= r[1] && y < r[3]) else { return false };
+        self.show_tab(t);
+        self.cues.push(11);
+        true
+    }
+
+    /// The tabs' names over the box while it is open (with a tab besides Main):
+    /// the one shown light yellow and underlined, one with lines unread green,
+    /// the rest grey, each noted for a click (`click_tab`).
+    fn draw_tabs(&mut self, vui: &Vui, ui: &mut dyn Raster) {
+        self.tabs.hits.clear();
+        let shown = self.tabs.shown();
+        if shown.len() < 2 || !(self.fixed() || self.scroll == 1) || !(self.window.is_open() || self.window.is_opening()) {
+            return;
+        }
+        let h = vui.font_height(ui);
+        let tl = self.window.top_left();
+        let (mut x, y) = (tl[0] + 25, tl[1] - h + 2);
+        for t in shown {
+            let name = crate::ui::wide(&self.tabs.name(t));
+            let w = vui.string_width(ui, &name);
+            let color = if t == self.tabs.active {
+                [1.0, 1.0, 0.6, 1.0]
+            } else if self.tabs.unread[t] {
+                [0.45, 1.0, 0.45, 1.0]
+            } else {
+                [0.7, 0.7, 0.7, 1.0]
+            };
+            ui.fill_fan([0.0, 0.0, 0.0, 0.5], [[x - 4, y - 1], [x + w + 4, y - 1], [x + w + 4, y + h - 3], [x - 4, y + h - 3]]);
+            vui.draw_string_ex(ui, &name, x, y, color, true);
+            if t == self.tabs.active {
+                ui.fill_fan(color, [[x, y + h - 5], [x + w, y + h - 5], [x + w, y + h - 4], [x, y + h - 4]]);
+            }
+            self.tabs.hits.push(([x - 4, y - 1, x + w + 4, y + h - 3], t));
+            x += w + 14;
+        }
     }
 
     /// `CountLines`: the fresh lines (every line while scrolling; five in a
     /// fixed mode), at most five.
     fn count_lines(&self) -> i32 {
-        if self.mode != 0 {
+        if self.fixed() {
             return 5;
         }
         let mut n = 0;
@@ -462,6 +763,24 @@ impl WndChat {
             i = ChatText::next(i);
         }
         n.min(5)
+    }
+
+    /// The chat box's top left at its full height (its five rows, as the fixed
+    /// mode and Chat Always Shown keep it), and its text's left (frame points,
+    /// before a moved piece's shift): `draw`'s window there. The stacked bars
+    /// stand on it (`hudmenu::HudMenus::draw_stacked`).
+    pub fn full_top_left(vui: &Vui, ui: &dyn Raster) -> [i32; 2] {
+        let mut w = Window::default();
+        w.init(vui, ui, [422, 390], 462, 6, 1);
+        w.center = [422, 475 - 85];
+        let tl = w.top_left();
+        [tl[0] + 25, tl[1]]
+    }
+
+    /// Whether the box is held open at five rows with every line in it: the
+    /// fixed mode's, or Chat Always Shown's (`always`).
+    fn fixed(&self) -> bool {
+        self.mode != 0 || self.always
     }
 
     /// `SetScroll`: 1 opens the view on the last five lines, 0 ends it. (A
@@ -571,7 +890,7 @@ impl WndChat {
         let it = if self.scroll == 1 { self.bottom } else { self.text.end() };
         self.lines = if self.scroll == 1 { 5 } else { self.count_lines() };
         let h = vui.font_height(ui);
-        if self.mode != 0 {
+        if self.fixed() {
             self.target = 85;
             self.height = 85;
             self.window.open(true);
@@ -595,7 +914,7 @@ impl WndChat {
             if let Some(l) = self.text.line(i)
                 && !l.text.is_empty()
                 && l.text[0] != 0
-                && (self.scroll == 1 || (self.scroll == 0 && l.kind == 1) || self.mode != 0)
+                && (self.scroll == 1 || (self.scroll == 0 && l.kind == 1) || self.fixed())
             {
                 let (text, color, seq) = (l.text.clone(), l.color, l.seq);
                 let links = if self.show_links { l.links.clone() } else { Vec::new() };
@@ -610,6 +929,7 @@ impl WndChat {
             }
             i = ChatText::prev(i);
         }
+        self.draw_tabs(vui, ui);
         self.drag_on(dt);
         self.tell_copy();
         if self.scroll == 1 {
@@ -974,6 +1294,87 @@ impl WndChat {
 mod tests {
     use super::*;
 
+    /// Ticket 1951: each line's kind as the server words and colours it.
+    #[test]
+    fn a_lines_kind_is_read_off_its_words_and_colour() {
+        let rgb = |r: u8, g: u8, b: u8| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0];
+        let white = [1.0; 4];
+        for (text, color, want) in [
+            ("Ann tells you, 'hi'", rgb(255, 127, 255), Kind::Tells),
+            ("You told Ann, 'hi'", rgb(255, 127, 255), Kind::Tells),
+            ("Ann whispers, 'psst'", rgb(255, 127, 255), Kind::Tells),
+            ("Ann tells the group: pull", rgb(128, 128, 255), Kind::Group),
+            ("Ann: the guild's line", rgb(64, 255, 204), Kind::Guild),
+            ("Powerbrick shouts: yrs?", rgb(63, 255, 63), Kind::Shouts),
+            ("Ann rolls 42 (1 to 100).", rgb(255, 215, 64), Kind::Rolls),
+            ("You receive 1200 XP.", white, Kind::Experience),
+            ("Your death left an experience debt of 50 (50 owed in all).", white, Kind::Experience),
+            ("You have looted a Rusty Sword.", white, Kind::Loot),
+            ("Gnoll Guard's Lava Breath hits you for 300 (resisted).", white, Kind::Combat),
+            ("You have slain a gnoll.", rgb(255, 140, 40), Kind::Combat),
+            ("Ann: hello there", white, Kind::Say),
+            ("Warden Holt: Well done.", white, Kind::Say),
+            ("The DPS meter is on.", white, Kind::System),
+            ("Tell Failed", [1.0, 0.25, 0.25, 1.0], Kind::System),
+        ] {
+            assert_eq!(kind_of(text, color), want, "{text:?}");
+        }
+        // the controls: a say quoting a shout is a say; a tell's words in
+        // another colour are still a tell
+        assert_eq!(kind_of("Bob: Ann shouts: hi", white), Kind::Say);
+        assert_eq!(kind_of("Ann tells you, 'hi'", white), Kind::Tells);
+    }
+
+    /// Ticket 1951: a kind sent to a tab goes there and not to Main; the tab
+    /// is drawn (with Main) only while some kind goes to it, is named by its
+    /// first kind until named, marks lines unread until shown, and shown,
+    /// holds its lines while Main is shown again. The control: every kind
+    /// Main's, every line in the box, no tabs.
+    #[test]
+    fn a_kind_sent_to_a_tab_goes_there_alone() {
+        let w = |s: &[u16]| s.len() as i32 * 8;
+        let rows = |t: &ChatText| {
+            let (mut out, mut i) = (Vec::new(), t.first());
+            while i != t.end() {
+                out.push(plain(&t.line(i).unwrap().text));
+                i = ChatText::next(i);
+            }
+            out
+        };
+        let tell = [1.0, 127.0 / 255.0, 1.0, 1.0];
+        let mut c = WndChat::new();
+        c.add_line("Ann: hello", [1.0; 4], 0, w, &[]);
+        c.add_line("Ann tells you, 'psst'", tell, 0, w, &[]);
+        assert_eq!(rows(&c.text), ["Ann: hello", "Ann tells you, 'psst'"], "the control: all Main's");
+        assert_eq!(c.tab_names().len(), 1, "no tabs");
+        let mut routes = [0u8; KINDS];
+        routes[Kind::Tells.index()] = 2;
+        routes[Kind::Loot.index()] = 2;
+        let mut names = [['\0'; TAB_NAME_MOST]; TABS];
+        c.set_tabs(routes, names);
+        c.add_line("Ann tells you, 'again'", tell, 0, w, &[]);
+        c.add_line("You have looted a Rusty Sword.", [1.0; 4], 0, w, &[]);
+        c.add_line("Bob: hi", [1.0; 4], 0, w, &[]);
+        assert_eq!(rows(&c.text), ["Ann: hello", "Ann tells you, 'psst'", "Bob: hi"], "Main keeps no tell from now");
+        assert_eq!(c.tab_names(), vec![(0, "Main".to_string(), false), (2, "Tells".to_string(), true)]);
+        assert!(!c.show_tab(1), "tab 1 has no kind: not there");
+        assert!(c.show_tab(2));
+        assert_eq!(rows(&c.text), ["Ann tells you, 'again'", "You have looted a Rusty Sword."]);
+        assert_eq!(c.tab_names()[1].2, false, "read");
+        c.add_line("Cid: yo", [1.0; 4], 0, w, &[]);
+        assert!(c.tab_names()[0].2, "Main unread");
+        names[1] = tab_name("Whispers and loot");
+        c.set_tabs(routes, names);
+        assert_eq!(c.tab_names()[1].1, "Whispers", "named, eight characters");
+        assert!(c.show_tab(0));
+        assert_eq!(rows(&c.text).last().map(String::as_str), Some("Cid: yo"));
+        // the tab given up while shown: Main is shown
+        assert!(c.show_tab(2));
+        c.set_tabs([0; KINDS], names);
+        assert_eq!(c.tab(), 0);
+        assert_eq!(c.tab_names().len(), 1);
+    }
+
     /// A shout is someone else's "<name> shouts: <text>" in the shout's
     /// colour, as Sandstorm's 0x0A7B carries it (the capture's own line); the
     /// controls: the same words white, a say quoting " shouts: ", the
@@ -1104,6 +1505,34 @@ mod tests {
     /// A frame `dt` seconds on.
     fn frame(c: &mut WndChat, dt: f32) {
         c.draw(&vui(), &mut Rows, 0, dt);
+    }
+
+    /// Chat Always Shown (ticket 1914): two lines 30 s old (past `Age`'s 20)
+    /// are both still drawn, the box open at its five rows; the box with no
+    /// lines at all stays open too. The control: the game's box (off) shows
+    /// neither line and slides shut.
+    #[test]
+    fn chat_always_shown_never_collapses() {
+        let (v, mut r) = (vui(), Rows);
+        let mut run = |always: bool, lines: usize| {
+            let mut c = WndChat::new();
+            c.always = always;
+            for k in 0..lines {
+                c.text.add_text(&crate::ui::wide(&format!("line {k}")), [1.0; 4], 0, width);
+            }
+            for _ in 0..40 {
+                c.draw(&v, &mut r, 30_000, 0.1);
+            }
+            c
+        };
+        let on = run(true, 2);
+        assert_eq!((on.shown.len(), on.lines, on.height), (2, 5, 85), "both old lines in the full box");
+        assert!(on.window.is_open());
+        let empty = run(true, 0);
+        assert!(empty.window.is_open() && empty.height == 85, "open with nothing said yet");
+        let off = run(false, 2);
+        assert_eq!((off.shown.len(), off.lines), (0, 0), "the control: the game's box let them go");
+        assert!(!off.window.is_open() && off.height < 0, "the control: slid shut");
     }
 
     /// A press on line `seq`, past the slop and a frame on: the view the drag goes

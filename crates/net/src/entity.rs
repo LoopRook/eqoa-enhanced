@@ -60,10 +60,98 @@ pub struct LiveColors {
     pub variants: [u8; 6],
     /// The robe's, `+0x2BA`.
     pub robe: [u8; 4],
+    /// go-eqoa-server's trim colours per armour slot (chest .. helm), after
+    /// the live game's 201 bytes ([`ARMOR_STATE_SIZE`]) to a client that draws
+    /// its armour; alpha 0 none (all none from every other server).
+    pub trim: [[u8; 4]; 6],
+    /// go-eqoa-server's auras per worn piece (chest, bracer, gloves, legs,
+    /// boots, helm, robe), after the trims ([`AURA_STATE_SIZE`]) to a client
+    /// that draws them ([`crate::session::LIVE_LOOK_AURAS`]), then the
+    /// character's body's ([`BODY_AURA`], [`BODY_AURA_STATE_SIZE`]), then its
+    /// cape's ([`CAPE_AURA`], [`CAPE_AURA_STATE_SIZE`]), then its hands'
+    /// ([`MAIN_HAND_AURA`], [`OFF_HAND_AURA`], [`HAND_AURA_STATE_SIZE`]); all
+    /// none from every other server.
+    pub auras: [PieceAura; AURAS],
+}
+
+/// A worn piece's aura (go-eqoa-server's, [`AURA_STATE_SIZE`]): ten bytes, its
+/// colour (r, g, b, a: the aura's colour is the rgb times the alpha, alpha 0
+/// none), its kind (`crate::npctint::Aura`'s: 0 the default, the shell while
+/// it has a colour; 1 none; 2 shell; 3 particles; 4 both), the u32 DictID of
+/// the item or model whose particle sprite its particles are (0 the Sword of
+/// Virtue's) and the u8 count of nodes they take (0 the default). All zero:
+/// none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct PieceAura {
+    pub color: [u8; 4],
+    pub kind: u8,
+    pub source: u32,
+    pub nodes: u8,
+}
+
+/// The bytes of one piece's aura on the channel.
+pub const PIECE_AURA_SIZE: usize = 10;
+
+/// The live channel with the trims and go-eqoa-server's seven pieces' auras
+/// after them ([`LiveColors::auras`]): 295 bytes, to a client that draws them.
+pub const AURA_STATE_SIZE: usize = ARMOR_STATE_SIZE + 7 * PIECE_AURA_SIZE;
+
+/// The eighth aura: a character's own body and underclothes, under its
+/// armour (go-eqoa-server's charaura slot 7).
+pub const BODY_AURA: usize = 7;
+
+/// The aura channel with the body's aura after the pieces': 305 bytes, to a
+/// client that answered [`crate::session::LIVE_LOOK_BODY`].
+pub const BODY_AURA_STATE_SIZE: usize = AURA_STATE_SIZE + PIECE_AURA_SIZE;
+
+/// The ninth aura: the cape's (go-eqoa-server's charaura slot 8, or the worn
+/// cape item's itemaura; the owner, 2026-11-14: "also cannot apply aura to
+/// capes yet").
+pub const CAPE_AURA: usize = 8;
+
+/// The tenth and eleventh auras: the items held in the main hand and the off
+/// hand (go-eqoa-server's charaura slots 9 and 10; the owner, 2026-11-14:
+/// "give zaeires equipped weapons the necro's tainted aura from the epic
+/// sickle"), of kind [`crate::npctint::Aura::EPIC`] or
+/// [`crate::npctint::Aura::PARTICLES`], drawn on whatever the hand holds (the
+/// off hand's on a shield held there too).
+pub const MAIN_HAND_AURA: usize = 9;
+pub const OFF_HAND_AURA: usize = 10;
+
+/// How many auras a channel carries at most: the seven pieces', the body's,
+/// the cape's and the two hands'.
+pub const AURAS: usize = 11;
+
+/// The body aura channel with the cape's aura after the body's: 315 bytes, to
+/// a client that answered [`crate::session::LIVE_LOOK_CAPE`].
+pub const CAPE_AURA_STATE_SIZE: usize = BODY_AURA_STATE_SIZE + PIECE_AURA_SIZE;
+
+/// The cape's aura channel with the hands' auras after the cape's (the main
+/// hand's, then the off hand's): 335 bytes, to a client that answered
+/// [`crate::session::LIVE_LOOK_HANDS`].
+pub const HAND_AURA_STATE_SIZE: usize = CAPE_AURA_STATE_SIZE + 2 * PIECE_AURA_SIZE;
+
+/// The auras out of `b` (each: r, g, b, a, kind, the source's u32
+/// little-endian, nodes): seven pieces' in its first 70 bytes, the body's in
+/// the next ten, the cape's in the ten after, then the main hand's and the off
+/// hand's (none when `b` is shorter).
+pub fn auras_of(b: &[u8]) -> [PieceAura; AURAS] {
+    std::array::from_fn(|i| {
+        let p = |k: usize| b.get(PIECE_AURA_SIZE * i + k).copied().unwrap_or(0);
+        PieceAura { color: [p(0), p(1), p(2), p(3)], kind: p(4), source: u32::from_le_bytes([p(5), p(6), p(7), p(8)]), nodes: p(9) }
+    })
 }
 
 /// The live game's entity channel: 201 bytes (the disc's 162).
 pub const LIVE_STATE_SIZE: usize = 201;
+/// The live channel with go-eqoa-server's six trim colours after it
+/// ([`LiveColors::trim`]): 225 bytes, to a client that draws its armour.
+pub const ARMOR_STATE_SIZE: usize = LIVE_STATE_SIZE + 24;
+
+/// Six trim colours (r, g, b, a each) out of `b`'s first 24 bytes.
+pub fn trims_of(b: &[u8]) -> [[u8; 4]; 6] {
+    std::array::from_fn(|i| std::array::from_fn(|k| b.get(4 * i + k).copied().unwrap_or(0)))
+}
 
 /// `VICreatureEntity`'s part of the update.
 #[derive(Clone, Debug, Default)]
@@ -357,6 +445,22 @@ impl Entities {
         e.id = id;
         let old_vel = e.creature.as_ref().map(|c| c.velocity);
         e.read_update(&mut r, self.live_look && data.len() >= LIVE_STATE_SIZE);
+        // go-eqoa-server's trims, after the live game's channel
+        if self.live_look && data.len() >= ARMOR_STATE_SIZE
+            && let Some(l) = e.creature.as_mut().and_then(|c| c.colors.as_mut())
+        {
+            l.trim = trims_of(&data[LIVE_STATE_SIZE..ARMOR_STATE_SIZE]);
+            // and the worn pieces' auras after them
+            if data.len() >= HAND_AURA_STATE_SIZE {
+                l.auras = auras_of(&data[ARMOR_STATE_SIZE..HAND_AURA_STATE_SIZE]);
+            } else if data.len() >= CAPE_AURA_STATE_SIZE {
+                l.auras = auras_of(&data[ARMOR_STATE_SIZE..CAPE_AURA_STATE_SIZE]);
+            } else if data.len() >= BODY_AURA_STATE_SIZE {
+                l.auras = auras_of(&data[ARMOR_STATE_SIZE..BODY_AURA_STATE_SIZE]);
+            } else if data.len() >= AURA_STATE_SIZE {
+                l.auras = auras_of(&data[ARMOR_STATE_SIZE..AURA_STATE_SIZE]);
+            }
+        }
         sync(e);
         if created {
             e.vel = [0.0; 3];
@@ -500,6 +604,97 @@ mod tests {
 
         let not_yet = read(&live, false).creature.unwrap();
         assert!(not_yet.colors.is_none() && not_yet.name != "Tinctoria", "the control: before the look is in force, read as the disc's");
+    }
+
+    /// go-eqoa-server's trims after the live channel (225 bytes, to a client
+    /// that draws its armour): read into the colours' `trim`, every other field
+    /// as the 201 bytes alone read; the 201 alone (and the disc's channel) have
+    /// none.
+    #[test]
+    fn the_trims_after_the_live_channel() {
+        let live = unhex(LIVE_DYED);
+        let mut armor = live.clone();
+        for c in [[0xD1, 0, 0, 0xFF], [0; 4], [0; 4], [0x20, 0x50, 0xE0, 0xFF], [0; 4], [0; 4]] {
+            armor.extend(c);
+        }
+        assert_eq!(armor.len(), ARMOR_STATE_SIZE);
+        let read = |data: &[u8]| {
+            let mut e = Entities { live_look: true, ..Default::default() };
+            e.channel(1, data, Some(7), 0, 100, |_| {});
+            e.slots[1].clone().unwrap().creature.unwrap()
+        };
+        let (a, l) = (read(&armor), read(&live));
+        let (ac, lc) = (a.colors.unwrap(), l.colors.unwrap());
+        assert_eq!(ac.trim, [[0xD1, 0, 0, 0xFF], [0; 4], [0; 4], [0x20, 0x50, 0xE0, 0xFF], [0; 4], [0; 4]]);
+        assert_eq!(lc.trim, [[0; 4]; 6], "the live channel alone: no trims");
+        assert_eq!(LiveColors { trim: lc.trim, ..ac }, lc, "every other colour the same");
+        assert_eq!((a.name, a.armor, a.level), (l.name, l.armor, l.level));
+    }
+
+    /// go-eqoa-server's pieces' auras after the trims (295 bytes, to a client
+    /// that draws them): red bracers and a blue breastplate's shells, a
+    /// helm's particles of a source on 2 nodes; every other field as the 225
+    /// bytes read; the 225 (and the 201) have none.
+    #[test]
+    fn the_pieces_auras_after_the_trims() {
+        let mut armor = unhex(LIVE_DYED);
+        armor.extend([0u8; 24]);
+        let mut auras = armor.clone();
+        let piece = |c: [u8; 4], kind: u8, source: u32, nodes: u8| {
+            let mut b = c.to_vec();
+            b.push(kind);
+            b.extend(source.to_le_bytes());
+            b.push(nodes);
+            b
+        };
+        auras.extend(piece([0x30, 0x60, 0xFF, 0xFF], 0, 0, 0));
+        auras.extend(piece([0xFF, 0x20, 0x20, 0xFF], 2, 0, 0));
+        for _ in 0..3 {
+            auras.extend([0u8; PIECE_AURA_SIZE]);
+        }
+        auras.extend(piece([0, 0, 0, 0], 3, 0x88EC_092D, 2));
+        auras.extend([0u8; PIECE_AURA_SIZE]);
+        assert_eq!(auras.len(), AURA_STATE_SIZE);
+        let read = |data: &[u8]| {
+            let mut e = Entities { live_look: true, ..Default::default() };
+            e.channel(1, data, Some(7), 0, 100, |_| {});
+            e.slots[1].clone().unwrap().creature.unwrap()
+        };
+        let (a, b) = (read(&auras), read(&armor));
+        let (ac, bc) = (a.colors.unwrap(), b.colors.unwrap());
+        assert_eq!(ac.auras[0], PieceAura { color: [0x30, 0x60, 0xFF, 0xFF], kind: 0, source: 0, nodes: 0 });
+        assert_eq!(ac.auras[1], PieceAura { color: [0xFF, 0x20, 0x20, 0xFF], kind: 2, source: 0, nodes: 0 });
+        assert_eq!(ac.auras[5], PieceAura { color: [0; 4], kind: 3, source: 0x88EC_092D, nodes: 2 });
+        assert_eq!([ac.auras[2], ac.auras[3], ac.auras[4], ac.auras[6]], [PieceAura::default(); 4]);
+        assert_eq!(bc.auras, [PieceAura::default(); AURAS], "the trims alone: no auras");
+        assert_eq!(ac.auras[BODY_AURA], PieceAura::default(), "the 295 bytes: no body");
+        // the 305 bytes: the body's after the pieces'
+        let mut body = auras.clone();
+        body.extend(piece([0, 0, 0, 0xFF], 2, 0, 0));
+        assert_eq!(body.len(), BODY_AURA_STATE_SIZE);
+        let bdc = read(&body).colors.unwrap();
+        assert_eq!(bdc.auras[BODY_AURA], PieceAura { color: [0, 0, 0, 0xFF], kind: 2, source: 0, nodes: 0 });
+        assert_eq!(bdc.auras[..7], ac.auras[..7], "the pieces' the same");
+        assert_eq!(bdc.auras[CAPE_AURA], PieceAura::default(), "the 305 bytes: no cape");
+        // the 315 bytes: the cape's after the body's
+        let mut cape = body.clone();
+        cape.extend(piece([0xFF, 0x20, 0x20, 0xFF], 5, 0, 0));
+        assert_eq!(cape.len(), CAPE_AURA_STATE_SIZE);
+        let cc = read(&cape).colors.unwrap();
+        assert_eq!(cc.auras[CAPE_AURA], PieceAura { color: [0xFF, 0x20, 0x20, 0xFF], kind: 5, source: 0, nodes: 0 });
+        assert_eq!(cc.auras[..CAPE_AURA], bdc.auras[..CAPE_AURA], "the pieces' and the body's the same");
+        assert_eq!([cc.auras[MAIN_HAND_AURA], cc.auras[OFF_HAND_AURA]], [PieceAura::default(); 2], "the 315 bytes: no hands");
+        // the 335 bytes: the main hand's and the off hand's after the cape's
+        let mut hands = cape.clone();
+        hands.extend(piece([0, 0, 0, 0], 7, 0x5FD4_AE7C, 0));
+        hands.extend(piece([0xFF, 0x20, 0x20, 0xFF], 3, 0x88EC_092D, 0));
+        assert_eq!(hands.len(), HAND_AURA_STATE_SIZE);
+        let hc = read(&hands).colors.unwrap();
+        assert_eq!(hc.auras[MAIN_HAND_AURA], PieceAura { color: [0; 4], kind: 7, source: 0x5FD4_AE7C, nodes: 0 });
+        assert_eq!(hc.auras[OFF_HAND_AURA], PieceAura { color: [0xFF, 0x20, 0x20, 0xFF], kind: 3, source: 0x88EC_092D, nodes: 0 });
+        assert_eq!(hc.auras[..MAIN_HAND_AURA], cc.auras[..MAIN_HAND_AURA], "every aura before the hands' the same");
+        assert_eq!(LiveColors { auras: bc.auras, ..ac }, bc, "every other colour the same");
+        assert_eq!((a.name, a.armor, a.level), (b.name, b.armor, b.level));
     }
 
     /// A slot past the limit is not read (CLIENT's `type < 24` until a server

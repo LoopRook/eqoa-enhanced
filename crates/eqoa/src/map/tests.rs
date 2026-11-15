@@ -720,6 +720,21 @@ fn the_groups_line_names_the_world() {
     assert_eq!(m.group_line(community::Spot { world: 4, at: [1.0, 2.0] }, Some(&words)), None, "a world with no name");
 }
 
+/// In the Plane of Sky the area is the isle (`skyisles`): the group is told
+/// "near Night Chain 1"; off every isle no area. The control: Tunaria's spot
+/// at the same x, z is none (Tunaria's zones are not named here).
+#[test]
+fn the_plane_of_skys_area_is_its_isle() {
+    let mut m = up((1280, 720));
+    let words = vi::strtab::StringTable::parse(b"English\r\nTunaria\r\nPlane of Sky").unwrap();
+    m.names.names[4] = Some(3);
+    let line = m.group_line(community::Spot { world: 4, at: [4160.7, 6404.1] }, Some(&words)).unwrap();
+    assert_eq!(line, "Waypoint in Plane of Sky at x 4161, z 6404 near Night Chain 1");
+    assert_eq!(m.area_of(community::Spot { world: 4, at: [4824.0, 5497.0] }, Some(&words)).as_deref(), Some("Main Isle"));
+    assert_eq!(m.area_of(community::Spot { world: 4, at: [0.0, 0.0] }, Some(&words)), None, "off every isle");
+    assert_eq!(m.area_of(community::Spot { world: 0, at: [4160.7, 6404.1] }, Some(&words)), None, "the control");
+}
+
 /// The waypoints are kept as they change, a line a world, this window's own
 /// (window 2's `waypoints-2.opt`), and read back by a map made later; a
 /// line that does not read is left out. The control: a store that refuses
@@ -1050,4 +1065,27 @@ fn n_suggests_a_spot() {
     none.show();
     none.key(key::L3, true);
     assert_eq!(none.take_suggest(), None, "the control: no view");
+}
+
+/// Map Pointer (petition 1848): on Facing, the default, the player's dart
+/// turns with the walk's heading, as it always did; on Camera with the
+/// camera's, the compass's, so the camera swung while standing still turns
+/// it. The control: the walk facing 0.5 and the camera looking 1.25, so each
+/// choice draws a dart the other would not; the same heading is the same
+/// dart either way. Each window's setting is its own (`settings::client`).
+#[test]
+fn the_map_pointer_follows_the_facing_or_the_camera() {
+    crate::settings::testing::reset(false);
+    let (facing, camera) = (0.5, 1.25);
+    assert_eq!(crate::settings::map_pointer(), Pointer::Facing, "Facing by default");
+    assert_eq!(pointer_heading(facing, camera), facing, "Facing: the walk's heading");
+    // the camera swung while standing still: the dart stays
+    assert_eq!(pointer_heading(facing, -2.0), facing, "Facing: the camera moves nothing");
+    crate::settings::set_client(crate::settings::ClientOptions { map_pointer: Pointer::Camera, ..Default::default() });
+    assert_eq!(pointer_heading(facing, camera), camera, "Camera: the camera's heading");
+    assert_eq!(pointer_heading(facing, -2.0), -2.0, "Camera: the camera swung, the dart turns");
+    assert_ne!(pointer_heading(facing, camera), facing, "the control: the two differ");
+    assert_eq!(pointer_heading(facing, facing), facing, "the same heading either way");
+    crate::settings::testing::reset(false);
+    assert_eq!(pointer_heading(facing, camera), facing, "back to Facing");
 }

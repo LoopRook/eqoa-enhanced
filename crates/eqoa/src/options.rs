@@ -10,8 +10,8 @@
 //! every setting back as it was and applies.
 //!
 //! The client's own on the game's Interface page: Profanity Filter under its
-//! rows (the GM Jibrish's petition 1490), On by default as the game is at
-//! every login; it is the server's filter of what the player hears, told to a
+//! rows (the GM Jibrish's petition 1490), Off, Medium (only racial slurs) or
+//! High (petition 1625), High by default as the game is at every login; it is the server's filter of what the player hears, told to a
 //! server that asks for it (go-eqoa-server's 0x7E60,
 //! `Session::agree_profanity_filter`), taken by Save Changes and put back by
 //! Triangle as an Extended row is.
@@ -19,9 +19,18 @@
 //! The client's own, beside the game's: an Extended row between Sound and
 //! Save Changes (the menu a row longer), its words the client's (no
 //! WORDS.TXT entry). It opens a menu of its own over the options menu, drawn
-//! as that one is: Video, World, Lighting, UI, Controller, Camera, Characters,
-//! Sound, natively Textures, Map, Number Colors and Combat (`CATEGORIES`), each of which opens a page laid out and driven as
-//! the game's pages are, short enough that none scrolls (`PAGE_MOST`):
+//! as that one is, of four groups (the GM Jibrish's petitions 1631 and 1634,
+//! 2026-11-11: `GROUPS`): Graphics (Video, World, Lighting, Characters,
+//! natively Textures), UI (HUD, HUD Layout, Name Plates, Map, Number Colors,
+//! Merc Colors, DPS Meter, Chat), Other (General, Combat, Camera, natively
+//! Sound), Touch Controls (Size & Look, Layout: every row of the touch
+//! screen's pad, the GM Jibcrotwo's petition 2084) and the Multi-boxing
+//! settings. A group opens a menu of its
+//! categories in the place of the groups' (`CATEGORIES`), the Multi-boxing
+//! settings, a group of one, its page at once; each category opens a page laid
+//! out and driven as the game's pages are, short enough that none scrolls
+//! (`PAGE_MOST`). The rows by the categories they were on before the groups
+//! (where a row went since is said in `ALL_CATEGORIES`):
 //! - Video: Display (natively: Window or Full Screen, the window's own as
 //!   F11 and Alt+Enter toggle it, `display`: it changes at once and stays,
 //!   kept with the window's place, and Triangle leaves it), Brightness (a
@@ -74,7 +83,10 @@
 //!   Exact: at eight bits a channel, where many faint puffs pile up into a
 //!   darker mass; here because World's page is full);
 //! - UI: Ability Bars (the game's 2, or 3 or 4: the HUD's quick menus and
-//!   the spell book's slots, `hudmenu`), Update Notices (one setting for
+//!   the spell book's slots, `hudmenu`), Stacked Spell Bars (2026-11-13,
+//!   Jibwiz's ticket 1913, Off by default: On, on a computer, the first two
+//!   bars as two rows of five above the chat box at 95% with no name bar,
+//!   each slot a key on the Controls page; `hudmenu::Stacked`), Update Notices (one setting for
 //!   every window: off, the game never asks to restart into a newer build,
 //!   which starts the next time the game does; `update::asks`, and a page's
 //!   Reload notice, `web/main.js`), Text (Sharp or Smooth: the game's font
@@ -101,7 +113,14 @@
 //!   Opacity (10 to 200% of its own in tens) and Touch Edge (how far in from
 //!   the window's left and right edges it keeps, 0 to 10% of the window's
 //!   shorter side); they took over Touch Pad Size (the whole pad's 50 to 100,
-//!   which an older client.opt's line gives both sizes);
+//!   which an older client.opt's line gives both sizes); and Move Touch Pad
+//!   (Off; On: once the menu is left, the pad's three parts outlined, a
+//!   finger dragging one, two pinching both sizes, a bar with Reset and Done,
+//!   `touch::editing`; kept the moment the fingers lift; not kept itself, a
+//!   mode), Button Layout (Classic, or Bottom: Select and Start low between
+//!   the sticks, `touch::Opts::low_start`, petition 2084) and Reset Touch Pad
+//!   (the sizes, the edge and every move back, by ✕, left or right). Since
+//!   2026-11-14 they are all Touch Controls' (Size & Look, Layout);
 //! - Camera: Camera Distance (a slider: the follow orbit's zoom-out ceiling,
 //!   8 to 50, `camstyle`), Camera Turn Speed (a slider: how fast the stick
 //!   and the keys turn the view, half to three times the game's,
@@ -143,13 +162,21 @@
 //!   click, the minimap, the waypoints on the compass and the group's
 //!   waypoint, `map`; Off: none of them, the game's own), Minimap (On: the
 //!   map round the player under the quick menus, `map::mini`; N turns it
-//!   too), Map Markers (On: the map's XP camps and coaches, `map::markers`;
+//!   too), Map Pointer (Facing: the player's dart on the minimap and the
+//!   map turns with the way the character faces, as it always did; Camera:
+//!   with the way the camera looks, as the compass turns, so swinging the
+//!   camera standing still turns it; petition 1848, Facing by default),
+//!   Minimap Scroll Frame (on HUD Layout's page, Map's being full; On: the minimap framed as the quick menu's
+//!   scroll, its parchment round the map and a roller across its top and
+//!   its bottom, the owner's of 2026-11-13; Off: the window's frame it had
+//!   before, `map::mini::draw_scroll`), Map
+//!   Markers (On: the map's XP camps and coaches, `map::markers`;
 //!   the map's own X or ○ turns it too), Quest Helper (On: the quests' marks
 //!   on the map and the minimap and their tracker, from a server that sends
 //!   them, else the client's own guide, `questguide`, `map::quests`; Off:
 //!   none, and no server asked for them) and Quest Tracker (On: the HUD's
 //!   list of the quests under way, each step counted, under the minimap,
-//!   `tracker`). Each defaults to On; the Map and the Quest Helper Off are
+//!   `tracker`). Each but Map Pointer defaults to On; the Map and the Quest Helper Off are
 //!   the game as it is without them;
 //! - Number Colors (2026-11-09, the server owner's "we can add the number
 //!   colors to extended menu"): Your Damage, Your Procs, Your Heals, Pet
@@ -166,17 +193,36 @@
 //!   the login; the panel's title and `/dps` turn it too) and Reset DPS Meter
 //!   (Reset: the meter cleared and the server's fight under way dropped, by ✕,
 //!   left or right, as Texture Folder opens; `dpsmeter::ask_reset`), the page
-//!   saying when this server keeps no meter;
+//!   saying when this server keeps no meter; Auto-Cast (2026-11-11: On, the
+//!   quick bars' slots marked auto used by the client itself, `autocast`; Off,
+//!   none) and Auto Target (Off by default; On: with no target or a dead one,
+//!   the nearest creature fighting the player targeted);
 //! - Chat (2026-11-10, the GM Jibrish's petition 1463: "This should be off by
 //!   default for ps2 players and a toggle option"): Item Links (On by default:
 //!   items linked from the inventory into the chat line, drawn purple in the
 //!   chat box and opened in a window, `itemlink`, the server asked for them:
 //!   `Session::agree_item_links`; Off: none, the server sends the plain names a
-//!   PS2 gets), the page saying when this server has no links.
-//! Triangle goes back a step: a page to the categories, the categories to
+//!   PS2 gets), the page saying when this server has no links; Chat Always
+//!   Shown (2026-11-13, Jibwiz's ticket 1914, Off by default: On, the chat box
+//!   stays open at its five rows, the last lines in it, never sliding away).
+//! - Multi-boxing settings (2026-11-11, petition 1634): natively Slow When Not
+//!   Focused (Off by default: a window covered or minimised takes its frames
+//!   at its Frame Rate as in front; On: at the game's 30 a second, as every
+//!   window did before; each window's own, as Controller Focus is), then
+//!   Controller Focus, Capture Controller and Sound in Background.
+//! Triangle goes back a step: a page to its group's categories (a lone
+//! category's to the groups), the categories to the groups, the groups to
 //! the options menu. They change as they are moved, Triangle on the options
 //! menu puts them back, and Save Changes keeps them with the game's
 //! (`client.opt`).
+//!
+//! Auto Save Options (Other > General; Waldorf's ticket 2002, 2026-11-13, Off
+//! by default, the game's): On, every step back (a page to the menu, an
+//! Extended page or menu up a step, the Controls and Macros pages) keeps what
+//! was changed as Save Changes does, the game's, the client's and the keys
+//! (`WndOptions::keep`), and Triangle on the options menu saves as Save
+//! Changes' Yes does ("Saving...", then kept and applied) instead of putting
+//! them back. It takes effect from the step back after it is turned.
 //!
 //! The client's own Controls page after it (`bindpage`): every key and
 //! button of the default layout, moved by pressing the one to put there,
@@ -393,8 +439,12 @@ pub struct WndOptions {
     page: i32,
     /// `m_row`: the page's row
     row: i32,
-    /// Extended's: the category whose page is open (`CATEGORIES`), none while
-    /// its menu of categories has the keys; and that menu's row
+    /// Extended's: the group whose menu is open (`GROUPS`), none while its
+    /// first menu, the groups', has the keys; and that menu's row
+    grp: Option<usize>,
+    grp_sel: i32,
+    /// the category whose page is open (its place in `CATEGORIES`), none
+    /// while a menu has the keys; and the group's menu's row
     cat: Option<usize>,
     cat_sel: i32,
     /// In the world, what this server gives (`Play::agree_entity_view` sets
@@ -413,6 +463,8 @@ pub struct WndOptions {
     saved: GameOptions,
     /// the client's own as it opened, put back with them
     saved_client: ClientOptions,
+    /// The Save Changes box carries the account's notice (`settings::ACCOUNT_NOTICE`).
+    notice: bool,
     /// the keys and buttons as it opened, put back with them
     saved_binds: crate::binds::Binds,
     /// the Controls page and the Macros page, and the sounds they made
@@ -428,8 +480,10 @@ pub struct WndOptions {
     window: Window,
     window2: Window,
     window3: Window,
-    /// Extended's menu of categories, drawn as the options menu is, over it
+    /// Extended's menu of groups, drawn as the options menu is, over it; and
+    /// a group's menu of categories, drawn the same, in its place
     window4: Window,
+    window5: Window,
     /// the preview last asked for
     preview: Option<i32>,
     /// what was drawn where, for a pointer: the menu's rows, or Extended's
@@ -463,7 +517,9 @@ impl WndOptions {
         let k = h % HIT_ROWS;
         if h < LABEL {
             // a menu: `Prev`/`Next` start the tick's pulse over
-            if self.page == 3 {
+            if self.page == 3 && self.grp.is_none() {
+                self.grp_sel = k;
+            } else if self.page == 3 {
                 self.cat_sel = k;
             } else {
                 self.sel = k;
@@ -500,11 +556,21 @@ impl WndOptions {
         self.edit = [(o.no_faction == 0) as u8, (o.no_loot == 0) as u8, o.auto_attack, o.vibration];
         self.sel = 0;
         self.page = -1;
+        self.grp = None;
+        self.grp_sel = 0;
         self.cat = None;
         self.cat_sel = 0;
         self.item = -1;
         self.save_count = 0;
-        self.preview = None;
+        // a preview still playing is left for `draw`, which ends it (the
+        // menu's page wants none): forgetting it here kept it playing
+        // (petition 2129)
+    }
+
+    /// The Sound page's preview, if one is playing, let go of: whether it
+    /// was (`Play` then ends it, the window closed under it).
+    pub fn take_preview(&mut self) -> bool {
+        self.preview.take().is_some()
     }
 
     /// The Controls page straight from play (F1, the HUD's "F1 Controls"):
@@ -591,10 +657,10 @@ impl WndOptions {
         if self.message.visible {
             // 307: Yes commits the four held settings and saves
             if self.message.key(key, now, cues) == Some(0) {
-                o.no_faction = (self.edit[0] == 0) as u8;
-                o.no_loot = (self.edit[1] == 0) as u8;
-                o.auto_attack = self.edit[2];
-                o.vibration = self.edit[3];
+                if std::mem::take(&mut self.notice) {
+                    crate::settings::account_notice_seen();
+                }
+                self.take_held(o);
                 self.save_count = 4;
             }
             return;
@@ -605,12 +671,14 @@ impl WndOptions {
         if self.page == 4 {
             if self.controls.key(key, true, now, cues) {
                 self.back(cues);
+                self.keep(o);
             }
             return;
         }
         if self.page == 5 {
             if self.macros.key(key, true, now, cues) {
                 self.back(cues);
+                self.keep(o);
             }
             return;
         }
@@ -622,38 +690,82 @@ impl WndOptions {
             13 | 134 => {
                 if self.select(vui, r, cues) {
                     let w = |id: i32| wide(vui.words.get(id, vui.language));
-                    self.message.setup(vui, r, w(1633), w(1634), 2, CENTER, 300);
+                    // the account's options (petition 1621): said in the box until a Yes
+                    let mut text = w(1634);
+                    self.notice = crate::settings::account_notice_due();
+                    if self.notice {
+                        text.extend(wide(&format!(" {}", crate::settings::ACCOUNT_NOTICE)));
+                    }
+                    self.message.setup(vui, r, w(1633), text, 2, CENTER, 300);
                     self.message.visible = true;
                     self.message.focus(vui, r);
                 }
             }
-            27 | 132
-                if self.back(cues) => {
-                    let s = self.saved;
-                    o.follow = s.follow;
-                    o.inverted = s.inverted;
-                    o.battle = s.battle;
-                    o.stereo = s.stereo;
-                    o.fx_volume = s.fx_volume;
-                    o.music_volume = s.music_volume;
-                    o.compact = s.compact;
-                    o.no_damage = s.no_damage;
-                    crate::settings::set_client(self.saved_client);
-                    crate::settings::set_binds(self.saved_binds.clone());
-                    ups.push(OptionsUp::Volume(0, o.fx_volume));
-                    ups.push(OptionsUp::Volume(1, o.music_volume));
-                    ups.push(OptionsUp::Apply);
-                }
+            // a step back: kept there with Auto Save Options on (`keep`)
+            27 | 132 if !self.back(cues) => self.keep(o),
+            // Triangle on the menu with Auto Save Options on: saved as Save
+            // Changes' Yes saves ("Saving...", then kept and applied), no box
+            27 | 132 if crate::settings::auto_save() => {
+                self.take_held(o);
+                self.save_count = 4;
+            }
+            27 | 132 => {
+                let s = self.saved;
+                o.follow = s.follow;
+                o.inverted = s.inverted;
+                o.battle = s.battle;
+                o.stereo = s.stereo;
+                o.fx_volume = s.fx_volume;
+                o.music_volume = s.music_volume;
+                o.compact = s.compact;
+                o.no_damage = s.no_damage;
+                crate::settings::set_client(self.saved_client);
+                crate::settings::set_binds(self.saved_binds.clone());
+                ups.push(OptionsUp::Volume(0, o.fx_volume));
+                ups.push(OptionsUp::Volume(1, o.music_volume));
+                ups.push(OptionsUp::Apply);
+            }
             _ => {}
         }
+    }
+
+    /// The four settings only Save commits (`m_edit93` .. `m_edit97`) taken
+    /// into the options, as Save Changes' Yes takes them.
+    fn take_held(&self, o: &mut GameOptions) {
+        o.no_faction = (self.edit[0] == 0) as u8;
+        o.no_loot = (self.edit[1] == 0) as u8;
+        o.auto_attack = self.edit[2];
+        o.vibration = self.edit[3];
+    }
+
+    /// A step back (a page to the menu, an Extended page or menu up a step)
+    /// with Auto Save Options on (Waldorf's ticket 2002): everything changed
+    /// kept as Save Changes keeps it (the four held settings taken,
+    /// `settings::save`: game.opt, client.opt and keys.opt), with no box and
+    /// no "Saving...", and what Triangle on the menu would put back made
+    /// what was kept. Off, nothing: the game's, only Save Changes keeps them.
+    fn keep(&mut self, o: &mut GameOptions) {
+        if !crate::settings::auto_save() {
+            return;
+        }
+        self.take_held(o);
+        // nothing changed since the window opened or last kept: nothing written
+        if *o == self.saved && crate::settings::client() == self.saved_client && crate::settings::binds() == self.saved_binds {
+            return;
+        }
+        crate::settings::save(o);
+        self.saved = *o;
+        self.saved_client = crate::settings::client();
+        self.saved_binds = crate::settings::binds();
     }
 
     /// The row up and down move: the options menu's, Extended's
     /// categories', or a page's.
     fn at(&mut self) -> &mut i32 {
-        match (self.page, self.cat) {
-            (-1, _) => &mut self.sel,
-            (3, None) => &mut self.cat_sel,
+        match (self.page, self.grp, self.cat) {
+            (-1, _, _) => &mut self.sel,
+            (3, None, _) => &mut self.grp_sel,
+            (3, Some(_), None) => &mut self.cat_sel,
             _ => &mut self.row,
         }
     }
@@ -674,11 +786,12 @@ impl WndOptions {
     /// menu's Extended and Controls are the client's, and so are Extended's
     /// categories and their pages.
     fn next(&mut self, now: i64, cues: &mut Vec<i32>) {
-        let last = match (self.page, self.cat) {
-            (-1, _) => MENU.len() as i32 - 1,
-            (3, None) => fork_options::pages().len() as i32 - 1,
-            (3, Some(c)) => fork_options::pages()[c].items.len() as i32 - 1,
-            (page, _) => {
+        let last = match (self.page, self.grp, self.cat) {
+            (-1, _, _) => MENU.len() as i32 - 1,
+            (3, None, _) => GROUPS.len() as i32 - 1,
+            (3, Some(g), None) => group_categories(g).len() as i32 - 1,
+            (3, _, Some(c)) => fork_options::pages()[c].items.len() as i32 - 1,
+            (page, _, _) => {
                 let mut last = [2, 3, 3];
                 if FEATURES & 0x100 != 0 {
                     last[1] = 4;
@@ -718,7 +831,9 @@ impl WndOptions {
     /// Smooth; Update Notices (29), Overlapping Names (34, Hide and Show),
     /// Mipmaps (35), Loading Screens (38, Longer and Instant), Texture Packs
     /// (50), Dump Textures (51), the Map (41), Minimap (42), Map Markers (43),
-    /// the Quest Helper (44) and Quest Tracker (45) turn over; Texture Folder (55) shows the
+    /// the Quest Helper (44), Quest Tracker (45) and Minimap Scroll Frame (91)
+    /// turn over, Map Pointer (87)
+    /// between Facing and Camera; Texture Folder (55) shows the
     /// folder (`texpack::open_folder`: sound 8, or 9 with none to show);
     /// Output Device (32) goes round the system default and the devices
     /// listed (`step_output`); Display (33) turns the window over (`display`);
@@ -765,9 +880,11 @@ impl WndOptions {
             // Save Changes as an Extended row is
             PROFANITY => {
                 let mut c = crate::settings::client();
-                c.profanity_filter = !c.profanity_filter;
+                c.profanity_filter = c.profanity_filter.step(d);
                 crate::settings::set_client(c);
             }
+            // Slow When Not Focused: this window's (petition 1634)
+            SLOW_UNFOCUSED => crate::settings::set_slow_unfocused(!crate::settings::slow_unfocused()),
             16 => {
                 let all = Focus::ALL;
                 let at = all.iter().position(|&f| f == crate::settings::focus()).unwrap_or(0);
@@ -802,16 +919,43 @@ impl WndOptions {
                     // Raid List: the server told from the next frame
                     // (`Session::agree_raid_roster`)
                     49 => c.raid_list = !c.raid_list,
+                    // Raid Mercenaries: the raid list's mercs' rows drawn or
+                    // not from the next frame (`Play::raid_rows`)
+                    88 => c.raid_mercs = !c.raid_mercs,
                     // Pet Effects: the server told from the next frame
                     // (`Session::agree_pet_effects`), the row under the pet's
                     // bar drawn or not (`hud`)
                     58 => c.pet_effects = !c.pet_effects,
+                    // Power Bars: the server told from the next frame
+                    // (`Session::agree_power_bars`), the bars drawn or not
+                    // under the group's, the pet's and the raid list's health
+                    86 => c.power_bars = !c.power_bars,
+                    // Buff Window: the server told from the next frame
+                    // (`Session::agree_buffs`), ours or the game's strip
+                    // drawn (`buffwnd`)
+                    83 => c.buff_window = !c.buff_window,
+                    // Quest Markers: the server told from the next frame
+                    // (`Session::agree_head_marks`), the marks drawn or not
+                    // over the NPCs' names (`Play::plates`)
+                    85 => c.head_marks = !c.head_marks,
+                    // Target Level: drawn or not from the next frame
+                    // (`hud::draw_target`)
+                    TARGET_LEVEL => c.target_level = !c.target_level,
+                    // Loading Tips: from the next loading screen (`tips`)
+                    84 => c.loading_tips = !c.loading_tips,
                     // the Map: the map, the minimap and the waypoints from
                     // the next frame (`Play::map_frame`; off, an open map
                     // closes)
                     41 => c.map = !c.map,
                     // Minimap: drawn or not from the next frame (`map::mini`)
                     42 => c.minimap = !c.minimap,
+                    // Map Pointer: the dart on the minimap and the map turned
+                    // with the walk or the camera from the next frame
+                    // (`map::pointer_heading`)
+                    87 => c.map_pointer = c.map_pointer.other(),
+                    // Minimap Scroll Frame: the scroll or the window's frame
+                    // round the minimap from the next frame (`map::mini`)
+                    91 => c.minimap_scroll = !c.minimap_scroll,
                     // Map Markers: the map's camps and coaches from its next
                     // frame (`map::markers`)
                     43 => c.map_markers = !c.map_markers,
@@ -880,9 +1024,10 @@ impl WndOptions {
                     // Number Colors: round Default and the palette, the next
                     // number drawn in it and the server told from the next
                     // frame whether to tag them (`Session::agree_number_tags`)
-                    64..=69 => {
-                        let row = (self.item - 64) as usize;
-                        c.number_colors[row] = crate::numcolor::step(c.number_colors[row], d);
+                    64..=69 | 80 | 81 => {
+                        if let Some(row) = crate::numcolor::row_of_item(self.item) {
+                            c.number_colors[row] = crate::numcolor::step(c.number_colors[row], d);
+                        }
                     }
                     // DPS Meter: the server told from the next frame
                     // (`Session::agree_dps_meter`), the panel drawn or not
@@ -893,6 +1038,49 @@ impl WndOptions {
                     // (`Session::agree_item_links`), the chat box's links drawn
                     // or plain, the windows closed when off (`itemlink`)
                     73 => c.item_links = !c.item_links,
+                    // Chat Always Shown (ticket 1914): the box from the next
+                    // frame (`chat::WndChat::always`)
+                    89 => c.chat_always = !c.chat_always,
+                    // Stacked Spell Bars (ticket 1913): from the next frame
+                    // (`hudmenu::Stacked`)
+                    90 => c.stacked_bars = !c.stacked_bars,
+                    // Spell Bar Opacity (ticket 1953): the stacked bars' frames
+                    // from the next frame (`hudmenu::HudMenus::draw_stacked`)
+                    SPELL_BAR_OPACITY => slide(&mut c.spell_bar_opacity, 0, 100, 10),
+                    // Pets Pass Through (ticket 1977): every creature's capsule
+                    // set again from the next frame (`Play::place_actors`)
+                    PETS_PASS => c.pets_pass = !c.pets_pass,
+                    // Same Shortcuts on Every Character (ticket 1987): the
+                    // account's quick-chat menus from the next frame
+                    // (`Play::sync_shortcuts`)
+                    SHARED_SHORTCUTS => c.shared_shortcuts = !c.shared_shortcuts,
+                    // Auto Save Options (ticket 2002): from the next step
+                    // back (`WndOptions::keep`)
+                    AUTO_SAVE => c.auto_save = !c.auto_save,
+                    // the Chat Tabs rows (ticket 1951): the kind's lines to
+                    // Main or a tab, round Main and the three, from the next
+                    // line (`chat::WndChat::set_tabs`)
+                    item if chat_tab_kind(item).is_some() => {
+                        let k = chat_tab_kind(item).unwrap_or(0);
+                        let n = crate::chat::TABS as i32 + 1;
+                        c.chat_tabs[k] = (c.chat_tabs[k] as i32 + if d < 0 { n - 1 } else { 1 }).rem_euclid(n) as u8;
+                    }
+                    // Auto-Cast and Auto Target (`autocast`): from the next
+                    // game frame
+                    78 => c.auto_cast = !c.auto_cast,
+                    79 => c.auto_target = !c.auto_target,
+                    // Move Touch Pad: the pad's parts dragged and pinched once
+                    // the menu is left (`touch::editing`); a mode, not kept
+                    MOVE_TOUCH => crate::touch::set_editing(!crate::touch::editing()),
+                    // Button Layout: Classic or Bottom, the pad laid out so
+                    // from the next frame
+                    TOUCH_LAYOUT => c.touch_low_start = !c.touch_low_start,
+                    // Reset Touch Pad: the sizes, the edge and every move the
+                    // pad's as it was (kept as the other rows are)
+                    RESET_TOUCH => {
+                        c = c.with_touch_opts(&crate::touch::reset_opts(c.touch_opts()));
+                        cues.push(8);
+                    }
                     // Move HUD: the HUD's pieces dragged once the menu is left
                     // (`hudlayout`); not an option kept, so Triangle leaves it
                     76 => crate::hudlayout::set_unlocked(!crate::hudlayout::unlocked()),
@@ -974,7 +1162,7 @@ impl WndOptions {
             _ => {}
         }
         // (Texture Folder and Reset DPS Meter make their own sound)
-        let inert = (self.item == 26 && cfg!(target_arch = "wasm32")) || self.item == 55 || self.item == 72 || self.item == 77;
+        let inert = (self.item == 26 && cfg!(target_arch = "wasm32")) || self.item == 55 || self.item == 72 || self.item == 77 || self.item == RESET_TOUCH;
         let slides = matches!(self.item, 3 | 4) || slider_at(self.item).is_some();
         if !slides && !inert && ((0..=11).contains(&self.item) || extended(self.item)) {
             cues.push(11);
@@ -1003,12 +1191,26 @@ impl WndOptions {
     /// Extended, over it) and X there a category's page (`page_window`), or
     /// on Save Changes asks (true).
     fn select(&mut self, vui: &Vui, r: &dyn Raster, cues: &mut Vec<i32>) -> bool {
+        if self.page == 3 && self.grp.is_none() {
+            cues.push(8);
+            let g = self.grp_sel.clamp(0, GROUPS.len() as i32 - 1) as usize;
+            self.grp = Some(g);
+            self.cat_sel = 0;
+            match lone_category(g) {
+                // a group of one category: its page at once
+                Some(c) => self.open_category(vui, r, c),
+                None => {
+                    let n = group_categories(g).len();
+                    self.menu_window(vui, r, 5, n, GROUPS[g].1);
+                }
+            }
+            return false;
+        }
         if self.page == 3 && self.cat.is_none() {
             cues.push(8);
-            let c = self.cat_sel.clamp(0, fork_options::pages().len() as i32 - 1) as usize;
-            self.cat = Some(c);
-            self.row = 0;
-            self.page_window(vui, r, fork_options::pages()[c].items.len() as i32 + 3);
+            let cats = group_categories(self.grp.unwrap_or(0));
+            let c = cats[self.cat_sel.clamp(0, cats.len() as i32 - 1) as usize];
+            self.open_category(vui, r, c);
             return false;
         }
         // ✕ on Texture Folder shows it, as left and right do (`change`); on
@@ -1031,6 +1233,18 @@ impl WndOptions {
         if self.page == 3 && self.cat.is_some() && self.item == 77 {
             crate::hudlayout::reset();
             cues.push(8);
+            return false;
+        }
+        // Reset Touch Pad and Move Touch Pad the same (`change`)
+        if self.page == 3 && self.cat.is_some() && self.item == RESET_TOUCH {
+            let c = crate::settings::client();
+            crate::settings::set_client(c.with_touch_opts(&crate::touch::reset_opts(c.touch_opts())));
+            cues.push(8);
+            return false;
+        }
+        if self.page == 3 && self.cat.is_some() && self.item == MOVE_TOUCH {
+            crate::touch::set_editing(!crate::touch::editing());
+            cues.push(11);
             return false;
         }
         if self.page == 3 && self.cat.is_some() && self.item == 76 {
@@ -1057,18 +1271,11 @@ impl WndOptions {
             2 => 7,
             3 => {
                 self.page = 3;
+                self.grp = None;
+                self.grp_sel = 0;
                 self.cat = None;
                 self.cat_sel = 0;
-                // a window as the menu's (`open`), as tall as its categories
-                // and their legend (`CATEGORY_ROWS`), its bottom where the
-                // menu's is: the rows past the menu's nine go up, clear of
-                // the title's own menu under it
-                self.window4.close(true);
-                self.window4.init(vui, r, CENTER, 300, fork_options::category_rows(), 0);
-                self.window4.open(false);
-                self.window4.set_title(Some(&wide(EXTENDED)));
-                let bottom = |w: &Window| w.top_left()[1] + w.size[1];
-                self.window4.center[1] -= bottom(&self.window4) - bottom(&self.window);
+                self.menu_window(vui, r, 4, GROUPS.len(), EXTENDED);
                 return false;
             }
             4 | 5 => {
@@ -1089,6 +1296,28 @@ impl WndOptions {
         self.page = self.sel;
         self.page_window(vui, r, rows);
         false
+    }
+
+    /// One of Extended's menus' windows (4 the groups', 5 a group's
+    /// categories'): as the options menu's (`open`), as tall as its `entries`
+    /// and their legend (`menu_rows`), its bottom where the menu's is: the
+    /// rows past the menu's nine go up, clear of the title's own menu under it.
+    fn menu_window(&mut self, vui: &Vui, r: &dyn Raster, which: u8, entries: usize, title: &str) {
+        let bottom = |w: &Window| w.top_left()[1] + w.size[1];
+        let menu = bottom(&self.window);
+        let w = if which == 4 { &mut self.window4 } else { &mut self.window5 };
+        w.close(true);
+        w.init(vui, r, CENTER, 300, menu_rows(entries), 0);
+        w.open(false);
+        w.set_title(Some(&wide(title)));
+        w.center[1] -= bottom(w) - menu;
+    }
+
+    /// Category `c`'s page open on its first row (`page_window`).
+    fn open_category(&mut self, vui: &Vui, r: &dyn Raster, c: usize) {
+        self.cat = Some(c);
+        self.row = 0;
+        self.page_window(vui, r, fork_options::pages()[c].items.len() as i32 + 3);
     }
 
     /// A page's window, 440 wide and `rows` high, an empty title bar, over
@@ -1113,12 +1342,20 @@ impl WndOptions {
     }
 
     /// `Back`: Triangle on a page goes back to the menu (on a category's,
-    /// to Extended's categories, and from there to the menu); on the menu,
-    /// true to close.
+    /// to its group's categories, from there to Extended's groups, and from
+    /// there to the menu; a lone category's page to the groups); on the
+    /// menu, true to close.
     fn back(&mut self, cues: &mut Vec<i32>) -> bool {
         cues.push(8);
         if self.page == 3 && self.cat.is_some() {
             self.cat = None;
+            if self.grp.is_some_and(|g| lone_category(g).is_some()) {
+                self.grp = None;
+            }
+            return false;
+        }
+        if self.page == 3 && self.grp.is_some() {
+            self.grp = None;
             return false;
         }
         if self.page >= 0 {
@@ -1160,7 +1397,10 @@ impl WndOptions {
             1 => self.draw_interface(vui, r, o),
             2 => self.draw_sound(vui, r, o),
             3 => {
-                self.draw_categories(vui, r);
+                match self.grp {
+                    Some(g) if lone_category(g).is_none() => self.draw_categories(vui, r, g),
+                    _ => self.draw_groups(vui, r),
+                }
                 if let Some(c) = self.cat {
                     self.draw_category(vui, r, c);
                 }
@@ -1284,7 +1524,7 @@ impl WndOptions {
             values.push(on_off(self.edit[3]));
         }
         items.push(PROFANITY);
-        values.push(on_off(crate::settings::profanity_filter() as u8));
+        values.push(Some(wide(crate::settings::profanity_filter().label())));
         self.item = items.get(self.row as usize).copied().unwrap_or(self.item);
         let mut labels = words(vui, &labels);
         labels.push(wide(PROFANITY_LABEL));
@@ -1314,25 +1554,41 @@ impl WndOptions {
         self.back_legend(vui, r, 6);
     }
 
-    /// Extended's menu: its categories, the selected one lit, and the
-    /// legend, laid out as the options menu is (`draw_menu`: a row down, the
-    /// legend two under the last) in a window as its (`select`), over it; its
-    /// rows answer a pointer only while it has the keys (no category's page
-    /// open).
-    fn draw_categories(&mut self, vui: &Vui, r: &mut dyn Raster) {
-        self.window4.draw(vui, r);
-        let width = self.window4.size[0];
-        for (k, c) in fork_options::pages().iter().enumerate() {
-            let on = self.cat_sel == k as i32;
-            let s = if on { format!("|q{}|w", c.name) } else { c.name.to_string() };
-            self.window4.text_box(vui, r, &wide(&s), 40, k as i32 + 1, width - 80, 1, UI_COLORS[on as usize], 8);
-            if self.cat.is_none() {
-                self.hits.push(rows_rect(&self.window4, vui, r, 40, k as i32 + 1, width - 80, 1), k as i32);
+    /// Extended's first menu: its groups (`GROUPS`), the selected one lit,
+    /// and the legend, laid out as the options menu is (`draw_menu`: a row
+    /// down, the legend two under the last) in a window as its (`select`),
+    /// over it; its rows answer a pointer only while it has the keys (no
+    /// group's menu or page open).
+    fn draw_groups(&mut self, vui: &Vui, r: &mut dyn Raster) {
+        let names: Vec<&str> = GROUPS.iter().map(|g| g.1).collect();
+        let (sel, live) = (self.grp_sel, self.grp.is_none());
+        Self::draw_menu_of(vui, r, &mut self.window4, &mut self.hits, &names, sel, live);
+    }
+
+    /// Group `g`'s menu of its categories, as the groups' (`draw_groups`), in
+    /// its place.
+    fn draw_categories(&mut self, vui: &Vui, r: &mut dyn Raster, g: usize) {
+        let names: Vec<&str> = group_categories(g).into_iter().map(|c| fork_options::pages()[c].name).collect();
+        let (sel, live) = (self.cat_sel, self.cat.is_none());
+        Self::draw_menu_of(vui, r, &mut self.window5, &mut self.hits, &names, sel, live);
+    }
+
+    /// One of Extended's menus in `w`: `names` from its first row, `sel` lit,
+    /// a pointer's rows while it has the keys (`live`), the legend two under.
+    fn draw_menu_of(vui: &Vui, r: &mut dyn Raster, w: &mut Window, hits: &mut Hits, names: &[&str], sel: i32, live: bool) {
+        w.draw(vui, r);
+        let width = w.size[0];
+        for (k, name) in names.iter().enumerate() {
+            let on = sel == k as i32;
+            let s = if on { format!("|q{name}|w") } else { name.to_string() };
+            w.text_box(vui, r, &wide(&s), 40, k as i32 + 1, width - 80, 1, UI_COLORS[on as usize], 8);
+            if live {
+                hits.push(rows_rect(w, vui, r, 40, k as i32 + 1, width - 80, 1), k as i32);
             }
         }
-        let w = |id: i32| vui.words.get(id, vui.language);
-        let legend = wide(&format!("|x {}   |t {}", w(212), w(750)));
-        self.window4.text(vui, r, &legend, 40, fork_options::category_legend(), UI_COLORS[0], 0);
+        let words = |id: i32| vui.words.get(id, vui.language);
+        let legend = wide(&format!("|x {}   |t {}", words(212), words(750)));
+        w.text(vui, r, &legend, 40, names.len() as i32 + 2, UI_COLORS[0], 0);
     }
 
     /// A category's page (`CATEGORIES`), laid out as the game's pages are (a
@@ -1400,7 +1656,18 @@ impl WndOptions {
             },
             Note::Meter => self.meter_note.clone().filter(|_| matches!(self.item, 70..=72)),
             Note::Links => self.links_note.clone().filter(|_| self.item == 73),
+            Note::TouchLayout => match self.item {
+                MOVE_TOUCH if crate::touch::editing() => Some("Leave the menu, drag a part, pinch to size".to_string()),
+                TOUCH_LAYOUT => Some("Bottom: Start and Select between the sticks".to_string()),
+                _ => None,
+            },
             Note::Hud => (self.item == 76 && crate::hudlayout::unlocked()).then(|| "Leave the menu and drag the pieces".to_string()),
+            Note::ChatTabs => Some("Name a tab in chat: /tabname 1 Loot".to_string()),
+            Note::Shortcuts => match self.item {
+                SHARED_SHORTCUTS => Some("L2's menus on every character of the account".to_string()),
+                AUTO_SAVE => Some("Back saves your changes".to_string()),
+                _ => None,
+            },
             Note::None => None,
         }
     }
@@ -1461,7 +1728,7 @@ const CENTER: [i32; 2] = [320, 246];
 /// Extended's rows, by the item each changes (`change`), and their labels.
 /// A row is drawn by its item (`value_text`, or `slider_at` for a slider)
 /// and shown on the page of the category that lists it (`CATEGORIES`).
-const EXTENDED_ITEMS: [(i32, &str); 61] = [
+const EXTENDED_ITEMS: [(i32, &str); 93] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1523,7 +1790,70 @@ const EXTENDED_ITEMS: [(i32, &str); 61] = [
     (73, "Item Links"),
     (76, "Move HUD"),
     (77, "Reset HUD"),
+    (78, "Auto-Cast"),
+    (79, "Auto Target"),
+    (80, crate::numcolor::LABELS[6]),
+    (81, crate::numcolor::LABELS[7]),
+    (SLOW_UNFOCUSED, "Slow When Not Focused"),
+    (83, "Buff Window"),
+    (84, "Loading Tips"),
+    (85, "Quest Markers"),
+    (86, "Power Bars"),
+    (87, "Map Pointer"),
+    (88, "Raid Mercenaries"),
+    (89, "Chat Always Shown"),
+    (90, "Stacked Spell Bars"),
+    (91, "Minimap Scroll Frame"),
+    (92, "Say"),
+    (93, "Tells"),
+    (94, "Group"),
+    (95, "Guild"),
+    (96, "Shouts"),
+    (97, "Combat"),
+    (98, "Loot"),
+    (99, "Rolls"),
+    (100, "Experience"),
+    (101, "System"),
+    (SPELL_BAR_OPACITY, "Spell Bar Opacity"),
+    (PETS_PASS, "Pets Pass Through"),
+    (SHARED_SHORTCUTS, "Same Shortcuts"),
+    (AUTO_SAVE, "Auto Save Options"),
+    (MOVE_TOUCH, "Move Touch Pad"),
+    (RESET_TOUCH, "Reset Touch Pad"),
+    (TOUCH_LAYOUT, "Button Layout"),
+    (TARGET_LEVEL, "Target Level"),
 ];
+
+/// The Chat Tabs rows' first item (ticket 1951): one a kind of line, in
+/// `chat::Kind::ALL`'s order, 92 to 101.
+const CHAT_TAB_FIRST: i32 = 92;
+
+/// The kind (`chat::Kind::ALL`'s index) a Chat Tabs row sends to a tab.
+fn chat_tab_kind(item: i32) -> Option<usize> {
+    usize::try_from(item - CHAT_TAB_FIRST).ok().filter(|&k| k < crate::chat::KINDS)
+}
+
+/// Spell Bar Opacity's item (Jibwiz's ticket 1953).
+const SPELL_BAR_OPACITY: i32 = 102;
+/// Pets Pass Through's item (Thorinoak's ticket 1977).
+const PETS_PASS: i32 = 103;
+/// Same Shortcuts on Every Character's item (Piedpiper's ticket 1987).
+const SHARED_SHORTCUTS: i32 = 104;
+/// Auto Save Options' item (Waldorf's ticket 2002).
+const AUTO_SAVE: i32 = 105;
+/// Move Touch Pad's, Reset Touch Pad's and Button Layout's items (the server
+/// owner's of 2026-11-14, "the apk client cant resize or move touch pad
+/// display"; the GM Jibcrotwo's petition 2084).
+const MOVE_TOUCH: i32 = 106;
+const RESET_TOUCH: i32 = 107;
+const TOUCH_LAYOUT: i32 = 108;
+/// Target Level's item (Live petition 5130). 120, not the next free, is this
+/// lane's (sibling lanes may take 109 onwards).
+const TARGET_LEVEL: i32 = 120;
+
+/// Slow When Not Focused's item (the GM Jibrish's petition 1634; natively:
+/// a page's pace in the back is the browser's).
+const SLOW_UNFOCUSED: i32 = 82;
 
 /// What a category's page says beside its Back legend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1556,68 +1886,128 @@ enum Note {
     Links,
     /// how the HUD's pieces move while Move HUD is on and chosen (`hudlayout`)
     Hud,
+    /// how a chat tab is named (`/tabname`), on the Chat Tabs pages
+    ChatTabs,
+    /// how the touch pad is moved while Move Touch Pad is on and chosen, and
+    /// where Button Layout's Bottom puts Select and Start while it is chosen
+    TouchLayout,
+    /// what Same Shortcuts does, while it is chosen
+    Shortcuts,
 }
 
 /// One of Extended's categories: its name, its rows (their items, in the
-/// page's order) and its note.
+/// page's order), its note, and the group whose menu lists it (`Group`).
 #[derive(Clone, Copy)]
 struct Category {
     name: &'static str,
     items: &'static [i32],
     note: Note,
+    group: Group,
 }
 
-/// Extended's categories, in its menu's order (the user's: "Extended, then
-/// Video, UI, Controller, etc."), each a page of `PAGE_MOST` rows at most;
-/// Lighting after World (2026-11-08: Dynamic Lighting, the world's light,
-/// and Ambient Occlusion);
-/// natively Textures (2026-11-08: Texture Packs and Dump Textures, a
-/// folder's files a page cannot reach; 2026-11-09: Texture Folder); Map last
-/// (2026-11-09: the map and the quest helper, the client's own, back from
-/// before 2026-10-27); Number Colors after it (2026-11-09: the floating
-/// numbers' colours by what made them, `numcolor`); Combat last (2026-11-10:
-/// the DPS meter, `dpsmeter`); HUD Layout last (2026-11-11: Move HUD and
-/// Reset HUD, `hudlayout`; UI's page was full).
-const ALL_CATEGORIES: [Category; 14] = [
-    Category { name: "Video", items: VIDEO, note: Note::Scale },
-    Category { name: "World", items: &[20, 35, 36, 37, 47, 25], note: Note::None },
-    Category { name: "Lighting", items: &[52, 53, 56, 57, 54, 63], note: Note::Lighting },
-    Category { name: "UI", items: &[22, 29, 30, 40, 49, 58], note: Note::None },
-    Category { name: "Controller", items: &[16, 19, 59, 60, 61, 62], note: Note::Reads },
-    Category { name: "Camera", items: &[15, 17, 18], note: Note::None },
-    Category { name: "Characters", items: &[12, 23, 24, 27, 34, 46], note: Note::Server },
-    Category { name: "Sound", items: SOUND, note: Note::Output },
-    Category { name: "Textures", items: TEXTURES, note: Note::Textures },
-    Category { name: "Map", items: &[41, 42, 43, 44, 45], note: Note::None },
-    Category { name: "Number Colors", items: &crate::numcolor::ITEMS, note: Note::None },
-    Category { name: "Combat", items: &[70, 71, 72], note: Note::Meter },
-    Category { name: "Chat", items: &[73], note: Note::Links },
-    Category { name: "HUD Layout", items: &[76, 77], note: Note::Hud },
+/// Extended's first menu (the GM Jibrish's petitions 1631, "when they open
+/// extended they see 3 options, graphics, UI and other", and 1634, a
+/// "Multi-boxing settings" folder off it): each opens a menu of its
+/// categories, a group of one category its page at once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Group {
+    /// how the world is drawn
+    Graphics,
+    /// the HUD, the windows, the words and the figures drawn over the world
+    Ui,
+    /// the rest: input, camera, sound, play's own helpers, the client itself
+    Other,
+    /// what a window of several keeps for itself or shares with the others
+    Multibox,
+    /// the touch screen's pad (petition 2084: "Move all of the mobile / cell
+    /// phone specific controls into its own category under the extended menu")
+    Touch,
+}
+
+/// The groups in their menu's order, and their names.
+const GROUPS: [(Group, &str); 5] = [(Group::Graphics, "Graphics"), (Group::Ui, "UI"), (Group::Other, "Other"), (Group::Touch, "Touch Controls"), (Group::Multibox, "Multi-boxing settings")];
+
+/// Extended's categories, each a page of `PAGE_MOST` rows at most, listed
+/// in its group's menu in this order (2026-11-11, petition 1631: the fifteen
+/// categories of one menu put in three; Characters' name plate rows became
+/// UI's Name Plates, Combat's meter UI's DPS Meter, UI's Update Notices and
+/// Video's Loading Screens Other's General; petition 1634: Controller Focus,
+/// Capture Controller and Sound in Background the Multi-boxing settings',
+/// Controller's touch rows Other's Touch; petition 2084, 2026-11-14: Touch a
+/// group of its own, Touch Controls, its rows Size & Look and Layout).
+const ALL_CATEGORIES: [Category; 23] = [
+    Category { name: "Video", items: VIDEO, note: Note::Scale, group: Group::Graphics },
+    Category { name: "World", items: &[20, 35, 36, 37, 47, 25], note: Note::None, group: Group::Graphics },
+    Category { name: "Lighting", items: &[52, 53, 56, 57, 54, 63], note: Note::Lighting, group: Group::Graphics },
+    Category { name: "Characters", items: &[12, 23, 24, 46], note: Note::Server, group: Group::Graphics },
+    Category { name: "Textures", items: TEXTURES, note: Note::Textures, group: Group::Graphics },
+    Category { name: "HUD", items: &[22, 90, 30, 40, 58, 83], note: Note::None, group: Group::Ui },
+    // the group's and the raid's windows (2026-11-12, Power Bars: HUD's page
+    // was full, so Raid List came with it)
+    Category { name: "Group & Raid", items: &[49, 86, 88], note: Note::None, group: Group::Ui },
+    // Minimap Scroll Frame (2026-11-13) here: Map's page was full
+    // Spell Bar Opacity (2026-11-13, ticket 1953) here: HUD's page is full
+    Category { name: "HUD Layout", items: &[76, 77, 91, SPELL_BAR_OPACITY], note: Note::Hud, group: Group::Ui },
+    Category { name: "Name Plates", items: &[27, 34, 85, TARGET_LEVEL], note: Note::None, group: Group::Ui },
+    Category { name: "Map", items: &[41, 42, 87, 43, 44, 45], note: Note::None, group: Group::Ui },
+    Category { name: "Number Colors", items: &crate::numcolor::NUMBER_ITEMS, note: Note::None, group: Group::Ui },
+    Category { name: "Merc Colors", items: &crate::numcolor::MERC_ITEMS, note: Note::None, group: Group::Ui },
+    Category { name: "DPS Meter", items: &[70, 71, 72], note: Note::Meter, group: Group::Ui },
+    Category { name: "Chat", items: &[73, 89], note: Note::Links, group: Group::Ui },
+    Category { name: "General", items: &[29, 38, 84, SHARED_SHORTCUTS, AUTO_SAVE], note: Note::Shortcuts, group: Group::Other },
+    Category { name: "Combat", items: &[78, 79, PETS_PASS], note: Note::None, group: Group::Other },
+    Category { name: "Camera", items: &[15, 17, 18], note: Note::None, group: Group::Other },
+    Category { name: "Size & Look", items: &[59, 60, 61, 62], note: Note::Reads, group: Group::Touch },
+    Category { name: "Sound", items: &[32], note: Note::Output, group: Group::Other },
+    Category { name: "Multi-boxing settings", items: MULTIBOX, note: Note::Reads, group: Group::Multibox },
+    // the chat tabs (2026-11-13, Jibwiz's ticket 1951): each kind of line to
+    // Main or a tab of its own, the talk on one page and the game's on another
+    Category { name: "Chat Tabs: Talk", items: &[92, 93, 94, 95, 96], note: Note::ChatTabs, group: Group::Ui },
+    Category { name: "Chat Tabs: Game", items: &[97, 98, 99, 100, 101], note: Note::ChatTabs, group: Group::Ui },
+    // the touch pad's place and buttons (2026-11-14: Move Touch Pad, Button
+    // Layout, petition 2084), its sizes' page full
+    Category { name: "Layout", items: &[MOVE_TOUCH, TOUCH_LAYOUT, RESET_TOUCH], note: Note::TouchLayout, group: Group::Touch },
 ];
 #[cfg(not(target_arch = "wasm32"))]
 const CATEGORIES: &[Category] = &ALL_CATEGORIES;
-/// A page's: all but Textures.
+/// A page's: all but Textures and Sound (Output Device, its one row, is the
+/// browser's).
 #[cfg(target_arch = "wasm32")]
 const CATEGORIES: &[Category] = &{
     let a = ALL_CATEGORIES;
-    [a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9], a[10], a[11], a[12], a[13]]
+    [a[0], a[1], a[2], a[3], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16], a[17], a[19], a[20], a[21], a[22]]
 };
+
+/// The categories group `g` lists, by their place in `CATEGORIES`.
+fn group_categories(g: usize) -> Vec<usize> {
+    let group = GROUPS[g].0;
+    fork_options::pages().iter().enumerate().filter(|(_, c)| c.group == group).map(|(k, _)| k).collect()
+}
+
+/// The group `g`'s one category when it has only one, its page opened from
+/// the groups' menu at once.
+fn lone_category(g: usize) -> Option<usize> {
+    let cats = group_categories(g);
+    (cats.len() == 1).then(|| cats[0])
+}
 
 /// Video's rows: natively Display first (F3 20261024-201507: full screen was
 /// F11's alone); a page's full screen is the browser's. Fog and Mipmaps went
-/// to World with Art (the user's, 2026-10-25); Loading Screens came from UI,
-/// and Text went back to UI beside HUD when Render Scale came (2026-10-27).
+/// to World with Art (the user's, 2026-10-25); Text went back to UI beside
+/// HUD when Render Scale came (2026-10-27); Loading Screens to Other's
+/// General (2026-11-11).
 #[cfg(not(target_arch = "wasm32"))]
-const VIDEO: &[i32] = &[33, 13, 14, 26, 39, 38];
+const VIDEO: &[i32] = &[33, 13, 14, 26, 39];
 #[cfg(target_arch = "wasm32")]
-const VIDEO: &[i32] = &[13, 14, 26, 39, 38];
+const VIDEO: &[i32] = &[13, 14, 26, 39];
 
-/// Sound's rows: natively Output Device after Sound in Background; a page
-/// plays where the browser does.
+/// The Multi-boxing settings' rows: natively Slow When Not Focused first (a
+/// page's pace in the back is the browser's), then Controller Focus, Capture
+/// Controller and Sound in Background.
 #[cfg(not(target_arch = "wasm32"))]
-const SOUND: &[i32] = &[21, 32];
+const MULTIBOX: &[i32] = &[SLOW_UNFOCUSED, 16, 19, 21];
 #[cfg(target_arch = "wasm32")]
-const SOUND: &[i32] = &[21];
+const MULTIBOX: &[i32] = &[16, 19, 21];
 
 /// Textures' rows (natively; a page has none): on a computer Texture Folder
 /// after Texture Packs and Dump Textures, showing the folder beside the
@@ -1628,13 +2018,38 @@ const TEXTURES: &[i32] = &[50, 51, 55];
 #[cfg(target_os = "android")]
 const TEXTURES: &[i32] = &[50, 51];
 
-/// Extended's menu (`draw_categories`): the categories from its first row,
-/// the legend two under the last, as the options menu's six and its legend
-/// on its eighth row of nine (`draw_menu`), the window as tall as they are
-/// (F3 20261026-135758: a category drawn on the menu's legend row).
-const CATEGORY_LEGEND: i32 = CATEGORIES.len() as i32 + 2;
-#[allow(dead_code)] // the runtime window uses the fork's appended pages instead
-const CATEGORY_ROWS: i32 = CATEGORY_LEGEND + 1;
+/// The most a menu of Extended's lists (a group's categories): its rows and
+/// legend as tall as the fifteen categories' one menu was, which fit.
+const MENU_MOST: usize = 15;
+
+/// Whether every group's menu holds its categories (`MENU_MOST`).
+const fn menus_fit(cats: &[Category]) -> bool {
+    let mut g = 0;
+    while g < GROUPS.len() {
+        let (mut i, mut n) = (0, 0);
+        while i < cats.len() {
+            if cats[i].group as u8 == GROUPS[g].0 as u8 {
+                n += 1;
+            }
+            i += 1;
+        }
+        if n == 0 || n > MENU_MOST {
+            return false;
+        }
+        g += 1;
+    }
+    true
+}
+
+const _: () = assert!(menus_fit(CATEGORIES), "a group's menu would be empty or too tall");
+
+/// Extended's menus (`draw_groups`, `draw_categories`): the entries from the
+/// first row, the legend two under the last, as the options menu's six and
+/// its legend on its eighth row of nine (`draw_menu`), the window as tall as
+/// they are (F3 20261026-135758: a category drawn on the menu's legend row).
+const fn menu_rows(entries: usize) -> i32 {
+    entries as i32 + 3
+}
 
 /// The most rows a category's page holds: six and the legend are as tall as
 /// nine rows, the most the options window has room for (`page_window`), so
@@ -1684,6 +2099,7 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         18 => on_off(c.screen_shake),
         19 => on_off(c.capture),
         21 => on_off(c.background_sound),
+        SLOW_UNFOCUSED => on_off(c.slow_unfocused[crate::multibox::place()]),
         22 => wide(&c.ability_bars.to_string()),
         25 => wide(match c.art {
             esf::Era::Frontiers => "Frontiers",
@@ -1693,12 +2109,20 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         29 => on_off(c.update_notices),
         41 => on_off(c.map),
         42 => on_off(c.minimap),
+        87 => wide(c.map_pointer.name()),
+        91 => on_off(c.minimap_scroll),
         43 => on_off(c.map_markers),
         44 => on_off(c.quest_helper),
         45 => on_off(c.quest_tracker),
         34 => wide(if c.overlapping_names { "Show" } else { "Hide" }),
         49 => on_off(c.raid_list),
         58 => on_off(c.pet_effects),
+        86 => on_off(c.power_bars),
+        88 => wide(if c.raid_mercs { "Shown" } else { "Hidden" }),
+        83 => on_off(c.buff_window),
+        85 => on_off(c.head_marks),
+        TARGET_LEVEL => on_off(c.target_level),
+        84 => on_off(c.loading_tips),
         50 => on_off(c.texture_packs),
         51 => on_off(c.dump_textures),
         55 => wide("Open"),
@@ -1711,13 +2135,32 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         56 => on_off(c.light_shadows),
         54 => on_off(c.ambient_occlusion),
         63 => wide(if c.ps2_particles { "PS2" } else { "Exact" }),
-        64..=69 => wide(crate::numcolor::name(c.number_colors[(item - 64) as usize])),
+        64..=69 | 80 | 81 => wide(crate::numcolor::name(c.number_colors[crate::numcolor::row_of_item(item)?])),
         70 => on_off(c.dps_meter),
         71 => wide(c.dps_view.name()),
         72 => wide("Reset"),
         76 => on_off(crate::hudlayout::unlocked()),
+        MOVE_TOUCH => on_off(crate::touch::editing()),
+        RESET_TOUCH => wide("Reset"),
+        TOUCH_LAYOUT => wide(if c.touch_low_start { "Bottom" } else { "Classic" }),
         77 => wide("Reset"),
         73 => on_off(c.item_links),
+        89 => on_off(c.chat_always),
+        PETS_PASS => on_off(c.pets_pass),
+        SHARED_SHORTCUTS => on_off(c.shared_shortcuts),
+        AUTO_SAVE => on_off(c.auto_save),
+        item if chat_tab_kind(item).is_some() => {
+            let t = c.chat_tabs[chat_tab_kind(item).unwrap_or(0)] as usize;
+            if t == 0 {
+                wide("Main")
+            } else {
+                let own = crate::chat::tab_name_text(&c.chat_tab_names[t - 1]);
+                wide(&if own.is_empty() { format!("Tab {t}") } else { format!("{t}: {own}") })
+            }
+        }
+        90 => on_off(c.stacked_bars),
+        78 => on_off(c.auto_cast),
+        79 => on_off(c.auto_target),
         52 => on_off(c.dynamic_lighting),
         38 => wide(if c.loading_longer { "Longer" } else { "Instant" }),
         39 => wide(&format!("x{}", c.render_scale)),
@@ -1738,7 +2181,7 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
 /// The colour an Extended row's value is drawn in, none for the windows'
 /// own: a Number Colors row's colour (Default none).
 fn value_paint(item: i32) -> Option<[f32; 4]> {
-    let row = crate::numcolor::ITEMS.iter().position(|&i| i == item)?;
+    let row = crate::numcolor::row_of_item(item)?;
     crate::numcolor::swatch(crate::settings::client().number_colors[row])
 }
 
@@ -1784,6 +2227,7 @@ fn slider_at(item: i32) -> Option<(f32, Option<u16>)> {
         61 => (at(c.touch_opacity as f32, TOUCH_OPACITY_MIN as f32, TOUCH_OPACITY_MAX as f32), Some(c.touch_opacity as u16)),
         62 => (c.touch_edge as f32 / TOUCH_EDGE_MAX as f32, Some(c.touch_edge as u16)),
         57 => (at(c.shadow_distance as f32, SHADOW_DISTANCE_GAME as f32, SHADOW_DISTANCE_MAX as f32), Some(c.shadow_distance)),
+        SPELL_BAR_OPACITY => (c.spell_bar_opacity as f32 / 100.0, Some(c.spell_bar_opacity as u16)),
         _ => return None,
     })
 }
@@ -1838,10 +2282,43 @@ mod tests {
         assert_eq!((o.stereo, o.follow, o.vibration, o.no_loot), (1, 0, 1, 0));
     }
 
+    /// The Sound page previews the Battle Music choice until the page is
+    /// left; the window opened again over a preview still playing (petition
+    /// 2129: closed under it) ends it at its first draw, where `open` used to
+    /// forget it with the track playing. The control: on the page, drawn
+    /// again, nothing more is asked.
+    #[test]
+    fn opening_the_window_ends_a_preview_left_playing() {
+        use crate::pointer::key;
+        use crate::pointer::testing::{NullRaster, vui};
+        crate::settings::testing::reset(false);
+        let vui = vui();
+        let mut r = NullRaster;
+        let mut o = GameOptions { battle: 3, ..Default::default() };
+        let mut w = WndOptions::default();
+        let (mut cues, mut ups) = (Vec::new(), Vec::new());
+        w.open(&vui, &r, &o);
+        w.sel = 2;
+        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+        assert_eq!(w.page, 2, "the Sound page");
+        ups.clear();
+        w.draw(&vui, &mut r, &o, &mut ups);
+        assert_eq!(ups, vec![OptionsUp::Preview(3)]);
+        ups.clear();
+        w.draw(&vui, &mut r, &o, &mut ups);
+        assert!(ups.is_empty(), "the control: still on the page, nothing more: {ups:?}");
+        // closed under it (a teleport's mode 0), then opened again
+        w.open(&vui, &r, &o);
+        w.draw(&vui, &mut r, &o, &mut ups);
+        assert_eq!(ups, vec![OptionsUp::PreviewEnd], "ended, not forgotten");
+        assert!(!w.take_preview());
+    }
+
     /// The Interface page's last row is the client's Profanity Filter (petition
-    /// 1490): down to it past the game's five, right turns it off in the
-    /// client's settings (what Play tells the server), Triangle on the menu puts
-    /// it back on. The control: the row above it (Vibration) leaves it alone.
+    /// 1490): down to it past the game's five, right steps it High -> Off ->
+    /// Medium in the client's settings (what Play tells the server; petition
+    /// 1625's tiers), left back, Triangle on the menu puts it back to High. The
+    /// control: the row above it (Vibration) leaves it alone.
     #[test]
     fn the_interface_page_turns_the_profanity_filter() {
         use crate::pointer::key;
@@ -1862,17 +2339,25 @@ mod tests {
         w.draw(&vui, &mut r, &o, &mut ups);
         assert_eq!(w.item, 11, "Vibration");
         w.key(&vui, &mut r, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
-        assert!(crate::settings::profanity_filter(), "the control: Vibration is not it");
+        use crate::settings::Profanity;
+        assert_eq!(crate::settings::profanity_filter(), Profanity::High, "the control: Vibration is not it");
         w.key(&vui, &mut r, &mut o, key::DOWN, 0, &mut cues, &mut ups);
         w.key(&vui, &mut r, &mut o, key::DOWN, 0, &mut cues, &mut ups);
         w.draw(&vui, &mut r, &o, &mut ups);
         assert_eq!((w.row, w.item), (5, PROFANITY), "the last row, and no row past it");
         w.key(&vui, &mut r, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
-        assert!(!crate::settings::profanity_filter(), "turned off");
+        assert_eq!(crate::settings::profanity_filter(), Profanity::Off, "turned off");
+        w.key(&vui, &mut r, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
+        assert_eq!(crate::settings::profanity_filter(), Profanity::Medium, "Medium");
+        w.key(&vui, &mut r, &mut o, key::LEFT, 0, &mut cues, &mut ups);
+        w.key(&vui, &mut r, &mut o, key::LEFT, 0, &mut cues, &mut ups);
+        assert_eq!(crate::settings::profanity_filter(), Profanity::High, "left back round to High");
+        w.key(&vui, &mut r, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
+        w.key(&vui, &mut r, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
         // Triangle to the menu, Triangle there: every setting as it was
         w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
         w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
-        assert!(crate::settings::profanity_filter(), "put back on");
+        assert_eq!(crate::settings::profanity_filter(), Profanity::High, "put back to High");
         crate::settings::testing::reset(false);
     }
 
@@ -2002,6 +2487,46 @@ mod tests {
     /// round from the platform's; Triangle on the menu puts them back; Save
     /// Changes keeps them, and the game's, where nothing was kept before (the
     /// control).
+    /// The keys from where `w` is on Extended to `item`'s row: back to the
+    /// groups' menu, to its group and in, to its category and in (a lone
+    /// category's page opens with its group), down to its row.
+    fn path_to(w: &WndOptions, item: i32) -> Vec<i32> {
+        let c = CATEGORIES.iter().position(|c| c.items.contains(&item)).expect("a listed row");
+        let g = GROUPS.iter().position(|g| g.0 == CATEGORIES[c].group).unwrap();
+        let mut keys = Vec::new();
+        if w.cat.is_some() {
+            keys.push(key::TRIANGLE);
+            if w.grp.is_some_and(|g| lone_category(g).is_none()) {
+                keys.push(key::TRIANGLE);
+            }
+        } else if w.grp.is_some() {
+            keys.push(key::TRIANGLE);
+        }
+        let d = g as i32 - w.grp_sel;
+        keys.extend(std::iter::repeat_n(if d < 0 { key::UP } else { key::DOWN }, d.unsigned_abs() as usize));
+        keys.push(key::CROSS);
+        if lone_category(g).is_none() {
+            let at = group_categories(g).iter().position(|&k| k == c).unwrap();
+            keys.extend(std::iter::repeat_n(key::DOWN, at));
+            keys.push(key::CROSS);
+        }
+        let row = CATEGORIES[c].items.iter().position(|&i| i == item).unwrap();
+        keys.extend(std::iter::repeat_n(key::DOWN, row));
+        keys
+    }
+
+    /// Category `name`'s page opened by the keys from where `w` is on
+    /// Extended (`path_to` its first row), drawn.
+    fn go(w: &mut WndOptions, vui: &Vui, o: &mut GameOptions, name: &str) {
+        use crate::pointer::testing::NullRaster;
+        let c = CATEGORIES.iter().position(|c| c.name == name).expect("a category");
+        for k in path_to(w, CATEGORIES[c].items[0]) {
+            w.key(vui, &mut NullRaster, o, k, 0, &mut Vec::new(), &mut Vec::new());
+            w.draw(vui, &mut NullRaster, o, &mut Vec::new());
+        }
+        assert_eq!((w.cat, w.row), (Some(c), 0), "{name}'s page");
+    }
+
     #[test]
     fn the_extended_pages() {
         use crate::pointer::testing::{NullRaster, vui};
@@ -2016,18 +2541,31 @@ mod tests {
             w.key(&vui, &mut r, o, k, 0, cues, &mut ups);
             w.draw(&vui, &mut NullRaster, o, &mut ups);
         };
+        // each row reached by the keys, the way the menus go (`path_to`)
+        macro_rules! goto {
+            ($item:expr) => {
+                for k in path_to(&w, $item) {
+                    press(&mut w, &mut o, k, &mut cues);
+                }
+            };
+        }
         w.open(&vui, &NullRaster, &o);
         w.draw(&vui, &mut NullRaster, &o, &mut Vec::new());
         for k in [key::DOWN, key::DOWN, key::DOWN, key::CROSS] {
             press(&mut w, &mut o, k, &mut cues);
         }
-        assert_eq!((w.sel, w.page, w.cat, w.cat_sel, w.item), (3, 3, None, 0, -1), "Extended's categories, Video lit");
+        assert_eq!((w.sel, w.page, w.grp, w.grp_sel, w.cat, w.item), (3, 3, None, 0, None, -1), "Extended's groups, Graphics lit");
         cues.clear();
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert!(cues.is_empty(), "left and right are nothing on the categories: {cues:?}");
+        assert!(cues.is_empty(), "left and right are nothing on the groups: {cues:?}");
+        press(&mut w, &mut o, key::CROSS, &mut cues);
+        assert_eq!((w.grp, w.cat, w.cat_sel, w.item), (Some(0), None, 0, -1), "Graphics' categories, Video lit");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert_eq!(cues, [8], "left and right are nothing on the categories");
         assert_eq!(settings::client(), settings::ClientOptions::default());
-        // Video: Display, Brightness, Frame Rate, VSync, Render Scale, Loading Screens
+        // Video: Display, Brightness, Frame Rate, VSync, Render Scale
         press(&mut w, &mut o, key::CROSS, &mut cues);
         assert_eq!((w.page, w.cat, w.row, w.item), (3, Some(0), 0, 33), "Video, on Display");
         assert_eq!(cues.last(), Some(&8));
@@ -2041,14 +2579,14 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!((crate::display::full(), crate::display::take()), (false, Some(false)), "and back: a window");
         crate::display::seen(false);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(13);
         assert_eq!(w.item, 13, "Brightness");
         for _ in 0..6 {
             press(&mut w, &mut o, key::RIGHT, &mut cues);
         }
         assert_eq!(settings::client().brightness, 10);
         assert_eq!(&cues[cues.len() - 2..], &[11, 9], "the last step, then its end");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(14);
         assert_eq!(w.item, 14, "Frame Rate");
         assert_eq!(settings::frame_rate(), FrameRate::Display, "the platform's");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
@@ -2056,7 +2594,7 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::client().frame_rate, Some(FrameRate::Sixty));
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(26);
         assert_eq!(w.item, 26, "VSync");
         assert!(settings::vsync(), "on: a frame only at the display's refresh");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
@@ -2064,7 +2602,7 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::vsync(), "and back: two values");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(39);
         assert_eq!(w.item, 39, "Render Scale");
         assert_eq!((settings::client().render_scale, value_text(&vui, 39)), (1, Some(wide("x1"))), "x1, the game's picture as drawn");
         for want in [2, 4, 1] {
@@ -2073,25 +2611,20 @@ mod tests {
         }
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!((settings::client().render_scale, value_text(&vui, 39)), (4, Some(wide("x4"))), "and the other way");
-        assert_eq!(w.page_note(0), None, "drawn at the scale asked: nothing said");
+        assert_eq!(w.page_note(w.cat.unwrap()), None, "drawn at the scale asked: nothing said");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::client().render_scale, 1);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(38);
         assert_eq!(w.item, 38, "Loading Screens");
         assert!(settings::loading_longer(), "Longer, the default: a long trip's screen held");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::loading_longer(), cues.last()), (false, Some(&11)), "Instant");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::loading_longer(), "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Video's last row (six, a page's most)");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        assert_eq!((w.page, w.cat, w.cat_sel, w.item), (3, None, 0, -1), "back to the categories, Video still lit");
         // World: Fog, Mipmaps, Flora, Environment, Ground Fog, Art
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(1), 20), "World, Fog");
+        goto!(20);
+        assert_eq!(w.item, 20, "World, Fog");
         assert_eq!(settings::fog(), crate::fog::GAME, "the game's");
         for _ in 0..6 {
             press(&mut w, &mut o, key::RIGHT, &mut cues);
@@ -2107,28 +2640,28 @@ mod tests {
             press(&mut w, &mut o, key::RIGHT, &mut cues);
         }
         assert_eq!(settings::fog(), crate::fog::GAME);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(35);
         assert_eq!(w.item, 35, "Mipmaps");
         assert!(settings::client().mipmaps, "on: the game's");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().mipmaps, cues.last()), (false, Some(&11)), "off");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().mipmaps, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(36);
         assert_eq!(w.item, 36, "Flora");
         assert!(settings::client().flora, "on: the game's");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().flora, cues.last()), (false, Some(&11)), "off");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().flora, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(37);
         assert_eq!(w.item, 37, "Environment");
         assert!(settings::client().environment, "on: the game's");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().environment, settings::client().flora, cues.last()), (false, true, Some(&11)), "off, Flora still on");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().environment, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(47);
         assert_eq!(w.item, 47, "Ground Fog");
         assert!(settings::client().ps2_fog, "PS2: the game's look");
         assert_eq!(value_text(&vui, 47), Some(wide("PS2")));
@@ -2137,21 +2670,16 @@ mod tests {
         assert_eq!(value_text(&vui, 47), Some(wide("Exact")));
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().ps2_fog, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(25);
         assert_eq!(w.item, 25, "Art, on World since 2026-10-25");
         assert_eq!(settings::art(), esf::Era::Frontiers, "Frontiers', the disc the game runs off");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::art(), cues.last()), (esf::Era::Y2002, Some(&11)), "the 2002 disc's");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::art(), esf::Era::Frontiers, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (5, Some(&9)), "World's last row");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        assert_eq!((w.page, w.cat, w.cat_sel, w.item), (3, None, 1, -1), "back to the categories, World still lit");
         // Lighting: Dynamic Lighting, Off (the PS2's), then On
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(2), 52), "Lighting, Dynamic Lighting");
+        goto!(52);
+        assert_eq!(w.item, 52, "Lighting, Dynamic Lighting");
         assert_eq!(value_text(&vui, 52), Some(wide(vui.words.get(552, vui.language))), "Off, the PS2's light");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().dynamic_lighting, cues.last()), (true, Some(&11)), "On");
@@ -2160,30 +2688,30 @@ mod tests {
         assert!(!settings::client().dynamic_lighting, "and back: two values");
         // Sun Shadows: Off, then On, which without Dynamic Lighting the page
         // says they need
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(53);
         assert_eq!(w.item, 53, "Sun Shadows");
         assert_eq!(value_text(&vui, 53), Some(wide(vui.words.get(552, vui.language))), "Off");
-        assert_eq!(w.page_note(2), None, "off: no note");
+        assert_eq!(w.page_note(w.cat.unwrap()), None, "off: no note");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().sun_shadows, cues.last()), (true, Some(&11)), "On");
         assert_eq!(value_text(&vui, 53), Some(wide(vui.words.get(551, vui.language))));
-        assert_eq!(w.page_note(2).as_deref(), Some("Sun Shadows need Dynamic Lighting"), "on without Dynamic Lighting");
+        assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some("Sun Shadows need Dynamic Lighting"), "on without Dynamic Lighting");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(!settings::client().sun_shadows, "and back: two values");
         // Light Shadows: the same, with their own note
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(56);
         assert_eq!(w.item, 56, "Light Shadows");
         assert_eq!(value_text(&vui, 56), Some(wide(vui.words.get(552, vui.language))), "Off");
-        assert_eq!(w.page_note(2), None, "off: no note");
+        assert_eq!(w.page_note(w.cat.unwrap()), None, "off: no note");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().light_shadows, settings::client().sun_shadows, cues.last()), (true, false, Some(&11)), "On, Sun Shadows still off");
         assert_eq!(value_text(&vui, 56), Some(wide(vui.words.get(551, vui.language))));
-        assert_eq!(w.page_note(2).as_deref(), Some("Light Shadows need Dynamic Lighting"), "on without Dynamic Lighting");
+        assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some("Light Shadows need Dynamic Lighting"), "on without Dynamic Lighting");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(!settings::client().light_shadows, "and back: two values");
         // Shadow Distance: a slider and its number, the game's 250 at the
         // left, a step of 125 a press, 1000 at the right
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(57);
         assert_eq!(w.item, 57, "Shadow Distance");
         assert_eq!(slider_at(57), Some((0.0, Some(250))), "the game's 250");
         press(&mut w, &mut o, key::LEFT, &mut cues);
@@ -2200,7 +2728,7 @@ mod tests {
         }
         assert_eq!(settings::client().shadow_distance, 250, "and back");
         // Ambient Occlusion, Off (the game's picture), then On
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(54);
         assert_eq!(w.item, 54, "Ambient Occlusion");
         assert_eq!(value_text(&vui, 54), Some(wide(vui.words.get(552, vui.language))), "Off, the game's picture");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
@@ -2209,7 +2737,7 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(!settings::client().ambient_occlusion, "and back: two values");
         // Particles, PS2 (the game's look), then Exact
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(63);
         assert_eq!(w.item, 63, "Particles");
         assert!(settings::client().ps2_particles, "PS2: the game's look");
         assert_eq!(value_text(&vui, 63), Some(wide("PS2")));
@@ -2218,14 +2746,9 @@ mod tests {
         assert_eq!(value_text(&vui, 63), Some(wide("Exact")));
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().ps2_particles, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Lighting's last row");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        assert_eq!((w.page, w.cat, w.cat_sel, w.item), (3, None, 2, -1), "back to the categories, Lighting still lit");
         // UI: Ability Bars, Update Notices, Text, HUD, Raid List, Pet Effects
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(3), 22), "UI, Ability Bars");
+        goto!(22);
+        assert_eq!(w.item, 22, "UI, Ability Bars");
         assert_eq!(settings::ability_bars(), 2, "the game's two");
         for want in [3, 4, 2] {
             press(&mut w, &mut o, key::RIGHT, &mut cues);
@@ -2234,7 +2757,7 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::ability_bars(), 4, "and the other way");
         assert_eq!(cues.last(), Some(&11));
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(29);
         assert_eq!(w.item, 29, "Update Notices");
         assert!(settings::update_notices(), "on: the game asks to restart into a newer build");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
@@ -2242,21 +2765,21 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::update_notices(), "and back: two values");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(30);
         assert_eq!(w.item, 30, "Text, back on UI since Render Scale took its place on Video");
         assert_eq!(settings::client().text, render::ui::TextFilter::Sharp, "Sharp, the default");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().text, cues.last()), (render::ui::TextFilter::Smooth, Some(&11)), "Smooth");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::client().text, render::ui::TextFilter::Sharp, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(40);
         assert_eq!(w.item, 40, "HUD");
         assert_eq!((settings::client().hud, value_text(&vui, 40)), (render::ui::HudFilter::Nearest, Some(wide("Nearest"))), "Nearest, the game's and the default");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().hud, value_text(&vui, 40), cues.last()), (render::ui::HudFilter::Sharp, Some(wide("Sharp")), Some(&11)), "Sharp");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::client().hud, render::ui::HudFilter::Nearest, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(49);
         assert_eq!(w.item, 49, "Raid List");
         assert!(settings::raid_list(), "on: a raid group's every name and health");
         assert_eq!(value_text(&vui, 49), Some(wide(vui.words.get(551, vui.language))));
@@ -2264,7 +2787,24 @@ mod tests {
         assert_eq!((settings::raid_list(), cues.last()), (false, Some(&11)), "off: the game's bars");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::raid_list(), "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(86);
+        assert_eq!(w.item, 86, "Power Bars");
+        assert!(settings::power_bars(), "on: others' power under their health");
+        assert_eq!(value_text(&vui, 86), Some(wide(vui.words.get(551, vui.language))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::power_bars(), cues.last()), (false, Some(&11)), "off: the game's bars");
+        assert_eq!(value_text(&vui, 86), Some(wide(vui.words.get(552, vui.language))));
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::power_bars(), "and back: two values");
+        goto!(88);
+        assert_eq!(w.item, 88, "Raid Mercenaries");
+        assert_eq!((settings::raid_mercs(), value_text(&vui, 88)), (false, Some(wide("Hidden"))), "Hidden by default");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::raid_mercs(), value_text(&vui, 88), cues.last()), (true, Some(wide("Shown")), Some(&11)), "Shown");
+        assert!(settings::raid_list() && settings::power_bars(), "moving no other row");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::raid_mercs(), "and back: two values");
+        goto!(58);
         assert_eq!(w.item, 58, "Pet Effects");
         assert!(settings::pet_effects(), "on: the pet's effects under its bar");
         assert_eq!(value_text(&vui, 58), Some(wide(vui.words.get(551, vui.language))));
@@ -2273,13 +2813,9 @@ mod tests {
         assert_eq!(value_text(&vui, 58), Some(wide(vui.words.get(552, vui.language))));
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::pet_effects(), "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (5, Some(&9)), "UI's last row");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         // Controller: Controller Focus, Capture Controller, Touch Pad Size
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(4), 16), "Controller, Controller Focus");
+        goto!(16);
+        assert_eq!(w.item, 16, "Controller, Controller Focus");
         assert_eq!(settings::focus(), Focus::Auto);
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::focus(), Focus::Off, "round to Off");
@@ -2289,14 +2825,14 @@ mod tests {
         assert_eq!(settings::focus(), Focus::Pad(1), "Auto, Window, Pad 1");
         assert_eq!(settings::client().controller[0], Focus::Pad(1), "the first window's: this one, with nowhere to take a place");
         assert_eq!(cues.last(), Some(&11));
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(19);
         assert_eq!(w.item, 19, "Capture Controller");
         assert!(!settings::capture(), "off: every window on a pad reads it");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert!(settings::capture());
         // the touch rows (they took over Touch Pad Size): each from the pad
         // as it was, to both ends, sound 9 past each
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(59);
         assert_eq!(w.item, 59, "Touch Stick Size");
         assert_eq!((settings::client().touch_stick, slider_at(59)), (100, Some((50.0 / 150.0, Some(100)))), "the pad's as it was, a third along");
         for _ in 0..21 {
@@ -2310,7 +2846,7 @@ mod tests {
         assert_eq!((settings::client().touch_stick, slider_at(59), cues.last()), (50, Some((0.0, Some(50))), Some(&9)), "down to 50 in 30");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!(settings::client().touch_stick, 55);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(60);
         assert_eq!(w.item, 60, "Touch Button Size");
         assert_eq!((settings::client().touch_buttons, slider_at(60)), (100, Some((50.0 / 150.0, Some(100)))));
         for _ in 0..11 {
@@ -2321,7 +2857,7 @@ mod tests {
             press(&mut w, &mut o, key::RIGHT, &mut cues);
         }
         assert_eq!((settings::client().touch_buttons, slider_at(60), cues.last()), (200, Some((1.0, Some(200))), Some(&9)));
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(61);
         assert_eq!(w.item, 61, "Touch Opacity");
         assert_eq!((settings::client().touch_opacity, slider_at(61)), (100, Some((90.0 / 190.0, Some(100)))), "its own alphas");
         for _ in 0..10 {
@@ -2332,7 +2868,7 @@ mod tests {
             press(&mut w, &mut o, key::RIGHT, &mut cues);
         }
         assert_eq!((settings::client().touch_opacity, cues.last()), (200, Some(&9)), "to 200 in 19");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(62);
         assert_eq!(w.item, 62, "Touch Edge");
         assert_eq!((settings::client().touch_edge, slider_at(62)), (0, Some((0.0, Some(0)))), "none");
         press(&mut w, &mut o, key::LEFT, &mut cues);
@@ -2341,20 +2877,46 @@ mod tests {
             press(&mut w, &mut o, key::RIGHT, &mut cues);
         }
         assert_eq!((settings::client().touch_edge, slider_at(62), cues.last()), (10, Some((1.0, Some(10))), Some(&9)), "0 to 10 in ones");
-        assert_eq!(settings::touch_options(), crate::touch::Opts { stick: 0.55, buttons: 2.0, opacity: 2.0, edge: 0.1 }, "the pad drawn so");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Controller's last row");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        // Camera: Camera Distance, Camera Turn Speed, Screen Shake
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(settings::touch_options(), crate::touch::Opts { stick: 0.55, buttons: 2.0, opacity: 2.0, edge: 0.1, ..Default::default() }, "the pad drawn so");
+        // Touch Controls' Layout (2026-11-14, petition 2084): Move Touch Pad
+        // Off, On and back by right and ✕ (its note while on), a mode not
+        // kept; Button Layout Classic, then Bottom, kept as a row; Reset Touch
+        // Pad the sizes, the edge and the moves back, the opacity and the
+        // layout left, by right or ✕, with its own sound
+        crate::touch::set_editing(false);
+        goto!(MOVE_TOUCH);
+        assert_eq!(w.item, MOVE_TOUCH, "Layout, Move Touch Pad");
+        assert_eq!(value_text(&vui, MOVE_TOUCH), Some(wide(vui.words.get(552, vui.language))), "Off");
+        assert_eq!(w.page_note(w.cat.unwrap()), None, "no note while off");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((crate::touch::editing(), cues.last()), (true, Some(&11)), "on");
+        assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some("Leave the menu, drag a part, pinch to size"));
         press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(5), 15), "Camera, Camera Distance");
+        assert!(!crate::touch::editing(), "✕ turns it too");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.item, value_text(&vui, TOUCH_LAYOUT)), (TOUCH_LAYOUT, Some(wide("Classic"))), "Button Layout");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((value_text(&vui, TOUCH_LAYOUT), settings::touch_options().low_start), (Some(wide("Bottom")), true));
+        assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some("Bottom: Start and Select between the sticks"));
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.item, value_text(&vui, RESET_TOUCH)), (RESET_TOUCH, Some(wide("Reset"))), "Reset Touch Pad");
+        for k in [key::RIGHT, key::CROSS] {
+            settings::set_client(settings::client().with_touch_opts(&crate::touch::Opts { stick: 1.5, moves: [[0.1, 0.0], [0.0, 0.0], [0.0, -0.2]], ..settings::touch_options() }));
+            assert_ne!(settings::client().touch_moves, [[0; 2]; 3], "the control: moved");
+            press(&mut w, &mut o, k, &mut cues);
+            let c = settings::client();
+            assert_eq!((c.touch_stick, c.touch_buttons, c.touch_edge, c.touch_moves), (100, 100, 0, [[0; 2]; 3]), "back ({k})");
+            assert_eq!((c.touch_opacity, c.touch_low_start, cues.last()), (200, true, Some(&8)), "opacity and layout left, its sound ({k})");
+        }
+        // Camera: Camera Distance, Camera Turn Speed, Screen Shake
+        goto!(15);
+        assert_eq!(w.item, 15, "Camera, Camera Distance");
         for _ in 0..15 {
             press(&mut w, &mut o, key::RIGHT, &mut cues);
         }
         assert_eq!(settings::client().camera_distance, 50, "11 to 50 in 13 steps of 3");
         assert_eq!(&cues[cues.len() - 3..], &[11, 9, 9]);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(17);
         assert_eq!(w.item, 17, "Camera Turn Speed");
         assert_eq!(settings::camera_turn(), 100, "the game's");
         for _ in 0..9 {
@@ -2367,7 +2929,7 @@ mod tests {
         }
         assert_eq!(settings::camera_turn(), 50, "down to half");
         assert_eq!(cues.last(), Some(&9));
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(18);
         assert_eq!(w.item, 18, "Screen Shake");
         assert!(settings::screen_shake(), "the game's shake");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
@@ -2376,15 +2938,13 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::screen_shake(), "turned over again");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         // Characters: Level of Detail, NPC/PC Display, NPC/PC Distance
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(6), 12), "Characters, Level of Detail");
+        goto!(12);
+        assert_eq!(w.item, 12, "Characters, Level of Detail");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert!(!settings::client().lod);
         assert_eq!(cues.last(), Some(&11));
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(23);
         assert_eq!(w.item, 23, "NPC/PC Display");
         assert_eq!(settings::entity_slots(), 24, "the game's 24");
         press(&mut w, &mut o, key::LEFT, &mut cues);
@@ -2406,7 +2966,7 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::entity_slots(), 96, "a number between, as client.opt may hold, to the eight below");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(24);
         assert_eq!(w.item, 24, "NPC/PC Distance");
         assert_eq!(settings::entity_view(), 100, "the game's 100");
         press(&mut w, &mut o, key::LEFT, &mut cues);
@@ -2419,7 +2979,7 @@ mod tests {
             press(&mut w, &mut o, key::RIGHT, &mut cues);
         }
         assert_eq!((settings::entity_view(), cues.last()), (1000, Some(&9)), "1000, then its end");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(27);
         assert_eq!(w.item, 27, "Name Distance");
         assert_eq!(settings::client().name_distance, 22, "the game's 22");
         press(&mut w, &mut o, key::LEFT, &mut cues);
@@ -2432,7 +2992,7 @@ mod tests {
         assert_eq!(settings::client().name_distance, 200, "30 to 200 in 17 steps of 10");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().name_distance, cues.last()), (200, Some(&9)), "its end");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(34);
         assert_eq!(w.item, 34, "Overlapping Names");
         assert!(!settings::overlapping_names(), "Hide: the game's");
         assert_eq!(value_text(&vui, 34), Some(wide("Hide")));
@@ -2441,69 +3001,67 @@ mod tests {
         assert_eq!(value_text(&vui, 34), Some(wide("Show")));
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(!settings::overlapping_names(), "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(46);
         assert_eq!(w.item, 46, "Shadows, on Characters since 2026-10-30");
         assert!(settings::client().shadows, "on: the game's");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::client().shadows, settings::client().ps2_fog, cues.last()), (false, true, Some(&11)), "off, Ground Fog still PS2");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().shadows, "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Characters' last row (six, a page's most)");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         // Sound: Sound in Background
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(7), 21), "Sound, Sound in Background");
+        goto!(21);
+        assert_eq!(w.item, 21, "Sound, Sound in Background");
         assert!(settings::background_sound(), "on: a window behind others keeps its sound");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert!(!settings::background_sound());
         assert_eq!(cues.last(), Some(&11));
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(32);
         assert_eq!(w.item, 32, "Output Device");
         assert_eq!(value_text(&vui, 32), Some(wide(SYSTEM_DEFAULT)), "the system's default");
-        assert!(w.page_note(7).is_some_and(|n| n.starts_with("Plays on ") || n == "No output now"), "where it plays, beside Back");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (1, Some(&9)), "Sound's last row");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert!(w.page_note(w.cat.unwrap()).is_some_and(|n| n.starts_with("Plays on ") || n == "No output now"), "where it plays, beside Back");
         // Textures (natively): Texture Packs and Dump Textures, each Off
         // then On; a test keeps no folder, so the note says there is none
-        assert_eq!((w.cat_sel, cues.last()), (8, Some(&11)), "Textures, after Sound");
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(8), 50), "Textures, Texture Packs");
+        goto!(50);
+        assert_eq!(w.item, 50, "Textures, Texture Packs");
         assert_eq!(value_text(&vui, 50), Some(wide(vui.words.get(552, vui.language))), "Off, the game's own textures");
-        assert_eq!(w.page_note(8), None, "off: no note");
+        assert_eq!(w.page_note(w.cat.unwrap()), None, "off: no note");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert!(settings::client().texture_packs);
         assert_eq!((value_text(&vui, 50), cues.last()), (Some(wide(vui.words.get(551, vui.language))), Some(&11)));
-        assert_eq!(w.page_note(8).as_deref(), Some("No folder here"));
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some("No folder here"));
+        goto!(51);
         assert_eq!(w.item, 51, "Dump Textures");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().dump_textures, "either way turns it over");
-        assert_eq!(w.page_note(8).as_deref(), Some("0 dumped"), "how many dumped, beside Back");
+        assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some("0 dumped"), "how many dumped, beside Back");
         // Texture Folder: Open; with no folder here (a test's), nothing to
         // show, sound 9, by either way or ✕
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.item, cues.last()), (55, Some(&11)), "Texture Folder");
         assert_eq!(value_text(&vui, 55), Some(wide("Open")));
-        assert_eq!(w.page_note(8).as_deref(), Some("No folder here"), "where it is, beside Back");
+        assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some("No folder here"), "where it is, beside Back");
         for k in [key::RIGHT, key::LEFT, key::CROSS] {
             press(&mut w, &mut o, k, &mut cues);
             assert_eq!(cues.last(), Some(&9), "none to show ({k})");
         }
         assert!(crate::texpack::testing::shown().is_empty());
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (2, Some(&9)), "Textures' last row");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
         // Map: the Map, Minimap, Map Markers, the Quest Helper and Quest
-        // Tracker, each On then Off, one moving no other
-        assert_eq!((w.cat_sel, cues.last()), (9, Some(&11)), "Map, after Textures");
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(9), 41), "Map, the Map");
+        // Tracker, each On then Off, one moving no other; Map Pointer
+        // (after Minimap) Facing then Camera, moving none of them
+        goto!(41);
+        assert_eq!(w.item, 41, "Map, the Map");
         for (item, on) in [(41, settings::map as fn() -> bool), (42, settings::minimap), (43, settings::map_markers), (44, settings::quest_helper), (45, settings::quest_tracker)] {
+            if item == 43 {
+                use crate::map::Pointer;
+                assert_eq!(w.item, 87, "Map Pointer, after Minimap");
+                assert_eq!((settings::map_pointer(), value_text(&vui, 87)), (Pointer::Facing, Some(wide("Facing"))), "Facing by default");
+                press(&mut w, &mut o, key::RIGHT, &mut cues);
+                assert_eq!((settings::map_pointer(), value_text(&vui, 87), cues.last()), (Pointer::Camera, Some(wide("Camera")), Some(&11)), "Camera");
+                assert!(settings::map() && settings::minimap(), "Map Pointer moves no other row");
+                press(&mut w, &mut o, key::LEFT, &mut cues);
+                assert_eq!(settings::map_pointer(), Pointer::Facing, "and back: two values");
+                press(&mut w, &mut o, key::DOWN, &mut cues);
+            }
             assert_eq!(w.item, item, "{}", label_of(item));
             assert!(on(), "{}: on by default", label_of(item));
             assert_eq!(value_text(&vui, item), Some(wide(vui.words.get(551, vui.language))), "{}: On, the game's word", label_of(item));
@@ -2514,24 +3072,21 @@ mod tests {
             assert!(on(), "{}: and back, two values", label_of(item));
             press(&mut w, &mut o, key::DOWN, &mut cues);
         }
-        assert_eq!((w.row, cues.last()), (4, Some(&9)), "Map's last row");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.row, cues.last()), (5, Some(&9)), "Map's last row");
         // Number Colors: six rows, each Default (the game's colour, drawn as
         // any value) then round the palette either way, each drawn in its
         // colour, one moving no other
-        assert_eq!((w.cat_sel, cues.last()), (10, Some(&11)), "Number Colors, after Map");
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(10), 64), "Number Colors, Your Damage");
+        goto!(64);
+        assert_eq!(w.item, 64, "Number Colors, Your Damage");
         let last = crate::numcolor::PALETTE.len() as u8;
-        for (row, item) in crate::numcolor::ITEMS.into_iter().enumerate() {
+        for (row, item) in crate::numcolor::NUMBER_ITEMS.into_iter().enumerate() {
             assert_eq!((w.item, label_of(item)), (item, crate::numcolor::LABELS[row]));
-            assert_eq!(settings::number_colors(), [0; crate::numcolor::ROWS], "{}: every row Default", label_of(item));
+            assert_eq!(settings::number_colors(), crate::numcolor::DEFAULTS, "{}: every row as it came", label_of(item));
             assert_eq!((value_text(&vui, item), value_paint(item)), (Some(wide("Default")), None), "{}: Default, drawn as any value", label_of(item));
             press(&mut w, &mut o, key::RIGHT, &mut cues);
             assert_eq!((settings::number_colors()[row], cues.last()), (1, Some(&11)), "{}: on to the first colour", label_of(item));
             assert_eq!((value_text(&vui, item), value_paint(item)), (Some(wide("White")), Some([1.0; 4])), "{}: White, in white", label_of(item));
-            assert_eq!(settings::number_colors().iter().filter(|&&c| c != 0).count(), 1, "{}: no other row moved", label_of(item));
+            assert_eq!(settings::number_colors().iter().zip(crate::numcolor::DEFAULTS).filter(|(c, d)| *c != d).count(), 1, "{}: no other row moved", label_of(item));
             press(&mut w, &mut o, key::LEFT, &mut cues);
             press(&mut w, &mut o, key::LEFT, &mut cues);
             assert_eq!(settings::number_colors()[row], last, "{}: left of Default, the last", label_of(item));
@@ -2541,13 +3096,36 @@ mod tests {
             press(&mut w, &mut o, key::DOWN, &mut cues);
         }
         assert_eq!((w.row, cues.last()), (5, Some(&9)), "Number Colors' last row");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        // Merc Colors: Merc Damage Light Blue and Merc Heals Purple as they
+        // come (the owner, petition 1613: distinct from the player's own
+        // without a pick), each drawn in its colour, then round the palette,
+        // Default the game's
+        goto!(80);
+        assert_eq!(w.item, 80, "Merc Colors, Merc Damage");
+        for (k, (item, start, next)) in [(80, "Light Blue", "Cyan"), (81, "Purple", "Blue")].into_iter().enumerate() {
+            let row = 6 + k;
+            assert_eq!((w.item, label_of(item)), (item, crate::numcolor::LABELS[row]));
+            assert_eq!(settings::number_colors(), crate::numcolor::DEFAULTS, "{}: as it came", label_of(item));
+            assert_eq!(value_text(&vui, item), Some(wide(start)), "{}: {start} by default", label_of(item));
+            assert!(value_paint(item).is_some(), "{}: drawn in its colour", label_of(item));
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!((value_text(&vui, item), cues.last()), (Some(wide(next)), Some(&11)), "{}: on to the next", label_of(item));
+            for _ in 0..crate::numcolor::PALETTE.len() - crate::numcolor::DEFAULTS[row] as usize {
+                press(&mut w, &mut o, key::RIGHT, &mut cues);
+            }
+            assert_eq!((settings::number_colors()[row], value_paint(item)), (0, None), "{}: round to Default, the game's", label_of(item));
+            assert_eq!(value_text(&vui, item), Some(wide("Default")));
+            for _ in 0..crate::numcolor::DEFAULTS[row] {
+                press(&mut w, &mut o, key::RIGHT, &mut cues);
+            }
+            assert_eq!(settings::number_colors()[row], crate::numcolor::DEFAULTS[row], "{}: and back", label_of(item));
+            press(&mut w, &mut o, key::DOWN, &mut cues);
+        }
+        assert_eq!((w.row, cues.last()), (1, Some(&9)), "Merc Colors' last row");
         // Combat: the DPS Meter Off then On, what it shows Fight then Overall,
         // and Reset DPS Meter asking the meter's reset either way, as ✕ does
-        assert_eq!((w.cat_sel, cues.last()), (11, Some(&11)), "Combat, after Number Colors");
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(11), 70), "Combat, the DPS Meter");
+        goto!(70);
+        assert_eq!(w.item, 70, "Combat, the DPS Meter");
         assert!(!settings::dps_meter(), "off by default");
         assert_eq!(value_text(&vui, 70), Some(wide(vui.words.get(552, vui.language))), "Off, the game's word");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
@@ -2555,7 +3133,7 @@ mod tests {
         assert_eq!(value_text(&vui, 70), Some(wide(vui.words.get(551, vui.language))));
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(!settings::dps_meter(), "and back: two values");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        goto!(71);
         assert_eq!(w.item, 71, "DPS Meter Shows");
         assert_eq!((settings::dps_view(), value_text(&vui, 71)), (crate::dpsmeter::View::Fight, Some(wide("Fight"))), "the fight by default");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
@@ -2569,44 +3147,51 @@ mod tests {
             press(&mut w, &mut o, k, &mut cues);
             assert_eq!((crate::dpsmeter::take_reset(), cues.last()), (true, Some(&8)), "a reset asked ({k}), its sound");
         }
-        assert_eq!(w.page_note(11), None, "no note off a server");
+        assert_eq!(w.page_note(w.cat.unwrap()), None, "no note off a server");
         w.meter_note = Some("This server keeps no meter".into());
-        assert_eq!(w.page_note(11).as_deref(), Some("This server keeps no meter"), "a server that keeps none said");
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (2, Some(&9)), "Combat's last row");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some("This server keeps no meter"), "a server that keeps none said");
+        // Auto-Cast On by default (no slot is auto until marked), Auto Target
+        // Off by default (`autocast`), each two values
+        goto!(78);
+        assert_eq!(w.item, 78, "Auto-Cast");
+        assert!(settings::auto_cast(), "on by default");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::auto_cast(), cues.last()), (false, Some(&11)), "off");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::auto_cast(), "and back");
+        goto!(79);
+        assert_eq!(w.item, 79, "Auto Target");
+        assert!(!settings::auto_target(), "off by default");
+        assert_eq!(value_text(&vui, 79), Some(wide(vui.words.get(552, vui.language))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::auto_target(), cues.last()), (true, Some(&11)), "on");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::auto_target(), "and back");
         // Chat: Item Links On by default, then Off and back (the petition 1463's
         // toggle), the page saying where the server has none
-        assert_eq!((w.cat_sel, cues.last()), (12, Some(&11)), "Chat, after Combat");
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(12), 73), "Chat, Item Links");
+        goto!(73);
+        assert_eq!(w.item, 73, "Chat, Item Links");
         assert!(settings::item_links(), "on by default");
         assert_eq!(value_text(&vui, 73), Some(wide(vui.words.get(551, vui.language))), "On, the game's word");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((settings::item_links(), cues.last()), (false, Some(&11)), "off");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::item_links(), "and back: two values");
-        assert_eq!(w.page_note(12), None, "no note off a server");
+        assert_eq!(w.page_note(w.cat.unwrap()), None, "no note off a server");
         w.links_note = Some("This server has no item links".into());
-        assert_eq!(w.page_note(12).as_deref(), Some("This server has no item links"));
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (0, Some(&9)), "Chat's one row");
-        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some("This server has no item links"));
         // HUD Layout (`hudlayout`): Move HUD Off, then On and back by left,
         // right and ✕, its note while on; Reset HUD putting every piece back
         // by any of them, kept, with its own sound
-        assert_eq!((w.cat_sel, cues.last()), (13, Some(&11)), "HUD Layout, after Chat");
         crate::hudlayout::testing_reset();
-        press(&mut w, &mut o, key::CROSS, &mut cues);
-        assert_eq!((w.cat, w.item), (Some(13), 76), "HUD Layout, Move HUD");
+        goto!(76);
+        assert_eq!(w.item, 76, "HUD Layout, Move HUD");
         assert!(!crate::hudlayout::unlocked(), "off by default");
         assert_eq!(value_text(&vui, 76), Some(wide(vui.words.get(552, vui.language))));
-        assert_eq!(w.page_note(13), None, "no note while off");
+        assert_eq!(w.page_note(w.cat.unwrap()), None, "no note while off");
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         assert_eq!((crate::hudlayout::unlocked(), cues.last()), (true, Some(&11)), "on");
-        assert_eq!(w.page_note(13).as_deref(), Some("Leave the menu and drag the pieces"));
+        assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some("Leave the menu and drag the pieces"));
         press(&mut w, &mut o, key::CROSS, &mut cues);
         assert!(!crate::hudlayout::unlocked(), "✕ turns it too");
         press(&mut w, &mut o, key::DOWN, &mut cues);
@@ -2619,12 +3204,22 @@ mod tests {
             assert_eq!(crate::hudlayout::layout(), Default::default(), "every piece back ({k})");
             assert_eq!((testing::kept("hud.opt"), cues.last()), (Some(Vec::new()), Some(&8)), "kept so, its sound ({k})");
         }
+        // Minimap Scroll Frame: On by default, Off and back, moving no other
         press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.row, cues.last()), (1, Some(&9)), "HUD Layout's last row");
+        assert_eq!(w.item, 91, "Minimap Scroll Frame, after Reset HUD");
+        assert!(settings::minimap_scroll(), "on by default");
+        assert_eq!(value_text(&vui, 91), Some(wide(vui.words.get(551, vui.language))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::minimap_scroll(), cues.last()), (false, Some(&11)), "off");
+        assert!(settings::minimap() && !crate::hudlayout::unlocked(), "moving no other row");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::minimap_scroll(), "and back: two values");
+        // Triangle: UI's categories, the groups, the menu, then closed with
+        // every setting put back
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
-        press(&mut w, &mut o, key::DOWN, &mut cues);
-        assert_eq!((w.cat_sel, cues.last()), (13, Some(&9)), "HUD Layout, the last category");
-        // Triangle: the menu, then closed with every setting put back
+        assert_eq!((w.grp, w.cat), (Some(1), None), "UI's categories");
+        press(&mut w, &mut o, key::TRIANGLE, &mut cues);
+        assert_eq!((w.grp, w.grp_sel), (None, 1), "the groups, UI lit");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
         assert_eq!((w.page, w.sel), (-1, 3), "the menu, on Extended");
         press(&mut w, &mut o, key::TRIANGLE, &mut cues);
@@ -2640,24 +3235,29 @@ mod tests {
             key::DOWN,
             key::DOWN,
             key::CROSS,
-            // Video: Brightness a step down (past Display)
+            // Graphics > Video: Brightness a step down (past Display)
+            key::CROSS,
             key::CROSS,
             key::DOWN,
             key::LEFT,
             key::TRIANGLE,
-            // World: Fog a step down
+            // Graphics > World: Fog a step down
             key::DOWN,
             key::CROSS,
             key::LEFT,
             key::TRIANGLE,
-            // Camera: Camera Turn Speed a step up (past Lighting)
+            key::TRIANGLE,
+            // Other > Camera: Camera Turn Speed a step up (past General
+            // and Combat)
             key::DOWN,
             key::DOWN,
+            key::CROSS,
             key::DOWN,
             key::DOWN,
             key::CROSS,
             key::DOWN,
             key::RIGHT,
+            key::TRIANGLE,
             key::TRIANGLE,
             key::TRIANGLE,
             // Save Changes (past Controls and Macros), Yes
@@ -2726,14 +3326,18 @@ mod tests {
         assert_eq!(d.output, None);
     }
 
-    /// Every category's page opens on its first row, its window its rows and
-    /// three high (the game's pages': a row down, the legend two under the
-    /// last), and down walks the rows in the table's order; Triangle goes
-    /// back a step at a time: the categories with that one still lit, then
-    /// the menu on Extended, then closed. (Planted: a Back from a page
-    /// straight to the menu, or a page opening on the category before.)
+    /// Extended opens on its groups: Graphics, UI, Other and the
+    /// Multi-boxing settings (the GM Jibrish's petitions 1631 and 1634), a
+    /// window as the options menu's with its bottom where that one's is. Each
+    /// group opens its categories' menu (the Multi-boxing settings, a group
+    /// of one, its page at once), each category its page on its first row,
+    /// its window its rows and three high, and down walks the rows in the
+    /// table's order; Triangle goes back a step at a time: the group's
+    /// categories with that one still lit, the groups with it lit, then the
+    /// menu on Extended, then closed. (Planted: a Back from a page straight
+    /// to the groups or the menu, or a page opening on the category before.)
     #[test]
-    fn each_category_opens_its_rows_and_back_goes_up_a_step() {
+    fn each_group_and_category_opens_and_back_goes_up_a_step() {
         use crate::pointer::testing::{NullRaster, vui};
         crate::settings::testing::reset(false);
         let vui = vui();
@@ -2744,34 +3348,151 @@ mod tests {
         w.open(&vui, &r, &o);
         w.sel = 3;
         w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-        // the menu's window holds every category and, a row clear of the
-        // last, the legend (F3 20261026-135758: the eighth on the legend's row)
-        assert_eq!(w.window4.rows, CATEGORIES.len() as i32 + 3, "the categories' window");
-        assert!(CATEGORY_LEGEND > CATEGORIES.len() as i32 + 1 && CATEGORY_LEGEND < w.window4.rows, "the legend under the last category, in the window");
+        let names: Vec<&str> = GROUPS.iter().map(|g| g.1).collect();
+        assert_eq!(names, ["Graphics", "UI", "Other", "Touch Controls", "Multi-boxing settings"], "five entries, in the petitions' order");
+        // the groups' window holds them and, a row clear, the legend
+        assert_eq!(w.window4.rows, GROUPS.len() as i32 + 3, "the groups' window");
         let bottom = |w: &Window| w.top_left()[1] + w.size[1];
         assert_eq!(bottom(&w.window4), bottom(&w.window), "its bottom where the menu's is (the title's menu under it in view)");
-        assert!(w.window4.top_left()[1] < w.window.top_left()[1] && w.window4.top_left()[1] > 24, "grown upward, its title tab on the picture");
-        for (k, c) in CATEGORIES.iter().enumerate() {
-            w.draw(&vui, &mut r, &o, &mut ups);
-            assert_eq!((w.page, w.cat, w.cat_sel), (3, None, k as i32), "{}: on the categories", c.name);
-            w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-            assert_eq!((w.cat, w.row, w.window2.rows), (Some(k), 0, c.items.len() as i32 + 3), "{}: its page", c.name);
-            let mut seen = Vec::new();
-            for _ in 0..c.items.len() {
-                w.draw(&vui, &mut r, &o, &mut ups);
-                seen.push(w.item);
-                w.key(&vui, &mut r, &mut o, key::DOWN, 0, &mut cues, &mut ups);
+        let mut keys = |w: &mut WndOptions, k: i32, cues: &mut Vec<i32>| {
+            w.key(&vui, &mut r, &mut o, k, 0, cues, &mut ups);
+            w.draw(&vui, &mut NullRaster, &o, &mut ups);
+        };
+        let mut pages = 0;
+        for (g, (_, gname)) in GROUPS.iter().enumerate() {
+            assert_eq!((w.page, w.grp, w.grp_sel, w.cat), (3, None, g as i32, None), "{gname}: on the groups");
+            keys(&mut w, key::CROSS, &mut cues);
+            let cats = group_categories(g);
+            let lone = cats.len() == 1;
+            if !lone {
+                assert_eq!((w.grp, w.cat, w.cat_sel), (Some(g), None, 0), "{gname}: its categories");
+                assert_eq!(w.window5.rows, cats.len() as i32 + 3, "{gname}: its menu's window");
+                assert!(w.window5.rows <= menu_rows(MENU_MOST), "{gname}: no taller than the one menu was");
+                assert_eq!(bottom(&w.window5), bottom(&w.window), "{gname}: its bottom where the menu's is");
+                assert!(w.window5.top_left()[1] > 24, "{gname}: its title tab on the picture");
             }
-            assert_eq!(seen, c.items, "{}: its rows in order", c.name);
-            assert_eq!((w.row, cues.last()), (c.items.len() as i32 - 1, Some(&9)), "{}: stopped at its last", c.name);
-            w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
-            assert_eq!((w.page, w.cat, w.cat_sel), (3, None, k as i32), "{}: back to the categories, it still lit", c.name);
-            w.key(&vui, &mut r, &mut o, key::DOWN, 0, &mut cues, &mut ups);
+            for (k, &c) in cats.iter().enumerate() {
+                let cat = &CATEGORIES[c];
+                if !lone {
+                    keys(&mut w, key::CROSS, &mut cues);
+                }
+                assert_eq!((w.grp, w.cat, w.row, w.window2.rows), (Some(g), Some(c), 0, cat.items.len() as i32 + 3), "{}: its page", cat.name);
+                let mut seen = Vec::new();
+                for _ in 0..cat.items.len() {
+                    seen.push(w.item);
+                    keys(&mut w, key::DOWN, &mut cues);
+                }
+                assert_eq!(seen, cat.items, "{}: its rows in order", cat.name);
+                assert_eq!((w.row, cues.last()), (cat.items.len() as i32 - 1, Some(&9)), "{}: stopped at its last", cat.name);
+                keys(&mut w, key::TRIANGLE, &mut cues);
+                pages += 1;
+                if lone {
+                    assert_eq!((w.page, w.grp, w.grp_sel, w.cat), (3, None, g as i32, None), "{}: back to the groups, it still lit", cat.name);
+                } else {
+                    assert_eq!((w.page, w.grp, w.cat, w.cat_sel), (3, Some(g), None, k as i32), "{}: back to its group's categories, it still lit", cat.name);
+                    keys(&mut w, key::DOWN, &mut cues);
+                }
+            }
+            if !lone {
+                assert_eq!(cues.last(), Some(&9), "{gname}: no category past its last");
+                keys(&mut w, key::TRIANGLE, &mut cues);
+                assert_eq!((w.page, w.grp, w.grp_sel), (3, None, g as i32), "{gname}: back to the groups, it still lit");
+            }
+            keys(&mut w, key::DOWN, &mut cues);
         }
-        assert_eq!(cues.last(), Some(&9), "no category past the last");
-        assert!(!w.back(&mut cues), "the categories go back to the menu");
+        assert_eq!(pages, CATEGORIES.len(), "every category's page reached");
+        assert_eq!(cues.last(), Some(&9), "no group past the last");
+        assert!(!w.back(&mut cues), "the groups go back to the menu");
         assert_eq!((w.page, w.sel), (-1, 3));
         assert!(w.back(&mut cues), "and the menu closes");
+    }
+
+    /// Each group's categories and their rows, the petitions' grouping
+    /// (natively; a page has no Textures, no Sound, and Video and the
+    /// Multi-boxing settings a row less).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn each_group_holds_its_kind() {
+        let of = |g: usize| group_categories(g).into_iter().map(|c| (CATEGORIES[c].name, CATEGORIES[c].items.iter().map(|&i| label_of(i)).collect::<Vec<_>>())).collect::<Vec<_>>();
+        let textures: Vec<&str> = if cfg!(target_os = "android") { vec!["Texture Packs", "Dump Textures"] } else { vec!["Texture Packs", "Dump Textures", "Texture Folder"] };
+        assert_eq!(
+            of(0),
+            vec![
+                ("Video", vec!["Display", "Brightness", "Frame Rate", "VSync", "Render Scale"]),
+                ("World", vec!["Fog", "Mipmaps", "Flora", "Environment", "Ground Fog", "Art"]),
+                ("Lighting", vec!["Dynamic Lighting", "Sun Shadows", "Light Shadows", "Shadow Distance", "Ambient Occlusion", "Particles"]),
+                ("Characters", vec!["Level of Detail", "NPC/PC Display", "NPC/PC Distance", "Shadows"]),
+                ("Textures", textures),
+            ],
+            "Graphics: how the world is drawn"
+        );
+        let n = crate::numcolor::LABELS;
+        assert_eq!(
+            of(1),
+            vec![
+                ("HUD", vec!["Ability Bars", "Stacked Spell Bars", "Text", "HUD", "Pet Effects", "Buff Window"]),
+                ("Group & Raid", vec!["Raid List", "Power Bars", "Raid Mercenaries"]),
+                ("HUD Layout", vec!["Move HUD", "Reset HUD", "Minimap Scroll Frame", "Spell Bar Opacity"]),
+                ("Name Plates", vec!["Name Distance", "Overlapping Names", "Quest Markers", "Target Level"]),
+                ("Map", vec!["Map", "Minimap", "Map Pointer", "Map Markers", "Quest Helper", "Quest Tracker"]),
+                ("Number Colors", n[..6].to_vec()),
+                ("Merc Colors", n[6..8].to_vec()),
+                ("DPS Meter", vec!["DPS Meter", "DPS Meter Shows", "Reset DPS Meter"]),
+                ("Chat", vec!["Item Links", "Chat Always Shown"]),
+                ("Chat Tabs: Talk", vec!["Say", "Tells", "Group", "Guild", "Shouts"]),
+                ("Chat Tabs: Game", vec!["Combat", "Loot", "Rolls", "Experience", "System"]),
+            ],
+            "UI: what is drawn over the world"
+        );
+        assert_eq!(
+            of(2),
+            vec![
+                ("General", vec!["Update Notices", "Loading Screens", "Loading Tips", "Same Shortcuts", "Auto Save Options"]),
+                ("Combat", vec!["Auto-Cast", "Auto Target", "Pets Pass Through"]),
+                ("Camera", vec!["Camera Distance", "Camera Turn Speed", "Screen Shake"]),
+                ("Sound", vec!["Output Device"]),
+            ],
+            "Other: the rest"
+        );
+        assert_eq!(
+            of(3),
+            vec![("Size & Look", vec!["Touch Stick Size", "Touch Button Size", "Touch Opacity", "Touch Edge"]), ("Layout", vec!["Move Touch Pad", "Button Layout", "Reset Touch Pad"])],
+            "petition 2084: every touch row in a group of its own"
+        );
+        assert_eq!(of(4), vec![("Multi-boxing settings", vec!["Slow When Not Focused", "Controller Focus", "Capture Controller", "Sound in Background"])], "petition 1634's folder");
+    }
+
+    /// Slow When Not Focused (petition 1634): Off by default, turned by left
+    /// and right on its page, this window's alone (another window's place
+    /// kept as it was), and back with Triangle on the menu.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn slow_when_not_focused_is_off_and_this_windows() {
+        use crate::pointer::testing::{NullRaster, vui};
+        crate::settings::testing::reset(false);
+        let vui = vui();
+        let mut r = NullRaster;
+        let mut o = GameOptions::default();
+        let mut w = WndOptions::default();
+        let (mut cues, mut ups) = (Vec::new(), Vec::new());
+        w.open(&vui, &r, &o);
+        w.sel = 3;
+        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+        go(&mut w, &vui, &mut o, "Multi-boxing settings");
+        assert_eq!(w.item, SLOW_UNFOCUSED, "its first row");
+        assert!(!crate::settings::slow_unfocused(), "off by default");
+        assert_eq!(value_text(&vui, SLOW_UNFOCUSED), Some(wide(vui.words.get(552, vui.language))));
+        w.key(&vui, &mut r, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
+        assert!(crate::settings::slow_unfocused(), "on");
+        assert_eq!(crate::settings::client().slow_unfocused.iter().filter(|&&on| on).count(), 1, "this window's alone");
+        w.key(&vui, &mut r, &mut o, key::LEFT, 0, &mut cues, &mut ups);
+        assert!(!crate::settings::slow_unfocused(), "and back: two values");
+        w.key(&vui, &mut r, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
+        for _ in 0..3 {
+            w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
+        }
+        assert!(!crate::settings::slow_unfocused(), "Triangle on the menu puts it back");
+        crate::settings::testing::reset(false);
     }
 
     /// Extended's rows are its categories' between them, every one on one
@@ -2789,11 +3510,13 @@ mod tests {
         let all: Vec<i32> = EXTENDED_ITEMS.iter().map(|&(i, _)| i).filter(|&i| !(cfg!(target_os = "android") && i == 55)).collect();
         assert_eq!(listed(CATEGORIES), all);
         assert!(fits(CATEGORIES));
+        assert!(menus_fit(CATEGORIES));
         assert!(EXTENDED_ITEMS.iter().all(|&(i, l)| !l.is_empty() && label_of(i) == l));
-        let short = [Category { name: "Video", items: &[13, 20], note: Note::None }];
+        let short = [Category { name: "Video", items: &[13, 20], note: Note::None, group: Group::Graphics }];
         assert_ne!(listed(&short), all, "the control: rows left out");
-        let seven = [Category { name: "Video", items: &[13, 20, 14, 26, 25, 12, 15], note: Note::None }];
+        let seven = [Category { name: "Video", items: &[13, 20, 14, 26, 25, 12, 15], note: Note::None, group: Group::Graphics }];
         assert!(!fits(&seven), "the control: a page that would scroll");
+        assert!(!menus_fit(&seven), "the control: groups with no category");
     }
 
     /// A category's page of `PAGE_MOST` rows, a row more than the game's
@@ -2978,21 +3701,35 @@ mod tests {
         w.sel = 3;
         w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
         w.draw(&vui, &mut r, &o, &mut ups);
-        let category = |w: &WndOptions, k: i32| mid(rows_rect(&w.window4, &vui, &NullRaster, 40, k + 1, 200, 1));
+        let group = |w: &WndOptions, k: i32| mid(rows_rect(&w.window4, &vui, &NullRaster, 40, k + 1, 200, 1));
+        let category = |w: &WndOptions, k: i32| mid(rows_rect(&w.window5, &vui, &NullRaster, 40, k + 1, 200, 1));
         let label = |w: &WndOptions, k: i32| mid(rows_rect(&w.window2, &vui, &NullRaster, 40, k + 1, 100, 1));
         let y = |w: &WndOptions, k: i32| w.window2.row_center(&vui, &NullRaster, k + 1)[1] as f32;
         let down = |n: usize, last: i32| std::iter::repeat_n(key::DOWN, n).chain([last]).collect::<Vec<_>>();
-        // the categories: Camera chosen at once
-        assert_eq!(w.point(category(&w, 5)), vec![key::CROSS]);
-        assert_eq!(w.cat_sel, 5, "Camera");
-        assert_eq!(w.point(category(&w, 7)), vec![key::CROSS]);
-        assert_eq!(w.cat_sel, 7, "Sound");
+        // the groups: Other chosen at once
+        assert_eq!(w.point(group(&w, 2)), vec![key::CROSS]);
+        assert_eq!(w.grp_sel, 2, "Other");
+        assert_eq!(w.point(group(&w, 3)), vec![key::CROSS]);
+        assert_eq!(w.grp_sel, 3, "Multi-boxing settings");
         assert!(w.point([5.0, 5.0]).is_empty());
-        w.point(category(&w, 5));
+        w.point(group(&w, 2));
         w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
         w.draw(&vui, &mut r, &o, &mut ups);
-        assert_eq!(w.cat, Some(5), "Camera's page");
-        for k in 0..CATEGORIES.len() as i32 {
+        assert_eq!((w.grp, w.cat), (Some(2), None), "Other's categories");
+        // the groups' menu is not drawn under it: its place is the categories'
+        assert_eq!(w.point(group(&w, 1)), vec![key::CROSS]);
+        assert_eq!((w.grp, w.grp_sel), (Some(2), 2), "a row there is a category's, not a group's");
+        // Other's categories: Camera chosen at once
+        let camera = group_categories(2).iter().position(|&c| CATEGORIES[c].name == "Camera").unwrap() as i32;
+        assert_eq!(w.point(category(&w, camera)), vec![key::CROSS]);
+        assert_eq!(w.cat_sel, camera, "Camera");
+        assert_eq!(w.point(category(&w, 0)), vec![key::CROSS]);
+        assert_eq!(w.cat_sel, 0, "General");
+        w.point(category(&w, camera));
+        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+        w.draw(&vui, &mut r, &o, &mut ups);
+        assert_eq!(w.cat.map(|c| CATEGORIES[c].name), Some("Camera"), "Camera's page");
+        for k in 0..group_categories(2).len() as i32 {
             assert!(w.hits.at(category(&w, k)).is_none_or(|h| h >= LABEL), "category {k} behind the page answers nothing");
         }
         let width = w.window2.size[0];
@@ -3013,24 +3750,15 @@ mod tests {
         assert!(w.point([slider + 70.0, y(&w, 4)]).is_empty(), "the legend's row: nothing");
         // Video: Display's value, Brightness at 5 of 10 (its knob mid-bar),
         // Frame Rate's value
-        w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
-        w.cat_sel = 0;
-        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-        w.draw(&vui, &mut r, &o, &mut ups);
-        assert_eq!(w.cat, Some(0), "Video's page");
+        go(&mut w, &vui, &mut o, "Video");
         assert_eq!(w.point([frame + 20.0, y(&w, 0)]), vec![key::LEFT], "Display's value, left");
         assert_eq!(w.point([slider + 10.0, y(&w, 1)]), down(1, key::LEFT), "Brightness down");
         assert_eq!(w.point([slider + 130.0, y(&w, 1)]), down(1, key::RIGHT), "Brightness up");
         assert_eq!(w.point([frame + 110.0, y(&w, 2)]), down(2, key::RIGHT), "Frame Rate's value");
-        assert_eq!(w.point([frame + 110.0, y(&w, 4)]), down(4, key::RIGHT), "Loading Screens' value, under VSync");
-        assert_eq!(w.point([frame + 110.0, y(&w, 5)]), down(5, key::RIGHT), "Text's value, under Loading Screens");
-        assert!(w.point([frame + 110.0, y(&w, 6)]).is_empty(), "the row under Text: nothing");
+        assert_eq!(w.point([frame + 110.0, y(&w, 3)]), down(3, key::RIGHT), "VSync's value");
+        assert!(w.point([frame + 110.0, y(&w, VIDEO.len() as i32)]).is_empty(), "the row under the last: nothing");
         // World: Fog at 5 of 10 (its knob mid-bar), Flora's and Art's values
-        w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
-        w.cat_sel = 1;
-        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-        w.draw(&vui, &mut r, &o, &mut ups);
-        assert_eq!(w.cat, Some(1), "World's page");
+        go(&mut w, &vui, &mut o, "World");
         assert_eq!(w.point([slider + 10.0, y(&w, 0)]), vec![key::LEFT], "Fog thinner");
         assert_eq!(w.point([slider + 130.0, y(&w, 0)]), vec![key::RIGHT], "Fog thicker");
         assert_eq!(w.point([frame + 110.0, y(&w, 2)]), down(2, key::RIGHT), "Flora's value");
@@ -3038,11 +3766,7 @@ mod tests {
         assert_eq!(w.point([frame + 20.0, y(&w, 4)]), down(4, key::LEFT), "Ground Fog's value");
         // Characters: NPC/PC Display's knob at its left end (the game's 24),
         // then at 128 near its middle
-        w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
-        w.cat_sel = 6;
-        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-        w.draw(&vui, &mut r, &o, &mut ups);
-        assert_eq!(w.cat, Some(6), "Characters' page");
+        go(&mut w, &vui, &mut o, "Characters");
         assert_eq!(w.point([frame + 110.0, y(&w, 0)]), vec![key::RIGHT], "Level of Detail's value");
         assert_eq!(w.point([slider + 30.0, y(&w, 1)]), down(1, key::RIGHT));
         assert_eq!(w.point([slider - 2.0, y(&w, 1)]), down(1, key::LEFT), "left of the knob at the bar's end");
@@ -3056,20 +3780,21 @@ mod tests {
         crate::settings::set_client(ClientOptions { entity_view: 1000, ..crate::settings::client() });
         w.draw(&vui, &mut r, &o, &mut ups);
         assert_eq!(w.point([slider + 110.0, y(&w, 2)]), down(2, key::LEFT), "left of the knob at 1000");
-        // Name Distance: its knob at the left end (the game's 22), then at
-        // 200 at the right end
-        assert_eq!(w.point([slider + 30.0, y(&w, 3)]), down(3, key::RIGHT));
-        assert_eq!(w.point([slider - 2.0, y(&w, 3)]), down(3, key::LEFT), "left of the knob at the bar's end");
+        // UI > Name Plates: Name Distance's knob at the left end (the game's
+        // 22), then at 200 at the right end
+        go(&mut w, &vui, &mut o, "Name Plates");
+        assert_eq!(w.point([slider + 30.0, y(&w, 0)]), vec![key::RIGHT]);
+        assert_eq!(w.point([slider - 2.0, y(&w, 0)]), vec![key::LEFT], "left of the knob at the bar's end");
         crate::settings::set_client(ClientOptions { name_distance: 200, ..crate::settings::client() });
         w.draw(&vui, &mut r, &o, &mut ups);
-        assert_eq!(w.point([slider + 110.0, y(&w, 3)]), down(3, key::LEFT), "left of the knob at 200");
-        // Controller: Controller Focus's halves
-        w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
-        w.cat_sel = 4;
-        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-        w.draw(&vui, &mut r, &o, &mut ups);
-        assert_eq!(w.point([frame + 20.0, y(&w, 0)]), vec![key::LEFT], "Controller Focus's value, left");
-        assert_eq!(w.point([frame + 110.0, y(&w, 1)]), down(1, key::RIGHT), "Capture Controller's, right");
+        assert_eq!(w.point([slider + 110.0, y(&w, 0)]), vec![key::LEFT], "left of the knob at 200");
+        // Multi-boxing settings (its page straight from the groups):
+        // Controller Focus's halves, Capture Controller's
+        go(&mut w, &vui, &mut o, "Multi-boxing settings");
+        let focus = MULTIBOX.iter().position(|&i| i == 16).unwrap();
+        let first = |n: usize, last: i32| if n == 0 { vec![last] } else { down(n, last) };
+        assert_eq!(w.point([frame + 20.0, y(&w, focus as i32)]), first(focus, key::LEFT), "Controller Focus's value, left");
+        assert_eq!(w.point([frame + 110.0, y(&w, focus as i32 + 1)]), down(focus + 1, key::RIGHT), "Capture Controller's, right");
         crate::settings::testing::reset(false);
     }
 
@@ -3092,15 +3817,16 @@ mod tests {
         w.sel = 3;
         w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
         let by_name = |n: &str| CATEGORIES.iter().position(|c| c.name == n).unwrap();
-        assert_eq!(CATEGORIES[by_name("Controller")].note, Note::Reads);
+        assert_eq!(CATEGORIES[by_name("Multi-boxing settings")].note, Note::Reads);
+        assert_eq!(CATEGORIES[by_name("Size & Look")].note, Note::Reads);
+        assert_eq!(CATEGORIES[by_name("Layout")].note, Note::TouchLayout);
         assert_eq!(CATEGORIES[by_name("Characters")].note, Note::Server);
-        assert_eq!(CATEGORIES[by_name("Sound")].note, Note::Output);
         assert_eq!(CATEGORIES[by_name("Video")].note, Note::Scale);
         assert_eq!(CATEGORIES[by_name("Lighting")].note, Note::Lighting);
-        assert_eq!(CATEGORIES[by_name("Combat")].note, Note::Meter);
+        assert_eq!(CATEGORIES[by_name("DPS Meter")].note, Note::Meter);
         assert_eq!(CATEGORIES[by_name("Chat")].note, Note::Links);
         assert_eq!(CATEGORIES[by_name("HUD Layout")].note, Note::Hud);
-        assert!(CATEGORIES.iter().filter(|c| c.note != Note::None).count() == if cfg!(target_arch = "wasm32") { 8 } else { 9 }, "the notes only");
+        assert!(CATEGORIES.iter().filter(|c| c.note != Note::None).count() == if cfg!(target_arch = "wasm32") { 12 } else { 14 }, "the notes only");
         #[cfg(not(target_arch = "wasm32"))]
         {
             // Textures: nothing to say while both are off (a test keeps no
@@ -3112,21 +3838,20 @@ mod tests {
             assert_eq!(note(&w, by_name("Textures")).as_deref(), Some("No folder here"), "on, with no folder to read");
             crate::settings::set_client(crate::settings::ClientOptions { texture_packs: false, ..crate::settings::client() });
         }
-        w.cat_sel = by_name("Characters") as i32;
-        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-        w.draw(&vui, &mut r, &o, &mut ups);
+        go(&mut w, &vui, &mut o, "Characters");
         assert_eq!(note(&w, by_name("Characters")), None, "Level of Detail: no note");
         w.key(&vui, &mut r, &mut o, key::DOWN, 0, &mut cues, &mut ups);
         w.draw(&vui, &mut r, &o, &mut ups);
         assert_eq!(note(&w, by_name("Characters")).as_deref(), Some("This server: 24 (the game's)"), "NPC/PC Display: the server's");
-        w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
-        w.cat_sel = by_name("Controller") as i32;
-        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-        w.draw(&vui, &mut r, &o, &mut ups);
-        assert_eq!(note(&w, by_name("Controller")), Some(crate::input::reads()), "Controller: what this window reads");
+        go(&mut w, &vui, &mut o, "Multi-boxing settings");
+        assert_eq!(note(&w, by_name("Multi-boxing settings")), Some(crate::input::reads()), "Multi-boxing settings: what this window reads");
         assert_eq!(note(&w, by_name("Video")), None, "the control: none on Video's");
         // no output in a test (no device opened): said so
-        assert_eq!(note(&w, by_name("Sound")).as_deref(), Some("No output now"), "Sound: where it plays");
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            assert_eq!(CATEGORIES[by_name("Sound")].note, Note::Output);
+            assert_eq!(note(&w, by_name("Sound")).as_deref(), Some("No output now"), "Sound: where it plays");
+        }
     }
 
     /// Texture Folder (55) on a computer: its value Open; right, left and ✕
@@ -3152,9 +3877,7 @@ mod tests {
         w.open(&vui, &r, &o);
         w.sel = 3;
         w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-        w.cat_sel = textures as i32;
-        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-        w.draw(&vui, &mut r, &o, &mut ups);
+        go(&mut w, &vui, &mut o, "Textures");
         for _ in 0..2 {
             w.key(&vui, &mut r, &mut o, key::DOWN, 0, &mut cues, &mut ups);
             w.draw(&vui, &mut r, &o, &mut ups);
@@ -3257,7 +3980,7 @@ mod tests {
             fn set_viewport(&mut self, _: [i32; 4]) {}
         }
         impl crate::ui::Layout for Texts {}
-        let page = |choices: [u8; 6]| -> Vec<([i32; 2], [f32; 4], String)> {
+        let page = |choices: [u8; crate::numcolor::ROWS]| -> Vec<([i32; 2], [f32; 4], String)> {
             crate::settings::testing::reset(false);
             let mut c = crate::settings::client();
             c.number_colors = choices;
@@ -3270,14 +3993,13 @@ mod tests {
             w.open(&vui, &r, &o);
             w.sel = 3;
             w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-            w.cat_sel = CATEGORIES.iter().position(|c| c.name == "Number Colors").unwrap() as i32;
-            w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+            go(&mut w, &vui, &mut o, "Number Colors");
             let mut t = Texts::default();
             w.draw(&vui, &mut t, &o, &mut ups);
             t.0
         };
         let red = [1.0, 48.0 / 255.0, 48.0 / 255.0, 1.0];
-        let drawn = page([0, crate::numcolor::from_key("red").unwrap(), 0, 0, 0, 0]);
+        let drawn = page([0, crate::numcolor::from_key("red").unwrap(), 0, 0, 0, 0, 0, 0]);
         let of = |s: &str| drawn.iter().filter(|d| d.2 == s).cloned().collect::<Vec<_>>();
         let reds = of("Red");
         assert_eq!(reds.len(), 2, "its shadow and itself: {drawn:?}");
@@ -3286,10 +4008,10 @@ mod tests {
         let defaults = of("Default");
         assert_eq!(defaults.len(), 5, "five rows Default, no shadows: {defaults:?}");
         assert!(defaults.iter().all(|d| d.1 == UI_COLORS[0]), "Default in the window's black");
-        let plain = page([0; 6]);
+        let plain = page([0; crate::numcolor::ROWS]);
         assert!(plain.iter().filter(|d| d.2 == "Default").all(|d| d.1 == UI_COLORS[0]) && plain.iter().filter(|d| d.2 == "Default").count() == 6);
-        for p in crate::numcolor::LABELS {
-            assert!(plain.iter().any(|d| d.2 == p), "{p}'s label on the page");
+        for p in &crate::numcolor::LABELS[..6] {
+            assert!(plain.iter().any(|d| d.2 == *p), "{p}'s label on the page");
         }
         crate::settings::testing::reset(false);
     }
@@ -3314,5 +4036,99 @@ mod tests {
         once.sort_unstable();
         once.dedup();
         assert_eq!(once.len(), listed.len(), "an item on two pages");
+    }
+
+    /// Auto Save Options (Waldorf's ticket 2002). Off (the control, the
+    /// game's): Faction Messages (held) and Damage Numbers changed on Game's
+    /// page, Triangle to the menu keeps nothing, Triangle there puts them
+    /// back and nothing is written. Turned on on Other > General's page, the
+    /// step back off that page keeps it at once; the same changes then kept
+    /// by the step back off Game's page, Faction Messages taken as Save's Yes
+    /// takes it; a step back with nothing changed writes nothing; Triangle on
+    /// the menu saves ("Saving...", then applied) and puts nothing back.
+    /// (Planted: `keep` returning at once, or the menu's Triangle putting
+    /// them back with it on, fails it.)
+    #[test]
+    fn auto_save_options_keeps_changes_on_a_step_back() {
+        use crate::pointer::testing::{NullRaster, vui};
+        use crate::settings::{self, testing};
+        testing::reset(false);
+        let vui = vui();
+        let mut o = GameOptions::default();
+        let mut w = WndOptions::default();
+        let mut ups = Vec::new();
+        let mut press = |w: &mut WndOptions, o: &mut GameOptions, k: i32, ups: &mut Vec<OptionsUp>| {
+            w.key(&vui, &mut NullRaster, o, k, 0, &mut Vec::new(), ups);
+            w.draw(&vui, &mut NullRaster, o, ups);
+        };
+        let game_page = [key::CROSS, key::RIGHT, key::DOWN, key::DOWN, key::RIGHT];
+        // off: the game's
+        assert!(!settings::auto_save(), "off by default");
+        w.open(&vui, &NullRaster, &o);
+        for k in game_page {
+            press(&mut w, &mut o, k, &mut ups);
+        }
+        assert_eq!((w.edit[0], o.no_damage), (0, 1), "Faction Messages held off, Damage Numbers off");
+        press(&mut w, &mut o, key::TRIANGLE, &mut ups);
+        assert_eq!(w.page, -1, "the menu");
+        assert_eq!(testing::kept("game.opt"), None, "nothing kept by the step back");
+        press(&mut w, &mut o, key::TRIANGLE, &mut ups);
+        assert_eq!((o.no_faction, o.no_damage, w.save_count), (0, 0, 0), "put back, no save");
+        assert_eq!(ups.last(), Some(&OptionsUp::Apply));
+        assert_eq!(testing::kept("game.opt"), None, "nothing written");
+        // turned on, by its row: kept by the step back off its page
+        w.open(&vui, &NullRaster, &o);
+        press(&mut w, &mut o, key::DOWN, &mut ups);
+        press(&mut w, &mut o, key::DOWN, &mut ups);
+        press(&mut w, &mut o, key::DOWN, &mut ups);
+        press(&mut w, &mut o, key::CROSS, &mut ups);
+        for k in path_to(&w, AUTO_SAVE) {
+            press(&mut w, &mut o, k, &mut ups);
+        }
+        assert_eq!(w.item, AUTO_SAVE);
+        press(&mut w, &mut o, key::RIGHT, &mut ups);
+        assert!(settings::auto_save(), "on");
+        press(&mut w, &mut o, key::TRIANGLE, &mut ups);
+        let kept = String::from_utf8(testing::kept("client.opt").expect("kept at the step back")).unwrap();
+        assert!(kept.ends_with("auto_save_options=on\n"), "{kept}");
+        assert_eq!((w.grp, w.cat), (Some(2), None), "Other's categories");
+        for _ in 0..2 {
+            press(&mut w, &mut o, key::TRIANGLE, &mut ups);
+        }
+        assert_eq!((w.page, w.sel), (-1, 3), "the menu, on Extended");
+        // Game's page: kept by the step back, the held setting taken
+        for _ in 0..3 {
+            press(&mut w, &mut o, key::UP, &mut ups);
+        }
+        // (the toggle's save wrote game.opt as well: Save Changes writes all three)
+        testing::forget("game.opt");
+        for k in game_page {
+            press(&mut w, &mut o, k, &mut ups);
+        }
+        assert_eq!(testing::kept("game.opt"), None, "not yet: still on the page");
+        press(&mut w, &mut o, key::TRIANGLE, &mut ups);
+        let game = GameOptions::from_card(&testing::kept("game.opt").expect("kept at the step back")).unwrap();
+        assert_eq!((game.no_faction, game.no_damage), (1, 1), "both kept");
+        assert_eq!(o.no_faction, 1, "Faction Messages taken as Save's Yes takes it");
+        // a step back with nothing changed writes nothing
+        testing::forget("game.opt");
+        press(&mut w, &mut o, key::CROSS, &mut ups);
+        press(&mut w, &mut o, key::TRIANGLE, &mut ups);
+        assert_eq!(testing::kept("game.opt"), None, "nothing changed, nothing written");
+        // Triangle on the menu: saved as Save Changes' Yes, nothing put back
+        ups.clear();
+        press(&mut w, &mut o, key::TRIANGLE, &mut ups);
+        assert_eq!(w.save_count, 3, "Saving... (one frame drawn)");
+        assert!(!w.message.visible, "no box");
+        for _ in 0..3 {
+            w.draw(&vui, &mut NullRaster, &o, &mut ups);
+        }
+        assert_eq!(ups.last(), Some(&OptionsUp::Apply));
+        assert!(!ups.iter().any(|u| matches!(u, OptionsUp::Volume(..))), "nothing put back");
+        assert_eq!((o.no_faction, o.no_damage), (1, 1), "as changed");
+        let game = GameOptions::from_card(&testing::kept("game.opt").expect("saved")).unwrap();
+        assert_eq!((game.no_faction, game.no_damage), (1, 1));
+        assert!(settings::auto_save());
+        testing::reset(false);
     }
 }

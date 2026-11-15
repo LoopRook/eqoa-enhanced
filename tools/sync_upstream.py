@@ -461,7 +461,10 @@ def resume(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    # the report quotes upstream's text (e.g. U+2715); a Windows console's code page cannot print it
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+    parser =argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--continue", dest="resume", action="store_true", help="finish a sync after hand resolution")
     parser.add_argument("--tests-only", action="store_true", help="with --continue: only run the tests")
     parser.add_argument("--no-tests", action="store_true", help="skip cargo and Python tests")

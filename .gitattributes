@@ -8,5 +8,7 @@ bundled-mods/** -text
 # The shared packaged catalogue is hash-pinned: keep its exact bytes too.
 mods/resources/map-entities.json -text
 
-# Shadow shader assembly matches LF-terminated source lines on every host.
-crates/render/src/*.wgsl text eol=lf
+# Shaders are spliced as text (render: sunshadow::shadowed_lit,
+# lightshadow::receivers_wgsl): their lines end \n on every checkout,
+# Windows (core.autocrlf) included.
+*.wgsl text eol=lf

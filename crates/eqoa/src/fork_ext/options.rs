@@ -25,6 +25,8 @@ const PAGES: [Category; super::CATEGORIES.len() + 1] = categories(super::CATEGOR
 // upstream's pages keep their own rule (none scrolls); the fork's page is taller than a game page
 // and drawn without its title bar (`WndOptions::page_window`)
 const _: () = assert!(super::fits(super::CATEGORIES));
+// the Enhanced page joins the UI group's menu: every group's menu must still fit (`menus_fit`)
+const _: () = assert!(super::menus_fit(&PAGES));
 /// The rows of the Enhanced page ahead of the Mods & Addons rows: one per Enhanced HUD toggle.
 const HUD_ROWS: usize = 6;
 #[cfg(test)]
@@ -88,12 +90,6 @@ pub(super) fn pages() -> &'static [Category] {
         &PAGES
     }
 }
-pub(super) fn category_legend() -> i32 {
-    pages().len() as i32 + 2
-}
-pub(super) fn category_rows() -> i32 {
-    category_legend() + 1
-}
 #[cfg(test)]
 struct ForkPages;
 #[cfg(test)]
@@ -138,6 +134,8 @@ pub(super) const CATEGORY: Category = Category {
         1053,
     ],
     note: Note::None,
+    // listed in upstream's UI menu (Extended's groups, 2026-11-15), beside its HUD page
+    group: super::Group::Ui,
 };
 /// The registered rows: upstream's and the fork's own.
 pub(super) fn items() -> impl Iterator<Item = &'static (i32, &'static str)> {

@@ -24,9 +24,13 @@ pub mod overlay;
 pub mod recolor;
 pub mod scale;
 pub mod shadow;
+pub mod shell;
 pub mod standin;
 pub mod sunshadow;
+pub mod tattoo;
 pub mod text;
+pub mod trimart;
+pub mod trimglow;
 pub mod ui;
 
 use bytemuck::{Pod, Zeroable};
@@ -52,6 +56,20 @@ impl BufferInit for wgpu::Device {
         let mask = wgpu::COPY_BUFFER_ALIGNMENT - 1;
         let size = ((n + mask) & !mask).max(wgpu::COPY_BUFFER_ALIGNMENT);
         let buffer = self.create_buffer(&wgpu::BufferDescriptor { label: d.label, size, usage: d.usage, mapped_at_creation: true });
+        // In a browser on WebGPU the mapping is written through the page's
+        // own `getMappedRange` (`web_write_mapped`), which says when it has
+        // no bytes to give; wgpu's view of it is made by a call that cannot
+        // fail and throws instead, through the whole frame (the page's "The
+        // client stopped: Uint8Array@[native code]
+        // __wbg_new_with_byte_offset_and_length", petition 2097).
+        #[cfg(target_arch = "wasm32")]
+        if let Some(gpu) = buffer.as_webgpu() {
+            // unmapped whatever came of it: a buffer drawn while mapped is a
+            // validation error, which wgpu raises as a panic
+            web_write_mapped(gpu, d.contents);
+            buffer.unmap();
+            return buffer;
+        }
         let mapped = match buffer.get_mapped_range_mut(..) {
             Ok(mut m) => {
                 m.slice(..n as usize).copy_from_slice(d.contents);
@@ -64,6 +82,78 @@ impl BufferInit for wgpu::Device {
         }
         buffer
     }
+}
+
+/// A buffer mapped at its creation written with `contents` through the
+/// browser's WebGPU itself: whether it was. The
+/// mapping's `ArrayBuffer` comes back short, or detached (no bytes at all),
+/// when the browser could not give the buffer its memory (its GPU process
+/// out of it, the device lost): then nothing is written, and the buffer is
+/// left as the browser made it, drawn nowhere, as a lost device's are.
+#[cfg(target_arch = "wasm32")]
+fn web_write_mapped(gpu: &wgpu::webgpu::GpuBuffer, contents: &[u8]) -> bool {
+    let Ok(range) = gpu.get_mapped_range() else { return false };
+    if !mapping_holds(range.byte_length() as u64, contents.len() as u64) {
+        return false;
+    }
+    js_sys::Uint8Array::new_with_byte_offset_and_length(&range, 0, contents.len() as u32).copy_from(contents);
+    true
+}
+
+/// A draw's buffers made a frame (the 2D layer's and the text's vertices),
+/// destroyed `RETIRE_AFTER` draws later, when the frames that drew them
+/// are long submitted: dropped, a browser's WebGPU keeps each until its
+/// garbage collector comes by (wgpu destroys nothing on a drop), 60 to 120
+/// a second of a frame's quads.
+#[derive(Default)]
+pub struct Retire(std::sync::Mutex<std::collections::VecDeque<wgpu::Buffer>>);
+
+/// How many draws a buffer `Retire` keeps outlives: a layer draws two or
+/// three times a frame, so its buffer goes ten frames or more after its own.
+pub const RETIRE_AFTER: usize = 32;
+
+impl Retire {
+    /// `b`, drawn now, kept until `RETIRE_AFTER` draws on; the oldest past
+    /// that destroyed.
+    pub fn keep(&self, b: wgpu::Buffer) {
+        let Ok(mut q) = self.0.lock() else { return };
+        q.push_back(b);
+        while q.len() > RETIRE_AFTER {
+            if let Some(old) = q.pop_front() {
+                old.destroy();
+            }
+        }
+    }
+
+    /// How many are kept.
+    pub fn len(&self) -> usize {
+        self.0.lock().map_or(0, |q| q.len())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Whether a mapping of `have` bytes takes the `want` written into it (a
+/// detached one has none).
+pub fn mapping_holds(have: u64, want: u64) -> bool {
+    have >= want
+}
+
+/// A mapped `buffer`'s bytes, read through the browser's WebGPU itself
+/// where it is the page's (`web_write_mapped`'s reasons): None when the
+/// mapping has fewer bytes than the buffer; natively wgpu's.
+pub fn read_mapped(buffer: &wgpu::Buffer) -> Option<Vec<u8>> {
+    #[cfg(target_arch = "wasm32")]
+    if let Some(gpu) = buffer.as_webgpu() {
+        let range = gpu.get_mapped_range().ok()?;
+        if !mapping_holds(range.byte_length() as u64, buffer.size()) {
+            return None;
+        }
+        return Some(js_sys::Uint8Array::new(&range).to_vec());
+    }
+    buffer.slice(..).get_mapped_range().ok().map(|d| d.to_vec())
 }
 
 pub use lit::{Lights, MAX_LIGHTS, PointLight};
@@ -332,9 +422,36 @@ pub struct GpuModel {
     /// bounds make at its instances, which Light Shadows ask whether it holds
     /// a light (`lightshadow`).
     core: std::cell::Cell<Option<(Vec3, Vec3)>>,
+    /// A glowing creature's aura shell (`shell`, `Renderer::set_shell`),
+    /// drawn after its blended layers; none for every other model.
+    pub shell: Option<shell::Shell>,
+    /// Its armour trims' auras (`trimglow`, `Renderer::set_trims`), drawn
+    /// after its blended layers; none for every other model.
+    pub trim: Option<trimglow::Trim>,
 }
 
 impl GpuModel {
+    /// Destroys the model's buffers (its vertices, palette, instances,
+    /// static lights, and each batch's indices and layers' uniforms), for a
+    /// model let go once the work drawing it is submitted (the map's tiles,
+    /// `forget_textures`): their memory is the GPU's again when that work is
+    /// done. Dropped alone, a model's buffers wait for the page's garbage
+    /// collector in a browser (wgpu's WebGPU backend destroys nothing on a
+    /// drop), tens of thousands of them a minute while the map is drawn.
+    /// Never for a model still to be drawn: a destroyed buffer in a
+    /// submission is a validation error.
+    pub fn destroy(&self) {
+        for b in [&self.vertices, &self.palette, &self.instances, &self.statics] {
+            b.destroy();
+        }
+        for (indices, _, passes, _) in &self.batches {
+            indices.destroy();
+            for p in passes {
+                p.uniform.destroy();
+            }
+        }
+    }
+
     /// How many batches (each with its layer passes) the model has.
     pub fn batch_count(&self) -> usize {
         self.batches.len()
@@ -681,6 +798,10 @@ pub struct Renderer {
     pub curve: curve::Curve,
     /// The options' Ambient Occlusion (`ao`): off until set.
     pub ao: ao::Ao,
+    /// The aura shells' pipeline (`shell`), made at the first shell.
+    shell: Option<shell::Pipeline>,
+    /// The trims' auras' pipelines (`trimglow`), made at the first trim.
+    trim: Option<trimglow::Pipeline>,
 }
 
 /// What to draw this frame. The lights are the VU1 strip programs' uniforms:
@@ -957,6 +1078,8 @@ impl Renderer {
             scale: scale::Scale::new(format),
             curve: curve::Curve::new(format),
             ao: ao::Ao::new(format),
+            shell: None,
+            trim: None,
         }
     }
 
@@ -1155,16 +1278,31 @@ impl Renderer {
             casts: true,
             world: std::cell::Cell::new(sunshadow::world_box((lo, hi), m.skinned, instances)),
             core: std::cell::Cell::new(sunshadow::world_box((lo, hi), false, instances)),
+            shell: None,
+            trim: None,
         }
     }
 
-    /// Lets go of every texture uploaded so far (the models made keep
-    /// theirs while they live): for a renderer that draws one thing after
-    /// another and keeps nothing from one to the next (the map's tiles).
+    /// Lets go of every texture uploaded so far, and destroys them: for a
+    /// renderer that draws one thing after another and keeps nothing from
+    /// one to the next (the map's tiles), its models drawn with them already
+    /// submitted and let go too (`GpuModel::destroy`). A destroyed texture's
+    /// memory is the GPU's again once the work submitted with it is done; one
+    /// only dropped waits for the page's garbage collector in a browser.
     pub fn forget_textures(&mut self) {
+        for (view, _) in self.textures.values().flatten() {
+            view.texture().destroy();
+        }
         self.textures.clear();
         self.missing_textures.clear();
         self.materials.clear();
+    }
+
+    /// What the texture under `key` (`TextureSource::key`) was made as: None
+    /// never asked for, `Some(false)` asked for and nothing, `Some(true)` a
+    /// texture.
+    pub fn texture_made(&self, key: u64) -> Option<bool> {
+        self.textures.get(&key).map(Option::is_some)
     }
 
     /// Re-points one layer pass of one batch, as `VIAtmosphere` changes the
@@ -1310,6 +1448,51 @@ impl Renderer {
         if let Some(u) = quads {
             u.draw(device, &mut pass, size);
         }
+    }
+
+    /// Gives `m` (uploaded from `model`) an aura shell in `color` over the
+    /// whole of it (`shell`: its mesh again, pushed out along its normals,
+    /// drawn additively as a rim after its blended layers), or with `None`
+    /// takes its shell away.
+    pub fn set_shell(&mut self, device: &wgpu::Device, m: &mut GpuModel, model: &esf::Model, color: Option<[u8; 3]>) {
+        let parts: Vec<shell::PartOf> = color.map(|color| shell::PartOf { color, batches: None, dark: false }).into_iter().collect();
+        self.set_shells(device, m, model, &parts);
+    }
+
+    /// Gives `m` (uploaded from `model`) an aura shell in `parts`, each over
+    /// some of its batches in a colour of its own (a worn piece's), or with
+    /// none takes its shell away. The pipeline is made at the first shell; a
+    /// page whose WebGL2 refuses it draws none.
+    pub fn set_shells(&mut self, device: &wgpu::Device, m: &mut GpuModel, model: &esf::Model, parts: &[shell::PartOf]) {
+        if parts.is_empty() {
+            m.shell = None;
+            return;
+        }
+        if self.shell.is_none() && !self.refused.contains(&SHELL) {
+            let (frame, palette, format) = (&self.frame_layout, &self.palette_layout, self.format);
+            self.shell = guarded(device, &mut self.refused, &mut self.refusals, SHELL, || Some(shell::Pipeline::new(device, frame, palette, format)));
+        }
+        m.shell = self.shell.as_ref().and_then(|p| p.shell(device, model, m.bounds, parts));
+    }
+
+    /// Gives `m` (uploaded from `model`) its armour trims' auras in `trims`
+    /// (`trimglow`: each the trim of some of its batches lit in a colour, or
+    /// darkened), their masks out of `textures`; with none (or none whose
+    /// mask resolves) takes them away. The pipelines are made at the first
+    /// trim; a page whose WebGL2 refuses them draws none.
+    pub fn set_trims(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, m: &mut GpuModel, model: &esf::Model, trims: &[trimglow::TrimOf], textures: &Textures) {
+        m.trim = None;
+        if trims.iter().all(|t| t.batches.is_empty()) {
+            return;
+        }
+        if self.trim.is_none() && !self.refused.contains(&TRIM) {
+            let (frame, material, palette, format) = (&self.frame_layout, &self.material_layout, &self.palette_layout, self.format);
+            self.trim = guarded(device, &mut self.refused, &mut self.refusals, TRIM, || Some(trimglow::Pipeline::new(device, frame, material, palette, format)));
+        }
+        let Some(p) = self.trim.take() else { return };
+        let views: std::collections::HashMap<i32, Option<wgpu::TextureView>> = trimglow::by_mask(trims).into_iter().map(|(_, id, _)| (id, self.texture(device, queue, id, textures))).collect();
+        m.trim = p.trim(device, &self.material_layout, &self.samplers[0], model, m.bounds, trims, |id| views.get(&id).cloned().flatten());
+        self.trim = Some(p);
     }
 
     /// The skin palette for a skinned model: one matrix per skeleton node
@@ -1560,6 +1743,22 @@ impl Renderer {
                             current = usize::MAX;
                         }
                         draws += self.encode_model(&mut pass, m, deferred, &mut current, 0..m.instance_count, shade);
+                        // its aura shell after its blended layers (`shell`)
+                        if deferred && let Some(n) = self.encode_shell(&mut pass, m) {
+                            draws += n;
+                            current = usize::MAX;
+                            if let Some(bg) = shade.group3() {
+                                pass.set_bind_group(3, bg, &[]);
+                            }
+                        }
+                        // and its trims' auras (`trimglow`)
+                        if deferred && let Some(n) = self.encode_trim(&mut pass, m) {
+                            draws += n;
+                            current = usize::MAX;
+                            if let Some(bg) = shade.group3() {
+                                pass.set_bind_group(3, bg, &[]);
+                            }
+                        }
                     }
                     Draw::Instances(m, r) => {
                         if !Self::draws_anything(m) || r.is_empty() {
@@ -1599,6 +1798,51 @@ impl Renderer {
             }
         }
         self.drawn.set((drawn_models, draws));
+    }
+
+    /// A model's aura shell (`shell`), if it has one and a pipeline was
+    /// made: its draw calls (one a part), or `None` when nothing was drawn.
+    fn encode_shell<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, m: &'a GpuModel) -> Option<u32> {
+        let (Some(s), Some(p)) = (m.shell.as_ref(), self.shell.as_ref()) else { return None };
+        let mut draws = 0;
+        for part in &s.parts {
+            let Some((_, indices, count)) = part.run(m.level) else { continue };
+            pass.set_pipeline(if part.dark { &p.dark } else { &p.pipeline });
+            if draws == 0 {
+                pass.set_bind_group(2, &m.palette_bg, &[]);
+                pass.set_vertex_buffer(0, m.vertices.slice(..));
+                pass.set_vertex_buffer(1, m.instances.slice(..));
+                pass.set_vertex_buffer(2, s.normals.slice(..));
+            }
+            pass.set_bind_group(1, &part.bg, &[]);
+            pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..*count, 0, 0..m.instance_count);
+            draws += 1;
+        }
+        (draws > 0).then_some(draws)
+    }
+
+    /// A model's trims' auras (`trimglow`), if it has any and the pipelines
+    /// were made: its draw calls (one a part), or `None` when nothing was
+    /// drawn.
+    fn encode_trim<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, m: &'a GpuModel) -> Option<u32> {
+        let (Some(t), Some(p)) = (m.trim.as_ref(), self.trim.as_ref()) else { return None };
+        let mut draws = 0;
+        for part in &t.parts {
+            let Some((_, indices, count)) = part.run(m.level) else { continue };
+            pass.set_pipeline(if part.dark { &p.dark } else { &p.glow });
+            if draws == 0 {
+                pass.set_bind_group(2, &m.palette_bg, &[]);
+                pass.set_vertex_buffer(0, m.vertices.slice(..));
+                pass.set_vertex_buffer(1, m.instances.slice(..));
+                pass.set_vertex_buffer(2, t.normals.slice(..));
+            }
+            pass.set_bind_group(1, &part.bg, &[]);
+            pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..*count, 0, 0..m.instance_count);
+            draws += 1;
+        }
+        (draws > 0).then_some(draws)
     }
 
     /// Whether `draw` draws `m` at all (the sky draws apart).
@@ -2085,6 +2329,8 @@ fn layer_state(l: &esf::Layer, textured: bool) -> (usize, LayerUniform, usize) {
 const LIT: &str = "Dynamic Lighting";
 const SUN: &str = "Sun Shadows";
 const POINTS: &str = "Light Shadows";
+const SHELL: &str = "Aura shells";
+const TRIM: &str = "Trim auras";
 
 /// What `make` makes (a lighting feature's maps, samplers and pipelines),
 /// unless a page's WebGL2 refuses it. A browser's GL driver may refuse a
@@ -2125,6 +2371,18 @@ fn ready<F: std::future::Future>(f: F) -> Option<F::Output> {
         std::task::Poll::Ready(v) => Some(v),
         std::task::Poll::Pending => None,
     }
+}
+
+/// A shader's text with its lines ended as this source's are (`\n`): a
+/// Windows checkout (git's `core.autocrlf`, the default there and on
+/// GitHub's Windows runners) ends `include_str!`'s lines `\r\n`, and the
+/// receivers' modules are made by finding lit.wgsl's lines in it
+/// (`sunshadow::shadowed_lit`, `lightshadow::receivers_wgsl`), which a `\r`
+/// left unfound: Sun Shadows and Light Shadows were never made in the
+/// Windows release (2026-11-12, a player's "the release shadows wasn't
+/// working, built from source it worked").
+pub(crate) fn lf(text: &str) -> String {
+    text.replace("\r\n", "\n")
 }
 
 pub(crate) fn uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
@@ -2331,13 +2589,43 @@ pub const IDENTITY: [[f32; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0],
 /// its Frontiers namesake are two textures, and an unchanged one is one.
 pub struct LibraryTextures<'a>(pub &'a esf::Library);
 
+/// The tattoos' patterns read so far, by pattern (`tattoo::Woad::of`, off the
+/// disc's own face: never a texture pack's).
+static WOADS: std::sync::Mutex<Vec<(u8, std::sync::Arc<tattoo::Woad>)>> = std::sync::Mutex::new(Vec::new());
+
 impl LibraryTextures<'_> {
+    /// Tattoo pattern `pattern` read off its face in this library; none for a
+    /// pattern of none or a library without the face.
+    fn woad(&self, pattern: u8) -> Option<std::sync::Arc<tattoo::Woad>> {
+        let face = tattoo::pattern_face(pattern)?;
+        let mut g = WOADS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, w)) = g.iter().find(|(p, _)| *p == pattern) {
+            return Some(w.clone());
+        }
+        let (c, s) = self.0.surface(face as i32)?;
+        let im = s.decode(&c.data)?;
+        let w = std::sync::Arc::new(tattoo::Woad::of(pattern, &im.rgba, im.width, im.height)?);
+        g.push((pattern, w.clone()));
+        Some(w)
+    }
+
     /// The surface a DictID names in the library's view, its container, and
     /// the disc its record came off.
     fn surface(&self, id: i32) -> Option<(&esf::Container, esf::Surface, esf::Era)> {
         let r = self.0.lookup(id)?;
         let (c, s) = self.0.surface(id)?;
         Some((c, s, self.0.era_of(r.file)))
+    }
+
+    /// A texture's trim (`trimart`) as this library draws it: every trim
+    /// on Frontiers' art, the plate's gold alone on the 2002 disc's (F9:
+    /// its other sets' art is other art, which the rules were not read off).
+    fn trim_of(&self, id: i32) -> Option<trimart::Trim> {
+        let t = trimart::trim_of(id as u32)?;
+        match self.surface(id).map(|(_, _, era)| era) {
+            Some(esf::Era::Y2002) if t != trimart::Trim::Gold => None,
+            _ => Some(t),
+        }
     }
 }
 
@@ -2356,10 +2644,57 @@ impl TextureSource for LibraryTextures<'_> {
     fn levels(&self, id: i32) -> Vec<esf::Image> {
         let Some((c, s, era)) = self.surface(id) else {
             return match recolor::source_of(id) {
+                Some((source, r)) if r >> 24 == recolor::TATTOO => {
+                    // a barbarian's tattoo: the face's own woad off (the
+                    // face it was made from at the first), the pattern's on
+                    let mut levels = self.levels(source);
+                    let root = recolor::root_of(source);
+                    if root as u32 == tattoo::CHEST_ART {
+                        for l in &mut levels {
+                            tattoo::chest(&mut l.rgba, l.width, l.height, tattoo::pattern_of(r));
+                        }
+                        return levels;
+                    }
+                    let own = tattoo::own_pattern(root as u32).and_then(|p| self.woad(p));
+                    let put = self.woad(tattoo::pattern_of(r));
+                    for l in &mut levels {
+                        tattoo::lay(&mut l.rgba, l.width, l.height, own.as_deref(), source == root, put.as_deref());
+                    }
+                    levels
+                }
+                Some((source, r)) if r >> 24 == recolor::TRIM_MASK => {
+                    // a texture's trim as a mask (`trimglow`), each level its own
+                    let mut levels = self.levels(source);
+                    let trim = self.trim_of(source);
+                    for l in &mut levels {
+                        l.rgba = match trim {
+                            Some(t) => recolor::trim_mask_of(&l.rgba, l.width, l.height, t),
+                            None => recolor::trim_mask_of(&l.rgba, l.width, l.height, trimart::Trim::Parts(&[])),
+                        };
+                    }
+                    levels
+                }
+                Some((source, r)) if r >> 24 == recolor::TRIM => {
+                    // a piece's trim in a dye's colour: the trim read off the
+                    // texture it was made from (a MUL before it changed the
+                    // texels' colours, not which are trim)
+                    let mut levels = self.levels(source);
+                    let root = recolor::root_of(source);
+                    let Some(trim) = self.trim_of(root) else { return levels };
+                    let base: Vec<(Vec<u8>, u32)> = if root == source { levels.iter().map(|l| (l.rgba.clone(), l.width)).collect() } else { self.levels(root).into_iter().map(|l| (l.rgba, l.width)).collect() };
+                    let mut rgba: Vec<Vec<u8>> = levels.iter_mut().map(|l| std::mem::take(&mut l.rgba)).collect();
+                    recolor::trim_levels(&mut rgba, &base, r, trim);
+                    for (l, px) in levels.iter_mut().zip(rgba) {
+                        l.rgba = px;
+                    }
+                    levels
+                }
                 Some((source, r)) => {
                     let mut levels = self.levels(source);
-                    for l in &mut levels {
-                        recolor::recolor_rgba(&mut l.rgba, r);
+                    let mut rgba: Vec<Vec<u8>> = levels.iter_mut().map(|l| std::mem::take(&mut l.rgba)).collect();
+                    recolor::recolor_levels(&mut rgba, r);
+                    for (l, px) in levels.iter_mut().zip(rgba) {
+                        l.rgba = px;
                     }
                     levels
                 }

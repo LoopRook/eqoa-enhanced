@@ -10,7 +10,8 @@
 //! here, `EQOA_SOFT_KEYBOARD=1` turns the option off); a pad or the touch
 //! screen in use shows the soft keyboard, driven by the d-pad, X, square
 //! (back) and circle (space) (on a keyboard: the arrows, E, Backspace and
-//! Space).
+//! Space). Square backs on the compact face too, the client's own: a
+//! controller sees that face once a keyboard's key was pressed.
 //!
 //! The client's own: the chat line's item links (`itemlink`, `TextLink`), each
 //! an item's name drawn in the links' purple and kept one unit: the caret
@@ -38,6 +39,32 @@ static PAD_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 /// and the options' Soft Keyboard (`m_x91`).
 pub fn set_pad_only(compact: bool) {
     PAD_ONLY.store(compact, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// `gKeyboardAttached` as the PS2 has it: a keyboard is plugged in, whichever
+/// of it and the pad was pressed last. Here: a key of a keyboard has been
+/// pressed since the touch screen was last touched (`keyboard_pressed`,
+/// `screen_touched`). The GM Jibrish's petition 1633: with Keyboard set to
+/// Compact, Enter opened the compact face but the controller's R3 the soft
+/// keyboard, the pad's press read as no keyboard at all.
+static KEYBOARD_SEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A keyboard's key was pressed: one is at hand from now on.
+pub fn keyboard_pressed() {
+    KEYBOARD_SEEN.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The touch screen was touched: a phone's or a tablet's, no keyboard at hand
+/// until a key is pressed again.
+pub fn screen_touched() {
+    KEYBOARD_SEEN.store(false, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The face the options' Keyboard asks for (`set_pad_only`'s argument): the
+/// compact face with Compact chosen and a keyboard at hand, whether the last
+/// key (`last_keyboard`) was the keyboard's or a controller's.
+pub fn compact_face(last_keyboard: bool, compact: bool) -> bool {
+    compact && (last_keyboard || KEYBOARD_SEEN.load(std::sync::atomic::Ordering::Relaxed))
 }
 
 /// The compact face is showing.
@@ -527,6 +554,22 @@ impl EditBox {
                 let ok = self.line_down(vui, r, now);
                 Self::sound(ok, cues);
             }
+            // □: back, on either face. `OnKeyDown` takes it on the soft
+            // keyboard's face alone (a PS2 shows the compact face only with a
+            // keyboard plugged in, whose Backspace backs); here the compact
+            // face is a controller's too once any key of a keyboard was
+            // pressed (`compact_face`, petition 1633), F3 for a bug report
+            // among them, and its □ did nothing there (a player's report,
+            // 2026-11-12: "square backspace missing when sending reports").
+            // It does not repeat while held, on either face.
+            133 => {
+                if self.text.is_empty() {
+                    cues.push(9);
+                } else {
+                    let ok = self.backspace(now);
+                    Self::sound(ok, cues);
+                }
+            }
             _ if pad_only() => {}
             142 => {
                 cues.push(11);
@@ -552,14 +595,6 @@ impl EditBox {
             135 => {
                 let ok = self.insert(b' ' as u16, now);
                 Self::sound(ok, cues);
-            }
-            133 => {
-                if self.text.is_empty() {
-                    cues.push(9);
-                } else {
-                    let ok = self.backspace(now);
-                    Self::sound(ok, cues);
-                }
             }
             134 => return self.press_key(vui, r, now, cues),
             _ => {}
@@ -1097,6 +1132,50 @@ impl EditBox {
 mod tests {
     use super::*;
 
+    /// The options' Keyboard on Compact (petition 1633): the compact face
+    /// whether the box was opened by Enter or by a controller's R3, once a
+    /// keyboard has been used; the soft keyboard with the other setting, with
+    /// no keyboard used yet, and after the touch screen is touched (the
+    /// controls: the face as the last key alone picked it).
+    #[test]
+    fn compact_keyboard_holds_for_a_controller() {
+        screen_touched();
+        assert!(!compact_face(false, true), "no keyboard yet: a controller's press shows the soft keyboard");
+        assert!(compact_face(true, true), "Enter: compact");
+        keyboard_pressed();
+        assert!(compact_face(false, true), "R3 after a keyboard was used: compact, as Enter");
+        assert!(!compact_face(false, false), "the other setting: the soft keyboard");
+        assert!(!compact_face(true, false), "the other setting, from the keyboard too");
+        screen_touched();
+        assert!(!compact_face(false, true), "a finger on the screen: no keyboard at hand");
+    }
+
+    /// Square (133) backs on either face, as the chat line's soft keyboard
+    /// has it: a character off before the caret, the refusal's sound (9) on
+    /// an empty box; held, it does not repeat. (`PAD_ONLY` is shared with
+    /// other tests running at once; Square's answer does not depend on it.)
+    #[test]
+    fn square_backs_on_either_face() {
+        let (vui, r) = (crate::pointer::testing::vui(), crate::pointer::testing::NullRaster);
+        for compact in [false, true] {
+            let mut e = EditBox::default();
+            e.set_text(&wide("abc"));
+            let mut cues = Vec::new();
+            set_pad_only(compact);
+            e.key(&vui, &r, 133, 0, &mut cues);
+            assert_eq!(String::from_utf16_lossy(&e.text), "ab", "compact {compact}");
+            assert_eq!(cues, vec![11]);
+            assert_eq!(e.repeat_key, 0, "no repeat while held");
+            e.key_up(133);
+            e.key(&vui, &r, 133, 0, &mut cues);
+            e.key(&vui, &r, 133, 0, &mut cues);
+            cues.clear();
+            e.key(&vui, &r, 133, 0, &mut cues);
+            assert!(e.text.is_empty());
+            assert_eq!(cues, vec![9], "an empty box refuses");
+        }
+    }
+
     /// `MoveKey` steps over empty cells and wraps at the edges: from the
     /// top-left, up wraps to the bottom row's first key, left to the last
     /// column; the two empty cells at the bottom right are skipped.
@@ -1427,6 +1506,32 @@ mod tests {
             }
             assert_eq!(e.text.len(), 1505, "every character typed went in");
         }
+    }
+
+    /// A box of lines (a petition's, a mail's body): Enter (13) types a new
+    /// line, and Shift+Enter (4, as `VIKeyboard` makes it; the legend's
+    /// "Shift+Enter = End", petition 1626) ends it with the text kept, as R2
+    /// (143) does. The control: a box of one line ends at Enter.
+    #[test]
+    fn shift_enter_ends_a_box_of_lines() {
+        let vui = crate::pointer::testing::vui();
+        let r = crate::pointer::testing::NullRaster;
+        let mut cues = Vec::new();
+        let mut e = EditBox::default();
+        e.set_multi_line(true);
+        e.set_max_length(512);
+        e.purpose = 7;
+        for key in [b'a' as i32, 13, b'b' as i32] {
+            assert!(matches!(e.key(&vui, &r, key, 0, &mut cues), EditUp::None));
+        }
+        assert_eq!(e.text, wide("a\nb"));
+        assert!(matches!(e.key(&vui, &r, 4, 0, &mut cues), EditUp::Done(7)), "Shift+Enter ends it");
+        assert_eq!(e.text, wide("a\nb"), "with the text as typed");
+        assert!(matches!(e.key(&vui, &r, 143, 0, &mut cues), EditUp::Done(7)), "as R2 does");
+        let mut e = EditBox::default();
+        e.set_max_length(128);
+        e.purpose = 7;
+        assert!(matches!(e.key(&vui, &r, 13, 0, &mut cues), EditUp::Done(7)), "the control: one line");
     }
 
     #[test]

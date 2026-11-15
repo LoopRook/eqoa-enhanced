@@ -64,6 +64,162 @@ pub fn worn_by_a_race(model: u32, races: Option<&Creation>) -> bool {
 /// third times the size of the fairy (`eqoa dress 7A85646C ... shield=...`).
 const SHIELD_FIX: &[(u32, f32)] = &[(0x7A85_646C, 0.3)];
 
+/// Where a body whose item nodes are no hands holds a player's items: for
+/// each item slot (main hand, off hand, shield) the node it hangs from and the
+/// frame of a node made there for it, in that node's space. The Jal'Raeth's
+/// three (go-eqoa-server's race 30: robes, channeler, knight; one 42-node
+/// skeleton) name their item nodes 38 and 37, which hang off the root at the
+/// knee, where their knights' blade discs float (the owner, 2026-11-11: "they
+/// hold weapons weird"): a sword hung there floated beside the crossed legs.
+/// Their arms have the human's bone names (hand 10 and 21, forearm 20, the
+/// namesakes of HumanMale's 13, 22 and 21, which its item nodes 18, 27 and 28
+/// hang from) and, as the human's, every node's axes are the model's in the
+/// bind pose, so each made node is the human's item node's frame under its
+/// namesake parent (the off hand's turned half round its z as the human's
+/// 27 is), moved out by the Jal'Raeth's longer hand (0.18 from wrist to
+/// fingertip against the human's 0.10) and forearm (0.34 against 0.24).
+/// `nodes`: the skeleton's own count, which tells a sprite already given them.
+struct HandSeats {
+    bodies: &'static [u32],
+    nodes: usize,
+    /// Per item slot: the parent node, the frame's rotation (x, y, z, w) and
+    /// its place.
+    seats: [(i32, [f32; 4], [f32; 3]); 3],
+}
+
+/// The hand seats (`HandSeats`), by skeleton.
+///
+/// The merfolk's four (go-eqoa-server's race 32, the Mermaid, petition 1620:
+/// the merman, the mermaid and the two sirens of Odus; one 24-node skeleton)
+/// name the right hand's last node, 18, for both hands and none for the
+/// shield, so a sword and a shield would hang together in the right hand.
+/// Their arms run as the human's do (right arm 14-18 at -x, left 9-13 at +x:
+/// collar, shoulder, elbow, wrist, fingertips; every node with the model's
+/// axes in the bind pose), with no bone name of the human's; each made node is
+/// the human's item node's frame under the namesake of its parent by place
+/// (wrists 17 and 12, as HumanMale's hands 13 and 22, its off hand turned half
+/// round its z; the left forearm 11, as its 21), the hand and the forearm about
+/// the human's lengths (0.09 wrist to fingertip, 0.27 elbow to wrist).
+const HAND_SEATS: &[HandSeats] = &[
+    HandSeats {
+        bodies: &[0xF51B_AB09, 0x4B24_FF7E, 0x491F_6347],
+        nodes: 42,
+        seats: [(10, [0.0, 0.0, 0.0, 1.0], [-0.08, -0.035, 0.0]), (21, [0.0, 0.0, 1.0, 0.0], [0.08, -0.035, 0.0]), (20, [0.0, 0.0, 0.0, 1.0], [0.2, 0.11, 0.0])],
+    },
+    HandSeats {
+        bodies: MERFOLK,
+        nodes: 24,
+        seats: [(17, [0.0, 0.0, 0.0, 1.0], [-0.045, -0.02, 0.0]), (12, [0.0, 0.0, 1.0, 0.0], [0.045, -0.02, 0.0]), (11, [0.0, 0.0, 0.0, 1.0], [0.15, 0.08, 0.0])],
+    },
+];
+
+/// The merfolk's bodies: go-eqoa-server's race 32's merman (its male's),
+/// mermaid (its female's), the two sirens and the sea king (Quintashi's body,
+/// the same skeleton) its options offer.
+pub const MERFOLK: &[u32] = &[0xA316_EB78, 0x74BA_7C3D, 0xBF21_FEF5, 0x1740_427C, 0xD275_EE8F];
+
+/// Bodies whose hair is a part of their mesh that comes out through a helm, and
+/// where it lies in their one texture (palette entry 0, a rect of texture
+/// coordinates each: u0, v0, u1, v1): the merman's, the mermaid's and the two sirens'
+/// (go-eqoa-server's race 32; the owner, 2026-11-12: "the mermaid helms arent
+/// sitting right"), whose long hair streamed out of the back of every helm and
+/// whose crown showed through the top of the smaller ones. Under a helm their
+/// hair is left out, as a player race's `$Hair` is (the sea king has none).
+const HAIR: [f32; 4] = [0.0, 0.0, 63.0 / 255.0, 128.0 / 255.0];
+const HAIR_UNDER_HELM: &[(u32, &[[f32; 4]])] = &[
+    (0xA316_EB78, &[HAIR]),
+    (0x74BA_7C3D, &[HAIR]),
+    (0xBF21_FEF5, &[HAIR]),
+    // the enchanting siren's tiara too (a strip below the hair, on her head and
+    // neck alone), which stood out of the front of every helm
+    (0x1740_427C, &[HAIR, [0.0, 128.0 / 255.0, 63.0 / 255.0, 150.0 / 255.0]]),
+];
+
+/// Takes body `id`'s hair (`HAIR_UNDER_HELM`) out of `model`, a player's
+/// character's wearing a helm: each triangle of entry 0 whose texture
+/// coordinates' centre (its first layer's) lies in the hair's rect.
+pub fn hide_hair(model: &mut esf::Model, id: u32) {
+    let Some(&(_, rects)) = HAIR_UNDER_HELM.iter().find(|(b, _)| *b == id) else { return };
+    let uv = model.uv.clone();
+    let mut gone = 0;
+    for b in model.batches.iter_mut().filter(|b| b.material == 0) {
+        let Some(l) = b.layers.first().cloned() else { continue };
+        let before = b.indices.len();
+        b.indices = b
+            .indices
+            .chunks_exact(3)
+            .filter(|t| {
+                let c = t.iter().fold([0.0f32; 2], |a, &v| {
+                    let q = l.apply_uv(uv[v as usize]);
+                    [a[0] + q[0].rem_euclid(1.0) / 3.0, a[1] + q[1].rem_euclid(1.0) / 3.0]
+                });
+                !rects.iter().any(|r| c[0] >= r[0] && c[0] < r[2] && c[1] >= r[1] && c[1] < r[3])
+            })
+            .flatten()
+            .copied()
+            .collect();
+        gone += (before - b.indices.len()) / 3;
+    }
+    model.triangles -= gone as u32;
+}
+
+/// Bodies a server's race offers whose mesh holds a weapon of its own, and the
+/// palette entries it is drawn in: the sea king's trident (Quintashi's body,
+/// entries 4-6, every triangle on its right hand's fingertips, 18), left out of
+/// a player's character, who holds its own items (`drop_own_weapons`).
+const OWN_WEAPONS: &[(u32, &[i32])] = &[(0xD275_EE8F, &[4, 5, 6])];
+
+/// Takes the triangles of body `id`'s own weapon (`OWN_WEAPONS`) out of
+/// `model`, a player's character's.
+pub fn drop_own_weapons(model: &mut esf::Model, id: u32) {
+    let Some((_, entries)) = OWN_WEAPONS.iter().find(|(b, _)| *b == id) else { return };
+    for b in model.batches.iter_mut().filter(|b| entries.contains(&b.material)) {
+        model.triangles -= (b.indices.len() / 3) as u32;
+        b.indices.clear();
+    }
+}
+
+/// The hand seats of body `model` (`HAND_SEATS`).
+fn hand_seats(model: u32) -> Option<&'static HandSeats> {
+    HAND_SEATS.iter().find(|h| h.bodies.contains(&model))
+}
+
+/// The nodes made under `cs`'s hands for its main and off hand (`HAND_SEATS`),
+/// when body `model` has hand seats and `cs` has been given them (`grant`, a
+/// player's): what holds an item in each hand, so their parents are its hands.
+pub fn hand_items(model: u32, cs: &CSprite<Ee>) -> Option<[i32; 2]> {
+    let seats = hand_seats(model)?;
+    (cs.h.nodes.len() == seats.nodes + seats.seats.len()).then(|| [cs.item_nodes[0], cs.item_nodes[1]])
+}
+
+/// Gives `cs` a node for each item slot where `HAND_SEATS` says, under its
+/// hands, and names them its item nodes; once only (a sprite with more nodes
+/// than its skeleton's has them already), and on the skeleton the table was
+/// measured on alone.
+fn seat_hands(cs: &mut CSprite<Ee>, seats: &HandSeats) {
+    if cs.h.nodes.len() != seats.nodes {
+        return;
+    }
+    for (slot, &(parent, q, t)) in seats.seats.iter().enumerate() {
+        let Some(p) = cs.h.nodes.get(parent as usize) else { return };
+        use vi::fpu::F;
+        let pb = p.bind;
+        let rot = vi::quat::Quat { x: F::new(q[0]), y: F::new(q[1]), z: F::new(q[2]), w: F::new(q[3]) };
+        let local = vi::geom::Matrix44::transform_quat(&rot, F::ONE, &vi::vect::Vect3::of(t[0], t[1], t[2]));
+        let bind = vi::geom::Matrix44::mul(&local, &vi::geom::Matrix44::transform_quat(&pb.rot, pb.scale, &pb.trans));
+        let (bq, bs, bt) = bind.convert_to();
+        let i = cs.h.add(parent);
+        if i < 0 {
+            return;
+        }
+        cs.h.set_node_bind_pose(i as usize, bq, bs, bt);
+        let n = &mut cs.h.nodes[i as usize];
+        n.frame = n.rest;
+        n.fix_scale = vi::vect::Vect3::of(1.0, 1.0, 1.0);
+        cs.item_nodes[slot] = i;
+    }
+}
+
 /// `cs`, made of `model`, holds items when it is a player's character
 /// (`player`) in a body one of the server's races wears (`races`), its shield
 /// on the off hand's hand when it names no node for one, and its shield node
@@ -79,11 +235,15 @@ pub fn grant(cs: &mut CSprite<Ee>, model: u32, player: bool, races: Option<&Crea
         if cs.item_nodes[2] < 0
             && let Some(off) = usize::try_from(cs.item_nodes[1]).ok().and_then(|i| cs.h.nodes.get(i))
         {
-            // the root is no hand: an off hand's node hung off it (the Jal'Raeth's,
-            // whose item nodes float beside them as their knights' blades do) takes
-            // the shield itself
+            // the root is no hand: an off hand's node hung off it takes the shield
+            // itself (the Jal'Raeth's, whose item nodes float beside them as their
+            // knights' blades do, are given nodes in their hands below instead)
             cs.item_nodes[2] = if off.parent > 0 { off.parent } else { cs.item_nodes[1] };
         }
+    }
+    // item nodes that are no hands: nodes of their own under the hands
+    if let Some(seats) = hand_seats(model) {
+        seat_hands(cs, seats);
     }
     if let Some(&(_, fix)) = SHIELD_FIX.iter().find(|(b, _)| *b == model)
         && let Some(n) = usize::try_from(cs.item_nodes[2]).ok().and_then(|i| cs.h.nodes.get_mut(i))
@@ -249,6 +409,169 @@ mod tests {
             assert!((npc - 1.0).abs() < 0.01, "{action:?}: the control, an NPC's at the art's {npc:.3}");
             let (off, shield) = scales(PIXIE, true, action);
             assert!((off - 0.3).abs() < 0.01 && (shield - 0.3).abs() < 0.01, "{action:?}: the pixie's as its art has them");
+        }
+    }
+
+    /// The Jal'Raeth (go-eqoa-server's race 30) hold a player's items in their
+    /// hands: on each of their three bodies `grant` makes three nodes, under the
+    /// namesakes of the nodes HumanMale's item nodes hang from (its hands 13 and 22,
+    /// its left forearm 21), once only, and names them the item nodes; posed in the
+    /// idle and in the first attack each sits at its hand (within a hand's length
+    /// of it), where the body's own item nodes (the control) float at the knee,
+    /// half a metre and more away in the swing (in the idle the hands rest on the
+    /// knees). An NPC in the body keeps its own nodes. Needs
+    /// `run/eqoa.iso`.
+    #[test]
+    fn a_jalraeth_holds_its_items_in_its_hands() {
+        let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        let Ok(mut iso) = iso::Iso::open(&p) else {
+            eprintln!("SKIP: no disc at run/eqoa.iso");
+            return;
+        };
+        let mut lib = esf::Library::new();
+        lib.add("CHAR.ESF", esf::Container::open(iso.read("CHAR.ESF").unwrap()).unwrap());
+        let human = crate::raceemote::Rig::load(&lib, 0x70D8_98C6).unwrap();
+        for &id in HAND_SEATS[0].bodies {
+            let listed = races(&[[id, id]]);
+            let rig = crate::raceemote::Rig::load(&lib, id).unwrap();
+            let (mut sc, mut cache, mut rand) = (AnimScene::<Ee>::default(), AnimCache::new(), Rand(1));
+            let mut cs = load_csprite(&lib, lib.lookup(id as i32).unwrap(), &mut sc, &mut cache, &mut rand).unwrap();
+            let own = cs.item_nodes;
+            assert_eq!(cs.h.nodes.len(), 42);
+            let mut npc = load_csprite(&lib, lib.lookup(id as i32).unwrap(), &mut AnimScene::<Ee>::default(), &mut AnimCache::new(), &mut Rand(1)).unwrap();
+            grant(&mut npc, id, false, Some(&listed));
+            assert_eq!((npc.h.nodes.len(), npc.item_nodes), (42, own), "{id:#010x}: an NPC's as it was");
+            assert!(grant(&mut cs, id, true, Some(&listed)));
+            let made = cs.item_nodes;
+            assert_eq!(&made[..3], &[42, 43, 44], "{id:#010x}");
+            assert!(grant(&mut cs, id, true, Some(&listed)));
+            assert_eq!((cs.h.nodes.len(), cs.item_nodes), (45, made), "{id:#010x}: again, as it was");
+            for (slot, humans) in [18usize, 27, 28].into_iter().enumerate() {
+                let parent = cs.h.nodes[made[slot] as usize].parent as usize;
+                let hp = human.parent[humans] as usize;
+                assert_eq!(rig.refs[parent], human.refs[hp], "{id:#010x} slot {slot}: under the namesake of the human's node {hp}");
+            }
+            for action in [None, Some(23)] {
+                let mut t = 0;
+                while t <= 900 {
+                    sc.time = t;
+                    match action {
+                        Some(a) if t == 0 => {
+                            cs.set_action(a, &sc, &mut rand);
+                        }
+                        Some(_) => {}
+                        None => cs.set_locomotion(0, &sc, &mut rand),
+                    }
+                    cs.h.process(0, &sc);
+                    t += 16;
+                }
+                let at = |n: i32| {
+                    let m = cs.h.nodes[n as usize].world.to_cols();
+                    glam::Vec3::new(m[3][0], m[3][1], m[3][2])
+                };
+                let scale = cs.h.default_scale.0;
+                for (slot, &item) in made.iter().enumerate().take(3) {
+                    let parent = cs.h.nodes[item as usize].parent;
+                    let d = at(item).distance(at(parent));
+                    assert!(d < 0.25 * scale, "{id:#010x} {action:?} slot {slot}: {d:.3} from its hand");
+                }
+                let knee = at(own[0]).distance(at(made[0]));
+                eprintln!("{id:#010x} {action:?}: the body's own item node {knee:.3} from the hand's");
+                if action.is_some() {
+                    assert!(knee > 0.5, "{id:#010x} {action:?}: the control, its own item node {knee:.3} from the hand's");
+                }
+            }
+        }
+    }
+
+    /// The merfolk (go-eqoa-server's race 32, the Mermaid) hold a player's
+    /// items in their hands: on each of their four bodies `grant` makes three
+    /// nodes, under the right wrist (17), the left wrist (12) and the left
+    /// forearm (11), once only; treading water and in their attack (44) each
+    /// sits at its parent, and the off hand's and the shield's are on the left
+    /// of the body (+x in the model), the main hand's on the right. The
+    /// control: the bodies' own nodes put the off hand's item in the right
+    /// hand, with the main hand's. An NPC in the body keeps its own nodes.
+    /// Needs `run/eqoa.iso`.
+    #[test]
+    fn the_merfolk_hold_items_in_both_hands() {
+        let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        let Ok(mut iso) = iso::Iso::open(&p) else {
+            eprintln!("SKIP: no disc at run/eqoa.iso");
+            return;
+        };
+        let mut lib = esf::Library::new();
+        lib.add("CHAR.ESF", esf::Container::open(iso.read("CHAR.ESF").unwrap()).unwrap());
+        for &id in MERFOLK {
+            let listed = races(&[[0xA316_EB78, 0x74BA_7C3D], [0xBF21_FEF5, 0x1740_427C], [0xD275_EE8F, 0xD275_EE8F]]);
+            let (mut sc, mut cache, mut rand) = (AnimScene::<Ee>::default(), AnimCache::new(), Rand(1));
+            let mut cs = load_csprite(&lib, lib.lookup(id as i32).unwrap(), &mut sc, &mut cache, &mut rand).unwrap();
+            let own = cs.item_nodes;
+            // the sea king (Quintashi's) names its head for both hands and its forearm for the shield
+            let seaking = id == 0xD275_EE8F;
+            assert_eq!((cs.h.nodes.len(), &own[..3]), (24, if seaking { &[20, 20, 11][..] } else { &[18, 18, -1][..] }), "{id:#010x}");
+            let mut npc = load_csprite(&lib, lib.lookup(id as i32).unwrap(), &mut AnimScene::<Ee>::default(), &mut AnimCache::new(), &mut Rand(1)).unwrap();
+            grant(&mut npc, id, false, Some(&listed));
+            assert_eq!((npc.h.nodes.len(), npc.item_nodes), (24, own), "{id:#010x}: an NPC's as it was");
+            assert!(grant(&mut cs, id, true, Some(&listed)), "{id:#010x}: listed or offered");
+            let made = cs.item_nodes;
+            assert_eq!(&made[..3], &[24, 25, 26], "{id:#010x}");
+            assert_eq!([24, 25, 26].map(|n| cs.h.nodes[n].parent), [17, 12, 11], "{id:#010x}");
+            assert!(grant(&mut cs, id, true, Some(&listed)));
+            assert_eq!((cs.h.nodes.len(), cs.item_nodes), (27, made), "{id:#010x}: again, as it was");
+            let bind_x = |n: i32| cs.h.nodes[n as usize].bind.trans.x.0;
+            assert!(bind_x(made[0]) < 0.0 && bind_x(made[1]) > 0.0 && bind_x(made[2]) > 0.0, "{id:#010x}: right, left, left");
+            assert!(seaking || bind_x(own[1]) < 0.0, "the control: the body's own off hand is its right");
+            for action in [None, Some(23)] {
+                let mut t = 0;
+                cs.set_locomotion(13, &sc, &mut rand);
+                while t <= 900 {
+                    sc.time = t;
+                    match action {
+                        Some(a) if t == 0 => {
+                            cs.set_action(a, &sc, &mut rand);
+                        }
+                        _ => {}
+                    }
+                    cs.h.process(0, &sc);
+                    t += 16;
+                }
+                let at = |n: i32| {
+                    let m = cs.h.nodes[n as usize].world.to_cols();
+                    glam::Vec3::new(m[3][0], m[3][1], m[3][2])
+                };
+                let scale = cs.h.default_scale.0;
+                for (slot, &item) in made.iter().enumerate().take(3) {
+                    let parent = cs.h.nodes[item as usize].parent;
+                    let d = at(item).distance(at(parent));
+                    assert!(d < 0.25 * scale, "{id:#010x} {action:?} slot {slot}: {d:.3} from its parent");
+                }
+            }
+        }
+    }
+
+    /// A merfolk player's hair is left out under a helm (`hide_hair`; the owner,
+    /// 2026-11-12: "the mermaid helms arent sitting right"): on the merman, the
+    /// mermaid and the sirens the hair's triangles go (the enchanting siren's
+    /// tiara too) and nothing else of the body; the sea king, the human and a body
+    /// of no race keep every triangle. Needs `run/eqoa.iso`.
+    #[test]
+    fn merfolk_hair_goes_under_a_helm() {
+        let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        let Ok(mut iso) = iso::Iso::open(&p) else {
+            eprintln!("SKIP: no disc at run/eqoa.iso");
+            return;
+        };
+        let mut lib = esf::Library::new();
+        lib.add("CHAR.ESF", esf::Container::open(iso.read("CHAR.ESF").unwrap()).unwrap());
+        for (id, lo, hi) in [(0xA316_EB78u32, 100, 400), (0x74BA_7C3D, 150, 400), (0xBF21_FEF5, 150, 400), (0x1740_427C, 180, 450), (0xD275_EE8F, 0, 0), (0x70D8_98C6, 0, 0)] {
+            let m = lib.build_model(lib.lookup(id as i32).unwrap()).unwrap();
+            let mut h = m.clone();
+            hide_hair(&mut h, id);
+            let gone = (m.triangles - h.triangles) as usize;
+            assert!((lo..=hi).contains(&gone), "{id:08X}: {gone} triangles of hair");
+            let left: usize = h.batches.iter().map(|b| b.indices.len() / 3).sum();
+            assert_eq!(left, h.triangles as usize, "{id:08X}: the count kept");
         }
     }
 

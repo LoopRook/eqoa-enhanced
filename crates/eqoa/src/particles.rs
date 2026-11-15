@@ -152,6 +152,12 @@ impl Particles {
 /// `VIParticleSystem::Render`: each emitter's billboards with its
 /// definition's material.
 pub fn render(sys: &mut System<Ee>, time: i64) -> Vec<Batch> {
+    render_tinted(sys, time, |_| None)
+}
+
+/// `render`, each emitter's billboards in the hue `tint` gives it
+/// (`aura::recolor_quads`; none: as they are).
+fn render_tinted(sys: &mut System<Ee>, time: i64, tint: impl Fn(usize) -> Option<[u8; 3]>) -> Vec<Batch> {
     let mut out = Vec::new();
     for (id, bbs) in sys.render(time) {
         let def = sys.emitter(id).def;
@@ -171,6 +177,9 @@ pub fn render(sys: &mut System<Ee>, time: i64) -> Vec<Batch> {
                 })
                 .collect(),
         });
+        if let (Some(c), Some(b)) = (tint(id), out.last_mut()) {
+            crate::aura::recolor_quads(b, c);
+        }
     }
     out
 }
@@ -302,6 +311,10 @@ pub enum How {
 /// The key a creature's own emitters take in the hand's place.
 pub const OWN: usize = usize::MAX;
 
+/// The key a glowing NPC's aura (`aura::body_emitters`) takes in the hand's
+/// place.
+pub const AURA: usize = usize::MAX - 1;
+
 /// One of the emitters creatures carry this frame: which (the holder, the
 /// hand or `OWN`, the item or the creature's model, its place among them),
 /// its world transform (the member's under the hand's node, or the
@@ -313,6 +326,9 @@ pub struct InHand {
     pub def: Ref,
     pub how: How,
     pub drawn: bool,
+    /// A held item's own colour (`aura::hand`): its particles in its hue;
+    /// none as the disc's.
+    pub tint: Option<[u8; 3]>,
 }
 
 /// The particles creatures carry, on a particle system of their own: the
@@ -346,6 +362,7 @@ impl Held {
                 self.sys.destroy_emitter(id);
             }
         }
+        let mut tints = HashMap::new();
         for h in now {
             let id = match self.emitters.get(&h.key) {
                 Some(&id) => id,
@@ -365,6 +382,9 @@ impl Held {
                     id
                 }
             };
+            if let Some(t) = h.tint {
+                tints.insert(id, t);
+            }
             if h.drawn {
                 match h.how {
                     How::Sprite(flags) => raster_sprite(&mut self.sys, id, flags, &h.world, eye, &mut self.rand),
@@ -372,14 +392,19 @@ impl Held {
                 }
             }
         }
-        render(&mut self.sys, time)
+        render_tinted(&mut self.sys, time, |id| tints.get(&id).copied())
     }
 
     /// How many emitters are in hands, and their particles.
     pub fn describe(&self) -> String {
         let n: usize = self.emitters.values().map(|&id| self.sys.particle_count(id)).sum();
         let own = self.emitters.keys().filter(|k| k.1 == OWN).count();
-        format!("{} held-item emitters, {own} creatures' own, {n} particles", self.emitters.len() - own)
+        let aura = self.emitters.keys().filter(|k| k.1 == AURA).count();
+        if aura == 0 {
+            format!("{} held-item emitters, {own} creatures' own, {n} particles", self.emitters.len() - own)
+        } else {
+            format!("{} held-item emitters, {own} creatures' own, {aura} aura, {n} particles", self.emitters.len() - own - aura)
+        }
     }
 }
 
@@ -492,7 +517,7 @@ mod tests {
         let Some(lib) = items() else { return };
         let e = item_emitters(&lib, 0x8A82B605)[0];
         let at = |x: f32, y: f32, z: f32| Matrix44::transform(&Vect3::of(0.0, 0.0, 0.0), F::ONE, &Vect3::of(x, y, z));
-        let hand = |world, drawn| [InHand { key: (3, 0, 0x8A82B605, 0), world, def: e.def, how: How::Sprite(e.flags), drawn }];
+        let hand = |world, drawn| [InHand { key: (3, 0, 0x8A82B605, 0), world, def: e.def, how: How::Sprite(e.flags), drawn, tint: None }];
         let mut held = Held::new(0);
         let near = [100.0, 52.0, 195.0];
         let pts = run(&mut held, &lib, &hand(at(100.0, 50.0, 200.0), true), near, 0, 1000);
@@ -561,7 +586,7 @@ mod tests {
         let e = part_emitters(&lib, 0x6E5E0E2A)[0];
         let at = |x: f32, y: f32, z: f32| Matrix44::transform(&Vect3::of(0.0, 0.0, 0.0), F::ONE, &Vect3::of(x, y, z));
         let how = How::Part { use_location: e.use_location, once: e.once };
-        let own = |world, drawn, how| [InHand { key: (5, OWN, 0x6E5E0E2A, 0), world, def: e.def, how, drawn }];
+        let own = |world, drawn, how| [InHand { key: (5, OWN, 0x6E5E0E2A, 0), world, def: e.def, how, drawn, tint: None }];
         let near = [100.0, 52.0, 195.0];
         let mut held = Held::new(0);
         let pts = run(&mut held, &lib, &own(at(100.0, 50.0, 200.0), true, how), near, 0, 1000);

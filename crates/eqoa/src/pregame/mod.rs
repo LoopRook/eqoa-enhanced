@@ -318,6 +318,14 @@ impl Pregame {
         }
     }
 
+    /// The wheel's `lines` or a finger's drag of `dy` frame pixels: the
+    /// window up scrolls (character select's list).
+    pub fn scroll(&mut self, lines: f32, dy: f32) {
+        if self.entering.is_none() && self.stage == Stage::Client {
+            self.client.scroll(lines, dy);
+        }
+    }
+
     /// The files read since the last frame go into `res`; then the stage
     /// moves on if its files are in.
     pub fn update(&mut self, now: i64) {
@@ -330,6 +338,10 @@ impl Pregame {
         // and the bodies the characters' capes are cut from (`cape`)
         let mut bodies = client::create::tables::bodies();
         bodies.extend(self.client.cape_bodies());
+        // and, with go-eqoa-server's armour, the bodies set 9's art is in
+        // (`s2::art_bodies`): the world registers it out of CHAR.ESF whole,
+        // which the pregame never reads
+        bodies.extend(crate::s2::art_bodies());
         self.res.want_bodies(&bodies);
         if self.res.take_bodies_in() {
             self.client.bodies_in();

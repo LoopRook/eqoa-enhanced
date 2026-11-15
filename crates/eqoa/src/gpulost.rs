@@ -93,6 +93,31 @@ pub fn mark(why: &str) {
     }
 }
 
+/// Why the device is taken as lost when the browser threw from a WebGPU call
+/// on it (`what`: the call and its error, web/gpuguard.js): Safari throws an
+/// InvalidStateError from a lost device's calls (petitions 5074, 5076, 5105,
+/// 5106) where the spec gives invalid objects.
+pub fn threw_why(what: &str) -> String {
+    let what: String = what.lines().next().unwrap_or("").chars().take(200).collect();
+    format!("the browser refused the device's calls, its graphics process gone ({what})")
+}
+
+/// Whether a panic's text is wgpu's WebGPU backend unwrapping a call the
+/// browser threw from with an InvalidStateError: a lost device's
+/// (`threw_why`), where web/gpuguard.js did not stand in for it.
+pub fn browser_threw(panic: &str) -> bool {
+    panic.contains("backend/webgpu.rs") && panic.contains("InvalidStateError")
+}
+
+/// The page's notice for such a panic: the browser's words (the notice says
+/// to reload).
+pub fn threw_detail(panic: &str) -> String {
+    let at = panic.find("InvalidStateError").unwrap_or(0);
+    let words: String = panic[at..].lines().next().unwrap_or("").chars().take(160).collect();
+    let words = words.split(" @").next().unwrap_or("").trim().to_string();
+    format!("the browser's graphics stopped answering ({words}): its graphics process ended, as a browser's does when it runs short of memory")
+}
+
 /// Whether the device is lost (and not yet made again): nothing more is
 /// drawn or uploaded on it.
 pub fn lost() -> bool {
@@ -288,9 +313,80 @@ pub fn test(device: &wgpu::Device, now: i64) {
     }
 }
 
+/// A page's way to a new device in place of a lost one (`web::remake`): the
+/// backends it tries in order, each with the pauses before its tries. On
+/// WebGPU first WebGPU again, for about 50 s (a Windows driver reset, a TDR,
+/// can take longer than the 16 s this waited before: Roach's crash report of
+/// 2026-11-13, `requestDevice` refused with `DXGI_ERROR_DEVICE_REMOVED` on
+/// every try), each try a fresh adapter; then WebGL2, on a fresh canvas (one
+/// that has had a "webgpu" context never gives a "webgl2" one), which a
+/// Chrome whose GPU process keeps failing still draws on (in software if it
+/// must). On WebGL2 (chosen, or fallen back to: never back to WebGPU in that
+/// page) WebGL2 again on its canvas once the browser gives the context back.
+pub mod page {
+    use render::wgpu::Backend;
+
+    /// WebGPU's pauses: rising to 5 s, then 5 s apart, 50.85 s in all.
+    pub const WEBGPU_PAUSES_MS: [i32; 15] = [100, 250, 500, 1000, 2000, 3000, 4000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000];
+    /// WebGL2's on its own canvas, its context given back (as before: 15.85 s).
+    pub const WEBGL_PAUSES_MS: [i32; 8] = [100, 250, 500, 1000, 2000, 3000, 4000, 5000];
+    /// WebGL2's on a fresh canvas after WebGPU's 50 s: the browser has had
+    /// its time; a few tries, 7.25 s.
+    pub const FALLBACK_PAUSES_MS: [i32; 4] = [0, 250, 2000, 5000];
+
+    /// One leg of the way: the backend, the pauses before each try, and
+    /// whether the canvas is replaced by a fresh one first.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Leg {
+        pub backend: Backend,
+        pub pauses_ms: &'static [i32],
+        pub fresh_canvas: bool,
+    }
+
+    /// The legs, in order, for a device lost on `drawn`.
+    pub fn plan(drawn: Backend) -> Vec<Leg> {
+        if drawn == Backend::Gl {
+            return vec![Leg { backend: Backend::Gl, pauses_ms: &WEBGL_PAUSES_MS, fresh_canvas: false }];
+        }
+        vec![
+            Leg { backend: Backend::BrowserWebGpu, pauses_ms: &WEBGPU_PAUSES_MS, fresh_canvas: false },
+            Leg { backend: Backend::Gl, pauses_ms: &FALLBACK_PAUSES_MS, fresh_canvas: true },
+        ]
+    }
+
+    /// A leg's whole wait, in ms.
+    pub fn total_ms(pauses: &[i32]) -> i32 {
+        pauses.iter().sum()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use render::wgpu::Backend;
+
+    /// WebGPU is tried again for 45-60 s, no pause over 5 s and none
+    /// shorter than the one before; then WebGL2 on a fresh canvas. On WebGL2
+    /// only WebGL2, on its own canvas: a page fallen back never goes back to
+    /// WebGPU (the backend it draws on is WebGL2's from then). The control:
+    /// the old schedule's 16 s, too short for Roach's driver reset.
+    #[test]
+    fn page_remake_plan() {
+        let p = page::plan(Backend::BrowserWebGpu);
+        assert_eq!(p.iter().map(|l| (l.backend, l.fresh_canvas)).collect::<Vec<_>>(), [(Backend::BrowserWebGpu, false), (Backend::Gl, true)]);
+        let w = p[0].pauses_ms;
+        let total = page::total_ms(w);
+        assert!((45_000..=60_000).contains(&total), "WebGPU waits {total} ms");
+        assert!(w.iter().all(|&ms| (0..=5000).contains(&ms)), "no pause over 5 s");
+        assert!(w.windows(2).all(|d| d[0] <= d[1]), "the pauses never shorten");
+        assert!(w[0] <= 250, "the first try comes at once, as a lone GPU-process restart wants");
+        let g = page::plan(Backend::Gl);
+        assert_eq!(g.len(), 1);
+        assert_eq!((g[0].backend, g[0].fresh_canvas), (Backend::Gl, false), "no flip back to WebGPU");
+        assert!(g[0].pauses_ms.iter().all(|&ms| ms <= 5000));
+        assert!(p[1].pauses_ms.iter().all(|&ms| ms <= 5000) && page::total_ms(p[1].pauses_ms) < 15_000, "the fallback is quick once WebGPU had its 50 s");
+        assert!(page::total_ms(&page::WEBGL_PAUSES_MS) < 45_000, "the control: the old 16 s schedule is short of a TDR");
+    }
 
     /// A loss is taken, recovered from, and a loss soon after is too soon
     /// (`again_soon`, the fallback); before any recovery none is too soon (the
@@ -309,6 +405,23 @@ mod tests {
         assert!(lost() && again_soon(), "lost again within REPEAT: no second recovery");
         *RECOVERED.lock().unwrap() = Instant::now().checked_sub(REPEAT + Duration::from_secs(1));
         assert!(!again_soon(), "past REPEAT, recovered from again");
+    }
+
+    /// The crash reports' panics (petitions 5076 and 5105, Safari's words)
+    /// are the browser refusing a lost device's calls; the control: another
+    /// wgpu panic, and an InvalidStateError not wgpu's, are not.
+    #[test]
+    fn a_browser_refusal_is_the_graphics_stopping() {
+        let pass = "panicked at src/index.crates.io-1949cf8c6b5b557f/wgpu-30.0.1/src/backend/webgpu.rs:3334:70:\ncalled `Result::unwrap()` on an `Err` value: JsValue(InvalidStateError: GPUCommandEncoder.beginRenderPass: Unable to begin render pass. beginRenderPass@[native code] @https://eqoaclassic.com/eqoa/play/v/76e02bcff137/eqoa.js:524:45";
+        let buffer = "panicked at src/index.crates.io-1949cf8c6b5b557f/wgpu-30.0.1/src/backend/webgpu.rs:2461:63:\ncalled `Result::unwrap()` on an `Err` value: JsValue(InvalidStateError: GPUDevice.createBuffer: Unable to create buffer. createBuffer@[native code]";
+        assert!(browser_threw(pass) && browser_threw(buffer));
+        let d = threw_detail(pass);
+        assert!(d.starts_with("the browser's graphics stopped answering (InvalidStateError: GPUCommandEncoder.beginRenderPass: Unable to begin render pass. beginRenderPass@[native code])"), "{d}");
+        assert!(d.ends_with("runs short of memory"));
+        assert!(!browser_threw("panicked at src/backend/webgpu.rs:2015:90: called `Result::unwrap()` on an `Err` value: wgsl"), "the control: wgpu's own panic");
+        assert!(!browser_threw("panicked at crates/eqoa/src/web/mod.rs:1:1: InvalidStateError"), "the control: not wgpu's");
+        let w = threw_why("GPUDevice.createBuffer: Unable to create buffer.\nmore");
+        assert_eq!(w, "the browser refused the device's calls, its graphics process gone (GPUDevice.createBuffer: Unable to create buffer.)");
     }
 
     #[test]

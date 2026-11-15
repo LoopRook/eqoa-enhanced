@@ -37,6 +37,10 @@ pub struct HudState {
     pub chat_open: bool,
     /// The target's name when it is a creature (`GetTargetName` answering 0).
     pub target_name: Option<String>,
+    /// The target's level, drawn after "Target" (Live petition 5130): only a
+    /// creature's, only on a server that offered it (`Session::con_level_offer`)
+    /// with Extended's Target Level on; `None` is the game's box.
+    pub target_level: Option<i32>,
     /// The target's +0x19.
     pub target_hp: i32,
     /// `m_targetInfoValid` and `m_targetDisposition`.
@@ -54,6 +58,11 @@ pub struct HudState {
     /// A raid group's every member (`raidlist`), drawn in place of `group`'s
     /// bars when there are any.
     pub raid: Vec<crate::raidlist::Row>,
+    /// A raid row dragged to another group (`play::raid_drag_*`): the group a new
+    /// one would be (an empty group drawn to drop on), and the group the pointer
+    /// is over (lit).
+    pub raid_new_group: Option<u8>,
+    pub raid_drop: Option<u8>,
     /// The live client's duel (0x1502 sub 8): its centre while the duel is on
     /// and in the player's world, for `DrawPatch`'s orange patch (`duel.rs`).
     pub duel: Option<[f32; 3]>,
@@ -105,6 +114,10 @@ pub struct MemberState {
     /// The client's own: the raid's marks on its bar (`raidlist::draw_marks`),
     /// none outside a raid or on a server that sends no raid state.
     pub marks: u8,
+    /// The client's own (Extended's Power Bars): its power of 255 as the
+    /// server last sent it (`Session::power_of`), none when there is none to
+    /// show.
+    pub power: Option<u8>,
 }
 
 /// What `DrawPet` reads: `GetPetName`, whether the pet is the target, and
@@ -118,6 +131,21 @@ pub struct PetState {
     pub is_target: bool,
     pub creature: Option<(i32, bool, bool)>,
     pub effects: Vec<u32>,
+    /// Power Bars: its power of 255 where the server sends it.
+    pub power: Option<u8>,
+}
+
+/// Power Bars (the server owner's of 2026-11-12, "lets add power bars to
+/// group/raid display"; the game draws no one's power but the player's): a
+/// member's or the pet's power in the player's own power art (fill 9 in the
+/// gauge's frame 136, 60 by 10) under its health, from its bar's top as the
+/// player's own frame stacks them: the health gauge 25 down, the power 10
+/// under it, inside the bar's 46 and clear of the pet's effects' row (48).
+const POWER_UNDER: [i32; 2] = [10, 35];
+
+/// Where a bar's power gauge goes, for its bar at `at`.
+fn power_at(at: [i32; 2]) -> [i32; 2] {
+    [at[0] + POWER_UNDER[0], at[1] + POWER_UNDER[1]]
 }
 
 /// The pet's effects' row (the user, 2026-11-09: "put the buff icons under the
@@ -185,7 +213,12 @@ pub fn pet_effects_pieces(vui: &Vui, at: [i32; 2], icons: &[u32]) -> Vec<FxPiece
 /// The row drawn: each piece's texels over its rectangle, in floats (half the
 /// strip's size falls between the frame's pixels), as `Blit` draws them.
 fn draw_pet_effects(vui: &Vui, ui: &mut UiRaster, at: [i32; 2], icons: &[u32]) {
-    for p in pet_effects_pieces(vui, at, icons) {
+    draw_fx_pieces(vui, ui, &pet_effects_pieces(vui, at, icons), 1.0);
+}
+
+/// Pieces of an effects' row drawn (the pet's, `buffwnd`'s), each at `alpha`.
+pub fn draw_fx_pieces(vui: &Vui, ui: &mut UiRaster, pieces: &[FxPiece], alpha: f32) {
+    for &p in pieces {
         let (id, texels) = match p.art {
             FxArt::Entry(n, size) => {
                 let e = vui.entry(n);
@@ -198,7 +231,7 @@ fn draw_pet_effects(vui: &Vui, ui: &mut UiRaster, at: [i32; 2], icons: &[u32]) {
         let t = texels.unwrap_or([0, 0, w as i32, h as i32]).map(|v| v as f32);
         let (u0, v0, u1, v1) = (t[0] / w as f32, t[1] / h as f32, (t[0] + t[2]) / w as f32, (t[1] + t[3]) / h as f32);
         let (x0, y0, x1, y1) = (p.r[0], p.r[1], p.r[0] + p.r[2], p.r[1] + p.r[3]);
-        ui.ui.push(Quad { tex, blend: 0, pos: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], uv: [[u0, v0], [u1, v0], [u1, v1], [u0, v1]], color: [1.0; 4], clip: None });
+        ui.ui.push(Quad { tex, blend: 0, pos: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], uv: [[u0, v0], [u1, v0], [u1, v1], [u0, v1]], color: [1.0, 1.0, 1.0, alpha], clip: None });
         ui.glyphs.other();
     }
 }
@@ -211,6 +244,35 @@ pub fn exp_for_level(level: i32) -> u32 {
     } else {
         l.wrapping_mul(l).wrapping_mul(l).wrapping_mul((l.wrapping_sub(1)).wrapping_mul(28).wrapping_add(25))
     }
+}
+
+/// The experience bars' fills, as `OnDrawSelf` works them: the level's (the
+/// experience the server sends, 0x0020 and the dump, over `ExpForLevel` of
+/// the next level: go-eqoa-server's `CharXPDict`, or at 60 and at 100% to the
+/// masteries the way to the next mastery point on the same scale) and how far
+/// through its current fifth (a fifth whole at 5 x need / 5 and over, the
+/// game's: none).
+pub fn exp_gauges(level: i32, exp: i32) -> (f32, f32) {
+    let need = exp_for_level(level + 1);
+    let v = exp as f32 / need as f32;
+    let fifth = (need / 5) as i32;
+    let mut part = 0.0f32;
+    if exp > 0 {
+        if exp < fifth {
+            part = exp as f32 / fifth as f32;
+        } else {
+            let mut i: i32 = 2;
+            while i < 6 {
+                // the EE's 32-bit products (a GM's level 100 bar passes 2^31)
+                if exp < i.wrapping_mul(fifth) {
+                    part = exp.wrapping_sub((i - 1).wrapping_mul(fifth)) as f32 / fifth as f32;
+                    break;
+                }
+                i += 1;
+            }
+        }
+    }
+    (v, part.clamp(0.0, 1.0))
 }
 
 pub struct Hud {
@@ -234,6 +296,8 @@ pub struct Hud {
     /// (`Hud::raid_wheel`).
     raid_first: usize,
     raid_panel: Option<([f32; 4], usize)>,
+    /// how far the wheel steps the raid list at the last frame
+    raid_more: usize,
     /// Where the DPS meter's panel lay at the last frame, how many items it
     /// showed and how far its list steps (`Hud::meter_wheel`, `meter_page`).
     meter_panel: Option<([f32; 4], usize, usize)>,
@@ -250,6 +314,8 @@ pub enum Pick {
     Pet,
     Raid(u32),
     Report,
+    /// a raid list's group (its number): its line or the room under its rows
+    RaidGroup(u8),
     /// the minimap (`map::mini`): the map opened
     Minimap,
     /// the quest tracker (`tracker`): the quest journal opened
@@ -278,6 +344,7 @@ impl Hud {
             picks: Vec::new(),
             raid_first: 0,
             raid_panel: None,
+            raid_more: 0,
             meter_panel: None,
         }
     }
@@ -360,26 +427,7 @@ impl Hud {
         let v = if s.max_power == 0 { 0.0 } else { s.power as f32 / s.max_power as f32 };
         if fork_hud::power_bar_visible(s) { draw_gauge(vui, ui, 9, 136, p, true, v); }
         p[1] += 10;
-        let need = exp_for_level(s.level + 1);
-        let v = s.exp as f32 / need as f32;
-        let fifth = (need / 5) as i32;
-        // How far through the current fifth of the level.
-        let mut part = 0.0f32;
-        if s.exp > 0 {
-            if s.exp < fifth {
-                part = s.exp as f32 / fifth as f32;
-            } else {
-                let mut i = 2;
-                while i < 6 {
-                    if s.exp < i * fifth {
-                        part = (s.exp - (i - 1) * fifth) as f32 / fifth as f32;
-                        break;
-                    }
-                    i += 1;
-                }
-            }
-        }
-        let part = part.clamp(0.0, 1.0);
+        let (v, part) = exp_gauges(s.level, s.exp);
         if fork_hud::secondary_exp_bar_visible(s) { draw_gauge(vui, ui, 152, 151, [p[0], p[1] + 10], true, part); }
         if fork_hud::main_exp_bar_visible(s) { draw_gauge(vui, ui, 8, 136, p, true, v); }
         crate::hudlayout::end(ui.ui, m);
@@ -393,14 +441,31 @@ impl Hud {
             self.glow1_on = -1;
             // the pet's bar under it, and its effects' row
             let below = s.pet.as_ref().map_or(0, |p| crate::raidlist::PET_H + pet_effects_height(p.effects.len()));
-            let fit = crate::raidlist::Fit::under(s.raid.len(), below);
-            self.raid_first = self.raid_first.min(fit.more);
-            for (r, id) in crate::raidlist::draw(vui, ui, GROUP_AT, &fit, &s.raid, self.raid_first) {
-                self.note(ui, r, Pick::Raid(id));
-            }
-            let b = fit.bounds(GROUP_AT);
+            let sections = crate::raidlist::sections(&s.raid, s.raid_new_group);
+            let b = if sections.is_empty() {
+                let fit = crate::raidlist::Fit::under(s.raid.len(), below);
+                self.raid_first = self.raid_first.min(fit.more);
+                for (r, id) in crate::raidlist::draw(vui, ui, GROUP_AT, &fit, &s.raid, self.raid_first) {
+                    self.note(ui, r, Pick::Raid(id));
+                }
+                self.raid_more = fit.more;
+                fit.bounds(GROUP_AT)
+            } else {
+                // in its groups (petition 1687): the wheel steps a group
+                let fit = crate::raidlist::GroupFit::under(&sections, s.raid.len(), below, self.raid_first);
+                self.raid_first = fit.first;
+                for (r, hit) in crate::raidlist::draw_groups(vui, ui, GROUP_AT, &fit, &sections, &s.raid, s.raid_drop) {
+                    let pick = match hit {
+                        crate::raidlist::Hit::Row(id) => Pick::Raid(id),
+                        crate::raidlist::Hit::Group(g) => Pick::RaidGroup(g),
+                    };
+                    self.note(ui, r, pick);
+                }
+                self.raid_more = fit.more;
+                fit.bounds(GROUP_AT)
+            };
             let (a, c) = (ui.ui.placed([b[0] as f32, b[1] as f32]), ui.ui.placed([b[2] as f32, b[3] as f32]));
-            self.raid_panel = Some(([a[0], a[1], c[0], c[1]], fit.more));
+            self.raid_panel = Some(([a[0], a[1], c[0], c[1]], self.raid_more));
             b[3] + 2
         };
         crate::hudlayout::end(ui.ui, m);
@@ -427,9 +492,10 @@ impl Hud {
             ui.ui.anchor = Anchor::Right;
             ui.ui.vertical = Vertical::Top;
             let m = crate::hudlayout::begin(ui.ui, Piece::Minimap);
-            self.note(ui, crate::map::mini::FRAME, Pick::Minimap);
+            // all it draws (the scroll's rollers past its frame too)
+            let f = crate::map::mini::drawn(crate::settings::minimap_scroll());
+            self.note(ui, f, Pick::Minimap);
             // drawn on the map's own layer: noted where it lies
-            let f = crate::map::mini::FRAME;
             let (a, b) = (ui.ui.placed([f[0] as f32, f[1] as f32]), ui.ui.placed([f[2] as f32, f[3] as f32]));
             crate::hudlayout::note(Piece::Minimap, [a[0], a[1], b[0], b[1]], ui.ui.shift);
             crate::hudlayout::end(ui.ui, m);
@@ -481,6 +547,9 @@ impl Hud {
             if m.marks != 0 {
                 crate::raidlist::draw_marks(ui, p[0] + 168, p[1] + 5, m.marks);
             }
+            if let Some(v) = m.power {
+                draw_gauge(vui, ui, 9, 136, power_at(start), m.is_target, v as f32 / 255.0);
+            }
             if let Some((hp, f4, f8)) = m.hp {
                 p = [p[0] + 10, p[1] + 25];
                 draw_gauge(vui, ui, 7, 136, p, m.is_target, hp as f32 / 255.0);
@@ -521,6 +590,9 @@ impl Hud {
         w.open(true);
         w.text_box(vui, ui, &wide(&pet.name), 0, 0, 160, 1, [0.0, 0.0, 0.0, g], 10);
         draw_pet_effects(vui, ui, p, fx);
+        if let Some(v) = pet.power {
+            draw_gauge(vui, ui, 9, 136, power_at(p), pet.is_target, v as f32 / 255.0);
+        }
         let Some((hp, f4, f8)) = pet.creature else { return };
         p = [p[0] + 10, p[1] + 25];
         draw_gauge(vui, ui, 7, 136, p, pet.is_target, hp as f32 / 255.0);
@@ -543,6 +615,13 @@ impl Hud {
         self.glow0_on = if has { 1 } else { -1 };
         let name = wide(s.target_name.as_deref().unwrap_or(""));
         vui.draw_word_ex(ui, 408, p[0], p[1], [1.0, 1.0, 1.0, self.glow0], true);
+        // a server's: the level, "Level" (word 503) and the number, ending
+        // where the bar under it ends (Live petition 5130)
+        if let (Some(level), true) = (s.target_level, has) {
+            let text = wide(&target_level_text(vui.words.get(503, vui.language), level));
+            let x = p[0] + 174 - vui.string_width(ui, &text);
+            vui.draw_string_ex(ui, &text, x, p[1], [1.0, 1.0, 1.0, self.glow0], true);
+        }
         p[1] += 25;
         vui.blit_bar(ui, &[], [0.0; 4], p, 25, 26, 174, 3, self.glow0, 0, true);
         self.scroll.init(vui, ui, [p[0] + 87, p[1] + 12], 160, 0, 1);
@@ -670,6 +749,12 @@ impl Hud {
     }
 }
 
+/// The target box's level: "Level" (WORDS.TXT 503, the game's own word, as
+/// `DrawTargetInfo` writes a pet's) and the number.
+fn target_level_text(word: &str, level: i32) -> String {
+    format!("{word} {level}")
+}
+
 /// Where `DrawPatch` puts a member `d` from the camera, whose heading is
 /// `yaw`: 27 pixels out from (39, 55) at its bearing (ahead is up); none
 /// past 2000. (The game's two wraps, the first testing the heading as read,
@@ -722,7 +807,47 @@ pub fn draw_gauge(vui: &Vui, ui: &mut dyn Raster, bar: i32, frame: i32, at: [i32
 
 #[cfg(test)]
 mod tests {
-    use super::{FxArt, FxPiece, Hud, HudState, MemberState, PetState, Pick, bearing_point, patch_point, pet_effects_height, pet_effects_pieces, waypoint_point};
+    /// The experience bars against the server's tables (go-eqoa-server's
+    /// `CharXPDict`, CLIENT's `ExpForLevel`): level 1 to 2 takes 424, 50 to
+    /// 51 181,731,870 (the upper branch from 51), 60's bar is drawn over
+    /// 372,248,840; a level just begun is empty, one point short of the next
+    /// all but full, half way half; the fifths' bar restarts at each fifth and
+    /// is empty past the last whole one (the game's: 424 / 5 = 84, 420..423).
+    #[test]
+    fn the_experience_bars_are_the_levels_share() {
+        use super::{exp_for_level, exp_gauges};
+        assert_eq!((exp_for_level(2), exp_for_level(51), exp_for_level(61)), (424, 181_731_870, 372_248_840));
+        assert_eq!(exp_for_level(50), 174_625_000, "49 to 50, the lower branch");
+        assert_eq!(exp_gauges(1, 0), (0.0, 0.0));
+        let (v, part) = exp_gauges(1, 423);
+        assert!(v < 1.0 && v > 0.99 && part == 0.0, "{v} {part}");
+        let (v, part) = exp_gauges(30, 25_769_215 / 2);
+        assert!((v - 0.5).abs() < 1e-6 && (part - 0.5).abs() < 1e-3, "{v} {part}");
+        let fifth = 25_769_215 / 5;
+        assert_eq!(exp_gauges(30, fifth).1, 0.0, "a fifth just made: its bar starts again");
+        assert!((exp_gauges(30, fifth + fifth / 2).1 - 0.5).abs() < 1e-3);
+        assert_eq!(exp_gauges(1, 84), (84.0 / 424.0, 0.0));
+        let (v, _) = exp_gauges(60, 186_124_420);
+        assert!((v - 0.5).abs() < 1e-6, "60's bar, half way to the next mastery point: {v}");
+        let (v, part) = exp_gauges(100, i32::MAX);
+        assert!(v.is_finite() && v > 0.0 && (0.0..=1.0).contains(&part), "a GM's level 100: {v} {part}");
+    }
+
+    use super::{FxArt, FxPiece, Hud, HudState, MemberState, PetState, Pick, bearing_point, patch_point, pet_effects_height, pet_effects_pieces, power_at, waypoint_point};
+
+    /// Power Bars: a member's (or the pet's) power under its health gauge (25
+    /// down, its frame 10 high), inside its 46-high bar and above the pet's
+    /// effects' row (48 down); the next member's bar 48 on.
+    #[test]
+    fn a_power_bar_sits_under_the_health_it_goes_with() {
+        let at = [20, 93];
+        let health = [at[0] + 10, at[1] + 25];
+        let p = power_at(at);
+        assert_eq!(p, [health[0], health[1] + 10], "under the health, its left edge");
+        assert!(p[1] + 10 <= at[1] + 46, "inside the bar");
+        assert!(p[1] + 10 <= at[1] + super::PET_FX_AT[1], "clear of the pet's effects");
+        assert!(p[1] + 10 <= at[1] + 48, "clear of the next member's bar");
+    }
 
     /// A Vui whose atlas has the player's effects strip's art at the disc's
     /// sizes (SUPPORT's: the cell 157 32x32, the caps 159 5x34 and 160 3x34).
@@ -866,6 +991,14 @@ mod tests {
         assert!(near(waypoint_point(std::f32::consts::FRAC_PI_2, cam, [25100.0, 15000.0]), [39.0, 28.0]));
         assert!(near(waypoint_point(0.0, cam, [25000.0, 15000.0 - 9000.0]), [39.0, 82.0]));
         assert!(patch_point(0.0, [0.0, 0.0, 5000.0]).is_none(), "the control: a member that far has no patch");
+    }
+
+    /// The target box's level is the game's word and the number ("Level 32",
+    /// as `DrawTargetInfo` writes a pet's).
+    #[test]
+    fn the_target_level_reads_as_the_games_word() {
+        assert_eq!(super::target_level_text("Level", 32), "Level 32");
+        assert_eq!(super::target_level_text("Niveau", 7), "Niveau 7");
     }
 
     /// The minimap's place (`map::mini::FRAME`): a pointer finds it in a

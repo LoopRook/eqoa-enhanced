@@ -1109,7 +1109,9 @@ impl Rules {
             player_search: false,
             damage_rgb: false,
             commands_to_server: false,
-            auction_max_level: 50,
+            // the disc's 50; every server vanilla plays goes to 60 (Sandstorm's S2 hooks 60; eqoaclassic's
+            // petition 1845, 2026-11-12: "Auction max level defaults to 50 instead of 60")
+            auction_max_level: 60,
             sell_stack: StackTest::Below(2),
             guild_cap: 128,
             worlds: None,
@@ -1212,15 +1214,52 @@ impl Rules {
 
     /// The CHAR.ESF surfaces the patch registers under DictIDs of its own
     /// (set 9's), registered in `lib` too once CHAR.ESF is in it: each a
-    /// Surface record at its file offset, else not registered.
+    /// Surface record at its file offset, else not registered. Set 9's are
+    /// registered whatever the patch (`ORNATE_RECORDS`): go-eqoa-server draws
+    /// it with no patch, when it says so (`set_server_armor`); until a set 9
+    /// is drawn nothing reads them.
     pub fn register_art(&self, lib: &mut esf::Library) {
         let Some(file) = lib.files.iter().position(|(n, _)| n.eq_ignore_ascii_case("CHAR.ESF")) else { return };
-        for (_, ids, records) in &self.armor_art {
+        let ornate = (vi::cust::ORNATE_SET, vi::cust::ORNATE, ORNATE_RECORDS);
+        for (_, ids, records) in self.armor_art.iter().chain(std::iter::once(&ornate)) {
             for (&id, &off) in ids.iter().zip(records) {
+                if lib.surface(id as i32).is_some() {
+                    continue;
+                }
                 let c = lib.file(file);
                 // a record's body follows its 12-byte header
                 let node = c.nodes.iter().position(|n| n.ty == esf::types::SURFACE && n.body == off as usize + 12);
                 if let Some(node) = node {
+                    lib.alias(id as i32, esf::Ref { file, node });
+                }
+            }
+        }
+    }
+
+    /// `register_art` for a library with no CHAR.ESF whole (character
+    /// select's, `pregame::res`): the art's records found in `file`, bodies
+    /// cut out of CHAR.ESF (`ART_BODIES`, `files::cut`), each at its place in
+    /// its body's record, which in the cut sits elsewhere than in the file.
+    /// A record in no body of the cut is not registered; an id registered
+    /// already is left as it is.
+    pub fn register_art_cut(&self, lib: &mut esf::Library, file: usize) {
+        let ornate = (vi::cust::ORNATE_SET, vi::cust::ORNATE, ORNATE_RECORDS);
+        for (_, ids, records) in self.armor_art.iter().chain(std::iter::once(&ornate)) {
+            for (&id, &off) in ids.iter().zip(records) {
+                if lib.surface(id as i32).is_some() {
+                    continue;
+                }
+                let Some(&(body, start, len)) = ART_BODIES.iter().find(|&&(_, start, len)| (start..start + len).contains(&off)) else { continue };
+                let c = lib.file(file);
+                let Some(&b) = c.dict.get(&(body as i32)) else { continue };
+                let b = c.node(b);
+                if b.body < 12 || b.size + 12 != len as usize {
+                    continue;
+                }
+                // the body's record starts 12 bytes before its body, the
+                // surface's body 12 past its own header
+                let at = b.body - 12 + (off - start) as usize + 12;
+                if let Some(node) = c.nodes.iter().position(|n| n.ty == esf::types::SURFACE && n.body == at) {
                     lib.alias(id as i32, esf::Ref { file, node });
                 }
             }
@@ -1259,8 +1298,20 @@ impl Rules {
     }
 
     /// The customisation tables `vi::cust` dresses a look by, as this patch
-    /// leaves them (`Tables::retail()` without one).
+    /// leaves them (`Tables::retail()` without one), with go-eqoa-server's
+    /// armour when it said so on this connection (`server_armor`).
     pub fn cust(&self) -> vi::cust::Tables {
+        self.cust_with(server_armor())
+    }
+
+    /// `cust`, with go-eqoa-server's armour or without: set 9 (the ornate
+    /// plate, set 4's helm) and the trims (`render::recolor::trimmed`).
+    pub fn cust_with(&self, server_armor: bool) -> vi::cust::Tables {
+        let t = self.cust_of_patch();
+        if server_armor { t.with_server_armor(vi::cust::TrimNamer(name_trim)) } else { t }
+    }
+
+    fn cust_of_patch(&self) -> vi::cust::Tables {
         let mut t = vi::cust::Tables::retail();
         if let Some(tints) = &self.tints {
             t.tints = tints.clone();
@@ -1319,6 +1370,69 @@ impl Rules {
 }
 
 static CURRENT: RwLock<Option<Arc<Rules>>> = RwLock::new(None);
+
+/// The CHAR.ESF records set 9's five surfaces are ([`vi::cust::ORNATE`]'s
+/// order: chest, bracer, gloves, legs, boots), by file offset: what Sandstorm's
+/// S2 registers (`SetResources`' hook) and go-eqoa-server's armour draws.
+pub const ORNATE_RECORDS: [u32; 5] = [0x073BEC, 0x072257, 0x0C7D31, 0x06C8BE, 0x06AF29];
+
+/// The CHAR.ESF bodies set 9's records lie in (`ORNATE_RECORDS`): each
+/// body's DictID, its record's offset in the file and its length (header and
+/// body), as the file's directory has them. The chest, bracer, legs and boots
+/// are in the first, the gloves in the second. Character select reads no
+/// CHAR.ESF whole: it cuts these out of it (`art_bodies`).
+pub const ART_BODIES: [(u32, u32, u32); 2] = [(0xDC3B_344D, 0x06AEB9, 321_452), (0xDC3B_344E, 0x0B9665, 344_805)];
+
+/// The CHAR.ESF bodies a library with no CHAR.ESF whole (character select)
+/// is to cut out of it for set 9's art (`ART_BODIES`,
+/// `Rules::register_art_cut`): with go-eqoa-server's armour in force on this
+/// connection (`server_armor`), else none (retail and Sandstorm draw
+/// character select as the console does, with no CHAR.ESF).
+pub fn art_bodies() -> Vec<u32> {
+    if server_armor() { ART_BODIES.iter().map(|b| b.0).collect() } else { Vec::new() }
+}
+
+/// go-eqoa-server's armour is in force on this connection (its live look's
+/// third word: `net::session::Session::armor_look`): set 9 and the trims.
+static SERVER_ARMOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Says whether go-eqoa-server's armour is in force (the session's
+/// `armor_look`, at character select and in the world); a figure or body
+/// dressed after it is dressed by it.
+pub fn set_server_armor(on: bool) {
+    SERVER_ARMOR.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether go-eqoa-server's armour is in force (`set_server_armor`); false
+/// on every other server, and before any says.
+pub fn server_armor() -> bool {
+    #[cfg(test)]
+    if let Some(on) = TEST_ARMOR.with(|t| t.get()) {
+        return on;
+    }
+    SERVER_ARMOR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// A test's own word on the server's armour (`with_server_armor`).
+    static TEST_ARMOR: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// `f` run with go-eqoa-server's armour in force or not on this thread
+/// alone (a test's), so tests running at once never see each other's.
+#[cfg(test)]
+pub fn with_server_armor<T>(on: bool, f: impl FnOnce() -> T) -> T {
+    TEST_ARMOR.with(|t| t.set(Some(on)));
+    let out = f();
+    TEST_ARMOR.with(|t| t.set(None));
+    out
+}
+
+/// `vi::cust::TrimNamer`'s: a trimmed piece's texture by `render::recolor`.
+fn name_trim(tex: u32, body: [u8; 3], trim: [u8; 3], has: &dyn Fn(u32) -> bool) -> u32 {
+    render::recolor::trimmed(tex as i32, body, trim, |id| has(id as u32)) as u32
+}
 
 #[cfg(test)]
 thread_local! {
@@ -1601,8 +1715,9 @@ mod tests {
     }
 
     /// Set 9's art: the five CHAR.ESF records at the patch's file offsets
-    /// are surfaces, and once registered under its DictIDs they resolve;
-    /// retail's rules (the control) register nothing. Needs the disc.
+    /// are surfaces, and once registered under its DictIDs they resolve; the
+    /// patch's are go-eqoa-server's (`vi::cust::ORNATE`, `ORNATE_RECORDS`).
+    /// Needs the disc and the live S2.
     #[test]
     fn set_9s_art_out_of_char_esf() {
         let iso = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
@@ -1614,12 +1729,242 @@ mod tests {
         let mut lib = esf::Library::new();
         lib.add("CHAR.ESF", crate::stream::open_file(&iso, "CHAR.ESF").unwrap());
         let ids = r.armor_art[0].1;
-        Rules::retail().register_art(&mut lib);
+        assert_eq!((ids, r.armor_art[0].2), (vi::cust::ORNATE, ORNATE_RECORDS));
         assert!(ids.iter().all(|&id| lib.surface(id as i32).is_none()));
         r.register_art(&mut lib);
         for id in ids {
             assert!(lib.surface(id as i32).is_some(), "{id:08X}");
         }
+    }
+
+    /// With no patch, set 9's five surfaces are registered all the same
+    /// (go-eqoa-server draws them when it says so), each the CHAR.ESF surface
+    /// at its record, and a second registration changes nothing. The control:
+    /// a library without CHAR.ESF registers nothing. Needs the disc.
+    #[test]
+    fn set_9s_art_without_the_patch() {
+        let iso = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        if !iso.is_file() {
+            eprintln!("SKIP: no disc");
+            return;
+        }
+        let mut none = esf::Library::new();
+        Rules::retail().register_art(&mut none);
+        assert!(none.lookup(vi::cust::ORNATE[0] as i32).is_none());
+        let mut lib = esf::Library::new();
+        let file = lib.add("CHAR.ESF", crate::stream::open_file(&iso, "CHAR.ESF").unwrap());
+        assert!(vi::cust::ORNATE.iter().all(|&id| lib.surface(id as i32).is_none()));
+        Rules::retail().register_art(&mut lib);
+        Rules::retail().register_art(&mut lib);
+        for (id, off) in vi::cust::ORNATE.iter().zip(ORNATE_RECORDS) {
+            let r = lib.lookup(*id as i32).unwrap_or_else(|| panic!("{id:08X}"));
+            assert_eq!((r.file, lib.file(file).node(r.node).body), (file, off as usize + 12));
+            let (_, s) = lib.surface(*id as i32).unwrap();
+            assert!(s.width >= 64, "{id:08X}");
+        }
+    }
+
+    /// Set 9's art out of the two bodies cut out of CHAR.ESF (character
+    /// select's, `register_art_cut`): `ART_BODIES` is what CHAR.ESF's
+    /// directory says of those bodies, every one of `ORNATE_RECORDS` lies in
+    /// one, and each DictID registered in the cut is the very surface the
+    /// world registers out of the whole file (`register_art`), byte for byte.
+    /// The control: a cut of other bodies registers nothing. Needs the disc.
+    #[test]
+    fn set_9s_art_out_of_a_cut() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        let Ok(d) = iso::Iso::open(path.to_str().unwrap()) else {
+            eprintln!("SKIP: no disc");
+            return;
+        };
+        let e = d.find("CHAR.ESF").cloned().unwrap();
+        let window = || esf::Window::new(std::fs::File::open(&path).unwrap(), e.lba as u64 * iso::SECTOR, e.size as u64);
+        let dir = esf::ResourceDir::read(&mut window()).unwrap();
+        for &(id, off, len) in &ART_BODIES {
+            assert_eq!(dir.find(id), Some((off as u64, len as usize)), "{id:08X}");
+        }
+        assert!(ORNATE_RECORDS.iter().all(|&r| ART_BODIES.iter().any(|&(_, off, len)| (off..off + len).contains(&r))));
+        let ids: Vec<u32> = ART_BODIES.iter().map(|b| b.0).collect();
+        let cut = crate::pregame::files::cut_from(&mut window(), &[ids, vec![0xD130_0BD3]]).unwrap();
+        let mut groups = cut.groups.into_iter();
+        let (art, other) = (groups.next().flatten().unwrap(), groups.next().flatten().unwrap());
+        let mut none = esf::Library::new();
+        let f = none.add("CHAR.ESF (bodies)", other);
+        Rules::retail().register_art_cut(&mut none, f);
+        assert!(vi::cust::ORNATE.iter().all(|&id| none.lookup(id as i32).is_none()), "the control");
+        let mut lib = esf::Library::new();
+        let f = lib.add("CHAR.ESF (bodies)", art);
+        Rules::retail().register_art_cut(&mut lib, f);
+        Rules::retail().register_art_cut(&mut lib, f);
+        let mut world = esf::Library::new();
+        world.add("CHAR.ESF", crate::stream::open_file(&path, "CHAR.ESF").unwrap());
+        Rules::retail().register_art(&mut world);
+        for id in vi::cust::ORNATE {
+            let (c, s) = lib.surface(id as i32).unwrap_or_else(|| panic!("{id:08X}"));
+            let (wc, ws) = world.surface(id as i32).unwrap();
+            assert_eq!((s.width, s.height), (ws.width, ws.height), "{id:08X}");
+            assert_eq!(s.decode(&c.data).unwrap().rgba, ws.decode(&wc.data).unwrap().rgba, "{id:08X}");
+        }
+    }
+
+    /// A human dressed as the world dresses a player (`play::dress_look`): with
+    /// go-eqoa-server's armour and no trim colours, every look in sets 0-8 is
+    /// the model retail's tables make, bit for bit; set 9 is the ornate plate
+    /// in the dye's colour. A trim dye on set 9's chest draws it with a
+    /// texture whose texels, resolved as the renderer resolves them, are the
+    /// ornate chest's times the dye (`MUL`) where they are not trim and the
+    /// trim's glow in the trim's colour where they wholly are, the layer white;
+    /// its legs (no trim dye) as before. Needs the disc.
+    #[test]
+    fn a_trim_dye_on_a_human() {
+        use render::TextureSource;
+        let iso = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        if !iso.is_file() {
+            eprintln!("SKIP: no disc");
+            return;
+        }
+        let mut lib = esf::Library::new();
+        for f in crate::dressview::FILES {
+            lib.add(*f, crate::stream::open_file(&iso, f).unwrap());
+        }
+        Rules::retail().register_art(&mut lib);
+        let human = 0x70D8_98C6u32 as i32;
+        let r = lib.lookup(human).unwrap();
+        let mut anims = vi::hsprite::AnimScene::<vi::fpu::Ee>::default();
+        let cs = vi::character::load_csprite(&lib, r, &mut anims, &mut vi::character::AnimCache::new(), &mut vi::csprite::Rand(1)).unwrap();
+        let dress = |look: &vi::cust::Look, t: &vi::cust::Tables| {
+            let mut m = lib.build_model(r).unwrap();
+            crate::play::dress_look(&lib, human, &mut m, &cs, look, false, t, true);
+            m
+        };
+        let (with, without) = (Rules::retail().cust_with(true), Rules::retail().cust_with(false));
+        let grey = [0x80, 0x80, 0x80, 0xFF];
+        for set in 0..=8u8 {
+            for colors in [None, Some([grey; 6])] {
+                let look = vi::cust::Look { armor: [set; 6], armor_tint: [3; 6], armor_color: colors, robe: -1, ..Default::default() };
+                let parts = |m: esf::Model| m.batches.into_iter().map(|b| (b.material, b.layers, b.indices)).collect::<Vec<_>>();
+                assert_eq!(parts(dress(&look, &with)), parts(dress(&look, &without)), "set {set}");
+            }
+        }
+        let chest = cs.text_slots[0];
+        let layer_of = |m: &esf::Model, entry: i32| m.batches.iter().find(|b| b.material == entry).map(|b| b.layers[chest.1 as usize].clone()).unwrap();
+        let nine = vi::cust::Look { armor: [9; 6], armor_color: Some([grey; 6]), robe: -1, ..Default::default() };
+        let plain = dress(&nine, &with);
+        assert_eq!((layer_of(&plain, chest.0).texture, layer_of(&plain, chest.0).color), (vi::cust::ORNATE[0] as i32, grey));
+        let mut trims = [[0u8; 4]; 6];
+        trims[0] = [0xD1, 0, 0, 0xFF];
+        let trimmed = dress(&vi::cust::Look { trim_color: Some(trims), ..nine }, &with);
+        let l = layer_of(&trimmed, chest.0);
+        assert_eq!(l.color, [255, 255, 255, 0xFF], "the layer white");
+        assert_eq!(render::recolor::root_of(l.texture), vi::cust::ORNATE[0] as i32);
+        let legs = cs.text_slots[3];
+        assert_eq!(layer_of(&trimmed, legs.0).texture, vi::cust::ORNATE[3] as i32, "the legs, with no trim dye, as before");
+        let src = render::library_textures(&lib);
+        let (got, root) = (src.levels(l.texture), src.levels(vi::cust::ORNATE[0] as i32));
+        assert_eq!(got.len(), root.len());
+        let (mut trim, mut body) = (0, 0);
+        for (g, r) in got[0].rgba.chunks_exact(4).zip(root[0].rgba.chunks_exact(4)) {
+            let rc = [r[0], r[1], r[2]];
+            assert_eq!(g[3], r[3], "alpha kept");
+            match render::recolor::trim_weight(rc) {
+                0.0 => {
+                    body += 1;
+                    assert_eq!([g[0], g[1], g[2]], render::recolor::recolor_rgb(rc, render::recolor::MUL << 24 | 0x80_8080), "{rc:?}");
+                }
+                1.0 => {
+                    trim += 1;
+                    assert_eq!([g[0], g[1], g[2]], render::recolor::trim_glow(rc, [0xD1, 0, 0]), "{rc:?}");
+                }
+                _ => {}
+            }
+        }
+        assert!(trim > 1000 && body > 1000, "trim {trim}, body {body}");
+    }
+
+    /// The textures `vi::cust` names as having trim are the textures render
+    /// has a trim for (`render::trimart`), one for one.
+    #[test]
+    fn the_trimmed_textures_agree() {
+        let mut a: Vec<u32> = vi::cust::TRIMMED.to_vec();
+        let mut b: Vec<u32> = render::trimart::TRIMS.iter().map(|&(id, _)| id).collect();
+        a.sort();
+        b.sort();
+        assert_eq!(a, b);
+    }
+
+    /// Every texture with trim, off the disc as the world registers it (set
+    /// 9's by `register_art`): how much of it is trim (printed), more than
+    /// nothing and less than its whole (set 9's bracer is four fifths gold). Set 1's chest (cloth) dyed with a
+    /// trim, resolved as the renderer resolves it: its yellow bands in the
+    /// trim's colour, its brown leather times the body's colour (`MUL`), the
+    /// trim found by its own rule (not the plate's gold, which takes the
+    /// leather too), crisp: each texel wholly trim or not. Needs the disc.
+    #[test]
+    fn every_trim_on_the_disc() {
+        use render::TextureSource;
+        let iso = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        if !iso.is_file() {
+            eprintln!("SKIP: no disc");
+            return;
+        }
+        let mut lib = esf::Library::new();
+        for f in crate::dressview::FILES {
+            lib.add(*f, crate::stream::open_file(&iso, f).unwrap());
+        }
+        Rules::retail().register_art(&mut lib);
+        let src = render::library_textures(&lib);
+        for &(id, trim) in render::trimart::TRIMS {
+            let im = src.levels(id as i32).into_iter().next().unwrap_or_else(|| panic!("{id:08X} on the disc"));
+            let (w, h) = (im.width as usize, im.height as usize);
+            let mask = trim.mask(&im.rgba, w, h);
+            let (mut sum, mut n) = (0.0f32, 0usize);
+            for (k, p) in im.rgba.chunks_exact(4).enumerate() {
+                if im.alpha && p[3] == 0 {
+                    continue;
+                }
+                sum += mask[k];
+                n += 1;
+            }
+            let share = sum / n as f32;
+            eprintln!("{id:08X}: {:.1}% trim", share * 100.0);
+            assert!(share > 0.01 && share < 0.85, "{id:08X}: {share}");
+        }
+        let cloth = 0xBF4B_7E0Au32 as i32;
+        let id = render::recolor::trimmed(cloth, [0x40, 0x60, 0xC0], [0xD1, 0, 0], |i| lib.surface(i).is_some());
+        let (got, root) = (src.levels(id), src.levels(cloth));
+        assert_eq!(got.len(), root.len());
+        let (mut band, mut leather, mut gold_on_leather) = (0, 0, 0);
+        let mask = render::trimart::trim_of(cloth as u32).unwrap().mask(&root[0].rgba, root[0].width as usize, root[0].height as usize);
+        assert!(mask.iter().all(|&w| w == 0.0 || w == 1.0), "cloth's trim is crisp");
+        for ((g, r), &w) in got[0].rgba.chunks_exact(4).zip(root[0].rgba.chunks_exact(4)).zip(&mask) {
+            let rc = [r[0], r[1], r[2]];
+            assert_eq!(g[3], r[3], "alpha kept");
+            if w == 0.0 {
+                leather += 1;
+                gold_on_leather += (render::recolor::trim_weight(rc) == 1.0) as usize;
+                assert_eq!([g[0], g[1], g[2]], render::recolor::recolor_rgb(rc, render::recolor::MUL << 24 | 0x40_60C0), "{rc:?}");
+            } else if w == 1.0 {
+                band += 1;
+                assert_eq!([g[0], g[1], g[2]], render::recolor::trim_glow(rc, [0xD1, 0, 0]), "{rc:?}");
+            }
+        }
+        assert!(band > 1500 && leather > 2000, "band {band}, leather {leather}");
+        assert!(gold_on_leather > 1000, "the gold rule would have taken the leather: {gold_on_leather}");
+    }
+
+    /// The tables with go-eqoa-server's armour (`cust_with(true)`): retail's
+    /// with set 9 (its five DictIDs, set 4's helm) and a trim namer; without,
+    /// retail's exactly. Sandstorm's S2's tables keep theirs and gain the trims.
+    #[test]
+    fn the_servers_armour_in_the_tables() {
+        let r = Rules::retail();
+        assert_eq!(r.cust_with(false), vi::cust::Tables::retail());
+        let t = r.cust_with(true);
+        assert_eq!((t.armor_limit, t.helm_remap.clone(), t.armor_extra.clone()), (10, vec![(9, 4)], vec![(9, vi::cust::ORNATE)]));
+        assert!(t.trim.is_some());
+        assert_eq!(vi::cust::Tables { armor_limit: 9, helm_remap: vec![], armor_extra: vec![], trim: None, ..t }, vi::cust::Tables::retail(), "nothing else");
+        let named = (t.trim.unwrap().0)(vi::cust::ORNATE[0], [0x80, 0x10, 0x10], [0xD1, 0, 0], &|_| false);
+        assert_eq!(render::recolor::root_of(named as i32), vi::cust::ORNATE[0] as i32);
     }
 
     /// The words come out of the server's folder when the patcher put a
@@ -1704,17 +2049,18 @@ mod tests {
             assert_eq!(r.source, "retail");
             assert!(r.image.is_none() && r.worlds.is_none() && r.tints.is_none());
             assert!(!r.player_search && !r.damage_rgb);
-            assert_eq!((r.armor_set_limit, r.robe_limit, r.auction_max_level, r.sell_stack, r.guild_cap), (9, 4, 50, StackTest::Below(2), 128));
-            assert_eq!(r.cust(), vi::cust::Tables::retail());
+            assert_eq!((r.armor_set_limit, r.robe_limit, r.auction_max_level, r.sell_stack, r.guild_cap), (9, 4, 60, StackTest::Below(2), 128));
+            assert_eq!(r.cust_with(false), vi::cust::Tables::retail());
             assert_eq!(r.world_file(5).as_deref(), Some("SECRETS.ESF"));
             assert_eq!(r.world_file(6), None);
         }
         // the control: a patch that hooks the auction level is not retail
-        let mut p = rec(at::CLIENT_AUCTION_LEVEL, &0x2405_003Cu32.to_le_bytes());
+        // (a hook of 55: no patch's 60 is the default too, petition 1845)
+        let mut p = rec(at::CLIENT_AUCTION_LEVEL, &0x2405_0037u32.to_le_bytes());
         p.extend(tail(&[]));
         std::fs::write(dir.join("S2"), &p).unwrap();
         let r = Rules::from_dir(&dir);
-        assert_eq!((r.source.as_str(), r.auction_max_level), ("S2", 60));
+        assert_eq!((r.source.as_str(), r.auction_max_level), ("S2", 55));
         assert_ne!(r.auction_max_level, retail.auction_max_level);
         assert_eq!(r.sell_stack, StackTest::Below(2), "no record at CanSell: retail's test");
         // and one that rewrites CanSell's test

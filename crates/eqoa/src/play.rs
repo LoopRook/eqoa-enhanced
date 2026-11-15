@@ -34,8 +34,12 @@ mod mapsuggest;
 mod groupmark;
 #[path = "linkplay.rs"]
 mod linkplay;
+#[path = "buffplay.rs"]
+mod buffplay;
 #[path = "mercplay.rs"]
 mod mercplay;
+#[path = "autoplay.rs"]
+mod autoplay;
 pub use mercplay::{ENTRY as MERC_ENTRY, MSG_DISMISS_MERC};
 
 #[path = "fork_ext/play.rs"]
@@ -108,7 +112,15 @@ struct Puppet {
     race_look: Option<std::rc::Rc<net::raceopts::Look>>,
     /// The tint the server names for its body (`npctint`: an NPC's, by its
     /// name): another, or one gone, rebuilds it.
-    tint: Option<u32>,
+    tint: Option<crate::npctint::Tint>,
+    /// Its auras' particles (`aura::Worn`): a body whose tint asks for them
+    /// (`aura::npc_particles`) and each worn piece's whose aura does
+    /// (`aura::pieces`, `aura::helm_aura`), none for every other. Its shells
+    /// (`aura::npc_shell`, the pieces') are on its `gpu` and its helm's.
+    aura: Vec<crate::aura::Worn>,
+    /// The worn pieces' auras it was made with (the channel's): others made
+    /// it anew.
+    pieces: [net::entity::PieceAura; net::entity::AURAS],
     /// A Wisp's (`wisp::is`): it casts no shadow, neither its blob shadow
     /// (`shadow_casters`) nor any of its models into the shadow maps
     /// (`set_casts`).
@@ -165,13 +177,31 @@ const NAME_COLORS: [[f32; 4]; 3] = [[212.0 / 255.0, 192.0 / 255.0, 111.0 / 255.0
 /// pet's.
 const MERC_COLOR: [f32; 4] = [155.0 / 255.0, 165.0 / 255.0, 210.0 / 255.0, 1.0];
 
-/// A name plate to draw: where, in what colour, what, and a line under it
-/// (a merc's "<Hirer's Mercenary>": `mercplay`).
+/// A name plate to draw: where, in what colour, what, a line under it (a
+/// merc's "<Hirer's Mercenary>": `mercplay`), and a quest mark over it (the
+/// server's, `net::headmarks`: `TAKE` "!", `STEP` "?").
 pub struct Plate {
     pub at: [f32; 3],
     pub color: [f32; 4],
     pub name: String,
     pub tag: Option<String>,
+    pub mark: Option<u8>,
+}
+
+/// A quest mark's colour (the GM Jibrish's petition 1813: "yellow ! and ?").
+const MARK_COLOR: [f32; 4] = [1.0, 0.86, 0.1, 1.0];
+
+/// A quest mark's size against its name's at `MARK_NEAR` from the camera.
+const MARK_SIZE: f32 = 1.75;
+
+/// Where a quest mark is drawn at `MARK_SIZE`: nearer it is larger, farther
+/// smaller, within `MARK_SCALE`.
+const MARK_NEAR: f32 = 10.0;
+const MARK_SCALE: (f32, f32) = (0.7, 1.4);
+
+/// A quest mark's size at clip depth `w` (the distance from the camera).
+fn mark_size(w: f32) -> f32 {
+    MARK_SIZE * (MARK_NEAR / w.max(1e-3)).clamp(MARK_SCALE.0, MARK_SCALE.1)
 }
 
 pub struct Play {
@@ -211,6 +241,8 @@ pub struct Play {
     presses: crate::s2::Presses,
     /// The HUD's quick menus.
     pub hud_menus: crate::hudmenu::HudMenus,
+    /// The quick bars' auto slots and auto targeting (`autocast`, `autoplay`).
+    pub autocast: crate::autocast::AutoCast,
     /// A 0x0033 for a slot past the game's ten (the Extended page's Ability
     /// Bars) waiting for its 0x00B4: (display index, slot, the session's
     /// clock when it was sent, in ms). A server that keeps only the game's slots
@@ -242,6 +274,13 @@ pub struct Play {
     self_actor: Option<EntityActor>,
     actors_in: u64,
     refresh_collision: bool,
+    /// Each slot's actor made to pass through as a pet's (Pets Pass Through,
+    /// ticket 1977), as last set (`place_actors`).
+    actor_passes: Vec<bool>,
+    /// Same Shortcuts on Every Character (ticket 1987): the world entry's
+    /// quick-chat menus in, and the account's given to them since
+    /// (`sync_shortcuts`).
+    shortcuts: (bool, bool),
     /// The player's model as the server last named it on its channel.
     pub self_model: Option<u32>,
     /// The player dressed as its own channel says (look, items, helm),
@@ -370,6 +409,9 @@ pub struct Play {
     /// carries (`Event::ChatLinks`, by the event it came as); Shift held (a
     /// click on an item links it).
     pub links: crate::itemlink::Links,
+    /// The buff window (`buffwnd`, petition 1761): its light, its d-pad, where
+    /// it drew.
+    pub buffs: crate::buffwnd::BuffWnd,
     link_draft: Option<(Vec<u16>, Vec<crate::editbox::TextLink>)>,
     event_no: u64,
     next_links: Option<(u64, Vec<net::itemlink::ChatLink>)>,
@@ -888,7 +930,9 @@ impl Play {
         let d = crate::dialog::DialogBox {
             id,
             text: vi::ui::expand(text, 128, true, &ctx),
-            options: options.iter().take(6).map(|o| vi::ui::expand(o, 64, true, &ctx)).collect(),
+            // CLIENT keeps six (m_options[6]); a server told this client's
+            // room (`net::session::OP_DIALOG_ROOM`) sends up to `dialog::PAGE`
+            options: options.iter().take(crate::dialog::PAGE as usize).map(|o| vi::ui::expand(o, 64, true, &ctx)).collect(),
         };
         if self.mode == 0 {
             self.show_dialog_box(d);
@@ -1008,6 +1052,17 @@ impl Play {
             0x124D
         } else if f & 8 != 0 {
             0x0061
+        } else if c.p256 == 3 && self.own_merc(&c.name) {
+            // one's own merc: the talk that opens its menu on a server that
+            // keeps one (go-eqoa-server's mercmenu.go: the owner's of
+            // 2026-11-12, "let players press Square to open a dialog with
+            // their mercs"; CLIENT talks to no pet), and no details box: the
+            // menu's question box takes the press, so its release never
+            // reached `info_let_go` and the box stayed up beside the menu and
+            // after it (the owner, 2026-11-12: "the square menu is keeping the
+            // popup on screen")
+            self.info_up = false;
+            0x0004
         } else if c.p256 == 2 || c.p256 == 3 {
             self.info_up = true;
             return;
@@ -1052,7 +1107,13 @@ fn race_look_of(e: &net::entity::Entity) -> Option<std::rc::Rc<net::raceopts::Lo
 
 /// The tint the server names for an NPC's body (`npctint`), by the name its
 /// channel carries; none for a player's character.
-fn tint_of(e: &net::entity::Entity) -> Option<u32> {
+/// The auras on its worn pieces the channel carries (`aura::pieces`): none
+/// from a server that sends none.
+fn pieces_of(e: &net::entity::Entity) -> [net::entity::PieceAura; net::entity::AURAS] {
+    e.creature.as_ref().and_then(|c| c.colors).map(|l| l.auras).unwrap_or_default()
+}
+
+fn tint_of(e: &net::entity::Entity) -> Option<crate::npctint::Tint> {
     e.creature.as_ref().filter(|_| !a_player(e)).and_then(|c| crate::npctint::of(&c.name))
 }
 
@@ -1064,7 +1125,8 @@ fn tint_of(e: &net::entity::Entity) -> Option<u32> {
 /// server with `jumps`, a player's in a body with no fall or landing of its
 /// own falls and lands as the table has it (`raceemote::grant_air`); on one
 /// with races of its own, one in a body with no swim swims as it has it
-/// (`raceemote::grant_swim`).
+/// (`raceemote::grant_swim`), and one in a body with no monk's moves of its
+/// own kicks and strikes as the human (`raceemote::grant_moves`).
 #[allow(clippy::too_many_arguments)]
 fn build_puppet(lib: &Library, g: &mut Gpu, e: &net::entity::Entity, look: Option<vi::cust::Look>, slot: usize, game_ms: i64, races: Option<&net::creation::Creation>, jumps: bool) -> Option<Puppet> {
     let era = lib.view_for(e.drawn_model as i32);
@@ -1083,13 +1145,14 @@ fn build_puppet_in(lib: &Library, g: &mut Gpu, e: &net::entity::Entity, look: Op
                     if let Some(cs) = sprite.as_mut() {
                         crate::racebody::grant(cs, e.drawn_model, player, races);
                         crate::raceemote::grant(lib, cs, &mut anims, e.drawn_model, player, races);
+                        crate::raceemote::grant_moves(lib, cs, &mut anims, e.drawn_model, player, races);
                         crate::raceemote::grant_air(lib, cs, &mut anims, e.drawn_model, player, jumps);
                         crate::raceemote::grant_swim(lib, cs, &mut anims, e.drawn_model, player, races);
                     }
                     let held = held_by(sprite.as_ref(), e.creature.as_ref());
-                    let (attached, weapons, helm_worn) = match (&sprite, &e.creature) {
+                    let (attached, weapons, helm_worn, helm_aura) = match (&sprite, &e.creature) {
                         (Some(cs), Some(c)) => attach(lib, g, cs, c, held, e.drawn_model, player),
-                        _ => (Vec::new(), [None; 3], false),
+                        _ => (Vec::new(), [None; 3], false, None),
                     };
                     let projectile = projectiles_of(sprite.as_ref(), e.creature.as_ref());
                     // ApplyLook: the look's textures and tints on the layers the
@@ -1114,8 +1177,41 @@ fn build_puppet_in(lib: &Library, g: &mut Gpu, e: &net::entity::Entity, look: Op
                         crate::npctint::apply(&mut model, t);
                     }
                     let wisp = crate::wisp::is(lib, e.drawn_model, race_look.as_deref());
-                    let gpu = g.renderer.upload(g.device, g.queue, &model, &[render::IDENTITY], &textures);
-                    let mut p = Puppet { id: e.id, model: e.drawn_model, look, sprite, anims, rand, gpu, attached, held, projectile, name_at: None, slot4_at: None, actor_m: Matrix44::identity(), centre: Matrix44::identity(), weapons, trail: Default::default(), first: true, shown: false, era, textures: crate::texpack::generation(), cape: None, race_look, tint, wisp };
+                    // its auras (`aura`): an NPC's whole body's (its tint's) and
+                    // each worn piece's, their particles' nodes and their shells
+                    let pieces = pieces_of(e);
+                    let mut aura = Vec::new();
+                    let mut shells: Vec<render::shell::PartOf> = crate::aura::npc_shell_part(tint).into_iter().collect();
+                    // and the trims' (`aura::npc_trim`, `aura::piece_trims`)
+                    let taken = |id: i32| lib.lookup(id).is_some();
+                    let mut trims: Vec<render::trimglow::TrimOf> = crate::aura::npc_trim(&model, tint, &taken).into_iter().collect();
+                    if let Some(cs) = &sprite {
+                        if let Some(pt) = crate::aura::npc_particles(tint) {
+                            aura.push(crate::aura::Worn { nodes: crate::aura::body_nodes(cs, pt.nodes), particles: pt, first: 0 });
+                        }
+                        if pieces != [net::entity::PieceAura::default(); net::entity::AURAS] {
+                            let robed = look.as_ref().is_some_and(|l| l.robe >= 0);
+                            let (s, w) = crate::aura::pieces(&model, cs, &pieces, robed);
+                            shells.extend(s);
+                            aura.extend(w);
+                            trims.extend(crate::aura::piece_trims(&model, cs, &pieces, robed, &taken));
+                            // the body's own, under the armour it wears
+                            if let Some(lk) = &look {
+                                let (s, w) = crate::aura::body_aura(&model, cs, &pieces, crate::aura::covered(lk));
+                                shells.extend(s);
+                                aura.extend(w);
+                            }
+                        }
+                    }
+                    aura.extend(helm_aura);
+                    let mut gpu = g.renderer.upload(g.device, g.queue, &model, &[render::IDENTITY], &textures);
+                    if !shells.is_empty() {
+                        g.renderer.set_shells(g.device, &mut gpu, &model, &shells);
+                    }
+                    if !trims.is_empty() {
+                        g.renderer.set_trims(g.device, g.queue, &mut gpu, &model, &trims, &textures);
+                    }
+                    let mut p = Puppet { id: e.id, model: e.drawn_model, look, sprite, anims, rand, gpu, attached, held, projectile, name_at: None, slot4_at: None, actor_m: Matrix44::identity(), centre: Matrix44::identity(), weapons, trail: Default::default(), first: true, shown: false, era, textures: crate::texpack::generation(), cape: None, race_look, tint, aura, pieces, wisp };
                     p.set_casts();
                     Some(p)
                 })
@@ -1141,11 +1237,36 @@ fn wear_cape(lib: &Library, g: &mut Gpu, p: &mut Puppet, want: Option<net::cape:
     if p.cape.as_ref().map(|(c, _)| *c) == want {
         return;
     }
+    // the cape's aura's particles go with the cape they were on
+    p.aura.retain(|w| w.first != 64 * (crate::aura::CAPE + 1));
+    let pieces = p.pieces;
+    let mut worn = None;
     p.cape = want.map(|c| {
-        let m = p.sprite.as_ref().and_then(|cs| crate::cape::model(lib, c, p.model, cs));
-        let gpu = m.map(|m| lib.with_view(esf::Era::Frontiers, || g.renderer.upload(g.device, g.queue, &m, &[render::IDENTITY], &render::library_textures(lib))));
+        let cs = p.sprite.as_ref();
+        let m = cs.and_then(|cs| crate::cape::model(lib, c, p.model, cs));
+        let gpu = m.map(|m| {
+            lib.with_view(esf::Era::Frontiers, || {
+                let textures = render::library_textures(lib);
+                let mut gpu = g.renderer.upload(g.device, g.queue, &m, &[render::IDENTITY], &textures);
+                // its aura (`aura::cape_aura`): the shell over it, the trim's
+                // glow, the particles on the wearer's nodes under it
+                if let Some(cs) = cs.filter(|_| pieces[crate::aura::CAPE] != Default::default()) {
+                    let taken = |id: i32| lib.lookup(id).is_some();
+                    let (shell, w, trim) = crate::aura::cape_aura(&m, cs, &pieces, &taken);
+                    if let Some(s) = &shell {
+                        g.renderer.set_shells(g.device, &mut gpu, &m, std::slice::from_ref(s));
+                    }
+                    if let Some(t) = &trim {
+                        g.renderer.set_trims(g.device, g.queue, &mut gpu, &m, std::slice::from_ref(t), &textures);
+                    }
+                    worn = w;
+                }
+                gpu
+            })
+        });
         (c, gpu)
     });
+    p.aura.extend(worn);
     p.set_casts();
 }
 
@@ -1210,28 +1331,76 @@ fn projectiles_of(sprite: Option<&CSprite<Ee>>, c: Option<&net::entity::Creature
 /// the hands' weapon ends and whether a helm is worn. `model`: the body's
 /// DictID; `player`: a player's character.
 #[allow(clippy::too_many_arguments)]
-fn attach(lib: &Library, g: &mut Gpu, cs: &CSprite<Ee>, c: &net::entity::Creature, held: Held, model: u32, player: bool) -> (Vec<(i32, GpuModel)>, Weapons, bool) {
+fn attach(lib: &Library, g: &mut Gpu, cs: &CSprite<Ee>, c: &net::entity::Creature, held: Held, model: u32, player: bool) -> (Vec<(i32, GpuModel)>, Weapons, bool, Option<crate::aura::Worn>) {
     let textures = render::library_textures(lib);
     let mut attached = Vec::new();
     let mut weapons = [None; 3];
+    // each hand's item's own colour on its glow (`aura`), none plain
+    let colors = crate::aura::hands(Some(&look_of(c)));
+    // and each hand's aura (`aura::hand_aura`): an epic's look lent it
+    let auras = c.colors.map(|l| l.auras).unwrap_or_default();
     for (i, held) in held.into_iter().enumerate() {
         let Some((id, node)) = held else { continue };
         weapons[i] = crate::trails::weapon_points(lib, id).map(|w| (node, w));
-        if let Some(m) = lib.lookup(id as i32).and_then(|r| lib.build_model(r)) {
+        if let Some(mut m) = lib.lookup(id as i32).and_then(|r| lib.build_model(r)) {
+            if let Some(color) = colors[i] {
+                crate::aura::recolor(&mut m, color);
+            }
+            // its hand's aura's look lent it: an epic's, or an energy skin (`aura::lend_hand`)
+            if let Some(a) = crate::aura::hand_aura(&auras, i) {
+                crate::aura::lend_hand(lib, &mut m, &a, id);
+            }
             attached.push((node, g.renderer.upload(g.device, g.queue, &m, &[render::IDENTITY], &textures)));
         }
     }
     let mut helm_worn = false;
     // the server's patch's tables (`s2`), retail's without one
     let t = crate::s2::get().cust();
-    if let Some((node, m)) = crate::slotless::helm_on(lib, model, cs, player, c.armor[5], look_of(c).helm_color(&t), &t, true) {
+    let mut helm_aura = None;
+    if let Some((node, mut m)) = crate::slotless::helm_on(lib, model, cs, player, c.armor[5], look_of(c).helm_color(&t), &t, true) {
         helm_worn = true;
+        let look = look_of(c);
+        crate::slotless::helm_trim(lib, &mut m, look.helm_color(&t), look.trim_color.map(|c| c[5]), &t);
+        let mut gpu = g.renderer.upload(g.device, g.queue, &m, &[render::IDENTITY], &textures);
+        // the helm's own aura (`aura::helm_aura`): its shell over it, its
+        // particles on its node
+        if let Some(a) = c.colors.map(|l| l.auras).filter(|a| a[crate::aura::HELM] != Default::default()) {
+            let (shell, worn) = crate::aura::helm_aura(&a, node);
+            if let Some(s) = &shell {
+                g.renderer.set_shells(g.device, &mut gpu, &m, std::slice::from_ref(s));
+            }
+            // and its trim's glow (kind trim or trimshell: `aura::helm_trim`),
+            // which the body's `piece_trims` never reaches
+            let taken = |id: i32| lib.lookup(id).is_some();
+            if let Some(t) = crate::aura::helm_trim(&m, &a, &taken) {
+                g.renderer.set_trims(g.device, g.queue, &mut gpu, &m, std::slice::from_ref(&t), &textures);
+            }
+            helm_aura = worn;
+        }
+        attached.push((node, gpu));
+    }
+    // a circlet round the head (the helm's aura of kind circlet), while no helm is drawn
+    if !helm_worn
+        && let Some((node, m)) = circlet_on(lib, model, cs, player, c)
+    {
         attached.push((node, g.renderer.upload(g.device, g.queue, &m, &[render::IDENTITY], &textures)));
     }
     if let Some((node, m)) = wisp_of(lib, cs, c, model, player) {
         attached.push((node, g.renderer.upload(g.device, g.queue, &m, &[render::IDENTITY], &textures)));
     }
-    (attached, weapons, helm_worn)
+    (attached, weapons, helm_worn, helm_aura)
+}
+
+/// A circlet on a creature's head (`aura::circlet`): when its helm's aura is
+/// one, the source's glowing part laid round the head on the helm's node,
+/// measured by set 4's helm as the body would wear it. None without one, for
+/// a body that wears no helm, or a source not loaded.
+pub fn circlet_on(lib: &Library, model: u32, cs: &CSprite<Ee>, player: bool, c: &net::entity::Creature) -> Option<(i32, esf::Model)> {
+    let (src, hue, height) = crate::aura::circlet_of(&c.colors?.auras)?;
+    let t = crate::s2::get().cust();
+    let (node, measure) = crate::slotless::helm_on(lib, model, cs, player, crate::aura::CIRCLET_MEASURE_SET, [255; 4], &t, true)?;
+    let source = lib.lookup(src as i32).and_then(|r| lib.build_model(r))?;
+    Some((node, crate::aura::circlet(&source, &measure, hue, height)?))
 }
 
 /// A Wisp's wisp (`wisp`), for a player's character whose race look (by its
@@ -1285,6 +1454,7 @@ fn apply(lib: &Library, g: &mut Gpu, p: &mut Option<Puppet>, e: &net::entity::En
         let anims = &mut p.anims;
         lib.with_view(p.era, || {
             crate::raceemote::grant(lib, cs, anims, p.model, a_player(e), races);
+            crate::raceemote::grant_moves(lib, cs, anims, p.model, a_player(e), races);
             crate::raceemote::grant_swim(lib, cs, anims, p.model, a_player(e), races);
             crate::raceemote::grant_air(lib, cs, anims, p.model, a_player(e), jumps)
         });
@@ -1295,9 +1465,10 @@ fn apply(lib: &Library, g: &mut Gpu, p: &mut Option<Puppet>, e: &net::entity::En
         Some(p) if r != Redo::Build && p.race_look != race_look_of(e) => Redo::Build,
         _ => r,
     };
-    // a tint on its body come, changed or gone (`npctint`): made anew
+    // a tint on its body come, changed or gone (`npctint`), or a worn
+    // piece's aura (`aura::pieces`): made anew
     let r = match p.as_ref() {
-        Some(p) if r != Redo::Build && p.tint != tint_of(e) => Redo::Build,
+        Some(p) if r != Redo::Build && (p.tint != tint_of(e) || p.pieces != pieces_of(e)) => Redo::Build,
         _ => r,
     };
     // the art swapped (F9), or a texture pack turned on or off (`texpack`),
@@ -1312,7 +1483,11 @@ fn apply(lib: &Library, g: &mut Gpu, p: &mut Option<Puppet>, e: &net::entity::En
             {
                 p.held = held_items(cs, c);
                 p.projectile = crate::spells::hand_projectiles(c, cs.holds_items);
-                (p.attached, p.weapons, _) = lib.with_view(p.era, || attach(lib, g, cs, c, p.held, p.model, a_player(e)));
+                let helm_aura;
+                (p.attached, p.weapons, _, helm_aura) = lib.with_view(p.era, || attach(lib, g, cs, c, p.held, p.model, a_player(e)));
+                // the helm's aura's particles made again with it
+                p.aura.retain(|w| w.first != 64 * (crate::aura::HELM + 1));
+                p.aura.extend(helm_aura);
                 p.set_casts();
             }
             None
@@ -1430,6 +1605,10 @@ pub(crate) fn dress_look(lib: &Library, id: i32, model: &mut esf::Model, cs: &CS
     dress(model, &vi::cust::apply_look_with(cs, look, helm_worn, has, t));
     if player {
         crate::slotless::dress(lib, id, model, cs, look, helm_worn, has, t);
+        crate::racebody::drop_own_weapons(model, id as u32);
+        if helm_worn {
+            crate::racebody::hide_hair(model, id as u32);
+        }
     }
 }
 
@@ -1477,7 +1656,7 @@ pub fn chat_labels(play: &Play, text: &render::text::Text, size: (u32, u32)) -> 
     if play.hud.is_none()
         && let Some(name) = play.target_name()
     {
-        out.push(render::text::Label { at: [0.0, 1.0 - (24.0 * k) / size.1 as f32 * 2.0, 0.0], color: [1.0, 1.0, 1.0, 1.0], text: name });
+        out.push(render::text::Label { at: [0.0, 1.0 - (24.0 * k) / size.1 as f32 * 2.0, 0.0], color: [1.0, 1.0, 1.0, 1.0], text: name, size: 1.0 });
     }
     let n = rows.len();
     for (i, (s, c)) in rows.into_iter().enumerate() {
@@ -1485,7 +1664,7 @@ pub fn chat_labels(play: &Play, text: &render::text::Text, size: (u32, u32)) -> 
         let x = 12.0 * k + w / 2.0;
         let y = size.1 as f32 - 12.0 * k - line * (n - i) as f32 + line / 2.0;
         let ndc = [x / size.0 as f32 * 2.0 - 1.0, 1.0 - y / size.1 as f32 * 2.0, 0.0];
-        out.push(render::text::Label { at: ndc, color: c, text: s });
+        out.push(render::text::Label { at: ndc, color: c, text: s, size: 1.0 });
     }
     out
 }
@@ -1577,11 +1756,15 @@ fn labels_by(plates: &[Plate], view: &PlateView, view_proj: glam::Mat4, width: i
         let h = (height as f32 * view.scale).round() as i32;
         let mut min = (qx - (w >> 1), qy - (h >> 1));
         let mut max = (min.0 + w, min.1 + h);
+        // a quest mark over the name (and its tag): the rect takes it in
+        if p.mark.is_some() {
+            min.1 -= (height as f32 * mark_size(clip.w) * view.scale).round() as i32;
+        }
         // a tag (`mercplay`): it sits where the name would, the name a line
         // above it, both clear of the head (the owner, 2026-11-11: under the
         // name it covered the merc's head); the plate's rect takes both in
         if let Some(t) = &p.tag {
-            let tw = (width(t) as f32 * view.scale).round() as i32;
+            let tw = (width(t) as f32 * tag_size(height) * view.scale).round() as i32;
             min.1 -= h;
             if tw > w {
                 (min.0, max.0) = (qx - (tw >> 1), qx - (tw >> 1) + tw);
@@ -1590,13 +1773,13 @@ fn labels_by(plates: &[Plate], view: &PlateView, view_proj: glam::Mat4, width: i
         queued.push((clip.w, min, max, ndc, p));
     }
     queued.sort_by(|a, b| a.0.total_cmp(&b.0));
-    /// A kept plate: its rect's corners, where it is drawn, what.
-    type Kept<'a> = ((i32, i32), (i32, i32), glam::Vec3, &'a Plate);
+    /// A kept plate: its depth, its rect's corners, where it is drawn, what.
+    type Kept<'a> = (f32, (i32, i32), (i32, i32), glam::Vec3, &'a Plate);
     let mut kept: Vec<Kept> = Vec::new();
-    for (_, min, max, ndc, p) in queued {
-        let meets = !view.overlap && kept.iter().any(|k| !(min.0 > k.1.0 || max.0 < k.0.0 || min.1 > k.1.1 || max.1 < k.0.1));
+    for (w, min, max, ndc, p) in queued {
+        let meets = !view.overlap && kept.iter().any(|k| !(min.0 > k.2.0 || max.0 < k.1.0 || min.1 > k.2.1 || max.1 < k.1.1));
         if !meets {
-            kept.push((min, max, ndc, p));
+            kept.push((w, min, max, ndc, p));
         }
     }
     if view.overlap {
@@ -1607,15 +1790,33 @@ fn labels_by(plates: &[Plate], view: &PlateView, view_proj: glam::Mat4, width: i
     // PS2's 448 lines is 2 / 448 high)
     let line = 2.0 * height as f32 * view.scale / render::text::SCREEN_H;
     let mut out = Vec::new();
-    for (_, _, ndc, p) in kept {
+    for (w, _, _, ndc, p) in kept {
         let up = if p.tag.is_some() { line } else { 0.0 };
-        out.push(render::text::Label { at: [ndc.x, ndc.y + up, ndc.z], color: p.color, text: p.name.clone() });
+        out.push(render::text::Label { at: [ndc.x, ndc.y + up, ndc.z], color: p.color, text: p.name.clone(), size: 1.0 });
         if let Some(t) = &p.tag {
-            out.push(render::text::Label { at: ndc.to_array(), color: p.color, text: t.clone() });
+            out.push(render::text::Label { at: ndc.to_array(), color: p.color, text: t.clone(), size: tag_size(height) });
+        }
+        // the quest mark over the name: its centre half the name's line and
+        // half its own above the name's, and a little more
+        if let Some(sign) = p.mark.and_then(net::headmarks::sign) {
+            let size = mark_size(w);
+            let at = ndc.y + up + line * (0.5 + 0.5 * size + 0.15);
+            out.push(render::text::Label { at: [ndc.x, at, ndc.z], color: MARK_COLOR, text: sign.into(), size });
         }
     }
     out
 }
+
+/// How much smaller a merc's tag is drawn than its name: two of the font's
+/// pixels off its `height` (the GM Jibrish's petition 1587, 2026-11-11:
+/// "Lower the font size of mercenary display tags by 2"), the name the
+/// font's own size.
+fn tag_size(height: u32) -> f32 {
+    height.saturating_sub(TAG_SMALLER).max(1) as f32 / height.max(1) as f32
+}
+
+/// The font pixels a merc's tag is smaller than its name (petition 1587).
+const TAG_SMALLER: u32 = 2;
 
 /// `CalcSlotWorldTransform(slot)`'s translation: the slot's node under the
 /// centre transform `m`; None when the sprite lacks the slot (the game then
@@ -1637,11 +1838,21 @@ fn look_of(c: &net::entity::Creature) -> vi::cust::Look {
         // the live game's channel's colours, when the server sends its look
         armor_color: c.colors.map(|l| l.armor),
         robe_color: c.colors.map(|l| l.robe),
+        // the held items' (`aura`)
+        item_color: c.colors.map(|l| l.items),
+        // go-eqoa-server's trims
+        trim_color: c.colors.map(|l| l.trim),
     }
 }
 
 fn v3(a: [f32; 3]) -> Vect3<Ee> {
     Vect3::of(a[0], a[1], a[2])
+}
+
+/// The camera's heading (the eye's direction's, `GetHPR`): what the HUD's
+/// compass turns by, and the map's dart with Map Pointer on Camera.
+fn camera_heading(walker: &Walker) -> f32 {
+    walker.eye.direction.get_hpr().0.0
 }
 
 /// Where the walk stands now (`self.player.pos` changes only on a move).
@@ -1852,6 +2063,38 @@ mod entity_actors {
         hush(&mut cs, &mut s);
         assert!(!s.dev.is_playing(h) && cs.snd.channel == -1, "the loop stopped");
         assert!(cs.h.triggers.iter().all(|t| t.tripped == 0), "the trips let go");
+    }
+
+    /// Pets Pass Through (ticket 1977): a pet's capsule (plate colour 3) is met
+    /// by no walk while the row is on, as by default; turned off, it is solid
+    /// again from the next frame, and on, not. The control: a creature of the
+    /// world beside it (colour 0) is solid throughout.
+    #[test]
+    fn pets_pass_through_while_the_row_is_on() {
+        let (x, z) = (25275.115f32, 15766.627f32);
+        let Some((lib, file)) = freeport_lib(x, z) else { return };
+        let mut w = Walker::arrive(World::load(&lib, file).unwrap(), crate::walker::Spawn::ground(x + 40.0, z, 0.0));
+        let (x2, z2) = (x - 12.0, z);
+        let mut p = super::commands::play();
+        let ground = |w: &mut Walker, x: f32, z: f32| [x, crate::walker::ground(&mut w.scene, x, z).unwrap(), z];
+        let pet = |id: u32, at: [f32; 3], p256: u8| net::entity::Entity { id, kind: net::entity::TYPE_CREATURE, model: HUMAN, drawn_model: HUMAN, scale: 1.0, pos: at, actor_pos: at, creature: Some(net::entity::Creature { p256, ..Default::default() }), ..Default::default() };
+        let (a, b) = (ground(&mut w, x, z), ground(&mut w, x2, z2));
+        p.entities.slots[3] = Some(pet(0x30, a, 3));
+        p.entities.slots[4] = Some(pet(0x40, b, 0));
+        let mut c = crate::settings::client();
+        assert!(c.pets_pass, "on by default");
+        p.place_actors(&mut w, &lib);
+        let (a3, a4) = (p.actors[3].unwrap().actor as i32, p.actors[4].unwrap().actor as i32);
+        assert_eq!(meets(&mut w.scene, x, z), -2, "the pet passes");
+        assert_eq!(meets(&mut w.scene, x2, z2), a4, "the control: a creature of the world is solid");
+        c.pets_pass = false;
+        crate::settings::set_client(c);
+        p.place_actors(&mut w, &lib);
+        assert_eq!(meets(&mut w.scene, x, z), a3, "off: the pet is solid");
+        c.pets_pass = true;
+        crate::settings::set_client(c);
+        p.place_actors(&mut w, &lib);
+        assert_eq!((meets(&mut w.scene, x, z), meets(&mut w.scene, x2, z2)), (-2, a4), "on again");
     }
 
     /// `place_actor` over an entity's time in a slot: made with its first
@@ -2072,6 +2315,44 @@ mod entity_actors {
 /// (200), or farther is never targeted.
 const CYCLE_REACH2: f32 = 40000.0;
 
+/// Whether `c` is a familiar, which no target cycle takes (the GM Jibwiz's
+/// petitions 1881 and 1903, Brother's 1902, 2026-11-13: "Only direct mouse
+/// targeting, or pressing and holding the target button to go into first
+/// person with a cross hair ... should target heal bot. The cycle targeting
+/// should not"); a click, the crosshair, a name and the 6 key still do. A
+/// familiar is a follower that does not fight, as go-eqoa-server makes them
+/// (no marker of its own on the wire):
+///   - Healbot and any familiar an item calls (its `entity/familiar.go`): an
+///     NPC with the NPC bit (`npc_flags` 0x80) and no owner, as a merchant,
+///     known by its name (table familiars: Healbot alone);
+///   - a pet (`m_p256` 3, a player's or the player's own) of a summoning
+///     whose pet takes no fight: the wizard's familiars (Minor Familiar to
+///     Arch Familiar, Gargoyle Familiar: passive alone) and the workbook's
+///     non-combat pets (Crazy Contraption, Invention, Swamp Friend).
+///
+/// A combat pet stays the cycle's (the wizard's Guardians, a magician's,
+/// necromancer's or enchanter's pet, a charmed creature), and so does a
+/// creature of the world named so (a caster's own "Familiar", which fights).
+/// Whether entity `e` is a pet as Pets Pass Through takes one (ticket 1977):
+/// the player's own pet (`pet_id`), or any creature of a player's side whose
+/// plate is a pet's (colour 3: pets, mercs, familiars).
+fn passes_as_pet(e: &net::entity::Entity, pet_id: u32) -> bool {
+    e.id == pet_id || e.creature.as_ref().is_some_and(|c| c.p256 == 3)
+}
+
+fn is_familiar(c: &net::entity::Creature) -> bool {
+    let name = c.name.trim();
+    let is = |w: &str| name.eq_ignore_ascii_case(w);
+    if c.npc_flags & 0x80 != 0 && c.p256 != 3 {
+        return is("Healbot");
+    }
+    c.p256 == 3
+        && (name.rsplit(' ').next().is_some_and(|w| w.eq_ignore_ascii_case("Familiar"))
+            || is("Crazy Contraption")
+            || is("Invention")
+            || is("Swamp Friend"))
+}
+
 /// What `TargetCentre` reads of a creature with an actor: its id, where it is
 /// measured (a character's slot 4, else its place), its +0x18 bit 0 (the
 /// selectable flag), whether it is of a player's side (`m_p256` 3) and how
@@ -2155,7 +2436,7 @@ mod name_plates {
     /// A plate at `at` (the view is the identity, so its x and y are where
     /// it is on the screen, -1 to 1).
     fn plate(at: [f32; 3], name: &str) -> Plate {
-        Plate { at, color: [1.0; 4], name: name.into(), tag: None }
+        Plate { at, color: [1.0; 4], name: name.into(), tag: None, mark: None }
     }
 
     fn names(view: &PlateView, plates: &[Plate]) -> Vec<String> {
@@ -2182,12 +2463,55 @@ mod name_plates {
         assert!((ls[0].at[1] - 2.0 * 12.0 / 448.0).abs() < 1e-6, "the name a line above it: {:?}", ls[0].at);
         assert!(ls.iter().all(|l| l.at[1] >= -1e-6), "nothing below the name's own place");
         assert_eq!(ls[1].color, ls[0].color);
+        // the tag two of the font's pixels smaller, the name its own size
+        // (petition 1587)
+        assert_eq!(ls[0].size, 1.0, "the name unchanged");
+        assert!((ls[1].size - 10.0 / 12.0).abs() < 1e-6, "the tag 2 pixels smaller: {}", ls[1].size);
         let mut merc = plate([0.0, 0.0, 0.5], "Ralthas");
         merc.tag = Some("<Lonewulf's Mercenary>".into());
         let below = plate([0.0, -step, 0.5], "Kel");
         assert_eq!(names(&PlateView::game(eye), &[merc, below]), ["Ralthas", "<Lonewulf's Mercenary>", "Kel"], "a plate just below is kept");
         let untagged = [plate([0.0, 0.0, 0.5], "Ralthas"), plate([0.0, step, 0.5], "Kel")];
         assert_eq!(names(&PlateView::game(eye), &untagged), ["Ralthas", "Kel"], "the control must fail");
+    }
+
+    /// A quest mark (petition 1813) is drawn over its name in yellow, "!" for
+    /// a quest to take and "?" for a step, larger than the name, and larger
+    /// near than far; over a merc's tag's name too. The control: an unmarked
+    /// plate draws its name alone.
+    #[test]
+    fn a_quest_mark_sits_over_the_name() {
+        let eye = Vec3::new(0.0, 0.0, -1.0);
+        let mut nothard = plate([0.0, 0.0, 0.5], "Commander Nothard");
+        nothard.mark = Some(net::headmarks::TAKE);
+        let ls = labels_by(&[nothard], &PlateView::game(eye), Mat4::IDENTITY, width, 12);
+        let texts: Vec<_> = ls.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, ["Commander Nothard", "!"]);
+        assert_eq!(ls[1].color, MARK_COLOR);
+        assert!(ls[1].size > 1.0, "larger than the name: {}", ls[1].size);
+        assert!(ls[1].at[1] > ls[0].at[1] + 12.0 / 448.0 && ls[1].at[0] == ls[0].at[0], "over the name: {:?} {:?}", ls[1].at, ls[0].at);
+        let mut galosh = plate([0.0, 0.0, 0.5], "Merchant Galosh");
+        galosh.mark = Some(net::headmarks::STEP);
+        galosh.tag = Some("<a tag>".into());
+        let ls = labels_by(&[galosh], &PlateView::game(eye), Mat4::IDENTITY, width, 12);
+        assert_eq!(ls.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["Merchant Galosh", "<a tag>", "?"]);
+        assert!(ls[2].at[1] > ls[0].at[1], "over the name a line up: {:?}", ls[2].at);
+        // a plate just above a marked one, where the mark is, is dropped
+        let mut marked = plate([0.0, 0.0, 0.5], "Ab");
+        marked.mark = Some(net::headmarks::TAKE);
+        let step = 20.0 / 224.0;
+        assert_eq!(names(&PlateView::game(eye), &[marked, plate([0.0, step, 0.5], "Cd")]), ["Ab", "!"]);
+        assert_eq!(names(&PlateView::game(eye), &[plate([0.0, 0.0, 0.5], "Ab"), plate([0.0, step, 0.5], "Cd")]), ["Ab", "Cd"], "the control: unmarked");
+        // near larger than far, in a perspective view
+        let proj = Mat4::from_cols(glam::Vec4::X, glam::Vec4::Y, glam::Vec4::new(0.0, 0.0, 1.0, 1.0), glam::Vec4::ZERO);
+        let size_at = |z: f32| {
+            let mut p = plate([0.0, 0.0, z], "Ab");
+            p.mark = Some(net::headmarks::TAKE);
+            labels_by(&[p], &PlateView::game(Vec3::ZERO), proj, width, 12).into_iter().find(|l| l.text == "!").unwrap().size
+        };
+        assert!(size_at(4.0) > size_at(18.0), "near {} far {}", size_at(4.0), size_at(18.0));
+        assert_eq!(mark_size(1.0), MARK_SIZE * MARK_SCALE.1);
+        assert_eq!(mark_size(1000.0), MARK_SIZE * MARK_SCALE.0);
     }
 
     /// Zoomed out to 50 the plates round the player stay, measured from the
@@ -2497,6 +2821,18 @@ mod held {
         dyed.armor_tint[0] = 3;
         assert_eq!(redo(was, state(&human, &dyed, 0xC698D870)), Redo::Build);
         assert_eq!(redo(was, state(&human, &swapped, 0x9BBCEEB9)), Redo::Build);
+        // a hand's own colour (the live look's, `aura`) come or changed: made
+        // anew, the item drawn in it
+        let colors = |items: [[u8; 4]; 3]| net::entity::LiveColors { items, ..Default::default() };
+        let mut plain = c.clone();
+        plain.colors = Some(colors([[255; 4]; 3]));
+        let mut twisted = plain.clone();
+        twisted.colors = Some(colors([[0xB0, 0x10, 0x2A, 0xFF], [255; 4], [255; 4]]));
+        let plain_state = state(&human, &plain, 0xC698D870);
+        assert_eq!(redo(plain_state, plain_state), Redo::Keep);
+        assert_eq!(redo(plain_state, state(&human, &twisted, 0xC698D870)), Redo::Build);
+        assert_eq!(crate::aura::hands(plain_state.2.as_ref()), [None; 3], "white is plain");
+        assert_eq!(crate::aura::hands(state(&human, &twisted, 0xC698D870).2.as_ref())[0], Some([0xB0, 0x10, 0x2A]));
 
         let mut form = CSprite::<Ee>::new(vi::hsprite::HSprite::new(0), 2, 9, 0, F::ONE, false);
         form.item_nodes[..2].copy_from_slice(&[6, 10]);
@@ -2684,21 +3020,41 @@ mod held {
             ..Default::default()
         };
         let (yhafiran, twin, player) = (entity(7001, "YHAFIRAN", 0), entity(7002, "Uzrathixius", 0), entity(7003, "Yhafiran", 2));
-        crate::npctint::set(vec![("yhafiran".into(), 0x2A73_33FF)]);
+        use crate::npctint::Tint;
+        crate::npctint::set(vec![("yhafiran".into(), Tint::color(0x2A73_33FF))]);
         let tint = |p: &Option<Puppet>| p.as_ref().expect("a puppet").tint;
         let (mut him, mut beside, mut them) = (None, None, None);
         for (p, e) in [(&mut him, &yhafiran), (&mut beside, &twin), (&mut them, &player)] {
             apply(&lib, &mut g, p, e, None, 0, 0, None, false);
         }
-        assert_eq!((tint(&him), tint(&beside), tint(&them)), (Some(0x2A73_33FF), None, None));
+        assert_eq!((tint(&him), tint(&beside), tint(&them)), (Some(Tint::color(0x2A73_33FF)), None, None));
+        let aura = |p: &Option<Puppet>| p.as_ref().expect("a puppet").aura.iter().map(|w| w.nodes.len()).sum::<usize>();
+        let shell = |p: &Option<Puppet>| p.as_ref().expect("a puppet").gpu.shell.as_ref().map(|s| s.colors()[0]);
+        assert_eq!((aura(&him), aura(&beside), aura(&them)), (0, 0, 0), "a colour alone: no aura");
+        assert_eq!((shell(&him), shell(&beside), shell(&them)), (None, None, None), "a colour alone: no shell");
         assert!(apply(&lib, &mut g, &mut him, &yhafiran, None, 0, 33, None, false).is_none(), "the same tint: kept");
-        crate::npctint::set(vec![("yhafiran".into(), 0x4D80_4DFF)]);
+        crate::npctint::set(vec![("yhafiran".into(), Tint::color(0x4D80_4DFF))]);
         assert!(apply(&lib, &mut g, &mut him, &yhafiran, None, 0, 66, None, false).is_some(), "a new tint: made anew");
         assert!(apply(&lib, &mut g, &mut beside, &twin, None, 0, 66, None, false).is_none(), "the twin kept");
-        assert_eq!(tint(&him), Some(0x4D80_4DFF));
+        assert_eq!(tint(&him), Some(Tint::color(0x4D80_4DFF)));
+        // a glow come on the same colour (petition 1893): made anew in it
+        crate::npctint::set(vec![("yhafiran".into(), Tint { color: 0x4D80_4DFF, glow: 0xFF40_4080, ..Default::default() })]);
+        assert!(apply(&lib, &mut g, &mut him, &yhafiran, None, 0, 77, None, false).is_some(), "a glow come: made anew");
+        assert_eq!(tint(&him), Some(Tint { color: 0x4D80_4DFF, glow: 0xFF40_4080, ..Default::default() }));
+        assert_eq!((aura(&him), aura(&beside)), (0, 0), "a glow (the default aura): no particles");
+        assert_eq!((shell(&him), shell(&beside)), (Some([128, 32, 32]), None), "a glow: its shell in the glow; the twin none");
+        // the particles template named (layout 3): both, the sword's on 5 nodes
+        use net::npctint::Aura;
+        let both = Tint { color: 0x4D80_4DFF, glow: 0xFF40_4080, aura: Aura { kind: Aura::BOTH, source: 0, nodes: 5 } };
+        crate::npctint::set(vec![("yhafiran".into(), both)]);
+        assert!(apply(&lib, &mut g, &mut him, &yhafiran, None, 0, 88, None, false).is_some(), "an aura named: made anew");
+        assert_eq!((aura(&him), shell(&him)), (5, Some([128, 32, 32])));
+        crate::npctint::set(vec![("yhafiran".into(), Tint { aura: Aura { kind: Aura::PARTICLES, source: 0, nodes: 0 }, ..both })]);
+        assert!(apply(&lib, &mut g, &mut him, &yhafiran, None, 0, 89, None, false).is_some());
+        assert_eq!((aura(&him), shell(&him)), (crate::aura::AURA_NODES, None), "particles alone");
         crate::npctint::set(Vec::new());
         assert!(apply(&lib, &mut g, &mut him, &yhafiran, None, 0, 99, None, false).is_some(), "the tint gone: made anew");
-        assert_eq!(tint(&him), None);
+        assert_eq!((tint(&him), aura(&him), shell(&him)), (None, 0, None));
     }
 
     /// A player of a server's race in the gargoyles' body (go-eqoa-server's
@@ -2866,7 +3222,7 @@ impl Play {
         crate::racelabel::clear();
         // Msg000D reads `m_speed` out of the dump
         let speed = dump.speed;
-        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, stood_sent: false, last_pos: [0.0; 3], send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), aloft_vy: vec![None; MAX_SLOTS], airs: vec![Default::default(); MAX_SLOTS], actors: vec![None; MAX_SLOTS], self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, mob_info: None, talk_held: false, mob_shown_at: None, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), links: Default::default(), link_draft: None, event_no: 0, next_links: None, shift: false, wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_wait_since: None, cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, chat_unsent: 0, reopened: 0, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, rumbles: Vec::new(), glyphs: Default::default(), wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default(), record: Default::default(), raid: Default::default(), meter: Default::default(), merc: Default::default() };
+        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, stood_sent: false, last_pos: [0.0; 3], send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), autocast: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), aloft_vy: vec![None; MAX_SLOTS], airs: vec![Default::default(); MAX_SLOTS], actors: vec![None; MAX_SLOTS], actor_passes: vec![false; MAX_SLOTS], shortcuts: (false, false), self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, mob_info: None, talk_held: false, mob_shown_at: None, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), links: Default::default(), buffs: Default::default(), link_draft: None, event_no: 0, next_links: None, shift: false, wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_wait_since: None, cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, chat_unsent: 0, reopened: 0, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, rumbles: Vec::new(), glyphs: Default::default(), wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default(), record: Default::default(), raid: Default::default(), meter: Default::default(), merc: Default::default() };
         p.take_abilities();
         p.npcw_world_entry();
         // world entry: LoadModels and StreamFillCache under the loading screen
@@ -2954,6 +3310,8 @@ impl Play {
             let anims = &mut walker.anims;
             lib.with_view(lib.view_for(model as i32), || {
                 crate::raceemote::grant(lib, cs, anims, model, true, self.session.creation.as_ref());
+                // a body with no monk's moves of its own kicks as the human
+                crate::raceemote::grant_moves(lib, cs, anims, model, true, self.session.creation.as_ref());
                 // a body with no swim of its own swims as the table has it
                 crate::raceemote::grant_swim(lib, cs, anims, model, true, self.session.creation.as_ref());
                 // on a server with jumps, its fall and landing the table's
@@ -3071,6 +3429,7 @@ impl Play {
                 // (`world.mob_info`): its name and level, for the info window
                 Event::MobInfo { id, level, name } => self.mob_info_shown(id, level, name, now),
                 Event::RaidRoll(r) => self.raid_roll(r),
+                Event::ReadyCheck(c) => self.ready_check(c),
                 Event::MasterLoot(m) => self.master_loot(m),
                 Event::GroupInvite { id, name, .. } => {
                     // Msg0773: refused at once while in a group
@@ -3432,6 +3791,7 @@ impl Play {
                     let air = &mut self.airs[slot];
                     // the live game's look, when the server said it is in force
                     self.entities.live_look = self.session.live_look;
+                    crate::s2::set_server_armor(self.session.armor_look);
                     // where it was drawn and its speed, before this update
                     let was = self.entities.slots[slot].as_ref().and_then(|e| Some((e.id, e.actor_pos, e.creature.as_ref()?.velocity)));
                     self.entities.channel(slot, &data, self_id, now, UPDATE_RATE, |e| {
@@ -3607,6 +3967,13 @@ impl Play {
         // Pet Effects: the server told what the Extended row says (off, what it
         // sent forgotten)
         self.session.agree_pet_effects(crate::settings::pet_effects());
+        // Power Bars: the server told what its row says (off, what it sent
+        // forgotten and the raid list's power not drawn)
+        self.session.agree_power_bars(crate::settings::power_bars());
+        // Buff Window: the server told what its row says (off, the game's strip)
+        self.session.agree_buffs(crate::settings::buff_window());
+        // Quest Markers: the server told what its row says (off, none drawn)
+        self.session.agree_head_marks(crate::settings::head_marks());
         self.agree_number_tags();
         self.agree_dps_meter();
         self.agree_quests();
@@ -3617,7 +3984,7 @@ impl Play {
         self.merc_menu(); // Community > Group > Dismiss Mercenary while one's merc is out
         self.agree_item_links();
         // Options > Interface's Profanity Filter, to a server that asks (0x7E60)
-        self.session.agree_profanity_filter(crate::settings::profanity_filter());
+        self.session.agree_profanity_filter(crate::settings::profanity_filter().wire());
         self.drop_dead_target_info();
         self.drop_stale_mob_info(now);
         if self.has_self() {
@@ -3626,6 +3993,7 @@ impl Play {
             self.options_tick();
             self.tell_shouts();
         }
+        self.end_options_preview();
         // what the Options window asked of the sound device and the camera
         // (kept until there is a device: the volumes loaded with the options)
         for op in if sound.is_some() { std::mem::take(&mut self.sound_ops) } else { Vec::new() } {
@@ -3836,7 +4204,7 @@ impl Play {
                                 if cs.cur[0].play >= 0 { cs.h.plays.get(cs.cur[0].play).frame_a } else { -1 },
                                 crate::jump::blended(cs, &p.anims),
                                 self.airs[slot],
-                                p.tint.map_or_else(|| "none".to_string(), |t| format!("{t:08X}"))
+                                p.tint.map_or_else(|| "none".to_string(), |t| if t.glow != 0 { format!("{:08X} glow {:08X}", t.color, t.glow) } else { format!("{:08X}", t.color) })
                             );
                         }
                     }
@@ -3966,6 +4334,8 @@ impl Play {
         // S2's pad read at the end of `VIClient::Process`: a frame counted
         if game_frame {
             self.presses.frame_end();
+            // the auto slots and auto targeting (`autoplay`)
+            self.auto_frame(walker);
         }
         // the GM's move (MoveToGrid) and DrawPosition's lines (`adminplay`)
         self.admin_frame(walker);
@@ -4018,7 +4388,10 @@ impl Play {
     /// place, turn (a creature with its own walk kept level) and scale, its
     /// copy dead with its sprite; a creature's is a capsule the player's walk
     /// stops at. `RefreshCollision`: a creature new, or every one after the
-    /// ignore list changed, collideable unless the list names it.
+    /// ignore list changed, collideable unless the list names it. Pets Pass
+    /// Through (ticket 1977, on by default): a pet's or a merc's capsule (a
+    /// player's side's, the plate colour 3, or the player's own pet) as an
+    /// ignored player's, solid to no one; set again whenever that changes.
     ///
     /// The sprite is the model's whether or not it draws anything:
     /// `VIClientPart06D00::LoadRes` puts on the actor whatever sprite the
@@ -4031,6 +4404,7 @@ impl Play {
         self.actors_scene(walker);
         let me = self.self_id32();
         let refresh = std::mem::take(&mut self.refresh_collision);
+        let pets_pass = crate::settings::client().pets_pass;
         for slot in 0..MAX_SLOTS {
             let e = self.entities.slots[slot].as_ref().filter(|e| Some(e.id) != me);
             let want = e.filter(|e| e.drawn_model != 0).map(|e| {
@@ -4044,12 +4418,14 @@ impl Play {
             });
             let (a, made) = place_actor(&mut walker.scene, lib, self.actors[slot], want);
             self.actors[slot] = a;
+            let passes = pets_pass && e.is_some_and(|e| passes_as_pet(e, self.pet_id));
             if let (Some(a), Some(c)) = (a, e.and_then(|e| e.creature.as_ref()))
-                && (made || refresh)
+                && (made || refresh || self.actor_passes[slot] != passes)
             {
                 let ignored = self.ignore.list.iter().any(|r| r.name == c.name);
-                walker.scene.set_actor_collideable(a.actor, !ignored);
+                walker.scene.set_actor_collideable(a.actor, !ignored && !passes);
             }
+            self.actor_passes[slot] = passes;
         }
     }
 
@@ -4251,7 +4627,10 @@ impl Play {
             if c.name.is_empty() || !p.shown {
                 continue;
             }
-            out.push(Plate { at, color: self.name_color(c), name: c.name.clone(), tag: self.merc_tag(c) });
+            // a quest mark over it from a server that sends them, while
+            // Extended's Quest Markers is on (`net::headmarks`)
+            let mark = crate::settings::head_marks().then(|| self.session.head_mark(e.id)).flatten();
+            out.push(Plate { at, color: self.name_color(c), name: c.name.clone(), tag: self.merc_tag(c), mark });
         }
         out
     }
@@ -4261,6 +4640,14 @@ impl Play {
     /// ends the scroll, L3 toggles autorun (33 is a chat mode), and the
     /// attack and the target's details are let go as in play.
     fn chat_scroll_key(&mut self, key: i32, down: bool) {
+        // L2 with R2 held (the keyboard's Z with C): the buff window takes the
+        // d-pad, or lets it go (`buffwnd`); while it has it, the d-pad is its
+        if down && key == 141 && self.toggle_buff_focus() {
+            return;
+        }
+        if self.buff_key(key, down) {
+            return;
+        }
         // the walk through the item links (`itemlink`), unless a loot roll's
         // strips have the d-pad
         if down && !self.rolls_focused() && self.link_key(key) {
@@ -4299,9 +4686,9 @@ impl Play {
     /// `CycleTarget(group)`. Not `group` (R1, Tab): the next creature in
     /// view, by `CompareY` over the game's score (mostly how far off the
     /// screen's centre line, plus distance; a corpse 2 further), from the
-    /// camera at `eye` looking along `dir`, the group, the pet and the player
-    /// left out. `group` (L1): the player, the group's other members, the
-    /// pet, in turn. Changing between the two starts each from its first;
+    /// camera at `eye` looking along `dir`, the group, the pet, the player
+    /// and a familiar (`is_familiar`: Healbot) left out. `group` (L1): the
+    /// player, the group's other members, the pet (but a familiar), in turn. Changing between the two starts each from its first;
     /// then 0x0010 with the token and the choice.
     ///
     /// How far off the centre line a creature is (its x after the divide)
@@ -4328,7 +4715,9 @@ impl Play {
         if group {
             cand.extend(me.map(|id| (0.0, id)));
             cand.extend(members.iter().filter(|&&id| Some(id) != me).map(|&id| (0.0, id)));
-            if self.pet_id != u32::MAX {
+            // the pet, but a familiar (`is_familiar`: a wizard's Familiar)
+            let familiar = self.entities.slots.iter().flatten().find(|e| e.id == self.pet_id).and_then(|e| e.creature.as_ref()).is_some_and(is_familiar);
+            if self.pet_id != u32::MAX && !familiar {
                 cand.push((0.0, self.pet_id));
             }
         }
@@ -4342,6 +4731,10 @@ impl Play {
                 // a pet (of a player's side) is passed over, but the duel's
                 // (the live client's `IsDueling`)
                 if c.p256 == 3 && !self.is_dueling(e.id) {
+                    continue;
+                }
+                // a familiar (Healbot) is never cycled to (`is_familiar`)
+                if is_familiar(c) {
                     continue;
                 }
                 dead = c.state == 14;
@@ -4975,6 +5368,30 @@ impl Play {
     /// button glyph drawn there that button, else what the window has there
     /// (its rows, tabs and fields) as the keys it takes. True when a window
     /// took it (one up takes every one), so it targets nothing.
+    /// A finger held still at window pixels `at` on a `size` window (the
+    /// touch pad's long press, `touch::take_holds`) in play: on a bar's
+    /// ability its auto turned (`autocast`), as a right click turns it. True
+    /// when it was one; else the tap it would have been is the caller's.
+    pub fn hud_hold(&mut self, at: [f32; 2], size: (u32, u32)) -> bool {
+        if self.mode != 0 || self.search.open || crate::hideui::hidden() {
+            return false;
+        }
+        let f = render::ui::frame_from_window(size, at);
+        // on a buff (`buffwnd`, petition 1809): taken off, as a right click
+        if self.buff_hold(f) {
+            return true;
+        }
+        let (side, up) = (render::ui::side(size), render::ui::top(size));
+        let menus = crate::hudlayout::shift(crate::hudlayout::Piece::QuickMenus, crate::hudlayout::Beyond::of(size));
+        self.auto_point([f[0] - side - menus[0], f[1] + up - menus[1]])
+    }
+
+    /// Long presses are wanted in play (`hud_hold`): auto-cast on, or the
+    /// buff window up.
+    pub fn wants_holds(&self) -> bool {
+        self.mode == 0 && (crate::settings::auto_cast() || self.buff_window_on()) && !self.map.open
+    }
+
     pub fn point(&mut self, c: crate::mouse::Click, size: (u32, u32), finger: bool) -> bool {
         use crate::mouse::Click;
         // a mouse means a keyboard beside it (the edit boxes' compact face,
@@ -4997,6 +5414,12 @@ impl Play {
         if matches!(c, Click::Target(..) | Click::Interact(..)) && matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && self.roll_point(f) {
             return true;
         }
+        // the buff window (`buffwnd`, petition 1809): a left click on a buff
+        // selects it or lets it go, a right click takes it off (a left click
+        // off it lets go and is still the world's)
+        if matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && self.buff_point(f, matches!(c, Click::Right(..)), finger) {
+            return true;
+        }
         // the item links' windows (`itemlink`): a click on one is theirs, on
         // its X it closes
         if matches!(c, Click::Target(..) | Click::Interact(..)) && matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && self.links.covers(f) {
@@ -5008,7 +5431,7 @@ impl Play {
         // in play; a server's player search over it is a window
         if self.mode == 0 && !self.search.open {
             // Hide UI (`hideui`): none of the HUD's buttons is there to press
-            if matches!(c, Click::Right(..)) || crate::hideui::hidden() {
+            if crate::hideui::hidden() {
                 return false;
             }
             // the quick menus and the chat box are drawn out at a wide
@@ -5019,13 +5442,23 @@ impl Play {
             // each where the player put it (`hudlayout`)
             let moved = |p| crate::hudlayout::shift(p, crate::hudlayout::Beyond::of(size));
             let (compass, menus) = (moved(crate::hudlayout::Piece::Player), moved(crate::hudlayout::Piece::QuickMenus));
+            // a right click on a bar's ability: its auto turned (`autocast`);
+            // anywhere else, the world's as ever
+            if matches!(c, Click::Right(..)) {
+                let chat = moved(crate::hudlayout::Piece::Chat);
+                let bars_at = if self.hud_menus.stacked { [f[0] - side - chat[0], f[1] - up - chat[1]] } else { [f[0] - side - menus[0], f[1] + up - menus[1]] };
+                return self.auto_point(bars_at);
+            }
             // the compass opens the map, with the Map on (the touch screen's
             // way to it)
             if crate::settings::map() && crate::hud::fork_hud::compass_visible(&crate::hud::HudState::default()) && crate::map::on_compass([f[0] + side - compass[0], f[1] + up - compass[1]]) && self.hud.is_some() {
                 self.map.show();
                 return true;
             }
-            if crate::hud::fork_hud::hud_menu_visible(&self.hud_menus) && let Some(k) = self.hud_menus.point([f[0] - side - menus[0], f[1] + up - menus[1]]) {
+            // the stacked bars (ticket 1913) are in the chat box's place
+            let chat = moved(crate::hudlayout::Piece::Chat);
+            let bars_at = if self.hud_menus.stacked { [f[0] - side - chat[0], f[1] - up - chat[1]] } else { [f[0] - side - menus[0], f[1] + up - menus[1]] };
+            if crate::hud::fork_hud::hud_menu_visible(&self.hud_menus) && let Some(k) = self.hud_menus.point(bars_at) {
                 // the pad key it stands for in S2's record, let go at once
                 self.note_hud_key(k, true);
                 self.hud_key(k);
@@ -5033,7 +5466,6 @@ impl Play {
                 return true;
             }
             // the chat box: the chat line, as R3 opens it
-            let chat = moved(crate::hudlayout::Piece::Chat);
             if crate::hud::fork_hud::chat_window_visible() && self.wnd_chat.as_ref().is_some_and(|w| w.contains([f[0] - side - chat[0], f[1] - up - chat[1]])) {
                 self.open_chat_line();
                 return true;
@@ -5047,6 +5479,14 @@ impl Play {
                     crate::fork_ext::report_core::open();
                     return true;
                 }
+                Some(crate::hud::Pick::Me) => self.self_id32(),
+                Some(crate::hud::Pick::Member(id)) => Some(id),
+                // the raid list's: only one the client can see (out of sight its
+                // id is a stand-in, nothing to target)
+                Some(crate::hud::Pick::Raid(id)) => Some(id).filter(|&id| self.sees_entity(id)),
+                // a raid list's group line: nothing to target
+                Some(crate::hud::Pick::RaidGroup(_)) => return true,
+                Some(crate::hud::Pick::Pet) => (self.pet_id != u32::MAX).then_some(self.pet_id),
                 // the minimap: the map opened, as the compass opens it
                 Some(crate::hud::Pick::Minimap) => {
                     if !crate::fork_ext::minimap_contains(&self.map, [x as f32,y as f32]) {return false;}
@@ -5066,12 +5506,6 @@ impl Play {
                     self.meter_point(hit);
                     return true;
                 }
-                Some(crate::hud::Pick::Me) => self.self_id32(),
-                Some(crate::hud::Pick::Member(id)) => Some(id),
-                // the raid list's: only one the client can see (out of sight its
-                // id is a stand-in, nothing to target)
-                Some(crate::hud::Pick::Raid(id)) => Some(id).filter(|&id| self.sees_entity(id)),
-                Some(crate::hud::Pick::Pet) => (self.pet_id != u32::MAX).then_some(self.pet_id),
                 None => return false,
             };
             if let Some(id) = id.filter(|&id| id != self.target) {
@@ -5084,7 +5518,21 @@ impl Play {
         } else {
             match self.glyphs.at(f, if finger { crate::pointer::FINGER } else { 0.0 }) {
                 Some(k) => vec![k],
-                None => self.window_point(f),
+                None => {
+                    let keys = self.window_point(f);
+                    // the chat box, under a trade's (or a wager's) window and
+                    // not on it: its chat line, as the chat box opens the chat
+                    // line in play
+                    if keys.is_empty()
+                        && !crate::hideui::hidden()
+                        && self.window_chat_ready()
+                        && self.wnd_chat.as_ref().is_some_and(|w| w.contains(Self::chat_point((x, y), size)))
+                    {
+                        self.window_chat("");
+                        return true;
+                    }
+                    keys
+                }
             }
         };
         self.press(&keys);
@@ -5109,6 +5557,10 @@ impl Play {
         let scrolling = self.mode == 33;
         let Some(c) = self.wnd_chat.as_mut() else { return false };
         if c.dragging() {
+            return true;
+        }
+        // a tab's name over the box (ticket 1951): that tab shown
+        if left && lines && c.click_tab(Self::chat_point(at, size)) {
             return true;
         }
         if left && lines && c.press(Self::chat_point(at, size), at) {
@@ -5405,7 +5857,7 @@ impl Play {
         let target = self.target;
         if wide.first() != Some(&(b'/' as u16)) {
             // a PS2's spelling of /bug: the note goes first (`send_bug_note`)
-            if text.split(' ').next().is_some_and(|w| w.eq_ignore_ascii_case("#bug")) {
+            if text.split(' ').next().is_some_and(|w| w.eq_ignore_ascii_case("#bug") || w.eq_ignore_ascii_case("#feature")) {
                 self.send_bug_note();
             }
             let l = Self::wire_links(&wide, links, 0, 0);
@@ -5417,6 +5869,14 @@ impl Play {
                 _ if self.session.say_linked(Route::Say, text, target, &l) => {}
                 _ => self.session.say(text, target),
             }
+            return;
+        }
+        // `/autotarget` (`autocast`), the client's own: longer than the
+        // game's ten characters of a command's word
+        if let Some((word, rest)) = text.split_once(' ').or(Some((text, "")))
+            && word.eq_ignore_ascii_case("/autotarget")
+        {
+            self.autotarget_command(rest);
             return;
         }
         // The command: up to ten characters, to a space, A-Z lowered.
@@ -5478,6 +5938,12 @@ impl Play {
             "/alarm" => self.alarm_command(&rest),
             // the DPS meter's (`dpsmeter`), the client's own
             "/dps" => self.dps_command(&rest),
+            // the chat tabs' (`chat`, ticket 1951), the client's own
+            "/tab" => self.tab_command(&rest),
+            "/tabname" => self.tabname_command(&rest),
+            // auto-cast and auto targeting (`autocast`), the client's own
+            "/autocast" | "/ac" => self.autocast_command(&rest),
+            "/at" => self.autotarget_command(&rest),
             // the HUD's layout (`hudlayout`), the client's own
             "/hud" => {
                 let line = crate::hudlayout::command(&rest);
@@ -5511,6 +5977,15 @@ impl Play {
             // reports; elsewhere the line as typed, its note first
             "/bug" => {
                 if !self.open_bug_report_typed(&rest) {
+                    self.send_bug_note();
+                    self.session.say(text, target);
+                }
+            }
+            // go-eqoa-server's feature request (petition 1841): the form on
+            // Bug Report / Feature Request, the words in it; elsewhere the
+            // line as typed (a server's own /feature), its note first
+            "/feature" => {
+                if !self.open_feature_request_typed(&rest) {
                     self.send_bug_note();
                     self.session.say(text, target);
                 }
@@ -5896,6 +6371,39 @@ impl Play {
         self.mode == 0 && self.locks.1 && !self.map.open
     }
 
+    /// The one followed as `UpdateControls` finds it (`control_client`):
+    /// still in the group, or a player, and in the scene (`FindEntity`), with
+    /// an actor (`member_at`), as the player is (`self_at`); one gone from
+    /// view or the zone is lost.
+    fn follow_found(&self, member_at: Option<[f32; 3]>, self_at: Option<[f32; 3]>) -> crate::controls::Follow {
+        if !self.following {
+            return crate::controls::Follow::Off;
+        }
+        let (id, me) = (self.follow_id, self.self_id32());
+        let member = (self.group_member(id) && self.entities.slots.iter().flatten().any(|e| e.id == id)) || self.player_in_scene(id);
+        match (member && id != u32::MAX && Some(id) != me).then(|| member_at.zip(self_at)).flatten() {
+            Some((member_at, self_at)) => crate::controls::Follow::At(member_at, self_at),
+            None => crate::controls::Follow::Lost,
+        }
+    }
+
+    /// The follow (`follow_found`) at a console frame `back_ms` before this
+    /// frame's (`Walker::frames_behind`: a frame that came late, a hidden
+    /// page's or a busy machine's), the player where the walk now stands
+    /// (`self_at`): the one followed where its actor was then, extrapolated
+    /// to that time as each frame extrapolates it (`VIClient::Extrapolate`)
+    /// from what the last frame had heard, so each console frame's steering
+    /// sees the member move on as it went.
+    pub fn follow_back(&self, back_ms: i64, self_at: [f32; 3]) -> crate::controls::Follow {
+        let at = self.session.now().wrapping_sub(back_ms.clamp(0, u32::MAX as i64) as u32);
+        let member_at = self.entities.slots.iter().flatten().find(|e| e.id == self.follow_id).filter(|e| self.in_scene(e)).map(|e| {
+            let mut e = e.clone();
+            e.extrapolate(at, UPDATE_RATE);
+            e.actor_pos
+        });
+        self.follow_found(member_at, Some(self_at))
+    }
+
     /// What `UpdateControls` reads of the client this frame.
     pub fn control_client(&self) -> crate::controls::Client {
         let now = self.session.now();
@@ -5909,16 +6417,7 @@ impl Play {
         // the one followed, as UpdateControls finds it: still in the group,
         // or a player, and in the scene (`FindEntity`), with an actor, as the
         // player is; one gone from view or the zone is lost
-        let follow = if !self.following {
-            crate::controls::Follow::Off
-        } else {
-            let id = self.follow_id;
-            let member = (self.group_member(id) && self.entities.slots.iter().flatten().any(|e| e.id == id)) || self.player_in_scene(id);
-            match (member && id != u32::MAX && Some(id) != me).then(|| self.actor_pos(id).zip(self.self_at.map(|s| s.0))).flatten() {
-                Some((member_at, self_at)) => crate::controls::Follow::At(member_at, self_at),
-                None => crate::controls::Follow::Lost,
-            }
-        };
+        let follow = self.follow_found(self.actor_pos(self.follow_id), self.self_at.map(|s| s.0));
         crate::controls::Client {
             follow,
             // UpdateGame: `m_speed`, 1.05 times it while following
@@ -5949,6 +6448,7 @@ impl Play {
             modal: self.mode == 38,
             // the server's word (`Session::flying`, `walker`)
             flying: self.session.flying,
+            noclip: self.session.noclip,
             // the server's offer (`Session::jumps`), and a report standing sent
             // since its last move (none while one is not done)
             jumps: self.session.jumps,
@@ -5963,6 +6463,10 @@ impl Play {
     /// the chat box's history, a dialog. False in play (mode 0), where
     /// `VIWndGame` takes them.
     fn window_key(&mut self, key: i32, down: bool) -> bool {
+        // the buff window while it has the d-pad (`buffwnd`)
+        if self.buff_key(key, down) {
+            return true;
+        }
         // the map, while it is up, over everything (`map.rs`)
         if self.map.key(key, down) {
             return true;
@@ -6107,6 +6611,10 @@ impl Play {
         if self.typing.is_some() || self.window_key(key, down) {
             return;
         }
+        // ○ held a second on a bar's ability turns its auto (`autoplay`)
+        if key == 135 {
+            self.auto_use_held(down);
+        }
         if !down {
             match key {
                 134 => self.attack_release(),
@@ -6176,6 +6684,8 @@ impl Play {
     /// sets (`LoadTextSets`).
     fn take_abilities(&mut self) {
         self.quick.load(&self.dump.text_sets);
+        // the account's menus given at the next frame (Same Shortcuts, ticket 1987)
+        self.shortcuts = (true, false);
         self.abilities = self.dump.abilities.iter().map(|a| (a.id, a.clone())).collect();
         self.ability_token = self.dump.p2bb60;
         // the dump's crafting token and slots (SetP78C0, ReadSlots)
@@ -6727,6 +7237,8 @@ impl Play {
             let paint = rgb.map_or_else(|| "game".to_string(), |c| format!("{:02x}{:02x}{:02x}", c[0], c[1], c[2]));
             eprintln!("damage: {attacker:08x} {amount:+} {defender:08x} after [{after}] colour {paint}");
         }
+        // who fights whom, for auto-cast and auto targeting (`autocast`)
+        self.auto_hit(attacker, defender);
         let me = self.self_id32();
         let now = self.session.now();
         // the player's own hit: after a swap the swing timer follows the
@@ -7566,6 +8078,7 @@ impl Play {
                 for m in crate::quickchat::default_text_sets(&mut self.quick.sets) {
                     self.session.send(&m);
                 }
+                self.keep_shortcuts();
             }
             // VITimeOfDay::GetLocalTime, to the chat box
             0x0B0E_0008 => {
@@ -7754,6 +8267,10 @@ impl Play {
             H::Right => 137,
             H::Use => 135,
         };
+        // E held a second on a bar's ability turns its auto (`autoplay`)
+        if key == H::Use {
+            self.auto_use_held(down);
+        }
         if !self.is_dead() {
             self.presses.key(code, down, self.session.timer() as u32, crate::input::from_device());
         }
@@ -7856,6 +8373,8 @@ impl Play {
     /// details.
     fn quick_outs(&mut self, outs: Vec<crate::quickchat::Out>) {
         use crate::quickchat::Out;
+        // an edit sent: the account's copy kept too (Same Shortcuts, ticket 1987)
+        let edited = outs.iter().any(|o| matches!(o, Out::Send(_)));
         for o in outs {
             match o {
                 Out::Say(line) => {
@@ -7882,6 +8401,9 @@ impl Play {
                     _ => {}
                 },
             }
+        }
+        if edited {
+            self.keep_shortcuts();
         }
     }
 
@@ -8008,13 +8530,44 @@ impl Play {
         let used = self.hud_menus.key(key, now, bars, self.mode == 0, &mut cues);
         self.cues.extend(cues);
         if let Some((msg, id)) = used {
-            match msg {
-                0x8060000 => self.send_0032(id),
-                0x2030000 => self.use_item(id as i32, 1),
-                crate::gear::MSG => self.use_gear_set(id),
-                _ => {}
-            }
+            self.use_hud_entry(msg, id);
         }
+    }
+
+    /// What a HUD menu's entry says, done: an ability's 0x0032, an item used,
+    /// a weapon set taken up.
+    fn use_hud_entry(&mut self, msg: u32, id: i64) {
+        match msg {
+            0x8060000 => self.send_0032(id),
+            0x2030000 => self.use_item(id as i32, 1),
+            crate::gear::MSG => self.use_gear_set(id),
+            _ => {}
+        }
+    }
+
+    /// A key on an ability bar's slot (`binds::bar_slot`, Jibwiz's ticket
+    /// 1913): in play (and the manual camera), the ability on it used as a
+    /// click on it uses it, its bar lit; nothing for an empty slot, a bar
+    /// the carousel does not hold, or with a window up.
+    pub fn bar_slot_key(&mut self, bar: usize, slot: usize) {
+        if (self.mode != 0 && self.mode != 38) || self.typing.is_some() || self.map.open {
+            return;
+        }
+        if bar >= self.ability_bars() as usize {
+            return;
+        }
+        let Some((msg, id)) = self.hud_menus.slot_entry(bar, slot) else { return };
+        self.hud_menus.menus[bar].sel = slot as i32;
+        eprintln!("play: bar {} slot {} key: {msg:#x} {id}", bar + 1, slot + 1);
+        self.use_hud_entry(msg, id);
+    }
+
+    /// Stacked Spell Bars are drawn (`hudmenu`'s doc, ticket 1913): the
+    /// Extended row on, and play on a computer: the last input the keyboard's
+    /// or the mouse's (a controller's or a finger's keeps the carousel, whose
+    /// d-pad walk they need), never on a phone.
+    pub fn stacked_bars(&self) -> bool {
+        crate::settings::stacked_bars() && self.keyboard && !cfg!(target_os = "android")
     }
 
     /// A memorize past the game's ten slots that the server left unanswered
@@ -8679,6 +9232,16 @@ impl Play {
         }
     }
 
+    /// The Options window's Sound page preview ended once the window is not
+    /// the mode, however it closed: a teleport's `mode = 0` (and every other
+    /// close that is not its own Save or Triangle) left the battle track the
+    /// preview asked for playing over all other music (petition 2129).
+    fn end_options_preview(&mut self) {
+        if self.mode != 34 && self.options_wnd.take_preview() {
+            self.sound_ops.push(crate::options::OptionsUp::PreviewEnd);
+        }
+    }
+
     /// The map's frame (`map.rs`): its build behind the game, and while it
     /// is up its view and quads, the player and the group on it. It closes
     /// when a window comes up (the server's, a dialog) or the player dies.
@@ -8727,7 +9290,8 @@ impl Play {
             format,
             size,
             dt,
-            player: Some(([p.position.x.0, p.position.y.0, p.position.z.0], p.angles.x.0)),
+            // the dart the way the walk faces, or the camera looks (Map Pointer)
+            player: Some(([p.position.x.0, p.position.y.0, p.position.z.0], crate::map::pointer_heading(p.angles.x.0, camera_heading(walker)))),
             world: self.player.world as i32,
             origin,
             group,
@@ -8998,6 +9562,35 @@ impl Play {
         }
     }
 
+    /// The raid list's rows this frame: the roster's members, its mercs only
+    /// with Extended's Raid Mercenaries Shown (the owner, 2026-11-13: "lets
+    /// hide mercs from raid group display"; Hidden by default). Hidden, a merc
+    /// stays in `group.raid`, so L1's group cycle still reaches it, and the
+    /// groups' counts and Move to Group take players alone either way.
+    pub(super) fn raid_rows(&self, me: Option<u32>, power_bars: bool) -> Vec<crate::raidlist::Row> {
+        let show_mercs = crate::settings::raid_mercs();
+        self.group
+            .raid
+            .iter()
+            .filter(|m| show_mercs || !m.merc)
+            .map(|m| crate::raidlist::Row {
+                id: m.id,
+                name: m.name.clone(),
+                hp: m.hp,
+                // the roster's, with Extended's Power Bars on
+                power: power_bars.then_some(m.power),
+                is_target: m.id == self.target,
+                seen: self.sees_entity(m.id),
+                me: Some(m.id) == me,
+                marks: self.raid_marks(m.id),
+                class: m.class,
+                group: m.group,
+                dragged: self.raid.drag.is_some_and(|d| d.moved && d.id == m.id),
+                merc: m.merc,
+            })
+            .collect()
+    }
+
     /// The HUD's quads for one of the game's frames (`VIWndGame::OnDrawSelf`),
     /// its windows stepped (their pulses, animations and scrolls count
     /// frames).
@@ -9023,7 +9616,7 @@ impl Play {
         let reticle = (self.mode == 38 && walker.cam.effect.manual_terp == F::ONE).then(|| self.target_centre(walker, view_proj));
         // VIWndEdit::OnDrawSelf's `sPadOnly`: a keyboard in use and the
         // options' Soft Keyboard on show the compact face
-        crate::editbox::set_pad_only(self.keyboard && self.options.compact != 0);
+        crate::editbox::set_pad_only(crate::editbox::compact_face(self.keyboard, self.options.compact != 0));
         let under_liquid = walker.cam.walk.is_under_liquid();
         let (start_stats, start_loc) = self.start_view(walker);
         let info_text = if self.info_wanted() || self.info_window.open > 0.0 { self.target_info_text() } else { None };
@@ -9043,9 +9636,10 @@ impl Play {
             // the client's own: the effects on it the server sent, those not
             // over yet, for the row under its bar (Extended's Pet Effects)
             effects: self.pet_effects(),
+            power: self.session.power_of(self.pet_id),
         });
-        let dir = walker.eye.direction;
-        let (heading, _, _) = dir.get_hpr();
+        let power_bars = crate::settings::power_bars();
+        let heading = camera_heading(walker);
         let state = crate::hud::HudState {
             #[cfg(not(target_arch = "wasm32"))]
             forge_health_hidden: fork_hooks::health_hidden(self),
@@ -9055,9 +9649,10 @@ impl Play {
             max_power: self.stats.stat[10],
             level: self.dump.player.level as i32,
             exp: self.dump.player.exp as i32,
-            heading: heading.0,
+            heading,
             chat_open: self.wnd_chat.as_ref().is_some_and(|c| c.mode != 0),
             target_name: target.and_then(|e| e.creature.as_ref()).map(|c| c.name.clone()),
+            target_level: self.target_level(crate::settings::target_level()),
             target_hp: target.map_or(0, |e| e.p19 as i32),
             target_info: self.target_info,
             self_targeted_flag: Some(self.target) == me && self.dump.player.p2c > 0,
@@ -9068,15 +9663,12 @@ impl Play {
                 .filter(|m| Some(m.id) != me && m.active)
                 .map(|m| {
                     let flags = find(Some(m.id)).and_then(|e| e.creature.as_ref()).map_or(0, |c| c.flags262);
-                    crate::hud::MemberState { id: m.id, name: m.name.clone(), is_target: m.id == self.target, hp: (m.hp_known != 0).then_some((m.hp, flags & 4 != 0, flags & 8 != 0)), marks: self.raid_marks(m.id) }
+                    crate::hud::MemberState { id: m.id, name: m.name.clone(), is_target: m.id == self.target, hp: (m.hp_known != 0).then_some((m.hp, flags & 4 != 0, flags & 8 != 0)), marks: self.raid_marks(m.id), power: self.session.power_of(m.id) }
                 })
                 .collect(),
-            raid: self
-                .group
-                .raid
-                .iter()
-                .map(|m| crate::raidlist::Row { id: m.id, name: m.name.clone(), hp: m.hp, power: m.power, is_target: m.id == self.target, seen: self.sees_entity(m.id), me: Some(m.id) == me, marks: self.raid_marks(m.id) })
-                .collect(),
+            raid: self.raid_rows(me, power_bars),
+            raid_drop: self.raid_drag_shown().0,
+            raid_new_group: self.raid_drag_shown().1,
             patches: self.group.members[..self.group.count()]
                 .iter()
                 .enumerate()
@@ -9170,8 +9762,16 @@ impl Play {
             r.ui.vertical = Vertical::Top;
             if crate::influence::shown(self.mode) {
                 let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::Effects);
-                crate::hud::fork_hud::draw_active_effects(vui, &mut r, &self.effects);
+                // the client's own buff window where the server sends its set
+                // (`buffwnd`, petition 1761), else the game's strip
+                if self.buff_window_on() {
+                    if crate::hud::fork_hud::active_effects_visible() { self.draw_buffs(vui, &mut r); }
+                } else {
+                    crate::hud::fork_hud::draw_active_effects(vui, &mut r, &self.effects);
+                }
                 crate::hudlayout::end(r.ui, m);
+            } else if self.buffs.focused() {
+                self.buffs.let_go();
             }
             r.ui.anchor = Anchor::Right;
             r.ui.vertical = Vertical::Bottom;
@@ -9183,9 +9783,14 @@ impl Play {
                 }
                 // item links drawn as links, or the line's plain words (`itemlink`)
                 c.show_links = crate::settings::item_links();
+                // Chat Always Shown (ticket 1914): never sliding away
+                c.always = crate::settings::chat_always();
+                // the chat tabs (ticket 1951), each line into its kind's
+                let opts = crate::settings::client();
+                c.set_tabs(opts.chat_tabs, opts.chat_tab_names);
                 for (text, color, at, links) in self.chat_pending.drain(..) {
                     let rr = &r;
-                    c.text.add_text_linked(&crate::ui::wide(&text), color, at, |s| vi::ui::Raster::string_width(rr, s), &links);
+                    c.add_line(&text, color, at, |s| vi::ui::Raster::string_width(rr, s), &links);
                 }
                 let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::Chat);
                 crate::hud::fork_hud::draw_chat_window(c, vui, &mut r, now, dt);
@@ -9322,9 +9927,25 @@ impl Play {
                         _ => Vec::new(),
                     }
                 };
-                let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::QuickMenus);
-                crate::hud::fork_hud::draw_hud_menus(&mut self.hud_menus, vui, &mut r, now as i64, &name);
-                crate::hudlayout::end(r.ui, m);
+                // Stacked Spell Bars (ticket 1913): the first two bars in two
+                // rows above the chat box, moving with it, no name bar
+                self.hud_menus.stacked = self.stacked_bars();
+                if self.hud_menus.stacked {
+                    let (anchor, vertical) = (r.ui.anchor, r.ui.vertical);
+                    r.ui.anchor = Anchor::Right;
+                    r.ui.vertical = Vertical::Bottom;
+                    let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::Chat);
+                    let [left, top] = crate::chat::WndChat::full_top_left(vui, &r);
+                    if crate::hud::fork_hud::hud_menu_visible(&self.hud_menus) { self.hud_menus.draw_stacked(vui, &mut r, top, left, bars); }
+                    crate::hudlayout::end(r.ui, m);
+                    (r.ui.anchor, r.ui.vertical) = (anchor, vertical);
+                } else {
+                    let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::QuickMenus);
+                    crate::hud::fork_hud::draw_hud_menus(&mut self.hud_menus, vui, &mut r, now as i64, &name);
+                    crate::hudlayout::end(r.ui, m);
+                }
+            } else {
+                self.hud_menus.stacked = false;
             }
             // Move HUD (`hudlayout`): the pieces outlined and named, the bar
             // at the top with Lock and Reset, over everything but the fade
@@ -9357,7 +9978,52 @@ impl Play {
         }
         self.start_actions(actions);
         self.quick_outs(quick_outs);
+        self.sync_shortcuts();
         self.pump_keys();
+    }
+
+    /// Same Shortcuts on Every Character (Piedpiper's ticket 1987), once the
+    /// world entry's menus are in and the row is on: the account's menus
+    /// given to this character (shown, and sent so the server keeps them as
+    /// its own, `quickchat::sync_messages`: nothing when they are the same);
+    /// an account with none kept takes this character's, once. Off, nothing:
+    /// each character's own, as the server keeps them.
+    fn sync_shortcuts(&mut self) {
+        if !crate::settings::client().shared_shortcuts {
+            self.shortcuts.1 = false;
+            return;
+        }
+        if !self.shortcuts.0 || self.shortcuts.1 || !crate::settings::account_known() {
+            return;
+        }
+        self.shortcuts.1 = true;
+        let kept = crate::settings::account_shortcuts().map(|b| crate::quickchat::from_shared_text(&String::from_utf8_lossy(&b))).filter(|s| !s.is_empty());
+        let Some(recs) = kept else {
+            self.keep_shortcuts();
+            crate::say("shortcuts: this character's quick-chat menus kept for the account");
+            return;
+        };
+        let mut want = vi::textset::TextSets::default();
+        want.load(&recs);
+        let msgs = crate::quickchat::sync_messages(&self.quick.sets, &want);
+        if !msgs.is_empty() {
+            crate::say(&format!("shortcuts: the account's quick-chat menus given to this character ({} messages)", msgs.len()));
+            for m in &msgs {
+                self.session.send(m);
+            }
+            self.quick.sets = want;
+        }
+    }
+
+    /// The quick-chat menus as they stand kept for the account, while Same
+    /// Shortcuts on Every Character is on (an edit, `DefaultTextSets`).
+    fn keep_shortcuts(&mut self) {
+        if !crate::settings::client().shared_shortcuts || !self.shortcuts.0 {
+            return;
+        }
+        if let Err(e) = crate::settings::set_account_shortcuts(crate::quickchat::shared_text(&self.quick.sets).as_bytes()) {
+            crate::say(&format!("shortcuts: not kept for the account: {e}"));
+        }
     }
 
     /// Where the creature `id` is drawn this frame, which its damage numbers
@@ -9407,8 +10073,9 @@ impl Play {
     /// row off, from a server that sends none (Sandstorm, eqoa.live), or with no
     /// pet; the game shows a pet's effects nowhere, and nor does this client
     /// anywhere else.
+    /// With the buff window up they are its third row instead (`buffwnd`).
     fn pet_effects(&self) -> Vec<u32> {
-        if !crate::settings::pet_effects() {
+        if !crate::settings::pet_effects() || self.buff_window_on() {
             return Vec::new();
         }
         self.session.pet_effects_left(self.session.now()).into_iter().map(|(icon, _)| icon).collect()
@@ -9449,10 +10116,11 @@ impl Play {
     /// the bar's Lock or Reset), and so nothing else's.
     pub fn hud_press(&mut self, at: [f32; 2], size: (u32, u32)) -> bool {
         use crate::hudlayout::{Beyond, Button, Press};
-        if !self.hud_moving() {
-            return false;
-        }
         let f = render::ui::frame_from_window(size, at);
+        if !self.hud_moving() {
+            // a raid list's row held to move it (`raidplay`, petition 1687)
+            return self.raid_drag_press(f);
+        }
         match crate::hudlayout::press(f, Beyond::of(size)) {
             Press::None => false,
             Press::Piece(_) => true,
@@ -9470,7 +10138,7 @@ impl Play {
     /// with it. False with none dragged.
     pub fn hud_drag(&mut self, at: [f32; 2], size: (u32, u32)) -> bool {
         if !crate::hudlayout::dragging() {
-            return false;
+            return self.raid_drag_move(render::ui::frame_from_window(size, at));
         }
         crate::hudlayout::drag_to(render::ui::frame_from_window(size, at), crate::hudlayout::Beyond::of(size));
         true
@@ -9478,7 +10146,7 @@ impl Play {
 
     /// The press let go: a dragged piece stays, kept. False with none.
     pub fn hud_release(&mut self) -> bool {
-        crate::hudlayout::release()
+        crate::hudlayout::release() || self.raid_drag_release()
     }
 
     /// The meter cleared, and the server told to drop the fight under way.
@@ -9534,6 +10202,49 @@ impl Play {
     /// reset, the meter on or off (as the Extended row, kept by Save Changes),
     /// or how to type it; each said in the chat box, and that the meter is off
     /// when a view or a reset was asked of it off.
+    /// `/tab [n|name]` (ticket 1951): the chat tab of that number (0 or
+    /// "main" Main) or name shown; none, the next tab there.
+    fn tab_command(&mut self, arg: &str) {
+        let Some(c) = self.wnd_chat.as_mut() else { return };
+        let tabs = c.tab_names();
+        if tabs.len() < 2 {
+            self.add_chat("There are no chat tabs: Extended > UI > Chat Tabs sends a kind of line to one.".to_string(), [1.0; 4]);
+            return;
+        }
+        let a = arg.trim();
+        let to = if a.is_empty() {
+            let at = tabs.iter().position(|t| t.0 == c.tab()).unwrap_or(0);
+            Some(tabs[(at + 1) % tabs.len()].0)
+        } else if let Ok(n) = a.parse::<usize>() {
+            Some(n)
+        } else {
+            tabs.iter().find(|t| t.1.eq_ignore_ascii_case(a)).map(|t| t.0)
+        };
+        if !to.is_some_and(|t| c.show_tab(t)) {
+            let names: Vec<String> = tabs.iter().map(|t| format!("{} {}", t.0, t.1)).collect();
+            self.add_chat(format!("No such chat tab. The tabs: {}.", names.join(", ")), [1.0; 4]);
+        }
+    }
+
+    /// `/tabname n name` (ticket 1951): chat tab n (1 to 3) named, eight
+    /// characters at most, kept at once; no name, its first kind's again.
+    fn tabname_command(&mut self, arg: &str) {
+        let (n, name) = arg.trim().split_once(' ').unwrap_or((arg.trim(), ""));
+        let line = match n.parse::<usize>().ok().filter(|n| (1..=crate::chat::TABS).contains(n)) {
+            None => "To name a chat tab: /tabname 1 Loot (tabs 1 to 3, eight characters at most).".to_string(),
+            Some(n) => {
+                let kept = crate::settings::set_chat_tab_name(n, name);
+                let shown = crate::chat::tab_name_text(&crate::chat::tab_name(name));
+                let what = if shown.is_empty() { format!("Chat tab {n} is named after what it shows.") } else { format!("Chat tab {n} is named {shown}.") };
+                match kept {
+                    Ok(()) => what,
+                    Err(e) => format!("{what} (not kept: {e})"),
+                }
+            }
+        };
+        self.add_chat(line, [1.0; 4]);
+    }
+
     fn dps_command(&mut self, arg: &str) {
         use crate::dpsmeter::{Command, View};
         let offer = self.session.dps_meter_offer;
@@ -9684,6 +10395,18 @@ impl Play {
         self.mob_info = Some((id, level, name));
     }
 
+    /// The target box's level (Live petition 5130): the target's, a creature's
+    /// (the entity channel's level, the one its con colour is of), only on a
+    /// server that offered it (`Session::con_level_offer`) and with Extended's
+    /// Target Level (`on`); `None`, the game's box.
+    fn target_level(&self, on: bool) -> Option<i32> {
+        if !on || !self.session.con_level_offer {
+            return None;
+        }
+        let e = self.entities.slots.iter().flatten().find(|e| e.id == self.target)?;
+        e.creature.as_ref().map(|c| c.level as i32)
+    }
+
     /// `DrawTargetInfo`'s text: a player's name, guild, race, title or
     /// class and level (the guild and title with 0x0010's answer), a
     /// creature's name and level; `None` closes the window.
@@ -9704,7 +10427,20 @@ impl Play {
                 let rank = if title.is_empty() { class.as_str() } else { title };
                 Some(if guild.is_empty() { format!("{}\n{race}\n{rank}\n{level}", c.name) } else { format!("{}\n{guild}\n{race}\n{rank}\n{level}", c.name) })
             }
-            3 => Some(format!("{}\n{level}", c.name)),
+            // a merc's class (and a healer's mode) under its name, where the
+            // server tells them (0x7E5B's layout 3: the owner's of 2026-11-12,
+            // "for mercs show class also in the square pop up")
+            3 => Some(match self.session.mercs.as_ref().and_then(|m| m.class(&c.name)) {
+                Some((k, mode)) => {
+                    let class = word(if k < 15 { 165 + k as i32 } else { 165 });
+                    match mode {
+                        1 => format!("{}\n{class} (Defensive)\n{level}", c.name),
+                        2 => format!("{}\n{class} (Offensive)\n{level}", c.name),
+                        _ => format!("{}\n{class}\n{level}", c.name),
+                    }
+                }
+                None => format!("{}\n{level}", c.name),
+            }),
             // a monster the server said has nothing to say (`mob_info`): its
             // name and level as the server holds them, as a pet's are drawn
             _ => self.mob_info.as_ref().filter(|m| m.0 == e.id).map(|(_, lv, name)| format!("{name}\n{} {lv}", word(503))),
@@ -9733,7 +10469,9 @@ impl Play {
     /// and its sprite's own emitters (`particles::part_emitters`) under their
     /// nodes, run while the creature is rastered (`UpdateParticleEmitters`,
     /// from `VICSprite::Raster`), a player-only one on the player alone
-    /// (`SetIsPlayer`).
+    /// (`SetIsPlayer`). An NPC whose tint names particles carries them too
+    /// (`aura::body_emitters`: its source's emitter on its nodes, the Sword
+    /// of Virtue's by default, in its glow's hue), run while it is rastered.
     pub fn in_hand(&self, lib: &Library, walker: &Walker, matrix: [[f32; 4]; 4]) -> Vec<crate::particles::InHand> {
         use crate::particles::{How, InHand, OWN};
         let mut out = Vec::new();
@@ -9743,8 +10481,13 @@ impl Play {
                 let Some(n) = cs.h.nodes.get(node as usize) else { continue };
                 let drawn = shown.unwrap_or_else(|| p.attached.iter().any(|a| a.0 == node && a.1.visible));
                 let at = Matrix44::mul(&n.world, centre);
+                let tint = p.look.as_ref().and_then(|l| crate::aura::hand(l, hand));
                 for (k, e) in lib.with_view(p.era, || crate::particles::item_emitters(lib, item)).into_iter().enumerate() {
-                    out.push(InHand { key: (holder, hand, item, k), world: Matrix44::mul(&e.member, &at), def: e.def, how: How::Sprite(e.flags), drawn });
+                    out.push(InHand { key: (holder, hand, item, k), world: Matrix44::mul(&e.member, &at), def: e.def, how: How::Sprite(e.flags), drawn, tint });
+                }
+                // its hand's aura's particles (`aura::hand_emitters`): an epic's, lent
+                if let Some(a) = crate::aura::hand_aura(&p.pieces, hand) {
+                    out.extend(lib.with_view(p.era, || crate::aura::hand_emitters(lib, holder, hand, item, &at, &a, drawn)));
                 }
             }
             let player = holder == crate::spells::SELF;
@@ -9754,7 +10497,11 @@ impl Play {
                     continue;
                 }
                 let how = How::Part { use_location: e.use_location, once: e.once };
-                out.push(InHand { key: (holder, OWN, p.model, k), world: Matrix44::mul(&n.world, centre), def: e.def, how, drawn: shown.unwrap_or(p.shown) });
+                out.push(InHand { key: (holder, OWN, p.model, k), world: Matrix44::mul(&n.world, centre), def: e.def, how, drawn: shown.unwrap_or(p.shown), tint: None });
+            }
+            // its auras' particles: sources looked up only for a body that wears some
+            if !p.aura.is_empty() {
+                out.extend(crate::aura::worn_emitters(lib, holder, cs, &p.aura, centre, shown.unwrap_or(p.shown)));
             }
         };
         for (slot, p) in self.puppets.iter().enumerate() {
@@ -9926,6 +10673,40 @@ mod commands {
         let mut s = Session::connect_with(Box::new(Nowhere), ([127, 0, 0, 1], 5000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
         s.self_id = Some(0x100);
         Play::new(s, Player::default(), dump)
+    }
+
+    /// A preview of the Sound page's Battle Music playing when the Options
+    /// window closes under it (a teleport's `mode = 0`, petition 2129) is
+    /// ended by `Play`'s frame, once. The control: the window still the mode
+    /// keeps it.
+    #[test]
+    fn a_preview_ends_when_options_closes_under_it() {
+        use crate::options::OptionsUp;
+        use crate::pointer::key;
+        use crate::pointer::testing::{NullRaster, vui};
+        crate::settings::testing::reset(false);
+        let vui = vui();
+        let mut r = NullRaster;
+        let mut p = play();
+        p.options.battle = 4;
+        p.mode = 34;
+        p.options_wnd.open(&vui, &r, &p.options);
+        let (mut cues, mut ups) = (Vec::new(), Vec::new());
+        for k in [key::DOWN, key::DOWN, key::CROSS] {
+            p.options_wnd.key(&vui, &mut r, &mut p.options, k, 0, &mut cues, &mut ups);
+        }
+        ups.clear();
+        p.options_wnd.draw(&vui, &mut r, &p.options, &mut ups);
+        assert_eq!(ups, vec![OptionsUp::Preview(4)], "the Sound page previews");
+        // what entering asked (the options' volumes)
+        p.sound_ops.clear();
+        p.end_options_preview();
+        assert!(p.sound_ops.is_empty(), "the control: the window up keeps it");
+        p.mode = 0;
+        p.end_options_preview();
+        assert_eq!(p.sound_ops, vec![OptionsUp::PreviewEnd], "ended with the window");
+        p.end_options_preview();
+        assert_eq!(p.sound_ops.len(), 1, "once");
     }
 
     /// A character wears the cape the server's set names for its id
@@ -10806,6 +11587,77 @@ mod commands {
         assert_eq!(p.actor_pos(0x0020_0001), None, "the control: another world's has no actor here");
     }
 
+    /// No target cycle takes a familiar (petitions 1881, 1902, 1903): Tab and
+    /// R1 pass Healbot by (an NPC-bit NPC of that name), L1 the player's own
+    /// wizard's Familiar; a click on Healbot still targets it. The controls:
+    /// a merchant (the NPC bit too) and a creature of the world named
+    /// "Familiar" (no pet: it fights) are still Tab's, and a wizard's
+    /// Guardian (a combat pet) still L1's.
+    #[test]
+    fn no_target_cycle_takes_a_familiar() {
+        let mut p = play();
+        let me = 0x1DCD_6501;
+        p.session.self_id = Some(u64::from(me));
+        let creature = |id: u32, x: f32, name: &str, npc_flags: u16, p256: u8| net::entity::Entity {
+            id,
+            kind: 130,
+            p18: 1,
+            p19: 1,
+            pos: [x, 0.0, -12.0],
+            actor_pos: [x, 0.0, -12.0],
+            creature: Some(net::entity::Creature { name: name.into(), npc_flags, p256, ..Default::default() }),
+            ..Default::default()
+        };
+        let (healbot, merchant, wild, pet) = (0x0010_0001, 0x0010_0002, 0x0010_0003, 0x0010_0004);
+        p.entities.slots[0] = Some(creature(healbot, 0.0, "Healbot", 0x80, 0));
+        p.entities.slots[1] = Some(creature(merchant, 3.0, "Merchant Merb", 0x80, 0));
+        p.entities.slots[2] = Some(creature(wild, -3.0, "Familiar", 0, 0));
+        p.entities.slots[3] = Some(creature(pet, 1.5, "Lesser Familiar", 0, 3));
+        p.pet_id = pet;
+        let view = glam::camera::rh::view::look_to_mat4(glam::Vec3::ZERO, glam::Vec3::NEG_Z, glam::Vec3::Y);
+        let m = crate::walker::projection_to(4.0 / 3.0, 6000.0) * view;
+        let cycle = |p: &mut Play, group: bool| -> Vec<u32> {
+            (0..6)
+                .map(|_| {
+                    p.cycle_target(group, glam::Vec3::ZERO, glam::Vec3::NEG_Z, m, m);
+                    p.target
+                })
+                .collect()
+        };
+        let tab = cycle(&mut p, false);
+        assert!(!tab.contains(&healbot), "Tab passes Healbot by: {tab:x?}");
+        assert!(tab.contains(&merchant) && tab.contains(&wild), "but not a merchant or a wild Familiar: {tab:x?}");
+        assert!(!tab.contains(&pet), "nor takes the pet, as before: {tab:x?}");
+        let l1 = cycle(&mut p, true);
+        assert!(!l1.contains(&pet), "L1 passes the wizard's Familiar by: {l1:x?}");
+        assert!(l1.contains(&me), "and still takes the player: {l1:x?}");
+        // the control: a wizard's Guardian fights, and is L1's
+        p.entities.slots[3] = Some(creature(pet, 1.5, "Lesser Guardian", 0, 3));
+        assert!(cycle(&mut p, true).contains(&pet), "L1 takes a combat pet");
+        // a click on Healbot still targets it
+        let c = m * glam::Vec4::new(0.0, 1.0, -12.0, 1.0);
+        let at = (((c.x / c.w + 1.0) * 0.5 * 640.0) as f64, ((1.0 - c.y / c.w) * 0.5 * 480.0) as f64);
+        assert_eq!(p.creature_at(at, (640, 480), m), Some(healbot), "the mouse still finds Healbot");
+        // the rule itself
+        let c = |name: &str, npc_flags: u16, p256: u8| net::entity::Creature { name: name.into(), npc_flags, p256, ..Default::default() };
+        for (name, flags, p256, want) in [
+            ("Healbot", 0x80, 0, true),
+            ("healbot ", 0x80, 0, true),
+            ("Healbot", 0, 0, false), // no NPC bit: a creature of that name
+            ("Arch Familiar", 0, 3, true),
+            ("Gargoyle Familiar", 0, 3, true),
+            ("Crazy Contraption", 0, 3, true),
+            ("Invention", 0, 3, true),
+            ("Swamp Friend", 0, 3, true),
+            ("Gargoyle Guardian", 0, 3, false),
+            ("Fire Elemental", 0, 3, false),
+            ("Familiar", 0, 0, false),
+            ("Merchant Merb", 0x80, 0, false),
+        ] {
+            assert_eq!(is_familiar(&c(name, flags, p256)), want, "{name:?} flags {flags:#x} p256 {p256}");
+        }
+    }
+
     /// R1 and Tab in a window wider than 4:3 go in the console's order (F3
     /// 20261026-154639, jib at 1707x932: "a *slightly* higher preference to
     /// targeting mobs in front of you and close"). How far off the middle a
@@ -10882,8 +11734,10 @@ mod commands {
         p.entities.slots[0] = at(0x100, 0.0);
         p.entities.slots[1] = at(0x103, 3.0); // a raid member past the roster, in sight
         p.entities.slots[2] = at(0x200, -3.0); // a stranger
+        p.entities.slots[3] = at(0x105, -6.0); // a merc of the raid, in sight
         let row = |id: u32| RaidMember { id, name: format!("m{id}"), ..Default::default() };
-        p.group.raid_page(5, 0, vec![row(0x100), row(me), row(0x101), row(0x103), row(0x7F00_0104)]);
+        let merc = RaidMember { merc: true, ..row(0x105) };
+        p.group.raid_page(6, 0, vec![row(0x100), row(me), row(0x101), row(0x103), merc, row(0x7F00_0104)]);
         assert!(p.sees_entity(0x103) && p.sees_entity(me), "in sight, and itself");
         assert!(!p.sees_entity(0x7F00_0104), "out of sight: its id is a stand-in");
         let cycle = |p: &mut Play, group: bool| -> Vec<u32> {
@@ -10898,6 +11752,7 @@ mod commands {
         };
         let group = cycle(&mut p, true);
         assert!(group.contains(&0x103), "L1 reaches the raid member it sees: {group:x?}");
+        assert!(group.contains(&0x105), "and the raid's merc it sees: {group:x?}");
         assert!(!group.contains(&0x7F00_0104), "not one out of sight: {group:x?}");
         assert!(!group.contains(&0x200), "not a stranger: {group:x?}");
         let tab = cycle(&mut p, false);
@@ -10909,6 +11764,50 @@ mod commands {
         p.agree_raid_roster();
         assert!(p.group.raid.is_empty());
         assert!(!cycle(&mut p, true).contains(&0x103), "the control: the roster's own");
+        crate::settings::set_client(crate::settings::ClientOptions::default());
+    }
+
+    /// Raid Mercenaries (the owner, 2026-11-13: "lets hide mercs from raid group
+    /// display"): Hidden by default, the raid list's rows are its players' alone
+    /// while the roster keeps its merc, which L1's group cycle still reaches;
+    /// Shown, the merc's row too, with its coin. The control: every player's row
+    /// either way.
+    #[test]
+    fn a_raids_mercs_are_hidden_from_its_list_unless_shown() {
+        use net::entity::{Entity, TYPE_CREATURE};
+        use net::session::RaidMember;
+        let mut p = play();
+        crate::settings::set_client(crate::settings::ClientOptions::default());
+        let me = 0x1DCD_6501;
+        p.session.self_id = Some(u64::from(me));
+        grouped(&mut p, &[me, 0x101]);
+        let at = |id: u32, x: f32| {
+            Some(Entity { id, kind: TYPE_CREATURE, creature: Some(net::entity::Creature { name: format!("{id:x}"), ..Default::default() }), p18: 1, actor_pos: [x, 0.0, -12.0], ..Default::default() })
+        };
+        p.entities.slots[0] = at(0x105, -3.0); // the raid's merc, in sight
+        let row = |id: u32, class: u8| RaidMember { id, name: format!("m{id}"), class, group: 1, ..Default::default() };
+        let merc = RaidMember { merc: true, ..row(0x105, 9) };
+        p.group.raid_page(5, 0, vec![row(me, 0), row(0x101, 9), merc, row(0x102, 13), row(0x103, 2)]);
+        let ids = |rows: &[crate::raidlist::Row]| rows.iter().map(|r| r.id).collect::<Vec<_>>();
+
+        let hidden = p.raid_rows(Some(me), true);
+        assert_eq!(ids(&hidden), [me, 0x101, 0x102, 0x103], "Hidden by default: the players' rows alone");
+        assert_eq!(p.group.raid.len(), 5, "the roster keeps the merc");
+        let view = glam::camera::rh::view::look_to_mat4(glam::Vec3::ZERO, glam::Vec3::NEG_Z, glam::Vec3::Y);
+        let m = crate::walker::projection_to(4.0 / 3.0, 6000.0) * view;
+        let reached: Vec<u32> = (0..4)
+            .map(|_| {
+                p.cycle_target(true, glam::Vec3::ZERO, glam::Vec3::NEG_Z, m, m);
+                p.target
+            })
+            .collect();
+        assert!(reached.contains(&0x105), "L1 still reaches the hidden merc: {reached:x?}");
+
+        crate::settings::set_client(crate::settings::ClientOptions { raid_mercs: true, ..Default::default() });
+        let shown = p.raid_rows(Some(me), true);
+        assert_eq!(ids(&shown), [me, 0x101, 0x105, 0x102, 0x103], "Shown: the merc's row in its place");
+        assert_eq!(crate::raidlist::row_role(&shown[2]), crate::raidlist::Role::Merc, "with its coin");
+        assert_eq!(crate::raidlist::row_role(&shown[1]), crate::raidlist::Role::Healer, "a player of its class keeps its role");
         crate::settings::set_client(crate::settings::ClientOptions::default());
     }
 
@@ -11129,6 +12028,27 @@ mod commands {
         assert_eq!(centre_choice(&[far], Some(0x100), 7, game, drawn), None);
     }
 
+    /// The target box's level (Live petition 5130): the target creature's,
+    /// once the server offered it, with Target Level on. The controls: no
+    /// offer (Sandstorm, any other server), Target Level off, no target, a
+    /// target that is not a creature: none, the game's box.
+    #[test]
+    fn the_target_box_has_its_level_only_where_the_server_offered_it() {
+        let mut p = play();
+        let creature = net::entity::Creature { level: 32, ..Default::default() };
+        p.entities.slots[2] = Some(net::entity::Entity { id: 0x22, kind: net::entity::TYPE_CREATURE, creature: Some(creature), ..Default::default() });
+        p.entities.slots[3] = Some(net::entity::Entity { id: 0x33, ..Default::default() });
+        p.target = 0x22;
+        assert_eq!(p.target_level(true), None, "no offer: the game's box");
+        p.session.con_level_offer = true;
+        assert_eq!(p.target_level(true), Some(32));
+        assert_eq!(p.target_level(false), None, "Target Level off");
+        p.target = 0x33;
+        assert_eq!(p.target_level(true), None, "no creature");
+        p.target = u32::MAX;
+        assert_eq!(p.target_level(true), None, "no target");
+    }
+
     /// The choice made the target: a change stops the attack and drops the
     /// target's info (and asks the server, 0x0010), none too; the same
     /// again changes nothing.
@@ -11230,7 +12150,7 @@ mod commands {
     /// The guaranteed messages in the client's datagrams, each starting
     /// with its opcode (read as `net`'s own tests read them; a state
     /// message ends the datagram's reading, none goes out here).
-    fn guaranteed(datagrams: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    pub(super) fn guaranteed(datagrams: &[Vec<u8>]) -> Vec<Vec<u8>> {
         use drdp::buffer::Buffer;
         let mut out = Vec::new();
         for d in datagrams {
@@ -11671,14 +12591,22 @@ mod commands {
         let red = Some([255, 48, 48]);
         assert_eq!(number_rgb(true, &[255, 128, 0], true, &c), Some([255, 128, 0]), "the patch's");
         assert_eq!(number_rgb(true, &[0x05], true, &c), None, "a patch colours: no tag read");
-        assert_eq!(number_rgb(true, &[], false, &[0; 6]), None, "a patch's number with no colour: the game's");
+        assert_eq!(number_rgb(true, &[], false, &[0; crate::numcolor::ROWS]), None, "a patch's number with no colour: the game's");
         assert_eq!(number_rgb(false, &[0x05], true, &c), red, "a proc: Your Procs");
         assert_eq!(number_rgb(false, &[0x81], true, &c), Some([176, 96, 255]), "its pet's swing: Pet Damage");
         assert_eq!(number_rgb(false, &[0x85], true, &c), None, "Pet Procs Default: the game's");
         assert_eq!(number_rgb(false, &[0x05], false, &c), None, "no offer: no tag");
         assert_eq!(number_rgb(false, &[], true, &c), None, "untagged");
         assert_eq!(number_rgb(false, &[255, 128, 0], true, &c), None, "no patch: three bytes are nothing");
-        assert_eq!(number_rgb(false, &[0x05], true, &[0; 6]), None, "every row Default");
+        assert_eq!(number_rgb(false, &[0x05], true, &[0; crate::numcolor::ROWS]), None, "every row Default");
+        // the merc's (layout 2, bit 6), as the rows come: Light Blue, Purple
+        let d = crate::numcolor::DEFAULTS;
+        assert_eq!(number_rgb(false, &[0x41], true, &d), Some([130, 190, 255]), "its merc's swing: Merc Damage");
+        assert_eq!(number_rgb(false, &[0x42], true, &d), Some([130, 190, 255]), "its merc's spell");
+        assert_eq!(number_rgb(false, &[0x46], true, &d), Some([176, 96, 255]), "its merc's heal: Merc Heals");
+        assert_eq!(number_rgb(false, &[0x01], true, &d), None, "its own swing: the game's");
+        assert_eq!(number_rgb(false, &[0x81], true, &d), None, "the control: a layout 1 server's merc hit (the pet's bit) is Pet Damage, Default");
+        assert_eq!(number_rgb(true, &[0x41], true, &d), None, "a patch colours: no tag read");
     }
 
     /// Number Colors on the screen (`numcolor`, go-eqoa-server's tags): with
@@ -11715,6 +12643,11 @@ mod commands {
         };
         let tagged = [Some(0x01), Some(0x05), Some(0x06), Some(0x86), None];
         // every row Default: the game's colours, tags or none
+        let mut c = crate::settings::client();
+        assert_eq!(c.number_colors, crate::numcolor::DEFAULTS, "as they come");
+        let as_they_came = c.clone();
+        c.number_colors = [0; crate::numcolor::ROWS];
+        crate::settings::set_client(c);
         let mut p = play();
         p.session.number_tags_offer = true;
         let game = run(&mut p, tagged);
@@ -11737,6 +12670,30 @@ mod commands {
         // and tagged numbers from a server that made no offer: the byte is not read
         let mut p = play();
         assert_eq!(run(&mut p, tagged), game);
+        // the merc's (petition 1613), with the rows as they come: its hit from
+        // the player (as the server tells it) Light Blue, its heal on the
+        // player (from the merc) Purple, the player's own hit and heal the
+        // game's white and green
+        crate::settings::set_client(as_they_came);
+        let (light_blue, purple) = ([130.0 / 255.0, 190.0 / 255.0, 1.0, 1.0], [176.0 / 255.0, 96.0 / 255.0, 1.0, 1.0]);
+        let mut p = play();
+        p.session.number_tags_offer = true;
+        let me = p.self_id32().expect("the player's id");
+        let (foe, merc) = (0x200, 0x400);
+        p.damage_indication(&msg(me, -40, foe, Some(0x01)), 1); // its own hit
+        p.damage_indication(&msg(me, -50, foe, Some(0x41)), 1); // its merc's hit
+        p.damage_indication(&msg(merc, 125, me, Some(0x46)), 1); // its merc's heal on it
+        p.damage_indication(&msg(me, 25, me, Some(0x06)), 1); // its own heal
+        assert_eq!(colors(&mut p, me, foe), [white, light_blue, purple, green]);
+        // the control: the same from an older server (layout 1: the merc's hit
+        // with the pet's bit, its heal untagged): the game's
+        let mut p = play();
+        p.session.number_tags_offer = true;
+        p.damage_indication(&msg(me, -40, foe, Some(0x01)), 1);
+        p.damage_indication(&msg(me, -50, foe, Some(0x81)), 1);
+        p.damage_indication(&msg(merc, 125, me, None), 1);
+        p.damage_indication(&msg(me, 25, me, Some(0x06)), 1);
+        assert_eq!(colors(&mut p, me, foe), [white, white, green, green]);
         crate::settings::testing::reset(false);
     }
 
@@ -11769,16 +12726,21 @@ mod commands {
             c.number_colors[row] = crate::numcolor::from_key(key).unwrap();
             crate::settings::set_client(c);
         };
-        set(0, "orange");
+        // as the rows come (the merc's coloured): asked; every row Default:
+        // stopped; one chosen: asked again
         p.agree_number_tags();
         assert!(answers(&mut p).is_empty(), "no offer: nothing asked");
         p.session.number_tags_offer = true;
         p.agree_number_tags();
         p.agree_number_tags();
-        assert_eq!(answers(&mut p), vec![vec![0x39, 0x7E, 1]], "a row chosen: asked once");
-        set(0, "default");
+        assert_eq!(answers(&mut p), vec![vec![0x39, 0x7E, 1]], "as they come (the merc's rows): asked once");
+        set(6, "default");
+        set(7, "default");
         p.agree_number_tags();
         assert_eq!(answers(&mut p), vec![vec![0x39, 0x7E, 0]], "every row Default: stopped");
+        set(0, "orange");
+        p.agree_number_tags();
+        assert_eq!(answers(&mut p), vec![vec![0x39, 0x7E, 1]], "a row chosen: asked");
         crate::settings::testing::reset(false);
     }
 

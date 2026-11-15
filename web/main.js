@@ -4,11 +4,21 @@
 // server list, character select and creation, the world). Query parameters
 // override the defaults: ?relay=ws://127.0.0.1:8790&server=203.0.113.10 for a
 // local server. Notices and what goes wrong are notices.js's
-// (window.eqoaNotices).
-import init, { boot, view, disc_id, disc_2002, update_notices, hidden_tick, field_up, field_text, chat_copy_text, chat_copied, field_cut, field_paste, lose_device } from './eqoa.js';
+// (window.eqoaNotices). gpuguard.js first: WebGPU's calls on a lost device
+// give what the spec says, not Safari's InvalidStateError.
+import './gpuguard.js';
+import init, { boot, view, disc_id, disc_2002, update_notices, hidden_tick, field_up, field_text, chat_copy_text, chat_copied, field_cut, field_paste, lose_device, gpu_threw, event_loop_stuck, event_loop_stuck_in } from './eqoa.js';
 import { canRemember, keptHandle, keepHandle, forgetHandle } from './discstore.js';
 
 const $ = (id) => document.getElementById(id);
+// The page's own listeners on the game's canvas, kept so that a fresh canvas
+// put in its place gets them too: the client's fallback from WebGPU to WebGL2
+// after a lost device that WebGPU could not make again (crates/eqoa/src/web,
+// `fresh_canvas`; a canvas that has had a "webgpu" context gives no "webgl2"
+// one). winit puts its own on the fresh one as it makes the window again.
+const canvasHooks = [];
+const onCanvas = (type, fn) => { canvasHooks.push([type, fn]); $('eqoa').addEventListener(type, fn); };
+window.eqoaCanvasNew = (c) => { for (const [type, fn] of canvasHooks) c.addEventListener(type, fn); };
 // the client's own graphics line ("graphics: <adapter> (<backend>)")
 let clientGraphics = '';
 // a software renderer's name, as WebGL's unmasked renderer, WebGPU's adapter
@@ -179,6 +189,33 @@ window.eqoaWebglKeep = (why) => store.set('webglKept', `${new Date().toISOString
 // a test's: the graphics device lost at the next frame (gpulost::test), the
 // page recovering from it as from a real loss
 window.eqoaLoseDevice = () => { if (clientReady) lose_device(); };
+// the browser threw from a WebGPU call on the client's device (gpuguard.js):
+// the device taken as lost, a new one made (gpulost)
+window.eqoaGpuThrew = (text) => { if (clientReady) gpu_threw(String(text)); };
+// whether the client's event loop was left dead by an exception, or by the
+// browser stopping its script (web/notices.js), and in what call ("a frame
+// (RedrawRequested), 3.2 s ago")
+window.eqoaLoopStuck = () => clientReady && event_loop_stuck();
+window.eqoaLoopStuckIn = () => (clientReady && event_loop_stuck_in()) || '';
+// The page going (a reload, a navigation away, the tab closed). On a loop
+// left dead (a call into the client that never returned: the browser
+// stopped the script mid-frame, as Firefox does when the player navigates
+// away; or an exception, web::Guarded), winit's own pagehide would panic
+// ("runner.rs:683:69: RefCell already borrowed", petitions 1618, 1664, 5003,
+// 5004) and that panic was kept and sent as the client's crash: this
+// listener, added before winit's (the client is not started yet) and on the
+// capture, keeps it from running then. A live loop's pagehide is winit's as
+// before. Said to the watch too (notices.js): the page going is no crash.
+addEventListener('pagehide', (e) => {
+  if (e.persisted) return;
+  window.eqoaUnloading = true;
+  let stuck = false;
+  try { stuck = !!window.eqoaLoopStuck(); } catch { /* the client is gone */ }
+  if (stuck) {
+    console.log(`the page leaves with the game's loop stopped in ${window.eqoaLoopStuckIn()}: winit's unload skipped`);
+    e.stopImmediatePropagation();
+  }
+}, true);
 const wsBase = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
 // What the page offers when nothing is given: kept only when the player
 // changed it, so that a new default reaches everyone who did not.
@@ -422,13 +459,13 @@ window.eqoaWantText = (on) => {
   // (where a browser allows it; else at the next touch)
   if (wantText && lastTouch && navigator.userActivation && navigator.userActivation.isActive) typeHere();
 };
-$('eqoa').addEventListener('pointerdown', (e) => {
+onCanvas('pointerdown', (e) => {
   lastTouch = e.pointerType === 'touch';
   $('eqoa').focus();
 });
 // winit puts the focus on the canvas at every press: a touch while the game
 // wants text puts it back in the input, the device's keyboard with it
-$('eqoa').addEventListener('pointerup', (e) => { if (wantText && e.pointerType === 'touch') typeHere(); });
+onCanvas('pointerup', (e) => { if (wantText && e.pointerType === 'touch') typeHere(); });
 
 // ---- a DNAS module off the disc (CLIENT, for the start menu): unpacked by
 // the disc's own library in a worker (unpack.js), and kept in this origin's
@@ -1089,7 +1126,7 @@ for (const ev of ['keydown', 'keyup']) {
   addEventListener(ev, (e) => { if (e.key === 'F11') e.stopImmediatePropagation(); }, true);
 }
 
-$('eqoa').addEventListener('pointerup', (e) => {
+onCanvas('pointerup', (e) => {
   if (e.pointerType !== 'mouse' && started && !wantText && window.eqoaTouchFirst()) fullScreen();
 });
 

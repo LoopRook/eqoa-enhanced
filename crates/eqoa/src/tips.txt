@@ -1,0 +1,98 @@
+# The loading screens' tips (the GM Jibrish's petition 1778, 2026-11-12: "Add text
+# tips to the loading screens. Create one for each command, with a brief one
+# sentence description of the command ... Create one hint that loads on a loading
+# screen that is randomly displayed"). One tip a line, one sentence each; a line
+# starting with # is a note, and a blank line is nothing. Edit freely: `tips.rs`
+# reads this file into the client as it is built. GM-only commands stay out.
+#
+# Each tip starts with its tag (the GM Jibrish's petition 1811): `all:` for the
+# client's own features and the game's own commands, shown on every server and
+# on the title screen; `heirloom:` for the server's commands, NPCs and features,
+# shown only on the Heirloom shard (and on the title screen when Heirloom was
+# the server last picked). An untagged tip counts as `heirloom:`.
+
+# The game's own chat commands
+all: You can type /say to speak one line aloud to those near you.
+all: You can type /shout (or /s) to call out to everyone in the zone.
+all: You can type /group (or /g) to speak to your group.
+all: You can type /guild (or /gu) to speak to your guild.
+all: You can type /tell (or /t) and a name to send someone a private message.
+all: You can type /reply (or /r), or press R, to answer the last tell you received.
+all: You can type /follow to follow your target.
+all: You can type /time to see the time in the world.
+all: You can type /alarm and a time, or a number of minutes, to set an alarm.
+
+# The server's commands for everyone
+heirloom: You can type /help to list the commands everyone can use.
+heirloom: You can type /who to see who is in the world.
+heirloom: You can type /tar (or /target) and a name to target the nearest one by that name.
+heirloom: You can type /invite and a name to invite a player to your group.
+heirloom: You can type /stuck to return to your bind point when you cannot move.
+heirloom: You can type /roll to roll a random number everyone near you can see.
+heirloom: You can type /lfg on to let others know you are looking for a group.
+heirloom: You can type /record to see your combat record, or /record and a name to see someone else's.
+heirloom: You can type /bug and a few words, or press F3, to send a bug report to the GMs.
+heirloom: You can type /filter to turn the profanity filter on or off.
+heirloom: You can type /tutorial to read the welcome guide again.
+heirloom: You can type /duel to challenge your target to a duel.
+heirloom: You can type /fish to cast a line with the fishing pole in your hand.
+heirloom: You can type /pvp to turn your player-versus-player flag on or off.
+heirloom: You can type /home to visit your own home and invite guests to it.
+heirloom: You can type /ctf to see the capture the flag arena's match and sign up for it.
+heirloom: You can type /merc to give orders to your mercenary.
+heirloom: You can type /familiar to see or dismiss your familiar.
+heirloom: You can type /campfix to report a hunting camp that needs fixing.
+heirloom: You can type /mark to mark a spot in your open camp report.
+heirloom: You can type /testinvis to keep creatures from attacking you on sight while you test.
+
+# Raids, groups and loot
+heirloom: You can type /raid to invite everyone nearby who is not in a group to your raid.
+heirloom: You can type /raidinvite and a name to invite a player, or your target, to your raid.
+heirloom: You can type /raidleave to leave your raid or your group.
+heirloom: A raid's leader or helper can type /raidkick and a name to take a member out of the raid.
+heirloom: You can type /raidleader and a name to hand your raid's lead to another member.
+heirloom: A raid's leader can type /raidhelper and a name to choose a helper who may invite and kick.
+heirloom: A raid's leader can type /raidassist and a name to choose the main assist, and anyone can type /raidassist to assist them.
+heirloom: A raid's leader can type /raidloot to choose free for all, need before greed or master looter.
+heirloom: You can type /raidgroup to list your raid's groups, and its leader can move members between them.
+heirloom: A raid's leader or helper can type /raidswap and two names to trade those members' groups.
+heirloom: You can type /rsay to talk to your whole raid.
+heirloom: You can type /readycheck to ask your group or raid whether everyone is ready.
+heirloom: You can type /ready or /notready to answer a ready check.
+heirloom: You can type /need, /greed or /pass to answer a loot roll.
+heirloom: A master looter can type /assign and an item's number and a name to give that item away.
+heirloom: A master looter can type /abandon to let every item on the corpse go to everyone.
+
+# This client's own commands
+all: You can type /dps to show the DPS meter, and /dps reset to start it over.
+all: You can type /autocast to list or set the abilities your quick bars fire by themselves.
+all: You can type /autotarget to have whatever is attacking you targeted whenever you have no target.
+all: You can type /hud to drag the pieces of your HUD wherever you like, and /hud reset to put them back.
+
+# Features
+all: You can turn the graphics up in Options > Extended > Graphics.
+all: You can turn on Dynamic Lighting, Sun Shadows and Ambient Occlusion in Options > Extended > Graphics > Lighting.
+all: You can draw the game sharper with Render Scale in Options > Extended > Graphics > Video.
+all: You can use PCSX2 texture packs in Options > Extended > Graphics > Textures.
+all: You can press F9 to see the world in the art of the 2002 disc.
+all: You can play several characters at once, each in its own window, with a controller for each.
+all: You can set up macros, PCSX2's way, in the Options window's Macros page.
+all: You can change every key and button in the Options window's Controls page, or press F1 in play.
+all: You can press M to open the map, and N to show or hide the minimap.
+all: You can click the compass to open the map.
+all: You can press Z, or L2, to open the quick chat menus.
+all: You can press H to hide everything over the world for a clean view.
+all: You can press Space to jump.
+all: You can press X, or L3, to run without holding the stick.
+all: You can press F to assist: target whatever your target is fighting.
+all: You can press 1 to 6 to target yourself, your group and your pet.
+all: You can hold R2, or C, to scroll back through the chat.
+all: You can select chat lines with the mouse and copy them.
+all: You can Shift+click an item to link it in chat for others to see.
+all: You can hold a quick bar's ability, or right-click it, to have it cast by itself.
+all: You can left-click one of your buffs to see how long it has left, and right-click it (long-press on touch) to remove it.
+all: You can hold R2 and press L2 to walk your buffs, then press Square to remove one (or hold C, press Z, and use Backspace).
+all: You can turn the DPS meter on in Options > Extended > UI > DPS Meter.
+all: You can choose the colours of your damage and healing numbers in Options > Extended > UI > Number Colors.
+all: You can make loading screens instant in Options > Extended > Other > General.
+all: You can press F11, or Alt+Enter, to play full screen.

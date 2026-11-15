@@ -105,9 +105,10 @@ impl ControlsPage {
         if row >= ROWS.len() as i32 { return col == 0; }
         match entry(row) {
             Entry::Row(r) => {
+                let slot = binds::bar_slot(r).is_some();
                 let r = &ROWS[r];
                 let button = matches!(r.pad, Pad::Button(_));
-                if col == 0 { !r.keys.is_empty() || button } else { !matches!(r.pad, Pad::Stick(..)) }
+                if col == 0 { !r.keys.is_empty() || button || slot } else { !matches!(r.pad, Pad::Stick(..) | Pad::KeysOnly) }
             }
             Entry::Defaults => false,
         }
@@ -264,7 +265,7 @@ impl ControlsPage {
                 None => return,
             },
             Pad::None => b.bind_row_button(row, phys),
-            Pad::Stick(..) => return,
+            Pad::Stick(..) | Pad::KeysOnly => return,
         };
         crate::settings::set_binds(b.clone());
         self.capture = None;
@@ -366,6 +367,7 @@ impl ControlsPage {
                     Pad::None => glyph(b.row_button(entry as usize)),
                     Pad::Button(f) => glyph(Some(b.button(binds::bit_index(f).unwrap_or(0))).filter(|&g| g != binds::NO_BUTTON)),
                     Pad::Stick(right, d) => format!("{} stick {}", if right { "R" } else { "L" }, arrow(d)),
+                    Pad::KeysOnly => "-".to_string(),
                 }
             };
             for (col, x, cw, t) in [(0, kx, KEY_W, kt), (1, px, PAD_W, pt)] {

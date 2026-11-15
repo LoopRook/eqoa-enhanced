@@ -7,6 +7,721 @@ is put on the page by `.github/workflows/notes.yml`.
 
 
 
+## 2026-11-15 · Every race's monk kicks and strikes
+- **A monk of any race now shows the monk's moves**: Flame Kick, Spinning Kick, Lightning Kick and Force Kick are
+  the flying kick, and the Punches and Strikes, Lunging Mantis, Swooping Eagle, Pouncing Tiger and Roaring Dragon
+  play their own moves, on an elf, a dwarf, an ogre, a troll or any race but the human, where they used to be a
+  plain punch. The new races do too (a hill giant, a kerran, a gnoll...), and the Jal'Raeth and the merfolk move
+  where they used to stand still. They borrow the human's moves, as the emotes do.
+- You see it on your own monk and on every other player's, on eqoaclassic.com; the pixie, the fairy and the
+  fungusman keep their own strike. A PlayStation 2 still shows the punch.
+
+## 2026-11-15 · Twelve choices to a page
+- **A box of choices now holds up to twelve before "More..."** on a server that sends that many (eqoaclassic.com):
+  a coachman's or a waysender's stops, the Heroic Dungeons board, the Testing Heroes Vendor's wares, the Teleporter,
+  a merc's spells and every other list are one box where they used to be cut at six. The Equipment Dyer's first
+  question lists the armour pieces, the robe and the shield straight away, so dyeing a chest is one choice fewer.
+- A list whose choices run long shows fewer a page so the box always stays on the screen. On any other server the
+  boxes are as before.
+
+## 2026-11-15 · Network Setup: eqoaclassic.com in one press
+- **On the web page, Network Setup on the title is greyed out**: the page always plays on its own server, so the
+  arrows pass over it and it cannot be chosen. Play and Options are as they were.
+- **In the downloaded game, Network Setup has a "Use eqoaclassic.com" row** under the server's address, always
+  there whatever address you have now: move down to it (the d-pad or the arrow keys) and press X (Enter), or click
+  or tap it, and the game keeps eqoaclassic.com as its server and goes back to the title. The address row still
+  takes any other server as before.
+
+## 2026-11-15 · A target's level
+- **The target box shows your target's level**, "Level 32" on the "Target" line above its name, on a server that
+  allows it: no more guessing from the con colour alone. Extended > UI > Name Plates > Target Level turns it off.
+- On such a server, **/con** in chat also tells you your target's level in a line ("a moss snake is level 22."), and
+  a PlayStation 2 player can type `/t con` for the same.
+
+## 2026-11-15 · Long spell descriptions in a window
+- **A spell's description too long for the spell book's box can be read whole**: its last line ends in a □ button.
+  Press □ (Q on the keyboard), or click or tap the description, and the whole description opens in the game's
+  inspect window, the ability's name on top, scrolled with the d-pad, the arrow keys, the wheel or a finger; △
+  (Escape), or a click off it, closes it. R1 and R2 still scroll the box itself. A description that fits looks as
+  it always did.
+- **The same at a merchant**: when an item's text or description is cut off (a spell scroll's, say), □ or a click on
+  the description shows all of it, its stats and description together.
+## 2026-11-15 · Six choices to a page
+- **A box of choices (a coachman's destinations, a waysender's, a merchant-like list, a quest's answers) now shows
+  up to six at once**, one under another, instead of three and "More…": a coach's five stops are all on one page.
+
+## 2026-11-15 · Dyed Shadow Knight epics
+- **A dye now colours the whole Shadow Knight epic** (Beheader of Isthiak, Downfall, the Epic Greataxe, their
+  Heirloom and Ascended copies), not only the gem on the handle: the crimson blade and bands take the dye's colour.
+  Any other weapon whose own colour is in its material (Virtus Ferrum's gold hilt, say) takes the dye the same way;
+  steel stays lightly tinted as before.
+
+## 2026-11-14 · Lore items at the auction
+- **A Lore item is greyed out in the auction's sell list**, as the server refuses to list one ("Item is not auctionable"): no more choosing one only to be told no.
+
+## 2026-11-14 · Safari's graphics stopping
+- **On the web page in Safari (on an iPhone, iPad or Mac), the game no longer stops when the browser's graphics stop**
+  ("The client stopped: … InvalidStateError: GPUCommandEncoder.beginRenderPass: Unable to begin render pass",
+  "GPUDevice.createBuffer: Unable to create buffer", "GPUDevice.createCommandEncoder: Unable to make command
+  encoder"): Safari ends its graphics when it runs short of memory, and the game now makes its graphics again and
+  goes on, as it already did in other browsers, saying "The graphics card stopped for a moment".
+- **Where it cannot**, the page says "The graphics stopped" with a Reload button instead of "The client stopped".
+
+## 2026-11-14 · Battle music after a teleport
+- **Music from the Options sound preview no longer keeps playing after a teleport** (or anything else that closes
+  the Options window while its Sound page is up): the battle track the page previews now stops with the window.
+
+## 2026-11-14 · Freezing at the tip
+- **Spell-effect weapon auras** (the freezing drip) now sit at the tip of whatever is held: a sword's point, a
+  staff's head, a bow's limb end, instead of at the hand.
+
+## 2026-11-14 · New camps on the map
+- **The map shows the new camps**: the Frosteye Orcs at the Snowblind Plains excavation, the Tae Ew Aggressors at
+  the Stone Watchers, the Desert Bandits in Tak 'Xiv, the frogloks of the Burial Mounds, the Mossmouth Goblins, the
+  hobgoblins of the Cyclops' Fortress in the Rathe, Quintashi's Lair and the beasts of The Hunt, each with its levels.
+- **Camps whose creatures' levels changed show the new levels**: Cracktooth Orcs 21-30, Mossmouth Goblins 21-30, the
+  Tae Ew of Brokenskull Rock 41-47, the South Barren Coast gargoyles 41-50, Tendora-Buki 46-50 and the others, and
+  some camps sit closer to their creatures.
+
+## 2026-11-14 · Hair, gnome caps and glasses in a GM's colour
+- **A GM can colour a character's hair** (white, red, any colour), **a gnome's cap** and **a gnome's glasses**, each
+  on its own: glasses no longer have to take the hair's colour.
+
+## 2026-11-14 · Freezing weapons
+- **Spell effects as weapon auras**: a GM can now put a spell's hand effect on the weapon in a character's hand, such
+  as the ice dripping off a caster's hands ("freezing"), in any colour, at the hand or up the blade.
+
+## 2026-11-14 · Energy shields
+- **A shield or weapon can carry an energy skin**: the moving streaks of the old energy shield laid over its own
+  look, in its colour, glowing at night. Dust's Heirloom Shield of Twisted Virtue keeps its square shape and its
+  diamond and cross, now in crimson energy.
+
+## 2026-11-14 · Circlets higher, bigger and in colour
+- **Circlets** now sit higher, round the upper forehead and temples instead of across the eyes, and are a little
+  bigger. The server can set how high each one sits, and a circlet can take a colour (Dust's is red).
+
+## 2026-11-14 · The experience bar, checked
+- **The experience bar** was checked against the server's level table at every level, at 60 (the way to your next
+  mastery point) and with a death's debt: it was right, and it still draws exactly as the PlayStation 2's did. A GM's
+  level 100 character no longer trips a check in test builds of the bar.
+
+## 2026-11-14 · The web page stops dropping players out of the world
+- **On the web page, the game no longer stops after a while in the world** ("The client stopped: Uint8Array@[native
+  code]…", and the server seeing you vanish): the map, drawn in the background after you enter a world, made tens of
+  thousands of pieces of graphics memory a minute and left every one for the browser to clean up whenever it got
+  round to it; where the graphics memory ran out first, the next piece the game asked for came back empty and
+  stopped it. Each piece is now given back the moment it is done with, as are the
+  menus' and the text's each frame, and a piece the browser cannot give is skipped instead of stopping the game.
+- If the game does stop, its message now says what went wrong as well as where, for the next bug report.
+
+## 2026-11-14 · Character select shows the right character from the start
+- **No more wrong character for a moment at character select**: on an account with more than eight characters,
+  the character shown beside the list could be the one first in the short list the server sends at first (your
+  most recently played) until the whole list came, so the first name was selected but another character stood
+  there. The character shown now always matches the one selected, and wears its own colours from the start.
+
+## 2026-11-14 · Bow auras at the grip; circlets
+- **A weapon aura on a bow** now sits at the hand, on the bow's grip, instead of floating off past it.
+- **Circlets**: a GM can now give a character a glowing circlet round the head made from an epic's effect, such as
+  the monk staff's ring of light. It shows while no helm is drawn (a hidden helm counts as none).
+
+## 2026-11-14 · Weapon aura sparkles placed along the blade
+- **Where a weapon aura's sparkles sit** can now be set by the server, from the hand up to the tip: the druid staff
+  glow now sits mid-blade on a scimitar instead of near its tip.
+
+## 2026-11-14 · The Android app updates itself
+- **No more downloading each new APK by hand**: the Android app now looks for a new build when it starts and every
+  ten minutes while you play, downloads it in the background (a dropped connection picks up where it stopped), and
+  asks you when nothing else is on the screen: "A new version is ready", with what is new in it. Install now, or
+  Later (asked again in half an hour).
+- **Install now** leaves the world if you are in it, then Android's own screen asks you to confirm: tap Update.
+  Android closes the game to install it; open EQOA again after. Your settings, servers and disc stay as they were.
+- **The first time only**, Android asks you to allow EQOA to install apps: the game takes you to that setting, turn on
+  "Allow from this source" and come back. Cancel either screen and the game asks again later.
+- This build has to be installed by hand one last time, from the release page; the ones after it come by themselves.
+
+## 2026-11-14 · Weapon auras sit on the blade
+- **An epic's sparkles on a borrowed weapon** now sit along that weapon's own blade, where they sit on the epic (a
+  druid staff's sparkles near the top of a scimitar or an axe, not floating past its tip).
+
+## 2026-11-14 · Move and resize the touch controls with your fingers
+- **Move and resize the on-screen controls by touch** (phones, tablets and the Android app): Options > Extended >
+  Touch Controls > Layout > Move Touch Pad, then leave the menu. Drag the left side, the right side or Start and
+  Select wherever you like, and pinch with two fingers to make the controls bigger or smaller. They stay where you
+  leave them. Tap Done on the bar when finished, or Reset to put everything back.
+- **Start and Select at the bottom**: Touch Controls > Layout > Button Layout has a second layout, Bottom, that puts
+  Start and Select down between the two sticks instead of at the top of the screen. Classic is the layout as it
+  was.
+- **All the touch settings in one place**: Touch Stick Size, Touch Button Size, Touch Opacity and Touch Edge moved
+  from Other to their own Touch Controls menu, beside the new rows. Reset Touch Pad puts the sizes and the place
+  back.
+
+## 2026-11-14 · Weapon auras
+- **Weapons can wear an epic's aura**: a GM can now give the weapon in a character's hand (main hand, off hand, or
+  both) the look of an epic weapon: its glow by night and its particles. The first is the necromancer's Sickle of
+  Avhi Escron's tainted aura, a green glow with a green mist rising off the blade, on whatever weapon that hand
+  holds. It shows on any weapon held there and goes away with an empty hand.
+
+## 2026-11-14 · Plane of Sky isles on the map
+- **The map names every isle of the Plane of Sky**: "Main Isle", "Isle of Wonder", "Rain Chain 3", "Night Chain 1",
+  "Snow Chain 2" and the rest are written on the isles themselves, in the map's place-name style. Where two names
+  would cover each other one moves just above or below; the smaller is left out if there is no room, and comes back
+  as you zoom in.
+
+## 2026-11-14 · Plane of Sky isles by name
+- **Where you are in the Plane of Sky**: the map's title, the start menu's Location and the group's waypoint line
+  now name the isle you are on: "Plane of Sky (Night Chain 1)", "Plane of Sky (Rain Chain 3)", "Plane of Sky
+  (Main Isle)", "Plane of Sky (Isle of Wonder)" and so on, for every isle of the Rain, Day, Night, Snow and
+  Desolation chains.
+
+## 2026-11-14 · Cleaner armor trim
+- **Trim dyes stay on the trim**: the trim colour no longer speckles or smears onto the armor around it. On cloth
+  it now fills the yellow bands and the cream padding whole, with clean edges, and leaves the brown leather alone;
+  the stray flecks of trim colour on other sets' leather, mail and robes are gone too.
+
+## 2026-11-14 · Helm trim auras and cape auras
+- **Helm auras**: a trim aura on a helm now lights the helm's trim (the cloth helm's cream bands, and so on), as it
+  already did on the rest of the armour.
+- **Cape auras**: a cape can now wear an aura of its own, a glow, sparkles or both, in its own colour. Capes have no
+  trim, so a trim aura on a cape makes the whole cape glow.
+- **Capes on aviaks** now sit on the shoulders instead of riding up the back of the head; kappas' and hill giants'
+  capes sit a little lower too.
+
+## 2026-11-13 · Trim dyes on every armour
+- **Armor trim on every set**: an Armor Dyer's trim colour now shows on cloth, leather, chain, banded, scale and the
+  monk's wraps as well as the plate: cloth's yellow bands, leather's studded bands and buckles, the leather straps of
+  chain and scale, the steel plates of banded armour, and so on, each set its own trim.
+- Robes take it too (their top the chest's trim, their skirt the legs'), and so do most helms. A piece whose art has
+  no trim (the plate's gauntlets, the plain steel helms) looks as before.
+
+## 2026-11-13 · 154 more camps on the map
+- **More camps on the map (M)**: besides the 49 popular XP camps, the map now marks 154 more of the hunting camps
+  from the EQOA-Data map guide that this server really has: 137 in Tunaria and 17 on Odus. They wear a darker
+  "XP" badge so the popular ones still stand out. Hover or tap one for its card: its name, where it is, the levels
+  of its creatures here, the rare creatures near it and the notable drops of its area.
+- A camp whose name alone would not say which it is carries its area: "Undead (Druid's Watch)", "Goblins
+  (Guardian Forest)", and a side where one area has two ("Tae Ew (Dinbak, east)").
+- Zoomed out, only the popular camps and the coaches are shown, as before; zoom in a few steps and the others
+  appear.
+
+
+## 2026-11-13 · Auto Save Options
+- **Auto Save Options** (Options > Extended > Other > General, off by default): turn it on and every change you
+  make in the Options window is kept as soon as you back out of the page you made it on, so you no longer have to
+  go back to Save Changes. Backing out of the Options menu itself saves too, instead of putting everything back.
+  Off, the game works as before: only Save Changes keeps your changes. Turning it on takes effect when you back out
+  of its page.
+
+## 2026-11-13 · Stat maximums in Character > Summary, auto-cast keeps self buffs
+- **See how far each stat can go**: in Character > Summary every stat now shows its value and its maximum, as
+  "346/435", so you know your target while you train. The maximum is your level's cap plus whatever your Combat
+  Mastery stat-max purchases (Brawn, and the others for each stat) have added, and it updates as soon as you buy or
+  remove one.
+- **Auto-cast**: a buff on yourself (such as the necromancer's Ebonweave) is no longer switched to a pet slot
+  when your pet changes around the time you cast it. A slot that was already switched shows as a buff again.
+
+## 2026-11-13 · Key combinations, chat tabs, spell bar opacity, pets you walk through, shared shortcuts
+- **Key combinations on the Controls page**: holding Shift, Ctrl or Alt while you pick a key now binds the
+  combination (Shift+1, Ctrl+F, Alt+2...) instead of the character it types ("!"). The binding fires when you press
+  that key with the same modifiers held; the key on its own keeps doing what it did. Works for macros' triggers too.
+- **Chat tabs**: send any kind of chat to a tab of its own, up to three tabs besides Main, in **Options > Extended >
+  UI > Chat Tabs: Talk** (say, tells, group, guild, shouts) and **Chat Tabs: Game** (combat, loot, rolls, experience,
+  system). A tab's lines no longer show in Main. With the chat box open, the tabs' names sit above it: click one to
+  show it (a tab with new lines turns green), or type `/tab` (next tab), `/tab 2` or `/tab Loot`. Name a tab with
+  `/tabname 1 Loot` (eight characters at most). Everything stays in Main until you choose otherwise.
+- **Spell Bar Opacity** (Extended > UI > HUD Layout): how solid the frames of the Stacked Spell Bars are, 0 to 100%.
+  The spell icons always stay fully visible.
+- **Pets pass through you**: your pet, other players' pets and mercenaries no longer block your walk or make you
+  slide round them (Extended > Other > Combat > Pets Pass Through, on by default; off, they are solid as before).
+- **Same Shortcuts on Every Character** (Extended > Other > General > Same Shortcuts): your L2 quick-chat menus are
+  kept for your account. Turn it on and the character you are playing gives the account its menus; every other
+  character of the account gets them when it enters the world, and a change on any character is kept for all.
+  Off, each character keeps its own, as before.
+- **Jal'Raeth helms fit better**: on the robed and channeler bodies the helm sits higher and is a little taller, so
+  the brim is above the eyes and the top of the head stays inside it.
+
+## 2026-11-13 · Glowing armour trim, and dark auras
+- **Armour trim can glow**: the gold trim of plate armour (the plain plate and the ornate plate) can now light up in
+  an aura's colour, the trim itself bright and a soft halo bleeding off it onto the steel, stronger along the
+  armour's outline, with the same slow shimmer and pulse as the body auras. It follows every move. The server can
+  give it to a creature's armour or to any worn plate piece, alone or with the shell round the piece.
+- **Dark auras**: an aura in black (or nearly black) is now a shadow instead of a light. A dark shell wraps the body
+  in a smoky halo that darkens what is behind it, with a faint violet sheen on its outline so it still shows at
+  night; a dark trim takes the trim toward black under a dark sheen, with smoke off it. Any aura can be dark, on a
+  creature or on a piece of armour. These show once the server sends them.
+- **A character's own aura**: a GM can now give one character (or one mercenary) an aura on a single armour piece,
+  or on their body: a body aura wraps the skin and underclothes, and any armour worn covers it up, each armour piece
+  able to carry its own. Only that character shows it, not everyone wearing the same item.
+- Everything without such an aura looks exactly as before.
+
+## 2026-11-13 · Mr. Moogie's aura covers his mane
+- **The aura over Mr. Moogie's mane no longer has holes.** His mane is two layers of hair back to back, and the
+  shell of light was bent the wrong way where they meet, leaving dark, hole-like patches and stray bright shards in
+  it. Each side of the mane now carries its own layer of the aura, so the glow wraps the mane as evenly as the rest
+  of him.
+- Creatures without an aura look exactly as before.
+## 2026-11-13 · The minimap on a scroll
+- **The minimap now hangs on a scroll, like the spell bar's**: the same parchment round the map, with a wooden roller
+  and its brass knobs across the top and another across the bottom. The map inside is the same size and nothing of
+  it is covered; it moves, zooms and opens the big map as before.
+- Prefer the old plain border? Turn **Extended > UI > HUD Layout > Minimap Scroll Frame** off.
+
+## 2026-11-13 · A glowing NPC's aura
+- **Glowing creatures now wear one aura round their whole body**: a creature the server gives a glow, such as
+  **Mr. Moogie** in Freeport, is wrapped in a single soft, form-fitting shell of light in its glow colour that
+  follows its body, head, legs and tail exactly as it moves, brightest along its outline with a slow shimmer and
+  pulse, as some buffs looked in Anarchy Online. It replaces the rising sparkles of the last build.
+- **Auras are a template the server can give any creature or armour piece**: the shell, the Sword of Virtue's rising
+  sparkles (or another item's) over the body, or both, each in its own colour; and on a worn piece alone, so a
+  character's bracers can glow red and their breastplate blue. These show once the server sends them.
+- Every other creature, and every player, looks exactly as before.
+
+## 2026-11-13 · Ornate plate at character select
+- **Your armour now shows at character select on the Heirloom Test Server.** A character in the server's ornate
+  plate (its own armour set, with or without a trim colour) stood at character select in plain clothes, though the
+  armour showed in the world. Character select now reads the plate's art off the disc the moment the
+  server says it uses its own armour, and the character is drawn in it as the world draws it, trims and dye included.
+- On every other server character select is exactly as before.
+
+## 2026-11-13 · Froglok helms seated as the PS2's were
+- **A Froglok's helm sits closer to its head again**, as it did on the PS2 with our old patch: lower and snugger
+  over the crown, following the head as it moves, instead of riding high and loose. The sides of the head and the
+  snout may show past the helm's edges, as they did there. Every helm, on frogloks robed and spiked, and on ghouls.
+## 2026-11-13 · Stacked spell bars, a chat box that stays open, glowing NPCs, group loot rules and instances
+- **Stacked Spell Bars** (Options > Extended > UI > HUD, off by default): on a computer your first two ability bars
+  are drawn as two rows of five, one above the other, just above the chat box, a little smaller (95%) and with no
+  name box popping up over them. Click a slot to use it; right-click it to turn its auto-cast. They move with the
+  chat box when you move it (Move HUD). Playing with a controller or a touch screen keeps the usual bar.
+- **A key for every slot**: Options > Controls now has **Bar 1: slot 1** to **Bar 2: slot 5**. Pick one, press a key,
+  and that key uses the ability on that slot (with or without stacked bars). None has a key until you give it one.
+- **Chat Always Shown** (Options > Extended > UI > Chat, off by default): the chat box stays open at its full size
+  with your last lines in it, and no longer slides away when nothing is said.
+- **Glowing NPCs**: on the Heirloom Test Server some creatures can now glow in a colour of their own, as **Mr. Moogie**
+  does in a soft red. Every other creature looks exactly as before.
+- **GM flight through walls** (/noclip, for the server's GMs): the client now flies straight through walls, floors
+  and ceilings while it is on.
+- **Group loot rules**: a group's leader now finds **Loot Rules** under Community > Group > Raid even outside a raid:
+  **Free for All** or **Need Before Greed** (the rule in use is marked with *). The same as typing /grouploot.
+- **Add to Instance** and **Remove from Instance** under Community > Group > Raid (in a group or a raid): they act
+  on your target, as /addinstance and /removeinstance do. The server says who may.
+## 2026-11-13 · Froglok helms, Mermaid robes and armour
+- **A Froglok's helm now fits its head**: wider and deeper, it sits down over the whole head above the mouth,
+  instead of perching on top with the sides and back of the head poking out through it. Every helm, on frogloks
+  robed and spiked, and on ghouls.
+- **Mermaid robes**: the sleeves now follow the arm down to the wrist with a normal cuff, instead of stopping at
+  the elbow in a huge bell.
+- **Mermaid chest armour and robes no longer cover the chin**: the collar now sits at the neck, where before it
+  stood up over the mouth, and a Merman's broad chest no longer shows through his chest armour. Mermen, mermaids,
+  sirens and the sea king, every armour set.
+- Every other race's helms, armour and robes are exactly as before.
+
+## 2026-11-13 · Target cycling skips familiars; no false crash reports when leaving the browser page
+- **Tab, R1 and L1 no longer pick familiars.** Cycling targets (Tab or R1 for the next creature, ` or L1 for
+  you, your group and your pet) now passes over **Healbot** and other familiars an item calls, a wizard's own
+  **Familiar** (Minor Familiar to Arch Familiar, Gargoyle Familiar) and the non-combat pets (Crazy Contraption,
+  Invention, Swamp Friend). This works the same on a keyboard, a controller and a touch screen.
+- You can still target a familiar on purpose: **click it**, hold the target button for the **crosshair**, or press
+  **6** for your pet. Combat pets are unchanged: a wizard's Guardian or a magician's, necromancer's, enchanter's or
+  charmed pet is still yours with L1, and merchants and other townsfolk are still cycled to.
+- **Browser page:** leaving the page while the game was in the middle of a frame (most often in Firefox, by going
+  Back, typing an address or opening a bookmark) sent a false crash report at your next login: "The game client
+  stopped: ... runner.rs:683:69: RefCell already borrowed". Leaving the page no longer counts as a crash, and old
+  reports of it saved in your browser are dropped without being sent.
+- If the browser stops the game itself while you play (Firefox's "This page is slowing down" **Stop**, or running
+  out of memory), the page now says so within two seconds and offers **Reload**. Before, the game just froze.
+
+## 2026-11-13 · Ornate plate (armor set 9) and trim dyes
+- **Ornate plate** (armor set 9), the gold-and-steel plate that was on the disc all along, is now drawn on the
+  Heirloom Test Server without any patch: the Ornate armor pieces show as ornate plate (with the plain plate helm),
+  in the world and at character select. On a PS2, or an older client, they show as plain plate.
+- **Trim dyes**: plate's **gold trim** can now be dyed apart from the rest of the armor, so a dyed suit no longer
+  mutes its trim. Ask an **Armor Dyer** for **Armor trim** (the last choice), then all your armor's trim or one piece
+  (chest, bracers, legs or boots). The trim takes the color you pick at its own shading; the rest of the piece keeps
+  its own dye. The plain plate (set 4) and the ornate plate (set 9) have trim; other armor has none to dye.
+- Armor with no trim dye looks exactly as before. Needs the Heirloom Test Server's update; on any other server
+  armor is drawn as before.
+## 2026-11-13 · The browser page survives a graphics driver reset
+- In the browser, when the graphics card's driver resets (on Windows: the screen flickers black, and the game
+  stopped with "the browser gave no new graphics device"), the game now **waits for the graphics card for about
+  50 seconds** instead of 16, asking the browser afresh each time.
+- If WebGPU still can't be had, the game **switches to WebGL2 and carries on**: you stay where you were, and a
+  notice says it now draws with WebGL2. It stays on WebGL2 until the page is reloaded; a reload tries WebGPU again.
+- The downloaded program is unchanged.
+
+## 2026-11-13 · Weapons glow in their own colour
+- A weapon or shield with a colour of its own now **glows in that colour**: its glow, sheen and sparkles take the
+  colour's hue at the glow's usual brightness, and the rest of it is tinted lightly. The first is the **Heirloom
+  Sword of Twisted Virtue**: the Sword of Virtue with a crimson, evil aura in place of its white-cyan one.
+- **Weapon and shield dyes from the Armor Dyers now show** the same way (before, only armour dyes were drawn).
+- Plain weapons look exactly as before. Shown in the world and at character select. Needs the Heirloom Test
+  Server's update; on any other server weapons are drawn as before.
+
+## 2026-11-13 · Mercenaries hidden from the raid window (a toggle shows them)
+- The raid window now lists **players only**; mercenaries no longer take up its rows. You can still target a mercenary
+  in the world, and L1's group cycle still reaches it.
+- To see them again, with their gold coin: Options > Extended > UI > **Group & Raid** > **Raid Mercenaries** > **Shown**.
+
+## 2026-11-13 · Feature requests, apart from bug reports
+- Have an idea for the game? **Type /feature and what you would like**: the bug report window opens with
+  **Feature Request** already picked and your words in it, ready to send. Feature requests now reach the GMs
+  apart from the real bug reports.
+- **Feature Request** is also the last choice in Bug Report's list (F3, or Support in the start menu). A PS2
+  player can pick it there too, or type **#feature** and the request in chat.
+- Needs the Heirloom Test Server's update; on another server /feature goes to the server as typed.
+
+## 2026-11-12 · The map's arrow can turn with your camera
+- New row **Extended > UI > Map > Map Pointer**: what your arrow on the minimap (and the map) points along.
+  - **Facing** (the default, as before): the way your character faces.
+  - **Camera**: the way your camera looks, as the compass does, so looking around while standing still
+    turns the arrow too.
+
+## 2026-11-12 · Mercenaries marked with a coin in the raid window
+- In the raid window a **mercenary's row now shows a gold coin** where a player's shows its role (shield, staff or
+  sword), so you can tell hired hands from players at a glance. Players' rows are unchanged.
+
+## 2026-11-12 · Mercenaries in the raid window: click them to target them
+- **Mercenaries now show in the raid window**, each under its owner's group, with its health and power bars.
+  **Click one** to target it (or reach it with L1's group cycle), as you target any raid member: in a raid you
+  could not target a mercenary before, since the raid window had no row for it.
+- A mercenary takes **no place** in a raid's group of four: a group with two players and their two mercenaries still
+  shows **(2/4)** in Raid > Move to Group. A mercenary goes with its owner, so its row is not dragged, and Move to
+  Group on it says to move its owner instead. Needs the Heirloom Test Server's update (on an older server the raid
+  window is as before).
+
+## 2026-11-12 · The auction search reaches level 60 items by default
+- The auction's search form now opens with **Max. Level 60** (it was 50, the disc's own), so level 60 items show
+  without changing it first. A server whose patch sets its own maximum still uses that one.
+
+## 2026-11-12 · Your mercenary's menu no longer leaves its info box on screen
+- Pressing □ (Q) on **your own** mercenary now opens its menu alone: its info box no longer stays on screen beside
+  the menu and after you close it. □ on anyone else's mercenary still shows its info box (name, class, level).
+
+## 2026-11-12 · Mercenaries: their class at a glance, and a menu of their own
+- **Press □ (Q) on a mercenary** and its details box now shows its **class** under its name, and for a
+  healer whether it is **Defensive** or **Offensive**.
+- **Press □ (Q) on your own mercenary** to open its menu: **Advice** from it, its **Spells** (turn any of
+  them on or off), its **Stance**, a healer's **Be offensive / Be defensive**, and **Dismiss** (asked again
+  before it goes). Needs a server with mercenaries (the Heirloom Test Server); on a PS2, type `/merc menu`.
+
+## 2026-11-12 · Power bars in the group and raid windows
+- **See your group's power**: a thin blue power bar now sits under each group member's health bar, for
+  other players and for mercenaries in your group alike, and under your pet's health too. They move as
+  people cast and as their power comes back, wherever they are, near or far.
+- **The raid window** keeps its thin blue power bar under every member's health.
+- **Turn them off** in Options > Extended > UI > **Group & Raid** > **Power Bars** (on by default). Raid List
+  moved to the same page. On a server that does not send others' power, the windows are as before.
+
+## 2026-11-12 · Sun Shadows and Light Shadows on Windows; your own shadow from your lantern
+- **Sun Shadows and Light Shadows now work in the Windows download.** Until now they did nothing there (the
+  options turned on, but no shadow was drawn); a copy built from the source code had them. Turn on **Dynamic
+  Lighting** too: both shadows need it (Options > Extended > Graphics > Lighting).
+- **Your own character now casts a shadow from your lantern** with Light Shadows on, as everyone else's does: a
+  small shadow at your feet, and under a gargoyle (or any race) hovering in the air, the shape of its body and wings
+  on the ground below.
+
+## 2026-11-12 · Loading tips without "Did you know"
+
+Every loading tip is now a plain sentence ("You can type /stuck to return to your bind point when you cannot move."), without the "Did you know" in front.
+
+## 2026-11-12 · Barbarian tattoos
+- **Barbarians can now choose a tattoo** when you create one: on the Customize Character page, under Face and the
+  hair rows, the **Tattoo** row offers **Off**, **Bands** (the blue-grey blocks and bars) or **Crest** (the framed
+  brow and eye band), on any of the four faces, **men and women alike**. A barbarian man's first step,
+  **Face's own**, keeps the face as the game paints it (his second and fourth faces come with their own woad).
+- **Change it later** from character select: Options > **Customize Character**.
+- Other players with this client see your tattoo too. On a PS2 your barbarian shows the face you picked as the
+  game has it. Needs a server that offers tattoos (the Heirloom Test Server).
+
+## 2026-11-12 · Character select: Wisps, their colour, and more about each character
+- **A Wisp now looks like a Wisp in Customize Character**, and stays one after you press Accept there (it turned
+  into a plain human until you logged in).
+- **Wisps have a Color**: choose your wisp's glow when you make a Wisp, or change it any time at character select's
+  Customize Character. Everyone sees it in the world. Natural is the wisp's own glow.
+- **Character select now shows four lines** under your character on servers that send them: its level, its CMs
+  (mastery points earned, spent and unspent), its race (its own name: Ratman, Wisp, Jal'Raeth...) and its class.
+
+## 2026-11-12 · Following from a tab in the back
+- **A character on /follow keeps close behind the one it follows when its tab or window is in the back.** A tab
+  you are not looking at gets fewer frames (the browser saving power, a busy computer running several clients), and
+  each of those frames used to run all the steps it had missed in one straight line: the follower overshot, ran
+  back and forth and dropped far behind. Each frame now catches the missed steps up one at a time, turning toward
+  the one followed at every step, as it does on screen.
+- A tab or window in the back also skips the work that only shows on screen (shadows, lights, mist and plants), so
+  it keeps its pace better while you play in another.
+
+## 2026-11-12 · Ambient Occlusion without the dark aura
+- **Ambient Occlusion no longer draws a dark aura round characters and models.** The ground, walls and sky seen
+  just past a character's outline (or a post's, a cactus's, a tree's) stayed their own colour instead of a grey
+  shadow that followed the model wherever it stood. Corners, the foot of a wall and the ground right at a
+  character's feet are still darkened as before. (Options > Extended > Graphics > Lighting > Ambient Occlusion;
+  it is still off unless you turn it on.)
+
+## 2026-11-12 · Tips on the title screen
+- **The title screen now shows a tip** in the space under Play, Network Setup and Options, a new one every few
+  seconds.
+- **Tips now match your server:** on the Heirloom Test Server you see every tip; on the Live Server (and any
+  other server) only tips about the client itself: lighting, the buff window, the raid window, keys, settings and
+  so on. The title screen goes by the server you picked last. Options > Extended > Other > General > Loading
+  Tips turns them off in both places.
+
+## 2026-11-12 · Buffs: right-click to remove
+- **Left-click a buff** to select it (its name and time left show); **left-click it again**, or anywhere else, to
+  unselect it. Left-clicking another buff selects that one instead.
+- **Right-click a buff to remove it**, no need to select it first. On a touch screen: **tap** to select or unselect,
+  **press and hold** to remove. Harmful effects still can't be removed; the bar says so.
+- **On a controller** (hold **R2**, press **L2**, then the d-pad): **✕ selects** the highlighted buff (or unselects
+  it), **□ (Square) removes** it, **△ or L2** gives the d-pad back. **On a keyboard** (hold **C**, press **Z**, then
+  the arrows): **Enter** selects, **Backspace** removes, **Escape** is done.
+
+## 2026-11-12 · Quest markers over NPCs
+- **A yellow "!" floats over an NPC's name when it has a quest you can take right now**, and a **yellow "?" when you
+  can move one of your quests on there right now**: someone you are sent to speak with, or a turn-in you are carrying
+  the items for. It changes as you go: take the quest and the "!" goes, the "?" shows where to go next.
+- The game masters choose which quests show them. To start with, **every race and class's first quest** at its
+  starting city or homeland has them.
+- The marks are bigger up close and smaller far away, and show wherever the NPC's name does.
+- Turn them off or on in **Options > Extended > UI > Name Plates > Quest Markers** (on by default). On a server that
+  does not send them nothing changes.
+
+## 2026-11-12 · The buff window and loading screen tips
+- **Your buffs now have room for two rows** at the top of the screen (up to 16), and your **pet's buffs sit in a
+  smaller third row** just under them, instead of under the pet's bar.
+- **Click (or tap) a buff** to see its name and how long it has left. **Click it again to remove it.** Only buffs
+  you would want gone can be removed: a poison or another harmful effect stays, and the chat says so. Your pet's
+  buffs can be removed the same way, and so can the Tester Pro's.
+- **On a controller:** hold **R2** and press **L2**, then use the d-pad to walk your buffs (left and right along a
+  row, up and down between rows); each shows its name and time left. **✕ removes** the lit one, **△ or L2** gives
+  the d-pad back. **On a keyboard:** hold **C** and press **Z**, then the arrows, **Enter** removes, **Escape** is done.
+  You can still walk and turn meanwhile.
+- **Loading screens now show a tip**: one "Did you know..." line about a command or a feature, a different one each
+  time, when you enter the world, zone, coach, gate, die and return, or log out.
+- Both are in Options > Extended: **UI > HUD > Buff Window** (Off brings back the old single strip) and **Other >
+  General > Loading Tips**.
+
+## 2026-11-12 · Mermaid helms sit at the brow
+- A Mermaid's helm now sits forward on her head, its front at her brow as on a human, instead of a little behind
+  it with her face standing out of the front. Mermaids, mermen, sirens and sea kings, every helm.
+
+## 2026-11-12 · Square deletes in every text box
+- **On a controller, Square (□) now deletes a letter in a bug report or a help request**, the same as it does in the
+  chat line. After a keyboard key had been pressed (F3 for a bug report is one), the text boxes switch to their
+  short keyboard layout, and Square did nothing there. It now deletes on either layout, in every box you type in:
+  the chat line (in the world, in a trade and in a duel's wager), bug reports and help requests and their replies,
+  mail and tells, the auction's search and sell fields, the group finder, the fishing window, gear set names, quick
+  chat lines, map marker names, and the name, account and server fields before you enter the world.
+
+## 2026-11-12 · Chat while trading
+- **You can chat during a trade.** With the trade window open, Enter opens its chat line, the same way it does in
+  the world; `/` starts it with a slash, T with `/tell` and R with `/reply`. Clicking or tapping the chat box opens it
+  too, and R3 (or Space or G) still does. Say, tells, group, guild, shout and slash commands all work from it.
+- Typing in it never touches the trade: Q, E and every other key are part of your message, and Escape closes the
+  chat line first; press Escape again to cancel the trade as before. E (✕) and the mouse still pick items.
+- The same goes for a duel's wager window.
+- On a phone or a tablet, your own keyboard now comes up for the trade's chat line, and for the other windows you
+  type in (mail, bank, help requests).
+
+## 2026-11-12 · Ready checks
+- A raid's leader or helper, or anyone in a regular group, can type **`/readycheck`**. Everyone else in the group
+  gets a small **"Are you ready?"** pop-up at the right of the screen with **Yes** and **No** and 30 seconds on a
+  bar. It never stops you moving or fighting: click or tap Yes or No, or on a controller hold **R2** and press
+  **right**, pick with left and right and press **✕** (on a keyboard, hold **C** and use the arrows and Enter).
+  You can also type `/ready` or `/notready`.
+- Whoever asked hears **"Everyone is ready"**, or **"Raid not ready"** (or "Group not ready") with the names of
+  who said no and who did not answer in time.
+
+## 2026-11-12 · Mermaid capes hang from the shoulders
+- A Mermaid's cape now hangs from her shoulders down her back and tail. It had been carried too high, so its collar
+  rose round her head like a helm; now her head is clear above it, on every cape style and on mermaids, mermen,
+  sirens and sea kings alike.
+
+## 2026-11-12 · Mermaid helms and capes
+- **Capes now show on Mermaids** (mermaids, mermen, sirens and sea kings). The cape hangs down the back over the tail
+  and sways with the tail as she treads water and swims. Every cape style works.
+- **Helms sit better on Mermaids**: a little lower and snugger on the head, so the crown no longer shows through the
+  smaller helms. Her hair (and the enchanting siren's tiara) is tucked away under a helm, as a human's is, instead of
+  streaming out of the back of it.
+
+## 2026-11-12 · Floating races stay in the air when they emote
+- A Mermaid (merman, mermaid, sirens, sea king), a Gargoyle or a Jal'Raeth no longer drops to the ground to wave,
+  bow, point or cheer: they emote at the height they float at, their tail treading, their wings beating or their
+  legs crossed as when they are idle. Everyone using this client sees it the same way, yours and others'.
+
+## 2026-11-12 · The raid list in its groups, with role icons
+- On a server with raids, the **raid list** now sorts everyone into **Group 1, Group 2, Group 3...** of up to four,
+  each under a small label, in the order they joined. A big raid fills more columns, and the mouse wheel over the
+  list steps through the groups when they do not all fit.
+- Each member's health bar has a small **role icon**: a blue **shield** for Warriors, Paladins and Shadow Knights, a
+  green **staff** for Clerics, Druids and Shamans, and a red **sword** for everyone else.
+- The **raid leader and the raid helper** can move members between groups: drag a name onto another group (or onto
+  a member of a full group, to swap the two), or target the member and choose **Community > Group > Raid > Move to
+  Group**. Typed: `/raidgroup <name> <number>` and `/raidswap <name> <name>`; `/raidgroup` alone lists the groups
+  in chat. Groups are for organising: experience, loot and group spells work as before.
+
+## 2026-11-12 · Mermen may be sea kings
+- A male Mermaid may now choose the **sea king**: a green-scaled merman with a fin crest, at a merman's height. He holds
+  your own weapons (not his trident), wears chest armour, bracers, gloves and a helm like any merfolk, and his skin
+  takes the colour choices.
+
+## 2026-11-12 · The web page says why the game stopped
+- In the web page, a rare fault could freeze the game with only a small "Something in the page failed" line, and
+  the bug report you sent later said only "RefCell already borrowed". The page now stops the game at once with
+  the Reload notice, and keeps the real cause for your next bug report, so it can be found and fixed.
+
+## 2026-11-12 · Auto-cast knows your pet summonings again
+- Auto-cast no longer mistakes a pet summoning (Summon Efreeti Lord, the necromancer's bones and spectres, the
+  enchanter's golems, the druid's spirits, familiars...) for a buff: right-clicking one sets it to summon your pet
+  when you have none, and it is never cast over a pet you already have.
+- A summoning you had already set as a buff is switched to a pet summoning by itself (the chat box says so). If a
+  slot set as a buff ever brings a new pet, it is switched the same way.
+
+## 2026-11-11 · Extended is tidier, boxes keep their pace, Compact keyboard from a controller
+- **Options > Extended** now opens on four entries: **Graphics** (Video, World, Lighting, Characters, Textures),
+  **UI** (HUD, HUD Layout, Name Plates, Map, Number Colors, Merc Colors, DPS Meter, Chat), **Other** (General,
+  Combat, Camera, Touch, Sound) and **Multi-boxing settings**. Every setting is still there, set as you left it;
+  some moved to the page of their kind: Name Distance and Overlapping Names are under UI > Name Plates, the DPS
+  meter's rows under UI > DPS Meter, Update Notices and Loading Screens under Other > General, the touch pad's
+  sizes under Other > Touch.
+- **Multi-boxing settings**: Controller Focus, Capture Controller and Sound in Background are here now, with a new
+  **Slow When Not Focused**, **Off** by default: a window that is covered or minimised keeps its normal frame rate,
+  so a box in the back keeps following and playing as it should. Turn it **On** in a window to have that window
+  slow down to 30 frames a second while it is hidden, as before. Each window keeps its own.
+- With **Options > Interface > Keyboard** on the compact setting, opening a chat or text box with the controller
+  (R3) now shows the compact box too, as Enter does, whenever you have a keyboard; before, the controller always
+  opened the on-screen keyboard. On a touch screen, or with the other setting, you still get the on-screen
+  keyboard.
+
+## 2026-11-11 · Forgot your password?
+- On eqoaclassic, the login screen's **Forgot Password** button now opens the server's password page in your web
+  browser (a new tab in the browser version), where you can ask for a new password or change the one you have. A
+  box on the login screen shows the page's address too, in case your browser does not come up. On other servers
+  the button is the game's own, as before.
+- The play page has a **Forgot password?** link under its Start button as well.
+
+## 2026-11-11 · A moved quick bar stays put with a long spell name
+- If you moved your quick bar with **Move HUD**, selecting a spell with a long name (one that scrolls in the bar's
+  title, like "Quil'Eyne's Unspeakable Hunger") made the whole bar slide across the screen as the name scrolled. The
+  bar now stays where you put it, whatever the name's length; the name scrolls inside its box as before.
+
+## 2026-11-11 · Options for the whole account, Class Mastery keeps your place
+- Your options now belong to your **account**, not to a window: the Options menu's settings, every Extended row
+  and where you put the HUD's pieces are the same for every character you log in with on that account, in any
+  window. The first time you log in, the account takes the options you saved most recently, so nothing has to be
+  set up again. Another account keeps its own. Your keys, buttons and macros stay the same for everyone on the
+  computer, and quick bars, auto-cast slots and quest records stay with each character.
+- The Save Changes question says once that options now save for every character on the account.
+- **Class Mastery**: buying or switching a mastery no longer sends the cursor back to the top of the list. It
+  stays where it was, with the list scrolled as it was, and when the mastery you bought has a next rank, that
+  rank takes its place in the list and is highlighted.
+
+
+## 2026-11-11 · Profanity Filter: Off, Medium or High
+- **Options > Interface > Profanity Filter** now has three settings instead of On and Off: **Off** shows chat as it
+  was typed, **Medium** hides only racial slurs (swears are left alone), and **High** hides every swear and slur, as
+  On did. High is still the default, and if you had it On it is High now; Off stays Off.
+- This needs a server that knows the new setting; on one that does not, Medium filters as High.
+
+## 2026-11-11 · Shift+Enter finishes a long message
+- In a box where Enter starts a new line (a petition or bug report's text, a mail's body), **Shift+Enter** now
+  finishes the text and closes the box, as the "Shift+Enter = End" line under it always said. Enter still starts a
+  new line, and Tab, R2 and the on-screen Done still finish it too.
+
+## 2026-11-11 · Notice boards everywhere
+- The papered notice board (Highpass's, used for the Mercenary Recruitment boards in the cities) now shows in every
+  city and every world. It is read from your own disc when you enter the world, so it no longer depends on the
+  server sending its art file.
+
+## 2026-11-11 · More than eight characters
+- On a server that allows it (eqoaclassic: up to **20 characters** an account), character select has a slot for
+  every character and one empty slot to make another, eight in view at a time. Up to eight characters it looks
+  exactly as before.
+- The list scrolls: the d-pad, the stick or the arrow keys walk past the eighth row and the list follows, the mouse
+  wheel scrolls it, and on a phone or tablet drag the screen up or down. A scroll bar at the list's right shows where
+  you are. Delete Character stays under the list.
+- A PlayStation 2 still shows eight: there you see your eight most recently played characters, and the others wait,
+  untouched, for this client.
+
+## 2026-11-11 · Jal'Raeth helms, leggings, boots and capes
+- A Jal'Raeth's helm now sits higher and a little larger, so its head no longer pokes out of the top (the knight's
+  crested head too), in every helm.
+- Leggings and boots now show on a Jal'Raeth's crossed legs: the leggings on the thighs and shins, the boots on the
+  feet. The skirt still covers some of them from behind.
+- Capes now show on Jal'Raeth players.
+
+## 2026-11-11 · Mermaids
+- On a server with the **Mermaid** race, a mermaid (or merman, or siren) treads water when she stands and swims when
+  she moves, on land as in the sea, and her attacks now show: she dives and strikes with her tail, where before she
+  floated still while she fought. You see it on your own character and on every other mermaid.
+- Mermaids hold a weapon in each hand and a shield on the left arm, wear chest armour, bracers and gloves over their
+  upper body (no legs or boots on a tail), and wear their helm on their head.
+- They wave, bow, point and cheer with their arms and head, the tail still treading water.
+
+## 2026-11-11 · Auto-cast keeps your pet buffed
+- Auto-cast now works with **pet buffs**. A pet buff's effect shows on your pet, not on your own effects, so auto-cast
+  used to think it had not landed, cast it again and turned the slot off after three casts. Now it looks for the buff
+  on your pet's effects (under the pet's bar) and casts it again only when it is about to wear off or is gone. If the
+  server sends no pet effects (or Options > Extended > Pet Effects is off), it waits the buff's full length (for
+  example the "5min" in its description) after a cast that went off before casting it again.
+- A pet buff is only cast while you have a pet out, and a new pet (after yours died or you summoned another) is
+  buffed right away.
+- Right-clicking a pet buff on your quick bar now sets it as a buff by itself (it used to ask you to type
+  /autocast).
+- A slot is now turned off only when its cast does not go off three times in a row (refused, out of range, no
+  pet...). A buff that did go off is never turned off just because you cannot see it on yourself.
+
+## 2026-11-11 · Skin shades for every race
+- On a server that offers them, character creation's appearance page has a **Skin** row under face and hair: every
+  race (human, elf, dark elf, gnome, dwarf, troll, barbarian, halfling, erudite, ogre) can now pick from Natural
+  (the race's own), Porcelain, Fair, Light, Tan, Olive, Bronze, Brown, Dark, Ebony, Ashen or Moss. A human can be as
+  dark as an erudite, an erudite as light as a human. The shade covers the face, arms, hands, chest and legs, under
+  any armour or robe; eyes, brows and the armour itself keep their colours.
+- Already have a character? Choose **Customize Character** at character select: the Skin row is there too, and
+  the new shade is kept when you enter the world.
+- Everyone with this update sees your shade; older clients and the PS2 see your race's own skin.
+- The rows of a server's own races (pixies, fairies) now keep the colours you chose when you press Create.
+
+## 2026-11-11 · Your mercenary's numbers in their own colour
+- The damage your mercenary does now floats up in **light blue** and its heals on you in **purple**, so you can tell
+  them from your own hits (white) and heals (green) at a glance. Its swings, its spells and its damage over time are
+  all light blue; its heals and its heals over time on you are purple.
+- Pick other colours in **Options > Extended > Merc Colors** (Merc Damage and Merc Heals). Set one to **Default** to
+  have it drawn as before: its hits white like yours, its heals green.
+- This needs the server to say which numbers are your mercenary's; on a server that does not, they look as they
+  always did.
+
+## 2026-11-11 · The Jal'Raeth hold their weapons and show their armour
+- A Jal'Raeth now holds its weapons in its hands: a sword or staff in the right hand, a bow or an off-hand weapon in
+  the left, and a shield on the left forearm, and they swing with its arms. Before, they floated beside its knees.
+- A Jal'Raeth's chest armour now shows from the front too. Its chest is deeper than a human's, so the front of the
+  armour (and on the knight's body, all of it) was hidden inside it; robes, chest pieces, bracers and gloves now sit
+  over the body. Leggings and boots still do not show: the Jal'Raeth's crossed legs have no place for them.
+
+## 2026-11-11 · Smaller mercenary tags, whole shadows under the lantern
+- A mercenary's "<Owner's Mercenary>" line over its name is now drawn a little smaller than the name, so the name
+  stands out. The name itself is the same size as before.
+- With Light Shadows on (Extended > Lighting), something that comes very close to a light no longer has a piece cut
+  out of its shadow. A Jal'Raeth's helm floating up to the lantern over its head lost a large square from the middle
+  of its shadow near the top of the float; the shadow now stays whole as it grows and shrinks.
+
+## 2026-11-11 · Auto-cast and auto targeting
+- An ability on your quick bars can now be set to **auto**: it is used by itself whenever it is ready. Right-click its
+  slot (on a phone or tablet, press and hold it; on a controller or the keyboard, hold ○ or E for a second on it) and
+  a gold **A** shows in its corner. Do the same again to turn it off.
+- What an auto slot waits for depends on the ability: an attack or a combat art fires off its timer while you are in
+  a fight, at your target if it is in range (it never starts a fight for you); a buff is cast again when it wears off
+  you; a pet summoning when you have no pet (it died or you let it go); a heal when you drop below half health. The
+  chat box tells you which it picked. If it picked wrong, type **/autocast <slot number or name> attack**, **buff**,
+  **pet** or **heal** (for example `/autocast 3 buff` or `/autocast Spirit Blast attack`); **/autocast** alone lists
+  your auto slots.
+- It casts one thing at a time, never while you are already casting, dead, invisible, in a menu, merchant or trade
+  window, or short of power (it waits for the power). Heals come first, then your pet, then buffs out of a fight and
+  attacks in one. A buff that never shows on you (or a summoning that brings no pet) is tried less and less often and
+  is turned off after three tries.
+- **Auto Target** (off until you turn it on): when you have no target, or your target died, the nearest creature that
+  is attacking you (or else your pet or group) is targeted for you. It never picks a player or a creature that isn't
+  fighting you. Turn it on in **Options > Extended > Combat > Auto Target** or type **/autotarget**.
+- **Options > Extended > Combat > Auto-Cast** turns every auto slot off at once (or type **/autocast off**). Your auto
+  slots are kept for each character. It works on any server: the game simply presses the ability for you.
+
 ## 2026-11-11 · The installed page opens another window each time
 - On a computer where the page is installed as an app (Windows 11's Start menu or taskbar), opening it again now
   starts another game window for multiboxing instead of bringing back (or reloading) the one already open.

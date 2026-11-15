@@ -97,9 +97,28 @@ pub struct CharRecord {
     /// The cape it wears, on a server with capes (`cape`: the session's
     /// `cape_list` by its server id, which comes after the list).
     pub cape: Option<net::cape::Cape>,
+    /// Its race's options re-chosen at Customize (a game race's skin shade,
+    /// `raceopts`), sent with 0x002A when it is played; empty, as it was.
+    pub options: Vec<(String, u8)>,
+    /// More of it from a server that sends it (`net::selectinfo`, by its server
+    /// id, after the list): its own race and the race's name, its mastery
+    /// points, the rows Customize re-chooses; none from any other.
+    pub info: Option<net::selectinfo::Info>,
 }
 
 impl CharRecord {
+    /// Its own race: the server's (`net::selectinfo`), else the list's.
+    pub fn own_race(&self) -> i32 {
+        self.info.as_ref().map_or(self.race, |i| i.race as i32)
+    }
+
+    /// Its sex, by its body (a record has none of its own): 1 for its own
+    /// race's female body where that is not the male's, else 0.
+    pub fn sex(&self) -> i32 {
+        let female = |race: i32| create::tables::model_of(race, 1) == self.model && create::tables::model_of(race, 0) != self.model;
+        (female(self.race) || female(self.own_race())) as i32
+    }
+
     /// `CharacterList`'s read: the zigzags, then the 32 raw bytes (`m_robe`
     /// as an int, `m_p40`, `m_weapons` three ints, `m_p50`, `m_armor`,
     /// `m_p59`).
@@ -128,6 +147,8 @@ impl CharRecord {
             tints: std::array::from_fn(|k| g(26 + k)),
             colors: None,
             cape: None,
+            options: Vec::new(),
+            info: None,
         }
     }
 
@@ -161,8 +182,14 @@ impl CharRecord {
                 items: std::array::from_fn(|k| rgba(31 + 4 * k)),
                 armor: std::array::from_fn(|k| rgba(43 + 4 * k)),
                 robe: rgba(67),
+                // go-eqoa-server's trims after the 71 (`ARMOR_GEAR_SIZE`), else none
+                trim: std::array::from_fn(|k| rgba(net::session::LIVE_GEAR_SIZE + 4 * k)),
+                // the character record carries no auras: character select draws none
+                auras: Default::default(),
             }),
             cape: None,
+            options: Vec::new(),
+            info: None,
         }
     }
 
@@ -181,6 +208,7 @@ impl CharRecord {
             hair_style: self.hair_style as i64,
             face: self.face as i64,
             gear: Vec::new(),
+            options: self.options.clone(),
         }
     }
 }
@@ -204,8 +232,9 @@ pub enum Req {
     Select(usize),
     /// `DeleteCharacter(i)`
     Delete(usize),
-    /// `SetCharLook(i, face, hair style, hair length, hair colour)`
-    Look(usize, [i32; 4]),
+    /// `SetCharLook(i, face, hair style, hair length, hair colour)`, and the
+    /// race's options re-chosen with it (a game race's skin: `raceopts`)
+    Look(usize, [i32; 4], Vec<(String, u8)>),
     /// `Msg0777`: back to the list, quietly
     Msg0777,
 }
@@ -572,10 +601,19 @@ impl Client {
         }
     }
 
-    /// `CharacterList`: the characters (eight at most), creation closed,
+    /// `CharacterList`: the characters (eight at most, or as many as the
+    /// server said it lists: `Session::char_slots`), creation closed,
     /// character select up.
     fn character_list(&mut self, list: &[net::session::Character]) {
-        self.chars = list.iter().take(8).map(CharRecord::of).collect();
+        let chars: Vec<CharRecord> = list.iter().take(self.char_slots() as usize).map(CharRecord::of).collect();
+        // the figure follows the list: a list that puts another character (or
+        // the same in another look) at the selection has it made again before
+        // it is drawn (`CharSelect::list_replaced`)
+        let at = self.select.sel as usize;
+        self.select.list_replaced(self.chars.get(at), chars.get(at));
+        self.chars = chars;
+        self.select.cap = self.char_slots() as i32;
+        self.select.reveal(self.chars.len() as i32);
         // creation's form and pages start over; the selection stays where
         // it was (`CreateCharacter` left it on the new character's slot)
         self.create.reset();
@@ -669,7 +707,10 @@ impl Client {
         let mut created = None;
         match self.top {
             Wnd::Server => self.server_wnd.draw(&mut ui, &self.shards, &mut reqs),
-            Wnd::Select => self.select.draw(&mut ui, &self.chars, self.stage.as_mut(), &mut reqs),
+            Wnd::Select => {
+                self.select.cap = self.char_slots() as i32;
+                self.select.draw(&mut ui, &self.chars, self.stage.as_mut(), &mut reqs)
+            }
             Wnd::Notice => self.notice.draw(&mut ui),
             Wnd::Create => {
                 created = Some(match self.session.as_mut() {
@@ -735,6 +776,7 @@ impl Client {
         };
         self.select.sel = self.chars.len() as i32;
         self.chars.push(rec);
+        self.select.reveal(self.chars.len() as i32);
         self.top = Wnd::Select;
         self.set_active(Wnd::Select);
         self.select.show_text_none();
@@ -763,6 +805,8 @@ impl Client {
         }
         let Some(s) = self.session.as_mut() else { return };
         let events = s.pump();
+        // go-eqoa-server's armour (set 9, the trims), as the server says
+        crate::s2::set_server_armor(s.armor_look);
         // a character played while the server's worlds were being built goes
         // once the server is told which are held (the pump told it), or once
         // the server's word comes that its login needs none of them
@@ -783,6 +827,8 @@ impl Client {
         crate::inventory::set_caps(s.item_lists);
         for c in &mut self.chars {
             c.cape = if s.capes { s.cape_list.get(&c.server_id).copied() } else { None };
+            // and more of each, on a server that sends it (`net::selectinfo`)
+            c.info = s.select_info.get(&c.server_id).cloned();
         }
         // and its races' own options and the looks chosen (`raceopts`)
         crate::raceopts::set_options(s.race_options.as_ref());
@@ -891,11 +937,18 @@ impl Client {
                         self.chars.remove(i);
                     }
                 }
-                Req::Look(i, [face, style, length, color]) => {
+                Req::Look(i, [face, style, length, color], options) => {
                     // `SetCharLook`: Frontiers only
-                    if self.expansion() & 2 != 0 && i < self.chars.len() && self.chars.len() < 9 {
+                    if self.expansion() & 2 != 0 && i < self.chars.len() && self.chars.len() <= self.char_slots() as usize {
                         let c = &mut self.chars[i];
                         (c.face, c.hair_style, c.hair_length, c.hair_color) = (face, style, length, color);
+                        // the race's options re-chosen: kept for the 0x002A, and
+                        // the character drawn in them here until the server's
+                        // list says (`raceopts`)
+                        if !options.is_empty() {
+                            crate::raceopts::set_look_of(&c.name, crate::raceopts::rechosen_by_name(&c.name, c.own_race(), c.sex(), c.model, &options));
+                            c.options = options;
+                        }
                     }
                 }
                 Req::Msg0777 => {
@@ -908,10 +961,16 @@ impl Client {
         }
     }
 
-    /// `SelectCharacter(i)`: past the list (fewer than eight), creation;
+    /// The characters character select has slots for: CLIENT's eight, or
+    /// more from a server that said it lists more (`Session::char_slots`).
+    fn char_slots(&self) -> u32 {
+        self.session.as_ref().map_or(net::session::CLIENT_CHAR_SLOTS, |s| s.char_slots).max(net::session::CLIENT_CHAR_SLOTS)
+    }
+
+    /// `SelectCharacter(i)`: past the list (fewer than its slots), creation;
     /// else the character played (0x002A with its look).
     fn select_character(&mut self, i: usize) {
-        if i >= self.chars.len() && self.chars.len() < 8 {
+        if i >= self.chars.len() && self.chars.len() < self.char_slots() as usize {
             self.select.show_text_none();
             self.create.open();
             self.top = Wnd::Create;
@@ -960,6 +1019,15 @@ impl Client {
         self.active == Wnd::Create && self.create.typing()
     }
 
+    /// The mouse wheel's `lines` (up positive) or a finger's drag (`dy`
+    /// frame pixels, down positive): character select's list scrolls; no
+    /// other window here takes them.
+    pub fn scroll(&mut self, lines: f32, dy: f32) {
+        if self.active == Wnd::Select {
+            self.select.scroll(lines, dy, self.chars.len() as i32);
+        }
+    }
+
     /// A pointer at frame point `p`: the keys the window under it asks for.
     pub fn point(&mut self, p: [f32; 2]) -> Vec<i32> {
         let mut keys = match self.active {
@@ -994,7 +1062,53 @@ mod tests {
     use super::*;
 
     fn character(name: &str, id: i64, gear: Vec<u8>) -> net::session::Character {
-        net::session::Character { name: name.into(), server_id: id, model: 0x70D898C6, class: 11, race: 2, level: 7, hair_color: 1, hair_length: 2, hair_style: 3, face: 1, gear }
+        net::session::Character { name: name.into(), server_id: id, model: 0x70D898C6, class: 11, race: 2, level: 7, hair_color: 1, hair_length: 2, hair_style: 3, face: 1, gear, options: Vec::new() }
+    }
+
+    /// The list sent again puts another character at the selection: the figure
+    /// is made again (the server owner's of 2026-11-14: a session's first list
+    /// is go-eqoa-server's eight most recently played in the disc's look, Dust
+    /// first, and the whole list in the live look comes a moment later,
+    /// Meshuggah first; the figure kept from the first drew Dust at
+    /// Meshuggah's slot). The same character in the live look is made again
+    /// too (its dyes); the same list again, or what the pump adds to a record
+    /// (its cape, its select info), keeps it. The control: comparing the
+    /// selected slot's name alone, as the figure's own look is not, would keep
+    /// the disc's look over the live one's.
+    #[test]
+    fn the_figure_follows_the_list() {
+        let mut dyed = vec![0u8; net::session::LIVE_GEAR_SIZE];
+        dyed[19..25].copy_from_slice(&[3; 6]);
+        for k in 0..6 {
+            dyed[43 + 4 * k..47 + 4 * k].copy_from_slice(&[0xD1, 0, 0, 0xFF]);
+        }
+        let mut disc = vec![0u8; 32];
+        disc[20..26].copy_from_slice(&[3; 6]);
+        let mut first = vec![character("Dust", 197, disc.clone()), character("Skinny", 470, disc.clone())];
+        first[0].model = 0x7ED8_9DAA;
+        let mut whole = vec![character("Meshuggah", 47, dyed.clone()), character("Dust", 197, dyed.clone())];
+        whole[0].model = 0x4C6F_A532;
+        let records = |l: &[net::session::Character]| l.iter().map(CharRecord::of).collect::<Vec<_>>();
+        let (a, b) = (records(&first), records(&whole));
+        assert!(select::refigure(a.first(), b.first()), "another character at the selection: made again");
+        assert!(!select::refigure(b.first(), b.first()), "the same list again: kept");
+        let mut c = b[0].clone();
+        c.cape = Some(Default::default());
+        c.info = Some(Default::default());
+        assert!(!select::refigure(b.first(), Some(&c)), "the pump's cape and select info: kept (the cape is put on every frame)");
+        // the same character, the disc's look then the live one's (its dyes)
+        let mut live = vec![character("Dust", 197, dyed)];
+        live[0].model = 0x7ED8_9DAA;
+        let l = records(&live);
+        assert!(select::refigure(a.first(), l.first()), "the same character in its dyes: made again");
+        assert_eq!(a[0].name, l[0].name, "the control: by name alone it would have been kept");
+        assert!(select::refigure(a.first(), None) && select::refigure(None, a.first()), "a slot emptied or filled");
+        // and through the list's own path: the selection stays at its slot
+        let mut cl = Client::new();
+        cl.phase = 3;
+        cl.character_list(&first);
+        cl.character_list(&whole);
+        assert_eq!((cl.select.sel, cl.chars[0].name.as_str()), (0, "Meshuggah"));
     }
 
     /// `CharacterList`'s raw 32 bytes: the robe as an int, its tint, three
@@ -1047,6 +1161,25 @@ mod tests {
         assert_eq!((look.armor_color, look.robe_color), (Some(l.armor), Some(l.robe)));
         let disc = CharRecord::of(&character("Plain", 8, vec![0; net::session::DISC_GEAR_SIZE]));
         assert!(disc.colors.is_none() && select::look_of(&disc, true).armor_color.is_none(), "the control: the disc's record");
+    }
+
+    /// go-eqoa-server's record with its armour (`ARMOR_GEAR_SIZE`: the live
+    /// game's 71, then six trim colours): the trims read into the colours and
+    /// onto the look, set 9 kept; the live game's 71 alone (the control) have
+    /// no trim.
+    #[test]
+    fn a_record_with_the_servers_armour_reads_its_trims() {
+        let mut g = vec![0u8; net::session::ARMOR_GEAR_SIZE];
+        g[19] = 9;
+        g[net::session::LIVE_GEAR_SIZE..net::session::LIVE_GEAR_SIZE + 4].copy_from_slice(&[0xD1, 0, 0, 0xFF]);
+        g[net::session::LIVE_GEAR_SIZE + 16..net::session::LIVE_GEAR_SIZE + 20].copy_from_slice(&[0x20, 0x50, 0xE0, 0xFF]);
+        let r = CharRecord::of(&character("Gilded", 9, g.clone()));
+        assert_eq!(r.armor[0], 9);
+        let l = r.colors.expect("colours");
+        assert_eq!(l.trim, [[0xD1, 0, 0, 0xFF], [0; 4], [0; 4], [0; 4], [0x20, 0x50, 0xE0, 0xFF], [0; 4]]);
+        assert_eq!(select::look_of(&r, true).trim_color, Some(l.trim));
+        let live = CharRecord::of(&character("Plain", 8, g[..net::session::LIVE_GEAR_SIZE].to_vec()));
+        assert_eq!(live.colors.unwrap().trim, [[0; 4]; 6], "the control: the live game's record");
     }
 
     /// A character played while the server's worlds are still being built

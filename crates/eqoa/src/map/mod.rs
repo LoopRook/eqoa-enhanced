@@ -800,6 +800,12 @@ impl Map {
     /// The area a spot is in: its cell's name, as the map's names and title
     /// have it (`cells::name`), when there is one.
     pub fn area_of(&self, spot: community::Spot, words: Option<&vi::strtab::StringTable>) -> Option<String> {
+        // the Plane of Sky's: its isle (`skyisles`; a waypoint has no height, so of two isles over one another the lower)
+        if spot.world == crate::skyisles::WORLD
+            && let Some(isle) = crate::skyisles::isle(spot.at[0], f32::NAN, spot.at[1])
+        {
+            return Some(isle.to_string());
+        }
         let bounds = self.names.bounds.get(usize::try_from(spot.world).ok()?).copied().flatten();
         let n = cells::name(spot.world, bounds, (spot.at[0] / CELL) as i32, (spot.at[1] / CELL) as i32)?;
         words.map(|t| t.get(n as i32, 0).to_string()).filter(|s| s != "(null)" && !s.is_empty())
@@ -1782,7 +1788,28 @@ impl Map {
         let mut names = Vec::new();
         let k = (f([1.0, 0.0])[0] - f([0.0, 0.0])[0]).max(1e-6);
         let font = l.assets.font.map(|fo| (ui.fonts[fo].height as f32, fo));
-        for cell in 0..cells.len() {
+        // the Plane of Sky's isles by name, each on its own (`skyisles::labels`), in the cells' names' place: the
+        // biggest first, a name that would cover another's moved above or below it, else left out
+        let sky = w.index == crate::skyisles::WORLD;
+        let mut sky_names: Vec<([f32; 2], String)> = Vec::new();
+        if sky && let Some((h, fo)) = font {
+            let wanted: Vec<([f32; 2], &str)> = crate::skyisles::labels().iter().map(|&(n, at)| (v.to_window(size, at), n)).collect();
+            let rects: Vec<[f32; 4]> = wanted
+                .iter()
+                .map(|&(at, n)| {
+                    let half = ui.fonts[fo].string_width(&vi::ui::wide(n)) as f32 / k / 2.0 + 2.0;
+                    [at[0] - half, at[1] - h / k / 2.0, at[0] + half, at[1] + h / k / 2.0]
+                })
+                .collect();
+            for ((_, n), spot) in wanted.iter().zip(crate::skyisles::place_labels(&rects)) {
+                let Some(q) = spot else { continue };
+                let mid = [(q[0] + q[2]) / 2.0, (q[1] + q[3]) / 2.0];
+                if (0.0..size.0 as f32).contains(&mid[0]) && (0.0..size.1 as f32).contains(&mid[1]) {
+                    sky_names.push((f(mid), n.to_string()));
+                }
+            }
+        }
+        for cell in (0..cells.len()).filter(|_| !sky) {
             let (c, r) = cells.col_row(cell);
             let rect = rect_of(cells.rect(cell));
             if rect[2] < 0.0 || rect[0] > size.0 as f32 || rect[3] < 0.0 || rect[1] > size.1 as f32 {
@@ -1823,11 +1850,13 @@ impl Map {
             None => cells::name(w.index, bounds, (v.center[0] / CELL) as i32, (v.center[1] / CELL) as i32).and_then(|n| word(n as i32)),
         };
         let (built, of) = w.builder.progress();
-        let c = chrome::Chrome {
+        let mut c = chrome::Chrome {
             corners: [f([0.0, 0.0]), f([size.0 as f32, size.1 as f32])],
-            title: match area {
-                Some(a) => format!("{world_name}: {a}"),
-                None => world_name,
+            // the Plane of Sky's isle the player stands on (`skyisles`): "Plane of Sky (Night Chain 1)"
+            title: match (player.and_then(|(p, _)| crate::skyisles::place(w.index, p[0], p[1], p[2])), area) {
+                (Some(isle), _) => isle,
+                (None, Some(a)) => format!("{world_name}: {a}"),
+                (None, None) => world_name,
             },
             names,
             keyboard: cx.keyboard,
@@ -1847,6 +1876,18 @@ impl Map {
                 &fallback
             }
         };
+        // the isles' names clear of the chrome's panels and words (its legend, its title)
+        if !sky_names.is_empty() {
+            let panels = chrome::footprint(&l.assets.raster(ui), vui, &c);
+            let h = font.map_or(16.0, |f| f.0);
+            for (at, n) in sky_names {
+                let half = font.map_or(0, |(_, fo)| ui.fonts[fo].string_width(&vi::ui::wide(&n))) as f32 / 2.0;
+                let r = [at[0] - half, at[1] - h / 2.0, at[0] + half, at[1] + h / 2.0];
+                if !panels.iter().any(|q| r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3]) {
+                    c.names.push((at, n));
+                }
+            }
+        }
         // where the chrome will go, for what keeps clear of it
         let footprint = chrome::footprint(&l.assets.raster(ui), vui, &c);
         // the names, then the group and the player over them, then the rest
@@ -1866,6 +1907,7 @@ impl Map {
             }
             markers::draw_routes(ui, white, &pieces, half * k, shade * k);
             let shown: Vec<(markers::Marker, [f32; 2])> = markers::of_world(w.index)
+                .filter(|m| m.shown_at(v.scale))
                 .map(|m| (m, v.to_window(size, m.at())))
                 .filter(|(_, p)| p[0] >= lo[0] && p[1] >= lo[1] && p[0] <= hi[0] && p[1] <= hi[1])
                 .map(|(m, p)| (m, f(p)))
@@ -2189,6 +2231,66 @@ impl Map {
 /// across about (39, 54)), which a click or a tap opens the map from.
 pub fn on_compass(f: [f32; 2]) -> bool {
     (f[0] - 39.0).powi(2) + (f[1] - 54.0).powi(2) <= 22.0 * 22.0
+}
+
+/// What the player's dart on the minimap and the map turns with (Extended >
+/// Map's Map Pointer; petition 1848, "minimap pointer should turn the way you
+/// move the camera when looking around. similar to the way the compass
+/// moves"): the way the character faces (the walk's heading, as it always
+/// was), or the way the camera looks (the eye's heading, the compass's).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Pointer {
+    #[default]
+    Facing,
+    Camera,
+}
+
+impl Pointer {
+    pub fn other(self) -> Pointer {
+        match self {
+            Pointer::Facing => Pointer::Camera,
+            Pointer::Camera => Pointer::Facing,
+        }
+    }
+
+    /// Its name on the Extended page.
+    pub fn name(self) -> &'static str {
+        match self {
+            Pointer::Facing => "Facing",
+            Pointer::Camera => "Camera",
+        }
+    }
+
+    /// Its word in `client.opt`'s line.
+    pub fn key(self) -> &'static str {
+        match self {
+            Pointer::Facing => "facing",
+            Pointer::Camera => "camera",
+        }
+    }
+
+    pub fn from_key(k: &str) -> Option<Pointer> {
+        match k {
+            "facing" => Some(Pointer::Facing),
+            "camera" => Some(Pointer::Camera),
+            _ => None,
+        }
+    }
+
+    /// The dart's heading: `facing` (the walk's) or `camera` (the eye's, the
+    /// compass's), by this choice.
+    pub fn heading(self, facing: f32, camera: f32) -> f32 {
+        match self {
+            Pointer::Facing => facing,
+            Pointer::Camera => camera,
+        }
+    }
+}
+
+/// The heading the player's dart is drawn at this frame (`Context::player`),
+/// by Map Pointer (`settings::map_pointer`): each window's own walk and camera.
+pub fn pointer_heading(facing: f32, camera: f32) -> f32 {
+    crate::settings::map_pointer().heading(facing, camera)
 }
 
 fn title_case(s: &str) -> String {

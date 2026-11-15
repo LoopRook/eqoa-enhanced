@@ -36,11 +36,15 @@
 //! player walks, a spell's) is drawn whole every frame. A zone's members are
 //! culled by each instance's box against the light's sphere and each face.
 //!
-//! What is nearer a light than [`NEAR`] casts nothing for it (a torch's own
-//! stick, a lamp's housing round its flame), nor does a body whose own box
-//! holds the light (a spell's light inside its target), nor, for the
-//! personal light, the body under it (the player's: its light 3 over the
-//! player's feet would shadow the ground round them).
+//! What does not move and is nearer a light than [`NEAR`] casts nothing for
+//! it (a torch's own stick, a lamp's housing round its flame); a mover is
+//! never cut there (held on the near plane: petition 1591's helm floating up
+//! to the lantern lost a square from its shadow's middle), nor does a body whose own box
+//! holds the light (a spell's light inside its target). For the personal
+//! light the body under it (the player's) casts into the face looking down
+//! alone, what of it is `OWN_CLEAR` (lightcast.wgsl) under the light: its
+//! shadow on the ground under it, a hovering body's too (a gargoyle's wings
+//! round its lantern), and nothing beside or over the light.
 //!
 //! The receivers are Dynamic Lighting's pipelines with the point term
 //! taking the light's visibility (`lightshadow.wgsl`), with the sun's map too
@@ -95,8 +99,10 @@ pub fn map_size(device: &wgpu::Device) -> u32 {
 /// memory of the frame's 32.
 pub const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth16Unorm;
 
-/// Each face's near plane: what is nearer the light than this along the
-/// face's axis casts nothing (a torch's stick, a lamp's housing).
+/// Each face's near plane: what does not move and is nearer the light than
+/// this along the face's axis casts nothing (a torch's stick, a lamp's
+/// housing); a mover's vertex nearer than it is held on it (`lightcast.wgsl`'s
+/// `vs_light_cast_mover`), so a mover's shadow is never cut.
 pub const NEAR: f32 = 0.5;
 
 /// The receivers' filter (`lightshadow.wgsl`): a tent of the map's texels
@@ -252,6 +258,18 @@ fn hold(l: &lit::PointLight) -> f32 {
 pub const SETTLE: f32 = 0.1;
 
 /// The faces, each its view's forward and up axes (right is forward × up):
+/// The face looking down (−y, [`face_of`]'s order): the only one the
+/// player's own body casts into for the personal light (`under_personal`).
+const DOWN: usize = 3;
+
+/// Whether `m` is the body under the personal light at `at`: a skinned
+/// model (and what its palette carries: a cape) whose own box's footprint
+/// holds the light. A held sword's box straddles the lantern's line in an
+/// idle stance and is not a body: weapons cast every way (petition 1389).
+fn under_personal(m: &GpuModel, at: Vec3) -> bool {
+    m.skinned && m.core.get().is_some_and(|(lo, hi)| lo.x <= at.x && at.x <= hi.x && lo.z <= at.z && at.z <= hi.z)
+}
+
 /// +x, −x, +y, −y, +z, −z, as `lightshadow.wgsl`'s `light_face` picks them.
 pub const FACES: [(Vec3, Vec3); 6] = [(Vec3::X, Vec3::Y), (Vec3::NEG_X, Vec3::Y), (Vec3::Y, Vec3::Z), (Vec3::NEG_Y, Vec3::NEG_Z), (Vec3::Z, Vec3::Y), (Vec3::NEG_Z, Vec3::Y)];
 
@@ -294,10 +312,16 @@ pub fn face_matrix(k: usize, far: f32, g: f32) -> Mat4 {
 
 /// Whether any of the box `(lo, hi)` (less the light) is inside face `k`'s
 /// view out to `far`, widened to `g`.
-pub fn in_face(k: usize, (lo, hi): (Vec3, Vec3), far: f32, g: f32) -> bool {
+pub fn in_face(k: usize, b: (Vec3, Vec3), far: f32, g: f32) -> bool {
+    in_face_from(k, b, NEAR, far, g)
+}
+
+/// `in_face` from `near` along the face's axis (a mover's: 0, as its part
+/// nearer than [`NEAR`] is held on the plane, not cut).
+pub fn in_face_from(k: usize, (lo, hi): (Vec3, Vec3), near: f32, far: f32, g: f32) -> bool {
     let (f, u) = FACES[k];
     let r = f.cross(u);
-    let planes = [(f, -NEAR), (-f, far), (f * g - r, 0.0), (f * g + r, 0.0), (f * g - u, 0.0), (f * g + u, 0.0)];
+    let planes = [(f, -near), (-f, far), (f * g - r, 0.0), (f * g + r, 0.0), (f * g - u, 0.0), (f * g + u, 0.0)];
     planes.iter().all(|&(n, d)| {
         let c = Vec3::new(if n.x >= 0.0 { hi.x } else { lo.x }, if n.y >= 0.0 { hi.y } else { lo.y }, if n.z >= 0.0 { hi.z } else { lo.z });
         n.dot(c) + d >= 0.0
@@ -458,7 +482,14 @@ const TENT: &str = "    // the texels round the point, their centres at whole nu
 /// `None` if lit.wgsl's lines are not there to change
 /// (tests::the_receivers_take_the_point_lines holds them to it).
 pub(crate) fn receivers_wgsl(sun: bool, filter: Filter) -> Option<String> {
-    let mut lit = include_str!("lit.wgsl").to_string();
+    receivers_from(include_str!("lit.wgsl"), include_str!("lightshadow.wgsl"), sun, filter)
+}
+
+/// `receivers_wgsl` from lit.wgsl's text `lit` and lightshadow.wgsl's
+/// `shadow`, their lines found whatever the checkout ended them with
+/// (`crate::lf`).
+fn receivers_from(lit: &str, shadow: &str, sun: bool, filter: Filter) -> Option<String> {
+    let mut lit = crate::lf(lit);
     if sun {
         lit = sunshadow::shadowed_lit(&lit)?;
     }
@@ -466,13 +497,13 @@ pub(crate) fn receivers_wgsl(sun: bool, filter: Filter) -> Option<String> {
         return None;
     }
     let lit = lit.replace(POINT_LINE, POINT_LINE_SHADOWED).replace(PLANT_LINE, PLANT_LINE_SHADOWED);
-    let shadow = include_str!("lightshadow.wgsl");
+    let shadow = crate::lf(shadow);
     let tent = format!("{TENT}{WIDE}");
     if shadow.matches(&tent).count() != 1 {
         return None;
     }
     let shadow = match filter {
-        Filter::Wide => shadow.to_string(),
+        Filter::Wide => shadow,
         Filter::Narrow => shadow.replace(WIDE, NARROW),
         Filter::One => shadow.replace(&tent, ONE),
     };
@@ -532,6 +563,13 @@ pub(crate) struct Points {
     /// The casters: alpha tested, and a solid layer's, depth alone.
     caster: wgpu::RenderPipeline,
     solid: wgpu::RenderPipeline,
+    /// The same for a mover, held on the near plane rather than cut by it.
+    mover: wgpu::RenderPipeline,
+    mover_solid: wgpu::RenderPipeline,
+    /// The player's own body under the personal light (lightcast.wgsl's
+    /// `vs_light_cast_own`: the face looking down alone, what is
+    /// `OWN_CLEAR` under the light).
+    own: wgpu::RenderPipeline,
     /// The copy from a cache's face to its live one.
     copy: wgpu::RenderPipeline,
     copy_bg: wgpu::BindGroup,
@@ -648,6 +686,8 @@ impl Points {
             })
         };
         let (caster, solid) = (cast_pipeline("vs_light_cast", Some("fs_light_cast")), cast_pipeline("vs_light_cast_solid", None));
+        let (mover, mover_solid) = (cast_pipeline("vs_light_cast_mover", Some("fs_light_cast")), cast_pipeline("vs_light_cast_solid_mover", None));
+        let own = cast_pipeline("vs_light_cast_own", Some("fs_light_cast_own"));
         // the copy: the cache's depth through a nearest sampler (a depth
         // texture binds as an unfilterable float; wgpu's GL backend leaves a
         // depth texture's own filters linear, which GLES 3.0 counts as
@@ -697,6 +737,9 @@ impl Points {
             cache,
             caster,
             solid,
+            mover,
+            mover_solid,
+            own,
             copy,
             copy_bg,
             faces,
@@ -838,16 +881,24 @@ impl Points {
                 Mover::Model(m) => m.world.get(),
                 Mover::Prop(_, p) => p.posed.get(),
             };
-            let in_face = |face: usize, b: Option<(Vec3, Vec3)>| b.is_none_or(|(lo, hi)| in_face(face, (lo - at, hi - at), range, g));
+            // a mover in a face by any part of it before the light along
+            // the face's axis (its part nearer than NEAR held on the plane)
+            let in_face = |face: usize, b: Option<(Vec3, Vec3)>| b.is_none_or(|(lo, hi)| in_face_from(face, (lo - at, hi - at), 0.0, range, g));
+            // the player's own body under the personal light casts into the
+            // face looking down alone: its shadow on the ground under it,
+            // as a light over its head casts it, and nothing of it beside or
+            // over the light (a hovering body round its lantern) darkening
+            // the world about it
+            let in_face = |face: usize, m: &Mover| in_face(face, mover_box(m)) && (face == DOWN || !(personal && matches!(m, Mover::Model(m) if under_personal(m, at))));
             if s.still < SETTLE {
                 // still moving: drawn whole, every face
                 let near = near(&reached, at, range);
                 for face in 0..6 {
-                    let here: Vec<&&Mover> = casting.iter().filter(|m| in_face(face, mover_box(m))).collect();
+                    let here: Vec<&&Mover> = casting.iter().filter(|m| in_face(face, m)).collect();
                     let mut pass = self.pass(encoder, &self.live[k * 6 + face]);
                     let mut current = None;
                     drawn.draws += self.statics(r, &mut pass, &near, at, range, face, g, k * 6 + face, &mut current);
-                    drawn.draws += self.movers(r, &mut pass, &here, k * 6 + face, &mut current);
+                    drawn.draws += self.movers(r, &mut pass, &here, k * 6 + face, &mut current, personal.then_some(at));
                     drawn.whole += 1;
                 }
                 s.dirty = [true; 6];
@@ -865,7 +916,7 @@ impl Points {
                 s.dirty = [true; 6];
             }
             for face in 0..6 {
-                let here: Vec<&&Mover> = casting.iter().filter(|m| in_face(face, mover_box(m))).collect();
+                let here: Vec<&&Mover> = casting.iter().filter(|m| in_face(face, m)).collect();
                 if here.is_empty() && !s.dirty[face] {
                     continue;
                 }
@@ -877,7 +928,7 @@ impl Points {
                 drawn.copied += 1;
                 drawn.draws += 1;
                 let mut current = None;
-                drawn.draws += self.movers(r, &mut pass, &here, k * 6 + face, &mut current);
+                drawn.draws += self.movers(r, &mut pass, &here, k * 6 + face, &mut current, personal.then_some(at));
                 s.dirty[face] = !here.is_empty();
             }
         }
@@ -945,12 +996,10 @@ impl Points {
                     return false;
                 }
                 match m.core.get() {
-                    // the personal light's own body (a skinned one, and what
-                    // its palette carries: a cape) by its footprint; a held
-                    // sword's box straddles the lantern's line in an idle
-                    // stance, and was taken for the body: weapons cast only
-                    // while walking (petition 1389)
-                    Some((lo, hi)) if personal && m.skinned => !(lo.x <= at.x && at.x <= hi.x && lo.z <= at.z && at.z <= hi.z),
+                    // the personal light's own body casts, but only down
+                    // (`under_personal`: the owner, 2026-11-12, "it shows it
+                    // for other chars but not the player themselves")
+                    Some(_) if personal && under_personal(m, at) => true,
                     Some((lo, hi)) => !(lo.cmple(at).all() && at.cmple(hi).all()),
                     None => true,
                 }
@@ -1031,23 +1080,33 @@ impl Points {
     /// The movers `here` into a face (its uniform `layer`): a model's opaque
     /// layers of the level it draws, a prop's every instance. Returns the
     /// draw calls.
-    fn movers(&self, r: &Renderer, pass: &mut wgpu::RenderPass<'_>, here: &[&&Mover], layer: usize, current: &mut Option<bool>) -> u32 {
+    fn movers(&self, r: &Renderer, pass: &mut wgpu::RenderPass<'_>, here: &[&&Mover], layer: usize, current: &mut Option<bool>, own: Option<Vec3>) -> u32 {
         if here.is_empty() {
             return 0;
         }
         pass.set_bind_group(0, &r.frame_bg, &[]);
         pass.set_bind_group(3, &self.face_bgs[layer], &[]);
-        let mut set_pipeline = |pass: &mut wgpu::RenderPass<'_>, solid: bool| {
-            if *current != Some(solid) {
-                pass.set_pipeline(if solid { &self.solid } else { &self.caster });
-                *current = Some(solid);
+        // the movers' own pipelines (held on the near plane): what the
+        // statics set is not theirs, and theirs is not the statics'; and the
+        // player's own body under the personal light (`own`) its own
+        let mut mine = None;
+        let mut set_pipeline = |pass: &mut wgpu::RenderPass<'_>, solid: bool, own: bool| {
+            if mine != Some((solid, own)) {
+                pass.set_pipeline(match (solid, own) {
+                    (_, true) => &self.own,
+                    (true, false) => &self.mover_solid,
+                    (false, false) => &self.mover,
+                });
+                mine = Some((solid, own));
             }
         };
+        *current = None;
         let mut draws = 0;
         let mut layer_bound = false;
         for m in here {
             match **m {
                 Mover::Model(m) => {
+                    let mine = own.is_some_and(|at| under_personal(m, at));
                     pass.set_vertex_buffer(0, m.vertices.slice(..));
                     pass.set_vertex_buffer(1, m.instances.slice(..));
                     pass.set_vertex_buffer(2, m.statics.slice(..));
@@ -1058,8 +1117,9 @@ impl Points {
                         }
                         pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
                         for p in passes.iter().take(m.passes_used).filter(|p| p.blend == 0) {
-                            let solid = p.solid();
-                            set_pipeline(pass, solid);
+                            // the own body's fragments are cut: its layer bound
+                            let solid = p.solid() && !mine;
+                            set_pipeline(pass, solid, mine);
                             if !solid || !layer_bound {
                                 pass.set_bind_group(1, &p.bg, &[]);
                                 layer_bound = true;
@@ -1078,7 +1138,7 @@ impl Points {
                     pass.set_vertex_buffer(2, gr.statics.slice(i0 * 16..(i0 + n) * 16));
                     for (indices, passes) in p.batches.iter().filter(|(_, ps)| opaque(ps)) {
                         for q in passes.iter().filter(|q| q.blend == 0) {
-                            set_pipeline(pass, q.solid);
+                            set_pipeline(pass, q.solid, false);
                             if !q.solid || !layer_bound {
                                 pass.set_bind_group(1, &q.bg, &[]);
                                 layer_bound = true;
@@ -1129,6 +1189,23 @@ mod tests {
     /// lit.wgsl's point lines are there to change, once each, alone and
     /// after the sun's change: a change to either (another branch's) fails
     /// here, not as shadows that never come.
+    /// lit.wgsl and lightshadow.wgsl as a Windows checkout ends their lines
+    /// (`\r\n`, git's `core.autocrlf`, as the Windows release was built
+    /// until 2026-11-12, when it never made Light Shadows): every filter's
+    /// module, alone and with the sun, the one a `\n` checkout makes. The
+    /// control: the point line itself is not in the text as it stands.
+    #[test]
+    fn the_receivers_are_made_from_a_windows_checkout() {
+        let crlf = |s: &str| crate::lf(s).replace('\n', "\r\n");
+        let (lit, shadow) = (crlf(include_str!("lit.wgsl")), crlf(include_str!("lightshadow.wgsl")));
+        assert!(!lit.contains(POINT_LINE) && !shadow.contains(&format!("{TENT}{WIDE}")), "the control: unfound as the text stands");
+        for (sun, filter) in FILTERS {
+            let made = receivers_from(&lit, &shadow, sun, filter);
+            assert!(made.is_some(), "sun {sun} {filter:?}: made");
+            assert_eq!(made, receivers_wgsl(sun, filter), "sun {sun} {filter:?}: as a \\n checkout's");
+        }
+    }
+
     #[test]
     fn the_receivers_take_the_point_lines() {
         for (sun, filter) in FILTERS {
@@ -1143,6 +1220,7 @@ mod tests {
             assert_eq!(s.contains("min(i.base.w, sun_shadow(i, n))"), sun);
         }
         assert!(CAST_WGSL.contains("fn vs_light_cast") && CAST_WGSL.contains("fn vs_light_cast_solid"));
+        assert!(CAST_WGSL.contains("fn vs_light_cast_mover") && CAST_WGSL.contains("fn vs_light_cast_solid_mover"));
     }
 
     /// Natively the wide tent, in a page and on Android the narrow one, and

@@ -207,15 +207,20 @@ impl Figure {
                 let Some(node) = cs.item_node(i).filter(|_| id != 0) else { continue };
                 // `AttachItem`: the item, or `!Item` when it is not there
                 let m = lib.lookup(id as i32).or_else(|| lib.lookup(vi::hash::hash_resource_id("!Item") as i32)).and_then(|r| lib.build_model(r));
-                if let Some(m) = m {
+                if let Some(mut m) = m {
+                    // its own colour on its glow (`aura`), as the world draws it
+                    if let Some(color) = crate::aura::hand(&look, i) {
+                        crate::aura::recolor(&mut m, color);
+                    }
                     attached.push((node, g.renderer.upload(g.device, g.queue, &m, &[render::IDENTITY], &textures)));
                 }
             }
             // the server's patch's tables (`s2`), retail's without one
             let t = crate::s2::get().cust();
             // on the node the world puts it on, seated as there (`play::attach`)
-            if let Some((node, m)) = crate::slotless::helm_on(lib, id, cs, true, look.armor[5], look.helm_color(&t), &t, true) {
+            if let Some((node, mut m)) = crate::slotless::helm_on(lib, id, cs, true, look.armor[5], look.helm_color(&t), &t, true) {
                 helm_worn = true;
+                crate::slotless::helm_trim(lib, &mut m, look.helm_color(&t), look.trim_color.map(|c| c[5]), &t);
                 attached.push((node, g.renderer.upload(g.device, g.queue, &m, &[render::IDENTITY], &textures)));
             }
             crate::play::dress_look(lib, id as i32, &mut built, cs, &look, helm_worn, &t, true);
@@ -322,7 +327,7 @@ impl Figure {
                 let Some(n) = cs.item_node(slot).filter(|_| item != 0).and_then(|node| cs.h.nodes.get(node as usize)) else { continue };
                 let at = Matrix44::mul(&n.world, &self.centre);
                 for (k, e) in crate::particles::item_emitters(lib, item).into_iter().enumerate() {
-                    hands.push(InHand { key: (0, slot, item, k), world: Matrix44::mul(&e.member, &at), def: e.def, how: How::Sprite(e.flags), drawn: true });
+                    hands.push(InHand { key: (0, slot, item, k), world: Matrix44::mul(&e.member, &at), def: e.def, how: How::Sprite(e.flags), drawn: true, tint: crate::aura::hand(&self.look, slot) });
                 }
             }
         });
@@ -382,7 +387,9 @@ mod tests {
     /// The items in a figure's hands carry their particles at character
     /// select as in the world (`particles_frame`): the Sword of Virtue's
     /// glow, round the hand that holds it. The control: the same figure with
-    /// nothing in its hands has none. Needs `run/eqoa.iso` (the pregame's
+    /// nothing in its hands has none. In the live look's crimson for its hand
+    /// (`aura`: the Heirloom Sword of Twisted Virtue) the glow is red, where
+    /// the disc's and a plain (white) one's are the same pale white. Needs `run/eqoa.iso` (the pregame's
     /// files, ITEM.CSF among them) and a graphics adapter.
     #[test]
     fn a_figures_epic_weapon_glows_at_character_select() {
@@ -409,7 +416,7 @@ mod tests {
         let human = vi::hash::hash_resource_id("HumanMale");
         let look = vi::cust::Look { hair: [1, 2, 3], face: 1, robe: -1, ..Default::default() };
         let eye = Vect3::of(0.0, 1.0, 4.0);
-        let glow = |items: [u32; 3], g: &mut Gpu| {
+        let glow_in = |items: [u32; 3], look: vi::cust::Look, g: &mut Gpu| {
             let mut fig = Figure::new(&lib, g, human, look, items, [0.0; 3], [0.0; 3], 0).unwrap();
             let mut hand = [0.0; 3];
             for t in (33..1500).step_by(33) {
@@ -421,13 +428,26 @@ mod tests {
                 hand = [w.m[3].x.0, w.m[3].y.0, w.m[3].z.0];
             }
             let quads: Vec<[f32; 3]> = fig.fx.iter().flat_map(|b| b.quads.iter().map(|q| q.center)).collect();
-            (quads, hand)
+            let colors: Vec<[f32; 4]> = fig.fx.iter().flat_map(|b| b.quads.iter().map(|q| q.color)).collect();
+            (quads, hand, colors)
+        };
+        let glow = |items: [u32; 3], g: &mut Gpu| {
+            let (q, h, _) = glow_in(items, look, g);
+            (q, h)
         };
         let (quads, hand) = glow([0x88EC_092D, 0, 0], &mut g);
         assert!(!quads.is_empty(), "the sword's glow");
         let near = |c: &[f32; 3]| (0..3).map(|k| (c[k] - hand[k]).powi(2)).sum::<f32>().sqrt() < 3.0;
         assert!(quads.iter().all(near), "round the hand at {hand:?}: {:?}", quads.iter().find(|c| !near(c)));
         assert!(glow([0; 3], &mut g).0.is_empty(), "the control: empty hands, no particles");
+        let sword = [0x88EC_092D, 0, 0];
+        let colored = |c: [u8; 4]| vi::cust::Look { item_color: Some([c, [255; 4], [255; 4]]), ..look };
+        let (_, _, disc) = glow_in(sword, look, &mut g);
+        let (_, _, plain) = glow_in(sword, colored([255; 4]), &mut g);
+        let (_, _, red) = glow_in(sword, colored([0xB0, 0x10, 0x2A, 0xFF]), &mut g);
+        assert_eq!(plain, disc, "white is plain: the disc's glow exactly");
+        assert!(!disc.is_empty() && disc.iter().all(|c| c[0] <= c[1].max(c[2]) + 0.01), "the disc's glow is a pale white, not red: {:?}", disc.first());
+        assert!(!red.is_empty() && red.iter().all(|c| c[0] > 3.0 * c[1].max(c[2]) || c[0] == 0.0), "crimson: {:?}", red.iter().find(|c| c[0] <= 3.0 * c[1].max(c[2])));
     }
 
     /// A figure in a body one of the server's races wears holds its items as
@@ -522,6 +542,106 @@ mod tests {
         assert_eq!(fig.models().count(), bare, "a style with no art: none drawn");
         fig.wear_cape(&lib, &mut g, None);
         assert_eq!((fig.models().count(), fig.cape()), (bare, None), "taken off");
+    }
+
+    /// Character select draws go-eqoa-server's set 9 (the ornate plate) as the
+    /// world does. Its five surfaces are CHAR.ESF's, which the pregame never
+    /// reads whole: with the server's armour in force it cuts the two bodies
+    /// they lie in out of CHAR.ESF (`s2::art_bodies`, by the file's
+    /// directory, as `res::Res::want_bodies` does) and registers them under
+    /// set 9's DictIDs (`s2::Rules::register_art_cut`). A figure made before
+    /// they came was dressed as the body's own clothes, the armour missing (the owner,
+    /// 2026-11-13: the look leaves a piece whose art is not there as it is);
+    /// once they come it is stale, made again, and every piece is its ornate
+    /// surface, dyed (the chest trimmed), a texture on the GPU. The control:
+    /// without the server's armour no bodies are asked for.
+    /// Needs `run/eqoa.iso` and a graphics adapter. With
+    /// `$EQOA_SELARMOR_PNG` (a folder) the select library's figure is drawn
+    /// there before and after (`dressview::shot`).
+    #[test]
+    fn a_figure_in_set_9_wears_the_ornate_plate() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        let Ok(mut iso) = iso::Iso::open(&path) else {
+            eprintln!("SKIP: no run/eqoa.iso");
+            return;
+        };
+        let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let instance = render::wgpu::Instance::new(render::wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&render::wgpu::RequestAdapterOptions::default())) else {
+            eprintln!("SKIP: no graphics adapter");
+            return;
+        };
+        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let mut renderer = render::Renderer::new(&device, &queue, render::TARGET_FORMAT);
+        // character select's library: the pregame's files, no CHAR.ESF
+        let mut lib = Library::new();
+        for f in crate::pregame::client::FILES {
+            if let Some(c) = iso.read(f).ok().and_then(|b| esf::Container::open(b).ok()) {
+                lib.add(crate::pregame::res::name_of(f).to_ascii_uppercase(), c);
+            }
+        }
+        let human = 0x70D8_98C6u32;
+        let grey = [0x80, 0x80, 0x80, 0xFF];
+        let mut trims = [[0u8; 4]; 6];
+        trims[0] = [0xD1, 0, 0, 0xFF];
+        let look = vi::cust::Look { hair: [1, 2, 3], face: 1, armor: [9; 6], armor_tint: [3; 6], armor_color: Some([grey; 6]), trim_color: Some(trims), robe: -1, ..Default::default() };
+        crate::s2::with_rules(crate::s2::Rules::retail(), || {
+            assert!(crate::s2::with_server_armor(false, crate::s2::art_bodies).is_empty(), "the control: no server armour, no bodies");
+            crate::s2::with_server_armor(true, || {
+                let bodies = crate::s2::art_bodies();
+                assert_eq!(bodies, [0xDC3B_344D, 0xDC3B_344E]);
+                // the textures set 9's five slots are dressed with, as the
+                // figure dresses them
+                let slot_textures = |lib: &Library| {
+                    let r = lib.lookup(human as i32).unwrap();
+                    let mut anims = AnimScene::<Ee>::default();
+                    let cs = load_csprite(lib, r, &mut anims, &mut AnimCache::new(), &mut Rand(1)).unwrap();
+                    let mut m = lib.build_model(r).unwrap();
+                    crate::play::dress_look(lib, human as i32, &mut m, &cs, &look, false, &crate::s2::get().cust(), true);
+                    let tex: Vec<i32> = cs.text_slots[..5].iter().filter_map(|&(entry, layer)| m.batches.iter().find(|b| b.material == entry).map(|b| b.layers[layer as usize].texture)).collect();
+                    tex
+                };
+                let made = |lib: &Library, r: &render::Renderer, tex: &[i32]| {
+                    use render::TextureSource;
+                    let src = render::library_textures(lib);
+                    tex.iter().map(|&t| r.texture_made(src.key(t))).collect::<Vec<_>>()
+                };
+                let shot = |lib: &Library, name: &str| {
+                    if let Some(dir) = std::env::var_os("EQOA_SELARMOR_PNG") {
+                        let words = crate::dressview::parse(&["set=9".to_string(), "dye=808080".to_string(), "trim=D10000".to_string(), "hair=1,2,3".to_string(), "face=1".to_string()]).unwrap();
+                        let out = std::path::Path::new(&dir).join(name);
+                        crate::dressview::shot(lib, human as i32, &words, out.to_str().unwrap()).unwrap();
+                        eprintln!("drew {}", out.display());
+                    }
+                };
+                let mut g = Gpu { renderer: &mut renderer, device: &device, queue: &queue };
+                let mut fig = Figure::new(&lib, &mut g, human, look, [0; 3], [0.0; 3], [0.0; 3], 0).unwrap();
+                let before = slot_textures(&lib);
+                assert_eq!(before.len(), 5);
+                // the bug: set 9's art is not in character select's library,
+                // so the look leaves every piece the body's own clothes
+                assert!(vi::cust::ORNATE.iter().all(|&id| lib.surface(id as i32).is_none()));
+                assert!(before.iter().all(|&t| !vi::cust::ORNATE.contains(&(render::recolor::root_of(t) as u32))), "the bug: no ornate piece at character select");
+                shot(&lib, "select-set9-before.png");
+                // the bodies cut out of CHAR.ESF by its directory, as the pregame does
+                let e = iso.find("CHAR.ESF").cloned().unwrap();
+                let mut window = esf::Window::new(std::fs::File::open(&path).unwrap(), e.lba as u64 * iso::SECTOR, e.size as u64);
+                let cut = crate::pregame::files::cut_from(&mut window, std::slice::from_ref(&bodies)).unwrap();
+                assert!(cut.bytes < 1 << 20, "{} bytes", cut.bytes);
+                let f = lib.add(crate::pregame::res::BODIES, cut.groups.into_iter().next().flatten().unwrap());
+                crate::s2::get().register_art_cut(&mut lib, f);
+                assert!(vi::cust::ORNATE.iter().all(|&id| lib.surface(id as i32).is_some()));
+                // as character select does when bodies come (`Client::bodies_in`)
+                assert!(fig.stale(&lib), "the figure asked for set 9's art and the answer changed");
+                assert!(fig.refresh(&lib, &mut g, 33), "made again");
+                let after = slot_textures(&lib);
+                // each piece its ornate surface, recoloured (the dye; the chest's trim too)
+                assert_eq!(after.iter().map(|&t| render::recolor::root_of(t) as u32).collect::<Vec<_>>(), vi::cust::ORNATE, "the ornate pieces");
+                assert!(render::recolor::source_of(after[0]).is_some_and(|(_, r)| r >> 24 == render::recolor::TRIM), "the chest trimmed");
+                assert_eq!(made(&lib, g.renderer, &after), [Some(true); 5], "every ornate piece a texture on the figure");
+                shot(&lib, "select-set9-after.png");
+            });
+        });
     }
 
     /// A figure is its model as the art drawn has it (`era`): with the 2002

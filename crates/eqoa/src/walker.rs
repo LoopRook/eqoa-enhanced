@@ -142,6 +142,9 @@ pub struct Walker {
     /// A GM's flight is on (the module's doc), and the orbit's pitch and its
     /// camera mode when it came on, its look put back when it ends.
     flying: bool,
+    /// A GM's noclip (`Client::noclip`, go-eqoa-server's 0x7E7A): in flight,
+    /// the walk passes through everything (`Aloft`).
+    noclip: bool,
     fly_tilt: Option<(i32, F<Ee>)>,
     /// This frame's length (s), as the camera's `Process` is told it.
     frame_s: f32,
@@ -265,15 +268,20 @@ impl Kept {
 
 /// The world as the walk meets it in flight (the module's doc): its collision
 /// the world's, and water everywhere with no surface, so `Process` takes the swim
-/// path whatever is really there, and past a real surface freely.
-struct Aloft<'a>(&'a mut World<Ee>);
+/// path whatever is really there, and past a real surface freely. In a GM's
+/// noclip (go-eqoa-server's `/noclip`, 0x7E7A, the GM Jibrish's petition 1904)
+/// it meets nothing at all: every wall, floor and ceiling is passed through.
+struct Aloft<'a> {
+    world: &'a mut World<Ee>,
+    noclip: bool,
+}
 
 impl Scene<Ee> for Aloft<'_> {
     fn time(&self) -> i64 {
-        self.0.time
+        self.world.time
     }
     fn collide_sphere(&mut self, s: &mut CollSphere<Ee>, filter: &mut Filter) -> bool {
-        self.0.collide_sphere(s, filter)
+        !self.noclip && self.world.collide_sphere(s, filter)
     }
     fn collide_env(&mut self, _: &mut EnvRay<Ee>) -> bool {
         false
@@ -379,9 +387,9 @@ const FLY_STOPPED_SQ: f32 = 0.0025;
 /// up, nothing a floor does not put back on the ground), so a body in the air
 /// would creep for good, and a 0x40 go out for each step of it where one standing
 /// still sends none. A floor or anything else met keeps the height it gave.
-fn process_aloft(w: &mut WalkControl<Ee>, scene: &mut World<Ee>) {
+fn process_aloft(w: &mut WalkControl<Ee>, scene: &mut World<Ee>, noclip: bool) {
     let (from, pushed) = (w.committed.position, w.phys.force);
-    w.process(0, &mut Aloft(scene));
+    w.process(0, &mut Aloft { world: scene, noclip });
     let (zero, stopped) = (F::<Ee>::ZERO, F::<Ee>::new(FLY_STOPPED_SQ));
     let v = w.phys.velocity;
     if pushed.x == zero && pushed.y == zero && pushed.z == zero && v.dot(&v) < stopped {
@@ -399,13 +407,13 @@ fn process_aloft(w: &mut WalkControl<Ee>, scene: &mut World<Ee>) {
 
 /// A console frame of the walk: `Process`, in flight in the world of water, the
 /// gait then the land's.
-fn step_frame(w: &mut WalkControl<Ee>, scene: &mut World<Ee>, flying: bool) {
+fn step_frame(w: &mut WalkControl<Ee>, scene: &mut World<Ee>, flying: bool, noclip: bool) {
     if !flying {
         w.process(0, scene);
         return;
     }
     let (from, was, ms) = (w.committed.position, w.committed.loco_state, scene.time - w.committed.time);
-    process_aloft(w, scene);
+    process_aloft(w, scene, noclip);
     fly_gait(w, &from, was, ms.min(w.tick_alt_ms as i64));
 }
 
@@ -461,7 +469,7 @@ impl Walker {
         cam.set_orbit_distance(dist);
         cam.set_orbit_angle_behind();
         let eye = cam.process(&mut scene);
-        Walker { cam, scene, eye, sprite: None, anims: AnimScene::default(), rand: Rand(1), shake: 0, reach: Default::default(), kept: None, rewound: false, given: None, scale: F::ONE, flying: false, fly_tilt: None, frame_s: 0.0, jump_asked: None, in_jump: false }
+        Walker { cam, scene, eye, sprite: None, anims: AnimScene::default(), rand: Rand(1), shake: 0, reach: Default::default(), kept: None, rewound: false, given: None, scale: F::ONE, flying: false, noclip: false, fly_tilt: None, frame_s: 0.0, jump_asked: None, in_jump: false }
     }
 
     /// `Respawn`'s placing: the character stood at `pos` (on the ground
@@ -540,14 +548,24 @@ impl Walker {
         let actor = self.actor();
         let Some(cs) = self.sprite.as_mut() else { return (actor.to_cols(), Vec::new()) };
         self.anims.time = self.scene.time;
+        // a sea creature's body treads water and swims for its walk's gait
+        // (`seabody`), on land too, so its swing plays its attack
+        let sea = crate::seabody::swims(cs);
         if self.flying {
             // standing like normal, under real water too: `UpdateSprite` pitches
             // a body under liquid with the walk, and sinks one at a surface
             let mut w = self.cam.walk;
             w.phys.flags &= !flags::LIQUID;
+            if sea {
+                w.committed.loco_state = crate::seabody::gait(w.committed.loco_state);
+            }
             w.update_sprite(cs, &self.anims, &mut self.rand);
         } else {
-            self.cam.walk.update_sprite(cs, &self.anims, &mut self.rand);
+            let mut w = self.cam.walk;
+            if sea {
+                w.committed.loco_state = crate::seabody::gait(w.committed.loco_state);
+            }
+            w.update_sprite(cs, &self.anims, &mut self.rand);
             // a jump's fall in by its top, till the feet are on a floor
             let p = &self.cam.walk.phys;
             if p.flags & ON_FLOOR != 0 && p.velocity.y <= F::ZERO {
@@ -594,6 +612,12 @@ impl Walker {
         self.rewind();
         if c.flying != self.flying {
             self.set_flying(c.flying);
+        }
+        if c.noclip != self.noclip {
+            self.noclip = c.noclip;
+            if let Some(k) = self.kept.as_mut() {
+                k.ahead = None;
+            }
         }
         // UpdateGame sets the run speed and calls InitIntermediate every
         // frame (SetSpeed the walk speed, when one comes); with the speeds
@@ -674,6 +698,33 @@ impl Walker {
         }
     }
 
+    /// The console frames come by `now` that a frame drawn at `now` would
+    /// step on its one set of controls (`step_kept`), but the last (that
+    /// frame's own), at most the `most` latest, their times on the wall clock:
+    /// none while frames come at the console's rate or faster. A frame that
+    /// comes late (a hidden page's, a covered or busy window's) steps each of
+    /// them as a frame of its own (`frame_with` at its time, each with its
+    /// own `UpdateControls`) before its own, as the console would have, so
+    /// a follow steers every console frame toward the member as it moved
+    /// rather than holding one steer for them all; past `most` the frames
+    /// before them are one long frame as ever (`step_kept`'s gap).
+    /// The walk is put back first (`rewind`, once a frame: the look may
+    /// already have), so a walk moved since (a place given) counts its
+    /// console frames from where it stands.
+    pub fn frames_behind(&mut self, now: i64, most: usize) -> Vec<i64> {
+        self.rewind();
+        let Some(k) = &self.kept else { return Vec::new() };
+        let mut n = k.frames + 1;
+        let mut due = Vec::new();
+        while k.time(n) <= now {
+            due.push(k.time(n));
+            n += 1;
+        }
+        due.pop();
+        let skip = due.len().saturating_sub(most);
+        due.split_off(skip)
+    }
+
     /// `Process` for every console frame come by `now`, each on this frame's
     /// controls (the forces `UpdateControls` gave, given again to each, as
     /// Process clears them), and the walk kept as the last of them left it.
@@ -681,14 +732,14 @@ impl Walker {
     /// frame, as the console takes a long one: Process steps its last 200 ms
     /// and skips the rest, and the console frames begin again there.
     fn step_kept(&mut self, now: i64) {
-        let Walker { cam, scene, kept, flying, .. } = self;
-        let flying = *flying;
+        let Walker { cam, scene, kept, flying, noclip, .. } = self;
+        let (flying, noclip) = (*flying, *flying && *noclip);
         let Some(k) = kept.as_mut() else { return };
         let w = &mut cam.walk;
         let (force, torque) = (w.phys.force, w.phys.torque);
         if now - k.time(k.frames) > w.tick_alt_ms as i64 {
             scene.time = now;
-            step_frame(w, scene, flying);
+            step_frame(w, scene, flying, noclip);
             (k.origin, k.frames, k.ahead) = (now, 0, None);
         }
         while k.time(k.frames + 1) <= now {
@@ -697,7 +748,7 @@ impl Walker {
             w.phys.torque = torque;
             scene.time = k.time(k.frames);
             Kept::ready(&mut w.committed, k.frames, scene.time);
-            step_frame(w, scene, flying);
+            step_frame(w, scene, flying, noclip);
         }
         let mut at = w.phys;
         at.force = Vect3::default();
@@ -712,8 +763,8 @@ impl Walker {
     /// controls hold: `Process` on a copy, stepped again only when the frame
     /// kept or the controls (all the walk they write) have changed.
     fn ahead(&mut self) -> WalkPhysics<Ee> {
-        let Walker { cam, scene, kept, flying, .. } = self;
-        let flying = *flying;
+        let Walker { cam, scene, kept, flying, noclip, .. } = self;
+        let (flying, noclip) = (*flying, *flying && *noclip);
         let Some(k) = kept.as_mut() else { return cam.walk.phys };
         if let Some((n, from, next)) = &k.ahead
             && *n == k.frames
@@ -726,7 +777,7 @@ impl Walker {
         scene.time = k.time(k.frames + 1);
         Kept::ready(&mut w.committed, k.frames + 1, scene.time);
         if flying {
-            process_aloft(&mut w, scene);
+            process_aloft(&mut w, scene, noclip);
         } else {
             w.process(0, scene);
         }
@@ -1553,6 +1604,112 @@ pub(crate) mod tests {
         let mut w = Walker::arrive(tunaria_round(x, z)?, Spawn::ground(x, z, std::f32::consts::FRAC_PI_2));
         w.cam.set_camera_mode(2);
         Some(w)
+    }
+
+    /// The member a follow runs after: from 8 east of the follower's start,
+    /// east 20, north 15, east 20, south 15, east 20 at 8.6 a second (a
+    /// run), then standing.
+    const ROUND: [(f32, f32); 6] = [(8.0, 0.0), (28.0, 0.0), (28.0, -15.0), (48.0, -15.0), (48.0, 0.0), (68.0, 0.0)];
+
+    /// The member on `way` at 8.6 a second, (x, z) from the follower's start
+    /// at `ms` from its own, standing at the end.
+    fn member_at(way: &[(f32, f32)], ms: i64) -> (f32, f32) {
+        let mut left = ms.max(0) as f32 / 1000.0 * 8.6;
+        for p in way.windows(2) {
+            let (dx, dz) = (p[1].0 - p[0].0, p[1].1 - p[0].1);
+            let len = (dx * dx + dz * dz).sqrt();
+            if left <= len {
+                return (p[0].0 + dx * left / len, p[0].1 + dz * left / len);
+            }
+            left -= len;
+        }
+        way[way.len() - 1]
+    }
+
+    /// Following the member on `way` on Tunaria's open ground in the follow
+    /// orbit (the game's camera) for `until` ms, frames drawn every `gap` ms;
+    /// with `catch_up` each frame first steps the console frames it is late by
+    /// as frames of their own (`frames_behind`, as the viewer does while
+    /// following), the member where it was at each. The most of the
+    /// follower's distance to the member at the frames drawn from 2 s on and
+    /// of its distance off the member's way, and its distance at the end.
+    fn follow_run(way: &[(f32, f32)], until: i64, gap: i64, catch_up: bool) -> Option<(f32, f32, f32)> {
+        let (x0, z0) = (22000.0f32, 18000.0f32);
+        let mut w = Walker::arrive(tunaria_round(x0 + 30.0, z0)?, Spawn::ground(x0, z0, std::f32::consts::FRAC_PI_2));
+        w.cam.set_camera_mode(3);
+        let t0 = w.scene.time;
+        let run_speed = (F::<Ee>::new(vi::walk::RUN_SPEED) * F::new(1.05)).0;
+        let client = |w: &Walker, ms: i64| {
+            let (mx, mz) = member_at(way, ms);
+            let me = w.cam.walk.phys.smooth_location().to_array();
+            crate::controls::Client { follow: crate::controls::Follow::At([x0 + mx, me[1], z0 + mz], me), run_speed, ..Default::default() }
+        };
+        let off_way = |p: [f32; 3]| {
+            let (px, pz) = (p[0] - x0, p[2] - z0);
+            way.windows(2)
+                .map(|s| {
+                    let (dx, dz) = (s[1].0 - s[0].0, s[1].1 - s[0].1);
+                    let f = (((px - s[0].0) * dx + (pz - s[0].1) * dz) / (dx * dx + dz * dz)).clamp(0.0, 1.0);
+                    ((px - s[0].0 - f * dx).powi(2) + (pz - s[0].1 - f * dz).powi(2)).sqrt()
+                })
+                .fold(f32::MAX, f32::min)
+        };
+        let (mut far, mut off, mut end) = (0.0f32, 0.0f32, 0.0f32);
+        let mut ms = 0;
+        while ms <= until {
+            // the look puts the walk back first, as a window's does every
+            // frame (`viewer`'s `sticks`: `rewind`)
+            w.rewind();
+            if catch_up {
+                for t in w.frames_behind(t0 + ms, 60) {
+                    let c = client(&w, t - t0);
+                    w.frame_with([0.0; 4], t, &c, false);
+                }
+            }
+            let c = client(&w, ms);
+            w.frame_with([0.0; 4], t0 + ms, &c, true);
+            let p = w.cam.walk.phys.position.to_array();
+            let (mx, mz) = member_at(way, ms);
+            end = ((p[0] - x0 - mx).powi(2) + (p[2] - z0 - mz).powi(2)).sqrt();
+            if ms >= 2000 {
+                far = far.max(end);
+                off = off.max(off_way(p));
+            }
+            ms += gap;
+        }
+        Some((far, off, end))
+    }
+
+    /// A follow whose frames come late (a hidden page's ticks held up, a
+    /// busy machine's; players multiboxing in a browser: "the follow gets
+    /// messed up") keeps to the member as one drawn at the console's rate
+    /// when each late frame steps the console frames it missed one at a
+    /// time, each steered toward the member where it then was. The
+    /// control: the same late frames each stepping all of theirs on one
+    /// steer (the client before) fall behind and cut the corners.
+    #[test]
+    fn a_follow_on_late_frames_keeps_to_the_member() {
+        let Some((far30, off30, _)) = follow_run(&ROUND, 16000, 33, false) else { return };
+        let (far_late, off_late, _) = follow_run(&ROUND, 16000, 500, true).unwrap();
+        let (far_old, off_old, _) = follow_run(&ROUND, 16000, 500, false).unwrap();
+        eprintln!("at 30 a second: {far30:.2} from the member at most, {off30:.2} off its way; late frames caught up: {far_late:.2}, {off_late:.2}; late frames on one steer: {far_old:.2}, {off_old:.2}");
+        assert!(far_late < far30 + 1.0, "caught up, as near as at 30 a second: {far_late} against {far30}");
+        assert!(off_late < off30 + 1.0, "and on the member's way: {off_late} against {off30}");
+        assert!(far_old > far30 + 3.0 || off_old > off30 + 3.0, "the control falls behind or cuts corners: {far_old}, {off_old}");
+    }
+
+    /// The member turning about and running back past the follower: the
+    /// follower turns round after it and stands by it where it stops, at 30
+    /// frames a second, at 30 with a frame now and then late (a ticker's
+    /// jitter) and on frames half a second apart caught up.
+    #[test]
+    fn a_follow_turns_round_after_a_member_that_runs_back_past() {
+        const BACK: [(f32, f32); 3] = [(8.0, 0.0), (40.0, 0.0), (6.0, 0.0)];
+        for (gap, catch_up) in [(33, false), (33, true), (47, true), (500, true)] {
+            let Some((_, _, end)) = follow_run(&BACK, 15000, gap, catch_up) else { return };
+            eprintln!("frames {gap} ms apart (caught up {catch_up}): {end:.2} from the member at the end");
+            assert!(end < 6.5, "frames {gap} ms apart: stands by the member, not {end} off");
+        }
     }
 
     /// The control: the walk stepped once a frame drawn, as the client
@@ -2580,7 +2737,7 @@ pub(crate) mod tests {
         // the control
         let mut copy = w.cam.walk;
         copy.committed.time = w.scene.time - 33;
-        copy.process(0, &mut Aloft(&mut w.scene));
+        copy.process(0, &mut Aloft { world: &mut w.scene, noclip: false });
         assert!(matches!(copy.committed.loco_state, 12 | 13), "the control: {}", copy.committed.loco_state);
     }
 
@@ -2645,6 +2802,35 @@ pub(crate) mod tests {
         eprintln!("under the roof at {roof}: stopped at {top}");
         assert!(top < roof - 1.0, "through the roof at {roof}: {top}");
         assert!(top > y + 1.0, "it rose: {y} to {top}");
+    }
+
+    /// A GM's noclip (go-eqoa-server's 0x7E7A, petition 1904): the same climb
+    /// under Gilgash's roof goes through it and on past it; then, noclip off,
+    /// the same flyer stops at the floor of the stall again on the way down
+    /// (the control is `a_flyer_stops_under_a_roof`, the climb without it).
+    /// Noclip with no flight is the walk's own: it lands on the ground.
+    #[test]
+    fn noclip_flies_through_the_roof() {
+        let (x, y, z) = (25476.0f32, 54.398438f32, 15707.797f32);
+        let Some(world) = tunaria_round(x, z) else { return };
+        let roof = ground(&mut tunaria_round(x, z).unwrap(), x, z).unwrap();
+        let mut w = Walker::arrive(world, Spawn { pos: [x, y, z], heading: 0.0, placing: Placing::AsGiven });
+        w.cam.set_camera_mode(0);
+        let noclip = crate::controls::Client { noclip: true, ..flying() };
+        let up = Controls { fwd: 1.0, ..Default::default() };
+        hold(&mut w, Controls::default(), &noclip, 30.0, 0.2);
+        crate::mouse::pitch_body(&mut w.cam, F::new(-2.0));
+        hold(&mut w, up, &noclip, 30.0, 5.0);
+        let top = w.cam.walk.phys.position.y.0;
+        eprintln!("noclip under the roof at {roof}: rose to {top}");
+        assert!(top > roof + 5.0, "noclip stopped at {top}, the roof at {roof}");
+
+        // noclip with no flight: the walk's own, it stands on the ground
+        let (gx, gz) = (22000.0f32, 18000.0f32);
+        let Some(mut g) = tunaria_round(gx, gz).map(|s| Walker::arrive(s, Spawn::ground(gx, gz, 1.5))) else { return };
+        let floor = g.cam.walk.phys.position.y.0;
+        hold(&mut g, Controls::default(), &crate::controls::Client { noclip: true, ..Default::default() }, 30.0, 1.0);
+        assert!((g.cam.walk.phys.position.y.0 - floor).abs() < 0.5, "noclip without flight fell: {floor} to {}", g.cam.walk.phys.position.y.0);
     }
 
     /// A dump (a respawn, a restart of the server's) puts the body where it

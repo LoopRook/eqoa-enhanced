@@ -12,23 +12,43 @@ current.
   the Controls page, copy and paste in the edit boxes (the user's of 2026-11-07, held to what a
   console's keyboard can type: `editbox::typable`), chat lines selected with a mouse and copied (the
   same day; `chat`, drawn over the game's chat, not in it), 1,000 lines of chat, no green backdrop behind the start menu's windows, the
-  Extended options, the updater, the 2002 disc's art on F9, Hide UI
+  Extended options (since 2026-11-11, the GM Jibrish's petitions 1631 and 1634, four groups each a menu of its
+  categories: Graphics, how the world is drawn; UI, what is drawn over it; Other, the rest; Multi-boxing settings,
+  one page: a new row goes in the group of its kind, `options::ALL_CATEGORIES`' `group`; setting keys never change
+  with a row's place), the updater, the 2002 disc's art on F9, Hide UI
   on H, names from farther and smaller zoomed out (and every one in a crowd, Overlapping Names Show),
   the raid list on a server that has raid groups (the user's of 2026-11-07: `raidlist`, an Extended row, on by default),
   a raid's windows on a server that sends them (the GM Jibrish's petitions 1448 and 1451, 2026-11-10: the leader's,
   helper's and main assist's marks in the raid list, the loot rolls' pop-up, Community > Group > Raid and the master
   looter's menu on a corpse: `raidplay`, `rollwnd`, `masterloot`, go-eqoa-server's 0x7E42-0x7E48; on any other
-  server none of it, and the start menu the game's),
+  server none of it, and the start menu the game's; the raid list in its groups with a role icon on each health bar and the leader's and helper's moves between
+  groups by a drag or Raid > Move to Group, the GM Jibrish's petition 1687, 2026-11-12: `raidlist::draw_groups`, go-eqoa-server's
+  0x7E18 offer of 2 and a group byte after each 0x7E1A record (an offer of 3, 2026-11-12: the raid's mercs in it, each in its
+  owner's group, a kind byte after the group, so they are targeted from their rows and kept out of the groups' counts), 0x7E48 ops 12 and 13; the role icons drawn on every server),
+  a group's or a raid's ready check on a server that offers it (the GM Jibrish's petition 1711, 2026-11-12: a strip atop
+  the rolls' column, Yes or No, 30 seconds, never stopping the walk: `readywnd`, go-eqoa-server's 0x7E49-0x7E4B, 0x7E56),
+  the buff window on a server that offers it (the GM Jibrish's petition 1761, 2026-11-12: two rows of the player's
+  buffs and one of its pet's in the effects strip's place, a click shows a buff's name and time left and a second
+  takes it off, R2 held and L2 (the keyboard's C and Z) give it the d-pad: `buffwnd`, go-eqoa-server's 0x7E57-0x7E59;
+  Extended > UI > HUD's Buff Window, on by default; off, or on any other server, the game's strip), a yellow "!" or "?"
+  over a quest NPC's name on a server that sends them (the GM Jibrish's petition 1813, 2026-11-12: `net::headmarks`,
+  `Play::plates`' `mark`, go-eqoa-server's 0x7E61-0x7E63, every rule the server's; Extended > UI > Name Plates' Quest
+  Markers, setting `head_marks`, on by default; off, or on any other server, none), a "Did you know"
+  tip on every loading screen (petition 1778: `tips.rs`, `tips.txt`, Extended > Other > General's Loading Tips),
   the pet's effects in a row under its bar on a server that sends them (the server owner's of 2026-11-09, "put the
-  buff icons under the pet name plate": `hud::pet_effects_pieces`, go-eqoa-server's 0x7E32/0x7E33, Extended > UI's
+  buff icons under the pet name plate": `hud::pet_effects_pieces`, go-eqoa-server's 0x7E32/0x7E33, Extended > UI > HUD's
   Pet Effects, on by default; off, or on any other server, nothing is drawn),
   the floating numbers of the player's own figures and its pet's in a colour chosen for what made them on a server
   that tags them (the server owner's of 2026-11-09, "we can add the number colors to extended menu": `numcolor`,
   go-eqoa-server's 0x7E38/0x7E39 and one byte after 0x00DB's body, Extended > Number Colors; every row Default, the
-  game's own colour, until chosen),
+  game's own colour, until chosen; the merc's figures too, on a server of the tags' layout 2: Extended > Merc Colors,
+  Light Blue and Purple until chosen, petition 1613),
   a DPS meter of the player's group on a server that keeps one (the server owner's of 2026-11-10, "lets add dps meters,
   will work solo, group, raid": `dpsmeter`, go-eqoa-server's 0x7E3A-0x7E3D, a HUD panel under the quest tracker,
-  `/dps`, Extended > Combat, off by default; off, or on any other server, nothing is drawn or asked),
+  `/dps`, Extended > UI > DPS Meter, off by default; off, or on any other server, nothing is drawn or asked),
+  each stat's cap after its value in Character > Summary (ticket 1996, the owner's: `trainer::value_of_cap`,
+  "346/435", the cap the game's own `GetP44Total`, m_p44 and m_bonus as any server sends them; the column's caption
+  175 wide and value 100 where the game's are 200 and 75),
   Ignore Shouts kept, Update Notices, Text Sharp or Smooth, Loading Screens Longer or Instant, Render
   Scale x1, x2 or x4 (off unless chosen), HUD Nearest or Sharp (Nearest, the game's, by default: the
   user's of 2026-10-28, "make nearest the default ... since there is a cost"; Sharp was the default
@@ -60,31 +80,46 @@ current.
   eqoaclassic.com on any server), the waypoints and the group's waypoint, the minimap on N; the quest marks on
   the map and the minimap and the quest tracker from a server that sends them, else the client's own quest
   guide's, labelled "(guide)"; the Map and the Quest Helper off are the game without them, exactly. The Stats
-  Box, others' mana bars and Target of Target stay out; the owner's "they are everywhere" the same day: the
+  Box, the target's mana bar and Target of Target stay out (others' power came back to the group's bars on
+  2026-11-12, below); the owner's "they are everywhere" the same day: the
   minimap's rim keeps only the player's own steps' "?", a "!" only where it lies, and the server marks a quest's
   name once near the player's level; and a GM's Ctrl+click on the map travels there, offered by go-eqoa-server
   to a GM's client alone, 0x7E34/0x7E35); the map's list of places, any world or town shown from the player's
   own disc, and the minimap inside a building, cave or dungeon (players' petitions 1479 and 1494, 2026-11-11:
   `map::places`, `map::indoor`, the floors under the ceiling as FrontiersForge's minimap drew them), and
   Options > Interface's Profanity Filter told to a server that asks (the GM Jibrish's petition 1490:
-  go-eqoa-server's 0x7E60; the filter is the server's, on at every login)).
+  go-eqoa-server's 0x7E60; the filter is the server's, on at every login), and Power Bars on a server that sends
+  others' power (the server owner's of 2026-11-12, "lets add power bars to group/raid display": a member's power,
+  a player's or a merc's, and the pet's under its health in the game's bars, go-eqoa-server's 0x7E01/0x7E02,
+  `Session::agree_power_bars`, `hud::power_at`; the raid list's from 0x7E1A as before; Extended > UI > Group &
+  Raid's Power Bars, setting `power_bars`, on by default; off, or on any other server, the game's bars)).
   `render::lit`, `lights.rs`; off it is the PS2's light exactly, every test and oracle unchanged, and `vi` untouched), and Sun
   Shadows (2026-11-08: Extended > Lighting, off unless chosen, drawn only with Dynamic Lighting; `render::sunshadow`; off, every
   frame byte for byte as before, on Vulkan and GL)).
   there is no pass at all, the picture byte for byte the game's), and a server's own races' customisation on a server
   that sends it (the user's of 2026-11-08, "lets add char customization to the new races": `raceopts.rs`,
   `net::raceopts`, `render::recolor`, README "A server's race's own customisation"; the options are the server's,
-  the parts' triangles too; every row's first step is the body as it is, byte for byte), and an NPC's body in a
+  the parts' triangles too; every row's first step is the body as it is, byte for byte), and the game's ten races'
+  skin shades on a server that sends them (the server owner's of 2026-11-11: a Skin row under the four on the
+  appearance page and at select's Customize, `render::recolor::SKIN`, README "The game's ten races' skin shades";
+  Natural is the body byte for byte), and an NPC's body in a
   server's tint on a server that names one (the server owner's of 2026-11-10, Yhafiran "the black and green oriental
   dragon" on the disc's green one: `npctint.rs`, `net::npctint`, go-eqoa-server's 0x7E3E-0x7E40; untinted, the body
   byte for byte as before), and a monster's name and level in the target's details box on a server that offers it (the GM
   Jibrish's petition 1459, 2026-11-10, "This should ONLY show the monsters name and level, nothing else": Q's talk sent
   as ever, the server's answer 0x7E4E drawn as CLIENT draws a pet's for 3 s or while Q is held, `Play::mob_info_shown`,
   go-eqoa-server's `world.mob_info`, 0x7E4C-0x7E4E; on any other server, or a monster that talks, the game's), and
+  the target's level in the target box on a server that offers it (Live petition 5130, the owner's "yes lets allow",
+  2026-11-15: "Level N" on the "Target" line, `Play::target_level`, go-eqoa-server's `world.con_level`, 0x7E70;
+  Extended > UI > Name Plates' Target Level, on by default; off, or on any other server, the game's), and
   item links in chat on a server that offers them (the GM Jibrish's petition 1463, 2026-11-10: the item menu's Link Item
   and a Shift+click put an item in the chat line as a purple unit, a link in the chat box opens a window of the item at
   the top middle, two at most, R2 held walks the links: `itemlink.rs`, `linkplay.rs`, `net::itemlink`, go-eqoa-server's
-  0x7E4F-0x7E53; Extended > Chat > Item Links, on by default; off, or on any other server, plain names, the game's)).
+  0x7E4F-0x7E53; Extended > Chat > Item Links, on by default; off, or on any other server, plain names, the game's), and
+  auto-cast on the quick bars and auto targeting (the server owner's of 2026-11-11, "lets add auto-cast to abilities to
+  fire off cooldown/timer/buff gone/pet's die similar to the mercs, also auto targeting": `autocast`, `autoplay`; a slot
+  marked auto is pressed by the client itself with the press's own 0x0032, its target taken with the game's 0x0010:
+  nothing new on the wire; Extended > Other > Combat's Auto-Cast and Auto Target, `/autocast`, `/autotarget`)).
   A new client-side addition is the user's call: ask first. Sharp filtering is for the 2D layer and
   the text only: the world's textures are drawn smooth, as the game filters them (the user,
   2026-10-27, after a Crisp row for them: "world textures cant render proper without smooth. so
@@ -106,6 +141,9 @@ current.
   test before pushing, and never push a half-done change. Only a build that carries `EQOA_UPDATE_CHANNEL`
   and `EQOA_BUILD_COMMIT` (CI's) updates itself; dev.yml refuses one without its commit. Test the
   updater with `EQOA_UPDATE_URL=<base>` against a server of one's own, never by pushing.
+  The Android app follows the same release (update.txt's `android` line, its APK): downloaded into its
+  cache in the background and installed by Android's own screen at the player's Install now (README
+  "Android", "Its updates"); never silently.
 - **Update notes**: a push that changes the program adds a section on top of `UPDATE-NOTES.md`
   (`## <date> · <title>`, then bullets: what a player sees, in a player's words), in the same push.
   The release page shows them, newest first (`release/notes.sh`): the sections new since the last build
@@ -184,6 +222,13 @@ current.
 - SOE's live game's look (README "Dyes", `net::session::OP_LIVE_LOOK`): taken whenever a server offers it; the
   disc's look stays every other server's (Sandstorm never offers it), so a change to the disc's readers is tested on
   both. `EQOA_LIVE_LOOK=0` keeps the disc's in a test (a PS2's view of the same server).
+  Its held items' colours (`Look::item_color`) recolour an item's glow (`aura.rs`: emissive, additive layers and
+  particles to the colour's hue at their own brightness, other layers tinted 25%); white or none draws the disc's
+  item bit for bit. `eqoa dress ... main=ID maincolor=RRGGBB night=1` shows it.
+  go-eqoa-server's armour (`LIVE_LOOK_ARMOR`, granted in the look in force's third u32): set 9 (`vi::cust::ORNATE`,
+  CHAR.ESF's ornate plate) and the trim colours after the live channel and record; `s2::server_armor` is the switch
+  (`Rules::cust_with`), set by the session's `armor_look`. A trim is drawn only on `vi::cust::TRIMMED` textures (the
+  plate's gold; brown leather reads as gold by hue, so never by rule alone), and no trim draws every piece bit for bit.
 - Game-logic floats go through `ee::*`, never host `f32` operators; every compare too.
 - Port from the decomp (`../decomp/src`), not from the Go client: the Go client's
   differences from the original are listed in `../claude-notes/go-client-vs-decomp-audit-20261015.md`.
@@ -256,6 +301,11 @@ current.
   `Walker::rewind` first, or it reads as a place given and no console frame is stepped; a place it
   gives the follow orbit's camera then (`set_orbit_angle`, round the console frame put back) is moved
   onto the walk as last drawn (`Walker::camera_as_drawn`), or a sidestep jitters the camera.
+  A frame that comes late while following (a hidden page's ticks held up, a covered or busy window's) steps each
+  console frame it is late by as a frame of its own, with its own `UpdateControls` and the member extrapolated to
+  its time (`viewer::follow_catch_up`, `Walker::frames_behind`, `Play::follow_back`): on one steer the follower
+  overshot and fell behind (`a_follow_on_late_frames_keeps_to_the_member`). A frame drawn on nothing (`unseen`)
+  skips the dynamic lights, shadows, effect volumes and flora; the game, sound and network go on.
 - Input (README "the pad", "the mouse and the touch screen"): the pad is the game's own path
   (`vi::pad` held to oracle ops 50-52; `input.rs` libpad on the host, `PadKeys`, `Play::set_key`,
   `controls.rs` UpdateControls). Headless: `EQOA_PAD` (`start@2500;stick l 0 -1@1500+2000`),
@@ -279,7 +329,9 @@ current.
   controllers' buttons the game's fields before `VIPad::Read`. A key added to the dispatch needs a
   row in `binds::ROWS` (a test reads `viewer.rs` for them).
   Multiboxing: each window reads the controllers its Controller Focus picks (`input::pick`,
-  Extended's Controller page; per window by its place, `multibox.rs`: lock files in the config directory's
+  Extended's Multi-boxing settings, with Capture Controller, Sound in Background and Slow When Not Focused (petition
+  1634: off by default, a covered or minimised window at its Frame Rate; on, at `HIDDEN_GAP`'s 30 a second; per
+  window as Controller Focus, `slow_unfocused.<n>` in client.opt); per window by its place, `multibox.rs`: lock files in the config directory's
   `windows/`, Web Locks in a page; one place a program, never a thread's: a settings read on another
   thread took a second; let go at the loop's end). Windows' Xbox pads are read through XInput (`xinput.rs`) and its
   DualShock 4s and DualSenses over HID (`hidpad.rs`, which also sets their motors; gilrs's force feedback
@@ -336,7 +388,12 @@ current.
   order, after the build. Every file a page loads must be in its build (a new one goes into
   `build.sh`'s copy list). Its notices are `web/notices.js`'s: the client raises them through
   `web::problem` (a part gone: dismissed) and `web::crash` (the client stopped: Reload).
-  `web/pagetest.py` checks the page's half.
+  `web/pagetest.py` checks the page's half. A call of winit's loop into the client that never
+  returns (an exception, or the browser stopping the script mid-frame: Firefox does for a
+  navigation away) leaves winit's runner borrowed: `web::Guarded` counts the calls, notices.js
+  stops the client with where it stopped (after an error, and its watch every second), and
+  main.js's own `pagehide` keeps winit's off a dead loop (its panic, "runner.rs:683:69: RefCell
+  already borrowed", is no crash: `crashfile::is_unload_panic`, never kept or sent).
   The page puts itself full screen at Start (`main.js` "full screen", README "In a browser"): on a
   touch device but iOS's (there the Home Screen app is), on a computer only where Keyboard Lock keeps
   Escape the game's, never while multiboxing; F11 stays the browser's. A full screen asked for uses
@@ -349,7 +406,7 @@ current.
   over the game's own connection (the user, 2026-11-05), so a server hears only its own players: on
   a server that offers them (go-eqoa-server's 0x7E0E, `net::session::OP_BUG_REPORTS`) F3 opens
   Support's request form on Bug Report (`Play::open_bug_report`), and each petition the player files
-  (the form, a typed `/bug` or `#bug`) goes after the client's note (0x7E0F, `bugnote.rs`: build,
+  (the form, a typed `/bug` or `#bug`, `/feature` or `#feature`: the form on Bug Report / Feature Request, subcategory 100, petition 1841) goes after the client's note (0x7E0F, `bugnote.rs`: build,
   platform, graphics, frame rate, where it shows the player and its target; one message, at most
   1,000 bytes; never an account name, an address or a path). Support's forms hold as many characters
   as the offer's second u32 says the server takes (`Session::petition_text`, at most 2,047, petition

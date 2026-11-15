@@ -43,6 +43,13 @@
 //! defaults (a row it put on G takes G, the attack the key that row left), and
 //! a macro it put on G keeps G (`Binds::from_text`).
 //!
+//! The ability bars' slots (Jibwiz's ticket 1913, "allow you to keybind each
+//! key", for PC players: `hudmenu::Stacked`) are rows of no key and no button
+//! (`Pad::KeysOnly`): a key the player puts on one uses that slot's ability
+//! (`Alias::Slot`, `Play::bar_slot_key`), the first two bars' ten, whether the
+//! bars are drawn stacked or as the game's carousel. Nothing is on them until
+//! the player puts a key there.
+//!
 //! With nothing moved every key is itself and every button its own field
 //! (`Binds::default`, the tests). Kept per device in `keys.opt` beside the
 //! client's options (`settings`), as the PS2 keeps every option on its card.
@@ -86,6 +93,9 @@ pub enum Pad {
     Button(u16),
     /// a stick's way (the right stick when set); not rebound
     Stick(bool, Dir),
+    /// none, and none may be given: a row of the keyboard's alone (an ability
+    /// bar's slot, `bar_slot`)
+    KeysOnly,
 }
 
 /// A row of the default layout.
@@ -134,13 +144,23 @@ pub const ROWS: &[Row] = &[
     row("menu_down", "Quick menu: down", &["down"], b(bit::DOWN), "In a window, down a row. On the map: pan down."),
     row("menu_prev", "Quick menu: {1692}", &["left"], b(bit::LEFT), "In a window, left. On the map: pan left."),
     row("menu_next", "Quick menu: {216}", &["right"], b(bit::RIGHT), "In a window, right. On the map: pan right."),
+    row("bar1_slot1", "Bar 1: slot 1", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar1_slot2", "Bar 1: slot 2", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar1_slot3", "Bar 1: slot 3", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar1_slot4", "Bar 1: slot 4", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar1_slot5", "Bar 1: slot 5", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar2_slot1", "Bar 2: slot 1", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar2_slot2", "Bar 2: slot 2", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar2_slot3", "Bar 2: slot 3", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar2_slot4", "Bar 2: slot 4", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar2_slot5", "Bar 2: slot 5", &[], Pad::KeysOnly, BAR_HELP),
     row("cycle_target", "Target: {1405}, group, {418}", &["`", "~"], b(bit::L1), "Each press the next of the player, the group and the pet; held, aim as with Tab. On the map |7 zooms out."),
     row("quick_chat", "Quick chat", &["z"], b(bit::L2), "Again, it closes the quick chat."),
     row("next_target", "Target: the next (hold: aim)", &["tab"], b(bit::R1), "Held: the view at the eyes, the target the one nearest the crosshair. In a window Tab is |8; on the map |8 zooms in."),
-    row("history", "{424} {1694} (hold)", &["c"], b(bit::R2), "Up and down scroll it while held. In a window C is |c (the factions' next page)."),
+    row("history", "{424} {1694} (hold)", &["c"], b(bit::R2), "Up and down scroll it while held. With it held, Z (L2) gives the buff bar the arrows: Enter (|x) selects a buff, Backspace (|s) removes it, Escape (|t) or Z again lets go. With the mouse, left-click a buff to select it, right-click (long-press on touch) to remove it. In a window C is |c (the factions' next page)."),
     row("autorun", "Autorun", &["x"], b(bit::L3), "A stick pushed past the run's edge ends it."),
     row("jump", "Jump", &["space", "v"], Pad::None, "In play, on a server that has jumps (its own, not the game's); V too. Wherever it makes no jump (any other server, a window up) Space is {1018}'s key, as it was before it jumped. A controller's button can take it here: every button of the pad is the game's, so none has it till given. On the map Space is |x."),
-    row("chat", "{424}", &["enter"], b(bit::R3), "In a window Enter is |x {212}; over the quick chat, the chat line. On the map: |x."),
+    row("chat", "{424}", &["enter"], b(bit::R3), "In a window Enter is |x {212}; in a trade, its chat line (/, T and R too). Over the quick chat, the chat line. On the map: |x."),
     row("start_menu", "Start menu", &["escape"], b(bit::START), "In a window Escape is |t {217}. Escape also cancels a key being chosen here."),
     row("camera_style", "Camera style", &["p"], b(bit::SELECT), "First person, and back."),
     row("back", "{217} (in a window)", &["backspace"], Pad::None, "In a window it is |t {217}. On the map it closes it."),
@@ -171,6 +191,18 @@ pub const ROWS: &[Row] = &[
     row("minimap", "Minimap", &["n"], Pad::None, "Shows or hides the minimap, as Extended's Map page does, and keeps it. On the map: a community marker suggested."),
     row("controls", "Controls", &["f1"], Pad::None, "This page, from play."),
 ];
+
+/// What a key on an ability bar's slot row does (`bar_slot`).
+const BAR_HELP: &str = "Uses the ability on this slot, as clicking it does. No key until you give it one. Extended > UI > HUD > Stacked Spell Bars shows the first two bars above the chat box.";
+
+/// The ability bar and its slot (each from 0) a row is the key of: the
+/// first two bars' ten (`bar1_slot1` .. `bar2_slot5`).
+pub fn bar_slot(row: usize) -> Option<(usize, usize)> {
+    let id = ROWS.get(row)?.id.strip_prefix("bar")?;
+    let (bar, slot) = id.split_once("_slot")?;
+    let (bar, slot) = (bar.parse::<usize>().ok()?, slot.parse::<usize>().ok()?);
+    ((1..=2).contains(&bar) && (1..=5).contains(&slot)).then(|| (bar - 1, slot - 1))
+}
 
 /// A row's index by its name.
 pub fn row_named(id: &str) -> Option<usize> {
@@ -257,6 +289,8 @@ pub enum Alias {
     Button(u16),
     /// in a macro's trigger (one or more: `macros::Run` reads it by name)
     Macro,
+    /// an ability bar's slot row put on it (`bar_slot`): the bar and slot
+    Slot(usize, usize),
 }
 
 /// A field whose button went to a row of the client's keys (`Binds::button`).
@@ -565,7 +599,7 @@ impl Binds {
             return match (ROWS[r].keys.first(), ROWS[r].pad) {
                 (Some(k), _) => Alias::To(k),
                 (None, Pad::Button(b)) => Alias::Button(b),
-                (None, _) => Alias::Nothing,
+                (None, _) => bar_slot(r).map_or(Alias::Nothing, |(bar, slot)| Alias::Slot(bar, slot)),
             };
         }
         match default_row(name) {
@@ -579,7 +613,7 @@ impl Binds {
     /// key); else that key is free.
     pub fn bind_key(&mut self, row: usize, name: &str) -> Moved {
         let old = self.key(row).map(str::to_string);
-        if old.as_deref() == Some(name) || (ROWS[row].keys.is_empty() && !matches!(ROWS[row].pad, Pad::Button(_))) {
+        if old.as_deref() == Some(name) || (ROWS[row].keys.is_empty() && !matches!(ROWS[row].pad, Pad::Button(_)) && bar_slot(row).is_none()) {
             return Moved::Already;
         }
         // the macros' triggers with the key give it up: the row takes it
@@ -702,6 +736,13 @@ impl Binds {
                 Moved::Freed(had.map(|b| BUTTONS[b as usize].0.to_string()))
             }
         }
+    }
+
+    /// Whether a key name with modifiers ("shift+1") is anything's: a row's
+    /// or a macro's trigger's. Only then is a key pressed with them sent on
+    /// by that name; else by the name it types, as before (`App::key_name`).
+    pub fn combo_bound(&self, name: &str) -> bool {
+        self.alias(name) != Alias::Same
     }
 
     /// Whether a key is in a macro's trigger (any macro's).
@@ -1255,6 +1296,9 @@ pub enum Sent {
     Button(u16),
     /// a key in a macros' trigger (its name), to the macros (`macros::Run`)
     Macro(String),
+    /// a key on an ability bar's slot row: the bar and the slot, to play
+    /// (`Play::bar_slot_key`)
+    Slot(usize, usize),
 }
 
 /// The keys from press to release through the bindings: what each key
@@ -1281,6 +1325,7 @@ impl KeyEdge {
             Alias::To(k) => same(k),
             Alias::Button(k) => Some(Sent::Button(k)),
             Alias::Macro => Some(Sent::Macro(name.to_string())),
+            Alias::Slot(bar, slot) => Some(Sent::Slot(bar, slot)),
             Alias::Nothing => None,
         };
         if !down {
@@ -1336,7 +1381,7 @@ fn split_chord(v: &str) -> Vec<&str> {
 
 /// Whether a name read back can be a key's (`name_of`'s, or a character).
 fn valid_name(v: &str) -> bool {
-    !v.is_empty() && v.chars().count() <= 12 && !v.chars().any(char::is_control)
+    !v.is_empty() && v.chars().count() <= 32 && !v.chars().any(char::is_control)
 }
 
 /// A key's name, as the client's dispatch and `keys.opt` use it: the cursor
@@ -1416,8 +1461,117 @@ pub fn key_of(name: &str) -> Key {
     Key::Named(named)
 }
 
-/// A key's name as the page shows it.
+/// A key's name with the modifiers held written before it, in the order
+/// ctrl, alt, shift ("ctrl+alt+shift+1"; Jibwiz's ticket 1950: Shift+1 binds
+/// as Shift+1, not as the "!" it types): `base` the key's own, as it is
+/// without them (`base_name`).
+pub fn combo_name(ctrl: bool, alt: bool, shift: bool, base: &str) -> String {
+    let mut s = String::new();
+    for (held, m) in [(ctrl, "ctrl"), (alt, "alt"), (shift, "shift")] {
+        if held {
+            s.push_str(m);
+            s.push('+');
+        }
+    }
+    s.push_str(base);
+    s
+}
+
+/// A name split into its modifiers (ctrl, alt, shift) and its key. "+" alone,
+/// or a name ending in "+", is a key's own.
+pub fn split_combo(name: &str) -> ((bool, bool, bool), &str) {
+    let (mut ctrl, mut alt, mut shift) = (false, false, false);
+    let mut rest = name;
+    loop {
+        let Some((m, tail)) = rest.split_once('+') else { break };
+        if tail.is_empty() {
+            break;
+        }
+        match m {
+            "ctrl" => ctrl = true,
+            "alt" => alt = true,
+            "shift" => shift = true,
+            _ => break,
+        }
+        rest = tail;
+    }
+    ((ctrl, alt, shift), rest)
+}
+
+/// A key's own name by where it is on the keyboard (the US layout's), as it
+/// is with no modifier held: the "1" under a "!" typed with Shift. The keys
+/// whose names no modifier changes (the named keys) are None: `name_of`'s
+/// name is theirs.
+pub fn base_name(code: winit::keyboard::KeyCode) -> Option<&'static str> {
+    use winit::keyboard::KeyCode as C;
+    Some(match code {
+        C::KeyA => "a",
+        C::KeyB => "b",
+        C::KeyC => "c",
+        C::KeyD => "d",
+        C::KeyE => "e",
+        C::KeyF => "f",
+        C::KeyG => "g",
+        C::KeyH => "h",
+        C::KeyI => "i",
+        C::KeyJ => "j",
+        C::KeyK => "k",
+        C::KeyL => "l",
+        C::KeyM => "m",
+        C::KeyN => "n",
+        C::KeyO => "o",
+        C::KeyP => "p",
+        C::KeyQ => "q",
+        C::KeyR => "r",
+        C::KeyS => "s",
+        C::KeyT => "t",
+        C::KeyU => "u",
+        C::KeyV => "v",
+        C::KeyW => "w",
+        C::KeyX => "x",
+        C::KeyY => "y",
+        C::KeyZ => "z",
+        C::Digit0 | C::Numpad0 => "0",
+        C::Digit1 | C::Numpad1 => "1",
+        C::Digit2 | C::Numpad2 => "2",
+        C::Digit3 | C::Numpad3 => "3",
+        C::Digit4 | C::Numpad4 => "4",
+        C::Digit5 | C::Numpad5 => "5",
+        C::Digit6 | C::Numpad6 => "6",
+        C::Digit7 | C::Numpad7 => "7",
+        C::Digit8 | C::Numpad8 => "8",
+        C::Digit9 | C::Numpad9 => "9",
+        C::Minus => "-",
+        C::Equal => "=",
+        C::BracketLeft => "[",
+        C::BracketRight => "]",
+        C::Backslash => "\\",
+        C::Semicolon => ";",
+        C::Quote => "'",
+        C::Comma => ",",
+        C::Period => ".",
+        C::Slash => "/",
+        C::Backquote => "`",
+        _ => return None,
+    })
+}
+
+/// A key's name as the page shows it, its modifiers before it ("Shift+1").
 pub fn display(name: &str) -> String {
+    let ((ctrl, alt, shift), key) = split_combo(name);
+    if key.len() == name.len() {
+        return display_key(name);
+    }
+    let mut s = String::new();
+    for (held, m) in [(ctrl, "Ctrl+"), (alt, "Alt+"), (shift, "Shift+")] {
+        if held {
+            s.push_str(m);
+        }
+    }
+    s + &display_key(key)
+}
+
+fn display_key(name: &str) -> String {
     match name {
         "" => "-".into(),
         "space" => "Space".into(),
@@ -1629,8 +1783,40 @@ mod tests {
         // from a key, onto another row's: that row takes the key it left
         assert_eq!(t.bind_key(clear, "e"), Moved::Swapped(use_));
         assert_eq!(t.key(use_), Some("y"));
-        // a stick's row has keys; no row without keys or a button exists to refuse
-        assert!(ROWS.iter().all(|r| !r.keys.is_empty() || matches!(r.pad, Pad::Button(_))));
+        // a stick's row has keys; no row without keys or a button exists to
+        // refuse but the bars' slots, which take a key
+        assert!(ROWS.iter().enumerate().all(|(k, r)| !r.keys.is_empty() || matches!(r.pad, Pad::Button(_)) || bar_slot(k).is_some()));
+    }
+
+    /// The bars' slots (ticket 1913): ten rows, none with a key until given
+    /// one; a key put on one sends that bar's slot (and is let go as it), is
+    /// kept in `keys.opt` and read back; a slot moved onto another slot's key
+    /// swaps; a row's own key put there leaves that row with none. The
+    /// control: with nothing moved the key is itself.
+    #[test]
+    fn a_bars_slot_takes_a_key() {
+        let slots: Vec<usize> = (0..ROWS.len()).filter(|&k| bar_slot(k).is_some()).collect();
+        assert_eq!(slots.len(), 10);
+        assert_eq!(bar_slot(row_named("bar1_slot1").unwrap()), Some((0, 0)));
+        assert_eq!(bar_slot(row_named("bar2_slot5").unwrap()), Some((1, 4)));
+        assert_eq!(bar_slot(row_named("attack").unwrap()), None);
+        let mut b = Binds::default();
+        assert!(slots.iter().all(|&k| b.key(k).is_none()), "no key by default");
+        assert_eq!(b.alias("7"), Alias::Same, "the control");
+        let (s13, s21) = (row_named("bar1_slot3").unwrap(), row_named("bar2_slot1").unwrap());
+        assert_eq!(b.bind_key(s13, "7"), Moved::Freed(None));
+        assert_eq!(b.alias("7"), Alias::Slot(0, 2));
+        let mut e = KeyEdge::default();
+        assert_eq!(e.key("7", true, false, false, &b), Some(Sent::Slot(0, 2)));
+        assert_eq!(e.key("7", false, false, false, &b), Some(Sent::Slot(0, 2)));
+        assert_eq!(e.key("7", true, false, true, &b), Some(Sent::Key("7".into())), "typed into an edit box: the key");
+        let back = Binds::from_text(&b.to_text());
+        assert_eq!(back.alias("7"), Alias::Slot(0, 2), "kept: {}", b.to_text());
+        assert_eq!(b.bind_key(s21, "7"), Moved::Swapped(s13));
+        assert_eq!((b.alias("7"), b.key(s13)), (Alias::Slot(1, 0), None));
+        // the target's 1 put on a slot: target self is left with none
+        assert_eq!(b.bind_key(s13, "1"), Moved::Swapped(row_named("target_self").unwrap()));
+        assert_eq!(b.alias("1"), Alias::Slot(0, 2));
     }
 
     /// The pad: a field moved onto another button swaps the two; the
@@ -1721,6 +1907,11 @@ mod tests {
             assert_eq!(b.bind_row_button(row_named(id).unwrap(), l3), Moved::Already, "{id}");
         }
         assert!(ROWS.iter().enumerate().filter(|(r, _)| takes_button(*r)).all(|(_, r)| r.pad == Pad::None && !r.keys.is_empty()));
+        for k in 0..ROWS.len() {
+            if bar_slot(k).is_some() {
+                assert_eq!(b.bind_row_button(k, l3), Moved::Already, "a bar's slot takes no button");
+            }
+        }
         everything_once(&b);
         // the control: fields alone stay a permutation, none left without
         let mut c = Binds::default();
@@ -2283,5 +2474,40 @@ mod tests {
         assert_eq!(name_of(&Key::Character("Q".into())).as_deref(), Some("q"));
         assert_eq!(name_of(&Key::Named(NamedKey::Shift)), None);
         assert_eq!((display("pageup"), display("q"), display("f5"), display("|")), ("Page Up".into(), "Q".into(), "F5".into(), "||".into()));
+    }
+
+    /// Ticket 1950: a key captured with Shift held is "shift+1", a name of its
+    /// own: a row put on it takes it, the plain key stays the row's it was,
+    /// and only the combination is bound (`combo_bound`); it reads back from
+    /// keys.opt and shows as "Shift+1".
+    #[test]
+    fn a_key_with_modifiers_binds_as_itself() {
+        assert_eq!(combo_name(false, false, true, "1"), "shift+1");
+        assert_eq!(combo_name(true, true, true, "f"), "ctrl+alt+shift+f");
+        assert_eq!(split_combo("ctrl+shift+1"), ((true, false, true), "1"));
+        assert_eq!(split_combo("+"), ((false, false, false), "+"));
+        assert_eq!(split_combo("shift++"), ((false, false, true), "+"));
+        assert_eq!(display("shift+1"), "Shift+1");
+        assert_eq!(display("ctrl+alt+pageup"), "Ctrl+Alt+Page Up");
+        assert_eq!(display("+"), "+");
+        assert_eq!(base_name(winit::keyboard::KeyCode::Digit1), Some("1"));
+        let mut b = Binds::default();
+        let slot = row_named("bar1_slot1").unwrap();
+        assert!(!b.combo_bound("shift+1"));
+        b.bind_key(slot, "shift+1");
+        assert!(b.combo_bound("shift+1"));
+        assert_eq!(b.alias("shift+1"), Alias::Slot(0, 0));
+        // the plain key is whatever it was
+        assert_eq!(b.alias("1"), Binds::default().alias("1"));
+        assert!(!b.combo_bound("ctrl+1"));
+        let back = Binds::from_text(&b.to_text());
+        assert_eq!(back, b);
+        // the edge sends the combination's press and its release as the slot
+        let mut e = KeyEdge::default();
+        assert_eq!(e.key("shift+1", true, false, false, &b), Some(Sent::Slot(0, 0)));
+        assert_eq!(e.key("shift+1", false, false, false, &b), Some(Sent::Slot(0, 0)));
+        // negative control: unbound, the combination is itself, not the slot
+        let d = Binds::default();
+        assert_ne!(d.alias("shift+1"), Alias::Slot(0, 0));
     }
 }

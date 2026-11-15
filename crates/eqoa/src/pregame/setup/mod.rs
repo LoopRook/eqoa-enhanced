@@ -448,6 +448,11 @@ impl Setup {
                     self.sound.push(OptionsUp::Volume(0, self.options.fx_volume));
                     self.sound.push(OptionsUp::Volume(1, self.options.music_volume));
                 }
+                // the client's own: a tip in the space under the menu (`tips`,
+                // the GM Jibrish's petition 1811), while nothing is over it
+                if self.splash.ready && !self.options_visible && !self.message.visible && !self.net_visible {
+                    crate::tips::draw_title(cx.vui, cx.r, 304, 392);
+                }
                 if self.options_visible {
                     let mut ups = Vec::new();
                     self.options_wnd.draw(cx.vui, cx.r, &self.options, &mut ups);
@@ -614,7 +619,7 @@ impl Setup {
     /// (compact) put back after.
     fn edit_face(&mut self) {
         if self.typing() {
-            crate::editbox::set_pad_only(self.keyboard && self.options.compact != 0);
+            crate::editbox::set_pad_only(crate::editbox::compact_face(self.keyboard, self.options.compact != 0));
             self.face_set = true;
         } else {
             self.restore_face();
@@ -803,6 +808,28 @@ mod tests {
         assert_eq!((run.s.focus, run.s.typing()), (Some(Focus::NetSetup), false), "the control: cancelled, the page up");
         assert_eq!(run.shared.server, None);
         crate::settings::testing::reset(false);
+    }
+
+    /// Network Setup's eqoaclassic.com preset, from the title: down to it
+    /// and X keeps eqoaclassic.com (server.opt and the session's) and goes
+    /// back to the title, from another address or from none.
+    #[test]
+    fn network_setup_preset_keeps_eqoaclassic() {
+        for current in [Some("192.0.2.1"), None] {
+            let mut run = Run::new(current);
+            run.s.state = 2;
+            run.s.focus = None;
+            run.frames(32);
+            run.press(18);
+            run.press(13);
+            assert_eq!(run.s.focus, Some(Focus::NetSetup), "the page");
+            run.press(key::DOWN);
+            run.press(key::CROSS);
+            assert_eq!((run.s.focus, run.s.net_visible, run.s.typing()), (Some(Focus::Title), false, false), "kept, and back at the title");
+            assert_eq!(run.shared.server.as_deref(), Some(crate::settings::DEFAULT_SERVER));
+            assert_eq!(crate::settings::server().as_deref(), Some("eqoaclassic.com"), "kept in server.opt");
+            crate::settings::testing::reset(false);
+        }
     }
 
     thread_local! {

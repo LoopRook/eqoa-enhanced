@@ -5,15 +5,19 @@
 
 pub mod addr;
 pub mod auth;
+pub mod buffs;
 pub mod cape;
 pub mod creation;
 pub mod dump;
 pub mod entity;
+pub mod headmarks;
 pub mod hidelook;
 pub mod itemlink;
 pub mod npctint;
 pub mod raceopts;
 pub mod raid;
+pub mod readycheck;
+pub mod selectinfo;
 pub mod serverworlds;
 pub mod session;
 pub mod stream;
