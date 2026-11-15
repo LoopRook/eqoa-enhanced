@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import time
 import unittest
@@ -102,11 +103,9 @@ class TestRunGates(unittest.TestCase):
         lock_dir.mkdir(parents=True, exist_ok=True)
 
         lock = run_gates.CargoLock(lock_dir=lock_dir, wait_minutes=0.01, poll_interval=0.05)
-        # Should timeout quickly because lock_dir already exists
         with self.assertRaises(TimeoutError):
             lock.acquire()
 
-        # If existing lock is removed externally, acquire succeeds
         lock_dir.rmdir()
         lock2 = run_gates.CargoLock(lock_dir=lock_dir, wait_minutes=1, poll_interval=0.05)
         with lock2:
@@ -125,14 +124,57 @@ class TestRunGates(unittest.TestCase):
         self.assertIn("player-release", step_names)
         self.assertIn("release", step_names)
 
-        # round without filter should be omitted
         steps_no_filter = run_gates.build_steps(root=self.root, filters=None, release=False)
         names_no_filter = [s[0] for s in steps_no_filter]
         self.assertNotIn("round", names_no_filter)
         self.assertNotIn("release", names_no_filter)
 
-    @mock.patch("subprocess.run")
-    def test_dry_run_executes_nothing(self, mock_run):
+    def test_unknown_step_name_returns_error_exit_code_2(self):
+        target_dir = Path(self.temp_dir.name) / "target"
+        stderr_capture = io.StringIO()
+        with mock.patch("sys.stderr", stderr_capture):
+            exit_code = run_gates.run_gates(
+                root=self.root,
+                only="nonexistent_step",
+                cargo_target_dir=target_dir,
+                branch="test-feat",
+            )
+        self.assertEqual(exit_code, 2)
+        err_msg = stderr_capture.getvalue()
+        self.assertIn("Unknown step(s) in --only: nonexistent_step", err_msg)
+        for valid in run_gates.VALID_STEP_NAMES:
+            self.assertIn(valid, err_msg)
+
+        # Also test --skip-step with unknown step
+        stderr_capture = io.StringIO()
+        with mock.patch("sys.stderr", stderr_capture):
+            exit_code = run_gates.run_gates(
+                root=self.root,
+                skip_steps="typo_step",
+                cargo_target_dir=target_dir,
+                branch="test-feat",
+            )
+        self.assertEqual(exit_code, 2)
+        self.assertIn("Unknown step(s) in --skip-step: typo_step", stderr_capture.getvalue())
+
+    def test_multiple_filter_words_dry_run(self):
+        target_dir = Path(self.temp_dir.name) / "target"
+        output_capture = io.StringIO()
+        with mock.patch("sys.stdout", output_capture):
+            exit_code = run_gates.run_gates(
+                root=self.root,
+                filters=["filter_one", "filter_two"],
+                only="round",
+                dry_run=True,
+                cargo_target_dir=target_dir,
+                branch="test-feat",
+            )
+        self.assertEqual(exit_code, 0)
+        output = output_capture.getvalue()
+        self.assertIn("-- filter_one filter_two --test-threads=1", output)
+
+    @mock.patch("run_gates.run_subprocess_tree")
+    def test_dry_run_executes_nothing(self, mock_run_tree):
         target_dir = Path(self.temp_dir.name) / "target"
         output_capture = io.StringIO()
         with mock.patch("sys.stdout", output_capture):
@@ -143,24 +185,62 @@ class TestRunGates(unittest.TestCase):
                 branch="test-feat",
             )
         self.assertEqual(exit_code, 0)
-        mock_run.assert_not_called()
+        mock_run_tree.assert_not_called()
         self.assertIn("Dry run mode", output_capture.getvalue())
 
-    @mock.patch("subprocess.run")
-    def test_run_gates_flow_with_mocked_subprocess(self, mock_run):
+    @mock.patch("run_gates.kill_process_tree")
+    @mock.patch("subprocess.Popen")
+    def test_timeout_kills_process_tree_and_decodes_bytes(self, mock_popen, mock_kill):
+        mock_proc = mock.MagicMock()
+        mock_proc.pid = 99999
+        mock_proc.returncode = 0
+        # First communicate raises TimeoutExpired with bytes in stdout
+        mock_proc.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd="cargo test", timeout=60, output=b"some bytes output before timeout"),
+            (b"final drained bytes", None),
+        ]
+        mock_popen.return_value = mock_proc
+
+        ret, text = run_gates.run_subprocess_tree(
+            ["cargo", "test"],
+            cwd=self.root,
+            env={},
+            timeout_minutes=1,
+        )
+
+        mock_kill.assert_called_once_with(99999)
+        self.assertEqual(ret, -1)
+        self.assertIn("final drained bytes", text)
+        self.assertIn("Command timed out after 1 minutes", text)
+
+    @mock.patch("run_gates.kill_process_tree")
+    @mock.patch("subprocess.Popen")
+    def test_ctrl_c_kills_process_tree_and_raises(self, mock_popen, mock_kill):
+        mock_proc = mock.MagicMock()
+        mock_proc.pid = 88888
+        mock_proc.communicate.side_effect = KeyboardInterrupt()
+        mock_popen.return_value = mock_proc
+
+        with self.assertRaises(KeyboardInterrupt):
+            run_gates.run_subprocess_tree(
+                ["cargo", "test"],
+                cwd=self.root,
+                env={},
+                timeout_minutes=1,
+            )
+
+        mock_kill.assert_called_once_with(88888)
+
+    @mock.patch("run_gates.run_subprocess_tree")
+    def test_timeout_step_writes_fail_log_and_subsequent_steps_run(self, mock_run_tree):
         target_dir = Path(self.temp_dir.name) / "target"
         lock_dir = Path(self.temp_dir.name) / "test_flow.lock"
 
-        def fake_subprocess_run(cmd, **kwargs):
-            mock_proc = mock.MagicMock()
-            mock_proc.returncode = 0
-            if "cargo" in cmd and "test" in cmd:
-                mock_proc.stdout = SAMPLE_CARGO_TEST_OUTPUT
-            else:
-                mock_proc.stdout = "OK\n"
-            return mock_proc
-
-        mock_run.side_effect = fake_subprocess_run
+        # Step 1 (footprint) times out, Step 2 (paths) passes
+        mock_run_tree.side_effect = [
+            (-1, "Step timed out\nCommand timed out after 60 minutes\n"),
+            (0, "All paths clean\n"),
+        ]
 
         exit_code = run_gates.run_gates(
             root=self.root,
@@ -169,12 +249,20 @@ class TestRunGates(unittest.TestCase):
             lock_dir=lock_dir,
             branch="test-feat",
         )
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(mock_run.call_count, 2)
-        summary_file = next((target_dir / "gates").glob("*-summary.md"), None)
-        self.assertIsNotNone(summary_file)
-        content = summary_file.read_text(encoding="utf-8")
-        self.assertIn("ALL GATES PASSED", content)
+
+        self.assertEqual(exit_code, 1)  # failed because step 1 failed
+        self.assertEqual(mock_run_tree.call_count, 2)  # step 2 still ran!
+
+        footprint_log = target_dir / "gates" / "test-feat-footprint.log"
+        self.assertTrue(footprint_log.is_file())
+        self.assertIn("Command timed out after 60 minutes", footprint_log.read_text("utf-8"))
+
+        summary_file = target_dir / "gates" / "test-feat-summary.md"
+        self.assertTrue(summary_file.is_file())
+        summary_content = summary_file.read_text("utf-8")
+        self.assertIn("- **footprint**: FAIL", summary_content)
+        self.assertIn("- **paths**: PASS", summary_content)
+        self.assertIn("SOME GATES FAILED", summary_content)
 
 
 if __name__ == "__main__":

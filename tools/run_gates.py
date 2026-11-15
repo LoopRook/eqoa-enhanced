@@ -26,6 +26,89 @@ TEST_RESULT_RE = re.compile(
 FAILED_TEST_RE = re.compile(r"^test\s+([^\s]+)\s+\.\.\.\s+FAILED", re.MULTILINE)
 
 
+VALID_STEP_NAMES = [
+    "round",
+    "addons",
+    "full",
+    "wasm",
+    "footprint",
+    "paths",
+    "player-release",
+    "release",
+]
+
+
+def safe_decode(data):
+    if data is None:
+        return ""
+    if isinstance(data, bytes):
+        return data.decode("utf-8", errors="replace")
+    return str(data)
+
+
+def kill_process_tree(pid):
+    if pid is None:
+        return
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(pid)],
+                capture_output=True,
+                check=False,
+            )
+        except OSError:
+            pass
+    else:
+        try:
+            import signal
+            pgid = os.getpgid(pid)
+            os.killpg(pgid, signal.SIGKILL)
+        except (OSError, ProcessLookupError, AttributeError):
+            try:
+                import signal
+                os.kill(pid, signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                pass
+
+
+def run_subprocess_tree(cmd, cwd, env, timeout_minutes):
+    timeout_seconds = timeout_minutes * 60
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cwd),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=(sys.platform != "win32"),
+    )
+    timed_out = False
+    stdout_data = None
+    try:
+        stdout_data, _ = proc.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        kill_process_tree(proc.pid)
+        try:
+            stdout_data, _ = proc.communicate()
+        except Exception:
+            stdout_data = exc.stdout
+    except BaseException:
+        kill_process_tree(proc.pid)
+        try:
+            proc.communicate()
+        except Exception:
+            pass
+        raise
+
+    returncode = proc.returncode
+    stdout_text = safe_decode(stdout_data)
+    if timed_out:
+        stdout_text += f"\nCommand timed out after {timeout_minutes} minutes\n"
+        returncode = -1
+
+    return returncode, stdout_text
+
+
 def get_current_branch(root=None):
     try:
         cmd = ["git", "-c", "safe.directory=*", "rev-parse", "--abbrev-ref", "HEAD"]
@@ -107,6 +190,7 @@ class CargoLock:
         self.lock_dir = Path(lock_dir)
         self.wait_minutes = wait_minutes
         self.poll_interval = poll_interval
+        self.owner_token = f"pid-{os.getpid()}-{id(self)}.token"
         self.acquired = False
 
     def acquire(self):
@@ -116,8 +200,6 @@ class CargoLock:
         while True:
             try:
                 os.mkdir(self.lock_dir)
-                self.acquired = True
-                return
             except FileExistsError:
                 elapsed = time.time() - start
                 if elapsed >= timeout_seconds:
@@ -126,9 +208,28 @@ class CargoLock:
                     )
                 print(f"Waiting for cargo lock at {self.lock_dir}... ({int(elapsed)}s elapsed)")
                 time.sleep(min(self.poll_interval, max(0.1, timeout_seconds - elapsed)))
+                continue
+            except BaseException:
+                try:
+                    os.rmdir(self.lock_dir)
+                except OSError:
+                    pass
+                raise
+
+            self.acquired = True
+            try:
+                (self.lock_dir / self.owner_token).touch()
+            except OSError:
+                pass
+            return
 
     def release(self):
-        if self.acquired:
+        token_path = self.lock_dir / self.owner_token
+        if self.acquired or token_path.is_file():
+            try:
+                token_path.unlink(missing_ok=True)
+            except OSError:
+                pass
             try:
                 os.rmdir(self.lock_dir)
             except OSError:
@@ -265,11 +366,32 @@ def run_gates(
     )
 
     if only:
-        only_set = {s.strip() for s in only.split(",") if s.strip()}
+        only_list = [s.strip() for s in only.split(",") if s.strip()]
+        unknown = [s for s in only_list if s not in VALID_STEP_NAMES]
+        if unknown:
+            print(
+                f"Error: Unknown step(s) in --only: {', '.join(unknown)}. "
+                f"Valid step names: {', '.join(VALID_STEP_NAMES)}",
+                file=sys.stderr,
+            )
+            return 2
+        only_set = set(only_list)
         all_steps = [s for s in all_steps if s[0] in only_set]
+        if not all_steps:
+            print("Error: No runnable steps selected.", file=sys.stderr)
+            return 2
 
     if skip_steps:
-        skip_set = {s.strip() for s in skip_steps.split(",") if s.strip()}
+        skip_list = [s.strip() for s in skip_steps.split(",") if s.strip()]
+        unknown = [s for s in skip_list if s not in VALID_STEP_NAMES]
+        if unknown:
+            print(
+                f"Error: Unknown step(s) in --skip-step: {', '.join(unknown)}. "
+                f"Valid step names: {', '.join(VALID_STEP_NAMES)}",
+                file=sys.stderr,
+            )
+            return 2
+        skip_set = set(skip_list)
         all_steps = [s for s in all_steps if s[0] not in skip_set]
 
     default_iso = root / "run" / "eqoa.iso"
@@ -313,32 +435,17 @@ def run_gates(
             try:
                 if is_cargo:
                     with CargoLock(lock_dir=lock_dir, wait_minutes=lock_wait):
-                        proc = subprocess.run(
-                            cmd,
-                            cwd=str(root),
-                            env=step_env,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT,
-                            text=True,
-                            timeout=timeout * 60,
+                        returncode, combined_output = run_subprocess_tree(
+                            cmd, cwd=root, env=step_env, timeout_minutes=timeout
                         )
-                        combined_output = proc.stdout
-                        step_passed = (proc.returncode == 0)
+                        step_passed = (returncode == 0)
                 else:
-                    proc = subprocess.run(
-                        cmd,
-                        cwd=str(root),
-                        env=step_env,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        timeout=timeout * 60,
+                    returncode, combined_output = run_subprocess_tree(
+                        cmd, cwd=root, env=step_env, timeout_minutes=timeout
                     )
-                    combined_output = proc.stdout
-                    step_passed = (proc.returncode == 0)
-            except subprocess.TimeoutExpired as exc:
-                combined_output = (exc.stdout or "") + f"\nCommand timed out after {timeout} minutes\n"
-                step_passed = False
+                    step_passed = (returncode == 0)
+            except KeyboardInterrupt:
+                raise
             except Exception as exc:
                 combined_output = f"Execution error: {exc}\n"
                 step_passed = False
