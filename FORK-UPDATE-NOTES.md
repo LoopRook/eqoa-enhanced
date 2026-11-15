@@ -4,6 +4,10 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Upstream's latest changes are in (192 of them: auras and armour looks, stacked spell bars, a buff window on servers that send one, raid lists, Touch Controls and more; see the vanilla client's notes).
+- Options -> Extended is now upstream's five groups (Graphics, UI, Other, Touch Controls, Multi-boxing). The **Enhanced** page (HUD extras and Mods & Addons) is in the **UI** group: Options -> Extended -> UI -> Enhanced. Every row keeps its saved setting.
+- Group members' and your pet's power bars are now the game's own (Options -> Extended -> UI -> Power Bars, on by default). The Mana Bars mod keeps your target's power bar; with Power Bars off the server sends no power, so the target's bar is gone too. A mod that hides the effects strip or the ability bars now also hides the new buff window and stacked spell bars and their clicks.
+
 - Round minimap hover reads compact current-frame dot positions, avoiding a full creature-record list each frame.
 - The round minimap is now a clean circle: the game's square frame no longer shows inside it. Its hover card cuts a single very long word with "...", and its mod no longer reports errors in the Addon Manager.
 - Map Search's button and box are back at the sizes the built-in search had, scaled with the HUD at any window size or Render Scale.
