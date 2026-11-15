@@ -102,6 +102,10 @@ game's own rounding: `eqoa.merchant.price(ref, "buy" or "sell", quantity)`.
 `eqoa.items.slots`, `.stats` and `.attack_types` are the item enums by name, and
 `eqoa.gems.get/is_gem/format` look up the crafting gems.
 
+The items example is [the bag viewer](../../bundled-mods/eqoa_bag_viewer/main.lua): a read-only Bags window
+that reads `eqoa.inventory` and `eqoa.bank`, takes its loot log from `loot.changed`, and listens to nothing
+else while it is closed. It is off by default.
+
 Not given yet: the item page's tab and selection (`Container.view`) and the
 merchant window's mode and selection (`MerchantState.mode`, `options`); asking
 for them says so in the Addon Manager. FrontiersForge's `inventory`, `item`,
