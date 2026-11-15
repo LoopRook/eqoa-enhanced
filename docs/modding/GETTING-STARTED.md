@@ -106,9 +106,7 @@ The items example is [the bag viewer](../../bundled-mods/eqoa_bag_viewer/main.lu
 that reads `eqoa.inventory` and `eqoa.bank`, takes its loot log from `loot.changed`, and listens to nothing
 else while it is closed. It is off by default.
 
-Not given yet: the item page's tab and selection (`Container.view`) and the
-merchant window's mode and selection (`MerchantState.mode`, `options`); asking
-for them says so in the Addon Manager. FrontiersForge's `inventory`, `item`,
+While the start menu's item page is up the pack's `view` gives its tab, the stacks under it and the lit row; while a merchant window is up `MerchantState` gives its mode (menu, sell, buy), the option lit in the menu, and its `view` the rows and the lit one. Not given: `MerchantState.button_hint` (asking says so in the Addon Manager). FrontiersForge's `inventory`, `item`,
 `bank`, `loot`, `merchant` and `gems` modules read the same data with their own
 shapes (tab enum 0..3, `bank.GetItems` as `{idx, slot, level, name, amount}`).
 
