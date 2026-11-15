@@ -1,5 +1,33 @@
 # Round 5 report: the items API (Part A, 2026-11-15)
 
+## For the owner: what to test
+
+Package: `Downloads\EQOA-Enhanced-Round5-Test`, start it with "Play EQOA Round5 Test.bat" (your settings copy,
+updater off; the "(fps log)" bat also writes the per-mod timing log). Build: commit 7152fba8.
+
+1. In the Addon Manager turn on **EQOA Bag Viewer** (it is off by default). Controls page: give "Bag viewer" a
+   key (it starts unbound). Press it: a Bags window opens; Escape or the key closes it.
+2. The grid shows your 40 slots with the right icons, stack counts, an E on worn items, tunar and "used/40".
+   Try each tab: All, Usable, Equipment, Charged, Misc should match the game's own item page tabs; Bank shows
+   your bank and bank tunar anywhere, without visiting a banker.
+3. Hover items: name, level, slot, stats, HP, value; a red "You can't use this" on items your class, race or
+   level can't use.
+4. Loot a few corpses: lines appear under the grid, newest first, with the time. "from <corpse>" shows only
+   when you had the corpse targeted a second before looting; clicking a corpse to loot it usually gives no
+   "from" (the one-line upstream hook below would fix that).
+5. Buy/sell, bank and zone with the window open: it should update, never move or sell anything itself.
+   Also check your usual mods (Wereoxxs, the HUD mods, map mods) still work and fps is as before with the
+   Bag Viewer off.
+
+Tested by agents: 2312 client tests pass (0 failed; 50 skipped because the decomp oracle is not on this
+machine), 35 round 5 tests with protocol-shaped data and negative controls, two Terra reviews (Part A REJECT
+then fixed; Part B approved with one fix, done), packaging dry run. Not tested: real play on a server, real
+loot/merchant/bank traffic, the look at your screen size; mods' per-frame cost in a busy place.
+
+Your decisions (none block testing): (a) the one upstream line for exact "from <corpse>" (`play.rs`, budget +1,
+section "Part B fix round"); (b) the two read-only accessor seams for the item page's tab/selection and the
+merchant's mode/selection (section "What is not given", about 11 lines). Both would also go into the PR.
+
 Branch `feat/eqoa-api-r5` from develop `8efdc147` (after sync 2026-11-15), reviewed footprint base
 `a76d8d27a1c3f51fca545d7eabaca9e5dc336091`. Builder: Claude Sonnet. Commits are LoopRook's; nothing was pushed, merged
 or tagged. Part B (the example mod) is at the end.
