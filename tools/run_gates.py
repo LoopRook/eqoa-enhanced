@@ -209,12 +209,15 @@ class CargoLock:
                 print(f"Waiting for cargo lock at {self.lock_dir}... ({int(elapsed)}s elapsed)")
                 time.sleep(min(self.poll_interval, max(0.1, timeout_seconds - elapsed)))
                 continue
-            except BaseException:
-                try:
-                    os.rmdir(self.lock_dir)
-                except OSError:
-                    pass
-                raise
+            except PermissionError:
+                # Windows refuses mkdir while another holder is removing the folder: wait, never
+                # remove a lock this process did not create.
+                if time.time() - start >= timeout_seconds:
+                    raise TimeoutError(
+                        f"Timed out after {self.wait_minutes} minutes waiting for cargo lock at {self.lock_dir}"
+                    )
+                time.sleep(min(self.poll_interval, 1.0))
+                continue
 
             self.acquired = True
             try:

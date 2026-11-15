@@ -112,6 +112,18 @@ class TestRunGates(unittest.TestCase):
             self.assertTrue(lock_dir.exists())
         self.assertFalse(lock_dir.exists())
 
+    def test_lock_never_removes_a_foreign_lock_on_mkdir_error(self):
+        # Another agent's lock (a plain empty folder) exists; mkdir reports access denied, as Windows
+        # does while a holder removes it. The foreign lock must survive and acquire must time out.
+        lock_dir = Path(self.temp_dir.name) / "foreign.lock"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        lock = run_gates.CargoLock(lock_dir=lock_dir, wait_minutes=0.005, poll_interval=0.05)
+        with mock.patch.object(run_gates.os, "mkdir", side_effect=PermissionError("denied")):
+            with self.assertRaises(TimeoutError):
+                lock.acquire()
+        self.assertTrue(lock_dir.exists())
+        self.assertFalse(lock.acquired)
+
     def test_step_selection_only_and_skip(self):
         steps = run_gates.build_steps(root=self.root, filters="my_filter", release=True)
         step_names = [s[0] for s in steps]
