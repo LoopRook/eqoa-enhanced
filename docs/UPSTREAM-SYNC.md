@@ -438,3 +438,19 @@ unchanged, footprint 6242 shared changed lines. Gates rerun once: client/net
 2319 passed, 2 GPU failures, 34 ignored, 298 SKIP lines; both failures reproduce
 exactly on untouched 5d54c0c. See the report second section for overlaps, the
 zero-conflict dry run and final post-commit release/package receipts.
+
+## Sync 2026-11-15 (192 commits to a76d8d2)
+
+Merge 0d548415 plus follow-up 5dc2d440. Eight hand conflicts (hud, map/mini, options, play,
+settings, update, net session, .gitattributes), resolved by the Opus lead keeping upstream's code:
+upstream's Extended became five groups and the fork's Enhanced page joins the UI group
+(`fork_options::pages()` feeds upstream's group lookups); upstream's new Power Bars (others' power,
+on by default, group and pet bars) replace the fork's duplicate request, and the Mana Bars mod
+keeps only the target's bar (plan decision of 2026-11-10); upstream's stacked spell bars and buff
+window take the existing mod hide hooks. Terra review: APPROVE WITH CHANGES, 0 HIGH / 3 MEDIUM, all
+fixed (buff-window and autocast clicks honour the hide checks; old Mana Bars checksum kept in the
+shipped history). Tests: client/net 2320 passed before the follow-up, the 4 failures were the tests
+of the intended changes and were rewritten (with controls); after the follow-up the addon/options
+suites pass (494, 0 SKIP); Python tools 101 passed. 50 SKIP messages in the full run (no oracle).
+Footprint PASS at reviewed base a76d8d2 (session.rs +207 to +110; play.rs +92/-51). The script's
+console output is now UTF-8 (it crashed printing U+2715).
