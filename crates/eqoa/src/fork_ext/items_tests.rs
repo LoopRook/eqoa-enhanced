@@ -456,8 +456,11 @@ fn round5_merchant_opens_by_0x00b7_prices_natively_and_close_discards_the_wares(
         assert(m.kind == 'merchant' and m.open == true and m.used == 2 and m.capacity == nil and m.money == nil)
         assert(m.merchant.entity_id == 7001 and m.merchant.greeting == 'Welcome, traveller!' and m.merchant.pending == false)
         assert(m.merchant.sell_rate == 90 and m.merchant.buy_rate == 110)
-        -- only what the client knows: the window's mode and selection are not given
-        assert(m.merchant.mode == nil and m.merchant.options == nil)
+        -- the window opens on its menu with Buy lit and no row lit; the button hint is still to come
+        assert(m.merchant.mode == 'menu' and m.merchant.selected_option == 'buy' and #m.merchant.options == 3)
+        assert(m.merchant.options[1].key == 'buy' and m.merchant.options[1].selected == true and m.merchant.options[3].key == 'exit')
+        assert(m.view ~= nil and #m.view.tabs == 0 and #m.view.rows == 0 and m.view.selected == nil and m.view.selected_row == nil)
+        assert(m.merchant.button_hint == nil)
         axe = m.items[1].ref
         -- 15 x 110% = 16.5: the native rounding makes it 17, and a pair is 34 (not 33)
         assert(eqoa.merchant.price(axe, 'buy') == 17 and eqoa.merchant.price(axe, 'buy', 2) == 34)
@@ -633,8 +636,10 @@ fn round5_capabilities_list_every_new_function_and_say_what_is_missing() {
           local c = eqoa.capabilities.get(p)
           if p:find('^eqoa.events') then assert(c.status == 'supported' or c.status == 'unknown', p) else assert(c.status == 'supported', p .. ' ' .. tostring(c.status)) end
         end
-        local c = eqoa.capabilities.get('eqoa.items.Container.view'); assert(c.status == 'not_yet' and c.round == 6)
-        local c = eqoa.capabilities.get('eqoa.items.MerchantState.mode'); assert(c.status == 'not_yet')
+        -- the window state came with the owner-approved accessors; only the button hint is still to come
+        local c = eqoa.capabilities.get('eqoa.items.Container.view'); assert(c.status == 'supported')
+        local c = eqoa.capabilities.get('eqoa.items.MerchantState.mode'); assert(c.status == 'supported')
+        local c = eqoa.capabilities.get('eqoa.items.MerchantState.button_hint'); assert(c.status == 'not_yet' and c.round == 6)
         assert(eqoa.capabilities.has('eqoa.inventory.get'))
         local listed = {}
         for _, c in ipairs(eqoa.capabilities.list('eqoa.items')) do listed[c.path] = c.status end
@@ -755,10 +760,14 @@ fn round5_forge_item_modules_follow_the_pinned_shapes() {
         assert(merchant.IsOpen() and merchant.GetEntityId() == 7001 and merchant.GetGreeting() == 'Hello there')
         assert(merchant.GetItemCount() == 2 and merchant.GetItem(1).name == 'Bronze Axe' and merchant.GetItem(1).idx == 1)
         assert(merchant.GetItem(0) == nil and merchant.GetItem(3) == nil and #merchant.GetItems() == 2 and merchant.max_slots == 40)
-        -- the window's mode and selection are not given by the client: no made-up answer
-        assert(merchant.GetMode() == nil and merchant.GetSelectedOption() == nil and merchant.GetOptions() == nil and merchant.GetSelectedItem() == nil)
-        assert(inventory.IsWindowOpen() == nil and inventory.GetOpenTab() == nil and inventory.GetTabs() == nil and inventory.GetSelectedSlot() == nil)
-        local c = eqoa.capabilities.get('frontiers_forge.merchant.GetMode'); assert(c.status == 'not_yet')
+        -- the window just opened on its menu, Buy lit: the mode and options are the client's, no row is lit
+        assert(merchant.GetMode() == merchant.Mode.menu and merchant.GetSelectedOption() == merchant.Option.buy)
+        assert(#merchant.GetOptions() == 3 and merchant.GetOptions()[1].selected == true and merchant.GetOptions()[2].selected == false)
+        assert(merchant.GetSelectedItem() == nil and merchant.GetSelectedItemIndex() == nil)
+        -- the item page is not up
+        assert(inventory.IsWindowOpen() == false and inventory.GetOpenTab() == nil and inventory.GetTabs() == nil and inventory.GetSelectedSlot() == nil and inventory.GetSelectedItem() == nil)
+        local c = eqoa.capabilities.get('frontiers_forge.merchant.GetMode'); assert(c.status == 'supported')
+        local c = eqoa.capabilities.get('frontiers_forge.merchant.GetButtonHint'); assert(c.status == 'not_yet')
         -- gems: Get, IsGem and a Format that calls the real Get
         assert(gems.IsGem('Moonstone') == true and gems.IsGem('Rock') == false and gems.IsGem(nil) == nil)
         assert(gems.Get('Moonstone').rarity == 'Common' and gems.Get('Rock') == nil)
@@ -963,6 +972,245 @@ fn round5b_a_reply_with_no_recent_request_for_a_corpse_has_no_source() {
     apply(&mut p, opcode(0x0018, pelt()));
     native_events::dispatch(&h).unwrap();
     assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil");
+}
+
+
+/// A raster that draws nothing: the item page and the merchant window are driven by their keys.
+struct Quiet;
+impl crate::ui::Layout for Quiet {}
+impl vi::ui::Raster for Quiet {
+    fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+    fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+    fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
+    fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
+    fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) {}
+    fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) {}
+    fn string_width(&self, s: &[u16]) -> i32 {
+        s.len() as i32 * 8
+    }
+    fn point_size(&self) -> i32 {
+        16
+    }
+    fn viewport(&self) -> [i32; 4] {
+        [0, 0, 640, 448]
+    }
+    fn set_viewport(&mut self, _: [i32; 4]) {}
+}
+impl Play {
+    /// The start menu's item page, opened on the usable tab, then `tabs` tab changes to the right and
+    /// `downs` presses of Down in the tab's list: the game's own `ItemMenu` driven by its keys.
+    pub(crate) fn bags_item_page(&mut self, tabs: usize, downs: usize) {
+        use crate::pointer::key;
+        let vui = crate::ui::Vui::new(Default::default(), Default::default(), vec![]);
+        let mut r = Quiet;
+        let inv = self.dump.inventory.clone();
+        let built = crate::itemmenu::build(&inv, [40; 4], &|_| 0, &|_| true);
+        self.items.set_built(built);
+        self.items.open(&vui, &r);
+        let info = crate::infotext::Info { words: &vui.words, inv: &inv, hp: [0; 4], base: &self.stats.base, class: 0, level: 50, attack_words: &[] };
+        let (mut cues, mut out) = (Vec::new(), Vec::new());
+        self.items.draw(&vui, &mut r, &info, &mut cues);
+        for k in std::iter::repeat_n(key::RIGHT, tabs).chain(std::iter::repeat_n(key::DOWN, downs)) {
+            for down in [true, false] {
+                self.items.key(&vui, &mut r, k, down, &inv, &info, false, &mut cues, &mut out);
+            }
+            // the page is drawn each frame: the tab's list takes its rows then
+            self.items.draw(&vui, &mut r, &info, &mut cues);
+        }
+    }
+    /// The merchant window opens on its menu after 0x00B7 (what the draw loop does with `merchant_open`).
+    pub(crate) fn bags_merchant_open(&mut self) {
+        let vui = crate::ui::Vui::new(Default::default(), Default::default(), vec![]);
+        let greeting = self.npcw.shop.greeting.clone();
+        self.npcw.merchant.open(&vui, &mut Quiet, &greeting);
+        self.npcw.merchant.visible = true;
+        self.bags_merchant_keys(&[]);
+    }
+    /// Keys pressed in the merchant window (each down and up), the window drawn after each.
+    pub(crate) fn bags_merchant_keys(&mut self, keys: &[i32]) {
+        let vui = crate::ui::Vui::new(Default::default(), Default::default(), vec![]);
+        let mut r = Quiet;
+        let inv = self.dump.inventory.clone();
+        let info = crate::infotext::Info { words: &vui.words, inv: &inv, hp: [0; 4], base: &self.stats.base, class: 0, level: 50, attack_words: &[] };
+        let coin = self.dump.player.p34 as i32;
+        let (can_use, icon) = (|_: &NetItem| true, |_: &NetItem| 0);
+        let npcw = &mut self.npcw;
+        let view = crate::merchant::View { info: &info, shop: &npcw.shop, coin, can_use: &can_use, inv_icon: &icon };
+        let (mut cues, mut out) = (Vec::new(), Vec::new());
+        npcw.merchant.draw(&vui, &mut r, &view, &mut cues, &mut out);
+        for k in keys {
+            for down in [true, false] {
+                npcw.merchant.key(&vui, &mut r, &view, *k, down, &mut cues, &mut out);
+            }
+            npcw.merchant.draw(&vui, &mut r, &view, &mut cues, &mut out);
+        }
+    }
+    /// The start menu closes: the item page goes away.
+    pub(crate) fn bags_close_item_page(&mut self) {
+        self.items.visible = false;
+    }
+}
+
+// ---- The item page and the merchant window's state, from the owner-approved read-only accessors.
+/// What a frame does: sees a window's change with no event of its own, then tells the subscribers.
+fn frame(p: &Play, h: &Host) {
+    items::refresh(p);
+    native_core::flush_deferred();
+    native_events::dispatch(h).unwrap();
+}
+
+fn tabbed_pack() -> Vec<Spec> {
+    let mut potion = Spec::new(900_002, "Healing Potion", 12);
+    potion.p4c = 2;
+    potion.quantity = 5;
+    potion.max_stack = 20;
+    let mut mana = Spec::new(900_020, "Mana Potion", 14);
+    mana.p4c = 7;
+    let mut wand = Spec::new(900_021, "Fire Wand", 15);
+    wand.p4c = 3;
+    wand.p54 = 5;
+    vec![sword(), potion, ring(), mana, wand, Spec::new(900_022, "Rat Pelt", 16)]
+}
+
+#[test]
+fn round5b_the_item_pages_tab_and_lit_row_are_the_pack_containers_view_and_each_change_is_one_event() {
+    let (mut p, h) = world();
+    p.dump.inventory = list(&tabbed_pack());
+    capture_all(&p);
+    native_events::dispatch(&h).unwrap();
+    h.execute("log = {}; assert(eqoa.inventory.get().view == nil, 'no item page, no view')").unwrap();
+    // the page opens on the usable tab with its first row lit: the potions
+    p.bags_item_page(0, 0);
+    frame(&p, &h);
+    h.execute(
+        r#"
+        local c = eqoa.inventory.get(); local v = c.view
+        assert(v ~= nil and v.tab == 1 and #v.tabs == 4 and v.tabs[1].key == 'usable' and v.tabs[3].key == 'charged' and v.tabs[3].index == 3 and v.tabs[4].key == 'misc')
+        assert(#v.rows == 2 and v.rows[1] == c.items[2].ref and v.rows[2] == c.items[4].ref, 'the usable stacks, in the pack order')
+        assert(v.selected_row == 1 and v.selected == c.items[2].ref)
+        assert(#log == 1 and log[1].name == 'inventory.changed' and log[1].cause == 'frame' and log[1].changed:find('view', 1, true), log[1] and log[1].changed)
+        "#,
+    )
+    .unwrap();
+    // to the equipment tab and its second row (Right, Down): one change, one event
+    p.bags_item_page(1, 1);
+    frame(&p, &h);
+    h.execute(
+        r#"
+        local c = eqoa.inventory.get(); local v = c.view
+        assert(v.tab == 2 and #v.rows == 2 and v.rows[1] == c.items[1].ref and v.rows[2] == c.items[3].ref)
+        assert(v.selected_row == 2 and v.selected == c.items[3].ref)
+        assert(#log == 2 and log[2].cause == 'frame', #log)
+        "#,
+    )
+    .unwrap();
+    // nothing moved: a frame says nothing
+    frame(&p, &h);
+    frame(&p, &h);
+    h.execute("assert(#log == 2)").unwrap();
+    // the charged tab (the wand) and the misc tab (the pelt)
+    p.bags_item_page(2, 0);
+    frame(&p, &h);
+    h.execute("local c = eqoa.inventory.get(); local v = c.view; assert(v.tab == 3 and #v.rows == 1 and v.rows[1] == c.items[5].ref and v.selected_row == 1 and #log == 3)").unwrap();
+    p.bags_item_page(3, 0);
+    frame(&p, &h);
+    h.execute("local c = eqoa.inventory.get(); local v = c.view; assert(v.tab == 4 and #v.rows == 1 and v.rows[1] == c.items[6].ref and #log == 4)").unwrap();
+    // the page closes: no view, one event
+    p.bags_close_item_page();
+    frame(&p, &h);
+    h.execute("assert(eqoa.inventory.get().view == nil and #log == 5 and log[5].cause == 'frame')").unwrap();
+    // Forge's calls over the same state
+    p.bags_item_page(1, 1);
+    frame(&p, &h);
+    let mods = h.registered_modules();
+    h.lua.globals().set("inventory", mods.get("frontiers_forge.inventory").unwrap().clone()).unwrap();
+    h.execute(
+        r#"
+        assert(inventory.IsWindowOpen() == true and inventory.GetOpenTab() == inventory.Tab.equipment)
+        local tabs = inventory.GetTabs(); assert(#tabs == 4 and tabs[1].tab == 0 and tabs[4].tab == 3)
+        local list = inventory.GetTabList(); assert(#list == 2 and list[1].name == 'Rusty Sword' and list[2].name == 'Iron Ring' and list[2].idx == 3)
+        assert(inventory.GetTabList(2)[1].name == 'Fire Wand' and inventory.GetTabList(9) == nil)
+        assert(inventory.GetSelectedSlot() == 3, 'the pack position of the lit stack, not its row in the tab')
+        assert(inventory.GetSelectedItem().name == 'Iron Ring')
+        "#,
+    )
+    .unwrap();
+    p.bags_close_item_page();
+    frame(&p, &h);
+    h.execute("assert(inventory.IsWindowOpen() == false and inventory.GetOpenTab() == nil and inventory.GetTabList() == nil and inventory.GetSelectedItem() == nil)").unwrap();
+}
+
+#[test]
+fn round5b_the_merchant_windows_mode_option_and_row_are_the_containers_state_and_each_change_is_one_event() {
+    use crate::pointer::key;
+    let (mut p, h) = world();
+    let wares = [Spec::new(3001, "Bronze Axe", 41), Spec::new(3002, "Bread", 42)];
+    apply(&mut p, opcode(0x00B7, shop_bytes(7001, 90, 110, &wares, "Hello there")));
+    native_events::dispatch(&h).unwrap();
+    p.bags_merchant_open();
+    frame(&p, &h);
+    h.execute(
+        r#"
+        log = {}
+        local m = eqoa.merchant.get()
+        assert(m.merchant.mode == 'menu' and m.merchant.selected_option == 'buy' and m.view.selected == nil and #m.view.rows == 0)
+        assert(#m.merchant.options == 3 and m.merchant.options[1].selected == true and m.merchant.options[2].key == 'sell' and m.merchant.options[3].selected == false)
+        "#,
+    )
+    .unwrap();
+    // Down: the Sell option lit, one event
+    p.bags_merchant_keys(&[key::DOWN]);
+    frame(&p, &h);
+    h.execute(
+        r#"
+        local m = eqoa.merchant.get()
+        assert(m.merchant.selected_option == 'sell' and m.merchant.options[2].selected == true and m.merchant.options[1].selected == false)
+        assert(#log == 1 and log[1].name == 'merchant.changed' and log[1].cause == 'frame' and log[1].changed:find('merchant', 1, true), log[1] and log[1].changed)
+        "#,
+    )
+    .unwrap();
+    // Cross: selling. The rows are the pack's stacks, the first lit; Down lights the second
+    p.bags_merchant_keys(&[key::CROSS]);
+    frame(&p, &h);
+    h.execute(
+        r#"
+        local m = eqoa.merchant.get(); local inv = eqoa.inventory.get()
+        assert(m.merchant.mode == 'sell' and m.merchant.selected_option == nil)
+        assert(#m.view.rows == #inv.items and m.view.rows[1] == inv.items[1].ref and m.view.selected == inv.items[1].ref and m.view.selected_row == 1, 'selling lists the pack')
+        assert(m.items[1].name == 'Bronze Axe', 'the wares stay the container items')
+        assert(#log == 2)
+        "#,
+    )
+    .unwrap();
+    p.bags_merchant_keys(&[key::DOWN]);
+    frame(&p, &h);
+    h.execute("local m = eqoa.merchant.get(); local inv = eqoa.inventory.get(); assert(m.view.selected_row == 2 and m.view.selected == inv.items[2].ref and #log == 3)").unwrap();
+    // Forge's calls
+    let mods = h.registered_modules();
+    h.lua.globals().set("merchant", mods.get("frontiers_forge.merchant").unwrap().clone()).unwrap();
+    h.execute(
+        r#"
+        assert(merchant.GetMode() == merchant.Mode.sell and merchant.GetSelectedOption() == nil and #merchant.GetOptions() == 3)
+        assert(merchant.GetSelectedItemIndex() == 2 and merchant.GetSelectedItem().name == 'Healing Potion', 'a pack stack when selling')
+        local v, e = merchant.GetButtonHint(); assert(v == nil)
+        "#,
+    )
+    .unwrap();
+    // Triangle: back to the menu; Cross on Buy: buying, the wares' rows
+    p.bags_merchant_keys(&[key::TRIANGLE, key::CROSS]);
+    frame(&p, &h);
+    h.execute(
+        r#"
+        local m = eqoa.merchant.get()
+        assert(m.merchant.mode == 'buy' and #m.view.rows == 2 and m.view.rows[1] == m.items[1].ref and m.view.selected == m.items[1].ref and m.view.selected_row == 1)
+        assert(merchant.GetMode() == merchant.Mode.buy and merchant.GetSelectedItem().name == 'Bronze Axe' and merchant.GetSelectedItemIndex() == 1)
+        "#,
+    )
+    .unwrap();
+    // the window closes with the merchant: nothing
+    p.npcw_respawn();
+    frame(&p, &h);
+    h.execute("local v, e = eqoa.merchant.get(); assert(v == nil and e == nil and merchant.GetMode() == nil and merchant.GetSelectedItem() == nil and merchant.GetOptions() == nil)").unwrap();
 }
 
 // ---- Round 5 Part B: the bag viewer's fixtures. The manager's tests (`addons::manager`) cannot name this

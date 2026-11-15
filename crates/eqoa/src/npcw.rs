@@ -19,7 +19,7 @@ pub struct NpcWindows {
     loot_open: bool,
     /// `m_merchant` and its fields (0x00B7)
     pub shop: Shop,
-    merchant: Merchant,
+    pub merchant: Merchant,
     merchant_open: bool,
     /// `VIClient`'s trade fields
     pub trade_state: TradeState,

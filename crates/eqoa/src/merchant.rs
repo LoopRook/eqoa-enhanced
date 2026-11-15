@@ -264,6 +264,11 @@ fn box_key(key: i32) -> Option<BoxKey> {
 }
 
 impl Merchant {
+    /// The mode, the menu's lit option and the list's lit row.
+    pub fn read_state(&self) -> (i32, i32, i32) {
+        (self.mode, self.menu.sel, self.list.sel)
+    }
+
     /// `VIWndMerchant::Open` (on `MerchantOpen`, and Escape from a list):
     /// back to the buy/sell menu, the greeting expanded.
     pub fn open(&mut self, vui: &Vui, r: &mut dyn Raster, greeting: &[u16]) {

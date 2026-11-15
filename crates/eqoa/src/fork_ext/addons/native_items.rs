@@ -102,6 +102,29 @@ impl Core {
             }
         }
         self.item_versions.insert(name, versions);
+        self.resolve_view_refs(container);
+    }
+
+    /// A container's `view` arrives with wire keys (`row_keys`, `selected_key`) of the stacks of the list it
+    /// names (`row_list`: its own, or the pack for a merchant that is buying from the player); they become
+    /// the handles of those stacks, which the lists' own passes gave (the pack is passed before the merchant).
+    fn resolve_view_refs(&self, container: &mut Json) {
+        let Some(view) = container.get_mut("view").and_then(Json::as_object_mut) else { return };
+        let list = view.remove("row_list").and_then(|l| l.as_str().map(String::from)).unwrap_or_default();
+        let generation = self.generation;
+        let handle = |key: u64| {
+            let version = self.item_versions.get(list.as_str())?.get(&(key as u32))?;
+            Some(json!({"$ref":"item","key":format!("{list}:{key}"),"generation":generation,"incarnation":version}))
+        };
+        let rows: Vec<Json> = view.remove("row_keys").and_then(|k| k.as_array().cloned()).unwrap_or_default().iter().filter_map(|k| handle(k.as_u64()?)).collect();
+        let selected = view.remove("selected_key").and_then(|k| handle(k.as_u64()?));
+        if selected.is_none() {
+            view.remove("selected_row");
+        }
+        view.insert("rows".into(), Json::Array(rows));
+        if let Some(selected) = selected {
+            view.insert("selected".into(), selected);
+        }
     }
     fn next_version_for_items(&mut self) -> u64 {
         self.next_incarnation()
@@ -360,6 +383,10 @@ fn word(id: i32) -> Option<String> {
         })
     })
 }
+/// The game's word `id` (a window's label), when the words are loaded.
+pub(crate) fn words(id: i32) -> Option<String> {
+    word(id)
+}
 pub(crate) fn stat_name(id: i64) -> Option<String> {
     crate::infotext::stat_word(id).and_then(word)
 }
@@ -453,7 +480,10 @@ fn install_fields(lua: &Lua) {
         ("eqoa.items.LootSource", "entity_id name"),
         ("eqoa.items.CanUse", "allowed reasons"),
         ("eqoa.items.SlotInfo", "id name order"),
-        ("eqoa.items.MerchantState", "entity_id greeting pending sell_rate buy_rate mode selected_option options button_hint"),
+        ("eqoa.items.MerchantState", "entity_id greeting pending sell_rate buy_rate mode selected_option options"),
+        ("eqoa.items.ContainerView", "tab tabs selected selected_row rows"),
+        ("eqoa.items.Tab", "index key label"),
+        ("eqoa.items.MerchantOption", "key label selected"),
         ("eqoa.gems.Gem", "type rarity stat"),
     ] {
         describe(lua, path, "supported", Some(5), "");
@@ -461,23 +491,14 @@ fn install_fields(lua: &Lua) {
             describe(lua, &format!("{path}.{field}"), "supported", Some(5), "");
         }
     }
-    // not reachable without read access to private state of the item and merchant windows: the
-    // fields stay absent, and asking for one says so (the lead lists the lines in the round 5 report)
-    for path in [
-        "eqoa.items.Container.view",
-        "eqoa.items.MerchantState.mode",
-        "eqoa.items.MerchantState.selected_option",
-        "eqoa.items.MerchantState.options",
+    // the button hint is the game's glyph text (`windows.format_hint`), which is not built yet
+    describe(
+        lua,
         "eqoa.items.MerchantState.button_hint",
-    ] {
-        describe(
-            lua,
-            path,
-            "not_yet",
-            Some(6),
-            "needs read access to the item or merchant window's private selection state (a seam the owner approves first)",
-        );
-    }
+        "not_yet",
+        Some(6),
+        "needs windows.format_hint, which is not built yet",
+    );
 }
 
 pub(crate) fn install(host: &Host) -> Result<()> {

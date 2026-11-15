@@ -4,27 +4,16 @@
 //! here: its 1-based positions, the tab enum 0..3, the dense `bank.GetItems`, the item objects with
 //! live methods and properties (a handle in `.record` stands in for the record's memory offset), the
 //! `SLOT`/`STAT`/`ATTACK` names. What Forge reads from a window's private memory (the item page's
-//! tab and selection, the merchant window's mode and selection) is not reachable from the native
-//! state yet: those calls say so (`DEFERRED`) and return nothing, they never report a made-up value.
+//! tab and selection, the merchant window's mode and selection) comes from the two read-only
+//! accessors the owner approved (`ItemMenu::read_state`, `Merchant::read_state`) through
+//! `Container.view` and `MerchantState`; only the button hint, which needs `windows.format_hint`,
+//! says it is not built (`DEFERRED`) and returns nothing.
 //! Forge's transactions (buy, sell, loot, bank moves) are not built in this round.
 use super::{host::Host, native::error};
 use mlua::{Function, Lua, MultiValue, Result, Table, Value};
 
-/// Forge functions that need the item and merchant windows' selection state (a later round's seam).
-pub(super) const DEFERRED: &[&str] = &[
-    "frontiers_forge.inventory.IsWindowOpen",
-    "frontiers_forge.inventory.GetOpenTab",
-    "frontiers_forge.inventory.GetTabs",
-    "frontiers_forge.inventory.GetTabList",
-    "frontiers_forge.inventory.GetSelectedSlot",
-    "frontiers_forge.inventory.GetSelectedItem",
-    "frontiers_forge.merchant.GetMode",
-    "frontiers_forge.merchant.GetSelectedOption",
-    "frontiers_forge.merchant.GetOptions",
-    "frontiers_forge.merchant.GetButtonHint",
-    "frontiers_forge.merchant.GetSelectedItemIndex",
-    "frontiers_forge.merchant.GetSelectedItem",
-];
+/// Forge functions whose text is not built yet (the button hint is `windows.format_hint`'s).
+pub(super) const DEFERRED: &[&str] = &["frontiers_forge.merchant.GetButtonHint"];
 
 const ITEM: &str = r#"
 local eqoa, unsupported = ...
@@ -291,8 +280,57 @@ function Inventory.GetTabLabel(tab)
     if id == nil then return nil end
     return (eqoa.text.localized(id))
 end
-for _, name in ipairs({ "IsWindowOpen", "GetOpenTab", "GetTabs", "GetTabList", "GetSelectedSlot", "GetSelectedItem" }) do
-    Inventory[name] = function() return unsupported("frontiers_forge.inventory." .. name) end
+-- the item page: open while the start menu shows it; the tab is Forge's 0..3
+local TAB_KEYS = { [0] = "usable", [1] = "equipment", [2] = "charged", [3] = "misc" }
+local function page()
+    local c = container()
+    return c and c.view or nil
+end
+function Inventory.IsWindowOpen() return page() ~= nil end
+function Inventory.GetOpenTab()
+    local view = page()
+    return view and view.tab - 1 or nil
+end
+function Inventory.GetTabs()
+    local view = page()
+    if view == nil then return nil end
+    local tabs = {}
+    for i, tab in ipairs(view.tabs) do tabs[i] = { tab = tab.index - 1, label = tab.label } end
+    return tabs
+end
+-- the stacks under a tab (the open one when none is named), in the page's order, as item objects
+function Inventory.GetTabList(tab)
+    local c = container()
+    if c == nil then return nil end
+    if tab == nil then
+        if c.view == nil then return nil end
+        tab = c.view.tab - 1
+    end
+    local key = TAB_KEYS[tab]
+    if key == nil then return nil end
+    local list = {}
+    for _, item in ipairs(c.items) do
+        for _, k in ipairs(item.tabs) do
+            if k == key then
+                local object = Item.new(item.ref)
+                object.idx = item.index
+                list[#list + 1] = object
+                break
+            end
+        end
+    end
+    return list
+end
+-- the lit row's stack: its position in the pack (not its row in the tab)
+function Inventory.GetSelectedSlot()
+    local view = page()
+    if view == nil or view.selected == nil then return nil end
+    local item = eqoa.items.get(view.selected)
+    return item and item.index or nil
+end
+function Inventory.GetSelectedItem()
+    local slot = Inventory.GetSelectedSlot()
+    return slot and Inventory.GetItem(slot) or nil
 end
 return Inventory
 "#;
@@ -406,9 +444,40 @@ function Merchant.GetItems()
     end
     return items
 end
-for _, name in ipairs({ "GetMode", "GetSelectedOption", "GetOptions", "GetButtonHint", "GetSelectedItemIndex", "GetSelectedItem" }) do
-    Merchant[name] = function() return unsupported("frontiers_forge.merchant." .. name) end
+local function window()
+    local c = eqoa.merchant.get()
+    return c, c and c.merchant or nil
 end
+function Merchant.GetMode()
+    local _, state = window()
+    return state and Merchant.Mode[state.mode] or nil
+end
+function Merchant.GetSelectedOption()
+    local _, state = window()
+    return state and state.selected_option and Merchant.Option[state.selected_option] or nil
+end
+function Merchant.GetOptions()
+    local _, state = window()
+    if state == nil then return nil end
+    local options = {}
+    for i, option in ipairs(state.options) do
+        options[i] = { option = Merchant.Option[option.key], label = option.label, selected = option.selected }
+    end
+    return options
+end
+-- the lit row, 1-based: a ware when buying, a pack position when selling
+function Merchant.GetSelectedItemIndex()
+    local c = eqoa.merchant.get()
+    return c and c.view and c.view.selected_row or nil
+end
+function Merchant.GetSelectedItem()
+    local c = eqoa.merchant.get()
+    if c == nil or c.view == nil or c.view.selected == nil then return nil end
+    local object = Item.new(c.view.selected)
+    object.idx = c.view.selected_row
+    return object
+end
+Merchant.GetButtonHint = function() return unsupported("frontiers_forge.merchant.GetButtonHint") end
 return Merchant
 "#;
 

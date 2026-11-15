@@ -81,6 +81,68 @@ fn item_json(it: &NetItem, list: &str, index: usize, flags: u32, attack_words: &
     })
 }
 
+/// The item page's tabs, by key, with the words of their labels (`itemmenu.rs`).
+const TABS: [(&str, i32); 4] = [("usable", 437), ("equipment", 438), ("charged", 1473), ("misc", 439)];
+
+/// `Container.view` of the pack while the item page is up: its tab, the stacks under it in the page's own
+/// order (the same four predicates), and the row lit. `row_keys` and `selected_key` are wire keys the core
+/// turns into handles.
+fn pack_view(play: &Play) -> Json {
+    if !play.items.visible {
+        return Json::Null;
+    }
+    let (tab, menu, sel) = play.items.read_state();
+    let tab = tab.clamp(0, 3);
+    let has: fn(&NetItem) -> bool = match tab {
+        0 => crate::infotext::is_usable,
+        1 => crate::infotext::is_wearable,
+        2 => crate::infotext::is_charged,
+        _ => crate::infotext::is_misc,
+    };
+    let rows: Vec<u32> = play.dump.inventory.items.iter().filter(|it| has(it)).map(|it| it.inv_index).collect();
+    let lit = if menu >= 0 && sel >= 0 { rows.get(sel as usize).copied() } else { None };
+    json!({
+        "tab": tab + 1,
+        "tabs": TABS.iter().enumerate().map(|(i, (key, word))| json!({"index":i + 1,"key":key,"label":crate::fork_ext::addons::native_items::words(*word)})).collect::<Vec<_>>(),
+        "row_list": "inventory",
+        "row_keys": rows,
+        "selected_key": lit,
+        "selected_row": lit.map(|_| sel + 1),
+    })
+}
+
+/// The merchant window's mode, its menu's options and the list's rows (`MerchantState`, `Container.view`):
+/// buying lists the wares, selling the pack; the menu lists neither.
+fn merchant_window(play: &Play, shop: &net::dump::ItemList) -> (Json, Json) {
+    let (mode, option, sel) = play.npcw.merchant.read_state();
+    let mode_name = match mode {
+        1 => "sell",
+        2 => "buy",
+        _ => "menu",
+    };
+    let options = [("buy", 63), ("sell", 62), ("exit", 161)];
+    let in_menu = mode == 0;
+    let state = json!({
+        "mode": mode_name,
+        "selected_option": in_menu.then(|| options.get(option as usize).map(|o| o.0)).flatten(),
+        "options": options.iter().enumerate().map(|(i, (key, word))| json!({"key":key,"label":crate::fork_ext::addons::native_items::words(*word),"selected":in_menu && i as i32 == option})).collect::<Vec<_>>(),
+    });
+    let (list, rows): (&str, &[NetItem]) = match mode {
+        1 => ("inventory", &play.dump.inventory.items),
+        2 => ("merchant", &shop.items),
+        _ => ("merchant", &[]),
+    };
+    let lit = (sel >= 0 && mode != 0).then(|| rows.get(sel as usize).map(|it| it.inv_index)).flatten();
+    let view = json!({
+        "tabs": [],
+        "row_list": list,
+        "row_keys": rows.iter().map(|it| it.inv_index).collect::<Vec<_>>(),
+        "selected_key": lit,
+        "selected_row": lit.map(|_| sel + 1),
+    });
+    (state, view)
+}
+
 struct Context<'a> {
     flags: u32,
     attack_words: &'a [(i32, i64)],
@@ -121,7 +183,7 @@ pub(super) fn build(play: &Play) -> [Json; 4] {
         flags: play.session.expansion & net::session::EXPANSION_FLAGS,
         attack_words: play.start.as_ref().map_or(&[][..], |s| s.attack_words.as_slice()),
     };
-    let inventory = container(
+    let mut inventory = container(
         "inventory",
         &play.dump.inventory,
         true,
@@ -130,6 +192,10 @@ pub(super) fn build(play: &Play) -> [Json; 4] {
         Json::Null,
         &ctx,
     );
+    let view = pack_view(play);
+    if !view.is_null() {
+        inventory["view"] = view;
+    }
     let bank = container(
         "bank",
         &play.dump.bank.items,
@@ -149,15 +215,14 @@ pub(super) fn build(play: &Play) -> [Json; 4] {
     };
     let shop = &play.npcw.shop;
     let merchant = match (play.mode == 10, shop.id) {
-        (true, Some(id)) => container(
-            "merchant",
-            &shop.wares,
-            true,
-            None,
-            None,
-            json!({"entity_id":id,"greeting":greeting(&shop.greeting),"pending":shop.pending,"sell_rate":shop.sell_rate,"buy_rate":shop.buy_rate}),
-            &ctx,
-        ),
+        (true, Some(id)) => {
+            let (mut state, view) = merchant_window(play, &shop.wares);
+            let fields = json!({"entity_id":id,"greeting":greeting(&shop.greeting),"pending":shop.pending,"sell_rate":shop.sell_rate,"buy_rate":shop.buy_rate});
+            state.as_object_mut().unwrap().extend(fields.as_object().unwrap().clone());
+            let mut merchant = container("merchant", &shop.wares, true, None, None, state, &ctx);
+            merchant["view"] = view;
+            merchant
+        }
         _ => Json::Null,
     };
     debug_assert_eq!(LISTS, ["inventory", "bank", "loot", "merchant"]);
@@ -171,6 +236,8 @@ fn key(play: &Play) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     (play.mode == 1, play.mode == 10, play.mode == 11, play.npcw.shop.id, play.npcw.shop.pending).hash(&mut h);
     (play.dump.player.p34, play.dump.player.p38).hash(&mut h);
+    // the item page's tab and lit row, the merchant window's mode, option and row: what a key moves
+    (play.items.visible, play.items.read_state(), play.npcw.merchant.read_state()).hash(&mut h);
     (
         play.dump.inventory.items.len(),
         play.dump.bank.items.items.len(),

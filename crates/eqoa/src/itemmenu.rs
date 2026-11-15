@@ -348,6 +348,10 @@ impl Default for ItemMenu {
 }
 
 impl ItemMenu {
+    /// The tab, the menu shown (-1 quick slots, -2 weapon sets, -3 none) and the row lit in the tab's menu.
+    pub fn read_state(&self) -> (i32, i32, i32) {
+        (self.tab, self.menu, self.menus.get(self.tab as usize).map_or(-1, |m| m.list.sel))
+    }
 
     /// A pointer at frame point `p` (`pointer`), to the window with the
     /// focus: a tab is the left or right steps to it (the popup closed
