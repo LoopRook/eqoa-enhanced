@@ -1,15 +1,17 @@
 // Real Manager + GPU evidence for the bundled eqoa_bag_viewer mod (included in manager tests, round 5 Part B).
 // The game state is protocol-shaped: the zone-in dump's pack and bank, and the loot window, the bank's and the
 // pack's changes arrive through the client's own opcode and event handlers (`Play::bags_*`, items_tests.rs).
-// Set EQOA_R5B_TEST_SOURCE to run the mod's Lua from bundled-mods/ instead of the embedded bytes (negative
+// Set EQOA_R5B_TEST_SOURCE to a copy of the package folder to run that instead of the embedded bytes (negative
 // controls), and EQOA_R5B_CAPTURE_DIR to save the pictures.
 const BV: &str = "eqoa_bag_viewer";
 const BV_SIZE: (u32, u32) = (1024, 768);
 const BV_BACKGROUND: [u8; 4] = [26, 38, 26, 255];
 
-/// A flat, distinct colour per icon id (the fixture's art cache).
+/// A flat colour per icon id (the fixture's art cache); none of them is the worn marker's green.
 fn bv_icon_color(id: u32) -> [u8; 4] {
-    [((id * 53) % 200 + 55) as u8, ((id * 97) % 200 + 55) as u8, ((id * 29) % 200 + 55) as u8, 255]
+    let table = [[200, 80, 80], [70, 120, 220], [220, 190, 60], [170, 90, 200], [230, 130, 60], [200, 200, 210], [160, 120, 80], [210, 110, 160]];
+    let c = table.get((id as usize).wrapping_sub(4001)).copied().unwrap_or([120, 130, 170 + (id % 60) as u8]);
+    [c[0], c[1], c[2], 255]
 }
 struct BvIcons;
 impl super::super::icons::IconProvider for BvIcons {
@@ -96,10 +98,12 @@ impl Bv {
         for file in crate::fork_ext::bundled::EMBEDDED_FILES.iter().filter(|f| f.package == BV) {
             let path = root.0.join(file.path);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
-            if std::env::var_os("EQOA_R5B_TEST_SOURCE").is_some() && file.path.ends_with(".lua") {
-                fs::copy(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods").join(file.path), &path).unwrap();
-            } else {
-                fs::write(path, file.data).unwrap();
+            // a negative control points this at a mutated copy of the package folder
+            match std::env::var_os("EQOA_R5B_TEST_SOURCE") {
+                Some(dir) => {
+                    fs::copy(PathBuf::from(dir).join(file.path.strip_prefix("eqoa_bag_viewer/").unwrap()), &path).unwrap();
+                }
+                None => fs::write(path, file.data).unwrap(),
             }
         }
         let mut play = crate::play::Play::bundled_ui_fixture();
@@ -265,6 +269,20 @@ fn bv_near(pixels: &[u8], width: u32, p: (f64, f64), radius: i32, color: [u8; 4]
         }
     }
     false
+}
+/// Whether a pixel within `radius` of (x, y) is red-dominant (the mod's accent, as a thin line comes out blended).
+fn bv_red_near(pixels: &[u8], width: u32, p: (f64, f64), radius: i32) -> bool {
+    (-radius..=radius).any(|dy| (-radius..=radius).any(|dx| {
+        let c = bv_px(pixels, width, p.0 + dx as f64, p.1 + dy as f64);
+        c[0] >= 120 && c[1] <= 70 && c[2] <= 70
+    }))
+}
+/// The same for the worn marker's green.
+fn bv_green_near(pixels: &[u8], width: u32, p: (f64, f64), radius: i32) -> bool {
+    (-radius..=radius).any(|dy| (-radius..=radius).any(|dx| {
+        let c = bv_px(pixels, width, p.0 + dx as f64, p.1 + dy as f64);
+        c[1] >= 150 && c[0] <= 130 && c[2] <= 140 && c[1] as i32 - c[0] as i32 >= 60
+    }))
 }
 fn bv_png(pixels: &[u8], size: (u32, u32), name: &str) {
     if let Some(dir) = std::env::var_os("EQOA_R5B_CAPTURE_DIR") {
@@ -551,17 +569,17 @@ fn round5b_picture_the_window_is_drawn_where_it_says_and_closed_it_is_not() {
     }
     // the card: a red frame to the lower right of the pointer
     let ptr = bv.slot(1);
-    assert!(bv_near(&px, w, (ptr.0 + 14. * k + 40., ptr.1 + 14. * k + 4.), 30, [215, 25, 33, 255], 40), "the hover card's red frame");
+    assert!(bv_red_near(&px, w, (ptr.0 + 14. * k + 40., ptr.1 + 14. * k + 4.), 30), "the hover card's red frame");
     // the pointer away: the worn sword has its green border, the active tab its red underline, the log its lines
     bv.point((1., 1.));
     let calm = bv.frames(3);
     let calm_px = rm_pixels(&bv.gpu, &calm);
     let left = bv.at(8., 46. + 16.);
-    assert!(bv_near(&calm_px, w, left, 3, [89, 204, 102, 255], 40), "the worn marker's green at the sword's edge");
-    let beside = bv.at(8. + 34., 46. + 16.);
-    assert!(!bv_near(&calm_px, w, (beside.0 - 3. * k, beside.1), 1, [89, 204, 102, 255], 40), "the potion's edge is not green");
+    assert!(bv_green_near(&calm_px, w, left, 3), "the worn marker's green at the sword's edge");
+    let ring = bv.at(8. + 68., 46. + 16.);
+    assert!(!bv_green_near(&calm_px, w, ring, 1), "an unworn ring's edge is not green");
     let under = bv.at(8. + 14., 40.);
-    assert!(bv_near(&calm_px, w, under, 2, [215, 25, 33, 255], 40), "the All tab's red underline");
+    assert!(bv_red_near(&calm_px, w, under, 2), "the All tab's red underline");
     let log_row = bv.at(30., 46. + 5. * 34. + 5. + 38. + 6.);
     assert!(bv_near(&calm_px, w, log_row, 40, [232, 232, 232, 255], 30), "a log line's text");
     // the Bank tab, nothing hovered
