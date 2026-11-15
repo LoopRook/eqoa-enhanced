@@ -44,6 +44,13 @@ Maintains exact SHA-256 checksums and file lists for bundled mods across three f
 - `tools/build_player_release.py` (`BUNDLED_MOD_FILES`)
 - `tools/test_player_release.py` (`BUNDLED_MOD_FILES`)
 
+### Inclusion and Scanning Rules
+
+Scans only files tracked by Git (`git ls-files bundled-mods`) plus untracked files under an existing mod or shared resource directory that are not git-ignored. Only runtime mod asset types matching the existing allowlist and `crates/eqoa/src/fork_ext/bundled.rs` are included:
+- Extensions: `.json`, `.lua`, `.md`, `.png`, `.ttf`, `.txt`.
+- Stray root files (such as `bundled-mods/SOURCE.txt` itself), dotfiles, and editor temporary/backup files (e.g. `.tmp`, `.bak`, `~`, `#*#`) are ignored.
+- File bytes and line endings (`\r\n` vs `\n`) are preserved byte-identically, and any trailing text following the checksum table in `SOURCE.txt` is preserved.
+
 ### Command
 
 ```bash
