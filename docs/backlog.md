@@ -275,3 +275,7 @@ units a frame pixel outdoors, `map/indoor.rs` 0.5 to 6 inside), and the mod forw
 notch whole (`round_minimap_wheel_reaches_both_ends_of_upstreams_zoom_in_whole_steps`). Going
 closer than upstream would need a neutral zoom-limit seam (a held view asking for a lower floor) or a
 mod-owned zoom the capture honours. Not built; propose it before building.
+
+## Wereoxxs not maintained for now (owner, 2026-11-15)
+
+Wereoxxs: not maintained for now (owner 2026-11-15); its map zooms in further than ours (see zoom beyond upstream's range).
