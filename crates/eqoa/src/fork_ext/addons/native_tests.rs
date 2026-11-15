@@ -7,9 +7,9 @@ fn native_capabilities_are_probeable_and_stubs_diagnose_even_when_caught() {
         r#"
         assert(eqoa.api == 'eqoa/1')
         assert(eqoa.capabilities.has('eqoa.capabilities.get'))
-        assert(eqoa.capabilities.get('eqoa.inventory.get').status == 'not_yet')
+        assert(eqoa.capabilities.get('eqoa.camera.get').status == 'not_yet')
         assert(eqoa.capabilities.get('eqoa.no_such_symbol').status == 'unknown')
-        local v,e = eqoa.inventory.get()
+        local v,e = eqoa.camera.get()
         assert(v == nil and e.code == 'not_yet')
         local ok = pcall(function() return eqoa.player.misspelled end)
         assert(ok)
@@ -17,7 +17,7 @@ fn native_capabilities_are_probeable_and_stubs_diagnose_even_when_caught() {
     )
     .unwrap();
     let logs = h.drain_logs().unwrap();
-    assert!(logs.iter().any(|s| s.contains("eqoa.inventory.get")));
+    assert!(logs.iter().any(|s| s.contains("eqoa.camera.get")));
     assert!(logs.iter().any(|s| s.contains("eqoa.player.misspelled")));
 }
 

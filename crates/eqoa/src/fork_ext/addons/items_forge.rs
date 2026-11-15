@@ -8,7 +8,7 @@
 //! state yet: those calls say so (`DEFERRED`) and return nothing, they never report a made-up value.
 //! Forge's transactions (buy, sell, loot, bank moves) are not built in this round.
 use super::{host::Host, native::error};
-use mlua::{Result, Table, Value};
+use mlua::{Function, Lua, MultiValue, Result, Table, Value};
 
 /// Forge functions that need the item and merchant windows' selection state (a later round's seam).
 pub(super) const DEFERRED: &[&str] = &[
@@ -434,9 +434,60 @@ end
 return Gems
 "#;
 
+/// The functions each module's table carries (the real module is built by the Lua source above on the
+/// first call or the first read of anything else, inside the calling script's own instruction budget:
+/// building them while the host is made would use up the budget a test or a loader still has).
+const NAMES: [(&str, &str); 6] = [
+    (
+        "item",
+        "GetSlotId GetName GetDescription GetAmount GetLevelReq GetRange GetMaxStack GetMaxHp GetDur GetCurrentHp GetItemId GetValue GetDamage GetAttackType GetAttackTypeName GetSlotName IsEquippable IsNoTrade IsLore IsNoRent GetClassMask GetRaceMask GetInventoryIndex GetIconRef GetStatCount GetStats GetStat GetEquippedSlotIndex GetEquippedStatus IsUsableByClass IsUsableByRace GetAllowedClasses GetAllowedRaces GetInspectInfo new",
+    ),
+    (
+        "inventory",
+        "GetSlotLabelAndOrder GetTunar InventoryUsed SlotsUsed SlotsRemaining IsFull GetIconRef GetItem GetItems GetTabLabel IsWindowOpen GetOpenTab GetTabs GetTabList GetSelectedSlot GetSelectedItem",
+    ),
+    ("bank", "SlotsUsed GetItems"),
+    ("loot", "IsLootWindowOpen GetCount GetIconRef GetItem GetItems Items"),
+    (
+        "merchant",
+        "IsOpen GetEntityId GetGreeting GetOptionLabel GetItemCount GetItem GetItems GetMode GetSelectedOption GetOptions GetButtonHint GetSelectedItemIndex GetSelectedItem",
+    ),
+    ("gems", "IsGem Get Format"),
+];
+
+fn source(short: &str) -> &'static str {
+    match short {
+        "item" => ITEM,
+        "inventory" => INVENTORY,
+        "bank" => BANK,
+        "loot" => LOOT,
+        "merchant" => MERCHANT,
+        _ => GEMS,
+    }
+}
+
+/// The built module `short` (built once per VM and kept in the registry).
+fn real(lua: &Lua, short: &str) -> Result<Table> {
+    let key = format!("eqoa_forge_{short}");
+    if let Ok(t) = lua.named_registry_value::<Table>(&key) {
+        return Ok(t);
+    }
+    let eqoa: Value = lua.globals().get("eqoa")?;
+    let unsupported: Function = lua.named_registry_value("eqoa_forge_unsupported")?;
+    let mut args = vec![eqoa, Value::Function(unsupported)];
+    if matches!(short, "inventory" | "loot" | "merchant") {
+        args.push(Value::Table(real(lua, "item")?));
+    }
+    let module: Table = lua
+        .load(source(short))
+        .set_name(format!("=frontiers_forge.{short}"))
+        .call(mlua::MultiValue::from_iter(args))?;
+    lua.set_named_registry_value(&key, module.clone())?;
+    Ok(module)
+}
+
 pub(super) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
-    let eqoa: Value = lua.globals().get("eqoa")?;
     let unsupported = lua.create_function(|lua, symbol: String| {
         error(
             lua,
@@ -446,27 +497,52 @@ pub(super) fn install(host: &Host) -> Result<()> {
         )?;
         Ok(Value::Nil)
     })?;
-    let load = |name: &str, source: &str, args: mlua::MultiValue| -> Result<Table> {
-        lua.load(source).set_name(format!("={name}")).call(args)
-    };
-    let pair = |extra: Option<Value>| -> mlua::MultiValue {
-        let mut v = vec![eqoa.clone(), Value::Function(unsupported.clone())];
-        v.extend(extra);
-        mlua::MultiValue::from_iter(v)
-    };
-    let item = load("frontiers_forge.item", ITEM, pair(None))?;
-    host.register_host_module("frontiers_forge.item", Value::Table(item.clone()))?;
-    for (name, source) in [
-        ("frontiers_forge.inventory", INVENTORY),
-        ("frontiers_forge.loot", LOOT),
-        ("frontiers_forge.merchant", MERCHANT),
-    ] {
-        let module = load(name, source, pair(Some(Value::Table(item.clone()))))?;
-        host.register_host_module(name, Value::Table(module))?;
+    lua.set_named_registry_value("eqoa_forge_unsupported", unsupported)?;
+    for (short, names) in NAMES {
+        let proxy = lua.create_table()?;
+        for name in names.split_whitespace() {
+            proxy.set(
+                name,
+                lua.create_function(move |lua, args: MultiValue| {
+                    let f: Function = real(lua, short)?.get(name)?;
+                    f.call::<MultiValue>(args)
+                })?,
+            )?;
+        }
+        // everything else (the constants, `max_slots`) reads from the built module
+        let meta = lua.create_table()?;
+        meta.set(
+            "__index",
+            lua.create_function(move |lua, (_, key): (Table, Value)| {
+                real(lua, short)?.get::<Value>(key)
+            })?,
+        )?;
+        proxy.set_metatable(Some(meta));
+        host.register_host_module(format!("frontiers_forge.{short}"), Value::Table(proxy))?;
     }
-    let bank = load("frontiers_forge.bank", BANK, mlua::MultiValue::from_iter([eqoa.clone()]))?;
-    host.register_host_module("frontiers_forge.bank", Value::Table(bank))?;
-    let gems = load("frontiers_forge.gems", GEMS, mlua::MultiValue::from_iter([eqoa.clone()]))?;
-    host.register_host_module("frontiers_forge.gems", Value::Table(gems))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each function the built modules carry is on the proxy, so none is missing from `NAMES`.
+    #[test]
+    fn every_function_of_each_forge_item_module_is_listed() {
+        let host = Host::new().unwrap();
+        for (short, names) in NAMES {
+            let listed: std::collections::BTreeSet<&str> = names.split_whitespace().collect();
+            let built = real(&host.lua, short).unwrap();
+            for pair in built.pairs::<String, Value>() {
+                let (key, value) = pair.unwrap();
+                if matches!(value, Value::Function(_)) {
+                    assert!(listed.contains(key.as_str()), "{short}.{key} is not in NAMES");
+                }
+            }
+            for name in &listed {
+                assert!(built.contains_key(*name).unwrap(), "{short}.{name} listed but not built");
+            }
+        }
+    }
 }

@@ -234,6 +234,64 @@ fn get_container(lua: &Lua, symbol: &'static str, name: &'static str, args: Mult
     lua.pack_multi((built, Value::Nil))
 }
 
+/// Where a handle's stack is now, without copying it: its list, place and the container's revision,
+/// and the handle's key and incarnation (the cache's).
+fn locate(v: &Value, c: &Core) -> Option<(&'static str, usize, u64, (String, u64))> {
+    let r = v.as_userdata()?.borrow::<Ref>().ok()?;
+    if r.kind != "item" || r.generation != c.generation {
+        return None;
+    }
+    let (list, _) = r.key.split_once(':')?;
+    let list = LISTS.into_iter().find(|l| *l == list)?;
+    let container = peek(&c.view, list);
+    let index = container["items"].as_array()?.iter().position(|i| {
+        i["ref"]["key"].as_str() == Some(r.key.as_str())
+            && i["ref"]["incarnation"].as_u64() == Some(r.incarnation)
+    })?;
+    Some((list, index, container["revision"].as_u64().unwrap_or(0), (r.key.clone(), r.incarnation)))
+}
+
+/// The record last built for each stack read, by (generation, revision): a mod (or the Forge item
+/// objects, which read one property at a time) that asks about the same stack again and again gets the
+/// same read-only table until its container changes.
+#[derive(Default)]
+struct BuiltItems(std::collections::HashMap<(String, u64), (u64, u64, Table)>);
+
+fn get_item(lua: &Lua, r: &Value) -> Result<MultiValue> {
+    let symbol = "eqoa.items.get";
+    if !is_item_ref(r) {
+        return error(lua, symbol, "invalid_argument", "expected an ItemRef");
+    }
+    let (in_world, generation, found) = CORE.with(|c| {
+        let c = c.borrow();
+        (c.view.in_world, c.generation, locate(r, &c))
+    });
+    if !in_world {
+        return error(lua, symbol, "not_in_world", "enter a loaded world first");
+    }
+    let Some((list, index, revision, tag)) = found else {
+        return error(lua, symbol, "stale_handle", "the item is no longer in its list");
+    };
+    if let Some(cache) = lua.app_data_ref::<BuiltItems>()
+        && let Some((g, rev, table)) = cache.0.get(&tag)
+        && *g == generation
+        && *rev == revision
+    {
+        return lua.pack_multi((Value::Table(table.clone()), Value::Nil));
+    }
+    let item = CORE.with(|c| peek(&c.borrow().view, list)["items"][index].clone());
+    let built = record(lua, ITEM, &item)?;
+    if let Value::Table(t) = &built {
+        let mut cache = lua.remove_app_data::<BuiltItems>().unwrap_or_default();
+        if cache.0.len() >= 512 {
+            cache.0.clear();
+        }
+        cache.0.insert(tag, (generation, revision, t.clone()));
+        lua.set_app_data(cache);
+    }
+    lua.pack_multi((built, Value::Nil))
+}
+
 /// The stack a handle names right now, or none (another list's, another world's, taken, or from a
 /// session that closed).
 fn resolve(v: &Value, c: &Core) -> Option<(&'static str, Json)> {
@@ -437,10 +495,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua,
         "items",
         "get",
-        lua.create_function(|lua, r: Value| match item_of(lua, "eqoa.items.get", &r) {
-            Ok((_, item)) => lua.pack_multi((record(lua, ITEM, &item)?, Value::Nil)),
-            Err(e) => Ok(e),
-        })?,
+        lua.create_function(|lua, r: Value| get_item(lua, &r))?,
     )?;
     bind(
         lua,
