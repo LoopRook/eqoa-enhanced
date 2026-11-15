@@ -463,6 +463,17 @@ SettingsValue is nil/bool/finite number/string or acyclic table with either stri
 
 Round 3 exposes observations and events; **new game transaction actions land in round 4**, as the plan requires. Do not slip auto-loot/purchase packet writers into round 3 to make the item demo look complete. Existing native item UI remains usable for owner testing.
 
+### Round 5 build status (this section's "round 3"; observations and events only)
+
+Built as written above, from the client's own lists: `eqoa.inventory/bank/loot/merchant.get`, `eqoa.items.get/can_use/stat/slot_info/attack_name/stat_name`, `eqoa.items.slots/stats/attack_types`, `eqoa.merchant.price`, `eqoa.gems.*`, the four `*.changed` events, and the Forge `inventory`, `item`, `bank`, `loot`, `merchant` and `gems` modules. Where the build differs from the text:
+
+- `capacity` is the native rule (`inventory::pack_cap` / `bank_cap`: 40, or what the server's list sizes say); the corpse's is 40, the merchant's is nil. An inventory's `open` is always true (it has no window of its own); the bank's is its window (mode 11).
+- `Container.view` (tab, tabs, selected, rows) and `MerchantState.mode/selected_option/options/button_hint` are **not given**: the item page's and merchant window's selection live in private fields. They are absent, listed as `not_yet` (round 6) in `eqoa.capabilities`, and reading one diagnoses. The Forge calls that read them (`inventory.IsWindowOpen/GetOpenTab/GetTabs/GetTabList/GetSelectedSlot/GetSelectedItem`, `merchant.GetMode/GetSelectedOption/GetOptions/GetButtonHint/GetSelectedItemIndex/GetSelectedItem`) say the same and return nothing.
+- `cause` is `open`, `close` (a container appearing, going, or the bank's window flag flipping), `reset` (zoning, with `before` or `after` nil), `frame` (a change seen at a frame with no event of its own), or the native event's name: `inv_add`, `inv_took`, `inv_move`, `inv_use`, `inv_equip`, `inv_unequip`, `quick_slot`, `gear_set`, `item_hp`, `loot_open`, `loot_close`, `loot_one`, `loot_all`, `merchant_open`, `merchant_ready`, `money`, `bank_open`, `bank_took`, `bank_added`, `bank_money`, `auction`.
+- A handle is `(generation, list session, wire key, incarnation)`: it follows its stack through compaction, changes with a new corpse or merchant session, and is stale after the stack is gone.
+- `merchant.price` takes the unit price from the native rounding and multiplies by the quantity.
+- Forge `item.GetStats` values keep their sign (the reference read unsigned words).
+
 ## 7. Quests, camera, windows, map and mastery (round 4)
 
 ### Quests and Class Mastery
