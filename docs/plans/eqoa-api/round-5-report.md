@@ -2,7 +2,7 @@
 
 Branch `feat/eqoa-api-r5` from develop `8efdc147` (after sync 2026-11-15), reviewed footprint base
 `a76d8d27a1c3f51fca545d7eabaca9e5dc336091`. Builder: Claude Sonnet. Commits are LoopRook's; nothing was pushed, merged
-or tagged. Part B (the example mod) is not started.
+or tagged. Part B (the example mod) is at the end.
 
 ## What was built (observations and events only; no transactions)
 
@@ -129,3 +129,84 @@ Gates after the fix round: round 5 filter above 22 passed; addon suite 461 passe
 touched); `tools/test_player_release.py` 20 OK; release build PASS after the last code commit. SKIP lines are the same set as Part A
 (no disc oracle, sibling S2 files, `run/client.bin`).
 
+
+## Part B: the bag viewer example mod (2026-11-15)
+
+Builder: Claude Sonnet. Same branch, commits are LoopRook's, nothing pushed, merged or tagged. Tests are `round5b_...` under `fork_ext::addons::manager::tests` (the round 5 filter `round5_` does not match them: use `round5b_` too).
+
+### What a player gets (`bundled-mods/eqoa_bag_viewer`, off by default)
+
+Turn it on in Mods & Addons; its row **Bag viewer** appears on Controls, unbound (the game's keys are unchanged). The key opens and closes a read-only Bags window, centred in the HUD frame, scaled as the HUD is, always on screen; Escape closes it. It shows the 40 pack slots as item icons with a stack count (when more than one) and a green E on worn items, your tunar and used/40 under the grid, and tabs **All**, **Equipment** and **Bank** (the bank's items and bank tunar, readable anywhere). Hover an item: card with name, level, slot, stats (signed), HP, durability and value, and a red "You can't use this" when class, race or level rule it out (the API's own `eqoa.items.can_use`). Under the grid, the loot log: this session's pickups, newest first ("12:41 Rusty Sword x1"), last 50, the wheel scrolls it. Kept through zoning; "Leave All" adds nothing. While the window is closed it does nothing except note pickups for the log.
+
+### Not in the window, and why (for the lead)
+
+1. **Usable, Charged and Misc tabs are missing.** The game puts an item in those by its item type (`Item.p4c` in 7, 2, 5, 8 is Usable) and its charge definition (`Item.p54 > 0`, type not 8, not worn is Charged; Misc is the rest; `infotext::is_usable/is_charged/is_misc`). The `Item` record carries neither, and `Container.view` (the game's own tab rows) is the `not_yet` seam. Equipment is exact (`wear_slot ~= 0xFFFFFFFF`, which is the game's `wearable`; the test compares with `infotext::is_wearable` over the same pack and has a wear-slot-0 item that `equippable` would get wrong). Smallest fix: two fork-owned `Item` fields, `item_type` (= `p4c`) and `max_charges` (= `p54`), in `items_capture.rs` `item_json` plus the spec row and capabilities (about 6 lines, no upstream file), then the mod adds three predicates and tab labels (about 10 Lua lines). Not built: you decide whether the API grows. Nothing in the window pretends to have these tabs.
+2. **"from <corpse>" is not on the log lines.** The corpse window's data (0x0018) is the item list only; `Container` for loot has no corpse name or entity, and `loot.changed` carries none. Entries read "13:36 Spider Silk x4". To give the name the API would need a corpse entity (the entity the player targeted for the loot request) on the loot container; your call.
+3. Escape: the mod claims it (`eqoa.input.claim("Escape", true)`) only while the window is open so the game menu does not open too. If another mod owns Escape the claim is refused and the Addon Manager shows one `busy` entry; the window still closes on Escape.
+4. The captures use flat stand-in icon art (a test art cache); the real art path is `eqoa.icons.resource(item.icon)` and was not run against the disc's art here. The mod falls back to the item's first letter when an icon is missing.
+
+### Files
+
+`bundled-mods/eqoa_bag_viewer/{mod.json, main.lua, modules/bags.lua, README.md}` (LF, `-text`); registered in `fork_ext/bundled.rs` (`PACKAGES`, `EMBEDDED_FILES`); `bundled-mods/SOURCE.txt` (four SHA-256 rows + a provenance line); `tools/build_player_release.py` and `tools/test_player_release.py` (the four files in `BUNDLED_MOD_FILES`); `crates/eqoa/src/fork_ext/addons/bag_viewer_tests.rs` (new, included from `manager.rs`'s test module); fixture methods `Play::bags_*` and `bags_native_tab` in `fork_ext/items_tests.rs`; `FORK-UPDATE-NOTES.md`, `docs/modding/GETTING-STARTED.md`. No upstream file, no budget change. Uses only `eqoa.inventory/bank/items/icons/hud/input/events/imgui` (no Forge layer, no private hook); the mod reads `loot.changed`, `inventory.changed`, `bank.changed`, `state.reset`.
+
+### Tests (real Manager, the bundled files, GPU readback; protocol-shaped state)
+
+The world is the zone-in dump (pack of eight with a worn sword, one stack of five, class/race/level-locked items and a wear-slot-0 item; bank of two; tunar 1,234 and bank 99,000) and the client's own handlers: loot window by real 0x0018/0x0019/0x001A/0x0016 bytes, 0x003B/0x003C item changes, 0x0052 tunar, zoning by the core's reset. Each test asserts zero Addon Manager diagnostics.
+
+| Test (`round5b_...`) | Covers |
+|---|---|
+| `off_by_default_loads_clean_has_an_unbound_controls_row_and_its_key_opens_and_closes_it` | package present but Disabled, no Controls row until enabled; after enable zero diagnostics, row exists and is unbound (`""`), the unbound row and another key open nothing; bound to K opens and closes; Escape closes; a disabled mod's key fires nothing |
+| `the_grid_shows_the_pack_as_the_dump_gave_it_and_follows_its_changes` | 8 items in dump order, 5 rows of 8 = 40 slots, used 8, capacity 40, tunar 1,234; icons and counts from the records; one worn; a quiet frame reads nothing; a taken stack, an added stack and a tunar change each update the grid after their event, one read per event |
+| `equipment_follows_the_games_own_tab_and_the_bank_reads_away_from_a_banker` | tab strip All/Equipment/Bank; Equipment equals the game's `is_wearable` list over the same pack (6 stacks, includes wear slot 0); used/capacity still the whole pack; Bank shows the two bank items and 99,000 with the bank window closed; back to All |
+| `the_card_has_the_items_fields_and_the_red_line_only_when_the_character_cannot_use_it` | sword card lines (level, slot, signed stats, HP, value) and no red line; the ring (class/race/level all allowed) no red line; robe (class), cloak (race), helm (level) each red, each with exactly that one reason from `can_use` |
+| `the_loot_log_is_fed_by_pickups_newest_first_and_keeps_fifty` | window closed: three pickups (one, one, all) newest first as `HH:MM Name xN`, no grid read; Leave All with items left adds nothing; zoning and a new world keep the log; 51 pickups keep the newest 50 |
+| `a_closed_window_does_no_work_and_an_open_one_rebuilds_only_on_change` | closed: 30 frames and a tunar change give 0 grid reads and 0 draws; open: one read, one draw per frame, no more reads in 30 frames; closed again: no draws, no reads |
+| `the_window_follows_the_ui_scale_and_stays_on_screen` | 640x480, 1024x768, 1600x900 and 320x240: the window is on screen, 286 frame pixels at the HUD frame's scale, larger in a larger window |
+| `picture_the_window_is_drawn_where_it_says_and_closed_it_is_not` | through the real renderer: panel drawn where the mod says and absent closed (scene shows through), nothing changes outside the panel, three slots show their icons' colours, the worn marker's green and the active tab's red underline, the hover card's red frame, log text; a control pixel (an unworn slot's edge) is not green. Writes the captures below when `EQOA_R5B_CAPTURE_DIR` is set |
+
+### Negative controls (each: the mod's Lua changed in a copy, the tests run against it via `EQOA_R5B_TEST_SOURCE`, the copy removed)
+
+| Break | Failed |
+|---|---|
+| `loot.changed` handler removed | 2 (loot log, picture) |
+| Equipment tab by `equippable` instead of wear slot | 1 (equipment) |
+| red line never added / red line on every item | 1 each (card) |
+| `close()` leaves its listeners on | 1 (closed window) |
+| grid read again every frame | 2 (closed/open, grid) |
+| log keeps 51 | 1 (loot log) |
+| Leave All logs what is left on the corpse | 1 (loot log) |
+| zoning clears the log | 1 (loot log) |
+| default key K / enabled by default | 1 each (off by default) |
+| window never drawn | 6 |
+| Escape does not close | 1 (off by default) |
+| Bank tab reads the pack | 1 (equipment/bank) |
+
+14 breaks, every one made tests fail; the baseline is 8 of 8 passing.
+
+### Captures for the owner (flat stand-in icon art)
+
+`docs/plans/eqoa-api/r5-bags-all.png` (All tab, sword hovered, two pickups in the log), `r5-bags-bank.png`, `r5-bags-loot.png`.
+
+### Test file changes (no test deleted or weakened)
+
+- `fork_ext/addons/round_minimap_manager_tests.rs`: `every_bundled_mod_runs_a_play_session_with_zero_manager_diagnostics` asserted the bundled set is 11 packages; it is 12 with the bag viewer (the message says nine `eqoa_*` mods). The session now also runs the bag viewer through enable, disable, zoning and the rest, with zero diagnostics.
+- `fork_ext/bundled.rs` tests: the five expected package lists gain `eqoa_bag_viewer` after `eqoa_round_minimap`.
+- `fork_ext/items_tests.rs`: `Spec` gained an `icon` field (default 4001, what every earlier test read) and the Part B fixture methods; additions only.
+- `fork_ext/addons/manager.rs`: one `include!` line for the new test file.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `round5_ round5b_ every_function_of_each_forge` | 30 passed (22 Part A + 8 Part B) |
+| `fork_ext::addons::` (scratch `EQOA_CONFIG`) | 468 passed, 1 failed (the bundled-set count, 11 to 12, fixed as listed above; that test then passes alone and the full-suite run below includes it), 25 ignored |
+| Full client suite, timing skips as before | 2307 passed, 0 failed, 30 ignored (2299 + 8) |
+| Bundled Wereoxxs, ARPG, Modern UI and the round 3/4 mods | in the runs above, pass; the zero-diagnostics play-session gate runs each of the 12 packages |
+| `cargo check --locked -p eqoa --target wasm32-unknown-unknown` | PASS |
+| `check_fork_footprint.py --base a76d8d27...` | PASS; 31 shared files as before, no upstream file touched, no budget change |
+| `git merge-tree` against `origin/master` | clean |
+| `tools/test_player_release.py` | 20 OK |
+| Release build, `RUSTFLAGS=-C target-feature=+crt-static`, after the last code commit | PASS (2 min 22 s) |
+| Packaging dry run | see below |
+
+SKIP lines: not recounted this round (passing tests' output is captured). The Part A set stands (no disc oracle, sibling S2 files, `run/client.bin`, disc variants); Part B added none: its 8 tests all ran on this machine's GPU adapter and wrote the pictures (without an adapter they print a SKIP line and return).
