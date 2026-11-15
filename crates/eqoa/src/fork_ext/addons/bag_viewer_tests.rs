@@ -727,6 +727,11 @@ fn round5b_captures_for_the_owner_draw_the_discs_own_item_art_and_the_corpse_in_
             }
         }
         assert!(colours.len() > 6, "slot {n} shows the disc's art: {} colours", colours.len());
+        // the art fills the slot: no black strip of the surface's padding under it (a point near the slot's
+        // bottom-left, clear of the count)
+        let low = bv.at(8. + ((n - 1) % 8) as f64 * 38. + 6., 46. + ((n - 1) / 8) as f64 * 38. + 33.);
+        let under = bv_px(&px, w, low.0, low.1);
+        assert!(under[0] as u32 + under[1] as u32 + under[2] as u32 > 120, "slot {n}: black strip under the icon: {under:?}");
         if n == 1 {
             bv_png(&px, size, "r5-bags-all.png");
         }

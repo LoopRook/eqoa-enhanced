@@ -30,7 +30,7 @@ function M.rebuild()
     local items = {}
     for _, it in ipairs(c.items) do
         if keeps(key, it) then
-            local info = it.icon and eqoa.icons.resource(it.icon, {trim = true})
+            local info = it.icon and eqoa.icons.resource(it.icon, {trim = true, trim_color = {r = 0, g = 0, b = 0, a = 1}})
             items[#items + 1] = {item = it, texture = info and info.texture}
         end
     end
