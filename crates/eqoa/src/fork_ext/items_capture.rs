@@ -190,57 +190,24 @@ pub(super) fn take_builds() -> usize {
 }
 
 thread_local! {static KEY: Cell<Option<u64>> = const { Cell::new(None) };}
-// The corpse the open loot window belongs to. The loot request (0x0015) names the player's target when it is
-// sent, and the reply (0x0018) does not say which corpse it is for, so the target at the reply is the corpse
-// asked for only when it did not change in between. Fork code cannot see the request, so it is certain only
-// when the target had been steady for `STEADY_MS` before the reply (a longer time than any reply takes); a
-// target that changed more recently, or a target that is not a named corpse, leaves the source unknown.
+// The corpse the open loot window belongs to: the one the client's loot request (0x0015, `loot_source`)
+// named, when the corpse's list (0x0018) arrives within `REPLY_MS` of it and the entity is a named corpse.
+// Whatever the player targets in between does not matter; with no recent request it stays unknown.
 thread_local! {static SOURCE: std::cell::RefCell<Option<(u32, String)>> = const { std::cell::RefCell::new(None) };}
-// The target last seen and when it was first seen (the game's clock, milliseconds), kept while an addon
-// wants state: once a frame and when a corpse arrives, so each is O(1).
-thread_local! {static TARGET: Cell<Option<(u32, u32)>> = const { Cell::new(None) };}
-const STEADY_MS: u32 = 1000;
-#[cfg(test)]
-thread_local! {static SKEW: Cell<u32> = const { Cell::new(0) };}
-/// A test moves the game's clock on by `ms`.
-#[cfg(test)]
-pub(super) fn advance_clock(ms: u32) {
-    SKEW.with(|s| s.set(s.get() + ms));
-}
-
-fn clock(play: &Play) -> u32 {
-    #[cfg(test)]
-    return play.session.now().wrapping_add(SKEW.with(|s| s.get()));
-    #[cfg(not(test))]
-    play.session.now()
-}
-
-/// Notes the target on the game's clock: the moment it was first seen is when it last changed.
-fn observe_target(play: &Play) {
-    let now = clock(play);
-    TARGET.with(|t| {
-        if t.get().map(|(id, _)| id) != Some(play.target) {
-            t.set(Some((play.target, now)));
-        }
-    });
-}
 
 fn note_source(play: &Play) {
-    observe_target(play);
-    let steady = TARGET.with(|t| t.get()).is_some_and(|(_, since)| clock(play).wrapping_sub(since) >= STEADY_MS);
-    let corpse = play.entities.slots.iter().flatten().find(|e| e.id == play.target && e.p18 & 2 != 0);
+    let asked = crate::fork_ext::loot_source::take_recent();
+    let corpse = asked.and_then(|id| play.entities.slots.iter().flatten().find(|e| e.id == id && e.p18 & 2 != 0));
     let named = corpse.and_then(|e| e.creature.as_ref()).map(|c| c.name.clone()).filter(|n| !n.is_empty());
-    SOURCE.with(|s| *s.borrow_mut() = named.filter(|_| steady).map(|n| (play.target, n)));
+    SOURCE.with(|s| *s.borrow_mut() = asked.zip(named));
 }
 
 /// The key the containers were last read with: set by a full publish, and forgotten when the
 /// addon side lets go or the world ends (`forget`).
 pub(super) fn note(play: &Play) {
-    observe_target(play);
     KEY.with(|k| k.set(Some(key(play))));
 }
 pub(super) fn forget() {
-    TARGET.with(|t| t.set(None));
     KEY.with(|k| k.set(None));
 }
 
@@ -265,7 +232,6 @@ pub(super) fn capture(play: &Play, cause: &'static str) {
 /// Once a frame (while an addon wants state): a list that moved with no event of its own (a window
 /// closed by a key, a sale's tunar) is read then.
 pub(super) fn refresh(play: &Play) {
-    observe_target(play);
     if KEY.with(|k| k.get()) == Some(key(play)) {
         return;
     }
