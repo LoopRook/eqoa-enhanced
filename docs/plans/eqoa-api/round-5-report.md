@@ -207,6 +207,6 @@ The world is the zone-in dump (pack of eight with a worn sword, one stack of fiv
 | `git merge-tree` against `origin/master` | clean |
 | `tools/test_player_release.py` | 20 OK |
 | Release build, `RUSTFLAGS=-C target-feature=+crt-static`, after the last code commit | PASS (2 min 22 s) |
-| Packaging dry run | see below |
+| Packaging dry run (`tools/build_player_release.py --channel enhanced-dev` with the local catalogue) | PASS: the zip carries the four `mods/eqoa_bag_viewer/` files and the checksum check accepts them. The executable was built with crt-static, `EQOA_BUILD_COMMIT` and `EQOA_UPDATE_CHANNEL=enhanced-dev` at e1f2ebcc (1 min 38 s) and packaged from a clean clone of that commit, because the packager refuses a checkout holding your untracked `round-5-review-a.md`. Temp output and clone deleted |
 
 SKIP lines: not recounted this round (passing tests' output is captured). The Part A set stands (no disc oracle, sibling S2 files, `run/client.bin`, disc variants); Part B added none: its 8 tests all ran on this machine's GPU adapter and wrote the pictures (without an adapter they print a SKIP line and return).
