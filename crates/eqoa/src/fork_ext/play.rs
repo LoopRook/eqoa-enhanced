@@ -13,7 +13,32 @@ mod map_mod_tests;
 #[path = "api_capture_tests.rs"]
 mod native_tests;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use api_capture::{begin_game_event, end_game_event};
+pub(crate) struct GameEventCapture {
+    api: api_capture::ChangeCapture,
+    assist_reply: Option<u32>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> GameEventCapture {
+    let api = api_capture::begin_game_event(play, event);
+    let assist_reply = if crate::fork_ext::addons::action_broker::has_in_flight() {
+        match event {
+            net::session::Event::Assist(id) => Some(*id),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    GameEventCapture { api, assist_reply }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
+    api_capture::end_game_event(play, capture.api);
+    if let Some(id) = capture.assist_reply {
+        crate::fork_ext::addons::action_broker::resolve_server_assist(id);
+    }
+}
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn begin_game_event(_: &Play, _: &net::session::Event) {}
 #[cfg(target_arch = "wasm32")]
@@ -61,6 +86,8 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
             pet_y,
             pet_h,
         );
+        let snapshot = native_action_snapshot(_play);
+        crate::fork_ext::addons::action_broker::update_native_snapshot(snapshot);
         crate::fork_ext::addons::native_core::iteration(_game_step);
         if _game_step {
             let ready = _play.in_world_now();
@@ -69,6 +96,9 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                 _play.map.mini_wheel(wheel);
             }
             weapon_sets_requests(_play, ready);
+            crate::fork_ext::addons::action_broker::step_tick(snapshot, |kind| {
+                dispatch_broker_action(_play, kind)
+            });
             let reqs = crate::fork_ext::addons::actions::take_action_requests();
             if ready {
                 if reqs.map && crate::settings::map() && _play.addon_input_available() {
@@ -223,6 +253,53 @@ pub(crate) fn art_changed() {
     crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow_mut().words = None);
     #[cfg(not(target_arch = "wasm32"))]
     crate::fork_ext::addons::icons::notify_art_changed();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_action_snapshot(play: &Play) -> crate::fork_ext::addons::action_broker::NativeSnapshot {
+    crate::fork_ext::addons::action_broker::NativeSnapshot {
+        in_world: play.in_world_now(),
+        mode: play.mode,
+        bank_busy: play.bank.state != 0,
+        merchant_pending: play.npcw.shop.pending,
+        loot_busy: false,
+        inventory_busy: play.waiting,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dispatch_broker_action(
+    play: &mut Play,
+    kind: &crate::fork_ext::addons::action_broker::ActionKind,
+) -> crate::fork_ext::addons::action_broker::DispatchOutcome {
+    use crate::fork_ext::addons::action_broker::{ActionKind, DispatchOutcome, ServerMatcher};
+    if !play.in_world_now() {
+        return DispatchOutcome::Refused {
+            code: "not_in_world",
+            reason: "enter a loaded world first".into(),
+        };
+    }
+    match kind {
+        ActionKind::Assist => {
+            if play.is_dead() {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot assist while dead".into(),
+                };
+            }
+            if !matches!(play.mode, 0 | 38) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: format!("cannot assist while in mode {}", play.mode),
+                };
+            }
+            play.assist_target();
+            DispatchOutcome::AwaitingServer {
+                matcher: ServerMatcher::Assist,
+                detail: None,
+            }
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -977,6 +977,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_events::install(host, host.once_mode())?;
     install_fields(lua);
     super::native_state::install(host)?;
+    super::action_broker::install(host)?;
     super::native_items::install(host)?;
     super::map_views::install(host)?;
     super::guides::install(host)?;

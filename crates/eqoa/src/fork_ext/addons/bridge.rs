@@ -333,6 +333,9 @@ impl Bridge {
                 let label = text(&label)?;
                 f.borrow_mut().check()?;
                 let pressed = unsafe { sys::igCheckbox(label.as_ptr(), &mut value) };
+                if pressed {
+                    super::gesture::arm_imgui_click();
+                }
                 Ok((value, pressed))
             })?,
         )?;

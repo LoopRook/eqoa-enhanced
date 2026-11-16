@@ -1777,14 +1777,148 @@ fn addon_actions_use_live_camera_assist_and_summary_overlay_gates() {
         );
     }
     actions::clear_actions();
+    crate::fork_ext::addons::action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
     CORE.with(|c| c.borrow_mut().view.in_world = true);
     let host = Host::new().unwrap();
-    host.execute("for i=1,16 do assert(eqoa.actions.assist()) end;local v,e=eqoa.actions.assist();assert(v==nil and e.code=='busy')").unwrap();
+    host.execute(
+        r#"
+        local no_g, e_g = eqoa.actions.assist()
+        assert(no_g == nil and e_g.code == 'needs_player_action')
+        queued = {}
+        eqoa.input.bind({ id = 'a', label = 'A', default_key = 'k' }, function()
+            local id, e = eqoa.actions.assist()
+            last_id, last_err = id, e
+            if id then queued[#queued + 1] = id end
+            local second, e2 = eqoa.actions.assist()
+            assert(second == nil and e2.code == 'needs_player_action')
+        end)
+    "#,
+    )
+    .unwrap();
+    for _ in 0..32 {
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+            )
+        });
+        crate::fork_ext::addons::native_events::dispatch(&host).unwrap();
+        host.execute("assert(last_id ~= nil and last_err == nil)").unwrap();
+    }
+    CORE.with(|c| {
+        c.borrow_mut().emit(
+            "input.key",
+            serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+        )
+    });
+    crate::fork_ext::addons::native_events::dispatch(&host).unwrap();
+    host.execute("assert(last_id == nil and last_err.code == 'busy' and #queued == 32)")
+        .unwrap();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    let before = p.session.sends_lost;
+    begin_iteration(&mut p, true);
     assert_eq!(
-        actions::drain_actions().len(),
-        16,
-        "one queued request for each successful API call"
+        p.session.sends_lost - before,
+        8,
+        "broker burst dispatches at most 8 actions on the first 30 Hz tick"
     );
+    crate::fork_ext::addons::action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}
+
+#[test]
+fn round6b_assist_emits_dispatch_and_server_phases_via_play() {
+    use crate::fork_ext::addons::{action_broker, native_core::CORE, native_events};
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+    CORE.with(|c| c.borrow_mut().view.in_world = true);
+
+    let host = Host::new().unwrap();
+    host.execute(
+        r#"
+        results = {}
+        eqoa.events.on("action.result", function(e)
+            results[#results + 1] = {
+                match_req = (e.data.request_id == req),
+                kind = e.data.kind,
+                phase = e.data.phase,
+                state = e.data.state,
+                ok = e.data.ok,
+                code = e.data.code,
+            }
+        end)
+        eqoa.input.bind({ id = "a", label = "Assist", default_key = "k" }, function()
+            req, req_err = eqoa.actions.assist()
+        end)
+    "#,
+    )
+    .unwrap();
+
+    let press_k = || {
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+            )
+        });
+        native_events::dispatch(&host).unwrap();
+    };
+    press_k();
+    host.execute("assert(req ~= nil and req_err == nil)").unwrap();
+
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    // Non-game frame does NOT advance broker
+    begin_iteration(&mut p, false);
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(#results == 0)").unwrap();
+
+    // 30 Hz game_step dispatches Assist and emits `dispatch` phase
+    begin_iteration(&mut p, true);
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        r#"
+        assert(#results == 1 and results[1].match_req)
+        assert(results[1].phase == "dispatch" and results[1].state == "dispatched" and results[1].ok == true)
+        local st = assert(eqoa.actions.status(req))
+        assert(st.request_id == req and st.state == "dispatched")
+    "#,
+    )
+    .unwrap();
+
+    // Server reply Event::Assist(42) resolves `server` phase -> completed
+    let ev = net::session::Event::Assist(42);
+    let cap = begin_game_event(&p, &ev);
+    end_game_event(&p, cap);
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        r#"
+        assert(#results == 2 and results[2].match_req)
+        assert(results[2].phase == "server" and results[2].state == "completed" and results[2].ok == true)
+        local st = assert(eqoa.actions.status(req))
+        assert(st.state == "completed" and st.ok == true)
+    "#,
+    )
+    .unwrap();
+
+    // Second assist refused by server (u32::MAX)
+    press_k();
+    begin_iteration(&mut p, true);
+    let refuse = net::session::Event::Assist(u32::MAX);
+    let cap2 = begin_game_event(&p, &refuse);
+    end_game_event(&p, cap2);
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        r#"
+        assert(#results == 4 and results[4].phase == "server" and results[4].state == "refused" and results[4].ok == false)
+    "#,
+    )
+    .unwrap();
+
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
 }
 
 #[test]

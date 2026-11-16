@@ -56,41 +56,7 @@ pub(crate) fn cancel_vm(vm: u64) {
     OUTGOING_CHAT.with(|q| q.borrow_mut().retain(|(owner, _, _)| *owner != Some(vm)));
 }
 pub(crate) fn report_route(text: &str) -> bool {
-    let mut text = text.trim_start();
-    for _ in 0..16 {
-        let (head, rest) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
-        let command = head.to_ascii_lowercase();
-        if matches!(command.as_str(), "#bug" | "/bug") {
-            return true;
-        }
-        if matches!(
-            command.as_str(),
-            "/say"
-                | "/s"
-                | "/group"
-                | "/g"
-                | "/party"
-                | "/p"
-                | "/guild"
-                | "/gu"
-                | "/shout"
-                | "/sh"
-                | "/reply"
-                | "/r"
-        ) {
-            text = rest.trim_start();
-            continue;
-        }
-        if matches!(command.as_str(), "/tell" | "/t") {
-            let rest = rest.trim_start();
-            text = rest
-                .split_once(char::is_whitespace)
-                .map_or("", |(_, rest)| rest.trim_start());
-            continue;
-        }
-        return false;
-    }
-    true
+    super::gesture::is_forbidden_report_text(text)
 }
 
 pub(crate) fn take_outgoing_chat() -> Vec<String> {
