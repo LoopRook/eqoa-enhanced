@@ -205,7 +205,7 @@ return Item
 "#;
 
 const INVENTORY: &str = r#"
-local eqoa, unsupported, Item = ...
+local eqoa, unsupported, Item, windows = ...
 local Inventory = {}
 Inventory.max_slots = 40
 
@@ -280,57 +280,103 @@ function Inventory.GetTabLabel(tab)
     if id == nil then return nil end
     return (eqoa.text.localized(id))
 end
--- the item page: open while the start menu shows it; the tab is Forge's 0..3
+-- The item page (reference inventory.lua:178-285). The page is a child of the pause screen, built once with
+-- it and kept: "allocated" is our start menu having been built (`page.allocated`); "showing" is the page
+-- being the one drawn (`page.open`). The tab is read whenever the window is allocated (reference 213-219).
 local TAB_KEYS = { [0] = "usable", [1] = "equipment", [2] = "charged", [3] = "misc" }
+local TAB_ORDER = { 0, 1, 2, 3 }
+local NUM_SLOTS = 40
 local function page()
-    local c = container()
-    return c and c.view or nil
+    local w = windows()
+    local p = w and w.page
+    if p == nil or not p.allocated then return nil end
+    return p
 end
-function Inventory.IsWindowOpen() return page() ~= nil end
+function Inventory.IsWindowOpen()
+    local p = page()
+    return p ~= nil and p.open == true
+end
 function Inventory.GetOpenTab()
-    local view = page()
-    return view and view.tab - 1 or nil
+    local p = page()
+    return p and p.tab or nil
 end
+-- { tab, label, selected } for the four tabs, {} when the page is not showing (reference 233-249)
 function Inventory.GetTabs()
-    local view = page()
-    if view == nil then return nil end
+    if not Inventory.IsWindowOpen() then return {} end
+    local open = Inventory.GetOpenTab()
     local tabs = {}
-    for i, tab in ipairs(view.tabs) do tabs[i] = { tab = tab.index - 1, label = tab.label } end
+    for _, tab in ipairs(TAB_ORDER) do
+        tabs[#tabs + 1] = { tab = tab, label = Inventory.GetTabLabel(tab), selected = tab == open }
+    end
     return tabs
 end
--- the stacks under a tab (the open one when none is named), in the page's order, as item objects
-function Inventory.GetTabList(tab)
-    local c = container()
-    if c == nil then return nil end
-    if tab == nil then
-        if c.view == nil then return nil end
-        tab = c.view.tab - 1
-    end
-    local key = TAB_KEYS[tab]
-    if key == nil then return nil end
-    local list = {}
+
+-- The list child backing a tab: a window object with the reference's WindowObject methods that
+-- inventory.lua reads (`GetMenu`, `GetSelectedRow`, `GetScrollTop`, `IsVisible`, `GetClassName`).
+-- Each tab has its own list; the client keeps only the shown tab's lit row, and a list is put at its top
+-- when its tab is shown, so a tab that is not the shown one reads row 1.
+local List = {}
+List.__index = List
+function List:IsVisible()
+    local p = page()
+    return p ~= nil and p.open == true and p.tab == self.tab
+end
+function List:GetClassName() return "VIWndMenu" end
+function List:GetScrollTop() return 1 end
+function List:GetSelectedRow()
+    local p = page()
+    if p == nil then return nil end
+    if p.tab ~= self.tab then return 1 end
+    return p.lit >= 0 and p.lit + 1 or nil
+end
+-- the menu descriptor: a row per stack under the tab, then the empty rows up to the list's size;
+-- `parameter` is the record's index counted from zero, `name_handle` is set only on a row with an item
+function List:GetMenu()
+    local p, c = page(), container()
+    if p == nil or c == nil then return nil end
+    local key = TAB_KEYS[self.tab]
+    local rows = {}
     for _, item in ipairs(c.items) do
         for _, k in ipairs(item.tabs) do
             if k == key then
-                local object = Item.new(item.ref)
-                object.idx = item.index
-                list[#list + 1] = object
+                rows[#rows + 1] = {
+                    index = #rows, command = 0, parameter = item.index - 1, name_handle = item.inventory_key,
+                    quantity = item.quantity,
+                    worn_out = item.maximum_hp > 0 and item.current_hp / item.maximum_hp < 0.25,
+                }
                 break
             end
         end
     end
-    return list
+    while #rows < p.rows[self.tab + 1] do
+        rows[#rows + 1] = { index = #rows, command = 0, parameter = 0, worn_out = false }
+    end
+    return { rows = rows }
 end
--- the lit row's stack: its position in the pack (not its row in the tab)
+function Inventory.GetTabList(tab)
+    local p = page()
+    if p == nil then return nil end
+    tab = tab or Inventory.GetOpenTab()
+    if TAB_KEYS[tab] == nil then return nil end
+    return setmetatable({ tab = tab }, List)
+end
+-- the slot (1-based) of the lit row, nil for a filler row (reference 262-285)
 function Inventory.GetSelectedSlot()
-    local view = page()
-    if view == nil or view.selected == nil then return nil end
-    local item = eqoa.items.get(view.selected)
-    return item and item.index or nil
+    local list = Inventory.GetTabList()
+    if list == nil then return nil end
+    local menu = list:GetMenu()
+    local row = list:GetSelectedRow()
+    if menu == nil or row == nil or menu.rows[row] == nil then return nil end
+    local entry = menu.rows[row]
+    if entry.name_handle == nil then return nil end
+    local index = entry.parameter
+    if index == nil or index >= NUM_SLOTS then return nil end
+    return index + 1
 end
 function Inventory.GetSelectedItem()
     local slot = Inventory.GetSelectedSlot()
-    return slot and Inventory.GetItem(slot) or nil
+    if slot == nil then return nil end
+    return Inventory.GetItem(slot)
 end
 return Inventory
 "#;
@@ -405,9 +451,10 @@ return Loot
 "#;
 
 const MERCHANT: &str = r#"
-local eqoa, unsupported, Item = ...
+local eqoa, unsupported, Item, windows = ...
 local Merchant = {}
 Merchant.max_slots = 40
+local NUM_SLOTS = 40
 Merchant.Mode = { menu = 0, sell = 1, buy = 2 }
 Merchant.Option = { buy = 0, sell = 1, exit = 2 }
 local OPTION_STRING_ID = { [0] = 0x3F, [1] = 0x3E, [2] = 0xA1 }
@@ -444,38 +491,44 @@ function Merchant.GetItems()
     end
     return items
 end
+-- The merchant window (reference merchant.lua:97-237): the mode and the menu's lit option are read while a
+-- merchant is open, the option from the menu that stays behind the lists, the row from the list.
 local function window()
-    local c = eqoa.merchant.get()
-    return c, c and c.merchant or nil
+    local w = windows()
+    return w and w.merchant or nil
 end
 function Merchant.GetMode()
-    local _, state = window()
-    return state and Merchant.Mode[state.mode] or nil
+    local m = window()
+    return m and m.mode or nil
 end
 function Merchant.GetSelectedOption()
-    local _, state = window()
-    return state and state.selected_option and Merchant.Option[state.selected_option] or nil
+    local m = window()
+    return m and m.option or nil
 end
 function Merchant.GetOptions()
-    local _, state = window()
-    if state == nil then return nil end
+    local m = window()
+    if m == nil then return {} end
     local options = {}
-    for i, option in ipairs(state.options) do
-        options[i] = { option = Merchant.Option[option.key], label = option.label, selected = option.selected }
+    for _, option in ipairs({ Merchant.Option.buy, Merchant.Option.sell, Merchant.Option.exit }) do
+        options[#options + 1] = { option = option, label = Merchant.GetOptionLabel(option), selected = option == m.option }
     end
     return options
 end
--- the lit row, 1-based: a ware when buying, a pack position when selling
+-- the raw lit row + 1 in buy and sell mode, empty or not, for a row under 40 (reference 208-221)
 function Merchant.GetSelectedItemIndex()
-    local c = eqoa.merchant.get()
-    return c and c.view and c.view.selected_row or nil
+    local m = window()
+    if m == nil or (m.mode ~= Merchant.Mode.buy and m.mode ~= Merchant.Mode.sell) then return nil end
+    local row = m.lit
+    if row == nil or row < 0 or row >= NUM_SLOTS then return nil end
+    return row + 1
 end
+-- only a ware: selling lights a pack slot (reference 227-237)
 function Merchant.GetSelectedItem()
-    local c = eqoa.merchant.get()
-    if c == nil or c.view == nil or c.view.selected == nil then return nil end
-    local object = Item.new(c.view.selected)
-    object.idx = c.view.selected_row
-    return object
+    local m = window()
+    if m == nil or m.mode ~= Merchant.Mode.buy then return nil end
+    local index = Merchant.GetSelectedItemIndex()
+    if index == nil then return nil end
+    return Merchant.GetItem(index)
 end
 Merchant.GetButtonHint = function() return unsupported("frontiers_forge.merchant.GetButtonHint") end
 return Merchant
@@ -549,6 +602,9 @@ fn real(lua: &Lua, short: &str) -> Result<Table> {
     if matches!(short, "inventory" | "loot" | "merchant") {
         args.push(Value::Table(real(lua, "item")?));
     }
+    if matches!(short, "inventory" | "merchant") {
+        args.push(Value::Function(lua.named_registry_value("eqoa_forge_windows")?));
+    }
     let module: Table = lua
         .load(source(short))
         .set_name(format!("=frontiers_forge.{short}"))
@@ -569,6 +625,10 @@ pub(super) fn install(host: &Host) -> Result<()> {
         Ok(Value::Nil)
     })?;
     lua.set_named_registry_value("eqoa_forge_unsupported", unsupported)?;
+    // the raw state of the item page and the merchant window, which the Forge layer reads as the reference
+    // read the windows' fields (the eqoa-family containers carry only what spec section 6 asks for)
+    let windows = lua.create_function(|lua, ()| super::native_items::windows_raw(lua))?;
+    lua.set_named_registry_value("eqoa_forge_windows", windows)?;
     for (short, names) in NAMES {
         let proxy = lua.create_table()?;
         for name in names.split_whitespace() {

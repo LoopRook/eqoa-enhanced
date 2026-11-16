@@ -383,6 +383,44 @@ fn word(id: i32) -> Option<String> {
         })
     })
 }
+thread_local! {static WINDOWS: std::cell::RefCell<Json> = const { std::cell::RefCell::new(Json::Null) };}
+/// The raw state of the item page and the merchant window, as `items_capture` last read it (for the Forge
+/// layer, which reads the windows' fields).
+pub(crate) fn set_windows_raw(raw: Json) {
+    WINDOWS.with(|w| *w.borrow_mut() = raw);
+}
+fn plain(lua: &Lua, v: &Json) -> Result<Value> {
+    Ok(match v {
+        Json::Null => Value::Nil,
+        Json::Bool(b) => Value::Boolean(*b),
+        Json::Number(n) => Value::Number(n.as_f64().unwrap_or(0.0)),
+        Json::String(s) => Value::String(lua.create_string(s)?),
+        Json::Array(a) => {
+            let t = lua.create_table()?;
+            for (i, x) in a.iter().enumerate() {
+                t.set(i + 1, plain(lua, x)?)?;
+            }
+            Value::Table(t)
+        }
+        Json::Object(o) => {
+            let t = lua.create_table()?;
+            for (k, x) in o {
+                t.set(k.as_str(), plain(lua, x)?)?;
+            }
+            Value::Table(t)
+        }
+    })
+}
+/// The windows' raw state as a Lua table, or nil outside a world.
+pub(crate) fn windows_raw(lua: &Lua) -> Result<Value> {
+    let in_world = CORE.with(|c| c.borrow().view.in_world);
+    if !in_world {
+        return Ok(Value::Nil);
+    }
+    let raw = WINDOWS.with(|w| w.borrow().clone());
+    plain(lua, &raw)
+}
+
 /// The game's word `id` (a window's label), when the words are loaded.
 pub(crate) fn words(id: i32) -> Option<String> {
     word(id)

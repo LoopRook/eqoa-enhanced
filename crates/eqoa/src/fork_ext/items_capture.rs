@@ -229,6 +229,25 @@ pub(super) fn build(play: &Play) -> [Json; 4] {
     [inventory, bank, loot, merchant]
 }
 
+/// The raw state of the item page and the merchant window for the Forge layer: the page's allocation (the
+/// start menu was built, which builds the page with it), whether it is showing, its tab and lit row; the
+/// merchant window's mode, menu option and list row, while a merchant is open.
+fn windows_raw(play: &Play) -> Json {
+    let (tab, _, lit) = play.items.read_state();
+    let (mode, option, row) = play.npcw.merchant.read_state();
+    let merchant = play.mode == 10 && play.npcw.shop.id.is_some();
+    json!({
+        "page": {
+            "allocated": play.start.is_some(),
+            "open": play.items.visible,
+            "tab": tab.clamp(0, 3),
+            "lit": lit,
+            "rows": play.start.as_ref().map_or([40; 4], |s| s.item_counts).map(|c| c.max(crate::inventory::pack_cap() as i32)),
+        },
+        "merchant": merchant.then(|| json!({"mode": mode, "option": option, "lit": row})),
+    })
+}
+
 /// What a frame compares to see that a window opened or closed with no event of its own (a key
 /// closed it) or tunar moved: scalars only. A stack's contents change through the native events in
 /// `cause`, never by polling them; list lengths are here to catch a list replaced behind an event.
@@ -237,7 +256,7 @@ fn key(play: &Play) -> u64 {
     (play.mode == 1, play.mode == 10, play.mode == 11, play.npcw.shop.id, play.npcw.shop.pending).hash(&mut h);
     (play.dump.player.p34, play.dump.player.p38).hash(&mut h);
     // the item page's tab and lit row, the merchant window's mode, option and row: what a key moves
-    (play.items.visible, play.items.read_state(), play.npcw.merchant.read_state()).hash(&mut h);
+    (play.items.visible, play.items.read_state(), play.npcw.merchant.read_state(), play.start.is_some()).hash(&mut h);
     (
         play.dump.inventory.items.len(),
         play.dump.bank.items.items.len(),
@@ -275,6 +294,10 @@ pub(super) fn note(play: &Play) {
     KEY.with(|k| k.set(Some(key(play))));
 }
 pub(super) fn forget() {
+    // the world ended: a request that was in flight and the corpse of the window are not the next world's
+    crate::fork_ext::loot_source::clear();
+    SOURCE.with(|s| *s.borrow_mut() = None);
+    crate::fork_ext::addons::native_items::set_windows_raw(Json::Null);
     KEY.with(|k| k.set(None));
 }
 
@@ -283,13 +306,18 @@ pub(super) fn forget() {
 pub(super) fn capture(play: &Play, cause: &'static str) {
     match cause {
         "loot_open" => note_source(play),
-        "loot_close" => SOURCE.with(|s| *s.borrow_mut() = None),
+        "loot_close" => {
+            SOURCE.with(|s| *s.borrow_mut() = None);
+            crate::fork_ext::loot_source::clear();
+        }
         _ => {}
     }
     let lists = build(play);
     let bytes = lists.iter().map(native_core::json_len).sum::<usize>() + 512;
     note(play);
+    let raw = windows_raw(play);
     native_core::defer(bytes, move |c| {
+        crate::fork_ext::addons::native_items::set_windows_raw(raw);
         for (name, after) in LISTS.into_iter().zip(lists) {
             c.items_patch(name, after, cause);
         }

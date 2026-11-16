@@ -765,7 +765,7 @@ fn round5_forge_item_modules_follow_the_pinned_shapes() {
         assert(#merchant.GetOptions() == 3 and merchant.GetOptions()[1].selected == true and merchant.GetOptions()[2].selected == false)
         assert(merchant.GetSelectedItem() == nil and merchant.GetSelectedItemIndex() == nil)
         -- the item page is not up
-        assert(inventory.IsWindowOpen() == false and inventory.GetOpenTab() == nil and inventory.GetTabs() == nil and inventory.GetSelectedSlot() == nil and inventory.GetSelectedItem() == nil)
+        assert(inventory.IsWindowOpen() == false and inventory.GetOpenTab() == nil and #inventory.GetTabs() == 0 and inventory.GetSelectedSlot() == nil and inventory.GetSelectedItem() == nil and inventory.GetTabList() == nil)
         local c = eqoa.capabilities.get('frontiers_forge.merchant.GetMode'); assert(c.status == 'supported')
         local c = eqoa.capabilities.get('frontiers_forge.merchant.GetButtonHint'); assert(c.status == 'not_yet')
         -- gems: Get, IsGem and a Format that calls the real Get
@@ -951,6 +951,62 @@ fn round5b_a_target_switched_before_the_reply_is_still_the_requested_corpse() {
 }
 
 #[test]
+fn round5b_two_requests_in_flight_name_neither_corpse() {
+    let (mut p, h) = world();
+    // two corpses asked for before either reply: the first reply could be for either
+    p.bags_target_corpse(5001, "a decaying skeleton");
+    p.bags_press_loot();
+    p.bags_target_corpse(5002, "a rat's corpse");
+    p.bags_press_loot();
+    apply(&mut p, opcode(0x0018, pelt()));
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil", "ambiguous: nil");
+    apply(&mut p, opcode(0x0016, vec![]));
+    apply(&mut p, opcode(0x0018, pelt()));
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil", "the second reply has no request of its own left");
+    // the control: one at a time, each reply has its corpse
+    apply(&mut p, opcode(0x0016, vec![]));
+    p.bags_press_loot();
+    apply(&mut p, opcode(0x0018, pelt()));
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "5002:a rat's corpse");
+    // a request that went unanswered a long time ago does not make the next one ambiguous
+    apply(&mut p, opcode(0x0016, vec![]));
+    p.bags_target_corpse(5003, "a bat's corpse");
+    p.bags_press_loot();
+    p.bags_advance_clock(6000);
+    p.bags_target_corpse(5004, "a gnoll's corpse");
+    p.bags_press_loot();
+    apply(&mut p, opcode(0x0018, pelt()));
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "5004:a gnoll's corpse");
+}
+
+#[test]
+fn round5b_a_request_does_not_survive_the_world_it_was_made_in() {
+    let (mut p, h) = world();
+    p.bags_target_corpse(5001, "a decaying skeleton");
+    p.bags_press_loot();
+    // the player zones before the reply; the new world has a corpse with the same entity id
+    p.bags_zone();
+    p.bags_set(&serde_json::json!({"pack": [], "bank": []}));
+    p.forge_snapshot(None);
+    native_events::dispatch(&h).unwrap();
+    p.bags_target_corpse(5001, "a different corpse");
+    apply(&mut p, opcode(0x0018, pelt()));
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil", "the old world's request is gone");
+    // the loot window closing also clears a request that was waiting
+    apply(&mut p, opcode(0x0016, vec![]));
+    p.bags_press_loot();
+    apply(&mut p, opcode(0x0016, vec![]));
+    apply(&mut p, opcode(0x0018, pelt()));
+    native_events::dispatch(&h).unwrap();
+    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil");
+}
+
+#[test]
 fn round5b_a_reply_with_no_recent_request_for_a_corpse_has_no_source() {
     let (mut p, h) = world();
     // no request was made at all
@@ -1045,6 +1101,15 @@ impl Play {
             npcw.merchant.draw(&vui, &mut r, &view, &mut cues, &mut out);
         }
     }
+    /// The start menu has been built (the item page with it, allocated but not showing).
+    pub(crate) fn bags_start_built(&mut self) {
+        let mut bytes = vec![0u8; 0x0200_0000];
+        bytes[..4].copy_from_slice(b"SNR1");
+        let img = crate::client_image::ClientImage::from_bytes(bytes).expect("a blank client image");
+        let mut start = crate::startmenu::StartData::from_image(&img);
+        start.item_counts = [40; 4];
+        self.start = Some(start);
+    }
     /// The start menu closes: the item page goes away.
     pub(crate) fn bags_close_item_page(&mut self) {
         self.items.visible = false;
@@ -1119,25 +1184,65 @@ fn round5b_the_item_pages_tab_and_lit_row_are_the_pack_containers_view_and_each_
     p.bags_close_item_page();
     frame(&p, &h);
     h.execute("assert(eqoa.inventory.get().view == nil and #log == 5 and log[5].cause == 'frame')").unwrap();
-    // Forge's calls over the same state
-    p.bags_item_page(1, 1);
-    frame(&p, &h);
+    // Forge's calls over the same state, as the reference answers them (inventory.lua:178-285)
     let mods = h.registered_modules();
     h.lua.globals().set("inventory", mods.get("frontiers_forge.inventory").unwrap().clone()).unwrap();
+    // the start menu was never built: the page's window is not allocated, so nothing is read from it
+    h.execute("assert(inventory.IsWindowOpen() == false and inventory.GetOpenTab() == nil and inventory.GetTabList() == nil and inventory.GetTabList(1) == nil and #inventory.GetTabs() == 0 and inventory.GetSelectedSlot() == nil)").unwrap();
+    p.bags_start_built();
+    p.bags_item_page(1, 1);
+    frame(&p, &h);
     h.execute(
         r#"
         assert(inventory.IsWindowOpen() == true and inventory.GetOpenTab() == inventory.Tab.equipment)
-        local tabs = inventory.GetTabs(); assert(#tabs == 4 and tabs[1].tab == 0 and tabs[4].tab == 3)
-        local list = inventory.GetTabList(); assert(#list == 2 and list[1].name == 'Rusty Sword' and list[2].name == 'Iron Ring' and list[2].idx == 3)
-        assert(inventory.GetTabList(2)[1].name == 'Fire Wand' and inventory.GetTabList(9) == nil)
+        local tabs = inventory.GetTabs()
+        assert(#tabs == 4 and tabs[1].tab == 0 and tabs[4].tab == 3)
+        local lit = 0
+        for _, t in ipairs(tabs) do if t.selected then lit = lit + 1; assert(t.tab == inventory.Tab.equipment) end end
+        assert(lit == 1, 'exactly the open tab is selected')
+        -- the list child is a window object: its menu descriptor, its lit row
+        local list = inventory.GetTabList(); assert(list ~= nil and list:IsVisible() == true and list:GetClassName() == 'VIWndMenu')
+        local menu = list:GetMenu()
+        assert(#menu.rows == 40 and menu.rows[1].parameter == 0 and menu.rows[1].name_handle ~= nil and menu.rows[1].quantity == 1)
+        assert(menu.rows[2].parameter == 2, 'the ring is pack record 2, counted from zero')
+        assert(menu.rows[3].name_handle == nil and menu.rows[3].quantity == nil, 'a row with no item behind it is a filler')
+        assert(list:GetSelectedRow() == 2)
+        assert(inventory.GetTabList(2):GetSelectedRow() == 1 and inventory.GetTabList(2):IsVisible() == false and #inventory.GetTabList(2):GetMenu().rows == 40)
+        assert(inventory.GetTabList(2):GetMenu().rows[1].parameter == 4, 'the wand')
+        assert(inventory.GetTabList(9) == nil)
         assert(inventory.GetSelectedSlot() == 3, 'the pack position of the lit stack, not its row in the tab')
         assert(inventory.GetSelectedItem().name == 'Iron Ring')
         "#,
     )
     .unwrap();
+    // an empty tab (nothing charged in the pack): its first row is lit, and it is a filler: no slot
+    p.dump.inventory = list(&[sword()]);
+    capture_all(&p);
+    p.bags_item_page(2, 0);
+    frame(&p, &h);
+    h.execute(
+        r#"
+        local c = eqoa.inventory.get()
+        assert(inventory.GetOpenTab() == inventory.Tab.tradeskill)
+        assert(inventory.GetTabList():GetSelectedRow() == 1, 'row ' .. tostring(inventory.GetTabList():GetSelectedRow()))
+        assert(inventory.GetTabList():GetMenu().rows[1].name_handle == nil)
+        assert(inventory.GetSelectedSlot() == nil and inventory.GetSelectedItem() == nil, 'slot')
+        assert(c.view.selected == nil and c.view.selected_row == nil and #c.view.rows == 0, 'view')
+        "#,
+    )
+    .unwrap();
+    // the page put away, the window still allocated: the tab is still read, the page is not showing
     p.bags_close_item_page();
     frame(&p, &h);
-    h.execute("assert(inventory.IsWindowOpen() == false and inventory.GetOpenTab() == nil and inventory.GetTabList() == nil and inventory.GetSelectedItem() == nil)").unwrap();
+    h.execute(
+        r#"
+        assert(inventory.IsWindowOpen() == false and #inventory.GetTabs() == 0, 'no tabs while the page is not showing')
+        assert(inventory.GetOpenTab() == inventory.Tab.tradeskill, 'the window is still allocated and holds the tab it was left on')
+        local list = inventory.GetTabList(); assert(list ~= nil and list:IsVisible() == false)
+        assert(eqoa.inventory.get().view == nil)
+        "#,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -1185,13 +1290,16 @@ fn round5b_the_merchant_windows_mode_option_and_row_are_the_containers_state_and
     p.bags_merchant_keys(&[key::DOWN]);
     frame(&p, &h);
     h.execute("local m = eqoa.merchant.get(); local inv = eqoa.inventory.get(); assert(m.view.selected_row == 2 and m.view.selected == inv.items[2].ref and #log == 3)").unwrap();
-    // Forge's calls
+    // Forge's calls, as the reference answers them (merchant.lua:97-237)
     let mods = h.registered_modules();
     h.lua.globals().set("merchant", mods.get("frontiers_forge.merchant").unwrap().clone()).unwrap();
     h.execute(
         r#"
-        assert(merchant.GetMode() == merchant.Mode.sell and merchant.GetSelectedOption() == nil and #merchant.GetOptions() == 3)
-        assert(merchant.GetSelectedItemIndex() == 2 and merchant.GetSelectedItem().name == 'Healing Potion', 'a pack stack when selling')
+        assert(merchant.GetMode() == merchant.Mode.sell)
+        -- the menu's option is retained behind the list (Buy, which Cross in the menu reset it to), and listed
+        assert(merchant.GetSelectedOption() == merchant.Option.buy and #merchant.GetOptions() == 3 and merchant.GetOptions()[1].selected == true)
+        assert(merchant.GetSelectedItemIndex() == 2, 'the lit row + 1 in sell mode')
+        assert(merchant.GetSelectedItem() == nil, 'sell mode lights a pack slot, not a ware')
         local v, e = merchant.GetButtonHint(); assert(v == nil)
         "#,
     )
@@ -1207,10 +1315,38 @@ fn round5b_the_merchant_windows_mode_option_and_row_are_the_containers_state_and
         "#,
     )
     .unwrap();
+    // a merchant with no wares: buying lists nothing, its first row is lit, and the index is that row + 1
+    apply(&mut p, opcode(0x0016, vec![]));
+    p.npcw_respawn();
+    apply(&mut p, opcode(0x00B7, shop_bytes(7002, 90, 110, &[], "Nothing today")));
+    native_events::dispatch(&h).unwrap();
+    p.bags_merchant_open();
+    p.bags_merchant_keys(&[key::CROSS]);
+    frame(&p, &h);
+    h.execute(
+        r#"
+        local m = eqoa.merchant.get()
+        assert(merchant.GetMode() == merchant.Mode.buy and #m.items == 0)
+        assert(merchant.GetSelectedItemIndex() == 1, 'index ' .. tostring(merchant.GetSelectedItemIndex()))
+        assert(merchant.GetSelectedItem() == nil, 'no ware behind the row')
+        assert(m.view.selected == nil and m.view.selected_row == nil and #m.view.rows == 0, 'view')
+        "#,
+    )
+    .unwrap();
     // the window closes with the merchant: nothing
     p.npcw_respawn();
     frame(&p, &h);
-    h.execute("local v, e = eqoa.merchant.get(); assert(v == nil and e == nil and merchant.GetMode() == nil and merchant.GetSelectedItem() == nil and merchant.GetOptions() == nil)").unwrap();
+    h.execute(
+        r#"
+        local v, e = eqoa.merchant.get(); assert(v == nil and e == nil, 'closed')
+        assert(merchant.GetMode() == nil, 'mode')
+        assert(merchant.GetSelectedItem() == nil, 'item')
+        assert(merchant.GetSelectedOption() == nil, 'option')
+        assert(merchant.GetSelectedItemIndex() == nil, 'index')
+        assert(type(merchant.GetOptions()) == 'table' and #merchant.GetOptions() == 0, 'no options, an empty table')
+        "#,
+    )
+    .unwrap();
 }
 
 // ---- Round 5 Part B: the bag viewer's fixtures. The manager's tests (`addons::manager`) cannot name this
@@ -1330,6 +1466,8 @@ impl Play {
     /// The server moves the player to another world; the next `bags_set` is the entry dump of the new one.
     pub(crate) fn bags_zone(&mut self) {
         CORE.with(|c| c.borrow_mut().reset("zone"));
+        // what the session's Teleport / WorldEntry arm does with the capture
+        items::forget();
         self.mode = 0;
         self.npcw.corpse = None;
     }

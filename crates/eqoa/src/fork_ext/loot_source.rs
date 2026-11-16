@@ -7,9 +7,18 @@ use std::time::Instant;
 /// How long a request stays the one a reply belongs to.
 pub(crate) const REPLY_MS: u64 = 5000;
 
+/// The loot request not yet answered: the corpse it named, when it was sent, and whether another was sent
+/// while it was still waiting (then the next reply could be for either, and names neither).
+#[derive(Clone, Copy)]
+struct Pending {
+    id: u32,
+    at: u64,
+    crowded: bool,
+}
+
 thread_local! {
     static START: Instant = Instant::now();
-    static REQUEST: Cell<Option<(u32, u64)>> = const { Cell::new(None) };
+    static REQUEST: Cell<Option<Pending>> = const { Cell::new(None) };
 }
 #[cfg(test)]
 thread_local! {static SKEW: Cell<u64> = const { Cell::new(0) };}
@@ -27,15 +36,22 @@ pub(crate) fn advance(ms: u64) {
     SKEW.with(|s| s.set(s.get() + ms));
 }
 
-/// The client sent a loot request for corpse `id`.
+/// The client sent a loot request for corpse `id`. One still waiting (sent less than `REPLY_MS` ago) makes
+/// the next reply ambiguous: it is not told which corpse it is for.
 pub(crate) fn requested(id: u32) {
     let now = now_ms();
-    REQUEST.with(|r| r.set(Some((id, now))));
+    let crowded = REQUEST.with(|r| r.get()).is_some_and(|p| now.saturating_sub(p.at) <= REPLY_MS);
+    REQUEST.with(|r| r.set(Some(Pending { id, at: now, crowded })));
 }
 
-/// The corpse the latest request named, when it was made within `REPLY_MS` of now. A reply uses its
-/// request up: the next reply is for the next request.
+/// The corpse the one request in flight named, when it was made within `REPLY_MS` of now and nothing else
+/// was asked meanwhile. A reply uses the request up: the next reply is for the next request.
 pub(crate) fn take_recent() -> Option<u32> {
     let now = now_ms();
-    REQUEST.with(|r| r.take()).filter(|(_, at)| now.saturating_sub(*at) <= REPLY_MS).map(|(id, _)| id)
+    REQUEST.with(|r| r.take()).filter(|p| !p.crowded && now.saturating_sub(p.at) <= REPLY_MS).map(|p| p.id)
+}
+
+/// The world ended or the loot window closed: no request is waiting.
+pub(crate) fn clear() {
+    REQUEST.with(|r| r.set(None));
 }
