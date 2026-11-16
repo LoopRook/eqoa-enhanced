@@ -1108,6 +1108,10 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
             | "eqoa.hud.SinglePanelLayout",
             "panel" | "health" | "power" | "exp",
         ) => Some("eqoa.hud.Rect"),
+        ("eqoa.windows.Windows", "windows") => Some("eqoa.windows.Window"),
+        ("eqoa.windows.Window", "rows") => Some("eqoa.windows.MenuRow"),
+        ("eqoa.windows.Window", "hints") => Some("eqoa.windows.ButtonHint"),
+        ("eqoa.windows.Window", "dialog") => Some("eqoa.windows.Dialog"),
         _ => None,
     }
 }

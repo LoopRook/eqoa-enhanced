@@ -42,6 +42,53 @@ where
     }
 }
 
+pub(crate) fn format_hint_str(button: &str, label: &str) -> Option<String> {
+    crate::binds::BUTTONS
+        .iter()
+        .find(|(name, _)| *name == button)
+        .map(|(_, glyph)| format!("{glyph}{label}"))
+}
+
+pub(crate) fn parse_hint_json(text: &str) -> Vec<Json> {
+    let mut out: Vec<Json> = Vec::new();
+    let mut cur_btn: &str = "text";
+    let mut buf = String::new();
+    let flush = |btn: &str, buf: &mut String, out: &mut Vec<Json>| {
+        let label = buf.trim();
+        if !label.is_empty() {
+            out.push(json!({"button": btn, "label": label}));
+        }
+        buf.clear();
+    };
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'|' && i + 1 < bytes.len() {
+            let two = &text[i..i + 2];
+            if two == "|-" || two == "|+" {
+                i += 2;
+                continue;
+            }
+            if two == "||" {
+                buf.push('|');
+                i += 2;
+                continue;
+            }
+            if let Some((btn_name, _)) = crate::binds::BUTTONS.iter().find(|(_, g)| *g == two) {
+                flush(cur_btn, &mut buf, &mut out);
+                cur_btn = btn_name;
+                i += 2;
+                continue;
+            }
+        }
+        let ch = text[i..].chars().next().unwrap();
+        buf.push(ch);
+        i += ch.len_utf8();
+    }
+    flush(cur_btn, &mut buf, &mut out);
+    out
+}
+
 pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
 
@@ -212,9 +259,142 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         })?,
     )?;
 
+    // eqoa.windows.*
+    bind(
+        lua,
+        "windows",
+        "get",
+        lua.create_function(|lua, ()| {
+            let wnd = CORE.with(|c| c.borrow().view.windows_state.clone());
+            lua.pack_multi((record(lua, "eqoa.windows.Windows", &wnd)?, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "windows",
+        "find",
+        lua.create_function(|lua, kind: Value| {
+            let Some(kind) = kind.as_string().and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+            else {
+                return error(
+                    lua,
+                    "eqoa.windows.find",
+                    "invalid_argument",
+                    "kind must be a string",
+                );
+            };
+            let found = CORE.with(|c| {
+                let c = c.borrow();
+                c.view.windows_state["windows"]
+                    .as_array()
+                    .and_then(|arr| {
+                        arr.iter()
+                            .find(|w| {
+                                w["kind"].as_str() == Some(kind.as_str())
+                                    && w["visible"].as_bool() == Some(true)
+                            })
+                            .cloned()
+                    })
+            });
+            match found {
+                Some(w) => lua.pack_multi((record(lua, "eqoa.windows.Window", &w)?, Value::Nil)),
+                None => lua.pack_multi((Value::Nil, Value::Nil)),
+            }
+        })?,
+    )?;
+    bind(
+        lua,
+        "windows",
+        "get_window",
+        lua.create_function(|lua, r: Value| {
+            let found = CORE.with(|c| {
+                let c = c.borrow();
+                let list = c.view.windows_state["windows"].as_array()?;
+                resolve_in(&r, list, c.generation, "window")
+            });
+            let Some(w) = found else {
+                return error(
+                    lua,
+                    "eqoa.windows.get_window",
+                    "stale_handle",
+                    "window handle is stale or invalid",
+                );
+            };
+            lua.pack_multi((record(lua, "eqoa.windows.Window", &w)?, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "windows",
+        "format_hint",
+        lua.create_function(|lua, (button, label): (Value, Value)| {
+            let Some(button) = button
+                .as_string()
+                .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+            else {
+                return error(
+                    lua,
+                    "eqoa.windows.format_hint",
+                    "invalid_argument",
+                    "button must be a string",
+                );
+            };
+            let Some(label) = label
+                .as_string()
+                .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+            else {
+                return error(
+                    lua,
+                    "eqoa.windows.format_hint",
+                    "invalid_argument",
+                    "label must be a string",
+                );
+            };
+            let Some(formatted) = format_hint_str(&button, &label) else {
+                return error(
+                    lua,
+                    "eqoa.windows.format_hint",
+                    "invalid_argument",
+                    "unknown button name",
+                );
+            };
+            lua.pack_multi((formatted, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "windows",
+        "parse_hint",
+        lua.create_function(|lua, text: Value| {
+            let Some(text) = text
+                .as_string()
+                .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+            else {
+                return error(
+                    lua,
+                    "eqoa.windows.parse_hint",
+                    "invalid_argument",
+                    "text must be a string",
+                );
+            };
+            let parsed = parse_hint_json(&text);
+            lua.pack_multi((
+                record(lua, "eqoa.windows.ButtonHint", &json!(parsed))?,
+                Value::Nil,
+            ))
+        })?,
+    )?;
+
     for (path, fields) in [
         ("eqoa.quests.Quest", "ref index title"),
         ("eqoa.camera.Camera", "position heading pitch distance mode"),
+        (
+            "eqoa.windows.Windows",
+            "mode native_mode busy start_menu_open any_window_open active windows",
+        ),
+        ("eqoa.windows.Window", "ref kind title visible focused hints dialog"),
+        ("eqoa.windows.ButtonHint", "button label"),
+        ("eqoa.windows.Dialog", "kind text tag title chat password style style_id"),
         (
             "eqoa.mastery.Mastery",
             "available spent experience_share progress_raw pending stats bonuses",
@@ -232,6 +412,23 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         for field in fields.split_whitespace() {
             describe(lua, &format!("{path}.{field}"), "supported", Some(4), "");
         }
+    }
+
+    let seam_reason = "needs an upstream read accessor the owner approves first";
+    for path in [
+        "eqoa.windows.Window.rows",
+        "eqoa.windows.Window.selected_row",
+        "eqoa.windows.Window.scroll_top",
+        "eqoa.windows.MenuRow",
+        "eqoa.windows.MenuRow.index",
+        "eqoa.windows.MenuRow.text",
+        "eqoa.windows.MenuRow.enabled",
+        "eqoa.windows.MenuRow.item",
+        "eqoa.windows.MenuRow.command",
+        "eqoa.windows.Dialog.options",
+        "eqoa.windows.Dialog.selection",
+    ] {
+        describe(lua, path, "not_yet", Some(4), seam_reason);
     }
 
     Ok(())

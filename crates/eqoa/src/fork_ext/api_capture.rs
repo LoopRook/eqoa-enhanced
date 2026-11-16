@@ -272,6 +272,7 @@ impl Play {
             mastery_node: None,
             camera: Json::Null,
             camera_compass: None,
+            windows_state: crate::fork_ext::addons::native_core::none_windows_json(),
             channel: match self.channel {
                 0 => "say",
                 2 => "shout",

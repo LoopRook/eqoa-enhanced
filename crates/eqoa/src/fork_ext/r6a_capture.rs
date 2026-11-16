@@ -55,16 +55,343 @@ struct CameraFingerprint {
     mode: i32,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct WindowsFingerprint {
+    world_gen: u64,
+    mode: i32,
+    start_visible: bool,
+    items_visible: bool,
+    map_open: bool,
+    search_open: bool,
+    typing_hash: u64,
+    edit_hash: u64,
+    mbox_hash: u64,
+    words_present: bool,
+    merchant_mode: i32,
+    merchant_visible: bool,
+}
+
 thread_local! {
     static LAST_QUEST_HASH: Cell<Option<u64>> = const { Cell::new(None) };
     static LAST_CM: RefCell<Option<CmFingerprint>> = const { RefCell::new(None) };
     static LAST_CAMERA: Cell<Option<CameraFingerprint>> = const { Cell::new(None) };
+    static LAST_WINDOWS: Cell<Option<WindowsFingerprint>> = const { Cell::new(None) };
 }
 
 pub(super) fn forget() {
     LAST_QUEST_HASH.with(|h| h.set(None));
     LAST_CM.with(|c| *c.borrow_mut() = None);
     LAST_CAMERA.with(|c| c.set(None));
+    LAST_WINDOWS.with(|w| w.set(None));
+}
+
+pub(super) fn mode_name(mode: i32) -> &'static str {
+    match mode {
+        0 => "normal",
+        1 => "loot",
+        2 => "input",
+        4 => "gm_goto",
+        5 => "spellbook",
+        6 => "recipe_book",
+        7 => "response_dialog",
+        9 => "text_dialog",
+        10 => "merchant",
+        11 => "bank",
+        12 => "trainer",
+        13 => "start_menu",
+        14 => "confirm",
+        15 => "trade",
+        16 => "trade_ask",
+        17 => "buddy_request",
+        18 => "buddy_list",
+        19 => "blacksmith",
+        20 => "guild_invite",
+        21 => "guild",
+        22 => "quest_log",
+        23 => "mail_compose",
+        24 => "mail_inbox",
+        26 => "ignore_list",
+        27 => "gm_buff_pc",
+        28 => "mail_tell",
+        29 => "mail_reply",
+        30 => "quick_chat",
+        31 => "support_request",
+        32 => "support_inbox",
+        33 => "chat_history",
+        34 => "options",
+        35 => "who",
+        36 => "fishing",
+        37 => "experiment",
+        38 => "manual_camera",
+        39 => "auction_search",
+        40 => "mastery",
+        41 => "factions",
+        42 => "group_search",
+        43 => "duel_invite",
+        44 => "duel",
+        60 => "combat_record",
+        _ => "other",
+    }
+}
+
+fn mode_title(mode: i32, edit_title: &str) -> Option<&str> {
+    match mode {
+        1 => Some("Loot"),
+        2 => Some(if edit_title.is_empty() { "Input" } else { edit_title }),
+        4 => Some("Go To"),
+        5 => Some("Abilities"),
+        6 => Some("Recipe Book"),
+        7 | 9 => Some("Dialog"),
+        10 => Some("Merchant"),
+        11 => Some("Bank"),
+        12 => Some("Character Summary"),
+        13 => Some("Start Menu"),
+        14 => Some("Confirm"),
+        15 | 16 => Some("Trade"),
+        17 => Some("Buddy Request"),
+        18 => Some("Buddy List"),
+        19 => Some("Blacksmith"),
+        20 => Some("Guild Invite"),
+        21 => Some("Guild"),
+        22 => Some("Quest Journal"),
+        23 | 24 | 28 | 29 => Some("Mail"),
+        26 => Some("Ignore List"),
+        27 => Some("Buff PC"),
+        30 => Some("Quick Chat"),
+        31 | 32 => Some("Support"),
+        33 => Some("Chat History"),
+        34 => Some("Options"),
+        35 => Some("Who"),
+        36 => Some("Fishing"),
+        37 => Some("Experiment"),
+        39 => Some("Auction Search"),
+        40 => Some("Class Mastery"),
+        41 => Some("Factions"),
+        42 => Some("Group Search"),
+        43 | 44 => Some("Duel"),
+        60 => Some("Combat Record"),
+        _ => None,
+    }
+}
+
+fn windows_fingerprint(play: &Play, generation: u64) -> WindowsFingerprint {
+    let mut th = std::collections::hash_map::DefaultHasher::new();
+    play.typing.hash(&mut th);
+    let mut eh = std::collections::hash_map::DefaultHasher::new();
+    if play.mode == 2 {
+        play.edit.purpose.hash(&mut eh);
+        play.edit.password.hash(&mut eh);
+        play.edit.title.hash(&mut eh);
+        play.edit.text.hash(&mut eh);
+    }
+    let mut mh = std::collections::hash_map::DefaultHasher::new();
+    if play.mode == 14 {
+        play.mbox.kind.hash(&mut mh);
+        play.mbox.text.hash(&mut mh);
+    }
+    WindowsFingerprint {
+        world_gen: generation,
+        mode: play.mode,
+        start_visible: play.start.as_ref().is_some_and(|s| s.menu.visible),
+        items_visible: play.items.visible,
+        map_open: play.map.open,
+        search_open: play.search.open,
+        typing_hash: th.finish(),
+        edit_hash: eh.finish(),
+        mbox_hash: mh.finish(),
+        words_present: play.words.is_some(),
+        merchant_mode: play.npcw.merchant.mode,
+        merchant_visible: play.npcw.merchant.visible,
+    }
+}
+
+fn hint_entry(button: &str, label: &str) -> Json {
+    json!({"button": button, "label": label})
+}
+
+fn mode_hints(play: &Play, mode: i32) -> Vec<Json> {
+    let Some(words) = play.words.as_ref() else {
+        return Vec::new();
+    };
+    let word = |id: i32| -> Option<&str> {
+        let s = words.get(id, 0);
+        (!s.is_empty() && s != "(null)").then_some(s)
+    };
+    match mode {
+        12 | 13 => {
+            let mut out = Vec::new();
+            if let Some(s) = word(212) {
+                out.push(hint_entry("cross", s));
+            }
+            if let Some(e) = word(161) {
+                out.push(hint_entry("triangle", e));
+            }
+            out
+        }
+        10 if play.npcw.merchant.visible => word(161)
+            .map(|e| vec![hint_entry("triangle", e)])
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+fn windows_json(play: &Play) -> Json {
+    let start_menu_open =
+        play.mode == 13 || play.start.as_ref().is_some_and(|s| s.menu.visible);
+    let mut windows: Vec<Json> = Vec::new();
+    let push_wnd = |windows: &mut Vec<Json>,
+                    key: String,
+                    kind: &str,
+                    title: Option<&str>,
+                    hints: Vec<Json>,
+                    dialog: Json| {
+        windows.push(json!({
+            "_key": key,
+            "kind": kind,
+            "title": title,
+            "visible": true,
+            "focused": false,
+            "rows": Json::Null,
+            "selected_row": Json::Null,
+            "scroll_top": Json::Null,
+            "hints": hints,
+            "dialog": dialog,
+        }));
+    };
+
+    if play.mode != 0 && play.mode != 38 {
+        if play.mode == 13 {
+            push_wnd(
+                &mut windows,
+                "mode:13".into(),
+                "start_menu",
+                Some("Start Menu"),
+                mode_hints(play, 13),
+                Json::Null,
+            );
+            if play.items.visible {
+                push_wnd(
+                    &mut windows,
+                    "sub:inventory".into(),
+                    "inventory",
+                    Some("Inventory"),
+                    Vec::new(),
+                    Json::Null,
+                );
+            }
+        } else {
+            let kind = mode_name(play.mode);
+            let edit_title = if play.mode == 2 {
+                utf16_str(&play.edit.title)
+            } else {
+                String::new()
+            };
+            let title = mode_title(play.mode, &edit_title);
+            let dialog = match play.mode {
+                2 => json!({
+                    "kind": "input",
+                    "text": (!play.edit.password).then(|| utf16_str(&play.edit.text)),
+                    "tag": play.edit.purpose,
+                    "title": edit_title,
+                    "chat": play.edit.purpose == 0xB0F_0000,
+                    "password": play.edit.password,
+                }),
+                14 => {
+                    let style = match play.mbox.kind {
+                        0 => "ok",
+                        1 => "yes_no",
+                        2 => "cancel",
+                        _ => "other",
+                    };
+                    json!({
+                        "kind": "confirm",
+                        "text": utf16_str(&play.mbox.text),
+                        "style": style,
+                        "style_id": play.mbox.kind,
+                        "selection": (play.mbox.kind == 0 || play.mbox.kind == 2).then_some(1u64),
+                    })
+                }
+                // `PrivChat` (mode 9) and `Response` (mode 7) dialog contents remain nil
+                // until the read-only accessors in `round-6-seams.md` are approved.
+                _ => Json::Null,
+            };
+            let key = if kind == "other" {
+                format!("mode:other:{}", play.mode)
+            } else {
+                format!("mode:{}", play.mode)
+            };
+            push_wnd(
+                &mut windows,
+                key,
+                kind,
+                title,
+                mode_hints(play, play.mode),
+                dialog,
+            );
+        }
+    } else if start_menu_open {
+        push_wnd(
+            &mut windows,
+            "overlay:start_menu".into(),
+            "start_menu",
+            Some("Start Menu"),
+            mode_hints(play, 13),
+            Json::Null,
+        );
+    }
+
+    if play.map.open {
+        push_wnd(
+            &mut windows,
+            "overlay:map".into(),
+            "map",
+            Some("Map"),
+            Vec::new(),
+            Json::Null,
+        );
+    }
+    if play.search.open {
+        push_wnd(
+            &mut windows,
+            "overlay:search".into(),
+            "search",
+            Some("Player Search"),
+            Vec::new(),
+            Json::Null,
+        );
+    }
+    if let Some(text) = &play.typing {
+        push_wnd(
+            &mut windows,
+            "overlay:typing".into(),
+            "typing",
+            Some("Chat"),
+            Vec::new(),
+            json!({
+                "kind": "input",
+                "text": text,
+                "tag": 0xB0F_0000u32,
+                "title": "",
+                "chat": true,
+                "password": false,
+            }),
+        );
+    }
+
+    if let Some(last) = windows.last_mut() {
+        last["focused"] = json!(true);
+    }
+    let any_window_open = !windows.is_empty();
+    let busy = (play.mode != 0 && play.mode != 38) || start_menu_open || any_window_open;
+    json!({
+        "mode": mode_name(play.mode),
+        "native_mode": play.mode,
+        "busy": busy,
+        "start_menu_open": start_menu_open,
+        "any_window_open": any_window_open,
+        "active": Json::Null,
+        "windows": windows,
+    })
 }
 
 fn camera_fingerprint(w: &crate::walker::Walker, generation: u64) -> CameraFingerprint {
@@ -316,6 +643,9 @@ pub(super) fn populate_view(
             view.camera = Json::Null;
             view.camera_compass = None;
         }
+        let wfp = windows_fingerprint(play, c.generation);
+        LAST_WINDOWS.with(|lw| lw.set(Some(wfp)));
+        view.windows_state = windows_json(play);
         c.mastery_flags
     });
     let m = mastery_json(play, flags);
@@ -450,5 +780,26 @@ pub(super) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
             });
             super::updates::dirty();
         }
+    }
+
+    // 4. Windows
+    let wfp = windows_fingerprint(play, generation);
+    if LAST_WINDOWS.with(|lw| lw.replace(Some(wfp))) != Some(wfp) {
+        let mut after = windows_json(play);
+        CORE.with(|c| {
+            let mut c = c.borrow_mut();
+            c.assign_window_refs(&mut after);
+            let before = std::mem::replace(&mut c.view.windows_state, after);
+            if before != c.view.windows_state {
+                let changed = changed_fields(&before, &c.view.windows_state);
+                let payload = json!({
+                    "before": before,
+                    "after": c.view.windows_state,
+                    "changed": changed,
+                });
+                c.emit("windows.changed", payload);
+            }
+        });
+        super::updates::dirty();
     }
 }

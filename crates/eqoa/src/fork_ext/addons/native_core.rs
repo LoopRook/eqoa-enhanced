@@ -6,6 +6,18 @@ use std::{
     time::Instant,
 };
 
+pub(crate) fn none_windows_json() -> Json {
+    json!({
+        "mode": "none",
+        "native_mode": 0,
+        "busy": false,
+        "start_menu_open": false,
+        "any_window_open": false,
+        "active": Json::Null,
+        "windows": [],
+    })
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct View {
     pub in_world: bool,
@@ -37,6 +49,7 @@ pub(crate) struct View {
     pub mastery_node: Option<Json>,
     pub camera: Json,
     pub camera_compass: Option<f32>,
+    pub windows_state: Json,
     pub channel: &'static str,
 }
 impl Default for View {
@@ -67,6 +80,7 @@ impl Default for View {
             mastery_node: None,
             camera: Json::Null,
             camera_compass: None,
+            windows_state: none_windows_json(),
             channel: "other",
         }
     }
@@ -194,6 +208,7 @@ pub(crate) struct Core {
     /// Per item list, the revision the container last published with.
     pub item_revisions: BTreeMap<&'static str, u64>,
     pub quest_revision: u64,
+    pub window_versions: BTreeMap<String, u64>,
     pub mastery_flags: MasteryFlags,
     pub cm_pending_ops: u16,
     /// `gAttackWords` (the start menu's data), for the attack-type names.
@@ -236,6 +251,7 @@ impl Default for Core {
             item_versions: BTreeMap::new(),
             item_revisions: BTreeMap::new(),
             quest_revision: 0,
+            window_versions: BTreeMap::new(),
             mastery_flags: MasteryFlags::default(),
             cm_pending_ops: 0,
             attack_words: Vec::new(),
@@ -437,6 +453,7 @@ impl Core {
         self.item_versions.clear();
         self.item_revisions.clear();
         self.quest_revision = 0;
+        self.window_versions.clear();
         self.mastery_flags = MasteryFlags::default();
         self.cm_pending_ops = 0;
         self.cooldown_edges.clear();
@@ -450,6 +467,41 @@ impl Core {
         self.view = View::default();
         super::guides::update(self);
         self.emit("state.reset", json!({"in_world":false,"initial":false}));
+    }
+    pub(crate) fn assign_window_refs(&mut self, windows_state: &mut Json) {
+        let Some(list) = windows_state["windows"].as_array_mut() else {
+            self.window_versions.clear();
+            windows_state["active"] = Json::Null;
+            return;
+        };
+        let active_keys: Vec<String> = list
+            .iter()
+            .filter_map(|w| w["_key"].as_str().map(str::to_string))
+            .collect();
+        self.window_versions
+            .retain(|k, _| active_keys.iter().any(|ak| ak == k));
+        let mut active_ref = Json::Null;
+        for w in list.iter_mut() {
+            let key = w["_key"].as_str().unwrap_or("").to_string();
+            let version = *self.window_versions.entry(key.clone()).or_insert_with(|| {
+                self.next_version += 1;
+                self.next_version
+            });
+            let r = json!({
+                "$ref": "window",
+                "key": key,
+                "generation": self.generation,
+                "incarnation": version,
+            });
+            if w["focused"].as_bool() == Some(true) {
+                active_ref = r.clone();
+            }
+            w["ref"] = r;
+            if let Some(obj) = w.as_object_mut() {
+                obj.remove("_key");
+            }
+        }
+        windows_state["active"] = active_ref;
     }
     pub fn publish(&mut self, mut view: View) {
         let target = view.player["target_id"].as_u64().map(|id| id as u32);
@@ -509,6 +561,9 @@ impl Core {
         if view.player.is_object() {
             view.player["entity"] = entity_ref(&view.player["id"]);
             view.player["mastery"] = view.mastery.clone().unwrap_or(Json::Null);
+        }
+        if view.windows_state.is_object() {
+            self.assign_window_refs(&mut view.windows_state);
         }
         let quests_same = view.quests.len() == self.view.quests.len()
             && view
@@ -612,6 +667,13 @@ impl Core {
             }
             if !self.view.camera.is_null() && previous.camera != self.view.camera {
                 self.camera_changed(previous.camera);
+            }
+            if previous.windows_state != self.view.windows_state {
+                let changed = changed_fields(&previous.windows_state, &self.view.windows_state);
+                self.emit(
+                    "windows.changed",
+                    json!({"before":previous.windows_state,"after":self.view.windows_state,"changed":changed}),
+                );
             }
         }
     }

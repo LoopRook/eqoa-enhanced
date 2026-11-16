@@ -101,6 +101,7 @@ const EVENTS: &[&str] = &[
     "merchant.changed",
     "quests.changed",
     "camera.changed",
+    "windows.changed",
     "mastery.changed",
     "shared.changed",
     "mod.command",
@@ -144,6 +145,7 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("merchant.changed", "before after changed cause"),
         ("quests.changed", "before after changed"),
         ("camera.changed", "before after changed"),
+        ("windows.changed", "before after changed"),
         ("mastery.changed", "before after changed"),
         ("shared.changed", "mod path"),
         ("mod.command", "from command args"),
@@ -181,12 +183,7 @@ fn install_event_fields(lua: &mlua::Lua) {
             );
         }
     }
-    for (round, names) in [
-        (
-            4,
-            "windows.changed action.result",
-        ),
-    ] {
+    for (round, names) in [(4, "action.result")] {
         for name in names.split_whitespace() {
             super::native::describe(
                 lua,
@@ -241,7 +238,10 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
             "supported",
             Some(if *name == "player.stats_changed" {
                 3
-            } else if matches!(*name, "quests.changed" | "camera.changed" | "mastery.changed") {
+            } else if matches!(
+                *name,
+                "quests.changed" | "camera.changed" | "windows.changed" | "mastery.changed"
+            ) {
                 4
             } else {
                 2
