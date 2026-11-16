@@ -245,9 +245,9 @@
       "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`Loot::read_list`)."
     },
     "crates/eqoa/src/bankplay.rs": {
-      "added": 4,
+      "added": 5,
       "deleted": 0,
-      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`BankPlay::read_lists`)."
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`BankPlay::read_lists`). round 6 action hook call: `super::fork_hooks::bank_requests(self, &mut out);` immediately before the BankOut loop."
     },
     "crates/eqoa/src/bank.rs": {
       "added": 3,
@@ -273,11 +273,6 @@
       "added": 4,
       "deleted": 0,
       "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`ClassMastery::read_state`)."
-    },
-    "crates/eqoa/src/bankplay.rs": {
-      "added": 1,
-      "deleted": 0,
-      "reason": "round 6 action hook calls, approved by the lead on the owner's delegation 2026-11-16: `super::fork_hooks::bank_requests(self, &mut out);` immediately before the BankOut loop."
     },
     "crates/eqoa/src/npcw.rs": {
       "added": 6,
