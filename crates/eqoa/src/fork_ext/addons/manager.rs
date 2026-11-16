@@ -553,6 +553,12 @@ impl Manager {
         }
         let mut result = Value::Nil;
         instance.bridge.invoke(|| {
+            let vm = super::native_events::bus(&instance.host.lua).borrow().vm;
+            let addon = super::native::session(&instance.host.lua)
+                .borrow()
+                .addon
+                .clone();
+            let _gesture = super::gesture::enter_render_scope(vm, &addon);
             result = instance.host.callback(kind, value)?;
             Ok(())
         })?;
@@ -2532,5 +2538,140 @@ mod tests {
         );
         manager.shutdown();
         super::super::options::set_storage_root(None);
+    }
+
+    #[test]
+    fn round6b_frame_mode_and_forge_widget_click_grants_one_gesture_via_manager() {
+        super::super::action_broker::reset_all_for_test();
+        super::super::native_core::CORE.with(|c| {
+            let mut core = super::super::native_core::Core::default();
+            core.view.in_world = true;
+            *c.borrow_mut() = core;
+        });
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+
+        // 1. Default frame-mode eqoa/1 mod (no entryMode="once") draws eqoa.imgui.Button.
+        let frame_dir = scripts.0.join("frame_btn");
+        fs::create_dir_all(&frame_dir).unwrap();
+        fs::write(
+            frame_dir.join("mod.json"),
+            r#"{
+                "schemaVersion": 1,
+                "runtime": "lua",
+                "api": "eqoa/1",
+                "id": "frame_btn",
+                "name": "Frame Button Mod",
+                "entry": "main.lua",
+                "enabled": true,
+                "capabilities": ["eqoa.imgui", "eqoa.actions.*"]
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            frame_dir.join("main.lua"),
+            r#"
+            local ui = eqoa.imgui
+            ui.SetNextWindowPos(0, 0)
+            ui.SetNextWindowSize(120, 80)
+            local flags = ImGuiWindowFlags.NoTitleBar + ImGuiWindowFlags.NoResize + ImGuiWindowFlags.NoMove
+            if ui.Begin("frame_btn_win", nil, flags) then
+                if ui.Button("DoAssist", 100, 60) then
+                    click_req, click_err = eqoa.actions.assist()
+                    second_req, second_err = eqoa.actions.assist()
+                else
+                    idle_req, idle_err = eqoa.actions.assist()
+                end
+            end
+            ui.End()
+        "#,
+        )
+        .unwrap();
+
+        // 2. Forge widget mod (using ImGui.Button in entry and Settings callback).
+        scripts.package(
+            "forge_btn",
+            true,
+            r#"
+            ImGui.SetNextWindowPos(120, 0)
+            ImGui.SetNextWindowSize(120, 80)
+            if ImGui.Begin("forge_btn_win") then
+                if ImGui.Button("ForgeDo", 100, 50) then
+                    forge_clicked = (forge_clicked or 0) + 1
+                end
+            end
+            ImGui.End()
+        "#,
+        );
+
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        // Prime first frame without mouse press -> idle call refused with needs_player_action.
+        gpu.frame(&mut manager);
+        assert!(
+            manager.diagnostics().iter().all(|d| !d.message.contains("DoAssist")),
+            "{:?}",
+            manager.diagnostics()
+        );
+        let frame_lua = lua(&manager, "frame_btn");
+        let (idle_req, idle_code): (Option<mlua::AnyUserData>, Option<String>) = frame_lua
+            .load("return idle_req, idle_err and idle_err.code")
+            .eval()
+            .unwrap();
+        assert!(idle_req.is_none());
+        assert_eq!(idle_code.as_deref(), Some("needs_player_action"));
+
+        // Physical mouse hover then click on frame_btn's Button(DoAssist) inside Manager::frame.
+        gpu.context.io_mut().add_mouse_pos_event([50.0, 35.0]);
+        gpu.frame(&mut manager);
+        gpu.frame(&mut manager);
+        gpu.context
+            .io_mut()
+            .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+        gpu.frame(&mut manager);
+        gpu.context
+            .io_mut()
+            .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+        gpu.frame(&mut manager);
+
+        let (c_req, c_code, s_req, s_code): (
+            Option<mlua::AnyUserData>,
+            Option<String>,
+            Option<mlua::AnyUserData>,
+            Option<String>,
+        ) = frame_lua
+            .load("return click_req, click_err and click_err.code, second_req, second_err and second_err.code")
+            .eval()
+            .unwrap();
+        assert!(
+            c_req.is_some(),
+            "frame-mode Button click must authorize 1 action (c_code={c_code:?}, diag={:?})",
+            manager.diagnostics()
+        );
+        assert!(s_req.is_none(), "second action in same frame-mode click must fail");
+        assert_eq!(s_code.as_deref(), Some("needs_player_action"));
+
+        // Physical hover + click on Forge mod's ImGui.Button(ForgeDo) inside Manager::frame.
+        gpu.context.io_mut().add_mouse_pos_event([170.0, 40.0]);
+        gpu.frame(&mut manager);
+        gpu.frame(&mut manager);
+        gpu.context
+            .io_mut()
+            .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+        gpu.frame(&mut manager);
+        gpu.context
+            .io_mut()
+            .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+        gpu.frame(&mut manager);
+
+        let forge_lua = lua(&manager, "forge_btn");
+        assert_eq!(
+            forge_lua.globals().get::<Option<i32>>("forge_clicked").unwrap(),
+            Some(1),
+            "Forge ImGui.Button clicked cleanly through Manager::frame"
+        );
+
+        manager.shutdown();
+        super::super::action_broker::reset_all_for_test();
     }
 }
