@@ -978,6 +978,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     install_fields(lua);
     super::native_state::install(host)?;
     super::native_items::install(host)?;
+    super::native_r6a::install(host)?;
     super::map_views::install(host)?;
     super::guides::install(host)?;
     super::pointer_api::install(host)?;
@@ -1069,6 +1070,7 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.player.Attributes", "base" | "total") => Some("eqoa.player.SevenStats"),
         ("eqoa.player.Player", "resists") => Some("eqoa.player.Resists"),
         ("eqoa.player.Player", "location") => Some("eqoa.player.Location"),
+        ("eqoa.player.Player", "mastery") => Some("eqoa.mastery.Mastery"),
         (_, "position" | "actor_position" | "velocity") => Some("eqoa.Vec3"),
         ("eqoa.map.MapState", "search_anchor") => Some("eqoa.hud.Rect"),
         ("eqoa.group.Group", "members") => Some("eqoa.group.Member"),
@@ -1137,7 +1139,7 @@ fn install_fields(lua: &Lua) {
         ("eqoa.client.DisplayMetrics", "width height render_scale"),
         (
             "eqoa.player.Player",
-            "entity id name class_id class_name race_id race_name level experience experience_debt hp_fraction hp power attributes armor resists position velocity speed horizontal_speed heading target_id pet_id auto_attacking dead has_pet fighting location",
+            "entity id name class_id class_name race_id race_name level experience experience_debt hp_fraction hp power attributes armor resists position velocity speed horizontal_speed heading target_id pet_id auto_attacking dead has_pet fighting location mastery",
         ),
         ("eqoa.player.Vital", "current maximum base"),
         ("eqoa.player.Attributes", "base total"),
@@ -1241,7 +1243,9 @@ fn install_fields(lua: &Lua) {
         for field in fields.split_whitespace() {
             let field_round = if matches!(
                 (path, field),
-                ("eqoa.entities.Entity", "actor_position") | ("eqoa.map.MapState", "search_anchor")
+                ("eqoa.entities.Entity", "actor_position")
+                    | ("eqoa.map.MapState", "search_anchor")
+                    | ("eqoa.player.Player", "mastery")
             ) {
                 Some(4)
             } else if matches!(
@@ -1261,13 +1265,6 @@ fn install_fields(lua: &Lua) {
             );
         }
     }
-    describe(
-        lua,
-        "eqoa.player.Player.mastery",
-        "not_yet",
-        Some(4),
-        "Class Mastery arrives in round 4",
-    );
     describe(
         lua,
         "eqoa.hotbar.HotbarSlot.item",

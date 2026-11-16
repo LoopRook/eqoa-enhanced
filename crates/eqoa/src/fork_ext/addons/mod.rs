@@ -68,6 +68,7 @@ pub(crate) mod native_events;
 pub(crate) mod native_items;
 mod native_media;
 pub(crate) mod native_projection;
+pub(crate) mod native_r6a;
 pub(crate) mod native_settings;
 mod native_state;
 #[cfg(test)]

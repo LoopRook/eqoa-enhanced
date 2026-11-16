@@ -99,6 +99,8 @@ const EVENTS: &[&str] = &[
     "bank.changed",
     "loot.changed",
     "merchant.changed",
+    "quests.changed",
+    "mastery.changed",
     "shared.changed",
     "mod.command",
     "guide.lost",
@@ -139,6 +141,8 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("bank.changed", "before after changed cause"),
         ("loot.changed", "before after changed cause"),
         ("merchant.changed", "before after changed cause"),
+        ("quests.changed", "before after changed"),
+        ("mastery.changed", "before after changed"),
         ("shared.changed", "mod path"),
         ("mod.command", "from command args"),
         ("guide.lost", "owner world_id entity_id label reason"),
@@ -178,7 +182,7 @@ fn install_event_fields(lua: &mlua::Lua) {
     for (round, names) in [
         (
             4,
-            "quests.changed camera.changed windows.changed mastery.changed action.result",
+            "camera.changed windows.changed action.result",
         ),
     ] {
         for name in names.split_whitespace() {
@@ -235,6 +239,8 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
             "supported",
             Some(if *name == "player.stats_changed" {
                 3
+            } else if matches!(*name, "quests.changed" | "mastery.changed") {
+                4
             } else {
                 2
             }),

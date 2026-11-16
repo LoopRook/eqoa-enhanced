@@ -31,6 +31,10 @@ pub(crate) struct View {
     pub bank: Json,
     pub loot: Json,
     pub merchant: Json,
+    pub quests: Vec<Json>,
+    pub mastery: Option<Json>,
+    pub mastery_skills: Option<Vec<Json>>,
+    pub mastery_node: Option<Json>,
     pub channel: &'static str,
 }
 impl Default for View {
@@ -55,7 +59,49 @@ impl Default for View {
             bank: Json::Null,
             loot: Json::Null,
             merchant: Json::Null,
+            quests: Vec::new(),
+            mastery: None,
+            mastery_skills: None,
+            mastery_node: None,
             channel: "other",
+        }
+    }
+}
+
+/// Which individual Class Mastery counters have been populated by dump or 0x1402 replies.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MasteryFlags {
+    pub available_spent: bool,
+    pub share: bool,
+    pub progress: bool,
+    pub stats: bool,
+    pub skills: bool,
+}
+
+impl MasteryFlags {
+    pub fn from_dump(&mut self) {
+        self.available_spent = true;
+        self.share = true;
+        self.progress = true;
+        self.stats = true;
+    }
+
+    pub fn apply_subop(&mut self, op: u8) {
+        match op {
+            1 => self.share = true,
+            3 => self.available_spent = true,
+            4 => self.progress = true,
+            5 => {
+                self.available_spent = true;
+                self.stats = true;
+            }
+            6 => self.stats = true,
+            8 => self.skills = true,
+            10 => {
+                self.available_spent = true;
+                self.stats = true;
+            }
+            _ => {}
         }
     }
 }
@@ -141,6 +187,9 @@ pub(crate) struct Core {
     pub item_versions: BTreeMap<&'static str, BTreeMap<u32, u64>>,
     /// Per item list, the revision the container last published with.
     pub item_revisions: BTreeMap<&'static str, u64>,
+    pub quest_revision: u64,
+    pub mastery_flags: MasteryFlags,
+    pub cm_pending_ops: u16,
     /// `gAttackWords` (the start menu's data), for the attack-type names.
     pub attack_words: Vec<(i32, i64)>,
     pub cooldown_edges: BTreeMap<String, (f64, f64, f64)>,
@@ -178,6 +227,9 @@ impl Default for Core {
             ability_versions: BTreeMap::new(),
             item_versions: BTreeMap::new(),
             item_revisions: BTreeMap::new(),
+            quest_revision: 0,
+            mastery_flags: MasteryFlags::default(),
+            cm_pending_ops: 0,
             attack_words: Vec::new(),
             cooldown_edges: BTreeMap::new(),
             unknown_lockouts: BTreeMap::new(),
@@ -345,6 +397,9 @@ impl Core {
         self.ability_versions.clear();
         self.item_versions.clear();
         self.item_revisions.clear();
+        self.quest_revision = 0;
+        self.mastery_flags = MasteryFlags::default();
+        self.cm_pending_ops = 0;
         self.cooldown_edges.clear();
         self.unknown_lockouts.clear();
         self.disposition_target = None;
@@ -414,6 +469,20 @@ impl Core {
         };
         if view.player.is_object() {
             view.player["entity"] = entity_ref(&view.player["id"]);
+            view.player["mastery"] = view.mastery.clone().unwrap_or(Json::Null);
+        }
+        let quests_same = view.quests.len() == self.view.quests.len()
+            && view
+                .quests
+                .iter()
+                .zip(&self.view.quests)
+                .all(|(a, b)| a["index"] == b["index"] && a["title"] == b["title"]);
+        if !quests_same || self.quest_revision == 0 {
+            self.quest_revision += 1;
+        }
+        for q in &mut view.quests {
+            let key = q["index"].as_u64().unwrap_or(0).to_string();
+            q["ref"] = json!({"$ref":"quest","key":key,"generation":self.generation,"incarnation":self.quest_revision});
         }
         if let Some(members) = view.group["members"].as_array_mut() {
             for m in members {
@@ -466,6 +535,22 @@ impl Core {
         super::guides::update(self);
         if self.view.in_world && previous.player_stats != self.view.player_stats {
             self.emit("player.stats_changed", json!({}));
+        }
+        if !entered && self.view.in_world {
+            if previous.quests != self.view.quests {
+                self.emit(
+                    "quests.changed",
+                    json!({"before":previous.quests,"after":self.view.quests,"changed":["records"]}),
+                );
+            }
+            if previous.mastery != self.view.mastery {
+                let before = previous.mastery.as_ref().unwrap_or(&Json::Null);
+                let after = self.view.mastery.as_ref().unwrap_or(&Json::Null);
+                self.emit(
+                    "mastery.changed",
+                    json!({"before":previous.mastery,"after":self.view.mastery,"changed":changed_fields(before,after)}),
+                );
+            }
         }
 
         if !entered && self.view.in_world {
