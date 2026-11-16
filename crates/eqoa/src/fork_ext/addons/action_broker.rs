@@ -61,34 +61,97 @@ impl UserData for RequestId {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct AbilityLookup {
+    pub id: Option<i64>,
+    pub name: Option<String>,
+    pub index: Option<i64>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ActionKind {
     Assist,
+    Target(Option<u32>),
+    CycleTarget { group: bool, filter: Option<String> },
+    Interact,
+    Attack { on: Option<bool> },
+    Cast(AbilityLookup),
+    UseHotbar { bar: usize, slot: usize },
+    Chat { text: String },
+    Command { text: String },
+    Autorun { on: Option<bool> },
+    Follow { target_id: Option<u32> },
+    Stop,
+    OpenWindow { kind: String, arg: i32 },
+    WeaponSet { set: i64 },
+    PrepareWeaponSet { set: i32, name: String },
+    AssignAbility { slot: i64, ability: AbilityLookup },
+    UnmemorizeAbility { slot: Option<i64>, ability: Option<AbilityLookup> },
+    UnmemorizeAll,
+    ArrangeAbility { from: AbilityLookup, to: AbilityLookup },
 }
 
 impl ActionKind {
     pub(crate) const fn name(&self) -> &'static str {
         match self {
             Self::Assist => "assist",
+            Self::Target(_) => "target",
+            Self::CycleTarget { .. } => "cycle_target",
+            Self::Interact => "interact",
+            Self::Attack { .. } => "attack",
+            Self::Cast(_) => "cast",
+            Self::UseHotbar { .. } => "use_hotbar",
+            Self::Chat { .. } => "chat",
+            Self::Command { .. } => "command",
+            Self::Autorun { .. } => "autorun",
+            Self::Follow { .. } => "follow",
+            Self::Stop => "stop",
+            Self::OpenWindow { .. } => "open_window",
+            Self::WeaponSet { .. } => "weapon_set",
+            Self::PrepareWeaponSet { .. } => "prepare_weapon_set",
+            Self::AssignAbility { .. } => "assign_ability",
+            Self::UnmemorizeAbility { .. } => "unmemorize_ability",
+            Self::UnmemorizeAll => "unmemorize_all",
+            Self::ArrangeAbility { .. } => "arrange_ability",
         }
     }
 
     pub(crate) const fn subsystem(&self) -> Option<Subsystem> {
         match self {
-            Self::Assist => None,
+            Self::Assist
+            | Self::Target(_)
+            | Self::CycleTarget { .. }
+            | Self::Interact
+            | Self::Attack { .. }
+            | Self::Cast(_)
+            | Self::UseHotbar { .. }
+            | Self::Chat { .. }
+            | Self::Command { .. }
+            | Self::Autorun { .. }
+            | Self::Follow { .. }
+            | Self::Stop
+            | Self::OpenWindow { .. }
+            | Self::WeaponSet { .. }
+            | Self::PrepareWeaponSet { .. }
+            | Self::AssignAbility { .. }
+            | Self::UnmemorizeAbility { .. }
+            | Self::UnmemorizeAll
+            | Self::ArrangeAbility { .. } => None,
         }
     }
 
     pub(crate) const fn requires_in_world(&self) -> bool {
-        match self {
-            Self::Assist => true,
-        }
+        let _ = self;
+        true
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ServerMatcher {
     Assist,
+    AbilitySlot { slot: u8, index: u8 },
+    AbilityClearBar,
+    AbilityMoveIndex { from: u8, to: u8 },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -784,6 +847,50 @@ pub(crate) fn resolve_server_assist(target_id: u32) {
     });
 }
 
+pub(crate) fn resolve_server_ability_slot(index: u8, slot: u8) {
+    BROKER.with(|b| {
+        b.borrow_mut().resolve_matching(|inflight| {
+            let ServerMatcher::AbilitySlot { slot: expected_slot, index: expected_index } =
+                inflight.matcher
+            else {
+                return None;
+            };
+            if slot == expected_slot || index == expected_index {
+                Some((true, None, None))
+            } else {
+                None
+            }
+        });
+    });
+}
+
+pub(crate) fn resolve_server_ability_clear() {
+    BROKER.with(|b| {
+        b.borrow_mut().resolve_matching(|inflight| {
+            matches!(inflight.matcher, ServerMatcher::AbilityClearBar).then_some((true, None, None))
+        });
+    });
+}
+
+pub(crate) fn resolve_server_ability_move(from: u8, to: u8) {
+    BROKER.with(|b| {
+        b.borrow_mut().resolve_matching(|inflight| {
+            let ServerMatcher::AbilityMoveIndex {
+                from: ef,
+                to: et,
+            } = inflight.matcher
+            else {
+                return None;
+            };
+            if from == ef && to == et {
+                Some((true, None, None))
+            } else {
+                None
+            }
+        });
+    });
+}
+
 pub(crate) fn poll(lua: &Lua) -> Result<()> {
     let vm = super::native_events::bus(lua).borrow().vm;
     let events = BROKER.with(|b| {
@@ -856,10 +963,10 @@ fn action_result_to_table(lua: &Lua, rec: &ActionResultRecord) -> Result<mlua::T
     super::native::guard_lazy(lua, tbl, "eqoa.actions.ActionResult", ACTION_RESULT_KEYS)
 }
 
-pub(crate) fn enqueue_lua(
+pub(crate) fn enqueue_lua_with(
     lua: &Lua,
     symbol: &str,
-    kind: ActionKind,
+    build: impl FnOnce() -> std::result::Result<ActionKind, (&'static str, String)>,
 ) -> Result<mlua::MultiValue> {
     let vm = super::native_events::bus(lua).borrow().vm;
     let addon = session(lua).borrow().addon.clone();
@@ -867,9 +974,198 @@ pub(crate) fn enqueue_lua(
         Ok(tok) => tok,
         Err((code, msg)) => return error(lua, symbol, code, &msg),
     };
+    let kind = match build() {
+        Ok(kind) => kind,
+        Err((code, msg)) => return error(lua, symbol, code, &msg),
+    };
     match BROKER.with(|b| b.borrow_mut().enqueue(token, kind)) {
         Ok(req) => lua.pack_multi((lua.create_userdata(req)?, Value::Nil)),
         Err((code, msg)) => error(lua, symbol, code, &msg),
+    }
+}
+
+pub(crate) fn enqueue_lua(
+    lua: &Lua,
+    symbol: &str,
+    kind: ActionKind,
+) -> Result<mlua::MultiValue> {
+    enqueue_lua_with(lua, symbol, move || Ok(kind))
+}
+
+fn current_generation() -> u64 {
+    CORE.with(|c| c.borrow().generation)
+}
+
+fn parse_entity_id(arg: Value) -> std::result::Result<Option<u32>, (&'static str, String)> {
+    match arg {
+        Value::Nil => Ok(None),
+        Value::Integer(n) => {
+            if !(0..u32::MAX as i64).contains(&n) {
+                return Err(("invalid_argument", "entity id out of range".into()));
+            }
+            Ok(Some(n as u32))
+        }
+        Value::Number(n) => {
+            if !n.is_finite() || n < 0.0 || n >= u32::MAX as f64 || n.fract() != 0.0 {
+                return Err(("invalid_argument", "entity id must be a whole integer".into()));
+            }
+            Ok(Some(n as u32))
+        }
+        Value::UserData(ud) => {
+            let Ok(r) = ud.borrow::<super::native_state::Ref>() else {
+                return Err(("invalid_argument", "entity handle must be an entity ref or id".into()));
+            };
+            if r.kind != "entity" {
+                return Err(("invalid_argument", format!("expected entity ref, got {}", r.kind)));
+            }
+            let cur_gen = current_generation();
+            if r.generation != 0 && cur_gen != 0 && r.generation != cur_gen {
+                return Err(("stale_handle", "entity reference is from an older session generation".into()));
+            }
+            let id = r
+                .key
+                .parse::<u32>()
+                .map_err(|_| ("invalid_argument", "malformed entity ref key".into()))?;
+            Ok(Some(id))
+        }
+        _ => Err(("invalid_argument", "entity must be an entity ref, integer id, or nil".into())),
+    }
+}
+
+fn parse_ability_lookup(
+    arg: Value,
+    allow_display_index: bool,
+) -> std::result::Result<AbilityLookup, (&'static str, String)> {
+    match arg {
+        Value::Integer(n) => {
+            if n < 0 {
+                return Err(("invalid_argument", "ability id or index must be non-negative".into()));
+            }
+            Ok(if allow_display_index {
+                AbilityLookup {
+                    id: Some(n),
+                    name: None,
+                    index: Some(n),
+                }
+            } else {
+                AbilityLookup {
+                    id: Some(n),
+                    name: None,
+                    index: None,
+                }
+            })
+        }
+        Value::Number(n) => {
+            if !n.is_finite() || n < 0.0 || n.fract() != 0.0 {
+                return Err(("invalid_argument", "ability id or index must be a whole non-negative integer".into()));
+            }
+            let n = n as i64;
+            Ok(if allow_display_index {
+                AbilityLookup {
+                    id: Some(n),
+                    name: None,
+                    index: Some(n),
+                }
+            } else {
+                AbilityLookup {
+                    id: Some(n),
+                    name: None,
+                    index: None,
+                }
+            })
+        }
+        Value::String(s) => {
+            let text = s
+                .to_str()
+                .map_err(|_| ("invalid_argument", "ability string must be UTF-8".into()))?
+                .trim()
+                .to_string();
+            if text.is_empty() {
+                return Err(("invalid_argument", "ability name cannot be empty".into()));
+            }
+            if let Ok(id) = text.parse::<i64>() {
+                Ok(AbilityLookup {
+                    id: Some(id),
+                    name: Some(text),
+                    index: None,
+                })
+            } else {
+                Ok(AbilityLookup {
+                    id: None,
+                    name: Some(text),
+                    index: None,
+                })
+            }
+        }
+        Value::UserData(ud) => {
+            let Ok(r) = ud.borrow::<super::native_state::Ref>() else {
+                return Err(("invalid_argument", "ability must be an ability ref, id, or name".into()));
+            };
+            if r.kind != "ability" {
+                return Err(("invalid_argument", format!("expected ability ref, got {}", r.kind)));
+            }
+            let cur_gen = current_generation();
+            if r.generation != 0 && cur_gen != 0 && r.generation != cur_gen {
+                return Err(("stale_handle", "ability reference is from an older session generation".into()));
+            }
+            let id = r
+                .key
+                .parse::<i64>()
+                .map_err(|_| ("invalid_argument", "malformed ability ref key".into()))?;
+            Ok(AbilityLookup {
+                id: Some(id),
+                name: None,
+                index: None,
+            })
+        }
+        _ => Err(("invalid_argument", "ability must be an ability ref, id, or name".into())),
+    }
+}
+
+fn validate_chat_string(raw: Value, command_mode: bool) -> std::result::Result<String, (&'static str, String)> {
+    let Value::String(s) = raw else {
+        return Err(("invalid_argument", "message text must be a string".into()));
+    };
+    let text = s
+        .to_str()
+        .map_err(|_| ("invalid_argument", "message text must be UTF-8".into()))?
+        .trim()
+        .to_string();
+    if text.is_empty() || text.len() > 255 {
+        return Err(("invalid_argument", "message length must be 1..=255 bytes".into()));
+    }
+    if text.contains('\0') || text.contains('\r') || text.contains('\n') {
+        return Err(("invalid_argument", "message cannot contain control newlines or NUL".into()));
+    }
+    let normalized = if command_mode && !text.starts_with('/') && !text.starts_with('#') {
+        format!("/{text}")
+    } else {
+        text
+    };
+    if gesture::is_forbidden_report_text(&normalized) {
+        return Err((
+            "permission_denied",
+            "synthetic report routes (/bug, #bug, /feature, #feature) are forbidden".into(),
+        ));
+    }
+    Ok(normalized)
+}
+
+fn parse_weapon_set(raw: Value) -> std::result::Result<i64, (&'static str, String)> {
+    match raw {
+        Value::Integer(n) if (1..=5).contains(&n) => Ok(n - 1),
+        Value::Number(n) if n.is_finite() && n.fract() == 0.0 && (1.0..=5.0).contains(&n) => {
+            Ok((n as i64) - 1)
+        }
+        Value::String(s) => {
+            let s = s.to_str().map_err(|_| ("invalid_argument", "invalid set".into()))?;
+            if s.eq_ignore_ascii_case("bare_hands") || s.eq_ignore_ascii_case("bare hands") {
+                Ok(crate::gear::BARE_HANDS)
+            } else {
+                Err(("invalid_argument", "weapon set must be 1..=5 or 'bare_hands'".into()))
+            }
+        }
+        _ => Err(("invalid_argument", "weapon set must be 1..=5 or 'bare_hands'".into())),
     }
 }
 
@@ -1051,6 +1347,340 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             })?,
         )?;
     }
+
+    describe(
+        lua,
+        "eqoa.actions.camera",
+        "not_yet",
+        Some(4),
+        "requires &mut Walker hook in Play::frame (proposed in round-6b-seams.md)",
+    );
+
+    install_non_item_actions(lua)?;
+
+    Ok(())
+}
+
+fn install_non_item_actions(lua: &Lua) -> Result<()> {
+    bind(
+        lua,
+        "actions",
+        "target",
+        lua.create_function(|lua, arg: Value| {
+            enqueue_lua_with(lua, "eqoa.actions.target", || {
+                Ok(ActionKind::Target(parse_entity_id(arg)?))
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "cycle_target",
+        lua.create_function(|lua, filter: Option<String>| {
+            enqueue_lua_with(lua, "eqoa.actions.cycle_target", || {
+                let (group, norm) = match filter.as_deref().map(str::trim) {
+                    None | Some("") | Some("any") | Some("nearby") => (false, None),
+                    Some("group") => (true, Some("group".to_string())),
+                    Some(k @ ("hostile" | "friendly" | "corpse")) => (false, Some(k.to_string())),
+                    Some(other) => {
+                        return Err((
+                            "invalid_argument",
+                            format!("unsupported cycle_target filter '{other}'"),
+                        ));
+                    }
+                };
+                Ok(ActionKind::CycleTarget { group, filter: norm })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "interact",
+        lua.create_function(|lua, ()| {
+            enqueue_lua(lua, "eqoa.actions.interact", ActionKind::Interact)
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "attack",
+        lua.create_function(|lua, on: Option<bool>| {
+            enqueue_lua(lua, "eqoa.actions.attack", ActionKind::Attack { on })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "cast",
+        lua.create_function(|lua, ability: Value| {
+            enqueue_lua_with(lua, "eqoa.actions.cast", || {
+                Ok(ActionKind::Cast(parse_ability_lookup(ability, false)?))
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "use_hotbar",
+        lua.create_function(|lua, args: mlua::MultiValue| {
+            enqueue_lua_with(lua, "eqoa.actions.use_hotbar", || match args.len() {
+                1 => {
+                    let s: i64 = lua
+                        .unpack_multi(args)
+                        .map_err(|_| ("invalid_argument", "slot must be 1..=20".into()))?;
+                    if !(1..=20).contains(&s) {
+                        return Err(("invalid_argument", "hotbar slot must be 1..=20".into()));
+                    }
+                    Ok(ActionKind::UseHotbar {
+                        bar: ((s - 1) / 5) as usize,
+                        slot: ((s - 1) % 5) as usize,
+                    })
+                }
+                2 => {
+                    let (bar, slot): (i64, i64) = lua
+                        .unpack_multi(args)
+                        .map_err(|_| ("invalid_argument", "bar and slot must be integers".into()))?;
+                    if !(1..=4).contains(&bar) || !(1..=5).contains(&slot) {
+                        return Err(("invalid_argument", "hotbar (bar, slot) must be 1..=4, 1..=5".into()));
+                    }
+                    Ok(ActionKind::UseHotbar {
+                        bar: (bar - 1) as usize,
+                        slot: (slot - 1) as usize,
+                    })
+                }
+                _ => Err(("invalid_argument", "use_hotbar expects (slot) or (bar, slot)".into())),
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "chat",
+        lua.create_function(|lua, text: Value| {
+            enqueue_lua_with(lua, "eqoa.actions.chat", || {
+                Ok(ActionKind::Chat {
+                    text: validate_chat_string(text, false)?,
+                })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "command",
+        lua.create_function(|lua, cmd: Value| {
+            enqueue_lua_with(lua, "eqoa.actions.command", || {
+                Ok(ActionKind::Command {
+                    text: validate_chat_string(cmd, true)?,
+                })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "autorun",
+        lua.create_function(|lua, on: Option<bool>| {
+            enqueue_lua(lua, "eqoa.actions.autorun", ActionKind::Autorun { on })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "follow",
+        lua.create_function(|lua, entity: Value| {
+            enqueue_lua_with(lua, "eqoa.actions.follow", || {
+                Ok(ActionKind::Follow {
+                    target_id: parse_entity_id(entity)?,
+                })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "stop",
+        lua.create_function(|lua, ()| enqueue_lua(lua, "eqoa.actions.stop", ActionKind::Stop))?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "open_window",
+        lua.create_function(|lua, (kind, arg): (Value, Option<i32>)| {
+            enqueue_lua_with(lua, "eqoa.actions.open_window", || {
+                let Value::String(s) = kind else {
+                    return Err(("invalid_argument", "window kind must be a string".into()));
+                };
+                let kind = s
+                    .to_str()
+                    .map_err(|_| ("invalid_argument", "window kind must be UTF-8".into()))?
+                    .trim()
+                    .to_ascii_lowercase();
+                if !matches!(
+                    kind.as_str(),
+                    "summary"
+                        | "trainer"
+                        | "skills"
+                        | "map"
+                        | "inventory"
+                        | "bags"
+                        | "start"
+                        | "menu"
+                        | "abilities"
+                        | "spellbook"
+                        | "quests"
+                        | "mastery"
+                        | "factions"
+                        | "options"
+                        | "friends"
+                        | "buddies"
+                        | "ignore"
+                        | "guild"
+                        | "mail"
+                        | "mail_compose"
+                        | "auction"
+                        | "auction_browse"
+                        | "auction_search"
+                        | "support"
+                        | "support_inbox"
+                        | "who"
+                        | "search"
+                        | "recipes"
+                        | "experiment"
+                ) {
+                    return Err((
+                        "invalid_argument",
+                        format!("unknown or unsupported window kind '{kind}'"),
+                    ));
+                }
+                Ok(ActionKind::OpenWindow {
+                    kind,
+                    arg: arg.unwrap_or(0),
+                })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "weapon_set",
+        lua.create_function(|lua, set: Value| {
+            enqueue_lua_with(lua, "eqoa.actions.weapon_set", || {
+                Ok(ActionKind::WeaponSet {
+                    set: parse_weapon_set(set)?,
+                })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "prepare_weapon_set",
+        lua.create_function(|lua, (set, name): (i64, String)| {
+            enqueue_lua_with(lua, "eqoa.actions.prepare_weapon_set", || {
+                if !(1..=crate::gear::SETS as i64).contains(&set) {
+                    return Err(("invalid_argument", "weapon set slot must be 1..=4".into()));
+                }
+                let trimmed = name.trim().to_string();
+                if trimmed.is_empty()
+                    || trimmed.chars().count() > crate::gear::NAME_MAX
+                    || trimmed.chars().any(char::is_control)
+                {
+                    return Err((
+                        "invalid_argument",
+                        format!(
+                            "weapon set name must be 1..={} non-control characters",
+                            crate::gear::NAME_MAX
+                        ),
+                    ));
+                }
+                Ok(ActionKind::PrepareWeaponSet {
+                    set: (set - 1) as i32,
+                    name: trimmed,
+                })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "assign_ability",
+        lua.create_function(|lua, (slot, ability): (i64, Value)| {
+            enqueue_lua_with(lua, "eqoa.actions.assign_ability", || {
+                if !(1..=20).contains(&slot) {
+                    return Err(("invalid_argument", "hotbar slot must be 1..=20".into()));
+                }
+                Ok(ActionKind::AssignAbility {
+                    slot: slot - 1,
+                    ability: parse_ability_lookup(ability, false)?,
+                })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "unmemorize_ability",
+        lua.create_function(|lua, target: Value| {
+            enqueue_lua_with(lua, "eqoa.actions.unmemorize_ability", || match target {
+                Value::Integer(n) if (1..=20).contains(&n) => Ok(ActionKind::UnmemorizeAbility {
+                    slot: Some(n - 1),
+                    ability: None,
+                }),
+                Value::Number(n)
+                    if n.is_finite() && n.fract() == 0.0 && (1.0..=20.0).contains(&n) =>
+                {
+                    Ok(ActionKind::UnmemorizeAbility {
+                        slot: Some((n as i64) - 1),
+                        ability: None,
+                    })
+                }
+                other => Ok(ActionKind::UnmemorizeAbility {
+                    slot: None,
+                    ability: Some(parse_ability_lookup(other, false)?),
+                }),
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "unmemorize_all",
+        lua.create_function(|lua, ()| {
+            enqueue_lua(lua, "eqoa.actions.unmemorize_all", ActionKind::UnmemorizeAll)
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "arrange_ability",
+        lua.create_function(|lua, (from, to): (Value, Value)| {
+            enqueue_lua_with(lua, "eqoa.actions.arrange_ability", || {
+                Ok(ActionKind::ArrangeAbility {
+                    from: parse_ability_lookup(from, true)?,
+                    to: parse_ability_lookup(to, true)?,
+                })
+            })
+        })?,
+    )?;
 
     Ok(())
 }
