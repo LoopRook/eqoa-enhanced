@@ -84,13 +84,14 @@ def _format_progress_line(step_name, elapsed_seconds, is_test, test_count):
 
 def _stream_subprocess_output(proc, timeout_seconds, step_name, is_test, progress_interval):
     line_queue = queue.Queue()
+    reader_error = []
 
     def _reader():
         try:
             for raw_line in iter(proc.stdout.readline, b""):
                 line_queue.put(raw_line)
-        except Exception:
-            pass
+        except Exception as exc:
+            reader_error.append(exc)
         finally:
             line_queue.put(None)
 
@@ -136,15 +137,37 @@ def _stream_subprocess_output(proc, timeout_seconds, step_name, is_test, progres
                 while next_progress <= now:
                     next_progress += progress_interval
 
-        try:
-            proc.wait(timeout=5 if timed_out else None)
-        except Exception:
-            pass
+        if reader_error:
+            kill_process_tree(proc.pid)
+            err_msg = f"Stream reader error for {step_name or 'step'}: {reader_error[0]}"
+            print(err_msg, file=sys.stderr, flush=True)
+            chunks.append(f"\n{err_msg}\n".encode("utf-8", errors="replace"))
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+        elif timed_out:
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+        else:
+            try:
+                proc.wait(timeout=max(0.01, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                kill_process_tree(proc.pid)
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    pass
+
         reader.join(timeout=2)
-        try:
-            proc.stdout.close()
-        except Exception:
-            pass
+        if not reader.is_alive():
+            try:
+                proc.stdout.close()
+            except Exception:
+                pass
         while True:
             try:
                 item = line_queue.get_nowait()
@@ -160,7 +183,8 @@ def _stream_subprocess_output(proc, timeout_seconds, step_name, is_test, progres
             pass
         raise
 
-    return proc.returncode, b"".join(chunks), timed_out
+    returncode = -1 if (timed_out or reader_error) else proc.returncode
+    return returncode, b"".join(chunks), timed_out
 
 
 def run_subprocess_tree(

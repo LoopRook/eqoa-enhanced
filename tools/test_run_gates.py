@@ -390,6 +390,55 @@ class TestRunGates(unittest.TestCase):
         self.assertIn("Waiting for cargo lock", output)
         self.assertIn(f"held by pid {holder_pid}", output)
 
+    def test_streaming_timeout_after_child_closes_stdout_then_hangs(self):
+        script = (
+            "import os, sys, time\n"
+            "print('before close', flush=True)\n"
+            "sys.stdout.flush()\n"
+            "sys.stderr.flush()\n"
+            "os.close(1)\n"
+            "os.close(2)\n"
+            "time.sleep(30)\n"
+        )
+        ret, text = run_gates.run_subprocess_tree(
+            [sys.executable, "-u", "-c", script],
+            cwd=self.root,
+            env=os.environ.copy(),
+            timeout_minutes=0.005,
+            step_name="full",
+            is_test=False,
+            progress_interval=0.05,
+        )
+        self.assertEqual(ret, -1)
+        self.assertIn("before close", text)
+        self.assertIn("Command timed out after 0.005 minutes", text)
+
+    @mock.patch("run_gates.kill_process_tree")
+    @mock.patch("subprocess.Popen")
+    def test_streaming_reader_error_fails_step_visibly(self, mock_popen, mock_kill):
+        mock_proc = mock.MagicMock()
+        mock_proc.pid = 77777
+        mock_proc.returncode = 0
+        mock_proc.stdout.readline.side_effect = OSError("simulated read failure")
+        mock_popen.return_value = mock_proc
+
+        stderr_capture = io.StringIO()
+        with mock.patch("sys.stderr", stderr_capture):
+            ret, text = run_gates.run_subprocess_tree(
+                ["cargo", "test"],
+                cwd=self.root,
+                env={},
+                timeout_minutes=1,
+                step_name="full",
+                is_test=True,
+                progress_interval=0.05,
+            )
+
+        mock_kill.assert_called_once_with(77777)
+        self.assertEqual(ret, -1)
+        self.assertIn("Stream reader error for full: simulated read failure", text)
+        self.assertIn("Stream reader error for full: simulated read failure", stderr_capture.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
