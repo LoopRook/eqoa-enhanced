@@ -286,6 +286,12 @@ bundled mod needs it.
 
 ### Round 6: actions and the rest
 
+**Owner decision 2026-11-15:** round 6 builds everything below except autonomous automation (a mod acting
+on its own logic: auto-loot, auto-sell, bots). Click-driven actions (a mod button doing what the game's
+button does, with the same checks), quests, camera, dialogs and the remaining Forge pieces go in and into
+the round 8 PR (easier maintenance, a base for other mod authors). Autonomous automation comes after the
+PR and may stay in Enhanced only.
+
 Quest log and quest objects, camera, windows/dialogs (busy state), Class Mastery values not already
 done, class and disposition icons, the remaining ImGui pieces, and the full actions API from the
 spec (cast, use an item, target, loot, move, follow), callable from a click or from the mod's own
@@ -357,3 +363,15 @@ docs/modding/AGENT-GUIDE.md (one page for agents building mods from an owner bri
 - **Round 3 (HUD extras as mods), 2026-11-11.** Branch feat/eqoa-api-r3, merged into develop e31d280. Four bundled mods on by default (Stats Box and ToT start off, as before); new API: player.stats, power/target_id, actions.assist, windows.open("summary"), mod keys on Controls (own file), mod option rows, hud.frame/layout/visible and a native HUD layer (text/gauge/image in the game's HUD pass, for an identical look and layering). Route: Gemini Flash built (Argon REJECT: 12 HIGH; its fix round invented proving tests), DeepSeek Pro/Flash and Argon cut off by limits, Codex Sol proof round (native PNG references, real tests), Claude Sonnet final review (1 HIGH: mod keys lost on save) and final fixes; Sonnet found the benchmark measured nothing and fixed the real cost (1.2-1.9 ms to 0.38-0.40 ms for four mods). Gates: client 1987 passed, addons 374, net 87, tools 97, zero-addon gate, wasm, footprint PASS, dry-run clean. Owner live test passed 2026-11-11 (frame rate fine). Backlog: key-conflict handling (round 7). Owner: round 3u folded into round 8. Next: round 4 (map).
 
 - **Round 4 (map API and map mods), 2026-11-11/13.** Branch `feat/eqoa-api-r4` (6ff7992 + docs), not yet on develop. Preceded by two upstream syncs (a3cedec, 11aa5f0 Move HUD) and releases 0.5.2/0.5.3. API: map state/markers, upstream's own minimap rendered to a texture (no mini.rs change), mod-owned guides, minimap hide, pointer events/claims, input over the open map, packaged/async JSON, shared files between mods, mod commands, player-click import/export. Mods (bundled, on by default): Creature Journal, Map Search (F2/F4 now mod keys), Round Minimap; no skin mod (M map takes upstream's look; skinnable map in the backlog). Upstream's map family equals 11aa5f0 apart from 3 small seams. Builders: Sol (A, B), Claude Sonnet (C, owner's trial); reviews Sonnet (A, B) and Sol (C); Terra checks. Clean idle-PC release frame cost: none 0.28 ms, all seven mods about 1.4 ms. Known limits: clicking the round minimap does not open the map; diagonal quest steps cropped by the circle; no disc here, so real terrain/indoor pictures only in the owner's test. Owner branch-build test pending (gate 3). Owner live test 2026-11-15 (busy spot, fps): 0.5.3 39-43 mods off; round 4 39 mods off, 37 with the journal, 34-35 with Modern UI, round minimap and the other mods; Wereoxxs 26-31 on both builds (not maintained for now). Merged into develop.
+- **Round 5 (items), 2026-11-15/16.** Branch `feat/eqoa-api-r5`, merged into develop e909d8a7 (with the dev
+  tools 3830fc95). API: `eqoa.inventory/bank/loot/merchant/items/gems`, four `*.changed` events (native
+  causes, open/close/reset; per-frame check scalars only), `Item.tabs` from the game's own tab rules, loot
+  `Container.source`, six Forge adapters (transactions deferred to round 6). Owner-approved seams: play.rs +1
+  (loot request names its corpse), itemmenu.rs +4 and merchant.rs +5 (read-only state), npcw.rs +1/-1.
+  Example mod `eqoa_bag_viewer` (off by default). Route: Opus lead, Claude Sonnet builders (A; B + seams),
+  Terra reviews (A REJECT then fixed; B APPROVE WITH CHANGES; seams REJECT twice, fixed against the pinned
+  Forge reference), Haiku checker/packager. Gates on merged develop (tools/run_gates.py): client 2318 passed,
+  0 failed, 50 SKIP lines; addons 471; wasm, footprint, paths, player-release, release PASS. Owner test of
+  the branch build passed 2026-11-15. Known limit: if the server ignores a loot request, corpse names stay
+  off until the next zone (unverified on live traffic). Claude about 20 points of the month (36% to 56%).
+  Next: round 6 (scope above), fresh lead.
