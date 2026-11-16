@@ -951,36 +951,73 @@ fn round5b_a_target_switched_before_the_reply_is_still_the_requested_corpse() {
 }
 
 #[test]
-fn round5b_two_requests_in_flight_name_neither_corpse() {
+fn round5b_requests_that_overlap_name_no_corpse_until_a_quiet_point() {
     let (mut p, h) = world();
-    // two corpses asked for before either reply: the first reply could be for either
+    let said = |h: &Host| h.lua.load(SOURCE).eval::<String>().unwrap();
+    let reply = |p: &mut Play, h: &Host| {
+        apply(p, opcode(0x0018, pelt()));
+        native_events::dispatch(h).unwrap();
+    };
+    // A, B, a reply, C, a reply: the first reply could be for either, and C's is told from none while the
+    // state is tainted: both nil
     p.bags_target_corpse(5001, "a decaying skeleton");
     p.bags_press_loot();
     p.bags_target_corpse(5002, "a rat's corpse");
     p.bags_press_loot();
-    apply(&mut p, opcode(0x0018, pelt()));
-    native_events::dispatch(&h).unwrap();
-    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil", "ambiguous: nil");
+    reply(&mut p, &h);
+    assert_eq!(said(&h), "nil", "A and B were both waiting");
+    p.bags_target_corpse(5003, "a bat's corpse");
+    p.bags_press_loot();
+    reply(&mut p, &h);
+    assert_eq!(said(&h), "nil", "B's reply may still be on its way: C's is not told apart");
+    reply(&mut p, &h);
+    assert_eq!(said(&h), "nil", "the last reply, tainted");
+    // a quiet point: the window closes with nothing waiting; one request, one reply: named again
     apply(&mut p, opcode(0x0016, vec![]));
-    apply(&mut p, opcode(0x0018, pelt()));
-    native_events::dispatch(&h).unwrap();
-    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil", "the second reply has no request of its own left");
-    // the control: one at a time, each reply has its corpse
+    p.bags_target_corpse(5004, "a gnoll's corpse");
+    p.bags_press_loot();
+    reply(&mut p, &h);
+    assert_eq!(said(&h), "5004:a gnoll's corpse", "close, then a single request");
+    // A with no reply for a long time, B, then a late reply: nothing says whose it is
     apply(&mut p, opcode(0x0016, vec![]));
+    p.bags_target_corpse(5005, "a wolf's corpse");
+    p.bags_press_loot();
+    p.bags_target_corpse(5006, "a boar's corpse");
+    p.bags_press_loot();
+    reply(&mut p, &h);
+    assert_eq!(said(&h), "nil", "a late reply to A, with B waiting");
+    // the close with a request still waiting is not a quiet point (the reply of B is still to come)
+    apply(&mut p, opcode(0x0016, vec![]));
+    p.bags_target_corpse(5007, "a bear's corpse");
+    p.bags_press_loot();
+    reply(&mut p, &h);
+    assert_eq!(said(&h), "nil", "B's reply could be the one that arrives");
+    // sequential requests, each answered before the next: named every time
+    reply(&mut p, &h);
+    apply(&mut p, opcode(0x0016, vec![]));
+    p.bags_target_corpse(5008, "an owl's corpse");
+    p.bags_press_loot();
+    reply(&mut p, &h);
+    assert_eq!(said(&h), "5008:an owl's corpse");
+    apply(&mut p, opcode(0x0016, vec![]));
+    p.bags_target_corpse(5009, "a fox's corpse");
+    p.bags_press_loot();
+    reply(&mut p, &h);
+    assert_eq!(said(&h), "5009:a fox's corpse");
+}
+
+#[test]
+fn round5b_a_refused_request_is_answered_and_does_not_spoil_the_next() {
+    let (mut p, h) = world();
+    p.bags_target_corpse(5001, "a decaying skeleton");
+    p.bags_press_loot();
+    // the server refuses (0x0085, "too far"): that request has its answer
+    apply(&mut p, opcode(0x0085, vec![1]));
+    p.bags_target_corpse(5002, "a rat's corpse");
     p.bags_press_loot();
     apply(&mut p, opcode(0x0018, pelt()));
     native_events::dispatch(&h).unwrap();
     assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "5002:a rat's corpse");
-    // a request that went unanswered a long time ago does not make the next one ambiguous
-    apply(&mut p, opcode(0x0016, vec![]));
-    p.bags_target_corpse(5003, "a bat's corpse");
-    p.bags_press_loot();
-    p.bags_advance_clock(6000);
-    p.bags_target_corpse(5004, "a gnoll's corpse");
-    p.bags_press_loot();
-    apply(&mut p, opcode(0x0018, pelt()));
-    native_events::dispatch(&h).unwrap();
-    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "5004:a gnoll's corpse");
 }
 
 #[test]
@@ -997,13 +1034,6 @@ fn round5b_a_request_does_not_survive_the_world_it_was_made_in() {
     apply(&mut p, opcode(0x0018, pelt()));
     native_events::dispatch(&h).unwrap();
     assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil", "the old world's request is gone");
-    // the loot window closing also clears a request that was waiting
-    apply(&mut p, opcode(0x0016, vec![]));
-    p.bags_press_loot();
-    apply(&mut p, opcode(0x0016, vec![]));
-    apply(&mut p, opcode(0x0018, pelt()));
-    native_events::dispatch(&h).unwrap();
-    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil");
 }
 
 #[test]
@@ -1011,13 +1041,6 @@ fn round5b_a_reply_with_no_recent_request_for_a_corpse_has_no_source() {
     let (mut p, h) = world();
     // no request was made at all
     p.bags_target_corpse(5001, "a decaying skeleton");
-    apply(&mut p, opcode(0x0018, pelt()));
-    native_events::dispatch(&h).unwrap();
-    assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil");
-    // a request that is old (a refused one, say): not the one this reply belongs to
-    apply(&mut p, opcode(0x0016, vec![]));
-    p.bags_press_loot();
-    p.bags_advance_clock(6000);
     apply(&mut p, opcode(0x0018, pelt()));
     native_events::dispatch(&h).unwrap();
     assert_eq!(h.lua.load(SOURCE).eval::<String>().unwrap(), "nil");
@@ -1215,6 +1238,31 @@ fn round5b_the_item_pages_tab_and_lit_row_are_the_pack_containers_view_and_each_
         "#,
     )
     .unwrap();
+    // every method of the reference's WindowObject (window.lua:207-345, 412-430, 507) is on the list: the five
+    // a native list can back answer, the rest return nothing and say so; none is a missing-method error
+    let _ = h.drain_logs();
+    h.execute(
+        r#"
+        local list = inventory.GetTabList()
+        local backed = { 'IsVisible', 'GetClassName', 'GetMenu', 'GetSelectedRow', 'GetScrollTop' }
+        local memory = { 'Read', 'ReadText', 'ReadTextPointer', 'Child', 'Parent', 'GetDrawAddress', 'GetDrawSlotAddress', 'GetChildWindows', 'IsActive' }
+        for _, name in ipairs(backed) do
+            local ok, v = pcall(function() return list[name](list) end)
+            assert(ok and v ~= nil, name)
+        end
+        for _, name in ipairs(memory) do
+            local ok, v = pcall(function() return list[name](list, 0x24) end)
+            assert(ok and v == nil, name .. ' returns nothing and does not fail')
+        end
+        assert(list.base == nil)
+        "#,
+    )
+    .unwrap();
+    let logs = h.drain_logs().unwrap();
+    for name in ["Read", "ReadText", "ReadTextPointer", "Child", "Parent", "GetDrawAddress", "GetDrawSlotAddress", "GetChildWindows", "IsActive"] {
+        assert!(logs.iter().any(|s| s.contains(&format!("WindowObject:{name}"))), "{name} is diagnosed: {logs:?}");
+    }
+    assert!(!logs.iter().any(|s| s.contains("WindowObject:GetMenu") || s.contains("WindowObject:IsVisible")), "the backed ones are not: {logs:?}");
     // an empty tab (nothing charged in the pack): its first row is lit, and it is a filler: no slot
     p.dump.inventory = list(&[sword()]);
     capture_all(&p);
@@ -1349,6 +1397,40 @@ fn round5b_the_merchant_windows_mode_option_and_row_are_the_containers_state_and
     .unwrap();
 }
 
+#[test]
+fn round5b_the_merchants_selected_index_stops_at_forty_rows_as_the_reference_does() {
+    use crate::pointer::key;
+    let (mut p, h) = world();
+    // 45 wares: buying lists them; the reference reports a row under 40 (merchant.lua:208-221)
+    let wares: Vec<Spec> = (0..45).map(|i| Spec::new(4000 + i, "Ware", 60 + i as u32)).collect();
+    apply(&mut p, opcode(0x00B7, shop_bytes(7003, 90, 110, &wares, "A big shop")));
+    native_events::dispatch(&h).unwrap();
+    p.bags_merchant_open();
+    p.bags_merchant_keys(&[key::CROSS]);
+    let mods = h.registered_modules();
+    h.lua.globals().set("merchant", mods.get("frontiers_forge.merchant").unwrap().clone()).unwrap();
+    frame(&p, &h);
+    h.execute("assert(merchant.GetMode() == merchant.Mode.buy and merchant.GetSelectedItemIndex() == 1)").unwrap();
+    p.bags_merchant_keys(&[key::DOWN; 38]);
+    frame(&p, &h);
+    h.execute("assert(merchant.GetSelectedItemIndex() == 39 and merchant.GetSelectedItem() ~= nil, tostring(merchant.GetSelectedItemIndex()))").unwrap();
+    p.bags_merchant_keys(&[key::DOWN]);
+    frame(&p, &h);
+    h.execute("assert(merchant.GetSelectedItemIndex() == 40 and merchant.GetSelectedItem() ~= nil, 'row 40, the last index the reference gives: ' .. tostring(merchant.GetSelectedItemIndex()))").unwrap();
+    // the client's list holds 40 rows and wraps: one more Down is the first row again
+    p.bags_merchant_keys(&[key::DOWN]);
+    frame(&p, &h);
+    h.execute("assert(merchant.GetSelectedItemIndex() == 1, tostring(merchant.GetSelectedItemIndex()))").unwrap();
+    // the layer's own limit, for a row the client could not light: raw row 40 is past the reference's range
+    for (row, want) in [(39, "40"), (40, "nil"), (63, "nil")] {
+        crate::fork_ext::addons::native_items::set_windows_raw(serde_json::json!({
+            "page": {"allocated": false, "open": false, "tab": 0, "lit": 0, "rows": [40, 40, 40, 40]},
+            "merchant": {"mode": 2, "option": 0, "lit": row},
+        }));
+        h.execute(&format!("assert(tostring(merchant.GetSelectedItemIndex()) == '{want}', 'raw row {row}: ' .. tostring(merchant.GetSelectedItemIndex()))")).unwrap();
+    }
+}
+
 // ---- Round 5 Part B: the bag viewer's fixtures. The manager's tests (`addons::manager`) cannot name this
 // module, so they drive the same native paths through these methods and plain JSON.
 impl Spec {
@@ -1398,10 +1480,6 @@ impl Play {
         let creature = net::entity::Creature { name: name.into(), ..Default::default() };
         self.entities.slots.push(Some(net::entity::Entity { id, p18: 2, creature: Some(creature), ..Default::default() }));
         self.target = id;
-    }
-    /// The clock that tells a loot request from an old one moves on by `ms`.
-    pub(crate) fn bags_advance_clock(&self, ms: u32) {
-        crate::fork_ext::loot_source::advance(ms as u64);
     }
     /// The player presses the attack button on the target: a loot request for a corpse (0x0015).
     pub(crate) fn bags_press_loot(&mut self) {

@@ -282,7 +282,7 @@ thread_local! {static KEY: Cell<Option<u64>> = const { Cell::new(None) };}
 thread_local! {static SOURCE: std::cell::RefCell<Option<(u32, String)>> = const { std::cell::RefCell::new(None) };}
 
 fn note_source(play: &Play) {
-    let asked = crate::fork_ext::loot_source::take_recent();
+    let asked = crate::fork_ext::loot_source::reply();
     let corpse = asked.and_then(|id| play.entities.slots.iter().flatten().find(|e| e.id == id && e.p18 & 2 != 0));
     let named = corpse.and_then(|e| e.creature.as_ref()).map(|c| c.name.clone()).filter(|n| !n.is_empty());
     SOURCE.with(|s| *s.borrow_mut() = asked.zip(named));
@@ -306,9 +306,10 @@ pub(super) fn forget() {
 pub(super) fn capture(play: &Play, cause: &'static str) {
     match cause {
         "loot_open" => note_source(play),
+        "loot_refused" => crate::fork_ext::loot_source::refused(),
         "loot_close" => {
             SOURCE.with(|s| *s.borrow_mut() = None);
-            crate::fork_ext::loot_source::clear();
+            crate::fork_ext::loot_source::closed();
         }
         _ => {}
     }
@@ -349,6 +350,8 @@ pub(super) fn cause(event: &net::session::Event) -> Option<&'static str> {
         Opcode { op, .. } => match op {
             0x0018 => "loot_open",
             0x0016 => "loot_close",
+            // why a corpse did not open: the answer to a loot request that has no list
+            0x0085 => "loot_refused",
             0x0019 => "loot_one",
             0x001A => "loot_all",
             0x00B7 => "merchant_open",

@@ -1,57 +1,69 @@
 // Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 //! Which corpse the client asked to loot (0x0015): `Play::attack_press` tells it (one hook call) and the
 //! loot container's `source` reads it when the corpse's list (0x0018) arrives. Plain data, no `Play`.
+//!
+//! The reply does not say which request it answers, so a name is given only when it cannot be wrong:
+//! when exactly one request is waiting and no two were ever waiting at once since the last quiet point.
+//! Time proves nothing (an old request's reply can still arrive), so nothing is dropped on a timeout.
+//! A missing "from" is acceptable; a wrong one is not.
 use std::cell::Cell;
-use std::time::Instant;
 
-/// How long a request stays the one a reply belongs to.
-pub(crate) const REPLY_MS: u64 = 5000;
-
-/// The loot request not yet answered: the corpse it named, when it was sent, and whether another was sent
-/// while it was still waiting (then the next reply could be for either, and names neither).
-#[derive(Clone, Copy)]
-struct Pending {
-    id: u32,
-    at: u64,
-    crowded: bool,
+#[derive(Clone, Copy, Default)]
+struct State {
+    /// Requests sent and not yet answered (by a corpse's list, or the server's refusal, 0x0085).
+    outstanding: u32,
+    /// Two requests were waiting at once: replies cannot be told apart until a quiet point.
+    tainted: bool,
+    /// The corpse the latest request named.
+    last: Option<u32>,
 }
 
-thread_local! {
-    static START: Instant = Instant::now();
-    static REQUEST: Cell<Option<Pending>> = const { Cell::new(None) };
-}
-#[cfg(test)]
-thread_local! {static SKEW: Cell<u64> = const { Cell::new(0) };}
+thread_local! {static STATE: Cell<State> = const { Cell::new(State { outstanding: 0, tainted: false, last: None }) };}
 
-fn now_ms() -> u64 {
-    #[cfg(test)]
-    return START.with(|s| s.elapsed().as_millis() as u64) + SKEW.with(|s| s.get());
-    #[cfg(not(test))]
-    START.with(|s| s.elapsed().as_millis() as u64)
-}
-
-/// A test moves the clock on by `ms`.
-#[cfg(test)]
-pub(crate) fn advance(ms: u64) {
-    SKEW.with(|s| s.set(s.get() + ms));
-}
-
-/// The client sent a loot request for corpse `id`. One still waiting (sent less than `REPLY_MS` ago) makes
-/// the next reply ambiguous: it is not told which corpse it is for.
+/// The client sent a loot request for corpse `id`.
 pub(crate) fn requested(id: u32) {
-    let now = now_ms();
-    let crowded = REQUEST.with(|r| r.get()).is_some_and(|p| now.saturating_sub(p.at) <= REPLY_MS);
-    REQUEST.with(|r| r.set(Some(Pending { id, at: now, crowded })));
+    STATE.with(|s| {
+        let mut st = s.get();
+        st.tainted |= st.outstanding > 0;
+        st.outstanding += 1;
+        st.last = Some(id);
+        s.set(st);
+    });
 }
 
-/// The corpse the one request in flight named, when it was made within `REPLY_MS` of now and nothing else
-/// was asked meanwhile. A reply uses the request up: the next reply is for the next request.
-pub(crate) fn take_recent() -> Option<u32> {
-    let now = now_ms();
-    REQUEST.with(|r| r.take()).filter(|p| !p.crowded && now.saturating_sub(p.at) <= REPLY_MS).map(|p| p.id)
+/// The server answered a request without a list (it refused: 0x0085).
+pub(crate) fn refused() {
+    STATE.with(|s| {
+        let mut st = s.get();
+        st.outstanding = st.outstanding.saturating_sub(1);
+        s.set(st);
+    });
 }
 
-/// The world ended or the loot window closed: no request is waiting.
+/// A corpse's list arrived (0x0018): the corpse its request named, only when that request was the only one
+/// waiting and none overlapped another since the last quiet point. The reply uses its request up.
+pub(crate) fn reply() -> Option<u32> {
+    STATE.with(|s| {
+        let mut st = s.get();
+        let named = (!st.tainted && st.outstanding == 1).then_some(st.last).flatten();
+        st.outstanding = st.outstanding.saturating_sub(1);
+        s.set(st);
+        named
+    })
+}
+
+/// The loot window closed (0x0016). With no request waiting this is a quiet point: the next request starts
+/// afresh. With one still waiting (sent before the close arrived) nothing is known, and nothing changes.
+pub(crate) fn closed() {
+    STATE.with(|s| {
+        let st = s.get();
+        if st.outstanding == 0 {
+            s.set(State::default());
+        }
+    });
+}
+
+/// The world ended: no request of the old world is waiting.
 pub(crate) fn clear() {
-    REQUEST.with(|r| r.set(None));
+    STATE.with(|s| s.set(State::default()));
 }

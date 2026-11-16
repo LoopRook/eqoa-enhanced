@@ -317,6 +317,20 @@ end
 -- when its tab is shown, so a tab that is not the shown one reads row 1.
 local List = {}
 List.__index = List
+-- The rest of the reference's WindowObject (window.lua:207-263, 308-345, 412-430, 507-509) reads a window's
+-- memory in the emulator: a native list has none. Each is there, returns nothing, and says so in the Addon
+-- Manager (code `unsupported`); none is a missing-method error. `base`, the address, is not there either.
+local function memory(name)
+    return function()
+        unsupported("frontiers_forge.window.WindowObject:" .. name, "unsupported",
+            "a native window has no emulator memory to read; its rows and lit row are GetMenu and GetSelectedRow")
+        return nil
+    end
+end
+for _, name in ipairs({ "Read", "ReadText", "ReadTextPointer", "Child", "Parent", "GetDrawAddress",
+    "GetDrawSlotAddress", "GetChildWindows", "IsActive" }) do
+    List[name] = memory(name)
+end
 function List:IsVisible()
     local p = page()
     return p ~= nil and p.open == true and p.tab == self.tab
@@ -615,12 +629,14 @@ fn real(lua: &Lua, short: &str) -> Result<Table> {
 
 pub(super) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
-    let unsupported = lua.create_function(|lua, symbol: String| {
+    // `unsupported(symbol, code?, message?)`: a call the layer cannot back says so in the Addon Manager and
+    // returns nothing (a scheduled one is `not_yet`; one that has no native meaning is `unsupported`)
+    let unsupported = lua.create_function(|lua, (symbol, code, message): (String, Option<String>, Option<String>)| {
         error(
             lua,
             &symbol,
-            "not_yet",
-            "needs the item or merchant window's private selection state; see the round 5 report",
+            code.as_deref().unwrap_or("not_yet"),
+            message.as_deref().unwrap_or("not built yet (it needs windows.format_hint); see the round 5 report"),
         )?;
         Ok(Value::Nil)
     })?;
