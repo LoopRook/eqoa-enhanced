@@ -156,7 +156,6 @@ pub(crate) fn take_single_token(
 }
 
 /// Consumes the single-batch allowance from the current gesture scope (Part C).
-#[allow(dead_code)]
 pub(crate) fn take_batch_token(
     vm: u64,
     addon_id: &str,

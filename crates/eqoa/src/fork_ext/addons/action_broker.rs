@@ -25,6 +25,7 @@ pub(crate) const TOKEN_BUCKET_REFILL_PER_TICK: u32 = 1; // 30 ticks/s * 1 = 30/s
 pub(crate) const RATE_LIMIT_WAIT_TICKS: u64 = 30; // 1 s on the 30 Hz clock
 pub(crate) const SERVER_TIMEOUT_TICKS: u64 = 300; // 10 s on the 30 Hz clock
 pub(crate) const MAX_RETAINED_RESULTS_PER_VM: usize = 256;
+pub(crate) const MAX_BATCH_STEPS: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Subsystem {
@@ -58,6 +59,23 @@ impl UserData for RequestId {
         });
         m.add_meta_method(MetaMethod::ToString, |_, this, ()| {
             Ok(format!("RequestId({})", this.id))
+        });
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BatchId {
+    pub vm: u64,
+    pub id: u64,
+}
+
+impl UserData for BatchId {
+    fn add_methods<M: UserDataMethods<Self>>(m: &mut M) {
+        m.add_meta_method(MetaMethod::Eq, |_, this, other: AnyUserData| {
+            Ok(other.borrow::<BatchId>().is_ok_and(|o| *this == *o))
+        });
+        m.add_meta_method(MetaMethod::ToString, |_, this, ()| {
+            Ok(format!("BatchId({})", this.id))
         });
     }
 }
@@ -272,6 +290,62 @@ struct InFlightAction {
     detail: Option<Json>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BatchWindow {
+    Merchant,
+    Bank,
+    Loot,
+}
+
+impl BatchWindow {
+    fn is_open(self, snap: &NativeSnapshot) -> bool {
+        match self {
+            Self::Merchant => snap.merchant_open,
+            Self::Bank => snap.bank_open,
+            Self::Loot => snap.loot_open,
+        }
+    }
+
+    const fn closed_reason(self) -> &'static str {
+        match self {
+            Self::Merchant => "merchant closed",
+            Self::Bank => "bank closed",
+            Self::Loot => "corpse closed",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct BatchResultRecord {
+    pub id: u64,
+    pub vm: u64,
+    pub state: &'static str,
+    pub ok: Option<bool>,
+    pub completed: usize,
+    pub total: usize,
+    pub current_step: usize,
+    pub code: Option<String>,
+    pub reason: Option<String>,
+    pub queued_tick: u64,
+    pub completed_tick: Option<u64>,
+    pub failed_step: Option<usize>,
+    pub detail: Option<Json>,
+}
+
+#[derive(Clone, Debug)]
+struct ActiveBatch {
+    id: u64,
+    vm: u64,
+    steps: VecDeque<ActionKind>,
+    total: usize,
+    completed: usize,
+    current_step: usize,
+    waiting_req_id: Option<u64>,
+    queued_tick: u64,
+    require_window: Option<BatchWindow>,
+    rate_wait_start_tick: Option<u64>,
+}
+
 #[derive(Default)]
 struct VmBroker {
     addon_id: String,
@@ -279,6 +353,9 @@ struct VmBroker {
     in_flight: HashMap<u64, InFlightAction>,
     retained: VecDeque<ActionResultRecord>,
     pending_events: VecDeque<ActionResultRecord>,
+    active_batch: Option<ActiveBatch>,
+    retained_batches: VecDeque<BatchResultRecord>,
+    pending_batch_events: VecDeque<(bool, BatchResultRecord)>,
     tokens: u32,
     last_refill_tick: u64,
 }
@@ -291,8 +368,122 @@ impl VmBroker {
             in_flight: HashMap::new(),
             retained: VecDeque::new(),
             pending_events: VecDeque::new(),
+            active_batch: None,
+            retained_batches: VecDeque::new(),
+            pending_batch_events: VecDeque::new(),
             tokens: TOKEN_BUCKET_BURST,
             last_refill_tick: now_tick,
+        }
+    }
+
+    fn upsert_batch_retained(&mut self, record: BatchResultRecord) {
+        if let Some(existing) = self.retained_batches.iter_mut().find(|r| r.id == record.id) {
+            *existing = record;
+            return;
+        }
+        if self.retained_batches.len() >= MAX_RETAINED_RESULTS_PER_VM {
+            self.retained_batches.pop_front();
+        }
+        self.retained_batches.push_back(record);
+    }
+
+    fn finish_batch(
+        &mut self,
+        state: &'static str,
+        ok: Option<bool>,
+        code: Option<&str>,
+        reason: Option<String>,
+        now_tick: u64,
+        failed_step: Option<usize>,
+        emit_event: bool,
+    ) {
+        let Some(batch) = self.active_batch.take() else {
+            return;
+        };
+        let rec = BatchResultRecord {
+            id: batch.id,
+            vm: batch.vm,
+            state,
+            ok,
+            completed: batch.completed,
+            total: batch.total,
+            current_step: batch.current_step,
+            code: code.map(str::to_string),
+            reason,
+            queued_tick: batch.queued_tick,
+            completed_tick: Some(now_tick),
+            failed_step,
+            detail: None,
+        };
+        self.upsert_batch_retained(rec.clone());
+        if emit_event {
+            self.pending_batch_events.push_back((true, rec));
+        }
+    }
+
+    fn emit_batch_progress(&mut self) {
+        let Some(batch) = self.active_batch.as_ref() else {
+            return;
+        };
+        let rec = BatchResultRecord {
+            id: batch.id,
+            vm: batch.vm,
+            state: "running",
+            ok: None,
+            completed: batch.completed,
+            total: batch.total,
+            current_step: batch.current_step,
+            code: None,
+            reason: None,
+            queued_tick: batch.queued_tick,
+            completed_tick: None,
+            failed_step: None,
+            detail: None,
+        };
+        self.upsert_batch_retained(rec.clone());
+        self.pending_batch_events.push_back((false, rec));
+    }
+
+    fn handle_batch_step_resolution(
+        &mut self,
+        req_id: u64,
+        now_tick: u64,
+        state: &'static str,
+        ok: Option<bool>,
+        code: Option<&str>,
+        reason: Option<String>,
+    ) {
+        let Some(batch) = self.active_batch.as_mut() else {
+            return;
+        };
+        if batch.waiting_req_id != Some(req_id) {
+            return;
+        }
+        batch.waiting_req_id = None;
+        if ok == Some(true) {
+            batch.completed += 1;
+            if batch.completed >= batch.total {
+                self.finish_batch("completed", Some(true), None, None, now_tick, None, true);
+            } else {
+                batch.current_step += 1;
+                self.emit_batch_progress();
+            }
+        } else {
+            let failed_at = batch.current_step;
+            let term_state = if state == "unknown" {
+                "unknown"
+            } else {
+                "refused"
+            };
+            self.finish_batch(
+                term_state,
+                Some(false),
+                code,
+                reason,
+                now_tick,
+                Some(failed_at),
+                true,
+            );
         }
     }
 
@@ -426,6 +617,127 @@ impl BrokerState {
         Ok(RequestId { vm, id })
     }
 
+    fn enqueue_batch(
+        &mut self,
+        token: GestureToken,
+        steps: Vec<ActionKind>,
+        require_window: Option<BatchWindow>,
+    ) -> std::result::Result<BatchId, (&'static str, String)> {
+        if steps.is_empty() {
+            return Err(("invalid_argument", "batch must contain at least one step".into()));
+        }
+        if steps.len() > MAX_BATCH_STEPS {
+            return Err((
+                "invalid_argument",
+                format!("batch exceeds {MAX_BATCH_STEPS} steps"),
+            ));
+        }
+        let vm = token.vm;
+        if self
+            .vms
+            .get(&vm)
+            .is_some_and(|v| v.active_batch.is_some())
+        {
+            return Err(("busy", "a batch is already running for this addon".into()));
+        }
+        let inferred_window = require_window.or_else(|| {
+            if steps
+                .iter()
+                .any(|k| matches!(k, ActionKind::Sell { .. } | ActionKind::Buy { .. }))
+            {
+                Some(BatchWindow::Merchant)
+            } else if steps
+                .iter()
+                .any(|k| matches!(k, ActionKind::BankMove { .. } | ActionKind::BankMoney { .. }))
+            {
+                Some(BatchWindow::Bank)
+            } else if steps
+                .iter()
+                .any(|k| matches!(k, ActionKind::Loot { .. } | ActionKind::LootAll))
+            {
+                Some(BatchWindow::Loot)
+            } else {
+                None
+            }
+        });
+        let now_tick = self.tick;
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1).max(1);
+        let total = steps.len();
+        let vm_state = self.ensure_vm(vm, &token.addon_id);
+        let batch = ActiveBatch {
+            id,
+            vm,
+            steps: VecDeque::from(steps),
+            total,
+            completed: 0,
+            current_step: 1,
+            waiting_req_id: None,
+            queued_tick: now_tick,
+            require_window: inferred_window,
+            rate_wait_start_tick: None,
+        };
+        vm_state.active_batch = Some(batch);
+        vm_state.upsert_batch_retained(BatchResultRecord {
+            id,
+            vm,
+            state: "running",
+            ok: None,
+            completed: 0,
+            total,
+            current_step: 1,
+            code: None,
+            reason: None,
+            queued_tick: now_tick,
+            completed_tick: None,
+            failed_step: None,
+            detail: None,
+        });
+        Ok(BatchId { vm, id })
+    }
+
+    fn batch_status(
+        &self,
+        batch: BatchId,
+    ) -> std::result::Result<Option<BatchResultRecord>, (&'static str, String)> {
+        let Some(vm_state) = self.vms.get(&batch.vm) else {
+            return Ok(None);
+        };
+        Ok(vm_state
+            .retained_batches
+            .iter()
+            .rev()
+            .find(|r| r.id == batch.id)
+            .cloned())
+    }
+
+    fn stop_batch(
+        &mut self,
+        vm: u64,
+        target_id: Option<u64>,
+    ) -> std::result::Result<bool, (&'static str, String)> {
+        let now_tick = self.tick;
+        let Some(vm_state) = self.vms.get_mut(&vm) else {
+            return Ok(false);
+        };
+        let Some(active) = vm_state.active_batch.as_ref() else {
+            return Ok(false);
+        };
+        if target_id.is_some_and(|want| want != active.id) {
+            return Ok(false);
+        }
+        vm_state.finish_batch(
+            "stopped",
+            Some(false),
+            Some("cancelled"),
+            Some("stopped".into()),
+            now_tick,
+            None,
+            true,
+        );
+        Ok(true)
+    }
+
     fn status(&self, req: RequestId) -> std::result::Result<Option<ActionResultRecord>, (&'static str, String)> {
         let Some(vm_state) = self.vms.get(&req.vm) else {
             return Ok(None);
@@ -526,13 +838,38 @@ impl BrokerState {
                 });
             }
         }
+        if vm_state.active_batch.is_some() {
+            let step = vm_state.active_batch.as_ref().map(|b| b.current_step);
+            vm_state.finish_batch(
+                "cancelled",
+                Some(false),
+                Some("cancelled"),
+                Some(reason.into()),
+                now_tick,
+                step,
+                false,
+            );
+        }
         vm_state.pending_events.clear();
+        vm_state.pending_batch_events.clear();
     }
 
     fn reset_session(&mut self, reason: &str) {
         let now_tick = self.tick;
         self.native = NativeSnapshot::default();
         for vm_state in self.vms.values_mut() {
+            if vm_state.active_batch.is_some() {
+                let step = vm_state.active_batch.as_ref().map(|b| b.current_step);
+                vm_state.finish_batch(
+                    "cancelled",
+                    Some(false),
+                    Some("cancelled"),
+                    Some(reason.into()),
+                    now_tick,
+                    step,
+                    true,
+                );
+            }
             while let Some(item) = vm_state.queued.pop_front() {
                 let rec = ActionResultRecord {
                     id: item.id,
@@ -570,6 +907,14 @@ impl BrokerState {
                     };
                     vm_state.upsert_retained(rec.clone());
                     vm_state.pending_events.push_back(rec);
+                    vm_state.handle_batch_step_resolution(
+                        id,
+                        now_tick,
+                        "unknown",
+                        None,
+                        Some("unknown"),
+                        Some("server outcome unknown after 10s".into()),
+                    );
                 }
             }
             vm_state.tokens = TOKEN_BUCKET_BURST;
@@ -616,6 +961,14 @@ impl BrokerState {
                     };
                     vm_state.upsert_retained(rec.clone());
                     vm_state.pending_events.push_back(rec);
+                    vm_state.handle_batch_step_resolution(
+                        id,
+                        now_tick,
+                        "unknown",
+                        None,
+                        Some("unknown"),
+                        Some("server outcome unknown after 10s".into()),
+                    );
                 }
             }
             let closed: Vec<(u64, &'static str)> = vm_state
@@ -654,13 +1007,67 @@ impl BrokerState {
                     };
                     vm_state.upsert_retained(rec.clone());
                     vm_state.pending_events.push_back(rec);
+                    vm_state.handle_batch_step_resolution(
+                        id,
+                        now_tick,
+                        "refused",
+                        Some(false),
+                        Some("refused"),
+                        Some(reason.into()),
+                    );
                 }
+            }
+            if let Some(win) = vm_state.active_batch.as_ref().and_then(|b| b.require_window)
+                && !win.is_open(&snapshot)
+            {
+                let step = vm_state.active_batch.as_ref().map(|b| b.current_step);
+                if let Some(req_id) = vm_state.active_batch.as_ref().and_then(|b| b.waiting_req_id)
+                {
+                    vm_state.in_flight.remove(&req_id);
+                }
+                vm_state.finish_batch(
+                    "refused",
+                    Some(false),
+                    Some("not_ready"),
+                    Some(win.closed_reason().into()),
+                    now_tick,
+                    step,
+                    true,
+                );
             }
         }
 
         // 2. Refill token buckets & expire requests queued > 1 s (30 ticks) waiting on rate limit.
         for vm_state in self.vms.values_mut() {
             vm_state.refill(now_tick);
+            if vm_state
+                .active_batch
+                .as_ref()
+                .is_some_and(|b| b.waiting_req_id.is_none())
+            {
+                if vm_state.tokens == 0 {
+                    let start = vm_state
+                        .active_batch
+                        .as_mut()
+                        .expect("active batch")
+                        .rate_wait_start_tick
+                        .get_or_insert(now_tick);
+                    if now_tick.saturating_sub(*start) > RATE_LIMIT_WAIT_TICKS {
+                        let step = vm_state.active_batch.as_ref().map(|b| b.current_step);
+                        vm_state.finish_batch(
+                            "refused",
+                            Some(false),
+                            Some("rate_limited"),
+                            Some("batch waited more than 1s for rate limit".into()),
+                            now_tick,
+                            step,
+                            true,
+                        );
+                    }
+                } else if let Some(b) = vm_state.active_batch.as_mut() {
+                    b.rate_wait_start_tick = None;
+                }
+            }
             while let Some(front) = vm_state.queued.front() {
                 if now_tick.saturating_sub(front.queued_tick) <= RATE_LIMIT_WAIT_TICKS {
                     break;
@@ -692,6 +1099,7 @@ impl BrokerState {
         let vm_count = self.vm_order.len();
         let mut global_dispatched = 0usize;
         let mut per_vm_dispatched: HashMap<u64, usize> = HashMap::new();
+        let mut batch_dispatched_this_tick = std::collections::HashSet::<u64>::new();
 
         while global_dispatched < MAX_DISPATCH_PER_TICK_GLOBAL {
             let mut progressed = false;
@@ -705,24 +1113,22 @@ impl BrokerState {
                 if vm_sent >= MAX_DISPATCH_PER_TICK_PER_VM {
                     continue;
                 }
-                let next_req = {
-                    let Some(vm_state) = self.vms.get(&vm_id) else {
-                        continue;
-                    };
+                let next_req = self.vms.get(&vm_id).and_then(|vm_state| {
                     if vm_state.tokens == 0 || vm_state.queued.is_empty() {
-                        continue;
+                        None
+                    } else {
+                        vm_state.queued.front().cloned()
                     }
-                    vm_state.queued.front().cloned()
-                };
-                let Some(req) = next_req else {
-                    continue;
-                };
-                // Check live subsystem lock before popping/dispatching.
-                if let Some(sub) = req.kind.subsystem() {
-                    let sub_inflight = self.vms.values().any(|v| {
-                        v.in_flight.values().any(|f| f.subsystem == Some(sub))
+                });
+                if let Some(req) = next_req {
+                    // Check live subsystem lock before popping/dispatching.
+                    let busy_sub = req.kind.subsystem().filter(|sub| {
+                        let sub_inflight = self.vms.values().any(|v| {
+                            v.in_flight.values().any(|f| f.subsystem == Some(*sub))
+                        });
+                        self.native.subsystem_busy(*sub) || sub_inflight
                     });
-                    if self.native.subsystem_busy(sub) || sub_inflight {
+                    if let Some(sub) = busy_sub {
                         let popped = self
                             .vms
                             .get_mut(&vm_id)
@@ -746,95 +1152,250 @@ impl BrokerState {
                         vm_state.upsert_retained(rec.clone());
                         vm_state.pending_events.push_back(rec);
                         progressed = true;
-                        continue;
+                    } else {
+                        let popped = self
+                            .vms
+                            .get_mut(&vm_id)
+                            .and_then(|v| v.queued.pop_front())
+                            .expect("front queued");
+
+                        match dispatch(&popped.kind) {
+                            DispatchOutcome::Completed { detail } => {
+                                let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
+                                vm_state.tokens = vm_state.tokens.saturating_sub(1);
+                                let rec = ActionResultRecord {
+                                    id: popped.id,
+                                    vm: popped.vm,
+                                    kind: popped.kind.name(),
+                                    state: "completed",
+                                    phase: "dispatch",
+                                    ok: Some(true),
+                                    code: None,
+                                    reason: None,
+                                    queued_tick: popped.queued_tick,
+                                    dispatched_tick: Some(now_tick),
+                                    completed_tick: Some(now_tick),
+                                    detail,
+                                };
+                                vm_state.upsert_retained(rec.clone());
+                                vm_state.pending_events.push_back(rec);
+                                per_vm_dispatched.insert(vm_id, vm_sent + 1);
+                                global_dispatched += 1;
+                                progressed = true;
+                            }
+                            DispatchOutcome::AwaitingServer { matcher, detail } => {
+                                let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
+                                vm_state.tokens = vm_state.tokens.saturating_sub(1);
+                                let rec = ActionResultRecord {
+                                    id: popped.id,
+                                    vm: popped.vm,
+                                    kind: popped.kind.name(),
+                                    state: "dispatched",
+                                    phase: "dispatch",
+                                    ok: Some(true),
+                                    code: None,
+                                    reason: None,
+                                    queued_tick: popped.queued_tick,
+                                    dispatched_tick: Some(now_tick),
+                                    completed_tick: None,
+                                    detail: detail.clone(),
+                                };
+                                vm_state.upsert_retained(rec.clone());
+                                vm_state.pending_events.push_back(rec);
+                                vm_state.in_flight.insert(
+                                    popped.id,
+                                    InFlightAction {
+                                        id: popped.id,
+                                        vm: popped.vm,
+                                        kind: popped.kind.name(),
+                                        subsystem: popped.kind.subsystem(),
+                                        matcher,
+                                        queued_tick: popped.queued_tick,
+                                        dispatched_tick: now_tick,
+                                        detail,
+                                    },
+                                );
+                                per_vm_dispatched.insert(vm_id, vm_sent + 1);
+                                global_dispatched += 1;
+                                progressed = true;
+                            }
+                            DispatchOutcome::Refused { code, reason } => {
+                                let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
+                                let rec = ActionResultRecord {
+                                    id: popped.id,
+                                    vm: popped.vm,
+                                    kind: popped.kind.name(),
+                                    state: "refused",
+                                    phase: "dispatch",
+                                    ok: Some(false),
+                                    code: Some(code.into()),
+                                    reason: Some(reason),
+                                    queued_tick: popped.queued_tick,
+                                    dispatched_tick: None,
+                                    completed_tick: Some(now_tick),
+                                    detail: None,
+                                };
+                                vm_state.upsert_retained(rec.clone());
+                                vm_state.pending_events.push_back(rec);
+                                per_vm_dispatched.insert(vm_id, vm_sent + 1);
+                                global_dispatched += 1;
+                                progressed = true;
+                            }
+                        }
                     }
                 }
-
-                let popped = self
-                    .vms
-                    .get_mut(&vm_id)
-                    .and_then(|v| v.queued.pop_front())
-                    .expect("front queued");
-
-                match dispatch(&popped.kind) {
-                    DispatchOutcome::Completed { detail } => {
+                if !batch_dispatched_this_tick.contains(&vm_id)
+                    && global_dispatched < MAX_DISPATCH_PER_TICK_GLOBAL
+                    && per_vm_dispatched.get(&vm_id).copied().unwrap_or(0)
+                        < MAX_DISPATCH_PER_TICK_PER_VM
+                {
+                    let ready_step = self
+                        .vms
+                        .get(&vm_id)
+                        .and_then(|v| {
+                            if v.tokens == 0 {
+                                return None;
+                            }
+                            let b = v.active_batch.as_ref()?;
+                            if b.waiting_req_id.is_some() {
+                                return None;
+                            }
+                            b.steps.front().cloned()
+                        });
+                    if let Some(step_kind) = ready_step {
+                        batch_dispatched_this_tick.insert(vm_id);
+                        if let Some(sub) = step_kind.subsystem() {
+                            let sub_inflight = self.vms.values().any(|v| {
+                                v.in_flight.values().any(|f| f.subsystem == Some(sub))
+                            });
+                            if self.native.subsystem_busy(sub) || sub_inflight {
+                                if let Some(vm_state) = self.vms.get_mut(&vm_id) {
+                                    let step = vm_state.active_batch.as_ref().map(|b| b.current_step);
+                                    vm_state.finish_batch(
+                                        "refused",
+                                        Some(false),
+                                        Some("busy"),
+                                        Some(format!("{} subsystem is busy", sub.label())),
+                                        now_tick,
+                                        step,
+                                        true,
+                                    );
+                                }
+                                progressed = true;
+                                continue;
+                            }
+                        }
+                        let step_req_id = self.next_id;
+                        self.next_id = self.next_id.wrapping_add(1).max(1);
+                        let outcome = dispatch(&step_kind);
                         let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
-                        vm_state.tokens = vm_state.tokens.saturating_sub(1);
-                        let rec = ActionResultRecord {
-                            id: popped.id,
-                            vm: popped.vm,
-                            kind: popped.kind.name(),
-                            state: "completed",
-                            phase: "dispatch",
-                            ok: Some(true),
-                            code: None,
-                            reason: None,
-                            queued_tick: popped.queued_tick,
-                            dispatched_tick: Some(now_tick),
-                            completed_tick: Some(now_tick),
-                            detail,
-                        };
-                        vm_state.upsert_retained(rec.clone());
-                        vm_state.pending_events.push_back(rec);
-                        per_vm_dispatched.insert(vm_id, vm_sent + 1);
-                        global_dispatched += 1;
-                        progressed = true;
-                    }
-                    DispatchOutcome::AwaitingServer { matcher, detail } => {
-                        let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
-                        vm_state.tokens = vm_state.tokens.saturating_sub(1);
-                        let rec = ActionResultRecord {
-                            id: popped.id,
-                            vm: popped.vm,
-                            kind: popped.kind.name(),
-                            state: "dispatched",
-                            phase: "dispatch",
-                            ok: Some(true),
-                            code: None,
-                            reason: None,
-                            queued_tick: popped.queued_tick,
-                            dispatched_tick: Some(now_tick),
-                            completed_tick: None,
-                            detail: detail.clone(),
-                        };
-                        vm_state.upsert_retained(rec.clone());
-                        vm_state.pending_events.push_back(rec);
-                        vm_state.in_flight.insert(
-                            popped.id,
-                            InFlightAction {
-                                id: popped.id,
-                                vm: popped.vm,
-                                kind: popped.kind.name(),
-                                subsystem: popped.kind.subsystem(),
-                                matcher,
-                                queued_tick: popped.queued_tick,
-                                dispatched_tick: now_tick,
-                                detail,
-                            },
-                        );
-                        per_vm_dispatched.insert(vm_id, vm_sent + 1);
-                        global_dispatched += 1;
-                        progressed = true;
-                    }
-                    DispatchOutcome::Refused { code, reason } => {
-                        let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
-                        let rec = ActionResultRecord {
-                            id: popped.id,
-                            vm: popped.vm,
-                            kind: popped.kind.name(),
-                            state: "refused",
-                            phase: "dispatch",
-                            ok: Some(false),
-                            code: Some(code.into()),
-                            reason: Some(reason),
-                            queued_tick: popped.queued_tick,
-                            dispatched_tick: None,
-                            completed_tick: Some(now_tick),
-                            detail: None,
-                        };
-                        vm_state.upsert_retained(rec.clone());
-                        vm_state.pending_events.push_back(rec);
-                        per_vm_dispatched.insert(vm_id, vm_sent + 1);
+                        if let Some(batch) = vm_state.active_batch.as_mut() {
+                            let _ = batch.steps.pop_front();
+                            batch.rate_wait_start_tick = None;
+                        }
+                        match outcome {
+                            DispatchOutcome::Completed { detail } => {
+                                vm_state.tokens = vm_state.tokens.saturating_sub(1);
+                                let rec = ActionResultRecord {
+                                    id: step_req_id,
+                                    vm: vm_id,
+                                    kind: step_kind.name(),
+                                    state: "completed",
+                                    phase: "dispatch",
+                                    ok: Some(true),
+                                    code: None,
+                                    reason: None,
+                                    queued_tick: now_tick,
+                                    dispatched_tick: Some(now_tick),
+                                    completed_tick: Some(now_tick),
+                                    detail,
+                                };
+                                vm_state.upsert_retained(rec.clone());
+                                vm_state.pending_events.push_back(rec);
+                                if let Some(batch) = vm_state.active_batch.as_mut() {
+                                    batch.completed += 1;
+                                    if batch.completed >= batch.total {
+                                        vm_state.finish_batch(
+                                            "completed",
+                                            Some(true),
+                                            None,
+                                            None,
+                                            now_tick,
+                                            None,
+                                            true,
+                                        );
+                                    } else {
+                                        batch.current_step += 1;
+                                        vm_state.emit_batch_progress();
+                                    }
+                                }
+                            }
+                            DispatchOutcome::AwaitingServer { matcher, detail } => {
+                                vm_state.tokens = vm_state.tokens.saturating_sub(1);
+                                let rec = ActionResultRecord {
+                                    id: step_req_id,
+                                    vm: vm_id,
+                                    kind: step_kind.name(),
+                                    state: "dispatched",
+                                    phase: "dispatch",
+                                    ok: Some(true),
+                                    code: None,
+                                    reason: None,
+                                    queued_tick: now_tick,
+                                    dispatched_tick: Some(now_tick),
+                                    completed_tick: None,
+                                    detail: detail.clone(),
+                                };
+                                vm_state.upsert_retained(rec.clone());
+                                vm_state.pending_events.push_back(rec);
+                                vm_state.in_flight.insert(
+                                    step_req_id,
+                                    InFlightAction {
+                                        id: step_req_id,
+                                        vm: vm_id,
+                                        kind: step_kind.name(),
+                                        subsystem: step_kind.subsystem(),
+                                        matcher,
+                                        queued_tick: now_tick,
+                                        dispatched_tick: now_tick,
+                                        detail,
+                                    },
+                                );
+                                if let Some(batch) = vm_state.active_batch.as_mut() {
+                                    batch.waiting_req_id = Some(step_req_id);
+                                    vm_state.emit_batch_progress();
+                                }
+                            }
+                            DispatchOutcome::Refused { code, reason } => {
+                                let rec = ActionResultRecord {
+                                    id: step_req_id,
+                                    vm: vm_id,
+                                    kind: step_kind.name(),
+                                    state: "refused",
+                                    phase: "dispatch",
+                                    ok: Some(false),
+                                    code: Some(code.into()),
+                                    reason: Some(reason.clone()),
+                                    queued_tick: now_tick,
+                                    dispatched_tick: None,
+                                    completed_tick: Some(now_tick),
+                                    detail: None,
+                                };
+                                vm_state.upsert_retained(rec.clone());
+                                vm_state.pending_events.push_back(rec);
+                                let step = vm_state.active_batch.as_ref().map(|b| b.current_step);
+                                vm_state.finish_batch(
+                                    "refused",
+                                    Some(false),
+                                    Some(code),
+                                    Some(reason),
+                                    now_tick,
+                                    step,
+                                    true,
+                                );
+                            }
+                        }
+                        *per_vm_dispatched.entry(vm_id).or_insert(0) += 1;
                         global_dispatched += 1;
                         progressed = true;
                     }
@@ -877,7 +1438,15 @@ impl BrokerState {
                     detail: inflight.detail,
                 };
                 vm_state.upsert_retained(rec.clone());
-                vm_state.pending_events.push_back(rec);
+                vm_state.pending_events.push_back(rec.clone());
+                vm_state.handle_batch_step_resolution(
+                    id,
+                    now_tick,
+                    rec.state,
+                    rec.ok,
+                    rec.code.as_deref(),
+                    rec.reason,
+                );
             }
         }
     }
@@ -1104,16 +1673,27 @@ pub(crate) fn resolve_server_ability_move(from: u8, to: u8) {
 
 pub(crate) fn poll(lua: &Lua) -> Result<()> {
     let vm = super::native_events::bus(lua).borrow().vm;
-    let events = BROKER.with(|b| {
+    let (events, batch_events) = BROKER.with(|b| {
         let mut b = b.borrow_mut();
-        b.vms
-            .get_mut(&vm)
-            .map(|v| v.pending_events.drain(..).collect::<Vec<_>>())
-            .unwrap_or_default()
+        match b.vms.get_mut(&vm) {
+            Some(v) => (
+                v.pending_events.drain(..).collect::<Vec<_>>(),
+                v.pending_batch_events.drain(..).collect::<Vec<_>>(),
+            ),
+            None => (Vec::new(), Vec::new()),
+        }
     });
     for rec in events {
         let tbl = action_result_raw_table(lua, &rec)?;
         super::native_events::action_result(lua, tbl)?;
+    }
+    for (is_result, rec) in batch_events {
+        let tbl = batch_result_raw_table(lua, &rec)?;
+        super::native_events::batch_event(
+            lua,
+            if is_result { "batch.result" } else { "batch.progress" },
+            tbl,
+        )?;
     }
     Ok(())
 }
@@ -1131,6 +1711,64 @@ pub(crate) const ACTION_RESULT_KEYS: &[&str] = &[
     "completed_tick",
     "detail",
 ];
+
+pub(crate) const BATCH_RESULT_KEYS: &[&str] = &[
+    "batch_id",
+    "state",
+    "ok",
+    "completed",
+    "total",
+    "current_step",
+    "code",
+    "reason",
+    "queued_tick",
+    "completed_tick",
+    "failed_step",
+    "detail",
+];
+
+fn batch_result_raw_table(lua: &Lua, rec: &BatchResultRecord) -> Result<mlua::Table> {
+    let tbl = lua.create_table()?;
+    tbl.raw_set(
+        "batch_id",
+        lua.create_userdata(BatchId {
+            vm: rec.vm,
+            id: rec.id,
+        })?,
+    )?;
+    tbl.raw_set("state", rec.state)?;
+    if let Some(ok) = rec.ok {
+        tbl.raw_set("ok", ok)?;
+    }
+    tbl.raw_set("completed", rec.completed)?;
+    tbl.raw_set("total", rec.total)?;
+    tbl.raw_set("current_step", rec.current_step)?;
+    if let Some(code) = &rec.code {
+        tbl.raw_set("code", code.as_str())?;
+    }
+    if let Some(reason) = &rec.reason {
+        tbl.raw_set("reason", reason.as_str())?;
+    }
+    tbl.raw_set("queued_tick", rec.queued_tick)?;
+    if let Some(completed) = rec.completed_tick {
+        tbl.raw_set("completed_tick", completed)?;
+    }
+    if let Some(failed_step) = rec.failed_step {
+        tbl.raw_set("failed_step", failed_step)?;
+    }
+    if let Some(detail) = &rec.detail {
+        tbl.raw_set(
+            "detail",
+            record(lua, "eqoa.actions.BatchResult.detail", detail)?,
+        )?;
+    }
+    Ok(tbl)
+}
+
+fn batch_result_to_table(lua: &Lua, rec: &BatchResultRecord) -> Result<mlua::Table> {
+    let tbl = batch_result_raw_table(lua, rec)?;
+    super::native::guard_lazy(lua, tbl, "eqoa.actions.BatchResult", BATCH_RESULT_KEYS)
+}
 
 fn action_result_raw_table(lua: &Lua, rec: &ActionResultRecord) -> Result<mlua::Table> {
     let tbl = lua.create_table()?;
@@ -1380,6 +2018,331 @@ fn parse_weapon_set(raw: Value) -> std::result::Result<i64, (&'static str, Strin
     }
 }
 
+fn parse_batch_window(raw: &str) -> std::result::Result<BatchWindow, (&'static str, String)> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "merchant" => Ok(BatchWindow::Merchant),
+        "bank" => Ok(BatchWindow::Bank),
+        "loot" | "corpse" => Ok(BatchWindow::Loot),
+        other => Err((
+            "invalid_argument",
+            format!("unknown batch require_window '{other}'"),
+        )),
+    }
+}
+
+fn step_field(tbl: &mlua::Table, key: &str, pos: Option<usize>) -> Value {
+    if let Ok(v) = tbl.get::<Value>(key)
+        && !v.is_nil()
+    {
+        return v;
+    }
+    if let Some(i) = pos
+        && let Ok(v) = tbl.get::<Value>(i)
+    {
+        return v;
+    }
+    Value::Nil
+}
+
+fn step_int(v: &Value) -> Option<i64> {
+    match v {
+        Value::Integer(n) => Some(*n),
+        Value::Number(n) if n.is_finite() && n.fract() == 0.0 => Some(*n as i64),
+        _ => None,
+    }
+}
+
+fn parse_batch_step(raw: Value) -> std::result::Result<ActionKind, (&'static str, String)> {
+    let Value::Table(t) = raw else {
+        return Err(("invalid_argument", "each batch step must be a table".into()));
+    };
+    let kind_val = match t.get::<Value>("kind") {
+        Ok(v) if !v.is_nil() => v,
+        _ => t.get::<Value>("action").unwrap_or(Value::Nil),
+    };
+    let Value::String(kind_str) = kind_val else {
+        return Err(("invalid_argument", "batch step requires a 'kind' string".into()));
+    };
+    let kind = kind_str
+        .to_str()
+        .map_err(|_| ("invalid_argument", "step kind must be UTF-8".into()))?
+        .trim()
+        .to_ascii_lowercase();
+    match kind.as_str() {
+        "assist" | "target_target" => Ok(ActionKind::Assist),
+        "interact" => Ok(ActionKind::Interact),
+        "loot_all" => Ok(ActionKind::LootAll),
+        "stop" => Ok(ActionKind::Stop),
+        "unmemorize_all" => Ok(ActionKind::UnmemorizeAll),
+        "target" => Ok(ActionKind::Target(parse_entity_id(step_field(
+            &t,
+            "target",
+            Some(1),
+        ))?)),
+        "attack" => {
+            let on = match step_field(&t, "on", Some(1)) {
+                Value::Nil => None,
+                Value::Boolean(b) => Some(b),
+                _ => return Err(("invalid_argument", "attack 'on' must be boolean".into())),
+            };
+            Ok(ActionKind::Attack { on })
+        }
+        "autorun" => {
+            let on = match step_field(&t, "on", Some(1)) {
+                Value::Nil => None,
+                Value::Boolean(b) => Some(b),
+                _ => return Err(("invalid_argument", "autorun 'on' must be boolean".into())),
+            };
+            Ok(ActionKind::Autorun { on })
+        }
+        "use_item" => {
+            let item = step_field(&t, "item", Some(1));
+            let spec = resolve_item_handle(&item)?;
+            if spec.list != "inventory" {
+                return Err((
+                    "invalid_argument",
+                    format!("use_item requires an inventory item handle, got '{}'", spec.list),
+                ));
+            }
+            Ok(ActionKind::UseItem { item: spec })
+        }
+        "equip" => {
+            let item = step_field(&t, "item", Some(1));
+            let spec = resolve_item_handle(&item)?;
+            if spec.list != "inventory" {
+                return Err((
+                    "invalid_argument",
+                    format!("equip requires an inventory item handle, got '{}'", spec.list),
+                ));
+            }
+            Ok(ActionKind::Equip { item: spec })
+        }
+        "quick_slot" => {
+            let item = step_field(&t, "item", Some(1));
+            let spec = resolve_item_handle(&item)?;
+            if spec.list != "inventory" {
+                return Err((
+                    "invalid_argument",
+                    "quick_slot requires an inventory item handle".into(),
+                ));
+            }
+            let Some(slot) = step_int(&step_field(&t, "slot", Some(2))) else {
+                return Err(("invalid_argument", "quick_slot must be 1..=4".into()));
+            };
+            if !(1..=4).contains(&slot) {
+                return Err(("invalid_argument", "quick_slot must be 1..=4".into()));
+            }
+            Ok(ActionKind::QuickSlot {
+                item: spec,
+                slot: (slot - 1) as u8,
+            })
+        }
+        "loot" => {
+            let item = step_field(&t, "item", Some(1));
+            let spec = resolve_item_handle(&item)?;
+            if spec.list != "loot" {
+                return Err((
+                    "invalid_argument",
+                    format!("loot requires a loot item handle, got '{}'", spec.list),
+                ));
+            }
+            let count_v = step_field(&t, "count", Some(2));
+            let count = if count_v.is_nil() {
+                None
+            } else {
+                let Some(n) = step_int(&count_v).filter(|n| *n >= 1) else {
+                    return Err(("invalid_argument", "loot count must be >= 1".into()));
+                };
+                Some(n)
+            };
+            Ok(ActionKind::Loot { item: spec, count })
+        }
+        "buy" => {
+            let ware = step_field(&t, "ware", None);
+            let ware = if ware.is_nil() {
+                step_field(&t, "item", Some(1))
+            } else {
+                ware
+            };
+            let spec = resolve_item_handle(&ware)?;
+            if spec.list != "merchant" {
+                return Err((
+                    "invalid_argument",
+                    format!("buy requires a merchant ware handle, got '{}'", spec.list),
+                ));
+            }
+            let count_v = step_field(&t, "count", Some(2));
+            let count = if count_v.is_nil() {
+                1
+            } else {
+                let Some(n) = step_int(&count_v).filter(|n| *n >= 1) else {
+                    return Err(("invalid_argument", "buy count must be >= 1".into()));
+                };
+                n
+            };
+            Ok(ActionKind::Buy { ware: spec, count })
+        }
+        "sell" => {
+            let item = step_field(&t, "item", Some(1));
+            let spec = resolve_item_handle(&item)?;
+            if spec.list != "inventory" {
+                return Err((
+                    "invalid_argument",
+                    format!("sell requires an inventory item handle, got '{}'", spec.list),
+                ));
+            }
+            let count_v = step_field(&t, "count", Some(2));
+            let count = if count_v.is_nil() {
+                1
+            } else {
+                let Some(n) = step_int(&count_v).filter(|n| *n >= 1) else {
+                    return Err(("invalid_argument", "sell count must be >= 1".into()));
+                };
+                n
+            };
+            Ok(ActionKind::Sell { item: spec, count })
+        }
+        "bank_move" => {
+            let item = step_field(&t, "item", Some(1));
+            let spec = resolve_item_handle(&item)?;
+            let handle_bank = match spec.list {
+                "bank" => true,
+                "inventory" => false,
+                other => {
+                    return Err((
+                        "invalid_argument",
+                        format!("bank_move requires an inventory or bank handle, got '{other}'"),
+                    ));
+                }
+            };
+            let dir_v = step_field(&t, "from", None);
+            if let Value::String(s) = dir_v {
+                let d = s
+                    .to_str()
+                    .map_err(|_| ("invalid_argument", "invalid direction".into()))?;
+                let want_bank = match d.trim().to_ascii_lowercase().as_str() {
+                    "bank" | "withdraw" => true,
+                    "inventory" | "bags" | "deposit" => false,
+                    other => {
+                        return Err((
+                            "invalid_argument",
+                            format!("bank_move direction must be 'inventory' or 'bank', got '{other}'"),
+                        ));
+                    }
+                };
+                if want_bank != handle_bank {
+                    return Err((
+                        "invalid_argument",
+                        "bank_move direction does not match handle container".into(),
+                    ));
+                }
+            }
+            let count_v = step_field(&t, "count", Some(2));
+            let count = if count_v.is_nil() {
+                1
+            } else {
+                let Some(n) = step_int(&count_v).filter(|n| *n >= 1) else {
+                    return Err(("invalid_argument", "bank_move count must be >= 1".into()));
+                };
+                n
+            };
+            Ok(ActionKind::BankMove {
+                from_bank: handle_bank,
+                item: spec,
+                count,
+            })
+        }
+        "bank_money" => {
+            let dir_v = step_field(&t, "direction", Some(1));
+            let Value::String(s) = dir_v else {
+                return Err(("invalid_argument", "bank_money requires 'deposit' or 'withdraw'".into()));
+            };
+            let d = s
+                .to_str()
+                .map_err(|_| ("invalid_argument", "invalid direction".into()))?;
+            let dir = match d.trim().to_ascii_lowercase().as_str() {
+                "deposit" => 1u8,
+                "withdraw" => 2u8,
+                other => {
+                    return Err((
+                        "invalid_argument",
+                        format!("bank_money direction must be 'deposit' or 'withdraw', got '{other}'"),
+                    ));
+                }
+            };
+            let Some(amount) = step_int(&step_field(&t, "amount", Some(2))).filter(|n| *n >= 1) else {
+                return Err(("invalid_argument", "bank_money amount must be >= 1".into()));
+            };
+            Ok(ActionKind::BankMoney { dir, amount })
+        }
+        "chat" => Ok(ActionKind::Chat {
+            text: validate_chat_string(step_field(&t, "text", Some(1)), false)?,
+        }),
+        "command" => Ok(ActionKind::Command {
+            text: validate_chat_string(step_field(&t, "text", Some(1)), true)?,
+        }),
+        "cast" => Ok(ActionKind::Cast(parse_ability_lookup(
+            step_field(&t, "ability", Some(1)),
+            false,
+        )?)),
+        "weapon_set" => Ok(ActionKind::WeaponSet {
+            set: parse_weapon_set(step_field(&t, "set", Some(1)))?,
+        }),
+        other => Err((
+            "invalid_argument",
+            format!("unsupported batch action kind '{other}'"),
+        )),
+    }
+}
+
+fn parse_batch_spec(
+    raw: &Value,
+) -> std::result::Result<(Vec<ActionKind>, Option<BatchWindow>), (&'static str, String)> {
+    let Value::Table(t) = raw else {
+        return Err(("invalid_argument", "batch spec must be a table".into()));
+    };
+    let require_window = match t.get::<Value>("require_window") {
+        Ok(Value::String(s)) => {
+            let text = s
+                .to_str()
+                .map_err(|_| ("invalid_argument", "require_window must be UTF-8".into()))?;
+            Some(parse_batch_window(&text)?)
+        }
+        Ok(Value::Nil) | Err(_) => None,
+        Ok(_) => {
+            return Err((
+                "invalid_argument",
+                "require_window must be 'merchant', 'bank', or 'loot'".into(),
+            ));
+        }
+    };
+    let steps_tbl = match t.get::<Value>("steps") {
+        Ok(Value::Table(sub)) => sub,
+        Ok(Value::Nil) | Err(_) => t.clone(),
+        Ok(_) => {
+            return Err(("invalid_argument", "batch 'steps' must be a list table".into()));
+        }
+    };
+    let len = steps_tbl.raw_len();
+    if len == 0 {
+        return Err(("invalid_argument", "batch must contain at least one step".into()));
+    }
+    if len > MAX_BATCH_STEPS {
+        return Err((
+            "invalid_argument",
+            format!("batch exceeds {MAX_BATCH_STEPS} steps"),
+        ));
+    }
+    let mut out = Vec::with_capacity(len);
+    for i in 1..=len {
+        let step_val: Value = steps_tbl
+            .raw_get(i)
+            .map_err(|_| ("invalid_argument", "malformed batch step".into()))?;
+        out.push(parse_batch_step(step_val)?);
+    }
+    Ok((out, require_window))
+}
+
 pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
     describe(
@@ -1415,6 +2378,30 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "supported",
             Some(4),
             "ActionResult field",
+        );
+    }
+
+    describe(
+        lua,
+        "eqoa.actions.BatchId",
+        "supported",
+        Some(4),
+        "opaque action batch handle",
+    );
+    describe(
+        lua,
+        "eqoa.actions.BatchResult",
+        "supported",
+        Some(4),
+        "batch progress and completion record",
+    );
+    for field in BATCH_RESULT_KEYS {
+        describe(
+            lua,
+            &format!("eqoa.actions.BatchResult.{field}"),
+            "supported",
+            Some(4),
+            "BatchResult field",
         );
     }
 
@@ -1467,15 +2454,39 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     lua,
                     "eqoa.actions.status",
                     "invalid_argument",
-                    "request_id must be a RequestId handle",
+                    "id must be a RequestId or BatchId handle",
                 );
             };
+            if let Ok(batch) = ud.borrow::<BatchId>() {
+                let batch = *batch;
+                if batch.vm != caller_vm {
+                    return error(
+                        lua,
+                        "eqoa.actions.status",
+                        "permission_denied",
+                        "batch handle belongs to another addon",
+                    );
+                }
+                return match BROKER.with(|b| b.borrow().batch_status(batch)) {
+                    Ok(Some(rec)) => {
+                        let tbl = batch_result_to_table(lua, &rec)?;
+                        lua.pack_multi((Value::Table(tbl), Value::Nil))
+                    }
+                    Ok(None) => error(
+                        lua,
+                        "eqoa.actions.status",
+                        "not_found",
+                        "batch result not found or evicted",
+                    ),
+                    Err((code, msg)) => error(lua, "eqoa.actions.status", code, &msg),
+                };
+            }
             let Ok(req) = ud.borrow::<RequestId>() else {
                 return error(
                     lua,
                     "eqoa.actions.status",
                     "invalid_argument",
-                    "request_id must be a RequestId handle",
+                    "id must be a RequestId or BatchId handle",
                 );
             };
             let req = *req;
@@ -1514,15 +2525,36 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     lua,
                     "eqoa.actions.cancel",
                     "invalid_argument",
-                    "request_id must be a RequestId handle",
+                    "id must be a RequestId or BatchId handle",
                 );
             };
+            if let Ok(batch) = ud.borrow::<BatchId>() {
+                let batch = *batch;
+                if batch.vm != caller_vm {
+                    return error(
+                        lua,
+                        "eqoa.actions.cancel",
+                        "permission_denied",
+                        "batch handle belongs to another addon",
+                    );
+                }
+                return match BROKER.with(|b| b.borrow_mut().stop_batch(caller_vm, Some(batch.id))) {
+                    Ok(true) => lua.pack_multi((true, Value::Nil)),
+                    Ok(false) => error(
+                        lua,
+                        "eqoa.actions.cancel",
+                        "not_found",
+                        "batch is no longer running",
+                    ),
+                    Err((code, msg)) => error(lua, "eqoa.actions.cancel", code, &msg),
+                };
+            }
             let Ok(req) = ud.borrow::<RequestId>() else {
                 return error(
                     lua,
                     "eqoa.actions.cancel",
                     "invalid_argument",
-                    "request_id must be a RequestId handle",
+                    "id must be a RequestId or BatchId handle",
                 );
             };
             let req = *req;
@@ -1543,6 +2575,126 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     "request is no longer pending",
                 ),
                 Err((code, msg)) => error(lua, "eqoa.actions.cancel", code, &msg),
+            }
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "batch",
+        lua.create_function(|lua, spec: Value| {
+            let vm = super::native_events::bus(lua).borrow().vm;
+            let addon = session(lua).borrow().addon.clone();
+            let token = match gesture::take_batch_token(vm, &addon) {
+                Ok(tok) => tok,
+                Err((code, msg)) => return error(lua, "eqoa.actions.batch", code, &msg),
+            };
+            if !CORE.with(|c| c.borrow().view.in_world) {
+                return error(
+                    lua,
+                    "eqoa.actions.batch",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            let (steps, require_window) = match parse_batch_spec(&spec) {
+                Ok(parsed) => parsed,
+                Err((code, msg)) => return error(lua, "eqoa.actions.batch", code, &msg),
+            };
+            match BROKER.with(|b| b.borrow_mut().enqueue_batch(token, steps, require_window)) {
+                Ok(batch_id) => lua.pack_multi((lua.create_userdata(batch_id)?, Value::Nil)),
+                Err((code, msg)) => error(lua, "eqoa.actions.batch", code, &msg),
+            }
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "stop_batch",
+        lua.create_function(|lua, arg: Option<Value>| {
+            let caller_vm = super::native_events::bus(lua).borrow().vm;
+            let target_id = match arg {
+                None | Some(Value::Nil) => None,
+                Some(Value::UserData(ud)) => {
+                    let Ok(batch) = ud.borrow::<BatchId>() else {
+                        return error(
+                            lua,
+                            "eqoa.actions.stop_batch",
+                            "invalid_argument",
+                            "batch_id must be a BatchId handle",
+                        );
+                    };
+                    if batch.vm != caller_vm {
+                        return error(
+                            lua,
+                            "eqoa.actions.stop_batch",
+                            "permission_denied",
+                            "batch handle belongs to another addon",
+                        );
+                    }
+                    Some(batch.id)
+                }
+                Some(_) => {
+                    return error(
+                        lua,
+                        "eqoa.actions.stop_batch",
+                        "invalid_argument",
+                        "batch_id must be a BatchId handle",
+                    );
+                }
+            };
+            match BROKER.with(|b| b.borrow_mut().stop_batch(caller_vm, target_id)) {
+                Ok(stopped) => lua.pack_multi((stopped, Value::Nil)),
+                Err((code, msg)) => error(lua, "eqoa.actions.stop_batch", code, &msg),
+            }
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "batch_status",
+        lua.create_function(|lua, arg: Value| {
+            let caller_vm = super::native_events::bus(lua).borrow().vm;
+            let Value::UserData(ud) = arg else {
+                return error(
+                    lua,
+                    "eqoa.actions.batch_status",
+                    "invalid_argument",
+                    "batch_id must be a BatchId handle",
+                );
+            };
+            let Ok(batch) = ud.borrow::<BatchId>() else {
+                return error(
+                    lua,
+                    "eqoa.actions.batch_status",
+                    "invalid_argument",
+                    "batch_id must be a BatchId handle",
+                );
+            };
+            let batch = *batch;
+            if batch.vm != caller_vm {
+                return error(
+                    lua,
+                    "eqoa.actions.batch_status",
+                    "permission_denied",
+                    "batch handle belongs to another addon",
+                );
+            }
+            match BROKER.with(|b| b.borrow().batch_status(batch)) {
+                Ok(Some(rec)) => {
+                    let tbl = batch_result_to_table(lua, &rec)?;
+                    lua.pack_multi((Value::Table(tbl), Value::Nil))
+                }
+                Ok(None) => error(
+                    lua,
+                    "eqoa.actions.batch_status",
+                    "not_found",
+                    "batch result not found or evicted",
+                ),
+                Err((code, msg)) => error(lua, "eqoa.actions.batch_status", code, &msg),
             }
         })?,
     )?;
@@ -2642,5 +3794,312 @@ mod tests {
             assert_eq!(status, "not_yet", "{not_yet} must be not_yet");
         }
         reset_all_for_test();
+    }
+
+    #[test]
+    fn round6c_batch_gesture_single_batch_refuses_second_serial_execution_and_capabilities() {
+        reset_all_for_test();
+        crate::fork_ext::bindpage::reset_in_memory();
+        CORE.with(|c| {
+            let mut core = Core::default();
+            core.view.in_world = true;
+            *c.borrow_mut() = core;
+        });
+
+        let host = Host::new().unwrap();
+
+        // Capabilities for Part C batch symbols & events
+        for sym in [
+            "eqoa.actions.batch",
+            "eqoa.actions.stop_batch",
+            "eqoa.actions.batch_status",
+            "eqoa.actions.BatchId",
+            "eqoa.actions.BatchResult",
+            "eqoa.events.batch.progress",
+            "eqoa.events.batch.result",
+        ] {
+            let status: String = host
+                .lua
+                .load(format!("return assert(eqoa.capabilities.get('{sym}')).status"))
+                .eval()
+                .unwrap();
+            assert_eq!(status, "supported", "{sym} must be supported");
+        }
+        for field in BATCH_RESULT_KEYS {
+            let sym = format!("eqoa.actions.BatchResult.{field}");
+            let status: String = host
+                .lua
+                .load(format!("return assert(eqoa.capabilities.get('{sym}')).status"))
+                .eval()
+                .unwrap();
+            assert_eq!(status, "supported", "{sym} must be supported");
+        }
+
+        // Batch without gesture -> needs_player_action; 1 gesture allows 1 batch, 2nd fails;
+        // 2nd batch with new gesture while 1st runs -> busy; 3-step serial execution waits for server reply.
+        host.execute(
+            r#"
+            bprog, bres = {}, {}
+            eqoa.events.on("batch.progress", function(e) bprog[#bprog + 1] = e.data end)
+            eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
+            local no_g, no_g_err = eqoa.actions.batch({ { kind = "assist" } })
+            assert(no_g == nil and no_g_err.code == "needs_player_action")
+            eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+                if mode == "first" then
+                    b1, err1 = eqoa.actions.batch({
+                        { kind = "assist" },
+                        { kind = "assist" },
+                        { kind = "assist" },
+                    })
+                    same_g, same_g_err = eqoa.actions.batch({ { kind = "assist" } })
+                elseif mode == "second_while_running" then
+                    b2, err2 = eqoa.actions.batch({ { kind = "assist" } })
+                end
+            end)
+            mode = "first"
+        "#,
+        )
+        .unwrap();
+
+        let press_k = || {
+            CORE.with(|c| {
+                c.borrow_mut().emit(
+                    "input.key",
+                    json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                )
+            });
+            native_events::dispatch(&host).unwrap();
+        };
+        press_k();
+        host.execute(
+            r#"
+            assert(b1 ~= nil and err1 == nil)
+            assert(same_g == nil and same_g_err.code == "needs_player_action")
+            local st = assert(eqoa.actions.batch_status(b1))
+            assert(st.state == "running" and st.completed == 0 and st.total == 3)
+            assert(eqoa.actions.status(b1).state == "running")
+            mode = "second_while_running"
+        "#,
+        )
+        .unwrap();
+
+        press_k();
+        host.execute("assert(b2 == nil and err2.code == 'busy')").unwrap();
+
+        let snap = NativeSnapshot {
+            in_world: true,
+            mode: 0,
+            ..Default::default()
+        };
+        // Tick 1: dispatches step 1 ONLY (awaits server); step 2 must NOT run yet.
+        let mut dispatched = 0usize;
+        BROKER.with(|b| {
+            b.borrow_mut().step_tick(snap, |_| {
+                dispatched += 1;
+                DispatchOutcome::AwaitingServer {
+                    matcher: ServerMatcher::Assist,
+                    detail: None,
+                }
+            });
+        });
+        assert_eq!(dispatched, 1, "only step 1 dispatches while awaiting server");
+        BROKER.with(|b| {
+            b.borrow_mut().step_tick(snap, |_| {
+                dispatched += 1;
+                DispatchOutcome::Completed { detail: None }
+            });
+        });
+        assert_eq!(dispatched, 1, "step 2 must wait until step 1 server reply arrives");
+
+        // Resolve step 1 -> tick advances to step 2 (sync completed) -> tick 3 finishes step 3!
+        resolve_server_assist(101);
+        native_events::dispatch(&host).unwrap();
+        host.execute("assert(#bprog >= 1 and bprog[#bprog].completed == 1 and bprog[#bprog].state == 'running')").unwrap();
+
+        BROKER.with(|b| {
+            b.borrow_mut().step_tick(snap, |_| {
+                dispatched += 1;
+                DispatchOutcome::Completed { detail: None }
+            });
+        });
+        assert_eq!(dispatched, 2);
+        native_events::dispatch(&host).unwrap();
+        host.execute("assert(bprog[#bprog].completed == 2 and #bres == 0)").unwrap();
+
+        BROKER.with(|b| {
+            b.borrow_mut().step_tick(snap, |_| {
+                dispatched += 1;
+                DispatchOutcome::Completed { detail: None }
+            });
+        });
+        assert_eq!(dispatched, 3);
+        native_events::dispatch(&host).unwrap();
+        host.execute(
+            r#"
+            assert(#bres == 1)
+            assert(bres[1].batch_id == b1)
+            assert(bres[1].state == "completed" and bres[1].ok == true)
+            assert(bres[1].completed == 3 and bres[1].total == 3)
+            assert(eqoa.actions.batch_status(b1).state == "completed")
+        "#,
+        )
+        .unwrap();
+
+        reset_all_for_test();
+        crate::fork_ext::bindpage::reset_in_memory();
+    }
+
+    #[test]
+    fn round6c_batch_stops_on_refusal_window_close_stop_call_and_zoning_without_replay() {
+        reset_all_for_test();
+        crate::fork_ext::bindpage::reset_in_memory();
+        CORE.with(|c| {
+            let mut core = Core::default();
+            core.view.in_world = true;
+            *c.borrow_mut() = core;
+        });
+
+        let host = Host::new().unwrap();
+        host.execute(
+            r#"
+            bres = {}
+            eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
+            eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+                last_b, last_err = eqoa.actions.batch({
+                    steps = {
+                        { kind = "assist" },
+                        { kind = "assist" },
+                        { kind = "assist" },
+                    },
+                    require_window = req_win,
+                })
+            end)
+        "#,
+        )
+        .unwrap();
+
+        let press_k = |req_win: &str| {
+            host.execute(req_win).unwrap();
+            CORE.with(|c| {
+                c.borrow_mut().emit(
+                    "input.key",
+                    json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                )
+            });
+            native_events::dispatch(&host).unwrap();
+        };
+
+        let open_merch = NativeSnapshot {
+            in_world: true,
+            mode: 10,
+            merchant_open: true,
+            ..Default::default()
+        };
+        let closed_merch = NativeSnapshot {
+            in_world: true,
+            mode: 0,
+            merchant_open: false,
+            ..Default::default()
+        };
+
+        // 1. Stop on dispatch refusal at step 2 -> step 3 NEVER runs.
+        press_k("req_win = nil");
+        let mut dispatched = 0usize;
+        BROKER.with(|b| {
+            let mut b = b.borrow_mut();
+            let mut step_fn = |_: &ActionKind| {
+                dispatched += 1;
+                if dispatched == 1 {
+                    DispatchOutcome::Completed { detail: None }
+                } else {
+                    DispatchOutcome::Refused {
+                        code: "not_ready",
+                        reason: "inventory is full".into(),
+                    }
+                }
+            };
+            b.step_tick(open_merch, &mut step_fn);
+            b.step_tick(open_merch, &mut step_fn);
+            b.step_tick(open_merch, &mut step_fn);
+        });
+        assert_eq!(dispatched, 2, "step 3 must never run after refusal at step 2");
+        native_events::dispatch(&host).unwrap();
+        host.execute(
+            "assert(bres[#bres].state == 'refused' and bres[#bres].ok == false and bres[#bres].completed == 1 and bres[#bres].total == 3 and bres[#bres].failed_step == 2 and bres[#bres].reason == 'inventory is full')",
+        )
+        .unwrap();
+
+        // 2. Stop on window close (merchant closed after step 1) + never replay after reopening!
+        press_k("req_win = 'merchant'");
+        dispatched = 0;
+        BROKER.with(|b| {
+            b.borrow_mut().step_tick(open_merch, |_| {
+                dispatched += 1;
+                DispatchOutcome::Completed { detail: None }
+            });
+            b.borrow_mut().step_tick(closed_merch, |_| {
+                dispatched += 1;
+                DispatchOutcome::Completed { detail: None }
+            });
+            b.borrow_mut().step_tick(open_merch, |_| {
+                dispatched += 1;
+                DispatchOutcome::Completed { detail: None }
+            });
+        });
+        assert_eq!(dispatched, 1, "reopening merchant must not replay remaining steps");
+        native_events::dispatch(&host).unwrap();
+        host.execute(
+            "assert(bres[#bres].state == 'refused' and bres[#bres].completed == 1 and bres[#bres].reason == 'merchant closed')",
+        )
+        .unwrap();
+
+        // 3. Explicit stop_batch stops immediately and cancels remaining steps.
+        press_k("req_win = 'merchant'");
+        dispatched = 0;
+        BROKER.with(|b| {
+            b.borrow_mut().step_tick(open_merch, |_| {
+                dispatched += 1;
+                DispatchOutcome::Completed { detail: None }
+            });
+        });
+        host.execute("local ok, e = eqoa.actions.stop_batch(last_b); assert(ok == true and e == nil)").unwrap();
+        BROKER.with(|b| {
+            b.borrow_mut().step_tick(open_merch, |_| {
+                dispatched += 1;
+                DispatchOutcome::Completed { detail: None }
+            });
+        });
+        assert_eq!(dispatched, 1);
+        native_events::dispatch(&host).unwrap();
+        host.execute(
+            "assert(bres[#bres].state == 'stopped' and bres[#bres].ok == false and bres[#bres].completed == 1 and bres[#bres].reason == 'stopped')",
+        )
+        .unwrap();
+
+        // 4. Zoning (reset_session) stops immediately and never replays afterward.
+        press_k("req_win = nil");
+        dispatched = 0;
+        BROKER.with(|b| {
+            b.borrow_mut().step_tick(open_merch, |_| {
+                dispatched += 1;
+                DispatchOutcome::Completed { detail: None }
+            });
+        });
+        reset_session("zone");
+        BROKER.with(|b| {
+            b.borrow_mut().step_tick(open_merch, |_| {
+                dispatched += 1;
+                DispatchOutcome::Completed { detail: None }
+            });
+        });
+        assert_eq!(dispatched, 1, "zoning must never replay remaining steps");
+        native_events::dispatch(&host).unwrap();
+        host.execute(
+            "assert(bres[#bres].state == 'cancelled' and bres[#bres].ok == false and bres[#bres].completed == 1 and bres[#bres].reason == 'zone')",
+        )
+        .unwrap();
+
+        reset_all_for_test();
+        crate::fork_ext::bindpage::reset_in_memory();
     }
 }

@@ -119,6 +119,8 @@ const EVENTS: &[&str] = &[
     "resource.ready",
     "resource.failed",
     "action.result",
+    "batch.progress",
+    "batch.result",
 ];
 fn install_event_fields(lua: &mlua::Lua) {
     for (name, fields) in [
@@ -167,6 +169,14 @@ fn install_event_fields(lua: &mlua::Lua) {
         (
             "action.result",
             "request_id kind state phase ok code reason queued_tick dispatched_tick completed_tick detail",
+        ),
+        (
+            "batch.progress",
+            "batch_id state ok completed total current_step code reason queued_tick completed_tick failed_step detail",
+        ),
+        (
+            "batch.result",
+            "batch_id state ok completed total current_step code reason queued_tick completed_tick failed_step detail",
         ),
         ("events.dropped", "first_seq last_seq count streams"),
     ] {
@@ -240,7 +250,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
             "supported",
             Some(match *name {
                 "player.stats_changed" => 3,
-                "action.result" => 4,
+                "action.result" | "batch.progress" | "batch.result" => 4,
                 _ => 2,
             }),
             "",
@@ -608,7 +618,12 @@ fn deliver_data(
         let envelope_ready = if data.is_none()
             && !matches!(
                 e.name.as_str(),
-                "timer" | "resource.ready" | "resource.failed" | "action.result"
+                "timer"
+                    | "resource.ready"
+                    | "resource.failed"
+                    | "action.result"
+                    | "batch.progress"
+                    | "batch.result"
             )
         {
             envelope_readonly(lua, e)?
@@ -823,6 +838,16 @@ pub(super) fn readonly_envelope(lua: &mlua::Lua, event: mlua::Table) -> Result<m
                 super::action_broker::ACTION_RESULT_KEYS,
             )?,
         )?;
+    } else if matches!(name.as_str(), "batch.progress" | "batch.result") {
+        event.set(
+            "data",
+            super::native::guard_lazy(
+                lua,
+                data,
+                "eqoa.actions.BatchResult",
+                super::action_broker::BATCH_RESULT_KEYS,
+            )?,
+        )?;
     } else if matches!(
         name.as_str(),
         "timer" | "resource.ready" | "resource.failed"
@@ -1016,6 +1041,12 @@ pub(super) fn file_action(lua: &mlua::Lua, data: serde_json::Value, failed: bool
 }
 pub(super) fn action_result(lua: &mlua::Lua, data: mlua::Table) -> Result<()> {
     let mut event = local("action.result", json!({}));
+    event.bytes = 256;
+    enqueue(&mut bus(lua).borrow_mut(), event, Some(data));
+    Ok(())
+}
+pub(super) fn batch_event(lua: &mlua::Lua, name: &'static str, data: mlua::Table) -> Result<()> {
+    let mut event = local(name, json!({}));
     event.bytes = 256;
     enqueue(&mut bus(lua).borrow_mut(), event, Some(data));
     Ok(())
