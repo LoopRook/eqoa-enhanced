@@ -238,10 +238,10 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
             lua,
             &format!("eqoa.events.{name}"),
             "supported",
-            Some(if *name == "player.stats_changed" {
-                3
-            } else {
-                2
+            Some(match *name {
+                "player.stats_changed" => 3,
+                "action.result" => 4,
+                _ => 2,
             }),
             "",
         );

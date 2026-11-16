@@ -908,6 +908,8 @@ fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
 
     // Positive control: the same API and Controls row work once storage is writable.
     crate::settings::testing::reset(false);
+    // testing::reset clears bindpage in memory; re-register the Controls bind as the client session would.
+    crate::fork_ext::bindpage::register("eqoa_stats_box", "toggle", "b", "Toggle Stats Box");
     for expected in [true, false] {
         super::native_core::CORE.with(|c| {
             c.borrow_mut().emit(

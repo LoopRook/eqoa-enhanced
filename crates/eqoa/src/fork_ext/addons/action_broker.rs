@@ -2558,4 +2558,89 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn round6b_capabilities_and_descriptors_cover_actions_result_and_events() {
+        reset_all_for_test();
+        let host = Host::new().unwrap();
+        let supported = [
+            "eqoa.actions.status",
+            "eqoa.actions.cancel",
+            "eqoa.actions.RequestId",
+            "eqoa.actions.ActionResult",
+            "eqoa.events.action.result",
+            "eqoa.actions.target",
+            "eqoa.actions.cycle_target",
+            "eqoa.actions.assist",
+            "eqoa.actions.target_target",
+            "eqoa.actions.interact",
+            "eqoa.actions.attack",
+            "eqoa.actions.cast",
+            "eqoa.actions.use_hotbar",
+            "eqoa.actions.chat",
+            "eqoa.actions.command",
+            "eqoa.actions.autorun",
+            "eqoa.actions.follow",
+            "eqoa.actions.stop",
+            "eqoa.actions.open_window",
+            "eqoa.actions.weapon_set",
+            "eqoa.actions.prepare_weapon_set",
+            "eqoa.actions.assign_ability",
+            "eqoa.actions.unmemorize_ability",
+            "eqoa.actions.unmemorize_all",
+            "eqoa.actions.arrange_ability",
+            "eqoa.actions.use_item",
+            "eqoa.actions.equip",
+            "eqoa.actions.swap_items",
+            "eqoa.actions.quick_slot",
+            "eqoa.actions.loot",
+            "eqoa.actions.loot_all",
+            "eqoa.actions.buy",
+            "eqoa.actions.sell",
+            "eqoa.actions.bank_move",
+            "eqoa.actions.bank_money",
+        ];
+        for sym in supported {
+            let status: String = host
+                .lua
+                .load(format!("return assert(eqoa.capabilities.get('{sym}')).status"))
+                .eval()
+                .unwrap();
+            assert_eq!(status, "supported", "{sym} must be supported");
+        }
+        for field in ACTION_RESULT_KEYS {
+            let sym = format!("eqoa.actions.ActionResult.{field}");
+            let status: String = host
+                .lua
+                .load(format!("return assert(eqoa.capabilities.get('{sym}')).status"))
+                .eval()
+                .unwrap();
+            assert_eq!(status, "supported", "{sym} must be supported");
+        }
+        let destroy_status: String = host
+            .lua
+            .load("return assert(eqoa.capabilities.get('eqoa.actions.destroy')).status")
+            .eval()
+            .unwrap();
+        assert_eq!(destroy_status, "unsupported");
+        for not_yet in [
+            "eqoa.actions.camera",
+            "eqoa.actions.move",
+            "eqoa.actions.look",
+            "eqoa.actions.buttons",
+            "eqoa.actions.drop_quest",
+            "eqoa.actions.mastery_share",
+            "eqoa.actions.close_window",
+            "eqoa.actions.select_row",
+            "eqoa.actions.menu_command",
+        ] {
+            let status: String = host
+                .lua
+                .load(format!("return assert(eqoa.capabilities.get('{not_yet}')).status"))
+                .eval()
+                .unwrap();
+            assert_eq!(status, "not_yet", "{not_yet} must be not_yet");
+        }
+        reset_all_for_test();
+    }
 }
