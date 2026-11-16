@@ -295,7 +295,7 @@ PR and may stay in Enhanced only.
 **Owner decisions 2026-11-16 (round 6 start):** a mod action runs only inside the handling of the
 player's own gesture (its mod key, a press in its claimed pointer area, or its ImGui button clicked),
 one game action per gesture; other calls get a visible `needs_player_action` diagnostic. Batches ("sell
-all junk") come after the PR. Continuous controls (`move`, `look`, held `buttons`) also come after the
+all junk"): see Part C below. Continuous controls (`move`, `look`, held `buttons`) also come after the
 PR; autorun/follow/stop stay (one-press toggles). Two parts, each tested by the owner: **A** reads
 (quests, mastery, camera, windows and dialogs, class/disposition icons, remaining Forge reads); **B**
 click-driven actions and one example mod (5-line spec approved first). Part A is a trial of Gemini 4
@@ -304,6 +304,11 @@ Part B's example mod (owner-approved 2026-11-16): `eqoa_bag_viewer` gains click 
 Use, Equip/Unequip, Quick slot; Sell 1/stack at a merchant; Deposit/Withdraw at the bank; Take/Take all
 at a corpse; refused choices greyed with the game's reason; result line under the grid; still off by
 default). `actions.destroy` stays unsupported until after the PR.
+**Owner 2026-11-16 (later):** click-started batches come before the PR after all, as **Part C** after Part B:
+one click may run a short queue (one action at a time, each waiting for the server, stopping on error,
+zoning or window close); bag viewer gains Mark as junk, Sell junk, Take all but junk. Event-triggered
+automation (auto-sell, auto-loot) and continuous controls stay after the PR. Whether batches go into the
+upstream PR or stay Enhanced-only is decided at round 8.
 
 Quest log and quest objects, camera, windows/dialogs (busy state), Class Mastery values not already
 done, class and disposition icons, the remaining ImGui pieces, and the full actions API from the

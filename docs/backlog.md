@@ -291,7 +291,7 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
 ## After the PR: batch actions and continuous controls (owner, 2026-11-16)
 
 - **Status:** Deferred until after the round 8 PR (round 6 decision; see the plan's round 6 section).
-- **Wanted:** one click running a short batch, for example "sell all grey/junk items"; mod-held movement,
+- **Wanted:** (batches moved into round 6 Part C, owner 2026-11-16) mod-held movement,
   look and controller buttons (`move`, `look`, `buttons`); then autonomous automation (may stay
   Enhanced-only).
 - **Note:** round 6 gives one game action per player gesture; these build on its action broker.
