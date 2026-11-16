@@ -1622,6 +1622,34 @@ impl Play {
         let _ = self.npcw_opcode(0x001A, &[]);
         super::super::end_game_event(self, cap);
     }
+    pub(crate) fn bags_loot_confirm_one(&mut self, slot: u8, added: Option<&serde_json::Value>) {
+        let mut w = Writer::default();
+        w.u8(slot).u8(2);
+        let data = w.data.clone();
+        let ev = opcode(0x0019, w.data);
+        let cap = super::super::begin_game_event(self, &ev);
+        let _ = self.npcw_opcode(0x0019, &data);
+        super::super::end_game_event(self, cap);
+        if let Some(item) = added {
+            apply(self, Event::InvAdd(Box::new(Spec::from_json(item).net())));
+        }
+    }
+    pub(crate) fn bags_fill_inventory_to(&mut self, target_len: usize) {
+        let mut next_key = 9000u32;
+        while self.dump.inventory.items.len() < target_len {
+            next_key += 1;
+            let spec = Spec::from_json(&serde_json::json!({
+                "name": format!("Filler {next_key}"),
+                "id": 910000 + next_key,
+                "key": next_key,
+                "wear": 1,
+                "max_stack": 1,
+            }));
+            self.dump.inventory.items.push(spec.net());
+        }
+        items::forget();
+        self.forge_snapshot(None);
+    }
 }
 
 #[test]

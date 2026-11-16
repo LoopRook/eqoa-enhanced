@@ -786,6 +786,19 @@ impl Bv {
         );
         text.map(|t| (t, ok))
     }
+    fn action_hit(&self, needle: &str) -> Option<(f64, f64, String)> {
+        let (x, y, label): (Option<f64>, Option<f64>, Option<String>) = self.eval(&format!(
+            "(function()
+                for _, h in ipairs(require('bags').action_hits or {{}}) do
+                    if string.find(h.label, {needle:?}, 1, true) then
+                        return h.x + h.w / 2, h.y + h.h / 2, h.label
+                    end
+                end
+                return nil, nil, nil
+            end)()"
+        ));
+        Some((x?, y?, label?))
+    }
 }
 
 #[test]
@@ -987,6 +1000,235 @@ fn round6b_bag_viewer_merchant_bank_and_corpse_menus_and_captures() {
     let (res, ok) = bv.result_text().unwrap();
     assert_eq!(ok, Some(true), "{res}");
     assert!(res.starts_with("Take all:"), "{res}");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6c_bag_viewer_junk_marks_persist_across_reload_grey_off_by_default_and_no_unclicked_actions() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    let mut world = bv_world();
+    world["pack"][6]["value"] = serde_json::json!(15); // Rat Pelt (misc, grey item)
+    world["pack"][7]["value"] = serde_json::json!(25); // Odd Thing
+    bv.play.bags_set(&world);
+    bv.enable();
+    bv.open();
+
+    // Grey-items rule must be OFF by default and zero actions run without click.
+    assert!(!bv.eval::<bool>("require('bags').sell_grey"));
+    let sends_before = bv.play.bags_sends_lost();
+    bv.frames(4);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_before);
+
+    // Equipped item refuses Mark as junk.
+    let s1 = bv.slot(1);
+    bv.click(s1);
+    bv.frames(2);
+    let (_, _, en_worn, reason_worn, _) = bv.menu_row("Mark as junk").unwrap();
+    assert!(!en_worn);
+    assert!(reason_worn.as_deref().unwrap_or("").contains("equipped"), "{reason_worn:?}");
+    bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
+    bv.frames(1);
+
+    // Click slot 8 (Odd Thing) -> Mark as junk -> shows "Marked ..." and menu flips to Unmark.
+    let s8 = bv.slot(8);
+    bv.click(s8);
+    bv.frames(2);
+    let (mx, my, men, _, _) = bv.menu_row("Mark as junk").unwrap();
+    assert!(men);
+    bv.click((mx, my));
+    bv.frames(2);
+    assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"));
+    assert!(!bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "grey item stays non-junk while grey rule off");
+    bv.click(s8);
+    bv.frames(2);
+    assert!(bv.menu_row("Unmark").is_some(), "menu switches to Unmark once marked");
+    bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
+    bv.frames(1);
+
+    // Toggle "Also sell grey items" ON -> Rat Pelt (grey misc) gains junk badge too.
+    let (gx, gy, glbl) = bv.action_hit("Also sell grey items").unwrap();
+    assert_eq!(glbl, "Also sell grey items");
+    bv.click((gx, gy));
+    let badge_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &badge_tex), bv.win, "r6-junk-badges.png");
+    assert!(bv.eval::<bool>("require('bags').sell_grey == true"));
+    assert!(bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "Rat Pelt matches grey rule when ON");
+
+    // Toggle back OFF before reload test -> disables & re-enables addon -> marks survive reload!
+    let (gx, gy, _) = bv.action_hit("Also sell grey items").unwrap();
+    bv.click((gx, gy));
+    bv.frames(2);
+    assert!(!bv.eval::<bool>("require('bags').sell_grey"));
+
+    bv.manager.queue(Command::Enable(BV.into(), false));
+    bv.frames(2);
+    bv.manager.queue(Command::Enable(BV.into(), true));
+    bv.frames(3);
+    // Give the player a new stack with the same item id 900008 -> mark applies by item type.
+    bv.play.bags_added(&serde_json::json!({"name":"Odd Thing Copy","id":900008,"key":99,"wear":0,"icon":4008}));
+    bv.open();
+    assert!(!bv.eval::<bool>("require('bags').sell_grey"), "grey=false survived reload");
+    assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"), "junk id 900008 survived reload");
+    assert!(bv.eval::<bool>("(function() local ok=true for _,e in ipairs(require('bags').grid.items) do if e.item.id==900008 and not require('bags').is_junk(e.item) then ok=false end end return ok end)()"));
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    let world = serde_json::json!({
+        "pack": [
+            {"name":"Rusty Sword","id":900001,"key":11,"wear":12,"equip":0,"value":100,"icon":4001,"stats":[[0,3]]},
+            {"name":"Rat Pelt","id":900007,"key":17,"qty":2,"max_stack":100,"value":10,"icon":4007},
+            {"name":"Chipped Tooth","id":900010,"key":20,"qty":1,"max_stack":20,"value":20,"icon":4008},
+            {"name":"Torn Cloth","id":900011,"key":21,"qty":1,"max_stack":20,"value":40,"icon":4003},
+            {"name":"Cracked Fang","id":900012,"key":22,"qty":1,"max_stack":20,"value":30,"icon":4004}
+        ],
+        "bank": [],
+        "tunar": 100,
+        "bank_tunar": 0
+    });
+    bv.play.bags_set(&world);
+    bv.enable();
+    bv.open();
+
+    // Mark Chipped Tooth, Torn Cloth, and Cracked Fang as junk (leave Rat Pelt unmarked grey).
+    for slot in [3usize, 4, 5] {
+        let sp = bv.slot(slot);
+        bv.click(sp);
+        bv.frames(2);
+        let (mx, my, en, _, _) = bv.menu_row("Mark as junk").unwrap();
+        assert!(en);
+        bv.click((mx, my));
+        bv.frames(1);
+    }
+
+    // Open merchant: grey OFF -> shows 3 items; turn grey ON -> shows 4 items with native quote.
+    bv.play.bags_open_merchant(44);
+    bv.frames(2);
+    let (_, _, lbl_off) = bv.action_hit("Sell junk (").unwrap();
+    let quote_3: u64 = bv.eval("select(3, require('bags').junk_sell_list())");
+    assert!(lbl_off.starts_with("Sell junk (3 items, "), "{lbl_off}");
+    assert!(quote_3 > 0, "native quote must be positive");
+
+    // Idle frames perform zero sells even with merchant open.
+    let sends_idle = bv.play.bags_sends_lost();
+    bv.frames(4);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends_idle);
+
+    // Enable grey items -> count includes Rat Pelt (4 items) -> capture merchant PNG.
+    let (gx, gy, _) = bv.action_hit("Also sell grey items").unwrap();
+    bv.click((gx, gy));
+    let merch_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &merch_tex), bv.win, "r6-junk-merchant.png");
+    let (bx, by, lbl_on) = bv.action_hit("Sell junk (").unwrap();
+    assert!(lbl_on.starts_with("Sell junk (4 items, "), "{lbl_on}");
+
+    // One click starts ONE batch; only step 1 dispatches while waiting for merchant reply.
+    bv.click((bx, by));
+    bv.frames(1);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert!(bv.play.bags_shop_pending(), "step 1 dispatched");
+    let sends_after_s1 = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(1);
+    assert_eq!(bv.play.bags_sends_lost(), sends_after_s1, "step 2 waits for step 1 server reply");
+
+    // Server confirms step 1 (Rat Pelt at inv slot 1) -> progress shows 1 of 4 -> click Stop!
+    bv.play.bags_sell_confirm(1, 2);
+    bv.frames(2);
+    let (sx, sy, slbl) = bv.action_hit("Stop").unwrap();
+    assert_eq!(slbl, "Stop");
+    bv.click((sx, sy));
+    bv.play.bags_broker_tick();
+    let stopped_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &stopped_tex), bv.win, "r6-junk-stopped.png");
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert_eq!(res, "Sold 1 of 4: stopped");
+
+    // Start batch for remaining 3 junk items, confirm step 1, then close merchant -> stops cleanly!
+    let (bx, by, lbl2) = bv.action_hit("Sell junk (").unwrap();
+    assert!(lbl2.starts_with("Sell junk (3 items, "), "{lbl2}");
+    bv.click((bx, by));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    bv.play.bags_sell_confirm(1, 1);
+    bv.frames(2);
+    bv.play.bags_close_merchant();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert_eq!(res, "Sold 1 of 3: merchant closed");
+
+    // Remaining 2 junk items: start batch, confirm step 1, then zone -> stops cleanly without replay!
+    bv.play.bags_open_merchant(44);
+    bv.frames(2);
+    let (bx, by, lbl3) = bv.action_hit("Sell junk (").unwrap();
+    assert!(lbl3.starts_with("Sell junk (2 items, "), "{lbl3}");
+    bv.click((bx, by));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    bv.play.bags_sell_confirm(1, 1);
+    bv.frames(2);
+    bv.play.bags_zone();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert!(res.starts_with("Sold 1 of 2: zone"), "{res}");
+
+    // Turn grey back OFF for corpse test: Rat Pelt id=2001 will be marked explicitly as junk while Bone Chip & Spider Silk stay non-junk.
+    let (gx, gy, _) = bv.action_hit("Also sell grey items").unwrap();
+    bv.click((gx, gy));
+    bv.frames(1);
+
+    // Corpse open: mark Rat Pelt (id 2001) as junk, switch to Corpse tab, capture r6-junk-corpse.png.
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_corpse(&bv_corpse());
+    bv.play.bags_open_corpse_mode();
+    bv.frames(2);
+    let corpse_tab = bv.tab(7);
+    bv.click(corpse_tab);
+    bv.frames(2);
+    let c1 = bv.slot(1); // Rat Pelt id 2001 on corpse
+    bv.click(c1);
+    bv.frames(2);
+    let (mx, my, en, _, _) = bv.menu_row("Mark as junk").unwrap();
+    assert!(en);
+    bv.click((mx, my));
+    let corpse_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &corpse_tex), bv.win, "r6-junk-corpse.png");
+
+    // Fill inventory to 39/40 before "Take all but junk" -> loots Spider Silk, stops on Bone Chip with "inventory is full"!
+    bv.play.bags_fill_inventory_to(39);
+    bv.frames(2);
+    let (lx, ly, llbl) = bv.action_hit("Take all but junk").unwrap();
+    assert_eq!(llbl, "Take all but junk");
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    bv.play.bags_loot_confirm_one(1, Some(&serde_json::json!({"name":"Spider Silk","id":2002,"key":32,"qty":4,"max_stack":100})));
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert_eq!(res, "Looted 1 of 2: inventory is full");
+    assert!(bv.eval::<bool>("(function() local l=eqoa.loot.get() return l and l.items[1].name=='Rat Pelt' end)()"), "junk Rat Pelt stayed on corpse");
 
     bv.clean();
     super::super::action_broker::reset_all_for_test();

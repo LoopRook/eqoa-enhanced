@@ -5,7 +5,12 @@ local M = {
     open = false, tab = 1, grid = nil, log = {}, scroll = 0, hover = nil,
     builds = 0, draws = 0, rect = nil, menu = nil, result = nil,
     pending_label = nil, last_req = nil,
+    junk_ids = {}, sell_grey = false, junk_loaded = false,
+    batch_id = nil, batch_kind = nil, batch_verb = nil, batch_total = 0,
+    action_hits = {},
 }
+
+local JUNK_FILE = "junk.cfg"
 
 M.COLUMNS, M.MAX_ROWS, M.LOG_MAX = 8, 8, 50
 -- The game's item-page tabs, in its order, with All first and the bank last. A stack is under a tab when the
@@ -135,11 +140,182 @@ local function cannot_reason(it, can)
     return "cannot use item"
 end
 
+function M.load_junk()
+    M.junk_ids = {}
+    M.sell_grey = false
+    if eqoa and eqoa.files and eqoa.files.read then
+        local data = eqoa.files.read(JUNK_FILE)
+        if type(data) == "string" then
+            for line in data:gmatch("[^\r\n]+") do
+                if line == "grey=1" then
+                    M.sell_grey = true
+                elseif line == "grey=0" then
+                    M.sell_grey = false
+                elseif line:match("^%d+$") then
+                    M.junk_ids[line] = true
+                end
+            end
+        end
+    end
+    M.junk_loaded = true
+end
+
+function M.save_junk()
+    if not (eqoa and eqoa.files and eqoa.files.write) then return end
+    local ids = {}
+    for k, v in pairs(M.junk_ids) do
+        if v then ids[#ids + 1] = k end
+    end
+    table.sort(ids)
+    local lines = {M.sell_grey and "grey=1" or "grey=0"}
+    for _, k in ipairs(ids) do lines[#lines + 1] = k end
+    eqoa.files.write(JUNK_FILE, table.concat(lines, "\n") .. "\n")
+end
+
+-- Grey vendor trash: unequipped, non-equippable, non-quickslot misc item without usable/charged role or stats.
+function M.is_grey_item(it)
+    if not it or it.equipped or it.equippable or it.quick_slot ~= nil then return false end
+    local wearable = it.wear_slot ~= nil and it.wear_slot ~= 0 and it.wear_slot ~= 4294967295
+    if wearable then return false end
+    if has_tab(it, "usable") or has_tab(it, "charged") or has_tab(it, "equipment") then return false end
+    if not has_tab(it, "misc") then return false end
+    if (it.charges or 0) > 0 then return false end
+    if it.stats and #it.stats > 0 then return false end
+    return true
+end
+
+function M.is_junk(it)
+    if not it then return false end
+    if M.junk_ids[tostring(it.id)] then return true end
+    if M.sell_grey and M.is_grey_item(it) then return true end
+    return false
+end
+
+function M.set_junk(it, flag)
+    if not it then return end
+    if flag then
+        M.junk_ids[tostring(it.id)] = true
+        M.result = {text = "Marked " .. it.name .. " as junk", ok = true}
+    else
+        M.junk_ids[tostring(it.id)] = nil
+        M.result = {text = "Unmarked " .. it.name, ok = true}
+    end
+    M.save_junk()
+end
+
+function M.toggle_grey()
+    M.sell_grey = not M.sell_grey
+    M.save_junk()
+    M.result = {
+        text = M.sell_grey and "Also sell grey items: ON" or "Also sell grey items: OFF",
+        ok = nil,
+    }
+end
+
+function M.junk_sell_list()
+    local inv = eqoa.inventory.get()
+    if not inv then return {}, 0, 0 end
+    local steps, total_tunar = {}, 0
+    for _, it in ipairs(inv.items) do
+        if not it.equipped and M.is_junk(it) then
+            local qty = it.quantity or 1
+            local q = eqoa.merchant.price(it.ref, "sell", qty)
+            steps[#steps + 1] = {kind = "sell", item = it.ref, count = qty}
+            total_tunar = total_tunar + (q or 0)
+        end
+    end
+    return steps, #steps, total_tunar
+end
+
+function M.loot_non_junk_list()
+    local loot = eqoa.loot.get()
+    if not loot then return {}, 0 end
+    local steps = {}
+    for _, it in ipairs(loot.items) do
+        if not M.is_junk(it) then
+            steps[#steps + 1] = {kind = "loot", item = it.ref, count = it.quantity or 1}
+        end
+    end
+    return steps, #loot.items
+end
+
+function M.start_sell_junk()
+    local steps, count = M.junk_sell_list()
+    if count == 0 then
+        M.result = {text = "No junk items to sell", ok = false}
+        return
+    end
+    local bid, err = eqoa.actions.batch({steps = steps, require_window = "merchant"})
+    if not bid then
+        local msg = err and (err.message or err.code) or "refused"
+        M.result = {text = "Sell junk: " .. msg, ok = false}
+        return
+    end
+    M.batch_id = bid
+    M.batch_kind = "sell"
+    M.batch_verb = "Sold"
+    M.batch_total = count
+    M.result = {text = string.format("Selling junk 0 of %d...", count), ok = nil}
+end
+
+function M.start_loot_non_junk()
+    local steps, total = M.loot_non_junk_list()
+    if total == 0 then
+        M.result = {text = "Corpse has no items", ok = false}
+        return
+    end
+    if #steps == 0 then
+        M.result = {text = "Corpse has only junk items", ok = false}
+        return
+    end
+    local bid, err = eqoa.actions.batch({steps = steps, require_window = "loot"})
+    if not bid then
+        local msg = err and (err.message or err.code) or "refused"
+        M.result = {text = "Take all but junk: " .. msg, ok = false}
+        return
+    end
+    M.batch_id = bid
+    M.batch_kind = "loot"
+    M.batch_verb = "Looted"
+    M.batch_total = #steps
+    M.result = {text = string.format("Looting %d of %d...", 0, #steps), ok = nil}
+end
+
+function M.stop_batch()
+    if not M.batch_id then return end
+    local stopped = eqoa.actions.stop_batch(M.batch_id)
+    if stopped then
+        M.result = {text = "Stopping batch...", ok = nil}
+    end
+end
+
+function M.on_batch_progress(d)
+    if not d or not M.batch_id or d.batch_id ~= M.batch_id then return end
+    local verb = M.batch_kind == "loot" and "Looting" or "Selling junk"
+    M.result = {
+        text = string.format("%s %d of %d...", verb, d.completed or 0, d.total or M.batch_total or 0),
+        ok = nil,
+    }
+end
+
+function M.on_batch_result(d)
+    if not d or not M.batch_id or d.batch_id ~= M.batch_id then return end
+    local verb = M.batch_verb or (M.batch_kind == "loot" and "Looted" or "Sold")
+    local done, total = d.completed or 0, d.total or M.batch_total or 0
+    if d.ok == true then
+        M.result = {text = string.format("%s %d of %d", verb, done, total), ok = true}
+    else
+        local reason = d.reason or d.code or d.state or "stopped"
+        M.result = {text = string.format("%s %d of %d: %s", verb, done, total, reason), ok = false}
+    end
+    M.batch_id = nil
+end
+
 -- Build the click menu for one stack (never includes Destroy; refused entries carry the game's reason).
 function M.build_menu(it, fx, fy)
     local rows = {}
-    local function add(label, enabled, reason, run)
-        rows[#rows + 1] = {label = label, enabled = enabled, reason = reason, run = run}
+    local function add(label, enabled, reason, run, local_only)
+        rows[#rows + 1] = {label = label, enabled = enabled, reason = reason, run = run, local_only = local_only}
     end
     local loot = eqoa.loot.get()
     local bank = eqoa.bank.get()
@@ -228,12 +404,23 @@ function M.build_menu(it, fx, fy)
             end
         end
     end
+    if M.junk_ids[tostring(it.id)] then
+        add("Unmark", true, nil, function() M.set_junk(it, false) end, true)
+    else
+        add("Mark as junk", not it.equipped,
+            it.equipped and "cannot mark an equipped item as junk" or nil,
+            function() M.set_junk(it, true) end, true)
+    end
     M.menu = {title = it.name, ref = it.ref, rows = rows, fx = fx or 8, fy = fy or 46}
     return M.menu
 end
 
 function M.trigger_menu(row)
     if not row then return end
+    if row.local_only and row.enabled and row.run then
+        row.run()
+        return
+    end
     if not row.enabled or not row.run then
         M.result = {text = row.label .. ": " .. (row.reason or "unavailable"), ok = false}
         return

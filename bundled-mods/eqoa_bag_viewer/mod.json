@@ -16,6 +16,8 @@
     "eqoa.items.can_use",
     "eqoa.icons.resource",
     "eqoa.actions.*",
+    "eqoa.files.read",
+    "eqoa.files.write",
     "eqoa.hud.frame",
     "eqoa.input.bind",
     "eqoa.input.claim",
