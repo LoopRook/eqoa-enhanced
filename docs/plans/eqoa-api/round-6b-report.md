@@ -181,3 +181,13 @@ Resolved the remaining contention and reply-correlation findings from [round-6-r
    - `paths`: PASS
    - `player-release`: PASS
    - `release`: PASS
+
+## Fix round 3 (`d3a2873d`)
+
+One never-wrong rule replaces per-frame correlation.
+
+1. **Player activity makes broker results unknown.** `contended_subsystems` (cleared every game step) is now `player_activity`, a per-subsystem flag. The loot, merchant and bank hooks in `fork_ext/play.rs` set it when the native output vector already holds entries the broker did not add, but only while a broker request of that subsystem is staged or in flight. It is cleared only when no such request remains (`prune_player_activity`, after every resolution, `step_tick` and `clear_vm`), never in `begin_iteration`. While set, any reply for that subsystem resolves every sent broker request there as `unknown` ("you used the ... window yourself"), which stops a batch. `clear_frame_contention` is removed. Inventory has no server-reply resolver (its actions complete at dispatch), so it needs no flag use.
+2. **Merchant sell revalidation.** The staged sale is appended only if the stack at its key still holds the count (`npcw.rs` loop condition); otherwise it is refused `stale_handle` and never marked sent. Bank Move and loot/buy have no silent filter beyond the key lookup the hooks already do.
+3. **Tests in real frame order** (`items_tests.rs`, `round6f3_*`): player loot, bank deposit and merchant sale while a broker request is in flight, with a `begin_iteration` between the player's draw and the reply, all resolve `unknown` and the batch stops; a player sale that shrinks the stack below a staged broker sale is refused and nothing is sent.
+   - Negative control: `mark_player_activity` made a no-op and the quantity filter removed -> `python tools/run_gates.py --only round --filter round6f3_ --lock-wait 120`: 0 passed, 4 failed (all four). Restored; focused gate `round6b_ round6c_ round6f3_`: 26 passed, 0 failed.
+4. **Release gates:** `addons` 484 passed; `full` 2344 passed, 0 failed, 30 ignored (30 distinct prerequisite skips); `wasm`, `footprint`, `paths` PASS. In the combined `--release` run `player-release` and `release` failed within seconds with no test output; each passed when rerun alone (`player-release` PASS 46.9 s, `release` PASS 172.5 s).
