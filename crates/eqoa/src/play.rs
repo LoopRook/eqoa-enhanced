@@ -5801,6 +5801,7 @@ impl Play {
         let now = self.session.now();
         let Some(e) = self.entities.slots.iter().flatten().find(|e| e.id == self.target) else { return };
         if e.p18 & 2 != 0 {
+            crate::fork_ext::loot_requested(self.target);
             let mut w = net::stream::Writer::op(0x0015);
             w.u32(self.target);
             self.session.send(&w.data);

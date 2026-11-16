@@ -158,6 +158,12 @@ pub(crate) fn frame_library(
             if crate::fork_ext::addons::native_core::capture_requested() && c.words.is_none() {
                 c.words = _play.words.clone();
             }
+            if c.attack_words.is_empty()
+                && let Some(start) = _play.start.as_ref()
+                && crate::fork_ext::addons::native_core::capture_requested()
+            {
+                c.attack_words = start.attack_words.clone();
+            }
         });
         let current_key = if let Some((vui, _, _)) = &_play.hud {
             AtlasKey::Hud(&vui.textures as *const _ as usize)

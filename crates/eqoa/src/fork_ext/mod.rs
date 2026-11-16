@@ -6,6 +6,8 @@ pub mod addons;
 pub mod app_icon;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bundled;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod loot_source;
 pub mod chat_history;
 pub mod mods;
 pub mod player_stats;
@@ -24,6 +26,12 @@ pub mod report {
 pub mod report_core;
 pub mod telemetry;
 pub mod version;
+
+/// The client asked to loot corpse `id` (0x0015): the loot window's source, when its list arrives.
+pub(crate) fn loot_requested(_id: u32) {
+    #[cfg(not(target_arch = "wasm32"))]
+    loot_source::requested(_id);
+}
 
 /// Returns whether the client is in plain gameplay (mode 0 or manual camera 38
 /// with no dialog, menu, map, editor, or search claiming keyboard input).

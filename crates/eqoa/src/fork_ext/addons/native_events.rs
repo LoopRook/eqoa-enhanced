@@ -95,6 +95,10 @@ const EVENTS: &[&str] = &[
     "entity.removed",
     "group.changed",
     "map.changed",
+    "inventory.changed",
+    "bank.changed",
+    "loot.changed",
+    "merchant.changed",
     "shared.changed",
     "mod.command",
     "guide.lost",
@@ -131,6 +135,10 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("entity.removed", "ref before after changed"),
         ("group.changed", "before after changed"),
         ("map.changed", "before after changed"),
+        ("inventory.changed", "before after changed cause"),
+        ("bank.changed", "before after changed cause"),
+        ("loot.changed", "before after changed cause"),
+        ("merchant.changed", "before after changed cause"),
         ("shared.changed", "mod path"),
         ("mod.command", "from command args"),
         ("guide.lost", "owner world_id entity_id label reason"),
@@ -168,10 +176,6 @@ fn install_event_fields(lua: &mlua::Lua) {
         }
     }
     for (round, names) in [
-        (
-            3,
-            "inventory.changed bank.changed loot.changed merchant.changed",
-        ),
         (
             4,
             "quests.changed camera.changed windows.changed mastery.changed action.result",

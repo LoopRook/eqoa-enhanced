@@ -59,9 +59,56 @@ end
 
 `not_yet` means a scheduled feature has not landed; `unsupported` means an
 excluded feature or unavailable platform backend. Capability support does not
-mean a player, asset or window is currently available. Items and transactions
-arrive in Round 3; map, mastery, camera, dialogs and general actions in Round 4.
-Use the running client's capability list as the implementation inventory.
+mean a player, asset or window is currently available. Items (reading the pack,
+bank, corpse and merchant) are in; buying, selling, looting and moving items are
+actions, which come with the rest of them. Use the running client's capability
+list as the implementation inventory.
+
+## Items
+
+`eqoa.inventory.get()`, `eqoa.bank.get()`, `eqoa.loot.get()` and
+`eqoa.merchant.get()` each return a container: `{kind, revision, open, items,
+capacity, used, remaining, full, money, merchant}`. The pack and the bank are
+always there once you are in a world (the bank's contents arrive with the world,
+not at the banker; `open` says whether its window is up). `loot.get()` and
+`merchant.get()` return `nil, nil` while their window is closed, never a corpse
+or a shop from before. Positions (`item.index`) start at 1 and change as the
+list compacts; keep an `item.ref` to follow a stack: it names the same stack
+after others are taken, and `eqoa.items.get(ref)` answers `stale_handle` once it
+is gone. References are not saved and do not survive zoning.
+
+```lua
+local function show(c)
+    if not c then return end
+    for _, item in ipairs(c.items) do
+        local ok = eqoa.items.can_use(item.ref)  -- class, race, level
+        local label = item.name .. (item.quantity > 1 and (" x" .. item.quantity) or "")
+        if ok and not ok.allowed then label = label .. "  (" .. table.concat(ok.reasons, ", ") .. ")" end
+        eqoa.imgui.Text(label)
+    end
+    eqoa.imgui.Text(tostring(c.used) .. " used, " .. tostring(c.money or 0) .. " tunar")
+end
+
+eqoa.events.on("loot.changed", function(e)
+    -- e.data.cause is "open", "close", "reset" (zoning) or the game's own event
+    -- ("loot_one", "loot_all"); before/after are containers, either may be nil
+    if e.data.cause == "open" then eqoa.log.write("info", "a corpse with " .. e.data.after.used .. " items") end
+end)
+```
+
+`inventory.changed`, `bank.changed`, `loot.changed` and `merchant.changed` fire
+once per change with `{before, after, changed, cause}`. Prices come from the
+game's own rounding: `eqoa.merchant.price(ref, "buy" or "sell", quantity)`.
+`eqoa.items.slots`, `.stats` and `.attack_types` are the item enums by name, and
+`eqoa.gems.get/is_gem/format` look up the crafting gems.
+
+The items example is [the bag viewer](../../bundled-mods/eqoa_bag_viewer/main.lua): a read-only Bags window
+that reads `eqoa.inventory` and `eqoa.bank`, takes its loot log from `loot.changed`, and listens to nothing
+else while it is closed. It is off by default.
+
+While the start menu's item page is up the pack's `view` gives its tab, the stacks under it and the lit row; while a merchant window is up `MerchantState` gives its mode (menu, sell, buy), the option lit in the menu, and its `view` the rows and the lit one. Not given: `MerchantState.button_hint` (asking says so in the Addon Manager). FrontiersForge's `inventory`, `item`,
+`bank`, `loot`, `merchant` and `gems` modules read the same data with their own
+shapes (tab enum 0..3, `bank.GetItems` as `{idx, slot, level, name, amount}`).
 
 Save plain settings through `eqoa.settings.on_save`/`on_load`, or explicit
 `save`/`load`. They use the manager's active addon/profile slot. Settings contain

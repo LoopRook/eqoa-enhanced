@@ -713,12 +713,12 @@ mod tests {
         // 2. Unsupported frontiers_forge.* fails naming unsupported API
         let ff_err = host
             .lua
-            .load("require('frontiers_forge.inventory')")
+            .load("require('frontiers_forge.quest')")
             .exec()
             .unwrap_err()
             .to_string();
         assert!(
-            ff_err.contains("unsupported FrontiersForge API: 'frontiers_forge.inventory'"),
+            ff_err.contains("unsupported FrontiersForge API: 'frontiers_forge.quest'"),
             "got: {ff_err}"
         );
 

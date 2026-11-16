@@ -44,6 +44,7 @@ mod option_buttons;
 pub(crate) mod fonts;
 #[cfg(test)]
 mod gpu_test;
+mod gems;
 pub(crate) mod group;
 pub(crate) mod guides;
 #[cfg(not(target_arch = "wasm32"))]
@@ -56,6 +57,7 @@ mod hud_textures;
 mod icon_tests;
 pub(crate) mod icons;
 pub(crate) mod input;
+mod items_forge;
 mod json_save;
 pub(crate) mod manager;
 pub(crate) mod map_views;
@@ -63,6 +65,7 @@ pub(crate) mod named_profiles;
 pub(crate) mod native;
 pub(crate) mod native_core;
 pub(crate) mod native_events;
+pub(crate) mod native_items;
 mod native_media;
 pub(crate) mod native_projection;
 pub(crate) mod native_settings;

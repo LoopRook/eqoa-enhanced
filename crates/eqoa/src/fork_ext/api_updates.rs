@@ -393,6 +393,7 @@ pub(crate) fn key(play: &Play, walker: Option<&crate::walker::Walker>) -> FrameK
 pub(crate) fn inactive() {
     LIVE.with(|l| l.set(false));
     KEY.with(|k| k.set(None));
+    super::items::forget();
     SNAPSHOT.with(|s| *s.borrow_mut() = None);
     native_core::discard_deferred();
 }
@@ -439,6 +440,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         });
         KEY.with(|k| k.set(Some(key(play, walker))));
         MAP_KEY.with(|k| k.set(None));
+        super::items::note(play);
         dirty();
         return;
     }
@@ -446,6 +448,8 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         native_core::flush_deferred();
         return;
     }
+    native_core::flush_deferred();
+    super::items::refresh(play);
     native_core::flush_deferred();
     CORE.with(|c| c.borrow_mut().flush_player_motion());
     // `eqoa.entities.dots()` reads the view directly rather than a snapshot, and a hover frame

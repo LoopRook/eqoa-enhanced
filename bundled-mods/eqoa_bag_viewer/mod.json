@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_bag_viewer",
+  "name": "EQOA Bag Viewer",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "capabilities": [
+    "eqoa.inventory.get",
+    "eqoa.bank.get",
+    "eqoa.items.can_use",
+    "eqoa.icons.resource",
+    "eqoa.hud.frame",
+    "eqoa.input.bind",
+    "eqoa.input.claim",
+    "eqoa.input.pointer",
+    "eqoa.input.claim_pointer",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}
