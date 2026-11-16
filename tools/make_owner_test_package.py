@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+# Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
+"""Create a self-contained test build package for the owner."""
+import argparse
+import os
+from pathlib import Path
+import re
+import shutil
+import sys
+import tempfile
+import zipfile
+
+# Allow importing build_player_release from tools directory or repo root
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+try:
+    import build_player_release
+except ImportError:
+    from tools import build_player_release
+
+
+class LiveConfigOverlapError(ValueError):
+    """Raised when output folder overlaps the live configuration directory."""
+    pass
+
+
+def resolve_live_config():
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return (Path(appdata) / "eqoa-rs").resolve()
+    return (Path.home() / "AppData" / "Roaming" / "eqoa-rs").resolve()
+
+
+def is_symlink_or_junction(path):
+    p = Path(path)
+    if p.is_symlink():
+        return True
+    try:
+        import stat
+        s = p.lstat()
+        if hasattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT"):
+            if s.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                return True
+    except (OSError, AttributeError):
+        pass
+    return False
+
+
+def format_rem_name(name):
+    if re.match(r"^[A-Za-z]+\d+$", name):
+        return re.sub(r"([A-Za-z]+)(\d+)", r"\1 \2", name)
+    return name
+
+
+def make_package(
+    *,
+    name="Round5",
+    exe=None,
+    channel="enhanced-dev",
+    output_dir=None,
+    root=None,
+    catalog=None,
+    commit=None,
+    version=None,
+    force=False,
+    fresh_config=False,
+    config_source=None,
+):
+    if root is None:
+        root = Path(__file__).resolve().parent.parent
+    root = Path(root).resolve()
+
+    if exe is None:
+        raise ValueError("--exe is required")
+    exe = Path(exe).resolve()
+    if not exe.is_file():
+        raise FileNotFoundError(f"Executable not found: {exe}")
+
+    if output_dir is None:
+        output_dir = Path.home() / "Downloads" / f"EQOA-Enhanced-{name}-Test"
+    output_dir = Path(output_dir).resolve()
+
+    # Safety check: live config overlap
+    live_config = resolve_live_config()
+    try:
+        if (
+            output_dir == live_config
+            or output_dir.is_relative_to(live_config)
+            or live_config.is_relative_to(output_dir)
+        ):
+            raise LiveConfigOverlapError(
+                f"Output directory {output_dir} equals, contains, or is inside live config directory {live_config}"
+            )
+    except AttributeError:
+        # Fallback for Python versions without is_relative_to (Python 3.9+)
+        out_str = str(output_dir).rstrip("\\/")
+        live_str = str(live_config).rstrip("\\/")
+        if (
+            out_str == live_str
+            or out_str.startswith(live_str + os.sep)
+            or live_str.startswith(out_str + os.sep)
+        ):
+            raise LiveConfigOverlapError(
+                f"Output directory {output_dir} equals, contains, or is inside live config directory {live_config}"
+            )
+
+    config_dir = output_dir / "config"
+    play_dir = output_dir / "play"
+
+    # Safety check: junction/symlink on config
+    if config_dir.exists() and is_symlink_or_junction(config_dir):
+        raise LiveConfigOverlapError(
+            f"Config directory {config_dir} is a symlink or junction; refusing to write"
+        )
+
+    if output_dir.exists() and not force:
+        raise ValueError(
+            f"Output directory {output_dir} already exists; use --force to overwrite"
+        )
+
+    # Resolve catalog if not explicitly passed
+    if catalog is None:
+        default_catalog = root / "bundled-mods" / "eqoa_map_search" / "resources" / "map-entities.json"
+        if default_catalog.is_file():
+            catalog = default_catalog
+
+    # Build and stage into a temporary staging folder next to output_dir
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".eqoa-owner-stage-", dir=output_dir.parent) as stage_temp:
+        stage_dir = Path(stage_temp)
+        stage_build = stage_dir / "build_output"
+        stage_play = stage_dir / "play"
+        stage_play.mkdir(parents=True, exist_ok=True)
+
+        result = build_player_release.build_release(
+            root=root,
+            executable=exe,
+            output=stage_build,
+            catalog=catalog,
+            commit=commit,
+            version=version,
+            channel=channel,
+        )
+
+        # Unpack player archive into stage_play
+        if isinstance(result, (str, Path)) and Path(result).is_file() and zipfile.is_zipfile(result):
+            with zipfile.ZipFile(result, "r") as archive:
+                archive.extractall(stage_play)
+        else:
+            extracted = False
+            if stage_build.is_dir():
+                for item in stage_build.iterdir():
+                    if item.is_file() and zipfile.is_zipfile(item):
+                        with zipfile.ZipFile(item, "r") as archive:
+                            archive.extractall(stage_play)
+                        extracted = True
+                        break
+                if not extracted:
+                    for item in stage_build.iterdir():
+                        dest = stage_play / item.name
+                        if item.is_dir():
+                            shutil.copytree(item, dest)
+                        else:
+                            shutil.copy2(item, dest)
+
+        # Find target_exe_name in stage_play
+        target_exe_name = None
+        expected_channel_exe = getattr(build_player_release, "exe_name", lambda ch: "")(channel)
+        if expected_channel_exe and (stage_play / expected_channel_exe).is_file():
+            target_exe_name = expected_channel_exe
+        else:
+            exe_candidates = [
+                f.name for f in stage_play.glob("*.exe")
+                if f.name != "eqoa-enhanced-windows-x86_64.exe"
+            ]
+            if exe_candidates:
+                target_exe_name = exe_candidates[0]
+            else:
+                target_exe_name = expected_channel_exe or "EQOA Enhanced - Nightly.exe"
+
+        rem_label = format_rem_name(name)
+        normal_bat_content = (
+            "@echo off\r\n"
+            f"rem {rem_label} test build: uses the settings copy in .\\config, never updates itself.\r\n"
+            "set EQOA_CONFIG=%~dp0config\r\n"
+            "set EQOA_UPDATE_URL=http://127.0.0.1:9/\r\n"
+            f'start "" /D "%~dp0play" "%~dp0play\\{target_exe_name}"\r\n'
+        )
+
+        fps_bat_content = (
+            "@echo off\r\n"
+            f"rem {rem_label} test build: uses the settings copy in .\\config, never updates itself.\r\n"
+            "set EQOA_CONFIG=%~dp0config\r\n"
+            "set EQOA_UPDATE_URL=http://127.0.0.1:9/\r\n"
+            "set EQOA_PERF=1\r\n"
+            f'start "" /D "%~dp0play" "%~dp0play\\{target_exe_name}"\r\n'
+        )
+
+        stage_bat_normal = stage_dir / f"Play EQOA {name} Test.bat"
+        stage_bat_fps = stage_dir / f"Play EQOA {name} Test (fps log).bat"
+        stage_bat_normal.write_bytes(normal_bat_content.encode("ascii"))
+        stage_bat_fps.write_bytes(fps_bat_content.encode("ascii"))
+
+        # Build succeeded! Now apply to destination output_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Handle config/ directory
+        if config_dir.exists() and force and not fresh_config:
+            # Keep existing config
+            pass
+        else:
+            if config_dir.exists():
+                shutil.rmtree(config_dir)
+
+            if config_source is None:
+                config_source = live_config
+            config_source = Path(config_source)
+
+            if config_source.is_dir():
+                shutil.copytree(config_source, config_dir)
+            else:
+                config_dir.mkdir(parents=True, exist_ok=True)
+
+        # Replace play/
+        if play_dir.exists():
+            shutil.rmtree(play_dir)
+        shutil.copytree(stage_play, play_dir)
+
+        # Replace bats
+        shutil.copy2(stage_bat_normal, output_dir / f"Play EQOA {name} Test.bat")
+        shutil.copy2(stage_bat_fps, output_dir / f"Play EQOA {name} Test (fps log).bat")
+
+    print(f"Created owner test package at: {output_dir}")
+    print(f"  config: {config_dir}")
+    print(f"  play: {play_dir} (executable: {target_exe_name})")
+    print(f"  bats: Play EQOA {name} Test.bat, Play EQOA {name} Test (fps log).bat")
+
+    return output_dir
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--name", default="Round5", help="package name (default: Round5)")
+    parser.add_argument("--exe", type=Path, required=True, help="path to release eqoa.exe")
+    parser.add_argument("--channel", default="enhanced-dev", help="release channel (default: enhanced-dev)")
+    parser.add_argument("--output", type=Path, help="override output package folder")
+    parser.add_argument("--root", type=Path, help="repository root")
+    parser.add_argument("--catalog", type=Path, help="local catalog path for build_player_release")
+    parser.add_argument("--commit", help="commit assertion for build_player_release")
+    parser.add_argument("--version", help="version assertion for build_player_release")
+    parser.add_argument("--force", action="store_true", help="overwrite existing output folder")
+    parser.add_argument("--fresh-config", action="store_true", help="replace config even when --force is used")
+    args = parser.parse_args()
+
+    try:
+        make_package(
+            name=args.name,
+            exe=args.exe,
+            channel=args.channel,
+            output_dir=args.output,
+            root=args.root,
+            catalog=args.catalog,
+            commit=args.commit,
+            version=args.version,
+            force=args.force,
+            fresh_config=args.fresh_config,
+        )
+    except LiveConfigOverlapError as error:
+        parser.exit(2, f"Security error: {error}\n")
+    except (ValueError, FileNotFoundError, OSError) as error:
+        parser.exit(1, f"Error: {error}\n")
+
+
+if __name__ == "__main__":
+    main()
