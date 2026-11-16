@@ -300,6 +300,10 @@ PR; autorun/follow/stop stay (one-press toggles). Two parts, each tested by the 
 (quests, mastery, camera, windows and dialogs, class/disposition icons, remaining Forge reads); **B**
 click-driven actions and one example mod (5-line spec approved first). Part A is a trial of Gemini 4
 Hydrogen as builder, with a checker that reruns its tests.
+Part B's example mod (owner-approved 2026-11-16): `eqoa_bag_viewer` gains click actions (item menu with
+Use, Equip/Unequip, Quick slot; Sell 1/stack at a merchant; Deposit/Withdraw at the bank; Take/Take all
+at a corpse; refused choices greyed with the game's reason; result line under the grid; still off by
+default). `actions.destroy` stays unsupported until after the PR.
 
 Quest log and quest objects, camera, windows/dialogs (busy state), Class Mastery values not already
 done, class and disposition icons, the remaining ImGui pieces, and the full actions API from the
