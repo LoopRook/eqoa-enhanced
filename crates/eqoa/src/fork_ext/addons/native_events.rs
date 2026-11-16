@@ -601,6 +601,41 @@ fn deliver_data(
         }
         return Ok(());
     }
+    let (gesture_vm, gesture_addon) = (
+        shared.borrow().vm,
+        super::native::session(lua).borrow().addon.clone(),
+    );
+    // One gesture scope per physical event across all subscribers of this VM.
+    let _gesture = if matches!(e.name.as_str(), "render" | "settings.render") {
+        Some(super::gesture::enter_render_scope(gesture_vm, &gesture_addon))
+    } else if e.name == "pointer.pressed"
+        && e.data["inside_window"] == true
+        && e.data["synthetic"] != true
+    {
+        let x = e.data["x"].as_f64().unwrap_or(f64::NAN);
+        let y = e.data["y"].as_f64().unwrap_or(f64::NAN);
+        super::pointer_api::point_in_vm_claim(gesture_vm, x, y).then(|| {
+            super::gesture::enter_gesture(
+                gesture_vm,
+                &gesture_addon,
+                super::gesture::GestureKind::PointerClaim,
+                true,
+            )
+        })
+    } else if e.name == "input.key"
+        && e.data["down"] == true
+        && e.data["repeat"] != true
+        && e.data["synthetic"] != true
+    {
+        Some(super::gesture::enter_gesture(
+            gesture_vm,
+            &gesture_addon,
+            super::gesture::GestureKind::ModKey,
+            false,
+        ))
+    } else {
+        None
+    };
     for t in candidates {
         let call = {
             let mut b = shared.borrow_mut();
@@ -638,29 +673,6 @@ fn deliver_data(
             ready
         };
         drop(timed);
-        let (gesture_vm, gesture_addon) = (
-            shared.borrow().vm,
-            super::native::session(lua).borrow().addon.clone(),
-        );
-        let _gesture = if matches!(e.name.as_str(), "render" | "settings.render") {
-            Some(super::gesture::enter_render_scope(gesture_vm, &gesture_addon))
-        } else if e.name == "pointer.pressed"
-            && e.data["inside_window"] == true
-            && e.data["synthetic"] != true
-        {
-            let x = e.data["x"].as_f64().unwrap_or(f64::NAN);
-            let y = e.data["y"].as_f64().unwrap_or(f64::NAN);
-            super::pointer_api::point_in_vm_claim(gesture_vm, x, y).then(|| {
-                super::gesture::enter_gesture(
-                    gesture_vm,
-                    &gesture_addon,
-                    super::gesture::GestureKind::PointerClaim,
-                    true,
-                )
-            })
-        } else {
-            None
-        };
         let _phase = super::native::phase(lua, &e.name);
         let _drawing =
             super::bridge::drawing(matches!(e.name.as_str(), "render" | "settings.render"));

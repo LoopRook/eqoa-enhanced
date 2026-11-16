@@ -114,18 +114,35 @@ pub(crate) fn arm_imgui_click() {
     });
 }
 
-/// Consumes the single-action allowance from the current gesture scope.
-pub(crate) fn take_single_token(
-    vm: u64,
-    addon_id: &str,
-) -> std::result::Result<GestureToken, (&'static str, String)> {
+/// Arms the current `ModKey` physical-event scope when a Controls bind matches.
+pub(crate) fn arm_mod_key(vm: u64) {
     ACTIVE_GESTURE.with(|slot| {
         let mut slot = slot.borrow_mut();
-        let Some(active) = slot.as_mut() else {
+        if let Some(active) = slot.as_mut()
+            && active.vm == vm
+            && active.kind == GestureKind::ModKey
+            && !active.consumed_single
+            && !active.consumed_batch
+        {
+            active.armed = true;
+        }
+    });
+}
+
+/// Checks whether the current gesture scope authorizes `vm` without consuming yet.
+pub(crate) fn peek_token(
+    vm: u64,
+    addon_id: &str,
+    for_batch: bool,
+) -> std::result::Result<GestureToken, (&'static str, String)> {
+    let kind_label = if for_batch { "starting a batch" } else { "actions" };
+    ACTIVE_GESTURE.with(|slot| {
+        let slot = slot.borrow();
+        let Some(active) = slot.as_ref() else {
             return Err((
                 "needs_player_action",
                 format!(
-                    "{addon_id}: actions require a physical player gesture (Controls key, claimed pointer click, or ImGui click)"
+                    "{addon_id}: {kind_label} require a physical player gesture (Controls key, claimed pointer click, or ImGui click)"
                 ),
             ));
         };
@@ -133,7 +150,7 @@ pub(crate) fn take_single_token(
             return Err((
                 "needs_player_action",
                 format!(
-                    "{addon_id}: actions require an active player click or mod key gesture"
+                    "{addon_id}: {kind_label} require an active player click or mod key gesture"
                 ),
             ));
         }
@@ -145,7 +162,6 @@ pub(crate) fn take_single_token(
                 ),
             ));
         }
-        active.consumed_single = true;
         Ok(GestureToken {
             serial: active.serial,
             vm: active.vm,
@@ -155,45 +171,41 @@ pub(crate) fn take_single_token(
     })
 }
 
+/// Marks the checked token as consumed once the action or batch is accepted.
+pub(crate) fn consume_token(token: &GestureToken, for_batch: bool) {
+    ACTIVE_GESTURE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if let Some(active) = slot.as_mut()
+            && active.serial == token.serial
+            && active.vm == token.vm
+        {
+            if for_batch {
+                active.consumed_batch = true;
+            } else {
+                active.consumed_single = true;
+            }
+        }
+    });
+}
+
+/// Consumes the single-action allowance from the current gesture scope.
+pub(crate) fn take_single_token(
+    vm: u64,
+    addon_id: &str,
+) -> std::result::Result<GestureToken, (&'static str, String)> {
+    let tok = peek_token(vm, addon_id, false)?;
+    consume_token(&tok, false);
+    Ok(tok)
+}
+
 /// Consumes the single-batch allowance from the current gesture scope (Part C).
 pub(crate) fn take_batch_token(
     vm: u64,
     addon_id: &str,
 ) -> std::result::Result<GestureToken, (&'static str, String)> {
-    ACTIVE_GESTURE.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        let Some(active) = slot.as_mut() else {
-            return Err((
-                "needs_player_action",
-                format!(
-                    "{addon_id}: starting a batch requires a physical player gesture"
-                ),
-            ));
-        };
-        if active.vm != vm || !active.armed {
-            return Err((
-                "needs_player_action",
-                format!(
-                    "{addon_id}: starting a batch requires an active player click or mod key gesture"
-                ),
-            ));
-        }
-        if active.consumed_single || active.consumed_batch {
-            return Err((
-                "needs_player_action",
-                format!(
-                    "{addon_id}: only one action or batch may start per player gesture"
-                ),
-            ));
-        }
-        active.consumed_batch = true;
-        Ok(GestureToken {
-            serial: active.serial,
-            vm: active.vm,
-            addon_id: active.addon_id.clone(),
-            kind: active.kind,
-        })
-    })
+    let tok = peek_token(vm, addon_id, true)?;
+    consume_token(&tok, true);
+    Ok(tok)
 }
 
 /// Returns true if `text` routes through `/bug`, `#bug`, `/feature`, `#feature`,

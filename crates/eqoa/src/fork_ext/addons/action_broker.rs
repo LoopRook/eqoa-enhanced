@@ -1819,7 +1819,7 @@ pub(crate) fn enqueue_lua_with(
 ) -> Result<mlua::MultiValue> {
     let vm = super::native_events::bus(lua).borrow().vm;
     let addon = session(lua).borrow().addon.clone();
-    let token = match gesture::take_single_token(vm, &addon) {
+    let token = match gesture::peek_token(vm, &addon, false) {
         Ok(tok) => tok,
         Err((code, msg)) => return error(lua, symbol, code, &msg),
     };
@@ -1827,8 +1827,11 @@ pub(crate) fn enqueue_lua_with(
         Ok(kind) => kind,
         Err((code, msg)) => return error(lua, symbol, code, &msg),
     };
-    match BROKER.with(|b| b.borrow_mut().enqueue(token, kind)) {
-        Ok(req) => lua.pack_multi((lua.create_userdata(req)?, Value::Nil)),
+    match BROKER.with(|b| b.borrow_mut().enqueue(token.clone(), kind)) {
+        Ok(req) => {
+            gesture::consume_token(&token, false);
+            lua.pack_multi((lua.create_userdata(req)?, Value::Nil))
+        }
         Err((code, msg)) => error(lua, symbol, code, &msg),
     }
 }
@@ -2586,7 +2589,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua.create_function(|lua, spec: Value| {
             let vm = super::native_events::bus(lua).borrow().vm;
             let addon = session(lua).borrow().addon.clone();
-            let token = match gesture::take_batch_token(vm, &addon) {
+            let token = match gesture::peek_token(vm, &addon, true) {
                 Ok(tok) => tok,
                 Err((code, msg)) => return error(lua, "eqoa.actions.batch", code, &msg),
             };
@@ -2602,8 +2605,11 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 Ok(parsed) => parsed,
                 Err((code, msg)) => return error(lua, "eqoa.actions.batch", code, &msg),
             };
-            match BROKER.with(|b| b.borrow_mut().enqueue_batch(token, steps, require_window)) {
-                Ok(batch_id) => lua.pack_multi((lua.create_userdata(batch_id)?, Value::Nil)),
+            match BROKER.with(|b| b.borrow_mut().enqueue_batch(token.clone(), steps, require_window)) {
+                Ok(batch_id) => {
+                    gesture::consume_token(&token, true);
+                    lua.pack_multi((lua.create_userdata(batch_id)?, Value::Nil))
+                }
                 Err((code, msg)) => error(lua, "eqoa.actions.batch", code, &msg),
             }
         })?,
@@ -3469,6 +3475,69 @@ mod tests {
         // Outside render scope again -> rejected
         let after = enqueue_raw(vm, "test", ActionKind::Assist).unwrap_err();
         assert_eq!(after.0, "needs_player_action");
+        reset_all_for_test();
+        crate::fork_ext::bindpage::reset_in_memory();
+    }
+
+    #[test]
+    fn round6b_one_gesture_per_physical_event_across_multiple_listeners() {
+        use super::super::native_events;
+        reset_all_for_test();
+        crate::fork_ext::bindpage::reset_in_memory();
+        CORE.with(|c| c.borrow_mut().view.in_world = true);
+
+        let host = Host::new().unwrap();
+        let vm = native_events::bus(&host.lua).borrow().vm;
+        assert_ne!(vm, 0);
+        crate::fork_ext::addons::pointer_api::position([40.0, 40.0], true, (800, 600));
+        host.execute(
+            r#"
+            p_res, k_res, b_res = {}, {}, {}
+            assert(eqoa.input.claim_pointer({ x = 0, y = 0, width = 200, height = 200 }))
+            eqoa.events.on("pointer.pressed", function()
+                local req, err = eqoa.actions.assist()
+                p_res[#p_res + 1] = { ok = req ~= nil, code = err and err.code }
+            end)
+            eqoa.events.on("pointer.pressed", function()
+                local req, err = eqoa.actions.assist()
+                p_res[#p_res + 1] = { ok = req ~= nil, code = err and err.code }
+            end)
+            eqoa.input.bind({ id = "b1", label = "Bind 1", default_key = "h" }, function()
+                local req, err = eqoa.actions.assist()
+                k_res[#k_res + 1] = { ok = req ~= nil, code = err and err.code }
+            end)
+            eqoa.input.bind({ id = "b2", label = "Bind 2", default_key = "h" }, function()
+                local req, err = eqoa.actions.assist()
+                k_res[#k_res + 1] = { ok = req ~= nil, code = err and err.code }
+            end)
+        "#,
+        )
+        .unwrap();
+
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "pointer.pressed",
+                json!({"x":40.0,"y":40.0,"inside_window":true,"button":"left","steps":0}),
+            );
+        });
+        native_events::dispatch(&host).unwrap();
+        host.execute(
+            "assert(#p_res == 2 and p_res[1].ok == true and p_res[2].ok == false and p_res[2].code == 'needs_player_action')",
+        )
+        .unwrap();
+
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                json!({"key":"h","down":true,"repeat":false,"synthetic":false,"text":""}),
+            );
+        });
+        native_events::dispatch(&host).unwrap();
+        host.execute(
+            "assert(#k_res == 2 and k_res[1].ok == true and k_res[2].ok == false and k_res[2].code == 'needs_player_action')",
+        )
+        .unwrap();
+
         reset_all_for_test();
         crate::fork_ext::bindpage::reset_in_memory();
     }

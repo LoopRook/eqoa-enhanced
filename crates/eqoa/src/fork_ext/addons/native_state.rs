@@ -1361,12 +1361,7 @@ fn install_math(lua: &Lua) -> Result<()> {
                             if bound.is_some_and(|bound| {
                                 !bound.is_empty() && key.eq_ignore_ascii_case(&bound)
                             }) {
-                                let _gesture = super::gesture::enter_gesture(
-                                    vm_for_cb,
-                                    &addon_for_cb,
-                                    super::gesture::GestureKind::ModKey,
-                                    true,
-                                );
+                                super::gesture::arm_mod_key(vm_for_cb);
                                 cb.call::<()>(ev)?;
                             }
                         }
