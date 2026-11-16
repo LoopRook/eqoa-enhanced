@@ -638,10 +638,12 @@ pub(super) fn populate_view(
             let (cam, compass) = camera_values(w);
             view.camera = cam;
             view.camera_compass = Some(compass);
+            view.camera_orbit_x = Some(w.cam.cur.orbit.x.0);
         } else {
             LAST_CAMERA.with(|lc| lc.set(None));
             view.camera = Json::Null;
             view.camera_compass = None;
+            view.camera_orbit_x = None;
         }
         let wfp = windows_fingerprint(play, c.generation);
         LAST_WINDOWS.with(|lw| lw.set(Some(wfp)));
@@ -773,6 +775,7 @@ pub(super) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
             CORE.with(|c| {
                 let mut c = c.borrow_mut();
                 c.view.camera_compass = Some(compass);
+                c.view.camera_orbit_x = Some(w.cam.cur.orbit.x.0);
                 let before = std::mem::replace(&mut c.view.camera, cam);
                 if before != c.view.camera {
                     c.camera_changed(before);

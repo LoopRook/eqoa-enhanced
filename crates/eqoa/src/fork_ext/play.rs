@@ -439,6 +439,8 @@ impl Play {
                 crate::fork_ext::addons::player::PlayerLocationSnapshot::default()
             };
 
+            let cm_flags =
+                crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow().mastery_flags);
             crate::fork_ext::addons::player::PlayerSnapshot {
                 name: name_buf,
                 name_len: copy_len as u8,
@@ -480,9 +482,23 @@ impl Play {
                 cold_resist: self.stats.stat.get(25).copied().unwrap_or(0).max(0) as u32,
                 lightning_resist: self.stats.stat.get(26).copied().unwrap_or(0).max(0) as u32,
                 arcane_resist: self.stats.stat.get(27).copied().unwrap_or(0).max(0) as u32,
-                cms: 0,
-                cms_spent: 0,
-                cm_pct: 0,
+                cms: if cm_flags.available_spent {
+                    self.cm.m.x0c.max(0) as u32
+                } else {
+                    0
+                },
+                cms_spent: if cm_flags.available_spent {
+                    self.cm.m.x10.max(0) as u32
+                } else {
+                    0
+                },
+                cm_pct: if cm_flags.share {
+                    self.cm.m.x08.clamp(0, 100) as u32
+                } else {
+                    0
+                },
+                cm_available: cm_flags.available_spent,
+                cm_pct_available: cm_flags.share,
                 position,
                 velocity,
                 heading_rad,

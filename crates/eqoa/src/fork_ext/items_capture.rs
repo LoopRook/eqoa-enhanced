@@ -122,10 +122,13 @@ fn merchant_window(play: &Play, shop: &net::dump::ItemList) -> (Json, Json) {
     };
     let options = [("buy", 63), ("sell", 62), ("exit", 161)];
     let in_menu = mode == 0;
+    let button_hint = crate::fork_ext::addons::native_items::words(161)
+        .map(|label| format!("|t{label}"));
     let state = json!({
         "mode": mode_name,
         "selected_option": in_menu.then(|| options.get(option as usize).map(|o| o.0)).flatten(),
         "options": options.iter().enumerate().map(|(i, (key, word))| json!({"key":key,"label":crate::fork_ext::addons::native_items::words(*word),"selected":in_menu && i as i32 == option})).collect::<Vec<_>>(),
+        "button_hint": button_hint,
     });
     let (list, rows): (&str, &[NetItem]) = match mode {
         1 => ("inventory", &play.dump.inventory.items),

@@ -181,13 +181,107 @@ fn create_base_host() -> Result<BaseHost> {
         lua.create_function(move |_, ()| Ok(state.get().ui_busy))?,
     )?;
     window_mod.set("Mode", ui_mode)?;
+    let state = snapshot.clone();
+    window_mod.set(
+        "IsTextDialogOpen",
+        lua.create_function(move |_, ()| Ok(state.get().ui_mode == 9))?,
+    )?;
+    window_mod.set(
+        "FormatButtonHint",
+        lua.create_function(|_, (button, label): (Value, Option<String>)| {
+            let label = label.unwrap_or_default();
+            let b = match button {
+                Value::String(s) => s.to_str().ok().map(|v| v.to_string()),
+                _ => None,
+            };
+            Ok(b.and_then(|btn| super::native_r6a::format_hint_str(&btn, &label))
+                .unwrap_or(label))
+        })?,
+    )?;
+    window_mod.set(
+        "ParseButtonHint",
+        lua.create_function(|lua, hint: Value| {
+            let Some(text) = hint.as_string().and_then(|s| s.to_str().ok().map(|v| v.to_string()))
+            else {
+                return Ok((Value::Nil, "".to_string()));
+            };
+            if let Some(rest) = text.strip_prefix('|') {
+                if let Some(ch) = rest.chars().next() {
+                    let esc_len = 1 + ch.len_utf8();
+                    let glyph = &text[..esc_len];
+                    let label = text[esc_len..].to_string();
+                    let button = crate::binds::BUTTONS
+                        .iter()
+                        .find(|(_, g)| *g == glyph)
+                        .map(|(n, _)| *n);
+                    if let Some(btn) = button {
+                        return Ok((Value::String(lua.create_string(btn)?), label));
+                    }
+                    return Ok((Value::Nil, label));
+                }
+            }
+            Ok((Value::Nil, text))
+        })?,
+    )?;
     package_loaded.set("frontiers_forge.window", window_mod.clone())?;
+
+    // frontiers_forge.camera — pinned reference camera.lua:6-28
+    let cam_mod = lua.create_table()?;
+    cam_mod.set(
+        "GetCoordinates",
+        lua.create_function(|lua, ()| {
+            let pos = super::native_core::CORE.with(|c| {
+                let c = c.borrow();
+                c.view.camera.get("position").and_then(|p| {
+                    Some((p["x"].as_f64()?, p["y"].as_f64()?, p["z"].as_f64()?))
+                })
+            });
+            let (x, y, z) = pos.unwrap_or((0.0, 0.0, 0.0));
+            let t = lua.create_table()?;
+            t.set("x", x)?;
+            t.set("y", y)?;
+            t.set("z", z)?;
+            Ok(t)
+        })?,
+    )?;
+    cam_mod.set(
+        "GetFacingRadians",
+        lua.create_function(|_, ()| {
+            let rad = super::native_core::CORE.with(|c| c.borrow().view.camera_orbit_x);
+            Ok(rad.map(f64::from))
+        })?,
+    )?;
+    cam_mod.set(
+        "GetFacingDegrees",
+        lua.create_function(|_, ()| {
+            let rad = super::native_core::CORE
+                .with(|c| c.borrow().view.camera_orbit_x)
+                .unwrap_or(0.0);
+            Ok((f64::from(rad).to_degrees()).rem_euclid(360.0))
+        })?,
+    )?;
+    package_loaded.set("frontiers_forge.camera", cam_mod)?;
+
+    let state = snapshot.clone();
+    util.set(
+        "GetCompassRadians",
+        lua.create_function(move |_, ()| {
+            let compass = super::native_core::CORE.with(|c| c.borrow().view.camera_compass);
+            let rad = compass
+                .map(f64::from)
+                .unwrap_or_else(|| (state.get().player.heading_rad as f64).rem_euclid(std::f64::consts::TAU));
+            Ok(rad)
+        })?,
+    )?;
     let state = snapshot.clone();
     util.set(
         "GetCompassDegrees",
         lua.create_function(move |_, ()| {
-            let deg = (state.get().player.heading_rad.to_degrees() as f64).rem_euclid(360.0);
-            Ok(deg)
+            let compass = super::native_core::CORE.with(|c| c.borrow().view.camera_compass);
+            let rad = compass
+                .map(f64::from)
+                .unwrap_or_else(|| state.get().player.heading_rad as f64);
+            Ok(rad.to_degrees().rem_euclid(360.0))
         })?,
     )?;
     util.set(

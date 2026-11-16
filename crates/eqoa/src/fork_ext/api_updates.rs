@@ -387,6 +387,11 @@ pub(crate) fn key(play: &Play, walker: Option<&crate::walker::Walker>) -> FrameK
     let bars = play.hud_bars();
     bars.abilities.hash(&mut h);
     bars.gear.hash(&mut h);
+    for (idx, it) in play.dump.inventory.items.iter().enumerate() {
+        if (0..4).contains(&it.quick_slot) {
+            (idx, it.inv_index, it.quick_slot).hash(&mut h);
+        }
+    }
     v[31] = h.finish();
     FrameKey(v)
 }
@@ -923,7 +928,7 @@ struct Bar {
     kind: &'static str,
     selected: bool,
     selected_slot: Option<i32>,
-    slots: Vec<(crate::hudmenu::Entry, Option<i64>)>,
+    slots: Vec<(crate::hudmenu::Entry, Option<i64>, Option<u32>)>,
 }
 fn hotbars(p: &Play) -> Vec<Bar> {
     let bars = p.hud_bars();
@@ -960,6 +965,14 @@ fn hotbars(p: &Play) -> Vec<Bar> {
                             (e.msg == 0x8060000)
                                 .then(|| p.abilities.get(&e.id).map(|a| a.id))
                                 .flatten(),
+                            (e.msg == 0x2030000)
+                                .then(|| {
+                                    usize::try_from(e.id)
+                                        .ok()
+                                        .and_then(|idx| p.dump.inventory.items.get(idx))
+                                        .map(|it| it.inv_index)
+                                })
+                                .flatten(),
                         )
                     })
                     .collect(),
@@ -968,7 +981,8 @@ fn hotbars(p: &Play) -> Vec<Bar> {
         .collect()
 }
 fn patch_hotbars(c: &mut Core, bars: Vec<Bar>) {
-    let after=bars.into_iter().map(|b|json!({"index":b.index,"kind":b.kind,"selected":b.selected,"selected_slot":b.selected_slot,"slots":b.slots.into_iter().enumerate().map(|(i,(e,id))|{let kind=match e.msg{0=>"empty",0x8060000=>"ability",0x2030000=>"item",crate::gear::MSG=>"weapon_set",_=>"command"};let ability=id.and_then(|id|c.view.abilities.iter().find(|a|a["id"].as_str().is_some_and(|v|v.parse::<i64>().ok()==Some(id)))).map(|a|a["ref"].clone());json!({"index":i+1,"kind":kind,"ability":ability,"item":null,"weapon_set":(kind=="weapon_set").then_some(e.id+1),"command":null,"icon":null,"ui_icon":(e.icon2>=0).then_some(e.icon2)})}).collect::<Vec<_>>()})).collect::<Vec<_>>();
+    let mut after=bars.into_iter().map(|b|json!({"index":b.index,"kind":b.kind,"selected":b.selected,"selected_slot":b.selected_slot,"slots":b.slots.into_iter().enumerate().map(|(i,(e,id,item_key))|{let kind=match e.msg{0=>"empty",0x8060000=>"ability",0x2030000=>"item",crate::gear::MSG=>"weapon_set",_=>"command"};let ability=id.and_then(|id|c.view.abilities.iter().find(|a|a["id"].as_str().is_some_and(|v|v.parse::<i64>().ok()==Some(id)))).map(|a|a["ref"].clone());json!({"index":i+1,"kind":kind,"ability":ability,"item":null,"item_key":item_key,"weapon_set":(kind=="weapon_set").then_some(e.id+1),"command":null,"icon":null,"ui_icon":(e.icon2>=0).then_some(e.icon2)})}).collect::<Vec<_>>()})).collect::<Vec<_>>();
+    c.resolve_hotbar_items(&mut after);
     let before = std::mem::replace(&mut c.view.hotbar, after);
     if interested("hotbar.changed") && before != c.view.hotbar {
         c.emit(

@@ -767,7 +767,7 @@ fn round5_forge_item_modules_follow_the_pinned_shapes() {
         -- the item page is not up
         assert(inventory.IsWindowOpen() == false and inventory.GetOpenTab() == nil and #inventory.GetTabs() == 0 and inventory.GetSelectedSlot() == nil and inventory.GetSelectedItem() == nil and inventory.GetTabList() == nil)
         local c = eqoa.capabilities.get('frontiers_forge.merchant.GetMode'); assert(c.status == 'supported')
-        local c = eqoa.capabilities.get('frontiers_forge.merchant.GetButtonHint'); assert(c.status == 'not_yet')
+        local c = eqoa.capabilities.get('frontiers_forge.merchant.GetButtonHint'); assert(c.status == 'supported')
         -- gems: Get, IsGem and a Format that calls the real Get
         assert(gems.IsGem('Moonstone') == true and gems.IsGem('Rock') == false and gems.IsGem(nil) == nil)
         assert(gems.Get('Moonstone').rarity == 'Common' and gems.Get('Rock') == nil)

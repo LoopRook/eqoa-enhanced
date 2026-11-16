@@ -331,8 +331,16 @@ pub(crate) fn annotate_host(host: &Host) -> Result<()> {
         "frontiers_forge.ui.GetDispositionIconTexture",
         "frontiers_forge.ui.DrawClassIcon",
         "frontiers_forge.ui.DrawDispositionIcon",
+        "frontiers_forge.camera.GetCoordinates",
+        "frontiers_forge.camera.GetFacingRadians",
+        "frontiers_forge.camera.GetFacingDegrees",
+        "frontiers_forge.window.FormatButtonHint",
+        "frontiers_forge.window.ParseButtonHint",
+        "frontiers_forge.window.IsTextDialogOpen",
+        "frontiers_forge.util.GetCompassRadians",
+        "frontiers_forge.merchant.GetButtonHint",
     ] {
-        describe(lua, path, "not_yet", Some(4), "scheduled for round 4");
+        describe(lua, path, "supported", Some(4), "");
     }
     for path in super::items_forge::DEFERRED {
         describe(
@@ -1195,7 +1203,7 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.hotbar.HotbarSlot",
-            "index kind ability weapon_set command icon ui_icon",
+            "index kind ability item weapon_set command icon ui_icon",
         ),
         (
             "eqoa.cooldowns.Cooldown",
@@ -1250,6 +1258,7 @@ fn install_fields(lua: &Lua) {
                 ("eqoa.entities.Entity", "actor_position")
                     | ("eqoa.map.MapState", "search_anchor")
                     | ("eqoa.player.Player", "mastery")
+                    | ("eqoa.hotbar.HotbarSlot", "item")
             ) {
                 Some(4)
             } else if matches!(
@@ -1269,13 +1278,6 @@ fn install_fields(lua: &Lua) {
             );
         }
     }
-    describe(
-        lua,
-        "eqoa.hotbar.HotbarSlot.item",
-        "not_yet",
-        Some(6),
-        "hotbar item slots are not linked to item handles yet",
-    );
 }
 
 pub(crate) fn fatal_memory(error: &mlua::Error) -> bool {

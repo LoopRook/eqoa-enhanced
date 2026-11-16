@@ -1529,6 +1529,100 @@ fn install_native(
             }
         })?,
     )?;
+    bind(
+        lua,
+        "icons",
+        "class",
+        lua.create_function({
+            let cache = cache.clone();
+            let textures = textures.clone();
+            move |lua, class_id: Value| {
+                let Some(id) = super::native_state::uint(&class_id, 14) else {
+                    return error(
+                        lua,
+                        "eqoa.icons.class",
+                        "invalid_argument",
+                        "class_id must be an integer in 0..14",
+                    );
+                };
+                let tex_id = super::visibility::CLASS_ICON_TEX_IDS[id as usize];
+                let result = with_active_provider(|p| {
+                    cache.borrow_mut().get_or_load_ui_texture(tex_id, p)
+                });
+                match result {
+                    Some((id, width, height, token)) => {
+                        let t = lua.create_table()?;
+                        t.set(
+                            "texture",
+                            lua.create_userdata(Handle {
+                                owner: textures.clone(),
+                                id,
+                                token: Some(token),
+                            })?,
+                        )?;
+                        t.set("width", width)?;
+                        t.set("height", height)?;
+                        lua.pack_multi((t, Value::Nil))
+                    }
+                    None => error(
+                        lua,
+                        "eqoa.icons.class",
+                        "not_found",
+                        "class icon is not available in the current art cache",
+                    ),
+                }
+            }
+        })?,
+    )?;
+    bind(
+        lua,
+        "icons",
+        "disposition",
+        lua.create_function({
+            let cache = cache.clone();
+            let textures = textures.clone();
+            move |lua, disposition: Value| {
+                let d = match disposition {
+                    Value::Integer(i) => i,
+                    Value::Number(n) if n.is_finite() && n.fract() == 0.0 => n as i64,
+                    _ => {
+                        return error(
+                            lua,
+                            "eqoa.icons.disposition",
+                            "invalid_argument",
+                            "disposition must be an integer",
+                        );
+                    }
+                };
+                let tex_id = super::visibility::disposition_tex_id(d);
+                let result = with_active_provider(|p| {
+                    cache.borrow_mut().get_or_load_ui_texture(tex_id, p)
+                });
+                match result {
+                    Some((id, width, height, token)) => {
+                        let t = lua.create_table()?;
+                        t.set(
+                            "texture",
+                            lua.create_userdata(Handle {
+                                owner: textures.clone(),
+                                id,
+                                token: Some(token),
+                            })?,
+                        )?;
+                        t.set("width", width)?;
+                        t.set("height", height)?;
+                        lua.pack_multi((t, Value::Nil))
+                    }
+                    None => error(
+                        lua,
+                        "eqoa.icons.disposition",
+                        "not_found",
+                        "disposition icon is not available in the current art cache",
+                    ),
+                }
+            }
+        })?,
+    )?;
     super::native::describe(
         lua,
         "eqoa.icons.IconOptions.trim_color",

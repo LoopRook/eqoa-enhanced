@@ -49,6 +49,7 @@ pub(crate) struct View {
     pub mastery_node: Option<Json>,
     pub camera: Json,
     pub camera_compass: Option<f32>,
+    pub camera_orbit_x: Option<f32>,
     pub windows_state: Json,
     pub channel: &'static str,
 }
@@ -80,6 +81,7 @@ impl Default for View {
             mastery_node: None,
             camera: Json::Null,
             camera_compass: None,
+            camera_orbit_x: None,
             windows_state: none_windows_json(),
             channel: "other",
         }
@@ -468,6 +470,32 @@ impl Core {
         super::guides::update(self);
         self.emit("state.reset", json!({"in_world":false,"initial":false}));
     }
+    pub(crate) fn resolve_hotbar_items(&self, bars: &mut [Json]) {
+        let inv_vers = self.item_versions.get("inventory");
+        for bar in bars {
+            if let Some(slots) = bar["slots"].as_array_mut() {
+                for slot in slots {
+                    if let Some(key) = slot["item_key"].as_u64().map(|k| k as u32) {
+                        slot["item"] = inv_vers
+                            .and_then(|m| m.get(&key))
+                            .map(|ver| {
+                                json!({
+                                    "$ref": "item",
+                                    "key": format!("inventory:{key}"),
+                                    "generation": self.generation,
+                                    "incarnation": ver,
+                                })
+                            })
+                            .unwrap_or(Json::Null);
+                    }
+                    if let Some(obj) = slot.as_object_mut() {
+                        obj.remove("item_key");
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) fn assign_window_refs(&mut self, windows_state: &mut Json) {
         let Some(list) = windows_state["windows"].as_array_mut() else {
             self.window_versions.clear();
@@ -624,6 +652,7 @@ impl Core {
             self.emit("map.changed", json!({"before":self.view.map,"after":view.map,"changed":changed_fields(&before,&after)}));
         }
         let item_changes = self.items_prepare(&mut view, entered);
+        self.resolve_hotbar_items(&mut view.hotbar);
         let previous = std::mem::replace(&mut self.view, view);
         self.items_emit(item_changes);
         super::guides::update(self);

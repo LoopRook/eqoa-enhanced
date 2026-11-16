@@ -54,6 +54,8 @@ pub struct PlayerSnapshot {
     pub cms: u32,
     pub cms_spent: u32,
     pub cm_pct: u32,
+    pub cm_available: bool,
+    pub cm_pct_available: bool,
     pub position: [f32; 3], // x, y, z
     pub velocity: [f32; 3], // vx, vy, vz
     pub heading_rad: f32,
@@ -106,6 +108,8 @@ impl Default for PlayerSnapshot {
             cms: 0,
             cms_spent: 0,
             cm_pct: 0,
+            cm_available: false,
+            cm_pct_available: false,
             position: [0.0; 3],
             velocity: [0.0; 3],
             heading_rad: 0.0,
@@ -477,20 +481,18 @@ pub fn install_player_adapter(host: &Host) -> LuaResult<()> {
         )?;
     }
 
-    // 5. Class Mastery (CM)
+    // 5. Class Mastery (CM) — pinned reference player.lua:148-158
     {
         let s = snapshot_cell.clone();
         player.set(
             "GetCMs",
-            lua.create_function(move |lua, ()| {
-                let _ = &s;
-                super::native::diagnose(
-                    lua,
-                    "frontiers_forge.player.GetCMs",
-                    "not_yet",
-                    "Class Mastery arrives in round 4",
-                );
-                Ok(Value::Nil)
+            lua.create_function(move |_, ()| {
+                let snap = s.get().player;
+                if snap.available && (snap.cm_available || snap.cms != 0 || snap.cms_spent != 0) {
+                    Ok(Value::Integer(snap.cms as i64))
+                } else {
+                    Ok(Value::Nil)
+                }
             })?,
         )?;
     }
@@ -498,15 +500,13 @@ pub fn install_player_adapter(host: &Host) -> LuaResult<()> {
         let s = snapshot_cell.clone();
         player.set(
             "GetCMsSpent",
-            lua.create_function(move |lua, ()| {
-                let _ = &s;
-                super::native::diagnose(
-                    lua,
-                    "frontiers_forge.player.GetCMsSpent",
-                    "not_yet",
-                    "Class Mastery arrives in round 4",
-                );
-                Ok(Value::Nil)
+            lua.create_function(move |_, ()| {
+                let snap = s.get().player;
+                if snap.available && (snap.cm_available || snap.cms != 0 || snap.cms_spent != 0) {
+                    Ok(Value::Integer(snap.cms_spent as i64))
+                } else {
+                    Ok(Value::Nil)
+                }
             })?,
         )?;
     }
@@ -514,15 +514,13 @@ pub fn install_player_adapter(host: &Host) -> LuaResult<()> {
         let s = snapshot_cell.clone();
         player.set(
             "GetCMPct",
-            lua.create_function(move |lua, ()| {
-                let _ = &s;
-                super::native::diagnose(
-                    lua,
-                    "frontiers_forge.player.GetCMPct",
-                    "not_yet",
-                    "Class Mastery arrives in round 4",
-                );
-                Ok(Value::Nil)
+            lua.create_function(move |_, ()| {
+                let snap = s.get().player;
+                if snap.available && (snap.cm_pct_available || snap.cm_pct != 0) {
+                    Ok(Value::Integer(snap.cm_pct as i64))
+                } else {
+                    Ok(Value::Nil)
+                }
             })?,
         )?;
     }
@@ -971,9 +969,9 @@ mod tests {
             assert(P.GetColdResistBuff() == 40)
             assert(P.GetLightningResistBuff() == 45)
             assert(P.GetArcaneResistBuff() == 50)
-            assert(P.GetCMs() == nil)
-            assert(P.GetCMsSpent() == nil)
-            assert(P.GetCMPct() == nil)
+            assert(P.GetCMs() == 15)
+            assert(P.GetCMsSpent() == 10)
+            assert(P.GetCMPct() == 75)
             assert(P.GetEntityId() == 1001)
             assert(P.GetTargetEntityId() == 2002)
             assert(P.GetPetEntityId() == 3003)

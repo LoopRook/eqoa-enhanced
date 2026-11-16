@@ -210,7 +210,10 @@ impl Play {
             let def=&self.hud_menus.defs[k];let menu=&self.hud_menus.menus[k];
             let slots=def.entries.iter().take(def.count.max(0) as usize).enumerate().map(|(i,e)|{
                 let kind=match e.msg {0=>"empty",0x8060000=>"ability",0x2030000=>"item",crate::gear::MSG=>"weapon_set",_=>"command"};
-                json!({"index":i+1,"kind":kind,"ability_id":(kind=="ability").then(||self.abilities.get(&e.id).map(|a|a.id.to_string())).flatten(),"item":null,"weapon_set":(kind=="weapon_set").then_some(e.id+1),"command":null,"icon":null,"ui_icon":(e.icon2>=0).then_some(e.icon2)})
+                let item_key = (kind == "item")
+                    .then(|| usize::try_from(e.id).ok().and_then(|idx| self.dump.inventory.items.get(idx)).map(|it| it.inv_index))
+                    .flatten();
+                json!({"index":i+1,"kind":kind,"ability_id":(kind=="ability").then(||self.abilities.get(&e.id).map(|a|a.id.to_string())).flatten(),"item":null,"item_key":item_key,"weapon_set":(kind=="weapon_set").then_some(e.id+1),"command":null,"icon":null,"ui_icon":(e.icon2>=0).then_some(e.icon2)})
             }).collect::<Vec<_>>();
             json!({"index":index+1,"kind":match k {2=>"items",3=>"weapon_sets",_=>"abilities"},"selected":self.hud_menus.sel==k as i32,"selected_slot":(menu.sel>=0 && menu.sel<def.count).then_some(menu.sel+1),"slots":slots})
         }).collect();
@@ -272,6 +275,7 @@ impl Play {
             mastery_node: None,
             camera: Json::Null,
             camera_compass: None,
+            camera_orbit_x: None,
             windows_state: crate::fork_ext::addons::native_core::none_windows_json(),
             channel: match self.channel {
                 0 => "say",
