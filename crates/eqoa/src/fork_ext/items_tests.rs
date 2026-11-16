@@ -1557,6 +1557,12 @@ impl Play {
     }
     pub(crate) fn bags_broker_tick(&mut self) {
         super::super::begin_iteration(self, true);
+        let (vui, mut r) = (
+            crate::pointer::testing::vui(),
+            crate::pointer::testing::NullRaster,
+        );
+        self.run_npcw(&vui, &mut r);
+        self.run_bank(&vui, &mut r);
     }
     pub(crate) fn bags_open_merchant(&mut self, id: u32) {
         self.npcw.shop = crate::merchant::Shop {
@@ -1705,6 +1711,12 @@ fn round6b_items_use_equip_swap_quick_slot_and_stale_handles() {
         });
         native_events::dispatch(&host).unwrap();
         super::super::begin_iteration(p, true);
+        let (vui, mut r) = (
+            crate::pointer::testing::vui(),
+            crate::pointer::testing::NullRaster,
+        );
+        p.run_npcw(&vui, &mut r);
+        p.run_bank(&vui, &mut r);
         native_events::dispatch(&host).unwrap();
     };
 
@@ -1823,6 +1835,12 @@ fn round6b_merchant_buy_sell_bank_move_bank_money_and_loot() {
         });
         native_events::dispatch(&host).unwrap();
         super::super::begin_iteration(p, true);
+        let (vui, mut r) = (
+            crate::pointer::testing::vui(),
+            crate::pointer::testing::NullRaster,
+        );
+        p.run_npcw(&vui, &mut r);
+        p.run_bank(&vui, &mut r);
         native_events::dispatch(&host).unwrap();
     };
 
@@ -1935,6 +1953,143 @@ fn round6b_merchant_buy_sell_bank_move_bank_money_and_loot() {
     apply_broker(&mut p, opcode(0x0019, vec![0, 0]));
     native_events::dispatch(&host).unwrap();
     host.execute("assert(results[#results].phase == 'server' and results[#results].state == 'completed' and results[#results].ok == true)").unwrap();
+
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}
+
+#[test]
+fn round6b_transactions_route_through_native_consumers_and_camera_hook() {
+    use crate::fork_ext::addons::{action_broker, native_events};
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    p.dump.player.p34 = 500;
+    p.dump.player.p38 = 500;
+    let mut bag_pot = potion();
+    bag_pot.equip_slot = -1;
+    let mut bank_gem = gem();
+    bank_gem.equip_slot = -1;
+    p.dump.inventory = list(&[bag_pot]);
+    p.dump.bank.items = list(&[bank_gem]);
+    p.forge_snapshot(None);
+
+    let host = Host::new().unwrap();
+    host.execute(
+        r#"
+        results = {}
+        eqoa.events.on("action.result", function(e)
+            results[#results + 1] = e.data
+        end)
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+            last_req, last_err = next_fn()
+        end)
+        local inv = assert(eqoa.inventory.get())
+        h_pot = inv.items[1].ref
+        local bnk = assert(eqoa.bank.get())
+        h_gem = bnk.items[1].ref
+    "#,
+    )
+    .unwrap();
+
+    let (vui, mut r) = (
+        crate::pointer::testing::vui(),
+        crate::pointer::testing::NullRaster,
+    );
+    let key_tick = |p: &mut Play, code: &str| {
+        host.execute(code).unwrap();
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+            )
+        });
+        native_events::dispatch(&host).unwrap();
+        super::super::begin_iteration(p, true);
+        native_events::dispatch(&host).unwrap();
+    };
+
+    // Window closed: merchant/bank/corpse actions refuse with window_closed and native loops do not run/open anything.
+    p.mode = 0;
+    let before = p.session.sends_lost;
+    key_tick(&mut p, "next_fn = function() return eqoa.actions.sell(h_pot, 1) end");
+    host.execute("assert(results[#results].ok == false and results[#results].code == 'window_closed')").unwrap();
+    key_tick(&mut p, "next_fn = function() return eqoa.actions.bank_money('deposit', 10) end");
+    host.execute("assert(results[#results].ok == false and results[#results].code == 'window_closed')").unwrap();
+    p.run_npcw(&vui, &mut r);
+    p.run_bank(&vui, &mut r);
+    assert_eq!(p.session.sends_lost, before);
+    assert_eq!(p.mode, 0);
+    assert!(!p.npcw.shop.pending);
+    assert_eq!(p.bank.state, 0);
+
+    // Merchant open: begin_iteration stages without packet or shop.pending; run_npcw native loop sends 0x004B & sets pending.
+    p.npcw.shop = crate::merchant::Shop {
+        id: Some(77),
+        sell_rate: 100,
+        buy_rate: 100,
+        wares: Default::default(),
+        greeting: Vec::new(),
+        pending: false,
+    };
+    p.npcw.merchant.visible = true;
+    p.mode = 10;
+    let before = p.session.sends_lost;
+    key_tick(&mut p, "next_fn = function() return eqoa.actions.sell(h_pot, 1) end");
+    assert_eq!(p.session.sends_lost, before, "begin_iteration alone does not send 0x004B");
+    assert!(!p.npcw.shop.pending, "begin_iteration alone does not write shop.pending");
+    p.run_npcw(&vui, &mut r);
+    assert!(p.session.sends_lost > before, "npcw.rs loop sent the sell packet");
+    assert!(p.npcw.shop.pending, "npcw.rs loop set shop.pending");
+
+    // Bank open: begin_iteration stages without packet or bank.state; run_bank native loop sends 0x1254 & sets state=2.
+    p.mode = 11;
+    p.bank.state = 0;
+    let before_bank = p.session.sends_lost;
+    key_tick(&mut p, "next_fn = function() return eqoa.actions.bank_move(h_gem, 1) end");
+    assert_eq!(p.session.sends_lost, before_bank, "begin_iteration alone does not send 0x1254");
+    assert_eq!(p.bank.state, 0, "begin_iteration alone does not write bank.state");
+    p.run_bank(&vui, &mut r);
+    assert!(p.session.sends_lost > before_bank, "bankplay.rs loop sent bank move");
+    assert_eq!(p.bank.state, 2, "bankplay.rs loop set bank.state");
+
+    // Camera action through apply_camera(play, walker) with native clamps.
+    p.mode = 0;
+    let rec = |kind: u16, children: u32, body: Vec<u8>| {
+        let mut out = Vec::new();
+        out.extend(kind.to_le_bytes());
+        out.extend(1i16.to_le_bytes());
+        out.extend((body.len() as i32).to_le_bytes());
+        out.extend(children.to_le_bytes());
+        out.extend(body);
+        out
+    };
+    let root = rec(0x8000, 1, rec(0x8200, 1, rec(0x8230, 0, vec![0; 8])));
+    let mut lib = esf::Library::new();
+    let file = lib.add("synthetic-cam-world", esf::Container::parse_records(root));
+    let mut world = vi::world::World::load(&lib, file).unwrap();
+    world.leaves.push(0);
+    world.zones.push(Default::default());
+    let mut walker = crate::walker::Walker::arrive(
+        world,
+        crate::walker::Spawn {
+            pos: [0.; 3],
+            heading: 0.,
+            placing: crate::walker::Placing::AsGiven,
+        },
+    );
+    key_tick(
+        &mut p,
+        "next_fn = function() return eqoa.actions.camera({ mode = 3, heading = 1.25, pitch = 9.0, distance = 999.0 }) end",
+    );
+    super::super::apply_camera(&mut p, &mut walker);
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(results[#results].ok == true and results[#results].kind == 'camera')").unwrap();
+    assert_eq!(walker.cam.camera_mode, 3);
+    assert!((walker.cam.cur.orbit.y.0 - walker.cam.walk.max_pitch.0).abs() < 1e-4);
+    assert!((walker.cam.cur.dist.0 - walker.cam.max_orbit_distance.0).abs() < 1e-4);
 
     action_broker::reset_all_for_test();
     crate::fork_ext::bindpage::reset_in_memory();

@@ -21,9 +21,37 @@ struct CachedCycleView {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug)]
+enum PendingNpcwTx {
+    LootOne { key: u32, count: i32 },
+    LootAll,
+    Buy { ware_key: u32, count: i32 },
+    Sell { item_key: u32, count: i32 },
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug)]
+enum PendingBankTx {
+    Move { from_bank: bool, item_key: u32, count: i32 },
+    Money { dir: u8, amount: i32 },
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug)]
+struct PendingCameraReq {
+    mode: Option<i32>,
+    heading: Option<f32>,
+    pitch: Option<f32>,
+    distance: Option<f32>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static CACHED_CYCLE_VIEW: std::cell::Cell<Option<CachedCycleView>> = const { std::cell::Cell::new(None) };
     static LOOT_BUSY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PENDING_NPCW_TX: std::cell::RefCell<Option<PendingNpcwTx>> = const { std::cell::RefCell::new(None) };
+    static PENDING_BANK_TX: std::cell::RefCell<Option<PendingBankTx>> = const { std::cell::RefCell::new(None) };
+    static PENDING_CAMERA: std::cell::Cell<Option<PendingCameraReq>> = const { std::cell::Cell::new(None) };
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -212,6 +240,53 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         crate::fork_ext::addons::action_broker::update_native_snapshot(snapshot);
         crate::fork_ext::addons::native_core::iteration(_game_step);
         if _game_step {
+            if let Some(pending) = PENDING_BANK_TX.with(|b| {
+                if _play.mode != 11 {
+                    b.borrow_mut().take()
+                } else {
+                    None
+                }
+            }) {
+                let kind = match pending {
+                    PendingBankTx::Move { .. } => "bank_move",
+                    PendingBankTx::Money { .. } => "bank_money",
+                };
+                crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
+                    kind,
+                    "bank window is not open",
+                );
+            }
+            if let Some(pending) = PENDING_NPCW_TX.with(|p| {
+                let mut b = p.borrow_mut();
+                match *b {
+                    Some(PendingNpcwTx::LootOne { .. })
+                        if _play.mode != 1 || _play.npcw.corpse.is_none() =>
+                    {
+                        b.take()
+                    }
+                    Some(PendingNpcwTx::LootAll)
+                        if _play.mode != 1 || _play.npcw.corpse.is_none() =>
+                    {
+                        b.take()
+                    }
+                    Some(PendingNpcwTx::Buy { .. } | PendingNpcwTx::Sell { .. })
+                        if _play.mode != 10 || _play.npcw.shop.id.is_none() =>
+                    {
+                        b.take()
+                    }
+                    _ => None,
+                }
+            }) {
+                let (kind, msg) = match pending {
+                    PendingNpcwTx::LootOne { .. } => ("loot", "corpse window is not open"),
+                    PendingNpcwTx::LootAll => ("loot_all", "corpse window is not open"),
+                    PendingNpcwTx::Buy { .. } => ("buy", "merchant window is not open"),
+                    PendingNpcwTx::Sell { .. } => ("sell", "merchant window is not open"),
+                };
+                crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
+                    kind, msg,
+                );
+            }
             let ready = _play.in_world_now();
             let wheel = crate::fork_ext::addons::pointer_api::take_wheel();
             if ready && wheel != 0.0 {
@@ -243,6 +318,10 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                 }
             }
             if !ready {
+                LOOT_BUSY.with(|b| b.set(false));
+                PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                PENDING_BANK_TX.with(|b| *b.borrow_mut() = None);
+                PENDING_CAMERA.with(|c| c.set(None));
                 crate::fork_ext::addons::chat::cancel_outgoing_chat(
                     "world became unavailable before queued chat could be sent",
                 );
@@ -254,6 +333,232 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                 }
             }
         }
+    }
+}
+
+/// Pushes staged broker loot/merchant requests immediately before `npcw.rs`'s native loops.
+pub(crate) fn npcw_requests(
+    _play: &Play,
+    _loot_out: &mut Vec<crate::loot::LootOut>,
+    _merch_out: &mut Vec<crate::merchant::MerchantOut>,
+) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(req) = PENDING_NPCW_TX.with(|p| p.borrow_mut().take()) else {
+            return;
+        };
+        match req {
+            PendingNpcwTx::LootOne { key, count } => {
+                if _play.mode != 1 || _play.npcw.corpse.is_none() {
+                    crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
+                        "loot",
+                        "corpse window is not open",
+                    );
+                    return;
+                }
+                if !_loot_out.is_empty()
+                    || crate::fork_ext::addons::action_broker::is_master_loot_active()
+                {
+                    return;
+                }
+                if _play
+                    .npcw
+                    .corpse
+                    .as_ref()
+                    .is_some_and(|c| c.items.iter().any(|it| it.inv_index == key))
+                {
+                    LOOT_BUSY.with(|b| b.set(true));
+                    _loot_out.push(crate::loot::LootOut::One(key as i32, count));
+                } else {
+                    crate::fork_ext::addons::action_broker::resolve_server_loot_one(
+                        false,
+                        Some("item is no longer on corpse"),
+                    );
+                }
+            }
+            PendingNpcwTx::LootAll => {
+                if _play.mode != 1 || _play.npcw.corpse.is_none() {
+                    crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
+                        "loot_all",
+                        "corpse window is not open",
+                    );
+                    return;
+                }
+                if !_loot_out.is_empty()
+                    || crate::fork_ext::addons::action_broker::is_master_loot_active()
+                {
+                    return;
+                }
+                if _play
+                    .npcw
+                    .corpse
+                    .as_ref()
+                    .is_some_and(|c| !c.items.is_empty())
+                {
+                    LOOT_BUSY.with(|b| b.set(true));
+                    _loot_out.push(crate::loot::LootOut::All);
+                } else {
+                    crate::fork_ext::addons::action_broker::resolve_server_loot_all(
+                        false,
+                        Some("corpse has no items to loot"),
+                    );
+                }
+            }
+            PendingNpcwTx::Buy { ware_key, count } => {
+                if _play.mode != 10 || _play.npcw.shop.id.is_none() {
+                    crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
+                        "buy",
+                        "merchant window is not open",
+                    );
+                    return;
+                }
+                if _play.npcw.shop.pending || !_merch_out.is_empty() {
+                    return;
+                }
+                if let Some(pos) = _play
+                    .npcw
+                    .shop
+                    .wares
+                    .items
+                    .iter()
+                    .position(|it| it.inv_index == ware_key)
+                {
+                    _merch_out.push(crate::merchant::MerchantOut::Buy(pos as i32, count));
+                } else {
+                    crate::fork_ext::addons::action_broker::resolve_server_merchant(
+                        true,
+                        false,
+                        Some("ware is no longer offered by merchant"),
+                    );
+                }
+            }
+            PendingNpcwTx::Sell { item_key, count } => {
+                if _play.mode != 10 || _play.npcw.shop.id.is_none() {
+                    crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
+                        "sell",
+                        "merchant window is not open",
+                    );
+                    return;
+                }
+                if _play.npcw.shop.pending || !_merch_out.is_empty() {
+                    return;
+                }
+                if let Some(slot) = _play
+                    .dump
+                    .inventory
+                    .items
+                    .iter()
+                    .position(|it| it.inv_index == item_key)
+                {
+                    _merch_out.push(crate::merchant::MerchantOut::Sell(slot as i32, count));
+                } else {
+                    crate::fork_ext::addons::action_broker::resolve_server_merchant(
+                        false,
+                        false,
+                        Some("item is no longer in inventory"),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Pushes staged broker bank requests immediately before `bankplay.rs`'s native loop.
+pub(crate) fn bank_requests(_play: &Play, _out: &mut Vec<crate::bank::BankOut>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(req) = PENDING_BANK_TX.with(|b| b.borrow_mut().take()) else {
+            return;
+        };
+        if _play.mode != 11 {
+            let kind = match req {
+                PendingBankTx::Move { .. } => "bank_move",
+                PendingBankTx::Money { .. } => "bank_money",
+            };
+            crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
+                kind,
+                "bank window is not open",
+            );
+            return;
+        }
+        if _play.bank.state != 0 || !_out.is_empty() {
+            return;
+        }
+        match req {
+            PendingBankTx::Move {
+                from_bank,
+                item_key,
+                count,
+            } => {
+                let list = if from_bank {
+                    &_play.dump.bank.items
+                } else {
+                    &_play.dump.inventory
+                };
+                if let Some(slot) = list.items.iter().position(|it| it.inv_index == item_key) {
+                    _out.push(crate::bank::BankOut::Move(
+                        u8::from(from_bank),
+                        slot as i32,
+                        count,
+                    ));
+                } else {
+                    crate::fork_ext::addons::action_broker::resolve_server_bank(
+                        false,
+                        false,
+                        Some("item is no longer in source container"),
+                    );
+                }
+            }
+            PendingBankTx::Money { dir, amount } => {
+                _out.push(crate::bank::BankOut::MoveMoney(dir, amount));
+            }
+        }
+    }
+}
+
+/// Applies a one-shot broker camera request through native WalkCamera/camstyle setters.
+pub(crate) fn apply_camera(_play: &mut Play, _walker: &mut crate::walker::Walker) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(req) = PENDING_CAMERA.with(|c| c.take()) else {
+            return;
+        };
+        if !matches!(_play.mode, 0 | 38) || _play.is_dead() {
+            crate::fork_ext::addons::action_broker::resolve_server_camera(
+                false,
+                Some("camera cannot change in current state"),
+            );
+            return;
+        }
+        if let Some(mode) = req.mode {
+            let rc = _play.race_cams.as_ref().and_then(|t| {
+                crate::camstyle::race_camera(
+                    t,
+                    _play.dump.player.race as i32,
+                    _play.session.expansion & net::session::EXPANSION_FLAGS,
+                )
+            });
+            crate::camstyle::set_style(&mut _walker.cam, mode, rc, &mut _walker.scene);
+        }
+        if let Some(pitch) = req.pitch {
+            let min_p = _walker.cam.walk.min_pitch.0;
+            let max_p = _walker.cam.walk.max_pitch.0;
+            let clamped = pitch.clamp(min_p, max_p);
+            _walker
+                .cam
+                .set_orbit_pitch_angle(vi::fpu::F::<vi::fpu::Ee>::new(clamped));
+        }
+        if let Some(distance) = req.distance {
+            _walker
+                .cam
+                .set_orbit_distance(vi::fpu::F::<vi::fpu::Ee>::new(distance));
+        }
+        if let Some(heading) = req.heading {
+            _walker
+                .cam
+                .set_orbit_angle(vi::fpu::F::<vi::fpu::Ee>::new(heading));
+        }
+        crate::fork_ext::addons::action_broker::resolve_server_camera(true, None);
     }
 }
 pub(crate) fn observe_text(_text: &str, _color: [f32; 4]) {
@@ -1253,7 +1558,7 @@ fn dispatch_broker_action(
         ActionKind::Loot { item, count } => {
             if play.mode != 1 || play.npcw.corpse.is_none() {
                 return DispatchOutcome::Refused {
-                    code: "not_ready",
+                    code: "window_closed",
                     reason: "corpse window is not open".into(),
                 };
             }
@@ -1263,7 +1568,7 @@ fn dispatch_broker_action(
                     reason: "corpse is under master loot rules".into(),
                 };
             }
-            if LOOT_BUSY.with(|b| b.get()) {
+            if LOOT_BUSY.with(|b| b.get()) || PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
                 return DispatchOutcome::Refused {
                     code: "busy",
                     reason: "loot transaction already pending".into(),
@@ -1277,7 +1582,7 @@ fn dispatch_broker_action(
             }
             let Some(corpse) = play.npcw.corpse.as_ref() else {
                 return DispatchOutcome::Refused {
-                    code: "not_ready",
+                    code: "window_closed",
                     reason: "corpse window is not open".into(),
                 };
             };
@@ -1300,10 +1605,12 @@ fn dispatch_broker_action(
                     reason: "inventory is full".into(),
                 };
             }
-            LOOT_BUSY.with(|b| b.set(true));
-            let mut w = net::stream::Writer::op(0x0019);
-            w.u32(it.inv_index).u32(n as u32);
-            play.session.send(&w.data);
+            PENDING_NPCW_TX.with(|p| {
+                *p.borrow_mut() = Some(PendingNpcwTx::LootOne {
+                    key: it.inv_index,
+                    count: n as i32,
+                });
+            });
             DispatchOutcome::AwaitingServer {
                 matcher: ServerMatcher::LootOne { key: it.inv_index },
                 detail: Some(serde_json::json!({"count": n})),
@@ -1312,7 +1619,7 @@ fn dispatch_broker_action(
         ActionKind::LootAll => {
             if play.mode != 1 || play.npcw.corpse.is_none() {
                 return DispatchOutcome::Refused {
-                    code: "not_ready",
+                    code: "window_closed",
                     reason: "corpse window is not open".into(),
                 };
             }
@@ -1322,7 +1629,7 @@ fn dispatch_broker_action(
                     reason: "corpse is under master loot rules".into(),
                 };
             }
-            if LOOT_BUSY.with(|b| b.get()) {
+            if LOOT_BUSY.with(|b| b.get()) || PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
                 return DispatchOutcome::Refused {
                     code: "busy",
                     reason: "loot transaction already pending".into(),
@@ -1330,7 +1637,7 @@ fn dispatch_broker_action(
             }
             let Some(corpse) = play.npcw.corpse.as_ref() else {
                 return DispatchOutcome::Refused {
-                    code: "not_ready",
+                    code: "window_closed",
                     reason: "corpse window is not open".into(),
                 };
             };
@@ -1340,8 +1647,9 @@ fn dispatch_broker_action(
                     reason: "corpse has no items to loot".into(),
                 };
             }
-            LOOT_BUSY.with(|b| b.set(true));
-            play.session.send_opcode(0x001A);
+            PENDING_NPCW_TX.with(|p| {
+                *p.borrow_mut() = Some(PendingNpcwTx::LootAll);
+            });
             DispatchOutcome::AwaitingServer {
                 matcher: ServerMatcher::LootAll,
                 detail: None,
@@ -1350,11 +1658,11 @@ fn dispatch_broker_action(
         ActionKind::Buy { ware, count } => {
             if play.mode != 10 || play.npcw.shop.id.is_none() {
                 return DispatchOutcome::Refused {
-                    code: "not_ready",
+                    code: "window_closed",
                     reason: "merchant window is not open".into(),
                 };
             }
-            if play.npcw.shop.pending {
+            if play.npcw.shop.pending || PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
                 return DispatchOutcome::Refused {
                     code: "busy",
                     reason: "merchant transaction already pending".into(),
@@ -1366,7 +1674,7 @@ fn dispatch_broker_action(
                     reason: "merchant ware handle is stale".into(),
                 };
             }
-            let Some((pos, it)) = play
+            let Some((_, it)) = play
                 .npcw
                 .shop
                 .wares
@@ -1406,12 +1714,12 @@ fn dispatch_broker_action(
                     reason: "inventory is full".into(),
                 };
             }
-            let mut w = net::stream::Writer::op(0x004A);
-            w.signed(pos as i64)
-                .signed(*count)
-                .u32(play.npcw.shop.id.unwrap_or(u32::MAX));
-            play.session.send(&w.data);
-            play.npcw.shop.pending = true;
+            PENDING_NPCW_TX.with(|p| {
+                *p.borrow_mut() = Some(PendingNpcwTx::Buy {
+                    ware_key: it.inv_index,
+                    count: *count as i32,
+                });
+            });
             DispatchOutcome::AwaitingServer {
                 matcher: ServerMatcher::MerchantBuy,
                 detail: Some(serde_json::json!({"count": count, "total_price": total_price})),
@@ -1420,11 +1728,11 @@ fn dispatch_broker_action(
         ActionKind::Sell { item, count } => {
             if play.mode != 10 || play.npcw.shop.id.is_none() {
                 return DispatchOutcome::Refused {
-                    code: "not_ready",
+                    code: "window_closed",
                     reason: "merchant window is not open".into(),
                 };
             }
-            if play.npcw.shop.pending {
+            if play.npcw.shop.pending || PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
                 return DispatchOutcome::Refused {
                     code: "busy",
                     reason: "merchant transaction already pending".into(),
@@ -1462,12 +1770,12 @@ fn dispatch_broker_action(
             }
             let unit_price = crate::merchant::sell_price(it, play.npcw.shop.sell_rate) as i64;
             let total_price = unit_price.saturating_mul(*count);
-            let mut w = net::stream::Writer::op(0x004B);
-            w.u32(it.inv_index)
-                .signed(*count)
-                .u32(play.npcw.shop.id.unwrap_or(u32::MAX));
-            play.session.send(&w.data);
-            play.npcw.shop.pending = true;
+            PENDING_NPCW_TX.with(|p| {
+                *p.borrow_mut() = Some(PendingNpcwTx::Sell {
+                    item_key: it.inv_index,
+                    count: *count as i32,
+                });
+            });
             DispatchOutcome::AwaitingServer {
                 matcher: ServerMatcher::MerchantSell,
                 detail: Some(serde_json::json!({"count": count, "total_price": total_price})),
@@ -1480,11 +1788,11 @@ fn dispatch_broker_action(
         } => {
             if play.mode != 11 {
                 return DispatchOutcome::Refused {
-                    code: "not_ready",
+                    code: "window_closed",
                     reason: "bank window is not open".into(),
                 };
             }
-            if play.bank.state != 0 {
+            if play.bank.state != 0 || PENDING_BANK_TX.with(|b| b.borrow().is_some()) {
                 return DispatchOutcome::Refused {
                     code: "busy",
                     reason: "bank transaction already pending".into(),
@@ -1534,13 +1842,13 @@ fn dispatch_broker_action(
                     },
                 };
             }
-            let mut w = net::stream::Writer::op(0x1254);
-            w.u32(play.target)
-                .u8(u8::from(*from_bank))
-                .u32(it.inv_index)
-                .signed(*count);
-            play.session.send(&w.data);
-            play.bank.state = 2;
+            PENDING_BANK_TX.with(|b| {
+                *b.borrow_mut() = Some(PendingBankTx::Move {
+                    from_bank: *from_bank,
+                    item_key: it.inv_index,
+                    count: *count as i32,
+                });
+            });
             DispatchOutcome::AwaitingServer {
                 matcher: ServerMatcher::BankMove,
                 detail: Some(serde_json::json!({"from_bank": from_bank, "count": count})),
@@ -1549,11 +1857,11 @@ fn dispatch_broker_action(
         ActionKind::BankMoney { dir, amount } => {
             if play.mode != 11 {
                 return DispatchOutcome::Refused {
-                    code: "not_ready",
+                    code: "window_closed",
                     reason: "bank window is not open".into(),
                 };
             }
-            if play.bank.state != 0 {
+            if play.bank.state != 0 || PENDING_BANK_TX.with(|b| b.borrow().is_some()) {
                 return DispatchOutcome::Refused {
                     code: "busy",
                     reason: "bank transaction already pending".into(),
@@ -1571,13 +1879,40 @@ fn dispatch_broker_action(
                     reason: "not enough bank tunar to withdraw".into(),
                 };
             }
-            let mut w = net::stream::Writer::op(0x1255);
-            w.u32(play.target).u8(*dir).signed(*amount);
-            play.session.send(&w.data);
-            play.bank.state = 1;
+            PENDING_BANK_TX.with(|b| {
+                *b.borrow_mut() = Some(PendingBankTx::Money {
+                    dir: *dir,
+                    amount: *amount as i32,
+                });
+            });
             DispatchOutcome::AwaitingServer {
                 matcher: ServerMatcher::BankMoney,
                 detail: Some(serde_json::json!({"dir": if *dir == 1 { "deposit" } else { "withdraw" }, "amount": amount})),
+            }
+        }
+        ActionKind::Camera {
+            mode,
+            heading,
+            pitch,
+            distance,
+        } => {
+            if !matches!(play.mode, 0 | 38) || play.is_dead() {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "camera cannot change in current state".into(),
+                };
+            }
+            PENDING_CAMERA.with(|c| {
+                c.set(Some(PendingCameraReq {
+                    mode: *mode,
+                    heading: *heading,
+                    pitch: *pitch,
+                    distance: *distance,
+                }));
+            });
+            DispatchOutcome::AwaitingServer {
+                matcher: ServerMatcher::Camera,
+                detail: None,
             }
         }
     }

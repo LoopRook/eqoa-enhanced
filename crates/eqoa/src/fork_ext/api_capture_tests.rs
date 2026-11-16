@@ -2146,7 +2146,7 @@ fn round6b_non_item_chat_command_windows_weapon_sets_and_spellbook() {
         r#"
         -- Verify capabilities & non-yet reasons
         local cam = eqoa.capabilities.get("eqoa.actions.camera")
-        assert(cam and cam.status == "not_yet")
+        assert(cam and cam.status == "supported")
         local drop_q = eqoa.capabilities.get("eqoa.actions.drop_quest")
         assert(drop_q and drop_q.status == "not_yet" and drop_q.reason == "arrives with the window/quest read API")
         local dest = eqoa.capabilities.get("eqoa.actions.destroy")

@@ -118,6 +118,7 @@ pub(crate) enum ActionKind {
     Sell { item: ResolvedItemSpec, count: i64 },
     BankMove { from_bank: bool, item: ResolvedItemSpec, count: i64 },
     BankMoney { dir: u8, amount: i64 },
+    Camera { mode: Option<i32>, heading: Option<f32>, pitch: Option<f32>, distance: Option<f32> },
 }
 
 impl ActionKind {
@@ -152,6 +153,7 @@ impl ActionKind {
             Self::Sell { .. } => "sell",
             Self::BankMove { .. } => "bank_move",
             Self::BankMoney { .. } => "bank_money",
+            Self::Camera { .. } => "camera",
         }
     }
 
@@ -182,7 +184,8 @@ impl ActionKind {
             | Self::AssignAbility { .. }
             | Self::UnmemorizeAbility { .. }
             | Self::UnmemorizeAll
-            | Self::ArrangeAbility { .. } => None,
+            | Self::ArrangeAbility { .. }
+            | Self::Camera { .. } => None,
         }
     }
 
@@ -204,6 +207,7 @@ pub(crate) enum ServerMatcher {
     MerchantSell,
     BankMove,
     BankMoney,
+    Camera,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1028,7 +1032,7 @@ impl BrokerState {
                 vm_state.finish_batch(
                     "refused",
                     Some(false),
-                    Some("not_ready"),
+                    Some("window_closed"),
                     Some(win.closed_reason().into()),
                     now_tick,
                     step,
@@ -1618,6 +1622,38 @@ pub(crate) fn resolve_server_bank(is_money: bool, ok: bool, reason: Option<&str>
                     Some("refused"),
                     Some(reason.unwrap_or("bank transaction refused").to_string()),
                 ))
+            }
+        });
+    });
+}
+
+pub(crate) fn resolve_server_camera(ok: bool, reason: Option<&str>) {
+    BROKER.with(|b| {
+        b.borrow_mut().resolve_matching(|inflight| {
+            if !matches!(inflight.matcher, ServerMatcher::Camera) {
+                return None;
+            }
+            if ok {
+                Some((true, None, None))
+            } else {
+                Some((
+                    false,
+                    Some("busy"),
+                    Some(reason.unwrap_or("camera is locked").to_string()),
+                ))
+            }
+        });
+    });
+}
+
+pub(crate) fn resolve_in_flight_window_closed(kind_name: &'static str, reason: &str) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        b.resolve_matching(|inflight| {
+            if inflight.kind == kind_name {
+                Some((false, Some("window_closed"), Some(reason.to_string())))
+            } else {
+                None
             }
         });
     });
@@ -2717,12 +2753,63 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         )?;
     }
 
+    bind(
+        lua,
+        "actions",
+        "camera",
+        lua.create_function(|lua, opts: Option<Value>| {
+            enqueue_lua_with(lua, "eqoa.actions.camera", || {
+                let Some(Value::Table(t)) = opts else {
+                    return Err((
+                        "invalid_argument",
+                        "camera requires an options table with heading, pitch, distance, or mode".into(),
+                    ));
+                };
+                let parse_opt_f32 = |key: &str| -> std::result::Result<Option<f32>, (&'static str, String)> {
+                    match t.get::<Value>(key) {
+                        Ok(Value::Nil) => Ok(None),
+                        Ok(Value::Integer(n)) => Ok(Some(n as f32)),
+                        Ok(Value::Number(n)) if n.is_finite() => Ok(Some(n as f32)),
+                        _ => Err(("invalid_argument", format!("camera.{key} must be a finite number"))),
+                    }
+                };
+                let heading = parse_opt_f32("heading")?;
+                let pitch = parse_opt_f32("pitch")?;
+                let distance = parse_opt_f32("distance")?;
+                if let Some(d) = distance
+                    && d < 0.0
+                {
+                    return Err(("invalid_argument", "camera.distance must be non-negative".into()));
+                }
+                let mode = match t.get::<Value>("mode") {
+                    Ok(Value::Nil) => None,
+                    Ok(Value::Integer(m)) if (0..=3).contains(&m) => Some(m as i32),
+                    Ok(Value::Number(m)) if m.is_finite() && m.fract() == 0.0 && (0.0..=3.0).contains(&m) => {
+                        Some(m as i32)
+                    }
+                    _ => return Err(("invalid_argument", "camera.mode must be 0, 1, 2, or 3".into())),
+                };
+                if mode.is_none() && heading.is_none() && pitch.is_none() && distance.is_none() {
+                    return Err((
+                        "invalid_argument",
+                        "camera requires at least one of heading, pitch, distance, or mode".into(),
+                    ));
+                }
+                Ok(ActionKind::Camera {
+                    mode,
+                    heading,
+                    pitch,
+                    distance,
+                })
+            })
+        })?,
+    )?;
     describe(
         lua,
         "eqoa.actions.camera",
-        "not_yet",
+        "supported",
         Some(4),
-        "requires &mut Walker hook in Play::frame (proposed in round-6b-seams.md)",
+        "native WalkCamera/camstyle setter applied at Play::frame",
     );
 
     install_non_item_actions(lua)?;
@@ -3803,6 +3890,7 @@ mod tests {
             "eqoa.actions.autorun",
             "eqoa.actions.follow",
             "eqoa.actions.stop",
+            "eqoa.actions.camera",
             "eqoa.actions.open_window",
             "eqoa.actions.weapon_set",
             "eqoa.actions.prepare_weapon_set",
@@ -3845,7 +3933,6 @@ mod tests {
             .unwrap();
         assert_eq!(destroy_status, "unsupported");
         for not_yet in [
-            "eqoa.actions.camera",
             "eqoa.actions.move",
             "eqoa.actions.look",
             "eqoa.actions.buttons",
