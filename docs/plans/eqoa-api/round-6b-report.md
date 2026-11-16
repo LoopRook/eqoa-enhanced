@@ -145,3 +145,39 @@ All findings in [round-6-review-bc.md](round-6-review-bc.md) were resolved and v
 
 6. **Documentation / scope correction (`39d9b85f` + this report):**
    - Removed the inaccurate Forge transaction wiring claim (`items_forge.rs` is unchanged vs `develop` `b8d5fbdd`), updated [round-6b-seams.md](round-6b-seams.md), and updated `docs/fork-footprint.json` with exact approved counts (`494` fork-owned, `35` shared, `PASS`).
+
+---
+
+## Fix round 2 (2026-11-16)
+
+Resolved the remaining contention and reply-correlation findings from [round-6-recheck-bc.md](round-6-recheck-bc.md) with zero new upstream lines:
+
+1. **No silent drop on contention + `Staged` / `native_sent` lifecycle (`9e3e7b36`):**
+   - Added `DispatchOutcome::Staged` and `InFlightAction::native_sent` in `crates/eqoa/src/fork_ext/addons/action_broker.rs` so staged consumer transactions (`loot`, `loot_all`, `buy`, `sell`, `bank_move`, `bank_money`, `camera`) remain queued without emitting `"dispatched"` until `mark_deferred_sent` runs upon actual push to `_loot_out`, `_merch_out`, `_out`, or `apply_camera` application.
+   - Refactored `crates/eqoa/src/fork_ext/play.rs::npcw_requests` and `bank_requests` to inspect `PENDING_NPCW_TX` and `PENDING_BANK_TX` before `.take()`ing; when native outputs are non-empty or busy (`shop.pending`, `bank.state != 0`, `LOOT_BUSY`), staged requests stay staged to retry on the next tick, or expire with `"refused"` (`code = "busy"`) if continuously contended past `RATE_LIMIT_WAIT_TICKS` (30 ticks).
+   - Verified targeted gate: `python tools/run_gates.py --only round,wasm,footprint --filter round6b_ round6c_ --lock-wait 120` -> `round` `20 passed, 0 failed`, `wasm` `PASS`, `footprint` `PASS`.
+
+2. **Strict correlation of sent requests & frame contention guard (`79c2f465`):**
+   - Routed all server reply resolvers (`resolve_server_*`, including `resolve_server_d7`) through `resolve_matching_sent` so unsent (`!native_sent`) requests can never match or confirm on any server packet, and flagged frames where native output vectors were already populated (`mark_subsystem_contended` / `clear_frame_contention`) so any reply in a contended frame resolves the sent in-flight action as `"unknown"` (`ok = nil`).
+   - Updated `crates/eqoa/src/fork_ext/play.rs` (`begin_game_event` / `end_game_event`) and `action_broker.rs`:
+     - Bank deposit (`0x1251`) and withdraw (`0x1250`) confirm only when both item identity and moved quantity match (`added_item == Some((item_id, count))`, `withdrawn == Some((key, item_id, count))` and `bank_qty == qty_before - count`), else `"unknown"`.
+     - `LootOne` (`0x0019`) confirms only when corpse stack drops by exact requested count (`after == 0` if `count >= qty_before` else `after == qty_before - count`), else `"unknown"`.
+     - `LootAll` (`0x001A`) captures `corpse_before` and confirms only when `corpse_after != corpse_before` (state changed), else `"unknown"`, stopping active batches.
+   - Updated `round6b_merchant_buy_sell_bank_move_bank_money_and_loot` bank deposit (`0x1251` qty 1) and loot (`0x0019` 5-byte payload, qty 1) test fixtures to match exact requested counts.
+   - Verified targeted gate: `python tools/run_gates.py --only round,wasm,footprint --filter round6b_ round6c_ --lock-wait 120` -> `round` `20 passed, 0 failed`, `wasm` `PASS`, `footprint` `PASS`.
+
+3. **Regression tests & break-and-revert negative controls (`f73d2499`):**
+   - Added `items_tests::round6c_contention_retains_staged_deposit_and_never_confirms_on_player_reply`: verifies player `BankOut::Move` contention retains staged broker deposit, prevents player `0x1251` from confirming it, retries and sends once idle, treats mismatched deposit quantity (`2` vs `1`) as `"unknown"` stopping the batch, resolves `"unknown"` on concurrent native contention against an already-sent request, and refuses cleanly with `code == 'busy'` after `RATE_LIMIT_WAIT_TICKS`.
+     - Negative control: temporarily switched `PENDING_BANK_TX.with(|b| *b.borrow())` to `.take()` before `!_out.is_empty()` in `fork_ext/play.rs::bank_requests` -> `cargo test --locked -p eqoa --bin eqoa -- round6c_contention_retains_staged_deposit_and_never_confirms_on_player_reply --test-threads=1 --nocapture` failed at `crates\eqoa\src\fork_ext\items_tests.rs:2354:5` (`retained staged deposit must send once contention clears`), then reverted.
+   - Added `items_tests::round6c_loot_partial_decrease_and_noop_loot_all_yield_unknown_and_stop_batch`: verifies `LootOne` partial stack decrease (`4 -> 3` for `count = 3`) and no-op `LootAll` (`0x001A` with full pack) both resolve `"unknown"` (`ok == nil`) and stop the batch before step 2 sends.
+     - Negative control: temporarily weakened `resolve_server_loot_one` in `action_broker.rs` back to `after <= qty_before.saturating_sub(count) || after < qty_before` -> `cargo test --locked -p eqoa --bin eqoa -- round6c_loot_partial_decrease_and_noop_loot_all_yield_unknown_and_stop_batch --test-threads=1 --nocapture` failed at `crates\eqoa\src\fork_ext\items_tests.rs:2480:6` (`assertion failed` on `state == 'unknown'`), then reverted.
+   - Re-verified targeted gate after reverting both negative controls: `round` `22 passed, 0 failed`, `wasm` `PASS`, `footprint` `PASS`.
+
+4. **Final release gates (`python tools/run_gates.py --release --lock-wait 120`):**
+   - `addons`: PASS (`484 passed, 0 failed, 25 ignored`; 9 prerequisite skips)
+   - `full`: PASS (`2340 passed, 0 failed, 30 ignored`; 30 distinct prerequisite skips)
+   - `wasm`: PASS
+   - `footprint`: PASS
+   - `paths`: PASS
+   - `player-release`: PASS
+   - `release`: PASS
