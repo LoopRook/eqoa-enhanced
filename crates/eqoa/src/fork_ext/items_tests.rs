@@ -1609,8 +1609,16 @@ impl Play {
         self.bank.state = 0;
     }
     pub(crate) fn bags_bank_withdraw_confirm(&mut self, key: u32, qty: i64) {
+        let slot = self
+            .dump
+            .bank
+            .items
+            .items
+            .iter()
+            .position(|it| it.inv_index == key)
+            .unwrap_or(0) as u8;
         let mut w = Writer::default();
-        w.u32(key).signed(qty);
+        w.u8(slot).signed(qty);
         let ev = opcode(0x1250, w.data);
         let cap = super::super::begin_game_event(self, &ev);
         if let Event::Opcode { op, data } = &ev {
@@ -2090,6 +2098,177 @@ fn round6b_transactions_route_through_native_consumers_and_camera_hook() {
     assert_eq!(walker.cam.camera_mode, 3);
     assert!((walker.cam.cur.orbit.y.0 - walker.cam.walk.max_pitch.0).abs() < 1e-4);
     assert!((walker.cam.cur.dist.0 - walker.cam.max_orbit_distance.0).abs() < 1e-4);
+
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}
+
+#[test]
+fn round6c_no_false_confirmations_unrelated_invadd_or_corpse_close() {
+    use crate::fork_ext::addons::{action_broker, native_events};
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    p.dump.player.p34 = 500;
+    let mut bag1 = potion();
+    bag1.key = 101;
+    bag1.equip_slot = -1;
+    let mut bag2 = gem();
+    bag2.key = 102;
+    bag2.equip_slot = -1;
+    p.dump.inventory = list(&[bag1, bag2]);
+
+    let mut ware = potion();
+    ware.key = 99;
+    ware.value = 10;
+    p.npcw.shop = crate::merchant::Shop {
+        id: Some(88),
+        sell_rate: 100,
+        buy_rate: 100,
+        wares: list(&[ware]),
+        greeting: Vec::new(),
+        pending: false,
+    };
+    p.npcw.merchant.visible = true;
+    p.mode = 10;
+    p.forge_snapshot(None);
+
+    let host = Host::new().unwrap();
+    host.execute(
+        r#"
+        ares, bprog, bres = {}, {}, {}
+        eqoa.events.on("action.result", function(e) ares[#ares + 1] = e.data end)
+        eqoa.events.on("batch.progress", function(e) bprog[#bprog + 1] = e.data end)
+        eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+            last_batch, last_err = eqoa.actions.batch(spec_fn())
+        end)
+        local inv = assert(eqoa.inventory.get())
+        h_s1, h_s2 = inv.items[1].ref, inv.items[2].ref
+        h_ware = assert(eqoa.merchant.get()).items[1].ref
+    "#,
+    )
+    .unwrap();
+
+    let (vui, mut r) = (
+        crate::pointer::testing::vui(),
+        crate::pointer::testing::NullRaster,
+    );
+    let mut tick = |p: &mut Play| {
+        super::super::begin_iteration(p, true);
+        p.run_npcw(&vui, &mut r);
+        p.run_bank(&vui, &mut r);
+        native_events::dispatch(&host).unwrap();
+    };
+    let apply_broker = |p: &mut Play, event: Event| {
+        let capture = super::super::begin_game_event(p, &event);
+        match &event {
+            Event::InvAdd(item) => {
+                let limit = item.item.max_stack;
+                crate::inventory::add_item(&mut p.dump.inventory, item, limit, crate::inventory::pack_cap());
+                p.npcw_item_added();
+            }
+            Event::InvTook { slot, sound, n } => {
+                crate::inventory::took(&mut p.dump.inventory, *slot as usize, *n as i64);
+                p.npcw_item_took(*sound);
+            }
+            Event::Opcode { op, data } => {
+                assert!(
+                    p.bank_opcode(*op, data) || p.npcw_opcode(*op, data),
+                    "opcode {op:#06x}"
+                );
+            }
+            _ => panic!("unexpected event"),
+        }
+        super::super::end_game_event(p, capture);
+    };
+    let press_k = |spec_code: &str| {
+        host.execute(spec_code).unwrap();
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+            )
+        });
+        native_events::dispatch(&host).unwrap();
+    };
+
+    // 1. Sell batch: unrelated InvAdd must NOT confirm or advance.
+    press_k("spec_fn = function() return { steps = { { kind = 'sell', item = h_s1, count = 1 }, { kind = 'sell', item = h_s2, count = 1 } }, require_window = 'merchant' } end");
+    tick(&mut p);
+    assert!(p.npcw.shop.pending);
+    tick(&mut p); // sets saw_pending = true
+    let unrelated = Spec::from_json(&serde_json::json!({"name":"Other","id":77777,"key":77,"qty":1}));
+    apply_broker(&mut p, Event::InvAdd(Box::new(unrelated.net())));
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        "assert(ares[#ares].phase == 'dispatch' and ares[#ares].kind == 'sell'); assert(#bres == 0)",
+    )
+    .unwrap();
+    // On next tick, shop.pending cleared without confirmation -> batch stops as unknown ("merchant did not confirm")!
+    tick(&mut p);
+    host.execute(
+        "assert(#bres == 1 and bres[1].state == 'unknown' and bres[1].ok == nil and bres[1].completed == 0 and bres[1].reason == 'merchant did not confirm')",
+    )
+    .unwrap();
+
+    // 2. Buy batch: unrelated InvAdd (still pending) neither confirms nor advances; real InvAdd(potion) confirms!
+    p.npcw.shop.pending = false;
+    press_k("spec_fn = function() return { steps = { { kind = 'buy', item = h_ware, count = 1 }, { kind = 'buy', item = h_ware, count = 1 } }, require_window = 'merchant' } end");
+    tick(&mut p);
+    assert!(p.npcw.shop.pending);
+    tick(&mut p);
+    // Unrelated InvAdd (wrong item id) while merchant pending stays true -> does not confirm or advance.
+    let cap_u = super::super::begin_game_event(&p, &Event::InvAdd(Box::new(unrelated.net())));
+    crate::inventory::add_item(&mut p.dump.inventory, &unrelated.net(), 1, 40);
+    super::super::end_game_event(&p, cap_u);
+    native_events::dispatch(&host).unwrap();
+    assert!(p.npcw.shop.pending);
+    host.execute("assert(ares[#ares].phase == 'dispatch' and #bres == 1)").unwrap();
+    // Real ware InvAdd clears shop.pending & confirms step 1!
+    apply_broker(&mut p, Event::InvAdd(Box::new(potion().net())));
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(ares[#ares].phase == 'server' and ares[#ares].state == 'completed' and ares[#ares].ok == true)").unwrap();
+    // Cleanly close merchant before step 2 -> resets nicely for corpse test.
+    p.npcw.merchant.visible = false;
+    p.npcw.shop.id = None;
+    p.mode = 0;
+    tick(&mut p);
+
+    // 3. Corpse loot batch: wrong 0x0019 slot/key does NOT confirm step 1; 0x0016 LootClose -> unknown & batch stops!
+    let mut c1 = gem();
+    c1.key = 31;
+    let mut c2 = sword();
+    c2.key = 32;
+    p.npcw.corpse = Some(list(&[c1, c2]));
+    p.mode = 1;
+    p.forge_snapshot(None);
+    host.execute(
+        "local l = assert(eqoa.loot.get()); h_c1, h_c2 = l.items[1].ref, l.items[2].ref",
+    )
+    .unwrap();
+    press_k("spec_fn = function() return { steps = { { kind = 'loot', item = h_c1, count = 1 }, { kind = 'loot', item = h_c2, count = 1 } }, require_window = 'loot' } end");
+    let sends_before_loot = p.session.sends_lost;
+    tick(&mut p); // dispatches step 1 (key 31)
+    assert!(p.session.sends_lost > sends_before_loot);
+    // Inject 0x0019 for slot 1 (key 32) instead of key 31 -> must NOT confirm step 1!
+    apply_broker(&mut p, opcode(0x0019, vec![1, 2]));
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(ares[#ares].phase == 'dispatch' and #bres == 2)").unwrap();
+    // Corpse closes (0x0016) while step 1 is pending -> step 1 resolves unknown and batch stops!
+    let sends_before_close = p.session.sends_lost;
+    apply_broker(&mut p, opcode(0x0016, vec![]));
+    p.npcw.corpse = None;
+    p.mode = 0;
+    native_events::dispatch(&host).unwrap();
+    tick(&mut p);
+    assert_eq!(p.session.sends_lost, sends_before_close, "step 2 must never send after close");
+    host.execute(
+        "assert(ares[#ares].state == 'unknown' and ares[#ares].ok == nil); assert(bres[#bres].state == 'unknown' and bres[#bres].ok == nil and bres[#bres].completed == 0)",
+    )
+    .unwrap();
 
     action_broker::reset_all_for_test();
     crate::fork_ext::bindpage::reset_in_memory();

@@ -61,14 +61,14 @@ pub(crate) enum BrokerReply {
     AbilityClearBar,
     AbilityMoveIndex { from: u8, to: u8 },
     MasterLoot(bool),
-    InvAdd,
+    InvAdd { item_id: i64 },
     InvTook { sound: u8, in_shop: bool },
-    LootOne,
+    LootOne { confirmed_key: Option<u32> },
     LootAll,
     LootClose,
     LootBlocked,
     TxCancel,
-    BankMove,
+    BankMove { is_deposit: bool, added_item_id: Option<i64> },
     BankMoney,
 }
 
@@ -101,20 +101,39 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
                 })
             }
             net::session::Event::MasterLoot(m) => Some(BrokerReply::MasterLoot(m.is_some())),
-            net::session::Event::InvAdd(_) => Some(BrokerReply::InvAdd),
+            net::session::Event::InvAdd(item) => Some(BrokerReply::InvAdd {
+                item_id: item.item.id,
+            }),
             net::session::Event::InvTook { sound, .. } => Some(BrokerReply::InvTook {
                 sound: *sound,
                 in_shop: play.npcw.shop.id.is_some() && *sound != 0,
             }),
-            net::session::Event::Opcode { op: 0x0019, .. } => Some(BrokerReply::LootOne),
+            net::session::Event::Opcode { op: 0x0019, data } => {
+                let confirmed_key = data.first().copied().and_then(|slot| {
+                    play.npcw
+                        .corpse
+                        .as_ref()
+                        .and_then(|c| c.items.get(slot as usize))
+                        .map(|it| it.inv_index)
+                });
+                Some(BrokerReply::LootOne { confirmed_key })
+            }
             net::session::Event::Opcode { op: 0x001A, .. } => Some(BrokerReply::LootAll),
             net::session::Event::Opcode { op: 0x0016, .. } => Some(BrokerReply::LootClose),
             net::session::Event::Opcode { op: 0x0085, .. } => Some(BrokerReply::LootBlocked),
             net::session::Event::Opcode { op: 0x00D7, .. } => Some(BrokerReply::TxCancel),
-            net::session::Event::Opcode {
-                op: 0x1250 | 0x1251,
-                ..
-            } => Some(BrokerReply::BankMove),
+            net::session::Event::Opcode { op: 0x1250, .. } => Some(BrokerReply::BankMove {
+                is_deposit: false,
+                added_item_id: None,
+            }),
+            net::session::Event::Opcode { op: 0x1251, data } => {
+                let mut r = net::stream::Reader::new(data);
+                let item = net::dump::read_net_item(&mut r);
+                Some(BrokerReply::BankMove {
+                    is_deposit: true,
+                    added_item_id: Some(item.item.id),
+                })
+            }
             net::session::Event::Opcode { op: 0x1253, .. } => Some(BrokerReply::BankMoney),
             _ => None,
         }
@@ -143,36 +162,81 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
         Some(BrokerReply::MasterLoot(active)) => {
             crate::fork_ext::addons::action_broker::set_master_loot(active);
         }
-        Some(BrokerReply::InvAdd) => {
-            crate::fork_ext::addons::action_broker::resolve_server_merchant(true, true, None);
+        Some(BrokerReply::InvAdd { item_id }) => {
+            let inv_total: i64 = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .filter(|it| it.item.id == item_id)
+                .map(|it| it.quantity)
+                .sum();
+            crate::fork_ext::addons::action_broker::resolve_server_merchant_buy(
+                item_id,
+                !play.npcw.shop.pending,
+                inv_total,
+            );
         }
         Some(BrokerReply::InvTook { sound, in_shop }) => {
             if in_shop || (play.npcw.shop.id.is_some() && sound != 0) {
-                crate::fork_ext::addons::action_broker::resolve_server_merchant(false, true, None);
+                crate::fork_ext::addons::action_broker::resolve_server_merchant_sell(
+                    !play.npcw.shop.pending,
+                    |key| {
+                        play.dump
+                            .inventory
+                            .items
+                            .iter()
+                            .find(|it| it.inv_index == key)
+                            .map_or(0, |it| it.quantity)
+                    },
+                );
             }
         }
-        Some(BrokerReply::LootOne) => {
+        Some(BrokerReply::LootOne { confirmed_key }) => {
             LOOT_BUSY.with(|b| b.set(false));
-            crate::fork_ext::addons::action_broker::resolve_server_loot_one(true, None);
+            if let Some(key) = confirmed_key {
+                crate::fork_ext::addons::action_broker::resolve_server_loot_one(
+                    Some(key),
+                    Some(true),
+                    None,
+                    |k| {
+                        play.npcw
+                            .corpse
+                            .as_ref()
+                            .and_then(|c| c.items.iter().find(|it| it.inv_index == k))
+                            .map_or(0, |it| it.quantity)
+                    },
+                );
+            }
         }
         Some(BrokerReply::LootAll) => {
             LOOT_BUSY.with(|b| b.set(false));
-            crate::fork_ext::addons::action_broker::resolve_server_loot_all(true, None);
+            crate::fork_ext::addons::action_broker::resolve_server_loot_all(Some(true), None);
         }
         Some(BrokerReply::LootClose) => {
             LOOT_BUSY.with(|b| b.set(false));
             crate::fork_ext::addons::action_broker::set_master_loot(false);
-            crate::fork_ext::addons::action_broker::resolve_server_loot_one(true, None);
-            crate::fork_ext::addons::action_broker::resolve_server_loot_all(true, None);
+            crate::fork_ext::addons::action_broker::resolve_server_loot_one(
+                None,
+                None,
+                Some("corpse closed"),
+                |_| 0,
+            );
+            crate::fork_ext::addons::action_broker::resolve_server_loot_all(
+                None,
+                Some("corpse closed"),
+            );
         }
         Some(BrokerReply::LootBlocked) => {
             LOOT_BUSY.with(|b| b.set(false));
             crate::fork_ext::addons::action_broker::resolve_server_loot_one(
-                false,
+                None,
+                Some(false),
                 Some("loot blocked by server"),
+                |_| 0,
             );
             crate::fork_ext::addons::action_broker::resolve_server_loot_all(
-                false,
+                Some(false),
                 Some("loot blocked by server"),
             );
         }
@@ -180,11 +244,30 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
             LOOT_BUSY.with(|b| b.set(false));
             crate::fork_ext::addons::action_broker::resolve_server_d7();
         }
-        Some(BrokerReply::BankMove) => {
-            crate::fork_ext::addons::action_broker::resolve_server_bank(false, true, None);
+        Some(BrokerReply::BankMove {
+            is_deposit,
+            added_item_id,
+        }) => {
+            crate::fork_ext::addons::action_broker::resolve_server_bank_move(
+                is_deposit,
+                play.bank.state == 0,
+                added_item_id,
+                |key| {
+                    play.dump
+                        .bank
+                        .items
+                        .items
+                        .iter()
+                        .find(|it| it.inv_index == key)
+                        .map_or(0, |it| it.quantity)
+                },
+            );
         }
         Some(BrokerReply::BankMoney) => {
-            crate::fork_ext::addons::action_broker::resolve_server_bank(true, true, None);
+            crate::fork_ext::addons::action_broker::resolve_server_bank_money(
+                play.bank.state == 0,
+                play.dump.player.p38,
+            );
         }
         None => {}
     }
@@ -371,8 +454,10 @@ pub(crate) fn npcw_requests(
                     _loot_out.push(crate::loot::LootOut::One(key as i32, count));
                 } else {
                     crate::fork_ext::addons::action_broker::resolve_server_loot_one(
-                        false,
+                        None,
+                        Some(false),
                         Some("item is no longer on corpse"),
+                        |_| 0,
                     );
                 }
             }
@@ -399,7 +484,7 @@ pub(crate) fn npcw_requests(
                     _loot_out.push(crate::loot::LootOut::All);
                 } else {
                     crate::fork_ext::addons::action_broker::resolve_server_loot_all(
-                        false,
+                        Some(false),
                         Some("corpse has no items to loot"),
                     );
                 }
@@ -1612,7 +1697,11 @@ fn dispatch_broker_action(
                 });
             });
             DispatchOutcome::AwaitingServer {
-                matcher: ServerMatcher::LootOne { key: it.inv_index },
+                matcher: ServerMatcher::LootOne {
+                    key: it.inv_index,
+                    qty_before: it.quantity,
+                    count: n,
+                },
                 detail: Some(serde_json::json!({"count": n})),
             }
         }
@@ -1714,6 +1803,14 @@ fn dispatch_broker_action(
                     reason: "inventory is full".into(),
                 };
             }
+            let qty_before: i64 = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .filter(|inv_it| inv_it.item.id == it.item.id)
+                .map(|inv_it| inv_it.quantity)
+                .sum();
             PENDING_NPCW_TX.with(|p| {
                 *p.borrow_mut() = Some(PendingNpcwTx::Buy {
                     ware_key: it.inv_index,
@@ -1721,7 +1818,11 @@ fn dispatch_broker_action(
                 });
             });
             DispatchOutcome::AwaitingServer {
-                matcher: ServerMatcher::MerchantBuy,
+                matcher: ServerMatcher::MerchantBuy {
+                    item_id: it.item.id,
+                    qty_before,
+                    count: *count,
+                },
                 detail: Some(serde_json::json!({"count": count, "total_price": total_price})),
             }
         }
@@ -1777,7 +1878,11 @@ fn dispatch_broker_action(
                 });
             });
             DispatchOutcome::AwaitingServer {
-                matcher: ServerMatcher::MerchantSell,
+                matcher: ServerMatcher::MerchantSell {
+                    key: it.inv_index,
+                    qty_before: it.quantity,
+                    count: *count,
+                },
                 detail: Some(serde_json::json!({"count": count, "total_price": total_price})),
             }
         }
@@ -1850,7 +1955,13 @@ fn dispatch_broker_action(
                 });
             });
             DispatchOutcome::AwaitingServer {
-                matcher: ServerMatcher::BankMove,
+                matcher: ServerMatcher::BankMove {
+                    from_bank: *from_bank,
+                    key: it.inv_index,
+                    item_id: it.item.id,
+                    qty_before: it.quantity,
+                    count: *count,
+                },
                 detail: Some(serde_json::json!({"from_bank": from_bank, "count": count})),
             }
         }
@@ -1886,7 +1997,11 @@ fn dispatch_broker_action(
                 });
             });
             DispatchOutcome::AwaitingServer {
-                matcher: ServerMatcher::BankMoney,
+                matcher: ServerMatcher::BankMoney {
+                    dir: *dir,
+                    bank_before: play.dump.player.p38,
+                    amount: *amount,
+                },
                 detail: Some(serde_json::json!({"dir": if *dir == 1 { "deposit" } else { "withdraw" }, "amount": amount})),
             }
         }

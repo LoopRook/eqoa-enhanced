@@ -201,12 +201,12 @@ pub(crate) enum ServerMatcher {
     AbilitySlot { slot: u8, index: u8 },
     AbilityClearBar,
     AbilityMoveIndex { from: u8, to: u8 },
-    LootOne { key: u32 },
+    LootOne { key: u32, qty_before: i64, count: i64 },
     LootAll,
-    MerchantBuy,
-    MerchantSell,
-    BankMove,
-    BankMoney,
+    MerchantBuy { item_id: i64, qty_before: i64, count: i64 },
+    MerchantSell { key: u32, qty_before: i64, count: i64 },
+    BankMove { from_bank: bool, key: u32, item_id: i64, qty_before: i64, count: i64 },
+    BankMoney { dir: u8, bank_before: i64, amount: i64 },
     Camera,
 }
 
@@ -292,6 +292,7 @@ struct InFlightAction {
     queued_tick: u64,
     dispatched_tick: u64,
     detail: Option<Json>,
+    saw_pending: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -479,9 +480,14 @@ impl VmBroker {
             } else {
                 "refused"
             };
+            let term_ok = if term_state == "unknown" {
+                None
+            } else {
+                Some(false)
+            };
             self.finish_batch(
                 term_state,
-                Some(false),
+                term_ok,
                 code,
                 reason,
                 now_tick,
@@ -975,34 +981,37 @@ impl BrokerState {
                     );
                 }
             }
-            let closed: Vec<(u64, &'static str)> = vm_state
-                .in_flight
-                .values()
-                .filter_map(|f| match f.matcher {
-                    ServerMatcher::MerchantBuy | ServerMatcher::MerchantSell
-                        if !snapshot.merchant_open =>
-                    {
-                        Some((f.id, "merchant window closed"))
+            // Record observed native pending flags, and fail unconfirmed if pending cleared without reply.
+            let mut unconfirmed: Vec<(u64, &'static str)> = Vec::new();
+            for inflight in vm_state.in_flight.values_mut() {
+                match inflight.matcher {
+                    ServerMatcher::MerchantBuy { .. } | ServerMatcher::MerchantSell { .. } => {
+                        if snapshot.merchant_pending {
+                            inflight.saw_pending = true;
+                        } else if inflight.saw_pending {
+                            unconfirmed.push((inflight.id, "merchant did not confirm"));
+                        }
                     }
-                    ServerMatcher::BankMove | ServerMatcher::BankMoney if !snapshot.bank_open => {
-                        Some((f.id, "bank window closed"))
+                    ServerMatcher::BankMove { .. } | ServerMatcher::BankMoney { .. } => {
+                        if snapshot.bank_busy {
+                            inflight.saw_pending = true;
+                        } else if inflight.saw_pending {
+                            unconfirmed.push((inflight.id, "bank did not confirm"));
+                        }
                     }
-                    ServerMatcher::LootOne { .. } | ServerMatcher::LootAll if !snapshot.loot_open => {
-                        Some((f.id, "corpse window closed"))
-                    }
-                    _ => None,
-                })
-                .collect();
-            for (id, reason) in closed {
+                    _ => {}
+                }
+            }
+            for (id, reason) in unconfirmed {
                 if let Some(inflight) = vm_state.in_flight.remove(&id) {
                     let rec = ActionResultRecord {
                         id: inflight.id,
                         vm: inflight.vm,
                         kind: inflight.kind,
-                        state: "refused",
+                        state: "unknown",
                         phase: "server",
-                        ok: Some(false),
-                        code: Some("refused".into()),
+                        ok: None,
+                        code: Some("unknown".into()),
                         reason: Some(reason.into()),
                         queued_tick: inflight.queued_tick,
                         dispatched_tick: Some(inflight.dispatched_tick),
@@ -1014,9 +1023,59 @@ impl BrokerState {
                     vm_state.handle_batch_step_resolution(
                         id,
                         now_tick,
-                        "refused",
-                        Some(false),
-                        Some("refused"),
+                        "unknown",
+                        None,
+                        Some("unknown"),
+                        Some(reason.into()),
+                    );
+                }
+            }
+            let closed: Vec<(u64, &'static str)> = vm_state
+                .in_flight
+                .values()
+                .filter_map(|f| match f.matcher {
+                    ServerMatcher::MerchantBuy { .. } | ServerMatcher::MerchantSell { .. }
+                        if !snapshot.merchant_open =>
+                    {
+                        Some((f.id, "merchant closed"))
+                    }
+                    ServerMatcher::BankMove { .. } | ServerMatcher::BankMoney { .. }
+                        if !snapshot.bank_open =>
+                    {
+                        Some((f.id, "bank closed"))
+                    }
+                    ServerMatcher::LootOne { .. } | ServerMatcher::LootAll
+                        if !snapshot.loot_open =>
+                    {
+                        Some((f.id, "corpse closed"))
+                    }
+                    _ => None,
+                })
+                .collect();
+            for (id, reason) in closed {
+                if let Some(inflight) = vm_state.in_flight.remove(&id) {
+                    let rec = ActionResultRecord {
+                        id: inflight.id,
+                        vm: inflight.vm,
+                        kind: inflight.kind,
+                        state: "unknown",
+                        phase: "server",
+                        ok: None,
+                        code: Some("unknown".into()),
+                        reason: Some(reason.into()),
+                        queued_tick: inflight.queued_tick,
+                        dispatched_tick: Some(inflight.dispatched_tick),
+                        completed_tick: Some(now_tick),
+                        detail: inflight.detail,
+                    };
+                    vm_state.upsert_retained(rec.clone());
+                    vm_state.pending_events.push_back(rec);
+                    vm_state.handle_batch_step_resolution(
+                        id,
+                        now_tick,
+                        "unknown",
+                        None,
+                        Some("unknown"),
                         Some(reason.into()),
                     );
                 }
@@ -1217,6 +1276,7 @@ impl BrokerState {
                                         queued_tick: popped.queued_tick,
                                         dispatched_tick: now_tick,
                                         detail,
+                                        saw_pending: false,
                                     },
                                 );
                                 per_vm_dispatched.insert(vm_id, vm_sent + 1);
@@ -1363,6 +1423,7 @@ impl BrokerState {
                                         queued_tick: now_tick,
                                         dispatched_tick: now_tick,
                                         detail,
+                                        saw_pending: false,
                                     },
                                 );
                                 if let Some(batch) = vm_state.active_batch.as_mut() {
@@ -1414,11 +1475,11 @@ impl BrokerState {
 
     fn resolve_matching(
         &mut self,
-        matches: impl Fn(&InFlightAction) -> Option<(bool, Option<&'static str>, Option<String>)>,
+        matches: impl Fn(&InFlightAction) -> Option<(Option<bool>, Option<&'static str>, Option<String>)>,
     ) {
         let now_tick = self.tick;
         for vm_state in self.vms.values_mut() {
-            let mut matched: Option<(u64, bool, Option<&'static str>, Option<String>)> = None;
+            let mut matched: Option<(u64, Option<bool>, Option<&'static str>, Option<String>)> = None;
             for inflight in vm_state.in_flight.values() {
                 if let Some((ok, code, reason)) = matches(inflight) {
                     matched = Some((inflight.id, ok, code, reason));
@@ -1427,13 +1488,18 @@ impl BrokerState {
             }
             if let Some((id, ok, code, reason)) = matched {
                 let inflight = vm_state.in_flight.remove(&id).expect("matched inflight");
+                let state = match ok {
+                    Some(true) => "completed",
+                    Some(false) => "refused",
+                    None => "unknown",
+                };
                 let rec = ActionResultRecord {
                     id: inflight.id,
                     vm: inflight.vm,
                     kind: inflight.kind,
-                    state: if ok { "completed" } else { "refused" },
+                    state,
                     phase: "server",
-                    ok: Some(ok),
+                    ok,
                     code: code.map(str::to_string),
                     reason,
                     queued_tick: inflight.queued_tick,
@@ -1492,9 +1558,9 @@ pub(crate) fn resolve_server_assist(target_id: u32) {
                 return None;
             }
             if target_id == u32::MAX {
-                Some((false, Some("refused"), Some("there is no target to assist".into())))
+                Some((Some(false), Some("refused"), Some("there is no target to assist".into())))
             } else {
-                Some((true, None, None))
+                Some((Some(true), None, None))
             }
         });
     });
@@ -1509,7 +1575,7 @@ pub(crate) fn resolve_server_ability_slot(index: u8, slot: u8) {
                 return None;
             };
             if slot == expected_slot || index == expected_index {
-                Some((true, None, None))
+                Some((Some(true), None, None))
             } else {
                 None
             }
@@ -1520,7 +1586,8 @@ pub(crate) fn resolve_server_ability_slot(index: u8, slot: u8) {
 pub(crate) fn resolve_server_ability_clear() {
     BROKER.with(|b| {
         b.borrow_mut().resolve_matching(|inflight| {
-            matches!(inflight.matcher, ServerMatcher::AbilityClearBar).then_some((true, None, None))
+            matches!(inflight.matcher, ServerMatcher::AbilityClearBar)
+                .then_some((Some(true), None, None))
         });
     });
 }
@@ -1533,28 +1600,49 @@ pub(crate) fn is_master_loot_active() -> bool {
     MASTER_LOOT_ACTIVE.with(|m| m.get())
 }
 
-pub(crate) fn resolve_server_loot_one(ok: bool, reason: Option<&str>) {
+pub(crate) fn resolve_server_loot_one(
+    confirmed_key: Option<u32>,
+    ok: Option<bool>,
+    reason: Option<&str>,
+    corpse_qty_of: impl Fn(u32) -> i64,
+) {
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         b.native.loot_busy = false;
         b.resolve_matching(|inflight| {
-            if !matches!(inflight.matcher, ServerMatcher::LootOne { .. }) {
+            let ServerMatcher::LootOne { key, qty_before, count } = inflight.matcher else {
+                return None;
+            };
+            if let Some(ck) = confirmed_key
+                && ck != key
+            {
                 return None;
             }
-            if ok {
-                Some((true, None, None))
-            } else {
-                Some((
-                    false,
+            match ok {
+                Some(true) => {
+                    let after = corpse_qty_of(key);
+                    if after <= qty_before.saturating_sub(count) || after < qty_before {
+                        Some((Some(true), None, None))
+                    } else {
+                        None
+                    }
+                }
+                Some(false) => Some((
+                    Some(false),
                     Some("refused"),
                     Some(reason.unwrap_or("loot refused by server").to_string()),
-                ))
+                )),
+                None => Some((
+                    None,
+                    Some("unknown"),
+                    Some(reason.unwrap_or("loot outcome unknown").to_string()),
+                )),
             }
         });
     });
 }
 
-pub(crate) fn resolve_server_loot_all(ok: bool, reason: Option<&str>) {
+pub(crate) fn resolve_server_loot_all(ok: Option<bool>, reason: Option<&str>) {
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         b.native.loot_busy = false;
@@ -1562,14 +1650,80 @@ pub(crate) fn resolve_server_loot_all(ok: bool, reason: Option<&str>) {
             if !matches!(inflight.matcher, ServerMatcher::LootAll) {
                 return None;
             }
-            if ok {
-                Some((true, None, None))
-            } else {
-                Some((
-                    false,
+            match ok {
+                Some(true) => Some((Some(true), None, None)),
+                Some(false) => Some((
+                    Some(false),
                     Some("refused"),
                     Some(reason.unwrap_or("loot_all refused by server").to_string()),
-                ))
+                )),
+                None => Some((
+                    None,
+                    Some("unknown"),
+                    Some(reason.unwrap_or("loot outcome unknown").to_string()),
+                )),
+            }
+        });
+    });
+}
+
+pub(crate) fn resolve_server_merchant_buy(
+    added_item_id: i64,
+    pending_cleared: bool,
+    inv_total_for_item: i64,
+) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        if pending_cleared {
+            b.native.merchant_pending = false;
+        }
+        b.resolve_matching(|inflight| {
+            let ServerMatcher::MerchantBuy {
+                item_id,
+                qty_before,
+                count,
+            } = inflight.matcher
+            else {
+                return None;
+            };
+            if !pending_cleared || added_item_id != item_id {
+                return None;
+            }
+            if inv_total_for_item >= qty_before.saturating_add(count) {
+                Some((Some(true), None, None))
+            } else {
+                None
+            }
+        });
+    });
+}
+
+pub(crate) fn resolve_server_merchant_sell(
+    pending_cleared: bool,
+    inv_qty_for_key: impl Fn(u32) -> i64,
+) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        if pending_cleared {
+            b.native.merchant_pending = false;
+        }
+        b.resolve_matching(|inflight| {
+            let ServerMatcher::MerchantSell {
+                key,
+                qty_before,
+                count,
+            } = inflight.matcher
+            else {
+                return None;
+            };
+            if !pending_cleared {
+                return None;
+            }
+            let after = inv_qty_for_key(key);
+            if after <= qty_before.saturating_sub(count) {
+                Some((Some(true), None, None))
+            } else {
+                None
             }
         });
     });
@@ -1581,21 +1735,97 @@ pub(crate) fn resolve_server_merchant(is_buy: bool, ok: bool, reason: Option<&st
         b.native.merchant_pending = false;
         b.resolve_matching(|inflight| {
             let matched = if is_buy {
-                matches!(inflight.matcher, ServerMatcher::MerchantBuy)
+                matches!(inflight.matcher, ServerMatcher::MerchantBuy { .. })
             } else {
-                matches!(inflight.matcher, ServerMatcher::MerchantSell)
+                matches!(inflight.matcher, ServerMatcher::MerchantSell { .. })
             };
             if !matched {
                 return None;
             }
             if ok {
-                Some((true, None, None))
+                Some((Some(true), None, None))
             } else {
                 Some((
-                    false,
+                    Some(false),
                     Some("refused"),
                     Some(reason.unwrap_or("merchant transaction refused").to_string()),
                 ))
+            }
+        });
+    });
+}
+
+pub(crate) fn resolve_server_bank_move(
+    is_deposit_opcode: bool,
+    pending_cleared: bool,
+    added_item_id: Option<i64>,
+    bank_qty_for_key: impl Fn(u32) -> i64,
+) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        if pending_cleared {
+            b.native.bank_busy = false;
+        }
+        b.resolve_matching(|inflight| {
+            let ServerMatcher::BankMove {
+                from_bank,
+                key,
+                item_id,
+                qty_before,
+                count,
+            } = inflight.matcher
+            else {
+                return None;
+            };
+            if !pending_cleared {
+                return None;
+            }
+            if is_deposit_opcode && !from_bank {
+                if added_item_id == Some(item_id) {
+                    Some((Some(true), None, None))
+                } else {
+                    None
+                }
+            } else if !is_deposit_opcode && from_bank {
+                if bank_qty_for_key(key) <= qty_before.saturating_sub(count) {
+                    Some((Some(true), None, None))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        });
+    });
+}
+
+pub(crate) fn resolve_server_bank_money(pending_cleared: bool, bank_after: i64) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        if pending_cleared {
+            b.native.bank_busy = false;
+        }
+        b.resolve_matching(|inflight| {
+            let ServerMatcher::BankMoney {
+                dir,
+                bank_before,
+                amount,
+            } = inflight.matcher
+            else {
+                return None;
+            };
+            if !pending_cleared {
+                return None;
+            }
+            let expected = match dir {
+                1 => bank_after >= bank_before.saturating_add(amount),
+                2 => bank_after <= bank_before.saturating_sub(amount),
+                _ => bank_after != bank_before,
+            };
+            if expected {
+                Some((Some(true), None, None))
+            } else {
+                None
             }
         });
     });
@@ -1607,18 +1837,18 @@ pub(crate) fn resolve_server_bank(is_money: bool, ok: bool, reason: Option<&str>
         b.native.bank_busy = false;
         b.resolve_matching(|inflight| {
             let matched = if is_money {
-                matches!(inflight.matcher, ServerMatcher::BankMoney)
+                matches!(inflight.matcher, ServerMatcher::BankMoney { .. })
             } else {
-                matches!(inflight.matcher, ServerMatcher::BankMove)
+                matches!(inflight.matcher, ServerMatcher::BankMove { .. })
             };
             if !matched {
                 return None;
             }
             if ok {
-                Some((true, None, None))
+                Some((Some(true), None, None))
             } else {
                 Some((
-                    false,
+                    Some(false),
                     Some("refused"),
                     Some(reason.unwrap_or("bank transaction refused").to_string()),
                 ))
@@ -1634,10 +1864,10 @@ pub(crate) fn resolve_server_camera(ok: bool, reason: Option<&str>) {
                 return None;
             }
             if ok {
-                Some((true, None, None))
+                Some((Some(true), None, None))
             } else {
                 Some((
-                    false,
+                    Some(false),
                     Some("busy"),
                     Some(reason.unwrap_or("camera is locked").to_string()),
                 ))
@@ -1651,7 +1881,7 @@ pub(crate) fn resolve_in_flight_window_closed(kind_name: &'static str, reason: &
         let mut b = b.borrow_mut();
         b.resolve_matching(|inflight| {
             if inflight.kind == kind_name {
-                Some((false, Some("window_closed"), Some(reason.to_string())))
+                Some((Some(false), Some("window_closed"), Some(reason.to_string())))
             } else {
                 None
             }
@@ -1671,13 +1901,13 @@ pub(crate) fn resolve_server_d7() {
                 inflight.matcher,
                 ServerMatcher::LootOne { .. }
                     | ServerMatcher::LootAll
-                    | ServerMatcher::MerchantBuy
-                    | ServerMatcher::MerchantSell
-                    | ServerMatcher::BankMove
-                    | ServerMatcher::BankMoney
+                    | ServerMatcher::MerchantBuy { .. }
+                    | ServerMatcher::MerchantSell { .. }
+                    | ServerMatcher::BankMove { .. }
+                    | ServerMatcher::BankMoney { .. }
             ) {
                 Some((
-                    false,
+                    Some(false),
                     Some("refused"),
                     Some("server cancelled or refused transaction".into()),
                 ))
@@ -1699,7 +1929,7 @@ pub(crate) fn resolve_server_ability_move(from: u8, to: u8) {
                 return None;
             };
             if from == ef && to == et {
-                Some((true, None, None))
+                Some((Some(true), None, None))
             } else {
                 None
             }
