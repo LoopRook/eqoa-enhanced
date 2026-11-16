@@ -1,19 +1,21 @@
-# Round 6B Upstream Seam Proposals
+# Round 6B Upstream Seam Proposals & Approvals
 
-Per `FORK.md` and the Round 6 Part B brief, no new upstream lines were added outside `crates/eqoa/src/fork_ext/`. Actions that cannot be dispatched from `fork_ext/` without editing an upstream file remain `not_yet` and are recorded here for the lead/upstream review.
+Per `FORK.md` and the Round 6 B/C fix brief (2026-11-16), the lead approved three one-line upstream hook calls under the owner's delegation, and zero other upstream lines were added.
 
-## 1. `eqoa.actions.camera` (one-shot camera style / heading / pitch / distance)
+## Approved and Applied One-Line Seams (2026-11-16)
 
-- **Why `fork_ext/` cannot dispatch it today:**
-  `crates/eqoa/src/play.rs` receives `walker: &mut Walker` in `Play::frame`, then calls:
-  - `crates/eqoa/src/play.rs:3325`: `fork_hooks::begin_iteration(self, game_frame);` (no `Walker` parameter)
-  - `crates/eqoa/src/play.rs:3326`: `fork_hooks::frame_library(self, lib, Some(walker));` (immutable `Option<&Walker>`)
-  Neither hook provides `&mut Walker` (`walker.cam` / `walker.scene`), and `Play` itself does not own `Walker`. Native camera changes (`crate::camstyle::set_style`, orbit angle / pitch / zoom setters on `WalkCamera`) require `&mut WalkCamera<Ee>` and `&mut impl Scene<Ee>` inside `Walker`.
-- **Current status:** `eqoa.actions.camera` is `not_yet` with reason `"requires &mut Walker hook in Play::frame (proposed in round-6b-seams.md)"`.
-- **Proposed 1-line upstream seam (`crates/eqoa/src/play.rs:3326`):**
-  Either pass `Option<&mut Walker>` into a single camera hook after `begin_iteration`:
-  ```rust
-  fork_hooks::begin_iteration(self, game_frame);
-  fork_hooks::apply_camera(self, walker);
-  ```
-  where `fork_hooks::apply_camera` is a no-op when zero camera requests are queued (zero cost on vanilla / zero-addon frames) and applies native `camstyle::set_style` / orbit pitch & zoom clamps through `vi::camera::WalkCamera` when a brokered `ActionKind::Camera` dispatches.
+1. **`crates/eqoa/src/npcw.rs` (+1 line before `for o in loot_out {`):**
+   ```rust
+   super::fork_hooks::npcw_requests(self, &mut loot_out, &mut merch_out);
+   ```
+   Routes broker loot (`LootOut::One`/`All`) and merchant (`MerchantOut::Buy`/`Sell`) requests through `npcw.rs`'s own packet builders and `shop.pending` state.
+2. **`crates/eqoa/src/bankplay.rs` (+1 line before `for o in out {`):**
+   ```rust
+   super::fork_hooks::bank_requests(self, &mut out);
+   ```
+   Routes broker bank item (`BankOut::Move`) and money (`BankOut::MoveMoney`) requests through `bankplay.rs`'s own packet builders and `bank.state`.
+3. **`crates/eqoa/src/play.rs` (+1 line in `Play::frame` right after `fork_hooks::begin_iteration(self, game_frame);`):**
+   ```rust
+   fork_hooks::apply_camera(self, walker);
+   ```
+   Applies one-shot `eqoa.actions.camera` (`WalkCamera` / `camstyle`) setters when queued, and is a no-op otherwise. `eqoa.actions.camera` is now `supported`.
