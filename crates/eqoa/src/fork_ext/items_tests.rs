@@ -1549,6 +1549,79 @@ impl Play {
         self.mode = 0;
         self.npcw.corpse = None;
     }
+    pub(crate) fn bags_connect(&mut self) {
+        self.session.conn = Some(usize::MAX);
+    }
+    pub(crate) fn bags_sends_lost(&self) -> u32 {
+        self.session.sends_lost
+    }
+    pub(crate) fn bags_broker_tick(&mut self) {
+        super::super::begin_iteration(self, true);
+    }
+    pub(crate) fn bags_open_merchant(&mut self, id: u32) {
+        self.npcw.shop = crate::merchant::Shop {
+            id: Some(id),
+            sell_rate: 100,
+            buy_rate: 100,
+            wares: Default::default(),
+            greeting: Vec::new(),
+            pending: false,
+        };
+        self.npcw.merchant.visible = true;
+        self.mode = 10;
+    }
+    pub(crate) fn bags_close_merchant(&mut self) {
+        self.npcw.merchant.visible = false;
+        self.npcw.shop.id = None;
+        self.mode = 0;
+    }
+    pub(crate) fn bags_shop_pending(&self) -> bool {
+        self.npcw.shop.pending
+    }
+    pub(crate) fn bags_sell_confirm(&mut self, slot: usize, n: i64) {
+        let ev = Event::InvTook { slot: slot as _, sound: 3, n: n as _ };
+        let cap = super::super::begin_game_event(self, &ev);
+        crate::inventory::took(&mut self.dump.inventory, slot, n);
+        self.npcw_item_took(3);
+        super::super::end_game_event(self, cap);
+    }
+    pub(crate) fn bags_open_bank(&mut self) {
+        self.mode = 11;
+        self.bank.state = 0;
+    }
+    pub(crate) fn bags_bank_state(&self) -> i32 {
+        self.bank.state
+    }
+    pub(crate) fn bags_bank_deposit_confirm(&mut self, key: u32, id: u32, name: &str, qty: i64) {
+        let spec = Spec::from_json(&serde_json::json!({"name": name, "id": id, "key": key, "qty": qty, "max_stack": 100}));
+        let ev = opcode(0x1251, spec.bytes());
+        let cap = super::super::begin_game_event(self, &ev);
+        if let Event::Opcode { op, data } = &ev {
+            let _ = self.bank_opcode(*op, data);
+        }
+        super::super::end_game_event(self, cap);
+        self.bank.state = 0;
+    }
+    pub(crate) fn bags_bank_withdraw_confirm(&mut self, key: u32, qty: i64) {
+        let mut w = Writer::default();
+        w.u32(key).signed(qty);
+        let ev = opcode(0x1250, w.data);
+        let cap = super::super::begin_game_event(self, &ev);
+        if let Event::Opcode { op, data } = &ev {
+            let _ = self.bank_opcode(*op, data);
+        }
+        super::super::end_game_event(self, cap);
+        self.bank.state = 0;
+    }
+    pub(crate) fn bags_open_corpse_mode(&mut self) {
+        self.mode = 1;
+    }
+    pub(crate) fn bags_loot_confirm_all(&mut self) {
+        let ev = opcode(0x001A, vec![]);
+        let cap = super::super::begin_game_event(self, &ev);
+        let _ = self.npcw_opcode(0x001A, &[]);
+        super::super::end_game_event(self, cap);
+    }
 }
 
 #[test]

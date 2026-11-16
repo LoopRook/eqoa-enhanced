@@ -10,8 +10,12 @@
   "capabilities": [
     "eqoa.inventory.get",
     "eqoa.bank.get",
+    "eqoa.loot.get",
+    "eqoa.merchant.get",
+    "eqoa.merchant.price",
     "eqoa.items.can_use",
     "eqoa.icons.resource",
+    "eqoa.actions.*",
     "eqoa.hud.frame",
     "eqoa.input.bind",
     "eqoa.input.claim",

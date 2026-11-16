@@ -749,3 +749,245 @@ fn round5b_captures_for_the_owner_draw_the_discs_own_item_art_and_the_corpse_in_
     bv_png(&rm_pixels(&bv.gpu, &t), size, "r5-bags-loot.png");
     bv.clean();
 }
+
+fn bv_r6_png(pixels: &[u8], size: (u32, u32), name: &str) {
+    if let Some(dir) = std::env::var_os("EQOA_R6_CAPTURE_DIR").or_else(|| std::env::var_os("EQOA_R5B_CAPTURE_DIR")) {
+        let dir = PathBuf::from(dir);
+        fs::create_dir_all(&dir).unwrap();
+        let mut enc = png::Encoder::new(fs::File::create(dir.join(name)).unwrap(), size.0, size.1);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(pixels).unwrap();
+    }
+}
+
+impl Bv {
+    fn menu_row(&self, needle: &str) -> Option<(f64, f64, bool, Option<String>, String)> {
+        let (x, y, en, reason, label): (Option<f64>, Option<f64>, Option<bool>, Option<String>, Option<String>) = self.eval(&format!(
+            "(function()
+                for _, h in ipairs(require('bags').menu_hits or {{}}) do
+                    if string.find(h.row.label, {needle:?}, 1, true) then
+                        return h.x + h.w / 2, h.y + h.h / 2, h.row.enabled, h.row.reason, h.row.label
+                    end
+                end
+                return nil, nil, nil, nil, nil
+            end)()"
+        ));
+        Some((x?, y?, en?, reason, label?))
+    }
+    fn menu_labels(&self) -> Vec<String> {
+        self.eval(
+            "(function() local t = {} local m = require('bags').menu if m then for _, r in ipairs(m.rows) do t[#t + 1] = r.label end end return t end)()",
+        )
+    }
+    fn result_text(&self) -> Option<(String, Option<bool>)> {
+        let (text, ok): (Option<String>, Option<bool>) = self.eval(
+            "(function() local r = require('bags').result if r then return r.text, r.ok end return nil, nil end)()",
+        );
+        text.map(|t| (t, ok))
+    }
+}
+
+#[test]
+fn round6b_bag_viewer_bags_menu_actions_greyed_reasons_no_destroy_and_no_unclicked_actions() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    // Give Healing Potion p4c=2 so quick slot 1 fits while quick slot 3 refuses cleanly.
+    let mut world = bv_world();
+    world["pack"][1]["p4c"] = serde_json::json!(2);
+    bv.play.bags_set(&world);
+    bv.enable();
+    bv.open();
+
+    // Nothing happens without clicking: idle frames send no packets and open no menu.
+    let sends_before = bv.play.bags_sends_lost();
+    bv.frames(5);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_before, "idle frames perform zero actions");
+    assert!(!bv.eval::<bool>("require('bags').menu ~= nil"));
+
+    // Click slot 2 (Healing Potion): menu offers Use + Quick slot 1..4 and NEVER Destroy.
+    let s2 = bv.slot(2);
+    bv.click(s2);
+    bv.frames(2);
+    let labels = bv.menu_labels();
+    assert!(labels.iter().any(|l| l == "Use"), "{labels:?}");
+    assert!(labels.iter().any(|l| l == "Quick slot 1"), "{labels:?}");
+    assert!(!labels.iter().any(|l| l.to_lowercase().contains("destroy")), "must have no Destroy entry: {labels:?}");
+
+    // Click Use -> 1 action dispatched, result line shows ": ok".
+    let (mx, my, enabled, _, _) = bv.menu_row("Use").unwrap();
+    assert!(enabled);
+    let sends_before = bv.play.bags_sends_lost();
+    bv.click((mx, my));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert!(bv.play.bags_sends_lost() > sends_before, "clicking Use sends one use_item action");
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(true), "{res}");
+    assert!(res.starts_with("Use:"), "{res}");
+
+    // Click Healing Potion -> Quick slot 3 -> game refuses with exact reason on result line.
+    bv.click(s2);
+    bv.frames(2);
+    let (qx, qy, qen, _, _) = bv.menu_row("Quick slot 3").unwrap();
+    assert!(qen);
+    bv.click((qx, qy));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false), "{res}");
+    assert!(res.contains("quick slot 3"), "expected quick slot refusal reason, got {res}");
+
+    // Click Mage Robe (slot 4, wrong class): Equip entry is greyed with game's reason; capture menu PNG.
+    let s4 = bv.slot(4);
+    bv.click(s4);
+    let menu_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &menu_tex), bv.win, "r6-bags-menu.png");
+    let (ex, ey, een, ereason, _) = bv.menu_row("Equip").unwrap();
+    assert!(!een, "Mage Robe Equip must be greyed");
+    assert_eq!(ereason.as_deref(), Some("wrong class"));
+    let sends_before = bv.play.bags_sends_lost();
+    bv.click((ex, ey));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_before, "clicking disabled row queues nothing");
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert!(res.contains("wrong class"), "{res}");
+
+    // Hero Helm (slot 6) requires level 55 (player is 50) -> greyed with requires level 55.
+    let s6 = bv.slot(6);
+    bv.click(s6);
+    bv.frames(2);
+    let (_, _, hen, hreason, _) = bv.menu_row("Equip").unwrap();
+    assert!(!hen);
+    assert_eq!(hreason.as_deref(), Some("requires level 55"));
+
+    // Rusty Sword (slot 1, worn) -> Unequip is allowed & succeeds.
+    let s1 = bv.slot(1);
+    bv.click(s1);
+    bv.frames(2);
+    let (ux, uy, uen, _, ulabel) = bv.menu_row("Unequip").unwrap();
+    assert!(uen && ulabel == "Unequip");
+    let sends_before = bv.play.bags_sends_lost();
+    bv.click((ux, uy));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert!(bv.play.bags_sends_lost() > sends_before);
+    assert_eq!(bv.result_text().unwrap().1, Some(true));
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6b_bag_viewer_merchant_bank_and_corpse_menus_and_captures() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.enable();
+    bv.open();
+
+    // Open Merchant (mode 10)
+    bv.play.bags_open_merchant(888);
+    bv.frames(2);
+
+    // Equipped sword has Sell 1 greyed; Healing Potion has Sell 1 & Sell stack.
+    let s1 = bv.slot(1);
+    bv.click(s1);
+    bv.frames(2);
+    let (_, _, sw_en, sw_reason, _) = bv.menu_row("Sell 1").unwrap();
+    assert!(!sw_en && sw_reason.as_deref() == Some("cannot sell an equipped item"));
+    bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
+    bv.frames(1);
+
+    let s2 = bv.slot(2);
+    bv.click(s2);
+    let merch_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &merch_tex), bv.win, "r6-bags-merchant.png");
+    let labels = bv.menu_labels();
+    assert!(labels.iter().any(|l| l.starts_with("Sell 1")), "{labels:?}");
+    assert!(labels.iter().any(|l| l.starts_with("Sell stack (5")), "{labels:?}");
+    assert!(!labels.iter().any(|l| l.to_lowercase().contains("destroy")), "{labels:?}");
+
+    let (sx, sy, sen, _, _) = bv.menu_row("Sell stack").unwrap();
+    assert!(sen);
+    bv.click((sx, sy));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert!(bv.play.bags_shop_pending(), "Sell stack dispatches merchant 0x004B");
+    bv.play.bags_sell_confirm(1, 5);
+    bv.frames(2);
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(true), "{res}");
+    assert!(res.starts_with("Sell stack (5"), "{res}");
+
+    // Open Bank (mode 11) -> Deposit from bags & Withdraw on Bank tab
+    bv.play.bags_close_merchant();
+    bv.play.bags_open_bank();
+    bv.frames(2);
+
+    let pelt_idx: usize = bv.eval("(function() for i, e in ipairs(require('bags').grid.items) do if e.item.name == 'Rat Pelt' then return i end end end)()");
+    let sp = bv.slot(pelt_idx);
+    bv.click(sp);
+    bv.frames(2);
+    let (dx, dy, den, _, _) = bv.menu_row("Deposit stack (3)").unwrap();
+    assert!(den);
+    bv.click((dx, dy));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_bank_state(), 2);
+    bv.play.bags_bank_deposit_confirm(17, 900007, "Rat Pelt", 3);
+    bv.frames(2);
+    assert_eq!(bv.result_text().unwrap().1, Some(true));
+
+    // Switch to Bank tab -> click Moonstone -> Withdraw
+    let bank_tab = bv.tab(6);
+    bv.click(bank_tab);
+    bv.frames(2);
+    let b1 = bv.slot(1);
+    bv.click(b1);
+    let bank_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &bank_tex), bv.win, "r6-bags-bank-menu.png");
+    let (wx, wy, wen, _, _) = bv.menu_row("Withdraw 1").unwrap();
+    assert!(wen);
+    bv.click((wx, wy));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_bank_state(), 2);
+    bv.play.bags_bank_withdraw_confirm(21, 1);
+    bv.frames(2);
+    assert_eq!(bv.result_text().unwrap().1, Some(true));
+
+    // Open Corpse (mode 1) -> Corpse tab appears -> Take / Take all
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_corpse(&bv_corpse());
+    bv.play.bags_open_corpse_mode();
+    bv.frames(2);
+    let corpse_tab = bv.tab(7);
+    bv.click(corpse_tab);
+    bv.frames(2);
+    let c2 = bv.slot(2);
+    bv.click(c2);
+    let corpse_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &corpse_tex), bv.win, "r6-bags-corpse.png");
+    let labels = bv.menu_labels();
+    assert!(labels.iter().any(|l| l.starts_with("Take")), "{labels:?}");
+    assert!(labels.iter().any(|l| l == "Take all"), "{labels:?}");
+    let (tx, ty, ten, _, _) = bv.menu_row("Take all").unwrap();
+    assert!(ten);
+    bv.click((tx, ty));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    bv.play.bags_loot_confirm_all();
+    bv.frames(2);
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(true), "{res}");
+    assert!(res.starts_with("Take all:"), "{res}");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
