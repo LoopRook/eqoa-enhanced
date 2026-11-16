@@ -292,6 +292,15 @@ button does, with the same checks), quests, camera, dialogs and the remaining Fo
 the round 8 PR (easier maintenance, a base for other mod authors). Autonomous automation comes after the
 PR and may stay in Enhanced only.
 
+**Owner decisions 2026-11-16 (round 6 start):** a mod action runs only inside the handling of the
+player's own gesture (its mod key, a press in its claimed pointer area, or its ImGui button clicked),
+one game action per gesture; other calls get a visible `needs_player_action` diagnostic. Batches ("sell
+all junk") come after the PR. Continuous controls (`move`, `look`, held `buttons`) also come after the
+PR; autorun/follow/stop stay (one-press toggles). Two parts, each tested by the owner: **A** reads
+(quests, mastery, camera, windows and dialogs, class/disposition icons, remaining Forge reads); **B**
+click-driven actions and one example mod (5-line spec approved first). Part A is a trial of Gemini 4
+Hydrogen as builder, with a checker that reruns its tests.
+
 Quest log and quest objects, camera, windows/dialogs (busy state), Class Mastery values not already
 done, class and disposition icons, the remaining ImGui pieces, and the full actions API from the
 spec (cast, use an item, target, loot, move, follow), callable from a click or from the mod's own

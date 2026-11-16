@@ -287,3 +287,11 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
 - **Now:** since sync 2026-11-15 upstream's Options > Extended is five groups (Graphics, UI, Other, Touch Controls, Multi-boxing). The fork's Enhanced page (HUD toggles, Mods & Addons) sits in the UI group because a top-level entry would mean rewriting upstream's fixed `GROUPS` table.
 - **Owner's preference:** everything from the fork in one place.
 - **Plan:** the round 8 seam "option rows declared in one table; ids 1000+ reserved for other builds" also lets another build add its own group. Once upstream has it, Enhanced becomes its own top-level entry with no upstream line changed.
+
+## After the PR: batch actions and continuous controls (owner, 2026-11-16)
+
+- **Status:** Deferred until after the round 8 PR (round 6 decision; see the plan's round 6 section).
+- **Wanted:** one click running a short batch, for example "sell all grey/junk items"; mod-held movement,
+  look and controller buttons (`move`, `look`, `buttons`); then autonomous automation (may stay
+  Enhanced-only).
+- **Note:** round 6 gives one game action per player gesture; these build on its action broker.
