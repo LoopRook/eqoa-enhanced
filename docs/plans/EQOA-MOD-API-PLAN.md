@@ -309,6 +309,10 @@ one click may run a short queue (one action at a time, each waiting for the serv
 zoning or window close); bag viewer gains Mark as junk, Sell junk, Take all but junk. Event-triggered
 automation (auto-sell, auto-loot) and continuous controls stay after the PR. Whether batches go into the
 upstream PR or stay Enhanced-only is decided at round 8.
+**Owner 2026-11-16:** the lead decides round 6's upstream seams (owner: "can you act on that"). Rule: only
+small read-only accessors or one-line hook calls that expose data or call paths upstream already has; no
+behaviour change; the cross-family reviewer checks each line; budgets rise by the measured lines with the
+reason recorded; each approval is listed in `round-6-seams.md` for the owner to read.
 
 Quest log and quest objects, camera, windows/dialogs (busy state), Class Mastery values not already
 done, class and disposition icons, the remaining ImGui pieces, and the full actions API from the
