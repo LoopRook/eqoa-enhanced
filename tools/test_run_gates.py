@@ -112,6 +112,37 @@ class TestRunGates(unittest.TestCase):
             self.assertTrue(lock_dir.exists())
         self.assertFalse(lock_dir.exists())
 
+    def test_lock_clears_a_lock_whose_holder_died(self):
+        # A killed gate run leaves its folder and token behind; the next run must take over at once.
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        lock_dir = Path(self.temp_dir.name) / "stale.lock"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        (lock_dir / f"pid-{dead.pid}-1.token").touch()
+        lock = run_gates.CargoLock(lock_dir=lock_dir, wait_minutes=0.01, poll_interval=0.05)
+        with lock:
+            self.assertTrue(lock.acquired)
+            self.assertEqual([p.name for p in lock_dir.iterdir()], [lock.owner_token])
+        self.assertFalse(lock_dir.exists())
+
+    def test_lock_keeps_a_live_holder_and_a_tokenless_lock(self):
+        for name, token in (("live.lock", True), ("plain.lock", False)):
+            lock_dir = Path(self.temp_dir.name) / name
+            lock_dir.mkdir(parents=True, exist_ok=True)
+            if token:
+                # a running process other than this one: the parent of this test process
+                (lock_dir / f"pid-{os.getppid()}-1.token").touch()
+            lock = run_gates.CargoLock(lock_dir=lock_dir, wait_minutes=0.005, poll_interval=0.05)
+            with self.assertRaises(TimeoutError):
+                lock.acquire()
+            self.assertTrue(lock_dir.exists())
+
+    def test_process_alive(self):
+        self.assertTrue(run_gates.process_alive(os.getpid()))
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        self.assertFalse(run_gates.process_alive(dead.pid))
+
     def test_lock_never_removes_a_foreign_lock_on_mkdir_error(self):
         # Another agent's lock (a plain empty folder) exists; mkdir reports access denied, as Windows
         # does while a holder removes it. The foreign lock must survive and acquire must time out.

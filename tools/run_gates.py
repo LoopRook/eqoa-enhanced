@@ -183,6 +183,32 @@ def parse_cargo_test_output(text):
     }
 
 
+def process_alive(pid):
+    """True while process `pid` runs. Unsure answers count as alive, so a lock is never wrongly removed."""
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            # 87 = ERROR_INVALID_PARAMETER: no such process; anything else (access denied) means it exists
+            return ctypes.get_last_error() != 87
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
 class CargoLock:
     def __init__(self, lock_dir=None, wait_minutes=60, poll_interval=30):
         if lock_dir is None:
@@ -201,6 +227,8 @@ class CargoLock:
             try:
                 os.mkdir(self.lock_dir)
             except FileExistsError:
+                if self._clear_if_holder_dead():
+                    continue
                 elapsed = time.time() - start
                 if elapsed >= timeout_seconds:
                     raise TimeoutError(
@@ -225,6 +253,32 @@ class CargoLock:
             except OSError:
                 pass
             return
+
+    def _clear_if_holder_dead(self):
+        """Remove a lock left by a process that no longer runs (a killed gate run).
+
+        Only a lock holding exactly one `pid-<n>-*.token` whose process is gone counts as stale; a lock
+        without a token (a plain `mkdir` lock, or a holder between mkdir and touch) is never removed.
+        """
+        try:
+            tokens = [p for p in self.lock_dir.iterdir() if p.name.startswith("pid-") and p.name.endswith(".token")]
+        except OSError:
+            return False
+        if len(tokens) != 1:
+            return False
+        try:
+            pid = int(tokens[0].name.split("-")[1])
+        except (IndexError, ValueError):
+            return False
+        if pid == os.getpid() or process_alive(pid):
+            return False
+        print(f"Removing stale cargo lock at {self.lock_dir}: holder pid {pid} is no longer running")
+        try:
+            tokens[0].unlink(missing_ok=True)
+            os.rmdir(self.lock_dir)
+        except OSError:
+            return False
+        return True
 
     def release(self):
         token_path = self.lock_dir / self.owner_token
