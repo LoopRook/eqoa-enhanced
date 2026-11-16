@@ -44,6 +44,15 @@ impl Subsystem {
             Self::Inventory => "inventory",
         }
     }
+
+    const fn bit(self) -> u8 {
+        match self {
+            Self::Bank => 1 << 0,
+            Self::Merchant => 1 << 1,
+            Self::Loot => 1 << 2,
+            Self::Inventory => 1 << 3,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -248,6 +257,12 @@ pub(crate) enum DispatchOutcome {
         matcher: ServerMatcher,
         detail: Option<Json>,
     },
+    /// Request was staged for a native UI/queue consumer (`npcw.rs`, `bankplay.rs`, `apply_camera`).
+    /// It transitions to `"dispatched"` (`native_sent = true`) only in the frame the native consumer actually sends it.
+    Staged {
+        matcher: ServerMatcher,
+        detail: Option<Json>,
+    },
     Refused {
         code: &'static str,
         reason: String,
@@ -293,6 +308,7 @@ struct InFlightAction {
     dispatched_tick: u64,
     detail: Option<Json>,
     saw_pending: bool,
+    native_sent: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -527,6 +543,8 @@ struct BrokerState {
     vms: HashMap<u64, VmBroker>,
     native: NativeSnapshot,
     master_loot_active: bool,
+    contended_subsystems: u8,
+    expired_staged_kinds: Vec<&'static str>,
 }
 
 impl Default for BrokerState {
@@ -539,6 +557,8 @@ impl Default for BrokerState {
             vms: HashMap::new(),
             native: NativeSnapshot::default(),
             master_loot_active: false,
+            contended_subsystems: 0,
+            expired_staged_kinds: Vec::new(),
         }
     }
 }
@@ -781,20 +801,30 @@ impl BrokerState {
             return Ok(true);
         }
         if let Some(inflight) = vm_state.in_flight.remove(&req.id) {
+            let native_sent = inflight.native_sent;
+            if !native_sent {
+                self.expired_staged_kinds.push(inflight.kind);
+            }
             let rec = ActionResultRecord {
                 id: inflight.id,
                 vm: inflight.vm,
                 kind: inflight.kind,
                 state: "cancelled",
-                phase: "server",
+                phase: if native_sent { "server" } else { "dispatch" },
                 ok: Some(false),
                 code: Some("cancelled".into()),
-                reason: Some("cancelled while awaiting server reply".into()),
+                reason: Some(if native_sent {
+                    "cancelled while awaiting server reply"
+                } else {
+                    "cancelled before dispatch"
+                }
+                .into()),
                 queued_tick: inflight.queued_tick,
-                dispatched_tick: Some(inflight.dispatched_tick),
+                dispatched_tick: native_sent.then_some(inflight.dispatched_tick),
                 completed_tick: Some(now_tick),
                 detail: inflight.detail,
             };
+            let vm_state = self.vms.get_mut(&req.vm).expect("vm exists");
             vm_state.upsert_retained(rec.clone());
             vm_state.pending_events.push_back(rec);
             return Ok(true);
@@ -830,19 +860,27 @@ impl BrokerState {
             });
         }
         let inflight_ids: Vec<u64> = vm_state.in_flight.keys().copied().collect();
+        let mut cleared_staged: Vec<&'static str> = Vec::new();
         for id in inflight_ids {
             if let Some(inflight) = vm_state.in_flight.remove(&id) {
+                if !inflight.native_sent {
+                    cleared_staged.push(inflight.kind);
+                }
                 vm_state.upsert_retained(ActionResultRecord {
                     id: inflight.id,
                     vm: inflight.vm,
                     kind: inflight.kind,
                     state: "cancelled",
-                    phase: "server",
+                    phase: if inflight.native_sent {
+                        "server"
+                    } else {
+                        "dispatch"
+                    },
                     ok: Some(false),
                     code: Some("cancelled".into()),
                     reason: Some(reason.into()),
                     queued_tick: inflight.queued_tick,
-                    dispatched_tick: Some(inflight.dispatched_tick),
+                    dispatched_tick: inflight.native_sent.then_some(inflight.dispatched_tick),
                     completed_tick: Some(now_tick),
                     detail: inflight.detail,
                 });
@@ -862,11 +900,14 @@ impl BrokerState {
         }
         vm_state.pending_events.clear();
         vm_state.pending_batch_events.clear();
+        self.expired_staged_kinds.extend(cleared_staged);
     }
 
     fn reset_session(&mut self, reason: &str) {
         let now_tick = self.tick;
         self.native = NativeSnapshot::default();
+        self.contended_subsystems = 0;
+        self.expired_staged_kinds.clear();
         for vm_state in self.vms.values_mut() {
             if vm_state.active_batch.is_some() {
                 let step = vm_state.active_batch.as_ref().map(|b| b.current_step);
@@ -944,13 +985,57 @@ impl BrokerState {
         self.tick = self.tick.wrapping_add(1);
         self.native = snapshot;
         let now_tick = self.tick;
+        let mut expired_staged: Vec<&'static str> = Vec::new();
 
-        // 1. Server reply timeouts (10 s = 300 ticks -> `unknown`) & closed-window aborts.
+        // 1. Staged contention timeouts (`busy`), server reply timeouts (10 s = 300 ticks -> `unknown`) & closed-window aborts.
         for vm_state in self.vms.values_mut() {
+            let timed_out_staged: Vec<u64> = vm_state
+                .in_flight
+                .values()
+                .filter(|f| {
+                    !f.native_sent && now_tick.saturating_sub(f.queued_tick) >= RATE_LIMIT_WAIT_TICKS
+                })
+                .map(|f| f.id)
+                .collect();
+            for id in timed_out_staged {
+                if let Some(inflight) = vm_state.in_flight.remove(&id) {
+                    expired_staged.push(inflight.kind);
+                    let reason = format!(
+                        "{} stayed busy before request could be sent",
+                        inflight.subsystem.map(Subsystem::label).unwrap_or("native")
+                    );
+                    let rec = ActionResultRecord {
+                        id: inflight.id,
+                        vm: inflight.vm,
+                        kind: inflight.kind,
+                        state: "refused",
+                        phase: "dispatch",
+                        ok: Some(false),
+                        code: Some("busy".into()),
+                        reason: Some(reason.clone()),
+                        queued_tick: inflight.queued_tick,
+                        dispatched_tick: None,
+                        completed_tick: Some(now_tick),
+                        detail: inflight.detail,
+                    };
+                    vm_state.upsert_retained(rec.clone());
+                    vm_state.pending_events.push_back(rec);
+                    vm_state.handle_batch_step_resolution(
+                        id,
+                        now_tick,
+                        "refused",
+                        Some(false),
+                        Some("busy"),
+                        Some(reason),
+                    );
+                }
+            }
             let expired: Vec<u64> = vm_state
                 .in_flight
                 .values()
-                .filter(|f| now_tick.saturating_sub(f.dispatched_tick) >= SERVER_TIMEOUT_TICKS)
+                .filter(|f| {
+                    f.native_sent && now_tick.saturating_sub(f.dispatched_tick) >= SERVER_TIMEOUT_TICKS
+                })
                 .map(|f| f.id)
                 .collect();
             for id in expired {
@@ -984,6 +1069,9 @@ impl BrokerState {
             // Record observed native pending flags, and fail unconfirmed if pending cleared without reply.
             let mut unconfirmed: Vec<(u64, &'static str)> = Vec::new();
             for inflight in vm_state.in_flight.values_mut() {
+                if !inflight.native_sent {
+                    continue;
+                }
                 match inflight.matcher {
                     ServerMatcher::MerchantBuy { .. } | ServerMatcher::MerchantSell { .. } => {
                         if snapshot.merchant_pending {
@@ -1054,17 +1142,28 @@ impl BrokerState {
                 .collect();
             for (id, reason) in closed {
                 if let Some(inflight) = vm_state.in_flight.remove(&id) {
+                    let native_sent = inflight.native_sent;
+                    if !native_sent {
+                        expired_staged.push(inflight.kind);
+                    }
+                    let state = if native_sent { "unknown" } else { "refused" };
+                    let ok = if native_sent { None } else { Some(false) };
+                    let code = if native_sent {
+                        "unknown"
+                    } else {
+                        "window_closed"
+                    };
                     let rec = ActionResultRecord {
                         id: inflight.id,
                         vm: inflight.vm,
                         kind: inflight.kind,
-                        state: "unknown",
-                        phase: "server",
-                        ok: None,
-                        code: Some("unknown".into()),
+                        state,
+                        phase: if native_sent { "server" } else { "dispatch" },
+                        ok,
+                        code: Some(code.into()),
                         reason: Some(reason.into()),
                         queued_tick: inflight.queued_tick,
-                        dispatched_tick: Some(inflight.dispatched_tick),
+                        dispatched_tick: native_sent.then_some(inflight.dispatched_tick),
                         completed_tick: Some(now_tick),
                         detail: inflight.detail,
                     };
@@ -1073,9 +1172,9 @@ impl BrokerState {
                     vm_state.handle_batch_step_resolution(
                         id,
                         now_tick,
-                        "unknown",
-                        None,
-                        Some("unknown"),
+                        state,
+                        ok,
+                        Some(code),
                         Some(reason.into()),
                     );
                 }
@@ -1085,8 +1184,10 @@ impl BrokerState {
             {
                 let step = vm_state.active_batch.as_ref().map(|b| b.current_step);
                 if let Some(req_id) = vm_state.active_batch.as_ref().and_then(|b| b.waiting_req_id)
+                    && let Some(inflight) = vm_state.in_flight.remove(&req_id)
+                    && !inflight.native_sent
                 {
-                    vm_state.in_flight.remove(&req_id);
+                    expired_staged.push(inflight.kind);
                 }
                 vm_state.finish_batch(
                     "refused",
@@ -1277,6 +1378,44 @@ impl BrokerState {
                                         dispatched_tick: now_tick,
                                         detail,
                                         saw_pending: false,
+                                        native_sent: true,
+                                    },
+                                );
+                                per_vm_dispatched.insert(vm_id, vm_sent + 1);
+                                global_dispatched += 1;
+                                progressed = true;
+                            }
+                            DispatchOutcome::Staged { matcher, detail } => {
+                                let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
+                                vm_state.tokens = vm_state.tokens.saturating_sub(1);
+                                let rec = ActionResultRecord {
+                                    id: popped.id,
+                                    vm: popped.vm,
+                                    kind: popped.kind.name(),
+                                    state: "queued",
+                                    phase: "dispatch",
+                                    ok: None,
+                                    code: None,
+                                    reason: None,
+                                    queued_tick: popped.queued_tick,
+                                    dispatched_tick: None,
+                                    completed_tick: None,
+                                    detail: detail.clone(),
+                                };
+                                vm_state.upsert_retained(rec);
+                                vm_state.in_flight.insert(
+                                    popped.id,
+                                    InFlightAction {
+                                        id: popped.id,
+                                        vm: popped.vm,
+                                        kind: popped.kind.name(),
+                                        subsystem: popped.kind.subsystem(),
+                                        matcher,
+                                        queued_tick: popped.queued_tick,
+                                        dispatched_tick: now_tick,
+                                        detail,
+                                        saw_pending: false,
+                                        native_sent: false,
                                     },
                                 );
                                 per_vm_dispatched.insert(vm_id, vm_sent + 1);
@@ -1424,6 +1563,44 @@ impl BrokerState {
                                         dispatched_tick: now_tick,
                                         detail,
                                         saw_pending: false,
+                                        native_sent: true,
+                                    },
+                                );
+                                if let Some(batch) = vm_state.active_batch.as_mut() {
+                                    batch.waiting_req_id = Some(step_req_id);
+                                    vm_state.emit_batch_progress();
+                                }
+                            }
+                            DispatchOutcome::Staged { matcher, detail } => {
+                                vm_state.tokens = vm_state.tokens.saturating_sub(1);
+                                let rec = ActionResultRecord {
+                                    id: step_req_id,
+                                    vm: vm_id,
+                                    kind: step_kind.name(),
+                                    state: "queued",
+                                    phase: "dispatch",
+                                    ok: None,
+                                    code: None,
+                                    reason: None,
+                                    queued_tick: now_tick,
+                                    dispatched_tick: None,
+                                    completed_tick: None,
+                                    detail: detail.clone(),
+                                };
+                                vm_state.upsert_retained(rec);
+                                vm_state.in_flight.insert(
+                                    step_req_id,
+                                    InFlightAction {
+                                        id: step_req_id,
+                                        vm: vm_id,
+                                        kind: step_kind.name(),
+                                        subsystem: step_kind.subsystem(),
+                                        matcher,
+                                        queued_tick: now_tick,
+                                        dispatched_tick: now_tick,
+                                        detail,
+                                        saw_pending: false,
+                                        native_sent: false,
                                     },
                                 );
                                 if let Some(batch) = vm_state.active_batch.as_mut() {
@@ -1471,6 +1648,50 @@ impl BrokerState {
                 break;
             }
         }
+        self.expired_staged_kinds.extend(expired_staged);
+    }
+
+    fn mark_deferred_sent(&mut self, kind_name: &'static str) {
+        let now_tick = self.tick;
+        for vm_state in self.vms.values_mut() {
+            if let Some(inflight) = vm_state
+                .in_flight
+                .values_mut()
+                .find(|f| !f.native_sent && f.kind == kind_name)
+            {
+                inflight.native_sent = true;
+                inflight.dispatched_tick = now_tick;
+                let rec = ActionResultRecord {
+                    id: inflight.id,
+                    vm: inflight.vm,
+                    kind: inflight.kind,
+                    state: "dispatched",
+                    phase: "dispatch",
+                    ok: Some(true),
+                    code: None,
+                    reason: None,
+                    queued_tick: inflight.queued_tick,
+                    dispatched_tick: Some(now_tick),
+                    completed_tick: None,
+                    detail: inflight.detail.clone(),
+                };
+                vm_state.upsert_retained(rec.clone());
+                vm_state.pending_events.push_back(rec);
+                break;
+            }
+        }
+    }
+
+    fn resolve_matching_sent(
+        &mut self,
+        matches: impl Fn(&InFlightAction) -> Option<(Option<bool>, Option<&'static str>, Option<String>)>,
+    ) {
+        self.resolve_matching(|inflight| {
+            if !inflight.native_sent {
+                return None;
+            }
+            matches(inflight)
+        });
     }
 
     fn resolve_matching(
@@ -1498,12 +1719,16 @@ impl BrokerState {
                     vm: inflight.vm,
                     kind: inflight.kind,
                     state,
-                    phase: "server",
+                    phase: if inflight.native_sent {
+                        "server"
+                    } else {
+                        "dispatch"
+                    },
                     ok,
                     code: code.map(str::to_string),
                     reason,
                     queued_tick: inflight.queued_tick,
-                    dispatched_tick: Some(inflight.dispatched_tick),
+                    dispatched_tick: inflight.native_sent.then_some(inflight.dispatched_tick),
                     completed_tick: Some(now_tick),
                     detail: inflight.detail,
                 };
@@ -1529,6 +1754,38 @@ thread_local! {
 
 pub(crate) fn update_native_snapshot(snapshot: NativeSnapshot) {
     BROKER.with(|b| b.borrow_mut().native = snapshot);
+}
+
+pub(crate) fn clear_frame_contention() {
+    BROKER.with(|b| b.borrow_mut().contended_subsystems = 0);
+}
+
+pub(crate) fn mark_subsystem_contended(sub: Subsystem) {
+    BROKER.with(|b| b.borrow_mut().contended_subsystems |= sub.bit());
+}
+
+pub(crate) fn is_subsystem_contended(sub: Subsystem) -> bool {
+    BROKER.with(|b| (b.borrow().contended_subsystems & sub.bit()) != 0)
+}
+
+pub(crate) fn mark_deferred_sent(kind_name: &'static str) {
+    BROKER.with(|b| b.borrow_mut().mark_deferred_sent(kind_name));
+}
+
+pub(crate) fn take_expired_staged_kinds() -> Vec<&'static str> {
+    BROKER.with(|b| std::mem::take(&mut b.borrow_mut().expired_staged_kinds))
+}
+
+pub(crate) fn resolve_staged_refusal(kind_name: &'static str, code: &'static str, reason: &str) {
+    BROKER.with(|b| {
+        b.borrow_mut().resolve_matching(|inflight| {
+            if !inflight.native_sent && inflight.kind == kind_name {
+                Some((Some(false), Some(code), Some(reason.to_string())))
+            } else {
+                None
+            }
+        });
+    });
 }
 
 pub(crate) fn step_tick(
@@ -1609,7 +1866,7 @@ pub(crate) fn resolve_server_loot_one(
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         b.native.loot_busy = false;
-        b.resolve_matching(|inflight| {
+        b.resolve_matching_sent(|inflight| {
             let ServerMatcher::LootOne { key, qty_before, count } = inflight.matcher else {
                 return None;
             };
@@ -1646,7 +1903,7 @@ pub(crate) fn resolve_server_loot_all(ok: Option<bool>, reason: Option<&str>) {
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         b.native.loot_busy = false;
-        b.resolve_matching(|inflight| {
+        b.resolve_matching_sent(|inflight| {
             if !matches!(inflight.matcher, ServerMatcher::LootAll) {
                 return None;
             }
@@ -1677,7 +1934,7 @@ pub(crate) fn resolve_server_merchant_buy(
         if pending_cleared {
             b.native.merchant_pending = false;
         }
-        b.resolve_matching(|inflight| {
+        b.resolve_matching_sent(|inflight| {
             let ServerMatcher::MerchantBuy {
                 item_id,
                 qty_before,
@@ -1707,7 +1964,7 @@ pub(crate) fn resolve_server_merchant_sell(
         if pending_cleared {
             b.native.merchant_pending = false;
         }
-        b.resolve_matching(|inflight| {
+        b.resolve_matching_sent(|inflight| {
             let ServerMatcher::MerchantSell {
                 key,
                 qty_before,
@@ -1733,7 +1990,7 @@ pub(crate) fn resolve_server_merchant(is_buy: bool, ok: bool, reason: Option<&st
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         b.native.merchant_pending = false;
-        b.resolve_matching(|inflight| {
+        b.resolve_matching_sent(|inflight| {
             let matched = if is_buy {
                 matches!(inflight.matcher, ServerMatcher::MerchantBuy { .. })
             } else {
@@ -1766,7 +2023,7 @@ pub(crate) fn resolve_server_bank_move(
         if pending_cleared {
             b.native.bank_busy = false;
         }
-        b.resolve_matching(|inflight| {
+        b.resolve_matching_sent(|inflight| {
             let ServerMatcher::BankMove {
                 from_bank,
                 key,
@@ -1805,7 +2062,7 @@ pub(crate) fn resolve_server_bank_money(pending_cleared: bool, bank_after: i64) 
         if pending_cleared {
             b.native.bank_busy = false;
         }
-        b.resolve_matching(|inflight| {
+        b.resolve_matching_sent(|inflight| {
             let ServerMatcher::BankMoney {
                 dir,
                 bank_before,
@@ -1835,7 +2092,7 @@ pub(crate) fn resolve_server_bank(is_money: bool, ok: bool, reason: Option<&str>
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         b.native.bank_busy = false;
-        b.resolve_matching(|inflight| {
+        b.resolve_matching_sent(|inflight| {
             let matched = if is_money {
                 matches!(inflight.matcher, ServerMatcher::BankMoney { .. })
             } else {
@@ -1859,7 +2116,7 @@ pub(crate) fn resolve_server_bank(is_money: bool, ok: bool, reason: Option<&str>
 
 pub(crate) fn resolve_server_camera(ok: bool, reason: Option<&str>) {
     BROKER.with(|b| {
-        b.borrow_mut().resolve_matching(|inflight| {
+        b.borrow_mut().resolve_matching_sent(|inflight| {
             if !matches!(inflight.matcher, ServerMatcher::Camera) {
                 return None;
             }
@@ -1896,7 +2153,7 @@ pub(crate) fn resolve_server_d7() {
         b.native.merchant_pending = false;
         b.native.bank_busy = false;
         b.native.inventory_busy = false;
-        b.resolve_matching(|inflight| {
+        b.resolve_matching_sent(|inflight| {
             if matches!(
                 inflight.matcher,
                 ServerMatcher::LootOne { .. }

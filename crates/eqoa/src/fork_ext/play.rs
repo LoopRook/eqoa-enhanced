@@ -323,6 +323,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         crate::fork_ext::addons::action_broker::update_native_snapshot(snapshot);
         crate::fork_ext::addons::native_core::iteration(_game_step);
         if _game_step {
+            crate::fork_ext::addons::action_broker::clear_frame_contention();
             if let Some(pending) = PENDING_BANK_TX.with(|b| {
                 if _play.mode != 11 {
                     b.borrow_mut().take()
@@ -379,6 +380,9 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
             crate::fork_ext::addons::action_broker::step_tick(snapshot, |kind| {
                 dispatch_broker_action(_play, kind)
             });
+            for expired_kind in crate::fork_ext::addons::action_broker::take_expired_staged_kinds() {
+                clear_staged_for_kind(expired_kind);
+            }
             let reqs = crate::fork_ext::addons::actions::take_action_requests();
             if ready {
                 if reqs.map && crate::settings::map() && _play.addon_input_available() {
@@ -419,6 +423,44 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn clear_staged_for_kind(kind_name: &'static str) {
+    match kind_name {
+        "loot" => PENDING_NPCW_TX.with(|p| {
+            if matches!(*p.borrow(), Some(PendingNpcwTx::LootOne { .. })) {
+                *p.borrow_mut() = None;
+            }
+        }),
+        "loot_all" => PENDING_NPCW_TX.with(|p| {
+            if matches!(*p.borrow(), Some(PendingNpcwTx::LootAll)) {
+                *p.borrow_mut() = None;
+            }
+        }),
+        "buy" => PENDING_NPCW_TX.with(|p| {
+            if matches!(*p.borrow(), Some(PendingNpcwTx::Buy { .. })) {
+                *p.borrow_mut() = None;
+            }
+        }),
+        "sell" => PENDING_NPCW_TX.with(|p| {
+            if matches!(*p.borrow(), Some(PendingNpcwTx::Sell { .. })) {
+                *p.borrow_mut() = None;
+            }
+        }),
+        "bank_move" => PENDING_BANK_TX.with(|b| {
+            if matches!(*b.borrow(), Some(PendingBankTx::Move { .. })) {
+                *b.borrow_mut() = None;
+            }
+        }),
+        "bank_money" => PENDING_BANK_TX.with(|b| {
+            if matches!(*b.borrow(), Some(PendingBankTx::Money { .. })) {
+                *b.borrow_mut() = None;
+            }
+        }),
+        "camera" => PENDING_CAMERA.with(|c| c.set(None)),
+        _ => {}
+    }
+}
+
 /// Pushes staged broker loot/merchant requests immediately before `npcw.rs`'s native loops.
 pub(crate) fn npcw_requests(
     _play: &Play,
@@ -427,23 +469,39 @@ pub(crate) fn npcw_requests(
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let Some(req) = PENDING_NPCW_TX.with(|p| p.borrow_mut().take()) else {
+        use crate::fork_ext::addons::action_broker::{
+            self, Subsystem, is_master_loot_active, mark_deferred_sent, mark_subsystem_contended,
+            resolve_in_flight_window_closed, resolve_staged_refusal,
+        };
+        if !_loot_out.is_empty() {
+            mark_subsystem_contended(Subsystem::Loot);
+        }
+        if !_merch_out.is_empty() {
+            mark_subsystem_contended(Subsystem::Merchant);
+        }
+        let Some(req) = PENDING_NPCW_TX.with(|p| *p.borrow()) else {
             return;
         };
         match req {
             PendingNpcwTx::LootOne { key, count } => {
                 if _play.mode != 1 || _play.npcw.corpse.is_none() {
-                    crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
+                    PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                    resolve_in_flight_window_closed("loot", "corpse window is not open");
+                    return;
+                }
+                if is_master_loot_active() {
+                    PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                    resolve_staged_refusal(
                         "loot",
-                        "corpse window is not open",
+                        "permission_denied",
+                        "corpse is under master loot rules",
                     );
                     return;
                 }
-                if !_loot_out.is_empty()
-                    || crate::fork_ext::addons::action_broker::is_master_loot_active()
-                {
+                if LOOT_BUSY.with(|b| b.get()) || !_loot_out.is_empty() {
                     return;
                 }
+                PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
                 if _play
                     .npcw
                     .corpse
@@ -452,28 +510,30 @@ pub(crate) fn npcw_requests(
                 {
                     LOOT_BUSY.with(|b| b.set(true));
                     _loot_out.push(crate::loot::LootOut::One(key as i32, count));
+                    mark_deferred_sent("loot");
                 } else {
-                    crate::fork_ext::addons::action_broker::resolve_server_loot_one(
-                        None,
-                        Some(false),
-                        Some("item is no longer on corpse"),
-                        |_| 0,
-                    );
+                    resolve_staged_refusal("loot", "stale_handle", "item is no longer on corpse");
                 }
             }
             PendingNpcwTx::LootAll => {
                 if _play.mode != 1 || _play.npcw.corpse.is_none() {
-                    crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
+                    PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                    resolve_in_flight_window_closed("loot_all", "corpse window is not open");
+                    return;
+                }
+                if is_master_loot_active() {
+                    PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                    resolve_staged_refusal(
                         "loot_all",
-                        "corpse window is not open",
+                        "permission_denied",
+                        "corpse is under master loot rules",
                     );
                     return;
                 }
-                if !_loot_out.is_empty()
-                    || crate::fork_ext::addons::action_broker::is_master_loot_active()
-                {
+                if LOOT_BUSY.with(|b| b.get()) || !_loot_out.is_empty() {
                     return;
                 }
+                PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
                 if _play
                     .npcw
                     .corpse
@@ -482,24 +542,21 @@ pub(crate) fn npcw_requests(
                 {
                     LOOT_BUSY.with(|b| b.set(true));
                     _loot_out.push(crate::loot::LootOut::All);
+                    mark_deferred_sent("loot_all");
                 } else {
-                    crate::fork_ext::addons::action_broker::resolve_server_loot_all(
-                        Some(false),
-                        Some("corpse has no items to loot"),
-                    );
+                    resolve_staged_refusal("loot_all", "not_found", "corpse has no items to loot");
                 }
             }
             PendingNpcwTx::Buy { ware_key, count } => {
                 if _play.mode != 10 || _play.npcw.shop.id.is_none() {
-                    crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
-                        "buy",
-                        "merchant window is not open",
-                    );
+                    PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                    resolve_in_flight_window_closed("buy", "merchant window is not open");
                     return;
                 }
                 if _play.npcw.shop.pending || !_merch_out.is_empty() {
                     return;
                 }
+                PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
                 if let Some(pos) = _play
                     .npcw
                     .shop
@@ -509,25 +566,25 @@ pub(crate) fn npcw_requests(
                     .position(|it| it.inv_index == ware_key)
                 {
                     _merch_out.push(crate::merchant::MerchantOut::Buy(pos as i32, count));
+                    mark_deferred_sent("buy");
                 } else {
-                    crate::fork_ext::addons::action_broker::resolve_server_merchant(
-                        true,
-                        false,
-                        Some("ware is no longer offered by merchant"),
+                    resolve_staged_refusal(
+                        "buy",
+                        "stale_handle",
+                        "ware is no longer offered by merchant",
                     );
                 }
             }
             PendingNpcwTx::Sell { item_key, count } => {
                 if _play.mode != 10 || _play.npcw.shop.id.is_none() {
-                    crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
-                        "sell",
-                        "merchant window is not open",
-                    );
+                    PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                    resolve_in_flight_window_closed("sell", "merchant window is not open");
                     return;
                 }
                 if _play.npcw.shop.pending || !_merch_out.is_empty() {
                     return;
                 }
+                PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
                 if let Some(slot) = _play
                     .dump
                     .inventory
@@ -536,15 +593,13 @@ pub(crate) fn npcw_requests(
                     .position(|it| it.inv_index == item_key)
                 {
                     _merch_out.push(crate::merchant::MerchantOut::Sell(slot as i32, count));
+                    mark_deferred_sent("sell");
                 } else {
-                    crate::fork_ext::addons::action_broker::resolve_server_merchant(
-                        false,
-                        false,
-                        Some("item is no longer in inventory"),
-                    );
+                    resolve_staged_refusal("sell", "stale_handle", "item is no longer in inventory");
                 }
             }
         }
+        let _ = action_broker::has_in_flight;
     }
 }
 
@@ -552,23 +607,29 @@ pub(crate) fn npcw_requests(
 pub(crate) fn bank_requests(_play: &Play, _out: &mut Vec<crate::bank::BankOut>) {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let Some(req) = PENDING_BANK_TX.with(|b| b.borrow_mut().take()) else {
+        use crate::fork_ext::addons::action_broker::{
+            Subsystem, mark_deferred_sent, mark_subsystem_contended,
+            resolve_in_flight_window_closed, resolve_staged_refusal,
+        };
+        if !_out.is_empty() {
+            mark_subsystem_contended(Subsystem::Bank);
+        }
+        let Some(req) = PENDING_BANK_TX.with(|b| *b.borrow()) else {
             return;
         };
         if _play.mode != 11 {
+            PENDING_BANK_TX.with(|b| *b.borrow_mut() = None);
             let kind = match req {
                 PendingBankTx::Move { .. } => "bank_move",
                 PendingBankTx::Money { .. } => "bank_money",
             };
-            crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
-                kind,
-                "bank window is not open",
-            );
+            resolve_in_flight_window_closed(kind, "bank window is not open");
             return;
         }
         if _play.bank.state != 0 || !_out.is_empty() {
             return;
         }
+        PENDING_BANK_TX.with(|b| *b.borrow_mut() = None);
         match req {
             PendingBankTx::Move {
                 from_bank,
@@ -586,16 +647,18 @@ pub(crate) fn bank_requests(_play: &Play, _out: &mut Vec<crate::bank::BankOut>) 
                         slot as i32,
                         count,
                     ));
+                    mark_deferred_sent("bank_move");
                 } else {
-                    crate::fork_ext::addons::action_broker::resolve_server_bank(
-                        false,
-                        false,
-                        Some("item is no longer in source container"),
+                    resolve_staged_refusal(
+                        "bank_move",
+                        "stale_handle",
+                        "item is no longer in source container",
                     );
                 }
             }
             PendingBankTx::Money { dir, amount } => {
                 _out.push(crate::bank::BankOut::MoveMoney(dir, amount));
+                mark_deferred_sent("bank_money");
             }
         }
     }
@@ -609,12 +672,14 @@ pub(crate) fn apply_camera(_play: &mut Play, _walker: &mut crate::walker::Walker
             return;
         };
         if !matches!(_play.mode, 0 | 38) || _play.is_dead() {
-            crate::fork_ext::addons::action_broker::resolve_server_camera(
-                false,
-                Some("camera cannot change in current state"),
+            crate::fork_ext::addons::action_broker::resolve_staged_refusal(
+                "camera",
+                "busy",
+                "camera cannot change in current state",
             );
             return;
         }
+        crate::fork_ext::addons::action_broker::mark_deferred_sent("camera");
         if let Some(mode) = req.mode {
             let rc = _play.race_cams.as_ref().and_then(|t| {
                 crate::camstyle::race_camera(
@@ -1696,7 +1761,7 @@ fn dispatch_broker_action(
                     count: n as i32,
                 });
             });
-            DispatchOutcome::AwaitingServer {
+            DispatchOutcome::Staged {
                 matcher: ServerMatcher::LootOne {
                     key: it.inv_index,
                     qty_before: it.quantity,
@@ -1739,7 +1804,7 @@ fn dispatch_broker_action(
             PENDING_NPCW_TX.with(|p| {
                 *p.borrow_mut() = Some(PendingNpcwTx::LootAll);
             });
-            DispatchOutcome::AwaitingServer {
+            DispatchOutcome::Staged {
                 matcher: ServerMatcher::LootAll,
                 detail: None,
             }
@@ -1817,7 +1882,7 @@ fn dispatch_broker_action(
                     count: *count as i32,
                 });
             });
-            DispatchOutcome::AwaitingServer {
+            DispatchOutcome::Staged {
                 matcher: ServerMatcher::MerchantBuy {
                     item_id: it.item.id,
                     qty_before,
@@ -1877,7 +1942,7 @@ fn dispatch_broker_action(
                     count: *count as i32,
                 });
             });
-            DispatchOutcome::AwaitingServer {
+            DispatchOutcome::Staged {
                 matcher: ServerMatcher::MerchantSell {
                     key: it.inv_index,
                     qty_before: it.quantity,
@@ -1954,7 +2019,7 @@ fn dispatch_broker_action(
                     count: *count as i32,
                 });
             });
-            DispatchOutcome::AwaitingServer {
+            DispatchOutcome::Staged {
                 matcher: ServerMatcher::BankMove {
                     from_bank: *from_bank,
                     key: it.inv_index,
@@ -1996,7 +2061,7 @@ fn dispatch_broker_action(
                     amount: *amount as i32,
                 });
             });
-            DispatchOutcome::AwaitingServer {
+            DispatchOutcome::Staged {
                 matcher: ServerMatcher::BankMoney {
                     dir: *dir,
                     bank_before: play.dump.player.p38,
@@ -2025,7 +2090,7 @@ fn dispatch_broker_action(
                     distance: *distance,
                 }));
             });
-            DispatchOutcome::AwaitingServer {
+            DispatchOutcome::Staged {
                 matcher: ServerMatcher::Camera,
                 detail: None,
             }
