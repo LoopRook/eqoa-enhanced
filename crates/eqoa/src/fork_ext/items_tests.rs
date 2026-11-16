@@ -2278,3 +2278,225 @@ fn round6c_no_false_confirmations_unrelated_invadd_or_corpse_close() {
     action_broker::reset_all_for_test();
     crate::fork_ext::bindpage::reset_in_memory();
 }
+
+#[test]
+fn round6c_contention_retains_staged_deposit_and_never_confirms_on_player_reply() {
+    use crate::fork_ext::addons::{action_broker, native_events};
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    p.dump.player.p34 = 500;
+    p.dump.player.p38 = 500;
+    let mut bag_pot = potion();
+    bag_pot.equip_slot = -1;
+    p.dump.inventory = list(&[bag_pot]);
+    p.dump.bank.items = list(&[]);
+    p.mode = 11;
+    p.bank.state = 0;
+    p.forge_snapshot(None);
+
+    let host = Host::new().unwrap();
+    host.execute(
+        r#"
+        ares, bres = {}, {}
+        eqoa.events.on("action.result", function(e) ares[#ares + 1] = e.data end)
+        eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+            last_req, last_err = next_fn()
+        end)
+        local inv = assert(eqoa.inventory.get())
+        h_pot = inv.items[1].ref
+    "#,
+    )
+    .unwrap();
+
+    let press_k = |code: &str| {
+        host.execute(code).unwrap();
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+            )
+        });
+        native_events::dispatch(&host).unwrap();
+    };
+    let apply_broker = |p: &mut Play, event: Event| {
+        let capture = super::super::begin_game_event(p, &event);
+        if let Event::Opcode { op, data } = &event {
+            assert!(p.bank_opcode(*op, data), "opcode {op:#06x}");
+        }
+        super::super::end_game_event(p, capture);
+    };
+
+    // 1. Broker stages bank_move(deposit 1 potion), while native already queued a player BankOut::Move on same frame.
+    // The staged broker request must NOT be dropped and must NOT confirm when player's 0x1251 arrives.
+    press_k("next_fn = function() return eqoa.actions.batch({ steps = { { kind = 'bank_move', item = h_pot, count = 1 }, { kind = 'bank_money', direction = 'deposit', amount = 10 } }, require_window = 'bank' }) end");
+    host.execute("assert(last_req ~= nil, last_err and last_err.reason or 'batch nil')").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    let mut player_out = vec![crate::bank::BankOut::Move(0, 0, 1)];
+    super::super::bank_requests(&p, &mut player_out);
+    assert_eq!(player_out.len(), 1, "contended native output must block broker push without overwriting player output");
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(#ares == 0 and #bres == 0)").unwrap();
+
+    let mut pot_one = potion();
+    pot_one.quantity = 1;
+    apply_broker(&mut p, opcode(0x1251, pot_one.bytes()));
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(#ares == 0 and #bres == 0, 'player reply must not confirm or resolve unsent staged broker deposit')").unwrap();
+
+    // 2. Next idle tick: retained staged request retries and now sends via bank_requests!
+    let sends_before_retry = p.session.sends_lost;
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert!(p.session.sends_lost > sends_before_retry, "retained staged deposit must send once contention clears");
+    assert_eq!(p.bank.state, 2);
+    host.execute("assert(#ares == 1 and ares[1].state == 'dispatched' and #bres == 0)").unwrap();
+
+    // 3. Mismatched deposit quantity (0x1251 quantity=2 for count=1) resolves unknown and stops batch!
+    let mut pot_two = potion();
+    pot_two.quantity = 2;
+    apply_broker(&mut p, opcode(0x1251, pot_two.bytes()));
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        "assert(#ares == 2 and ares[2].state == 'unknown' and ares[2].ok == nil); assert(#bres == 1 and bres[1].state == 'unknown' and bres[1].completed == 0)",
+    )
+    .unwrap();
+
+    // 4. Already-sent deposit + same-frame player native BankOut contention -> reply resolves `unknown`, never `completed`.
+    p.bank.state = 0;
+    p.dump.bank.items = list(&[]);
+    p.forge_snapshot(None);
+    host.execute("h_pot = assert(eqoa.inventory.get()).items[1].ref").unwrap();
+    press_k("next_fn = function() return eqoa.actions.bank_move(h_pot, 1) end");
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert_eq!(p.bank.state, 2);
+    super::super::begin_iteration(&mut p, true);
+    let mut concurrent_out = vec![crate::bank::BankOut::Move(0, 0, 1)];
+    super::super::bank_requests(&p, &mut concurrent_out);
+    apply_broker(&mut p, opcode(0x1251, pot_one.bytes()));
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(ares[#ares].state == 'unknown' and ares[#ares].ok == nil)").unwrap();
+
+    // 5. Continuous contention past timeout refuses staged request cleanly with `busy`.
+    p.bank.state = 0;
+    press_k("next_fn = function() return eqoa.actions.bank_move(h_pot, 1) end");
+    for _ in 0..=action_broker::RATE_LIMIT_WAIT_TICKS {
+        super::super::begin_iteration(&mut p, true);
+        let mut busy_out = vec![crate::bank::BankOut::Move(0, 0, 1)];
+        super::super::bank_requests(&p, &mut busy_out);
+    }
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(ares[#ares].ok == false and ares[#ares].code == 'busy' and ares[#ares].state == 'refused')").unwrap();
+
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}
+
+#[test]
+fn round6c_loot_partial_decrease_and_noop_loot_all_yield_unknown_and_stop_batch() {
+    use crate::fork_ext::addons::{action_broker, native_events};
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    // 39 unique unstackable rings + 1 partial stack of Moonstone (room for LootOne, then full for LootAll).
+    let mut filler: Vec<NetItem> = (0..crate::inventory::pack_cap().saturating_sub(1))
+        .map(|i| {
+            let mut r = ring();
+            r.id = 910_000 + i as i64;
+            r.key = 200 + i as u32;
+            r.equip_slot = -1;
+            r.net()
+        })
+        .collect();
+    let mut inv_gem = gem();
+    inv_gem.key = 299;
+    inv_gem.quantity = 1;
+    filler.push(inv_gem.net());
+    p.dump.inventory = ItemList {
+        items: filler,
+        ..Default::default()
+    };
+
+    let mut stack_gem = gem();
+    stack_gem.key = 31;
+    stack_gem.quantity = 4;
+    let mut c2 = sword();
+    c2.key = 32;
+    c2.equip_slot = -1;
+    p.npcw.corpse = Some(list(&[stack_gem, c2]));
+    p.mode = 1;
+    p.forge_snapshot(None);
+
+    let host = Host::new().unwrap();
+    host.execute(
+        r#"
+        ares, bres = {}, {}
+        eqoa.events.on("action.result", function(e) ares[#ares + 1] = e.data end)
+        eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+            last_batch, last_err = eqoa.actions.batch(spec_fn())
+        end)
+        local l = assert(eqoa.loot.get())
+        h_gem, h_sword = l.items[1].ref, l.items[2].ref
+    "#,
+    )
+    .unwrap();
+
+    let press_k = |spec_code: &str| {
+        host.execute(spec_code).unwrap();
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+            )
+        });
+        native_events::dispatch(&host).unwrap();
+    };
+
+    // 1. LootOne requested count = 3 from stack of 4, server only reduces stack by 1 (partial) -> unknown & batch stops!
+    press_k("spec_fn = function() return { steps = { { kind = 'loot', item = h_gem, count = 3 }, { kind = 'loot', item = h_sword, count = 1 } }, require_window = 'loot' } end");
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    let sends_after_step1 = p.session.sends_lost;
+    let mut w = Writer::default();
+    w.u8(0).signed(0);
+    let ev_19 = opcode(0x0019, w.data);
+    let cap_19 = super::super::begin_game_event(&p, &ev_19);
+    // Simulate partial decrease of stack 31 from 4 to 3 instead of expected 1 (count=3).
+    p.npcw.corpse.as_mut().unwrap().items[0].quantity = 3;
+    super::super::end_game_event(&p, cap_19);
+    native_events::dispatch(&host).unwrap();
+    p.bags_broker_tick();
+    assert_eq!(p.session.sends_lost, sends_after_step1, "step 2 must not send after partial loot unknown");
+    host.execute(
+        "assert(ares[#ares].state == 'unknown' and ares[#ares].ok == nil); assert(#bres == 1 and bres[1].state == 'unknown' and bres[1].ok == nil and bres[1].completed == 0)",
+    )
+    .unwrap();
+
+    // 2. LootAll receives 0x001A without any corpse state change (full pack & full gem stack) -> unknown & batch stops!
+    p.dump.inventory.items.last_mut().unwrap().quantity = 100;
+    press_k("spec_fn = function() return { steps = { { kind = 'loot_all' }, { kind = 'loot', item = h_sword, count = 1 } }, require_window = 'loot' } end");
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    let sends_after_loot_all = p.session.sends_lost;
+    let ev_1a = opcode(0x001A, vec![]);
+    let cap_1a = super::super::begin_game_event(&p, &ev_1a);
+    assert!(p.npcw_opcode(0x001A, &[]));
+    super::super::end_game_event(&p, cap_1a);
+    native_events::dispatch(&host).unwrap();
+    p.bags_broker_tick();
+    assert_eq!(p.session.sends_lost, sends_after_loot_all, "step 2 must not send after noop loot_all unknown");
+    host.execute(
+        "assert(ares[#ares].kind == 'loot_all' and ares[#ares].state == 'unknown' and ares[#ares].ok == nil); assert(#bres == 2 and bres[2].state == 'unknown' and bres[2].ok == nil and bres[2].completed == 0)",
+    )
+    .unwrap();
+
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}
