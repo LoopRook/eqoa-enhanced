@@ -123,6 +123,13 @@ Paste these into each brief (they come from CLAUDE.md):
   change). Count SKIP lines. Also `cargo check --locked -p eqoa --target wasm32-unknown-unknown`,
   then a release build after the final commit.
 - Bundled Wereoxxs, ARPG and Modern UI must still load and pass their existing tests.
+- Run gates with `python tools/run_gates.py` (`docs/DEV-TOOLS.md`); it takes the shared lock, waits for it
+  and clears a lock whose holder died. Run long gate runs in the background with a long timeout and wait
+  for them **in the same turn**: nobody resumes an agent that ends its turn while waiting.
+- A negative control is executed, not described: break the code, run the test, record the command and
+  the failing line, restore. Checkers rerun named tests themselves.
+- Name the exact path of any reference that lives outside the worktree (the pinned Forge reference is
+  `<main checkout>/run/forge-compat-reference/`); a builder that cannot find it must stop and say so.
 - Write the report to `docs/plans/eqoa-api/round-N-report.md`: what changed, tests (pass/fail/skip
   counts), footprint, anything not done. Reviewers write to `docs/plans/eqoa-api/round-N-review.md`:
   verdict first, then findings by severity with file:line and a failure scenario.
