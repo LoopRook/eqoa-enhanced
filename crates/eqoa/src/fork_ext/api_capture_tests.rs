@@ -1824,6 +1824,26 @@ fn addon_actions_use_live_camera_assist_and_summary_overlay_gates() {
         8,
         "broker burst dispatches at most 8 actions on the first 30 Hz tick"
     );
+    for tick in 1..25 {
+        let prev = p.session.sends_lost;
+        begin_iteration(&mut p, true);
+        assert_eq!(
+            p.session.sends_lost - prev,
+            1,
+            "tick {tick} refills and dispatches 1 assist"
+        );
+    }
+    assert_eq!(
+        p.session.sends_lost - before,
+        32,
+        "all 32 queued assists dispatch exactly once over the following ticks"
+    );
+    begin_iteration(&mut p, true);
+    assert_eq!(
+        p.session.sends_lost - before,
+        32,
+        "no 33rd send after all 32 queued assists drained"
+    );
     crate::fork_ext::addons::action_broker::reset_all_for_test();
     crate::fork_ext::bindpage::reset_in_memory();
 }

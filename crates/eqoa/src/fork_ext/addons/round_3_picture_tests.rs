@@ -1253,7 +1253,7 @@ fn assert_mod_click(id: &str, option: &str, frame_rect: [f32; 4], vertical: &str
             if summary {
                 request.summary
             } else {
-                crate::fork_ext::addons::action_broker::queued_count_for_test() == 1
+                crate::fork_ext::addons::action_broker::queued_kinds_for_test() == vec!["assist"]
             },
             "native action at corner of {id}'s drawn rect"
         );

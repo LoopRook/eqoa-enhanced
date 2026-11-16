@@ -3663,6 +3663,34 @@ pub(crate) fn queued_count_for_test() -> usize {
 }
 
 #[cfg(test)]
+pub(crate) fn queued_kinds_for_test() -> Vec<&'static str> {
+    BROKER.with(|b| {
+        b.borrow()
+            .vms
+            .values()
+            .flat_map(|v| v.queued.iter().map(|q| q.kind.name()))
+            .collect()
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn dispatch_all_for_test() -> Vec<&'static str> {
+    let snap = NativeSnapshot {
+        in_world: true,
+        mode: 0,
+        ..Default::default()
+    };
+    let mut dispatched = Vec::new();
+    BROKER.with(|b| {
+        b.borrow_mut().step_tick(snap, |kind| {
+            dispatched.push(kind.name());
+            DispatchOutcome::Completed { detail: None }
+        });
+    });
+    dispatched
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::fork_ext::addons::{

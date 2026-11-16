@@ -520,6 +520,12 @@ fn round_3_stage_a_actions_assist_and_summary_api() {
     press_k();
     h.execute("assert(last_req ~= nil and last_err == nil, 'assist queued with RequestId')")
         .unwrap();
+    assert_eq!(super::action_broker::queued_kinds_for_test(), vec!["assist"]);
+    assert_eq!(
+        super::action_broker::dispatch_all_for_test(),
+        vec!["assist"],
+        "accepted assist must reach broker dispatch"
+    );
     super::action_broker::reset_all_for_test();
 
     h.execute(
