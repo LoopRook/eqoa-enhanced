@@ -278,6 +278,71 @@ fn locate(v: &Value, c: &Core) -> Option<(&'static str, usize, u64, (String, u64
     Some((list, index, container["revision"].as_u64().unwrap_or(0), (r.key.clone(), r.incarnation)))
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ResolvedItemSpec {
+    pub list: &'static str,
+    pub index: usize,
+    pub inv_index: u32,
+    pub key: String,
+    pub generation: u64,
+    pub incarnation: u64,
+}
+
+pub(crate) fn resolve_item_handle(
+    v: &Value,
+) -> std::result::Result<ResolvedItemSpec, (&'static str, String)> {
+    let Some(ud) = v.as_userdata() else {
+        return Err(("invalid_argument", "item must be an item handle".into()));
+    };
+    let Ok(r) = ud.borrow::<Ref>() else {
+        return Err(("invalid_argument", "item must be an item handle".into()));
+    };
+    if r.kind != "item" {
+        return Err(("invalid_argument", format!("expected item handle, got {}", r.kind)));
+    }
+    let key = r.key.clone();
+    let generation = r.generation;
+    let inc = r.incarnation;
+    CORE.with(|c| {
+        let c = c.borrow();
+        let Some((list, index, _rev, (k, incarnation))) = locate(v, &c) else {
+            return Err(("stale_handle", "item handle is stale or item no longer exists".into()));
+        };
+        let Some((_, raw_idx)) = k.split_once(':') else {
+            return Err(("invalid_argument", "malformed item handle key".into()));
+        };
+        let Ok(inv_index) = raw_idx.parse::<u32>() else {
+            return Err(("invalid_argument", "malformed item handle key".into()));
+        };
+        let _ = (key, generation, inc);
+        Ok(ResolvedItemSpec {
+            list,
+            index,
+            inv_index,
+            key: k,
+            generation: c.generation,
+            incarnation,
+        })
+    })
+}
+
+pub(crate) fn is_handle_fresh(spec: &ResolvedItemSpec) -> bool {
+    CORE.with(|c| {
+        let c = c.borrow();
+        if spec.generation != c.generation {
+            return false;
+        }
+        peek(&c.view, spec.list)["items"]
+            .as_array()
+            .is_some_and(|items| {
+                items.iter().any(|i| {
+                    i["ref"]["key"].as_str() == Some(spec.key.as_str())
+                        && i["ref"]["incarnation"].as_u64() == Some(spec.incarnation)
+                })
+            })
+    })
+}
+
 /// The record last built for each stack read, by (generation, revision): a mod (or the Forge item
 /// objects, which read one property at a time) that asks about the same stack again and again gets the
 /// same read-only table until its container changes.

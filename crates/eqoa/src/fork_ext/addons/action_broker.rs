@@ -8,6 +8,7 @@ use super::{
     host::Host,
     native::{bind, describe, error, record, session},
     native_core::CORE,
+    native_items::{ResolvedItemSpec, resolve_item_handle},
 };
 use mlua::{AnyUserData, Lua, MetaMethod, Result, UserData, UserDataMethods, Value};
 use serde_json::{Value as Json, json};
@@ -89,6 +90,16 @@ pub(crate) enum ActionKind {
     UnmemorizeAbility { slot: Option<i64>, ability: Option<AbilityLookup> },
     UnmemorizeAll,
     ArrangeAbility { from: AbilityLookup, to: AbilityLookup },
+    UseItem { item: ResolvedItemSpec },
+    Equip { item: ResolvedItemSpec },
+    SwapItems { a: ResolvedItemSpec, b: ResolvedItemSpec },
+    QuickSlot { item: ResolvedItemSpec, slot: u8 },
+    Loot { item: ResolvedItemSpec, count: Option<i64> },
+    LootAll,
+    Buy { ware: ResolvedItemSpec, count: i64 },
+    Sell { item: ResolvedItemSpec, count: i64 },
+    BankMove { from_bank: bool, item: ResolvedItemSpec, count: i64 },
+    BankMoney { dir: u8, amount: i64 },
 }
 
 impl ActionKind {
@@ -113,11 +124,28 @@ impl ActionKind {
             Self::UnmemorizeAbility { .. } => "unmemorize_ability",
             Self::UnmemorizeAll => "unmemorize_all",
             Self::ArrangeAbility { .. } => "arrange_ability",
+            Self::UseItem { .. } => "use_item",
+            Self::Equip { .. } => "equip",
+            Self::SwapItems { .. } => "swap_items",
+            Self::QuickSlot { .. } => "quick_slot",
+            Self::Loot { .. } => "loot",
+            Self::LootAll => "loot_all",
+            Self::Buy { .. } => "buy",
+            Self::Sell { .. } => "sell",
+            Self::BankMove { .. } => "bank_move",
+            Self::BankMoney { .. } => "bank_money",
         }
     }
 
     pub(crate) const fn subsystem(&self) -> Option<Subsystem> {
         match self {
+            Self::UseItem { .. }
+            | Self::Equip { .. }
+            | Self::SwapItems { .. }
+            | Self::QuickSlot { .. } => Some(Subsystem::Inventory),
+            Self::Loot { .. } | Self::LootAll => Some(Subsystem::Loot),
+            Self::Buy { .. } | Self::Sell { .. } => Some(Subsystem::Merchant),
+            Self::BankMove { .. } | Self::BankMoney { .. } => Some(Subsystem::Bank),
             Self::Assist
             | Self::Target(_)
             | Self::CycleTarget { .. }
@@ -152,6 +180,12 @@ pub(crate) enum ServerMatcher {
     AbilitySlot { slot: u8, index: u8 },
     AbilityClearBar,
     AbilityMoveIndex { from: u8, to: u8 },
+    LootOne { key: u32 },
+    LootAll,
+    MerchantBuy,
+    MerchantSell,
+    BankMove,
+    BankMoney,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -167,6 +201,10 @@ pub(crate) struct NativeSnapshot {
     pub merchant_pending: bool,
     pub loot_busy: bool,
     pub inventory_busy: bool,
+    pub merchant_open: bool,
+    pub bank_open: bool,
+    pub loot_open: bool,
+    pub master_loot_active: bool,
 }
 
 impl NativeSnapshot {
@@ -287,6 +325,7 @@ struct BrokerState {
     rr_cursor: usize,
     vms: HashMap<u64, VmBroker>,
     native: NativeSnapshot,
+    master_loot_active: bool,
 }
 
 impl Default for BrokerState {
@@ -298,6 +337,7 @@ impl Default for BrokerState {
             rr_cursor: 0,
             vms: HashMap::new(),
             native: NativeSnapshot::default(),
+            master_loot_active: false,
         }
     }
 }
@@ -550,7 +590,7 @@ impl BrokerState {
         self.native = snapshot;
         let now_tick = self.tick;
 
-        // 1. Server reply timeouts (10 s = 300 ticks -> `unknown`).
+        // 1. Server reply timeouts (10 s = 300 ticks -> `unknown`) & closed-window aborts.
         for vm_state in self.vms.values_mut() {
             let expired: Vec<u64> = vm_state
                 .in_flight
@@ -569,6 +609,44 @@ impl BrokerState {
                         ok: None,
                         code: Some("unknown".into()),
                         reason: Some("server outcome unknown after 10s".into()),
+                        queued_tick: inflight.queued_tick,
+                        dispatched_tick: Some(inflight.dispatched_tick),
+                        completed_tick: Some(now_tick),
+                        detail: inflight.detail,
+                    };
+                    vm_state.upsert_retained(rec.clone());
+                    vm_state.pending_events.push_back(rec);
+                }
+            }
+            let closed: Vec<(u64, &'static str)> = vm_state
+                .in_flight
+                .values()
+                .filter_map(|f| match f.matcher {
+                    ServerMatcher::MerchantBuy | ServerMatcher::MerchantSell
+                        if !snapshot.merchant_open =>
+                    {
+                        Some((f.id, "merchant window closed"))
+                    }
+                    ServerMatcher::BankMove | ServerMatcher::BankMoney if !snapshot.bank_open => {
+                        Some((f.id, "bank window closed"))
+                    }
+                    ServerMatcher::LootOne { .. } | ServerMatcher::LootAll if !snapshot.loot_open => {
+                        Some((f.id, "corpse window closed"))
+                    }
+                    _ => None,
+                })
+                .collect();
+            for (id, reason) in closed {
+                if let Some(inflight) = vm_state.in_flight.remove(&id) {
+                    let rec = ActionResultRecord {
+                        id: inflight.id,
+                        vm: inflight.vm,
+                        kind: inflight.kind,
+                        state: "refused",
+                        phase: "server",
+                        ok: Some(false),
+                        code: Some("refused".into()),
+                        reason: Some(reason.into()),
                         queued_tick: inflight.queued_tick,
                         dispatched_tick: Some(inflight.dispatched_tick),
                         completed_tick: Some(now_tick),
@@ -807,6 +885,7 @@ impl BrokerState {
 
 thread_local! {
     static BROKER: RefCell<BrokerState> = RefCell::new(BrokerState::default());
+    static MASTER_LOOT_ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 pub(crate) fn update_native_snapshot(snapshot: NativeSnapshot) {
@@ -829,6 +908,7 @@ pub(crate) fn clear_vm(vm: u64, reason: &str) {
 }
 
 pub(crate) fn reset_session(reason: &str) {
+    MASTER_LOOT_ACTIVE.with(|m| m.set(false));
     BROKER.with(|b| b.borrow_mut().reset_session(reason));
 }
 
@@ -868,6 +948,137 @@ pub(crate) fn resolve_server_ability_clear() {
     BROKER.with(|b| {
         b.borrow_mut().resolve_matching(|inflight| {
             matches!(inflight.matcher, ServerMatcher::AbilityClearBar).then_some((true, None, None))
+        });
+    });
+}
+
+pub(crate) fn set_master_loot(active: bool) {
+    MASTER_LOOT_ACTIVE.with(|m| m.set(active));
+}
+
+pub(crate) fn is_master_loot_active() -> bool {
+    MASTER_LOOT_ACTIVE.with(|m| m.get())
+}
+
+pub(crate) fn resolve_server_loot_one(ok: bool, reason: Option<&str>) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        b.native.loot_busy = false;
+        b.resolve_matching(|inflight| {
+            if !matches!(inflight.matcher, ServerMatcher::LootOne { .. }) {
+                return None;
+            }
+            if ok {
+                Some((true, None, None))
+            } else {
+                Some((
+                    false,
+                    Some("refused"),
+                    Some(reason.unwrap_or("loot refused by server").to_string()),
+                ))
+            }
+        });
+    });
+}
+
+pub(crate) fn resolve_server_loot_all(ok: bool, reason: Option<&str>) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        b.native.loot_busy = false;
+        b.resolve_matching(|inflight| {
+            if !matches!(inflight.matcher, ServerMatcher::LootAll) {
+                return None;
+            }
+            if ok {
+                Some((true, None, None))
+            } else {
+                Some((
+                    false,
+                    Some("refused"),
+                    Some(reason.unwrap_or("loot_all refused by server").to_string()),
+                ))
+            }
+        });
+    });
+}
+
+pub(crate) fn resolve_server_merchant(is_buy: bool, ok: bool, reason: Option<&str>) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        b.native.merchant_pending = false;
+        b.resolve_matching(|inflight| {
+            let matched = if is_buy {
+                matches!(inflight.matcher, ServerMatcher::MerchantBuy)
+            } else {
+                matches!(inflight.matcher, ServerMatcher::MerchantSell)
+            };
+            if !matched {
+                return None;
+            }
+            if ok {
+                Some((true, None, None))
+            } else {
+                Some((
+                    false,
+                    Some("refused"),
+                    Some(reason.unwrap_or("merchant transaction refused").to_string()),
+                ))
+            }
+        });
+    });
+}
+
+pub(crate) fn resolve_server_bank(is_money: bool, ok: bool, reason: Option<&str>) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        b.native.bank_busy = false;
+        b.resolve_matching(|inflight| {
+            let matched = if is_money {
+                matches!(inflight.matcher, ServerMatcher::BankMoney)
+            } else {
+                matches!(inflight.matcher, ServerMatcher::BankMove)
+            };
+            if !matched {
+                return None;
+            }
+            if ok {
+                Some((true, None, None))
+            } else {
+                Some((
+                    false,
+                    Some("refused"),
+                    Some(reason.unwrap_or("bank transaction refused").to_string()),
+                ))
+            }
+        });
+    });
+}
+
+pub(crate) fn resolve_server_d7() {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        b.native.loot_busy = false;
+        b.native.merchant_pending = false;
+        b.native.bank_busy = false;
+        b.native.inventory_busy = false;
+        b.resolve_matching(|inflight| {
+            if matches!(
+                inflight.matcher,
+                ServerMatcher::LootOne { .. }
+                    | ServerMatcher::LootAll
+                    | ServerMatcher::MerchantBuy
+                    | ServerMatcher::MerchantSell
+                    | ServerMatcher::BankMove
+                    | ServerMatcher::BankMoney
+            ) {
+                Some((
+                    false,
+                    Some("refused"),
+                    Some("server cancelled or refused transaction".into()),
+                ))
+            } else {
+                None
+            }
         });
     });
 }
@@ -1357,6 +1568,286 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     );
 
     install_non_item_actions(lua)?;
+    install_item_actions(lua)?;
+
+    Ok(())
+}
+
+fn install_item_actions(lua: &Lua) -> Result<()> {
+    bind(
+        lua,
+        "actions",
+        "use_item",
+        lua.create_function(|lua, item: Value| {
+            enqueue_lua_with(lua, "eqoa.actions.use_item", || {
+                let spec = resolve_item_handle(&item)?;
+                if spec.list != "inventory" {
+                    return Err((
+                        "invalid_argument",
+                        format!("use_item requires an inventory item handle, got '{}'", spec.list),
+                    ));
+                }
+                Ok(ActionKind::UseItem { item: spec })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "equip",
+        lua.create_function(|lua, item: Value| {
+            enqueue_lua_with(lua, "eqoa.actions.equip", || {
+                let spec = resolve_item_handle(&item)?;
+                if spec.list != "inventory" {
+                    return Err((
+                        "invalid_argument",
+                        format!("equip requires an inventory item handle, got '{}'", spec.list),
+                    ));
+                }
+                Ok(ActionKind::Equip { item: spec })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "swap_items",
+        lua.create_function(|lua, (a, b): (Value, Value)| {
+            enqueue_lua_with(lua, "eqoa.actions.swap_items", || {
+                let sa = resolve_item_handle(&a)?;
+                let sb = resolve_item_handle(&b)?;
+                if sa.list != "inventory" || sb.list != "inventory" {
+                    return Err((
+                        "invalid_argument",
+                        "swap_items requires two inventory item handles".into(),
+                    ));
+                }
+                if sa.inv_index == sb.inv_index {
+                    return Err((
+                        "invalid_argument",
+                        "swap_items requires two distinct item stacks".into(),
+                    ));
+                }
+                Ok(ActionKind::SwapItems { a: sa, b: sb })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "quick_slot",
+        lua.create_function(|lua, (item, slot): (Value, i64)| {
+            enqueue_lua_with(lua, "eqoa.actions.quick_slot", || {
+                let spec = resolve_item_handle(&item)?;
+                if spec.list != "inventory" {
+                    return Err((
+                        "invalid_argument",
+                        "quick_slot requires an inventory item handle".into(),
+                    ));
+                }
+                if !(1..=4).contains(&slot) {
+                    return Err(("invalid_argument", "quick_slot must be 1..=4".into()));
+                }
+                Ok(ActionKind::QuickSlot {
+                    item: spec,
+                    slot: (slot - 1) as u8,
+                })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "loot",
+        lua.create_function(|lua, (item, count): (Value, Option<i64>)| {
+            enqueue_lua_with(lua, "eqoa.actions.loot", || {
+                let spec = resolve_item_handle(&item)?;
+                if spec.list != "loot" {
+                    return Err((
+                        "invalid_argument",
+                        format!("loot requires a loot item handle, got '{}'", spec.list),
+                    ));
+                }
+                if let Some(n) = count
+                    && n < 1
+                {
+                    return Err(("invalid_argument", "loot count must be >= 1".into()));
+                }
+                Ok(ActionKind::Loot { item: spec, count })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "loot_all",
+        lua.create_function(|lua, ()| enqueue_lua(lua, "eqoa.actions.loot_all", ActionKind::LootAll))?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "buy",
+        lua.create_function(|lua, (ware, count): (Value, Option<i64>)| {
+            enqueue_lua_with(lua, "eqoa.actions.buy", || {
+                let spec = resolve_item_handle(&ware)?;
+                if spec.list != "merchant" {
+                    return Err((
+                        "invalid_argument",
+                        format!("buy requires a merchant ware handle, got '{}'", spec.list),
+                    ));
+                }
+                let count = count.unwrap_or(1);
+                if count < 1 {
+                    return Err(("invalid_argument", "buy count must be >= 1".into()));
+                }
+                Ok(ActionKind::Buy { ware: spec, count })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "sell",
+        lua.create_function(|lua, (item, count): (Value, Option<i64>)| {
+            enqueue_lua_with(lua, "eqoa.actions.sell", || {
+                let spec = resolve_item_handle(&item)?;
+                if spec.list != "inventory" {
+                    return Err((
+                        "invalid_argument",
+                        format!("sell requires an inventory item handle, got '{}'", spec.list),
+                    ));
+                }
+                let count = count.unwrap_or(1);
+                if count < 1 {
+                    return Err(("invalid_argument", "sell count must be >= 1".into()));
+                }
+                Ok(ActionKind::Sell { item: spec, count })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "bank_move",
+        lua.create_function(|lua, args: mlua::MultiValue| {
+            enqueue_lua_with(lua, "eqoa.actions.bank_move", || match args.len() {
+                1 | 2 if !args[0].is_string() => {
+                    let (item, count): (Value, Option<i64>) = lua
+                        .unpack_multi(args)
+                        .map_err(|_| ("invalid_argument", "expected (item, count?)".into()))?;
+                    let spec = resolve_item_handle(&item)?;
+                    let from_bank = match spec.list {
+                        "bank" => true,
+                        "inventory" => false,
+                        other => {
+                            return Err((
+                                "invalid_argument",
+                                format!("bank_move requires an inventory or bank handle, got '{other}'"),
+                            ));
+                        }
+                    };
+                    let count = count.unwrap_or(1);
+                    if count < 1 {
+                        return Err(("invalid_argument", "bank_move count must be >= 1".into()));
+                    }
+                    Ok(ActionKind::BankMove {
+                        from_bank,
+                        item: spec,
+                        count,
+                    })
+                }
+                2 | 3 => {
+                    let (dir, item, count): (String, Value, Option<i64>) = lua
+                        .unpack_multi(args)
+                        .map_err(|_| ("invalid_argument", "expected (from, item, count?)".into()))?;
+                    let spec = resolve_item_handle(&item)?;
+                    let want_bank = match dir.trim().to_ascii_lowercase().as_str() {
+                        "bank" | "withdraw" => true,
+                        "inventory" | "bags" | "deposit" => false,
+                        other => {
+                            return Err((
+                                "invalid_argument",
+                                format!("bank_move direction must be 'inventory' or 'bank', got '{other}'"),
+                            ));
+                        }
+                    };
+                    let handle_bank = match spec.list {
+                        "bank" => true,
+                        "inventory" => false,
+                        other => {
+                            return Err((
+                                "invalid_argument",
+                                format!("bank_move requires inventory or bank handle, got '{other}'"),
+                            ));
+                        }
+                    };
+                    if want_bank != handle_bank {
+                        return Err((
+                            "invalid_argument",
+                            "bank_move direction does not match handle container".into(),
+                        ));
+                    }
+                    let count = count.unwrap_or(1);
+                    if count < 1 {
+                        return Err(("invalid_argument", "bank_move count must be >= 1".into()));
+                    }
+                    Ok(ActionKind::BankMove {
+                        from_bank: want_bank,
+                        item: spec,
+                        count,
+                    })
+                }
+                _ => Err(("invalid_argument", "bank_move expects (item, count?) or (from, item, count?)".into())),
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "bank_money",
+        lua.create_function(|lua, (dir_val, amount): (Value, i64)| {
+            enqueue_lua_with(lua, "eqoa.actions.bank_money", || {
+                let dir = match dir_val {
+                    Value::String(s) => {
+                        let s = s
+                            .to_str()
+                            .map_err(|_| ("invalid_argument", "direction must be UTF-8".into()))?;
+                        match s.trim().to_ascii_lowercase().as_str() {
+                            "deposit" => 1u8,
+                            "withdraw" => 2u8,
+                            other => {
+                                return Err((
+                                    "invalid_argument",
+                                    format!("bank_money direction must be 'deposit' or 'withdraw', got '{other}'"),
+                                ));
+                            }
+                        }
+                    }
+                    Value::Integer(1) => 1u8,
+                    Value::Integer(2) => 2u8,
+                    _ => {
+                        return Err((
+                            "invalid_argument",
+                            "bank_money direction must be 'deposit' or 'withdraw'".into(),
+                        ));
+                    }
+                };
+                if amount <= 0 {
+                    return Err(("invalid_argument", "bank_money amount must be > 0".into()));
+                }
+                Ok(ActionKind::BankMoney { dir, amount })
+            })
+        })?,
+    )?;
 
     Ok(())
 }
@@ -1687,6 +2178,7 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
 
 #[cfg(test)]
 pub(crate) fn reset_all_for_test() {
+    MASTER_LOOT_ACTIVE.with(|m| m.set(false));
     BROKER.with(|b| *b.borrow_mut() = BrokerState::default());
 }
 

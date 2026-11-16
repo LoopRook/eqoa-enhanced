@@ -23,6 +23,7 @@ struct CachedCycleView {
 #[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static CACHED_CYCLE_VIEW: std::cell::Cell<Option<CachedCycleView>> = const { std::cell::Cell::new(None) };
+    static LOOT_BUSY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -31,6 +32,16 @@ pub(crate) enum BrokerReply {
     AbilitySlot { index: u8, slot: u8 },
     AbilityClearBar,
     AbilityMoveIndex { from: u8, to: u8 },
+    MasterLoot(bool),
+    InvAdd,
+    InvTook { sound: u8, in_shop: bool },
+    LootOne,
+    LootAll,
+    LootClose,
+    LootBlocked,
+    TxCancel,
+    BankMove,
+    BankMoney,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -42,6 +53,9 @@ pub(crate) struct GameEventCapture {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> GameEventCapture {
     let api = api_capture::begin_game_event(play, event);
+    if let net::session::Event::MasterLoot(m) = event {
+        crate::fork_ext::addons::action_broker::set_master_loot(m.is_some());
+    }
     let broker_reply = if crate::fork_ext::addons::action_broker::has_in_flight() {
         match event {
             net::session::Event::Assist(id) => Some(BrokerReply::Assist(*id)),
@@ -58,6 +72,22 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
                     to: *to,
                 })
             }
+            net::session::Event::MasterLoot(m) => Some(BrokerReply::MasterLoot(m.is_some())),
+            net::session::Event::InvAdd(_) => Some(BrokerReply::InvAdd),
+            net::session::Event::InvTook { sound, .. } => Some(BrokerReply::InvTook {
+                sound: *sound,
+                in_shop: play.npcw.shop.id.is_some() && *sound != 0,
+            }),
+            net::session::Event::Opcode { op: 0x0019, .. } => Some(BrokerReply::LootOne),
+            net::session::Event::Opcode { op: 0x001A, .. } => Some(BrokerReply::LootAll),
+            net::session::Event::Opcode { op: 0x0016, .. } => Some(BrokerReply::LootClose),
+            net::session::Event::Opcode { op: 0x0085, .. } => Some(BrokerReply::LootBlocked),
+            net::session::Event::Opcode { op: 0x00D7, .. } => Some(BrokerReply::TxCancel),
+            net::session::Event::Opcode {
+                op: 0x1250 | 0x1251,
+                ..
+            } => Some(BrokerReply::BankMove),
+            net::session::Event::Opcode { op: 0x1253, .. } => Some(BrokerReply::BankMoney),
             _ => None,
         }
     } else {
@@ -81,6 +111,52 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
         }
         Some(BrokerReply::AbilityMoveIndex { from, to }) => {
             crate::fork_ext::addons::action_broker::resolve_server_ability_move(from, to);
+        }
+        Some(BrokerReply::MasterLoot(active)) => {
+            crate::fork_ext::addons::action_broker::set_master_loot(active);
+        }
+        Some(BrokerReply::InvAdd) => {
+            crate::fork_ext::addons::action_broker::resolve_server_merchant(true, true, None);
+        }
+        Some(BrokerReply::InvTook { sound, in_shop }) => {
+            if in_shop || (play.npcw.shop.id.is_some() && sound != 0) {
+                crate::fork_ext::addons::action_broker::resolve_server_merchant(false, true, None);
+            }
+        }
+        Some(BrokerReply::LootOne) => {
+            LOOT_BUSY.with(|b| b.set(false));
+            crate::fork_ext::addons::action_broker::resolve_server_loot_one(true, None);
+        }
+        Some(BrokerReply::LootAll) => {
+            LOOT_BUSY.with(|b| b.set(false));
+            crate::fork_ext::addons::action_broker::resolve_server_loot_all(true, None);
+        }
+        Some(BrokerReply::LootClose) => {
+            LOOT_BUSY.with(|b| b.set(false));
+            crate::fork_ext::addons::action_broker::set_master_loot(false);
+            crate::fork_ext::addons::action_broker::resolve_server_loot_one(true, None);
+            crate::fork_ext::addons::action_broker::resolve_server_loot_all(true, None);
+        }
+        Some(BrokerReply::LootBlocked) => {
+            LOOT_BUSY.with(|b| b.set(false));
+            crate::fork_ext::addons::action_broker::resolve_server_loot_one(
+                false,
+                Some("loot blocked by server"),
+            );
+            crate::fork_ext::addons::action_broker::resolve_server_loot_all(
+                false,
+                Some("loot blocked by server"),
+            );
+        }
+        Some(BrokerReply::TxCancel) => {
+            LOOT_BUSY.with(|b| b.set(false));
+            crate::fork_ext::addons::action_broker::resolve_server_d7();
+        }
+        Some(BrokerReply::BankMove) => {
+            crate::fork_ext::addons::action_broker::resolve_server_bank(false, true, None);
+        }
+        Some(BrokerReply::BankMoney) => {
+            crate::fork_ext::addons::action_broker::resolve_server_bank(true, true, None);
         }
         None => {}
     }
@@ -315,13 +391,21 @@ pub(crate) fn art_changed() {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn native_action_snapshot(play: &Play) -> crate::fork_ext::addons::action_broker::NativeSnapshot {
+    let loot_open = play.mode == 1 && play.npcw.corpse.is_some();
+    if !loot_open {
+        LOOT_BUSY.with(|b| b.set(false));
+    }
     crate::fork_ext::addons::action_broker::NativeSnapshot {
         in_world: play.in_world_now(),
         mode: play.mode,
         bank_busy: play.bank.state != 0,
         merchant_pending: play.npcw.shop.pending,
-        loot_busy: false,
+        loot_busy: LOOT_BUSY.with(|b| b.get()),
         inventory_busy: play.waiting,
+        merchant_open: play.mode == 10 && play.npcw.shop.id.is_some(),
+        bank_open: play.mode == 11,
+        loot_open,
+        master_loot_active: crate::fork_ext::addons::action_broker::is_master_loot_active(),
     }
 }
 
@@ -993,7 +1077,543 @@ fn dispatch_broker_action(
                 detail: None,
             }
         }
+        ActionKind::UseItem { item } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38 | 13) || play.waiting {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot use inventory items right now".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item handle is stale or item moved".into(),
+                };
+            }
+            let Some((slot_idx, it)) = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, it)| it.inv_index == item.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item is no longer in inventory".into(),
+                };
+            };
+            let pl = &play.dump.player;
+            if !crate::inventory::can_use(it, pl.class, pl.race, pl.level) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: cannot_use_reason(it, pl),
+                };
+            }
+            play.use_item(slot_idx as i32, 0);
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::Equip { item } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38 | 13) || play.waiting {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot equip items right now".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item handle is stale or item moved".into(),
+                };
+            }
+            let Some((slot_idx, it)) = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, it)| it.inv_index == item.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item is no longer in inventory".into(),
+                };
+            };
+            if it.item.wear_slot < 0 {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: "item is not equippable".into(),
+                };
+            }
+            let pl = &play.dump.player;
+            if !crate::inventory::can_use(it, pl.class, pl.race, pl.level) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: cannot_use_reason(it, pl),
+                };
+            }
+            play.use_item(slot_idx as i32, 0);
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::SwapItems { a, b } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38 | 13) || play.waiting {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot swap inventory items right now".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(a)
+                || !crate::fork_ext::addons::native_items::is_handle_fresh(b)
+            {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item handle is stale or item moved".into(),
+                };
+            }
+            let Some((ia, ita)) = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, it)| it.inv_index == a.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "first item is no longer in inventory".into(),
+                };
+            };
+            let Some((ib, itb)) = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, it)| it.inv_index == b.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "second item is no longer in inventory".into(),
+                };
+            };
+            if ita.equip_slot >= 0 || itb.equip_slot >= 0 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot swap equipped items".into(),
+                };
+            }
+            play.item_outs(vec![crate::itemmenu::ItemOut::Swap(ia as i32, ib as i32)]);
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::QuickSlot { item, slot } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38 | 13) || play.waiting {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot assign quick slot right now".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item handle is stale or item moved".into(),
+                };
+            }
+            let Some((idx, it)) = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, it)| it.inv_index == item.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item is no longer in inventory".into(),
+                };
+            };
+            let fits = if play.gear.on {
+                (it.item.p4c == 2 && *slot < 2) || (it.item.p4c == 7 && (2..4).contains(slot))
+            } else {
+                (it.item.p4c == 2 && *slot < 2)
+                    || (it.item.p4c == 7 && *slot == 2)
+                    || (crate::inventory::fits_slot3(it) && *slot == 3)
+            };
+            if !fits {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: format!("item does not fit quick slot {}", *slot + 1),
+                };
+            }
+            play.item_outs(vec![crate::itemmenu::ItemOut::QuickSlot(
+                idx as i32,
+                *slot as i32,
+            )]);
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::Loot { item, count } => {
+            if play.mode != 1 || play.npcw.corpse.is_none() {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "corpse window is not open".into(),
+                };
+            }
+            if crate::fork_ext::addons::action_broker::is_master_loot_active() {
+                return DispatchOutcome::Refused {
+                    code: "permission_denied",
+                    reason: "corpse is under master loot rules".into(),
+                };
+            }
+            if LOOT_BUSY.with(|b| b.get()) {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "loot transaction already pending".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "loot handle is stale or corpse changed".into(),
+                };
+            }
+            let Some(corpse) = play.npcw.corpse.as_ref() else {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "corpse window is not open".into(),
+                };
+            };
+            let Some(it) = corpse.items.iter().find(|it| it.inv_index == item.inv_index) else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item is no longer on corpse".into(),
+                };
+            };
+            let n = count.unwrap_or(it.quantity);
+            if n < 1 || n > it.quantity {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: format!("invalid loot count {n} (stack has {})", it.quantity),
+                };
+            }
+            if !has_list_room(&play.dump.inventory, it, n, crate::inventory::pack_cap()) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "inventory is full".into(),
+                };
+            }
+            LOOT_BUSY.with(|b| b.set(true));
+            let mut w = net::stream::Writer::op(0x0019);
+            w.u32(it.inv_index).u32(n as u32);
+            play.session.send(&w.data);
+            DispatchOutcome::AwaitingServer {
+                matcher: ServerMatcher::LootOne { key: it.inv_index },
+                detail: Some(serde_json::json!({"count": n})),
+            }
+        }
+        ActionKind::LootAll => {
+            if play.mode != 1 || play.npcw.corpse.is_none() {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "corpse window is not open".into(),
+                };
+            }
+            if crate::fork_ext::addons::action_broker::is_master_loot_active() {
+                return DispatchOutcome::Refused {
+                    code: "permission_denied",
+                    reason: "corpse is under master loot rules".into(),
+                };
+            }
+            if LOOT_BUSY.with(|b| b.get()) {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "loot transaction already pending".into(),
+                };
+            }
+            let Some(corpse) = play.npcw.corpse.as_ref() else {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "corpse window is not open".into(),
+                };
+            };
+            if corpse.items.is_empty() {
+                return DispatchOutcome::Refused {
+                    code: "not_found",
+                    reason: "corpse has no items to loot".into(),
+                };
+            }
+            LOOT_BUSY.with(|b| b.set(true));
+            play.session.send_opcode(0x001A);
+            DispatchOutcome::AwaitingServer {
+                matcher: ServerMatcher::LootAll,
+                detail: None,
+            }
+        }
+        ActionKind::Buy { ware, count } => {
+            if play.mode != 10 || play.npcw.shop.id.is_none() {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "merchant window is not open".into(),
+                };
+            }
+            if play.npcw.shop.pending {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "merchant transaction already pending".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(ware) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "merchant ware handle is stale".into(),
+                };
+            }
+            let Some((pos, it)) = play
+                .npcw
+                .shop
+                .wares
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, it)| it.inv_index == ware.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "ware is no longer offered by merchant".into(),
+                };
+            };
+            if it.item.max_stack == 0 && *count > 1 {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: "non-stackable ware cannot be bought in quantity > 1".into(),
+                };
+            }
+            if it.item.max_stack > 0 && *count > it.item.max_stack {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: format!("count exceeds max stack ({})", it.item.max_stack),
+                };
+            }
+            let unit_price = crate::merchant::merchant_price(it, play.npcw.shop.buy_rate) as i64;
+            let total_price = unit_price.saturating_mul(*count);
+            if total_price > play.dump.player.p34 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "not enough tunar".into(),
+                };
+            }
+            if !has_list_room(&play.dump.inventory, it, *count, crate::inventory::pack_cap()) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "inventory is full".into(),
+                };
+            }
+            let mut w = net::stream::Writer::op(0x004A);
+            w.signed(pos as i64)
+                .signed(*count)
+                .u32(play.npcw.shop.id.unwrap_or(u32::MAX));
+            play.session.send(&w.data);
+            play.npcw.shop.pending = true;
+            DispatchOutcome::AwaitingServer {
+                matcher: ServerMatcher::MerchantBuy,
+                detail: Some(serde_json::json!({"count": count, "total_price": total_price})),
+            }
+        }
+        ActionKind::Sell { item, count } => {
+            if play.mode != 10 || play.npcw.shop.id.is_none() {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "merchant window is not open".into(),
+                };
+            }
+            if play.npcw.shop.pending {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "merchant transaction already pending".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item handle is stale or item moved".into(),
+                };
+            }
+            let Some(it) = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .find(|it| it.inv_index == item.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item is no longer in inventory".into(),
+                };
+            };
+            if it.equip_slot >= 0 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot sell an equipped item".into(),
+                };
+            }
+            if *count < 1 || *count > it.quantity {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: format!("sell count {} exceeds stack size {}", count, it.quantity),
+                };
+            }
+            let unit_price = crate::merchant::sell_price(it, play.npcw.shop.sell_rate) as i64;
+            let total_price = unit_price.saturating_mul(*count);
+            let mut w = net::stream::Writer::op(0x004B);
+            w.u32(it.inv_index)
+                .signed(*count)
+                .u32(play.npcw.shop.id.unwrap_or(u32::MAX));
+            play.session.send(&w.data);
+            play.npcw.shop.pending = true;
+            DispatchOutcome::AwaitingServer {
+                matcher: ServerMatcher::MerchantSell,
+                detail: Some(serde_json::json!({"count": count, "total_price": total_price})),
+            }
+        }
+        ActionKind::BankMove {
+            from_bank,
+            item,
+            count,
+        } => {
+            if play.mode != 11 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "bank window is not open".into(),
+                };
+            }
+            if play.bank.state != 0 {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "bank transaction already pending".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item handle is stale or item moved".into(),
+                };
+            }
+            let src_list = if *from_bank {
+                &play.dump.bank.items
+            } else {
+                &play.dump.inventory
+            };
+            let Some(it) = src_list.items.iter().find(|it| it.inv_index == item.inv_index) else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item is no longer in source container".into(),
+                };
+            };
+            if it.equip_slot >= 0 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot deposit an equipped item".into(),
+                };
+            }
+            if *count < 1 || *count > it.quantity {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: format!("bank move count {} exceeds stack size {}", count, it.quantity),
+                };
+            }
+            let (dst_list, cap) = if *from_bank {
+                (&play.dump.inventory, crate::inventory::pack_cap())
+            } else {
+                (&play.dump.bank.items, crate::inventory::bank_cap())
+            };
+            if !has_list_room(dst_list, it, *count, cap) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: if *from_bank {
+                        "inventory is full".into()
+                    } else {
+                        "bank is full".into()
+                    },
+                };
+            }
+            let mut w = net::stream::Writer::op(0x1254);
+            w.u32(play.target)
+                .u8(u8::from(*from_bank))
+                .u32(it.inv_index)
+                .signed(*count);
+            play.session.send(&w.data);
+            play.bank.state = 2;
+            DispatchOutcome::AwaitingServer {
+                matcher: ServerMatcher::BankMove,
+                detail: Some(serde_json::json!({"from_bank": from_bank, "count": count})),
+            }
+        }
+        ActionKind::BankMoney { dir, amount } => {
+            if play.mode != 11 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "bank window is not open".into(),
+                };
+            }
+            if play.bank.state != 0 {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "bank transaction already pending".into(),
+                };
+            }
+            if *dir == 1 && *amount > play.dump.player.p34 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "not enough carried tunar to deposit".into(),
+                };
+            }
+            if *dir == 2 && *amount > play.dump.player.p38 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "not enough bank tunar to withdraw".into(),
+                };
+            }
+            let mut w = net::stream::Writer::op(0x1255);
+            w.u32(play.target).u8(*dir).signed(*amount);
+            play.session.send(&w.data);
+            play.bank.state = 1;
+            DispatchOutcome::AwaitingServer {
+                matcher: ServerMatcher::BankMoney,
+                detail: Some(serde_json::json!({"dir": if *dir == 1 { "deposit" } else { "withdraw" }, "amount": amount})),
+            }
+        }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn cannot_use_reason(it: &net::dump::NetItem, pl: &net::dump::Player) -> String {
+    let c = 1i64 << pl.class.clamp(0, 31);
+    let r = 1i64 << pl.race.clamp(0, 31);
+    if it.item.class_mask & c == 0 {
+        "wrong class".into()
+    } else if it.item.race_mask & r == 0 {
+        "wrong race".into()
+    } else if pl.level < it.item.level_req {
+        format!("requires level {}", it.item.level_req)
+    } else {
+        "cannot use item".into()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn has_list_room(
+    list: &net::dump::ItemList,
+    item: &net::dump::NetItem,
+    count: i64,
+    cap: usize,
+) -> bool {
+    if item.item.max_stack > 1
+        && list.items.iter().any(|existing| {
+            existing.item.id == item.item.id
+                && existing.quantity + count <= item.item.max_stack
+        })
+    {
+        return true;
+    }
+    list.items.len() < cap
 }
 
 #[cfg(not(target_arch = "wasm32"))]
