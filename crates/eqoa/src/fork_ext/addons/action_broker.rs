@@ -1866,10 +1866,18 @@ pub(crate) fn resolve_server_loot_one(
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         b.native.loot_busy = false;
+        let contended = (b.contended_subsystems & Subsystem::Loot.bit()) != 0;
         b.resolve_matching_sent(|inflight| {
             let ServerMatcher::LootOne { key, qty_before, count } = inflight.matcher else {
                 return None;
             };
+            if contended {
+                return Some((
+                    None,
+                    Some("unknown"),
+                    Some("concurrent player native output on loot subsystem".into()),
+                ));
+            }
             if let Some(ck) = confirmed_key
                 && ck != key
             {
@@ -1878,10 +1886,22 @@ pub(crate) fn resolve_server_loot_one(
             match ok {
                 Some(true) => {
                     let after = corpse_qty_of(key);
-                    if after <= qty_before.saturating_sub(count) || after < qty_before {
+                    let exact = if count >= qty_before {
+                        after == 0
+                    } else {
+                        after == qty_before - count
+                    };
+                    if exact {
                         Some((Some(true), None, None))
                     } else {
-                        None
+                        Some((
+                            None,
+                            Some("unknown"),
+                            Some(format!(
+                                "loot count mismatch (expected {}, corpse stack {} -> {})",
+                                count, qty_before, after
+                            )),
+                        ))
                     }
                 }
                 Some(false) => Some((
@@ -1899,16 +1919,33 @@ pub(crate) fn resolve_server_loot_one(
     });
 }
 
-pub(crate) fn resolve_server_loot_all(ok: Option<bool>, reason: Option<&str>) {
+pub(crate) fn resolve_server_loot_all(
+    ok: Option<bool>,
+    reason: Option<&str>,
+    state_changed: bool,
+) {
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         b.native.loot_busy = false;
+        let contended = (b.contended_subsystems & Subsystem::Loot.bit()) != 0;
         b.resolve_matching_sent(|inflight| {
             if !matches!(inflight.matcher, ServerMatcher::LootAll) {
                 return None;
             }
+            if contended {
+                return Some((
+                    None,
+                    Some("unknown"),
+                    Some("concurrent player native output on loot subsystem".into()),
+                ));
+            }
             match ok {
-                Some(true) => Some((Some(true), None, None)),
+                Some(true) if state_changed => Some((Some(true), None, None)),
+                Some(true) => Some((
+                    None,
+                    Some("unknown"),
+                    Some("loot_all did not change corpse state".into()),
+                )),
                 Some(false) => Some((
                     Some(false),
                     Some("refused"),
@@ -1934,6 +1971,7 @@ pub(crate) fn resolve_server_merchant_buy(
         if pending_cleared {
             b.native.merchant_pending = false;
         }
+        let contended = (b.contended_subsystems & Subsystem::Merchant.bit()) != 0;
         b.resolve_matching_sent(|inflight| {
             let ServerMatcher::MerchantBuy {
                 item_id,
@@ -1943,6 +1981,13 @@ pub(crate) fn resolve_server_merchant_buy(
             else {
                 return None;
             };
+            if contended {
+                return Some((
+                    None,
+                    Some("unknown"),
+                    Some("concurrent player native output on merchant subsystem".into()),
+                ));
+            }
             if !pending_cleared || added_item_id != item_id {
                 return None;
             }
@@ -1964,6 +2009,7 @@ pub(crate) fn resolve_server_merchant_sell(
         if pending_cleared {
             b.native.merchant_pending = false;
         }
+        let contended = (b.contended_subsystems & Subsystem::Merchant.bit()) != 0;
         b.resolve_matching_sent(|inflight| {
             let ServerMatcher::MerchantSell {
                 key,
@@ -1973,6 +2019,13 @@ pub(crate) fn resolve_server_merchant_sell(
             else {
                 return None;
             };
+            if contended {
+                return Some((
+                    None,
+                    Some("unknown"),
+                    Some("concurrent player native output on merchant subsystem".into()),
+                ));
+            }
             if !pending_cleared {
                 return None;
             }
@@ -1990,6 +2043,7 @@ pub(crate) fn resolve_server_merchant(is_buy: bool, ok: bool, reason: Option<&st
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         b.native.merchant_pending = false;
+        let contended = (b.contended_subsystems & Subsystem::Merchant.bit()) != 0;
         b.resolve_matching_sent(|inflight| {
             let matched = if is_buy {
                 matches!(inflight.matcher, ServerMatcher::MerchantBuy { .. })
@@ -1998,6 +2052,13 @@ pub(crate) fn resolve_server_merchant(is_buy: bool, ok: bool, reason: Option<&st
             };
             if !matched {
                 return None;
+            }
+            if contended {
+                return Some((
+                    None,
+                    Some("unknown"),
+                    Some("concurrent player native output on merchant subsystem".into()),
+                ));
             }
             if ok {
                 Some((Some(true), None, None))
@@ -2015,7 +2076,8 @@ pub(crate) fn resolve_server_merchant(is_buy: bool, ok: bool, reason: Option<&st
 pub(crate) fn resolve_server_bank_move(
     is_deposit_opcode: bool,
     pending_cleared: bool,
-    added_item_id: Option<i64>,
+    added_item: Option<(i64, i64)>,
+    withdrawn: Option<(u32, i64, i64)>,
     bank_qty_for_key: impl Fn(u32) -> i64,
 ) {
     BROKER.with(|b| {
@@ -2023,6 +2085,7 @@ pub(crate) fn resolve_server_bank_move(
         if pending_cleared {
             b.native.bank_busy = false;
         }
+        let contended = (b.contended_subsystems & Subsystem::Bank.bit()) != 0;
         b.resolve_matching_sent(|inflight| {
             let ServerMatcher::BankMove {
                 from_bank,
@@ -2034,18 +2097,39 @@ pub(crate) fn resolve_server_bank_move(
             else {
                 return None;
             };
+            if contended {
+                return Some((
+                    None,
+                    Some("unknown"),
+                    Some("concurrent player native output on bank subsystem".into()),
+                ));
+            }
             if !pending_cleared {
                 return None;
             }
             if is_deposit_opcode && !from_bank {
-                if added_item_id == Some(item_id) {
+                if added_item == Some((item_id, count)) {
                     Some((Some(true), None, None))
+                } else if added_item.is_some_and(|(id, _)| id == item_id) {
+                    Some((
+                        None,
+                        Some("unknown"),
+                        Some("bank deposit quantity did not match request".into()),
+                    ))
                 } else {
                     None
                 }
             } else if !is_deposit_opcode && from_bank {
-                if bank_qty_for_key(key) <= qty_before.saturating_sub(count) {
+                if withdrawn == Some((key, item_id, count))
+                    && bank_qty_for_key(key) == qty_before.saturating_sub(count)
+                {
                     Some((Some(true), None, None))
+                } else if withdrawn.is_some_and(|(k, id, _)| k == key && id == item_id) {
+                    Some((
+                        None,
+                        Some("unknown"),
+                        Some("bank withdraw quantity did not match request".into()),
+                    ))
                 } else {
                     None
                 }
@@ -2062,6 +2146,7 @@ pub(crate) fn resolve_server_bank_money(pending_cleared: bool, bank_after: i64) 
         if pending_cleared {
             b.native.bank_busy = false;
         }
+        let contended = (b.contended_subsystems & Subsystem::Bank.bit()) != 0;
         b.resolve_matching_sent(|inflight| {
             let ServerMatcher::BankMoney {
                 dir,
@@ -2071,6 +2156,13 @@ pub(crate) fn resolve_server_bank_money(pending_cleared: bool, bank_after: i64) 
             else {
                 return None;
             };
+            if contended {
+                return Some((
+                    None,
+                    Some("unknown"),
+                    Some("concurrent player native output on bank subsystem".into()),
+                ));
+            }
             if !pending_cleared {
                 return None;
             }
@@ -2092,6 +2184,7 @@ pub(crate) fn resolve_server_bank(is_money: bool, ok: bool, reason: Option<&str>
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         b.native.bank_busy = false;
+        let contended = (b.contended_subsystems & Subsystem::Bank.bit()) != 0;
         b.resolve_matching_sent(|inflight| {
             let matched = if is_money {
                 matches!(inflight.matcher, ServerMatcher::BankMoney { .. })
@@ -2100,6 +2193,13 @@ pub(crate) fn resolve_server_bank(is_money: bool, ok: bool, reason: Option<&str>
             };
             if !matched {
                 return None;
+            }
+            if contended {
+                return Some((
+                    None,
+                    Some("unknown"),
+                    Some("concurrent player native output on bank subsystem".into()),
+                ));
             }
             if ok {
                 Some((Some(true), None, None))
@@ -2153,6 +2253,7 @@ pub(crate) fn resolve_server_d7() {
         b.native.merchant_pending = false;
         b.native.bank_busy = false;
         b.native.inventory_busy = false;
+        let contended_mask = b.contended_subsystems;
         b.resolve_matching_sent(|inflight| {
             if matches!(
                 inflight.matcher,
@@ -2163,11 +2264,22 @@ pub(crate) fn resolve_server_d7() {
                     | ServerMatcher::BankMove { .. }
                     | ServerMatcher::BankMoney { .. }
             ) {
-                Some((
-                    Some(false),
-                    Some("refused"),
-                    Some("server cancelled or refused transaction".into()),
-                ))
+                if inflight
+                    .subsystem
+                    .is_some_and(|s| (contended_mask & s.bit()) != 0)
+                {
+                    Some((
+                        None,
+                        Some("unknown"),
+                        Some("concurrent player native output on subsystem".into()),
+                    ))
+                } else {
+                    Some((
+                        Some(false),
+                        Some("refused"),
+                        Some("server cancelled or refused transaction".into()),
+                    ))
+                }
             } else {
                 None
             }

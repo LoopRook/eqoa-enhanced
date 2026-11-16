@@ -1917,7 +1917,9 @@ fn round6b_merchant_buy_sell_bank_move_bank_money_and_loot() {
     // Busy lock on 2nd bank call
     run_lua(&mut p, "next_fn = function() return eqoa.actions.bank_money('deposit', 50) end");
     host.execute("assert(last_req == nil and last_err.code == 'busy')").unwrap();
-    apply_broker(&mut p, opcode(0x1251, potion().bytes()));
+    let mut pot_one = potion();
+    pot_one.quantity = 1;
+    apply_broker(&mut p, opcode(0x1251, pot_one.bytes()));
     native_events::dispatch(&host).unwrap();
     assert_eq!(p.bank.state, 0);
     host.execute("assert(results[#results].phase == 'server' and results[#results].state == 'completed')").unwrap();
@@ -1935,6 +1937,7 @@ fn round6b_merchant_buy_sell_bank_move_bank_money_and_loot() {
     // Loot mode 1 + MasterLoot guard + 0x00D7 cancel
     let mut loot_gem = gem();
     loot_gem.key = 55;
+    loot_gem.quantity = 1;
     p.npcw.corpse = Some(list(&[loot_gem]));
     p.mode = 1;
     p.forge_snapshot(None);
@@ -1958,7 +1961,9 @@ fn round6b_merchant_buy_sell_bank_move_bank_money_and_loot() {
 
     // loot(h_loot, 1) -> 0x0019 server reply -> completed
     run_lua(&mut p, "next_fn = function() return eqoa.actions.loot(h_loot, 1) end");
-    apply_broker(&mut p, opcode(0x0019, vec![0, 0]));
+    let mut loot_bytes = Writer::default();
+    loot_bytes.u8(0).signed(0);
+    apply_broker(&mut p, opcode(0x0019, loot_bytes.data));
     native_events::dispatch(&host).unwrap();
     host.execute("assert(results[#results].phase == 'server' and results[#results].state == 'completed' and results[#results].ok == true)").unwrap();
 

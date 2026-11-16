@@ -64,11 +64,15 @@ pub(crate) enum BrokerReply {
     InvAdd { item_id: i64 },
     InvTook { sound: u8, in_shop: bool },
     LootOne { confirmed_key: Option<u32> },
-    LootAll,
+    LootAll { corpse_before: Vec<(u32, i64)> },
     LootClose,
     LootBlocked,
     TxCancel,
-    BankMove { is_deposit: bool, added_item_id: Option<i64> },
+    BankMove {
+        is_deposit: bool,
+        added_item: Option<(i64, i64)>,
+        withdrawn: Option<(u32, i64, i64)>,
+    },
     BankMoney,
 }
 
@@ -118,20 +122,39 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
                 });
                 Some(BrokerReply::LootOne { confirmed_key })
             }
-            net::session::Event::Opcode { op: 0x001A, .. } => Some(BrokerReply::LootAll),
+            net::session::Event::Opcode { op: 0x001A, .. } => {
+                let corpse_before: Vec<(u32, i64)> = play
+                    .npcw
+                    .corpse
+                    .as_ref()
+                    .map(|c| c.items.iter().map(|it| (it.inv_index, it.quantity)).collect())
+                    .unwrap_or_default();
+                Some(BrokerReply::LootAll { corpse_before })
+            }
             net::session::Event::Opcode { op: 0x0016, .. } => Some(BrokerReply::LootClose),
             net::session::Event::Opcode { op: 0x0085, .. } => Some(BrokerReply::LootBlocked),
             net::session::Event::Opcode { op: 0x00D7, .. } => Some(BrokerReply::TxCancel),
-            net::session::Event::Opcode { op: 0x1250, .. } => Some(BrokerReply::BankMove {
-                is_deposit: false,
-                added_item_id: None,
-            }),
+            net::session::Event::Opcode { op: 0x1250, data } => {
+                let mut r = net::stream::Reader::new(data);
+                let slot = r.u8() as usize;
+                let n = r.signed() as i64;
+                let withdrawn = (!r.error)
+                    .then(|| play.dump.bank.items.items.get(slot))
+                    .flatten()
+                    .map(|it| (it.inv_index, it.item.id, n));
+                Some(BrokerReply::BankMove {
+                    is_deposit: false,
+                    added_item: None,
+                    withdrawn,
+                })
+            }
             net::session::Event::Opcode { op: 0x1251, data } => {
                 let mut r = net::stream::Reader::new(data);
                 let item = net::dump::read_net_item(&mut r);
                 Some(BrokerReply::BankMove {
                     is_deposit: true,
-                    added_item_id: Some(item.item.id),
+                    added_item: Some((item.item.id, item.quantity)),
+                    withdrawn: None,
                 })
             }
             net::session::Event::Opcode { op: 0x1253, .. } => Some(BrokerReply::BankMoney),
@@ -194,9 +217,13 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
         }
         Some(BrokerReply::LootOne { confirmed_key }) => {
             LOOT_BUSY.with(|b| b.set(false));
-            if let Some(key) = confirmed_key {
+            if confirmed_key.is_some()
+                || crate::fork_ext::addons::action_broker::is_subsystem_contended(
+                    crate::fork_ext::addons::action_broker::Subsystem::Loot,
+                )
+            {
                 crate::fork_ext::addons::action_broker::resolve_server_loot_one(
-                    Some(key),
+                    confirmed_key,
                     Some(true),
                     None,
                     |k| {
@@ -209,9 +236,20 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
                 );
             }
         }
-        Some(BrokerReply::LootAll) => {
+        Some(BrokerReply::LootAll { corpse_before }) => {
             LOOT_BUSY.with(|b| b.set(false));
-            crate::fork_ext::addons::action_broker::resolve_server_loot_all(Some(true), None);
+            let corpse_after: Vec<(u32, i64)> = play
+                .npcw
+                .corpse
+                .as_ref()
+                .map(|c| c.items.iter().map(|it| (it.inv_index, it.quantity)).collect())
+                .unwrap_or_default();
+            let state_changed = !corpse_before.is_empty() && corpse_after != corpse_before;
+            crate::fork_ext::addons::action_broker::resolve_server_loot_all(
+                Some(true),
+                None,
+                state_changed,
+            );
         }
         Some(BrokerReply::LootClose) => {
             LOOT_BUSY.with(|b| b.set(false));
@@ -225,6 +263,7 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
             crate::fork_ext::addons::action_broker::resolve_server_loot_all(
                 None,
                 Some("corpse closed"),
+                false,
             );
         }
         Some(BrokerReply::LootBlocked) => {
@@ -238,6 +277,7 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
             crate::fork_ext::addons::action_broker::resolve_server_loot_all(
                 Some(false),
                 Some("loot blocked by server"),
+                false,
             );
         }
         Some(BrokerReply::TxCancel) => {
@@ -246,12 +286,14 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
         }
         Some(BrokerReply::BankMove {
             is_deposit,
-            added_item_id,
+            added_item,
+            withdrawn,
         }) => {
             crate::fork_ext::addons::action_broker::resolve_server_bank_move(
                 is_deposit,
                 play.bank.state == 0,
-                added_item_id,
+                added_item,
+                withdrawn,
                 |key| {
                     play.dump
                         .bank
