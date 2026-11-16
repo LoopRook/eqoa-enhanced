@@ -2500,3 +2500,190 @@ fn round6c_loot_partial_decrease_and_noop_loot_all_yield_unknown_and_stop_batch(
     action_broker::reset_all_for_test();
     crate::fork_ext::bindpage::reset_in_memory();
 }
+
+// Round 6 fix 3: the player's own native output while a broker request is in flight makes the
+// result `unknown` whatever the frame order (`begin_iteration` runs between the draw and the reply).
+fn r6f3_host() -> Host {
+    let host = Host::new().unwrap();
+    host.execute(
+        r#"
+        ares, bres = {}, {}
+        eqoa.events.on("action.result", function(e) ares[#ares + 1] = e.data end)
+        eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+            last_req, last_err = next_fn()
+        end)
+    "#,
+    )
+    .unwrap();
+    host
+}
+
+fn r6f3_press(host: &Host, code: &str) {
+    use crate::fork_ext::addons::native_events;
+    host.execute(code).unwrap();
+    CORE.with(|c| {
+        c.borrow_mut().emit(
+            "input.key",
+            serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+        )
+    });
+    native_events::dispatch(host).unwrap();
+}
+
+#[test]
+fn round6f3_player_loot_while_broker_loot_in_flight_is_unknown_and_stops_batch() {
+    use crate::fork_ext::addons::{action_broker, native_events};
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    p.dump.inventory = list(&[]);
+    let mut stack = gem();
+    stack.key = 31;
+    stack.quantity = 4;
+    let mut c2 = sword();
+    c2.key = 32;
+    c2.equip_slot = -1;
+    p.npcw.corpse = Some(list(&[stack, c2]));
+    p.mode = 1;
+    p.forge_snapshot(None);
+    let host = r6f3_host();
+    host.execute("local l = assert(eqoa.loot.get()); h_gem, h_sword = l.items[1].ref, l.items[2].ref").unwrap();
+    r6f3_press(&host, "next_fn = function() return eqoa.actions.batch({ steps = { { kind = 'loot', item = h_gem, count = 1 }, { kind = 'loot', item = h_sword, count = 1 } }, require_window = 'loot' }) end");
+    // frame 1: step, then the draw sends the broker's loot
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    let sent = p.session.sends_lost;
+    // frame 2: the player's own loot reaches the native output vector in the draw
+    super::super::begin_iteration(&mut p, true);
+    let mut player = vec![crate::loot::LootOut::One(31, 1)];
+    super::super::npcw_requests(&p, &mut player, &mut Vec::new());
+    // frame 3: the next game step runs first (the old marker was cleared here), then the reply
+    super::super::begin_iteration(&mut p, true);
+    let mut w = Writer::default();
+    w.u8(0).signed(0);
+    let ev = opcode(0x0019, w.data);
+    let cap = super::super::begin_game_event(&p, &ev);
+    p.npcw.corpse.as_mut().unwrap().items[0].quantity = 3;
+    super::super::end_game_event(&p, cap);
+    native_events::dispatch(&host).unwrap();
+    p.bags_broker_tick();
+    assert_eq!(p.session.sends_lost, sent, "the batch must stop, no second loot");
+    host.execute(
+        "assert(ares[#ares].kind == 'loot' and ares[#ares].state == 'unknown' and ares[#ares].ok == nil, ares[#ares].state); assert(#bres == 1 and bres[1].state == 'unknown' and bres[1].completed == 0)",
+    )
+    .unwrap();
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}
+
+#[test]
+fn round6f3_player_bank_deposit_while_broker_deposit_in_flight_is_unknown() {
+    use crate::fork_ext::addons::{action_broker, native_events};
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    p.dump.player.p34 = 500;
+    p.dump.player.p38 = 500;
+    let mut bag_pot = potion();
+    bag_pot.equip_slot = -1;
+    p.dump.inventory = list(&[bag_pot]);
+    p.dump.bank.items = list(&[]);
+    p.mode = 11;
+    p.bank.state = 0;
+    p.forge_snapshot(None);
+    let host = r6f3_host();
+    host.execute("h_pot = assert(eqoa.inventory.get()).items[1].ref").unwrap();
+    r6f3_press(&host, "next_fn = function() return eqoa.actions.bank_move(h_pot, 1) end");
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert_eq!(p.bank.state, 2, "broker deposit sent");
+    // the player's own deposit appears in the native output during a later draw
+    super::super::begin_iteration(&mut p, true);
+    let mut player = vec![crate::bank::BankOut::Move(0, 0, 1)];
+    super::super::bank_requests(&p, &mut player);
+    // next step, then the reply that matches the broker's item and count
+    super::super::begin_iteration(&mut p, true);
+    let mut one = potion();
+    one.quantity = 1;
+    let ev = opcode(0x1251, one.bytes());
+    let cap = super::super::begin_game_event(&p, &ev);
+    assert!(p.bank_opcode(0x1251, &one.bytes()));
+    super::super::end_game_event(&p, cap);
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(ares[#ares].kind == 'bank_move' and ares[#ares].state == 'unknown' and ares[#ares].ok == nil, ares[#ares].state)").unwrap();
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}
+
+#[test]
+fn round6f3_player_sale_while_broker_sale_in_flight_is_unknown_and_stops_batch() {
+    use crate::fork_ext::addons::{action_broker, native_events};
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    let mut a = potion();
+    a.key = 101;
+    a.equip_slot = -1;
+    let mut b = gem();
+    b.key = 102;
+    b.equip_slot = -1;
+    p.dump.inventory = list(&[a, b]);
+    p.bags_open_merchant(88);
+    p.forge_snapshot(None);
+    let host = r6f3_host();
+    host.execute("local inv = assert(eqoa.inventory.get()); h_a, h_b = inv.items[1].ref, inv.items[2].ref").unwrap();
+    r6f3_press(&host, "next_fn = function() return eqoa.actions.batch({ steps = { { kind = 'sell', item = h_a, count = 1 }, { kind = 'sell', item = h_b, count = 1 } }, require_window = 'merchant' }) end");
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert!(p.npcw.shop.pending, "broker sale sent");
+    let sent = p.session.sends_lost;
+    super::super::begin_iteration(&mut p, true);
+    let mut player = vec![crate::merchant::MerchantOut::Sell(0, 1)];
+    super::super::npcw_requests(&p, &mut Vec::new(), &mut player);
+    super::super::begin_iteration(&mut p, true);
+    p.bags_sell_confirm(0, 1);
+    native_events::dispatch(&host).unwrap();
+    p.bags_broker_tick();
+    assert_eq!(p.session.sends_lost, sent, "the batch must stop, no second sale");
+    host.execute("assert(ares[#ares].kind == 'sell' and ares[#ares].state == 'unknown' and ares[#ares].ok == nil, ares[#ares].state); assert(#bres == 1 and bres[1].state == 'unknown' and bres[1].completed == 0)").unwrap();
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}
+
+#[test]
+fn round6f3_staged_sale_refused_when_player_sale_shrinks_the_stack() {
+    use crate::fork_ext::addons::{action_broker, native_events};
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    let mut a = potion();
+    a.key = 101;
+    a.equip_slot = -1;
+    a.quantity = 3;
+    p.dump.inventory = list(&[a]);
+    p.bags_open_merchant(88);
+    p.forge_snapshot(None);
+    let host = r6f3_host();
+    host.execute("h_a = assert(eqoa.inventory.get()).items[1].ref").unwrap();
+    r6f3_press(&host, "next_fn = function() return eqoa.actions.sell(h_a, 2) end");
+    // the step stages the sale; the player's own sale occupies the merchant output that frame
+    super::super::begin_iteration(&mut p, true);
+    let sent = p.session.sends_lost;
+    let mut player = vec![crate::merchant::MerchantOut::Sell(0, 1)];
+    super::super::npcw_requests(&p, &mut Vec::new(), &mut player);
+    assert_eq!(player.len(), 1, "broker did not append beside the player's sale");
+    // that sale shrinks the stack below the staged count
+    p.dump.inventory.items[0].quantity = 1;
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert_eq!(p.session.sends_lost, sent, "a sale the native loop would drop must never be sent");
+    assert!(!p.npcw.shop.pending);
+    host.execute("assert(ares[#ares].kind == 'sell' and ares[#ares].state == 'refused' and ares[#ares].code == 'stale_handle', ares[#ares].state)").unwrap();
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}

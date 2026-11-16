@@ -218,7 +218,7 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
         Some(BrokerReply::LootOne { confirmed_key }) => {
             LOOT_BUSY.with(|b| b.set(false));
             if confirmed_key.is_some()
-                || crate::fork_ext::addons::action_broker::is_subsystem_contended(
+                || crate::fork_ext::addons::action_broker::is_player_activity(
                     crate::fork_ext::addons::action_broker::Subsystem::Loot,
                 )
             {
@@ -365,7 +365,6 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         crate::fork_ext::addons::action_broker::update_native_snapshot(snapshot);
         crate::fork_ext::addons::native_core::iteration(_game_step);
         if _game_step {
-            crate::fork_ext::addons::action_broker::clear_frame_contention();
             if let Some(pending) = PENDING_BANK_TX.with(|b| {
                 if _play.mode != 11 {
                     b.borrow_mut().take()
@@ -512,14 +511,14 @@ pub(crate) fn npcw_requests(
     #[cfg(not(target_arch = "wasm32"))]
     {
         use crate::fork_ext::addons::action_broker::{
-            self, Subsystem, is_master_loot_active, mark_deferred_sent, mark_subsystem_contended,
+            self, Subsystem, is_master_loot_active, mark_deferred_sent, mark_player_activity,
             resolve_in_flight_window_closed, resolve_staged_refusal,
         };
         if !_loot_out.is_empty() {
-            mark_subsystem_contended(Subsystem::Loot);
+            mark_player_activity(Subsystem::Loot);
         }
         if !_merch_out.is_empty() {
-            mark_subsystem_contended(Subsystem::Merchant);
+            mark_player_activity(Subsystem::Merchant);
         }
         let Some(req) = PENDING_NPCW_TX.with(|p| *p.borrow()) else {
             return;
@@ -632,12 +631,17 @@ pub(crate) fn npcw_requests(
                     .inventory
                     .items
                     .iter()
-                    .position(|it| it.inv_index == item_key)
+                    .position(|it| it.inv_index == item_key && it.quantity >= count as i64)
                 {
+                    // the native loop (`npcw.rs`) sends only while the stack still holds `count`
                     _merch_out.push(crate::merchant::MerchantOut::Sell(slot as i32, count));
                     mark_deferred_sent("sell");
                 } else {
-                    resolve_staged_refusal("sell", "stale_handle", "item is no longer in inventory");
+                    resolve_staged_refusal(
+                        "sell",
+                        "stale_handle",
+                        "item is no longer in inventory or the stack is smaller than requested",
+                    );
                 }
             }
         }
@@ -650,11 +654,11 @@ pub(crate) fn bank_requests(_play: &Play, _out: &mut Vec<crate::bank::BankOut>) 
     #[cfg(not(target_arch = "wasm32"))]
     {
         use crate::fork_ext::addons::action_broker::{
-            Subsystem, mark_deferred_sent, mark_subsystem_contended,
+            Subsystem, mark_deferred_sent, mark_player_activity,
             resolve_in_flight_window_closed, resolve_staged_refusal,
         };
         if !_out.is_empty() {
-            mark_subsystem_contended(Subsystem::Bank);
+            mark_player_activity(Subsystem::Bank);
         }
         let Some(req) = PENDING_BANK_TX.with(|b| *b.borrow()) else {
             return;
