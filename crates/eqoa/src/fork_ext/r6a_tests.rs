@@ -8,6 +8,7 @@ use crate::fork_ext::addons::{
     native_core::{self, CORE, Core},
     native_events,
 };
+use crate::dialog::Key;
 use net::dump::{Item, ItemList, NetItem};
 use net::session::Event;
 use net::stream::Writer;
@@ -62,6 +63,12 @@ fn apply(p: &mut Play, w: &mut crate::walker::Walker, event: Event) {
     match event {
         Event::Opcode { op: 0x007C, data } => p.quests.recv_add(&data),
         Event::Opcode { op: 0x007D, data } => p.quests.recv_remove(&data),
+        Event::Opcode { op: op @ (0x0016 | 0x0018), data } => {
+            p.npcw_opcode(op, &data);
+        }
+        Event::Opcode { op: 0x124D, data } => {
+            p.bank_opcode(0x124D, &data);
+        }
         Event::Opcode { op: 0x1402, data } => {
             p.cm_msgs.push(data);
         }
@@ -613,22 +620,22 @@ fn round6a_windows_modes_dialogs_hints_and_outside_world() {
     )
     .unwrap();
 
-    // Text dialog (mode 9) -> dialog nil until seam approved, Forge reports IsTextDialogOpen
+    // Text dialog (mode 9) -> dialog.kind='text', Forge reports IsTextDialogOpen
     p.mode = 9;
     frame(&p, Some(&w), &h);
     h.execute(
-        "assert(eqoa.windows.get().mode == 'text_dialog' and eqoa.windows.find('text_dialog').dialog == nil and ff_wnd.IsTextDialogOpen() == true)",
+        "assert(eqoa.windows.get().mode == 'text_dialog' and eqoa.windows.find('text_dialog').dialog.kind == 'text' and ff_wnd.IsTextDialogOpen() == true)",
     )
     .unwrap();
 
-    // Confirm box (mode 14) -> kind='confirm', text/style/style_id readable, yes_no selection=nil (seam)
+    // Confirm box (mode 14) -> kind='confirm', text/style/style_id readable, yes_no defaults to No (selection=2)
     p.mbox.prompt(&vi::ui::wide("Delete item?"), 1, 0, 0, 100);
     p.mode = 14;
     frame(&p, Some(&w), &h);
     h.execute(
         r#"
         local c = eqoa.windows.find('confirm')
-        assert(c.dialog.kind == 'confirm' and c.dialog.text == 'Delete item?' and c.dialog.style == 'yes_no' and c.dialog.style_id == 1 and c.dialog.selection == nil)
+        assert(c.dialog.kind == 'confirm' and c.dialog.text == 'Delete item?' and c.dialog.style == 'yes_no' and c.dialog.style_id == 1 and c.dialog.selection == 2)
         "#,
     )
     .unwrap();
@@ -801,8 +808,12 @@ fn round6a_forge_icons_merchant_hint_hotbar_items_and_zero_addon() {
         assert(eqoa.capabilities.get('frontiers_forge.merchant.GetButtonHint').status == 'supported')
         assert(eqoa.capabilities.get('frontiers_forge.camera.GetCoordinates').status == 'supported')
         assert(eqoa.capabilities.get('frontiers_forge.window.FormatButtonHint').status == 'supported')
-        assert(eqoa.capabilities.get('eqoa.windows.Window.rows').status == 'not_yet')
-        assert(eqoa.capabilities.get('eqoa.windows.Window.rows').reason == 'needs an upstream read accessor the owner approves first')
+        assert(eqoa.capabilities.get('eqoa.windows.Window.rows').status == 'supported')
+        assert(eqoa.capabilities.get('eqoa.windows.Window.selected_row').status == 'supported')
+        assert(eqoa.capabilities.get('eqoa.windows.Window.scroll_top').status == 'supported')
+        assert(eqoa.capabilities.get('eqoa.windows.MenuRow.command').status == 'supported')
+        assert(eqoa.capabilities.get('eqoa.windows.Dialog.options').status == 'supported')
+        assert(eqoa.capabilities.get('eqoa.windows.Dialog.selection').status == 'supported')
         assert(eqoa.capabilities.get('eqoa.textures.formats.jpeg').status == 'not_yet')
         "#,
     )
@@ -829,4 +840,423 @@ fn round6a_forge_icons_merchant_hint_hotbar_items_and_zero_addon() {
     super::take_view_builds();
     let _ = p.forge_snapshot(Some(&w));
     assert_eq!(super::take_view_builds(), 0);
+}
+
+#[test]
+fn round6a_seam_dialogs_privchat_response_pages_and_confirm_yes_no() {
+    let mut p = ready();
+    let w = Play::bundled_ui_walker();
+    let h = forge_host("seam_dialogs");
+    let mut lines = vec![String::new(); 300];
+    lines[160] = "Close".into();
+    lines[216] = "Back".into();
+    lines[244] = "More".into();
+    let vui = crate::ui::Vui::new(
+        vi::strtab::StringTable::parse(lines.join("\n").as_bytes()).unwrap(),
+        Default::default(),
+        vec![],
+    );
+
+    // 1. PrivChat (mode 9, text_dialog)
+    p.mode = 9;
+    p.priv_chat.set_text(&vi::ui::wide("Hail, adventurer!"));
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        local g = eqoa.windows.get()
+        assert(g.mode == 'text_dialog')
+        local rw = eqoa.windows.find('text_dialog')
+        assert(rw.dialog.kind == 'text' and rw.dialog.text == 'Hail, adventurer!')
+        assert(#rw.dialog.options == 0 and rw.rows == nil and rw.selected_row == nil)
+        "#,
+    )
+    .unwrap();
+
+    // 2. Response dialog (mode 7, response_dialog) with 14 options -> 2 pages (PAGE=12)
+    p.mode = 7;
+    p.response.set_dialog(
+        &vui,
+        crate::dialog::DialogBox {
+            id: 42,
+            text: vi::ui::wide("Choose your path:"),
+            options: (1..=14)
+                .map(|i| vi::ui::wide(&format!("Option {i}")))
+                .collect(),
+        },
+    );
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        wlog = {}
+        eqoa.events.on('windows.changed', function(e) wlog[#wlog + 1] = e.data end)
+        local rw = eqoa.windows.find('response_dialog')
+        assert(rw.dialog.kind == 'text' and rw.dialog.text == 'Choose your path:')
+        -- Page 1: Option 1..12, More, Close
+        assert(#rw.dialog.options == 14 and rw.dialog.options[13] == 'More' and rw.dialog.options[14] == 'Close',
+            (function()
+                local p = {}
+                for k = 1, 14 do p[#p+1] = string.format('[%d]=%q', k, tostring(rw.dialog.options[k])) end
+                return 'opts=' .. #rw.dialog.options .. ' ' .. table.concat(p, ' ')
+            end)())
+        assert(#rw.rows == 14 and rw.rows[1].text == 'Option 1' and rw.selected_row == 1)
+        "#,
+    )
+    .unwrap();
+
+    // Advance down to "More" (row 13, native index 12) and activate it -> page 2 (options 13, 14, Back, Close)
+    for _ in 0..12 {
+        p.response.key(&vui, Key::Down, 0);
+    }
+    p.response.key(&vui, Key::Enter, 0); // opens page 2 and steps sel from 12 to 13 -> visible row 2 on page 2!
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        assert(#wlog == 1)
+        local rw = eqoa.windows.find('response_dialog')
+        assert(#rw.dialog.options == 4)
+        assert(rw.dialog.options[1] == 'Option 13' and rw.dialog.options[2] == 'Option 14')
+        assert(rw.dialog.options[3] == 'Back' and rw.dialog.options[4] == 'Close')
+        -- selected_row must be visible 1-based position 2, NOT native sel+1 (14)
+        assert(rw.selected_row == 2 and rw.rows[2].text == 'Option 14')
+        wlog = {}
+        "#,
+    )
+    .unwrap();
+
+    // 3. MBox yes_no (mode 14, confirm) starts on No (2) -> Left -> Yes (1)
+    p.mode = 14;
+    p.mbox.prompt(&vi::ui::wide("Destroy item?"), 1, 0, 0, 0);
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        local mc = eqoa.windows.find('confirm')
+        assert(mc.dialog.kind == 'confirm' and mc.dialog.style == 'yes_no' and mc.dialog.selection == 2)
+        wlog = {}
+        "#,
+    )
+    .unwrap();
+    let mut cues = Vec::new();
+    p.mbox.key(Key::Left, &mut cues);
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        assert(#wlog == 1)
+        local mc = eqoa.windows.find('confirm')
+        assert(mc.dialog.selection == 1)
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round6a_seam_loot_bank_questlog_and_start_menu_rows() {
+    let mut p = ready();
+    let w = Play::bundled_ui_walker();
+    let h = forge_host("seam_windows");
+    let mut lines = vec![String::new(); 500];
+    lines[117] = "TAKE ALL".into();
+    lines[118] = "LEAVE ALL".into();
+    lines[160] = "Exit".into();
+    lines[436] = "Usable".into();
+    lines[437] = "Equipment".into();
+    lines[438] = "Misc".into();
+    let vui = crate::ui::Vui::new(
+        vi::strtab::StringTable::parse(lines.join("\n").as_bytes()).unwrap(),
+        Default::default(),
+        vec![],
+    );
+    let mut null_r = crate::pointer::testing::NullRaster;
+    p.words = Some(vui.words.clone());
+
+    // 1. Loot window (mode 1) via real 0x0018 corpse + NpcWindows::loot_lists()
+    let encode_net_item = |id: i64, inv_index: u32, name: &str| {
+        let mut iw = Writer::default();
+        iw.signed(1).signed(10).signed(0).signed(-1).signed(-1).u32(inv_index);
+        for v in [
+            id, 10, 0, 4001, 0, -1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, -1, -1, 0, 0, 0, 0,
+        ] {
+            iw.signed(v);
+        }
+        iw.wide(name).wide("").signed(0);
+        iw.data
+    };
+    let mut lw = Writer::default();
+    lw.signed(2).u32(0);
+    lw.bytes(&encode_net_item(101, 10, "Gnoll Fang"));
+    lw.bytes(&encode_net_item(102, 11, "Rusty Dirk"));
+    let mut mut_w = Play::bundled_ui_walker();
+    apply(&mut p, &mut mut_w, Event::Opcode { op: 0x0018, data: lw.data });
+    p.run_npcw(&vui, &mut null_r);
+    // Arrow down twice in loot window -> sel = 2 ("Rusty Dirk" row 3)
+    for _ in 0..2 {
+        p.npcw_key(139, true);
+        p.run_npcw(&vui, &mut null_r);
+        p.npcw_key(139, false);
+        p.run_npcw(&vui, &mut null_r);
+    }
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        local lw = eqoa.windows.find('loot')
+        assert(lw ~= nil and #lw.rows == 4)
+        assert(lw.rows[1].text == 'LEAVE ALL' and lw.rows[1].command == 'loot.leave_all' and lw.rows[1].item == nil)
+        assert(lw.rows[2].text == 'Gnoll Fang' and lw.rows[2].item ~= nil)
+        assert(eqoa.items.get(lw.rows[2].item).name == 'Gnoll Fang')
+        assert(lw.rows[3].text == 'Rusty Dirk' and lw.rows[4].text == 'TAKE ALL' and lw.rows[4].command == 'loot.take_all')
+        assert(lw.selected_row == 3 and lw.scroll_top == 1,
+            string.format('loot sel=%s top=%s', tostring(lw.selected_row), tostring(lw.scroll_top)))
+        "#,
+    )
+    .unwrap();
+    apply(&mut p, &mut mut_w, Event::Opcode { op: 0x0016, data: vec![] });
+    p.mode = 0;
+
+    // 2. Bank window (mode 11) via BankPlay::read_lists()
+    let mut b_item = Item::default();
+    b_item.id = 201;
+    b_item.name = "Stored Sapphire".into();
+    let mut dump = Box::<net::dump::MemoryDump>::default();
+    dump.bank.items = ItemList {
+        items: vec![NetItem { inv_index: 5, quantity: 1, item: b_item, ..Default::default() }],
+        ..Default::default()
+    };
+    apply(&mut p, &mut mut_w, Event::WorldEntry { self_id: 100, player: net::session::Player::default(), dump });
+    apply(&mut p, &mut mut_w, Event::Opcode { op: 0x124D, data: vec![] });
+    p.run_bank(&vui, &mut null_r);
+    // Move to "Items" option (down, enter), then Right arrow to focus bank list ("Stored Sapphire")
+    p.bank_key(139, true);
+    p.bank_key(134, true);
+    p.bank_key(137, true);
+    p.run_bank(&vui, &mut null_r);
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        local bw = eqoa.windows.find('bank')
+        assert(bw ~= nil and #bw.rows == 1)
+        assert(bw.rows[1].text == 'Stored Sapphire' and bw.rows[1].item ~= nil)
+        assert(eqoa.items.get(bw.rows[1].item).name == 'Stored Sapphire')
+        assert(bw.selected_row == 1 and bw.scroll_top == 1)
+        "#,
+    )
+    .unwrap();
+
+    // 3. Quest Log (mode 22) via QuestLog::read_state()
+    p.quests.titles = vec![
+        vi::ui::wide("First Errand"),
+        vi::ui::wide("Goblin Threat"),
+        vi::ui::wide("Lost Relic"),
+    ];
+    p.mode = 22;
+    p.quest_open = true;
+    p.run_quests(&vui, &mut null_r);
+    p.quest_keys.push((139, true)); // Down -> sel = 1 ("Goblin Threat")
+    p.run_quests(&vui, &mut null_r);
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        local qw = eqoa.windows.find('quest_log')
+        assert(qw ~= nil and #qw.rows == 3)
+        assert(qw.rows[1].text == 'First Errand' and qw.rows[2].text == 'Goblin Threat')
+        assert(qw.selected_row == 2 and qw.scroll_top == 1)
+        "#,
+    )
+    .unwrap();
+
+    // 4. Start menu (mode 13) via MainMenu::read_state()
+    p.bags_start_built();
+    {
+        let start = p.start.as_mut().unwrap();
+        let entry1 = crate::client_image::MenuEntry { msg: 0x0800_0001, id: 1, ..Default::default() };
+        let entry2 = crate::client_image::MenuEntry { msg: 0x0800_0002, id: 2, ..Default::default() };
+        start.menus.list[0].entries = vec![entry1, entry2];
+        start.menus.labels.insert(
+            (0x0800_0001, 1),
+            crate::client_image::Label { text: vi::ui::wide("Character"), tail: vec![], dim: false },
+        );
+        start.menus.labels.insert(
+            (0x0800_0002, 2),
+            crate::client_image::Label { text: vi::ui::wide("Raid (Locked)"), tail: vec![], dim: true },
+        );
+        let loc = crate::startmenu::Location {
+            world: 0,
+            pos: [0.0; 3],
+            cols: 1,
+            rows: 1,
+            cell: 1.0,
+            origin: [0.0; 3],
+            bounds: None,
+        };
+        start.menu.visible = true;
+        start.menu.show_main(&vui, &null_r, true, 0, &loc);
+        let mut cues = Vec::new();
+        start.menu.key(&vui, &null_r, &start.menus, 139, true, 1, &loc, &mut cues);
+        let sm_stats = crate::startmenu::Stats::default();
+        start.menu.draw(&vui, &mut null_r, &start.menus, 2, &sm_stats, &mut cues); // pulse -> sel = 1
+        start.menu.key(&vui, &null_r, &start.menus, 139, false, 3, &loc, &mut cues);
+    }
+    p.mode = 13;
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        local sw = eqoa.windows.find('start_menu')
+        assert(sw ~= nil and #sw.rows == 2)
+        assert(sw.rows[1].text == 'Character' and sw.rows[1].enabled == true and sw.rows[1].command == '0x8000001:1')
+        assert(sw.rows[2].text == 'Raid (Locked)' and sw.rows[2].enabled == false)
+        assert(sw.selected_row == 2 and sw.scroll_top == 1)
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round6a_seam_trainer_mastery_and_spellbook_rows() {
+    let mut p = ready();
+    let w = Play::bundled_ui_walker();
+    let h = forge_host("seam_skills");
+    let mut lines = vec![String::new(); 1800];
+    for (idx, word) in [
+        (76, "Details"),
+        (247, "Strength"),
+        (248, "Stamina"),
+        (249, "Agility"),
+        (250, "Dexterity"),
+        (251, "Wisdom"),
+        (252, "Intelligence"),
+        (253, "Charisma"),
+        (481, "Train"),
+        (510, "Tradeskill"),
+        (1652, "General"),
+        (1653, "Archetype"),
+        (1654, "Class"),
+        (1655, "Master Class"),
+    ] {
+        lines[idx] = word.into();
+    }
+    let vui = crate::ui::Vui::new(
+        vi::strtab::StringTable::parse(lines.join("\n").as_bytes()).unwrap(),
+        Default::default(),
+        vec![],
+    );
+    let mut null_r = crate::pointer::testing::NullRaster;
+    p.words = Some(vui.words.clone());
+
+    // 1. Trainer (mode 12) via Trainer::read_state()
+    p.mode = 12;
+    p.trainer_open = true;
+    p.run_trainer(&vui, &mut null_r);
+    p.trainer_keys.push((139, true)); // Down -> Stamina (row 2)
+    p.run_trainer(&vui, &mut null_r);
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        local tw = eqoa.windows.find('trainer')
+        assert(tw ~= nil and #tw.rows == 9)
+        assert(tw.rows[1].text == 'Strength' and tw.rows[2].text == 'Stamina')
+        assert(tw.rows[8].text == 'Train' and tw.rows[8].command == 'trainer.train')
+        assert(tw.rows[9].text == 'Details' and tw.rows[9].command == 'trainer.details')
+        assert(tw.selected_row == 2)
+        "#,
+    )
+    .unwrap();
+    // Move down to Details bar (mode == 2 -> selected_row 9)
+    for _ in 0..7 {
+        p.trainer_keys.push((139, true));
+    }
+    p.run_trainer(&vui, &mut null_r);
+    frame(&p, Some(&w), &h);
+    h.execute("assert(eqoa.windows.find('trainer').selected_row == 9)").unwrap();
+
+    // 2. Class Mastery (mode 40) via ClassMastery::read_state()
+    p.cm.skills = vec![
+        crate::classmastery::Skill {
+            x00: 100,
+            on: true,
+            known: 1,
+            id: 10,
+            parent: 0,
+            category: 1, // Archetype (tab 2)
+            cost: 3,
+            name: vi::ui::wide("Iron Will"),
+        },
+        crate::classmastery::Skill {
+            x00: 101,
+            on: false,
+            known: 0,
+            id: 11,
+            parent: 0,
+            category: 1,
+            cost: 4,
+            name: vi::ui::wide("Secret Art"),
+        },
+    ];
+    p.mode = 40;
+    p.cm_wnd.open(&vui, &null_r, &p.cm);
+    let mut cues = Vec::new();
+    // Switch category (+1 via key 136) -> category 1 ("Archetype", tab 2), switch column -> available (col 1)
+    p.cm_wnd.key(&vui, &mut null_r, &mut p.cm, 136, true, 0, &mut cues);
+    p.cm_wnd.key(&vui, &mut null_r, &mut p.cm, 9, true, 0, &mut cues);
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        local mw = eqoa.windows.find('mastery')
+        assert(mw ~= nil and mw.tab == 2 and mw.tabs[2] == 'Archetype' and #mw.tabs == 5,
+            (function()
+                local p = {}
+                for k = 1, 5 do p[#p+1] = string.format('[%d]=%q', k, tostring(mw and mw.tabs and mw.tabs[k])) end
+                return 'tab=' .. tostring(mw and mw.tab) .. ' ntabs=' .. tostring(mw and mw.tabs and #mw.tabs) .. ' ' .. table.concat(p, ' ')
+            end)())
+        assert(#mw.rows == 1 and mw.rows[1].text == '???' and mw.rows[1].enabled == false)
+        assert(mw.selected_row == 1 and mw.scroll_top == 1)
+        "#,
+    )
+    .unwrap();
+
+    // Switch back to owned (col 0) -> Iron Will
+    p.cm_wnd.key(&vui, &mut null_r, &mut p.cm, 9, true, 0, &mut cues);
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        local mw = eqoa.windows.find('mastery')
+        assert(#mw.rows == 1 and mw.rows[1].text == 'Iron Will' and mw.rows[1].enabled == true)
+        "#,
+    )
+    .unwrap();
+
+    // 3. SpellBook (mode 5) via SpellBook::top() + public fields
+    p.abilities.insert(
+        501,
+        net::dump::Ability {
+            id: 501,
+            name: "Greater Heal".into(),
+            level: 12,
+            ..Default::default()
+        },
+    );
+    p.abilities.insert(
+        502,
+        net::dump::Ability {
+            id: 502,
+            name: "Flash of Light".into(),
+            level: 14,
+            ..Default::default()
+        },
+    );
+    p.book.open(&vui, &null_r, 0, 0);
+    p.book.rows = vec![
+        crate::spellbook::Row { id: 501, valid: true, index: 1, ..Default::default() },
+        crate::spellbook::Row { id: 502, valid: true, index: 2, ..Default::default() },
+    ];
+    p.book.tab = 1; // 11-20 -> tab 2
+    p.book.sel = 1; // Flash of Light -> selected_row 2
+    p.mode = 5;
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        local sb = eqoa.windows.find('spellbook')
+        assert(sb ~= nil and sb.tab == 2 and #sb.tabs == 5)
+        assert(#sb.rows == 2 and sb.rows[1].text == 'Greater Heal' and sb.rows[2].text == 'Flash of Light')
+        assert(sb.selected_row == 2 and sb.scroll_top == 1)
+        "#,
+    )
+    .unwrap();
 }

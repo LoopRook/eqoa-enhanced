@@ -183,6 +183,9 @@ impl Default for SpellBook {
 }
 
 impl SpellBook {
+    pub fn top(&self) -> i32 {
+        self.top
+    }
 
     /// A pointer at frame point `p` (`pointer`), as the keys reach the
     /// book: the popup's row used at once, a click off the popup closing it

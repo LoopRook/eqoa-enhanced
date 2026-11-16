@@ -166,6 +166,9 @@ impl Default for Trainer {
 }
 
 impl Trainer {
+    pub fn read_state(&self) -> (i32, i32) {
+        (self.sel, self.mode)
+    }
 
     /// A pointer at frame point `p` (`pointer`), as the keys: a stat, a
     /// detail or a bar not selected is the up and down steps to it (from a

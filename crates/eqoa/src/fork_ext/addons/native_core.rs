@@ -525,6 +525,33 @@ impl Core {
                 active_ref = r.clone();
             }
             w["ref"] = r;
+            if let Some(rows) = w["rows"].as_array_mut() {
+                for row in rows {
+                    let item_ref = row["_item_container"]
+                        .as_str()
+                        .zip(row["_item_key"].as_u64().map(|k| k as u32))
+                        .and_then(|(container, item_key)| {
+                            self.item_versions
+                                .get(container)
+                                .and_then(|m| m.get(&item_key))
+                                .map(|ver| {
+                                    json!({
+                                        "$ref": "item",
+                                        "key": format!("{container}:{item_key}"),
+                                        "generation": self.generation,
+                                        "incarnation": ver,
+                                    })
+                                })
+                        });
+                    if let Some(ir) = item_ref {
+                        row["item"] = ir;
+                    }
+                    if let Some(obj) = row.as_object_mut() {
+                        obj.remove("_item_container");
+                        obj.remove("_item_key");
+                    }
+                }
+            }
             if let Some(obj) = w.as_object_mut() {
                 obj.remove("_key");
             }

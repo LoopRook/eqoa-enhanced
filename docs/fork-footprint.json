@@ -185,9 +185,9 @@
       "reason": "Log the login press, reply and error so a refused login's reason reaches eqoa.log."
     },
     "crates/eqoa/src/startmenu.rs": {
-      "added": 1,
+      "added": 7,
       "deleted": 1,
-      "reason": "Expose the existing zone_name helper as pub(crate) so the fork-owned report snapshot reuses the client bounds check; body and gameplay remain unchanged."
+      "reason": "Expose the existing zone_name helper as pub(crate) so the fork-owned report snapshot reuses the client bounds check; body and gameplay remain unchanged. round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16: `MainMenu::read_state(&self)`."
     },
     "NOTICE": {
       "added": 10,
@@ -235,9 +235,49 @@
       "reason": "owner-approved 2026-11-15, round 5: merchant accessor. `Merchant::read_state(&self) -> (i32, i32, i32)`, read-only: the mode, the menu's lit option and the list's lit row, for the addon API's MerchantState and Container.view."
     },
     "crates/eqoa/src/npcw.rs": {
-      "added": 1,
+      "added": 5,
       "deleted": 1,
-      "reason": "owner-approved 2026-11-15, round 5: merchant accessor. `merchant: Merchant,` becomes `pub merchant: Merchant,` so the fork adapter can read the window's state."
+      "reason": "owner-approved 2026-11-15, round 5: merchant accessor. `merchant: Merchant,` becomes `pub merchant: Merchant,` so the fork adapter can read the window's state. round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16: `NpcWindows::loot_lists(&self)`."
+    },
+    "crates/eqoa/src/dialog.rs": {
+      "added": 9,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`PrivChat::read_text`, `Response::read_state`, `MBox::sel`)."
+    },
+    "crates/eqoa/src/loot.rs": {
+      "added": 3,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`Loot::read_list`)."
+    },
+    "crates/eqoa/src/bankplay.rs": {
+      "added": 4,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`BankPlay::read_lists`)."
+    },
+    "crates/eqoa/src/bank.rs": {
+      "added": 3,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`Bank::read_lists`)."
+    },
+    "crates/eqoa/src/questlog.rs": {
+      "added": 3,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`QuestLog::read_state`)."
+    },
+    "crates/eqoa/src/spellbook.rs": {
+      "added": 3,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`SpellBook::top`)."
+    },
+    "crates/eqoa/src/trainer.rs": {
+      "added": 3,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`Trainer::read_state`)."
+    },
+    "crates/eqoa/src/classmastery.rs": {
+      "added": 4,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`ClassMastery::read_state`)."
     }
   },
   "immutable": [

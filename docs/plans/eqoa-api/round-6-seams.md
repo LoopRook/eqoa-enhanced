@@ -1,8 +1,14 @@
 # Round 6 Read-Only Upstream Seam Proposal
 
-Status: **Proposed (not applied)**. Per the Round 6 Part A brief, no upstream files have been modified in `feat/eqoa-api-r6`. Fields blocked on these seams return `nil` (with capability status `not_yet` and reason `"needs an upstream read accessor the owner approves first"`).
+Status: **Approved by the lead (owner-delegated) 2026-11-16 and applied**. Zero field visibility changes were made in upstream files; every seam is a read-only `&self` accessor:
+- `npcw.rs`: kept `loot: Loot` private; added `NpcWindows::loot_lists(&self) -> (&WndList, &WndList)`.
+- `bankplay.rs`: kept `wnd: Bank` private; added `BankPlay::read_lists(&self) -> (&WndList, &WndList)`.
+- `spellbook.rs`: kept `top: i32` private; added `SpellBook::top(&self) -> i32`.
+- `loot.rs`, `bank.rs`: `Loot::read_list(&self)` and `Bank::read_lists(&self)` placed in their existing `impl` blocks.
+- `classmastery.rs`: `ClassMastery::read_state(&self)` returns `(column, category, list.sel, list.top, shown)`.
+- `dialog.rs`, `questlog.rs`, `startmenu.rs`, `trainer.rs`: applied as read-only `&self` accessors.
 
-Total requested upstream budget delta: **+33 / -3 lines** across 10 upstream files (inside §10's 30–45 line estimate), read-only `&self` accessors (matching Round 5's approved `ItemMenu::read_state` and `Merchant::read_state` pattern) plus two `pub(crate)` / `pub` field promotions where types are already immutable outside their modules or trivially `Copy`.
+Final measured delta across all 10 upstream files against `a76d8d27a1c3f51fca545d7eabaca9e5dc336091`: **+42 / -0 lines newly added** (`44 / 2` total vs prior `2 / 2`).
 
 ---
 
@@ -184,20 +190,20 @@ Total requested upstream budget delta: **+33 / -3 lines** across 10 upstream fil
 
 ---
 
-## Footprint budget delta (`docs/fork-footprint.json`)
+## Footprint budget delta (`docs/fork-footprint.json`, measured)
 
-| File | Current budget (+ / -) | Proposed delta | Proposed budget (+ / -) |
+| File | Prior budget (+ / -) | Applied delta | Final measured budget (+ / -) |
 |---|---:|---:|---:|
 | `crates/eqoa/src/dialog.rs` | 0 / 0 | +9 / -0 | 9 / 0 |
-| `crates/eqoa/src/npcw.rs` | 1 / 1 | +1 / -1 | 2 / 2 |
+| `crates/eqoa/src/npcw.rs` | 1 / 1 | +4 / -0 | 5 / 1 |
 | `crates/eqoa/src/loot.rs` | 0 / 0 | +3 / -0 | 3 / 0 |
-| `crates/eqoa/src/bankplay.rs` | 0 / 0 | +1 / -1 | 1 / 1 |
+| `crates/eqoa/src/bankplay.rs` | 0 / 0 | +4 / -0 | 4 / 0 |
 | `crates/eqoa/src/bank.rs` | 0 / 0 | +3 / -0 | 3 / 0 |
 | `crates/eqoa/src/questlog.rs` | 0 / 0 | +3 / -0 | 3 / 0 |
-| `crates/eqoa/src/startmenu.rs` | 1 / 1 | +5 / -0 | 6 / 1 |
-| `crates/eqoa/src/spellbook.rs` | 0 / 0 | +1 / -1 | 1 / 1 |
+| `crates/eqoa/src/startmenu.rs` | 1 / 1 | +6 / -0 | 7 / 1 |
+| `crates/eqoa/src/spellbook.rs` | 0 / 0 | +3 / -0 | 3 / 0 |
 | `crates/eqoa/src/trainer.rs` | 0 / 0 | +3 / -0 | 3 / 0 |
 | `crates/eqoa/src/classmastery.rs` | 0 / 0 | +4 / -0 | 4 / 0 |
-| **Total** | **2 / 2** | **+33 / -3** | **35 / 5** |
+| **Total** | **2 / 2** | **+42 / -0** | **44 / 2** |
 
 *(Optional secondary windows not needed for core Part A parity—`FactionWnd`, `WhoList`, `RecipeWnd`, `WndGuild`, `BuddyList`/`IgnoreList`—remain deferred; each can add a 3-line `read_state(&self)` if a bundled mod later inspects their rows.)*

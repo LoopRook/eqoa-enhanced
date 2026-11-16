@@ -66,6 +66,7 @@ struct WindowsFingerprint {
     typing_hash: u64,
     edit_hash: u64,
     mbox_hash: u64,
+    detail_hash: u64,
     words_present: bool,
     merchant_mode: i32,
     merchant_visible: bool,
@@ -188,6 +189,62 @@ fn windows_fingerprint(play: &Play, generation: u64) -> WindowsFingerprint {
     if play.mode == 14 {
         play.mbox.kind.hash(&mut mh);
         play.mbox.text.hash(&mut mh);
+        play.mbox.sel().hash(&mut mh);
+    }
+    let mut dh = std::collections::hash_map::DefaultHasher::new();
+    match play.mode {
+        1 => {
+            let (inv, loot) = play.npcw.loot_lists();
+            (inv.x64, inv.sel, inv.top, loot.x64, loot.sel, loot.top).hash(&mut dh);
+            if let Some(c) = &play.npcw.corpse {
+                c.items.len().hash(&mut dh);
+                for it in &c.items {
+                    (it.inv_index, &it.item.name).hash(&mut dh);
+                }
+            }
+        }
+        5 => {
+            (play.book.sel, play.book.top(), play.book.tab, play.book.mode).hash(&mut dh);
+            for r in &play.book.rows {
+                (r.id, r.valid, r.index).hash(&mut dh);
+            }
+        }
+        7 => {
+            let (text, options, sel) = play.response.read_state();
+            text.hash(&mut dh);
+            options.hash(&mut dh);
+            sel.hash(&mut dh);
+        }
+        9 => {
+            play.priv_chat.read_text().hash(&mut dh);
+        }
+        10 => {
+            play.npcw.merchant.read_state().hash(&mut dh);
+        }
+        11 => {
+            let (inv, bank) = play.bank.read_lists();
+            (inv.x64, inv.sel, inv.top, bank.x64, bank.sel, bank.top).hash(&mut dh);
+            play.dump.bank.items.items.len().hash(&mut dh);
+        }
+        12 => {
+            play.trainer.read_state().hash(&mut dh);
+        }
+        22 => {
+            play.quest_log.read_state().hash(&mut dh);
+            quests_hash(play).hash(&mut dh);
+        }
+        40 => {
+            let (col, cat, sel, top, shown) = play.cm_wnd.read_state();
+            (col, cat, sel, top, shown).hash(&mut dh);
+        }
+        _ => {}
+    }
+    if let Some(start) = play.start.as_ref().filter(|_| play.mode == 13 || play.start.as_ref().is_some_and(|s| s.menu.visible)) {
+        start.menu.main.read_state().hash(&mut dh);
+        start.menus.labels.len().hash(&mut dh);
+    }
+    if play.mode == 13 && play.items.visible {
+        play.items.read_state().hash(&mut dh);
     }
     WindowsFingerprint {
         world_gen: generation,
@@ -199,6 +256,7 @@ fn windows_fingerprint(play: &Play, generation: u64) -> WindowsFingerprint {
         typing_hash: th.finish(),
         edit_hash: eh.finish(),
         mbox_hash: mh.finish(),
+        detail_hash: dh.finish(),
         words_present: play.words.is_some(),
         merchant_mode: play.npcw.merchant.mode,
         merchant_visible: play.npcw.merchant.visible,
@@ -235,6 +293,375 @@ fn mode_hints(play: &Play, mode: i32) -> Vec<Json> {
     }
 }
 
+fn word_or(play: &Play, id: i32, fallback: &str) -> String {
+    play.words
+        .as_ref()
+        .map(|w| w.get(id, 0))
+        .filter(|s| !s.is_empty() && *s != "(null)")
+        .map(str::to_string)
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn menu_row(
+    index: usize,
+    text: impl Into<String>,
+    enabled: bool,
+    item: Option<(&str, u32)>,
+    command: Option<String>,
+) -> Json {
+    let mut row = json!({
+        "index": index + 1,
+        "text": text.into(),
+        "enabled": enabled,
+        "item": Json::Null,
+        "command": command,
+    });
+    if let Some((container, key)) = item {
+        row["_item_container"] = json!(container);
+        row["_item_key"] = json!(key);
+    }
+    row
+}
+
+fn item_list_rows(items: &[net::dump::NetItem], container: &str) -> Vec<Json> {
+    items
+        .iter()
+        .enumerate()
+        .map(|(i, it)| menu_row(i, it.item.name.clone(), true, Some((container, it.inv_index)), None))
+        .collect()
+}
+
+fn wnd_list_sel_top(sel: i32, top: i32, len: usize) -> (Option<u64>, Option<u64>) {
+    let selected = (sel >= 0 && (sel as usize) < len).then(|| (sel + 1) as u64);
+    let scroll = (top >= 0).then(|| (top + 1) as u64);
+    (selected, scroll)
+}
+
+#[derive(Default)]
+struct WindowData {
+    rows: Option<Vec<Json>>,
+    selected_row: Option<u64>,
+    scroll_top: Option<u64>,
+    tabs: Option<Vec<String>>,
+    tab: Option<u64>,
+    dialog: Json,
+}
+
+fn start_menu_data(play: &Play) -> WindowData {
+    let Some(start) = play.start.as_ref() else {
+        return WindowData::default();
+    };
+    let (menu_idx, sel, top) = start.menu.main.read_state();
+    let Some(menu) = start.menus.list.get(menu_idx) else {
+        return WindowData::default();
+    };
+    let rows: Vec<Json> = menu
+        .entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let (label, enabled) = match start.menus.labels.get(&(e.msg, e.id)) {
+                Some(l) => (utf16_str(&l.text), !l.dim),
+                None => {
+                    let s = play
+                        .words
+                        .as_ref()
+                        .map(|w| crate::duel::word(w, e.word, 0))
+                        .unwrap_or_default();
+                    let label = if s == "(null)" { String::new() } else { s };
+                    (label, true)
+                }
+            };
+            let cmd = (e.msg != 0).then(|| format!("{:#x}:{}", e.msg, e.id));
+            menu_row(i, label, enabled, None, cmd)
+        })
+        .collect();
+    let (selected_row, scroll_top) = wnd_list_sel_top(sel, top, rows.len());
+    WindowData {
+        rows: Some(rows),
+        selected_row,
+        scroll_top,
+        ..Default::default()
+    }
+}
+
+fn inventory_subwindow_data(play: &Play) -> WindowData {
+    let (tab, menu, sel) = play.items.read_state();
+    let tab = tab.clamp(0, 3);
+    let tabs = vec![
+        word_or(play, 437, "Usable"),
+        word_or(play, 438, "Equipment"),
+        word_or(play, 1473, "Charged"),
+        word_or(play, 439, "Misc"),
+    ];
+    let has: fn(&net::dump::NetItem) -> bool = match tab {
+        0 => crate::infotext::is_usable,
+        1 => crate::infotext::is_wearable,
+        2 => crate::infotext::is_charged,
+        _ => crate::infotext::is_misc,
+    };
+    let rows: Vec<Json> = play
+        .dump
+        .inventory
+        .items
+        .iter()
+        .filter(|it| has(it))
+        .enumerate()
+        .map(|(i, it)| {
+            menu_row(
+                i,
+                it.item.name.clone(),
+                true,
+                Some(("inventory", it.inv_index)),
+                None,
+            )
+        })
+        .collect();
+    let selected_row = (menu >= 0 && sel >= 0 && (sel as usize) < rows.len())
+        .then(|| (sel + 1) as u64);
+    WindowData {
+        rows: Some(rows),
+        selected_row,
+        tabs: Some(tabs),
+        tab: Some((tab + 1) as u64),
+        ..Default::default()
+    }
+}
+
+fn mode_window_data(play: &Play, edit_title: &str) -> WindowData {
+    match play.mode {
+        1 => {
+            let (inv_list, loot_list) = play.npcw.loot_lists();
+            if inv_list.x64 && !loot_list.x64 {
+                let rows = item_list_rows(&play.dump.inventory.items, "inventory");
+                let (selected_row, scroll_top) = wnd_list_sel_top(inv_list.sel, inv_list.top, rows.len());
+                WindowData { rows: Some(rows), selected_row, scroll_top, ..Default::default() }
+            } else if let Some(corpse) = play.npcw.corpse.as_ref() {
+                let n = corpse.items.len().min(40);
+                let mut rows = Vec::with_capacity(n + 2);
+                rows.push(menu_row(
+                    0,
+                    if n > 0 { word_or(play, 119, "LEAVE ALL") } else { word_or(play, 641, "Empty") },
+                    true,
+                    None,
+                    (n > 0).then(|| "loot.leave_all".to_string()),
+                ));
+                for (i, it) in corpse.items.iter().take(n).enumerate() {
+                    rows.push(menu_row(i + 1, it.item.name.clone(), true, Some(("loot", it.inv_index)), None));
+                }
+                if n > 0 {
+                    rows.push(menu_row(n + 1, word_or(play, 118, "TAKE ALL"), true, None, Some("loot.take_all".to_string())));
+                }
+                let (selected_row, scroll_top) = wnd_list_sel_top(loot_list.sel, loot_list.top, rows.len());
+                WindowData { rows: Some(rows), selected_row, scroll_top, ..Default::default() }
+            } else {
+                WindowData::default()
+            }
+        }
+        2 => WindowData {
+            dialog: json!({
+                "kind": "input",
+                "text": (!play.edit.password).then(|| utf16_str(&play.edit.text)),
+                "tag": play.edit.purpose,
+                "title": edit_title,
+                "chat": play.edit.purpose == 0xB0F_0000,
+                "password": play.edit.password,
+            }),
+            ..Default::default()
+        },
+        5 => {
+            let rows: Vec<Json> = play
+                .book
+                .rows
+                .iter()
+                .enumerate()
+                .map(|(i, r)| {
+                    let name = play
+                        .abilities
+                        .get(&r.id)
+                        .map(|a| a.name.clone())
+                        .unwrap_or_else(|| format!("Ability {}", r.id));
+                    menu_row(i, name, r.valid, None, None)
+                })
+                .collect();
+            let (selected_row, scroll_top) = wnd_list_sel_top(play.book.sel, play.book.top(), rows.len());
+            let tab_count = if play.book.tab >= 5 || play.abilities.values().any(|a| a.level > 50) { 6 } else { 5 };
+            let tabs: Vec<String> = (0..tab_count)
+                .map(|k| word_or(play, 1729 + k, &format!("{}-{}", k * 10 + 1, (k + 1) * 10)))
+                .collect();
+            let tab = (play.book.tab >= 0).then(|| (play.book.tab + 1) as u64);
+            WindowData { rows: Some(rows), selected_row, scroll_top, tabs: Some(tabs), tab, ..Default::default() }
+        }
+        7 => {
+            let (text, options, sel) = play.response.read_state();
+            let opt_texts: Vec<String> = options.iter().map(|(_, _, t)| utf16_str(t)).collect();
+            let selected_row = options
+                .iter()
+                .position(|(idx, _, _)| *idx == sel)
+                .map(|pos| (pos + 1) as u64);
+            let rows: Vec<Json> = opt_texts
+                .iter()
+                .enumerate()
+                .map(|(i, t)| menu_row(i, t.as_str(), true, None, None))
+                .collect();
+            WindowData {
+                rows: Some(rows),
+                selected_row,
+                dialog: json!({
+                    "kind": "text",
+                    "text": utf16_str(text),
+                    "options": opt_texts,
+                }),
+                ..Default::default()
+            }
+        }
+        9 => WindowData {
+            dialog: json!({
+                "kind": "text",
+                "text": utf16_str(play.priv_chat.read_text()),
+                "options": [],
+            }),
+            ..Default::default()
+        },
+        10 => {
+            let (m_mode, m_opt, m_sel) = play.npcw.merchant.read_state();
+            let (rows, selected_row) = match m_mode {
+                1 => {
+                    let rows = item_list_rows(&play.dump.inventory.items, "inventory");
+                    let selected = (m_sel >= 0 && (m_sel as usize) < rows.len()).then(|| (m_sel + 1) as u64);
+                    (rows, selected)
+                }
+                2 => {
+                    let rows = item_list_rows(&play.npcw.shop.wares.items, "merchant");
+                    let selected = (m_sel >= 0 && (m_sel as usize) < rows.len()).then(|| (m_sel + 1) as u64);
+                    (rows, selected)
+                }
+                _ => {
+                    let rows = vec![
+                        menu_row(0, word_or(play, 63, "Buy"), true, None, Some("merchant.buy".to_string())),
+                        menu_row(1, word_or(play, 62, "Sell"), true, None, Some("merchant.sell".to_string())),
+                        menu_row(2, word_or(play, 161, "Exit"), true, None, Some("merchant.exit".to_string())),
+                    ];
+                    let selected = (0..3).contains(&m_opt).then(|| (m_opt + 1) as u64);
+                    (rows, selected)
+                }
+            };
+            WindowData { rows: Some(rows), selected_row, ..Default::default() }
+        }
+        11 => {
+            let (inv_list, bank_list) = play.bank.read_lists();
+            let (list, items, container) = if inv_list.x64 && !bank_list.x64 {
+                (inv_list, &play.dump.inventory.items, "inventory")
+            } else {
+                (bank_list, &play.dump.bank.items.items, "bank")
+            };
+            let rows = item_list_rows(items, container);
+            let (selected_row, scroll_top) = wnd_list_sel_top(list.sel, list.top, rows.len());
+            WindowData { rows: Some(rows), selected_row, scroll_top, ..Default::default() }
+        }
+        12 => {
+            const STATS: [(i32, &str); 7] = [(248, "Strength"), (249, "Stamina"), (250, "Agility"), (251, "Dexterity"), (252, "Wisdom"), (253, "Intelligence"), (254, "Charisma")];
+            const DETAILS: [(i32, &str); 9] = [(242, "Defense"), (233, "Hit Points"), (466, "Power"), (48, "Heat"), (483, "Cold"), (484, "Magic"), (485, "Disease"), (486, "Poison"), (487, "Resist")];
+            let (sel, t_mode) = play.trainer.read_state();
+            if t_mode != 3 {
+                let mut rows: Vec<Json> = STATS
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (w, fb))| menu_row(i, word_or(play, *w, fb), true, None, None))
+                    .collect();
+                rows.push(menu_row(7, word_or(play, 482, "Train"), true, None, Some("trainer.train".to_string())));
+                rows.push(menu_row(8, word_or(play, 77, "Details"), true, None, Some("trainer.details".to_string())));
+                let selected_row = match t_mode {
+                    0 => (0..7).contains(&sel).then(|| (sel + 1) as u64),
+                    1 => Some(8),
+                    2 => Some(9),
+                    _ => None,
+                };
+                WindowData { rows: Some(rows), selected_row, ..Default::default() }
+            } else {
+                let rows: Vec<Json> = DETAILS
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (w, fb))| menu_row(i, word_or(play, *w, fb), true, None, None))
+                    .collect();
+                let selected_row = (0..9).contains(&sel).then(|| (sel + 1) as u64);
+                WindowData { rows: Some(rows), selected_row, ..Default::default() }
+            }
+        }
+        14 => {
+            let style = match play.mbox.kind {
+                0 => "ok",
+                1 => "yes_no",
+                2 => "cancel",
+                _ => "other",
+            };
+            let sel = play.mbox.sel();
+            let selection = match play.mbox.kind {
+                0 | 2 => Some(1u64),
+                1 => (sel >= 0).then(|| (sel + 1) as u64),
+                _ => None,
+            };
+            WindowData {
+                dialog: json!({
+                    "kind": "confirm",
+                    "text": utf16_str(&play.mbox.text),
+                    "style": style,
+                    "style_id": play.mbox.kind,
+                    "selection": selection,
+                }),
+                ..Default::default()
+            }
+        }
+        22 => {
+            let (sel, top) = play.quest_log.read_state();
+            let rows: Vec<Json> = play
+                .quests
+                .titles
+                .iter()
+                .take(8)
+                .enumerate()
+                .map(|(i, t)| menu_row(i, utf16_str(t), true, None, None))
+                .collect();
+            let (selected_row, scroll_top) = wnd_list_sel_top(sel, top, rows.len());
+            WindowData { rows: Some(rows), selected_row, scroll_top, ..Default::default() }
+        }
+        40 => {
+            let (col, cat, sel, top, shown) = play.cm_wnd.read_state();
+            let rows: Vec<Json> = shown
+                .iter()
+                .enumerate()
+                .map(|(i, id)| {
+                    let known = col == 0 || play.cm.is_known(*id);
+                    let text = if known {
+                        play.cm
+                            .find(*id)
+                            .map(|k| utf16_str(&play.cm.skills[k].name))
+                            .unwrap_or_else(|| "???".to_string())
+                    } else {
+                        "???".to_string()
+                    };
+                    menu_row(i, text, known, None, None)
+                })
+                .collect();
+            let (selected_row, scroll_top) = wnd_list_sel_top(sel, top, rows.len());
+            const CM_TABS: [(i32, &str); 5] = [
+                (1653, "General"),
+                (1654, "Archetype"),
+                (1655, "Class"),
+                (511, "Tradeskill"),
+                (1656, "Master Class"),
+            ];
+            let tabs: Vec<String> = CM_TABS
+                .iter()
+                .map(|(w, fb)| word_or(play, *w, fb))
+                .collect();
+            let tab = (0..5).contains(&cat).then(|| (cat + 1) as u64);
+            WindowData { rows: Some(rows), selected_row, scroll_top, tabs: Some(tabs), tab, ..Default::default() }
+        }
+        _ => WindowData::default(),
+    }
+}
+
 fn windows_json(play: &Play) -> Json {
     let start_menu_open =
         play.mode == 13 || play.start.as_ref().is_some_and(|s| s.menu.visible);
@@ -244,19 +671,26 @@ fn windows_json(play: &Play) -> Json {
                     kind: &str,
                     title: Option<&str>,
                     hints: Vec<Json>,
-                    dialog: Json| {
-        windows.push(json!({
+                    data: WindowData| {
+        let mut obj = json!({
             "_key": key,
             "kind": kind,
             "title": title,
             "visible": true,
             "focused": false,
-            "rows": Json::Null,
-            "selected_row": Json::Null,
-            "scroll_top": Json::Null,
+            "rows": data.rows,
+            "selected_row": data.selected_row,
+            "scroll_top": data.scroll_top,
             "hints": hints,
-            "dialog": dialog,
-        }));
+            "dialog": data.dialog,
+        });
+        if let Some(tabs) = data.tabs {
+            obj["tabs"] = json!(tabs);
+        }
+        if let Some(tab) = data.tab {
+            obj["tab"] = json!(tab);
+        }
+        windows.push(obj);
     };
 
     if play.mode != 0 && play.mode != 38 {
@@ -267,7 +701,7 @@ fn windows_json(play: &Play) -> Json {
                 "start_menu",
                 Some("Start Menu"),
                 mode_hints(play, 13),
-                Json::Null,
+                start_menu_data(play),
             );
             if play.items.visible {
                 push_wnd(
@@ -276,7 +710,7 @@ fn windows_json(play: &Play) -> Json {
                     "inventory",
                     Some("Inventory"),
                     Vec::new(),
-                    Json::Null,
+                    inventory_subwindow_data(play),
                 );
             }
         } else {
@@ -287,34 +721,7 @@ fn windows_json(play: &Play) -> Json {
                 String::new()
             };
             let title = mode_title(play.mode, &edit_title);
-            let dialog = match play.mode {
-                2 => json!({
-                    "kind": "input",
-                    "text": (!play.edit.password).then(|| utf16_str(&play.edit.text)),
-                    "tag": play.edit.purpose,
-                    "title": edit_title,
-                    "chat": play.edit.purpose == 0xB0F_0000,
-                    "password": play.edit.password,
-                }),
-                14 => {
-                    let style = match play.mbox.kind {
-                        0 => "ok",
-                        1 => "yes_no",
-                        2 => "cancel",
-                        _ => "other",
-                    };
-                    json!({
-                        "kind": "confirm",
-                        "text": utf16_str(&play.mbox.text),
-                        "style": style,
-                        "style_id": play.mbox.kind,
-                        "selection": (play.mbox.kind == 0 || play.mbox.kind == 2).then_some(1u64),
-                    })
-                }
-                // `PrivChat` (mode 9) and `Response` (mode 7) dialog contents remain nil
-                // until the read-only accessors in `round-6-seams.md` are approved.
-                _ => Json::Null,
-            };
+            let data = mode_window_data(play, &edit_title);
             let key = if kind == "other" {
                 format!("mode:other:{}", play.mode)
             } else {
@@ -326,7 +733,7 @@ fn windows_json(play: &Play) -> Json {
                 kind,
                 title,
                 mode_hints(play, play.mode),
-                dialog,
+                data,
             );
         }
     } else if start_menu_open {
@@ -336,7 +743,7 @@ fn windows_json(play: &Play) -> Json {
             "start_menu",
             Some("Start Menu"),
             mode_hints(play, 13),
-            Json::Null,
+            start_menu_data(play),
         );
     }
 
@@ -347,7 +754,7 @@ fn windows_json(play: &Play) -> Json {
             "map",
             Some("Map"),
             Vec::new(),
-            Json::Null,
+            WindowData::default(),
         );
     }
     if play.search.open {
@@ -357,7 +764,7 @@ fn windows_json(play: &Play) -> Json {
             "search",
             Some("Player Search"),
             Vec::new(),
-            Json::Null,
+            WindowData::default(),
         );
     }
     if let Some(text) = &play.typing {
@@ -367,14 +774,17 @@ fn windows_json(play: &Play) -> Json {
             "typing",
             Some("Chat"),
             Vec::new(),
-            json!({
-                "kind": "input",
-                "text": text,
-                "tag": 0xB0F_0000u32,
-                "title": "",
-                "chat": true,
-                "password": false,
-            }),
+            WindowData {
+                dialog: json!({
+                    "kind": "input",
+                    "text": text,
+                    "tag": 0xB0F_0000u32,
+                    "title": "",
+                    "chat": true,
+                    "password": false,
+                }),
+                ..Default::default()
+            },
         );
     }
 

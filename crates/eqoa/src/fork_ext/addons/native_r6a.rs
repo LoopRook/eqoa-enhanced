@@ -392,9 +392,16 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "eqoa.windows.Windows",
             "mode native_mode busy start_menu_open any_window_open active windows",
         ),
-        ("eqoa.windows.Window", "ref kind title visible focused hints dialog"),
+        (
+            "eqoa.windows.Window",
+            "ref kind title visible focused rows selected_row scroll_top tabs tab hints dialog",
+        ),
+        ("eqoa.windows.MenuRow", "index text enabled item command"),
         ("eqoa.windows.ButtonHint", "button label"),
-        ("eqoa.windows.Dialog", "kind text tag title chat password style style_id"),
+        (
+            "eqoa.windows.Dialog",
+            "kind text options selection tag title chat password style style_id",
+        ),
         (
             "eqoa.mastery.Mastery",
             "available spent experience_share progress_raw pending stats bonuses",
@@ -412,23 +419,6 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         for field in fields.split_whitespace() {
             describe(lua, &format!("{path}.{field}"), "supported", Some(4), "");
         }
-    }
-
-    let seam_reason = "needs an upstream read accessor the owner approves first";
-    for path in [
-        "eqoa.windows.Window.rows",
-        "eqoa.windows.Window.selected_row",
-        "eqoa.windows.Window.scroll_top",
-        "eqoa.windows.MenuRow",
-        "eqoa.windows.MenuRow.index",
-        "eqoa.windows.MenuRow.text",
-        "eqoa.windows.MenuRow.enabled",
-        "eqoa.windows.MenuRow.item",
-        "eqoa.windows.MenuRow.command",
-        "eqoa.windows.Dialog.options",
-        "eqoa.windows.Dialog.selection",
-    ] {
-        describe(lua, path, "not_yet", Some(4), seam_reason);
     }
 
     Ok(())

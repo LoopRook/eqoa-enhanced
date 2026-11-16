@@ -29,6 +29,10 @@ pub struct NpcWindows {
     keys: Vec<(i32, bool)>,
 }
 
+impl NpcWindows {
+    pub fn loot_lists(&self) -> (&crate::wndlist::WndList, &crate::wndlist::WndList) { self.loot.read_list() }
+}
+
 /// The modes these windows own.
 pub fn owns(mode: i32) -> bool {
     matches!(mode, 1 | 10 | 15 | 16)
