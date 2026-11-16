@@ -270,6 +270,8 @@ impl Play {
             mastery: None,
             mastery_skills: None,
             mastery_node: None,
+            camera: Json::Null,
+            camera_compass: None,
             channel: match self.channel {
                 0 => "say",
                 2 => "shout",
@@ -278,7 +280,7 @@ impl Play {
                 _ => "other",
             },
         };
-        r6a::populate_view(self, &mut view);
+        r6a::populate_view(self, walker, &mut view);
         view
     }
 }

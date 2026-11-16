@@ -44,14 +44,62 @@ impl Default for CmFingerprint {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct CameraFingerprint {
+    world_gen: u64,
+    eye_pos: [u32; 3],
+    eye_dir: [u32; 3],
+    orbit_x: u32,
+    orbit_y: u32,
+    dist: u32,
+    mode: i32,
+}
+
 thread_local! {
     static LAST_QUEST_HASH: Cell<Option<u64>> = const { Cell::new(None) };
     static LAST_CM: RefCell<Option<CmFingerprint>> = const { RefCell::new(None) };
+    static LAST_CAMERA: Cell<Option<CameraFingerprint>> = const { Cell::new(None) };
 }
 
 pub(super) fn forget() {
     LAST_QUEST_HASH.with(|h| h.set(None));
     LAST_CM.with(|c| *c.borrow_mut() = None);
+    LAST_CAMERA.with(|c| c.set(None));
+}
+
+fn camera_fingerprint(w: &crate::walker::Walker, generation: u64) -> CameraFingerprint {
+    let ep = w.eye.position;
+    let ed = w.eye.direction;
+    CameraFingerprint {
+        world_gen: generation,
+        eye_pos: [ep.x.0.to_bits(), ep.y.0.to_bits(), ep.z.0.to_bits()],
+        eye_dir: [ed.x.0.to_bits(), ed.y.0.to_bits(), ed.z.0.to_bits()],
+        orbit_x: w.cam.cur.orbit.x.0.to_bits(),
+        orbit_y: w.cam.cur.orbit.y.0.to_bits(),
+        dist: w.cam.cur.dist.0.to_bits(),
+        mode: w.cam.camera_mode,
+    }
+}
+
+fn camera_values(w: &crate::walker::Walker) -> (Json, f32) {
+    let p = w.eye.position;
+    let d = w.eye.direction;
+    let angle = (-d.x).atan2f(-d.z).0;
+    let wrapped = if ee::lt(angle, 0.0) {
+        ee::add(angle, std::f32::consts::TAU)
+    } else {
+        angle
+    };
+    let compass = if wrapped == 0.0 { 0.0 } else { wrapped };
+    let heading = w.cam.cur.orbit.x.0.rem_euclid(std::f32::consts::TAU);
+    let cam = json!({
+        "position": {"x": p.x.0, "y": p.y.0, "z": p.z.0},
+        "heading": heading,
+        "pitch": w.cam.cur.orbit.y.0,
+        "distance": w.cam.cur.dist.0,
+        "mode": w.cam.camera_mode,
+    });
+    (cam, compass)
 }
 
 fn quests_hash(play: &Play) -> u64 {
@@ -240,7 +288,11 @@ fn node_json(play: &Play) -> Option<Json> {
 }
 
 /// Populates Round 6 Part A fields into `view` during initial / full `native_view` build.
-pub(super) fn populate_view(play: &Play, view: &mut View) {
+pub(super) fn populate_view(
+    play: &Play,
+    walker: Option<&crate::walker::Walker>,
+    view: &mut View,
+) {
     let qh = quests_hash(play);
     LAST_QUEST_HASH.with(|h| h.set(Some(qh)));
     view.quests = quests_json(play);
@@ -253,6 +305,17 @@ pub(super) fn populate_view(play: &Play, view: &mut View) {
             update_mastery_flags(play, prev.as_ref(), &fp, &mut c);
             *prev = Some(fp);
         });
+        if let Some(w) = walker {
+            let cfp = camera_fingerprint(w, c.generation);
+            LAST_CAMERA.with(|lc| lc.set(Some(cfp)));
+            let (cam, compass) = camera_values(w);
+            view.camera = cam;
+            view.camera_compass = Some(compass);
+        } else {
+            LAST_CAMERA.with(|lc| lc.set(None));
+            view.camera = Json::Null;
+            view.camera_compass = None;
+        }
         c.mastery_flags
     });
     let m = mastery_json(play, flags);
@@ -298,7 +361,7 @@ pub(super) fn capture_quests(play: &Play) {
 }
 
 /// Incremental per-frame refresh for Round 6 Part A state (zero allocations when unchanged).
-pub(super) fn refresh(play: &Play) {
+pub(super) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     // 1. Quests (also catches direct mutations to play.quests outside 0x007C/0x007D)
     let qh = quests_hash(play);
     if LAST_QUEST_HASH.with(|h| h.replace(Some(qh))) != Some(qh) {
@@ -370,5 +433,22 @@ pub(super) fn refresh(play: &Play) {
             }
         });
         super::updates::dirty();
+    }
+
+    // 3. Camera
+    if let Some(w) = walker {
+        let cfp = camera_fingerprint(w, generation);
+        if LAST_CAMERA.with(|lc| lc.replace(Some(cfp))) != Some(cfp) {
+            let (cam, compass) = camera_values(w);
+            CORE.with(|c| {
+                let mut c = c.borrow_mut();
+                c.view.camera_compass = Some(compass);
+                let before = std::mem::replace(&mut c.view.camera, cam);
+                if before != c.view.camera {
+                    c.camera_changed(before);
+                }
+            });
+            super::updates::dirty();
+        }
     }
 }

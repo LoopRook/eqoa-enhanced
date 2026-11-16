@@ -154,8 +154,67 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         })?,
     )?;
 
+    // eqoa.camera.*
+    bind(
+        lua,
+        "camera",
+        "get",
+        lua.create_function(|lua, ()| {
+            let (world, camera) = CORE.with(|c| {
+                let c = c.borrow();
+                (c.view.in_world, c.view.camera.clone())
+            });
+            if !world {
+                return error(
+                    lua,
+                    "eqoa.camera.get",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            if camera.is_null() {
+                return error(
+                    lua,
+                    "eqoa.camera.get",
+                    "unavailable",
+                    "waiting for camera state from a walker frame",
+                );
+            }
+            lua.pack_multi((record(lua, "eqoa.camera.Camera", &camera)?, Value::Nil))
+        })?,
+    )?;
+    bind(
+        lua,
+        "camera",
+        "compass",
+        lua.create_function(|lua, ()| {
+            let (world, compass) = CORE.with(|c| {
+                let c = c.borrow();
+                (c.view.in_world, c.view.camera_compass)
+            });
+            if !world {
+                return error(
+                    lua,
+                    "eqoa.camera.compass",
+                    "not_in_world",
+                    "enter a loaded world first",
+                );
+            }
+            let Some(compass) = compass else {
+                return error(
+                    lua,
+                    "eqoa.camera.compass",
+                    "unavailable",
+                    "waiting for camera direction from a walker frame",
+                );
+            };
+            lua.pack_multi((compass, Value::Nil))
+        })?,
+    )?;
+
     for (path, fields) in [
         ("eqoa.quests.Quest", "ref index title"),
+        ("eqoa.camera.Camera", "position heading pitch distance mode"),
         (
             "eqoa.mastery.Mastery",
             "available spent experience_share progress_raw pending stats bonuses",

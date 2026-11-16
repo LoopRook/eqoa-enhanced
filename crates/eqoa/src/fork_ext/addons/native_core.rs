@@ -35,6 +35,8 @@ pub(crate) struct View {
     pub mastery: Option<Json>,
     pub mastery_skills: Option<Vec<Json>>,
     pub mastery_node: Option<Json>,
+    pub camera: Json,
+    pub camera_compass: Option<f32>,
     pub channel: &'static str,
 }
 impl Default for View {
@@ -63,6 +65,8 @@ impl Default for View {
             mastery: None,
             mastery_skills: None,
             mastery_node: None,
+            camera: Json::Null,
+            camera_compass: None,
             channel: "other",
         }
     }
@@ -172,6 +176,8 @@ pub(crate) struct Core {
     event_bytes: usize,
     motion_tick: u64,
     pending_player_before: Option<Json>,
+    camera_tick: u64,
+    pending_camera_before: Option<Json>,
     pub forge_cooldowns: RetainedStream,
     pub forge_combat: RetainedStream,
     pub chat: VecDeque<Json>,
@@ -216,6 +222,8 @@ impl Default for Core {
             event_bytes: 0,
             motion_tick: u64::MAX,
             pending_player_before: None,
+            camera_tick: u64::MAX,
+            pending_camera_before: None,
             forge_cooldowns: RetainedStream::default(),
             forge_combat: RetainedStream::default(),
             chat: VecDeque::new(),
@@ -377,6 +385,35 @@ impl Core {
             }
         }
     }
+    pub(crate) fn camera_changed(&mut self, before: Json) {
+        if !super::native_events::interested("camera.changed") {
+            self.pending_camera_before = None;
+            return;
+        }
+        if self.camera_tick != self.tick {
+            let before = self.pending_camera_before.take().unwrap_or(before);
+            self.emit_camera_change(before);
+        } else if self.pending_camera_before.is_none() {
+            self.pending_camera_before = Some(before);
+        }
+    }
+    fn emit_camera_change(&mut self, before: Json) {
+        self.camera_tick = self.tick;
+        let changed = changed_fields(&before, &self.view.camera);
+        self.emit(
+            "camera.changed",
+            json!({"before":(!before.is_null()).then_some(before),"after":self.view.camera,"changed":changed}),
+        );
+    }
+    pub(crate) fn flush_camera_motion(&mut self) {
+        if !super::native_events::interested("camera.changed") {
+            self.pending_camera_before = None;
+        } else if self.camera_tick != self.tick {
+            if let Some(before) = self.pending_camera_before.take() {
+                self.emit_camera_change(before);
+            }
+        }
+    }
     pub fn reset(&mut self, reason: &str) {
         super::input::reset_input_state();
         if self.view.in_world {
@@ -389,6 +426,8 @@ impl Core {
         self.generation += 1;
         self.pending_player_before = None;
         self.motion_tick = u64::MAX;
+        self.pending_camera_before = None;
+        self.camera_tick = u64::MAX;
         self.forge_cooldowns.clear();
         self.forge_combat.clear();
         self.entity_worlds.clear();
@@ -570,6 +609,9 @@ impl Core {
             }
             if previous.player != self.view.player {
                 self.player_changed(previous.player);
+            }
+            if !self.view.camera.is_null() && previous.camera != self.view.camera {
+                self.camera_changed(previous.camera);
             }
         }
     }
@@ -851,6 +893,8 @@ pub(crate) fn invalidate_capture() {
         let mut c = c.borrow_mut();
         c.pending_player_before = None;
         c.motion_tick = u64::MAX;
+        c.pending_camera_before = None;
+        c.camera_tick = u64::MAX;
         c.unknown_lockouts.clear();
     });
 }
