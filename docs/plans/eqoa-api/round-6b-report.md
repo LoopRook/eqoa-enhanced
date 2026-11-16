@@ -64,7 +64,7 @@ Result: **ALL GATES PASSED**
 - **footprint**: PASS (1.67s)
 - **paths**: PASS (5.33s)
 - **player-release**: PASS (45.14s)
-- **release**: PASS (128.99s) — `C:\Users\hocka\Paseo\targets\shared\release\eqoa.exe`
+- **release**: PASS (128.99s) — `<CARGO_TARGET_DIR>/release/eqoa.exe`
 
 Also verified directly:
 - `python tools/update_bundled_manifest.py` + `python tools/test_player_release.py` -> `20 tests ... OK`
