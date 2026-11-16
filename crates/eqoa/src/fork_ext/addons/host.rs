@@ -77,6 +77,7 @@ struct BaseHost {
     snapshot: Rc<Cell<Snapshot>>,
     util: Table,
     window: Table,
+    camera: Table,
     bit: Table,
     clean_os: Table,
     remaining: Rc<Cell<u32>>,
@@ -260,7 +261,7 @@ fn create_base_host() -> Result<BaseHost> {
             Ok((f64::from(rad).to_degrees()).rem_euclid(360.0))
         })?,
     )?;
-    package_loaded.set("frontiers_forge.camera", cam_mod)?;
+    package_loaded.set("frontiers_forge.camera", cam_mod.clone())?;
 
     let state = snapshot.clone();
     util.set(
@@ -422,6 +423,7 @@ fn create_base_host() -> Result<BaseHost> {
         snapshot,
         util,
         window: window_mod,
+        camera: cam_mod,
         bit: bit_table,
         clean_os,
         remaining,
@@ -488,6 +490,7 @@ impl Host {
             host_registry,
         };
         host.register_host_module("frontiers_forge.window", Value::Table(base.window))?;
+        host.register_host_module("frontiers_forge.camera", Value::Table(base.camera))?;
         super::player::install_player_adapter(&host)?;
         super::visibility::install_standalone_ui_adapter(&host)?;
         super::group::install_group_adapter(&host)?;
@@ -526,6 +529,7 @@ impl Host {
         let base = create_base_host()?;
         let util_t = base.util.clone();
         let window_t = base.window.clone();
+        let camera_t = base.camera.clone();
         let bit_t = base.bit.clone();
         let os_t = base.clean_os.clone();
         base.lua.globals().set(
@@ -535,6 +539,8 @@ impl Host {
                     Ok(Value::Table(util_t.clone()))
                 } else if name == "frontiers_forge.window" {
                     Ok(Value::Table(window_t.clone()))
+                } else if name == "frontiers_forge.camera" {
+                    Ok(Value::Table(camera_t.clone()))
                 } else if name == "bit" {
                     Ok(Value::Table(bit_t.clone()))
                 } else if name == "os" {

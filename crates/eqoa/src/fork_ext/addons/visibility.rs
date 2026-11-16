@@ -507,11 +507,14 @@ fn fetch_ui_texture(lua: &mlua::Lua, tex_id: Option<u32>) -> mlua::Result<(Value
     let Some(id) = tex_id else {
         return Ok((Value::Nil, Value::Nil, Value::Nil));
     };
-    let loaded: mlua::Table = lua
-        .globals()
-        .get::<mlua::Table>("package")?
-        .get("loaded")?;
-    let icon_mod: mlua::Table = loaded.get("frontiers_forge.icon")?;
+    let icon_mod: mlua::Table = if let Ok(m) = lua.named_registry_value::<mlua::Table>("__forge_icon_mod") {
+        m
+    } else {
+        lua.globals()
+            .get::<mlua::Table>("package")?
+            .get::<mlua::Table>("loaded")?
+            .get("frontiers_forge.icon")?
+    };
     let get_ui: mlua::Function = icon_mod.get("GetUITexture")?;
     get_ui.call(id)
 }

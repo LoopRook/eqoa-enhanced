@@ -106,9 +106,39 @@ The items example is [the bag viewer](../../bundled-mods/eqoa_bag_viewer/main.lu
 that reads `eqoa.inventory` and `eqoa.bank`, takes its loot log from `loot.changed`, and listens to nothing
 else while it is closed. It is off by default.
 
-While the start menu's item page is up the pack's `view` gives its tab, the stacks under it and the lit row; while a merchant window is up `MerchantState` gives its mode (menu, sell, buy), the option lit in the menu, and its `view` the rows and the lit one. Not given: `MerchantState.button_hint` (asking says so in the Addon Manager). FrontiersForge's `inventory`, `item`,
+While the start menu's item page is up the pack's `view` gives its tab, the stacks under it and the lit row; while a merchant window is up `MerchantState` gives its mode (menu, sell, buy), the option lit in the menu, `button_hint` (when words are loaded), and its `view` the rows and the lit one. FrontiersForge's `inventory`, `item`,
 `bank`, `loot`, `merchant` and `gems` modules read the same data with their own
 shapes (tab enum 0..3, `bank.GetItems` as `{idx, slot, level, name, amount}`).
+
+## Quests, camera and windows
+
+Read journal titles, camera orientation and active UI mode from native state:
+
+```lua
+local quests = eqoa.quests.list()
+if quests then
+    for _, q in ipairs(quests) do
+        eqoa.log.write("info", string.format("%d: %s", q.index, q.title))
+    end
+end
+
+local w = eqoa.windows.get() -- always safe; returns mode="none" outside world
+if w.busy then
+    for _, h in ipairs(eqoa.windows.parse_hint("|tExit")) do
+        eqoa.log.write("debug", h.button .. " -> " .. h.label)
+    end
+end
+
+eqoa.events.on("quests.changed", function(e)
+    eqoa.log.write("info", "journal count is now " .. #e.data.after)
+end)
+
+eqoa.events.on("windows.changed", function(e)
+    eqoa.log.write("info", "window mode: " .. e.data.after.mode)
+end)
+```
+
+`eqoa.camera.get()` / `eqoa.camera.compass()` return camera eye position, orbit angles and final eye compass heading (`camera.changed` coalesces on the 30 Hz game clock). `eqoa.mastery.get()`, `skills()` and `selected()` expose Class Mastery state without opening raw memory (`Player.mastery` mirrors `eqoa.mastery.get()`).
 
 Save plain settings through `eqoa.settings.on_save`/`on_load`, or explicit
 `save`/`load`. They use the manager's active addon/profile slot. Settings contain

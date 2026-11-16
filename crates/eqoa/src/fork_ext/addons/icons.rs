@@ -1632,3 +1632,31 @@ fn install_native(
     );
     Ok(())
 }
+
+#[cfg(test)]
+pub(crate) fn install_test_gpu_for_host(
+    host: &super::host::Host,
+) -> Option<Box<dyn std::any::Any>> {
+    use render::wgpu;
+    let instance = wgpu::Instance::default();
+    let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).ok()?;
+    let mut context = dear_imgui_rs::Context::create();
+    context.set_ini_filename::<std::path::PathBuf>(None).ok()?;
+    let renderer = Rc::new(RefCell::new(
+        dear_imgui_wgpu::WgpuRenderer::new(
+            dear_imgui_wgpu::WgpuInitInfo::new(
+                device.clone(),
+                queue.clone(),
+                wgpu::TextureFormat::Rgba8Unorm,
+            ),
+            &mut context,
+        )
+        .ok()?,
+    ));
+    let bridge = super::bridge::Bridge::install(host).ok()?;
+    let textures = Textures::new(&device, &queue, renderer);
+    Textures::install(&textures, &host.lua).ok()?;
+    let cache = attach_icon_cache(&host.lua, textures.clone()).ok()?;
+    Some(Box::new((device, queue, context, bridge, textures, cache)))
+}

@@ -480,3 +480,6 @@ pub(super) mod r6a;
 #[cfg(test)]
 #[path = "items_tests.rs"]
 mod items_tests;
+#[cfg(test)]
+#[path = "r6a_tests.rs"]
+mod r6a_tests;
