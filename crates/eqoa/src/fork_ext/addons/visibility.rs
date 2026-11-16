@@ -582,13 +582,6 @@ fn install_icon_helpers(host: &Host, ui: &mlua::Table) -> mlua::Result<()> {
     )?;
 
     ui.set(
-        "GetDispositionIconTexture",
-        host.lua.create_function(|lua, val: Option<Value>| {
-            fetch_ui_texture(lua, parse_lua_int(val).map(disposition_tex_id))
-        })?,
-    )?;
-
-    ui.set(
         "DrawDispositionIcon",
         host.lua
             .create_function(|lua, (val, scale): (Option<Value>, Option<Value>)| {

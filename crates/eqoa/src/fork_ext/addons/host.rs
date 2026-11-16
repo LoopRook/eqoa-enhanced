@@ -187,6 +187,16 @@ fn create_base_host() -> Result<BaseHost> {
         "IsTextDialogOpen",
         lua.create_function(move |_, ()| Ok(state.get().ui_mode == 9))?,
     )?;
+    // Pinned window.lua:830-838 HINT_BUTTON table (exact Forge button hint escape mapping).
+    const FORGE_HINT_BUTTON: &[(&str, &str)] = &[
+        ("x", "cross"),
+        ("t", "triangle"),
+        ("s", "square"),
+        ("c", "circle"),
+        ("8", "r1"),
+        ("-", "dpad_left"),
+        ("+", "dpad_right"),
+    ];
     window_mod.set(
         "FormatButtonHint",
         lua.create_function(|_, (button, label): (Value, Option<String>)| {
@@ -195,8 +205,12 @@ fn create_base_host() -> Result<BaseHost> {
                 Value::String(s) => s.to_str().ok().map(|v| v.to_string()),
                 _ => None,
             };
-            Ok(b.and_then(|btn| super::native_r6a::format_hint_str(&btn, &label))
-                .unwrap_or(label))
+            if let Some(btn) = b {
+                if let Some((esc, _)) = FORGE_HINT_BUTTON.iter().find(|(_, name)| *name == btn) {
+                    return Ok(format!("|{esc}{label}"));
+                }
+            }
+            Ok(label)
         })?,
     )?;
     window_mod.set(
@@ -208,13 +222,13 @@ fn create_base_host() -> Result<BaseHost> {
             };
             if let Some(rest) = text.strip_prefix('|') {
                 if let Some(ch) = rest.chars().next() {
-                    let esc_len = 1 + ch.len_utf8();
-                    let glyph = &text[..esc_len];
-                    let label = text[esc_len..].to_string();
-                    let button = crate::binds::BUTTONS
+                    let mut esc_buf = [0u8; 4];
+                    let esc = ch.encode_utf8(&mut esc_buf);
+                    let label = rest[ch.len_utf8()..].to_string();
+                    let button = FORGE_HINT_BUTTON
                         .iter()
-                        .find(|(_, g)| *g == glyph)
-                        .map(|(n, _)| *n);
+                        .find(|(e, _)| *e == esc)
+                        .map(|(_, n)| *n);
                     if let Some(btn) = button {
                         return Ok((Value::String(lua.create_string(btn)?), label));
                     }
@@ -263,26 +277,20 @@ fn create_base_host() -> Result<BaseHost> {
     )?;
     package_loaded.set("frontiers_forge.camera", cam_mod.clone())?;
 
-    let state = snapshot.clone();
     util.set(
         "GetCompassRadians",
-        lua.create_function(move |_, ()| {
-            let compass = super::native_core::CORE.with(|c| c.borrow().view.camera_compass);
-            let rad = compass
-                .map(f64::from)
-                .unwrap_or_else(|| (state.get().player.heading_rad as f64).rem_euclid(std::f64::consts::TAU));
-            Ok(rad)
+        lua.create_function(|_, ()| {
+            let rad = super::native_core::CORE.with(|c| c.borrow().view.camera_orbit_x);
+            Ok(rad.map(f64::from))
         })?,
     )?;
-    let state = snapshot.clone();
     util.set(
         "GetCompassDegrees",
-        lua.create_function(move |_, ()| {
-            let compass = super::native_core::CORE.with(|c| c.borrow().view.camera_compass);
-            let rad = compass
-                .map(f64::from)
-                .unwrap_or_else(|| state.get().player.heading_rad as f64);
-            Ok(rad.to_degrees().rem_euclid(360.0))
+        lua.create_function(|_, ()| {
+            let rad = super::native_core::CORE
+                .with(|c| c.borrow().view.camera_orbit_x)
+                .unwrap_or(0.0);
+            Ok(f64::from(rad).to_degrees().rem_euclid(360.0))
         })?,
     )?;
     util.set(

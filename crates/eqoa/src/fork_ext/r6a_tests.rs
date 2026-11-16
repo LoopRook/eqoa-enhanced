@@ -490,10 +490,10 @@ fn round6a_camera_third_and_first_person_and_tick_coalescing() {
         assert(math.abs(c.pitch - 0.25) < 1e-4)
         local compass, cerr = eqoa.camera.compass()
         assert(cerr == nil and math.abs(compass) < 1e-5)
-        -- Forge retains raw orbit.x while Util.GetCompass uses final eye direction
+        -- M4: Util.GetCompassRadians/Degrees match camera.GetFacingRadians/Degrees (raw 0x1FB66AC)
         assert(math.abs(ff_cam.GetFacingRadians() - (-0.5)) < 1e-4)
-        assert(math.abs(ff_util.GetCompassRadians() - compass) < 1e-5)
-        assert(math.abs(ff_util.GetCompassDegrees() - 0.0) < 1e-3)
+        assert(math.abs(ff_util.GetCompassRadians() - (-0.5)) < 1e-4)
+        assert(math.abs(ff_util.GetCompassDegrees() - ff_cam.GetFacingDegrees()) < 1e-3)
         "#,
     )
     .unwrap();
@@ -517,6 +517,7 @@ fn round6a_camera_third_and_first_person_and_tick_coalescing() {
     // First person (mode 0, dist 0, eye equals player pos)
     native_core::iteration(true);
     w.cam.camera_mode = 0;
+    w.cam.cur.orbit.x = vi::fpu::F::new(std::f32::consts::FRAC_PI_2); // west -> 90 deg
     w.cam.cur.dist = vi::fpu::F::new(0.0);
     w.eye.position = w.cam.walk.phys.position;
     w.eye.direction = v3([-1.0, 0.0, 0.0]); // looking west -> atan2(1, 0) == pi/2
@@ -528,6 +529,19 @@ fn round6a_camera_third_and_first_person_and_tick_coalescing() {
         local comp = eqoa.camera.compass()
         assert(math.abs(comp - math.pi / 2) < 1e-4)
         assert(math.abs(ff_util.GetCompassDegrees() - 90.0) < 1e-2)
+        "#,
+    )
+    .unwrap();
+
+    // M4: without walker/camera, Util.GetCompassRadians returns nil (no player.heading_rad fallback)
+    native_core::iteration(true);
+    native_core::CORE.with(|c| c.borrow_mut().view.camera_orbit_x = None);
+    frame(&p, None, &h);
+    h.execute(
+        r#"
+        assert(ff_cam.GetFacingRadians() == nil)
+        assert(ff_util.GetCompassRadians() == nil)
+        assert(ff_util.GetCompassDegrees() == 0.0)
         "#,
     )
     .unwrap();
@@ -561,9 +575,28 @@ fn round6a_windows_modes_dialogs_hints_and_outside_world() {
         local bad_fmt, bad_err = eqoa.windows.format_hint('bogus', 'X')
         assert(bad_fmt == nil and bad_err.code == 'invalid_argument')
         assert(ff_wnd.FormatButtonHint('triangle', 'Exit') == '|tExit')
+        assert(ff_wnd.FormatButtonHint('dpad_left', 'Prev') == '|-Prev')
+        assert(ff_wnd.FormatButtonHint('dpad_right', 'Next') == '|+Next')
         assert(ff_wnd.FormatButtonHint('bogus', 'Fallback') == 'Fallback')
         local pb, pl = ff_wnd.ParseButtonHint('|tExit')
         assert(pb == 'triangle' and pl == 'Exit')
+        local lb, ll = ff_wnd.ParseButtonHint('|-Prev')
+        assert(lb == 'dpad_left' and ll == 'Prev')
+        local rb, rl = ff_wnd.ParseButtonHint('|+Next')
+        assert(rb == 'dpad_right' and rl == 'Next')
+        local ub, ul = ff_wnd.ParseButtonHint('|zUnknown')
+        assert(ub == nil and ul == 'Unknown')
+
+        -- H2: UTF-8 multi-byte / short pipe escapes must never panic parse_hint
+        local u1 = eqoa.windows.parse_hint('|é')
+        assert(#u1 == 1 and u1[1].button == 'text' and u1[1].label == '|é')
+        local u2 = eqoa.windows.parse_hint('|')
+        assert(#u2 == 1 and u2[1].button == 'text' and u2[1].label == '|')
+        local u3 = eqoa.windows.parse_hint('||')
+        assert(#u3 == 1 and u3[1].button == 'text' and u3[1].label == '|')
+        local u4 = eqoa.windows.parse_hint('|é|xClose|€')
+        assert(#u4 == 2 and u4[1].button == 'text' and u4[1].label == '|é')
+        assert(u4[2].button == 'cross' and u4[2].label == 'Close|€')
         "#,
     )
     .unwrap();
@@ -761,12 +794,12 @@ fn round6a_forge_icons_merchant_hint_hotbar_items_and_zero_addon() {
             local bad_c, bad_cerr = eqoa.icons.class(99)
             assert(bad_c == nil and bad_cerr.code == 'invalid_argument')
 
-            -- Forge UI class & disposition textures + Draw*Icon
+            -- Forge UI pinned ui.lua icon helpers (no hallucinated GetDispositionIconTexture)
+            assert(ff_ui.GetDispositionIconTexture == nil)
+            assert(ff_ui.GetDispositionFaceTexId(5) == 0x75)
+            assert(ff_ui.GetClassIconTexId(14) == 0xFB)
             local t1, w1, h1 = ff_ui.GetClassIconTexture(14)
             assert(t1 ~= nil and w1 == 32 and h1 == 44)
-            local t2, w2, h2 = ff_ui.GetDispositionIconTexture(5)
-            assert(t2 ~= nil and w2 == 32 and h2 == 44)
-            assert(ff_ui.GetDispositionIconTexture(nil) == nil)
             drawn = {}
             ImGui = { Image = function(tex, w, h) drawn[#drawn + 1] = { tex = tex, w = w, h = h } end }
             assert(ff_ui.DrawClassIcon(0, 2) == true and drawn[1].w == 64 and drawn[1].h == 88)
@@ -804,6 +837,10 @@ fn round6a_forge_icons_merchant_hint_hotbar_items_and_zero_addon() {
         assert(eqoa.capabilities.get('eqoa.icons.class').status == 'supported')
         assert(eqoa.capabilities.get('eqoa.icons.disposition').status == 'supported')
         assert(eqoa.capabilities.get('frontiers_forge.player.GetCMs').status == 'supported')
+        assert(ff_ui.GetDispositionIconTexture == nil)
+        assert(eqoa.capabilities.get('frontiers_forge.ui.GetDispositionIconTexture').status == 'unknown')
+        assert(eqoa.capabilities.get('frontiers_forge.ui.GetDispositionFaceTexId').status == 'supported')
+        assert(eqoa.capabilities.get('frontiers_forge.ui.GetClassIconTexId').status == 'supported')
         assert(eqoa.capabilities.get('frontiers_forge.ui.GetClassIconTexture').status == 'supported')
         assert(eqoa.capabilities.get('frontiers_forge.merchant.GetButtonHint').status == 'supported')
         assert(eqoa.capabilities.get('frontiers_forge.camera.GetCoordinates').status == 'supported')
@@ -1256,6 +1293,144 @@ fn round6a_seam_trainer_mastery_and_spellbook_rows() {
         assert(sb ~= nil and sb.tab == 2 and #sb.tabs == 5)
         assert(#sb.rows == 2 and sb.rows[1].text == 'Greater Heal' and sb.rows[2].text == 'Flash of Light')
         assert(sb.selected_row == 2 and sb.scroll_top == 1)
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round6a_fix_m5_merchant_and_bank_item_mutation_fires_windows_changed() {
+    let mut p = ready();
+    let w = Play::bundled_ui_walker();
+    let mut mut_w = Play::bundled_ui_walker();
+    let h = forge_host("m5_items");
+    let vui = crate::ui::Vui::new(Default::default(), Default::default(), vec![]);
+    let mut null_r = crate::pointer::testing::NullRaster;
+    p.words = Some(vui.words.clone());
+
+    // 1. Bank open (mode 11) with 1 bank item: mutating item in-place must fire windows.changed & update rows
+    let mut b_item = Item::default();
+    b_item.id = 201;
+    b_item.name = "Stored Sapphire".into();
+    let mut dump = Box::<net::dump::MemoryDump>::default();
+    dump.bank.items = ItemList {
+        items: vec![NetItem { inv_index: 5, quantity: 1, item: b_item, ..Default::default() }],
+        ..Default::default()
+    };
+    apply(&mut p, &mut mut_w, Event::WorldEntry { self_id: 100, player: net::session::Player::default(), dump });
+    apply(&mut p, &mut mut_w, Event::Opcode { op: 0x124D, data: vec![] });
+    p.run_bank(&vui, &mut null_r);
+    p.bank_key(139, true);
+    p.bank_key(134, true);
+    p.bank_key(137, true);
+    p.run_bank(&vui, &mut null_r);
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        wlog = {}
+        eqoa.events.on('windows.changed', function(e) wlog[#wlog + 1] = e.data end)
+        local bw = eqoa.windows.find('bank')
+        assert(bw ~= nil and #bw.rows == 1 and bw.rows[1].text == 'Stored Sapphire')
+        "#,
+    )
+    .unwrap();
+
+    frame(&p, Some(&w), &h);
+    h.execute("assert(#wlog == 0, 'spurious windows.changed without mutation: ' .. #wlog)").unwrap();
+    // the refresh path only re-reads windows when the fingerprint moves, so it must see the rename
+    let fp_before = r6a::windows_fingerprint(&p, 0);
+    p.dump.bank.items.items[0].item.name = "Renamed Ruby".into();
+    assert!(r6a::windows_fingerprint(&p, 0) != fp_before, "bank item rename must move the windows fingerprint");
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        assert(#wlog == 1)
+        local bw = eqoa.windows.find('bank')
+        assert(bw ~= nil and #bw.rows == 1 and bw.rows[1].text == 'Renamed Ruby')
+        wlog = {}
+        "#,
+    )
+    .unwrap();
+
+    // 2. Merchant open (mode 10) in Buy mode (m_mode == 2): mutating ware name fires windows.changed & updates rows
+    p.mode = 10;
+    let mut m_item = Item::default();
+    m_item.id = 301;
+    m_item.name = "Bronze Sword".into();
+    p.npcw.shop.wares = ItemList {
+        items: vec![NetItem { inv_index: 0, quantity: 1, item: m_item, ..Default::default() }],
+        ..Default::default()
+    };
+    p.npcw.merchant.mode = 2; // Buy list
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        local mw = eqoa.windows.find('merchant')
+        assert(mw ~= nil and #mw.rows == 1 and mw.rows[1].text == 'Bronze Sword')
+        wlog = {}
+        "#,
+    )
+    .unwrap();
+
+    frame(&p, Some(&w), &h);
+    h.execute("assert(#wlog == 0, 'spurious windows.changed without mutation: ' .. #wlog)").unwrap();
+    let fp_before = r6a::windows_fingerprint(&p, 0);
+    p.npcw.shop.wares.items[0].item.name = "Silver Sword".into();
+    assert!(r6a::windows_fingerprint(&p, 0) != fp_before, "merchant ware rename must move the windows fingerprint");
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        assert(#wlog == 1)
+        local mw = eqoa.windows.find('merchant')
+        assert(mw ~= nil and #mw.rows == 1 and mw.rows[1].text == 'Silver Sword')
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round6a_fix_m6_quests_full_log_stamp_change_fires_and_stales() {
+    let mut p = ready();
+    let mut w = Play::bundled_ui_walker();
+    let h = Host::new().unwrap();
+    h.execute("qlog = {} eqoa.events.on('quests.changed', function(e) qlog[#qlog + 1] = e.data end)").unwrap();
+    let mut dump = Box::<net::dump::MemoryDump>::default();
+    dump.quests = (1..=8).map(|i| format!("Quest {i}")).collect();
+    apply(
+        &mut p,
+        &mut w,
+        Event::WorldEntry {
+            self_id: 100,
+            player: net::session::Player { world: 1, ..Default::default() },
+            dump,
+        },
+    );
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        qlog = {}
+        local list = eqoa.quests.list()
+        assert(#list == 8)
+        old_ref = list[1].ref
+        "#,
+    )
+    .unwrap();
+
+    // Journal is full (8 quests), so 0x007C changes only play.quests.stamp without changing titles.
+    apply(
+        &mut p,
+        &mut w,
+        Event::Opcode {
+            op: 0x007C,
+            data: quest_packet(77, "Overflow Quest"),
+        },
+    );
+    frame(&p, Some(&w), &h);
+    h.execute(
+        r#"
+        assert(#qlog == 1, 'quests.changed must fire when stamp updates even with full 8-quest log')
+        local stale, err = eqoa.quests.get(old_ref)
+        assert(stale == nil and err.code == 'stale_handle')
         "#,
     )
     .unwrap();

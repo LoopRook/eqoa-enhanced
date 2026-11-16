@@ -56,7 +56,7 @@ struct CameraFingerprint {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct WindowsFingerprint {
+pub(super) struct WindowsFingerprint {
     world_gen: u64,
     mode: i32,
     start_visible: bool,
@@ -175,7 +175,7 @@ fn mode_title(mode: i32, edit_title: &str) -> Option<&str> {
     }
 }
 
-fn windows_fingerprint(play: &Play, generation: u64) -> WindowsFingerprint {
+pub(super) fn windows_fingerprint(play: &Play, generation: u64) -> WindowsFingerprint {
     let mut th = std::collections::hash_map::DefaultHasher::new();
     play.typing.hash(&mut th);
     let mut eh = std::collections::hash_map::DefaultHasher::new();
@@ -196,11 +196,10 @@ fn windows_fingerprint(play: &Play, generation: u64) -> WindowsFingerprint {
         1 => {
             let (inv, loot) = play.npcw.loot_lists();
             (inv.x64, inv.sel, inv.top, loot.x64, loot.sel, loot.top).hash(&mut dh);
-            if let Some(c) = &play.npcw.corpse {
-                c.items.len().hash(&mut dh);
-                for it in &c.items {
-                    (it.inv_index, &it.item.name).hash(&mut dh);
-                }
+            if inv.x64 && !loot.x64 {
+                hash_window_items(&play.dump.inventory.items, &mut dh);
+            } else if let Some(c) = &play.npcw.corpse {
+                hash_window_items(&c.items, &mut dh);
             }
         }
         5 => {
@@ -219,12 +218,23 @@ fn windows_fingerprint(play: &Play, generation: u64) -> WindowsFingerprint {
             play.priv_chat.read_text().hash(&mut dh);
         }
         10 => {
-            play.npcw.merchant.read_state().hash(&mut dh);
+            let (m_mode, m_opt, m_sel) = play.npcw.merchant.read_state();
+            (m_mode, m_opt, m_sel).hash(&mut dh);
+            match m_mode {
+                1 => hash_window_items(&play.dump.inventory.items, &mut dh),
+                2 => hash_window_items(&play.npcw.shop.wares.items, &mut dh),
+                _ => {}
+            }
         }
         11 => {
             let (inv, bank) = play.bank.read_lists();
             (inv.x64, inv.sel, inv.top, bank.x64, bank.sel, bank.top).hash(&mut dh);
-            play.dump.bank.items.items.len().hash(&mut dh);
+            let items = if inv.x64 && !bank.x64 {
+                &play.dump.inventory.items
+            } else {
+                &play.dump.bank.items.items
+            };
+            hash_window_items(items, &mut dh);
         }
         12 => {
             play.trainer.read_state().hash(&mut dh);
@@ -245,6 +255,7 @@ fn windows_fingerprint(play: &Play, generation: u64) -> WindowsFingerprint {
     }
     if play.mode == 13 && play.items.visible {
         play.items.read_state().hash(&mut dh);
+        hash_window_items(&play.dump.inventory.items, &mut dh);
     }
     WindowsFingerprint {
         world_gen: generation,
@@ -839,8 +850,16 @@ fn camera_values(w: &crate::walker::Walker) -> (Json, f32) {
     (cam, compass)
 }
 
+fn hash_window_items(items: &[net::dump::NetItem], h: &mut std::collections::hash_map::DefaultHasher) {
+    items.len().hash(h);
+    for it in items {
+        (it.inv_index, it.item.id, &it.item.name, it.quantity).hash(h);
+    }
+}
+
 fn quests_hash(play: &Play) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
+    play.quests.stamp.hash(&mut h);
     play.quests.titles.len().min(8).hash(&mut h);
     for t in play.quests.titles.iter().take(8) {
         t.hash(&mut h);

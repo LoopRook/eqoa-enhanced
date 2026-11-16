@@ -63,22 +63,26 @@ pub(crate) fn parse_hint_json(text: &str) -> Vec<Json> {
     let bytes = text.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'|' && i + 1 < bytes.len() {
-            let two = &text[i..i + 2];
-            if two == "|-" || two == "|+" {
-                i += 2;
-                continue;
-            }
-            if two == "||" {
-                buf.push('|');
-                i += 2;
-                continue;
-            }
-            if let Some((btn_name, _)) = crate::binds::BUTTONS.iter().find(|(_, g)| *g == two) {
-                flush(cur_btn, &mut buf, &mut out);
-                cur_btn = btn_name;
-                i += 2;
-                continue;
+        if bytes[i] == b'|' {
+            if let Some(next_ch) = text[i + 1..].chars().next() {
+                let esc_len = 1 + next_ch.len_utf8();
+                let esc = &text[i..i + esc_len];
+                if esc == "|-" || esc == "|+" {
+                    i += 2;
+                    continue;
+                }
+                if esc == "||" {
+                    buf.push('|');
+                    i += 2;
+                    continue;
+                }
+                if let Some((btn_name, _)) = crate::binds::BUTTONS.iter().find(|(_, g)| *g == esc)
+                {
+                    flush(cur_btn, &mut buf, &mut out);
+                    cur_btn = btn_name;
+                    i += esc_len;
+                    continue;
+                }
             }
         }
         let ch = text[i..].chars().next().unwrap();

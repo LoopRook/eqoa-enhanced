@@ -99,3 +99,16 @@ Executed with `EQOA_ISO` pointing to `run/eqoa.iso` after applying seams (`bc14c
 - **paths**: PASS (`5.00s` — re-verified clean after removing the local target path from this report)
 - **player-release**: PASS (`47.13s`)
 - **release**: PASS (`269.25s`, release `eqoa.exe` built)
+
+## Fix round (review findings H1, H2, M3-M6)
+
+| Finding | Fix | `round6a_` test | Negative control (fix reverted, test run with `cargo test -p eqoa round6a_`) |
+|---|---|---|---|
+| H1 | Removed `frontiers_forge.ui.GetDispositionIconTexture`; `eqoa.icons.disposition` kept. Pinned `ui.lua` helpers `GetDispositionFaceTexId`, `GetClassIconTexId`, `GetClassIconTexture`, `DrawClassIcon`, `DrawDispositionIcon` are built; capability list updated. | `round6a_forge_icons_merchant_hint_hotbar_items_and_zero_addon` | Fails at `r6a_tests.rs:809` (Forge spike line 11, absent-function assert) |
+| H2 | `parse_hint` is char-boundary safe. | `round6a_windows_modes_dialogs_hints_and_outside_world` (`'|é'`, `'|'`, `'||'`, `'|é|xClose|€'`) | Not isolated: with all fixes reverted the test stops earlier at the M3 assertion, so the panic path itself was not run. |
+| M3 | Forge `FormatButtonHint`/`ParseButtonHint` use the pinned `window.lua` table (`dpad_left` is `|-`, `dpad_right` is `|+`); `eqoa.windows.*` keeps the native glyphs. | same | Fails at `r6a_tests.rs:602` (Forge spike line 16) |
+| M4 | `Util.GetCompassRadians/Degrees` return the raw camera angle (as `camera.GetFacingRadians`); nil without a camera, no heading fallback. | `round6a_camera_third_and_first_person_and_tick_coalescing` | Fails at `r6a_tests.rs:499` (Forge spike line 15) |
+| M5 | Window fingerprint hashes row data (merchant buy/sell lists, bank, loot, inventory). The test compares `windows_fingerprint` before/after a rename, because the test frame's full rebuild would raise `windows.changed` by itself. | `round6a_fix_m5_merchant_and_bank_item_mutation_fires_windows_changed` | Fails at `r6a_tests.rs:1343`: "bank item rename must move the windows fingerprint" |
+| M6 | Quest hash and the event-level fingerprint (`api_updates.rs`) include the server stamp. | `round6a_fix_m6_quests_full_log_stamp_change_fires_and_stales` | Fails at `r6a_tests.rs:1427`: "quests.changed must fire when stamp updates even with full 8-quest log" |
+
+Gates (`python tools/run_gates.py --release --filter round6a_`): round 10 passed; addons 471 passed, 25 ignored; full 2328 passed, 30 ignored; wasm, footprint, paths, player-release, release all PASS. 30 distinct skips (no `run/client.bin`, no 2002 disc, no live S2, symlink privilege, `EQOA_FORGE_SPIKE`, `EQOA_BUNDLED_UI_GOLDENS`). Oracle tests skip on this machine.

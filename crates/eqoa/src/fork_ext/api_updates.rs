@@ -913,6 +913,7 @@ pub(crate) fn fingerprint(play: &Play, kind: Kind) -> u64 {
         }
         Kind::Quests => {
             use std::hash::Hash;
+            play.quests.stamp.hash(&mut h);
             play.quests.titles.len().hash(&mut h);
             for t in &play.quests.titles {
                 t.hash(&mut h);
