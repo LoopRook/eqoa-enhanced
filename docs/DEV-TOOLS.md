@@ -35,6 +35,10 @@ python tools/run_gates.py [options]
 - `--timeout <min>`: Per-step execution timeout in minutes (default: 60).
 - `--root <path>`: Repository root path (default: current working directory).
 
+### Progress Output
+
+While waiting for the Cargo build lock, `Waiting for cargo lock` messages include the holder PID from its token file when one is present. While any step runs, a flushed progress line is printed every 60 seconds showing the step name, elapsed minutes, and—for `cargo test` steps—the number of `test ... ok/FAILED/ignored` lines seen so far; full child output continues to be written to each step's log file.
+
 ---
 
 ## 2. Bundled Mod Manifest Updater (`tools/update_bundled_manifest.py`)
@@ -61,6 +65,10 @@ python tools/update_bundled_manifest.py [options]
 
 - `--check`: Verify manifests without modifying files on disk. Exits with code `1` and prints unified diffs if any manifest is out of date; exits `0` if up to date.
 - `--root <path>`: Repository root path (default: current working directory).
+
+### Progress Output
+
+While waiting for the Cargo build lock, `Waiting for cargo lock` messages include the holder PID from its token file when one is present. While any step runs, a flushed progress line is printed every 60 seconds showing the step name, elapsed minutes, and—for `cargo test` steps—the number of `test ... ok/FAILED/ignored` lines seen so far; full child output continues to be written to each step's log file.
 
 ---
 
