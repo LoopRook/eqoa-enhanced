@@ -5,11 +5,13 @@ import argparse
 import json
 import os
 from pathlib import Path
+import queue
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 DEFAULT_FULL_SKIPS = [
@@ -23,6 +25,7 @@ DEFAULT_FULL_SKIPS = [
 TEST_RESULT_RE = re.compile(
     r"test result:\s+(?:ok|FAILED)\.\s+(\d+)\s+passed;\s+(\d+)\s+failed;\s+(\d+)\s+ignored;"
 )
+TEST_LINE_RE = re.compile(r"^test\s+\S+\s+\.\.\.\s+(?:ok|FAILED|ignored)\b")
 FAILED_TEST_RE = re.compile(r"^test\s+([^\s]+)\s+\.\.\.\s+FAILED", re.MULTILINE)
 
 
@@ -71,7 +74,129 @@ def kill_process_tree(pid):
                 pass
 
 
-def run_subprocess_tree(cmd, cwd, env, timeout_minutes):
+def _format_progress_line(step_name, elapsed_seconds, is_test, test_count):
+    label = step_name or "step"
+    elapsed_minutes = elapsed_seconds / 60.0
+    if is_test:
+        return f"  [{label}] {elapsed_minutes:.1f}m elapsed ({test_count} tests)"
+    return f"  [{label}] {elapsed_minutes:.1f}m elapsed"
+
+
+def _stream_subprocess_output(proc, timeout_seconds, step_name, is_test, progress_interval):
+    line_queue = queue.Queue()
+    reader_error = []
+
+    def _reader():
+        try:
+            for raw_line in iter(proc.stdout.readline, b""):
+                line_queue.put(raw_line)
+        except Exception as exc:
+            reader_error.append(exc)
+        finally:
+            line_queue.put(None)
+
+    reader = threading.Thread(target=_reader, daemon=True)
+    reader.start()
+
+    start_time = time.monotonic()
+    deadline = start_time + timeout_seconds
+    next_progress = start_time + progress_interval
+    chunks = []
+    test_count = 0
+    timed_out = False
+    eof = False
+
+    try:
+        while not eof:
+            now = time.monotonic()
+            if now >= deadline:
+                timed_out = True
+                kill_process_tree(proc.pid)
+                break
+
+            wait_for = max(0.01, min(next_progress, deadline) - now)
+            try:
+                item = line_queue.get(timeout=wait_for)
+            except queue.Empty:
+                item = False  # sentinel for timeout on queue.get
+
+            if item is None:
+                eof = True
+                break
+            if item is not False:
+                chunks.append(item)
+                if is_test and TEST_LINE_RE.match(safe_decode(item)):
+                    test_count += 1
+
+            now = time.monotonic()
+            if now >= next_progress:
+                print(
+                    _format_progress_line(step_name, now - start_time, is_test, test_count),
+                    flush=True,
+                )
+                while next_progress <= now:
+                    next_progress += progress_interval
+
+        if reader_error:
+            kill_process_tree(proc.pid)
+            err_msg = f"Stream reader error for {step_name or 'step'}: {reader_error[0]}"
+            print(err_msg, file=sys.stderr, flush=True)
+            chunks.append(f"\n{err_msg}\n".encode("utf-8", errors="replace"))
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+        elif timed_out:
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+        else:
+            try:
+                proc.wait(timeout=max(0.01, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                kill_process_tree(proc.pid)
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    pass
+
+        reader.join(timeout=2)
+        if not reader.is_alive():
+            try:
+                proc.stdout.close()
+            except Exception:
+                pass
+        while True:
+            try:
+                item = line_queue.get_nowait()
+            except queue.Empty:
+                break
+            if item is not None:
+                chunks.append(item)
+    except BaseException:
+        kill_process_tree(proc.pid)
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+        raise
+
+    returncode = -1 if (timed_out or reader_error) else proc.returncode
+    return returncode, b"".join(chunks), timed_out
+
+
+def run_subprocess_tree(
+    cmd,
+    cwd,
+    env,
+    timeout_minutes,
+    *,
+    step_name=None,
+    is_test=False,
+    progress_interval=None,
+):
     timeout_seconds = timeout_minutes * 60
     proc = subprocess.Popen(
         cmd,
@@ -83,24 +208,33 @@ def run_subprocess_tree(cmd, cwd, env, timeout_minutes):
     )
     timed_out = False
     stdout_data = None
-    try:
-        stdout_data, _ = proc.communicate(timeout=timeout_seconds)
-    except subprocess.TimeoutExpired as exc:
-        timed_out = True
-        kill_process_tree(proc.pid)
+    if progress_interval is not None and progress_interval > 0:
+        returncode, stdout_data, timed_out = _stream_subprocess_output(
+            proc,
+            timeout_seconds,
+            step_name,
+            is_test,
+            progress_interval,
+        )
+    else:
         try:
-            stdout_data, _ = proc.communicate()
-        except Exception:
-            stdout_data = exc.stdout
-    except BaseException:
-        kill_process_tree(proc.pid)
-        try:
-            proc.communicate()
-        except Exception:
-            pass
-        raise
+            stdout_data, _ = proc.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            timed_out = True
+            kill_process_tree(proc.pid)
+            try:
+                stdout_data, _ = proc.communicate()
+            except Exception:
+                stdout_data = exc.stdout
+        except BaseException:
+            kill_process_tree(proc.pid)
+            try:
+                proc.communicate()
+            except Exception:
+                pass
+            raise
+        returncode = proc.returncode
 
-    returncode = proc.returncode
     stdout_text = safe_decode(stdout_data)
     if timed_out:
         stdout_text += f"\nCommand timed out after {timeout_minutes} minutes\n"
@@ -234,7 +368,12 @@ class CargoLock:
                     raise TimeoutError(
                         f"Timed out after {self.wait_minutes} minutes waiting for cargo lock at {self.lock_dir}"
                     )
-                print(f"Waiting for cargo lock at {self.lock_dir}... ({int(elapsed)}s elapsed)")
+                holder_pid = self._holder_pid()
+                holder_note = f", held by pid {holder_pid}" if holder_pid is not None else ""
+                print(
+                    f"Waiting for cargo lock at {self.lock_dir}... ({int(elapsed)}s elapsed{holder_note})",
+                    flush=True,
+                )
                 time.sleep(min(self.poll_interval, max(0.1, timeout_seconds - elapsed)))
                 continue
             except PermissionError:
@@ -253,6 +392,18 @@ class CargoLock:
             except OSError:
                 pass
             return
+
+    def _holder_pid(self):
+        try:
+            tokens = [p for p in self.lock_dir.iterdir() if p.name.startswith("pid-") and p.name.endswith(".token")]
+        except OSError:
+            return None
+        if len(tokens) != 1:
+            return None
+        try:
+            return int(tokens[0].name.split("-")[1])
+        except (IndexError, ValueError):
+            return None
 
     def _clear_if_holder_dead(self):
         """Remove a lock left by a process that no longer runs (a killed gate run).
@@ -399,6 +550,7 @@ def run_gates(
     cargo_target_dir=None,
     lock_dir=None,
     branch=None,
+    progress_interval=60,
 ):
     if root is None:
         root = Path.cwd()
@@ -484,7 +636,7 @@ def run_gates(
                 rustflags = step_env.get("RUSTFLAGS", "")
                 step_env["RUSTFLAGS"] = f"{rustflags} -C target-feature=+crt-static".strip()
 
-            print(f"==> Running step: {name}")
+            print(f"==> Running step: {name}", flush=True)
             start_time = time.time()
             combined_output = ""
             step_passed = False
@@ -493,12 +645,24 @@ def run_gates(
                 if is_cargo:
                     with CargoLock(lock_dir=lock_dir, wait_minutes=lock_wait):
                         returncode, combined_output = run_subprocess_tree(
-                            cmd, cwd=root, env=step_env, timeout_minutes=timeout
+                            cmd,
+                            cwd=root,
+                            env=step_env,
+                            timeout_minutes=timeout,
+                            step_name=name,
+                            is_test=is_test,
+                            progress_interval=progress_interval,
                         )
                         step_passed = (returncode == 0)
                 else:
                     returncode, combined_output = run_subprocess_tree(
-                        cmd, cwd=root, env=step_env, timeout_minutes=timeout
+                        cmd,
+                        cwd=root,
+                        env=step_env,
+                        timeout_minutes=timeout,
+                        step_name=name,
+                        is_test=is_test,
+                        progress_interval=progress_interval,
                     )
                     step_passed = (returncode == 0)
             except KeyboardInterrupt:
