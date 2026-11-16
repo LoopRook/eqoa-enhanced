@@ -158,3 +158,34 @@ Its ten hearts use ImGui draw lists, real player health, lifecycle cleanup and
 profile settings, with no Forge dependency. Live-game testing is still required.
 
 `eqoa.player.experience_for_level(level)` returns the native experience threshold for the requested level (1?59), including the native formula change at level 51. It does not add one to the argument. To query the next level's threshold, pass `player.level + 1`; arguments outside 1?59 return `nil, nil`. Forge keeps its pinned experience formula.
+
+## Actions
+
+Game actions under `eqoa.actions.*` go through the client's action broker and require a physical player gesture (`eqoa.input.bind` keypress, a `pointer.pressed` inside `eqoa.input.claim_pointer`, or a clicked interactive `eqoa.imgui` widget). Each gesture authorizes one action (`req, err`). Calling an action outside a gesture returns `nil, {code = "needs_player_action", ...}` with a diagnostic in the Addon Manager.
+
+```lua
+local last_req
+
+eqoa.events.on("action.result", function(e)
+    local d = e.data
+    if last_req and d.request_id == last_req then
+        -- d.state: "queued" -> "dispatched" -> "completed" | "refused" | "cancelled" | "unknown"
+        if d.ok == false then
+            eqoa.log.write("warn", d.kind .. ": " .. (d.reason or d.code))
+        end
+    end
+end)
+
+eqoa.input.bind({id = "use_pot", label = "Use top item", default_key = ""}, function()
+    local inv = eqoa.inventory.get()
+    if inv and inv.items[1] then
+        local req, err = eqoa.actions.use_item(inv.items[1].ref)
+        if req then last_req = req else eqoa.log.write("warn", err.message) end
+    end
+end)
+```
+
+- Poll `eqoa.actions.status(req)` for the retained `ActionResult` record or `eqoa.actions.cancel(req)` while a request is still `queued`.
+- `eqoa.actions.destroy` is `unsupported`; continuous movement/camera controls (`move`, `look`, `buttons`, `camera`) and Part-A window/quest/mastery actions remain `not_yet` and can be queried via `eqoa.capabilities.get(...)`.
+- See [the bag viewer](../../bundled-mods/eqoa_bag_viewer/main.lua) for click-menu actions (`use_item`, `equip`, `quick_slot`, `sell`, `bank_move`, `loot`, `loot_all`) and `action.result` feedback.
+

@@ -217,6 +217,7 @@ impl Play {
             b.wnd.draw(vui, r, &info, &view, &icon, &can_use, now, &mut cues);
         }
         self.cues.extend(cues.into_iter().map(crate::sound::Cue::Ui));
+        super::fork_hooks::bank_requests(self, &mut out);
         for o in out {
             match o {
                 BankOut::Close => self.bank_close(),

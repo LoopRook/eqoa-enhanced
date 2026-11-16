@@ -2,6 +2,7 @@
 //! Bounded native widget bindings audited against pinned sol_ImGui.h.
 //! All closures own only the epoch guard; native Ui/window addresses never escape.
 use super::{Frame, Stack, Vec2, finite, text};
+use crate::fork_ext::addons::gesture;
 use dear_imgui_rs::sys;
 use mlua::{Lua, MultiValue, Result, Table, Value};
 use std::{cell::RefCell, rc::Rc};
@@ -182,7 +183,11 @@ pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> R
             let label = text(&label)?;
             let size = size(x.unwrap_or(0.), y.unwrap_or(0.))?;
             f.borrow_mut().check()?;
-            Ok(unsafe { sys::igButton(label.as_ptr(), size) })
+            let clicked = unsafe { sys::igButton(label.as_ptr(), size) };
+            if clicked {
+                gesture::arm_imgui_click();
+            }
+            Ok(clicked)
         })?,
     )?;
     let f = frame.clone();
@@ -194,15 +199,20 @@ pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> R
                 (2, Some(Value::Boolean(_))) => {
                     let (label, active): (String, bool) = lua.unpack_multi(args)?;
                     let label = text(&label)?;
-                    Ok(MultiValue::from_vec(vec![Value::Boolean(unsafe {
-                        sys::igRadioButton_Bool(label.as_ptr(), active)
-                    })]))
+                    let clicked = unsafe { sys::igRadioButton_Bool(label.as_ptr(), active) };
+                    if clicked {
+                        gesture::arm_imgui_click();
+                    }
+                    Ok(MultiValue::from_vec(vec![Value::Boolean(clicked)]))
                 }
                 (3, _) => {
                     let (label, mut value, button): (String, i32, i32) = lua.unpack_multi(args)?;
                     let label = text(&label)?;
                     let changed =
                         unsafe { sys::igRadioButton_IntPtr(label.as_ptr(), &mut value, button) };
+                    if changed {
+                        gesture::arm_imgui_click();
+                    }
                     Ok(MultiValue::from_vec(vec![
                         Value::Integer(value as i64),
                         Value::Boolean(changed),
@@ -255,6 +265,9 @@ pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> R
                         height.unwrap_or(-1),
                     )
                 };
+                if changed {
+                    gesture::arm_imgui_click();
+                }
                 Ok((current, changed))
             },
         )?,
@@ -651,6 +664,9 @@ pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> R
                                 enabled.unwrap_or(true),
                             )
                         };
+                        if activated {
+                            gesture::arm_imgui_click();
+                        }
                         Ok(returns(Some(selected), activated))
                     }
                     None => {
@@ -659,9 +675,13 @@ pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> R
                                 "MenuItem enabled requires selected overload",
                             ));
                         }
-                        Ok(returns(None, unsafe {
+                        let activated = unsafe {
                             sys::igMenuItem_Bool(label.as_ptr(), shortcut, false, true)
-                        }))
+                        };
+                        if activated {
+                            gesture::arm_imgui_click();
+                        }
+                        Ok(returns(None, activated))
                     }
                 }
             },
@@ -978,7 +998,12 @@ pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> R
                     y: finite(h)?,
                 };
                 f.borrow_mut().check()?;
-                Ok(unsafe { sys::igInvisibleButton(id.as_ptr(), size, flags.unwrap_or(0)) })
+                let clicked =
+                    unsafe { sys::igInvisibleButton(id.as_ptr(), size, flags.unwrap_or(0)) };
+                if clicked {
+                    gesture::arm_imgui_click();
+                }
+                Ok(clicked)
             },
         )?,
     )?;
@@ -1083,14 +1108,18 @@ pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> R
                     y: finite(h.unwrap_or(0.0))?,
                 };
                 f.borrow_mut().check()?;
-                Ok(unsafe {
+                let clicked = unsafe {
                     sys::igSelectable_Bool(
                         label.as_ptr(),
                         selected.unwrap_or(false),
                         flags.unwrap_or(0),
                         size,
                     )
-                })
+                };
+                if clicked {
+                    gesture::arm_imgui_click();
+                }
+                Ok(clicked)
             },
         )?,
     )?;

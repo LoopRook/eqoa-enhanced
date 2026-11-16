@@ -687,6 +687,11 @@ impl Host {
         if !once || !initialized {
             let _phase = super::native::phase(&self.lua, "entry");
             let _drawing = super::bridge::drawing(!once);
+            let _gesture = (!once).then(|| {
+                let vm = bus.borrow().vm;
+                let addon = super::native::session(&self.lua).borrow().addon.clone();
+                super::gesture::enter_render_scope(vm, &addon)
+            });
             function.call::<()>(())?;
         }
         bus.borrow_mut().initialized = true;

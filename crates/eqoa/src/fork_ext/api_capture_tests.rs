@@ -1777,14 +1777,484 @@ fn addon_actions_use_live_camera_assist_and_summary_overlay_gates() {
         );
     }
     actions::clear_actions();
+    crate::fork_ext::addons::action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
     CORE.with(|c| c.borrow_mut().view.in_world = true);
     let host = Host::new().unwrap();
-    host.execute("for i=1,16 do assert(eqoa.actions.assist()) end;local v,e=eqoa.actions.assist();assert(v==nil and e.code=='busy')").unwrap();
+    host.execute(
+        r#"
+        local no_g, e_g = eqoa.actions.assist()
+        assert(no_g == nil and e_g.code == 'needs_player_action')
+        queued = {}
+        eqoa.input.bind({ id = 'a', label = 'A', default_key = 'k' }, function()
+            local id, e = eqoa.actions.assist()
+            last_id, last_err = id, e
+            if id then queued[#queued + 1] = id end
+            local second, e2 = eqoa.actions.assist()
+            assert(second == nil and e2.code == 'needs_player_action')
+        end)
+    "#,
+    )
+    .unwrap();
+    for _ in 0..32 {
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+            )
+        });
+        crate::fork_ext::addons::native_events::dispatch(&host).unwrap();
+        host.execute("assert(last_id ~= nil and last_err == nil)").unwrap();
+    }
+    CORE.with(|c| {
+        c.borrow_mut().emit(
+            "input.key",
+            serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+        )
+    });
+    crate::fork_ext::addons::native_events::dispatch(&host).unwrap();
+    host.execute("assert(last_id == nil and last_err.code == 'busy' and #queued == 32)")
+        .unwrap();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    let before = p.session.sends_lost;
+    begin_iteration(&mut p, true);
     assert_eq!(
-        actions::drain_actions().len(),
-        16,
-        "one queued request for each successful API call"
+        p.session.sends_lost - before,
+        8,
+        "broker burst dispatches at most 8 actions on the first 30 Hz tick"
     );
+    for tick in 1..25 {
+        let prev = p.session.sends_lost;
+        begin_iteration(&mut p, true);
+        assert_eq!(
+            p.session.sends_lost - prev,
+            1,
+            "tick {tick} refills and dispatches 1 assist"
+        );
+    }
+    assert_eq!(
+        p.session.sends_lost - before,
+        32,
+        "all 32 queued assists dispatch exactly once over the following ticks"
+    );
+    begin_iteration(&mut p, true);
+    assert_eq!(
+        p.session.sends_lost - before,
+        32,
+        "no 33rd send after all 32 queued assists drained"
+    );
+    crate::fork_ext::addons::action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}
+
+#[test]
+fn round6b_assist_emits_dispatch_and_server_phases_via_play() {
+    use crate::fork_ext::addons::{action_broker, native_core::CORE, native_events};
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+    CORE.with(|c| c.borrow_mut().view.in_world = true);
+
+    let host = Host::new().unwrap();
+    host.execute(
+        r#"
+        results = {}
+        eqoa.events.on("action.result", function(e)
+            results[#results + 1] = {
+                match_req = (e.data.request_id == req),
+                kind = e.data.kind,
+                phase = e.data.phase,
+                state = e.data.state,
+                ok = e.data.ok,
+                code = e.data.code,
+            }
+        end)
+        eqoa.input.bind({ id = "a", label = "Assist", default_key = "k" }, function()
+            req, req_err = eqoa.actions.assist()
+        end)
+    "#,
+    )
+    .unwrap();
+
+    let press_k = || {
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+            )
+        });
+        native_events::dispatch(&host).unwrap();
+    };
+    press_k();
+    host.execute("assert(req ~= nil and req_err == nil)").unwrap();
+
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    // Non-game frame does NOT advance broker
+    begin_iteration(&mut p, false);
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(#results == 0)").unwrap();
+
+    // 30 Hz game_step dispatches Assist and emits `dispatch` phase
+    begin_iteration(&mut p, true);
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        r#"
+        assert(#results == 1 and results[1].match_req)
+        assert(results[1].phase == "dispatch" and results[1].state == "dispatched" and results[1].ok == true)
+        local st = assert(eqoa.actions.status(req))
+        assert(st.request_id == req and st.state == "dispatched")
+    "#,
+    )
+    .unwrap();
+
+    // Server reply Event::Assist(42) resolves `server` phase -> completed
+    let ev = net::session::Event::Assist(42);
+    let cap = begin_game_event(&p, &ev);
+    end_game_event(&p, cap);
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        r#"
+        assert(#results == 2 and results[2].match_req)
+        assert(results[2].phase == "server" and results[2].state == "completed" and results[2].ok == true)
+        local st = assert(eqoa.actions.status(req))
+        assert(st.state == "completed" and st.ok == true)
+    "#,
+    )
+    .unwrap();
+
+    // Second assist refused by server (u32::MAX)
+    press_k();
+    begin_iteration(&mut p, true);
+    let refuse = net::session::Event::Assist(u32::MAX);
+    let cap2 = begin_game_event(&p, &refuse);
+    end_game_event(&p, cap2);
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        r#"
+        assert(#results == 4 and results[4].phase == "server" and results[4].state == "refused" and results[4].ok == false)
+    "#,
+    )
+    .unwrap();
+
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}
+
+#[test]
+fn round6b_non_item_target_cycle_interact_attack_cast_hotbar_move() {
+    use crate::fork_ext::addons::{action_broker, native_core::CORE, native_events};
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+
+    let mut p = ready();
+    CORE.with(|c| c.borrow_mut().view.in_world = true);
+    p.session.conn = Some(usize::MAX);
+    p.stats.stat[9] = 100;
+    p.stats.stat[10] = 100;
+    p.self_at = Some(([0.0, 0.0, 0.0], None));
+    let world = p.player.world as i8;
+    let self_id = p.self_id32().unwrap_or(1);
+
+    // Self player in slot 0, attackable hostile creature in slot 1, corpse in slot 2
+    p.entities.slots[0] = Some(net::entity::Entity {
+        id: self_id,
+        world,
+        kind: net::entity::TYPE_CREATURE,
+        pos: [0.0, 0.0, 0.0],
+        actor_pos: [0.0, 0.0, 0.0],
+        p18: 1,
+        p19: 255,
+        creature: Some(net::entity::Creature {
+            name: "PlayerOne".into(),
+            p256: 2,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    p.entities.slots[1] = Some(net::entity::Entity {
+        id: 200,
+        world,
+        kind: net::entity::TYPE_CREATURE,
+        pos: [0.0, 0.0, -5.0],
+        actor_pos: [0.0, 0.0, -5.0],
+        p18: 1,
+        p19: 255,
+        creature: Some(net::entity::Creature {
+            name: "Gnoll Pup".into(),
+            p256: 1,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    p.entities.slots[2] = Some(net::entity::Entity {
+        id: 300,
+        world,
+        kind: net::entity::TYPE_CREATURE,
+        pos: [0.0, 0.0, -6.0],
+        actor_pos: [0.0, 0.0, -6.0],
+        p18: 3, // selectable + corpse
+        p19: 0,
+        creature: Some(net::entity::Creature {
+            name: "Gnoll Corpse".into(),
+            p256: 1,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    p.abilities.insert(
+        501,
+        net::dump::Ability {
+            id: 501,
+            display_index: 1,
+            valid: 1,
+            slot: 0,
+            lockout: 0,
+            range: 20.0,
+            power_cost: 25,
+            scope: 1,
+            name: "Frost Bolt".into(),
+            ..Default::default()
+        },
+    );
+    p.abilities.insert(
+        502,
+        net::dump::Ability {
+            id: 502,
+            display_index: 2,
+            valid: 1,
+            slot: 1,
+            lockout: 5000, // on cooldown
+            range: 20.0,
+            power_cost: 10,
+            scope: 1,
+            name: "Fire Bolt".into(),
+            ..Default::default()
+        },
+    );
+    p.hud_menus.defs[0].count = 5;
+    p.hud_menus.defs[0].entries[0] = crate::hudmenu::Entry {
+        icon2: 10,
+        x08: 0,
+        msg: 0x0806_0000,
+        id: 501,
+    };
+
+    let host = Host::new().unwrap();
+    host.execute(
+        r#"
+        results = {}
+        eqoa.events.on("action.result", function(e)
+            results[#results + 1] = e.data
+        end)
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+            last_req, last_err = next_fn()
+        end)
+    "#,
+    )
+    .unwrap();
+
+    let run_lua = |p: &mut Play, code: &str| {
+        host.execute(code).unwrap();
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+            )
+        });
+        native_events::dispatch(&host).unwrap();
+        begin_iteration(p, true);
+        native_events::dispatch(&host).unwrap();
+    };
+
+    // target(200) -> sets p.target == 200
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.target(200) end");
+    assert_eq!(p.target, 200);
+    // cycle_target("corpse") -> cycles to corpse 300
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.cycle_target('corpse') end");
+    assert_eq!(p.target, 300);
+    // target(200) + interact() + attack(true)
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.target(200) end");
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.interact() end");
+    p.options.auto_attack = 1;
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.attack(true) end");
+    assert!(p.auto_attack, "attack(true) enables auto_attack");
+
+    // cast ready ability 501 -> succeeds; cast locked ability 502 -> refused busy
+    let sends_before_cast = p.session.sends_lost;
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.cast(501) end");
+    assert!(
+        p.session.sends_lost > sends_before_cast,
+        "cast 501 must dispatch 0x0032"
+    );
+    host.execute("assert(results[#results].ok == true and results[#results].kind == 'cast')")
+        .unwrap();
+
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.cast(502) end");
+    host.execute(
+        "assert(results[#results].ok == false and results[#results].code == 'busy')",
+    )
+    .unwrap();
+
+    // Out-of-range check via ee::* distance math
+    p.entities.slots[1].as_mut().unwrap().actor_pos = [100.0, 0.0, 0.0];
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.cast('Frost Bolt') end");
+    host.execute(
+        "assert(results[#results].ok == false and results[#results].reason == 'target is out of range')",
+    )
+    .unwrap();
+    p.entities.slots[1].as_mut().unwrap().actor_pos = [0.0, 0.0, -5.0];
+
+    // use_hotbar(1) dispatches slot 1; use_hotbar(4) refuses empty slot
+    let sends_before_hb = p.session.sends_lost;
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.use_hotbar(1) end");
+    assert!(p.session.sends_lost > sends_before_hb);
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.use_hotbar(4) end");
+    host.execute(
+        "assert(results[#results].ok == false and results[#results].code == 'not_found')",
+    )
+    .unwrap();
+
+    // autorun, follow self refused, follow creature refused, stop clears all
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.autorun(true) end");
+    assert!(p.autorun);
+    run_lua(&mut p, &format!("next_fn = function() return eqoa.actions.follow({self_id}) end"));
+    host.execute("assert(results[#results].ok == false and results[#results].code == 'invalid_argument')").unwrap();
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.stop() end");
+    assert!(!p.autorun && !p.auto_attack && !p.following);
+
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}
+
+#[test]
+fn round6b_non_item_chat_command_windows_weapon_sets_and_spellbook() {
+    use crate::fork_ext::addons::{action_broker, native_core::CORE, native_events};
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+
+    let mut p = ready();
+    CORE.with(|c| c.borrow_mut().view.in_world = true);
+    p.session.conn = Some(usize::MAX);
+    p.gear.set(0, "Main".into(), 77, u32::MAX);
+    p.abilities.insert(
+        601,
+        net::dump::Ability {
+            id: 601,
+            display_index: 3,
+            valid: 1,
+            slot: -1,
+            name: "Heal".into(),
+            ..Default::default()
+        },
+    );
+    p.abilities.insert(
+        602,
+        net::dump::Ability {
+            id: 602,
+            display_index: 5,
+            valid: 1,
+            slot: 2,
+            name: "Bolt".into(),
+            ..Default::default()
+        },
+    );
+
+    let host = Host::new().unwrap();
+    host.execute(
+        r#"
+        -- Verify capabilities & non-yet reasons
+        local cam = eqoa.capabilities.get("eqoa.actions.camera")
+        assert(cam and cam.status == "supported")
+        local drop_q = eqoa.capabilities.get("eqoa.actions.drop_quest")
+        assert(drop_q and drop_q.status == "not_yet" and drop_q.reason == "arrives with the window/quest read API")
+        local dest = eqoa.capabilities.get("eqoa.actions.destroy")
+        assert(dest and dest.status == "unsupported" and dest.reason == "not offered before the PR (owner)")
+
+        results = {}
+        eqoa.events.on("action.result", function(e)
+            results[#results + 1] = e.data
+        end)
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+            last_req, last_err = next_fn()
+        end)
+    "#,
+    )
+    .unwrap();
+
+    let run_lua = |p: &mut Play, code: &str| {
+        host.execute(code).unwrap();
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+            )
+        });
+        native_events::dispatch(&host).unwrap();
+        begin_iteration(p, true);
+        native_events::dispatch(&host).unwrap();
+    };
+
+    // Synthetic report guard via chat and command -> refused permission_denied
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.chat('/bug fake') end");
+    host.execute("assert(last_req == nil and last_err.code == 'permission_denied')").unwrap();
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.chat('/tell Alice #bug') end");
+    host.execute("assert(last_req == nil and last_err.code == 'permission_denied')").unwrap();
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.command('bug') end");
+    host.execute("assert(last_req == nil and last_err.code == 'permission_denied')").unwrap();
+    let sends_before = p.session.sends_lost;
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.chat('/say hello world') end");
+    assert!(p.session.sends_lost > sends_before);
+
+    // open_window("summary") opens mode 12, then refuses second window while mode != 0
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.open_window('summary') end");
+    assert_eq!(p.mode, 12);
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.open_window('spellbook') end");
+    host.execute("assert(results[#results].ok == false and results[#results].code == 'not_ready')").unwrap();
+    p.mode = 0;
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.open_window('spellbook') end");
+    assert_eq!(p.mode, 5);
+    p.mode = 0;
+
+    // weapon_set(1) selects set 0; prepare_weapon_set without equipped weapon refuses
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.weapon_set(1) end");
+    assert_eq!(p.hud_menus.menus[3].sel, 0);
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.prepare_weapon_set(1, 'Main') end");
+    host.execute("assert(results[#results].ok == false and results[#results].code == 'not_ready')").unwrap();
+
+    // assign_ability, unmemorize_ability, unmemorize_all, arrange_ability -> server replies
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.assign_ability(1, 601) end");
+    host.execute("assert(results[#results].phase == 'dispatch' and results[#results].state == 'dispatched')").unwrap();
+    let ev_slot = net::session::Event::AbilitySlot { token: 1, index: 3, slot: 0 };
+    let cap = begin_game_event(&p, &ev_slot);
+    end_game_event(&p, cap);
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(results[#results].phase == 'server' and results[#results].state == 'completed' and results[#results].ok == true)").unwrap();
+
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.unmemorize_ability(3) end");
+    let ev_unmem = net::session::Event::AbilitySlot { token: 2, index: 5, slot: 2 };
+    let cap = begin_game_event(&p, &ev_unmem);
+    end_game_event(&p, cap);
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(results[#results].phase == 'server' and results[#results].state == 'completed')").unwrap();
+
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.arrange_ability(601, 602) end");
+    let ev_move = net::session::Event::AbilityMoveIndex { token: 3, from: 3, to: 5 };
+    let cap = begin_game_event(&p, &ev_move);
+    end_game_event(&p, cap);
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(results[#results].phase == 'server' and results[#results].state == 'completed')").unwrap();
+
+    run_lua(&mut p, "next_fn = function() return eqoa.actions.unmemorize_all() end");
+    let ev_clear = net::session::Event::AbilityClearBar { token: 4 };
+    let cap = begin_game_event(&p, &ev_clear);
+    end_game_event(&p, cap);
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(results[#results].phase == 'server' and results[#results].state == 'completed')").unwrap();
+
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
 }
 
 #[test]

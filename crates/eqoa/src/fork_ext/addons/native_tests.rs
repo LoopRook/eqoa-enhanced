@@ -479,38 +479,55 @@ fn round_3_stage_a_player_stats_api() {
 fn round_3_stage_a_actions_assist_and_summary_api() {
     use super::native_core::{CORE, Core};
 
-    // Negative control: not in world
+    super::action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
     CORE.with(|c| *c.borrow_mut() = Core::default());
-    let h = Host::new().unwrap();
+    let h = option_test_host("test_r3_actions");
+    // Outside a player gesture: assist fails with needs_player_action.
     h.execute(
         r#"
         local ok, err = eqoa.actions.assist()
-        assert(ok == nil and err.code == 'not_in_world', "assist not in world")
+        assert(ok == nil and err.code == 'needs_player_action', "assist needs gesture")
         local ok2, err2 = eqoa.windows.open("summary")
         assert(ok2 == nil and err2.code == 'not_in_world', "summary not in world")
         local ok3, err3 = eqoa.windows.open("unsupported_window")
         assert(ok3 == nil and err3.code == 'invalid_argument', "unsupported window")
+        eqoa.input.bind({ id = "assist_go", label = "Assist Go", default_key = "k" }, function()
+            last_req, last_err = eqoa.actions.assist()
+        end)
     "#,
     )
     .unwrap();
+    let press_k = || {
+        CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+            )
+        });
+        super::native_events::dispatch(&h).unwrap();
+    };
+    press_k();
+    h.execute("assert(last_req == nil and last_err.code == 'not_in_world', 'assist not in world')")
+        .unwrap();
 
-    // In world: queue actions
+    // In world: queue assist inside bound key gesture
     CORE.with(|c| {
         let mut c = c.borrow_mut();
         c.view.in_world = true;
     });
 
     super::actions::take_action_requests(); // drain any leftover
-    h.execute(
-        r#"
-        local ok, err = eqoa.actions.assist()
-        assert(ok == true and err == nil, "assist succeeded")
-    "#,
-    )
-    .unwrap();
-    let reqs = super::actions::take_action_requests();
-    assert!(reqs.assist, "assist must be requested");
-    assert!(!reqs.summary, "summary must not be requested");
+    press_k();
+    h.execute("assert(last_req ~= nil and last_err == nil, 'assist queued with RequestId')")
+        .unwrap();
+    assert_eq!(super::action_broker::queued_kinds_for_test(), vec!["assist"]);
+    assert_eq!(
+        super::action_broker::dispatch_all_for_test(),
+        vec!["assist"],
+        "accepted assist must reach broker dispatch"
+    );
+    super::action_broker::reset_all_for_test();
 
     h.execute(
         r#"
@@ -522,6 +539,7 @@ fn round_3_stage_a_actions_assist_and_summary_api() {
     let reqs2 = super::actions::take_action_requests();
     assert!(!reqs2.assist, "assist must not be requested");
     assert!(reqs2.summary, "summary must be requested");
+    crate::fork_ext::bindpage::reset_in_memory();
 }
 
 #[test]
@@ -858,10 +876,23 @@ fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
         local ok,err = eqoa.options.set('stats_box',true)
         assert(ok == nil and err.code == 'io_error')
         assert(eqoa.options.get('stats_box') == false)
-        local state,action_err = eqoa.actions.toggle_stats_box()
-        assert(state == nil and action_err.code == 'io_error')
-        assert(eqoa.options.get('stats_box') == false)
+        local direct,direct_err = eqoa.actions.toggle_stats_box()
+        assert(direct == nil and direct_err.code == 'needs_player_action')
+        eqoa.input.bind({id='toggle',label='Toggle Stats Box',default_key='b'}, function()
+            last_state, last_action_err = eqoa.actions.toggle_stats_box()
+        end)
     "#,
+    )
+    .unwrap();
+    super::native_core::CORE.with(|c| {
+        c.borrow_mut().emit(
+            "input.key",
+            serde_json::json!({"key":"b","down":true,"repeat":false,"synthetic":false,"text":""}),
+        )
+    });
+    super::native_events::dispatch(&host).unwrap();
+    host.execute(
+        "assert(last_state == nil and last_action_err.code == 'io_error');assert(eqoa.options.get('stats_box') == false)",
     )
     .unwrap();
     assert!(!super::options::toggle_by_item(2000));
@@ -884,12 +915,23 @@ fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
 
     // Positive control: the same API and Controls row work once storage is writable.
     crate::settings::testing::reset(false);
+    // testing::reset clears bindpage in memory; re-register the Controls bind as the client session would.
+    crate::fork_ext::bindpage::register("eqoa_stats_box", "toggle", "b", "Toggle Stats Box");
+    for expected in [true, false] {
+        super::native_core::CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"b","down":true,"repeat":false,"synthetic":false,"text":""}),
+            )
+        });
+        super::native_events::dispatch(&host).unwrap();
+        host.execute(&format!(
+            "assert(last_state == {expected} and last_action_err == nil)"
+        ))
+        .unwrap();
+    }
     host.execute(
         r#"
-        local state,err = eqoa.actions.toggle_stats_box()
-        assert(state == true and err == nil)
-        state,err = eqoa.actions.toggle_stats_box()
-        assert(state == false and err == nil)
         local ok,save_err = eqoa.options.set('stats_box',true)
         assert(ok == true and save_err == nil)
     "#,
@@ -916,15 +958,24 @@ fn option_and_bind_names_never_redirect_caller_identity() {
             assert(toggle.value == true)
             assert(eqoa.options.get('stats_box') == true)
             assert(eqoa.options.set('stats_box',false))
-            local state,err = eqoa.actions.toggle_stats_box()
-            assert(state == nil and err.code == 'permission_denied')
             assert(eqoa.options.get('stats_box') == false)
-            assert(eqoa.input.bind({id='toggle',label='Toggle Stats Box',default_key='b'}))
+            assert(eqoa.input.bind({id='toggle',label='Toggle Stats Box',default_key='b'}, function()
+                other_state, other_err = eqoa.actions.toggle_stats_box()
+            end))
             assert(eqoa.binds.get('toggle') == 'b')
             assert(eqoa.binds.register('toggle','b','Toggle Stats Box'))
         "#,
         )
         .unwrap();
+        super::native_core::CORE.with(|c| {
+            c.borrow_mut().emit(
+                "input.key",
+                serde_json::json!({"key":"b","down":true,"repeat":false,"synthetic":false,"text":""}),
+            )
+        });
+        super::native_events::dispatch(&host).unwrap();
+        host.execute("assert(other_state == nil and other_err.code == 'permission_denied')")
+            .unwrap();
         assert_eq!(super::options::get_toggle(id, "stats_box"), Some(false));
         assert!(crate::fork_ext::bindpage::get_key(id, "toggle").is_some());
         assert_eq!(

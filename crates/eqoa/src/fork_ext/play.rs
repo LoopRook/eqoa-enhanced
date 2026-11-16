@@ -13,7 +13,307 @@ mod map_mod_tests;
 #[path = "api_capture_tests.rs"]
 mod native_tests;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use api_capture::{begin_game_event, end_game_event};
+#[derive(Clone, Copy)]
+struct CachedCycleView {
+    eye: glam::Vec3,
+    dir: glam::Vec3,
+    vp: glam::Mat4,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug)]
+enum PendingNpcwTx {
+    LootOne { key: u32, count: i32 },
+    LootAll,
+    Buy { ware_key: u32, count: i32 },
+    Sell { item_key: u32, count: i32 },
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug)]
+enum PendingBankTx {
+    Move { from_bank: bool, item_key: u32, count: i32 },
+    Money { dir: u8, amount: i32 },
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug)]
+struct PendingCameraReq {
+    mode: Option<i32>,
+    heading: Option<f32>,
+    pitch: Option<f32>,
+    distance: Option<f32>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! {
+    static CACHED_CYCLE_VIEW: std::cell::Cell<Option<CachedCycleView>> = const { std::cell::Cell::new(None) };
+    static LOOT_BUSY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PENDING_NPCW_TX: std::cell::RefCell<Option<PendingNpcwTx>> = const { std::cell::RefCell::new(None) };
+    static PENDING_BANK_TX: std::cell::RefCell<Option<PendingBankTx>> = const { std::cell::RefCell::new(None) };
+    static PENDING_CAMERA: std::cell::Cell<Option<PendingCameraReq>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) enum BrokerReply {
+    Assist(u32),
+    AbilitySlot { index: u8, slot: u8 },
+    AbilityClearBar,
+    AbilityMoveIndex { from: u8, to: u8 },
+    MasterLoot(bool),
+    InvAdd { item_id: i64 },
+    InvTook { sound: u8, in_shop: bool },
+    LootOne { confirmed_key: Option<u32> },
+    LootAll { corpse_before: Vec<(u32, i64)> },
+    LootClose,
+    LootBlocked,
+    TxCancel,
+    BankMove {
+        is_deposit: bool,
+        added_item: Option<(i64, i64)>,
+        withdrawn: Option<(u32, i64, i64)>,
+    },
+    BankMoney,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct GameEventCapture {
+    api: api_capture::ChangeCapture,
+    broker_reply: Option<BrokerReply>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> GameEventCapture {
+    let api = api_capture::begin_game_event(play, event);
+    if let net::session::Event::MasterLoot(m) = event {
+        crate::fork_ext::addons::action_broker::set_master_loot(m.is_some());
+    }
+    let broker_reply = if crate::fork_ext::addons::action_broker::has_in_flight() {
+        match event {
+            net::session::Event::Assist(id) => Some(BrokerReply::Assist(*id)),
+            net::session::Event::AbilitySlot { index, slot, .. } => {
+                Some(BrokerReply::AbilitySlot {
+                    index: *index,
+                    slot: *slot,
+                })
+            }
+            net::session::Event::AbilityClearBar { .. } => Some(BrokerReply::AbilityClearBar),
+            net::session::Event::AbilityMoveIndex { from, to, .. } => {
+                Some(BrokerReply::AbilityMoveIndex {
+                    from: *from,
+                    to: *to,
+                })
+            }
+            net::session::Event::MasterLoot(m) => Some(BrokerReply::MasterLoot(m.is_some())),
+            net::session::Event::InvAdd(item) => Some(BrokerReply::InvAdd {
+                item_id: item.item.id,
+            }),
+            net::session::Event::InvTook { sound, .. } => Some(BrokerReply::InvTook {
+                sound: *sound,
+                in_shop: play.npcw.shop.id.is_some() && *sound != 0,
+            }),
+            net::session::Event::Opcode { op: 0x0019, data } => {
+                let confirmed_key = data.first().copied().and_then(|slot| {
+                    play.npcw
+                        .corpse
+                        .as_ref()
+                        .and_then(|c| c.items.get(slot as usize))
+                        .map(|it| it.inv_index)
+                });
+                Some(BrokerReply::LootOne { confirmed_key })
+            }
+            net::session::Event::Opcode { op: 0x001A, .. } => {
+                let corpse_before: Vec<(u32, i64)> = play
+                    .npcw
+                    .corpse
+                    .as_ref()
+                    .map(|c| c.items.iter().map(|it| (it.inv_index, it.quantity)).collect())
+                    .unwrap_or_default();
+                Some(BrokerReply::LootAll { corpse_before })
+            }
+            net::session::Event::Opcode { op: 0x0016, .. } => Some(BrokerReply::LootClose),
+            net::session::Event::Opcode { op: 0x0085, .. } => Some(BrokerReply::LootBlocked),
+            net::session::Event::Opcode { op: 0x00D7, .. } => Some(BrokerReply::TxCancel),
+            net::session::Event::Opcode { op: 0x1250, data } => {
+                let mut r = net::stream::Reader::new(data);
+                let slot = r.u8() as usize;
+                let n = r.signed() as i64;
+                let withdrawn = (!r.error)
+                    .then(|| play.dump.bank.items.items.get(slot))
+                    .flatten()
+                    .map(|it| (it.inv_index, it.item.id, n));
+                Some(BrokerReply::BankMove {
+                    is_deposit: false,
+                    added_item: None,
+                    withdrawn,
+                })
+            }
+            net::session::Event::Opcode { op: 0x1251, data } => {
+                let mut r = net::stream::Reader::new(data);
+                let item = net::dump::read_net_item(&mut r);
+                Some(BrokerReply::BankMove {
+                    is_deposit: true,
+                    added_item: Some((item.item.id, item.quantity)),
+                    withdrawn: None,
+                })
+            }
+            net::session::Event::Opcode { op: 0x1253, .. } => Some(BrokerReply::BankMoney),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    GameEventCapture { api, broker_reply }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
+    api_capture::end_game_event(play, capture.api);
+    match capture.broker_reply {
+        Some(BrokerReply::Assist(id)) => {
+            crate::fork_ext::addons::action_broker::resolve_server_assist(id);
+        }
+        Some(BrokerReply::AbilitySlot { index, slot }) => {
+            crate::fork_ext::addons::action_broker::resolve_server_ability_slot(index, slot);
+        }
+        Some(BrokerReply::AbilityClearBar) => {
+            crate::fork_ext::addons::action_broker::resolve_server_ability_clear();
+        }
+        Some(BrokerReply::AbilityMoveIndex { from, to }) => {
+            crate::fork_ext::addons::action_broker::resolve_server_ability_move(from, to);
+        }
+        Some(BrokerReply::MasterLoot(active)) => {
+            crate::fork_ext::addons::action_broker::set_master_loot(active);
+        }
+        Some(BrokerReply::InvAdd { item_id }) => {
+            let inv_total: i64 = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .filter(|it| it.item.id == item_id)
+                .map(|it| it.quantity)
+                .sum();
+            crate::fork_ext::addons::action_broker::resolve_server_merchant_buy(
+                item_id,
+                !play.npcw.shop.pending,
+                inv_total,
+            );
+        }
+        Some(BrokerReply::InvTook { sound, in_shop }) => {
+            if in_shop || (play.npcw.shop.id.is_some() && sound != 0) {
+                crate::fork_ext::addons::action_broker::resolve_server_merchant_sell(
+                    !play.npcw.shop.pending,
+                    |key| {
+                        play.dump
+                            .inventory
+                            .items
+                            .iter()
+                            .find(|it| it.inv_index == key)
+                            .map_or(0, |it| it.quantity)
+                    },
+                );
+            }
+        }
+        Some(BrokerReply::LootOne { confirmed_key }) => {
+            LOOT_BUSY.with(|b| b.set(false));
+            if confirmed_key.is_some()
+                || crate::fork_ext::addons::action_broker::is_player_activity(
+                    crate::fork_ext::addons::action_broker::Subsystem::Loot,
+                )
+            {
+                crate::fork_ext::addons::action_broker::resolve_server_loot_one(
+                    confirmed_key,
+                    Some(true),
+                    None,
+                    |k| {
+                        play.npcw
+                            .corpse
+                            .as_ref()
+                            .and_then(|c| c.items.iter().find(|it| it.inv_index == k))
+                            .map_or(0, |it| it.quantity)
+                    },
+                );
+            }
+        }
+        Some(BrokerReply::LootAll { corpse_before }) => {
+            LOOT_BUSY.with(|b| b.set(false));
+            let corpse_after: Vec<(u32, i64)> = play
+                .npcw
+                .corpse
+                .as_ref()
+                .map(|c| c.items.iter().map(|it| (it.inv_index, it.quantity)).collect())
+                .unwrap_or_default();
+            let state_changed = !corpse_before.is_empty() && corpse_after != corpse_before;
+            crate::fork_ext::addons::action_broker::resolve_server_loot_all(
+                Some(true),
+                None,
+                state_changed,
+            );
+        }
+        Some(BrokerReply::LootClose) => {
+            LOOT_BUSY.with(|b| b.set(false));
+            crate::fork_ext::addons::action_broker::set_master_loot(false);
+            crate::fork_ext::addons::action_broker::resolve_server_loot_one(
+                None,
+                None,
+                Some("corpse closed"),
+                |_| 0,
+            );
+            crate::fork_ext::addons::action_broker::resolve_server_loot_all(
+                None,
+                Some("corpse closed"),
+                false,
+            );
+        }
+        Some(BrokerReply::LootBlocked) => {
+            LOOT_BUSY.with(|b| b.set(false));
+            crate::fork_ext::addons::action_broker::resolve_server_loot_one(
+                None,
+                Some(false),
+                Some("loot blocked by server"),
+                |_| 0,
+            );
+            crate::fork_ext::addons::action_broker::resolve_server_loot_all(
+                Some(false),
+                Some("loot blocked by server"),
+                false,
+            );
+        }
+        Some(BrokerReply::TxCancel) => {
+            LOOT_BUSY.with(|b| b.set(false));
+            crate::fork_ext::addons::action_broker::resolve_server_d7();
+        }
+        Some(BrokerReply::BankMove {
+            is_deposit,
+            added_item,
+            withdrawn,
+        }) => {
+            crate::fork_ext::addons::action_broker::resolve_server_bank_move(
+                is_deposit,
+                play.bank.state == 0,
+                added_item,
+                withdrawn,
+                |key| {
+                    play.dump
+                        .bank
+                        .items
+                        .items
+                        .iter()
+                        .find(|it| it.inv_index == key)
+                        .map_or(0, |it| it.quantity)
+                },
+            );
+        }
+        Some(BrokerReply::BankMoney) => {
+            crate::fork_ext::addons::action_broker::resolve_server_bank_money(
+                play.bank.state == 0,
+                play.dump.player.p38,
+            );
+        }
+        None => {}
+    }
+}
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn begin_game_event(_: &Play, _: &net::session::Event) {}
 #[cfg(target_arch = "wasm32")]
@@ -61,14 +361,69 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
             pet_y,
             pet_h,
         );
+        let snapshot = native_action_snapshot(_play);
+        crate::fork_ext::addons::action_broker::update_native_snapshot(snapshot);
         crate::fork_ext::addons::native_core::iteration(_game_step);
         if _game_step {
+            if let Some(pending) = PENDING_BANK_TX.with(|b| {
+                if _play.mode != 11 {
+                    b.borrow_mut().take()
+                } else {
+                    None
+                }
+            }) {
+                let kind = match pending {
+                    PendingBankTx::Move { .. } => "bank_move",
+                    PendingBankTx::Money { .. } => "bank_money",
+                };
+                crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
+                    kind,
+                    "bank window is not open",
+                );
+            }
+            if let Some(pending) = PENDING_NPCW_TX.with(|p| {
+                let mut b = p.borrow_mut();
+                match *b {
+                    Some(PendingNpcwTx::LootOne { .. })
+                        if _play.mode != 1 || _play.npcw.corpse.is_none() =>
+                    {
+                        b.take()
+                    }
+                    Some(PendingNpcwTx::LootAll)
+                        if _play.mode != 1 || _play.npcw.corpse.is_none() =>
+                    {
+                        b.take()
+                    }
+                    Some(PendingNpcwTx::Buy { .. } | PendingNpcwTx::Sell { .. })
+                        if _play.mode != 10 || _play.npcw.shop.id.is_none() =>
+                    {
+                        b.take()
+                    }
+                    _ => None,
+                }
+            }) {
+                let (kind, msg) = match pending {
+                    PendingNpcwTx::LootOne { .. } => ("loot", "corpse window is not open"),
+                    PendingNpcwTx::LootAll => ("loot_all", "corpse window is not open"),
+                    PendingNpcwTx::Buy { .. } => ("buy", "merchant window is not open"),
+                    PendingNpcwTx::Sell { .. } => ("sell", "merchant window is not open"),
+                };
+                crate::fork_ext::addons::action_broker::resolve_in_flight_window_closed(
+                    kind, msg,
+                );
+            }
             let ready = _play.in_world_now();
             let wheel = crate::fork_ext::addons::pointer_api::take_wheel();
             if ready && wheel != 0.0 {
                 _play.map.mini_wheel(wheel);
             }
             weapon_sets_requests(_play, ready);
+            crate::fork_ext::addons::action_broker::step_tick(snapshot, |kind| {
+                dispatch_broker_action(_play, kind)
+            });
+            for expired_kind in crate::fork_ext::addons::action_broker::take_expired_staged_kinds() {
+                clear_staged_for_kind(expired_kind);
+            }
             let reqs = crate::fork_ext::addons::actions::take_action_requests();
             if ready {
                 if reqs.map && crate::settings::map() && _play.addon_input_available() {
@@ -91,6 +446,10 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                 }
             }
             if !ready {
+                LOOT_BUSY.with(|b| b.set(false));
+                PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                PENDING_BANK_TX.with(|b| *b.borrow_mut() = None);
+                PENDING_CAMERA.with(|c| c.set(None));
                 crate::fork_ext::addons::chat::cancel_outgoing_chat(
                     "world became unavailable before queued chat could be sent",
                 );
@@ -102,6 +461,300 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                 }
             }
         }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn clear_staged_for_kind(kind_name: &'static str) {
+    match kind_name {
+        "loot" => PENDING_NPCW_TX.with(|p| {
+            if matches!(*p.borrow(), Some(PendingNpcwTx::LootOne { .. })) {
+                *p.borrow_mut() = None;
+            }
+        }),
+        "loot_all" => PENDING_NPCW_TX.with(|p| {
+            if matches!(*p.borrow(), Some(PendingNpcwTx::LootAll)) {
+                *p.borrow_mut() = None;
+            }
+        }),
+        "buy" => PENDING_NPCW_TX.with(|p| {
+            if matches!(*p.borrow(), Some(PendingNpcwTx::Buy { .. })) {
+                *p.borrow_mut() = None;
+            }
+        }),
+        "sell" => PENDING_NPCW_TX.with(|p| {
+            if matches!(*p.borrow(), Some(PendingNpcwTx::Sell { .. })) {
+                *p.borrow_mut() = None;
+            }
+        }),
+        "bank_move" => PENDING_BANK_TX.with(|b| {
+            if matches!(*b.borrow(), Some(PendingBankTx::Move { .. })) {
+                *b.borrow_mut() = None;
+            }
+        }),
+        "bank_money" => PENDING_BANK_TX.with(|b| {
+            if matches!(*b.borrow(), Some(PendingBankTx::Money { .. })) {
+                *b.borrow_mut() = None;
+            }
+        }),
+        "camera" => PENDING_CAMERA.with(|c| c.set(None)),
+        _ => {}
+    }
+}
+
+/// Pushes staged broker loot/merchant requests immediately before `npcw.rs`'s native loops.
+pub(crate) fn npcw_requests(
+    _play: &Play,
+    _loot_out: &mut Vec<crate::loot::LootOut>,
+    _merch_out: &mut Vec<crate::merchant::MerchantOut>,
+) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use crate::fork_ext::addons::action_broker::{
+            self, Subsystem, is_master_loot_active, mark_deferred_sent, mark_player_activity,
+            resolve_in_flight_window_closed, resolve_staged_refusal,
+        };
+        if !_loot_out.is_empty() {
+            mark_player_activity(Subsystem::Loot);
+        }
+        if !_merch_out.is_empty() {
+            mark_player_activity(Subsystem::Merchant);
+        }
+        let Some(req) = PENDING_NPCW_TX.with(|p| *p.borrow()) else {
+            return;
+        };
+        match req {
+            PendingNpcwTx::LootOne { key, count } => {
+                if _play.mode != 1 || _play.npcw.corpse.is_none() {
+                    PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                    resolve_in_flight_window_closed("loot", "corpse window is not open");
+                    return;
+                }
+                if is_master_loot_active() {
+                    PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                    resolve_staged_refusal(
+                        "loot",
+                        "permission_denied",
+                        "corpse is under master loot rules",
+                    );
+                    return;
+                }
+                if LOOT_BUSY.with(|b| b.get()) || !_loot_out.is_empty() {
+                    return;
+                }
+                PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                if _play
+                    .npcw
+                    .corpse
+                    .as_ref()
+                    .is_some_and(|c| c.items.iter().any(|it| it.inv_index == key))
+                {
+                    LOOT_BUSY.with(|b| b.set(true));
+                    _loot_out.push(crate::loot::LootOut::One(key as i32, count));
+                    mark_deferred_sent("loot");
+                } else {
+                    resolve_staged_refusal("loot", "stale_handle", "item is no longer on corpse");
+                }
+            }
+            PendingNpcwTx::LootAll => {
+                if _play.mode != 1 || _play.npcw.corpse.is_none() {
+                    PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                    resolve_in_flight_window_closed("loot_all", "corpse window is not open");
+                    return;
+                }
+                if is_master_loot_active() {
+                    PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                    resolve_staged_refusal(
+                        "loot_all",
+                        "permission_denied",
+                        "corpse is under master loot rules",
+                    );
+                    return;
+                }
+                if LOOT_BUSY.with(|b| b.get()) || !_loot_out.is_empty() {
+                    return;
+                }
+                PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                if _play
+                    .npcw
+                    .corpse
+                    .as_ref()
+                    .is_some_and(|c| !c.items.is_empty())
+                {
+                    LOOT_BUSY.with(|b| b.set(true));
+                    _loot_out.push(crate::loot::LootOut::All);
+                    mark_deferred_sent("loot_all");
+                } else {
+                    resolve_staged_refusal("loot_all", "not_found", "corpse has no items to loot");
+                }
+            }
+            PendingNpcwTx::Buy { ware_key, count } => {
+                if _play.mode != 10 || _play.npcw.shop.id.is_none() {
+                    PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                    resolve_in_flight_window_closed("buy", "merchant window is not open");
+                    return;
+                }
+                if _play.npcw.shop.pending || !_merch_out.is_empty() {
+                    return;
+                }
+                PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                if let Some(pos) = _play
+                    .npcw
+                    .shop
+                    .wares
+                    .items
+                    .iter()
+                    .position(|it| it.inv_index == ware_key)
+                {
+                    _merch_out.push(crate::merchant::MerchantOut::Buy(pos as i32, count));
+                    mark_deferred_sent("buy");
+                } else {
+                    resolve_staged_refusal(
+                        "buy",
+                        "stale_handle",
+                        "ware is no longer offered by merchant",
+                    );
+                }
+            }
+            PendingNpcwTx::Sell { item_key, count } => {
+                if _play.mode != 10 || _play.npcw.shop.id.is_none() {
+                    PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                    resolve_in_flight_window_closed("sell", "merchant window is not open");
+                    return;
+                }
+                if _play.npcw.shop.pending || !_merch_out.is_empty() {
+                    return;
+                }
+                PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
+                if let Some(slot) = _play
+                    .dump
+                    .inventory
+                    .items
+                    .iter()
+                    .position(|it| it.inv_index == item_key && it.quantity >= count as i64)
+                {
+                    // the native loop (`npcw.rs`) sends only while the stack still holds `count`
+                    _merch_out.push(crate::merchant::MerchantOut::Sell(slot as i32, count));
+                    mark_deferred_sent("sell");
+                } else {
+                    resolve_staged_refusal(
+                        "sell",
+                        "stale_handle",
+                        "item is no longer in inventory or the stack is smaller than requested",
+                    );
+                }
+            }
+        }
+        let _ = action_broker::has_in_flight;
+    }
+}
+
+/// Pushes staged broker bank requests immediately before `bankplay.rs`'s native loop.
+pub(crate) fn bank_requests(_play: &Play, _out: &mut Vec<crate::bank::BankOut>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use crate::fork_ext::addons::action_broker::{
+            Subsystem, mark_deferred_sent, mark_player_activity,
+            resolve_in_flight_window_closed, resolve_staged_refusal,
+        };
+        if !_out.is_empty() {
+            mark_player_activity(Subsystem::Bank);
+        }
+        let Some(req) = PENDING_BANK_TX.with(|b| *b.borrow()) else {
+            return;
+        };
+        if _play.mode != 11 {
+            PENDING_BANK_TX.with(|b| *b.borrow_mut() = None);
+            let kind = match req {
+                PendingBankTx::Move { .. } => "bank_move",
+                PendingBankTx::Money { .. } => "bank_money",
+            };
+            resolve_in_flight_window_closed(kind, "bank window is not open");
+            return;
+        }
+        if _play.bank.state != 0 || !_out.is_empty() {
+            return;
+        }
+        PENDING_BANK_TX.with(|b| *b.borrow_mut() = None);
+        match req {
+            PendingBankTx::Move {
+                from_bank,
+                item_key,
+                count,
+            } => {
+                let list = if from_bank {
+                    &_play.dump.bank.items
+                } else {
+                    &_play.dump.inventory
+                };
+                if let Some(slot) = list.items.iter().position(|it| it.inv_index == item_key) {
+                    _out.push(crate::bank::BankOut::Move(
+                        u8::from(from_bank),
+                        slot as i32,
+                        count,
+                    ));
+                    mark_deferred_sent("bank_move");
+                } else {
+                    resolve_staged_refusal(
+                        "bank_move",
+                        "stale_handle",
+                        "item is no longer in source container",
+                    );
+                }
+            }
+            PendingBankTx::Money { dir, amount } => {
+                _out.push(crate::bank::BankOut::MoveMoney(dir, amount));
+                mark_deferred_sent("bank_money");
+            }
+        }
+    }
+}
+
+/// Applies a one-shot broker camera request through native WalkCamera/camstyle setters.
+pub(crate) fn apply_camera(_play: &mut Play, _walker: &mut crate::walker::Walker) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(req) = PENDING_CAMERA.with(|c| c.take()) else {
+            return;
+        };
+        if !matches!(_play.mode, 0 | 38) || _play.is_dead() {
+            crate::fork_ext::addons::action_broker::resolve_staged_refusal(
+                "camera",
+                "busy",
+                "camera cannot change in current state",
+            );
+            return;
+        }
+        crate::fork_ext::addons::action_broker::mark_deferred_sent("camera");
+        if let Some(mode) = req.mode {
+            let rc = _play.race_cams.as_ref().and_then(|t| {
+                crate::camstyle::race_camera(
+                    t,
+                    _play.dump.player.race as i32,
+                    _play.session.expansion & net::session::EXPANSION_FLAGS,
+                )
+            });
+            crate::camstyle::set_style(&mut _walker.cam, mode, rc, &mut _walker.scene);
+        }
+        if let Some(pitch) = req.pitch {
+            let min_p = _walker.cam.walk.min_pitch.0;
+            let max_p = _walker.cam.walk.max_pitch.0;
+            let clamped = pitch.clamp(min_p, max_p);
+            _walker
+                .cam
+                .set_orbit_pitch_angle(vi::fpu::F::<vi::fpu::Ee>::new(clamped));
+        }
+        if let Some(distance) = req.distance {
+            _walker
+                .cam
+                .set_orbit_distance(vi::fpu::F::<vi::fpu::Ee>::new(distance));
+        }
+        if let Some(heading) = req.heading {
+            _walker
+                .cam
+                .set_orbit_angle(vi::fpu::F::<vi::fpu::Ee>::new(heading));
+        }
+        crate::fork_ext::addons::action_broker::resolve_server_camera(true, None);
     }
 }
 pub(crate) fn observe_text(_text: &str, _color: [f32; 4]) {
@@ -165,6 +818,18 @@ pub(crate) fn frame_library(
                 c.attack_words = start.attack_words.clone();
             }
         });
+        if crate::fork_ext::addons::native_core::capture_requested()
+            && let Some(walker) = _walker
+        {
+            let (proj, view) = walker.view(4.0 / 3.0);
+            CACHED_CYCLE_VIEW.with(|c| {
+                c.set(Some(CachedCycleView {
+                    eye: walker.eye_position(),
+                    dir: glam::Vec3::from(walker.eye.direction.to_array()),
+                    vp: proj * view,
+                }));
+            });
+        }
         let current_key = if let Some((vui, _, _)) = &_play.hud {
             AtlasKey::Hud(&vui.textures as *const _ as usize)
         } else if let Some((_, textures)) = &_play.ui_data {
@@ -223,6 +888,1293 @@ pub(crate) fn art_changed() {
     crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow_mut().words = None);
     #[cfg(not(target_arch = "wasm32"))]
     crate::fork_ext::addons::icons::notify_art_changed();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_action_snapshot(play: &Play) -> crate::fork_ext::addons::action_broker::NativeSnapshot {
+    let loot_open = play.mode == 1 && play.npcw.corpse.is_some();
+    if !loot_open {
+        LOOT_BUSY.with(|b| b.set(false));
+    }
+    crate::fork_ext::addons::action_broker::NativeSnapshot {
+        in_world: play.in_world_now(),
+        mode: play.mode,
+        bank_busy: play.bank.state != 0,
+        merchant_pending: play.npcw.shop.pending,
+        loot_busy: LOOT_BUSY.with(|b| b.get()),
+        inventory_busy: play.waiting,
+        merchant_open: play.mode == 10 && play.npcw.shop.id.is_some(),
+        bank_open: play.mode == 11,
+        loot_open,
+        master_loot_active: crate::fork_ext::addons::action_broker::is_master_loot_active(),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn lookup_ability<'a>(
+    play: &'a Play,
+    spec: &crate::fork_ext::addons::action_broker::AbilityLookup,
+) -> Option<&'a net::dump::Ability> {
+    if let Some(id) = spec.id
+        && let Some(a) = play.abilities.get(&id)
+    {
+        return Some(a);
+    }
+    if let Some(idx) = spec.index
+        && let Some(a) = play.abilities.values().find(|a| a.display_index == idx)
+    {
+        return Some(a);
+    }
+    if let Some(name) = &spec.name
+        && let Some(a) = play
+            .abilities
+            .values()
+            .find(|a| a.name.eq_ignore_ascii_case(name))
+    {
+        return Some(a);
+    }
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn ee_dist_sq(a: [f32; 3], b: [f32; 3]) -> f32 {
+    let dx = ee::sub(a[0], b[0]);
+    let dy = ee::sub(a[1], b[1]);
+    let dz = ee::sub(a[2], b[2]);
+    ee::add(ee::add(ee::mul(dx, dx), ee::mul(dy, dy)), ee::mul(dz, dz))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dispatch_broker_action(
+    play: &mut Play,
+    kind: &crate::fork_ext::addons::action_broker::ActionKind,
+) -> crate::fork_ext::addons::action_broker::DispatchOutcome {
+    use crate::fork_ext::addons::action_broker::{ActionKind, DispatchOutcome, ServerMatcher};
+    if !play.in_world_now() {
+        return DispatchOutcome::Refused {
+            code: "not_in_world",
+            reason: "enter a loaded world first".into(),
+        };
+    }
+    match kind {
+        ActionKind::Assist => {
+            if play.is_dead() {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot assist while dead".into(),
+                };
+            }
+            if !matches!(play.mode, 0 | 38) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: format!("cannot assist while in mode {}", play.mode),
+                };
+            }
+            play.assist_target();
+            DispatchOutcome::AwaitingServer {
+                matcher: ServerMatcher::Assist,
+                detail: None,
+            }
+        }
+        ActionKind::Target(opt_id) => {
+            if !matches!(play.mode, 0 | 38) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: format!("cannot change target while in mode {}", play.mode),
+                };
+            }
+            match opt_id {
+                None => {
+                    play.target_id(u32::MAX);
+                    DispatchOutcome::Completed { detail: None }
+                }
+                Some(id) => {
+                    let exists = play
+                        .entities
+                        .slots
+                        .iter()
+                        .flatten()
+                        .any(|e| e.id == *id && play.in_scene(e) && (e.p18 & 1 != 0));
+                    if !exists {
+                        return DispatchOutcome::Refused {
+                            code: "not_found",
+                            reason: format!("entity {id} is not targetable in scene"),
+                        };
+                    }
+                    play.target_id(*id);
+                    DispatchOutcome::Completed { detail: None }
+                }
+            }
+        }
+        ActionKind::CycleTarget { group, filter } => {
+            if play.is_dead() {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot cycle target while dead".into(),
+                };
+            }
+            if !matches!(play.mode, 0 | 38) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: format!("cannot cycle target while in mode {}", play.mode),
+                };
+            }
+            if let Some(kind) = filter.as_deref()
+                && kind == "corpse"
+            {
+                let mut ids: Vec<u32> = play
+                    .entities
+                    .slots
+                    .iter()
+                    .flatten()
+                    .filter(|e| play.in_scene(e) && (e.p18 & 1 != 0) && (e.p18 & 2 != 0))
+                    .map(|e| e.id)
+                    .collect();
+                ids.sort_unstable();
+                let next = ids
+                    .iter()
+                    .copied()
+                    .find(|id| *id > play.target)
+                    .or_else(|| ids.first().copied());
+                play.centre_target(next);
+                return DispatchOutcome::Completed { detail: None };
+            }
+            let view = CACHED_CYCLE_VIEW.with(|c| c.get()).unwrap_or_else(|| {
+                let eye = play
+                    .self_at
+                    .map_or(glam::Vec3::ZERO, |s| glam::Vec3::from(s.0));
+                let dir = glam::Vec3::NEG_Z;
+                let vp = crate::walker::projection_to(4.0 / 3.0, 300.0)
+                    * glam::camera::rh::view::look_to_mat4(eye, dir, glam::Vec3::Y);
+                CachedCycleView { eye, dir, vp }
+            });
+            play.cycle_target(*group, view.eye, view.dir, view.vp, view.vp);
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::Interact => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot interact right now".into(),
+                };
+            }
+            if play.target == u32::MAX
+                || !play
+                    .entities
+                    .slots
+                    .iter()
+                    .flatten()
+                    .any(|e| e.id == play.target && play.in_scene(e))
+            {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "no valid target to interact with".into(),
+                };
+            }
+            play.interact_with_target();
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::Attack { on } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot toggle attack right now".into(),
+                };
+            }
+            let want_on = match on {
+                Some(b) => *b,
+                None => !play.auto_attack,
+            };
+            if !want_on {
+                play.auto_attack = false;
+                play.attack_release();
+                return DispatchOutcome::Completed { detail: None };
+            }
+            let Some(ent) = play
+                .entities
+                .slots
+                .iter()
+                .flatten()
+                .find(|e| e.id == play.target && play.in_scene(e))
+            else {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "no valid target to attack".into(),
+                };
+            };
+            if Some(ent.id) == play.self_id32()
+                || (ent.p18 & 2 != 0)
+                || ent
+                    .creature
+                    .as_ref()
+                    .is_none_or(|c| (c.npc_flags & 0x80) != 0)
+            {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "current target cannot be attacked".into(),
+                };
+            }
+            play.attack_press();
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::Cast(lookup) => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot cast right now".into(),
+                };
+            }
+            if play.control_client().casting {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "already casting".into(),
+                };
+            }
+            let Some(ability) = lookup_ability(play, lookup).cloned() else {
+                return DispatchOutcome::Refused {
+                    code: "not_found",
+                    reason: "ability not found in spellbook".into(),
+                };
+            };
+            if ability.valid == 0 || ability.slot < 0 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "ability is not memorized".into(),
+                };
+            }
+            if ability.lockout > 0 {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "ability is on cooldown".into(),
+                };
+            }
+            if ability.power_cost > 0 && (play.stats.stat[9] as i64) < ability.power_cost {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "insufficient power".into(),
+                };
+            }
+            if matches!(ability.scope, 1 | 4) {
+                let Some(ent) = play
+                    .entities
+                    .slots
+                    .iter()
+                    .flatten()
+                    .find(|e| e.id == play.target && play.in_scene(e))
+                else {
+                    return DispatchOutcome::Refused {
+                        code: "not_ready",
+                        reason: "ability requires a target in scene".into(),
+                    };
+                };
+                if ability.scope == 4 && (ent.p18 & 2) == 0 {
+                    return DispatchOutcome::Refused {
+                        code: "not_ready",
+                        reason: "ability requires a corpse target".into(),
+                    };
+                }
+                if ability.range > 0.0
+                    && let Some((self_pos, _)) = play.self_at
+                {
+                    let d2 = ee_dist_sq(self_pos, ent.actor_pos);
+                    let max_d2 = ee::mul(ability.range, ability.range);
+                    if ee::lt(max_d2, d2) {
+                        return DispatchOutcome::Refused {
+                            code: "not_ready",
+                            reason: "target is out of range".into(),
+                        };
+                    }
+                }
+            } else if ability.scope == 3 && play.pet_id == u32::MAX {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "ability requires an active pet".into(),
+                };
+            }
+            play.send_0032(ability.id);
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::UseHotbar { bar, slot } => {
+            if play.is_dead()
+                || !matches!(play.mode, 0 | 38)
+                || play.typing.is_some()
+                || play.map.open
+            {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot use hotbar right now".into(),
+                };
+            }
+            if *bar >= play.ability_bars() as usize {
+                return DispatchOutcome::Refused {
+                    code: "not_found",
+                    reason: format!("hotbar {} is not available", bar + 1),
+                };
+            }
+            let menu_idx = [0usize, 1, 4, 5][*bar];
+            let entry = play
+                .hud_menus
+                .defs
+                .get(menu_idx)
+                .and_then(|d| d.entries.get(*slot))
+                .copied()
+                .filter(|e| e.msg != 0 && e.id >= 0 && e.icon2 != -1);
+            let Some(entry) = entry else {
+                return DispatchOutcome::Refused {
+                    code: "not_found",
+                    reason: "hotbar slot is empty".into(),
+                };
+            };
+            if *bar < 2 {
+                play.bar_slot_key(*bar, *slot);
+            } else {
+                play.hud_menus.menus[menu_idx].sel = *slot as i32;
+                play.use_hud_entry(entry.msg, entry.id);
+            }
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::Chat { text } | ActionKind::Command { text } => {
+            if crate::fork_ext::addons::gesture::is_forbidden_report_text(text) {
+                return DispatchOutcome::Refused {
+                    code: "permission_denied",
+                    reason: "synthetic report routes (/bug, #bug, /feature, #feature) are forbidden".into(),
+                };
+            }
+            play.chat_line(text);
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::Autorun { on } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot toggle autorun right now".into(),
+                };
+            }
+            let want = match on {
+                Some(b) => *b,
+                None => !play.autorun,
+            };
+            if play.autorun != want {
+                play.toggle_autorun();
+            }
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::Follow { target_id } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot follow right now".into(),
+                };
+            }
+            if let Some(id) = target_id {
+                if Some(*id) == play.self_id32() {
+                    return DispatchOutcome::Refused {
+                        code: "invalid_argument",
+                        reason: "cannot follow yourself".into(),
+                    };
+                }
+                let exists = play
+                    .entities
+                    .slots
+                    .iter()
+                    .flatten()
+                    .any(|e| e.id == *id && play.in_scene(e));
+                if !exists {
+                    return DispatchOutcome::Refused {
+                        code: "not_found",
+                        reason: format!("entity {id} is not in scene"),
+                    };
+                }
+                if play.target != *id {
+                    play.target_id(*id);
+                }
+                if play.following && play.follow_id == *id {
+                    return DispatchOutcome::Completed { detail: None };
+                }
+                play.following = false;
+                play.do_action(0x0B0E_0007, 0);
+                if !play.following {
+                    return DispatchOutcome::Refused {
+                        code: "not_ready",
+                        reason: "target cannot be followed".into(),
+                    };
+                }
+            } else if play.following {
+                play.do_action(0x0B0E_0007, 0);
+            } else {
+                play.do_action(0x0B0E_0007, 0);
+                if !play.following {
+                    return DispatchOutcome::Refused {
+                        code: "not_ready",
+                        reason: "no followable target selected".into(),
+                    };
+                }
+            }
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::Stop => {
+            play.auto_attack = false;
+            play.attack_release();
+            if play.autorun {
+                play.toggle_autorun();
+            }
+            if play.following {
+                play.following = false;
+                play.follow_id = u32::MAX;
+            }
+            play.cast_window = (0, 0);
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::OpenWindow { kind, arg } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: format!("cannot open window while in mode {}", play.mode),
+                };
+            }
+            match kind.as_str() {
+                "summary" | "trainer" | "skills" => {
+                    play.trainer_open = true;
+                    play.trainer_from_hud = true;
+                    play.mode = 12;
+                }
+                "map" => {
+                    if !crate::settings::map() {
+                        return DispatchOutcome::Refused {
+                            code: "unsupported",
+                            reason: "map is disabled in settings".into(),
+                        };
+                    }
+                    play.map.show();
+                }
+                "abilities" | "spellbook" => play.start_actions(vec![(0x0801_0000, 0)]),
+                "quests" => play.start_actions(vec![(0x0B0A_0000, 0)]),
+                "mastery" => play.start_actions(vec![(0x0208_0000, 0)]),
+                "factions" => play.start_actions(vec![(0xAA00_0001, 0)]),
+                "options" => play.open_options(),
+                "friends" | "buddies" => play.start_actions(vec![(0x0B05_0000, 0)]),
+                "ignore" => play.start_actions(vec![(0x0B05_3000, 0)]),
+                "guild" => {
+                    if !play.guild.in_guild {
+                        return DispatchOutcome::Refused {
+                            code: "not_ready",
+                            reason: "character is not in a guild".into(),
+                        };
+                    }
+                    play.do_action(0x0B05_1001, 0);
+                }
+                "mail" => play.start_actions(vec![(0x0B0B_0000, 0)]),
+                "mail_compose" => play.start_actions(vec![(0x0B0B_0002, 0)]),
+                "auction" | "auction_browse" => play.start_actions(vec![(0x0B0D_0000, 0)]),
+                "auction_search" => play.start_actions(vec![(0x0B0D_0001, 0)]),
+                "support" => play.start_actions(vec![(0x0B0B_1000, 0)]),
+                "support_inbox" => play.start_actions(vec![(0x0B0B_1001, 0)]),
+                "recipes" => play.start_actions(vec![(0xA701_0000, *arg)]),
+                "experiment" => play.start_actions(vec![(0xA702_0000, 0)]),
+                "who" => {
+                    play.search_mode = false;
+                    play.who_open = true;
+                    play.mode = 35;
+                }
+                "search" => {
+                    let Some(art) = crate::searchwnd::Art::current() else {
+                        return DispatchOutcome::Refused {
+                            code: "not_ready",
+                            reason: "search UI assets not loaded".into(),
+                        };
+                    };
+                    play.search.open(play.dump.player.level as i32, art);
+                    play.search_mode = false;
+                    play.who_open = true;
+                    play.mode = 35;
+                }
+                "start" | "menu" => {
+                    if play.start.is_none() {
+                        return DispatchOutcome::Refused {
+                            code: "not_ready",
+                            reason: "start menu UI assets not loaded".into(),
+                        };
+                    }
+                    play.open_start_menu(true);
+                }
+                "inventory" | "bags" => {
+                    if play.start.is_none() {
+                        return DispatchOutcome::Refused {
+                            code: "not_ready",
+                            reason: "start menu UI assets not loaded".into(),
+                        };
+                    }
+                    play.open_start_menu(true);
+                    play.start_key(13, true);
+                    play.start_key(13, false);
+                }
+                _ => {
+                    return DispatchOutcome::Refused {
+                        code: "invalid_argument",
+                        reason: format!("unknown window kind '{kind}'"),
+                    };
+                }
+            }
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::WeaponSet { set } => {
+            if !play.gear.on {
+                return DispatchOutcome::Refused {
+                    code: "unsupported",
+                    reason: "server has not enabled weapon sets".into(),
+                };
+            }
+            if *set != crate::gear::BARE_HANDS && play.gear.empty(*set) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: format!("weapon set {} is empty", set + 1),
+                };
+            }
+            if !play.forge_use_weapon_set(*set) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot switch weapon set right now".into(),
+                };
+            }
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::PrepareWeaponSet { set, name } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot prepare weapon set right now".into(),
+                };
+            }
+            if !play.gear.on {
+                return DispatchOutcome::Refused {
+                    code: "unsupported",
+                    reason: "server has not enabled weapon sets".into(),
+                };
+            }
+            let has_preparable = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .any(|it| it.equip_slot >= 0 && crate::gear::preparable(it.item.wear_slot));
+            if !has_preparable {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "no preparable weapon is currently equipped".into(),
+                };
+            }
+            play.item_outs(vec![crate::itemmenu::ItemOut::GearSet(*set, name.clone())]);
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::AssignAbility { slot, ability } => {
+            if play.is_dead() {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot assign abilities while dead".into(),
+                };
+            }
+            if *slot >= 10 && play.ability_bars() <= 2 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "extended ability bars are not active".into(),
+                };
+            }
+            let Some(found) = lookup_ability(play, ability).cloned() else {
+                return DispatchOutcome::Refused {
+                    code: "not_found",
+                    reason: "ability not found in spellbook".into(),
+                };
+            };
+            if found.valid == 0 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "ability is not usable".into(),
+                };
+            }
+            play.book_actions(vec![crate::spellbook::Out::Send0033(
+                found.display_index,
+                *slot,
+            )]);
+            DispatchOutcome::AwaitingServer {
+                matcher: ServerMatcher::AbilitySlot {
+                    slot: *slot as u8,
+                    index: found.display_index as u8,
+                },
+                detail: None,
+            }
+        }
+        ActionKind::UnmemorizeAbility { slot, ability } => {
+            let found = if let Some(target_slot) = slot {
+                play.abilities
+                    .values()
+                    .find(|a| a.valid != 0 && a.slot == *target_slot)
+                    .cloned()
+            } else if let Some(lookup) = ability {
+                lookup_ability(play, lookup)
+                    .filter(|a| a.valid != 0 && a.slot >= 0)
+                    .cloned()
+            } else {
+                None
+            };
+            let Some(found) = found else {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "ability or slot is not memorized".into(),
+                };
+            };
+            play.book_actions(vec![crate::spellbook::Out::Send0033(
+                found.display_index,
+                found.slot,
+            )]);
+            DispatchOutcome::AwaitingServer {
+                matcher: ServerMatcher::AbilitySlot {
+                    slot: found.slot as u8,
+                    index: found.display_index as u8,
+                },
+                detail: None,
+            }
+        }
+        ActionKind::UnmemorizeAll => {
+            if !play.abilities.values().any(|a| a.slot >= 0) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "no abilities are memorized".into(),
+                };
+            }
+            play.book_actions(vec![crate::spellbook::Out::Send00FE]);
+            DispatchOutcome::AwaitingServer {
+                matcher: ServerMatcher::AbilityClearBar,
+                detail: None,
+            }
+        }
+        ActionKind::ArrangeAbility { from, to } => {
+            let Some(from_ab) = lookup_ability(play, from).cloned() else {
+                return DispatchOutcome::Refused {
+                    code: "not_found",
+                    reason: "source ability not found in spellbook".into(),
+                };
+            };
+            let Some(to_ab) = lookup_ability(play, to).cloned() else {
+                return DispatchOutcome::Refused {
+                    code: "not_found",
+                    reason: "destination ability not found in spellbook".into(),
+                };
+            };
+            if from_ab.display_index == to_ab.display_index {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: "source and destination abilities must differ".into(),
+                };
+            }
+            play.book_actions(vec![crate::spellbook::Out::Send003A(
+                from_ab.display_index,
+                to_ab.display_index,
+            )]);
+            DispatchOutcome::AwaitingServer {
+                matcher: ServerMatcher::AbilityMoveIndex {
+                    from: from_ab.display_index as u8,
+                    to: to_ab.display_index as u8,
+                },
+                detail: None,
+            }
+        }
+        ActionKind::UseItem { item } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38 | 13) || play.waiting {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot use inventory items right now".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item handle is stale or item moved".into(),
+                };
+            }
+            let Some((slot_idx, it)) = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, it)| it.inv_index == item.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item is no longer in inventory".into(),
+                };
+            };
+            let pl = &play.dump.player;
+            if !crate::inventory::can_use(it, pl.class, pl.race, pl.level) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: cannot_use_reason(it, pl),
+                };
+            }
+            play.use_item(slot_idx as i32, 0);
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::Equip { item } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38 | 13) || play.waiting {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot equip items right now".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item handle is stale or item moved".into(),
+                };
+            }
+            let Some((slot_idx, it)) = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, it)| it.inv_index == item.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item is no longer in inventory".into(),
+                };
+            };
+            if it.item.wear_slot < 0 {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: "item is not equippable".into(),
+                };
+            }
+            let pl = &play.dump.player;
+            if !crate::inventory::can_use(it, pl.class, pl.race, pl.level) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: cannot_use_reason(it, pl),
+                };
+            }
+            play.use_item(slot_idx as i32, 0);
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::SwapItems { a, b } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38 | 13) || play.waiting {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot swap inventory items right now".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(a)
+                || !crate::fork_ext::addons::native_items::is_handle_fresh(b)
+            {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item handle is stale or item moved".into(),
+                };
+            }
+            let Some((ia, ita)) = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, it)| it.inv_index == a.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "first item is no longer in inventory".into(),
+                };
+            };
+            let Some((ib, itb)) = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, it)| it.inv_index == b.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "second item is no longer in inventory".into(),
+                };
+            };
+            if ita.equip_slot >= 0 || itb.equip_slot >= 0 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot swap equipped items".into(),
+                };
+            }
+            play.item_outs(vec![crate::itemmenu::ItemOut::Swap(ia as i32, ib as i32)]);
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::QuickSlot { item, slot } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38 | 13) || play.waiting {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot assign quick slot right now".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item handle is stale or item moved".into(),
+                };
+            }
+            let Some((idx, it)) = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, it)| it.inv_index == item.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item is no longer in inventory".into(),
+                };
+            };
+            let fits = if play.gear.on {
+                (it.item.p4c == 2 && *slot < 2) || (it.item.p4c == 7 && (2..4).contains(slot))
+            } else {
+                (it.item.p4c == 2 && *slot < 2)
+                    || (it.item.p4c == 7 && *slot == 2)
+                    || (crate::inventory::fits_slot3(it) && *slot == 3)
+            };
+            if !fits {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: format!("item does not fit quick slot {}", *slot + 1),
+                };
+            }
+            play.item_outs(vec![crate::itemmenu::ItemOut::QuickSlot(
+                idx as i32,
+                *slot as i32,
+            )]);
+            DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::Loot { item, count } => {
+            if play.mode != 1 || play.npcw.corpse.is_none() {
+                return DispatchOutcome::Refused {
+                    code: "window_closed",
+                    reason: "corpse window is not open".into(),
+                };
+            }
+            if crate::fork_ext::addons::action_broker::is_master_loot_active() {
+                return DispatchOutcome::Refused {
+                    code: "permission_denied",
+                    reason: "corpse is under master loot rules".into(),
+                };
+            }
+            if LOOT_BUSY.with(|b| b.get()) || PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "loot transaction already pending".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "loot handle is stale or corpse changed".into(),
+                };
+            }
+            let Some(corpse) = play.npcw.corpse.as_ref() else {
+                return DispatchOutcome::Refused {
+                    code: "window_closed",
+                    reason: "corpse window is not open".into(),
+                };
+            };
+            let Some(it) = corpse.items.iter().find(|it| it.inv_index == item.inv_index) else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item is no longer on corpse".into(),
+                };
+            };
+            let n = count.unwrap_or(it.quantity);
+            if n < 1 || n > it.quantity {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: format!("invalid loot count {n} (stack has {})", it.quantity),
+                };
+            }
+            if !has_list_room(&play.dump.inventory, it, n, crate::inventory::pack_cap()) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "inventory is full".into(),
+                };
+            }
+            PENDING_NPCW_TX.with(|p| {
+                *p.borrow_mut() = Some(PendingNpcwTx::LootOne {
+                    key: it.inv_index,
+                    count: n as i32,
+                });
+            });
+            DispatchOutcome::Staged {
+                matcher: ServerMatcher::LootOne {
+                    key: it.inv_index,
+                    qty_before: it.quantity,
+                    count: n,
+                },
+                detail: Some(serde_json::json!({"count": n})),
+            }
+        }
+        ActionKind::LootAll => {
+            if play.mode != 1 || play.npcw.corpse.is_none() {
+                return DispatchOutcome::Refused {
+                    code: "window_closed",
+                    reason: "corpse window is not open".into(),
+                };
+            }
+            if crate::fork_ext::addons::action_broker::is_master_loot_active() {
+                return DispatchOutcome::Refused {
+                    code: "permission_denied",
+                    reason: "corpse is under master loot rules".into(),
+                };
+            }
+            if LOOT_BUSY.with(|b| b.get()) || PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "loot transaction already pending".into(),
+                };
+            }
+            let Some(corpse) = play.npcw.corpse.as_ref() else {
+                return DispatchOutcome::Refused {
+                    code: "window_closed",
+                    reason: "corpse window is not open".into(),
+                };
+            };
+            if corpse.items.is_empty() {
+                return DispatchOutcome::Refused {
+                    code: "not_found",
+                    reason: "corpse has no items to loot".into(),
+                };
+            }
+            PENDING_NPCW_TX.with(|p| {
+                *p.borrow_mut() = Some(PendingNpcwTx::LootAll);
+            });
+            DispatchOutcome::Staged {
+                matcher: ServerMatcher::LootAll,
+                detail: None,
+            }
+        }
+        ActionKind::Buy { ware, count } => {
+            if play.mode != 10 || play.npcw.shop.id.is_none() {
+                return DispatchOutcome::Refused {
+                    code: "window_closed",
+                    reason: "merchant window is not open".into(),
+                };
+            }
+            if play.npcw.shop.pending || PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "merchant transaction already pending".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(ware) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "merchant ware handle is stale".into(),
+                };
+            }
+            let Some((_, it)) = play
+                .npcw
+                .shop
+                .wares
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, it)| it.inv_index == ware.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "ware is no longer offered by merchant".into(),
+                };
+            };
+            if it.item.max_stack == 0 && *count > 1 {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: "non-stackable ware cannot be bought in quantity > 1".into(),
+                };
+            }
+            if it.item.max_stack > 0 && *count > it.item.max_stack {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: format!("count exceeds max stack ({})", it.item.max_stack),
+                };
+            }
+            let unit_price = crate::merchant::merchant_price(it, play.npcw.shop.buy_rate) as i64;
+            let total_price = unit_price.saturating_mul(*count);
+            if total_price > play.dump.player.p34 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "not enough tunar".into(),
+                };
+            }
+            if !has_list_room(&play.dump.inventory, it, *count, crate::inventory::pack_cap()) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "inventory is full".into(),
+                };
+            }
+            let qty_before: i64 = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .filter(|inv_it| inv_it.item.id == it.item.id)
+                .map(|inv_it| inv_it.quantity)
+                .sum();
+            PENDING_NPCW_TX.with(|p| {
+                *p.borrow_mut() = Some(PendingNpcwTx::Buy {
+                    ware_key: it.inv_index,
+                    count: *count as i32,
+                });
+            });
+            DispatchOutcome::Staged {
+                matcher: ServerMatcher::MerchantBuy {
+                    item_id: it.item.id,
+                    qty_before,
+                    count: *count,
+                },
+                detail: Some(serde_json::json!({"count": count, "total_price": total_price})),
+            }
+        }
+        ActionKind::Sell { item, count } => {
+            if play.mode != 10 || play.npcw.shop.id.is_none() {
+                return DispatchOutcome::Refused {
+                    code: "window_closed",
+                    reason: "merchant window is not open".into(),
+                };
+            }
+            if play.npcw.shop.pending || PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "merchant transaction already pending".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item handle is stale or item moved".into(),
+                };
+            }
+            let Some(it) = play
+                .dump
+                .inventory
+                .items
+                .iter()
+                .find(|it| it.inv_index == item.inv_index)
+            else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item is no longer in inventory".into(),
+                };
+            };
+            if it.equip_slot >= 0 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot sell an equipped item".into(),
+                };
+            }
+            if *count < 1 || *count > it.quantity {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: format!("sell count {} exceeds stack size {}", count, it.quantity),
+                };
+            }
+            let unit_price = crate::merchant::sell_price(it, play.npcw.shop.sell_rate) as i64;
+            let total_price = unit_price.saturating_mul(*count);
+            PENDING_NPCW_TX.with(|p| {
+                *p.borrow_mut() = Some(PendingNpcwTx::Sell {
+                    item_key: it.inv_index,
+                    count: *count as i32,
+                });
+            });
+            DispatchOutcome::Staged {
+                matcher: ServerMatcher::MerchantSell {
+                    key: it.inv_index,
+                    qty_before: it.quantity,
+                    count: *count,
+                },
+                detail: Some(serde_json::json!({"count": count, "total_price": total_price})),
+            }
+        }
+        ActionKind::BankMove {
+            from_bank,
+            item,
+            count,
+        } => {
+            if play.mode != 11 {
+                return DispatchOutcome::Refused {
+                    code: "window_closed",
+                    reason: "bank window is not open".into(),
+                };
+            }
+            if play.bank.state != 0 || PENDING_BANK_TX.with(|b| b.borrow().is_some()) {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "bank transaction already pending".into(),
+                };
+            }
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item handle is stale or item moved".into(),
+                };
+            }
+            let src_list = if *from_bank {
+                &play.dump.bank.items
+            } else {
+                &play.dump.inventory
+            };
+            let Some(it) = src_list.items.iter().find(|it| it.inv_index == item.inv_index) else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item is no longer in source container".into(),
+                };
+            };
+            if it.equip_slot >= 0 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot deposit an equipped item".into(),
+                };
+            }
+            if *count < 1 || *count > it.quantity {
+                return DispatchOutcome::Refused {
+                    code: "invalid_argument",
+                    reason: format!("bank move count {} exceeds stack size {}", count, it.quantity),
+                };
+            }
+            let (dst_list, cap) = if *from_bank {
+                (&play.dump.inventory, crate::inventory::pack_cap())
+            } else {
+                (&play.dump.bank.items, crate::inventory::bank_cap())
+            };
+            if !has_list_room(dst_list, it, *count, cap) {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: if *from_bank {
+                        "inventory is full".into()
+                    } else {
+                        "bank is full".into()
+                    },
+                };
+            }
+            PENDING_BANK_TX.with(|b| {
+                *b.borrow_mut() = Some(PendingBankTx::Move {
+                    from_bank: *from_bank,
+                    item_key: it.inv_index,
+                    count: *count as i32,
+                });
+            });
+            DispatchOutcome::Staged {
+                matcher: ServerMatcher::BankMove {
+                    from_bank: *from_bank,
+                    key: it.inv_index,
+                    item_id: it.item.id,
+                    qty_before: it.quantity,
+                    count: *count,
+                },
+                detail: Some(serde_json::json!({"from_bank": from_bank, "count": count})),
+            }
+        }
+        ActionKind::BankMoney { dir, amount } => {
+            if play.mode != 11 {
+                return DispatchOutcome::Refused {
+                    code: "window_closed",
+                    reason: "bank window is not open".into(),
+                };
+            }
+            if play.bank.state != 0 || PENDING_BANK_TX.with(|b| b.borrow().is_some()) {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "bank transaction already pending".into(),
+                };
+            }
+            if *dir == 1 && *amount > play.dump.player.p34 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "not enough carried tunar to deposit".into(),
+                };
+            }
+            if *dir == 2 && *amount > play.dump.player.p38 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "not enough bank tunar to withdraw".into(),
+                };
+            }
+            PENDING_BANK_TX.with(|b| {
+                *b.borrow_mut() = Some(PendingBankTx::Money {
+                    dir: *dir,
+                    amount: *amount as i32,
+                });
+            });
+            DispatchOutcome::Staged {
+                matcher: ServerMatcher::BankMoney {
+                    dir: *dir,
+                    bank_before: play.dump.player.p38,
+                    amount: *amount,
+                },
+                detail: Some(serde_json::json!({"dir": if *dir == 1 { "deposit" } else { "withdraw" }, "amount": amount})),
+            }
+        }
+        ActionKind::Camera {
+            mode,
+            heading,
+            pitch,
+            distance,
+        } => {
+            if !matches!(play.mode, 0 | 38) || play.is_dead() {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "camera cannot change in current state".into(),
+                };
+            }
+            PENDING_CAMERA.with(|c| {
+                c.set(Some(PendingCameraReq {
+                    mode: *mode,
+                    heading: *heading,
+                    pitch: *pitch,
+                    distance: *distance,
+                }));
+            });
+            DispatchOutcome::Staged {
+                matcher: ServerMatcher::Camera,
+                detail: None,
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn cannot_use_reason(it: &net::dump::NetItem, pl: &net::dump::Player) -> String {
+    let c = 1i64 << pl.class.clamp(0, 31);
+    let r = 1i64 << pl.race.clamp(0, 31);
+    if it.item.class_mask & c == 0 {
+        "wrong class".into()
+    } else if it.item.race_mask & r == 0 {
+        "wrong race".into()
+    } else if pl.level < it.item.level_req {
+        format!("requires level {}", it.item.level_req)
+    } else {
+        "cannot use item".into()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn has_list_room(
+    list: &net::dump::ItemList,
+    item: &net::dump::NetItem,
+    count: i64,
+    cap: usize,
+) -> bool {
+    if item.item.max_stack > 1
+        && list.items.iter().any(|existing| {
+            existing.item.id == item.item.id
+                && existing.quantity + count <= item.item.max_stack
+        })
+    {
+        return true;
+    }
+    list.items.len() < cap
 }
 
 #[cfg(not(target_arch = "wasm32"))]

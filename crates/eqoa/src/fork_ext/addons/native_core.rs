@@ -434,6 +434,7 @@ impl Core {
     }
     pub fn reset(&mut self, reason: &str) {
         super::input::reset_input_state();
+        super::action_broker::reset_session(reason);
         if self.view.in_world {
             self.emit(
                 "world.leaving",

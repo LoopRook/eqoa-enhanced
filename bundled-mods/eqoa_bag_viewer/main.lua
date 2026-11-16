@@ -1,11 +1,11 @@
--- Bag viewer: a read-only Bags window over the public eqoa items API.
+-- Bag viewer: Bags, Bank, and Corpse window over the public eqoa items & actions API.
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 local ui = eqoa.imgui
 local B = require("bags")
 
 -- Sizes are in HUD frame pixels (640x448), scaled as the HUD is.
 local W, PAD, SLOT, GAP, LINE, LOG_LINES = 318, 8, 36, 2, 12, 6
-local tokens, escape, tab_hits, log_rect, last = {}, nil, {}, nil, nil
+local tokens, escape, tab_hits, slot_hits, menu_hits, action_hits, log_rect = {}, nil, {}, {}, {}, {}, nil
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
@@ -21,21 +21,51 @@ local function close()
     for _, token in ipairs(tokens) do eqoa.events.off(token) end
     tokens = {}
     if escape then eqoa.input.release(escape); escape = nil end
-    B.open, B.hover, tab_hits, log_rect = false, nil, {}, nil
+    B.open, B.hover, B.menu, B.menu_rect = false, nil, nil, nil
+    tab_hits, slot_hits, menu_hits, action_hits, log_rect = {}, {}, {}, {}, nil
+    B.tab_hits, B.slot_hits, B.menu_hits, B.action_hits = tab_hits, slot_hits, menu_hits, action_hits
 end
 
 local function open()
     if B.open then return end
-    B.open, B.grid = true, nil
+    if not B.junk_loaded then B.load_junk() end
+    B.open, B.grid, B.menu = true, nil, nil
     listen("render", draw)
-    for _, name in ipairs({"inventory.changed", "bank.changed", "state.reset"}) do listen(name, B.dirty) end
+    for _, name in ipairs({"inventory.changed", "bank.changed", "loot.changed", "merchant.changed", "state.reset"}) do
+        listen(name, B.dirty)
+    end
+    listen("action.result", function(e) B.on_action_result(e.data) end)
+    listen("batch.progress", function(e) B.on_batch_progress(e.data) end)
+    listen("batch.result", function(e) B.on_batch_result(e.data) end)
     listen("input.key", function(e)
-        if e.data.down and not e.data["repeat"] and e.data.key:lower() == "escape" then close() end
+        if e.data.down and not e.data["repeat"] and e.data.key:lower() == "escape" then
+            if B.menu then B.menu, B.menu_rect = nil, nil else close() end
+        end
     end)
     listen("pointer.pressed", function(e)
         local d = e.data
+        if B.menu then
+            if d.button == "right" then B.menu, B.menu_rect = nil, nil; return end
+            if d.button == "left" then
+                for _, h in ipairs(menu_hits) do
+                    if inside(d.x, d.y, h) then
+                        B.trigger_menu(h.row)
+                        B.menu, B.menu_rect = nil, nil
+                        return
+                    end
+                end
+                if inside(d.x, d.y, B.menu_rect) then return end
+                B.menu, B.menu_rect = nil, nil
+            end
+        end
         if d.button ~= "left" then return end
         for _, h in ipairs(tab_hits) do if inside(d.x, d.y, h) then B.select(h.tab); return end end
+        for _, h in ipairs(slot_hits) do
+            if inside(d.x, d.y, h) then B.build_menu(h.item, h.fx, h.fy); return end
+        end
+        for _, h in ipairs(action_hits) do
+            if inside(d.x, d.y, h) and h.run then h.run(); return end
+        end
     end)
     listen("pointer.wheel", function(e)
         local d, steps = e.data, e.data.steps or 0
@@ -51,6 +81,7 @@ eqoa.input.bind({id = "open", label = "Bag viewer", default_key = ""}, function(
     if B.open then close() else open() end
 end)
 -- The loot log is the one thing kept while the window is closed, from events only.
+B.load_junk()
 eqoa.events.on("loot.changed", function(e) B.log_loot(e.data) end)
 eqoa.events.on("disabling", close)
 
@@ -66,8 +97,14 @@ function draw()
     local gy = 46
     local gh = grid.rows * SLOT + (grid.rows - 1) * GAP
     local info_y = gy + gh + 5
-    local log_y = info_y + 38
-    local H = log_y + LOG_LINES * LINE + PAD
+    local res_y = info_y + 14
+    local div_y = res_y + 13
+    local log_hdr_y = div_y + 4
+    local log_y = log_hdr_y + 15
+    local bar_y = log_y + LOG_LINES * LINE + 4
+    local bar2_y = bar_y + 18
+    local has_ctx_btn = eqoa.merchant.get() ~= nil or eqoa.loot.get() ~= nil
+    local H = (has_ctx_btn and (bar2_y + 18) or (bar_y + 18)) + PAD
     -- centred in the HUD frame, and on screen wherever the window is sized
     local x0 = math.max(0, math.min(dw - W * k, f.offset_x + (640 - W) / 2 * f.scale_x))
     local y0 = math.max(0, math.min(dh - H * k, f.offset_y + (448 - H) / 2 * f.scale_y))
@@ -87,7 +124,9 @@ function draw()
         surface = ui.GetColorU32(.067, .067, .067, .96), raised = ui.GetColorU32(.11, .11, .11, 1),
         border = ui.GetColorU32(.25, .25, .25, 1), red = ui.GetColorU32(.843, .098, .129, 1),
         worn = ui.GetColorU32(.35, .8, .4, 1), warn = ui.GetColorU32(1, .3, .3, 1),
+        junk = ui.GetColorU32(.95, .72, .20, 1),
         white = ui.GetColorU32(1, 1, 1, 1), shadow = ui.GetColorU32(0, 0, 0, 1),
+        menu_bg = ui.GetColorU32(.09, .09, .10, .98), menu_hl = ui.GetColorU32(.20, .20, .24, 1),
     }
     local kinds = {title = c.white, text = c.text, muted = c.muted, red = c.warn}
     local function fill(x, y, w, h, color) dl:AddRectFilled(at(x, y), at(x + w, y + h), color) end
@@ -107,16 +146,18 @@ function draw()
     tab_hits = {}
     B.tab_hits = tab_hits
     local tx = PAD
-    for i, t in ipairs(B.TABS) do
+    for _, t in ipairs(B.visible_tabs()) do
         local tw = ui.CalcTextSize(t.label) / k + 8
-        text(tx + 4, 25, t.label, B.tab == i and c.text or c.muted)
-        if B.tab == i then fill(tx, 39, tw, 2, c.red) end
-        tab_hits[#tab_hits + 1] = {x = x0 + tx * k, y = y0 + 22 * k, w = tw * k, h = 19 * k, tab = i}
+        text(tx + 4, 25, t.label, B.tab == t.idx and c.text or c.muted)
+        if B.tab == t.idx then fill(tx, 39, tw, 2, c.red) end
+        tab_hits[#tab_hits + 1] = {x = x0 + tx * k, y = y0 + 22 * k, w = tw * k, h = 19 * k, tab = t.idx}
         tx = tx + tw + 2
     end
 
     local p = eqoa.input.pointer()
     local over
+    slot_hits = {}
+    B.slot_hits = slot_hits
     for slot = 1, grid.rows * B.COLUMNS do
         local col, row = (slot - 1) % B.COLUMNS, math.floor((slot - 1) / B.COLUMNS)
         local sx, sy = PAD + col * (SLOT + GAP), gy + row * (SLOT + GAP)
@@ -132,31 +173,135 @@ function draw()
                 text(sx + 14, sy + 11, it.name:sub(1, 1), c.muted)
             end
             if it.equipped then border = c.worn; fill(sx + 2, sy + 2, 9, 11, c.shadow); text(sx + 4, sy + 2, "E", c.worn) end
+            if not it.equipped and B.is_junk(it) then
+                fill(sx + SLOT - 11, sy + 2, 9, 11, c.shadow)
+                text(sx + SLOT - 9, sy + 2, "J", c.junk)
+            end
             if it.quantity > 1 then
                 local label = tostring(it.quantity)
                 local lw = ui.CalcTextSize(label) / k
                 text(sx + SLOT - lw - 2, sy + SLOT - 13, label, c.shadow)
                 text(sx + SLOT - lw - 3, sy + SLOT - 14, label, c.white)
             end
-            if p and p.inside_window and inside(p.x, p.y, {x = x0 + sx * k, y = y0 + sy * k, w = SLOT * k, h = SLOT * k}) then
+            slot_hits[#slot_hits + 1] = {
+                x = x0 + sx * k, y = y0 + sy * k, w = SLOT * k, h = SLOT * k,
+                item = it, fx = sx, fy = sy,
+            }
+            if not B.menu and p and p.inside_window and inside(p.x, p.y, {x = x0 + sx * k, y = y0 + sy * k, w = SLOT * k, h = SLOT * k}) then
                 over, border = entry, c.white
             end
         end
         frame(sx, sy, SLOT, SLOT, border)
     end
 
-    text(PAD, info_y, (grid.bank and "Bank tunar " or "Tunar ") .. B.tunar(grid.money), c.text)
+    local money_label
+    if grid.corpse then
+        money_label = "Corpse items"
+    elseif grid.bank then
+        money_label = "Bank tunar " .. B.tunar(grid.money)
+    else
+        money_label = "Tunar " .. B.tunar(grid.money)
+    end
+    text(PAD, info_y, money_label, c.text)
     local used = grid.used .. "/" .. (grid.capacity or "?")
     text(W - PAD - ui.CalcTextSize(used) / k, info_y, used, c.text)
-    fill(PAD, info_y + 16, W - 2 * PAD, 1, c.border)
-    text(PAD, info_y + 21, "Loot log", c.muted)
+
+    if B.result then
+        local rcol = B.result.ok == true and c.worn or (B.result.ok == false and c.warn or c.text)
+        text(PAD, res_y, B.result.text, rcol, W - 2 * PAD)
+    else
+        text(PAD, res_y, "Click an item for actions", c.muted, W - 2 * PAD)
+    end
+
+    fill(PAD, div_y, W - 2 * PAD, 1, c.border)
+    text(PAD, log_hdr_y, "Loot log", c.muted)
     log_rect = {x = x0 + PAD * k, y = y0 + log_y * k, w = (W - 2 * PAD) * k, h = LOG_LINES * LINE * k}
     if #B.log == 0 then text(PAD, log_y, "Nothing looted yet", c.muted) end
     for i = 1, LOG_LINES do
         local entry = B.log[B.scroll + i]
         if entry then text(PAD, log_y + (i - 1) * LINE, entry.text, c.text, W - 2 * PAD) end
     end
+
+    action_hits = {}
+    B.action_hits = action_hits
+    -- Row 1: grey-items toggle checkbox (left) and Stop button when batch running (right).
+    local cb_y = bar_y + 3
+    fill(PAD, cb_y, 11, 11, c.raised)
+    frame(PAD, cb_y, 11, 11, B.sell_grey and c.junk or c.border)
+    if B.sell_grey then fill(PAD + 2, cb_y + 2, 7, 7, c.junk) end
+    local cb_lbl = "Also sell grey items"
+    text(PAD + 15, cb_y - 1, cb_lbl, B.sell_grey and c.text or c.muted)
+    local cb_w = 15 + ui.CalcTextSize(cb_lbl) / k
+    action_hits[#action_hits + 1] = {
+        label = cb_lbl, x = x0 + PAD * k, y = y0 + bar_y * k, w = cb_w * k, h = 16 * k,
+        run = B.toggle_grey,
+    }
+    if B.batch_id ~= nil then
+        local sw = math.max(44, ui.CalcTextSize("Stop") / k + 14)
+        local sx = W - PAD - sw
+        fill(sx, bar_y, sw, 16, c.raised)
+        frame(sx, bar_y, sw, 16, c.red)
+        text(sx + 7, bar_y + 2, "Stop", c.white)
+        action_hits[#action_hits + 1] = {
+            label = "Stop", x = x0 + sx * k, y = y0 + bar_y * k, w = sw * k, h = 16 * k,
+            run = B.stop_batch,
+        }
+    end
+
+    -- Row 2 (when merchant/corpse open): full-width Sell junk / Take all but junk button.
+    local btn_lbl, btn_col, btn_border, btn_run
+    if eqoa.merchant.get() ~= nil then
+        local _, cnt, tunar = B.junk_sell_list()
+        btn_lbl = string.format("Sell junk (%d %s, %s tunar)", cnt, cnt == 1 and "item" or "items", B.tunar(tunar))
+        btn_col = cnt > 0 and c.text or c.muted
+        btn_border = cnt > 0 and c.junk or c.border
+        btn_run = B.start_sell_junk
+    elseif eqoa.loot.get() ~= nil then
+        local steps = B.loot_non_junk_list()
+        btn_lbl = "Take all but junk"
+        btn_col = #steps > 0 and c.text or c.muted
+        btn_border = #steps > 0 and c.worn or c.border
+        btn_run = B.start_loot_non_junk
+    end
+    if btn_lbl then
+        local bw = W - 2 * PAD
+        fill(PAD, bar2_y, bw, 16, c.raised)
+        frame(PAD, bar2_y, bw, 16, btn_border)
+        text(PAD + 6, bar2_y + 2, btn_lbl, btn_col, bw - 10)
+        action_hits[#action_hits + 1] = {
+            label = btn_lbl, x = x0 + PAD * k, y = y0 + bar2_y * k, w = bw * k, h = 16 * k,
+            run = btn_run,
+        }
+    end
+
     eqoa.input.claim_pointer({x = x0, y = y0, width = W * k, height = H * k})
+
+    menu_hits = {}
+    B.menu_hits = menu_hits
+    if B.menu then
+        local m = B.menu
+        local mw, rh = 232, 15
+        local mh = 18 + #m.rows * rh + 4
+        local mx = math.max(PAD, math.min(W - mw - PAD, m.fx + SLOT + 2))
+        local my = math.max(PAD, math.min(H - mh - PAD, m.fy))
+        B.menu_rect = {x = x0 + mx * k, y = y0 + my * k, w = mw * k, h = mh * k}
+        fill(mx, my, mw, mh, c.menu_bg)
+        frame(mx, my, mw, mh, c.red)
+        text(mx + 6, my + 3, m.title, c.white, mw - 12)
+        fill(mx + 4, my + 16, mw - 8, 1, c.border)
+        for i, r in ipairs(m.rows) do
+            local ry = my + 18 + (i - 1) * rh
+            local hr = {x = x0 + (mx + 2) * k, y = y0 + ry * k, w = (mw - 4) * k, h = rh * k, row = r}
+            if r.enabled and p and p.inside_window and inside(p.x, p.y, hr) then
+                fill(mx + 2, ry, mw - 4, rh, c.menu_hl)
+            end
+            local label = r.enabled and r.label or (r.label .. " (" .. (r.reason or "disabled") .. ")")
+            text(mx + 6, ry + 2, label, r.enabled and c.text or c.muted, mw - 12)
+            menu_hits[#menu_hits + 1] = hr
+        end
+    else
+        B.menu_rect = nil
+    end
 
     if over then
         local lines = B.card(over.item)

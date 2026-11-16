@@ -67,7 +67,7 @@ impl Session {
             ("actions", "assist target_target toggle_stats_box", 3),
             (
                 "actions",
-                "status cancel target cycle_target assist interact attack cast use_hotbar use_item equip destroy swap_items quick_slot weapon_set prepare_weapon_set assign_ability unmemorize_ability unmemorize_all arrange_ability loot loot_all buy sell bank_move bank_money chat command move look autorun follow stop camera open_window close_window select_row activate_row dialog_answer input_text drop_quest mastery_share mastery_browse mastery_buy mastery_refund buttons menu_command",
+                "status cancel batch stop_batch batch_status target cycle_target assist interact attack cast use_hotbar use_item equip destroy swap_items quick_slot weapon_set prepare_weapon_set assign_ability unmemorize_ability unmemorize_all arrange_ability loot loot_all buy sell bank_move bank_money chat command move look autorun follow stop camera open_window close_window select_row activate_row dialog_answer input_text drop_quest mastery_share mastery_browse mastery_buy mastery_refund buttons menu_command",
                 4,
             ),
             ("bank", "get", 3),
@@ -986,6 +986,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_events::install(host, host.once_mode())?;
     install_fields(lua);
     super::native_state::install(host)?;
+    super::action_broker::install(host)?;
     super::native_items::install(host)?;
     super::native_r6a::install(host)?;
     super::map_views::install(host)?;

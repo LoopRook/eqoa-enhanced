@@ -475,6 +475,7 @@ impl Play {
             }
         }
         self.cues.extend(cues.into_iter().map(crate::sound::Cue::Ui));
+        super::fork_hooks::npcw_requests(self, &mut loot_out, &mut merch_out);
         for o in loot_out {
             eprintln!("play: loot request {o:?}");
             match o {
