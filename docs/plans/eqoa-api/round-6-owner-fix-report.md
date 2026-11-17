@@ -11,6 +11,8 @@
 3. `73194a8b` — `fix(bag_viewer): bound window height to HUD frame and scroll large packs` (Item 5)
 4. `f5a75d05` — `feat(bag_viewer): add Take all button beside Take all but junk on Corpse footer` (Item 6)
 5. `6d87f0ce` — `test(bag_viewer): trigger loot source ask before corpse open in round6_item1`
+6. `bcabd928` — `docs(eqoa-api): round 6 owner-fix report`
+7. `2eae0689` — `fix(bags,loot): support per-take 0x0016 close and 0x0015 batch reopen`
 
 ## Per-Item Root Causes, Fixes, and Verification
 
@@ -22,13 +24,27 @@
   - Updated `M.start_loot_non_junk()` (and `M.start_loot_all()`) to call `M.dirty()` when `total == 0`.
 - **Verification**: `round6_item1_stale_corpse_grid_and_loot_batch_and_log` (`crates/eqoa/src/fork_ext/addons/bag_viewer_tests.rs`) — failed on base `2e4fb5fe` because `M.grid.rev` was missing; passes after fix, including negative controls for genuine `0/40` empty corpses (`"Corpse has no items"`, `ok = false`) and junk-only corpses (`"Corpse has only junk items"`, `ok = false`).
 
-### 2. `"Take all but junk"` taking one item per click (live-server reproducibility note)
-- **Offline observation**: Both before and after edits, in the offline test harness (`bv.play.bags_loot_confirm_one` injecting opcode `0x0019` followed by `bv.play.bags_broker_tick()`), clicking `"Take all but junk"` on a 3-item corpse (`Rat Pelt` marked junk, `Spider Silk`, `Bone Chip`) submits all non-junk steps in a single `eqoa.actions.batch({steps = steps, require_window = "loot"})`, resolves Step 1 on `0x0019`, and automatically dispatches and completes Step 2 (`"Looted 2 of 2"`, `ok = true`) in one click. Verified in `round6_item1_stale_corpse_grid_and_loot_batch_and_log`.
-- **Live-server gap stated plainly**: Reproducing "one item per click" requires observing the live server's packet sequence on loot. In code, `crates/eqoa/src/fork_ext/addons/native_items.rs:140` (`items_session_is_new`) resets all item handle incarnations whenever `0x0018` (`loot_open`) arrives (`stale_handle` on subsequent queued batch steps if a live server re-sends `0x0018` after `LootOut::One`), and `crates/eqoa/src/fork_ext/play.rs:115-124` + `crates/eqoa/src/fork_ext/addons/action_broker.rs:1985-2014` require `0x0019` whose first byte indexes `corpse.items` matching `key` and exact remaining stack count. No artificial passing test was invented for live-server packet ordering not reproducible offline.
+### 2. `"Take all but junk"` taking one item per click (Sandstorm per-take `0x0016` + `0x0015` reopen)
+- **Root cause** (confirmed from owner's live `config/eqoa.log`): Sandstorm never sends `0x0019` (`LootOne` reply) or `0x001A` (`LootAll` reply). Instead, after every single `LootOut::One(key, count)` request, the server sends item confirmation (`0x003B Event::InvAdd` + chat `"You receive <item> from the corpse."`) and immediately sends `0x0016` (0 bytes, `LootClose`). Prior to `2eae0689`, `resolve_server_loot_close()` resolved the in-flight `LootOne` as `state = "unknown"` and `step_tick` stopped the batch on `!win.is_open`, resulting in one item per click. Across corpse reopens (`0x0015` -> new `0x0018`), `native_items::items_session_is_new` also rotates all item handles and wire keys re-index (`0, 1, ...`).
+- **Fix** (`0` upstream lines added):
+  - `crates/eqoa/src/fork_ext/play.rs` & `crates/eqoa/src/fork_ext/addons/action_broker.rs`:
+    - `InvAdd` calls `mark_loot_inv_added(item_id)` to mark matching in-flight `LootOne` / `LootAll` actions `inv_confirmed = true`.
+    - `resolve_server_loot_close()` treats `inv_confirmed` on `0x0016` as `ok = Some(true)` (`state = "completed"`), clears `LOOT_BUSY`, and if more `ActionKind::Loot` steps remain in the batch for the targeted corpse (`corpse_target_id`), transitions the batch into `corpse_reopen` instead of aborting on closed window.
+    - While `corpse_reopen` is active in `mode == 0` with the same corpse still targeted, `begin_iteration` calls `take_corpse_reopen_ask()` and triggers `_play.attack_press()` (the game's own `0x0015` loot-request path).
+    - `resolve_server_loot_open` accepts the smaller `0x0018` for the same corpse (or aborts cleanly on 5-byte empty `is_empty` or corpse mismatch), and `dispatch_broker_action` re-resolves stale step handles by `LootItemIdentity` via `native_items::re_resolve_loot_handle()`.
+    - The reopen/batch aborts cleanly on `0x0085` refusal (`resolve_server_loot_blocked`), 5-byte empty `0x0018`, zoning (`reset_session`), targeting another entity (`corpse_target_id`), `SERVER_TIMEOUT_TICKS` (`300` ticks = 10s), or clicking `Stop`.
+- **What `"Take all"` (`0x001A`) does on Sandstorm**: `eqoa.actions.loot_all()` sends wire `LootOut::All` (`0x001A`). On servers that answer `0x001A`, `resolve_server_loot_all` confirms all items (`round6_item6_take_all_button_on_corpse_tab`). On a server like Sandstorm that never answers `0x001A`: if the server sends `0x0016` after an `InvAdd`, `resolve_server_loot_close` resolves `ok = Some(true)` (only the confirmed item) or `state = "unknown"`; if the server sends no `0x0016` or `0x001A`, the action times out after `SERVER_TIMEOUT_TICKS` (`300` ticks = 10s), resolves `state = "unknown"` (`"Take all: timed out waiting for server reply"`), and `take_loot_timeout_expired()` clears `LOOT_BUSY` in `play.rs` so looting is not left wedged.
+- **Verification**: `round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls` (`crates/eqoa/src/fork_ext/addons/bag_viewer_tests.rs`) — fails on `bcabd928` (`assertion 'left == right' failed: Sandstorm take must log on InvAdd + 0x0016: [] (left: 0, right: 1)`) and passes after `2eae0689`, replaying the exact `0x0018 -> One(1,1) -> InvAdd -> chat -> 0x0016 -> 0x0015 -> smaller 0x0018 (key 2 -> 0) -> One(0,1) -> InvAdd -> 0x0016` sequence (`"Looted 2 of 2"`, `ok = true`) plus negative controls (`0x0085`, 5-byte empty/tunar-only, retargeting elsewhere, `Stop`, zoning, and unanswered `0x001A` timeout).
 
-### 3. `"Loot log: Nothing looted yet"` after looting by hand and batch
-- **Offline observation**: `M.log_loot(data)` (`bundled-mods/eqoa_bag_viewer/modules/bags.lua`) logs `loot.changed` events with `cause == "loot_one"` (`0x0019`) or `cause == "loot_all"` (`0x001A`) when both `data.before` and `data.after` are present (verified in `round6_item1_stale_corpse_grid_and_loot_batch_and_log`, `round6_item6_take_all_button_on_corpse_tab`, and `round5b_bag_viewer_*`).
-- **Live-server gap stated plainly**: In `crates/eqoa/src/fork_ext/items_capture.rs:341-373`, only opcodes `0x0019` (`"loot_one"`) and `0x001A` (`"loot_all"`) produce causes logged by `M.log_loot`, and `0x0016` (`"loot_close"`) produces `data.after == nil` (intentionally ignored by `M.log_loot` so `"Leave All"` on an unemptied corpse does not log false pickups, per existing Round 5 tests). Live-server packet traces that omit `0x0019`/`0x001A` or replace corpse state via `0x0018`/`0x0016` cannot be reproduced offline without live captures.
+### 3. `"Loot log: Nothing looted yet"` on Sandstorm (no `0x0019` / `0x001A`)
+- **Root cause**: `M.log_loot(data)` (`bundled-mods/eqoa_bag_viewer/modules/bags.lua`) logs `loot.changed` events with `cause == "loot_one"` or `"loot_all"`, which previously only came from `0x0019`/`0x001A` opcodes (`crates/eqoa/src/fork_ext/items_capture.rs`). On Sandstorm, each take only produces `InvAdd` + `0x0016` (`"loot_close"`) and/or a smaller `0x0018` (`"loot_open"`), so `M.log_loot` never fired.
+- **Fix** (`0` upstream lines added):
+  - `crates/eqoa/src/fork_ext/items_capture.rs`, `crates/eqoa/src/fork_ext/addons/native_items.rs`, `crates/eqoa/src/fork_ext/play.rs`:
+    - `npcw_requests` records every native or broker `LootOut::One` / `LootOut::All` via `items_capture::note_loot_send()`, capturing corpse entity ID, `before_json`, and requested `(inv_index, item_id, qty_before, count)`.
+    - `end_game_event` calls `items_capture::note_loot_inv_add(item_id, qty)` on `InvAdd`.
+    - When `0x0016` (`"loot_close"`) arrives with `gained_qty > 0` (or `InvAdd` arrives right after `0x0016`), or when the next same-corpse `0x0018` (`"loot_open"`) lacks that record, `native_items::emit_sandstorm_loot_delta()` emits a single synthetic `loot.changed` (`cause = "loot_one"` or `"loot_all"`) with the removed quantity.
+    - `PENDING_TAKE` is cleared by `clear_pending_loot()` whenever `0x0019` (`"loot_one"`), `0x001A` (`"loot_all"`), `0x0085` (`"loot_refused"`), native `LootOut::Close`, or zone reset (`forget()`) occurs, preventing double entries when `0x0019`/`0x001A` arrives, preventing entries on refused takes, and ignoring tunar-only / 5-byte empty corpses.
+- **Verification**: `round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls` passes both `InvAdd + 0x0016` batch logging (0 duplicates) and closed-window native UI takes observed via smaller same-corpse `0x0018` (`Gnoll Ear x1, from an undead gnoll`), while `round5b_*` and `round6_item1`/`round6_item6` keep all `0x0019`/`0x001A` tests passing with 0 duplicate entries; negative controls confirm `0x0085` refused takes and 5-byte tunar-only corpses log nothing.
 
 ### 4. Icons missing until native inventory/bank windows open (and per-frame resource discipline)
 - **Root causes**:
@@ -59,14 +75,14 @@
 ## Validation Summary
 
 - `python tools/update_bundled_manifest.py --check`: `Bundled mod manifests are up to date.`
-- `git diff --name-only 2e4fb5fe..HEAD`: touches only `bundled-mods/SOURCE.txt`, `bundled-mods/eqoa_bag_viewer/main.lua`, `bundled-mods/eqoa_bag_viewer/modules/bags.lua`, `crates/eqoa/src/fork_ext/addons/bag_viewer_tests.rs`, `crates/eqoa/src/fork_ext/addons/icons.rs`, `crates/eqoa/src/fork_ext/items_capture.rs` (0 upstream lines added).
+- `git diff --name-only 2e4fb5fe..HEAD`: touches only `bundled-mods/SOURCE.txt`, `bundled-mods/eqoa_bag_viewer/main.lua`, `bundled-mods/eqoa_bag_viewer/modules/bags.lua`, `crates/eqoa/src/fork_ext/addons/action_broker.rs`, `crates/eqoa/src/fork_ext/addons/bag_viewer_tests.rs`, `crates/eqoa/src/fork_ext/addons/icons.rs`, `crates/eqoa/src/fork_ext/addons/native_items.rs`, `crates/eqoa/src/fork_ext/items_capture.rs`, `crates/eqoa/src/fork_ext/items_tests.rs`, `crates/eqoa/src/fork_ext/play.rs`, and this report (0 upstream lines added).
 - Focused tests (all run with `-- --test-threads=1`, `EQOA_ISO=run/eqoa.iso`):
-  - `cargo test --locked -p eqoa round6_item`: `4 passed, 0 failed` (covered in `cargo test --locked -p eqoa round6`: `51 passed, 0 failed, 2398 filtered out`).
-  - `cargo test --locked -p eqoa bag_viewer`: `4 passed, 0 failed` (after setting `bags_press_loot()` before `bags_corpse` in `round6_item1` -> re-verified in `round6` and `run_gates.py`).
-  - `cargo test --locked -p eqoa forge_icon`: `23 passed, 0 failed`.
-- `python tools/run_gates.py` (default gate suite): **ALL GATES PASSED**
-  - `addons`: **PASS** (`488 passed, 0 failed, 25 ignored`; 16 distinct environment skips: Windows symlink privilege, missing `run/eqoa.iso` in worktree path / real disc art, `EQOA_FORGE_SPIKE`, `EQOA_BUNDLED_UI_GOLDENS`).
-  - `full`: **PASS** (`2369 passed, 0 failed, 30 ignored`; 30 distinct skips for missing `run/eqoa.iso` in worktree / `EQOA_2002_ISO`, `run/client.bin`, save state, `extracted-assets/sandstorm-patch-20261015/S2`, `EQOA_FORGE_SPIKE`, Windows symlink privilege).
+  - `cargo test --locked -p eqoa round6`: `52 passed, 0 failed, 2398 filtered out`.
+  - `cargo test --locked -p eqoa bag_viewer`: `4 passed, 0 failed, 2446 filtered out` (includes `round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls`).
+  - `cargo test --locked -p eqoa items_tests::`: `40 passed, 0 failed, 2410 filtered out` (includes all `0x0019`/`0x001A` tests).
+- `python tools/run_gates.py` (re-run on commit `2eae0689`): **ALL GATES PASSED**
+  - `addons`: **PASS** (`489 passed, 0 failed, 25 ignored`; 16 distinct environment skips: Windows symlink privilege, missing `run/eqoa.iso` in worktree path / real disc art, `EQOA_FORGE_SPIKE`, `EQOA_BUNDLED_UI_GOLDENS`).
+  - `full`: **PASS** (`2370 passed, 0 failed, 30 ignored`; 30 distinct skips for missing `run/eqoa.iso` in worktree / `EQOA_2002_ISO`, `run/client.bin`, save state, `extracted-assets/sandstorm-patch-20261015/S2`, `EQOA_FORGE_SPIKE`, Windows symlink privilege).
   - `wasm`: **PASS**
   - `footprint`: **PASS**
   - `paths`: **PASS**
