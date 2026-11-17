@@ -6,18 +6,21 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import zipfile
 
-# Allow importing build_player_release from tools directory or repo root
+# Allow importing build_player_release and run_gates from tools directory or repo root
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 try:
     import build_player_release
+    import run_gates
 except ImportError:
     from tools import build_player_release
+    from tools import run_gates
 
 
 class LiveConfigOverlapError(ValueError):
@@ -53,10 +56,88 @@ def format_rem_name(name):
     return name
 
 
+def _build_release_exe(root, channel):
+    """Build eqoa.exe with commit, channel, and static-CRT env under CargoLock."""
+    status = subprocess.run(
+        [
+            "git",
+            "-c",
+            "safe.directory=*",
+            "-C",
+            str(root),
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if status.returncode != 0:
+        raise RuntimeError(f"git status failed: {status.stderr.strip()}")
+    if status.stdout.strip():
+        raise ValueError("Refusing --build: worktree has uncommitted changes to tracked files")
+
+    rev = subprocess.run(
+        ["git", "-c", "safe.directory=*", "-C", str(root), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if rev.returncode != 0 or not rev.stdout.strip():
+        raise RuntimeError(f"git rev-parse HEAD failed: {rev.stderr.strip()}")
+    head_commit = rev.stdout.strip()
+
+    cargo_target_dir = os.environ.get("CARGO_TARGET_DIR")
+    if not cargo_target_dir:
+        cargo_target_dir = str(Path.home() / "Paseo" / "targets" / "shared")
+    cargo_target_dir = Path(cargo_target_dir)
+
+    build_env = os.environ.copy()
+    build_env["CARGO_TARGET_DIR"] = str(cargo_target_dir)
+    build_env["EQOA_BUILD_COMMIT"] = head_commit
+    build_env["EQOA_UPDATE_CHANNEL"] = channel
+    rustflags = build_env.get("RUSTFLAGS", "")
+    if "-C target-feature=+crt-static" not in rustflags:
+        build_env["RUSTFLAGS"] = f"{rustflags} -C target-feature=+crt-static".strip()
+
+    cmd = ["cargo", "build", "--locked", "--release", "-p", "eqoa"]
+    with run_gates.CargoLock():
+        proc = subprocess.run(
+            cmd,
+            cwd=root,
+            env=build_env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    combined = "\n".join(part for part in (proc.stdout, proc.stderr) if part)
+    summary_lines = [
+        line.strip()
+        for line in combined.splitlines()
+        if line.lstrip().startswith(("Finished ", "error", "could not compile"))
+    ]
+    for line in summary_lines:
+        print(line)
+    if proc.returncode != 0:
+        if not summary_lines:
+            tail = [line.strip() for line in combined.splitlines() if line.strip()][-10:]
+            for line in tail:
+                print(line)
+        raise RuntimeError(f"cargo build failed with exit code {proc.returncode}")
+
+    return (cargo_target_dir / "release" / "eqoa.exe").resolve()
+
+
 def make_package(
     *,
     name="Round5",
     exe=None,
+    build=False,
     channel="enhanced-dev",
     output_dir=None,
     root=None,
@@ -71,11 +152,14 @@ def make_package(
         root = Path(__file__).resolve().parent.parent
     root = Path(root).resolve()
 
-    if exe is None:
-        raise ValueError("--exe is required")
-    exe = Path(exe).resolve()
-    if not exe.is_file():
-        raise FileNotFoundError(f"Executable not found: {exe}")
+    if build and exe is not None:
+        raise ValueError("Cannot specify both --exe and --build")
+    if not build:
+        if exe is None:
+            raise ValueError("--exe is required")
+        exe = Path(exe).resolve()
+        if not exe.is_file():
+            raise FileNotFoundError(f"Executable not found: {exe}")
 
     if output_dir is None:
         output_dir = Path.home() / "Downloads" / f"EQOA-Enhanced-{name}-Test"
@@ -118,6 +202,11 @@ def make_package(
         raise ValueError(
             f"Output directory {output_dir} already exists; use --force to overwrite"
         )
+
+    if build:
+        exe = _build_release_exe(root, channel)
+        if not exe.is_file():
+            raise FileNotFoundError(f"Executable not found: {exe}")
 
     # Resolve catalog if not explicitly passed
     if catalog is None:
@@ -242,7 +331,13 @@ def make_package(
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--name", default="Round5", help="package name (default: Round5)")
-    parser.add_argument("--exe", type=Path, required=True, help="path to release eqoa.exe")
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument("--exe", type=Path, help="path to release eqoa.exe")
+    source_group.add_argument(
+        "--build",
+        action="store_true",
+        help="build release eqoa.exe with commit/channel/crt-static env and shared CargoLock",
+    )
     parser.add_argument("--channel", default="enhanced-dev", help="release channel (default: enhanced-dev)")
     parser.add_argument("--output", type=Path, help="override output package folder")
     parser.add_argument("--root", type=Path, help="repository root")
@@ -257,6 +352,7 @@ def main():
         make_package(
             name=args.name,
             exe=args.exe,
+            build=args.build,
             channel=args.channel,
             output_dir=args.output,
             root=args.root,
@@ -268,7 +364,7 @@ def main():
         )
     except LiveConfigOverlapError as error:
         parser.exit(2, f"Security error: {error}\n")
-    except (ValueError, FileNotFoundError, OSError) as error:
+    except (ValueError, FileNotFoundError, OSError, RuntimeError) as error:
         parser.exit(1, f"Error: {error}\n")
 
 
