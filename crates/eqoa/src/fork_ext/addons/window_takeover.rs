@@ -1,10 +1,11 @@
 // Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 //! Window takeover registry for native loot, merchant, and bank windows.
 //!
-//! A takeover (`eqoa.windows.takeover(kind)`) hides only server sessions that
-//! were opened by the holding mod's own `open_loot` or `talk` requests. Native
-//! opens started directly by the player continue to open their normal native
-//! window even while a mod holds takeover.
+//! `eqoa.windows.takeover(kind, {scope?})` supports `"own"` (default) and `"all"`.
+//! With `scope = "own"`, only server sessions opened by the holding mod's own
+//! `open_loot`/`talk` requests are hidden (player-started opens show normally).
+//! With `scope = "all"`, every session of that kind (including player-started
+//! opens) is hidden for mods drawing a full replacement window.
 
 use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
@@ -52,10 +53,31 @@ impl TakeoverKind {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) enum TakeoverScope {
+    #[default]
+    Own,
+    All,
+}
+
+impl TakeoverScope {
+    pub(crate) fn parse(s: &str) -> std::result::Result<Self, (&'static str, String)> {
+        match s {
+            "own" => Ok(Self::Own),
+            "all" => Ok(Self::All),
+            _ => Err((
+                "invalid_argument",
+                format!("window takeover scope must be 'own' or 'all', got '{s}'"),
+            )),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Holder {
     vm: u64,
     addon_id: String,
+    scope: TakeoverScope,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -69,6 +91,7 @@ struct PendingOpen {
 pub(crate) struct HiddenSession {
     pub active: bool,
     pub vm: u64,
+    pub scope: TakeoverScope,
     pub target_id: u32,
     pub opened_at_pos: Option<[u32; 3]>,
     pub last_activity: Instant,
@@ -79,6 +102,7 @@ impl Default for HiddenSession {
         Self {
             active: false,
             vm: 0,
+            scope: TakeoverScope::Own,
             target_id: u32::MAX,
             opened_at_pos: None,
             last_activity: Instant::now(),
@@ -143,12 +167,13 @@ pub(crate) fn takeover(
     vm: u64,
     addon_id: &str,
     kind: TakeoverKind,
+    scope: TakeoverScope,
 ) -> std::result::Result<(), (&'static str, String)> {
     with_state_mut(|s| {
         let idx = kind as usize;
-        if let Some(existing) = &s.holders[idx] {
+        if let Some(existing) = &mut s.holders[idx] {
             if existing.vm == vm {
-                s.pending_close[idx] = false;
+                existing.scope = scope;
                 return Ok(());
             }
             return Err((
@@ -160,10 +185,10 @@ pub(crate) fn takeover(
                 ),
             ));
         }
-        s.pending_close[idx] = false;
         s.holders[idx] = Some(Holder {
             vm,
             addon_id: addon_id.to_string(),
+            scope,
         });
         Ok(())
     })
@@ -282,11 +307,13 @@ pub(crate) fn hidden_bank_session() -> Option<u32> {
     })
 }
 
-/// Accepts an incoming server open (`0x0018`, `0x00B7`, `0x124D`) as hidden ONLY if
-/// it matches a pending `open_loot`/`talk` from the VM currently holding takeover.
+/// Accepts an incoming server open (`0x0018`, `0x00B7`, `0x124D`) as hidden when:
+/// - `holder.scope == TakeoverScope::Own` and a matching pending `open_loot`/`talk` exists, OR
+/// - `holder.scope == TakeoverScope::All` (both mod-started and player-started opens).
 pub(crate) fn try_accept_open(
     kind: TakeoverKind,
     observed_target: Option<u32>,
+    fallback_player_target: Option<u32>,
     self_pos: Option<[f32; 3]>,
 ) -> bool {
     if !has_activity() {
@@ -300,28 +327,41 @@ pub(crate) fn try_accept_open(
         {
             s.pending_opens[idx] = None;
         }
-        let Some(pending) = s.pending_opens[idx] else {
-            return false;
-        };
-        if s.holders[idx].as_ref().is_none_or(|h| h.vm != pending.vm) {
+        let Some((holder_vm, holder_scope)) = s.holders[idx].as_ref().map(|h| (h.vm, h.scope))
+        else {
             s.pending_opens[idx] = None;
             return false;
-        }
-        if let Some(obs) = observed_target
-            && obs != pending.target_id
-        {
-            return false;
-        }
-        s.pending_opens[idx] = None;
-        s.pending_close[idx] = false;
-        s.hidden[idx] = HiddenSession {
-            active: true,
-            vm: pending.vm,
-            target_id: pending.target_id,
-            opened_at_pos: self_pos.map(|p| p.map(f32::to_bits)),
-            last_activity: now,
         };
-        true
+        if let Some(pending) = s.pending_opens[idx] {
+            if pending.vm != holder_vm {
+                s.pending_opens[idx] = None;
+            } else if observed_target.is_none_or(|obs| obs == pending.target_id) {
+                s.pending_opens[idx] = None;
+                s.pending_close[idx] = false;
+                s.hidden[idx] = HiddenSession {
+                    active: true,
+                    vm: holder_vm,
+                    scope: holder_scope,
+                    target_id: pending.target_id,
+                    opened_at_pos: self_pos.map(|p| p.map(f32::to_bits)),
+                    last_activity: now,
+                };
+                return true;
+            }
+        }
+        if holder_scope == TakeoverScope::All {
+            s.pending_close[idx] = false;
+            s.hidden[idx] = HiddenSession {
+                active: true,
+                vm: holder_vm,
+                scope: TakeoverScope::All,
+                target_id: observed_target.or(fallback_player_target).unwrap_or(u32::MAX),
+                opened_at_pos: self_pos.map(|p| p.map(f32::to_bits)),
+                last_activity: now,
+            };
+            return true;
+        }
+        false
     })
 }
 
@@ -344,7 +384,10 @@ pub(crate) fn end_session_for_vm(vm: u64, kind: TakeoverKind) {
     }
     with_state_mut(|s| {
         let idx = kind as usize;
-        if s.hidden[idx].active && s.hidden[idx].vm == vm {
+        if s.hidden[idx].active
+            && s.hidden[idx].vm == vm
+            && s.hidden[idx].scope == TakeoverScope::Own
+        {
             s.hidden[idx] = HiddenSession::default();
             s.pending_close[idx] = true;
         }
@@ -371,8 +414,9 @@ where
             }
             if s.hidden[idx].active {
                 let opened_pos = s.hidden[idx].opened_at_pos.map(|b| b.map(f32::from_bits));
-                let timed_out =
-                    now.saturating_duration_since(s.hidden[idx].last_activity) >= HIDDEN_SESSION_TIMEOUT;
+                let timed_out = s.hidden[idx].scope == TakeoverScope::Own
+                    && now.saturating_duration_since(s.hidden[idx].last_activity)
+                        >= HIDDEN_SESSION_TIMEOUT;
                 let lost = closed[idx]
                     || s.holders[idx].as_ref().is_none_or(|h| h.vm != s.hidden[idx].vm)
                     || timed_out
@@ -399,7 +443,7 @@ pub(crate) fn set_hidden_inactive(kind: TakeoverKind) {
 
 #[cfg(test)]
 pub(crate) fn activate_hidden_for_test(vm: u64, kind: TakeoverKind, target_id: u32) -> bool {
-    arm_pending_open(kind, vm, target_id) && try_accept_open(kind, Some(target_id), None)
+    arm_pending_open(kind, vm, target_id) && try_accept_open(kind, Some(target_id), None, None)
 }
 
 #[cfg(test)]

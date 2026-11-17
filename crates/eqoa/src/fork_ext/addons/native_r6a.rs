@@ -5,7 +5,7 @@ use super::{
     native::{bind, describe, diagnose, error, record, require_capability, session},
     native_core::{CORE, View},
     native_state::Ref,
-    window_takeover::{self, TakeoverKind},
+    window_takeover::{self, TakeoverKind, TakeoverScope},
 };
 use mlua::{Lua, Result, Value};
 use serde_json::{Value as Json, json};
@@ -393,7 +393,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua,
         "windows",
         "takeover",
-        lua.create_function(|lua, kind: Value| {
+        lua.create_function(|lua, (kind, opts): (Value, Option<Value>)| {
             if let Err((code, msg)) =
                 require_capability(lua, "eqoa.windows.takeover", "eqoa.windows.takeover")
             {
@@ -414,9 +414,47 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 Ok(k) => k,
                 Err((code, msg)) => return error(lua, "eqoa.windows.takeover", code, &msg),
             };
+            let scope = match opts {
+                None | Some(Value::Nil) => TakeoverScope::Own,
+                Some(Value::Table(t)) => match t.get::<Value>("scope")? {
+                    Value::Nil => TakeoverScope::Own,
+                    Value::String(s) => {
+                        let Ok(s) = s.to_str() else {
+                            return error(
+                                lua,
+                                "eqoa.windows.takeover",
+                                "invalid_argument",
+                                "options.scope must be UTF-8",
+                            );
+                        };
+                        match TakeoverScope::parse(&s) {
+                            Ok(sc) => sc,
+                            Err((code, msg)) => {
+                                return error(lua, "eqoa.windows.takeover", code, &msg);
+                            }
+                        }
+                    }
+                    _ => {
+                        return error(
+                            lua,
+                            "eqoa.windows.takeover",
+                            "invalid_argument",
+                            "options.scope must be 'own' or 'all'",
+                        );
+                    }
+                },
+                Some(_) => {
+                    return error(
+                        lua,
+                        "eqoa.windows.takeover",
+                        "invalid_argument",
+                        "options must be a table or nil",
+                    );
+                }
+            };
             let vm = super::native_events::bus(lua).borrow().vm;
             let addon = session(lua).borrow().addon.clone();
-            match window_takeover::takeover(vm, &addon, parsed) {
+            match window_takeover::takeover(vm, &addon, parsed, scope) {
                 Ok(()) => lua.pack_multi((true, Value::Nil)),
                 Err((code, msg)) => {
                     if code == "busy" {

@@ -2779,6 +2779,21 @@ fn round6f3_staged_sale_refused_when_player_sale_shrinks_the_stack() {
     crate::fork_ext::bindpage::reset_in_memory();
 }
 
+struct CountingRaster(usize);
+impl crate::ui::Layout for CountingRaster {}
+impl vi::ui::Raster for CountingRaster {
+    fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) { self.0 += 1; }
+    fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) { self.0 += 1; }
+    fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) { self.0 += 1; }
+    fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) { self.0 += 1; }
+    fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) { self.0 += 1; }
+    fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) { self.0 += 1; }
+    fn string_width(&self, _: &[u16]) -> i32 { 0 }
+    fn point_size(&self) -> i32 { 12 }
+    fn viewport(&self) -> [i32; 4] { [0, 0, 639, 447] }
+    fn set_viewport(&mut self, _: [i32; 4]) {}
+}
+
 #[test]
 fn round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases() {
     use crate::fork_ext::addons::{
@@ -2786,20 +2801,6 @@ fn round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases() {
         discovery::{DiscoveredAddon, EntryMode},
         native_events, window_takeover,
     };
-    struct CountingRaster(usize);
-    impl crate::ui::Layout for CountingRaster {}
-    impl vi::ui::Raster for CountingRaster {
-        fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) { self.0 += 1; }
-        fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) { self.0 += 1; }
-        fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) { self.0 += 1; }
-        fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) { self.0 += 1; }
-        fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) { self.0 += 1; }
-        fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) { self.0 += 1; }
-        fn string_width(&self, _: &[u16]) -> i32 { 0 }
-        fn point_size(&self) -> i32 { 12 }
-        fn viewport(&self) -> [i32; 4] { [0, 0, 639, 447] }
-        fn set_viewport(&mut self, _: [i32; 4]) {}
-    }
     let mk_addon = |id: &str, caps: &[&str]| {
         let root = std::env::temp_dir();
         Host::for_addon(&DiscoveredAddon {
@@ -3289,9 +3290,33 @@ fn round65_reset_all_for_test_clears_hidden_sessions() {
     window_takeover::reset_all_for_test();
 
     let mut p = ready();
-    assert!(window_takeover::takeover(1, "test_mod", window_takeover::TakeoverKind::Loot).is_ok());
-    assert!(window_takeover::takeover(1, "test_mod", window_takeover::TakeoverKind::Merchant).is_ok());
-    assert!(window_takeover::takeover(1, "test_mod", window_takeover::TakeoverKind::Bank).is_ok());
+    assert!(
+        window_takeover::takeover(
+            1,
+            "test_mod",
+            window_takeover::TakeoverKind::Loot,
+            window_takeover::TakeoverScope::Own,
+        )
+        .is_ok()
+    );
+    assert!(
+        window_takeover::takeover(
+            1,
+            "test_mod",
+            window_takeover::TakeoverKind::Merchant,
+            window_takeover::TakeoverScope::Own,
+        )
+        .is_ok()
+    );
+    assert!(
+        window_takeover::takeover(
+            1,
+            "test_mod",
+            window_takeover::TakeoverKind::Bank,
+            window_takeover::TakeoverScope::Own,
+        )
+        .is_ok()
+    );
     assert!(window_takeover::activate_hidden_for_test(1, window_takeover::TakeoverKind::Loot, 9001));
     assert!(window_takeover::activate_hidden_for_test(1, window_takeover::TakeoverKind::Merchant, 9002));
     assert!(window_takeover::activate_hidden_for_test(1, window_takeover::TakeoverKind::Bank, 9003));
@@ -3318,7 +3343,15 @@ fn round65_loot_release_clears_corpse_visibility_and_master_loot() {
 
     let mut p = ready();
     p.session.conn = Some(usize::MAX);
-    assert!(window_takeover::takeover(1, "test_mod", window_takeover::TakeoverKind::Loot).is_ok());
+    assert!(
+        window_takeover::takeover(
+            1,
+            "test_mod",
+            window_takeover::TakeoverKind::Loot,
+            window_takeover::TakeoverScope::Own,
+        )
+        .is_ok()
+    );
     assert!(window_takeover::arm_pending_open(window_takeover::TakeoverKind::Loot, 1, 9001));
     apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
     assert_eq!(p.mode, 0);
@@ -3336,6 +3369,204 @@ fn round65_loot_release_clears_corpse_visibility_and_master_loot() {
     assert!(p.session.sends_lost > sends_before, "release must send 0x0016");
     assert!(p.npcw.corpse.is_none(), "corpse must be cleared");
     assert!(!action_broker::is_master_loot_active(), "master-loot flag must be cleared on release");
+
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round65_window_takeover_scopes_own_and_all() {
+    use crate::fork_ext::addons::{
+        action_broker,
+        discovery::{DiscoveredAddon, EntryMode},
+        window_takeover,
+    };
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+
+    let root = std::env::temp_dir();
+    let host = Host::for_addon(&DiscoveredAddon {
+        id: "r65_scopes".into(),
+        name: "r65_scopes".into(),
+        entry: root.join("main.lua"),
+        script_root: root.clone(),
+        package_root: root.clone(),
+        module_dirs: vec![root.clone()],
+        resource_dirs: vec![root.clone()],
+        api: Some("eqoa/1".into()),
+        entry_mode: EntryMode::Once,
+        requested_capabilities: vec!["eqoa.windows.takeover".into(), "eqoa.actions.*".into()],
+        extensions: Default::default(),
+        initially_enabled: true,
+        mods_root: None,
+    })
+    .unwrap();
+
+    // Invalid scope rejects cleanly with invalid_argument.
+    host.execute(
+        r#"
+        local ok, err = eqoa.windows.takeover("loot", {scope = "bad"})
+        assert(ok == nil and err and err.code == "invalid_argument")
+    "#,
+    )
+    .unwrap();
+
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    p.dump.player.p34 = 500;
+    let mut bag_pot = potion();
+    bag_pot.equip_slot = -1;
+    p.dump.inventory = list(&[bag_pot]);
+    p.self_at = Some(([0.0, 0.0, 0.0], None));
+    p.entities.slots = vec![
+        Some(net::entity::Entity {
+            id: 9101,
+            world: 0,
+            kind: net::entity::TYPE_CREATURE,
+            p18: 3,
+            pos: [3.0, 0.0, 0.0],
+            actor_pos: [3.0, 0.0, 0.0],
+            creature: Some(net::entity::Creature {
+                name: "a beetle corpse".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        Some(net::entity::Entity {
+            id: 9102,
+            world: 0,
+            kind: net::entity::TYPE_CREATURE,
+            p18: 1,
+            pos: [4.0, 0.0, 0.0],
+            actor_pos: [4.0, 0.0, 0.0],
+            creature: Some(net::entity::Creature {
+                name: "Merchant Scope".into(),
+                npc_flags: 0x88,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        Some(net::entity::Entity {
+            id: 9103,
+            world: 0,
+            kind: net::entity::TYPE_CREATURE,
+            p18: 1,
+            pos: [5.0, 0.0, 0.0],
+            actor_pos: [5.0, 0.0, 0.0],
+            creature: Some(net::entity::Creature {
+                name: "Banker Scope".into(),
+                npc_flags: 0x82,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+    ];
+
+    // 1. scope = "own" (explicit and default) leaves player-opened loot, merchant, AND bank normal.
+    host.execute(
+        r#"
+        assert(eqoa.windows.takeover("loot"))
+        assert(eqoa.windows.takeover("merchant", {scope = "own"}))
+        assert(eqoa.windows.takeover("bank", {scope = "own"}))
+    "#,
+    )
+    .unwrap();
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 1, "scope=own must leave player-opened corpse window showing (mode 1)");
+    apply(&mut p, opcode(0x0016, vec![]));
+
+    p.target = 9102;
+    apply(&mut p, opcode(0x00B7, shop_bytes(9102, 90, 110, &[sword()], "Welcome")));
+    assert_eq!(p.mode, 10, "scope=own must leave player-opened merchant window showing (mode 10)");
+    p.npcw.merchant.visible = false;
+    p.npcw.shop = Default::default();
+    p.mode = 0;
+
+    p.target = 9103;
+    apply(&mut p, opcode(0x124D, vec![]));
+    assert_eq!(p.mode, 11, "scope=own must leave player-opened bank window showing (mode 11)");
+    p.bank = Default::default();
+    p.mode = 0;
+
+    // 2. scope = "all" hides every session of that kind, including player-opened ones.
+    host.execute(
+        r#"
+        assert(eqoa.windows.takeover("loot", {scope = "all"}))
+        assert(eqoa.windows.takeover("merchant", {scope = "all"}))
+        assert(eqoa.windows.takeover("bank", {scope = "all"}))
+    "#,
+    )
+    .unwrap();
+
+    // Player clicks corpse by hand -> hidden (mode == 0), readable via snapshot.
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 0, "scope=all must hide player-opened loot window");
+    assert!(super::super::loot_session_open(&p));
+    let vui = crate::ui::Vui::new(Default::default(), Default::default(), vec![]);
+    let mut raster = CountingRaster(0);
+    p.run_npcw(&vui, &mut raster);
+    assert_eq!(raster.0, 0);
+    apply(&mut p, opcode(0x0016, vec![]));
+    assert!(!super::super::loot_session_open(&p));
+
+    // Player clicks merchant by hand -> hidden (mode == 0), draws nothing, single sell keeps it open until release.
+    p.target = 9102;
+    apply(&mut p, opcode(0x00B7, shop_bytes(9102, 90, 110, &[sword()], "Welcome")));
+    assert_eq!(p.mode, 0, "scope=all must hide player-opened merchant window");
+    assert!(super::super::merchant_session_open(&p));
+    p.run_npcw(&vui, &mut raster);
+    assert_eq!(raster.0, 0);
+    p.forge_snapshot(None);
+    host.execute(
+        r#"
+        local m = assert(eqoa.merchant.get())
+        assert(m.open == true and #m.items == 1)
+        local inv = assert(eqoa.inventory.get())
+        assert(eqoa.actions.sell(inv.items[1].ref, 1))
+    "#,
+    )
+    .unwrap();
+    super::super::begin_iteration(&mut p, true);
+    let ev_took = Event::InvTook { slot: 0, sound: 3, n: 1 };
+    let cap_took = super::super::begin_game_event(&p, &ev_took);
+    crate::inventory::took(&mut p.dump.inventory, 0, 1);
+    p.npcw_item_took(3);
+    super::super::end_game_event(&p, cap_took);
+    super::super::begin_iteration(&mut p, true);
+    assert!(
+        super::super::merchant_session_open(&p),
+        "scope=all must keep replacement merchant open across single sell until mod releases or player leaves"
+    );
+    // Mod closes player's replacement merchant window cleanly via release().
+    host.execute("assert(eqoa.windows.release('merchant'))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert!(!super::super::merchant_session_open(&p), "release() must close scope=all hidden merchant session");
+
+    // Player clicks bank by hand -> hidden (mode == 0), uses play.target (9103) as banker_id.
+    p.target = 9103;
+    apply(&mut p, opcode(0x124D, vec![]));
+    assert_eq!(p.mode, 0, "scope=all must hide player-opened bank window");
+    assert_eq!(window_takeover::hidden_bank_session(), Some(9103));
+    p.run_bank(&vui, &mut raster);
+    assert_eq!(raster.0, 0);
+    host.execute("assert(eqoa.windows.release('bank'))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert!(!super::super::bank_session_open(&p));
+
+    // And if mod holding scope="all" uses talk(9103) then player retargets to 7777 before 0x124D,
+    // pending talk target (9103) still wins over retargeted play.target (M2 preserved).
+    host.execute(
+        r#"
+        assert(eqoa.windows.takeover("bank", {scope = "all"}))
+        assert(eqoa.actions.talk(9103, {kind = "bank"}))
+    "#,
+    )
+    .unwrap();
+    super::super::begin_iteration(&mut p, true);
+    p.target = 7777;
+    apply(&mut p, opcode(0x124D, vec![]));
+    assert_eq!(p.mode, 0);
+    assert_eq!(window_takeover::hidden_bank_session(), Some(9103));
 
     window_takeover::reset_all_for_test();
     action_broker::reset_all_for_test();

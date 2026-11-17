@@ -426,7 +426,13 @@ pub(crate) fn window_taken(play: &Play, mode: i32) -> bool {
             TakeoverKind::Merchant => play.npcw.shop.id,
             TakeoverKind::Bank => None,
         };
-        window_takeover::try_accept_open(kind, observed_target, play.self_at.map(|(p, _)| p))
+        let fallback_player_target = (play.target != u32::MAX).then_some(play.target);
+        window_takeover::try_accept_open(
+            kind,
+            observed_target,
+            fallback_player_target,
+            play.self_at.map(|(p, _)| p),
+        )
     }
     #[cfg(target_arch = "wasm32")]
     {
