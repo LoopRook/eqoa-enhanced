@@ -2075,6 +2075,32 @@ pub(crate) fn take_corpse_reopen_ask() -> Option<u32> {
     })
 }
 
+pub(crate) fn abort_corpse_reopen(code: &'static str, reason: &str) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        let now_tick = b.tick;
+        for vm_state in b.vms.values_mut() {
+            let Some(step) = vm_state
+                .active_batch
+                .as_ref()
+                .filter(|batch| batch.corpse_reopen.is_some())
+                .map(|batch| batch.current_step)
+            else {
+                continue;
+            };
+            vm_state.finish_batch(
+                "refused",
+                Some(false),
+                Some(code),
+                Some(reason.into()),
+                now_tick,
+                Some(step),
+                true,
+            );
+        }
+    });
+}
+
 pub(crate) fn resolve_server_loot_close() {
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
@@ -2133,10 +2159,11 @@ pub(crate) fn resolve_server_loot_close() {
                         && let Some(batch) = vm_state.active_batch.as_mut()
                         && !batch.steps.is_empty()
                         && matches!(batch.steps.front(), Some(ActionKind::Loot { .. }))
-                        && let Some(cid) = batch
-                            .corpse_target_id
-                            .or_else(|| CURRENT_CORPSE_TARGET.with(|c| c.get()))
+                        && let Some(cid) = CURRENT_CORPSE_TARGET
+                            .with(|c| c.get())
+                            .or(batch.corpse_target_id)
                     {
+                        batch.corpse_target_id = Some(cid);
                         batch.corpse_reopen = Some(CorpseReopen {
                             corpse_id: cid,
                             asked: false,
@@ -2153,6 +2180,9 @@ pub(crate) fn resolve_server_loot_open(opened_corpse_id: Option<u32>, is_empty: 
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         let now_tick = b.tick;
+        if let Some(cid) = opened_corpse_id {
+            CURRENT_CORPSE_TARGET.with(|c| c.set(Some(cid)));
+        }
         for vm_state in b.vms.values_mut() {
             let Some(reopen) = vm_state
                 .active_batch

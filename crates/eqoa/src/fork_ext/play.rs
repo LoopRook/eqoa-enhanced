@@ -439,7 +439,17 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                     .any(|e| e.id == _play.target && e.p18 & 2 != 0))
             .then_some(_play.target);
             crate::fork_ext::addons::action_broker::set_corpse_target_id(corpse_target);
-            if ready
+            if _play.map.open || _play.mode == 38 {
+                crate::fork_ext::addons::action_broker::abort_corpse_reopen(
+                    "not_ready",
+                    "stopped: map or camera open",
+                );
+            } else if ready && _play.mode != 0 && _play.mode != 1 {
+                crate::fork_ext::addons::action_broker::abort_corpse_reopen(
+                    "window_closed",
+                    "stopped: non-play mode active",
+                );
+            } else if ready
                 && _play.mode == 0
                 && let Some(reopen_cid) =
                     crate::fork_ext::addons::action_broker::take_corpse_reopen_ask()

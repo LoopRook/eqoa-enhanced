@@ -1682,6 +1682,87 @@ fn round6_m2_loot_open_without_close_diffs_with_inv_add() {
 }
 
 #[test]
+fn round6_m4_reopen_stops_immediately_on_map_or_camera_open() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.enable();
+    bv.open();
+
+    // Case 1: Map opens (map.open = true) during Sandstorm reopen -> stops at once, no 0x0015, no 10s wait.
+    bv.play.bags_target_corpse(5014, "a skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Dust","id":2002,"key":0,"qty":1,"max_stack":100},
+        {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(1);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Dust","id":2002,"key":71,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.play.map.open = true;
+    let sends_map = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_map, "map open must send no 0x0015");
+    assert_eq!(
+        bv.eval::<(bool, String, Option<bool>)>("require('bags').batch_id == nil, require('bags').result.text, require('bags').result.ok"),
+        (true, "Looted 1 of 2: stopped: map or camera open".into(), Some(false)),
+        "map open mid-batch must stop at once with clear reason"
+    );
+
+    // Case 2: Manual camera opens (mode = 38) during Sandstorm reopen -> stops at once with same clear reason.
+    bv.play.map.open = false;
+    bv.play.bags_target_corpse(5015, "a zombie");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Flesh","id":2020,"key":0,"qty":1,"max_stack":100},
+        {"name":"Tooth","id":2021,"key":1,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Flesh","id":2020,"key":72,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.play.mode = 38;
+    let sends_cam = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_cam, "manual camera mode 38 must send no 0x0015");
+    assert_eq!(
+        bv.eval::<(bool, String, Option<bool>)>("require('bags').batch_id == nil, require('bags').result.text, require('bags').result.ok"),
+        (true, "Looted 1 of 2: stopped: map or camera open".into(), Some(false)),
+        "manual camera mid-batch must stop at once with clear reason"
+    );
+
+    // Positive control: mode == 0 and map.open == false proceeds with 0x0015 reopen cleanly.
+    bv.play.mode = 0;
+    bv.play.bags_target_corpse(5016, "a ghoul");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Nail","id":2027,"key":0,"qty":1,"max_stack":100},
+        {"name":"Fang","id":2028,"key":1,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Nail","id":2027,"key":73,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    let sends_ok = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_ok, "mode == 0 & map closed must send 0x0015 reopen");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
 fn round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls() {
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
