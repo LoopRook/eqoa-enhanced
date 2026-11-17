@@ -424,8 +424,8 @@ docs/modding/AGENT-GUIDE.md (one page for agents building mods from an owner bri
   the branch build passed 2026-11-15. Known limit: if the server ignores a loot request, corpse names stay
   off until the next zone (unverified on live traffic). Claude about 20 points of the month (36% to 56%).
   Next: round 6 (scope above), fresh lead.
-- **Round 6 (actions and the rest), 2026-11-16/17.** Branch `feat/eqoa-api-r6` (2e4fb5fe), not yet on develop;
-  **owner test pending** (package EQOA-Enhanced-Round6-Test at 2e4fb5fe). One game action per player gesture
+- **Round 6 (actions and the rest), 2026-11-16/17.** Branch `feat/eqoa-api-r6` (2e4fb5fe), merged into develop;
+  owner test passed (package EQOA-Enhanced-Round6-Test at 2e4fb5fe). One game action per player gesture
   (mod key, claimed pointer press, ImGui click), else `needs_player_action`. Part A reads (windows, dialogs,
   quests, masteries); Part B click actions through an action broker plus bag viewer item actions; Part C
   click-started batches (Mark as junk, Sell junk, Take all but junk; stop on any refusal, Stop button); 11
@@ -437,3 +437,8 @@ docs/modding/AGENT-GUIDE.md (one page for agents building mods from an owner bri
   `--release` on the branch: full 2365 passed, 0 failed, 30 SKIP; addons 484; release PASS. Not verified: row,
   dialog and close actions end to end (native key presses; needs the live game). Tools merged into develop
   meanwhile: run_gates stale-lock fix and progress lines, make_owner_test_package `--build`.
+  **Owner test 2026-11-17:** first pass found the live server closes the corpse after every single take
+  (never 0x0019/0x001A; read from the package's eqoa.log), breaking Take all but junk and the loot log; plus
+  icons, window size, a hidden Take all. Hydrogen fixed all in 3 rounds (free DeepSeek review: 0H/4M/2L, fixed),
+  0 upstream lines. **Owner retest PASSED** (51bd3bf3); merged into develop 0d664fd4; gates `--release` ALL PASS.
+  Owner then dropped the one-gesture rule and approved round 6.5 as a general window takeover (above).
