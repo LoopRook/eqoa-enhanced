@@ -24,7 +24,9 @@ local function close()
     if eqoa.windows and eqoa.windows.release then
         eqoa.windows.release("merchant")
         eqoa.windows.release("bank")
-        if not (eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true) then
+        if not (B.pending_open and B.pending_open.kind == "loot")
+            and not (B.batch_id and B.batch_kind == "loot")
+        then
             eqoa.windows.release("loot")
         end
     end
@@ -38,11 +40,6 @@ local function open()
     if B.open then return end
     if not B.junk_loaded then B.load_junk() end
     B.open, B.grid, B.menu = true, nil, nil
-    if eqoa.windows and eqoa.windows.takeover then
-        B.ensure_takeover("loot")
-        B.ensure_takeover("merchant")
-        B.ensure_takeover("bank")
-    end
     listen("render", draw)
     listen("inventory.changed", B.dirty)
     listen("bank.changed", function(e) B.on_bank_changed(e.data) end)

@@ -79,6 +79,13 @@ function M.nearby_npc(kind)
     return best, best_d2
 end
 
+local function release_takeover(kind)
+    if kind and eqoa.windows and eqoa.windows.release then
+        eqoa.windows.release(kind)
+    end
+end
+M.release_takeover = release_takeover
+
 function M.ensure_takeover(kind)
     if not (eqoa.windows and eqoa.windows.takeover and eqoa.windows.taken) then
         return true
@@ -98,6 +105,7 @@ end
 function M.clear_corpse_hold()
     M.corpse_tab_kept = false
     M.pending_open = nil
+    M.held_for_req = nil
     M.eligible_corpses = {}
     M.auto_looted = {}
     M.tracked_target_id = nil
@@ -319,8 +327,11 @@ end
 
 function M.select(tab)
     if tab == 7 and (eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse() ~= nil) and M.tab ~= 7 then
+        if M.tab == 6 then release_takeover("bank") end
         M.tab = 7; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
     elseif tab ~= M.tab and M.TABS[tab] then
+        if M.tab == 7 then release_takeover("loot") end
+        if M.tab == 6 then release_takeover("bank") end
         M.corpse_tab_kept = false
         M.tab = tab; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
     end
@@ -467,6 +478,7 @@ function M.open_loot_corpse(after_kind, corpse_id)
     if not M.ensure_takeover("loot") then return nil, {message = "window busy"} end
     local req, err = eqoa.actions.open_loot(corpse_id)
     if not req then
+        release_takeover("loot")
         local msg = (err and (err.message or err.code)) or "refused"
         M.result = {text = "Loot: " .. msg, ok = false}
         M.dirty()
@@ -484,6 +496,7 @@ function M.open_talk_npc(talk_kind, verb, after_fn)
     if not M.ensure_takeover(talk_kind) then return nil, {message = "window busy"} end
     local req, err = eqoa.actions.talk(nil, {kind = talk_kind})
     if not req then
+        release_takeover(talk_kind)
         local msg = (err and (err.message or err.code)) or "refused"
         M.result = {text = verb .. ": " .. msg, ok = false}
         M.dirty()
@@ -517,11 +530,13 @@ function M.start_sell_junk()
     end
     local steps, count = M.junk_sell_list()
     if count == 0 then
+        release_takeover("merchant")
         M.result = {text = "No junk items to sell", ok = false}
         return false
     end
     local bid, err = eqoa.actions.batch({steps = steps, require_window = "merchant"})
     if not bid then
+        release_takeover("merchant")
         local msg = err and (err.message or err.code) or "refused"
         M.result = {text = "Sell junk: " .. msg, ok = false}
         return false
@@ -545,6 +560,7 @@ function M.start_loot_all()
         return false
     end
     if #(loot.items or {}) == 0 then
+        release_takeover("loot")
         M.dirty()
         M.result = {text = "Corpse has no items", ok = false}
         return false
@@ -552,12 +568,14 @@ function M.start_loot_all()
     M.pending_label = "Take all"
     local req, err = eqoa.actions.loot_all()
     if not req then
+        release_takeover("loot")
         local msg = err and (err.message or err.code) or "refused"
         M.result = {text = "Take all: " .. msg, ok = false}
         M.last_req = nil
         return false
     else
         M.last_req = req
+        M.held_for_req = "loot"
         M.result = {text = "Take all: queued...", ok = nil}
         return true
     end
@@ -575,11 +593,13 @@ function M.start_loot_non_junk()
     end
     local steps, total = M.loot_non_junk_list()
     if total == 0 then
+        release_takeover("loot")
         M.dirty()
         M.result = {text = "Corpse has no items", ok = false}
         return false
     end
     if #steps == 0 then
+        release_takeover("loot")
         M.result = {text = "Corpse has only junk items", ok = false}
         return false
     end
@@ -601,8 +621,10 @@ end
 function M.stop_batch()
     if M.pending_open then
         local req = M.pending_open.req
+        local kind = M.pending_open.kind
         M.pending_open = nil
         if req then pcall(eqoa.actions.cancel, req) end
+        release_takeover(kind)
         M.result = {text = "Stopped", ok = false}
         M.dirty()
     end
@@ -624,7 +646,8 @@ end
 
 function M.on_batch_result(d)
     if not d or not M.batch_id or d.batch_id ~= M.batch_id then return end
-    local verb = M.batch_verb or (M.batch_kind == "loot" and "Looted" or "Sold")
+    local kind = M.batch_kind
+    local verb = M.batch_verb or (kind == "loot" and "Looted" or "Sold")
     local done, total = d.completed or 0, d.total or M.batch_total or 0
     if d.ok == true then
         M.result = {text = string.format("%s %d of %d", verb, done, total), ok = true}
@@ -632,10 +655,11 @@ function M.on_batch_result(d)
         local reason = d.reason or d.code or d.state or "stopped"
         M.result = {text = string.format("%s %d of %d: %s", verb, done, total, reason), ok = false}
     end
-    if M.batch_kind == "loot" and M.tab == 7 then
+    if kind == "loot" and M.tab == 7 then
         M.corpse_tab_kept = true
     end
     M.batch_id = nil
+    release_takeover(kind == "loot" and "loot" or "merchant")
 end
 
 -- Build the click menu for one stack (never includes Destroy; refused entries carry the game's reason).
@@ -806,6 +830,11 @@ local function finish_pending_open(expected_kind)
         end
     elseif p.fn then
         p.fn()
+        if M.last_req ~= nil then
+            M.held_for_req = p.kind
+        elseif not M.batch_id and not (p.kind == "bank" and M.tab == 6) then
+            release_takeover(p.kind)
+        end
     end
     return true
 end
@@ -912,6 +941,7 @@ function M.on_action_result(d)
         local p = M.pending_open
         if d.ok == false then
             M.pending_open = nil
+            release_takeover(p.kind)
             local msg = d.reason or d.code or d.state or "refused"
             M.result = {text = (p.verb or d.kind) .. ": " .. msg, ok = false}
             M.dirty()
@@ -928,9 +958,19 @@ function M.on_action_result(d)
     elseif d.ok == true then
         M.result = {text = label .. ": ok", ok = true}
         M.last_req = nil
+        if M.held_for_req then
+            local k = M.held_for_req
+            M.held_for_req = nil
+            release_takeover(k)
+        end
     else
         M.result = {text = label .. ": " .. (d.reason or d.code or d.state), ok = false}
         M.last_req = nil
+        if M.held_for_req then
+            local k = M.held_for_req
+            M.held_for_req = nil
+            release_takeover(k)
+        end
     end
 end
 

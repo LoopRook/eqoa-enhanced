@@ -430,6 +430,7 @@ struct ActiveBatch {
     rate_wait_start_tick: Option<u64>,
     corpse_target_id: Option<u32>,
     corpse_reopen: Option<CorpseReopen>,
+    takeover_kinds: [bool; 3],
 }
 
 #[derive(Default)]
@@ -504,6 +505,11 @@ impl VmBroker {
         self.upsert_batch_retained(rec.clone());
         if emit_event {
             self.pending_batch_events.push_back((true, rec));
+        }
+        for kind in super::window_takeover::TakeoverKind::ALL {
+            if batch.takeover_kinds[kind as usize] {
+                super::window_takeover::end_session_for_vm(batch.vm, kind);
+            }
         }
     }
 
@@ -763,6 +769,31 @@ impl BrokerState {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1).max(1);
         let total = steps.len();
+        let mut takeover_kinds = [false; 3];
+        if inferred_window == Some(BatchWindow::Loot)
+            || steps.iter().any(|k| {
+                matches!(
+                    k,
+                    ActionKind::OpenLoot { .. } | ActionKind::Loot { .. } | ActionKind::LootAll
+                )
+            })
+        {
+            takeover_kinds[super::window_takeover::TakeoverKind::Loot as usize] = true;
+        }
+        if inferred_window == Some(BatchWindow::Merchant)
+            || steps
+                .iter()
+                .any(|k| matches!(k, ActionKind::Buy { .. } | ActionKind::Sell { .. }))
+        {
+            takeover_kinds[super::window_takeover::TakeoverKind::Merchant as usize] = true;
+        }
+        if inferred_window == Some(BatchWindow::Bank)
+            || steps
+                .iter()
+                .any(|k| matches!(k, ActionKind::BankMove { .. } | ActionKind::BankMoney { .. }))
+        {
+            takeover_kinds[super::window_takeover::TakeoverKind::Bank as usize] = true;
+        }
         let vm_state = self.ensure_vm(vm, addon_id);
         let batch = ActiveBatch {
             id,
@@ -779,6 +810,7 @@ impl BrokerState {
                 .then(|| CURRENT_CORPSE_TARGET.with(|c| c.get()))
                 .flatten(),
             corpse_reopen: None,
+            takeover_kinds,
         };
         vm_state.active_batch = Some(batch);
         vm_state.upsert_batch_retained(BatchResultRecord {
@@ -1426,6 +1458,7 @@ impl BrokerState {
                             .and_then(|v| v.queued.pop_front())
                             .expect("front queued");
 
+                        let _vm_guard = DispatchVmGuard::enter(vm_id);
                         match dispatch(&popped.kind) {
                             DispatchOutcome::Completed { detail } => {
                                 let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
@@ -1595,7 +1628,10 @@ impl BrokerState {
                         }
                         let step_req_id = self.next_id;
                         self.next_id = self.next_id.wrapping_add(1).max(1);
-                        let outcome = dispatch(&step_kind);
+                        let outcome = {
+                            let _vm_guard = DispatchVmGuard::enter(vm_id);
+                            dispatch(&step_kind)
+                        };
                         let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
                         if let Some(batch) = vm_state.active_batch.as_mut() {
                             let _ = batch.steps.pop_front();
@@ -1903,6 +1939,19 @@ impl BrokerState {
                     rec.code.as_deref(),
                     rec.reason,
                 );
+                let finished_takeover = match rec.kind {
+                    "loot" | "loot_all" => Some(super::window_takeover::TakeoverKind::Loot),
+                    "buy" | "sell" => Some(super::window_takeover::TakeoverKind::Merchant),
+                    "bank_move" | "bank_money" => Some(super::window_takeover::TakeoverKind::Bank),
+                    _ => None,
+                };
+                if let Some(kind) = finished_takeover
+                    && vm_state.active_batch.is_none()
+                    && !vm_state.queued.iter().any(|q| q.kind.subsystem() == inflight.subsystem)
+                    && !vm_state.in_flight.values().any(|f| f.subsystem == inflight.subsystem)
+                {
+                    super::window_takeover::end_session_for_vm(inflight.vm, kind);
+                }
                 if all {
                     continue;
                 }
@@ -1919,6 +1968,24 @@ thread_local! {
     static MASTER_LOOT_ACTIVE: Cell<bool> = const { Cell::new(false) };
     static CURRENT_CORPSE_TARGET: Cell<Option<u32>> = const { Cell::new(None) };
     static EXPIRED_LOOT_TIMEOUT: Cell<bool> = const { Cell::new(false) };
+    static DISPATCHING_VM: Cell<Option<u64>> = const { Cell::new(None) };
+}
+
+struct DispatchVmGuard(Option<u64>);
+impl DispatchVmGuard {
+    fn enter(vm: u64) -> Self {
+        let prev = DISPATCHING_VM.with(|d| d.replace(Some(vm)));
+        Self(prev)
+    }
+}
+impl Drop for DispatchVmGuard {
+    fn drop(&mut self) {
+        DISPATCHING_VM.with(|d| d.set(self.0));
+    }
+}
+
+pub(crate) fn current_dispatch_vm() -> Option<u64> {
+    DISPATCHING_VM.with(Cell::get)
 }
 
 pub(crate) fn set_corpse_target_id(id: Option<u32>) {
@@ -2071,7 +2138,7 @@ pub(crate) fn mark_loot_inv_added(added_item_id: i64) {
     });
 }
 
-pub(crate) fn take_corpse_reopen_ask() -> Option<u32> {
+pub(crate) fn take_corpse_reopen_ask() -> Option<(u64, u32)> {
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         for vm in b.vms.values_mut() {
@@ -2080,7 +2147,7 @@ pub(crate) fn take_corpse_reopen_ask() -> Option<u32> {
                 && !reopen.asked
             {
                 reopen.asked = true;
-                return Some(reopen.corpse_id);
+                return Some((batch.vm, reopen.corpse_id));
             }
         }
         None

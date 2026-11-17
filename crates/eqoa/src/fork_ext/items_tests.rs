@@ -2874,9 +2874,51 @@ fn round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases() {
         "conflict must diagnose naming holder: {logs:?}"
     );
 
-    // 1. Loot taken over: 0x0018 keeps mode == 0, draws 0 native pixels, loot data & actions work.
+    // Spawn entities in scene: corpse 9001 ([3,0,0]), merchant 9002 ([6,0,0]), banker 9003 ([8,0,0]).
+    p.self_at = Some(([0.0, 0.0, 0.0], None));
+    p.entities.slots = vec![None; 8];
+    p.entities.slots[0] = Some(net::entity::Entity {
+        id: 9001, world: 0, kind: net::entity::TYPE_CREATURE, p18: 3, pos: [3.0, 0.0, 0.0], actor_pos: [3.0, 0.0, 0.0],
+        creature: Some(net::entity::Creature { name: "a fallen orc".into(), ..Default::default() }), ..Default::default()
+    });
+    p.entities.slots[1] = Some(net::entity::Entity {
+        id: 9002, world: 0, kind: net::entity::TYPE_CREATURE, p18: 1, pos: [6.0, 0.0, 0.0], actor_pos: [6.0, 0.0, 0.0],
+        creature: Some(net::entity::Creature { name: "Merchant Kim".into(), npc_flags: 0x80 | 8, ..Default::default() }), ..Default::default()
+    });
+    p.entities.slots[2] = Some(net::entity::Entity {
+        id: 9003, world: 0, kind: net::entity::TYPE_CREATURE, p18: 1, pos: [8.0, 0.0, 0.0], actor_pos: [8.0, 0.0, 0.0],
+        creature: Some(net::entity::Creature { name: "Banker Dan".into(), npc_flags: 0x80 | 2, ..Default::default() }), ..Default::default()
+    });
+
+    // 0 (M1). Player-started opens STILL open normal native windows even while holder_mod holds takeover!
     apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
-    assert_eq!(p.mode, 0, "taken-over loot must keep mode == 0");
+    assert_eq!(p.mode, 1, "player-started loot must open native window even under takeover");
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.mode, 1, "sync_hidden_sessions must never hijack native loot window");
+    apply(&mut p, opcode(0x0016, vec![]));
+    assert_eq!(p.mode, 0);
+
+    apply(&mut p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Shop!")));
+    assert_eq!(p.mode, 10, "player-started merchant must open native window even under takeover");
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.mode, 10, "sync_hidden_sessions must never hijack native merchant window");
+    p.mode = 0;
+    p.npcw.shop = Default::default();
+
+    p.target = 9003;
+    apply(&mut p, opcode(0x124D, vec![]));
+    assert_eq!(p.mode, 11, "player-started bank must open native window even under takeover");
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.mode, 11, "sync_hidden_sessions must never hijack native bank window");
+    p.mode = 0;
+    p.bank = Default::default();
+    p.target = u32::MAX;
+
+    // 1. Mod-opened Loot (via open_loot): keeps mode == 0, draws 0 native pixels, loot data & action work, and M3 ends session on completion.
+    host_a.execute("assert(eqoa.actions.open_loot(9001))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 0, "mod-opened taken-over loot must keep mode == 0");
     let vui = crate::ui::Vui::new(Default::default(), Default::default(), vec![]);
     let mut raster = CountingRaster(0);
     p.run_npcw(&vui, &mut raster);
@@ -2896,11 +2938,21 @@ fn round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases() {
     p.run_npcw(&vui, &mut raster);
     assert_eq!(raster.0, 0, "dispatching loot under takeover draws 0 calls");
     assert!(p.session.sends_lost > 0, "native 0x0017 loot request must still send");
+    let mut w19 = net::stream::Writer::default();
+    w19.u8(0).signed(0);
+    let ev19 = opcode(0x0019, w19.data);
+    let cap19 = super::super::begin_game_event(&p, &ev19);
+    let _ = p.npcw_opcode(0x0019, match &ev19 { Event::Opcode { data, .. } => data, _ => &[] });
+    super::super::end_game_event(&p, cap19);
+    super::super::begin_iteration(&mut p, true);
+    assert!(!super::super::loot_session_open(&p), "M3: loot action completion must end hidden loot session");
 
-    // 2. Merchant taken over: 0x00B7 keeps mode == 0, draws 0 pixels, merchant.get().open == true & sell works.
+    // 2. Mod-opened Merchant (via talk): keeps mode == 0, draws 0 pixels, merchant.get().open == true & sell ends session (M3).
     let sent_before_merch = p.session.sends_lost;
-    apply(&mut p, opcode(0x00B7, shop_bytes(7001, 90, 110, &[sword()], "Shop!")));
-    assert_eq!(p.mode, 0, "taken-over merchant must keep mode == 0");
+    host_a.execute("assert(eqoa.actions.talk(9002, { kind = 'merchant' }))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    apply(&mut p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Shop!")));
+    assert_eq!(p.mode, 0, "mod-opened taken-over merchant must keep mode == 0");
     p.run_npcw(&vui, &mut raster);
     assert_eq!(raster.0, 0, "native merchant window must draw 0 calls under takeover");
     p.forge_snapshot(None);
@@ -2918,13 +2970,28 @@ fn round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases() {
     p.run_npcw(&vui, &mut raster);
     assert_eq!(raster.0, 0);
     assert!(p.session.sends_lost > sent_before_merch, "native sell request must still send");
+    let ev_took = Event::InvTook { slot: 0, sound: 3, n: 1 };
+    let cap_took = super::super::begin_game_event(&p, &ev_took);
+    crate::inventory::took(&mut p.dump.inventory, 0, 1);
+    p.npcw_item_took(3);
+    super::super::end_game_event(&p, cap_took);
+    super::super::begin_iteration(&mut p, true);
+    assert!(!super::super::merchant_session_open(&p), "M3: sell completion must end hidden merchant session");
+    assert!(p.npcw.shop.id.is_none());
 
-    // 3. Bank taken over: 0x124D keeps mode == 0, bank_taken_tick dispatches with 0 pixels drawn.
-    p.target = 9001;
+    // 3 (M2). Bank opened via talk(9003): retargeting BEFORE 0x124D must still preserve banker_id = 9003 (not retargeted id)!
     let sent_before_bank = p.session.sends_lost;
+    host_a.execute("assert(eqoa.actions.talk(9003, { kind = 'bank' }))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 9003);
+    p.target = 7777; // Player retargets away BEFORE 0x124D reply arrives!
     apply(&mut p, opcode(0x124D, vec![]));
-    assert_eq!(p.mode, 0, "taken-over bank must keep mode == 0");
-    p.target = u32::MAX; // change target cleanly while mode == 0; hidden banker_id still preserved!
+    assert_eq!(p.mode, 0, "mod-opened taken-over bank must keep mode == 0");
+    assert_eq!(
+        window_takeover::hidden_bank_session(),
+        Some(9003),
+        "M2: hidden banker_id must come from talk request (9003), not retargeted play.target (7777)"
+    );
     p.run_bank(&vui, &mut raster);
     assert_eq!(raster.0, 0, "native bank window must draw 0 calls under takeover");
     p.forge_snapshot(None);
@@ -2941,8 +3008,40 @@ fn round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases() {
     p.run_bank(&vui, &mut raster);
     assert_eq!(raster.0, 0, "bank_taken_tick must draw 0 calls to screen raster");
     assert_eq!(p.bank.state, 1, "bank_money must have sent native 0x1255");
-    assert_eq!(p.target, u32::MAX, "bank_taken_tick must restore player's target");
+    assert_eq!(p.target, 7777, "bank_taken_tick must restore player's current target");
     assert!(p.session.sends_lost > sent_before_bank);
+    let mut w53 = net::stream::Writer::default();
+    w53.signed(525);
+    let ev53 = opcode(0x1253, w53.data);
+    let cap53 = super::super::begin_game_event(&p, &ev53);
+    let _ = p.bank_opcode(0x1253, match &ev53 { Event::Opcode { data, .. } => data, _ => &[] });
+    super::super::end_game_event(&p, cap53);
+    super::super::begin_iteration(&mut p, true);
+    assert!(!super::super::bank_session_open(&p), "M3: bank_money completion must end hidden bank session");
+
+    // 3b (M3): Walk-away & idle timeout release lingering hidden sessions so next player open is native.
+    host_a.execute("assert(eqoa.actions.open_loot(9001))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert!(super::super::loot_session_open(&p));
+    p.self_at = Some(([40.0, 0.0, 0.0], None)); // walked > 25u away from [0,0,0] / corpse at [3,0,0]
+    super::super::begin_iteration(&mut p, true);
+    assert!(!super::super::loot_session_open(&p), "M3: walk-away must end hidden loot session");
+    assert!(p.npcw.corpse.is_none());
+
+    p.self_at = Some(([0.0, 0.0, 0.0], None));
+    host_a.execute("assert(eqoa.actions.open_loot(9001))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert!(super::super::loot_session_open(&p));
+    window_takeover::expire_hidden_session_for_test(window_takeover::TakeoverKind::Loot);
+    super::super::begin_iteration(&mut p, true);
+    assert!(!super::super::loot_session_open(&p), "M3: idle timeout must end hidden loot session");
+    assert!(p.npcw.corpse.is_none());
+    // Next player-started loot opens normally (mode == 1)!
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 1, "after timeout cleanup, player open must show native window");
+    apply(&mut p, opcode(0x0016, vec![]));
 
     // 4. Auto-release on zoning -> released cleanly; re-take -> auto-release on mod disable/clear.
     let tp = Event::Teleport { world: 2, pos: [0.0; 3], hpr: [0.0; 3], token: 7 };
@@ -3193,9 +3292,9 @@ fn round65_reset_all_for_test_clears_hidden_sessions() {
     assert!(window_takeover::takeover(1, "test_mod", window_takeover::TakeoverKind::Loot).is_ok());
     assert!(window_takeover::takeover(1, "test_mod", window_takeover::TakeoverKind::Merchant).is_ok());
     assert!(window_takeover::takeover(1, "test_mod", window_takeover::TakeoverKind::Bank).is_ok());
-    assert!(window_takeover::activate_hidden(window_takeover::TakeoverKind::Loot, 9001));
-    assert!(window_takeover::activate_hidden(window_takeover::TakeoverKind::Merchant, 9002));
-    assert!(window_takeover::activate_hidden(window_takeover::TakeoverKind::Bank, 9003));
+    assert!(window_takeover::activate_hidden_for_test(1, window_takeover::TakeoverKind::Loot, 9001));
+    assert!(window_takeover::activate_hidden_for_test(1, window_takeover::TakeoverKind::Merchant, 9002));
+    assert!(window_takeover::activate_hidden_for_test(1, window_takeover::TakeoverKind::Bank, 9003));
     p.npcw.corpse = Some(list(&[gem()]));
     p.npcw.shop = crate::merchant::read_shop(&shop_bytes(9002, 90, 110, &[sword()], "Hi"));
     assert!(super::super::loot_session_open(&p));
@@ -3220,8 +3319,9 @@ fn round65_loot_release_clears_corpse_visibility_and_master_loot() {
     let mut p = ready();
     p.session.conn = Some(usize::MAX);
     assert!(window_takeover::takeover(1, "test_mod", window_takeover::TakeoverKind::Loot).is_ok());
-    assert!(window_takeover::activate_hidden(window_takeover::TakeoverKind::Loot, 9001));
+    assert!(window_takeover::arm_pending_open(window_takeover::TakeoverKind::Loot, 1, 9001));
     apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 0);
     let ml = net::raid::MasterLoot { seconds: 60, members: vec![] };
     let ev_ml = Event::MasterLoot(Some(ml.clone()));
     let cap_ml = super::super::begin_game_event(&p, &ev_ml);

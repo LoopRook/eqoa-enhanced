@@ -2317,6 +2317,12 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     bv.open();
     bv.frames(2);
     assert_eq!(bv.play.mode, 0);
+    // M1: opening Bag Viewer holds ZERO takeovers; player-started merchant/corpse still open native windows normally.
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('loot') and not eqoa.windows.taken('merchant') and not eqoa.windows.taken('bank')"), "Bag Viewer must NOT hold takeovers while idle");
+    bv.play.bags_merchant_packet(888);
+    assert_eq!(bv.play.mode, 10, "player-started merchant must open natively while Bag Viewer is open");
+    bv.play.bags_close_merchant();
+    assert_eq!(bv.play.mode, 0);
 
     // 2. Click Corpse tab (visible because corpse is nearby) -> click Loot -> server refuses 0x0085 -> visible server text.
     bv.click(bv.tab(7));
@@ -2367,6 +2373,7 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
         bv.result_text(),
         Some(("Looted 2 of 2".into(), Some(true)))
     );
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('loot')"), "Bag Viewer must release loot takeover when batch ends");
 
     // 4. Mark Odd Thing (slot 8) as junk on All tab, then click Sell junk near Merchant (native merchant closed) -> talks & sells without native window!
     bv.click(bv.tab(1));
@@ -2394,6 +2401,7 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     bv.play.bags_sell_confirm(7, 1);
     bv.frames(2);
     assert_eq!(bv.result_text(), Some(("Sold 1 of 1".into(), Some(true))));
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "Bag Viewer must release merchant takeover when batch ends");
 
     // 5. Deposit near Banker (native bank closed): click item -> Deposit -> talks & deposits silently (mode stays 0).
     let s2 = bv.slot(2); // Healing Potion
@@ -2412,6 +2420,7 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     bv.play.bags_bank_deposit_confirm(99, 900002, "Healing Potion", 1);
     bv.frames(2);
     assert_eq!(bv.result_text(), Some(("Deposit: ok".into(), Some(true))));
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('bank')"), "Bag Viewer must release bank takeover when action ends");
 
     bv.clean();
     super::super::window_takeover::reset_all_for_test();
@@ -2448,6 +2457,7 @@ fn round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target() {
     bv.open();
     bv.frames(2);
     assert!(super::super::options::set_toggle("eqoa_bag_viewer", "auto_loot", true));
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('loot')"), "auto_loot ON must NOT hold loot takeover while idle");
     assert!(bv.eval::<bool>("(function() require('bags').junk_ids['2001'] = true return true end)()"));
 
     // Kill living target 9011 nearest ([2,0,0] < 9010 at [3,0,0]) -> auto-loot opens corpse & loots non-junk cleanly without native window!
@@ -2475,6 +2485,7 @@ fn round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target() {
         Some(("Looted 1 of 1".into(), Some(true))),
         "auto-loot must take all non-junk and report completion"
     );
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('loot')"), "auto-loot must release loot takeover after completion");
 
     bv.clean();
     super::super::window_takeover::reset_all_for_test();
