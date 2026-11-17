@@ -2204,13 +2204,39 @@ fn dispatch_window_action(
         if w["focused"] != true {
             return Err(refuse("busy", "the window does not hold the input focus"));
         }
-        if play.mode == 40 && play.cm.node.is_some() {
-            return Err(refuse("busy", "a skill window is open over the list"));
-        }
         if !play.key_queue.is_empty() || play.held.is_some() {
             return Err(refuse("busy", "an earlier key sequence is still being delivered"));
         }
         Ok(w)
+    };
+    // Windows act only in the exact state their exported rows describe. Where a sub-dialog,
+    // page or popup lives in private state this client does not expose (bank page, merchant
+    // quantity/MBox/inspect, spellbook popup, boxed quest prompt, mastery focus) the action is
+    // refused rather than guessed (see round-6b-seams.md for the read-only accessors it needs).
+    let gate = |play: &Play, op: &str| -> std::result::Result<(), DispatchOutcome> {
+        let rows_op = matches!(op, "select" | "activate" | "menu");
+        let ok = match play.mode {
+            1 => rows_op || op == "close",
+            13 => rows_op || op == "close",
+            7 => true,
+            9 | 14 => !rows_op,
+            2 => op == "close",
+            12 => op == "select",
+            _ => false,
+        };
+        if !ok {
+            return Err(refuse("unsupported", "this window's sub-state is not readable, so the action is refused rather than guessed"));
+        }
+        if matches!(play.mode, 7 | 9 | 14) && play.hud.is_none() {
+            return Err(refuse("not_ready", "the dialog is not drawn yet"));
+        }
+        if play.mode == 1 && (crate::fork_ext::addons::action_broker::is_master_loot_active() || LOOT_BUSY.with(|b| b.get())) {
+            return Err(refuse("busy", "a loot request or master-loot choice is open"));
+        }
+        if play.bank.state != 0 || play.npcw.shop.pending || play.waiting || play.cm.pending != 0 {
+            return Err(refuse("busy", "a native transaction is pending"));
+        }
+        Ok(())
     };
     // the keys that move a list selection from `from` to `to` (1-based), then `then`
     let walk = |from: Option<u64>, to: usize, then: &[i32]| -> std::result::Result<Vec<i32>, DispatchOutcome> {
@@ -2223,14 +2249,14 @@ fn dispatch_window_action(
         Ok(keys)
     };
     match kind {
-        ActionKind::DropQuest { index, title, revision } => {
+        ActionKind::DropQuest { index, title, revision, stamp } => {
             let current = crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow().quest_revision);
             let now_title = play
                 .quests
                 .titles
                 .get(index.wrapping_sub(1))
                 .map(|t| String::from_utf16_lossy(&t[..t.iter().position(|&c| c == 0).unwrap_or(t.len())]));
-            if current != *revision || now_title.as_deref() != Some(title.as_str()) {
+            if current != *revision || play.quests.stamp != *stamp || now_title.as_deref() != Some(title.as_str()) {
                 return refuse("stale_handle", "the quest journal changed since the handle was taken");
             }
             let m = play.quests.send_remove(*index as i32 - 1);
@@ -2269,13 +2295,17 @@ fn dispatch_window_action(
                     let Some(node) = play.cm.node.clone().filter(|n| n.x08 == *skill_id) else {
                         return refuse("not_ready", "inspect the skill (mastery_browse) before buying or refunding it");
                     };
+                    // the live skill list decides owned/known, never the inspected node's copy
+                    let Some(skill) = play.cm.find(*skill_id).map(|k| play.cm.skills[k].clone()) else {
+                        return refuse("not_found", "no such skill in the loaded list");
+                    };
                     if matches!(kind, ActionKind::MasteryRefund { .. }) {
-                        if node.x04 == 0 {
+                        if !skill.on {
                             return refuse("not_ready", "the skill is not owned");
                         }
                         play.cm.send03(node.x08)
                     } else {
-                        if node.x04 != 0 || node.x05 == 0 {
+                        if skill.on || skill.known == 0 {
                             return refuse("not_ready", "the skill is owned or not yet buyable");
                         }
                         if node.x10 == crate::classmastery::MASTER_CLASS && play.cm.refuses_master_class(node.x08, node.x0c) {
@@ -2294,7 +2324,7 @@ fn dispatch_window_action(
                 None => refuse("busy", "a class mastery request is still pending"),
             }
         }
-        ActionKind::CloseWindow { win } => match live(play, win) {
+        ActionKind::CloseWindow { win } => match live(play, win).and_then(|w| gate(play, "close").map(|_| w)) {
             Ok(_) => {
                 play.press(&[132]);
                 keys_sent(1)
@@ -2306,8 +2336,25 @@ fn dispatch_window_action(
                 Ok(w) => w,
                 Err(e) => return e,
             };
+            let activate = matches!(kind, ActionKind::ActivateRow { .. });
+            if let Err(e) = gate(play, if activate { "activate" } else { "select" }) {
+                return e;
+            }
             let r = &w["rows"][*row - 1];
-            if matches!(kind, ActionKind::ActivateRow { .. }) && r["enabled"] != true {
+            if play.mode == 12 {
+                // the trainer's stats and details step exactly one row per key, clamped; from
+                // Train/Details an Up restores the old stat, so those rows are not a start or target
+                let (sel, t_mode) = play.trainer.read_state();
+                let limit = match t_mode {
+                    0 => 7,
+                    3 => 9,
+                    _ => return refuse("not_ready", "the trainer's cursor is on its buttons"),
+                };
+                if activate || *row > limit || sel < 0 || sel >= limit as i32 {
+                    return refuse("unsupported", "only a stat or detail row can be selected in the trainer");
+                }
+            }
+            if activate && r["enabled"] != true {
                 return refuse("not_ready", "the row is not enabled");
             }
             if report_guard(&w, r["command"].as_str(), None).is_some() {
@@ -2327,6 +2374,9 @@ fn dispatch_window_action(
                 Ok(w) => w,
                 Err(e) => return e,
             };
+            if let Err(e) = gate(play, "menu") {
+                return e;
+            }
             if report_guard(&w, Some(command), None).is_some() {
                 return refuse("permission_denied", "report routes are forbidden");
             }
@@ -2349,7 +2399,11 @@ fn dispatch_window_action(
                 Ok(w) => w,
                 Err(e) => return e,
             };
+            if let Err(e) = gate(play, "answer") {
+                return e;
+            }
             let keys = match (play.mode, w["dialog"]["kind"].as_str()) {
+                (9, _) if *option == 1 => Ok(vec![134]),
                 (7, _) => walk(w["selected_row"].as_u64(), *option, &[134]),
                 (14, Some("confirm")) => match w["dialog"]["style"].as_str() {
                     Some("yes_no") => match w["dialog"]["selection"].as_u64() {

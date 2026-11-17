@@ -137,7 +137,7 @@ pub(crate) enum ActionKind {
     BankMove { from_bank: bool, item: ResolvedItemSpec, count: i64 },
     BankMoney { dir: u8, amount: i64 },
     Camera { mode: Option<i32>, heading: Option<f32>, pitch: Option<f32>, distance: Option<f32> },
-    DropQuest { index: usize, title: String, revision: u64 },
+    DropQuest { index: usize, title: String, revision: u64, stamp: u32 },
     MasteryShare { percent: i32 },
     MasteryBrowse { skill_id: i32 },
     MasteryBuy { skill_id: i32 },

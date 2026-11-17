@@ -34,6 +34,9 @@ pub(crate) fn signature(w: &Json) -> u64 {
     } else {
         w["dialog"]["text"].clone()
     };
+    // what an edit box or confirm is for: a replaced box is another window
+    let d = &w["dialog"];
+    let purpose = json!([d["tag"], d["title"], d["chat"], d["password"], d["style"], d["style_id"]]);
     let s = json!([
         w["kind"],
         rows,
@@ -41,7 +44,8 @@ pub(crate) fn signature(w: &Json) -> u64 {
         w["tab"],
         w["dialog"]["kind"],
         dialog_text,
-        w["dialog"]["options"]
+        w["dialog"]["options"],
+        purpose
     ])
     .to_string();
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -154,6 +158,7 @@ pub(crate) fn install(lua: &Lua) -> Result<()> {
                     index: q["index"].as_u64().unwrap_or(0) as usize,
                     title: q["title"].as_str().unwrap_or("").to_string(),
                     revision: r.incarnation,
+                    stamp: CORE.with(|c| c.borrow().quest_stamp),
                 })
             })
         })?,
@@ -250,7 +255,11 @@ pub(crate) fn install(lua: &Lua) -> Result<()> {
                         Some("ok" | "cancel") => 1,
                         _ => return Err(("unsupported", "unknown confirm style".into())),
                     },
-                    _ => w["dialog"]["options"].as_array().map_or(0, |o| o.len() as i64),
+                    // a Done-only text dialog (PrivChat) has no options; 1 is its Done
+                    _ => match w["dialog"]["options"].as_array().map_or(0, |o| o.len() as i64) {
+                        0 if w["kind"] == "text_dialog" => 1,
+                        n => n,
+                    },
                 };
                 if n == 0 {
                     return Err(("out_of_range", "dialog has no options".into()));

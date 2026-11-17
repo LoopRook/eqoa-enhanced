@@ -210,6 +210,8 @@ pub(crate) struct Core {
     /// Per item list, the revision the container last published with.
     pub item_revisions: BTreeMap<&'static str, u64>,
     pub quest_revision: u64,
+    /// the journal's stamp as of the last capture (`Quests::stamp`), what `drop_quest` queued against
+    pub quest_stamp: u32,
     pub window_versions: BTreeMap<String, u64>,
     pub mastery_flags: MasteryFlags,
     pub cm_pending_ops: u16,
@@ -253,6 +255,7 @@ impl Default for Core {
             item_versions: BTreeMap::new(),
             item_revisions: BTreeMap::new(),
             quest_revision: 0,
+            quest_stamp: 0,
             window_versions: BTreeMap::new(),
             mastery_flags: MasteryFlags::default(),
             cm_pending_ops: 0,
@@ -456,6 +459,7 @@ impl Core {
         self.item_versions.clear();
         self.item_revisions.clear();
         self.quest_revision = 0;
+        self.quest_stamp = 0;
         self.window_versions.clear();
         self.mastery_flags = MasteryFlags::default();
         self.cm_pending_ops = 0;

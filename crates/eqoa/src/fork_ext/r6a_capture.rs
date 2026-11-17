@@ -189,6 +189,7 @@ pub(super) fn windows_fingerprint(play: &Play, generation: u64) -> WindowsFinger
     if play.mode == 14 {
         play.mbox.kind.hash(&mut mh);
         play.mbox.text.hash(&mut mh);
+        play.mbox.p2.hash(&mut mh);
         play.mbox.sel().hash(&mut mh);
     }
     let mut dh = std::collections::hash_map::DefaultHasher::new();
@@ -618,6 +619,7 @@ fn mode_window_data(play: &Play, edit_title: &str) -> WindowData {
                     "text": utf16_str(&play.mbox.text),
                     "style": style,
                     "style_id": play.mbox.kind,
+                    "tag": play.mbox.p2,
                     "selection": selection,
                 }),
                 ..Default::default()
@@ -1052,6 +1054,7 @@ pub(super) fn populate_view(
     let qh = quests_hash(play);
     LAST_QUEST_HASH.with(|h| h.set(Some(qh)));
     view.quests = quests_json(play);
+    CORE.with(|c| c.borrow_mut().quest_stamp = play.quests.stamp);
 
     let flags = CORE.with(|c| {
         let mut c = c.borrow_mut();
@@ -1096,8 +1099,10 @@ pub(super) fn capture_quests(play: &Play) {
     }
     LAST_QUEST_HASH.with(|h| h.set(Some(qh)));
     let mut after = quests_json(play);
+    let stamp = play.quests.stamp;
     native_core::defer(2048, move |c| {
         c.quest_revision += 1;
+        c.quest_stamp = stamp;
         for q in &mut after {
             let key = q["index"].as_u64().unwrap_or(0).to_string();
             q["ref"] = json!({
@@ -1130,6 +1135,7 @@ pub(super) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         CORE.with(|c| {
             let mut c = c.borrow_mut();
             c.quest_revision += 1;
+            c.quest_stamp = play.quests.stamp;
             for q in &mut after {
                 let key = q["index"].as_u64().unwrap_or(0).to_string();
                 q["ref"] = json!({
