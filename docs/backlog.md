@@ -302,3 +302,15 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
   `unsupported`, because their pages and sub-dialogs are not readable from fork code (review D, Gemini Hydrogen).
 - **To enable:** five read-only accessors proposed in `docs/plans/eqoa-api/round-6b-seams.md` (feat/eqoa-api-r6).
   The typed actions (sell, buy, bank move/money, mastery buy/refund, drop_quest) already cover these windows.
+
+## Helper mod ideas on round 6.5's window takeover (owner, 2026-11-17)
+
+- **Status:** Ideas, not scheduled. Each is a mod, not an API change, unless noted.
+- **Helpers** (a mod opens its own hidden session, does the job, closes; a player-opened window stays normal):
+  auto-sell junk near a merchant (e.g. from an info bar); auto-loot your kills (Bag Viewer option, round 6.5);
+  restock (keep N of an item, buy up to N from a merchant that sells it); auto-bank (deposit crafting materials or
+  marked items near a banker); loot filters (always/never take, bag-nearly-full warning); one-key versions of each.
+- **Need the takeover extended first** (API work, one window at a time): quest turn-ins (NPC dialogs), trainers,
+  crafting.
+- **Server limit:** the server decides the range for every request; the owner's round 6.5 test shows whether
+  "from anywhere" works.
