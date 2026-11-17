@@ -2141,6 +2141,272 @@ fn dispatch_broker_action(
                 detail: None,
             }
         }
+        ActionKind::DropQuest { .. }
+        | ActionKind::MasteryShare { .. }
+        | ActionKind::MasteryBrowse { .. }
+        | ActionKind::MasteryBuy { .. }
+        | ActionKind::MasteryRefund { .. }
+        | ActionKind::CloseWindow { .. }
+        | ActionKind::SelectRow { .. }
+        | ActionKind::ActivateRow { .. }
+        | ActionKind::DialogAnswer { .. }
+        | ActionKind::InputText { .. }
+        | ActionKind::MenuCommand { .. } => dispatch_window_action(play, kind),
+    }
+}
+
+/// Round 6 window and quest actions, dispatched through the native key, edit, class-mastery and
+/// quest-journal paths. Windows are revalidated against the live window list (key, incarnation,
+/// row/dialog signature) and must hold the input focus; no packet is built here except the
+/// game's own `Quests::send_remove` and `Part::{select,browse,send02,send03}` requests.
+#[cfg(not(target_arch = "wasm32"))]
+fn dispatch_window_action(
+    play: &mut Play,
+    kind: &crate::fork_ext::addons::action_broker::ActionKind,
+) -> crate::fork_ext::addons::action_broker::DispatchOutcome {
+    use crate::fork_ext::addons::action_broker::{ActionKind, DispatchOutcome, WinTarget};
+    use crate::fork_ext::addons::window_actions::{report_guard, signature};
+    use serde_json::{Value as Json, json};
+    let refuse = |code: &'static str, reason: &str| DispatchOutcome::Refused { code, reason: reason.to_string() };
+    let keys_sent = |n: usize| DispatchOutcome::Completed { detail: Some(json!({"keys": n, "via": "native key presses"})) };
+    // the report confirmation and editor never take synthetic input, whatever the mode says
+    let report_owned = (play.mode == 14 && play.mbox.p2 == 0xB0B_1002)
+        || (play.mode == 2 && play.edit.purpose == 0xB0B_1002)
+        || matches!(play.mode, 31 | 32);
+    let window_op = !matches!(
+        kind,
+        ActionKind::DropQuest { .. }
+            | ActionKind::MasteryShare { .. }
+            | ActionKind::MasteryBrowse { .. }
+            | ActionKind::MasteryBuy { .. }
+            | ActionKind::MasteryRefund { .. }
+    );
+    if report_owned && window_op {
+        return refuse("permission_denied", "the report window does not take synthetic input");
+    }
+    // the live window: same key, same incarnation, same rows, holding the focus
+    let live = |play: &Play, win: &WinTarget| -> std::result::Result<Json, DispatchOutcome> {
+        if !win.key.starts_with("mode:") || win.key.starts_with("mode:other") {
+            return Err(refuse("unsupported", "only mode windows take window actions"));
+        }
+        let state = api_capture::r6a::windows_json(play);
+        let Some(w) = state["windows"]
+            .as_array()
+            .and_then(|l| l.iter().find(|w| w["_key"].as_str() == Some(win.key.as_str())))
+            .cloned()
+        else {
+            return Err(refuse("stale_handle", "the window is closed"));
+        };
+        let version = crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow().window_versions.get(&win.key).copied());
+        if version != Some(win.incarnation) || signature(&w) != win.sig {
+            return Err(refuse("stale_handle", "the window changed since the handle was taken"));
+        }
+        if w["focused"] != true {
+            return Err(refuse("busy", "the window does not hold the input focus"));
+        }
+        if play.mode == 40 && play.cm.node.is_some() {
+            return Err(refuse("busy", "a skill window is open over the list"));
+        }
+        if !play.key_queue.is_empty() || play.held.is_some() {
+            return Err(refuse("busy", "an earlier key sequence is still being delivered"));
+        }
+        Ok(w)
+    };
+    // the keys that move a list selection from `from` to `to` (1-based), then `then`
+    let walk = |from: Option<u64>, to: usize, then: &[i32]| -> std::result::Result<Vec<i32>, DispatchOutcome> {
+        let Some(from) = from else {
+            return Err(refuse("not_ready", "the window has no current selection to move from"));
+        };
+        let (from, to) = (from as i64, to as i64);
+        let mut keys: Vec<i32> = std::iter::repeat_n(if to > from { 139 } else { 138 }, (to - from).unsigned_abs() as usize).collect();
+        keys.extend_from_slice(then);
+        Ok(keys)
+    };
+    match kind {
+        ActionKind::DropQuest { index, title, revision } => {
+            let current = crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow().quest_revision);
+            let now_title = play
+                .quests
+                .titles
+                .get(index.wrapping_sub(1))
+                .map(|t| String::from_utf16_lossy(&t[..t.iter().position(|&c| c == 0).unwrap_or(t.len())]));
+            if current != *revision || now_title.as_deref() != Some(title.as_str()) {
+                return refuse("stale_handle", "the quest journal changed since the handle was taken");
+            }
+            let m = play.quests.send_remove(*index as i32 - 1);
+            play.session.send(&m);
+            DispatchOutcome::Completed { detail: Some(json!({"sent": true, "stamp": play.quests.stamp})) }
+        }
+        ActionKind::MasteryShare { percent } => {
+            let ready = crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow().mastery_flags.share);
+            if !ready {
+                return refuse("not_ready", "class mastery has not been received yet");
+            }
+            match play.cm.select(*percent) {
+                Some(m) => {
+                    play.session.send(&m);
+                    DispatchOutcome::Completed { detail: Some(json!({"sent": true, "percent": percent})) }
+                }
+                None => refuse("busy", "a class mastery request is still pending"),
+            }
+        }
+        ActionKind::MasteryBrowse { skill_id } | ActionKind::MasteryBuy { skill_id } | ActionKind::MasteryRefund { skill_id } => {
+            let ready = crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow().mastery_flags.skills);
+            if play.mode != 40 || !ready {
+                return refuse("not_ready", "the class mastery window must be open with its list loaded");
+            }
+            if play.cm.pending != 0 {
+                return refuse("busy", "a class mastery request is still pending");
+            }
+            let msg = match kind {
+                ActionKind::MasteryBrowse { .. } => {
+                    if play.cm.find(*skill_id).is_none() {
+                        return refuse("not_found", "no such skill in the loaded list");
+                    }
+                    play.cm.browse(*skill_id)
+                }
+                _ => {
+                    let Some(node) = play.cm.node.clone().filter(|n| n.x08 == *skill_id) else {
+                        return refuse("not_ready", "inspect the skill (mastery_browse) before buying or refunding it");
+                    };
+                    if matches!(kind, ActionKind::MasteryRefund { .. }) {
+                        if node.x04 == 0 {
+                            return refuse("not_ready", "the skill is not owned");
+                        }
+                        play.cm.send03(node.x08)
+                    } else {
+                        if node.x04 != 0 || node.x05 == 0 {
+                            return refuse("not_ready", "the skill is owned or not yet buyable");
+                        }
+                        if node.x10 == crate::classmastery::MASTER_CLASS && play.cm.refuses_master_class(node.x08, node.x0c) {
+                            play.warn(1840);
+                            return refuse("not_ready", "another Master Class is already owned");
+                        }
+                        play.cm.send02(node.x08)
+                    }
+                }
+            };
+            match msg {
+                Some(m) => {
+                    play.session.send(&m);
+                    DispatchOutcome::Completed { detail: Some(json!({"sent": true, "skill_id": skill_id})) }
+                }
+                None => refuse("busy", "a class mastery request is still pending"),
+            }
+        }
+        ActionKind::CloseWindow { win } => match live(play, win) {
+            Ok(_) => {
+                play.press(&[132]);
+                keys_sent(1)
+            }
+            Err(e) => e,
+        },
+        ActionKind::SelectRow { win, row } | ActionKind::ActivateRow { win, row } => {
+            let w = match live(play, win) {
+                Ok(w) => w,
+                Err(e) => return e,
+            };
+            let r = &w["rows"][*row - 1];
+            if matches!(kind, ActionKind::ActivateRow { .. }) && r["enabled"] != true {
+                return refuse("not_ready", "the row is not enabled");
+            }
+            if report_guard(&w, r["command"].as_str(), None).is_some() {
+                return refuse("permission_denied", "report routes are forbidden");
+            }
+            let then: &[i32] = if matches!(kind, ActionKind::ActivateRow { .. }) { &[134] } else { &[] };
+            match walk(w["selected_row"].as_u64(), *row, then) {
+                Ok(keys) => {
+                    play.press(&keys);
+                    keys_sent(keys.len())
+                }
+                Err(e) => e,
+            }
+        }
+        ActionKind::MenuCommand { win, command } => {
+            let w = match live(play, win) {
+                Ok(w) => w,
+                Err(e) => return e,
+            };
+            if report_guard(&w, Some(command), None).is_some() {
+                return refuse("permission_denied", "report routes are forbidden");
+            }
+            let Some(row) = w["rows"]
+                .as_array()
+                .and_then(|r| r.iter().position(|x| x["command"].as_str() == Some(command.as_str()) && x["enabled"] == true))
+            else {
+                return refuse("unsupported", "the command is not an enabled row of this window");
+            };
+            match walk(w["selected_row"].as_u64(), row + 1, &[134]) {
+                Ok(keys) => {
+                    play.press(&keys);
+                    keys_sent(keys.len())
+                }
+                Err(e) => e,
+            }
+        }
+        ActionKind::DialogAnswer { win, option } => {
+            let w = match live(play, win) {
+                Ok(w) => w,
+                Err(e) => return e,
+            };
+            let keys = match (play.mode, w["dialog"]["kind"].as_str()) {
+                (7, _) => walk(w["selected_row"].as_u64(), *option, &[134]),
+                (14, Some("confirm")) => match w["dialog"]["style"].as_str() {
+                    Some("yes_no") => match w["dialog"]["selection"].as_u64() {
+                        Some(cur) => {
+                            let mut k = Vec::new();
+                            if cur as usize != *option {
+                                k.push(if *option == 1 { 136 } else { 137 });
+                            }
+                            k.push(134);
+                            Ok(k)
+                        }
+                        None => Err(refuse("not_ready", "the confirm box has no current selection")),
+                    },
+                    _ => Ok(vec![134]),
+                },
+                _ => Err(refuse("unsupported", "this dialog takes no answer")),
+            };
+            match keys {
+                Ok(keys) => {
+                    play.press(&keys);
+                    keys_sent(keys.len())
+                }
+                Err(e) => e,
+            }
+        }
+        ActionKind::InputText { win, text, submit } => {
+            let w = match live(play, win) {
+                Ok(w) => w,
+                Err(e) => return e,
+            };
+            if play.mode != 2 || w["dialog"]["kind"] != "input" {
+                return refuse("unsupported", "the window has no native edit field");
+            }
+            if play.edit.password {
+                return refuse("permission_denied", "password fields never take synthetic input");
+            }
+            if report_guard(&w, None, Some(text)).is_some() {
+                return refuse("permission_denied", "synthetic report routes are forbidden");
+            }
+            if crate::editbox::paste_chars(text, true) != *text {
+                return refuse("invalid_argument", "the text has characters the game's keyboard cannot type");
+            }
+            let old = play.edit.text.clone();
+            let now = play.session.now() as i64;
+            play.edit.clear();
+            let typed = play.edit.paste(text, now);
+            if typed != text.chars().count() {
+                play.edit.set_text(&old);
+                return refuse("out_of_range", "the text does not fit the editor's length or rules");
+            }
+            if *submit {
+                let purpose = play.edit.purpose;
+                play.edit_done(purpose);
+            }
+            DispatchOutcome::Completed { detail: Some(json!({"typed": typed, "submitted": submit})) }
+        }
+        _ => refuse("unsupported", "not a window action"),
     }
 }
 

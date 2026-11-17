@@ -673,7 +673,7 @@ fn mode_window_data(play: &Play, edit_title: &str) -> WindowData {
     }
 }
 
-fn windows_json(play: &Play) -> Json {
+pub(crate) fn windows_json(play: &Play) -> Json {
     let start_menu_open =
         play.mode == 13 || play.start.as_ref().is_some_and(|s| s.menu.visible);
     let mut windows: Vec<Json> = Vec::new();

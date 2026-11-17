@@ -96,6 +96,15 @@ pub(crate) struct AbilityLookup {
     pub index: Option<i64>,
 }
 
+/// The window a window action was queued for: its key, incarnation and row/dialog signature
+/// (`window_actions::signature`), all revalidated at dispatch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WinTarget {
+    pub key: String,
+    pub incarnation: u64,
+    pub sig: u64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ActionKind {
     Assist,
@@ -128,6 +137,17 @@ pub(crate) enum ActionKind {
     BankMove { from_bank: bool, item: ResolvedItemSpec, count: i64 },
     BankMoney { dir: u8, amount: i64 },
     Camera { mode: Option<i32>, heading: Option<f32>, pitch: Option<f32>, distance: Option<f32> },
+    DropQuest { index: usize, title: String, revision: u64 },
+    MasteryShare { percent: i32 },
+    MasteryBrowse { skill_id: i32 },
+    MasteryBuy { skill_id: i32 },
+    MasteryRefund { skill_id: i32 },
+    CloseWindow { win: WinTarget },
+    SelectRow { win: WinTarget, row: usize },
+    ActivateRow { win: WinTarget, row: usize },
+    DialogAnswer { win: WinTarget, option: usize },
+    InputText { win: WinTarget, text: String, submit: bool },
+    MenuCommand { win: WinTarget, command: String },
 }
 
 impl ActionKind {
@@ -163,6 +183,17 @@ impl ActionKind {
             Self::BankMove { .. } => "bank_move",
             Self::BankMoney { .. } => "bank_money",
             Self::Camera { .. } => "camera",
+            Self::DropQuest { .. } => "drop_quest",
+            Self::MasteryShare { .. } => "mastery_share",
+            Self::MasteryBrowse { .. } => "mastery_browse",
+            Self::MasteryBuy { .. } => "mastery_buy",
+            Self::MasteryRefund { .. } => "mastery_refund",
+            Self::CloseWindow { .. } => "close_window",
+            Self::SelectRow { .. } => "select_row",
+            Self::ActivateRow { .. } => "activate_row",
+            Self::DialogAnswer { .. } => "dialog_answer",
+            Self::InputText { .. } => "input_text",
+            Self::MenuCommand { .. } => "menu_command",
         }
     }
 
@@ -194,7 +225,18 @@ impl ActionKind {
             | Self::UnmemorizeAbility { .. }
             | Self::UnmemorizeAll
             | Self::ArrangeAbility { .. }
-            | Self::Camera { .. } => None,
+            | Self::Camera { .. }
+            | Self::DropQuest { .. }
+            | Self::MasteryShare { .. }
+            | Self::MasteryBrowse { .. }
+            | Self::MasteryBuy { .. }
+            | Self::MasteryRefund { .. }
+            | Self::CloseWindow { .. }
+            | Self::SelectRow { .. }
+            | Self::ActivateRow { .. }
+            | Self::DialogAnswer { .. }
+            | Self::InputText { .. }
+            | Self::MenuCommand { .. } => None,
         }
     }
 
@@ -3081,28 +3123,6 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "continuous controls come after the PR",
         );
     }
-    for name in [
-        "drop_quest",
-        "mastery_share",
-        "mastery_browse",
-        "mastery_buy",
-        "mastery_refund",
-        "close_window",
-        "select_row",
-        "activate_row",
-        "dialog_answer",
-        "input_text",
-        "menu_command",
-    ] {
-        describe(
-            lua,
-            &format!("eqoa.actions.{name}"),
-            "not_yet",
-            Some(4),
-            "arrives with the window/quest read API",
-        );
-    }
-
     bind(
         lua,
         "actions",
@@ -3435,6 +3455,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
 
     install_non_item_actions(lua)?;
     install_item_actions(lua)?;
+    super::window_actions::install(lua)?;
 
     Ok(())
 }
@@ -4585,11 +4606,6 @@ mod tests {
             "eqoa.actions.move",
             "eqoa.actions.look",
             "eqoa.actions.buttons",
-            "eqoa.actions.drop_quest",
-            "eqoa.actions.mastery_share",
-            "eqoa.actions.close_window",
-            "eqoa.actions.select_row",
-            "eqoa.actions.menu_command",
         ] {
             let status: String = host
                 .lua

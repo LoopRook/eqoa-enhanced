@@ -26,6 +26,7 @@ mod object_cache;
 mod record_raw;
 pub(crate) mod action_broker;
 pub(crate) mod actions;
+pub(crate) mod window_actions;
 pub(crate) mod gesture;
 mod async_json;
 pub(crate) mod bit;
