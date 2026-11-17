@@ -1535,3 +1535,62 @@ fn round6_item5_window_fits_hud_and_scrolls_100_slot_pack() {
     bv.clean();
     super::super::action_broker::reset_all_for_test();
 }
+
+#[test]
+fn round6_item6_take_all_button_on_corpse_tab() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.session.conn = Some(usize::MAX);
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_corpse(&bv_corpse());
+    bv.enable();
+    bv.open();
+
+    // Mark Rat Pelt as junk so both Take all and Take all but junk are active side by side.
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.slot(1));
+    bv.frames(1);
+    let (jx, jy, _, _, _) = bv.menu_row("Mark as junk").unwrap();
+    bv.click((jx, jy));
+    bv.frames(1);
+
+    let (tax, tay, talbl) = bv.action_hit("Take all").unwrap();
+    assert_eq!(talbl, "Take all");
+    let (_, _, tnjlbl) = bv.action_hit("Take all but junk").unwrap();
+    assert_eq!(tnjlbl, "Take all but junk");
+
+    // Clicking "Take all" dispatches one LootAll (0x001A) and takes everything including junk.
+    let sends_before = bv.play.session.sends_lost;
+    bv.click((tax, tay));
+    bv.play.bags_broker_tick();
+    bv.frames(1);
+    assert!(
+        bv.play.session.sends_lost > sends_before,
+        "Take all button must send 0x001A LootAll"
+    );
+    bv.play.bags_loot_confirm_all();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Take all: ok".into(), Some(true))
+    );
+    assert_eq!(bv.names(), Vec::<String>::new(), "Take all must take junk items too");
+    assert_eq!(bv.log().len(), 3, "Take all logs all 3 corpse items");
+
+    // Negative control: clicking Take all on empty 0/40 corpse shows refusal and sends nothing.
+    let sends_empty = bv.play.session.sends_lost;
+    let (tax2, tay2, _) = bv.action_hit("Take all").unwrap();
+    bv.click((tax2, tay2));
+    bv.play.bags_broker_tick();
+    bv.frames(1);
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Corpse has no items".into(), Some(false))
+    );
+    assert_eq!(bv.play.session.sends_lost, sends_empty, "empty corpse Take all must send no packet");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}

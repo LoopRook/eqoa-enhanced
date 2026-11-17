@@ -272,30 +272,30 @@ function draw()
         }
     end
 
-    -- Row 2 (when merchant/corpse open): full-width Sell junk / Take all but junk button.
-    local btn_lbl, btn_col, btn_border, btn_run
+    -- Row 2 (when merchant/corpse open): Sell junk button, or Take all + Take all but junk buttons.
+    local function ctx_btn(bx, bw, lbl, col, bcol, run)
+        fill(bx, bar2_y, bw, 16, c.raised)
+        frame(bx, bar2_y, bw, 16, bcol)
+        text(bx + 6, bar2_y + 2, lbl, col, bw - 10)
+        action_hits[#action_hits + 1] = {
+            label = lbl, x = x0 + bx * k, y = y0 + bar2_y * k, w = bw * k, h = 16 * k,
+            run = run,
+        }
+    end
     if eqoa.merchant.get() ~= nil then
         local _, cnt, tunar = B.junk_sell_list()
-        btn_lbl = string.format("Sell junk (%d %s, %s tunar)", cnt, cnt == 1 and "item" or "items", B.tunar(tunar))
-        btn_col = cnt > 0 and c.text or c.muted
-        btn_border = cnt > 0 and c.junk or c.border
-        btn_run = B.start_sell_junk
-    elseif eqoa.loot.get() ~= nil then
-        local steps = B.loot_non_junk_list()
-        btn_lbl = "Take all but junk"
-        btn_col = #steps > 0 and c.text or c.muted
-        btn_border = #steps > 0 and c.worn or c.border
-        btn_run = B.start_loot_non_junk
-    end
-    if btn_lbl then
-        local bw = W - 2 * PAD
-        fill(PAD, bar2_y, bw, 16, c.raised)
-        frame(PAD, bar2_y, bw, 16, btn_border)
-        text(PAD + 6, bar2_y + 2, btn_lbl, btn_col, bw - 10)
-        action_hits[#action_hits + 1] = {
-            label = btn_lbl, x = x0 + PAD * k, y = y0 + bar2_y * k, w = bw * k, h = 16 * k,
-            run = btn_run,
-        }
+        local lbl = string.format("Sell junk (%d %s, %s tunar)", cnt, cnt == 1 and "item" or "items", B.tunar(tunar))
+        ctx_btn(PAD, W - 2 * PAD, lbl, cnt > 0 and c.text or c.muted, cnt > 0 and c.junk or c.border, B.start_sell_junk)
+    else
+        local loot = eqoa.loot.get()
+        if loot ~= nil then
+            local steps, total = B.loot_non_junk_list()
+            local bw, bgap = W - 2 * PAD, 6
+            local w_all = 88
+            local w_non = bw - w_all - bgap
+            ctx_btn(PAD, w_all, "Take all", total > 0 and c.text or c.muted, total > 0 and c.worn or c.border, B.start_loot_all)
+            ctx_btn(PAD + w_all + bgap, w_non, "Take all but junk", #steps > 0 and c.text or c.muted, #steps > 0 and c.worn or c.border, B.start_loot_non_junk)
+        end
     end
 
     eqoa.input.claim_pointer({x = x0, y = y0, width = W * k, height = H * k})

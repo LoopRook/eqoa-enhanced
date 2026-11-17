@@ -375,6 +375,25 @@ function M.start_sell_junk()
     M.result = {text = string.format("Selling junk 0 of %d...", count), ok = nil}
 end
 
+function M.start_loot_all()
+    local loot = eqoa.loot.get()
+    if not loot or #(loot.items or {}) == 0 then
+        M.dirty()
+        M.result = {text = "Corpse has no items", ok = false}
+        return
+    end
+    M.pending_label = "Take all"
+    local req, err = eqoa.actions.loot_all()
+    if not req then
+        local msg = err and (err.message or err.code) or "refused"
+        M.result = {text = "Take all: " .. msg, ok = false}
+        M.last_req = nil
+    else
+        M.last_req = req
+        M.result = {text = "Take all: queued...", ok = nil}
+    end
+end
+
 function M.start_loot_non_junk()
     local steps, total = M.loot_non_junk_list()
     if total == 0 then
