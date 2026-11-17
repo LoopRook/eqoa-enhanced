@@ -408,3 +408,16 @@ docs/modding/AGENT-GUIDE.md (one page for agents building mods from an owner bri
   the branch build passed 2026-11-15. Known limit: if the server ignores a loot request, corpse names stay
   off until the next zone (unverified on live traffic). Claude about 20 points of the month (36% to 56%).
   Next: round 6 (scope above), fresh lead.
+- **Round 6 (actions and the rest), 2026-11-16/17.** Branch `feat/eqoa-api-r6` (2e4fb5fe), not yet on develop;
+  **owner test pending** (package EQOA-Enhanced-Round6-Test at 2e4fb5fe). One game action per player gesture
+  (mod key, claimed pointer press, ImGui click), else `needs_player_action`. Part A reads (windows, dialogs,
+  quests, masteries); Part B click actions through an action broker plus bag viewer item actions; Part C
+  click-started batches (Mark as junk, Sell junk, Take all but junk; stop on any refusal, Stop button); 11
+  window/quest actions; row/dialog/close actions refuse on 5 windows whose rows are not readable (accessors in
+  the backlog). Destroy unsupported. Upstream: 3 one-line hook calls (npcw.rs, bankplay.rs, play.rs camera),
+  approved by the lead under the owner's delegation. Route: Gemini Hydrogen built A and B+C (trial item 12),
+  Terra reviewed (A REJECT 2H; B+C REJECT 3H, then 2 rechecks), Claude Sonnet fixed A, fix 3 of B+C, merged
+  A with B+C and built the window actions; Hydrogen reviewed those (8 of 8 findings valid, all fixed). Gates
+  `--release` on the branch: full 2365 passed, 0 failed, 30 SKIP; addons 484; release PASS. Not verified: row,
+  dialog and close actions end to end (native key presses; needs the live game). Tools merged into develop
+  meanwhile: run_gates stale-lock fix and progress lines, make_owner_test_package `--build`.
