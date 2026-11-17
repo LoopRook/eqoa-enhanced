@@ -13,6 +13,14 @@
 5. `6d87f0ce` — `test(bag_viewer): trigger loot source ask before corpse open in round6_item1`
 6. `bcabd928` — `docs(eqoa-api): round 6 owner-fix report`
 7. `2eae0689` — `fix(bags,loot): support per-take 0x0016 close and 0x0015 batch reopen`
+8. `1cae8b1e` — `docs(eqoa-api): update round 6 report with Sandstorm follow-up`
+9. `23864f46` — `fix(broker,loot): require corpse item match for LootAll InvAdd confirmation` (M1)
+10. `94dcb4e6` — `fix(loot): require InvAdd or 0x0019/0x001A before logging loot_open disappearance` (M3)
+11. `64a01518` — `fix(loot): diff InvAdd-confirmed same-corpse loot_open without 0x0016` (M2)
+12. `adb9d596` — `fix(broker,loot): stop corpse reopen immediately on map or camera open` (M4)
+13. `ab4413c5` — `fix(bag_viewer): keep Corpse tab active during loot batch and summary` (L1)
+14. `effa6edd` — `fix(bag_viewer,icons): retry cooled-down icons on change or slow backoff` (L2)
+15. `2422bc87` — `test(bag_viewer): add Sandstorm duplicate-id stacks and partial take coverage` (Test gap)
 
 ## Per-Item Root Causes, Fixes, and Verification
 
@@ -72,17 +80,27 @@
   - Updated `main.lua` (`bar2_y` when `eqoa.loot.get() ~= nil`) to draw `"Take all"` (`w = 88`) and `"Take all but junk"` (`w = bw - 88 - 6`) side-by-side within `W - 2 * PAD`, without increasing `H`.
 - **Verification**: `round6_item6_take_all_button_on_corpse_tab` passes: verifies `"Take all"` dispatches `0x001A` `LootAll`, clears all 3 items (including junk `Rat Pelt`), logs all 3 in loot log, and shows `"Take all: ok"`. Negative control: clicking `"Take all"` on an empty `0/40` corpse reports `"Corpse has no items"` (`ok = false`) and sends `0` packets.
 
+## Review Fixes (DeepSeek review of `2e4fb5fe..1cae8b1e`)
+
+- **M1 (`action_broker.rs`, `play.rs`)**: Changed `ServerMatcher::LootAll` to `ServerMatcher::LootAll { item_ids: Vec<i64> }` populated from the corpse's non-zero stacks at stage time (`play.rs`); `mark_loot_inv_added()` now confirms `LootAll` only if `item_ids.contains(&added_item_id)`. Verified by `round6_m1_loot_all_ignores_unrelated_inv_add_before_close` (failed before `23864f46` with `"Take all: ok"`; passes after, reporting `"Take all: corpse closed"` for unrelated `InvAdd` and `"Take all: ok"` for a matching corpse item).
+- **M2 (`items_capture.rs`)**: Removed `!pending.closed` guard in `capture("loot_open")` so a pending take whose `0x0016` never arrived is still diffed on a subsequent same-corpse `0x0018` (with the M3 `InvAdd` rule) rather than discarded. Verified by `round6_m2_loot_open_without_close_diffs_with_inv_add` (failed before `64a01518` with `left: 0, right: 1`; passes after, plus negative control with no `InvAdd`).
+- **M3 (`items_capture.rs`)**: Never-wrong pickup logging rule in `capture("loot_open")`: skips any pending entry with `entry.gained_qty <= 0` and bounds corpse diff by `entry.gained_qty`. A mere disappearance from the next `0x0018` without `InvAdd` (or `0x0019`/`0x001A`) logs nothing. Verified in `round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls` (failed before `94dcb4e6` logging `"Cracked Skull x1"`; passes after).
+- **M4 (`play.rs`, `action_broker.rs`)**: Added `abort_corpse_reopen(code, reason)` called in `begin_iteration()` before reopen `0x0015` when `_play.map.open || _play.mode == 38` (`"stopped: map or camera open"`) or `_play.mode != 0 && _play.mode != 1` (`"stopped: non-play mode active"`). Verified by `round6_m4_reopen_stops_immediately_on_map_or_camera_open` (failed before `adb9d596` by sending `0x0015` while `map.open`; passes after for map open, camera mode 38, and `mode == 0` positive control). Also fixed `resolve_server_loot_close` / `resolve_server_loot_open` to refresh `CURRENT_CORPSE_TARGET` so consecutive corpse switches never retain a prior `batch.corpse_target_id`.
+- **L1 (`bags.lua`, `main.lua`)**: Added `M.corpse_tab_kept`, `keeping_corpse_tab()`, `EMPTY_CORPSE` (`revision = -1`), and `M.clear_corpse_hold()` so `active_key_and_container()` and `visible_tabs()` keep tab 7 (`"Corpse"`) active across per-take `0x0016 -> 0x0015 -> 0x0018` gaps and after a loot batch finishes to display its summary (`"Looted N of N"`), clearing cleanly on manual tab change, viewer close, or `state.reset`. Verified by `round6_l1_loot_batch_keeps_corpse_tab_across_close_and_summary` (failed before `ab4413c5` dropping to `tab = 1`; passes after, with non-batch corpse close negative control still resetting to `tab = 1`).
+- **L2 (`bags.lua`)**: Replaced permanent `"failed"` string with negative backoff timestamp `-(os.clock() + ICON_RETRY_COOLDOWN_S)` (`10s`) cleared on `M.dirty()` (next items/state change) or in `sync_visible_icons()` after cooldown expiry, never on steady frames (`has_pending_icons` remains `false`). Verified by `round6_l2_failed_icon_retries_after_items_change_and_not_per_frame` (failed before `effa6edd`; passes after with `+0` steady-frame resource requests).
+- **Test gap (`bag_viewer_tests.rs`)**: Added `round6_sandstorm_duplicate_item_id_stacks_and_partial_take` covering a `"Take 1"` partial stack on `Bone Chip x4 -> x3`, followed by `"Take all but junk"` across two non-junk stacks sharing the same `item_id` (`Spider Silk` qty 3 and qty 5) plus a junk item (`Rat Pelt`) and the remaining partial `Bone Chip x3` across Sandstorm `0x0016`/`0x0015`/shifted-key `0x0018`, with junk-only negative control.
+
 ## Validation Summary
 
 - `python tools/update_bundled_manifest.py --check`: `Bundled mod manifests are up to date.`
 - `git diff --name-only 2e4fb5fe..HEAD`: touches only `bundled-mods/SOURCE.txt`, `bundled-mods/eqoa_bag_viewer/main.lua`, `bundled-mods/eqoa_bag_viewer/modules/bags.lua`, `crates/eqoa/src/fork_ext/addons/action_broker.rs`, `crates/eqoa/src/fork_ext/addons/bag_viewer_tests.rs`, `crates/eqoa/src/fork_ext/addons/icons.rs`, `crates/eqoa/src/fork_ext/addons/native_items.rs`, `crates/eqoa/src/fork_ext/items_capture.rs`, `crates/eqoa/src/fork_ext/items_tests.rs`, `crates/eqoa/src/fork_ext/play.rs`, and this report (0 upstream lines added).
 - Focused tests (all run with `-- --test-threads=1`, `EQOA_ISO=run/eqoa.iso`):
-  - `cargo test --locked -p eqoa round6`: `52 passed, 0 failed, 2398 filtered out`.
-  - `cargo test --locked -p eqoa bag_viewer`: `4 passed, 0 failed, 2446 filtered out` (includes `round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls`).
-  - `cargo test --locked -p eqoa items_tests::`: `40 passed, 0 failed, 2410 filtered out` (includes all `0x0019`/`0x001A` tests).
-- `python tools/run_gates.py` (re-run on commit `2eae0689`): **ALL GATES PASSED**
-  - `addons`: **PASS** (`489 passed, 0 failed, 25 ignored`; 16 distinct environment skips: Windows symlink privilege, missing `run/eqoa.iso` in worktree path / real disc art, `EQOA_FORGE_SPIKE`, `EQOA_BUNDLED_UI_GOLDENS`).
-  - `full`: **PASS** (`2370 passed, 0 failed, 30 ignored`; 30 distinct skips for missing `run/eqoa.iso` in worktree / `EQOA_2002_ISO`, `run/client.bin`, save state, `extracted-assets/sandstorm-patch-20261015/S2`, `EQOA_FORGE_SPIKE`, Windows symlink privilege).
+  - `cargo test --locked -p eqoa round6`: `58 passed, 0 failed, 2398 filtered out`.
+  - `cargo test --locked -p eqoa bag_viewer`: `4 passed, 0 failed, 2452 filtered out` (plus `round6_m1`, `round6_m2`, `round6_m4`, `round6_l1`, `round6_l2`, `round6_sandstorm_*` in `round6`).
+  - `cargo test --locked -p eqoa items_tests::`: `40 passed, 0 failed, 2416 filtered out` (includes all `0x0019`/`0x001A` tests).
+- `python tools/run_gates.py` (re-run on commit `2422bc87`): **ALL GATES PASSED**
+  - `addons`: **PASS** (`495 passed, 0 failed, 25 ignored`; 16 distinct environment skips: Windows symlink privilege, missing `run/eqoa.iso` in worktree path / real disc art, `EQOA_FORGE_SPIKE`, `EQOA_BUNDLED_UI_GOLDENS`).
+  - `full`: **PASS** (`2376 passed, 0 failed, 30 ignored`; 30 distinct skips for missing `run/eqoa.iso` in worktree / `EQOA_2002_ISO`, `run/client.bin`, save state, `extracted-assets/sandstorm-patch-20261015/S2`, `EQOA_FORGE_SPIKE`, Windows symlink privilege).
   - `wasm`: **PASS**
   - `footprint`: **PASS**
   - `paths`: **PASS**
