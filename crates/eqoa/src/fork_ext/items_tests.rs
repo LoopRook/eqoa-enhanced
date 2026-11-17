@@ -1781,7 +1781,7 @@ fn round6b_items_use_equip_swap_quick_slot_and_stale_handles() {
     p.dump.inventory = list(&[bag_sword, bag_pot, restricted_ring, extra_gem]);
     p.forge_snapshot(None);
 
-    let host = Host::new().unwrap();
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     host.execute(
         r#"
         results = {}
@@ -1903,7 +1903,7 @@ fn round6b_merchant_buy_sell_bank_move_bank_money_and_loot() {
     p.mode = 10;
     p.forge_snapshot(None);
 
-    let host = Host::new().unwrap();
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     host.execute(
         r#"
         results = {}
@@ -2080,7 +2080,7 @@ fn round6b_transactions_route_through_native_consumers_and_camera_hook() {
     p.dump.bank.items = list(&[bank_gem]);
     p.forge_snapshot(None);
 
-    let host = Host::new().unwrap();
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     host.execute(
         r#"
         results = {}
@@ -2231,7 +2231,7 @@ fn round6c_no_false_confirmations_unrelated_invadd_or_corpse_close() {
     p.mode = 10;
     p.forge_snapshot(None);
 
-    let host = Host::new().unwrap();
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     host.execute(
         r#"
         ares, bprog, bres = {}, {}, {}
@@ -2388,7 +2388,7 @@ fn round6c_contention_retains_staged_deposit_and_never_confirms_on_player_reply(
     p.bank.state = 0;
     p.forge_snapshot(None);
 
-    let host = Host::new().unwrap();
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     host.execute(
         r#"
         ares, bres = {}, {}
@@ -2524,7 +2524,7 @@ fn round6c_loot_partial_decrease_and_noop_loot_all_yield_unknown_and_stop_batch(
     p.mode = 1;
     p.forge_snapshot(None);
 
-    let host = Host::new().unwrap();
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     host.execute(
         r#"
         ares, bres = {}, {}
@@ -2595,7 +2595,7 @@ fn round6c_loot_partial_decrease_and_noop_loot_all_yield_unknown_and_stop_batch(
 // Round 6 fix 3: the player's own native output while a broker request is in flight makes the
 // result `unknown` whatever the frame order (`begin_iteration` runs between the draw and the reply).
 fn r6f3_host() -> Host {
-    let host = Host::new().unwrap();
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     host.execute(
         r#"
         ares, bres = {}, {}
@@ -2813,6 +2813,7 @@ fn round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases() {
             resource_dirs: vec![root],
             api: Some("eqoa/1".into()),
             entry_mode: EntryMode::Once,
+            capabilities_declared: true,
             requested_capabilities: caps.iter().map(|s| (*s).to_string()).collect(),
             extensions: Default::default(),
             initially_enabled: true,
@@ -3075,6 +3076,7 @@ fn round65_open_loot_talk_npc_flags_and_strict_target_guards() {
         resource_dirs: vec![root],
         api: Some("eqoa/1".into()),
         entry_mode: EntryMode::Once,
+        capabilities_declared: true,
         requested_capabilities: vec!["eqoa.actions.*".into(), "eqoa.windows.takeover".into()],
         extensions: Default::default(),
         initially_enabled: true,
@@ -3395,6 +3397,7 @@ fn round65_window_takeover_scopes_own_and_all() {
         resource_dirs: vec![root.clone()],
         api: Some("eqoa/1".into()),
         entry_mode: EntryMode::Once,
+        capabilities_declared: true,
         requested_capabilities: vec!["eqoa.windows.takeover".into(), "eqoa.actions.*".into()],
         extensions: Default::default(),
         initially_enabled: true,

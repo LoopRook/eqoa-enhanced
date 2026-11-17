@@ -161,7 +161,7 @@ profile settings, with no Forge dependency. Live-game testing is still required.
 
 ## Actions
 
-Game actions under `eqoa.actions.*` go through the client's action broker and may be called autonomously from any event, timer, or render callback once the mod declares `eqoa.actions.*` (or the specific `eqoa.actions.<name>` capability) in `mod.json`. Calling an undeclared action returns `nil, {code = "permission_denied", ...}` with a diagnostic in the Addon Manager.
+Game actions under `eqoa.actions.*` go through the client's action broker and may be called autonomously from any event, timer, or render callback once the mod explicitly declares `eqoa.actions.*` (or the specific `eqoa.actions.<name>` capability) in `mod.json`'s `capabilities` list (similarly `eqoa.windows.takeover` for window takeover). A mod without a `capabilities` list in `mod.json` receives `nil, {code = "not_declared", ...}` with a diagnostic in Mods & Addons; a mod with a `capabilities` list missing that capability receives `nil, {code = "permission_denied", ...}`.
 
 ```lua
 local last_req

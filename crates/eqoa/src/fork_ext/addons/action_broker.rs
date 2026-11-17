@@ -4596,6 +4596,7 @@ mod tests {
             resource_dirs: vec![root],
             api: Some("eqoa/1".into()),
             entry_mode: super::super::discovery::EntryMode::Once,
+            capabilities_declared: true,
             requested_capabilities: caps.iter().map(|s| (*s).to_string()).collect(),
             extensions: Default::default(),
             initially_enabled: true,
@@ -4691,13 +4692,138 @@ mod tests {
     }
 
     #[test]
+    fn round65_undeclared_capabilities_refuses_actions_and_takeover_with_not_declared() {
+        reset_all_for_test();
+        super::super::window_takeover::reset_all_for_test();
+        crate::fork_ext::bindpage::reset_in_memory();
+        CORE.with(|c| {
+            let mut core = Core::default();
+            core.view.in_world = true;
+            *c.borrow_mut() = core;
+        });
+
+        let uniq = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("eqoa-r65-not-declared-{uniq}"));
+        let mod_no_caps = root.join("no_caps");
+        let mod_explicit = root.join("explicit_caps");
+        std::fs::create_dir_all(&mod_no_caps).unwrap();
+        std::fs::create_dir_all(&mod_explicit).unwrap();
+        std::fs::write(mod_no_caps.join("main.lua"), "").unwrap();
+        std::fs::write(mod_explicit.join("main.lua"), "").unwrap();
+        std::fs::write(
+            mod_no_caps.join("mod.json"),
+            r#"{"schemaVersion":1,"runtime":"lua","api":"eqoa/1","id":"no_caps","name":"No Caps","entry":"main.lua","entryMode":"once"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            mod_explicit.join("mod.json"),
+            r#"{"schemaVersion":1,"runtime":"lua","api":"eqoa/1","id":"explicit_caps","name":"Explicit Caps","entry":"main.lua","entryMode":"once","capabilities":["eqoa.actions.assist","eqoa.windows.takeover"]}"#,
+        )
+        .unwrap();
+
+        let disc = super::super::discovery::discover(&root);
+        let a_no_caps = disc
+            .addons
+            .iter()
+            .find(|a| a.id == "no_caps")
+            .expect("discovered mod without capabilities");
+        let a_explicit = disc
+            .addons
+            .iter()
+            .find(|a| a.id == "explicit_caps")
+            .expect("discovered mod with explicit capabilities");
+        assert!(!a_no_caps.capabilities_declared);
+        assert_eq!(a_no_caps.declared_capabilities(), None);
+        assert_eq!(
+            super::super::runtime::autonomous_action_label(
+                a_no_caps.declared_capabilities().unwrap_or(&[])
+            ),
+            None
+        );
+        assert!(a_explicit.capabilities_declared);
+        assert_eq!(
+            super::super::runtime::autonomous_action_label(
+                a_explicit.declared_capabilities().unwrap_or(&[])
+            )
+            .as_deref(),
+            Some("Actions: can act on its own (assist)")
+        );
+
+        let h_no_caps = Host::for_addon(a_no_caps).unwrap();
+        h_no_caps
+            .execute(
+                r#"
+            -- Reads keep their normal behavior.
+            local _, r_err = eqoa.player.get()
+            assert(r_err == nil or r_err.code ~= "not_declared")
+            -- Actions and takeover refuse visibly with not_declared.
+            local r1, e1 = eqoa.actions.assist()
+            assert(r1 == nil and e1.code == "not_declared", "assist without capabilities list must refuse with not_declared")
+            local r2, e2 = eqoa.actions.open_loot()
+            assert(r2 == nil and e2.code == "not_declared")
+            local r3, e3 = eqoa.actions.talk()
+            assert(r3 == nil and e3.code == "not_declared")
+            local r4, e4 = eqoa.actions.batch({ { kind = "assist" } })
+            assert(r4 == nil and e4.code == "not_declared")
+            local r5, e5 = eqoa.windows.takeover("loot")
+            assert(r5 == nil and e5.code == "not_declared", "takeover without capabilities list must refuse with not_declared")
+        "#,
+            )
+            .unwrap();
+        let logs = h_no_caps.drain_logs().unwrap();
+        assert!(
+            logs.iter().any(|l| l.contains("not_declared") && l.contains("eqoa.actions.assist")),
+            "expected visible not_declared diagnostic for assist: {logs:?}"
+        );
+        assert!(
+            logs.iter().any(|l| l.contains("not_declared") && l.contains("eqoa.windows.takeover")),
+            "expected visible not_declared diagnostic for takeover: {logs:?}"
+        );
+
+        // Bare Host::new() (no mod.json) also refuses actions and takeover with not_declared.
+        let bare = Host::new().unwrap();
+        bare.execute(
+            r#"
+            local r, e = eqoa.actions.assist()
+            assert(r == nil and e.code == "not_declared")
+            local t, te = eqoa.windows.takeover("loot")
+            assert(t == nil and te.code == "not_declared")
+        "#,
+        )
+        .unwrap();
+
+        // Explicit mod.json grants only declared capabilities; other actions return permission_denied.
+        let h_explicit = Host::for_addon(a_explicit).unwrap();
+        h_explicit
+            .execute(
+                r#"
+            local r_ok, e_ok = eqoa.actions.assist()
+            assert(r_ok ~= nil and e_ok == nil)
+            local t_ok, te_ok = eqoa.windows.takeover("loot")
+            assert(t_ok == true and te_ok == nil)
+            local r_no, e_no = eqoa.actions.open_loot()
+            assert(r_no == nil and e_no.code == "permission_denied")
+        "#,
+            )
+            .unwrap();
+
+        let _ = std::fs::remove_dir_all(&root);
+        reset_all_for_test();
+        super::super::window_takeover::reset_all_for_test();
+        crate::fork_ext::bindpage::reset_in_memory();
+    }
+
+    #[test]
     fn round65_multiple_listeners_can_dispatch_actions_autonomously() {
         use super::super::native_events;
         reset_all_for_test();
         crate::fork_ext::bindpage::reset_in_memory();
         CORE.with(|c| c.borrow_mut().view.in_world = true);
 
-        let host = Host::new().unwrap();
+        let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
         crate::fork_ext::addons::pointer_api::position([40.0, 40.0], true, (800, 600));
         host.execute(
             r#"
@@ -5075,7 +5201,7 @@ mod tests {
             *c.borrow_mut() = core;
         });
 
-        let host = Host::new().unwrap();
+        let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
 
         // Capabilities for Part C batch symbols & events
         for sym in [
@@ -5223,7 +5349,7 @@ mod tests {
             *c.borrow_mut() = core;
         });
 
-        let host = Host::new().unwrap();
+        let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
         host.execute(
             r#"
             bres = {}

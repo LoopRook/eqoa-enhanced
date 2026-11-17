@@ -454,7 +454,15 @@ impl Host {
     pub(crate) fn requested_capabilities(&self) -> Option<&[String]> {
         self.addon
             .as_ref()
-            .map(|a| a.requested_capabilities.as_slice())
+            .and_then(super::discovery::DiscoveredAddon::declared_capabilities)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_capabilities(caps: &[&str]) -> Result<Self> {
+        let host = Self::new()?;
+        super::native::session(&host.lua).borrow_mut().capabilities =
+            Some(caps.iter().map(|s| (*s).to_string()).collect());
+        Ok(host)
     }
     pub fn drain_logs(&self) -> Result<Vec<String>> {
         let messages: Table = self.lua.named_registry_value("forge_log")?;

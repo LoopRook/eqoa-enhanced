@@ -261,22 +261,24 @@ pub(crate) fn describe(
 pub(crate) fn status(lua: &Lua, path: &str) -> Option<&'static str> {
     session(lua).borrow().descriptors.get(path).map(|d| d.status)
 }
-pub(crate) fn has_capability(lua: &Lua, cap: &str) -> bool {
-    let s_ref = session(lua);
-    let s = s_ref.borrow();
-    let Some(caps) = s.capabilities.as_ref() else {
-        return true;
-    };
-    caps.iter().any(|c| {
-        c == cap || (cap.starts_with("eqoa.actions.") && c == "eqoa.actions.*")
-    })
+pub(crate) fn capability_grants(caps: &[String], cap: &str) -> bool {
+    caps.iter()
+        .any(|c| c == cap || (cap.starts_with("eqoa.actions.") && c == "eqoa.actions.*"))
 }
 pub(crate) fn require_capability(
     lua: &Lua,
     symbol: &str,
     cap: &str,
 ) -> std::result::Result<(), (&'static str, String)> {
-    if has_capability(lua, cap) {
+    let s_ref = session(lua);
+    let s = s_ref.borrow();
+    let Some(caps) = s.capabilities.as_ref() else {
+        return Err((
+            "not_declared",
+            format!("{symbol} requires a 'capabilities' list declaring '{cap}' in mod.json"),
+        ));
+    };
+    if capability_grants(caps, cap) {
         return Ok(());
     }
     Err((

@@ -27,7 +27,7 @@ fn ready() -> Play {
 
 fn rig() -> (Play, Host) {
     let p = ready();
-    let host = Host::new().unwrap();
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     host.execute(
         r#"
         results = {}

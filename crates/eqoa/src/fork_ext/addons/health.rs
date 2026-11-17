@@ -280,6 +280,7 @@ mod tests {
             resource_dirs: Vec::new(),
             api: None,
             entry_mode: Default::default(),
+            capabilities_declared: true,
             requested_capabilities: Vec::new(),
             extensions: Default::default(),
             initially_enabled: true,

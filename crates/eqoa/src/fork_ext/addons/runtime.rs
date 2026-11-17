@@ -710,10 +710,11 @@ fn controls(
             ui.separator();ui.text(format!("{} ({})",entry.metadata.name,entry.metadata.id));
             ui.text(match entry.status {super::manager::Status::Disabled=>"Disabled",super::manager::Status::Enabled=>"Enabled",super::manager::Status::Failed=>"Failed — reload to retry"});
             if !entry.metadata.extensions.permissions.is_empty() {ui.text(format!("Permissions: {}",entry.metadata.extensions.permissions.join(", ")));}
-            if !entry.metadata.requested_capabilities.is_empty() {
-                ui.text_wrapped(format!("Capabilities: {}", entry.metadata.requested_capabilities.join(", ")));
+            let caps = entry.metadata.declared_capabilities().unwrap_or(&[]);
+            if !caps.is_empty() {
+                ui.text_wrapped(format!("Capabilities: {}", caps.join(", ")));
             }
-            if let Some(label) = autonomous_action_label(&entry.metadata.requested_capabilities) {
+            if let Some(label) = autonomous_action_label(caps) {
                 ui.text_wrapped(label);
             }
             let id=&entry.metadata.id;

@@ -1780,7 +1780,7 @@ fn addon_actions_use_live_camera_assist_and_summary_overlay_gates() {
     crate::fork_ext::addons::action_broker::reset_all_for_test();
     crate::fork_ext::bindpage::reset_in_memory();
     CORE.with(|c| c.borrow_mut().view.in_world = true);
-    let host = Host::new().unwrap();
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     host.execute(
         r#"
         local auto_id, e_g = eqoa.actions.assist()
@@ -1853,7 +1853,7 @@ fn round6b_assist_emits_dispatch_and_server_phases_via_play() {
     crate::fork_ext::bindpage::reset_in_memory();
     CORE.with(|c| c.borrow_mut().view.in_world = true);
 
-    let host = Host::new().unwrap();
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     host.execute(
         r#"
         results = {}
@@ -2039,7 +2039,7 @@ fn round6b_non_item_target_cycle_interact_attack_cast_hotbar_move() {
         id: 501,
     };
 
-    let host = Host::new().unwrap();
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     host.execute(
         r#"
         results = {}
@@ -2159,7 +2159,7 @@ fn round6b_non_item_chat_command_windows_weapon_sets_and_spellbook() {
         },
     );
 
-    let host = Host::new().unwrap();
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     host.execute(
         r#"
         -- Verify capabilities & non-yet reasons

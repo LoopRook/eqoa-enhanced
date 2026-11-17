@@ -1888,6 +1888,7 @@ mod tests {
             resource_dirs: vec![],
             api: None,
             entry_mode: Default::default(),
+            capabilities_declared: true,
             requested_capabilities: if large_data {
                 vec!["large_data".into()]
             } else {
