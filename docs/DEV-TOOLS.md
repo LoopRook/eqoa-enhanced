@@ -79,12 +79,19 @@ Assembles a self-contained test deployment directory for owner playtesting. The 
 ### Command
 
 ```bash
+python tools/make_owner_test_package.py --build [options]
+```
+
+Or package an already built executable:
+
+```bash
 python tools/make_owner_test_package.py --exe <path/to/release/eqoa.exe> [options]
 ```
 
 ### Options
 
-- `--exe <path>`: Path to built release executable (required; this tool does not build).
+- `--build`: Build `eqoa.exe` via `cargo build --locked --release -p eqoa` (using `CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/shared`, `EQOA_BUILD_COMMIT=<HEAD>`, `EQOA_UPDATE_CHANNEL=<channel>`, `RUSTFLAGS=-C target-feature=+crt-static`, and the shared `CargoLock`) before packaging. Refuses to run when tracked files have uncommitted changes. Mutually exclusive with `--exe` (one of `--build` or `--exe` is required).
+- `--exe <path>`: Path to a prebuilt release executable (mutually exclusive with `--build`).
 - `--name <label>`: Package and launcher name (default: `Round5`). Used in folder name (`EQOA-Enhanced-{name}-Test`) and launcher files.
 - `--channel <name>`: Release channel (default: `enhanced-dev`).
 - `--output <path>`: Override package destination directory (default: `<Downloads>/EQOA-Enhanced-{name}-Test`).

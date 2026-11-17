@@ -295,3 +295,10 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
   look and controller buttons (`move`, `look`, `buttons`); then autonomous automation (may stay
   Enhanced-only).
 - **Note:** round 6 gives one game action per player gesture; these build on its action broker.
+
+## Row/dialog mod actions for bank, merchant, spellbook, quest log and mastery (round 6, 2026-11-16)
+
+- **Status:** Deferred. Round 6 refuses `select_row`/`activate_row`/`close_window`/`menu_command` on these windows with
+  `unsupported`, because their pages and sub-dialogs are not readable from fork code (review D, Gemini Hydrogen).
+- **To enable:** five read-only accessors proposed in `docs/plans/eqoa-api/round-6b-seams.md` (feat/eqoa-api-r6).
+  The typed actions (sell, buy, bank move/money, mastery buy/refund, drop_quest) already cover these windows.

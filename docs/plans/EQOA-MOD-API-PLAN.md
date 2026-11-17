@@ -324,6 +324,22 @@ without the click; optional "also sell grey items" off by default. Owner wants t
 small read-only accessors or one-line hook calls that expose data or call paths upstream already has; no
 behaviour change; the cross-family reviewer checks each line; budgets rise by the measured lines with the
 reason recorded; each approval is listed in `round-6-seams.md` for the owner to read.
+**Owner 2026-11-17 (after the round 6 test): the one-gesture rule is dropped.** Enabling a mod is the
+player's permission: a mod may act whenever it wants, including on its own (auto-loot near a corpse). Mods &
+Addons labels every mod that can act on its own, so the player sees it before enabling. The game's own limits
+stay (the server decides range and session). Next: the API gains "loot the nearest corpse" and "talk to the
+nearest merchant/banker" (ported from the game's own requests), so the bag viewer loots, sells and banks
+without the native windows; an auto-loot option in the mod. Selling or banking from anywhere is a bonus if
+the server accepts the game's own requests at range (no position spoofing). Supersedes the 2026-11-15/16
+lines above on autonomous automation and `needs_player_action`; the 5-line spec goes to the owner first.
+Spec APPROVED by the owner 2026-11-17 (the mechanics are what is tested; the mods may later be split or
+revamped): (1) Mods & Addons labels mods that can act on their own; enabling is the permission; the click-only
+rule is gone for every mod; (2) Corpse tab "Loot" near a corpse loots the nearest corpse (all, or all but junk)
+without the game's corpse window; (3) Sell junk near a merchant and Deposit/Withdraw near a banker work without
+their windows; from farther away only if the server accepts the game's own requests (no position faking);
+(4) mod option "Auto-loot" (off by default): walking up to a corpse you killed takes all but junk; (5) progress
+line, stop on refusal, Stop button and no destroy stay. Order: owner-test fixes and retest close round 6, merge
+and push on go-ahead, then this as round 6.5 (small upstream hook calls approved by the lead under delegation).
 
 Quest log and quest objects, camera, windows/dialogs (busy state), Class Mastery values not already
 done, class and disposition icons, the remaining ImGui pieces, and the full actions API from the
@@ -408,3 +424,16 @@ docs/modding/AGENT-GUIDE.md (one page for agents building mods from an owner bri
   the branch build passed 2026-11-15. Known limit: if the server ignores a loot request, corpse names stay
   off until the next zone (unverified on live traffic). Claude about 20 points of the month (36% to 56%).
   Next: round 6 (scope above), fresh lead.
+- **Round 6 (actions and the rest), 2026-11-16/17.** Branch `feat/eqoa-api-r6` (2e4fb5fe), not yet on develop;
+  **owner test pending** (package EQOA-Enhanced-Round6-Test at 2e4fb5fe). One game action per player gesture
+  (mod key, claimed pointer press, ImGui click), else `needs_player_action`. Part A reads (windows, dialogs,
+  quests, masteries); Part B click actions through an action broker plus bag viewer item actions; Part C
+  click-started batches (Mark as junk, Sell junk, Take all but junk; stop on any refusal, Stop button); 11
+  window/quest actions; row/dialog/close actions refuse on 5 windows whose rows are not readable (accessors in
+  the backlog). Destroy unsupported. Upstream: 3 one-line hook calls (npcw.rs, bankplay.rs, play.rs camera),
+  approved by the lead under the owner's delegation. Route: Gemini Hydrogen built A and B+C (trial item 12),
+  Terra reviewed (A REJECT 2H; B+C REJECT 3H, then 2 rechecks), Claude Sonnet fixed A, fix 3 of B+C, merged
+  A with B+C and built the window actions; Hydrogen reviewed those (8 of 8 findings valid, all fixed). Gates
+  `--release` on the branch: full 2365 passed, 0 failed, 30 SKIP; addons 484; release PASS. Not verified: row,
+  dialog and close actions end to end (native key presses; needs the live game). Tools merged into develop
+  meanwhile: run_gates stale-lock fix and progress lines, make_owner_test_package `--build`.
