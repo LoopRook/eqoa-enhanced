@@ -7,6 +7,7 @@ local M = {
     pending_label = nil, last_req = nil,
     junk_ids = {}, sell_grey = false, junk_loaded = false,
     batch_id = nil, batch_kind = nil, batch_verb = nil, batch_total = 0,
+    corpse_tab_kept = false,
     action_hits = {},
     icon_req = {}, has_pending_icons = false,
 }
@@ -16,6 +17,19 @@ local TRIM_OPTS = {trim = true, trim_color = {r = 0, g = 0, b = 0, a = 1}}
 local ICON_RETRY_LIMIT = 5
 local _frame_tried = {}
 local _frame_tex = {}
+local EMPTY_CORPSE = {items = {}, used = 0, capacity = 40, money = 0, revision = -1}
+
+local function loot_batch_active()
+    return M.batch_id ~= nil and M.batch_kind == "loot"
+end
+
+local function keeping_corpse_tab()
+    return M.tab == 7 and (loot_batch_active() or M.corpse_tab_kept)
+end
+
+function M.clear_corpse_hold()
+    M.corpse_tab_kept = false
+end
 
 M.COLUMNS, M.MAX_ROWS, M.LOG_MAX = 8, 6, 50
 -- The game's item-page tabs, in its order, with All first and the bank last. A stack is under a tab when the
@@ -44,7 +58,7 @@ end
 function M.visible_tabs()
     local tabs = {}
     for _, t in ipairs(M.TABS) do tabs[#tabs + 1] = t end
-    if eqoa.loot.get() then
+    if eqoa.loot.get() or keeping_corpse_tab() then
         local t = M.CORPSE_TAB
         tabs[#tabs + 1] = {key = t.key, label = t.label, idx = 7}
     end
@@ -143,7 +157,13 @@ local function active_key_and_container()
         c = eqoa.bank.get()
     elseif key == "corpse" then
         c = eqoa.loot.get()
-        if not c then
+        if c then
+            if not loot_batch_active() then
+                M.corpse_tab_kept = false
+            end
+        elseif keeping_corpse_tab() then
+            c = EMPTY_CORPSE
+        else
             M.tab = 1
             key = "all"
             c = eqoa.inventory.get()
@@ -213,9 +233,10 @@ end
 function M.dirty() M.grid = nil end
 
 function M.select(tab)
-    if tab == 7 and eqoa.loot.get() and M.tab ~= 7 then
+    if tab == 7 and (eqoa.loot.get() or keeping_corpse_tab()) and M.tab ~= 7 then
         M.tab = 7; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
     elseif tab ~= M.tab and M.TABS[tab] then
+        M.corpse_tab_kept = false
         M.tab = tab; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
     end
 end
@@ -415,6 +436,7 @@ function M.start_loot_non_junk()
     M.batch_kind = "loot"
     M.batch_verb = "Looted"
     M.batch_total = #steps
+    M.corpse_tab_kept = (M.tab == 7)
     M.result = {text = string.format("Looting %d of %d...", 0, #steps), ok = nil}
 end
 
@@ -444,6 +466,9 @@ function M.on_batch_result(d)
     else
         local reason = d.reason or d.code or d.state or "stopped"
         M.result = {text = string.format("%s %d of %d: %s", verb, done, total, reason), ok = false}
+    end
+    if M.batch_kind == "loot" and M.tab == 7 then
+        M.corpse_tab_kept = true
     end
     M.batch_id = nil
 end

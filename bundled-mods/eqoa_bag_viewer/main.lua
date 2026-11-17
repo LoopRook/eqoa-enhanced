@@ -21,6 +21,7 @@ local function close()
     for _, token in ipairs(tokens) do eqoa.events.off(token) end
     tokens = {}
     if escape then eqoa.input.release(escape); escape = nil end
+    B.clear_corpse_hold()
     B.open, B.hover, B.menu, B.menu_rect, B.grid_scroll = false, nil, nil, nil, 0
     tab_hits, slot_hits, menu_hits, action_hits, log_rect, grid_rect = {}, {}, {}, {}, nil, nil
     B.tab_hits, B.slot_hits, B.menu_hits, B.action_hits = tab_hits, slot_hits, menu_hits, action_hits
@@ -88,7 +89,7 @@ end)
 -- The loot log is the one thing kept while the window is closed, from events only.
 B.load_junk()
 eqoa.events.on("loot.changed", function(e) B.log_loot(e.data) end)
-eqoa.events.on("state.reset", function() B.reset_icons(); B.dirty() end)
+eqoa.events.on("state.reset", function() B.clear_corpse_hold(); B.reset_icons(); B.dirty() end)
 eqoa.events.on("disabling", close)
 
 function draw()

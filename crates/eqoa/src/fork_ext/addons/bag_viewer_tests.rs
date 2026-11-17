@@ -1763,6 +1763,66 @@ fn round6_m4_reopen_stops_immediately_on_map_or_camera_open() {
 }
 
 #[test]
+fn round6_l1_loot_batch_keeps_corpse_tab_across_close_and_summary() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_target_corpse(5021, "a skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Dust","id":2002,"key":0,"qty":1,"max_stack":100},
+        {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100}
+    ]));
+    bv.enable();
+    bv.open();
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    assert_eq!(bv.eval::<i64>("require('bags').tab"), 7);
+
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Dust","id":2002,"key":71,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(
+        bv.eval::<i64>("require('bags').tab"),
+        7,
+        "L1: mid-batch 0x0016 close must keep Corpse tab (7) active"
+    );
+
+    bv.play.bags_broker_tick(); // 0x0015
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Bloodstone","id":2003,"key":0,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(1);
+    bv.play.bags_broker_tick(); // One(0, 1)
+    bv.play.bags_added(&serde_json::json!({"name":"Bloodstone","id":2003,"key":72,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(
+        bv.eval::<(i64, String, Option<bool>)>("require('bags').tab, require('bags').result.text, require('bags').result.ok"),
+        (7, "Looted 2 of 2".into(), Some(true)),
+        "L1: completed loot batch must stay on Corpse tab showing its summary"
+    );
+
+    // Negative control: switching manually to All tab leaves Corpse tab cleanly; opening/closing a non-batch corpse resets to tab 1.
+    bv.click(bv.tab(1));
+    bv.frames(1);
+    assert_eq!(bv.eval::<i64>("require('bags').tab"), 1);
+    bv.play.bags_target_corpse(5022, "another skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Bone","id":2004,"key":0,"qty":1,"max_stack":100}]));
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(bv.eval::<i64>("require('bags').tab"), 1, "non-batch corpse close still returns to tab 1");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
 fn round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls() {
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
