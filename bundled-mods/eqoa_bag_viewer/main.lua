@@ -5,7 +5,7 @@ local B = require("bags")
 
 -- Sizes are in HUD frame pixels (640x448), scaled as the HUD is.
 local W, PAD, SLOT, GAP, LINE, LOG_LINES = 318, 8, 36, 2, 12, 6
-local tokens, escape, tab_hits, slot_hits, menu_hits, action_hits, log_rect = {}, nil, {}, {}, {}, {}, nil
+local tokens, escape, tab_hits, slot_hits, menu_hits, action_hits, log_rect, grid_rect = {}, nil, {}, {}, {}, {}, nil, nil
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
@@ -21,8 +21,8 @@ local function close()
     for _, token in ipairs(tokens) do eqoa.events.off(token) end
     tokens = {}
     if escape then eqoa.input.release(escape); escape = nil end
-    B.open, B.hover, B.menu, B.menu_rect = false, nil, nil, nil
-    tab_hits, slot_hits, menu_hits, action_hits, log_rect = {}, {}, {}, {}, nil
+    B.open, B.hover, B.menu, B.menu_rect, B.grid_scroll = false, nil, nil, nil, 0
+    tab_hits, slot_hits, menu_hits, action_hits, log_rect, grid_rect = {}, {}, {}, {}, nil, nil
     B.tab_hits, B.slot_hits, B.menu_hits, B.action_hits = tab_hits, slot_hits, menu_hits, action_hits
 end
 
@@ -69,8 +69,13 @@ local function open()
     end)
     listen("pointer.wheel", function(e)
         local d, steps = e.data, e.data.steps or 0
-        if steps ~= 0 and inside(d.x, d.y, log_rect) then
-            B.scroll = math.max(0, math.min(math.max(0, #B.log - LOG_LINES), B.scroll + (steps > 0 and -1 or 1)))
+        if steps ~= 0 then
+            local delta = steps > 0 and -1 or 1
+            if inside(d.x, d.y, log_rect) then
+                B.scroll = math.max(0, math.min(math.max(0, #B.log - LOG_LINES), B.scroll + delta))
+            elseif inside(d.x, d.y, grid_rect) then
+                B.scroll_grid(delta)
+            end
         end
     end)
     -- Escape is the window's, not the game menu's, while it is up (a claim the menu's owner may refuse).
@@ -91,7 +96,8 @@ function draw()
     if grid == nil or B.is_grid_stale() then
         grid = B.rebuild()
     elseif B.has_pending_icons then
-        B.resolve_pending_icons(1, grid.rows * B.COLUMNS)
+        local first_slot, last_slot = B.visible_slot_range()
+        B.resolve_pending_icons(first_slot, last_slot)
     end
     if not grid then return end
     local f = eqoa.hud.frame()
@@ -163,8 +169,12 @@ function draw()
     local over
     slot_hits = {}
     B.slot_hits = slot_hits
-    for slot = 1, grid.rows * B.COLUMNS do
-        local col, row = (slot - 1) % B.COLUMNS, math.floor((slot - 1) / B.COLUMNS)
+    local gw = B.COLUMNS * SLOT + (B.COLUMNS - 1) * GAP
+    grid_rect = {x = x0 + PAD * k, y = y0 + gy * k, w = gw * k, h = gh * k}
+    local row_offset = B.grid_scroll * B.COLUMNS
+    for idx = 1, grid.rows * B.COLUMNS do
+        local slot = row_offset + idx
+        local col, row = (idx - 1) % B.COLUMNS, math.floor((idx - 1) / B.COLUMNS)
         local sx, sy = PAD + col * (SLOT + GAP), gy + row * (SLOT + GAP)
         fill(sx, sy, SLOT, SLOT, c.raised)
         local entry = grid.items[slot]
@@ -197,6 +207,15 @@ function draw()
             end
         end
         frame(sx, sy, SLOT, SLOT, border)
+    end
+    local total_rows = grid.total_rows or grid.rows
+    if total_rows > grid.rows then
+        local sb_x = PAD + gw + 3
+        fill(sb_x, gy, 2, gh, c.border)
+        local thumb_h = math.max(12, gh * grid.rows / total_rows)
+        local max_scroll = total_rows - grid.rows
+        local thumb_y = gy + (gh - thumb_h) * (B.grid_scroll / max_scroll)
+        fill(sb_x, thumb_y, 2, thumb_h, c.muted)
     end
 
     local money_label

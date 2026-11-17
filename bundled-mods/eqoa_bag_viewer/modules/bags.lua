@@ -2,7 +2,7 @@
 -- Nothing here is a copy of game state that can drift: the grid is read again on a change event or an open.
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 local M = {
-    open = false, tab = 1, grid = nil, log = {}, scroll = 0, hover = nil,
+    open = false, tab = 1, grid = nil, log = {}, scroll = 0, grid_scroll = 0, hover = nil,
     builds = 0, draws = 0, rect = nil, menu = nil, result = nil,
     pending_label = nil, last_req = nil,
     junk_ids = {}, sell_grey = false, junk_loaded = false,
@@ -17,7 +17,7 @@ local ICON_RETRY_LIMIT = 5
 local _frame_tried = {}
 local _frame_tex = {}
 
-M.COLUMNS, M.MAX_ROWS, M.LOG_MAX = 8, 8, 50
+M.COLUMNS, M.MAX_ROWS, M.LOG_MAX = 8, 6, 50
 -- The game's item-page tabs, in its order, with All first and the bank last. A stack is under a tab when the
 -- game's own rule for that tab says so: `Item.tabs` lists the keys, the rule is not copied here.
 M.TABS = {
@@ -163,11 +163,30 @@ function M.is_grid_stale()
     return grid.tab_key ~= key or grid.rev ~= c.revision
 end
 
+function M.visible_slot_range()
+    local grid = M.grid
+    if not grid then return 1, 0 end
+    local first = M.grid_scroll * M.COLUMNS + 1
+    local last = (M.grid_scroll + grid.rows) * M.COLUMNS
+    return first, last
+end
+
+function M.scroll_grid(delta)
+    local grid = M.grid
+    if not grid then return end
+    local max_scroll = math.max(0, (grid.total_rows or grid.rows) - grid.rows)
+    local next_scroll = math.max(0, math.min(max_scroll, M.grid_scroll + delta))
+    if next_scroll == M.grid_scroll then return end
+    M.grid_scroll = next_scroll
+    local first, last = M.visible_slot_range()
+    M.sync_visible_icons(first, last)
+end
+
 -- The grid for the tab on show: the items it keeps in the container's own order, with the numbers under it.
 function M.rebuild()
     M.builds = M.builds + 1
     local key, c = active_key_and_container()
-    if not c then M.grid = false; M.has_pending_icons = false; return false end
+    if not c then M.grid = false; M.has_pending_icons = false; M.grid_scroll = 0; return false end
     local items = {}
     for _, it in ipairs(c.items) do
         if keeps(key, it) then
@@ -175,13 +194,17 @@ function M.rebuild()
         end
     end
     local slots = math.max(c.capacity or 40, #c.items)
-    local rows = math.max(5, math.min(M.MAX_ROWS, math.ceil(slots / M.COLUMNS)))
+    local total_rows = math.max(5, math.ceil(slots / M.COLUMNS))
+    local rows = math.min(M.MAX_ROWS, total_rows)
+    M.grid_scroll = math.max(0, math.min(math.max(0, total_rows - rows), M.grid_scroll))
     M.grid = {
         items = items, used = c.used, capacity = c.capacity, money = c.money,
-        rows = rows, bank = key == "bank", corpse = key == "corpse",
+        rows = rows, total_rows = total_rows,
+        bank = key == "bank", corpse = key == "corpse",
         tab_key = key, rev = c.revision,
     }
-    M.sync_visible_icons(1, rows * M.COLUMNS)
+    local first, last = M.visible_slot_range()
+    M.sync_visible_icons(first, last)
     M.hover = nil
     M.menu = nil
     return M.grid
@@ -191,9 +214,9 @@ function M.dirty() M.grid = nil end
 
 function M.select(tab)
     if tab == 7 and eqoa.loot.get() and M.tab ~= 7 then
-        M.tab = 7; M.scroll = 0; M.grid = nil; M.menu = nil
+        M.tab = 7; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
     elseif tab ~= M.tab and M.TABS[tab] then
-        M.tab = tab; M.scroll = 0; M.grid = nil; M.menu = nil
+        M.tab = tab; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
     end
 end
 

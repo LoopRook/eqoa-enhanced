@@ -1436,3 +1436,102 @@ fn round6_item1_stale_corpse_grid_and_loot_batch_and_log() {
     bv.clean();
     super::super::action_broker::reset_all_for_test();
 }
+
+#[test]
+fn round6_item5_window_fits_hud_and_scrolls_100_slot_pack() {
+    use winit::event::{DeviceId, MouseScrollDelta, TouchPhase, WindowEvent};
+    let Some(mut bv) = Bv::new() else { return };
+    crate::inventory::with_caps([100, 40], || {
+        let pack100: Vec<serde_json::Value> = (1..=100)
+            .map(|n| {
+                serde_json::json!({
+                    "name": format!("Pack Item {n}"),
+                    "id": 920000 + n,
+                    "key": 200 + n,
+                    "qty": 1,
+                    "max_stack": 1,
+                    "wear": 1,
+                    "icon": 4001 + (n % 8)
+                })
+            })
+            .collect();
+        let world = serde_json::json!({
+            "pack": pack100,
+            "bank": [],
+            "tunar": 500,
+            "bank_tunar": 0
+        });
+        bv.play.bags_set(&world);
+        bv.play.bags_open_merchant(44);
+        bv.enable();
+        bv.open();
+
+        // 1. Window + footer must fit entirely within HUD frame (<= 448) and display height.
+        let (rows, total_rows, cap): (u32, u32, Option<u32>) =
+            bv.eval("require('bags').grid.rows, require('bags').grid.total_rows, require('bags').grid.capacity");
+        assert_eq!((rows, total_rows, cap), (6, 13, Some(100)));
+
+        let (_x, y, _w, h, k) = bv.rect();
+        assert!(y >= 0.0 && y + h <= bv.win.1 as f64 + 0.5, "window must stay inside display: y={y}, h={h}, dh={}", bv.win.1);
+        assert!(h / k <= 448.0, "window frame height {} exceeds HUD frame 448", h / k);
+
+        let all_btns_visible: bool = bv.eval(&format!(
+            "(function() local h = require('bags').action_hits if #h == 0 then return false end for _, r in ipairs(h) do if r.y < 0 or r.y + r.h > {} + 0.5 then return false end end return true end)()",
+            bv.win.1
+        ));
+        assert!(all_btns_visible, "all footer buttons must remain inside display bounds");
+
+        let tex_count: usize = bv.eval(
+            "(function() local n = 0 for _, e in ipairs(require('bags').grid.items) do if e.texture then n = n + 1 end end return n end)()",
+        );
+        assert!(tex_count <= 48, "only visible grid slots should hold live textures ({tex_count} <= 48)");
+
+        // 2. Scroll grid to bottom with mouse wheel over grid slots -> reaches Pack Item 100 (row 13, col 4 -> viewport slot 44).
+        bv.point(bv.slot(1));
+        for _ in 0..8 {
+            super::super::pointer_api::observe(
+                &WindowEvent::MouseWheel {
+                    device_id: DeviceId::dummy(),
+                    delta: MouseScrollDelta::LineDelta(0.0, -1.0),
+                    phase: TouchPhase::Moved,
+                },
+                bv.win,
+            );
+            bv.frame();
+        }
+        assert_eq!(bv.eval::<u32>("require('bags').grid_scroll"), 7, "should clamp scroll at bottom row");
+        bv.click(bv.slot(44));
+        bv.frames(1);
+        assert_eq!(
+            bv.eval::<String>("require('bags').menu and require('bags').menu.title or ''"),
+            "Pack Item 100",
+            "clicking scrolled bottom slot must target Pack Item 100"
+        );
+        let tex_count_scrolled: usize = bv.eval(
+            "(function() local n = 0 for _, e in ipairs(require('bags').grid.items) do if e.texture then n = n + 1 end end return n end)()",
+        );
+        assert!(tex_count_scrolled <= 48, "scrolled grid must still keep live textures <= 48 ({tex_count_scrolled})");
+    });
+
+    // Negative control: 40-slot pack keeps 5 rows and wheel over grid does not scroll.
+    crate::inventory::with_caps([40, 40], || {
+        bv.play.bags_set(&bv_world());
+        bv.frames(2);
+        let (rows40, total40): (u32, u32) = bv.eval("require('bags').grid.rows, require('bags').grid.total_rows");
+        assert_eq!((rows40, total40), (5, 5));
+        bv.point(bv.slot(1));
+        super::super::pointer_api::observe(
+            &WindowEvent::MouseWheel {
+                device_id: DeviceId::dummy(),
+                delta: MouseScrollDelta::LineDelta(0.0, -1.0),
+                phase: TouchPhase::Moved,
+            },
+            bv.win,
+        );
+        bv.frame();
+        assert_eq!(bv.eval::<u32>("require('bags').grid_scroll"), 0);
+    });
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
