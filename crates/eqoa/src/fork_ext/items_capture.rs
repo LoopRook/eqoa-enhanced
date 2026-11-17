@@ -202,13 +202,13 @@ pub(super) fn build(play: &Play) -> [Json; 4] {
     let bank = container(
         "bank",
         &play.dump.bank.items,
-        play.mode == 11,
+        crate::play::fork_hooks::bank_session_open(play),
         Some(crate::inventory::bank_cap()),
         Some(play.dump.player.p38),
         Json::Null,
         &ctx,
     );
-    let loot = match (play.mode == 1, play.npcw.corpse.as_ref()) {
+    let loot = match (crate::play::fork_hooks::loot_session_open(play), play.npcw.corpse.as_ref()) {
         (true, Some(corpse)) => {
             let mut loot = container("loot", corpse, true, Some(LOOT_CAPACITY), None, Json::Null, &ctx);
             loot["source"] = SOURCE.with(|s| s.borrow().clone()).map_or(Json::Null, |(id, name)| json!({"entity_id":id,"name":name}));
@@ -217,7 +217,7 @@ pub(super) fn build(play: &Play) -> [Json; 4] {
         _ => Json::Null,
     };
     let shop = &play.npcw.shop;
-    let merchant = match (play.mode == 10, shop.id) {
+    let merchant = match (crate::play::fork_hooks::merchant_session_open(play), shop.id) {
         (true, Some(id)) => {
             let (mut state, view) = merchant_window(play, &shop.wares);
             let fields = json!({"entity_id":id,"greeting":greeting(&shop.greeting),"pending":shop.pending,"sell_rate":shop.sell_rate,"buy_rate":shop.buy_rate});
@@ -238,7 +238,7 @@ pub(super) fn build(play: &Play) -> [Json; 4] {
 fn windows_raw(play: &Play) -> Json {
     let (tab, _, lit) = play.items.read_state();
     let (mode, option, row) = play.npcw.merchant.read_state();
-    let merchant = play.mode == 10 && play.npcw.shop.id.is_some();
+    let merchant = crate::play::fork_hooks::merchant_session_open(play) && play.npcw.shop.id.is_some();
     json!({
         "page": {
             "allocated": play.start.is_some(),
@@ -256,7 +256,14 @@ fn windows_raw(play: &Play) -> Json {
 /// `cause`, never by polling them; list lengths are here to catch a list replaced behind an event.
 fn key(play: &Play) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    (play.mode == 1, play.mode == 10, play.mode == 11, play.npcw.shop.id, play.npcw.shop.pending).hash(&mut h);
+    (
+        crate::play::fork_hooks::loot_session_open(play),
+        crate::play::fork_hooks::merchant_session_open(play),
+        crate::play::fork_hooks::bank_session_open(play),
+        play.npcw.shop.id,
+        play.npcw.shop.pending,
+    )
+        .hash(&mut h);
     (play.dump.player.p34, play.dump.player.p38).hash(&mut h);
     // the item page's tab and lit row, the merchant window's mode, option and row: what a key moves
     (play.items.visible, play.items.read_state(), play.npcw.merchant.read_state(), play.start.is_some()).hash(&mut h);

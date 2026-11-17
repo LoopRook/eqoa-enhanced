@@ -2704,3 +2704,371 @@ fn round6f3_staged_sale_refused_when_player_sale_shrinks_the_stack() {
     action_broker::reset_all_for_test();
     crate::fork_ext::bindpage::reset_in_memory();
 }
+
+#[test]
+fn round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases() {
+    use crate::fork_ext::addons::{
+        action_broker,
+        discovery::{DiscoveredAddon, EntryMode},
+        native_events, window_takeover,
+    };
+    struct CountingRaster(usize);
+    impl crate::ui::Layout for CountingRaster {}
+    impl vi::ui::Raster for CountingRaster {
+        fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) { self.0 += 1; }
+        fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) { self.0 += 1; }
+        fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) { self.0 += 1; }
+        fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) { self.0 += 1; }
+        fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) { self.0 += 1; }
+        fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) { self.0 += 1; }
+        fn string_width(&self, _: &[u16]) -> i32 { 0 }
+        fn point_size(&self) -> i32 { 12 }
+        fn viewport(&self) -> [i32; 4] { [0, 0, 639, 447] }
+        fn set_viewport(&mut self, _: [i32; 4]) {}
+    }
+    let mk_addon = |id: &str, caps: &[&str]| {
+        let root = std::env::temp_dir();
+        Host::for_addon(&DiscoveredAddon {
+            id: id.into(),
+            name: id.into(),
+            entry: root.join("main.lua"),
+            script_root: root.clone(),
+            package_root: root.clone(),
+            module_dirs: vec![root.clone()],
+            resource_dirs: vec![root],
+            api: Some("eqoa/1".into()),
+            entry_mode: EntryMode::Once,
+            requested_capabilities: caps.iter().map(|s| (*s).to_string()).collect(),
+            extensions: Default::default(),
+            initially_enabled: true,
+            mods_root: None,
+        })
+        .unwrap()
+    };
+
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    p.dump.player.p34 = 500;
+    p.dump.player.p38 = 500;
+    let mut bag_pot = potion();
+    bag_pot.equip_slot = -1;
+    p.dump.inventory = list(&[bag_pot]);
+    p.dump.bank.items = list(&[]);
+
+    // Negative control: mod without eqoa.windows.takeover is refused.
+    let no_cap = mk_addon("no_cap_mod", &["eqoa.actions.*"]);
+    no_cap
+        .execute(
+            r#"
+        local ok, err = eqoa.windows.takeover("loot")
+        assert(ok == nil and err.code == "permission_denied")
+    "#,
+        )
+        .unwrap();
+
+    let host_a = mk_addon("holder_mod", &["eqoa.windows.takeover", "eqoa.actions.*"]);
+    let host_b = mk_addon("rival_mod", &["eqoa.windows.takeover"]);
+    host_a
+        .execute(
+            r#"
+        assert(eqoa.windows.taken("loot") == false)
+        assert(eqoa.windows.takeover("loot"))
+        assert(eqoa.windows.takeover("merchant"))
+        assert(eqoa.windows.takeover("bank"))
+        assert(eqoa.windows.taken("loot") == true)
+        local all = eqoa.windows.taken()
+        assert(all.loot and all.merchant and all.bank and all.holders.loot == "holder_mod")
+    "#,
+        )
+        .unwrap();
+
+    // Two mods contesting: first wins, second gets busy naming holder_mod + diagnostic.
+    host_b
+        .execute(
+            r#"
+        local ok, err = eqoa.windows.takeover("loot")
+        assert(ok == nil and err.code == "busy" and err.message:find("holder_mod", 1, true))
+    "#,
+        )
+        .unwrap();
+    let logs = host_b.drain_logs().unwrap();
+    assert!(
+        logs.iter().any(|l| l.contains("busy") && l.contains("holder_mod")),
+        "conflict must diagnose naming holder: {logs:?}"
+    );
+
+    // 1. Loot taken over: 0x0018 keeps mode == 0, draws 0 native pixels, loot data & actions work.
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 0, "taken-over loot must keep mode == 0");
+    let vui = crate::ui::Vui::new(Default::default(), Default::default(), vec![]);
+    let mut raster = CountingRaster(0);
+    p.run_npcw(&vui, &mut raster);
+    assert_eq!(raster.0, 0, "native loot window must draw 0 calls under takeover");
+    p.forge_snapshot(None);
+    host_a
+        .execute(
+            r#"
+        local l = assert(eqoa.loot.get())
+        assert(l.open == true and #l.items == 1)
+        assert(eqoa.windows.find("loot") == nil)
+        loot_req = assert(eqoa.actions.loot(l.items[1].ref, 1))
+    "#,
+        )
+        .unwrap();
+    super::super::begin_iteration(&mut p, true);
+    p.run_npcw(&vui, &mut raster);
+    assert_eq!(raster.0, 0, "dispatching loot under takeover draws 0 calls");
+    assert!(p.session.sends_lost > 0, "native 0x0017 loot request must still send");
+
+    // 2. Merchant taken over: 0x00B7 keeps mode == 0, draws 0 pixels, merchant.get().open == true & sell works.
+    let sent_before_merch = p.session.sends_lost;
+    apply(&mut p, opcode(0x00B7, shop_bytes(7001, 90, 110, &[sword()], "Shop!")));
+    assert_eq!(p.mode, 0, "taken-over merchant must keep mode == 0");
+    p.run_npcw(&vui, &mut raster);
+    assert_eq!(raster.0, 0, "native merchant window must draw 0 calls under takeover");
+    p.forge_snapshot(None);
+    host_a
+        .execute(
+            r#"
+        local m = assert(eqoa.merchant.get())
+        assert(m.open == true and #m.items == 1)
+        local inv = assert(eqoa.inventory.get())
+        sell_req = assert(eqoa.actions.sell(inv.items[1].ref, 1))
+    "#,
+        )
+        .unwrap();
+    super::super::begin_iteration(&mut p, true);
+    p.run_npcw(&vui, &mut raster);
+    assert_eq!(raster.0, 0);
+    assert!(p.session.sends_lost > sent_before_merch, "native sell request must still send");
+
+    // 3. Bank taken over: 0x124D keeps mode == 0, bank_taken_tick dispatches with 0 pixels drawn.
+    p.target = 9001;
+    let sent_before_bank = p.session.sends_lost;
+    apply(&mut p, opcode(0x124D, vec![]));
+    assert_eq!(p.mode, 0, "taken-over bank must keep mode == 0");
+    p.target = u32::MAX; // change target cleanly while mode == 0; hidden banker_id still preserved!
+    p.run_bank(&vui, &mut raster);
+    assert_eq!(raster.0, 0, "native bank window must draw 0 calls under takeover");
+    p.forge_snapshot(None);
+    host_a
+        .execute(
+            r#"
+        local b = assert(eqoa.bank.get())
+        assert(b.open == true)
+        bm_req = assert(eqoa.actions.bank_money("deposit", 25))
+    "#,
+        )
+        .unwrap();
+    super::super::begin_iteration(&mut p, true);
+    p.run_bank(&vui, &mut raster);
+    assert_eq!(raster.0, 0, "bank_taken_tick must draw 0 calls to screen raster");
+    assert_eq!(p.bank.state, 1, "bank_money must have sent native 0x1255");
+    assert_eq!(p.target, u32::MAX, "bank_taken_tick must restore player's target");
+    assert!(p.session.sends_lost > sent_before_bank);
+
+    // 4. Auto-release on zoning -> released cleanly; re-take -> auto-release on mod disable/clear.
+    let tp = Event::Teleport { world: 2, pos: [0.0; 3], hpr: [0.0; 3], token: 7 };
+    let cap = super::super::begin_game_event(&p, &tp);
+    super::super::end_game_event(&p, cap);
+    host_a.execute("assert(eqoa.windows.taken('loot') == false and eqoa.windows.taken('bank') == false)").unwrap();
+    host_a.execute("assert(eqoa.windows.takeover('loot'))").unwrap();
+    native_events::clear(&host_a);
+    host_b.execute("assert(eqoa.windows.taken('loot') == false and eqoa.windows.takeover('loot'))").unwrap();
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}
+
+#[test]
+fn round65_open_loot_talk_npc_flags_and_strict_target_guards() {
+    use crate::fork_ext::addons::{
+        action_broker,
+        discovery::{DiscoveredAddon, EntryMode},
+        native_events, window_takeover,
+    };
+    let root = std::env::temp_dir();
+    let host = Host::for_addon(&DiscoveredAddon {
+        id: "r65_actions".into(),
+        name: "r65_actions".into(),
+        entry: root.join("main.lua"),
+        script_root: root.clone(),
+        package_root: root.clone(),
+        module_dirs: vec![root.clone()],
+        resource_dirs: vec![root],
+        api: Some("eqoa/1".into()),
+        entry_mode: EntryMode::Once,
+        requested_capabilities: vec!["eqoa.actions.*".into(), "eqoa.windows.takeover".into()],
+        extensions: Default::default(),
+        initially_enabled: true,
+        mods_root: None,
+    })
+    .unwrap();
+
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    p.player.world = 0;
+    p.self_at = Some(([0.0, 0.0, 0.0], None));
+    p.entities.slots = vec![
+        Some(net::entity::Entity {
+            id: 5001,
+            world: 0,
+            kind: net::entity::TYPE_CREATURE,
+            p18: 3, // targetable + corpse
+            pos: [20.0, 0.0, 0.0],
+            actor_pos: [20.0, 0.0, 0.0],
+            creature: Some(net::entity::Creature {
+                name: "Far Corpse".into(),
+                npc_flags: 0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        Some(net::entity::Entity {
+            id: 5002,
+            world: 0,
+            kind: net::entity::TYPE_CREATURE,
+            p18: 3, // targetable + corpse (nearest!)
+            pos: [4.0, 0.0, 0.0],
+            actor_pos: [4.0, 0.0, 0.0],
+            creature: Some(net::entity::Creature {
+                name: "Near Corpse".into(),
+                npc_flags: 0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        Some(net::entity::Entity {
+            id: 5003,
+            world: 0,
+            kind: net::entity::TYPE_CREATURE,
+            p18: 1, // living hostile mob (NOT a corpse, no friendly/merchant/bank npc_flags)
+            pos: [2.0, 0.0, 0.0],
+            actor_pos: [2.0, 0.0, 0.0],
+            creature: Some(net::entity::Creature {
+                name: "Hostile Mob".into(),
+                npc_flags: 0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        Some(net::entity::Entity {
+            id: 5004,
+            world: 0,
+            kind: net::entity::TYPE_CREATURE,
+            p18: 1,
+            pos: [8.0, 0.0, 0.0],
+            actor_pos: [8.0, 0.0, 0.0],
+            creature: Some(net::entity::Creature {
+                name: "Merchant Bob".into(),
+                npc_flags: 0x80 | 8,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        Some(net::entity::Entity {
+            id: 5005,
+            world: 0,
+            kind: net::entity::TYPE_CREATURE,
+            p18: 1,
+            pos: [12.0, 0.0, 0.0],
+            actor_pos: [12.0, 0.0, 0.0],
+            creature: Some(net::entity::Creature {
+                name: "Banker Alice".into(),
+                npc_flags: 0x80 | 2,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+    ];
+    p.forge_snapshot(None);
+    host.execute(
+        r#"
+        results = {}
+        eqoa.events.on("action.result", function(e) results[#results + 1] = e.data end)
+        local m = eqoa.entities.find(5004)
+        local b = eqoa.entities.find(5005)
+        assert(m.npc_flags == (128 + 8), "merchant npc_flags exported")
+        assert(b.npc_flags == (128 + 2), "banker npc_flags exported")
+    "#,
+    )
+    .unwrap();
+
+    // 1. Strict negative control: open_loot(living_mob) & talk(corpse) & talk(hostile_mob) never send packets!
+    let sent0 = p.session.sends_lost;
+    host.execute(
+        r#"
+        r_bad_loot = assert(eqoa.actions.open_loot(5003))
+        r_bad_talk1 = assert(eqoa.actions.talk(5002))
+        r_bad_talk2 = assert(eqoa.actions.talk(5003))
+        r_bad_bank = assert(eqoa.actions.talk(5004, { kind = "bank" }))
+    "#,
+    )
+    .unwrap();
+    for _ in 0..4 {
+        super::super::begin_iteration(&mut p, true);
+    }
+    native_events::dispatch(&host).unwrap();
+    assert_eq!(p.session.sends_lost, sent0, "guards must send zero packets");
+    assert!(!p.auto_attack, "open_loot guard must never engage auto_attack");
+    host.execute(
+        r#"
+        assert(eqoa.actions.status(r_bad_loot).state == "refused")
+        assert(eqoa.actions.status(r_bad_talk1).state == "refused")
+        assert(eqoa.actions.status(r_bad_talk2).state == "refused")
+        assert(eqoa.actions.status(r_bad_bank).state == "refused")
+    "#,
+    )
+    .unwrap();
+
+    // 2. open_loot() (nil) picks nearest corpse (5002 at dist 4, not 5001 at 20, not living 5003 at 2).
+    host.execute("r_open = assert(eqoa.actions.open_loot())").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 5002, "open_loot() must target nearest corpse");
+    assert!(p.session.sends_lost > sent0, "open_loot must send 0x0015");
+    // Server refuses with 0x0085 code 1 -> ActionResult gets code="refused" + server text.
+    apply(&mut p, opcode(0x0085, vec![1]));
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        r#"
+        local st = assert(eqoa.actions.status(r_open))
+        assert(st.state == "refused" and st.ok == false and st.code == "refused")
+        assert(type(st.reason) == "string" and #st.reason > 0)
+    "#,
+    )
+    .unwrap();
+
+    // Re-try open_loot(5002) and confirm on 0x0018.
+    host.execute("assert(eqoa.windows.takeover('loot'))").unwrap();
+    host.execute("r_open2 = assert(eqoa.actions.open_loot(5002))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    native_events::dispatch(&host).unwrap();
+    host.execute("local st = assert(eqoa.actions.status(r_open2)); assert(st.state == 'completed' and st.ok == true)").unwrap();
+
+    // 3. talk(nil, {kind="merchant"}) targets 5004 & confirms on 0x00B7; talk(nil, {kind="bank"}) targets 5005 & confirms on 0x124D.
+    host.execute("assert(eqoa.windows.takeover('merchant')); assert(eqoa.windows.takeover('bank'))").unwrap();
+    host.execute("r_merch = assert(eqoa.actions.talk(nil, { kind = 'merchant' }))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 5004);
+    apply(&mut p, opcode(0x00B7, shop_bytes(5004, 90, 110, &[sword()], "Hi")));
+    native_events::dispatch(&host).unwrap();
+    host.execute("local st = assert(eqoa.actions.status(r_merch)); assert(st.state == 'completed' and st.ok == true)").unwrap();
+
+    host.execute("r_bank = assert(eqoa.actions.talk(nil, { kind = 'bank' }))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 5005);
+    apply(&mut p, opcode(0x124D, vec![]));
+    native_events::dispatch(&host).unwrap();
+    host.execute("local st = assert(eqoa.actions.status(r_bank)); assert(st.state == 'completed' and st.ok == true)").unwrap();
+
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}

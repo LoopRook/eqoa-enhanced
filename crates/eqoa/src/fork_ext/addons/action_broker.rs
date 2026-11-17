@@ -105,6 +105,13 @@ pub(crate) struct WinTarget {
     pub sig: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TalkKind {
+    AnyFriendly,
+    Merchant,
+    Bank,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ActionKind {
     Assist,
@@ -148,6 +155,8 @@ pub(crate) enum ActionKind {
     DialogAnswer { win: WinTarget, option: usize },
     InputText { win: WinTarget, text: String, submit: bool },
     MenuCommand { win: WinTarget, command: String },
+    OpenLoot { entity_id: Option<u32> },
+    Talk { entity_id: Option<u32>, kind: TalkKind },
 }
 
 impl ActionKind {
@@ -194,6 +203,8 @@ impl ActionKind {
             Self::DialogAnswer { .. } => "dialog_answer",
             Self::InputText { .. } => "input_text",
             Self::MenuCommand { .. } => "menu_command",
+            Self::OpenLoot { .. } => "open_loot",
+            Self::Talk { .. } => "talk",
         }
     }
 
@@ -236,7 +247,9 @@ impl ActionKind {
             | Self::ActivateRow { .. }
             | Self::DialogAnswer { .. }
             | Self::InputText { .. }
-            | Self::MenuCommand { .. } => None,
+            | Self::MenuCommand { .. }
+            | Self::OpenLoot { .. }
+            | Self::Talk { .. } => None,
         }
     }
 
@@ -259,6 +272,8 @@ pub(crate) enum ServerMatcher {
     BankMove { from_bank: bool, key: u32, item_id: i64, qty_before: i64, count: i64 },
     BankMoney { dir: u8, bank_before: i64, amount: i64 },
     Camera,
+    OpenLoot { corpse_id: u32 },
+    Talk { npc_id: u32, kind: TalkKind },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -2180,6 +2195,15 @@ pub(crate) fn resolve_server_loot_open(opened_corpse_id: Option<u32>, is_empty: 
         if let Some(cid) = opened_corpse_id {
             CURRENT_CORPSE_TARGET.with(|c| c.set(Some(cid)));
         }
+        b.resolve_matching(|inflight| {
+            let ServerMatcher::OpenLoot { corpse_id } = inflight.matcher else {
+                return None;
+            };
+            if opened_corpse_id.is_some() && opened_corpse_id != Some(corpse_id) {
+                return None;
+            }
+            Some((Some(true), None, None))
+        });
         for vm_state in b.vms.values_mut() {
             let Some(reopen) = vm_state
                 .active_batch
@@ -2216,7 +2240,8 @@ pub(crate) fn resolve_server_loot_open(opened_corpse_id: Option<u32>, is_empty: 
     });
 }
 
-pub(crate) fn resolve_server_loot_blocked() {
+pub(crate) fn resolve_server_loot_blocked(reason: Option<&str>) {
+    let text = reason.unwrap_or("loot blocked by server");
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         let now_tick = b.tick;
@@ -2231,16 +2256,38 @@ pub(crate) fn resolve_server_loot_blocked() {
                     "refused",
                     Some(false),
                     Some("refused"),
-                    Some("loot blocked by server".into()),
+                    Some(text.to_string()),
                     now_tick,
                     step,
                     true,
                 );
             }
         }
+        b.resolve_matching(|inflight| {
+            matches!(
+                inflight.matcher,
+                ServerMatcher::OpenLoot { .. } | ServerMatcher::Talk { .. }
+            )
+            .then(|| (Some(false), Some("refused"), Some(text.to_string())))
+        });
     });
-    resolve_server_loot_one(None, Some(false), Some("loot blocked by server"), |_| 0);
-    resolve_server_loot_all(Some(false), Some("loot blocked by server"), false);
+    resolve_server_loot_one(None, Some(false), Some(text), |_| 0);
+    resolve_server_loot_all(Some(false), Some(text), false);
+}
+
+pub(crate) fn resolve_server_talk_open(opened: TalkKind) {
+    BROKER.with(|b| {
+        b.borrow_mut().resolve_matching(|inflight| {
+            let ServerMatcher::Talk { kind, .. } = inflight.matcher else {
+                return None;
+            };
+            if kind == TalkKind::AnyFriendly || kind == opened {
+                Some((Some(true), None, None))
+            } else {
+                None
+            }
+        });
+    });
 }
 
 pub(crate) fn resolve_server_loot_one(
@@ -3042,6 +3089,28 @@ fn parse_batch_step(raw: Value) -> std::result::Result<ActionKind, (&'static str
     match kind.as_str() {
         "assist" | "target_target" => Ok(ActionKind::Assist),
         "interact" => Ok(ActionKind::Interact),
+        "open_loot" => Ok(ActionKind::OpenLoot {
+            entity_id: parse_entity_id(step_field(&t, "entity_id", Some(1)))?,
+        }),
+        "talk" => {
+            let entity_id = parse_entity_id(step_field(&t, "entity_id", Some(1)))?;
+            let kind = match step_field(&t, "kind_filter", None) {
+                Value::Nil => TalkKind::AnyFriendly,
+                Value::String(s) => match s.to_str().ok().as_deref() {
+                    Some("merchant") => TalkKind::Merchant,
+                    Some("bank") => TalkKind::Bank,
+                    Some(other) => {
+                        return Err((
+                            "invalid_argument",
+                            format!("talk kind_filter must be 'merchant' or 'bank', got '{other}'"),
+                        ));
+                    }
+                    None => return Err(("invalid_argument", "talk kind_filter must be UTF-8".into())),
+                },
+                _ => return Err(("invalid_argument", "talk kind_filter must be a string".into())),
+            };
+            Ok(ActionKind::Talk { entity_id, kind })
+        }
         "loot_all" => Ok(ActionKind::LootAll),
         "stop" => Ok(ActionKind::Stop),
         "unmemorize_all" => Ok(ActionKind::UnmemorizeAll),
@@ -4051,6 +4120,55 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
         "interact",
         lua.create_function(|lua, ()| {
             enqueue_lua(lua, "eqoa.actions.interact", ActionKind::Interact)
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "open_loot",
+        lua.create_function(|lua, entity: Option<Value>| {
+            enqueue_lua_with(lua, "eqoa.actions.open_loot", || {
+                let entity_id = match entity {
+                    None | Some(Value::Nil) => None,
+                    Some(v) => parse_entity_id(v)?,
+                };
+                Ok(ActionKind::OpenLoot { entity_id })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "talk",
+        lua.create_function(|lua, (entity, options): (Option<Value>, Option<Value>)| {
+            enqueue_lua_with(lua, "eqoa.actions.talk", || {
+                let entity_id = match entity {
+                    None | Some(Value::Nil) => None,
+                    Some(v) => parse_entity_id(v)?,
+                };
+                let kind = match options {
+                    None | Some(Value::Nil) => TalkKind::AnyFriendly,
+                    Some(Value::Table(t)) => match t.get::<Value>("kind") {
+                        Ok(Value::Nil) | Err(_) => TalkKind::AnyFriendly,
+                        Ok(Value::String(s)) => match s.to_str().ok().as_deref() {
+                            Some("merchant") => TalkKind::Merchant,
+                            Some("bank") => TalkKind::Bank,
+                            Some(other) => {
+                                return Err((
+                                    "invalid_argument",
+                                    format!("talk options.kind must be 'merchant' or 'bank', got '{other}'"),
+                                ));
+                            }
+                            None => return Err(("invalid_argument", "talk options.kind must be UTF-8".into())),
+                        },
+                        Ok(_) => return Err(("invalid_argument", "talk options.kind must be a string".into())),
+                    },
+                    Some(_) => return Err(("invalid_argument", "talk options must be a table or nil".into())),
+                };
+                Ok(ActionKind::Talk { entity_id, kind })
+            })
         })?,
     )?;
 

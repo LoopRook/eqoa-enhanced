@@ -245,9 +245,9 @@
       "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`Loot::read_list`)."
     },
     "crates/eqoa/src/bankplay.rs": {
-      "added": 5,
+      "added": 7,
       "deleted": 0,
-      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`BankPlay::read_lists`). round 6 action hook call: `super::fork_hooks::bank_requests(self, &mut out);` immediately before the BankOut loop."
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`BankPlay::read_lists`). round 6 action hook call: `super::fork_hooks::bank_requests(self, &mut out);` immediately before the BankOut loop. round 6.5 window takeover hook calls (2 inserted one-liners, 0 deleted): `window_taken(self, 11)` on 0x124D and `bank_taken_tick(self, vui)` in run_bank."
     },
     "crates/eqoa/src/bank.rs": {
       "added": 3,
@@ -275,9 +275,9 @@
       "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`ClassMastery::read_state`)."
     },
     "crates/eqoa/src/npcw.rs": {
-      "added": 6,
+      "added": 8,
       "deleted": 1,
-      "reason": "owner-approved 2026-11-15, round 5: merchant accessor. `merchant: Merchant,` becomes `pub merchant: Merchant,` so the fork adapter can read the window's state. round 6 action hook calls, approved by the lead on the owner's delegation 2026-11-16: round 6 read-only accessor `NpcWindows::loot_lists(&self)`. round 6 action hook: `super::fork_hooks::npcw_requests(self, &mut loot_out, &mut merch_out);` immediately before the LootOut/MerchantOut loops."
+      "reason": "owner-approved 2026-11-15, round 5: merchant accessor. `merchant: Merchant,` becomes `pub merchant: Merchant,` so the fork adapter can read the window's state. round 6 action hook calls, approved by the lead on the owner's delegation 2026-11-16: round 6 read-only accessor `NpcWindows::loot_lists(&self)`. round 6 action hook: `super::fork_hooks::npcw_requests(self, &mut loot_out, &mut merch_out);` immediately before the LootOut/MerchantOut loops. round 6.5 window takeover hook calls (2 inserted one-liners, 0 deleted): `window_taken(self, 1)` on 0x0018 and `window_taken(self, 10)` on 0x00B7."
     }
   },
   "immutable": [
@@ -500,6 +500,24 @@
       "path": "crates/eqoa/src/bankplay.rs",
       "name": "action bank requests",
       "pattern": "fork_hooks::bank_requests\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/npcw.rs",
+      "name": "window takeover npcw",
+      "pattern": "fork_hooks::window_taken\\(",
+      "count": 2
+    },
+    {
+      "path": "crates/eqoa/src/bankplay.rs",
+      "name": "window takeover bank open",
+      "pattern": "fork_hooks::window_taken\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/bankplay.rs",
+      "name": "window takeover bank tick",
+      "pattern": "fork_hooks::bank_taken_tick\\(",
       "count": 1
     },
     {

@@ -221,6 +221,7 @@ impl Manager {
         self.frame_number = self.frame_number.saturating_add(1);
         let _prologue = super::addon_perf::section("mgr.prologue");
         if !snapshot.in_game && self.snapshot.in_game {
+            super::window_takeover::release_all();
             super::native_core::CORE
                 .with(|c| c.borrow_mut().publish(super::native_core::View::default()));
             for entry in &self.entries {

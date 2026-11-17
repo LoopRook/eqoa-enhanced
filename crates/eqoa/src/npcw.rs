@@ -161,6 +161,7 @@ impl Play {
                 } else {
                     self.session.send_opcode(0x0016);
                 }
+                if self.mode == 1 && super::fork_hooks::window_taken(self, 1) { self.npcw.loot_open = false; self.mode = 0; }
             }
             0x0016 => {
                 // LootClose, and the corpse forgotten
@@ -198,6 +199,7 @@ impl Play {
                     self.mode = 10;
                     self.npcw.shop.pending = false;
                 }
+                if self.mode == 10 && super::fork_hooks::window_taken(self, 10) { self.npcw.merchant_open = false; self.mode = 0; }
             }
             0x00D7 => {
                 // Msg00D7: the pending flags cleared
