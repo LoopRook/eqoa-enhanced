@@ -462,7 +462,7 @@ pub(super) fn capture(play: &Play, cause: &'static str) {
             let next_cid = current_loot_source_id(play);
             pre_emit = PENDING_TAKE.with(|p| {
                 let pending = p.borrow_mut().take()?;
-                if !pending.closed || pending.corpse_id.is_none() || next_cid != pending.corpse_id {
+                if pending.corpse_id.is_none() || next_cid != pending.corpse_id {
                     return None;
                 }
                 let next_items = play.npcw.corpse.as_ref().map_or(&[][..], |c| c.items.as_slice());

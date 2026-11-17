@@ -1649,6 +1649,39 @@ fn round6_m1_loot_all_ignores_unrelated_inv_add_before_close() {
 }
 
 #[test]
+fn round6_m2_loot_open_without_close_diffs_with_inv_add() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    // Corpse 5013 open: native take + InvAdd, NO 0x0016 LootClose ever arrives before smaller same-corpse 0x0018.
+    bv.play.bags_target_corpse(5013, "an undead gnoll");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Gnoll Ear","id":2010,"key":0,"qty":1,"max_stack":20},
+        {"name":"Cracked Skull","id":2011,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.play.bags_native_loot_one(0, 1);
+    bv.play.bags_added(&serde_json::json!({"name":"Gnoll Ear","id":2010,"key":81,"qty":1,"max_stack":20}));
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Cracked Skull","id":2011,"key":0,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(2);
+    assert_eq!(bv.log().len(), 1, "M2: InvAdd + same-corpse 0x0018 without 0x0016 must log once: {:?}", bv.log());
+    assert!(bv.log()[0].contains("Gnoll Ear x1, from an undead gnoll"), "{:?}", bv.log());
+
+    // Negative control: same-corpse 0x0018 without 0x0016 and WITHOUT InvAdd logs nothing.
+    bv.play.bags_native_loot_one(0, 1);
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([]));
+    bv.frames(2);
+    assert_eq!(bv.log().len(), 1, "M2 negative control: missing InvAdd must still log nothing: {:?}", bv.log());
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
 fn round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls() {
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
