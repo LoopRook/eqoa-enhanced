@@ -324,6 +324,14 @@ without the click; optional "also sell grey items" off by default. Owner wants t
 small read-only accessors or one-line hook calls that expose data or call paths upstream already has; no
 behaviour change; the cross-family reviewer checks each line; budgets rise by the measured lines with the
 reason recorded; each approval is listed in `round-6-seams.md` for the owner to read.
+**Owner 2026-11-17 (after the round 6 test): the one-gesture rule is dropped.** Enabling a mod is the
+player's permission: a mod may act whenever it wants, including on its own (auto-loot near a corpse). Mods &
+Addons labels every mod that can act on its own, so the player sees it before enabling. The game's own limits
+stay (the server decides range and session). Next: the API gains "loot the nearest corpse" and "talk to the
+nearest merchant/banker" (ported from the game's own requests), so the bag viewer loots, sells and banks
+without the native windows; an auto-loot option in the mod. Selling or banking from anywhere is a bonus if
+the server accepts the game's own requests at range (no position spoofing). Supersedes the 2026-11-15/16
+lines above on autonomous automation and `needs_player_action`; the 5-line spec goes to the owner first.
 
 Quest log and quest objects, camera, windows/dialogs (busy state), Class Mastery values not already
 done, class and disposition icons, the remaining ImGui pieces, and the full actions API from the
