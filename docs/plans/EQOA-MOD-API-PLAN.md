@@ -332,6 +332,14 @@ nearest merchant/banker" (ported from the game's own requests), so the bag viewe
 without the native windows; an auto-loot option in the mod. Selling or banking from anywhere is a bonus if
 the server accepts the game's own requests at range (no position spoofing). Supersedes the 2026-11-15/16
 lines above on autonomous automation and `needs_player_action`; the 5-line spec goes to the owner first.
+Spec APPROVED by the owner 2026-11-17 (the mechanics are what is tested; the mods may later be split or
+revamped): (1) Mods & Addons labels mods that can act on their own; enabling is the permission; the click-only
+rule is gone for every mod; (2) Corpse tab "Loot" near a corpse loots the nearest corpse (all, or all but junk)
+without the game's corpse window; (3) Sell junk near a merchant and Deposit/Withdraw near a banker work without
+their windows; from farther away only if the server accepts the game's own requests (no position faking);
+(4) mod option "Auto-loot" (off by default): walking up to a corpse you killed takes all but junk; (5) progress
+line, stop on refusal, Stop button and no destroy stay. Order: owner-test fixes and retest close round 6, merge
+and push on go-ahead, then this as round 6.5 (small upstream hook calls approved by the lead under delegation).
 
 Quest log and quest objects, camera, windows/dialogs (busy state), Class Mastery values not already
 done, class and disposition icons, the remaining ImGui pieces, and the full actions API from the
