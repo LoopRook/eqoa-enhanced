@@ -2986,9 +2986,9 @@ fn round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases() {
     host_a.execute("assert(eqoa.actions.talk(9003, { kind = 'bank' }))").unwrap();
     super::super::begin_iteration(&mut p, true);
     assert_eq!(p.target, 9003);
-    p.target = 7777; // Player retargets away BEFORE 0x124D reply arrives!
     apply(&mut p, opcode(0x124D, vec![]));
     assert_eq!(p.mode, 0, "mod-opened taken-over bank must keep mode == 0");
+    p.target = 7777; // the player retargets after the open: the hidden session keeps its banker
     assert_eq!(
         window_takeover::hidden_bank_session(),
         Some(9003),
@@ -3355,6 +3355,7 @@ fn round65_loot_release_clears_corpse_visibility_and_master_loot() {
         .is_ok()
     );
     assert!(window_takeover::arm_pending_open(window_takeover::TakeoverKind::Loot, 1, 9001));
+    crate::fork_ext::loot_requested(9001);
     apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
     assert_eq!(p.mode, 0);
     let ml = net::raid::MasterLoot { seconds: 60, members: vec![] };
@@ -3573,4 +3574,286 @@ fn round65_window_takeover_scopes_own_and_all() {
 
     window_takeover::reset_all_for_test();
     action_broker::reset_all_for_test();
+}
+
+// ---- Round 6.5 review fixes (M1-M3, L4) -------------------------------------------------------
+
+fn r65fix_creature(id: u32, name: &str, p18: u8, flags: u16, at: [f32; 3]) -> Option<net::entity::Entity> {
+    Some(net::entity::Entity {
+        id,
+        world: 0,
+        kind: net::entity::TYPE_CREATURE,
+        p18,
+        pos: at,
+        actor_pos: at,
+        creature: Some(net::entity::Creature { name: name.into(), npc_flags: flags, ..Default::default() }),
+        ..Default::default()
+    })
+}
+
+fn r65fix_world() -> Play {
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    p.self_at = Some(([0.0, 0.0, 0.0], None));
+    p.entities.slots = vec![
+        r65fix_creature(9001, "a fallen orc", 3, 0, [3.0, 0.0, 0.0]),
+        r65fix_creature(9002, "Merchant Kim", 1, 0x88, [6.0, 0.0, 0.0]),
+        r65fix_creature(9003, "Banker Dan", 1, 0x82, [8.0, 0.0, 0.0]),
+        r65fix_creature(9004, "a fallen gnoll", 3, 0, [4.0, 0.0, 0.0]),
+        r65fix_creature(9005, "Merchant Lee", 1, 0x88, [7.0, 0.0, 0.0]),
+        r65fix_creature(9007, "Banker Sue", 1, 0x82, [9.0, 0.0, 0.0]),
+    ];
+    p
+}
+
+fn r65fix_own(kind: crate::fork_ext::addons::window_takeover::TakeoverKind) {
+    use crate::fork_ext::addons::window_takeover::{self, TakeoverScope};
+    assert!(window_takeover::takeover(1, "r65fix_mod", kind, TakeoverScope::Own).is_ok());
+}
+
+fn r65fix_host(caps: &[&str]) -> Host {
+    use crate::fork_ext::addons::discovery::{DiscoveredAddon, EntryMode};
+    let root = std::env::temp_dir();
+    Host::for_addon(&DiscoveredAddon {
+        id: "r65fix_mod".into(),
+        name: "r65fix_mod".into(),
+        entry: root.join("main.lua"),
+        script_root: root.clone(),
+        package_root: root.clone(),
+        module_dirs: vec![root.clone()],
+        resource_dirs: vec![root.clone()],
+        api: Some("eqoa/1".into()),
+        entry_mode: EntryMode::Once,
+        capabilities_declared: true,
+        requested_capabilities: caps.iter().map(|s| (*s).to_string()).collect(),
+        extensions: Default::default(),
+        initially_enabled: true,
+        mods_root: None,
+    })
+    .unwrap()
+}
+
+/// M2: under scope own a pending open claims only the reply it can name: loot and merchant by the
+/// observed id, bank by the player's current target (0x124D carries no id). A player-started open
+/// beside it stays native and the pending open survives for its own reply.
+#[test]
+fn round65_fix_m2_pending_open_never_claims_a_player_started_open() {
+    use crate::fork_ext::addons::{action_broker, window_takeover::{self, TakeoverKind}};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let mut p = r65fix_world();
+    for k in TakeoverKind::ALL {
+        r65fix_own(k);
+    }
+
+    // loot: the mod's request and the player's overlap (two outstanding): the reply cannot be
+    // told apart, so it must stay a native window, never hidden.
+    assert!(window_takeover::arm_pending_open(TakeoverKind::Loot, 1, 9001));
+    crate::fork_ext::loot_requested(9004); // the player's own
+    crate::fork_ext::loot_requested(9001); // the mod's
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 1, "overlapping loot requests: the reply must not be claimed by the pending open");
+    apply(&mut p, opcode(0x0016, vec![]));
+    crate::fork_ext::loot_source::clear();
+    crate::fork_ext::loot_requested(9001);
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 0, "the pending open must still claim its own reply (known matching target)");
+    apply(&mut p, opcode(0x0016, vec![]));
+    window_takeover::set_hidden_inactive(TakeoverKind::Loot);
+
+    // merchant: the player's shop (9005) arrives while the mod's talk(9002) is pending
+    assert!(window_takeover::arm_pending_open(TakeoverKind::Merchant, 1, 9002));
+    apply(&mut p, opcode(0x00B7, shop_bytes(9005, 90, 110, &[sword()], "Lee")));
+    assert_eq!(p.mode, 10, "a player-started merchant must stay native beside a pending talk");
+    p.mode = 0;
+    p.npcw.merchant.visible = false;
+    p.npcw.shop = Default::default();
+    apply(&mut p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Kim")));
+    assert_eq!(p.mode, 0, "the pending talk must still claim its own merchant");
+    window_takeover::set_hidden_inactive(TakeoverKind::Merchant);
+    p.npcw.shop = Default::default();
+
+    // bank: no id in 0x124D; the player's target is 9007, the mod asked for 9003
+    assert!(window_takeover::arm_pending_open(TakeoverKind::Bank, 1, 9003));
+    p.target = 9007;
+    apply(&mut p, opcode(0x124D, vec![]));
+    assert_eq!(p.mode, 11, "a player-started bank (other target) must stay native beside a pending talk");
+    p.mode = 0;
+    p.bank = Default::default();
+    p.target = 9003;
+    apply(&mut p, opcode(0x124D, vec![]));
+    assert_eq!(p.mode, 0, "the pending bank talk must claim the open for its own banker");
+    assert_eq!(window_takeover::hidden_bank_session(), Some(9003));
+
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+}
+
+/// M2: a refused (0x0085) or timed-out open leaves no pending claim behind.
+#[test]
+fn round65_fix_m2_refused_open_clears_pending_claim() {
+    use crate::fork_ext::addons::{action_broker, window_takeover};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let host = r65fix_host(&["eqoa.windows.takeover", "eqoa.actions.*"]);
+    let mut p = r65fix_world();
+    p.forge_snapshot(None);
+    host.execute("assert(eqoa.windows.takeover('merchant'))").unwrap();
+    host.execute("local r, e = eqoa.actions.talk(9002, {kind = 'merchant'}); assert(r, e and (e.code .. ': ' .. e.message))")
+        .unwrap();
+    super::super::begin_iteration(&mut p, true);
+    // the server refuses
+    apply(&mut p, opcode(0x0085, vec![1]));
+    super::super::begin_iteration(&mut p, true);
+    // the player now opens a shop by hand: it must be theirs, a native window
+    apply(&mut p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Kim")));
+    assert_eq!(p.mode, 10, "a refused talk must not leave a pending claim on the player's own open");
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+}
+
+/// M3: a hidden session that ends while a native window of the player's is open is not forgotten:
+/// the close is owed and goes out once nothing blocks it, leaving no stale corpse.
+#[test]
+fn round65_fix_m3_hidden_session_end_while_mode_nonzero_is_deferred_not_dropped() {
+    use crate::fork_ext::addons::{action_broker, window_takeover::{self, TakeoverKind}};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let mut p = r65fix_world();
+    r65fix_own(TakeoverKind::Loot);
+    assert!(window_takeover::arm_pending_open(TakeoverKind::Loot, 1, 9001));
+    crate::fork_ext::loot_requested(9001);
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 0);
+    assert!(p.npcw.corpse.is_some());
+    // the player opens a merchant by hand while the hidden corpse session lives
+    apply(&mut p, opcode(0x00B7, shop_bytes(9005, 90, 110, &[sword()], "Lee")));
+    assert_eq!(p.mode, 10);
+    // the mod lets go: the session must end, but cannot be closed under the player's window
+    assert!(window_takeover::release(1, TakeoverKind::Loot));
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.mode, 10, "the player's native window is untouched");
+    assert!(window_takeover::has_activity(), "the owed close must keep the takeover state alive");
+    // the player closes their window; the owed close goes out now
+    p.mode = 0;
+    p.npcw.merchant.visible = false;
+    p.npcw.shop = Default::default();
+    let before = p.session.sends_lost;
+    super::super::begin_iteration(&mut p, true);
+    assert!(p.npcw.corpse.is_none(), "M3: the hidden corpse must not stay stale after its session ended");
+    assert!(p.session.sends_lost > before, "M3: the deferred 0x0016 close must be sent");
+    super::super::begin_iteration(&mut p, true);
+    assert!(!window_takeover::has_activity(), "once sent nothing is owed");
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+}
+
+/// L4: a window the player already had open natively is never taken over by a reply that arrives
+/// while a pending open for the same thing waits.
+#[test]
+fn round65_fix_l4_window_already_open_is_not_hidden_on_arrival() {
+    use crate::fork_ext::addons::{action_broker, window_takeover::{self, TakeoverKind}};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let mut p = r65fix_world();
+    for k in TakeoverKind::ALL {
+        r65fix_own(k);
+    }
+    // loot: native window up, then the mod's request is pending and its reply arrives
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 1);
+    assert!(window_takeover::arm_pending_open(TakeoverKind::Loot, 1, 9001));
+    crate::fork_ext::loot_requested(9001);
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 1, "L4: an already-open native corpse window must not be hidden by the reply");
+    apply(&mut p, opcode(0x0016, vec![]));
+    crate::fork_ext::loot_source::clear();
+    window_takeover::set_hidden_inactive(TakeoverKind::Loot);
+
+    // merchant
+    apply(&mut p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Kim")));
+    assert_eq!(p.mode, 10);
+    assert!(window_takeover::arm_pending_open(TakeoverKind::Merchant, 1, 9002));
+    apply(&mut p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Kim")));
+    assert_eq!(p.mode, 10, "L4: an already-open native merchant window must not be hidden");
+    p.mode = 0;
+    p.npcw.shop = Default::default();
+    window_takeover::set_hidden_inactive(TakeoverKind::Merchant);
+
+    // bank
+    p.target = 9003;
+    apply(&mut p, opcode(0x124D, vec![]));
+    assert_eq!(p.mode, 11);
+    assert!(window_takeover::arm_pending_open(TakeoverKind::Bank, 1, 9003));
+    apply(&mut p, opcode(0x124D, vec![]));
+    assert_eq!(p.mode, 11, "L4: an already-open native bank window must not be hidden");
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+}
+
+/// M1: a mod's `open_loot`/`talk` moves the player's target; when the mod is done (its hidden
+/// session ended) the previous target comes back if it still exists, is not a corpse and the
+/// player has not chosen another meanwhile.
+#[test]
+fn round65_fix_m1_previous_target_restored_when_the_mods_open_is_done() {
+    use crate::fork_ext::addons::{action_broker, window_takeover::{self, TakeoverKind}};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let host = r65fix_host(&["eqoa.windows.takeover", "eqoa.actions.*"]);
+    let mut p = r65fix_world();
+    p.entities.slots.push(r65fix_creature(9500, "a bristly rat", 1, 0, [10.0, 0.0, 0.0]));
+    p.entities.slots.push(r65fix_creature(9600, "a gnoll pup", 1, 0, [11.0, 0.0, 0.0]));
+    p.forge_snapshot(None);
+    host.execute("assert(eqoa.windows.takeover('loot'))").unwrap();
+
+    // 1. the previous target (9500) is put back after the session ends
+    p.target = 9500;
+    host.execute("local r, e = eqoa.actions.open_loot(9001); assert(r, e and (e.code .. ': ' .. e.message))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 9001, "open_loot targets the corpse (documented)");
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 9001, "not restored while the open is pending");
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 0);
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 9001, "not restored while the hidden session is in use");
+    let before = p.session.sends_lost;
+    host.execute("assert(eqoa.windows.release('loot'))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 9500, "M1: the player's previous target comes back");
+    assert!(p.session.sends_lost > before, "M1: the restore goes through the game's own target request");
+
+    // 2. a player who chose another target meanwhile keeps their choice
+    host.execute("assert(eqoa.windows.takeover('loot'))").unwrap();
+    p.target = 9500;
+    host.execute("assert(eqoa.actions.open_loot(9001))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    p.target = 9600; // the player chose
+    host.execute("assert(eqoa.windows.release('loot'))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 9600, "M1: never override a target the player chose");
+
+    // 3. a previous target that became a corpse is not restored
+    host.execute("assert(eqoa.windows.takeover('loot'))").unwrap();
+    p.target = 9500;
+    host.execute("assert(eqoa.actions.open_loot(9001))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    if let Some(Some(e)) = p.entities.slots.iter_mut().find(|e| e.as_ref().is_some_and(|e| e.id == 9500)) {
+        e.p18 = 3;
+    }
+    host.execute("assert(eqoa.windows.release('loot'))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 9001, "M1: a previous target that died is not restored");
+    let _ = TakeoverKind::Loot;
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
 }

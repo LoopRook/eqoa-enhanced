@@ -110,12 +110,25 @@ impl Default for HiddenSession {
     }
 }
 
+/// The target the player had before a mod's `open_loot`/`talk` retargeted (M1): put back when the
+/// mod is done, if the player has not chosen another target meanwhile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RestoreTarget {
+    pub vm: u64,
+    pub prev: u32,
+    pub mod_target: u32,
+}
+
 #[derive(Default)]
 struct TakeoverState {
     holders: [Option<Holder>; 3],
     pending_opens: [Option<PendingOpen>; 3],
     pending_close: [bool; 3],
+    /// A hidden session ended and its close (0x0016 for a corpse, the state reset) is still to be
+    /// done: it waits for a moment when it cannot disturb a native window (M3).
+    close_owed: [bool; 3],
     hidden: [HiddenSession; 3],
+    restore: Vec<RestoreTarget>,
 }
 
 impl TakeoverState {
@@ -123,7 +136,9 @@ impl TakeoverState {
         self.holders.iter().any(Option::is_some)
             || self.pending_opens.iter().any(Option::is_some)
             || self.pending_close.iter().any(|&c| c)
+            || self.close_owed.iter().any(|&c| c)
             || self.hidden.iter().any(|h| h.active)
+            || !self.restore.is_empty()
     }
 }
 
@@ -174,6 +189,11 @@ pub(crate) fn takeover(
         if let Some(existing) = &mut s.holders[idx] {
             if existing.vm == vm {
                 existing.scope = scope;
+                // asking again while holding renews a live hidden session's idle timer (L5): a mod
+                // that is still showing the session keeps it
+                if s.hidden[idx].active && s.hidden[idx].vm == vm {
+                    s.hidden[idx].last_activity = Instant::now();
+                }
                 return Ok(());
             }
             return Err((
@@ -307,8 +327,24 @@ pub(crate) fn hidden_bank_session() -> Option<u32> {
     })
 }
 
+/// The target an incoming open can be tied to: the corpse the client asked for (loot) or the shop's
+/// NPC (merchant) as the packet path observed it; for a bank (0x124D carries no id) the player's
+/// current target, which the mod's `talk` set. `None` when it cannot be told (M2).
+fn known_target(
+    kind: TakeoverKind,
+    observed_target: Option<u32>,
+    fallback_player_target: Option<u32>,
+) -> Option<u32> {
+    match kind {
+        TakeoverKind::Bank => fallback_player_target,
+        TakeoverKind::Loot | TakeoverKind::Merchant => observed_target,
+    }
+}
+
 /// Accepts an incoming server open (`0x0018`, `0x00B7`, `0x124D`) as hidden when:
-/// - `holder.scope == TakeoverScope::Own` and a matching pending `open_loot`/`talk` exists, OR
+/// - `holder.scope == TakeoverScope::Own` and a pending `open_loot`/`talk` exists whose target the
+///   open is **known** to match (loot and merchant: the observed id; bank: the player's target);
+///   an open that cannot be tied to the pending request is left to the native window, OR
 /// - `holder.scope == TakeoverScope::All` (both mod-started and player-started opens).
 pub(crate) fn try_accept_open(
     kind: TakeoverKind,
@@ -335,7 +371,12 @@ pub(crate) fn try_accept_open(
         if let Some(pending) = s.pending_opens[idx] {
             if pending.vm != holder_vm {
                 s.pending_opens[idx] = None;
-            } else if observed_target.is_none_or(|obs| obs == pending.target_id) {
+            } else if holder_scope == TakeoverScope::All
+                && observed_target.is_none_or(|obs| obs == pending.target_id)
+                || holder_scope == TakeoverScope::Own
+                    && known_target(kind, observed_target, fallback_player_target)
+                        == Some(pending.target_id)
+            {
                 s.pending_opens[idx] = None;
                 s.pending_close[idx] = false;
                 s.hidden[idx] = HiddenSession {
@@ -394,10 +435,13 @@ pub(crate) fn end_session_for_vm(vm: u64, kind: TakeoverKind) {
     });
 }
 
-pub(crate) fn sync_sessions_with<F, G>(mut still_valid: F, mut on_end: G)
+/// One pass over the sessions: pending opens nobody still waits for (`awaiting`: the mod's request
+/// is refused, timed out or gone) are dropped, hidden sessions that are over (released, mod gone,
+/// timed out, walked away from, window gone: `still_valid`) are reset and their close becomes owed.
+pub(crate) fn sync_sessions_with<F, W>(mut still_valid: F, awaiting: W)
 where
     F: FnMut(TakeoverKind, u32, Option<[f32; 3]>) -> bool,
-    G: FnMut(TakeoverKind),
+    W: Fn(u64, TakeoverKind) -> bool,
 {
     if !has_activity() {
         return;
@@ -408,7 +452,9 @@ where
         for kind in TakeoverKind::ALL {
             let idx = kind as usize;
             if let Some(p) = s.pending_opens[idx]
-                && (p.expires_at <= now || s.holders[idx].as_ref().is_none_or(|h| h.vm != p.vm))
+                && (p.expires_at <= now
+                    || s.holders[idx].as_ref().is_none_or(|h| h.vm != p.vm)
+                    || !awaiting(p.vm, kind))
             {
                 s.pending_opens[idx] = None;
             }
@@ -423,13 +469,61 @@ where
                     || !still_valid(kind, s.hidden[idx].target_id, opened_pos);
                 if lost {
                     s.hidden[idx] = HiddenSession::default();
-                    on_end(kind);
+                    s.close_owed[idx] = true;
                 }
             } else if closed[idx] {
-                on_end(kind);
+                s.close_owed[idx] = true;
             }
         }
     });
+}
+
+/// The closes owed by ended hidden sessions, taken (cleared) so the caller sends each exactly once.
+/// Call only when closing cannot disturb a native window of the player's (M3).
+pub(crate) fn take_owed_closes() -> [bool; 3] {
+    if !has_activity() {
+        return [false; 3];
+    }
+    with_state_mut(|s| std::mem::take(&mut s.close_owed))
+}
+
+/// A mod's `open_loot`/`talk` moved the player's target from `prev` to `mod_target` (M1). The first
+/// `prev` of a mod's run is kept; `mod_target` follows the latest retarget.
+pub(crate) fn note_retarget(vm: u64, prev: u32, mod_target: u32) {
+    with_state_mut(|s| {
+        if let Some(e) = s.restore.iter_mut().find(|e| e.vm == vm) {
+            e.mod_target = mod_target;
+        } else if prev != 0 && prev != u32::MAX && prev != mod_target {
+            s.restore.push(RestoreTarget { vm, prev, mod_target });
+        }
+    });
+}
+
+/// The retargets whose mod is done: no request waits for an open, no hidden session of the mod
+/// lives, and `vm_idle(vm)` (no queued or in-flight action, no batch). Taken, so each is put back once.
+pub(crate) fn take_restorable<I: Fn(u64) -> bool>(vm_idle: I) -> Vec<RestoreTarget> {
+    if !has_activity() {
+        return Vec::new();
+    }
+    with_state_mut(|s| {
+        let busy = |s: &TakeoverState, vm: u64| {
+            s.pending_opens.iter().flatten().any(|p| p.vm == vm)
+                || s.hidden.iter().any(|h| h.active && h.vm == vm)
+                || s.close_owed.iter().any(|&c| c)
+                || !vm_idle(vm)
+        };
+        let mut out = Vec::new();
+        let mut keep = Vec::new();
+        for e in std::mem::take(&mut s.restore) {
+            if busy(s, e.vm) {
+                keep.push(e);
+            } else {
+                out.push(e);
+            }
+        }
+        s.restore = keep;
+        out
+    })
 }
 
 pub(crate) fn set_hidden_inactive(kind: TakeoverKind) {
@@ -443,7 +537,8 @@ pub(crate) fn set_hidden_inactive(kind: TakeoverKind) {
 
 #[cfg(test)]
 pub(crate) fn activate_hidden_for_test(vm: u64, kind: TakeoverKind, target_id: u32) -> bool {
-    arm_pending_open(kind, vm, target_id) && try_accept_open(kind, Some(target_id), None, None)
+    arm_pending_open(kind, vm, target_id)
+        && try_accept_open(kind, Some(target_id), Some(target_id), None)
 }
 
 #[cfg(test)]

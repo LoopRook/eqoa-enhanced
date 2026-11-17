@@ -2138,6 +2138,53 @@ pub(crate) fn mark_loot_inv_added(added_item_id: i64) {
     });
 }
 
+/// For each mod VM, the window kinds (indexed by `TakeoverKind`) whose open it still waits for:
+/// an `open_loot` or `talk` request in flight, or a batch's corpse reopen. A pending takeover claim
+/// outlives none of these (refused, timed out, stopped).
+pub(crate) fn open_requests_waiting() -> Vec<(u64, [bool; 3])> {
+    BROKER.with(|b| {
+        let b = b.borrow();
+        let mut out = Vec::new();
+        for (vm, state) in &b.vms {
+            let mut kinds = [false; 3];
+            for f in state.in_flight.values() {
+                match f.matcher {
+                    ServerMatcher::OpenLoot { .. } => kinds[0] = true,
+                    ServerMatcher::Talk { kind, .. } => match kind {
+                        TalkKind::Merchant => kinds[1] = true,
+                        TalkKind::Bank => kinds[2] = true,
+                        TalkKind::AnyFriendly => {
+                            kinds[1] = true;
+                            kinds[2] = true;
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            if state
+                .active_batch
+                .as_ref()
+                .is_some_and(|batch| batch.corpse_reopen.is_some())
+            {
+                kinds[0] = true;
+            }
+            if kinds.iter().any(|&k| k) {
+                out.push((*vm, kinds));
+            }
+        }
+        out
+    })
+}
+
+/// Nothing of this mod VM's is queued, in flight or running as a batch.
+pub(crate) fn vm_is_idle(vm: u64) -> bool {
+    BROKER.with(|b| {
+        b.borrow().vms.get(&vm).is_none_or(|s| {
+            s.queued.is_empty() && s.in_flight.is_empty() && s.active_batch.is_none()
+        })
+    })
+}
+
 pub(crate) fn take_corpse_reopen_ask() -> Option<(u64, u32)> {
     BROKER.with(|b| {
         let mut b = b.borrow_mut();

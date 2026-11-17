@@ -52,6 +52,9 @@ thread_local! {
     static PENDING_NPCW_TX: std::cell::RefCell<Option<PendingNpcwTx>> = const { std::cell::RefCell::new(None) };
     static PENDING_BANK_TX: std::cell::RefCell<Option<PendingBankTx>> = const { std::cell::RefCell::new(None) };
     static PENDING_CAMERA: std::cell::Cell<Option<PendingCameraReq>> = const { std::cell::Cell::new(None) };
+    /// `Play::mode` as the event now being applied found it (L4): a window already open natively
+    /// before a packet is never taken over by that packet. -1 outside an event.
+    static MODE_BEFORE_EVENT: std::cell::Cell<i32> = const { std::cell::Cell::new(-1) };
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -88,6 +91,7 @@ pub(crate) struct GameEventCapture {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> GameEventCapture {
+    MODE_BEFORE_EVENT.with(|m| m.set(play.mode));
     let api = api_capture::begin_game_event(play, event);
     if let net::session::Event::MasterLoot(m) = event {
         crate::fork_ext::addons::action_broker::set_master_loot(m.is_some());
@@ -213,6 +217,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
+    MODE_BEFORE_EVENT.with(|m| m.set(-1));
     api_capture::end_game_event(play, capture.api);
     if let Some((item_id, qty)) = capture.loot_inv_add {
         api_capture::items::note_loot_inv_add(item_id, qty);
@@ -421,6 +426,10 @@ pub(crate) fn window_taken(play: &Play, mode: i32) -> bool {
         let Some(kind) = TakeoverKind::from_mode(mode) else {
             return false;
         };
+        // L4: the window was already open natively before this packet: it is the player's
+        if MODE_BEFORE_EVENT.with(std::cell::Cell::get) == mode {
+            return false;
+        }
         let observed_target = match kind {
             TakeoverKind::Loot => crate::fork_ext::loot_source::peek_single(),
             TakeoverKind::Merchant => play.npcw.shop.id,
@@ -548,7 +557,9 @@ fn sync_hidden_sessions(play: &mut Play) {
         return;
     }
     let self_pos = play.self_at.map(|(p, _)| p);
-    let mut to_close: [bool; 3] = [false; 3];
+    // the opens a mod's request still waits for: a pending claim without one (refused, timed out,
+    // cancelled) is dropped, so it can never claim a window the player opens (M2)
+    let waiting = crate::fork_ext::addons::action_broker::open_requests_waiting();
     window_takeover::sync_sessions_with(
         |kind, target_id, opened_pos| {
             match kind {
@@ -571,14 +582,34 @@ fn sync_hidden_sessions(play: &mut Play) {
             }
             true
         },
-        |kind| {
-            to_close[kind as usize] = true;
+        |vm, kind| {
+            waiting
+                .iter()
+                .any(|(w_vm, kinds)| *w_vm == vm && kinds[kind as usize])
         },
     );
+    // M3: an ended session's close waits while a native window is up (it would disturb it) and
+    // is sent the moment none is; it is never forgotten
     if play.mode == 0 {
+        let owed = window_takeover::take_owed_closes();
         for kind in TakeoverKind::ALL {
-            if to_close[kind as usize] {
+            if owed[kind as usize] {
                 close_hidden_session(play, kind);
+            }
+        }
+        // M1: the mod is done: the player's own target comes back, unless they chose another
+        let restores = window_takeover::take_restorable(|vm| {
+            crate::fork_ext::addons::action_broker::vm_is_idle(vm)
+        });
+        for r in restores {
+            let prev_ok = play
+                .entities
+                .slots
+                .iter()
+                .flatten()
+                .any(|e| e.id == r.prev && play.in_scene(e) && e.p18 & 2 == 0);
+            if play.target == r.mod_target && prev_ok {
+                play.target_id(r.prev);
             }
         }
     }
@@ -1441,7 +1472,11 @@ fn dispatch_broker_action(
                 }
             };
             if play.target != corpse_id {
+                let prev = play.target;
                 play.target_id(corpse_id);
+                if let Some(vm) = crate::fork_ext::addons::action_broker::current_dispatch_vm() {
+                    crate::fork_ext::addons::window_takeover::note_retarget(vm, prev, corpse_id);
+                }
             }
             let still_corpse = play.target == corpse_id
                 && play
@@ -1545,7 +1580,11 @@ fn dispatch_broker_action(
                 }
             };
             if play.target != npc_id {
+                let prev = play.target;
                 play.target_id(npc_id);
+                if let Some(vm) = crate::fork_ext::addons::action_broker::current_dispatch_vm() {
+                    crate::fork_ext::addons::window_takeover::note_retarget(vm, prev, npc_id);
+                }
             }
             let is_trainer = play
                 .entities
