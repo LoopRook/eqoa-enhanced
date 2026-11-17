@@ -274,3 +274,11 @@ for mods that call something unsupported; the bundled mods must show none.
    the visible act.
 10. **ImGui parity and Forge input polling** were not audited per function (audit "UNCLEAR"). They stay covered
     by the bridge tests and the bundled UIs; the support table says so.
+
+## Owner answers (2026-11-17)
+
+All eight questions: the recommended option. (1) Freeze with the Stable release carrying rounds 4-7. (2) Build
+`files.list` and `map.set_waypoint/clear_waypoint`; drop `map.images/load_image`. (3) Wereoxxs: loads and tests pass
+is enough. (4) Renumber round labels to the plan. (5) Delete the remote `docs/mod-author-api` branch (archive tag
+kept) and repoint FORGE-COMPATIBILITY-HANDOFF. (6) One hook line in `main.rs` for `eqoa mod-api`. (7) Key conflicts in
+round 7 with the five lines as written (approved). (8) `eqoa mod-test` only if Thursday allows, else backlog.
