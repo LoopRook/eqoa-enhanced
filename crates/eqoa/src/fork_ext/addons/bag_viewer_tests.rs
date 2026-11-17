@@ -1351,3 +1351,88 @@ fn round6_item4_lazy_icons_load_without_native_windows_and_zero_per_frame_reques
     bv.clean();
     super::super::action_broker::reset_all_for_test();
 }
+
+#[test]
+fn round6_item1_stale_corpse_grid_and_loot_batch_and_log() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_corpse(&bv_corpse());
+    bv.enable();
+    bv.open();
+
+    // Select Corpse tab (3 items: Rat Pelt, Spider Silk, Bone Chip).
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    assert_eq!(bv.names(), vec!["Rat Pelt", "Spider Silk", "Bone Chip"]);
+
+    // Item 1 check: M.grid tracks container revision & draw() invalidates stale grids even if B.dirty was bypassed.
+    let stale_rev_before: Option<u64> = bv.eval("require('bags').grid.rev");
+    assert!(stale_rev_before.is_some(), "M.grid must track container revision to detect staleness");
+
+    bv.play.bags_corpse(&serde_json::json!([]));
+    bv.frames(1);
+    assert_eq!(bv.names(), Vec::<String>::new(), "empty corpse must show 0 items, never stale slots");
+    let (_, _, take_lbl) = bv.action_hit("Take all but junk").unwrap();
+    bv.click(bv.action_hit(&take_lbl).map(|(x, y, _)| (x, y)).unwrap());
+    bv.frames(1);
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Corpse has no items".into(), Some(false)),
+        "negative control: genuine 0/40 corpse says Corpse has no items"
+    );
+
+    // Re-open 1-item corpse; mark Rat Pelt as junk -> negative control on junk-only, then multi-item batch + log.
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_corpse(&serde_json::json!([bv_corpse()[0].clone()]));
+    bv.frames(1);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.slot(1));
+    bv.frames(1);
+    let (jx, jy, _, _, _) = bv.menu_row("Mark as junk").unwrap();
+    bv.click((jx, jy));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.frames(1);
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Corpse has only junk items".into(), Some(false)),
+        "negative control: junk-only corpse stops before dispatching batch"
+    );
+
+    // Full 3-item corpse: Rat Pelt (junk), Spider Silk, Bone Chip -> ONE click must take BOTH non-junk items and log both.
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_corpse(&bv_corpse());
+    bv.frames(1);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    bv.play.bags_loot_confirm_one(
+        1,
+        Some(&serde_json::json!({"name":"Spider Silk","id":2002,"key":32,"qty":4,"max_stack":100})),
+    );
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    bv.play.bags_loot_confirm_one(
+        1,
+        Some(&serde_json::json!({"name":"Bone Chip","id":2003,"key":33,"qty":2,"max_stack":100})),
+    );
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Looted 2 of 2".into(), Some(true)),
+        "one click of Take all but junk must finish both non-junk steps sequentially"
+    );
+    assert_eq!(bv.names(), vec!["Rat Pelt"], "junk item must remain on corpse");
+    let log = bv.log();
+    assert_eq!(log.len(), 2, "loot log must record both looted items: {log:?}");
+    assert!(log[0].contains("Bone Chip x2, from a decaying skeleton"), "{log:?}");
+    assert!(log[1].contains("Spider Silk x4, from a decaying skeleton"), "{log:?}");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}

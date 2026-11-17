@@ -88,7 +88,7 @@ eqoa.events.on("disabling", close)
 
 function draw()
     local grid = B.grid
-    if grid == nil then
+    if grid == nil or B.is_grid_stale() then
         grid = B.rebuild()
     elseif B.has_pending_icons then
         B.resolve_pending_icons(1, grid.rows * B.COLUMNS)

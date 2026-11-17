@@ -128,9 +128,7 @@ function M.resolve_pending_icons(first_slot, last_slot)
     clear_pass_cache()
 end
 
--- The grid for the tab on show: the items it keeps in the container's own order, with the numbers under it.
-function M.rebuild()
-    M.builds = M.builds + 1
+local function active_key_and_container()
     local key
     if M.tab == 7 then
         key = "corpse"
@@ -153,6 +151,22 @@ function M.rebuild()
     else
         c = eqoa.inventory.get()
     end
+    return key, c
+end
+
+function M.is_grid_stale()
+    local grid = M.grid
+    if grid == nil then return true end
+    local key, c = active_key_and_container()
+    if not c then return grid ~= false end
+    if grid == false then return true end
+    return grid.tab_key ~= key or grid.rev ~= c.revision
+end
+
+-- The grid for the tab on show: the items it keeps in the container's own order, with the numbers under it.
+function M.rebuild()
+    M.builds = M.builds + 1
+    local key, c = active_key_and_container()
     if not c then M.grid = false; M.has_pending_icons = false; return false end
     local items = {}
     for _, it in ipairs(c.items) do
@@ -165,6 +179,7 @@ function M.rebuild()
     M.grid = {
         items = items, used = c.used, capacity = c.capacity, money = c.money,
         rows = rows, bank = key == "bank", corpse = key == "corpse",
+        tab_key = key, rev = c.revision,
     }
     M.sync_visible_icons(1, rows * M.COLUMNS)
     M.hover = nil
@@ -340,6 +355,7 @@ end
 function M.start_loot_non_junk()
     local steps, total = M.loot_non_junk_list()
     if total == 0 then
+        M.dirty()
         M.result = {text = "Corpse has no items", ok = false}
         return
     end
