@@ -3210,3 +3210,33 @@ fn round65_reset_all_for_test_clears_hidden_sessions() {
     assert!(!super::super::bank_session_open(&p));
     assert_eq!(window_takeover::hidden_bank_session(), None);
 }
+
+#[test]
+fn round65_loot_release_clears_corpse_visibility_and_master_loot() {
+    use crate::fork_ext::addons::{action_broker, window_takeover};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    assert!(window_takeover::takeover(1, "test_mod", window_takeover::TakeoverKind::Loot).is_ok());
+    assert!(window_takeover::activate_hidden(window_takeover::TakeoverKind::Loot, 9001));
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    let ml = net::raid::MasterLoot { seconds: 60, members: vec![] };
+    let ev_ml = Event::MasterLoot(Some(ml.clone()));
+    let cap_ml = super::super::begin_game_event(&p, &ev_ml);
+    p.master_loot(Some(ml));
+    super::super::end_game_event(&p, cap_ml);
+    assert!(action_broker::is_master_loot_active());
+    assert!(p.npcw.corpse.is_some());
+
+    let sends_before = p.session.sends_lost;
+    assert!(window_takeover::release(1, window_takeover::TakeoverKind::Loot));
+    super::super::begin_iteration(&mut p, true);
+    assert!(p.session.sends_lost > sends_before, "release must send 0x0016");
+    assert!(p.npcw.corpse.is_none(), "corpse must be cleared");
+    assert!(!action_broker::is_master_loot_active(), "master-loot flag must be cleared on release");
+
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+}

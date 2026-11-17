@@ -481,6 +481,32 @@ pub(crate) fn bank_session_open(play: &Play) -> bool {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn close_hidden_session(
+    play: &mut Play,
+    kind: crate::fork_ext::addons::window_takeover::TakeoverKind,
+) {
+    use crate::fork_ext::addons::window_takeover::TakeoverKind;
+    match kind {
+        TakeoverKind::Loot => {
+            if play.npcw.corpse.is_some() {
+                play.session.send_opcode(0x0016);
+            }
+            let _ = play.npcw_opcode(0x0016, &[]);
+            LOOT_BUSY.with(|b| b.set(false));
+            crate::fork_ext::addons::action_broker::set_master_loot(false);
+            crate::fork_ext::loot_source::closed();
+        }
+        TakeoverKind::Merchant => {
+            play.npcw.merchant.visible = false;
+            play.npcw.shop = Default::default();
+        }
+        TakeoverKind::Bank => {
+            play.bank.state = 0;
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn sync_hidden_sessions(play: &mut Play) {
     use crate::fork_ext::addons::window_takeover::{self, TakeoverKind};
     if !window_takeover::has_activity() {
@@ -488,19 +514,7 @@ fn sync_hidden_sessions(play: &mut Play) {
     }
     window_takeover::sync_sessions(|kind, close_native| {
         if close_native {
-            match kind {
-                TakeoverKind::Loot => {
-                    if play.npcw.corpse.take().is_some() {
-                        play.session.send_opcode(0x0016);
-                    }
-                }
-                TakeoverKind::Merchant => {
-                    play.npcw.shop = Default::default();
-                }
-                TakeoverKind::Bank => {
-                    play.bank.state = 0;
-                }
-            }
+            close_hidden_session(play, kind);
         }
     });
     if window_takeover::is_hidden_active(TakeoverKind::Loot) && play.npcw.corpse.is_none() {
