@@ -191,3 +191,41 @@ One never-wrong rule replaces per-frame correlation.
 3. **Tests in real frame order** (`items_tests.rs`, `round6f3_*`): player loot, bank deposit and merchant sale while a broker request is in flight, with a `begin_iteration` between the player's draw and the reply, all resolve `unknown` and the batch stops; a player sale that shrinks the stack below a staged broker sale is refused and nothing is sent.
    - Negative control: `mark_player_activity` made a no-op and the quantity filter removed -> `python tools/run_gates.py --only round --filter round6f3_ --lock-wait 120`: 0 passed, 4 failed (all four). Restored; focused gate `round6b_ round6c_ round6f3_`: 26 passed, 0 failed.
 4. **Release gates:** `addons` 484 passed; `full` 2344 passed, 0 failed, 30 ignored (30 distinct prerequisite skips); `wasm`, `footprint`, `paths` PASS. In the combined `--release` run `player-release` and `release` failed within seconds with no test output; each passed when rerun alone (`player-release` PASS 46.9 s, `release` PASS 172.5 s).
+
+## Merge and follow-up (branch `feat/eqoa-api-r6`)
+
+**Merge.** `develop` (run_gates progress and stale-lock removal) merged first with no conflicts. `feat/eqoa-api-r6b` (Parts B+C, final `9fef4d2c`) then merged into Part A. Conflicts and how they were resolved:
+
+| File | Resolution |
+|---|---|
+| `fork_ext/addons/native_events.rs` | Kept both sides' events: `quests/camera/windows/mastery.changed` (A) and `action.result`, `batch.progress`, `batch.result` (B) are all `supported` at round 4; the `not_yet` event loop is now empty. |
+| `docs/fork-footprint.json` | Kept both sides' entries. `npcw.rs` is one entry (+6 -1: A's `loot_lists` accessor, the `pub merchant` field, B's hook call); `bankplay.rs` one entry (+5: A's `read_lists`, B's hook call). Footprint PASS: 506 fork-owned, 42 shared. |
+| `round-6a-report.md:24` | Dropped the removed `GetDispositionIconTexture` from the first table. |
+
+Two existing tests changed because the merge made them stale, not to hide a failure: `native_tests::native_capabilities_are_probeable_and_stubs_diagnose_even_when_caught` used `eqoa.actions.cast` as its `not_yet` stub, and `cast` is now `supported`, so it uses `eqoa.actions.move` (still `not_yet`); `action_broker::tests::round6b_capabilities_and_descriptors_cover_actions_result_and_events` and `api_capture_tests::round6b_non_item_chat_command_windows_weapon_sets_and_spellbook` no longer expect `drop_quest`, `mastery_share`, `close_window`, `select_row`, `menu_command` to be `not_yet`. The focused gate after the merge failed only on those tests; no test was deleted, skipped or weakened.
+
+**Actions added** (`fork_ext/addons/window_actions.rs` parses and guards at queue time; `fork_ext/play.rs::dispatch_window_action` runs them): `drop_quest`, `mastery_share`, `mastery_browse`, `mastery_buy`, `mastery_refund`, `close_window`, `select_row`, `activate_row`, `dialog_answer`, `input_text`, `menu_command`, all `supported`. Every one is gesture-gated by the broker and revalidated at dispatch. No new upstream lines (`play.rs` private items are reached from the child module); `windows_json` became `pub(crate)` and `ActionKind` grew 11 variants (fork-owned).
+
+- `drop_quest`: needs the same journal revision and title at dispatch, then the game's `Quests::send_remove(index-1)` with the current stamp.
+- `mastery_share/browse/buy/refund`: `Part::select/browse/send02/send03`; the pending lock, a loaded list, the open window (mode 40) and, for buy/refund, an inspected matching node (owned for refund, known and unowned for buy, the Master Class refusal with its warning) are checked first.
+- Window actions need the window's key, incarnation and a row/dialog signature (rows, tabs, dialog text; not the selection) to match the live window, the window to hold the focus, and no earlier key sequence still being delivered. Selection moves, confirms, closes, dialog answers and menu commands are native Up/Down/Left/Right/Cross/Triangle key presses over the next frames (`Play::press`), so `applied` means the keys were handed to the window; it is not a verdict on what the window then did. Rows and options are 1-based visible positions.
+- `input_text`: only the native edit box (mode 2), characters the game's keyboard types, the editor's length rule, password fields refused, submit through the game's own `edit_done`; a failed fit restores the old text.
+- Report guard: queue time and dispatch both refuse the support request/inbox windows, the report editor (purpose `0x0B0B1002`), the report confirmation box, report start-menu commands, and `/bug`, `#bug`, `/feature`, `#feature` text (also inside a tell).
+
+**Not done / limits.** `select_row`/`activate_row` do not support overlay windows (map, search, typing, the start-menu overlay at mode 0); only `mode:N` windows. A text-dialog (mode 9) has no options to answer. Start-menu and trainer row walking assumes Up/Down move one row (the native key handlers were read, not driven live). The tests cannot run the real window key handlers (they need `run/client.bin`, absent here), so they check the keys delivered to `Play`'s key path, not the lit row afterwards.
+
+**Tests** (`fork_ext/r6d_tests.rs`, Play-shaped data, six, all pass): `round6d_drop_quest_sends_native_remove_and_refuses_stale_or_ungestured`, `round6d_mastery_actions_use_native_requests_and_gates`, `round6d_window_rows_walk_native_keys_and_refuse_stale_or_bad_rows`, `round6d_dialog_answer_walks_the_confirm_and_the_report_guard_holds`, `round6d_input_text_types_through_the_editor_and_guards_reports_and_passwords`, `round6d_capabilities_are_supported_for_what_is_wired`. `needs_player_action` outside a gesture is asserted in the drop_quest and window tests.
+
+**Negative controls** (each run with `python tools/run_gates.py --only round --filter <test> --lock-wait 120`, then restored with `git checkout`; the failing line is the `expect_code` helper, `r6d_tests.rs:83`, whose caller was the stated assertion):
+
+| Control | Result |
+|---|---|
+| dispatch drop_quest title/revision check disabled | `round6d_drop_quest...` fails (stale-at-dispatch assertion) |
+| mastery_browse `find` check disabled | `round6d_mastery...` fails (`not_found` assertion) |
+| window signature check dropped | `round6d_window_rows...` fails (page-change `stale_handle`) |
+| dispatch report-owned guard disabled | `round6d_dialog_answer...` fails (`permission_denied`) |
+| report text guard disabled at queue time and dispatch (the first alone did not fail the test, because the queue-time guard also catches it) | `round6d_input_text...` fails |
+
+`needs_player_action` has no separate control here; it is the broker's gesture gate, controlled in `round6b_broker_gesture_gate...`.
+
+**Gates.** `python tools/run_gates.py --release --lock-wait 120`: round, addons 484 passed 0 failed 25 ignored (9 distinct skip notes), full 2360 passed 0 failed 30 ignored (30 distinct skips: no `run/client.bin`, no 2002 disc, no live S2/save state, symlink privilege, `EQOA_FORGE_SPIKE`, `EQOA_BUNDLED_UI_GOLDENS`), wasm, footprint, paths, player-release, release all PASS. The earlier combined-run failure of player-release/release did not recur. Oracle tests skip on this machine.
