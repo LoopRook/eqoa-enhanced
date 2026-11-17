@@ -2606,7 +2606,7 @@ mod tests {
         );
 
         let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
-        // Prime first frame without mouse press -> idle call refused with needs_player_action.
+        // Prime first frame without mouse press -> idle call succeeds autonomously with eqoa.actions.*.
         gpu.frame(&mut manager);
         assert!(
             manager.diagnostics().iter().all(|d| !d.message.contains("DoAssist")),
@@ -2618,8 +2618,7 @@ mod tests {
             .load("return idle_req, idle_err and idle_err.code")
             .eval()
             .unwrap();
-        assert!(idle_req.is_none());
-        assert_eq!(idle_code.as_deref(), Some("needs_player_action"));
+        assert!(idle_req.is_some(), "idle call with capability succeeds: {idle_code:?}");
 
         // Physical mouse hover then click on frame_btn's Button(DoAssist) inside Manager::frame.
         gpu.context.io_mut().add_mouse_pos_event([50.0, 35.0]);
@@ -2645,11 +2644,10 @@ mod tests {
             .unwrap();
         assert!(
             c_req.is_some(),
-            "frame-mode Button click must authorize 1 action (c_code={c_code:?}, diag={:?})",
+            "frame-mode Button click must queue action (c_code={c_code:?}, diag={:?})",
             manager.diagnostics()
         );
-        assert!(s_req.is_none(), "second action in same frame-mode click must fail");
-        assert_eq!(s_code.as_deref(), Some("needs_player_action"));
+        assert!(s_req.is_some(), "second action in same callback also succeeds (s_code={s_code:?})");
 
         // Physical hover + click on Forge mod's ImGui.Button(ForgeDo) inside Manager::frame.
         gpu.context.io_mut().add_mouse_pos_event([170.0, 40.0]);

@@ -4,9 +4,9 @@
 //! correlation.
 
 use super::{
-    gesture::{self, GestureToken},
+    gesture,
     host::Host,
-    native::{bind, describe, error, record, session},
+    native::{bind, describe, error, record, require_capability, session},
     native_core::CORE,
     native_items::{LootItemIdentity, ResolvedItemSpec, item_identity_of, resolve_item_handle},
 };
@@ -335,8 +335,6 @@ struct QueuedAction {
     addon_id: String,
     kind: ActionKind,
     queued_tick: u64,
-    #[allow(dead_code)]
-    gesture_serial: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -646,7 +644,8 @@ impl BrokerState {
 
     fn enqueue(
         &mut self,
-        token: GestureToken,
+        vm: u64,
+        addon_id: &str,
         kind: ActionKind,
     ) -> std::result::Result<RequestId, (&'static str, String)> {
         if kind.requires_in_world() && !self.native.in_world {
@@ -663,7 +662,6 @@ impl BrokerState {
                 format!("{} subsystem already has an active request", sub.label()),
             ));
         }
-        let vm = token.vm;
         let now_tick = self.tick;
         let queued_len = self
             .vms
@@ -677,14 +675,13 @@ impl BrokerState {
         }
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1).max(1);
-        let vm_state = self.ensure_vm(vm, &token.addon_id);
+        let vm_state = self.ensure_vm(vm, addon_id);
         let req = QueuedAction {
             id,
             vm,
-            addon_id: token.addon_id,
+            addon_id: addon_id.to_string(),
             kind: kind.clone(),
             queued_tick: now_tick,
-            gesture_serial: token.serial,
         };
         vm_state.queued.push_back(req);
         vm_state.upsert_retained(ActionResultRecord {
@@ -706,7 +703,8 @@ impl BrokerState {
 
     fn enqueue_batch(
         &mut self,
-        token: GestureToken,
+        vm: u64,
+        addon_id: &str,
         steps: Vec<ActionKind>,
         require_window: Option<BatchWindow>,
     ) -> std::result::Result<BatchId, (&'static str, String)> {
@@ -719,7 +717,6 @@ impl BrokerState {
                 format!("batch exceeds {MAX_BATCH_STEPS} steps"),
             ));
         }
-        let vm = token.vm;
         if self
             .vms
             .get(&vm)
@@ -751,7 +748,7 @@ impl BrokerState {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1).max(1);
         let total = steps.len();
-        let vm_state = self.ensure_vm(vm, &token.addon_id);
+        let vm_state = self.ensure_vm(vm, addon_id);
         let batch = ActiveBatch {
             id,
             vm,
@@ -2794,19 +2791,15 @@ pub(crate) fn enqueue_lua_with(
 ) -> Result<mlua::MultiValue> {
     let vm = super::native_events::bus(lua).borrow().vm;
     let addon = session(lua).borrow().addon.clone();
-    let token = match gesture::peek_token(vm, &addon, false) {
-        Ok(tok) => tok,
-        Err((code, msg)) => return error(lua, symbol, code, &msg),
-    };
+    if let Err((code, msg)) = require_capability(lua, symbol, symbol) {
+        return error(lua, symbol, code, &msg);
+    }
     let kind = match build() {
         Ok(kind) => kind,
         Err((code, msg)) => return error(lua, symbol, code, &msg),
     };
-    match BROKER.with(|b| b.borrow_mut().enqueue(token.clone(), kind)) {
-        Ok(req) => {
-            gesture::consume_token(&token, false);
-            lua.pack_multi((lua.create_userdata(req)?, Value::Nil))
-        }
+    match BROKER.with(|b| b.borrow_mut().enqueue(vm, &addon, kind)) {
+        Ok(req) => lua.pack_multi((lua.create_userdata(req)?, Value::Nil)),
         Err((code, msg)) => error(lua, symbol, code, &msg),
     }
 }
@@ -3543,10 +3536,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua.create_function(|lua, spec: Value| {
             let vm = super::native_events::bus(lua).borrow().vm;
             let addon = session(lua).borrow().addon.clone();
-            let token = match gesture::peek_token(vm, &addon, true) {
-                Ok(tok) => tok,
-                Err((code, msg)) => return error(lua, "eqoa.actions.batch", code, &msg),
-            };
+            if let Err((code, msg)) = require_capability(lua, "eqoa.actions.batch", "eqoa.actions.batch") {
+                return error(lua, "eqoa.actions.batch", code, &msg);
+            }
             if !CORE.with(|c| c.borrow().view.in_world) {
                 return error(
                     lua,
@@ -3559,11 +3551,14 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 Ok(parsed) => parsed,
                 Err((code, msg)) => return error(lua, "eqoa.actions.batch", code, &msg),
             };
-            match BROKER.with(|b| b.borrow_mut().enqueue_batch(token.clone(), steps, require_window)) {
-                Ok(batch_id) => {
-                    gesture::consume_token(&token, true);
-                    lua.pack_multi((lua.create_userdata(batch_id)?, Value::Nil))
+            for step in &steps {
+                let cap = format!("eqoa.actions.{}", step.name());
+                if let Err((code, msg)) = require_capability(lua, "eqoa.actions.batch", &cap) {
+                    return error(lua, "eqoa.actions.batch", code, &msg);
                 }
+            }
+            match BROKER.with(|b| b.borrow_mut().enqueue_batch(vm, &addon, steps, require_window)) {
+                Ok(batch_id) => lua.pack_multi((lua.create_userdata(batch_id)?, Value::Nil)),
                 Err((code, msg)) => error(lua, "eqoa.actions.batch", code, &msg),
             }
         })?,
@@ -4385,10 +4380,7 @@ pub(crate) fn dispatch_all_for_test() -> Vec<&'static str> {
 mod tests {
     use super::*;
     use crate::fork_ext::addons::{
-        gesture::{
-            self, GestureKind, arm_imgui_click, enter_gesture, enter_render_scope,
-            is_forbidden_report_text,
-        },
+        gesture::{GestureKind, enter_gesture, is_forbidden_report_text},
         native_core::{CORE, Core},
         native_events,
     };
@@ -4402,12 +4394,31 @@ mod tests {
         addon_id: &str,
         kind: ActionKind,
     ) -> std::result::Result<RequestId, (&'static str, String)> {
-        let token = gesture::take_single_token(vm, addon_id)?;
-        BROKER.with(|b| b.borrow_mut().enqueue(token, kind))
+        BROKER.with(|b| b.borrow_mut().enqueue(vm, addon_id, kind))
+    }
+
+    fn cap_host(id: &str, caps: &[&str]) -> Host {
+        let root = std::env::temp_dir();
+        Host::for_addon(&super::super::discovery::DiscoveredAddon {
+            id: id.into(),
+            name: id.into(),
+            entry: root.join("main.lua"),
+            script_root: root.clone(),
+            package_root: root.clone(),
+            module_dirs: vec![root.clone()],
+            resource_dirs: vec![root],
+            api: Some("eqoa/1".into()),
+            entry_mode: super::super::discovery::EntryMode::Once,
+            requested_capabilities: caps.iter().map(|s| (*s).to_string()).collect(),
+            extensions: Default::default(),
+            initially_enabled: true,
+            mods_root: None,
+        })
+        .unwrap()
     }
 
     #[test]
-    fn round6b_broker_gesture_gate_enforces_three_sources_and_one_action_per_gesture() {
+    fn round65_broker_allows_autonomous_actions_with_capability_and_refuses_without() {
         reset_all_for_test();
         crate::fork_ext::bindpage::reset_in_memory();
         CORE.with(|c| {
@@ -4416,50 +4427,57 @@ mod tests {
             *c.borrow_mut() = core;
         });
 
-        let host = Host::new().unwrap();
+        // Negative control: mod without eqoa.actions.* or eqoa.actions.assist is refused + diagnosed.
+        let denied = cap_host("r65_denied", &["eqoa.player.get"]);
+        denied
+            .execute(
+                r#"
+            local r, err = eqoa.actions.assist()
+            assert(r == nil and err.code == "permission_denied")
+            local b, berr = eqoa.actions.batch({ { kind = "assist" } })
+            assert(b == nil and berr.code == "permission_denied")
+        "#,
+            )
+            .unwrap();
+        let logs = denied.drain_logs().unwrap();
+        assert!(
+            logs.iter()
+                .any(|line| line.contains("eqoa.actions.assist")
+                    && line.contains("permission_denied")),
+            "undeclared action capability must record visible diagnostic: {logs:?}"
+        );
+
+        // Specific action capability grants that action outside any gesture, and refuses others.
+        let specific = cap_host("r65_specific", &["eqoa.actions.assist"]);
+        specific
+            .execute(
+                r#"
+            local r, err = eqoa.actions.assist()
+            assert(r ~= nil and err == nil)
+            local r2, err2 = eqoa.actions.assist()
+            assert(r2 ~= nil and err2 == nil)
+            local bad, berr = eqoa.actions.interact()
+            assert(bad == nil and berr.code == "permission_denied")
+        "#,
+            )
+            .unwrap();
+
+        // Wildcard capability grants actions and batches autonomously from render/event callbacks.
+        let host = cap_host("r65_wild", &["eqoa.actions.*"]);
         let vm = crate::fork_ext::addons::native_events::bus(&host.lua)
             .borrow()
             .vm;
-
-        // Outside gesture -> needs_player_action + diagnostic
         host.execute(
             r#"
-            events_seen = {}
-            eqoa.events.on("action.result", function(e)
-                events_seen[#events_seen + 1] = e.data
-            end)
             local r, err = eqoa.actions.assist()
-            assert(r == nil and err.code == "needs_player_action")
+            assert(r ~= nil and err == nil)
             eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
                 key_req, key_err = eqoa.actions.assist()
                 second_req, second_err = eqoa.actions.assist()
             end)
-            eqoa.events.on("pointer.pressed", function()
-                ptr_req, ptr_err = eqoa.actions.assist()
-            end)
         "#,
         )
         .unwrap();
-        let logs = host.drain_logs().unwrap();
-        assert!(
-            logs.iter()
-                .any(|line| line.contains("eqoa.actions.assist")
-                    && line.contains("needs_player_action")),
-            "missing gesture must record visible diagnostic: {logs:?}"
-        );
-
-        // Synthetic key down must NOT grant gesture
-        CORE.with(|c| {
-            c.borrow_mut().emit(
-                "input.key",
-                json!({"key":"k","down":true,"repeat":false,"synthetic":true,"text":""}),
-            )
-        });
-        native_events::dispatch(&host).unwrap();
-        host.execute("assert(key_req == nil)")
-            .unwrap();
-
-        // Physical ModKey gesture grants 1 action; 2nd fails with needs_player_action
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
@@ -4468,67 +4486,35 @@ mod tests {
         });
         native_events::dispatch(&host).unwrap();
         host.execute(
-            "assert(key_req ~= nil and key_err == nil); assert(second_req == nil and second_err.code == 'needs_player_action')",
+            "assert(key_req ~= nil and key_err == nil); assert(second_req ~= nil and second_err == nil)",
         )
         .unwrap();
+        assert!(enqueue_raw(vm, "r65_wild", ActionKind::Assist).is_ok());
 
-        // Pointer claim gate: unclaimed click rejected; claimed click accepted
-        CORE.with(|c| {
-            c.borrow_mut().frame = 10;
-            c.borrow_mut().emit(
-                "pointer.pressed",
-                json!({"x":50.0,"y":50.0,"inside_window":true,"button":"left","steps":0}),
-            );
-        });
-        native_events::dispatch(&host).unwrap();
-        host.execute("assert(ptr_req == nil and ptr_err.code == 'needs_player_action')")
-            .unwrap();
-
-        crate::fork_ext::addons::pointer_api::position([50.0, 50.0], true, (800, 600));
-        host.execute("assert(eqoa.input.claim_pointer{x=40,y=40,width=30,height=30})")
-            .unwrap();
-        CORE.with(|c| {
-            c.borrow_mut().emit(
-                "pointer.pressed",
-                json!({"x":50.0,"y":50.0,"inside_window":true,"button":"left","steps":0}),
-            );
-        });
-        native_events::dispatch(&host).unwrap();
-        host.execute("assert(ptr_req ~= nil and ptr_err == nil)")
-            .unwrap();
-
-        // ImGui render scope: unarmed fails, armed after click succeeds once then refuses second
-        {
-            let _render = enter_render_scope(vm, "test");
-            let err = enqueue_raw(vm, "test", ActionKind::Assist).unwrap_err();
-            assert_eq!(err.0, "needs_player_action");
-            arm_imgui_click();
-            let first = enqueue_raw(vm, "test", ActionKind::Assist);
-            assert!(first.is_ok());
-            let second = enqueue_raw(vm, "test", ActionKind::Assist).unwrap_err();
-            assert_eq!(second.0, "needs_player_action");
-        }
-        // Outside render scope again -> rejected
-        let after = enqueue_raw(vm, "test", ActionKind::Assist).unwrap_err();
-        assert_eq!(after.0, "needs_player_action");
+        // Synthetic report guard still holds even with eqoa.actions.*.
+        host.execute(
+            r#"
+            local bug_r, bug_e = eqoa.actions.command("/bug test")
+            assert(bug_r == nil and bug_e.code == "permission_denied")
+        "#,
+        )
+        .unwrap();
         reset_all_for_test();
         crate::fork_ext::bindpage::reset_in_memory();
     }
 
     #[test]
-    fn round6b_one_gesture_per_physical_event_across_multiple_listeners() {
+    fn round65_multiple_listeners_can_dispatch_actions_autonomously() {
         use super::super::native_events;
         reset_all_for_test();
         crate::fork_ext::bindpage::reset_in_memory();
         CORE.with(|c| c.borrow_mut().view.in_world = true);
 
         let host = Host::new().unwrap();
-        let vm = native_events::bus(&host.lua).borrow().vm;
-        assert_ne!(vm, 0);
         crate::fork_ext::addons::pointer_api::position([40.0, 40.0], true, (800, 600));
         host.execute(
             r#"
-            p_res, k_res, b_res = {}, {}, {}
+            p_res, k_res = {}, {}
             assert(eqoa.input.claim_pointer({ x = 0, y = 0, width = 200, height = 200 }))
             eqoa.events.on("pointer.pressed", function()
                 local req, err = eqoa.actions.assist()
@@ -4557,10 +4543,8 @@ mod tests {
             );
         });
         native_events::dispatch(&host).unwrap();
-        host.execute(
-            "assert(#p_res == 2 and p_res[1].ok == true and p_res[2].ok == false and p_res[2].code == 'needs_player_action')",
-        )
-        .unwrap();
+        host.execute("assert(#p_res == 2 and p_res[1].ok == true and p_res[2].ok == true)")
+            .unwrap();
 
         CORE.with(|c| {
             c.borrow_mut().emit(
@@ -4569,10 +4553,8 @@ mod tests {
             );
         });
         native_events::dispatch(&host).unwrap();
-        host.execute(
-            "assert(#k_res == 2 and k_res[1].ok == true and k_res[2].ok == false and k_res[2].code == 'needs_player_action')",
-        )
-        .unwrap();
+        host.execute("assert(#k_res == 2 and k_res[1].ok == true and k_res[2].ok == true)")
+            .unwrap();
 
         reset_all_for_test();
         crate::fork_ext::bindpage::reset_in_memory();
@@ -4935,15 +4917,12 @@ mod tests {
             assert_eq!(status, "supported", "{sym} must be supported");
         }
 
-        // Batch without gesture -> needs_player_action; 1 gesture allows 1 batch, 2nd fails;
-        // 2nd batch with new gesture while 1st runs -> busy; 3-step serial execution waits for server reply.
+        // Batch starts autonomously; 2nd batch while 1st runs -> busy; 3-step serial execution waits for server reply.
         host.execute(
             r#"
             bprog, bres = {}, {}
             eqoa.events.on("batch.progress", function(e) bprog[#bprog + 1] = e.data end)
             eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
-            local no_g, no_g_err = eqoa.actions.batch({ { kind = "assist" } })
-            assert(no_g == nil and no_g_err.code == "needs_player_action")
             eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
                 if mode == "first" then
                     b1, err1 = eqoa.actions.batch({
@@ -4951,7 +4930,6 @@ mod tests {
                         { kind = "assist" },
                         { kind = "assist" },
                     })
-                    same_g, same_g_err = eqoa.actions.batch({ { kind = "assist" } })
                 elseif mode == "second_while_running" then
                     b2, err2 = eqoa.actions.batch({ { kind = "assist" } })
                 end
@@ -4974,7 +4952,6 @@ mod tests {
         host.execute(
             r#"
             assert(b1 ~= nil and err1 == nil)
-            assert(same_g == nil and same_g_err.code == "needs_player_action")
             local st = assert(eqoa.actions.batch_status(b1))
             assert(st.state == "running" and st.completed == 0 and st.total == 3)
             assert(eqoa.actions.status(b1).state == "running")

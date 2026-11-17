@@ -657,9 +657,9 @@ For native methods returning void today, the action adapter must validate the kn
 
 ### Queued batches (Part C)
 
-One physical player gesture may start **one** broker-owned batch (`eqoa.actions.batch(spec)`), which executes steps strictly **one action at a time**, waiting for each step's native dispatch/server completion before advancing to the next step.
+Broker-owned batches (`eqoa.actions.batch(spec)`) execute steps strictly **one action at a time**, waiting for each step's native dispatch/server completion before advancing to the next step.
 
-- `eqoa.actions.batch(spec)` -> `BatchId, nil` or `nil, Error`: `spec` is an ordered step list `{step1, ...}` or `{steps={...}, require_window?="merchant"|"bank"|"loot"}` (1..64 steps). Each step carries `{kind="<action>", ...}`. Requires an active unconsumed gesture (`needs_player_action`), in-world state (`not_in_world`), and no other running batch for that VM (`busy`). Starting a batch consumes the gesture's batch allowance and cannot be paired with a standalone action on the same gesture.
+- `eqoa.actions.batch(spec)` -> `BatchId, nil` or `nil, Error`: `spec` is an ordered step list `{step1, ...}` or `{steps={...}, require_window?="merchant"|"bank"|"loot"}` (1..64 steps). Each step carries `{kind="<action>", ...}`. Requires `eqoa.actions.*` (or `eqoa.actions.batch` plus each step's `eqoa.actions.<kind>`) declared in `mod.json` (`permission_denied`), in-world state (`not_in_world`), and no other running batch for that VM (`busy`).
 - `eqoa.actions.stop_batch(id: BatchId?)` / `eqoa.actions.cancel(id: RequestId|BatchId)` -> `bool, nil`: immediately stops the running batch (`state = "stopped"`, `reason = "stopped"`). Any already-transmitted network packet finishes its single outcome without starting another step.
 - `eqoa.actions.batch_status(id: BatchId)` / `eqoa.actions.status(id: RequestId|BatchId)` -> `BatchResult?, nil`: returns the retained record (up to 256 per VM).
 - Events `batch.progress` and `batch.result` carry `BatchResult`: `{batch_id: BatchId, state: "running"|"completed"|"stopped"|"refused"|"cancelled"|"unknown", ok: bool?, completed: uint, total: uint, current_step: uint, code: string?, reason: string?, queued_tick: uint, completed_tick: uint?, failed_step: uint?, detail: table?}`.

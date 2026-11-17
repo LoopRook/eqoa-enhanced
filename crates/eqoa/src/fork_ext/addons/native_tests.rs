@@ -482,12 +482,53 @@ fn round_3_stage_a_actions_assist_and_summary_api() {
     super::action_broker::reset_all_for_test();
     crate::fork_ext::bindpage::reset_in_memory();
     CORE.with(|c| *c.borrow_mut() = Core::default());
-    let h = option_test_host("test_r3_actions");
-    // Outside a player gesture: assist fails with needs_player_action.
+    let h = Host::for_addon(&super::discovery::DiscoveredAddon {
+        id: "test_r3_actions".into(),
+        name: "test_r3_actions".into(),
+        entry: std::env::temp_dir().join("main.lua"),
+        script_root: std::env::temp_dir(),
+        package_root: std::env::temp_dir(),
+        module_dirs: vec![std::env::temp_dir()],
+        resource_dirs: vec![std::env::temp_dir()],
+        api: Some("eqoa/1".into()),
+        entry_mode: super::discovery::EntryMode::Once,
+        requested_capabilities: vec!["eqoa.actions.assist".into()],
+        extensions: Default::default(),
+        initially_enabled: true,
+        mods_root: None,
+    })
+    .unwrap();
+    // Without eqoa.actions.assist capability: refused with permission_denied.
+    let denied = Host::for_addon(&super::discovery::DiscoveredAddon {
+        id: "test_r3_no_cap".into(),
+        name: "test_r3_no_cap".into(),
+        entry: std::env::temp_dir().join("main.lua"),
+        script_root: std::env::temp_dir(),
+        package_root: std::env::temp_dir(),
+        module_dirs: vec![std::env::temp_dir()],
+        resource_dirs: vec![std::env::temp_dir()],
+        api: Some("eqoa/1".into()),
+        entry_mode: super::discovery::EntryMode::Once,
+        requested_capabilities: Vec::new(),
+        extensions: Default::default(),
+        initially_enabled: true,
+        mods_root: None,
+    })
+    .unwrap();
+    denied
+        .execute(
+            r#"
+        local ok, err = eqoa.actions.assist()
+        assert(ok == nil and err.code == 'permission_denied', "assist requires capability")
+    "#,
+        )
+        .unwrap();
+
+    // Outside a gesture (with Host::new() capability bypass / declared cap): reaches in-world gate directly.
     h.execute(
         r#"
         local ok, err = eqoa.actions.assist()
-        assert(ok == nil and err.code == 'needs_player_action', "assist needs gesture")
+        assert(ok == nil and err.code == 'not_in_world', "assist not in world without gesture")
         local ok2, err2 = eqoa.windows.open("summary")
         assert(ok2 == nil and err2.code == 'not_in_world', "summary not in world")
         local ok3, err3 = eqoa.windows.open("unsupported_window")
@@ -869,7 +910,32 @@ fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
     super::options::set_storage_root(None);
     crate::settings::testing::reset(true);
     super::options::reset_in_memory();
-    let host = option_test_host("eqoa_stats_box");
+    let denied = option_test_host("eqoa_stats_box");
+    denied
+        .execute(
+            r#"
+        local direct,direct_err = eqoa.actions.toggle_stats_box()
+        assert(direct == nil and direct_err.code == 'permission_denied')
+    "#,
+        )
+        .unwrap();
+    let mut cap_addon = super::discovery::DiscoveredAddon {
+        id: "eqoa_stats_box".into(),
+        name: "eqoa_stats_box".into(),
+        entry: std::env::temp_dir().join("eqoa-option-test-eqoa_stats_box").join("main.lua"),
+        script_root: std::env::temp_dir().join("eqoa-option-test-eqoa_stats_box"),
+        package_root: std::env::temp_dir().join("eqoa-option-test-eqoa_stats_box"),
+        module_dirs: vec![std::env::temp_dir().join("eqoa-option-test-eqoa_stats_box")],
+        resource_dirs: vec![std::env::temp_dir().join("eqoa-option-test-eqoa_stats_box")],
+        api: Some("eqoa/1".into()),
+        entry_mode: super::discovery::EntryMode::Once,
+        requested_capabilities: vec!["eqoa.actions.toggle_stats_box".into()],
+        extensions: Default::default(),
+        initially_enabled: true,
+        mods_root: None,
+    };
+    let host = Host::for_addon(&cap_addon).unwrap();
+    cap_addon.requested_capabilities.clear();
     host.execute(
         r#"
         eqoa.options.toggle({id='stats_box',default=false})
@@ -877,7 +943,7 @@ fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
         assert(ok == nil and err.code == 'io_error')
         assert(eqoa.options.get('stats_box') == false)
         local direct,direct_err = eqoa.actions.toggle_stats_box()
-        assert(direct == nil and direct_err.code == 'needs_player_action')
+        assert(direct == nil and direct_err.code == 'io_error')
         eqoa.input.bind({id='toggle',label='Toggle Stats Box',default_key='b'}, function()
             last_state, last_action_err = eqoa.actions.toggle_stats_box()
         end)

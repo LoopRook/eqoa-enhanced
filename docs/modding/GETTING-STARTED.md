@@ -161,7 +161,7 @@ profile settings, with no Forge dependency. Live-game testing is still required.
 
 ## Actions
 
-Game actions under `eqoa.actions.*` go through the client's action broker and require a physical player gesture (`eqoa.input.bind` keypress, a `pointer.pressed` inside `eqoa.input.claim_pointer`, or a clicked interactive `eqoa.imgui` widget). Each gesture authorizes one action (`req, err`). Calling an action outside a gesture returns `nil, {code = "needs_player_action", ...}` with a diagnostic in the Addon Manager.
+Game actions under `eqoa.actions.*` go through the client's action broker and may be called autonomously from any event, timer, or render callback once the mod declares `eqoa.actions.*` (or the specific `eqoa.actions.<name>` capability) in `mod.json`. Calling an undeclared action returns `nil, {code = "permission_denied", ...}` with a diagnostic in the Addon Manager.
 
 ```lua
 local last_req
@@ -187,7 +187,7 @@ end)
 
 - Poll `eqoa.actions.status(req)` for the retained `ActionResult` record or `eqoa.actions.cancel(req)` while a request is still `queued`.
 - `eqoa.actions.destroy` is `unsupported`; continuous controls (`move`, `look`, `buttons`) remain `not_yet`; query them with `eqoa.capabilities.get(...)`.
-- Window and quest actions (`drop_quest`, `mastery_share`, `mastery_browse`, `mastery_buy`, `mastery_refund`, `close_window`, `select_row`, `activate_row`, `dialog_answer`, `input_text`, `menu_command`) take a `QuestRef` or `WindowRef` read from `eqoa.quests` / `eqoa.windows`, count rows and options from 1 as listed, and go through the game's own keys, editor and request paths one player gesture at a time. A page change, a closed window or a changed journal makes the handle `stale_handle` at dispatch. Rows and dialog answers are delivered as key presses over the next frames, so `applied` means the keys were handed to the window. Password fields and the support/report window, editor and confirmation never take synthetic input (`permission_denied`). `menu_command` runs only an enabled row's `command` from `Window.rows`; any other string is `unsupported`.
+- Window and quest actions (`drop_quest`, `mastery_share`, `mastery_browse`, `mastery_buy`, `mastery_refund`, `close_window`, `select_row`, `activate_row`, `dialog_answer`, `input_text`, `menu_command`) take a `QuestRef` or `WindowRef` read from `eqoa.quests` / `eqoa.windows`, count rows and options from 1 as listed, and go through the game's own keys, editor and request paths. A page change, a closed window or a changed journal makes the handle `stale_handle` at dispatch. Rows and dialog answers are delivered as key presses over the next frames, so `applied` means the keys were handed to the window. Password fields and the support/report window, editor and confirmation never take synthetic input (`permission_denied`). `menu_command` runs only an enabled row's `command` from `Window.rows`; any other string is `unsupported`.
 
 ```lua
 local w = eqoa.windows.find("quest_log")

@@ -451,6 +451,11 @@ impl Host {
             .as_ref()
             .is_some_and(|a| a.entry_mode == super::discovery::EntryMode::Once)
     }
+    pub(crate) fn requested_capabilities(&self) -> Option<&[String]> {
+        self.addon
+            .as_ref()
+            .map(|a| a.requested_capabilities.as_slice())
+    }
     pub fn drain_logs(&self) -> Result<Vec<String>> {
         let messages: Table = self.lua.named_registry_value("forge_log")?;
         let mut output = messages
