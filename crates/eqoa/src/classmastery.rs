@@ -595,6 +595,10 @@ pub struct ClassMastery {
 }
 
 impl ClassMastery {
+    pub fn read_state(&self) -> (i32, i32, i32, i32, &[i32]) {
+        let (list, shown) = if self.column == 0 { (&self.owned, &self.shown[0]) } else { (&self.available, &self.shown[1]) };
+        (self.column, self.category, list.sel, list.top, shown)
+    }
     /// A pointer at frame point `p` (`pointer`), to the window with the
     /// keys: in the list (not while a request is answered) the category's
     /// halves are left and right, a skill is selected (`MOVED`) and the

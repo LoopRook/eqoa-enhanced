@@ -125,9 +125,9 @@
       "reason": "Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. Owner-approved defaults export adds eight regression setup/assertion lines for the 64/650 defaults and retail-minimum controls. Sync 2026-11-07: upstream's Raid List row sits in Map & Quests (UI already holds six, PAGE_MOST stays 6); its walk-test lines move with it (+5/-5). Sync 2026-11-08: upstream's Textures page goes after Map & Quests and Mods & Addons (index 9, so the web build's split_at keeps the fork pages); its row-doc, array lengths, split_at and walk-test page numbers move with it (+5/-5). Refactor/fork-options-rows: the fork's rows, category, change/value_text arms and walk-test steps moved into fork-owned fork_ext/options.rs, leaving only hook calls and page references here (+41/-41). Sync 2026-11-09: Upstream restored IDs 41?45 overlap existing Mana Bars 42. Route map parts and masters through owned rows (existing IDs retained; new 1054/1055), retain six-row pages and put Textures last on web. Stock map/UI walk assertions move to the owned fork walk, retaining Lighting/Texture Folder tests in place. +1 for the new owned master-category reference; deletions remove the conflicting stock rows/arms and relocated assertions. New upstream unique-ID test uses the combined registry, and its retail-boundary fixture explicitly selects 24/100 rather than Enhanced defaults. Round 2.5 review fix (MiniMax H2/M1): upstream walk and table tests restored verbatim; +3/-2 net for the restored text and one allow(dead_code) on the unused stock row table. Sync 2026-11-15: upstream's Extended became five groups of categories (petitions 1631/1634/2084); the fork's Enhanced page joins the UI group (fork_ext/options.rs) and upstream's group/category/page lookups read fork_options::pages(); the category rows/legend hooks went with upstream's one-menu code. Tightened to measured."
     },
     "crates/eqoa/src/play.rs": {
-      "added": 93,
+      "added": 94,
       "deleted": 51,
-      "reason": "Integration of Parts B and C, tightened to the merged tree's measured +94/-53 (Part C removes the native circle/hover-card/search hooks, lowering Part B's +147/-54). Part B fix round: restore upstream test lines and the native map-open condition; tightened to measured. Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus... Round 3 Stage C removes native Stats Box, ToT, and Mana Bars fields, lowering added lines from 381 to 278 and deletions from 62 to 61. Sync 2026-11-11 fix round: send_bug_note wraps its note in fork_ext::report_label::bug_note (one line changed, +1/-1 against the measured 263/62) so F3's server Support note names EQOA Enhanced; deletions return to 62. Round 4 Part B: tightened to measured divergence after replacing native search/journal with bundled mods. Sync 2026-11-15: upstream's stacked spell bars and buff window take the existing ability-bar/active-effects hide hooks; the HUD pick match returns to upstream's order. Tightened to measured. Sync 2026-11-15 review (Terra M1/M2): upstream's new buff-window clicks and right-click autocast on the ability bars take the same mod hide checks as their drawing (+1/-1 each). Round 5 (owner-approved 2026-11-15, loot request seam): +1 line in attack_press, `crate::fork_ext::loot_requested(self.target);`, before the corpse request (0x0015) is built, so the loot window's source is the corpse that was asked for."
+      "reason": "Integration of Parts B and C, tightened to the merged tree's measured +94/-53 (Part C removes the native circle/hover-card/search hooks, lowering Part B's +147/-54). Part B fix round: restore upstream test lines and the native map-open condition; tightened to measured. Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus... Round 3 Stage C removes native Stats Box, ToT, and Mana Bars fields, lowering added lines from 381 to 278 and deletions from 62 to 61. Sync 2026-11-11 fix round: send_bug_note wraps its note in fork_ext::report_label::bug_note (one line changed, +1/-1 against the measured 263/62) so F3's server Support note names EQOA Enhanced; deletions return to 62. Round 4 Part B: tightened to measured divergence after replacing native search/journal with bundled mods. Sync 2026-11-15: upstream's stacked spell bars and buff window take the existing ability-bar/active-effects hide hooks; the HUD pick match returns to upstream's order. Tightened to measured. Sync 2026-11-15 review (Terra M1/M2): upstream's new buff-window clicks and right-click autocast on the ability bars take the same mod hide checks as their drawing (+1/-1 each). Round 5 (owner-approved 2026-11-15, loot request seam): +1 line in attack_press, `crate::fork_ext::loot_requested(self.target);`, before the corpse request (0x0015) is built, so the loot window's source is the corpse that was asked for. round 6 action hook calls, approved by the lead on the owner's delegation 2026-11-16: +1 line in Play::frame, `fork_hooks::apply_camera(self, walker);`."
     },
     "crates/eqoa/src/settings.rs": {
       "added": 17,
@@ -185,9 +185,9 @@
       "reason": "Log the login press, reply and error so a refused login's reason reaches eqoa.log."
     },
     "crates/eqoa/src/startmenu.rs": {
-      "added": 1,
+      "added": 7,
       "deleted": 1,
-      "reason": "Expose the existing zone_name helper as pub(crate) so the fork-owned report snapshot reuses the client bounds check; body and gameplay remain unchanged."
+      "reason": "Expose the existing zone_name helper as pub(crate) so the fork-owned report snapshot reuses the client bounds check; body and gameplay remain unchanged. round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16: `MainMenu::read_state(&self)`."
     },
     "NOTICE": {
       "added": 10,
@@ -234,10 +234,50 @@
       "deleted": 0,
       "reason": "owner-approved 2026-11-15, round 5: merchant accessor. `Merchant::read_state(&self) -> (i32, i32, i32)`, read-only: the mode, the menu's lit option and the list's lit row, for the addon API's MerchantState and Container.view."
     },
+    "crates/eqoa/src/dialog.rs": {
+      "added": 9,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`PrivChat::read_text`, `Response::read_state`, `MBox::sel`)."
+    },
+    "crates/eqoa/src/loot.rs": {
+      "added": 3,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`Loot::read_list`)."
+    },
+    "crates/eqoa/src/bankplay.rs": {
+      "added": 5,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`BankPlay::read_lists`). round 6 action hook call: `super::fork_hooks::bank_requests(self, &mut out);` immediately before the BankOut loop."
+    },
+    "crates/eqoa/src/bank.rs": {
+      "added": 3,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`Bank::read_lists`)."
+    },
+    "crates/eqoa/src/questlog.rs": {
+      "added": 3,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`QuestLog::read_state`)."
+    },
+    "crates/eqoa/src/spellbook.rs": {
+      "added": 3,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`SpellBook::top`)."
+    },
+    "crates/eqoa/src/trainer.rs": {
+      "added": 3,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`Trainer::read_state`)."
+    },
+    "crates/eqoa/src/classmastery.rs": {
+      "added": 4,
+      "deleted": 0,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`ClassMastery::read_state`)."
+    },
     "crates/eqoa/src/npcw.rs": {
-      "added": 1,
+      "added": 6,
       "deleted": 1,
-      "reason": "owner-approved 2026-11-15, round 5: merchant accessor. `merchant: Merchant,` becomes `pub merchant: Merchant,` so the fork adapter can read the window's state."
+      "reason": "owner-approved 2026-11-15, round 5: merchant accessor. `merchant: Merchant,` becomes `pub merchant: Merchant,` so the fork adapter can read the window's state. round 6 action hook calls, approved by the lead on the owner's delegation 2026-11-16: round 6 read-only accessor `NpcWindows::loot_lists(&self)`. round 6 action hook: `super::fork_hooks::npcw_requests(self, &mut loot_out, &mut merch_out);` immediately before the LootOut/MerchantOut loops."
     }
   },
   "immutable": [
@@ -448,6 +488,24 @@
       "path": "crates/eqoa/src/play.rs",
       "name": "loot request",
       "pattern": "\\bfork_ext::loot_requested\\s*\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/npcw.rs",
+      "name": "action npcw requests",
+      "pattern": "fork_hooks::npcw_requests\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/bankplay.rs",
+      "name": "action bank requests",
+      "pattern": "fork_hooks::bank_requests\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/play.rs",
+      "name": "action camera",
+      "pattern": "fork_hooks::apply_camera\\(",
       "count": 1
     }
   ]

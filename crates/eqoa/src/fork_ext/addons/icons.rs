@@ -613,6 +613,8 @@ static ATLAS_CLONE_COUNT: AtomicU64 = AtomicU64::new(0);
 static SAFE_LIBRARY_CLONE_COUNT: AtomicU64 = AtomicU64::new(0);
 #[cfg(not(target_arch = "wasm32"))]
 static LOOKUP_ATTEMPT_COUNT: AtomicU64 = AtomicU64::new(0);
+#[cfg(not(target_arch = "wasm32"))]
+static RESOURCE_CALL_COUNT: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
@@ -634,10 +636,17 @@ pub fn lookup_attempt_count() -> u64 {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
+pub fn resource_call_count() -> u64 {
+    RESOURCE_CALL_COUNT.load(Ordering::Relaxed)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 pub fn reset_test_counters() {
     ATLAS_CLONE_COUNT.store(0, Ordering::Relaxed);
     SAFE_LIBRARY_CLONE_COUNT.store(0, Ordering::Relaxed);
     LOOKUP_ATTEMPT_COUNT.store(0, Ordering::Relaxed);
+    RESOURCE_CALL_COUNT.store(0, Ordering::Relaxed);
 }
 
 #[derive(Default)]
@@ -767,6 +776,14 @@ thread_local! {
 }
 
 pub fn queue_pending_lookup(id: u32) {
+    let already_failed = FAILED_LOOKUPS.with(|fl| {
+        fl.borrow()
+            .as_ref()
+            .is_some_and(|set| set.contains(&id))
+    });
+    if already_failed {
+        return;
+    }
     PENDING_LOOKUPS.with(|p| {
         let mut borrow = p.borrow_mut();
         borrow.get_or_insert_with(HashSet::new).insert(id);
@@ -1407,6 +1424,10 @@ fn install_native(
                         "enter a loaded world first",
                     );
                 }
+                #[cfg(not(target_arch = "wasm32"))]
+                if name == "resource" {
+                    RESOURCE_CALL_COUNT.fetch_add(1, Ordering::Relaxed);
+                }
                 let Some(hash) = super::native_state::uint(&hash, u32::MAX as u64) else {
                     return error(
                         lua,
@@ -1529,6 +1550,100 @@ fn install_native(
             }
         })?,
     )?;
+    bind(
+        lua,
+        "icons",
+        "class",
+        lua.create_function({
+            let cache = cache.clone();
+            let textures = textures.clone();
+            move |lua, class_id: Value| {
+                let Some(id) = super::native_state::uint(&class_id, 14) else {
+                    return error(
+                        lua,
+                        "eqoa.icons.class",
+                        "invalid_argument",
+                        "class_id must be an integer in 0..14",
+                    );
+                };
+                let tex_id = super::visibility::CLASS_ICON_TEX_IDS[id as usize];
+                let result = with_active_provider(|p| {
+                    cache.borrow_mut().get_or_load_ui_texture(tex_id, p)
+                });
+                match result {
+                    Some((id, width, height, token)) => {
+                        let t = lua.create_table()?;
+                        t.set(
+                            "texture",
+                            lua.create_userdata(Handle {
+                                owner: textures.clone(),
+                                id,
+                                token: Some(token),
+                            })?,
+                        )?;
+                        t.set("width", width)?;
+                        t.set("height", height)?;
+                        lua.pack_multi((t, Value::Nil))
+                    }
+                    None => error(
+                        lua,
+                        "eqoa.icons.class",
+                        "not_found",
+                        "class icon is not available in the current art cache",
+                    ),
+                }
+            }
+        })?,
+    )?;
+    bind(
+        lua,
+        "icons",
+        "disposition",
+        lua.create_function({
+            let cache = cache.clone();
+            let textures = textures.clone();
+            move |lua, disposition: Value| {
+                let d = match disposition {
+                    Value::Integer(i) => i,
+                    Value::Number(n) if n.is_finite() && n.fract() == 0.0 => n as i64,
+                    _ => {
+                        return error(
+                            lua,
+                            "eqoa.icons.disposition",
+                            "invalid_argument",
+                            "disposition must be an integer",
+                        );
+                    }
+                };
+                let tex_id = super::visibility::disposition_tex_id(d);
+                let result = with_active_provider(|p| {
+                    cache.borrow_mut().get_or_load_ui_texture(tex_id, p)
+                });
+                match result {
+                    Some((id, width, height, token)) => {
+                        let t = lua.create_table()?;
+                        t.set(
+                            "texture",
+                            lua.create_userdata(Handle {
+                                owner: textures.clone(),
+                                id,
+                                token: Some(token),
+                            })?,
+                        )?;
+                        t.set("width", width)?;
+                        t.set("height", height)?;
+                        lua.pack_multi((t, Value::Nil))
+                    }
+                    None => error(
+                        lua,
+                        "eqoa.icons.disposition",
+                        "not_found",
+                        "disposition icon is not available in the current art cache",
+                    ),
+                }
+            }
+        })?,
+    )?;
     super::native::describe(
         lua,
         "eqoa.icons.IconOptions.trim_color",
@@ -1537,4 +1652,32 @@ fn install_native(
         "",
     );
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn install_test_gpu_for_host(
+    host: &super::host::Host,
+) -> Option<Box<dyn std::any::Any>> {
+    use render::wgpu;
+    let instance = wgpu::Instance::default();
+    let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).ok()?;
+    let mut context = dear_imgui_rs::Context::create();
+    context.set_ini_filename::<std::path::PathBuf>(None).ok()?;
+    let renderer = Rc::new(RefCell::new(
+        dear_imgui_wgpu::WgpuRenderer::new(
+            dear_imgui_wgpu::WgpuInitInfo::new(
+                device.clone(),
+                queue.clone(),
+                wgpu::TextureFormat::Rgba8Unorm,
+            ),
+            &mut context,
+        )
+        .ok()?,
+    ));
+    let bridge = super::bridge::Bridge::install(host).ok()?;
+    let textures = Textures::new(&device, &queue, renderer);
+    Textures::install(&textures, &host.lua).ok()?;
+    let cache = attach_icon_cache(&host.lua, textures.clone()).ok()?;
+    Some(Box::new((device, queue, context, bridge, textures, cache)))
 }

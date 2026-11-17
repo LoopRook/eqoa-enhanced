@@ -749,3 +749,1532 @@ fn round5b_captures_for_the_owner_draw_the_discs_own_item_art_and_the_corpse_in_
     bv_png(&rm_pixels(&bv.gpu, &t), size, "r5-bags-loot.png");
     bv.clean();
 }
+
+fn bv_r6_png(pixels: &[u8], size: (u32, u32), name: &str) {
+    if let Some(dir) = std::env::var_os("EQOA_R6_CAPTURE_DIR").or_else(|| std::env::var_os("EQOA_R5B_CAPTURE_DIR")) {
+        let dir = PathBuf::from(dir);
+        fs::create_dir_all(&dir).unwrap();
+        let mut enc = png::Encoder::new(fs::File::create(dir.join(name)).unwrap(), size.0, size.1);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(pixels).unwrap();
+    }
+}
+
+impl Bv {
+    fn menu_row(&self, needle: &str) -> Option<(f64, f64, bool, Option<String>, String)> {
+        let (x, y, en, reason, label): (Option<f64>, Option<f64>, Option<bool>, Option<String>, Option<String>) = self.eval(&format!(
+            "(function()
+                for _, h in ipairs(require('bags').menu_hits or {{}}) do
+                    if string.find(h.row.label, {needle:?}, 1, true) then
+                        return h.x + h.w / 2, h.y + h.h / 2, h.row.enabled, h.row.reason, h.row.label
+                    end
+                end
+                return nil, nil, nil, nil, nil
+            end)()"
+        ));
+        Some((x?, y?, en?, reason, label?))
+    }
+    fn menu_labels(&self) -> Vec<String> {
+        self.eval(
+            "(function() local t = {} local m = require('bags').menu if m then for _, r in ipairs(m.rows) do t[#t + 1] = r.label end end return t end)()",
+        )
+    }
+    fn result_text(&self) -> Option<(String, Option<bool>)> {
+        let (text, ok): (Option<String>, Option<bool>) = self.eval(
+            "(function() local r = require('bags').result if r then return r.text, r.ok end return nil, nil end)()",
+        );
+        text.map(|t| (t, ok))
+    }
+    fn action_hit(&self, needle: &str) -> Option<(f64, f64, String)> {
+        let (x, y, label): (Option<f64>, Option<f64>, Option<String>) = self.eval(&format!(
+            "(function()
+                for _, h in ipairs(require('bags').action_hits or {{}}) do
+                    if string.find(h.label, {needle:?}, 1, true) then
+                        return h.x + h.w / 2, h.y + h.h / 2, h.label
+                    end
+                end
+                return nil, nil, nil
+            end)()"
+        ));
+        Some((x?, y?, label?))
+    }
+}
+
+#[test]
+fn round6b_bag_viewer_bags_menu_actions_greyed_reasons_no_destroy_and_no_unclicked_actions() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    // Give Healing Potion p4c=2 so quick slot 1 fits while quick slot 3 refuses cleanly.
+    let mut world = bv_world();
+    world["pack"][1]["p4c"] = serde_json::json!(2);
+    bv.play.bags_set(&world);
+    bv.enable();
+    bv.open();
+
+    // Nothing happens without clicking: idle frames send no packets and open no menu.
+    let sends_before = bv.play.bags_sends_lost();
+    bv.frames(5);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_before, "idle frames perform zero actions");
+    assert!(!bv.eval::<bool>("require('bags').menu ~= nil"));
+
+    // Click slot 2 (Healing Potion): menu offers Use + Quick slot 1..4 and NEVER Destroy.
+    let s2 = bv.slot(2);
+    bv.click(s2);
+    bv.frames(2);
+    let labels = bv.menu_labels();
+    assert!(labels.iter().any(|l| l == "Use"), "{labels:?}");
+    assert!(labels.iter().any(|l| l == "Quick slot 1"), "{labels:?}");
+    assert!(!labels.iter().any(|l| l.to_lowercase().contains("destroy")), "must have no Destroy entry: {labels:?}");
+
+    // Click Use -> 1 action dispatched, result line shows ": ok".
+    let (mx, my, enabled, _, _) = bv.menu_row("Use").unwrap();
+    assert!(enabled);
+    let sends_before = bv.play.bags_sends_lost();
+    bv.click((mx, my));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert!(bv.play.bags_sends_lost() > sends_before, "clicking Use sends one use_item action");
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(true), "{res}");
+    assert!(res.starts_with("Use:"), "{res}");
+
+    // Click Healing Potion -> Quick slot 3 -> game refuses with exact reason on result line.
+    bv.click(s2);
+    bv.frames(2);
+    let (qx, qy, qen, _, _) = bv.menu_row("Quick slot 3").unwrap();
+    assert!(qen);
+    bv.click((qx, qy));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false), "{res}");
+    assert!(res.contains("quick slot 3"), "expected quick slot refusal reason, got {res}");
+
+    // Click Mage Robe (slot 4, wrong class): Equip entry is greyed with game's reason; capture menu PNG.
+    let s4 = bv.slot(4);
+    bv.click(s4);
+    let menu_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &menu_tex), bv.win, "r6-bags-menu.png");
+    let (ex, ey, een, ereason, _) = bv.menu_row("Equip").unwrap();
+    assert!(!een, "Mage Robe Equip must be greyed");
+    assert_eq!(ereason.as_deref(), Some("wrong class"));
+    let sends_before = bv.play.bags_sends_lost();
+    bv.click((ex, ey));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_before, "clicking disabled row queues nothing");
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert!(res.contains("wrong class"), "{res}");
+
+    // Hero Helm (slot 6) requires level 55 (player is 50) -> greyed with requires level 55.
+    let s6 = bv.slot(6);
+    bv.click(s6);
+    bv.frames(2);
+    let (_, _, hen, hreason, _) = bv.menu_row("Equip").unwrap();
+    assert!(!hen);
+    assert_eq!(hreason.as_deref(), Some("requires level 55"));
+
+    // Rusty Sword (slot 1, worn) -> Unequip is allowed & succeeds.
+    let s1 = bv.slot(1);
+    bv.click(s1);
+    bv.frames(2);
+    let (ux, uy, uen, _, ulabel) = bv.menu_row("Unequip").unwrap();
+    assert!(uen && ulabel == "Unequip");
+    let sends_before = bv.play.bags_sends_lost();
+    bv.click((ux, uy));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert!(bv.play.bags_sends_lost() > sends_before);
+    assert_eq!(bv.result_text().unwrap().1, Some(true));
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6b_bag_viewer_merchant_bank_and_corpse_menus_and_captures() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.enable();
+    bv.open();
+
+    // Open Merchant (mode 10)
+    bv.play.bags_open_merchant(888);
+    bv.frames(2);
+
+    // Equipped sword has Sell 1 greyed; Healing Potion has Sell 1 & Sell stack.
+    let s1 = bv.slot(1);
+    bv.click(s1);
+    bv.frames(2);
+    let (_, _, sw_en, sw_reason, _) = bv.menu_row("Sell 1").unwrap();
+    assert!(!sw_en && sw_reason.as_deref() == Some("cannot sell an equipped item"));
+    bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
+    bv.frames(1);
+
+    let s2 = bv.slot(2);
+    bv.click(s2);
+    let merch_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &merch_tex), bv.win, "r6-bags-merchant.png");
+    let labels = bv.menu_labels();
+    assert!(labels.iter().any(|l| l.starts_with("Sell 1")), "{labels:?}");
+    assert!(labels.iter().any(|l| l.starts_with("Sell stack (5")), "{labels:?}");
+    assert!(!labels.iter().any(|l| l.to_lowercase().contains("destroy")), "{labels:?}");
+
+    let (sx, sy, sen, _, _) = bv.menu_row("Sell stack").unwrap();
+    assert!(sen);
+    bv.click((sx, sy));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert!(bv.play.bags_shop_pending(), "Sell stack dispatches merchant 0x004B");
+    bv.play.bags_sell_confirm(1, 5);
+    bv.frames(2);
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(true), "{res}");
+    assert!(res.starts_with("Sell stack (5"), "{res}");
+
+    // Open Bank (mode 11) -> Deposit from bags & Withdraw on Bank tab
+    bv.play.bags_close_merchant();
+    bv.play.bags_open_bank();
+    bv.frames(2);
+
+    let pelt_idx: usize = bv.eval("(function() for i, e in ipairs(require('bags').grid.items) do if e.item.name == 'Rat Pelt' then return i end end end)()");
+    let sp = bv.slot(pelt_idx);
+    bv.click(sp);
+    bv.frames(2);
+    let (dx, dy, den, _, _) = bv.menu_row("Deposit stack (3)").unwrap();
+    assert!(den);
+    bv.click((dx, dy));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_bank_state(), 2);
+    bv.play.bags_bank_deposit_confirm(17, 900007, "Rat Pelt", 3);
+    bv.frames(2);
+    assert_eq!(bv.result_text().unwrap().1, Some(true));
+
+    // Switch to Bank tab -> click Moonstone -> Withdraw
+    let bank_tab = bv.tab(6);
+    bv.click(bank_tab);
+    bv.frames(2);
+    let b1 = bv.slot(1);
+    bv.click(b1);
+    let bank_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &bank_tex), bv.win, "r6-bags-bank-menu.png");
+    let (wx, wy, wen, _, _) = bv.menu_row("Withdraw 1").unwrap();
+    assert!(wen);
+    bv.click((wx, wy));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_bank_state(), 2);
+    bv.play.bags_bank_withdraw_confirm(21, 1);
+    bv.frames(2);
+    assert_eq!(bv.result_text().unwrap().1, Some(true));
+
+    // Open Corpse (mode 1) -> Corpse tab appears -> Take / Take all
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_corpse(&bv_corpse());
+    bv.play.bags_open_corpse_mode();
+    bv.frames(2);
+    let corpse_tab = bv.tab(7);
+    bv.click(corpse_tab);
+    bv.frames(2);
+    let c2 = bv.slot(2);
+    bv.click(c2);
+    let corpse_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &corpse_tex), bv.win, "r6-bags-corpse.png");
+    let labels = bv.menu_labels();
+    assert!(labels.iter().any(|l| l.starts_with("Take")), "{labels:?}");
+    assert!(labels.iter().any(|l| l == "Take all"), "{labels:?}");
+    let (tx, ty, ten, _, _) = bv.menu_row("Take all").unwrap();
+    assert!(ten);
+    bv.click((tx, ty));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    bv.play.bags_loot_confirm_all();
+    bv.frames(2);
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(true), "{res}");
+    assert!(res.starts_with("Take all:"), "{res}");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6c_bag_viewer_junk_marks_persist_across_reload_grey_off_by_default_and_no_unclicked_actions() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    let mut world = bv_world();
+    world["pack"][6]["value"] = serde_json::json!(15); // Rat Pelt (misc, grey item)
+    world["pack"][7]["value"] = serde_json::json!(25); // Odd Thing
+    bv.play.bags_set(&world);
+    bv.enable();
+    bv.open();
+
+    // Grey-items rule must be OFF by default and zero actions run without click.
+    assert!(!bv.eval::<bool>("require('bags').sell_grey"));
+    let sends_before = bv.play.bags_sends_lost();
+    bv.frames(4);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_before);
+
+    // Equipped item refuses Mark as junk.
+    let s1 = bv.slot(1);
+    bv.click(s1);
+    bv.frames(2);
+    let (_, _, en_worn, reason_worn, _) = bv.menu_row("Mark as junk").unwrap();
+    assert!(!en_worn);
+    assert!(reason_worn.as_deref().unwrap_or("").contains("equipped"), "{reason_worn:?}");
+    bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
+    bv.frames(1);
+
+    // Click slot 8 (Odd Thing) -> Mark as junk -> shows "Marked ..." and menu flips to Unmark.
+    let s8 = bv.slot(8);
+    bv.click(s8);
+    bv.frames(2);
+    let (mx, my, men, _, _) = bv.menu_row("Mark as junk").unwrap();
+    assert!(men);
+    bv.click((mx, my));
+    bv.frames(2);
+    assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"));
+    assert!(!bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "grey item stays non-junk while grey rule off");
+    bv.click(s8);
+    bv.frames(2);
+    assert!(bv.menu_row("Unmark").is_some(), "menu switches to Unmark once marked");
+    bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
+    bv.frames(1);
+
+    // Toggle "Also sell grey items" ON -> Rat Pelt (grey misc) gains junk badge too.
+    let (gx, gy, glbl) = bv.action_hit("Also sell grey items").unwrap();
+    assert_eq!(glbl, "Also sell grey items");
+    bv.click((gx, gy));
+    let badge_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &badge_tex), bv.win, "r6-junk-badges.png");
+    assert!(bv.eval::<bool>("require('bags').sell_grey == true"));
+    assert!(bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "Rat Pelt matches grey rule when ON");
+
+    // Toggle back OFF before reload test -> disables & re-enables addon -> marks survive reload!
+    let (gx, gy, _) = bv.action_hit("Also sell grey items").unwrap();
+    bv.click((gx, gy));
+    bv.frames(2);
+    assert!(!bv.eval::<bool>("require('bags').sell_grey"));
+
+    bv.manager.queue(Command::Enable(BV.into(), false));
+    bv.frames(2);
+    bv.manager.queue(Command::Enable(BV.into(), true));
+    bv.frames(3);
+    // Give the player a new stack with the same item id 900008 -> mark applies by item type.
+    bv.play.bags_added(&serde_json::json!({"name":"Odd Thing Copy","id":900008,"key":99,"wear":0,"icon":4008}));
+    bv.open();
+    assert!(!bv.eval::<bool>("require('bags').sell_grey"), "grey=false survived reload");
+    assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"), "junk id 900008 survived reload");
+    assert!(bv.eval::<bool>("(function() local ok=true for _,e in ipairs(require('bags').grid.items) do if e.item.id==900008 and not require('bags').is_junk(e.item) then ok=false end end return ok end)()"));
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    let world = serde_json::json!({
+        "pack": [
+            {"name":"Rusty Sword","id":900001,"key":11,"wear":12,"equip":0,"value":100,"icon":4001,"stats":[[0,3]]},
+            {"name":"Rat Pelt","id":900007,"key":17,"qty":2,"max_stack":100,"value":10,"icon":4007},
+            {"name":"Chipped Tooth","id":900010,"key":20,"qty":1,"max_stack":20,"value":20,"icon":4008},
+            {"name":"Torn Cloth","id":900011,"key":21,"qty":1,"max_stack":20,"value":40,"icon":4003},
+            {"name":"Cracked Fang","id":900012,"key":22,"qty":1,"max_stack":20,"value":30,"icon":4004}
+        ],
+        "bank": [],
+        "tunar": 100,
+        "bank_tunar": 0
+    });
+    bv.play.bags_set(&world);
+    bv.enable();
+    bv.open();
+
+    // Mark Chipped Tooth, Torn Cloth, and Cracked Fang as junk (leave Rat Pelt unmarked grey).
+    for slot in [3usize, 4, 5] {
+        let sp = bv.slot(slot);
+        bv.click(sp);
+        bv.frames(2);
+        let (mx, my, en, _, _) = bv.menu_row("Mark as junk").unwrap();
+        assert!(en);
+        bv.click((mx, my));
+        bv.frames(1);
+    }
+
+    // Open merchant: grey OFF -> shows 3 items; turn grey ON -> shows 4 items with native quote.
+    bv.play.bags_open_merchant(44);
+    bv.frames(2);
+    let (_, _, lbl_off) = bv.action_hit("Sell junk (").unwrap();
+    let quote_3: u64 = bv.eval("select(3, require('bags').junk_sell_list())");
+    assert!(lbl_off.starts_with("Sell junk (3 items, "), "{lbl_off}");
+    assert!(quote_3 > 0, "native quote must be positive");
+
+    // Idle frames perform zero sells even with merchant open.
+    let sends_idle = bv.play.bags_sends_lost();
+    bv.frames(4);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends_idle);
+
+    // Enable grey items -> count includes Rat Pelt (4 items) -> capture merchant PNG.
+    let (gx, gy, _) = bv.action_hit("Also sell grey items").unwrap();
+    bv.click((gx, gy));
+    let merch_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &merch_tex), bv.win, "r6-junk-merchant.png");
+    let (bx, by, lbl_on) = bv.action_hit("Sell junk (").unwrap();
+    assert!(lbl_on.starts_with("Sell junk (4 items, "), "{lbl_on}");
+
+    // One click starts ONE batch; only step 1 dispatches while waiting for merchant reply.
+    bv.click((bx, by));
+    bv.frames(1);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert!(bv.play.bags_shop_pending(), "step 1 dispatched");
+    let sends_after_s1 = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(1);
+    assert_eq!(bv.play.bags_sends_lost(), sends_after_s1, "step 2 waits for step 1 server reply");
+
+    // Server confirms step 1 (Rat Pelt at inv slot 1) -> progress shows 1 of 4 -> click Stop!
+    bv.play.bags_sell_confirm(1, 2);
+    bv.frames(2);
+    let (sx, sy, slbl) = bv.action_hit("Stop").unwrap();
+    assert_eq!(slbl, "Stop");
+    bv.click((sx, sy));
+    bv.play.bags_broker_tick();
+    let stopped_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &stopped_tex), bv.win, "r6-junk-stopped.png");
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert_eq!(res, "Sold 1 of 4: stopped");
+
+    // Start batch for remaining 3 junk items, confirm step 1, then close merchant -> stops cleanly!
+    let (bx, by, lbl2) = bv.action_hit("Sell junk (").unwrap();
+    assert!(lbl2.starts_with("Sell junk (3 items, "), "{lbl2}");
+    bv.click((bx, by));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    bv.play.bags_sell_confirm(1, 1);
+    bv.frames(2);
+    bv.play.bags_close_merchant();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert_eq!(res, "Sold 1 of 3: merchant closed");
+
+    // Remaining 2 junk items: start batch, confirm step 1, then zone -> stops cleanly without replay!
+    bv.play.bags_open_merchant(44);
+    bv.frames(2);
+    let (bx, by, lbl3) = bv.action_hit("Sell junk (").unwrap();
+    assert!(lbl3.starts_with("Sell junk (2 items, "), "{lbl3}");
+    bv.click((bx, by));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    bv.play.bags_sell_confirm(1, 1);
+    bv.frames(2);
+    bv.play.bags_zone();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert!(res.starts_with("Sold 1 of 2: zone"), "{res}");
+
+    // Turn grey back OFF for corpse test: Rat Pelt id=2001 will be marked explicitly as junk while Bone Chip & Spider Silk stay non-junk.
+    let (gx, gy, _) = bv.action_hit("Also sell grey items").unwrap();
+    bv.click((gx, gy));
+    bv.frames(1);
+
+    // Corpse open: mark Rat Pelt (id 2001) as junk, switch to Corpse tab, capture r6-junk-corpse.png.
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_corpse(&bv_corpse());
+    bv.play.bags_open_corpse_mode();
+    bv.frames(2);
+    let corpse_tab = bv.tab(7);
+    bv.click(corpse_tab);
+    bv.frames(2);
+    let c1 = bv.slot(1); // Rat Pelt id 2001 on corpse
+    bv.click(c1);
+    bv.frames(2);
+    let (mx, my, en, _, _) = bv.menu_row("Mark as junk").unwrap();
+    assert!(en);
+    bv.click((mx, my));
+    let corpse_tex = bv.frames(2);
+    bv_r6_png(&rm_pixels(&bv.gpu, &corpse_tex), bv.win, "r6-junk-corpse.png");
+
+    // Fill inventory to 39/40 before "Take all but junk" -> loots Spider Silk, stops on Bone Chip with "inventory is full"!
+    bv.play.bags_fill_inventory_to(39);
+    bv.frames(2);
+    let (lx, ly, llbl) = bv.action_hit("Take all but junk").unwrap();
+    assert_eq!(llbl, "Take all but junk");
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    bv.play.bags_loot_confirm_one(1, Some(&serde_json::json!({"name":"Spider Silk","id":2002,"key":32,"qty":4,"max_stack":100})));
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let (res, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert_eq!(res, "Looted 1 of 2: inventory is full");
+    assert!(bv.eval::<bool>("(function() local l=eqoa.loot.get() return l and l.items[1].name=='Rat Pelt' end)()"), "junk Rat Pelt stayed on corpse");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+fn bv_test_surface_container(surfaces: &[(i32, [u8; 4])]) -> esf::Container {
+    let mut rec = Vec::new();
+    for &(dict_id, rgba) in surfaces {
+        let (w, h, pal_entries) = (16i32, 16i32, 256);
+        let mut body = Vec::new();
+        body.extend_from_slice(&dict_id.to_le_bytes());
+        body.extend_from_slice(&w.to_le_bytes());
+        body.extend_from_slice(&h.to_le_bytes());
+        body.extend_from_slice(&1i32.to_le_bytes());
+        body.extend_from_slice(&1i32.to_le_bytes());
+        body.extend_from_slice(&(pal_entries as i32).to_le_bytes());
+        let mut pal = vec![0u8; pal_entries * 4];
+        pal[4] = rgba[0];
+        pal[5] = rgba[1];
+        pal[6] = rgba[2];
+        pal[7] = rgba[3];
+        body.extend_from_slice(&pal);
+        body.extend_from_slice(&w.to_le_bytes());
+        let pix = vec![1u8; (w * h) as usize];
+        body.extend_from_slice(&pix);
+
+        rec.extend_from_slice(&0x1000u16.to_le_bytes());
+        rec.extend_from_slice(&0i16.to_le_bytes());
+        rec.extend_from_slice(&(body.len() as i32).to_le_bytes());
+        rec.extend_from_slice(&0u32.to_le_bytes());
+        rec.extend_from_slice(&body);
+    }
+    esf::Container::parse_records(rec)
+}
+
+#[test]
+fn round6_item4_lazy_icons_load_without_native_windows_and_zero_per_frame_requests() {
+    let Some(mut bv) = Bv::new() else { return };
+    super::super::icons::set_custom_icon_provider(None);
+    super::super::icons::reset_test_counters();
+
+    let pos_id: i32 = 40011;
+    let neg_id: i32 = -40012;
+    let bank_id: i32 = 40013;
+    let unresolvable_id: u32 = 999_999;
+    let mut lib = esf::Library::new();
+    lib.add(
+        "ITEMICON.ESF",
+        bv_test_surface_container(&[
+            (pos_id, [220, 40, 40, 255]),
+            (neg_id, [40, 180, 220, 255]),
+            (bank_id, [90, 220, 90, 255]),
+        ]),
+    );
+    // Prime live library WITHOUT prefetching pos_id/neg_id/bank_id (mirrors bank, corpse, or unopened UI).
+    super::super::icons::update_live_data(&lib, None, &[]);
+
+    let world = serde_json::json!({
+        "pack": [
+            {"name":"Red Sword","id":900001,"key":11,"wear":12,"icon":pos_id},
+            {"name":"Blue Orb","id":900002,"key":12,"qty":2,"max_stack":20,"icon":neg_id},
+            {"name":"Ghost Charm","id":900003,"key":13,"qty":1,"icon":unresolvable_id}
+        ],
+        "bank": [
+            {"name":"Bank Gem","id":900101,"key":21,"qty":1,"icon":bank_id}
+        ],
+        "tunar": 100,
+        "bank_tunar": 0
+    });
+    bv.play.bags_set(&world);
+    bv.enable();
+    bv.open();
+
+    // Signed negative 32-bit dict_id must not be dropped to nil by items_capture.
+    let neg_icon: Option<u32> = bv.eval("require('bags').grid.items[2].item.icon");
+    assert_eq!(neg_icon, Some(neg_id as u32), "negative signed dict_id must reach Lua as u32");
+
+    // Next Play::frame runs frame_library -> update_live_data, decoding queued lookups into SAFE_LIBRARY.
+    super::super::icons::update_live_data(&lib, None, &[]);
+    bv.frames(1);
+
+    let (t1, t2, t3, r1, r2, pend): (bool, bool, bool, String, String, bool) = bv.eval(
+        "require('bags').grid.items[1].texture ~= nil, require('bags').grid.items[2].texture ~= nil, require('bags').grid.items[3].texture ~= nil, tostring(require('bags').icon_req[40011]), tostring(require('bags').icon_req[4294927284]), require('bags').has_pending_icons",
+    );
+    assert!(
+        t1 && t2,
+        "lazy icons must resolve once SAFE_LIBRARY loads without opening native windows (t1={t1}, t2={t2}, r1={r1}, r2={r2}, pend={pend}, snap1={}, snap2={}, res_cnt={}, lkp_cnt={})",
+        super::super::icons::snapshot_has_icon(pos_id as u32),
+        super::super::icons::snapshot_has_icon(neg_id as u32),
+        super::super::icons::resource_call_count(),
+        super::super::icons::lookup_attempt_count(),
+    );
+    assert!(!t3, "negative control: unresolvable icon stays nil and uses fallback letter");
+
+    // Steady-state frames must issue ZERO resource requests, ZERO ESF lookups, and avoid per-frame allocations.
+    let res_before = super::super::icons::resource_call_count();
+    let lkp_before = super::super::icons::lookup_attempt_count();
+    bv.lua().gc_collect().unwrap();
+    let bytes_before = bv.lua().used_memory();
+    bv.frames(10);
+    let res_after = super::super::icons::resource_call_count();
+    let lkp_after = super::super::icons::lookup_attempt_count();
+    bv.lua().gc_collect().unwrap();
+    let bytes_after = bv.lua().used_memory();
+    assert_eq!(res_after, res_before, "steady frames must not re-request eqoa.icons.resource");
+    assert_eq!(lkp_after, lkp_before, "steady frames must not trigger ESF surface lookups");
+    assert!(bytes_after.saturating_sub(bytes_before) <= 1024, "steady frames must not leak Lua tables (delta={} bytes)", bytes_after.saturating_sub(bytes_before));
+
+    // Bank tab loads its own non-prefetched icon without ever opening native bank UI.
+    bv.click(bv.tab(6));
+    bv.frames(1);
+    super::super::icons::update_live_data(&lib, None, &[]);
+    bv.frames(1);
+    let bank_loaded: bool = bv.eval("require('bags').grid.items[1].texture ~= nil");
+    assert!(bank_loaded, "bank icon must load lazily without opening native bank window");
+    let bank_res_before = super::super::icons::resource_call_count();
+    bv.frames(5);
+    assert_eq!(super::super::icons::resource_call_count(), bank_res_before, "bank tab steady frames must not re-request icons");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6_l2_failed_icon_retries_after_items_change_and_not_per_frame() {
+    let Some(mut bv) = Bv::new() else { return };
+    super::super::icons::set_custom_icon_provider(None);
+    super::super::icons::reset_test_counters();
+
+    let delayed_id: i32 = 40099;
+    let empty_lib = esf::Library::new();
+    super::super::icons::update_live_data(&empty_lib, None, &[]);
+    let world = serde_json::json!({
+        "pack": [
+            {"name":"Delayed Charm","id":900099,"key":11,"qty":1,"icon":delayed_id}
+        ],
+        "bank": [],
+        "tunar": 100,
+        "bank_tunar": 0
+    });
+    bv.play.bags_set(&world);
+    bv.enable();
+    bv.open();
+    bv.frames(4); // Exhaust initial 5 attempts -> cooled down (not permanent).
+    assert!(!bv.eval::<bool>("require('bags').grid.items[1].texture ~= nil"));
+
+    // Late arrival of icon 40099 into live library must NOT poll per frame while steady:
+    let mut lib_with_icon = esf::Library::new();
+    lib_with_icon.add(
+        "ITEMICON.ESF",
+        bv_test_surface_container(&[(delayed_id, [50, 200, 80, 255])]),
+    );
+    super::super::icons::update_live_data(&lib_with_icon, None, &[]);
+    let res_before_steady = super::super::icons::resource_call_count();
+    bv.frames(6);
+    assert_eq!(
+        super::super::icons::resource_call_count(),
+        res_before_steady,
+        "L2 negative control: cooled-down icon must never retry per frame"
+    );
+
+    // Next items/state change (inventory.changed via tunar) clears cooldown and retries cleanly:
+    bv.play.bags_tunar(200);
+    bv.frames(2);
+    super::super::icons::update_live_data(&lib_with_icon, None, &[]);
+    bv.frames(1);
+    assert!(
+        bv.eval::<bool>("require('bags').grid.items[1].texture ~= nil"),
+        "L2: failed icon must retry and load on next items/state change"
+    );
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6_item1_stale_corpse_grid_and_loot_batch_and_log() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_corpse(&bv_corpse());
+    bv.enable();
+    bv.open();
+
+    // Select Corpse tab (3 items: Rat Pelt, Spider Silk, Bone Chip).
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    assert_eq!(bv.names(), vec!["Rat Pelt", "Spider Silk", "Bone Chip"]);
+
+    // Item 1 check: M.grid tracks container revision & draw() invalidates stale grids even if B.dirty was bypassed.
+    let stale_rev_before: Option<u64> = bv.eval("require('bags').grid.rev");
+    assert!(stale_rev_before.is_some(), "M.grid must track container revision to detect staleness");
+
+    bv.play.bags_corpse(&serde_json::json!([]));
+    bv.frames(1);
+    assert_eq!(bv.names(), Vec::<String>::new(), "empty corpse must show 0 items, never stale slots");
+    let (_, _, take_lbl) = bv.action_hit("Take all but junk").unwrap();
+    bv.click(bv.action_hit(&take_lbl).map(|(x, y, _)| (x, y)).unwrap());
+    bv.frames(1);
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Corpse has no items".into(), Some(false)),
+        "negative control: genuine 0/40 corpse says Corpse has no items"
+    );
+
+    // Re-open 1-item corpse; mark Rat Pelt as junk -> negative control on junk-only, then multi-item batch + log.
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_corpse(&serde_json::json!([bv_corpse()[0].clone()]));
+    bv.frames(1);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.slot(1));
+    bv.frames(1);
+    let (jx, jy, _, _, _) = bv.menu_row("Mark as junk").unwrap();
+    bv.click((jx, jy));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.frames(1);
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Corpse has only junk items".into(), Some(false)),
+        "negative control: junk-only corpse stops before dispatching batch"
+    );
+
+    // Full 3-item corpse: Rat Pelt (junk), Spider Silk, Bone Chip -> ONE click must take BOTH non-junk items and log both.
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&bv_corpse());
+    bv.frames(1);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    bv.play.bags_loot_confirm_one(
+        1,
+        Some(&serde_json::json!({"name":"Spider Silk","id":2002,"key":32,"qty":4,"max_stack":100})),
+    );
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    bv.play.bags_loot_confirm_one(
+        1,
+        Some(&serde_json::json!({"name":"Bone Chip","id":2003,"key":33,"qty":2,"max_stack":100})),
+    );
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Looted 2 of 2".into(), Some(true)),
+        "one click of Take all but junk must finish both non-junk steps sequentially"
+    );
+    assert_eq!(bv.names(), vec!["Rat Pelt"], "junk item must remain on corpse");
+    let log = bv.log();
+    assert_eq!(log.len(), 2, "loot log must record both looted items: {log:?}");
+    assert!(log[0].contains("Bone Chip x2, from a decaying skeleton"), "{log:?}");
+    assert!(log[1].contains("Spider Silk x4, from a decaying skeleton"), "{log:?}");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6_item5_window_fits_hud_and_scrolls_100_slot_pack() {
+    use winit::event::{DeviceId, MouseScrollDelta, TouchPhase, WindowEvent};
+    let Some(mut bv) = Bv::new() else { return };
+    crate::inventory::with_caps([100, 40], || {
+        let pack100: Vec<serde_json::Value> = (1..=100)
+            .map(|n| {
+                serde_json::json!({
+                    "name": format!("Pack Item {n}"),
+                    "id": 920000 + n,
+                    "key": 200 + n,
+                    "qty": 1,
+                    "max_stack": 1,
+                    "wear": 1,
+                    "icon": 4001 + (n % 8)
+                })
+            })
+            .collect();
+        let world = serde_json::json!({
+            "pack": pack100,
+            "bank": [],
+            "tunar": 500,
+            "bank_tunar": 0
+        });
+        bv.play.bags_set(&world);
+        bv.play.bags_open_merchant(44);
+        bv.enable();
+        bv.open();
+
+        // 1. Window + footer must fit entirely within HUD frame (<= 448) and display height.
+        let (rows, total_rows, cap): (u32, u32, Option<u32>) =
+            bv.eval("require('bags').grid.rows, require('bags').grid.total_rows, require('bags').grid.capacity");
+        assert_eq!((rows, total_rows, cap), (6, 13, Some(100)));
+
+        let (_x, y, _w, h, k) = bv.rect();
+        assert!(y >= 0.0 && y + h <= bv.win.1 as f64 + 0.5, "window must stay inside display: y={y}, h={h}, dh={}", bv.win.1);
+        assert!(h / k <= 448.0, "window frame height {} exceeds HUD frame 448", h / k);
+
+        let all_btns_visible: bool = bv.eval(&format!(
+            "(function() local h = require('bags').action_hits if #h == 0 then return false end for _, r in ipairs(h) do if r.y < 0 or r.y + r.h > {} + 0.5 then return false end end return true end)()",
+            bv.win.1
+        ));
+        assert!(all_btns_visible, "all footer buttons must remain inside display bounds");
+
+        let tex_count: usize = bv.eval(
+            "(function() local n = 0 for _, e in ipairs(require('bags').grid.items) do if e.texture then n = n + 1 end end return n end)()",
+        );
+        assert!(tex_count <= 48, "only visible grid slots should hold live textures ({tex_count} <= 48)");
+
+        // 2. Scroll grid to bottom with mouse wheel over grid slots -> reaches Pack Item 100 (row 13, col 4 -> viewport slot 44).
+        bv.point(bv.slot(1));
+        for _ in 0..8 {
+            super::super::pointer_api::observe(
+                &WindowEvent::MouseWheel {
+                    device_id: DeviceId::dummy(),
+                    delta: MouseScrollDelta::LineDelta(0.0, -1.0),
+                    phase: TouchPhase::Moved,
+                },
+                bv.win,
+            );
+            bv.frame();
+        }
+        assert_eq!(bv.eval::<u32>("require('bags').grid_scroll"), 7, "should clamp scroll at bottom row");
+        bv.click(bv.slot(44));
+        bv.frames(1);
+        assert_eq!(
+            bv.eval::<String>("require('bags').menu and require('bags').menu.title or ''"),
+            "Pack Item 100",
+            "clicking scrolled bottom slot must target Pack Item 100"
+        );
+        let tex_count_scrolled: usize = bv.eval(
+            "(function() local n = 0 for _, e in ipairs(require('bags').grid.items) do if e.texture then n = n + 1 end end return n end)()",
+        );
+        assert!(tex_count_scrolled <= 48, "scrolled grid must still keep live textures <= 48 ({tex_count_scrolled})");
+    });
+
+    // Negative control: 40-slot pack keeps 5 rows and wheel over grid does not scroll.
+    crate::inventory::with_caps([40, 40], || {
+        bv.play.bags_set(&bv_world());
+        bv.frames(2);
+        let (rows40, total40): (u32, u32) = bv.eval("require('bags').grid.rows, require('bags').grid.total_rows");
+        assert_eq!((rows40, total40), (5, 5));
+        bv.point(bv.slot(1));
+        super::super::pointer_api::observe(
+            &WindowEvent::MouseWheel {
+                device_id: DeviceId::dummy(),
+                delta: MouseScrollDelta::LineDelta(0.0, -1.0),
+                phase: TouchPhase::Moved,
+            },
+            bv.win,
+        );
+        bv.frame();
+        assert_eq!(bv.eval::<u32>("require('bags').grid_scroll"), 0);
+    });
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6_item6_take_all_button_on_corpse_tab() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.session.conn = Some(usize::MAX);
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_corpse(&bv_corpse());
+    bv.enable();
+    bv.open();
+
+    // Mark Rat Pelt as junk so both Take all and Take all but junk are active side by side.
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.slot(1));
+    bv.frames(1);
+    let (jx, jy, _, _, _) = bv.menu_row("Mark as junk").unwrap();
+    bv.click((jx, jy));
+    bv.frames(1);
+
+    let (tax, tay, talbl) = bv.action_hit("Take all").unwrap();
+    assert_eq!(talbl, "Take all");
+    let (_, _, tnjlbl) = bv.action_hit("Take all but junk").unwrap();
+    assert_eq!(tnjlbl, "Take all but junk");
+
+    // Clicking "Take all" dispatches one LootAll (0x001A) and takes everything including junk.
+    let sends_before = bv.play.session.sends_lost;
+    bv.click((tax, tay));
+    bv.play.bags_broker_tick();
+    bv.frames(1);
+    assert!(
+        bv.play.session.sends_lost > sends_before,
+        "Take all button must send 0x001A LootAll"
+    );
+    bv.play.bags_loot_confirm_all();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Take all: ok".into(), Some(true))
+    );
+    assert_eq!(bv.names(), Vec::<String>::new(), "Take all must take junk items too");
+    assert_eq!(bv.log().len(), 3, "Take all logs all 3 corpse items");
+
+    // Negative control: clicking Take all on empty 0/40 corpse shows refusal and sends nothing.
+    let sends_empty = bv.play.session.sends_lost;
+    let (tax2, tay2, _) = bv.action_hit("Take all").unwrap();
+    bv.click((tax2, tay2));
+    bv.play.bags_broker_tick();
+    bv.frames(1);
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Corpse has no items".into(), Some(false))
+    );
+    assert_eq!(bv.play.session.sends_lost, sends_empty, "empty corpse Take all must send no packet");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6_m1_loot_all_ignores_unrelated_inv_add_before_close() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_target_corpse(5011, "a skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100}
+    ]));
+    bv.enable();
+    bv.open();
+    bv.click(bv.tab(7));
+    bv.frames(1);
+
+    let (tax, tay, _) = bv.action_hit("Take all").unwrap();
+    bv.click((tax, tay));
+    bv.play.bags_broker_tick();
+    // Unrelated quest/trade InvAdd (id 8888 != 2001) before 0x0016 must NOT confirm Take all.
+    bv.play.bags_added(&serde_json::json!({"name":"Quest Reward","id":8888,"key":91,"qty":1,"max_stack":20}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Take all: corpse closed".into(), Some(false)),
+        "unrelated InvAdd must not confirm Take all on 0x0016"
+    );
+
+    // Positive control: InvAdd of an item from the corpse (id 2002) DOES confirm Take all on 0x0016.
+    bv.play.bags_target_corpse(5012, "another skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Bone Chip","id":2002,"key":0,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let (tax2, tay2, _) = bv.action_hit("Take all").unwrap();
+    bv.click((tax2, tay2));
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Bone Chip","id":2002,"key":92,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Take all: ok".into(), Some(true)),
+        "matching corpse InvAdd confirms Take all on 0x0016"
+    );
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6_m2_loot_open_without_close_diffs_with_inv_add() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    // Corpse 5013 open: native take + InvAdd, NO 0x0016 LootClose ever arrives before smaller same-corpse 0x0018.
+    bv.play.bags_target_corpse(5013, "an undead gnoll");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Gnoll Ear","id":2010,"key":0,"qty":1,"max_stack":20},
+        {"name":"Cracked Skull","id":2011,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.play.bags_native_loot_one(0, 1);
+    bv.play.bags_added(&serde_json::json!({"name":"Gnoll Ear","id":2010,"key":81,"qty":1,"max_stack":20}));
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Cracked Skull","id":2011,"key":0,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(2);
+    assert_eq!(bv.log().len(), 1, "M2: InvAdd + same-corpse 0x0018 without 0x0016 must log once: {:?}", bv.log());
+    assert!(bv.log()[0].contains("Gnoll Ear x1, from an undead gnoll"), "{:?}", bv.log());
+
+    // Negative control: same-corpse 0x0018 without 0x0016 and WITHOUT InvAdd logs nothing.
+    bv.play.bags_native_loot_one(0, 1);
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([]));
+    bv.frames(2);
+    assert_eq!(bv.log().len(), 1, "M2 negative control: missing InvAdd must still log nothing: {:?}", bv.log());
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6_m4_reopen_stops_immediately_on_map_or_camera_open() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.enable();
+    bv.open();
+
+    // Case 1: Map opens (map.open = true) during Sandstorm reopen -> stops at once, no 0x0015, no 10s wait.
+    bv.play.bags_target_corpse(5014, "a skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Dust","id":2002,"key":0,"qty":1,"max_stack":100},
+        {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(1);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Dust","id":2002,"key":71,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.play.map.open = true;
+    let sends_map = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_map, "map open must send no 0x0015");
+    assert_eq!(
+        bv.eval::<(bool, String, Option<bool>)>("require('bags').batch_id == nil, require('bags').result.text, require('bags').result.ok"),
+        (true, "Looted 1 of 2: stopped: map or camera open".into(), Some(false)),
+        "map open mid-batch must stop at once with clear reason"
+    );
+
+    // Case 2: Manual camera opens (mode = 38) during Sandstorm reopen -> stops at once with same clear reason.
+    bv.play.map.open = false;
+    bv.play.bags_target_corpse(5015, "a zombie");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Flesh","id":2020,"key":0,"qty":1,"max_stack":100},
+        {"name":"Tooth","id":2021,"key":1,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Flesh","id":2020,"key":72,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.play.mode = 38;
+    let sends_cam = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_cam, "manual camera mode 38 must send no 0x0015");
+    assert_eq!(
+        bv.eval::<(bool, String, Option<bool>)>("require('bags').batch_id == nil, require('bags').result.text, require('bags').result.ok"),
+        (true, "Looted 1 of 2: stopped: map or camera open".into(), Some(false)),
+        "manual camera mid-batch must stop at once with clear reason"
+    );
+
+    // Positive control: mode == 0 and map.open == false proceeds with 0x0015 reopen cleanly.
+    bv.play.mode = 0;
+    bv.play.bags_target_corpse(5016, "a ghoul");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Nail","id":2027,"key":0,"qty":1,"max_stack":100},
+        {"name":"Fang","id":2028,"key":1,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Nail","id":2027,"key":73,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    let sends_ok = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_ok, "mode == 0 & map closed must send 0x0015 reopen");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6_l1_loot_batch_keeps_corpse_tab_across_close_and_summary() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_target_corpse(5021, "a skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Dust","id":2002,"key":0,"qty":1,"max_stack":100},
+        {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100}
+    ]));
+    bv.enable();
+    bv.open();
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    assert_eq!(bv.eval::<i64>("require('bags').tab"), 7);
+
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Dust","id":2002,"key":71,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(
+        bv.eval::<i64>("require('bags').tab"),
+        7,
+        "L1: mid-batch 0x0016 close must keep Corpse tab (7) active"
+    );
+
+    bv.play.bags_broker_tick(); // 0x0015
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Bloodstone","id":2003,"key":0,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(1);
+    bv.play.bags_broker_tick(); // One(0, 1)
+    bv.play.bags_added(&serde_json::json!({"name":"Bloodstone","id":2003,"key":72,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(
+        bv.eval::<(i64, String, Option<bool>)>("require('bags').tab, require('bags').result.text, require('bags').result.ok"),
+        (7, "Looted 2 of 2".into(), Some(true)),
+        "L1: completed loot batch must stay on Corpse tab showing its summary"
+    );
+
+    // Negative control: switching manually to All tab leaves Corpse tab cleanly; opening/closing a non-batch corpse resets to tab 1.
+    bv.click(bv.tab(1));
+    bv.frames(1);
+    assert_eq!(bv.eval::<i64>("require('bags').tab"), 1);
+    bv.play.bags_target_corpse(5022, "another skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Bone","id":2004,"key":0,"qty":1,"max_stack":100}]));
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(bv.eval::<i64>("require('bags').tab"), 1, "non-batch corpse close still returns to tab 1");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    let corpse_initial = serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100,"icon":4020},
+        {"name":"Pinch of Skeleton Dust","id":2002,"key":1,"qty":1,"max_stack":100,"icon":4021},
+        {"name":"Black Bloodstone","id":2003,"key":2,"qty":1,"max_stack":100,"icon":4022}
+    ]);
+    // Step 0: Player opens corpse 5001 via 0x0015 -> 0x0018 (NO 0x0019/0x001A anywhere in Sandstorm replay!).
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&corpse_initial);
+    bv.enable();
+    bv.open();
+
+    // Mark Rat Pelt as junk, then click "Take all but junk".
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.slot(1));
+    bv.frames(1);
+    let (jx, jy, _, _, _) = bv.menu_row("Mark as junk").unwrap();
+    bv.click((jx, jy));
+    bv.frames(1);
+
+    let (lx, ly, _) = bv.action_hit("Take all but junk").unwrap();
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick(); // Sends 0x0019(key=1, count=1) for Pinch of Skeleton Dust
+    bv.frames(1);
+
+    // Sandstorm response for Step 1: InvAdd + Chat "You receive ...", then 0x0016 LootClose (NO 0x0019!).
+    bv.play.bags_added(&serde_json::json!({"name":"Pinch of Skeleton Dust","id":2002,"key":71,"qty":1,"max_stack":100}));
+    bv.play.bags_chat("You receive Pinch of Skeleton Dust from the corpse.");
+    bv.play.bags_loot_close();
+    bv.frames(1);
+
+    // Log must record Step 1 immediately on 0x0016 close, and batch must still be running (reopen pending).
+    assert_eq!(bv.log().len(), 1, "Sandstorm take must log on InvAdd + 0x0016: {:?}", bv.log());
+    assert!(bv.log()[0].contains("Pinch of Skeleton Dust x1, from a decaying skeleton"), "{:?}", bv.log());
+    assert!(bv.eval::<bool>("require('bags').batch_id ~= nil"), "batch must NOT stop on Sandstorm 0x0016");
+
+    // Next broker tick must send 0x0015 (attack_press) to reopen the same corpse!
+    let sends_before_reask = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_before_reask, "batch must send 0x0015 reopen request");
+
+    // Server answers with smaller 0x0018 where Black Bloodstone re-indexed key 2 -> key 0!
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Black Bloodstone","id":2003,"key":0,"qty":1,"max_stack":100,"icon":4022},
+        {"name":"Rat Pelt","id":2001,"key":1,"qty":1,"max_stack":100,"icon":4020}
+    ]));
+    bv.frames(1);
+    assert_eq!(
+        bv.eval::<Option<String>>("eqoa.loot.get() and eqoa.loot.get().source and eqoa.loot.get().source.name"),
+        Some("a decaying skeleton".into()),
+        "0x0015 reopen must preserve corpse source"
+    );
+
+    // Next broker tick re-resolves Black Bloodstone by item identity (key 0) and sends LootOne(0, 1).
+    let sends_before_step2 = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_before_step2, "batch must dispatch Step 2 at re-indexed key 0");
+    bv.frames(1);
+
+    // Sandstorm response for Step 2: InvAdd + Chat + 0x0016 LootClose.
+    bv.play.bags_added(&serde_json::json!({"name":"Black Bloodstone","id":2003,"key":72,"qty":1,"max_stack":100}));
+    bv.play.bags_chat("You receive Black Bloodstone from the corpse.");
+    bv.play.bags_loot_close();
+    let sends_after_done = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+
+    assert_eq!(bv.play.bags_sends_lost(), sends_after_done, "completed batch must not re-ask corpse");
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Looted 2 of 2".into(), Some(true))
+    );
+    let log = bv.log();
+    assert_eq!(log.len(), 2, "must have exact 2 entries with no duplicates: {log:?}");
+    assert!(log[0].contains("Black Bloodstone x1, from a decaying skeleton"), "{log:?}");
+    assert!(log[1].contains("Pinch of Skeleton Dust x1, from a decaying skeleton"), "{log:?}");
+
+    // Closed-window native UI take on Sandstorm (with InvAdd) logs once and keeps zero duplicates.
+    bv.toggle();
+    assert!(!bv.is_open());
+    bv.play.bags_target_corpse(5002, "an undead gnoll");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Gnoll Ear","id":2010,"key":0,"qty":1,"max_stack":20},
+        {"name":"Cracked Skull","id":2011,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.play.bags_native_loot_one(0, 1);
+    bv.play.bags_added(&serde_json::json!({"name":"Gnoll Ear","id":2010,"key":81,"qty":1,"max_stack":20}));
+    bv.play.bags_loot_close();
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Cracked Skull","id":2011,"key":0,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(2);
+    assert_eq!(bv.log().len(), 3, "closed-window native take with InvAdd logs once: {:?}", bv.log());
+    assert!(bv.log()[0].contains("Gnoll Ear x1, from an undead gnoll"), "{:?}", bv.log());
+
+    // M3 negative control: Mere disappearance from next same-corpse 0x0018 without InvAdd or 0x0019/0x001A logs NOTHING.
+    let log_len_before_m3 = bv.log().len();
+    bv.play.bags_native_loot_one(0, 1);
+    bv.play.bags_loot_close();
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([])); // Cracked Skull vanished (e.g. another player took it), no InvAdd!
+    bv.frames(2);
+    assert_eq!(
+        bv.log().len(),
+        log_len_before_m3,
+        "M3: disappearance from next 0x0018 without InvAdd must log nothing: {:?}",
+        bv.log()
+    );
+    // Reopen gnoll corpse with Cracked Skull still there for Negative Control 1 below.
+    bv.play.bags_loot_close();
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Cracked Skull","id":2011,"key":0,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+
+    // Negative control 1: Refused take (no InvAdd + next 0x0018 still keeps record, OR 0x0085 refusal) logs NOTHING.
+    let log_len = bv.log().len();
+    bv.play.bags_native_loot_one(0, 1);
+    bv.play.bags_loot_refused(1);
+    bv.play.bags_loot_close();
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Cracked Skull","id":2011,"key":0,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(2);
+    assert_eq!(bv.log().len(), log_len, "negative control: refused take must log nothing");
+
+    // Negative control 2: Tunar-only / 5-byte empty corpse never logs an item.
+    bv.play.bags_loot_close();
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([]));
+    bv.play.bags_chat("You receive 5 tunar from the corpse.");
+    bv.play.bags_tunar(605);
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(bv.log().len(), log_len, "negative control: tunar-only 5-byte corpse must log nothing");
+
+    // Negative control 3: Mid-batch reopen aborted by 0x0085 refusal, 5-byte empty corpse, targeting elsewhere, and Stop.
+    bv.toggle();
+    assert!(bv.is_open());
+    // 3a: 5-byte empty 0x0018 on reopen stops batch cleanly
+    bv.play.bags_target_corpse(5003, "a rotting zombie");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Zombie Flesh","id":2020,"key":0,"qty":1,"max_stack":20},
+        {"name":"Old Coin Tooth","id":2021,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Zombie Flesh","id":2020,"key":73,"qty":1,"max_stack":20}));
+    bv.play.bags_loot_close();
+    bv.play.bags_broker_tick(); // sends 0x0015
+    bv.play.bags_corpse(&serde_json::json!([])); // 5-byte empty list!
+    bv.frames(2);
+    assert_eq!(
+        bv.eval::<(bool, Option<bool>)>("require('bags').batch_id == nil, require('bags').result.ok"),
+        (true, Some(false)),
+        "5-byte empty 0x0018 mid-batch must stop batch cleanly"
+    );
+
+    // 3b: Player targets something else during reopen -> stops batch and sends NO 0x0015
+    bv.play.bags_loot_close();
+    bv.play.bags_target_corpse(5004, "a phantom");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Ectoplasm","id":2022,"key":0,"qty":1,"max_stack":20},
+        {"name":"Wisp Ash","id":2023,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Ectoplasm","id":2022,"key":74,"qty":1,"max_stack":20}));
+    bv.play.bags_loot_close();
+    bv.play.bags_target(2002); // player targeted living Moss Snake!
+    let sends_on_retarget = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_on_retarget, "retargeting elsewhere must send no 0x0015");
+    assert_eq!(
+        bv.eval::<(bool, Option<bool>)>("require('bags').batch_id == nil, require('bags').result.ok"),
+        (true, Some(false)),
+        "retargeting must stop batch"
+    );
+
+    // 3c: 0x0085 refusal during reopen stops batch
+    bv.play.bags_target_corpse(5005, "a bogey");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Item One","id":2024,"key":0,"qty":1,"max_stack":20},
+        {"name":"Item Two","id":2025,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Item One","id":2024,"key":75,"qty":1,"max_stack":20}));
+    bv.play.bags_loot_close();
+    bv.play.bags_broker_tick(); // sends 0x0015
+    bv.play.bags_loot_refused(1); // 0x0085!
+    bv.frames(2);
+    assert_eq!(
+        bv.eval::<(bool, Option<bool>)>("require('bags').batch_id == nil, require('bags').result.ok"),
+        (true, Some(false)),
+        "0x0085 during reopen must stop batch"
+    );
+
+    // 3d: Unanswered 0x001A ("Take all") times out cleanly at 300 ticks without leaving LOOT_BUSY stuck.
+    bv.play.bags_target_corpse(5006, "a goblin");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rusty Coin","id":2026,"key":0,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let (tax, tay, _) = bv.action_hit("Take all").unwrap();
+    bv.click((tax, tay));
+    bv.play.bags_broker_tick(); // sends 0x001A
+    for _ in 0..305 {
+        bv.play.bags_broker_tick();
+    }
+    bv.frames(1);
+    let (res_text, res_ok): (String, Option<bool>) =
+        bv.eval("require('bags').result.text, require('bags').result.ok");
+    assert!(
+        res_text.starts_with("Take all: ") && res_ok == Some(false),
+        "unanswered 0x001A must time out cleanly in status bar: {res_text:?} {res_ok:?}"
+    );
+    // Ensure looting is NOT wedged after 0x001A timeout:
+    bv.click(bv.slot(1));
+    bv.frames(1);
+    let (tx, ty, _, _, _) = bv.menu_row("Take").unwrap();
+    bv.click((tx, ty));
+    let sends_after_timeout = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_after_timeout, "LOOT_BUSY must clear after 0x001A timeout");
+    bv.play.bags_loot_close();
+    bv.frames(2);
+
+    // 3e: Clicking Stop mid-reopen aborts batch cleanly and sends no 0x0015
+    bv.play.bags_target_corpse(5007, "a ghoul");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Ghoul Nail","id":2027,"key":0,"qty":1,"max_stack":20},
+        {"name":"Ghoul Fang","id":2028,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Ghoul Nail","id":2027,"key":76,"qty":1,"max_stack":20}));
+    bv.play.bags_loot_close();
+    bv.frames(1);
+    let (sx, sy, _) = bv.action_hit("Stop").unwrap();
+    bv.click((sx, sy));
+    let sends_on_stop = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_on_stop, "Stop mid-reopen must send no 0x0015");
+    assert!(bv.eval::<bool>("require('bags').batch_id == nil"), "Stop must clear active batch");
+
+    // 3f: Zoning mid-reopen aborts batch cleanly and sends no 0x0015
+    bv.play.bags_target_corpse(5008, "a specter");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Specter Dust","id":2029,"key":0,"qty":1,"max_stack":20},
+        {"name":"Specter Silk","id":2030,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Specter Dust","id":2029,"key":77,"qty":1,"max_stack":20}));
+    bv.play.bags_loot_close();
+    bv.frames(1);
+    bv.play.bags_zone();
+    let sends_on_zone = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_on_zone, "zoning mid-reopen must send no 0x0015");
+    assert!(bv.eval::<bool>("require('bags').batch_id == nil"), "zoning must clear active batch");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round6_sandstorm_duplicate_item_id_stacks_and_partial_take() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_target_corpse(5031, "a decaying skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Spider Silk","id":2002,"key":1,"qty":3,"max_stack":100},
+        {"name":"Spider Silk","id":2002,"key":2,"qty":5,"max_stack":100},
+        {"name":"Bone Chip","id":2003,"key":3,"qty":4,"max_stack":100}
+    ]));
+    bv.enable();
+    bv.open();
+    bv.click(bv.tab(7));
+    bv.frames(1);
+
+    // Mark Rat Pelt as junk (Slot 1).
+    bv.click(bv.slot(1));
+    bv.frames(1);
+    let (jx, jy, _, _, _) = bv.menu_row("Mark as junk").unwrap();
+    bv.click((jx, jy));
+    bv.frames(1);
+
+    // 1. Partial stack take: click Bone Chip x4 (Slot 4) -> "Take 1" -> logs x1 (not x4).
+    bv.click(bv.slot(4));
+    bv.frames(1);
+    let (tx1, ty1, _, _, lbl) = bv.menu_row("Take 1").unwrap();
+    assert_eq!(lbl, "Take 1");
+    bv.click((tx1, ty1));
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Bone Chip","id":2003,"key":71,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(bv.log().len(), 1, "partial take must log exact qty 1: {:?}", bv.log());
+    assert!(bv.log()[0].contains("Bone Chip x1, from a decaying skeleton"), "{:?}", bv.log());
+
+    // Reopen corpse with reduced Bone Chip stack (qty 4 -> qty 3), keeping both Spider Silk stacks + junk Rat Pelt.
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Spider Silk","id":2002,"key":1,"qty":3,"max_stack":100},
+        {"name":"Spider Silk","id":2002,"key":2,"qty":5,"max_stack":100},
+        {"name":"Bone Chip","id":2003,"key":3,"qty":3,"max_stack":100}
+    ]));
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+
+    // 2. "Take all but junk" with two non-junk stacks of identical item_id (2002 qty 3 and qty 5) + partial Bone Chip (qty 3).
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick(); // Step 1: One(1, 3) -> Spider Silk x3
+    bv.play.bags_added(&serde_json::json!({"name":"Spider Silk","id":2002,"key":72,"qty":3,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(1);
+    assert_eq!(bv.eval::<i64>("require('bags').tab"), 7, "L1 stays on Corpse tab during batch");
+
+    bv.play.bags_broker_tick(); // Sends 0x0015 reopen
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Spider Silk","id":2002,"key":1,"qty":5,"max_stack":100},
+        {"name":"Bone Chip","id":2003,"key":2,"qty":3,"max_stack":100}
+    ]));
+    bv.frames(1);
+    bv.play.bags_broker_tick(); // Step 2: re-resolves Spider Silk x5 at re-indexed key 1!
+    bv.play.bags_added(&serde_json::json!({"name":"Spider Silk","id":2002,"key":73,"qty":5,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(1);
+
+    bv.play.bags_broker_tick(); // Sends 0x0015 reopen
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Bone Chip","id":2003,"key":1,"qty":3,"max_stack":100}
+    ]));
+    bv.frames(1);
+    bv.play.bags_broker_tick(); // Step 3: re-resolves Bone Chip x3 at re-indexed key 1!
+    bv.play.bags_added(&serde_json::json!({"name":"Bone Chip","id":2003,"key":74,"qty":3,"max_stack":100}));
+    bv.play.bags_loot_close();
+    let sends_done = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_done, "completed 3-step batch sends no further 0x0015");
+    assert_eq!(
+        bv.eval::<(i64, String, Option<bool>)>("require('bags').tab, require('bags').result.text, require('bags').result.ok"),
+        (7, "Looted 3 of 3".into(), Some(true))
+    );
+    let log = bv.log();
+    assert_eq!(log.len(), 4, "must log 1 partial + 3 batch takes with 0 duplicates: {log:?}");
+    assert!(log[0].contains("Bone Chip x3, from a decaying skeleton"), "{log:?}");
+    assert!(log[1].contains("Spider Silk x5, from a decaying skeleton"), "{log:?}");
+    assert!(log[2].contains("Spider Silk x3, from a decaying skeleton"), "{log:?}");
+    assert!(log[3].contains("Bone Chip x1, from a decaying skeleton"), "{log:?}");
+
+    // Negative control: reopening shows only junk Rat Pelt left, and Take all but junk sends 0 packets.
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    let sends_junk = bv.play.bags_sends_lost();
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.frames(1);
+    assert_eq!(bv.play.bags_sends_lost(), sends_junk);
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Corpse has only junk items".into(), Some(false))
+    );
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}

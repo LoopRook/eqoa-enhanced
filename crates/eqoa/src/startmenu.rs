@@ -161,6 +161,12 @@ pub struct MainMenu {
 }
 
 impl MainMenu {
+    pub fn read_state(&self) -> (usize, i32, i32) {
+        match &self.sub {
+            Some(sub) if sub.visible => sub.read_state(),
+            _ => (self.menu, self.sel, self.top),
+        }
+    }
     pub fn new(menu: usize, sub2: bool) -> Self {
         MainMenu {
             menu,

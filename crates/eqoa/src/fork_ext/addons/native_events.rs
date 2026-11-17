@@ -99,6 +99,10 @@ const EVENTS: &[&str] = &[
     "bank.changed",
     "loot.changed",
     "merchant.changed",
+    "quests.changed",
+    "camera.changed",
+    "windows.changed",
+    "mastery.changed",
     "shared.changed",
     "mod.command",
     "guide.lost",
@@ -118,6 +122,9 @@ const EVENTS: &[&str] = &[
     "events.dropped",
     "resource.ready",
     "resource.failed",
+    "action.result",
+    "batch.progress",
+    "batch.result",
 ];
 fn install_event_fields(lua: &mlua::Lua) {
     for (name, fields) in [
@@ -139,6 +146,10 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("bank.changed", "before after changed cause"),
         ("loot.changed", "before after changed cause"),
         ("merchant.changed", "before after changed cause"),
+        ("quests.changed", "before after changed"),
+        ("camera.changed", "before after changed"),
+        ("windows.changed", "before after changed"),
+        ("mastery.changed", "before after changed"),
         ("shared.changed", "mod path"),
         ("mod.command", "from command args"),
         ("guide.lost", "owner world_id entity_id label reason"),
@@ -163,6 +174,18 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("pointer.wheel", "x y inside_window button steps"),
         ("resource.ready", "kind handle error request value path"),
         ("resource.failed", "kind handle error request value path"),
+        (
+            "action.result",
+            "request_id kind state phase ok code reason queued_tick dispatched_tick completed_tick detail",
+        ),
+        (
+            "batch.progress",
+            "batch_id state ok completed total current_step code reason queued_tick completed_tick failed_step detail",
+        ),
+        (
+            "batch.result",
+            "batch_id state ok completed total current_step code reason queued_tick completed_tick failed_step detail",
+        ),
         ("events.dropped", "first_seq last_seq count streams"),
     ] {
         for field in fields.split_whitespace() {
@@ -175,12 +198,7 @@ fn install_event_fields(lua: &mlua::Lua) {
             );
         }
     }
-    for (round, names) in [
-        (
-            4,
-            "quests.changed camera.changed windows.changed mastery.changed action.result",
-        ),
-    ] {
+    for (round, names) in [(4, "")] {
         for name in names.split_whitespace() {
             super::native::describe(
                 lua,
@@ -233,10 +251,11 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
             lua,
             &format!("eqoa.events.{name}"),
             "supported",
-            Some(if *name == "player.stats_changed" {
-                3
-            } else {
-                2
+            Some(match *name {
+                "player.stats_changed" => 3,
+                "action.result" | "batch.progress" | "batch.result" | "quests.changed"
+                | "camera.changed" | "windows.changed" | "mastery.changed" => 4,
+                _ => 2,
             }),
             "",
         );
@@ -361,6 +380,7 @@ pub(crate) fn dispatch(host: &Host) -> Result<()> {
     super::async_json::poll(&host.lua)?;
     super::json_save::poll(&host.lua)?;
     super::player_files::poll(&host.lua)?;
+    super::action_broker::poll(&host.lua)?;
     super::native_core::flush_deferred();
     drop(polls);
     let _drain = super::addon_perf::section("dispatch.drain");
@@ -585,6 +605,41 @@ fn deliver_data(
         }
         return Ok(());
     }
+    let (gesture_vm, gesture_addon) = (
+        shared.borrow().vm,
+        super::native::session(lua).borrow().addon.clone(),
+    );
+    // One gesture scope per physical event across all subscribers of this VM.
+    let _gesture = if matches!(e.name.as_str(), "render" | "settings.render") {
+        Some(super::gesture::enter_render_scope(gesture_vm, &gesture_addon))
+    } else if e.name == "pointer.pressed"
+        && e.data["inside_window"] == true
+        && e.data["synthetic"] != true
+    {
+        let x = e.data["x"].as_f64().unwrap_or(f64::NAN);
+        let y = e.data["y"].as_f64().unwrap_or(f64::NAN);
+        super::pointer_api::point_in_vm_claim(gesture_vm, x, y).then(|| {
+            super::gesture::enter_gesture(
+                gesture_vm,
+                &gesture_addon,
+                super::gesture::GestureKind::PointerClaim,
+                true,
+            )
+        })
+    } else if e.name == "input.key"
+        && e.data["down"] == true
+        && e.data["repeat"] != true
+        && e.data["synthetic"] != true
+    {
+        Some(super::gesture::enter_gesture(
+            gesture_vm,
+            &gesture_addon,
+            super::gesture::GestureKind::ModKey,
+            false,
+        ))
+    } else {
+        None
+    };
     for t in candidates {
         let call = {
             let mut b = shared.borrow_mut();
@@ -599,7 +654,17 @@ fn deliver_data(
             callback
         };
         let timed = super::addon_perf::section("deliver.envelope");
-        let envelope_ready = if data.is_none() && !matches!(e.name.as_str(), "timer" | "resource.ready" | "resource.failed") {
+        let envelope_ready = if data.is_none()
+            && !matches!(
+                e.name.as_str(),
+                "timer"
+                    | "resource.ready"
+                    | "resource.failed"
+                    | "action.result"
+                    | "batch.progress"
+                    | "batch.result"
+            )
+        {
             envelope_readonly(lua, e)?
         } else {
             let event = envelope(lua, e)?;
@@ -720,6 +785,7 @@ pub(crate) fn clear(host: &Host) {
     super::pointer_api::release_vm(vm);
     super::chat::cancel_vm(vm);
     super::weapon_sets::cancel_vm(vm);
+    super::action_broker::clear_vm(vm, "addon disabled or reloaded");
     let b = bus(&host.lua);
     let mut b = b.borrow_mut();
     b.subscriptions.clear();
@@ -778,7 +844,27 @@ pub(crate) fn resource(
 pub(super) fn readonly_envelope(lua: &mlua::Lua, event: mlua::Table) -> Result<mlua::Table> {
     let name: String = event.get("name")?;
     let data: mlua::Table = event.get("data")?;
-    if matches!(
+    if name == "action.result" {
+        event.set(
+            "data",
+            super::native::guard_lazy(
+                lua,
+                data,
+                "eqoa.actions.ActionResult",
+                super::action_broker::ACTION_RESULT_KEYS,
+            )?,
+        )?;
+    } else if matches!(name.as_str(), "batch.progress" | "batch.result") {
+        event.set(
+            "data",
+            super::native::guard_lazy(
+                lua,
+                data,
+                "eqoa.actions.BatchResult",
+                super::action_broker::BATCH_RESULT_KEYS,
+            )?,
+        )?;
+    } else if matches!(
         name.as_str(),
         "timer" | "resource.ready" | "resource.failed"
     ) {
@@ -967,6 +1053,18 @@ pub(super) fn file_action(lua: &mlua::Lua, data: serde_json::Value, failed: bool
     let mut event=local(if failed {"resource.failed"} else {"resource.ready"},json!({}));
     event.bytes=data.to_string().len();
     enqueue(&mut bus(lua).borrow_mut(),event,Some(table));
+    Ok(())
+}
+pub(super) fn action_result(lua: &mlua::Lua, data: mlua::Table) -> Result<()> {
+    let mut event = local("action.result", json!({}));
+    event.bytes = 256;
+    enqueue(&mut bus(lua).borrow_mut(), event, Some(data));
+    Ok(())
+}
+pub(super) fn batch_event(lua: &mlua::Lua, name: &'static str, data: mlua::Table) -> Result<()> {
+    let mut event = local(name, json!({}));
+    event.bytes = 256;
+    enqueue(&mut bus(lua).borrow_mut(), event, Some(data));
     Ok(())
 }
 

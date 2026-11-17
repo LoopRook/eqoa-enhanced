@@ -50,7 +50,7 @@ fn item_json(it: &NetItem, list: &str, index: usize, flags: u32, attack_words: &
         "id": i.id.to_string(),
         "name": i.name,
         "description": i.desc,
-        "icon": u32::try_from(icon).ok().filter(|v| *v != 0),
+        "icon": (icon as i32 != 0 && icon as i32 != -1).then_some(icon as u32),
         "quantity": it.quantity,
         "charges": it.charges,
         "equipped": it.equip_slot >= 0,
@@ -122,10 +122,13 @@ fn merchant_window(play: &Play, shop: &net::dump::ItemList) -> (Json, Json) {
     };
     let options = [("buy", 63), ("sell", 62), ("exit", 161)];
     let in_menu = mode == 0;
+    let button_hint = crate::fork_ext::addons::native_items::words(161)
+        .map(|label| format!("|t{label}"));
     let state = json!({
         "mode": mode_name,
         "selected_option": in_menu.then(|| options.get(option as usize).map(|o| o.0)).flatten(),
         "options": options.iter().enumerate().map(|(i, (key, word))| json!({"key":key,"label":crate::fork_ext::addons::native_items::words(*word),"selected":in_menu && i as i32 == option})).collect::<Vec<_>>(),
+        "button_hint": button_hint,
     });
     let (list, rows): (&str, &[NetItem]) = match mode {
         1 => ("inventory", &play.dump.inventory.items),
@@ -288,6 +291,149 @@ fn note_source(play: &Play) {
     SOURCE.with(|s| *s.borrow_mut() = asked.zip(named));
 }
 
+#[derive(Clone, Debug)]
+struct PendingLootItem {
+    inv_index: u32,
+    item_id: i64,
+    qty_before: i64,
+    count: i64,
+    gained_qty: i64,
+}
+
+#[derive(Clone, Debug)]
+struct PendingLootTake {
+    corpse_id: Option<u32>,
+    before_json: Json,
+    is_all: bool,
+    items: Vec<PendingLootItem>,
+    closed: bool,
+}
+
+thread_local! {static PENDING_TAKE: std::cell::RefCell<Option<PendingLootTake>> = const { std::cell::RefCell::new(None) };}
+
+pub(crate) fn current_loot_source_id(play: &Play) -> Option<u32> {
+    if let Some((id, _)) = SOURCE.with(|s| s.borrow().clone()) {
+        return Some(id);
+    }
+    (play.target != 0
+        && play
+            .entities
+            .slots
+            .iter()
+            .flatten()
+            .any(|e| e.id == play.target && e.p18 & 2 != 0))
+    .then_some(play.target)
+}
+
+pub(crate) fn clear_pending_loot() {
+    PENDING_TAKE.with(|p| *p.borrow_mut() = None);
+}
+
+pub(crate) fn note_loot_send(play: &Play, key: Option<u32>, count: i64, is_all: bool) {
+    if !native_core::capture_requested() {
+        return;
+    }
+    let Some(corpse) = play.npcw.corpse.as_ref() else {
+        return;
+    };
+    let items: Vec<PendingLootItem> = if is_all {
+        corpse
+            .items
+            .iter()
+            .filter(|it| it.quantity > 0)
+            .map(|it| PendingLootItem {
+                inv_index: it.inv_index,
+                item_id: it.item.id,
+                qty_before: it.quantity,
+                count: it.quantity,
+                gained_qty: 0,
+            })
+            .collect()
+    } else if let Some(k) = key
+        && let Some(it) = corpse.items.iter().find(|it| it.inv_index == k)
+    {
+        vec![PendingLootItem {
+            inv_index: it.inv_index,
+            item_id: it.item.id,
+            qty_before: it.quantity,
+            count: count.max(1).min(it.quantity),
+            gained_qty: 0,
+        }]
+    } else {
+        return;
+    };
+    if items.is_empty() {
+        return;
+    }
+    let ctx = Context {
+        flags: play.session.expansion & net::session::EXPANSION_FLAGS,
+        attack_words: play.start.as_ref().map_or(&[][..], |s| s.attack_words.as_slice()),
+    };
+    let mut before_json = container("loot", corpse, true, Some(LOOT_CAPACITY), None, Json::Null, &ctx);
+    before_json["source"] = SOURCE
+        .with(|s| s.borrow().clone())
+        .map_or(Json::Null, |(id, name)| json!({"entity_id":id,"name":name}));
+    let corpse_id = current_loot_source_id(play);
+    PENDING_TAKE.with(|p| {
+        *p.borrow_mut() = Some(PendingLootTake {
+            corpse_id,
+            before_json,
+            is_all,
+            items,
+            closed: false,
+        });
+    });
+}
+
+pub(crate) fn note_loot_inv_add(item_id: i64, qty: i64) {
+    if qty <= 0 {
+        return;
+    }
+    let late_emit = PENDING_TAKE.with(|p| {
+        let mut borrow = p.borrow_mut();
+        let Some(pending) = borrow.as_mut() else {
+            return None;
+        };
+        let mut remaining = qty;
+        for entry in &mut pending.items {
+            if entry.item_id == item_id && entry.gained_qty < entry.count {
+                let add = remaining.min(entry.count - entry.gained_qty);
+                entry.gained_qty += add;
+                remaining -= add;
+                if remaining == 0 {
+                    break;
+                }
+            }
+        }
+        if !pending.closed {
+            return None;
+        }
+        let taken: Vec<crate::fork_ext::addons::native_items::SandstormTakenItem> = pending
+            .items
+            .iter()
+            .filter(|e| e.gained_qty > 0)
+            .map(|e| crate::fork_ext::addons::native_items::SandstormTakenItem {
+                inv_index: e.inv_index,
+                item_id: e.item_id,
+                qty: e.gained_qty.min(e.qty_before),
+            })
+            .collect();
+        if taken.is_empty() {
+            None
+        } else {
+            let out = (taken, pending.is_all, pending.before_json.clone());
+            *borrow = None;
+            Some(out)
+        }
+    });
+    if let Some((taken, is_all, before_json)) = late_emit {
+        let bytes = native_core::json_len(&before_json) + 512;
+        native_core::defer(bytes, move |c| {
+            c.emit_sandstorm_loot_delta(&taken, is_all, Some(&before_json));
+        });
+    }
+}
+
 /// The key the containers were last read with: set by a full publish, and forgotten when the
 /// addon side lets go or the world ends (`forget`).
 pub(super) fn note(play: &Play) {
@@ -297,6 +443,7 @@ pub(super) fn forget() {
     // the world ended: a request that was in flight and the corpse of the window are not the next world's
     crate::fork_ext::loot_source::clear();
     SOURCE.with(|s| *s.borrow_mut() = None);
+    clear_pending_loot();
     crate::fork_ext::addons::native_items::set_windows_raw(Json::Null);
     KEY.with(|k| k.set(None));
 }
@@ -304,21 +451,109 @@ pub(super) fn forget() {
 /// Read the four lists now and apply them to the view when the core next flushes (`cause` names the
 /// native event for subscribers).
 pub(super) fn capture(play: &Play, cause: &'static str) {
+    let mut pre_emit: Option<(
+        Vec<crate::fork_ext::addons::native_items::SandstormTakenItem>,
+        bool,
+        Json,
+    )> = None;
     match cause {
-        "loot_open" => note_source(play),
-        "loot_refused" => crate::fork_ext::loot_source::refused(),
+        "loot_open" => {
+            note_source(play);
+            let next_cid = current_loot_source_id(play);
+            pre_emit = PENDING_TAKE.with(|p| {
+                let pending = p.borrow_mut().take()?;
+                if pending.corpse_id.is_none() || next_cid != pending.corpse_id {
+                    return None;
+                }
+                let next_items = play.npcw.corpse.as_ref().map_or(&[][..], |c| c.items.as_slice());
+                let mut before_qty: std::collections::BTreeMap<i64, i64> =
+                    std::collections::BTreeMap::new();
+                for entry in &pending.items {
+                    *before_qty.entry(entry.item_id).or_default() += entry.qty_before;
+                }
+                // Count total in before_json in case multiple stacks shared item_id
+                if let Some(arr) = pending.before_json["items"].as_array() {
+                    before_qty.clear();
+                    for it in arr {
+                        if let Some(id_str) = it["id"].as_str()
+                            && let Ok(id) = id_str.parse::<i64>()
+                        {
+                            *before_qty.entry(id).or_default() +=
+                                it["quantity"].as_i64().unwrap_or(0);
+                        }
+                    }
+                }
+                let mut after_qty: std::collections::BTreeMap<i64, i64> =
+                    std::collections::BTreeMap::new();
+                for it in next_items {
+                    *after_qty.entry(it.item.id).or_default() += it.quantity;
+                }
+                let mut taken = Vec::new();
+                for entry in &pending.items {
+                    if entry.gained_qty <= 0 {
+                        continue;
+                    }
+                    let b = before_qty.get(&entry.item_id).copied().unwrap_or(0);
+                    let a = after_qty.get(&entry.item_id).copied().unwrap_or(0);
+                    let diff = (b - a).max(0).min(entry.gained_qty).min(entry.qty_before);
+                    if diff > 0 {
+                        *before_qty.get_mut(&entry.item_id).unwrap() -= diff;
+                        taken.push(crate::fork_ext::addons::native_items::SandstormTakenItem {
+                            inv_index: entry.inv_index,
+                            item_id: entry.item_id,
+                            qty: diff,
+                        });
+                    }
+                }
+                (!taken.is_empty()).then_some((taken, pending.is_all, pending.before_json))
+            });
+        }
+        "loot_one" | "loot_all" | "loot_refused" => {
+            if cause == "loot_refused" {
+                crate::fork_ext::loot_source::refused();
+            }
+            clear_pending_loot();
+        }
         "loot_close" => {
             SOURCE.with(|s| *s.borrow_mut() = None);
             crate::fork_ext::loot_source::closed();
+            pre_emit = PENDING_TAKE.with(|p| {
+                let mut borrow = p.borrow_mut();
+                let pending = borrow.as_mut()?;
+                let taken: Vec<crate::fork_ext::addons::native_items::SandstormTakenItem> = pending
+                    .items
+                    .iter()
+                    .filter(|e| e.gained_qty > 0)
+                    .map(|e| crate::fork_ext::addons::native_items::SandstormTakenItem {
+                        inv_index: e.inv_index,
+                        item_id: e.item_id,
+                        qty: e.gained_qty.min(e.qty_before),
+                    })
+                    .collect();
+                if taken.is_empty() {
+                    pending.closed = true;
+                    None
+                } else {
+                    let out = (taken, pending.is_all, pending.before_json.clone());
+                    *borrow = None;
+                    Some(out)
+                }
+            });
         }
         _ => {}
     }
     let lists = build(play);
-    let bytes = lists.iter().map(native_core::json_len).sum::<usize>() + 512;
+    let extra_bytes = pre_emit
+        .as_ref()
+        .map_or(0, |(_, _, fb)| native_core::json_len(fb));
+    let bytes = lists.iter().map(native_core::json_len).sum::<usize>() + extra_bytes + 512;
     note(play);
     let raw = windows_raw(play);
     native_core::defer(bytes, move |c| {
         crate::fork_ext::addons::native_items::set_windows_raw(raw);
+        if let Some((taken, is_all, fb)) = pre_emit {
+            c.emit_sandstorm_loot_delta(&taken, is_all, Some(&fb));
+        }
         for (name, after) in LISTS.into_iter().zip(lists) {
             c.items_patch(name, after, cause);
         }

@@ -463,103 +463,144 @@ pub(crate) fn install_managed_health_adapter(
     )?;
 
     // 4. Disposition and Class Icon helpers
+    install_icon_helpers(host, &ui)
+}
+
+pub(crate) const CLASS_ICON_TEX_IDS: [u32; 15] = [
+    0x17, // 0: Warrior
+    0x13, // 1: Ranger
+    0x12, // 2: Paladin
+    0x15, // 3: Shadowknight
+    0x10, // 4: Monk
+    0x0B, // 5: Bard
+    0x14, // 6: Rogue
+    0x0D, // 7: Druid
+    0x16, // 8: Shaman
+    0x0C, // 9: Cleric
+    0x0F, // 10: Magician
+    0x11, // 11: Necromancer
+    0x0E, // 12: Enchanter
+    0x18, // 13: Wizard
+    0xFB, // 14: Alchemist
+];
+
+pub(crate) fn disposition_tex_id(d: i64) -> u32 {
+    if d <= 1 {
+        0x73
+    } else if (4..=6).contains(&d) {
+        0x75
+    } else {
+        0x74
+    }
+}
+
+fn parse_lua_int(val: Option<Value>) -> Option<i64> {
+    match val {
+        Some(Value::Integer(i)) => Some(i),
+        Some(Value::Number(n)) if n.is_finite() => Some(n as i64),
+        Some(Value::String(s)) => s.to_str().ok().and_then(|v| v.parse::<i64>().ok()),
+        _ => None,
+    }
+}
+
+fn fetch_ui_texture(lua: &mlua::Lua, tex_id: Option<u32>) -> mlua::Result<(Value, Value, Value)> {
+    let Some(id) = tex_id else {
+        return Ok((Value::Nil, Value::Nil, Value::Nil));
+    };
+    let icon_mod: mlua::Table = if let Ok(m) = lua.named_registry_value::<mlua::Table>("__forge_icon_mod") {
+        m
+    } else {
+        lua.globals()
+            .get::<mlua::Table>("package")?
+            .get::<mlua::Table>("loaded")?
+            .get("frontiers_forge.icon")?
+    };
+    let get_ui: mlua::Function = icon_mod.get("GetUITexture")?;
+    get_ui.call(id)
+}
+
+fn draw_ui_icon(
+    lua: &mlua::Lua,
+    tex_id: Option<u32>,
+    scale_arg: Option<Value>,
+) -> mlua::Result<bool> {
+    let scale = match scale_arg {
+        None | Some(Value::Nil) => 1.0_f64,
+        Some(Value::Integer(n)) => n as f64,
+        Some(Value::Number(n)) if n.is_finite() => n,
+        _ => return Ok(false),
+    };
+    let (tex, w, h) = fetch_ui_texture(lua, tex_id)?;
+    let (Some(w), Some(h)) = (
+        match w {
+            Value::Integer(n) => Some(n as f64),
+            Value::Number(n) => Some(n),
+            _ => None,
+        },
+        match h {
+            Value::Integer(n) => Some(n as f64),
+            Value::Number(n) => Some(n),
+            _ => None,
+        },
+    ) else {
+        return Ok(false);
+    };
+    if !matches!(tex, Value::UserData(_)) {
+        return Ok(false);
+    }
+    let imgui: mlua::Table = lua.globals().get("ImGui")?;
+    let image: mlua::Function = imgui.get("Image")?;
+    image.call::<()>((tex, w * scale, h * scale))?;
+    Ok(true)
+}
+
+fn install_icon_helpers(host: &Host, ui: &mlua::Table) -> mlua::Result<()> {
     ui.set(
         "GetDispositionFaceTexId",
         host.lua.create_function(|_, val: Option<Value>| {
-            let disp_opt: Option<i64> = match val {
-                Some(Value::Integer(i)) => Some(i),
-                Some(Value::Number(n)) => Some(n as i64),
-                Some(Value::String(s)) => s
-                    .to_str()
-                    .ok()
-                    .and_then(|str_val| str_val.parse::<i64>().ok()),
-                _ => None,
-            };
-            match disp_opt {
-                Some(d) if d <= 1 => Ok(Some(0x73u32)),
-                Some(d) if (4..=6).contains(&d) => Ok(Some(0x75u32)),
-                Some(_) => Ok(Some(0x74u32)),
-                None => Ok(None),
-            }
+            Ok(parse_lua_int(val).map(disposition_tex_id))
         })?,
     )?;
 
     ui.set(
         "GetClassIconTexId",
         host.lua.create_function(|_, val: Option<Value>| {
-            let class_opt: Option<u32> = match val {
-                Some(Value::Integer(i)) if i >= 0 => Some(i as u32),
-                Some(Value::Number(n)) if n >= 0.0 => Some(n as u32),
-                Some(Value::String(s)) => s
-                    .to_str()
-                    .ok()
-                    .and_then(|str_val| str_val.parse::<u32>().ok()),
-                _ => None,
-            };
-            const CLASS_ICON_TEX_IDS: [u32; 15] = [
-                0x17, // 0: Warrior
-                0x13, // 1: Ranger
-                0x12, // 2: Paladin
-                0x15, // 3: Shadowknight
-                0x10, // 4: Monk
-                0x0B, // 5: Bard
-                0x14, // 6: Rogue
-                0x0D, // 7: Druid
-                0x16, // 8: Shaman
-                0x0C, // 9: Cleric
-                0x0F, // 10: Magician
-                0x11, // 11: Necromancer
-                0x0E, // 12: Enchanter
-                0x18, // 13: Wizard
-                0xFB, // 14: Alchemist
-            ];
-            match class_opt {
-                Some(c) if (c as usize) < CLASS_ICON_TEX_IDS.len() => {
-                    Ok(Some(CLASS_ICON_TEX_IDS[c as usize]))
-                }
-                _ => Ok(None),
-            }
+            Ok(parse_lua_int(val)
+                .filter(|&c| c >= 0)
+                .and_then(|c| CLASS_ICON_TEX_IDS.get(c as usize).copied()))
         })?,
     )?;
 
     ui.set(
         "GetClassIconTexture",
-        host.lua.create_function(|lua, _: Option<u32>| {
-            super::native::diagnose(
-                lua,
-                "frontiers_forge.ui.GetClassIconTexture",
-                "not_yet",
-                "class icon textures arrive in round 4",
-            );
-            Ok((Value::Nil, Value::Nil, Value::Nil))
-        })?,
-    )?;
-    ui.set(
-        "DrawDispositionIcon",
-        host.lua.create_function(|lua, _: mlua::MultiValue| {
-            super::native::diagnose(
-                lua,
-                "frontiers_forge.ui.DrawDispositionIcon",
-                "not_yet",
-                "disposition drawing arrives in round 4",
-            );
-            Ok(false)
-        })?,
-    )?;
-    ui.set(
-        "DrawClassIcon",
-        host.lua.create_function(|lua, _: mlua::MultiValue| {
-            super::native::diagnose(
-                lua,
-                "frontiers_forge.ui.DrawClassIcon",
-                "not_yet",
-                "class icon drawing arrives in round 4",
-            );
-            Ok(false)
+        host.lua.create_function(|lua, val: Option<Value>| {
+            let tex_id = parse_lua_int(val)
+                .filter(|&c| c >= 0)
+                .and_then(|c| CLASS_ICON_TEX_IDS.get(c as usize).copied());
+            fetch_ui_texture(lua, tex_id)
         })?,
     )?;
 
-    host.register_host_module("frontiers_forge.ui", Value::Table(ui))
+    ui.set(
+        "DrawDispositionIcon",
+        host.lua
+            .create_function(|lua, (val, scale): (Option<Value>, Option<Value>)| {
+                draw_ui_icon(lua, parse_lua_int(val).map(disposition_tex_id), scale)
+            })?,
+    )?;
+
+    ui.set(
+        "DrawClassIcon",
+        host.lua
+            .create_function(|lua, (val, scale): (Option<Value>, Option<Value>)| {
+                let tex_id = parse_lua_int(val)
+                    .filter(|&c| c >= 0)
+                    .and_then(|c| CLASS_ICON_TEX_IDS.get(c as usize).copied());
+                draw_ui_icon(lua, tex_id, scale)
+            })?,
+    )?;
+
+    host.register_host_module("frontiers_forge.ui", Value::Table(ui.clone()))
 }
 
 fn native_leaves(element: &str) -> Option<Vec<&'static str>> {

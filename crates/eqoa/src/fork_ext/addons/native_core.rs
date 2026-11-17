@@ -6,6 +6,18 @@ use std::{
     time::Instant,
 };
 
+pub(crate) fn none_windows_json() -> Json {
+    json!({
+        "mode": "none",
+        "native_mode": 0,
+        "busy": false,
+        "start_menu_open": false,
+        "any_window_open": false,
+        "active": Json::Null,
+        "windows": [],
+    })
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct View {
     pub in_world: bool,
@@ -31,6 +43,14 @@ pub(crate) struct View {
     pub bank: Json,
     pub loot: Json,
     pub merchant: Json,
+    pub quests: Vec<Json>,
+    pub mastery: Option<Json>,
+    pub mastery_skills: Option<Vec<Json>>,
+    pub mastery_node: Option<Json>,
+    pub camera: Json,
+    pub camera_compass: Option<f32>,
+    pub camera_orbit_x: Option<f32>,
+    pub windows_state: Json,
     pub channel: &'static str,
 }
 impl Default for View {
@@ -55,7 +75,53 @@ impl Default for View {
             bank: Json::Null,
             loot: Json::Null,
             merchant: Json::Null,
+            quests: Vec::new(),
+            mastery: None,
+            mastery_skills: None,
+            mastery_node: None,
+            camera: Json::Null,
+            camera_compass: None,
+            camera_orbit_x: None,
+            windows_state: none_windows_json(),
             channel: "other",
+        }
+    }
+}
+
+/// Which individual Class Mastery counters have been populated by dump or 0x1402 replies.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MasteryFlags {
+    pub available_spent: bool,
+    pub share: bool,
+    pub progress: bool,
+    pub stats: bool,
+    pub skills: bool,
+}
+
+impl MasteryFlags {
+    pub fn from_dump(&mut self) {
+        self.available_spent = true;
+        self.share = true;
+        self.progress = true;
+        self.stats = true;
+    }
+
+    pub fn apply_subop(&mut self, op: u8) {
+        match op {
+            1 => self.share = true,
+            3 => self.available_spent = true,
+            4 => self.progress = true,
+            5 => {
+                self.available_spent = true;
+                self.stats = true;
+            }
+            6 => self.stats = true,
+            8 => self.skills = true,
+            10 => {
+                self.available_spent = true;
+                self.stats = true;
+            }
+            _ => {}
         }
     }
 }
@@ -126,6 +192,8 @@ pub(crate) struct Core {
     event_bytes: usize,
     motion_tick: u64,
     pending_player_before: Option<Json>,
+    camera_tick: u64,
+    pending_camera_before: Option<Json>,
     pub forge_cooldowns: RetainedStream,
     pub forge_combat: RetainedStream,
     pub chat: VecDeque<Json>,
@@ -141,6 +209,12 @@ pub(crate) struct Core {
     pub item_versions: BTreeMap<&'static str, BTreeMap<u32, u64>>,
     /// Per item list, the revision the container last published with.
     pub item_revisions: BTreeMap<&'static str, u64>,
+    pub quest_revision: u64,
+    /// the journal's stamp as of the last capture (`Quests::stamp`), what `drop_quest` queued against
+    pub quest_stamp: u32,
+    pub window_versions: BTreeMap<String, u64>,
+    pub mastery_flags: MasteryFlags,
+    pub cm_pending_ops: u16,
     /// `gAttackWords` (the start menu's data), for the attack-type names.
     pub attack_words: Vec<(i32, i64)>,
     pub cooldown_edges: BTreeMap<String, (f64, f64, f64)>,
@@ -167,6 +241,8 @@ impl Default for Core {
             event_bytes: 0,
             motion_tick: u64::MAX,
             pending_player_before: None,
+            camera_tick: u64::MAX,
+            pending_camera_before: None,
             forge_cooldowns: RetainedStream::default(),
             forge_combat: RetainedStream::default(),
             chat: VecDeque::new(),
@@ -178,6 +254,11 @@ impl Default for Core {
             ability_versions: BTreeMap::new(),
             item_versions: BTreeMap::new(),
             item_revisions: BTreeMap::new(),
+            quest_revision: 0,
+            quest_stamp: 0,
+            window_versions: BTreeMap::new(),
+            mastery_flags: MasteryFlags::default(),
+            cm_pending_ops: 0,
             attack_words: Vec::new(),
             cooldown_edges: BTreeMap::new(),
             unknown_lockouts: BTreeMap::new(),
@@ -325,8 +406,38 @@ impl Core {
             }
         }
     }
+    pub(crate) fn camera_changed(&mut self, before: Json) {
+        if !super::native_events::interested("camera.changed") {
+            self.pending_camera_before = None;
+            return;
+        }
+        if self.camera_tick != self.tick {
+            let before = self.pending_camera_before.take().unwrap_or(before);
+            self.emit_camera_change(before);
+        } else if self.pending_camera_before.is_none() {
+            self.pending_camera_before = Some(before);
+        }
+    }
+    fn emit_camera_change(&mut self, before: Json) {
+        self.camera_tick = self.tick;
+        let changed = changed_fields(&before, &self.view.camera);
+        self.emit(
+            "camera.changed",
+            json!({"before":(!before.is_null()).then_some(before),"after":self.view.camera,"changed":changed}),
+        );
+    }
+    pub(crate) fn flush_camera_motion(&mut self) {
+        if !super::native_events::interested("camera.changed") {
+            self.pending_camera_before = None;
+        } else if self.camera_tick != self.tick {
+            if let Some(before) = self.pending_camera_before.take() {
+                self.emit_camera_change(before);
+            }
+        }
+    }
     pub fn reset(&mut self, reason: &str) {
         super::input::reset_input_state();
+        super::action_broker::reset_session(reason);
         if self.view.in_world {
             self.emit(
                 "world.leaving",
@@ -337,6 +448,8 @@ impl Core {
         self.generation += 1;
         self.pending_player_before = None;
         self.motion_tick = u64::MAX;
+        self.pending_camera_before = None;
+        self.camera_tick = u64::MAX;
         self.forge_cooldowns.clear();
         self.forge_combat.clear();
         self.entity_worlds.clear();
@@ -345,6 +458,11 @@ impl Core {
         self.ability_versions.clear();
         self.item_versions.clear();
         self.item_revisions.clear();
+        self.quest_revision = 0;
+        self.quest_stamp = 0;
+        self.window_versions.clear();
+        self.mastery_flags = MasteryFlags::default();
+        self.cm_pending_ops = 0;
         self.cooldown_edges.clear();
         self.unknown_lockouts.clear();
         self.disposition_target = None;
@@ -356,6 +474,94 @@ impl Core {
         self.view = View::default();
         super::guides::update(self);
         self.emit("state.reset", json!({"in_world":false,"initial":false}));
+    }
+    pub(crate) fn resolve_hotbar_items(&self, bars: &mut [Json]) {
+        let inv_vers = self.item_versions.get("inventory");
+        for bar in bars {
+            if let Some(slots) = bar["slots"].as_array_mut() {
+                for slot in slots {
+                    if let Some(key) = slot["item_key"].as_u64().map(|k| k as u32) {
+                        slot["item"] = inv_vers
+                            .and_then(|m| m.get(&key))
+                            .map(|ver| {
+                                json!({
+                                    "$ref": "item",
+                                    "key": format!("inventory:{key}"),
+                                    "generation": self.generation,
+                                    "incarnation": ver,
+                                })
+                            })
+                            .unwrap_or(Json::Null);
+                    }
+                    if let Some(obj) = slot.as_object_mut() {
+                        obj.remove("item_key");
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn assign_window_refs(&mut self, windows_state: &mut Json) {
+        let Some(list) = windows_state["windows"].as_array_mut() else {
+            self.window_versions.clear();
+            windows_state["active"] = Json::Null;
+            return;
+        };
+        let active_keys: Vec<String> = list
+            .iter()
+            .filter_map(|w| w["_key"].as_str().map(str::to_string))
+            .collect();
+        self.window_versions
+            .retain(|k, _| active_keys.iter().any(|ak| ak == k));
+        let mut active_ref = Json::Null;
+        for w in list.iter_mut() {
+            let key = w["_key"].as_str().unwrap_or("").to_string();
+            let version = *self.window_versions.entry(key.clone()).or_insert_with(|| {
+                self.next_version += 1;
+                self.next_version
+            });
+            let r = json!({
+                "$ref": "window",
+                "key": key,
+                "generation": self.generation,
+                "incarnation": version,
+            });
+            if w["focused"].as_bool() == Some(true) {
+                active_ref = r.clone();
+            }
+            w["ref"] = r;
+            if let Some(rows) = w["rows"].as_array_mut() {
+                for row in rows {
+                    let item_ref = row["_item_container"]
+                        .as_str()
+                        .zip(row["_item_key"].as_u64().map(|k| k as u32))
+                        .and_then(|(container, item_key)| {
+                            self.item_versions
+                                .get(container)
+                                .and_then(|m| m.get(&item_key))
+                                .map(|ver| {
+                                    json!({
+                                        "$ref": "item",
+                                        "key": format!("{container}:{item_key}"),
+                                        "generation": self.generation,
+                                        "incarnation": ver,
+                                    })
+                                })
+                        });
+                    if let Some(ir) = item_ref {
+                        row["item"] = ir;
+                    }
+                    if let Some(obj) = row.as_object_mut() {
+                        obj.remove("_item_container");
+                        obj.remove("_item_key");
+                    }
+                }
+            }
+            if let Some(obj) = w.as_object_mut() {
+                obj.remove("_key");
+            }
+        }
+        windows_state["active"] = active_ref;
     }
     pub fn publish(&mut self, mut view: View) {
         let target = view.player["target_id"].as_u64().map(|id| id as u32);
@@ -414,6 +620,23 @@ impl Core {
         };
         if view.player.is_object() {
             view.player["entity"] = entity_ref(&view.player["id"]);
+            view.player["mastery"] = view.mastery.clone().unwrap_or(Json::Null);
+        }
+        if view.windows_state.is_object() {
+            self.assign_window_refs(&mut view.windows_state);
+        }
+        let quests_same = view.quests.len() == self.view.quests.len()
+            && view
+                .quests
+                .iter()
+                .zip(&self.view.quests)
+                .all(|(a, b)| a["index"] == b["index"] && a["title"] == b["title"]);
+        if !quests_same || self.quest_revision == 0 {
+            self.quest_revision += 1;
+        }
+        for q in &mut view.quests {
+            let key = q["index"].as_u64().unwrap_or(0).to_string();
+            q["ref"] = json!({"$ref":"quest","key":key,"generation":self.generation,"incarnation":self.quest_revision});
         }
         if let Some(members) = view.group["members"].as_array_mut() {
             for m in members {
@@ -461,11 +684,28 @@ impl Core {
             self.emit("map.changed", json!({"before":self.view.map,"after":view.map,"changed":changed_fields(&before,&after)}));
         }
         let item_changes = self.items_prepare(&mut view, entered);
+        self.resolve_hotbar_items(&mut view.hotbar);
         let previous = std::mem::replace(&mut self.view, view);
         self.items_emit(item_changes);
         super::guides::update(self);
         if self.view.in_world && previous.player_stats != self.view.player_stats {
             self.emit("player.stats_changed", json!({}));
+        }
+        if !entered && self.view.in_world {
+            if previous.quests != self.view.quests {
+                self.emit(
+                    "quests.changed",
+                    json!({"before":previous.quests,"after":self.view.quests,"changed":["records"]}),
+                );
+            }
+            if previous.mastery != self.view.mastery {
+                let before = previous.mastery.as_ref().unwrap_or(&Json::Null);
+                let after = self.view.mastery.as_ref().unwrap_or(&Json::Null);
+                self.emit(
+                    "mastery.changed",
+                    json!({"before":previous.mastery,"after":self.view.mastery,"changed":changed_fields(before,after)}),
+                );
+            }
         }
 
         if !entered && self.view.in_world {
@@ -485,6 +725,16 @@ impl Core {
             }
             if previous.player != self.view.player {
                 self.player_changed(previous.player);
+            }
+            if !self.view.camera.is_null() && previous.camera != self.view.camera {
+                self.camera_changed(previous.camera);
+            }
+            if previous.windows_state != self.view.windows_state {
+                let changed = changed_fields(&previous.windows_state, &self.view.windows_state);
+                self.emit(
+                    "windows.changed",
+                    json!({"before":previous.windows_state,"after":self.view.windows_state,"changed":changed}),
+                );
             }
         }
     }
@@ -766,6 +1016,8 @@ pub(crate) fn invalidate_capture() {
         let mut c = c.borrow_mut();
         c.pending_player_before = None;
         c.motion_tick = u64::MAX;
+        c.pending_camera_before = None;
+        c.camera_tick = u64::MAX;
         c.unknown_lockouts.clear();
     });
 }

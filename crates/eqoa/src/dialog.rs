@@ -24,6 +24,9 @@ pub struct PrivChat {
 }
 
 impl PrivChat {
+    pub fn read_text(&self) -> &[u16] {
+        &self.text
+    }
     pub fn set_text(&mut self, s: &[u16]) {
         self.text = s.to_vec();
         self.rows = 0;
@@ -107,6 +110,9 @@ pub enum Answer {
 }
 
 impl Response {
+    pub fn read_state(&self) -> (&[u16], Vec<(i32, i32, &[u16])>, i32) {
+        (&self.text, self.options.iter().map(|o| (o.index, o.kind, o.text.as_slice())).collect(), self.sel)
+    }
     /// `SetDialog`.
     pub fn set_dialog(&mut self, vui: &Vui, d: DialogBox) {
         self.dialog = d;
@@ -339,6 +345,9 @@ impl Default for MBox {
 }
 
 impl MBox {
+    pub fn sel(&self) -> i32 {
+        self.sel
+    }
     /// `Prompt(text, type, p1, p2)`: `Init(type, 1)`, the text and the two
     /// parameters; gaining the focus starts the fade (295).
     pub fn prompt(&mut self, text: &[u16], kind: i32, p1: i32, p2: i32, now: i64) {

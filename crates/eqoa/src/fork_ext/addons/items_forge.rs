@@ -13,7 +13,7 @@ use super::{host::Host, native::error};
 use mlua::{Function, Lua, MultiValue, Result, Table, Value};
 
 /// Forge functions whose text is not built yet (the button hint is `windows.format_hint`'s).
-pub(super) const DEFERRED: &[&str] = &["frontiers_forge.merchant.GetButtonHint"];
+pub(super) const DEFERRED: &[&str] = &[];
 
 const ITEM: &str = r#"
 local eqoa, unsupported = ...
@@ -544,7 +544,12 @@ function Merchant.GetSelectedItem()
     if index == nil then return nil end
     return Merchant.GetItem(index)
 end
-Merchant.GetButtonHint = function() return unsupported("frontiers_forge.merchant.GetButtonHint") end
+-- pinned reference merchant.lua:165-171
+function Merchant.GetButtonHint()
+    local label = Merchant.GetOptionLabel(Merchant.Option.exit)
+    if not Merchant.IsOpen() or label == nil then return nil end
+    return (eqoa.windows.format_hint("triangle", label))
+end
 return Merchant
 "#;
 

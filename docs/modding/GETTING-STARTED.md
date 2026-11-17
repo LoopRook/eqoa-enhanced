@@ -106,9 +106,39 @@ The items example is [the bag viewer](../../bundled-mods/eqoa_bag_viewer/main.lu
 that reads `eqoa.inventory` and `eqoa.bank`, takes its loot log from `loot.changed`, and listens to nothing
 else while it is closed. It is off by default.
 
-While the start menu's item page is up the pack's `view` gives its tab, the stacks under it and the lit row; while a merchant window is up `MerchantState` gives its mode (menu, sell, buy), the option lit in the menu, and its `view` the rows and the lit one. Not given: `MerchantState.button_hint` (asking says so in the Addon Manager). FrontiersForge's `inventory`, `item`,
+While the start menu's item page is up the pack's `view` gives its tab, the stacks under it and the lit row; while a merchant window is up `MerchantState` gives its mode (menu, sell, buy), the option lit in the menu, `button_hint` (when words are loaded), and its `view` the rows and the lit one. FrontiersForge's `inventory`, `item`,
 `bank`, `loot`, `merchant` and `gems` modules read the same data with their own
 shapes (tab enum 0..3, `bank.GetItems` as `{idx, slot, level, name, amount}`).
+
+## Quests, camera and windows
+
+Read journal titles, camera orientation and active UI mode from native state:
+
+```lua
+local quests = eqoa.quests.list()
+if quests then
+    for _, q in ipairs(quests) do
+        eqoa.log.write("info", string.format("%d: %s", q.index, q.title))
+    end
+end
+
+local w = eqoa.windows.get() -- always safe; returns mode="none" outside world
+if w.busy then
+    for _, h in ipairs(eqoa.windows.parse_hint("|tExit")) do
+        eqoa.log.write("debug", h.button .. " -> " .. h.label)
+    end
+end
+
+eqoa.events.on("quests.changed", function(e)
+    eqoa.log.write("info", "journal count is now " .. #e.data.after)
+end)
+
+eqoa.events.on("windows.changed", function(e)
+    eqoa.log.write("info", "window mode: " .. e.data.after.mode)
+end)
+```
+
+`eqoa.camera.get()` / `eqoa.camera.compass()` return camera eye position, orbit angles and final eye compass heading (`camera.changed` coalesces on the 30 Hz game clock). `eqoa.mastery.get()`, `skills()` and `selected()` expose Class Mastery state without opening raw memory (`Player.mastery` mirrors `eqoa.mastery.get()`).
 
 Save plain settings through `eqoa.settings.on_save`/`on_load`, or explicit
 `save`/`load`. They use the manager's active addon/profile slot. Settings contain
@@ -128,3 +158,40 @@ Its ten hearts use ImGui draw lists, real player health, lifecycle cleanup and
 profile settings, with no Forge dependency. Live-game testing is still required.
 
 `eqoa.player.experience_for_level(level)` returns the native experience threshold for the requested level (1?59), including the native formula change at level 51. It does not add one to the argument. To query the next level's threshold, pass `player.level + 1`; arguments outside 1?59 return `nil, nil`. Forge keeps its pinned experience formula.
+
+## Actions
+
+Game actions under `eqoa.actions.*` go through the client's action broker and require a physical player gesture (`eqoa.input.bind` keypress, a `pointer.pressed` inside `eqoa.input.claim_pointer`, or a clicked interactive `eqoa.imgui` widget). Each gesture authorizes one action (`req, err`). Calling an action outside a gesture returns `nil, {code = "needs_player_action", ...}` with a diagnostic in the Addon Manager.
+
+```lua
+local last_req
+
+eqoa.events.on("action.result", function(e)
+    local d = e.data
+    if last_req and d.request_id == last_req then
+        -- d.state: "queued" -> "dispatched" -> "completed" | "refused" | "cancelled" | "unknown"
+        if d.ok == false then
+            eqoa.log.write("warn", d.kind .. ": " .. (d.reason or d.code))
+        end
+    end
+end)
+
+eqoa.input.bind({id = "use_pot", label = "Use top item", default_key = ""}, function()
+    local inv = eqoa.inventory.get()
+    if inv and inv.items[1] then
+        local req, err = eqoa.actions.use_item(inv.items[1].ref)
+        if req then last_req = req else eqoa.log.write("warn", err.message) end
+    end
+end)
+```
+
+- Poll `eqoa.actions.status(req)` for the retained `ActionResult` record or `eqoa.actions.cancel(req)` while a request is still `queued`.
+- `eqoa.actions.destroy` is `unsupported`; continuous controls (`move`, `look`, `buttons`) remain `not_yet`; query them with `eqoa.capabilities.get(...)`.
+- Window and quest actions (`drop_quest`, `mastery_share`, `mastery_browse`, `mastery_buy`, `mastery_refund`, `close_window`, `select_row`, `activate_row`, `dialog_answer`, `input_text`, `menu_command`) take a `QuestRef` or `WindowRef` read from `eqoa.quests` / `eqoa.windows`, count rows and options from 1 as listed, and go through the game's own keys, editor and request paths one player gesture at a time. A page change, a closed window or a changed journal makes the handle `stale_handle` at dispatch. Rows and dialog answers are delivered as key presses over the next frames, so `applied` means the keys were handed to the window. Password fields and the support/report window, editor and confirmation never take synthetic input (`permission_denied`). `menu_command` runs only an enabled row's `command` from `Window.rows`; any other string is `unsupported`.
+
+```lua
+local w = eqoa.windows.find("quest_log")
+if w then eqoa.actions.activate_row(w.ref, 1) end
+```
+- See [the bag viewer](../../bundled-mods/eqoa_bag_viewer/main.lua) for click-menu actions (`use_item`, `equip`, `quick_slot`, `sell`, `bank_move`, `loot`, `loot_all`) and `action.result` feedback.
+

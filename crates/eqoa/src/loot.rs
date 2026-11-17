@@ -107,6 +107,9 @@ fn fill_loot(list: &mut WndList, corpse: &ItemList, icon: &dyn Fn(usize) -> i32)
 }
 
 impl Loot {
+    pub fn read_list(&self) -> (&WndList, &WndList) {
+        (&self.inv, &self.loot)
+    }
     /// `Open`: the inventory unlit, the corpse lit, both from the top; the
     /// text window reopened; the corpse list takes the keys.
     pub fn open(&mut self, vui: &Vui, r: &dyn Raster, now: i64) {

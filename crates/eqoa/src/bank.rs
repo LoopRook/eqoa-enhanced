@@ -154,6 +154,9 @@ fn fill(list: &mut WndList, l: &ItemList, rows: usize, worn: bool, icon: &dyn Fn
 }
 
 impl Bank {
+    pub fn read_lists(&self) -> (&WndList, &WndList) {
+        (&self.item.inv, &self.item.bank)
+    }
     /// `VIWndGame::OpenBank`'s `ShowMenu(1)`: the menu page, its cursor at
     /// the top, the focus (295: the window at (320, 224) closed and opening,
     /// the auction row when the bank has one).
