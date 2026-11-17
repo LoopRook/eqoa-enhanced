@@ -15,6 +15,7 @@ local M = {
 local JUNK_FILE = "junk.cfg"
 local TRIM_OPTS = {trim = true, trim_color = {r = 0, g = 0, b = 0, a = 1}}
 local ICON_RETRY_LIMIT = 5
+local ICON_RETRY_COOLDOWN_S = 10
 local _frame_tried = {}
 local _frame_tex = {}
 local EMPTY_CORPSE = {items = {}, used = 0, capacity = 40, money = 0, revision = -1}
@@ -82,7 +83,7 @@ local function fetch_entry_icon(entry)
     local icon = entry.item and entry.item.icon
     if not icon then return end
     local st = M.icon_req[icon]
-    if st == "failed" then return end
+    if type(st) == "number" and st < 0 then return end
     local cached = _frame_tex[icon]
     if cached then
         entry.texture = cached
@@ -99,9 +100,9 @@ local function fetch_entry_icon(entry)
         _frame_tex[icon] = info.texture
     else
         _frame_tried[icon] = true
-        local tries = (type(st) == "number" and st or 0) + 1
+        local tries = (type(st) == "number" and st > 0 and st or 0) + 1
         if tries >= ICON_RETRY_LIMIT then
-            M.icon_req[icon] = "failed"
+            M.icon_req[icon] = -(os.clock() + ICON_RETRY_COOLDOWN_S)
         else
             M.icon_req[icon] = tries
             M.has_pending_icons = true
@@ -114,12 +115,18 @@ function M.sync_visible_icons(first_slot, last_slot)
     if not grid then return end
     M.has_pending_icons = false
     clear_pass_cache()
+    local now = os.clock()
     local items = grid.items
     for i = 1, #items do
         local entry = items[i]
         if i < first_slot or i > last_slot then
             entry.texture = nil
         elseif entry.texture == nil then
+            local icon = entry.item and entry.item.icon
+            local st = icon and M.icon_req[icon]
+            if type(st) == "number" and st < 0 and now >= -st then
+                M.icon_req[icon] = nil
+            end
             fetch_entry_icon(entry)
         end
     end
@@ -230,7 +237,12 @@ function M.rebuild()
     return M.grid
 end
 
-function M.dirty() M.grid = nil end
+function M.dirty()
+    for k, v in pairs(M.icon_req) do
+        if type(v) == "number" and v < 0 then M.icon_req[k] = nil end
+    end
+    M.grid = nil
+end
 
 function M.select(tab)
     if tab == 7 and (eqoa.loot.get() or keeping_corpse_tab()) and M.tab ~= 7 then

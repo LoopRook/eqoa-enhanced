@@ -1353,6 +1353,58 @@ fn round6_item4_lazy_icons_load_without_native_windows_and_zero_per_frame_reques
 }
 
 #[test]
+fn round6_l2_failed_icon_retries_after_items_change_and_not_per_frame() {
+    let Some(mut bv) = Bv::new() else { return };
+    super::super::icons::set_custom_icon_provider(None);
+    super::super::icons::reset_test_counters();
+
+    let delayed_id: i32 = 40099;
+    let empty_lib = esf::Library::new();
+    super::super::icons::update_live_data(&empty_lib, None, &[]);
+    let world = serde_json::json!({
+        "pack": [
+            {"name":"Delayed Charm","id":900099,"key":11,"qty":1,"icon":delayed_id}
+        ],
+        "bank": [],
+        "tunar": 100,
+        "bank_tunar": 0
+    });
+    bv.play.bags_set(&world);
+    bv.enable();
+    bv.open();
+    bv.frames(4); // Exhaust initial 5 attempts -> cooled down (not permanent).
+    assert!(!bv.eval::<bool>("require('bags').grid.items[1].texture ~= nil"));
+
+    // Late arrival of icon 40099 into live library must NOT poll per frame while steady:
+    let mut lib_with_icon = esf::Library::new();
+    lib_with_icon.add(
+        "ITEMICON.ESF",
+        bv_test_surface_container(&[(delayed_id, [50, 200, 80, 255])]),
+    );
+    super::super::icons::update_live_data(&lib_with_icon, None, &[]);
+    let res_before_steady = super::super::icons::resource_call_count();
+    bv.frames(6);
+    assert_eq!(
+        super::super::icons::resource_call_count(),
+        res_before_steady,
+        "L2 negative control: cooled-down icon must never retry per frame"
+    );
+
+    // Next items/state change (inventory.changed via tunar) clears cooldown and retries cleanly:
+    bv.play.bags_tunar(200);
+    bv.frames(2);
+    super::super::icons::update_live_data(&lib_with_icon, None, &[]);
+    bv.frames(1);
+    assert!(
+        bv.eval::<bool>("require('bags').grid.items[1].texture ~= nil"),
+        "L2: failed icon must retry and load on next items/state change"
+    );
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
 fn round6_item1_stale_corpse_grid_and_loot_batch_and_log() {
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_target_corpse(5001, "a decaying skeleton");
