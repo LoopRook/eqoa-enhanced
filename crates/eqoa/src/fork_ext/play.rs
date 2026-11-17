@@ -320,11 +320,13 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
         Some(BrokerReply::MerchantOpen) => {
             crate::fork_ext::addons::action_broker::resolve_server_talk_open(
                 crate::fork_ext::addons::action_broker::TalkKind::Merchant,
+                play.npcw.shop.id,
             );
         }
         Some(BrokerReply::BankOpen) => {
             crate::fork_ext::addons::action_broker::resolve_server_talk_open(
                 crate::fork_ext::addons::action_broker::TalkKind::Bank,
+                None,
             );
         }
         Some(BrokerReply::LootBlocked(reason)) => {

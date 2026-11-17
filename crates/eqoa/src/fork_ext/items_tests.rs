@@ -3126,11 +3126,16 @@ fn round65_open_loot_talk_npc_flags_and_strict_target_guards() {
     native_events::dispatch(&host).unwrap();
     host.execute("local st = assert(eqoa.actions.status(r_open2)); assert(st.state == 'completed' and st.ok == true)").unwrap();
 
-    // 3. talk(nil, {kind="merchant"}) targets 5004 & confirms on 0x00B7; talk(nil, {kind="bank"}) targets 5005 & confirms on 0x124D.
+    // 3. talk(nil, {kind="merchant"}) targets 5004; mismatched 0x00B7 (id 9999) does NOT confirm it, matching 5004 does!
     host.execute("assert(eqoa.windows.takeover('merchant')); assert(eqoa.windows.takeover('bank'))").unwrap();
     host.execute("r_merch = assert(eqoa.actions.talk(nil, { kind = 'merchant' }))").unwrap();
     super::super::begin_iteration(&mut p, true);
     assert_eq!(p.target, 5004);
+    apply(&mut p, opcode(0x00B7, shop_bytes(9999, 90, 110, &[sword()], "Wrong")));
+    native_events::dispatch(&host).unwrap();
+    host.execute("local st = assert(eqoa.actions.status(r_merch)); assert(st.state == 'dispatched' and st.phase == 'dispatch', 'wrong npc_id must not confirm talk')").unwrap();
+    p.mode = 0;
+    p.npcw.shop = Default::default();
     apply(&mut p, opcode(0x00B7, shop_bytes(5004, 90, 110, &[sword()], "Hi")));
     native_events::dispatch(&host).unwrap();
     host.execute("local st = assert(eqoa.actions.status(r_merch)); assert(st.state == 'completed' and st.ok == true)").unwrap();

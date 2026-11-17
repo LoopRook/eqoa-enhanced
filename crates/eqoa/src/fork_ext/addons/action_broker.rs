@@ -2275,13 +2275,15 @@ pub(crate) fn resolve_server_loot_blocked(reason: Option<&str>) {
     resolve_server_loot_all(Some(false), Some(text), false);
 }
 
-pub(crate) fn resolve_server_talk_open(opened: TalkKind) {
+pub(crate) fn resolve_server_talk_open(opened: TalkKind, opened_npc_id: Option<u32>) {
     BROKER.with(|b| {
         b.borrow_mut().resolve_matching(|inflight| {
-            let ServerMatcher::Talk { kind, .. } = inflight.matcher else {
+            let ServerMatcher::Talk { npc_id, kind } = inflight.matcher else {
                 return None;
             };
-            if kind == TalkKind::AnyFriendly || kind == opened {
+            if (kind == TalkKind::AnyFriendly || kind == opened)
+                && opened_npc_id.is_none_or(|id| id == npc_id)
+            {
                 Some((Some(true), None, None))
             } else {
                 None
