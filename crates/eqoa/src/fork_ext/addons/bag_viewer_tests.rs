@@ -1730,7 +1730,7 @@ fn round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls() {
     assert!(log[0].contains("Black Bloodstone x1, from a decaying skeleton"), "{log:?}");
     assert!(log[1].contains("Pinch of Skeleton Dust x1, from a decaying skeleton"), "{log:?}");
 
-    // Closed-window native UI take on Sandstorm (without InvAdd before 0x0016; next 0x0018 lacks record).
+    // Closed-window native UI take on Sandstorm (with InvAdd) logs once and keeps zero duplicates.
     bv.toggle();
     assert!(!bv.is_open());
     bv.play.bags_target_corpse(5002, "an undead gnoll");
@@ -1741,14 +1741,36 @@ fn round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls() {
     ]));
     bv.frames(1);
     bv.play.bags_native_loot_one(0, 1);
+    bv.play.bags_added(&serde_json::json!({"name":"Gnoll Ear","id":2010,"key":81,"qty":1,"max_stack":20}));
     bv.play.bags_loot_close();
     bv.play.bags_press_loot();
     bv.play.bags_corpse(&serde_json::json!([
         {"name":"Cracked Skull","id":2011,"key":0,"qty":1,"max_stack":20}
     ]));
     bv.frames(2);
-    assert_eq!(bv.log().len(), 3, "native take without InvAdd logs via smaller same-corpse 0x0018: {:?}", bv.log());
+    assert_eq!(bv.log().len(), 3, "closed-window native take with InvAdd logs once: {:?}", bv.log());
     assert!(bv.log()[0].contains("Gnoll Ear x1, from an undead gnoll"), "{:?}", bv.log());
+
+    // M3 negative control: Mere disappearance from next same-corpse 0x0018 without InvAdd or 0x0019/0x001A logs NOTHING.
+    let log_len_before_m3 = bv.log().len();
+    bv.play.bags_native_loot_one(0, 1);
+    bv.play.bags_loot_close();
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([])); // Cracked Skull vanished (e.g. another player took it), no InvAdd!
+    bv.frames(2);
+    assert_eq!(
+        bv.log().len(),
+        log_len_before_m3,
+        "M3: disappearance from next 0x0018 without InvAdd must log nothing: {:?}",
+        bv.log()
+    );
+    // Reopen gnoll corpse with Cracked Skull still there for Negative Control 1 below.
+    bv.play.bags_loot_close();
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Cracked Skull","id":2011,"key":0,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
 
     // Negative control 1: Refused take (no InvAdd + next 0x0018 still keeps record, OR 0x0085 refusal) logs NOTHING.
     let log_len = bv.log().len();

@@ -490,9 +490,12 @@ pub(super) fn capture(play: &Play, cause: &'static str) {
                 }
                 let mut taken = Vec::new();
                 for entry in &pending.items {
+                    if entry.gained_qty <= 0 {
+                        continue;
+                    }
                     let b = before_qty.get(&entry.item_id).copied().unwrap_or(0);
                     let a = after_qty.get(&entry.item_id).copied().unwrap_or(0);
-                    let diff = (b - a).max(0).min(entry.count);
+                    let diff = (b - a).max(0).min(entry.gained_qty).min(entry.qty_before);
                     if diff > 0 {
                         *before_qty.get_mut(&entry.item_id).unwrap() -= diff;
                         taken.push(crate::fork_ext::addons::native_items::SandstormTakenItem {
