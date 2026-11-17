@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 # Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 """Unit tests for make_owner_test_package.py."""
+import io
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -244,6 +247,165 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
         # The previous play/ directory and sentinel MUST remain untouched!
         self.assertTrue(sentinel.is_file())
         self.assertEqual(sentinel.read_text("utf-8"), "owner working build state")
+
+    def test_build_env_command_lock_and_summary(self):
+        fake_home = self.base / "user_home"
+        expected_target = fake_home / "Paseo" / "targets" / "shared"
+        built_exe = expected_target / "release" / "eqoa.exe"
+        built_exe.parent.mkdir(parents=True, exist_ok=True)
+        built_exe.write_bytes(b"MZbuilt-exe")
+
+        fake_commit = "a" * 40
+        recorded_calls = []
+        lock_events = []
+
+        class FakeLock:
+            def __enter__(self):
+                lock_events.append("acquire")
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                lock_events.append("release")
+                return False
+
+        def fake_run(cmd, **kwargs):
+            recorded_calls.append((cmd, kwargs))
+            if cmd[0] == "git" and "status" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if cmd[0] == "git" and "rev-parse" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout=f"{fake_commit}\n", stderr="")
+            if cmd[0] == "cargo":
+                self.assertEqual(lock_events, ["acquire"])
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout="",
+                    stderr=(
+                        "   Compiling eqoa v0.1.0 (C:/repo/crates/eqoa)\n"
+                        "    Finished `release` profile [optimized] target(s) in 12.34s\n"
+                    ),
+                )
+            raise AssertionError(f"Unexpected command: {cmd}")
+
+        clean_env = {k: v for k, v in os.environ.items() if k not in ("CARGO_TARGET_DIR", "RUSTFLAGS", "EQOA_BUILD_COMMIT", "EQOA_UPDATE_CHANNEL")}
+        clean_env["USERPROFILE"] = str(fake_home)
+        clean_env["APPDATA"] = str(self.fake_appdata)
+
+        stdout_buf = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, clean_env, clear=True),
+            mock.patch("pathlib.Path.home", return_value=fake_home),
+            mock.patch("make_owner_test_package.run_gates.CargoLock", return_value=FakeLock()),
+            mock.patch("make_owner_test_package.subprocess.run", side_effect=fake_run),
+            mock.patch("make_owner_test_package.build_player_release.build_release", side_effect=self._fake_build_release) as mock_build_release,
+            mock.patch("sys.stdout", stdout_buf),
+        ):
+            out = make_owner_test_package.make_package(
+                name="Round6",
+                build=True,
+                channel="enhanced-dev",
+                output_dir=self.output_dir,
+                root=self.fake_root,
+                config_source=self.fake_config,
+            )
+
+        self.assertEqual(out, self.output_dir)
+        self.assertEqual(lock_events, ["acquire", "release"])
+        cargo_calls = [(cmd, kw) for cmd, kw in recorded_calls if cmd[0] == "cargo"]
+        self.assertEqual(len(cargo_calls), 1)
+        cargo_cmd, cargo_kw = cargo_calls[0]
+        self.assertEqual(cargo_cmd, ["cargo", "build", "--locked", "--release", "-p", "eqoa"])
+        self.assertEqual(cargo_kw["cwd"], self.fake_root.resolve())
+        cargo_env = cargo_kw["env"]
+        self.assertEqual(cargo_env["CARGO_TARGET_DIR"], str(expected_target))
+        self.assertEqual(cargo_env["EQOA_BUILD_COMMIT"], fake_commit)
+        self.assertEqual(cargo_env["EQOA_UPDATE_CHANNEL"], "enhanced-dev")
+        self.assertEqual(cargo_env["RUSTFLAGS"], "-C target-feature=+crt-static")
+        self.assertEqual(mock_build_release.call_args.kwargs["executable"], built_exe.resolve())
+
+        printed = stdout_buf.getvalue()
+        self.assertIn("Finished `release` profile", printed)
+        self.assertNotIn("Compiling eqoa", printed)
+
+    def test_build_releases_lock_on_cargo_failure(self):
+        lock_events = []
+
+        class FakeLock:
+            def __enter__(self):
+                lock_events.append("acquire")
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                lock_events.append("release")
+                return False
+
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == "git" and "status" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if cmd[0] == "git" and "rev-parse" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="b" * 40 + "\n", stderr="")
+            if cmd[0] == "cargo":
+                return subprocess.CompletedProcess(cmd, 101, stdout="", stderr="error: could not compile `eqoa`\n")
+            raise AssertionError(f"Unexpected command: {cmd}")
+
+        with (
+            mock.patch("make_owner_test_package.run_gates.CargoLock", return_value=FakeLock()),
+            mock.patch("make_owner_test_package.subprocess.run", side_effect=fake_run),
+            mock.patch("sys.stdout", io.StringIO()),
+        ):
+            with self.assertRaises(RuntimeError):
+                make_owner_test_package.make_package(
+                    name="Round6",
+                    build=True,
+                    output_dir=self.output_dir,
+                    root=self.fake_root,
+                    config_source=self.fake_config,
+                )
+
+        self.assertEqual(lock_events, ["acquire", "release"])
+
+    def test_build_refuses_dirty_tracked_tree(self):
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == "git" and "status" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout=" M crates/eqoa/src/main.rs\n", stderr="")
+            raise AssertionError(f"Should not run further commands on dirty tree: {cmd}")
+
+        with (
+            mock.patch("make_owner_test_package.run_gates.CargoLock") as mock_lock,
+            mock.patch("make_owner_test_package.subprocess.run", side_effect=fake_run),
+        ):
+            with self.assertRaisesRegex(ValueError, "uncommitted changes"):
+                make_owner_test_package.make_package(
+                    name="Round6",
+                    build=True,
+                    output_dir=self.output_dir,
+                    root=self.fake_root,
+                    config_source=self.fake_config,
+                )
+
+        mock_lock.assert_not_called()
+
+    def test_exe_and_build_mutually_exclusive(self):
+        with self.assertRaisesRegex(ValueError, "Cannot specify both"):
+            make_owner_test_package.make_package(
+                name="Round6",
+                exe=self.fake_exe,
+                build=True,
+                output_dir=self.output_dir,
+                root=self.fake_root,
+            )
+
+        with mock.patch.object(sys, "argv", ["make_owner_test_package.py", "--exe", str(self.fake_exe), "--build"]):
+            with mock.patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(SystemExit) as cm:
+                    make_owner_test_package.main()
+                self.assertEqual(cm.exception.code, 2)
+
+        with mock.patch.object(sys, "argv", ["make_owner_test_package.py"]):
+            with mock.patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(SystemExit) as cm:
+                    make_owner_test_package.main()
+                self.assertEqual(cm.exception.code, 2)
 
 
 if __name__ == "__main__":
