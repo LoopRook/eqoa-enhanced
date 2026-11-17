@@ -1909,11 +1909,17 @@ fn dispatch_broker_action(
                     reason: "corpse has no items to loot".into(),
                 };
             }
+            let item_ids: Vec<i64> = corpse
+                .items
+                .iter()
+                .filter(|it| it.quantity > 0)
+                .map(|it| it.item.id)
+                .collect();
             PENDING_NPCW_TX.with(|p| {
                 *p.borrow_mut() = Some(PendingNpcwTx::LootAll);
             });
             DispatchOutcome::Staged {
-                matcher: ServerMatcher::LootAll,
+                matcher: ServerMatcher::LootAll { item_ids },
                 detail: None,
             }
         }

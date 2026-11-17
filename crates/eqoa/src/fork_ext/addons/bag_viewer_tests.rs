@@ -1597,6 +1597,58 @@ fn round6_item6_take_all_button_on_corpse_tab() {
 }
 
 #[test]
+fn round6_m1_loot_all_ignores_unrelated_inv_add_before_close() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_target_corpse(5011, "a skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100}
+    ]));
+    bv.enable();
+    bv.open();
+    bv.click(bv.tab(7));
+    bv.frames(1);
+
+    let (tax, tay, _) = bv.action_hit("Take all").unwrap();
+    bv.click((tax, tay));
+    bv.play.bags_broker_tick();
+    // Unrelated quest/trade InvAdd (id 8888 != 2001) before 0x0016 must NOT confirm Take all.
+    bv.play.bags_added(&serde_json::json!({"name":"Quest Reward","id":8888,"key":91,"qty":1,"max_stack":20}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Take all: corpse closed".into(), Some(false)),
+        "unrelated InvAdd must not confirm Take all on 0x0016"
+    );
+
+    // Positive control: InvAdd of an item from the corpse (id 2002) DOES confirm Take all on 0x0016.
+    bv.play.bags_target_corpse(5012, "another skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Bone Chip","id":2002,"key":0,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let (tax2, tay2, _) = bv.action_hit("Take all").unwrap();
+    bv.click((tax2, tay2));
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Bone Chip","id":2002,"key":92,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Take all: ok".into(), Some(true)),
+        "matching corpse InvAdd confirms Take all on 0x0016"
+    );
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
 fn round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls() {
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();

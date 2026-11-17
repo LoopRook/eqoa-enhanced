@@ -253,7 +253,7 @@ pub(crate) enum ServerMatcher {
     AbilityClearBar,
     AbilityMoveIndex { from: u8, to: u8 },
     LootOne { key: u32, item_id: i64, qty_before: i64, count: i64 },
-    LootAll,
+    LootAll { item_ids: Vec<i64> },
     MerchantBuy { item_id: i64, qty_before: i64, count: i64 },
     MerchantSell { key: u32, qty_before: i64, count: i64 },
     BankMove { from_bank: bool, key: u32, item_id: i64, qty_before: i64, count: i64 },
@@ -1196,7 +1196,7 @@ impl BrokerState {
                     {
                         Some((f.id, "bank closed"))
                     }
-                    ServerMatcher::LootOne { .. } | ServerMatcher::LootAll
+                    ServerMatcher::LootOne { .. } | ServerMatcher::LootAll { .. }
                         if !snapshot.loot_open =>
                     {
                         Some((f.id, "corpse closed"))
@@ -2047,7 +2047,9 @@ pub(crate) fn mark_loot_inv_added(added_item_id: i64) {
                     ServerMatcher::LootOne { item_id, .. } if item_id == added_item_id => {
                         inflight.inv_confirmed = true;
                     }
-                    ServerMatcher::LootAll => {
+                    ServerMatcher::LootAll { ref item_ids }
+                        if item_ids.contains(&added_item_id) =>
+                    {
                         inflight.inv_confirmed = true;
                     }
                     _ => {}
@@ -2091,7 +2093,7 @@ pub(crate) fn resolve_server_loot_close() {
                 .iter()
                 .filter_map(|(&id, f)| {
                     (f.native_sent
-                        && matches!(f.matcher, ServerMatcher::LootOne { .. } | ServerMatcher::LootAll))
+                        && matches!(f.matcher, ServerMatcher::LootOne { .. } | ServerMatcher::LootAll { .. }))
                     .then_some(id)
                 })
                 .collect();
@@ -2283,7 +2285,7 @@ pub(crate) fn resolve_server_loot_all(
             return;
         }
         b.resolve_matching_sent(|inflight| {
-            if !matches!(inflight.matcher, ServerMatcher::LootAll) {
+            if !matches!(inflight.matcher, ServerMatcher::LootAll { .. }) {
                 return None;
             }
             match ok {
@@ -2577,7 +2579,7 @@ pub(crate) fn resolve_server_d7() {
             if matches!(
                 inflight.matcher,
                 ServerMatcher::LootOne { .. }
-                    | ServerMatcher::LootAll
+                    | ServerMatcher::LootAll { .. }
                     | ServerMatcher::MerchantBuy { .. }
                     | ServerMatcher::MerchantSell { .. }
                     | ServerMatcher::BankMove { .. }
