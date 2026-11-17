@@ -124,7 +124,7 @@ impl PlayerData {
         let s = &self.stats;
         let h = self.health;
         let known = self.known;
-        let mut value = json!({"id":self.id,"name":self.name,"class_id":p.class,"class_name":usize::try_from(p.class).ok().and_then(|i|crate::fork_ext::addons::player::CLASSES.get(i)),"race_id":p.race,"race_name":usize::try_from(p.race).ok().and_then(|i|crate::fork_ext::addons::player::RACES.get(i)),"level":p.level,"experience":p.exp,"experience_debt":p.p2c,"hp":known.then(||json!({"current":if h.available{h.current_hp}else{s.stat[7]},"maximum":if h.available{h.max_hp}else{s.stat[8]},"base":s.base[8]})),"power":known.then(||json!({"current":s.stat[9],"maximum":s.stat[10],"base":s.base[10]})),"attributes":known.then(||json!({"base":stats(&s.base),"total":stats(&s.stat)})),"armor":known.then_some(s.stat[14]),"resists":known.then(||json!({"base":40+s.stat[4].div_euclid(7),"poison":s.stat[22],"disease":s.stat[23],"fire":s.stat[24],"cold":s.stat[25],"lightning":s.stat[26],"arcane":s.stat[27]})),"target_id":self.target,"pet_id":self.pet,"auto_attacking":self.auto,"dead":self.dead,"has_pet":self.pet.is_some(),"fighting":self.fighting,"mastery":null});
+        let mut value = json!({"id":self.id,"name":self.name,"class_id":p.class,"class_name":usize::try_from(p.class).ok().and_then(|i|crate::fork_ext::addons::player::CLASSES.get(i)),"race_id":p.race,"race_name":usize::try_from(p.race).ok().and_then(|i|crate::fork_ext::addons::player::RACES.get(i)),"level":p.level,"experience":p.exp,"experience_debt":p.p2c,"hp":known.then(||json!({"current":if h.available{h.current_hp}else{s.stat[7]},"maximum":if h.available{h.max_hp}else{s.stat[8]},"base":s.base[8]})),"power":known.then(||json!({"current":s.stat[9],"maximum":s.stat[10],"base":s.base[10]})),"attributes":known.then(||json!({"base":stats(&s.base),"total":stats(&s.stat)})),"armor":known.then_some(s.stat[14]),"resists":known.then(||json!({"base":40+s.stat[4].div_euclid(7),"poison":s.stat[22],"disease":s.stat[23],"fire":s.stat[24],"cold":s.stat[25],"lightning":s.stat[26],"arcane":s.stat[27]})),"target_id":self.target,"pet_id":self.pet,"auto_attacking":self.auto,"dead":self.dead,"has_pet":self.pet.is_some(),"fighting":self.fighting,"mastery":c.view.mastery});
         for field in [
             "position",
             "velocity",
@@ -387,6 +387,11 @@ pub(crate) fn key(play: &Play, walker: Option<&crate::walker::Walker>) -> FrameK
     let bars = play.hud_bars();
     bars.abilities.hash(&mut h);
     bars.gear.hash(&mut h);
+    for (idx, it) in play.dump.inventory.items.iter().enumerate() {
+        if (0..4).contains(&it.quick_slot) {
+            (idx, it.inv_index, it.quick_slot).hash(&mut h);
+        }
+    }
     v[31] = h.finish();
     FrameKey(v)
 }
@@ -394,6 +399,7 @@ pub(crate) fn inactive() {
     LIVE.with(|l| l.set(false));
     KEY.with(|k| k.set(None));
     super::items::forget();
+    super::r6a::forget();
     SNAPSHOT.with(|s| *s.borrow_mut() = None);
     native_core::discard_deferred();
 }
@@ -450,8 +456,13 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     }
     native_core::flush_deferred();
     super::items::refresh(play);
+    super::r6a::refresh(play, walker);
     native_core::flush_deferred();
-    CORE.with(|c| c.borrow_mut().flush_player_motion());
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.flush_player_motion();
+        c.flush_camera_motion();
+    });
     // `eqoa.entities.dots()` reads the view directly rather than a snapshot, and a hover frame
     // often reuses the cached snapshot (creatures move while the player and camera stand still),
     // so this frame's dots are refreshed on every pass.
@@ -717,6 +728,9 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
                 }
             });
         }
+        Kind::Quests => {
+            super::r6a::capture_quests(play);
+        }
         _ => {}
     }
     if let Some((id, old)) = cooldown {
@@ -771,6 +785,7 @@ pub(crate) enum Kind {
     Ability(i64),
     Abilities,
     Effects,
+    Quests,
     Legacy,
     Other,
 }
@@ -804,6 +819,7 @@ pub(crate) fn kind(play: &Play, event: &net::session::Event) -> Kind {
         | AbilityRemove { .. }
         | AbilityClearBar { .. }
         | AbilityUsable { .. } => Kind::Abilities,
+        Opcode { op: 0x007C | 0x007D, .. } => Kind::Quests,
         InvAdd(_)
         | InvTook { .. }
         | InvMove { .. }
@@ -895,6 +911,14 @@ pub(crate) fn fingerprint(play: &Play, kind: Kind) -> u64 {
                 a.lockout.hash(&mut h);
             }
         }
+        Kind::Quests => {
+            use std::hash::Hash;
+            play.quests.stamp.hash(&mut h);
+            play.quests.titles.len().hash(&mut h);
+            for t in &play.quests.titles {
+                t.hash(&mut h);
+            }
+        }
         Kind::Other | Kind::Legacy => {}
     }
     h.finish()
@@ -905,7 +929,7 @@ struct Bar {
     kind: &'static str,
     selected: bool,
     selected_slot: Option<i32>,
-    slots: Vec<(crate::hudmenu::Entry, Option<i64>)>,
+    slots: Vec<(crate::hudmenu::Entry, Option<i64>, Option<u32>)>,
 }
 fn hotbars(p: &Play) -> Vec<Bar> {
     let bars = p.hud_bars();
@@ -942,6 +966,14 @@ fn hotbars(p: &Play) -> Vec<Bar> {
                             (e.msg == 0x8060000)
                                 .then(|| p.abilities.get(&e.id).map(|a| a.id))
                                 .flatten(),
+                            (e.msg == 0x2030000)
+                                .then(|| {
+                                    usize::try_from(e.id)
+                                        .ok()
+                                        .and_then(|idx| p.dump.inventory.items.get(idx))
+                                        .map(|it| it.inv_index)
+                                })
+                                .flatten(),
                         )
                     })
                     .collect(),
@@ -950,7 +982,8 @@ fn hotbars(p: &Play) -> Vec<Bar> {
         .collect()
 }
 fn patch_hotbars(c: &mut Core, bars: Vec<Bar>) {
-    let after=bars.into_iter().map(|b|json!({"index":b.index,"kind":b.kind,"selected":b.selected,"selected_slot":b.selected_slot,"slots":b.slots.into_iter().enumerate().map(|(i,(e,id))|{let kind=match e.msg{0=>"empty",0x8060000=>"ability",0x2030000=>"item",crate::gear::MSG=>"weapon_set",_=>"command"};let ability=id.and_then(|id|c.view.abilities.iter().find(|a|a["id"].as_str().is_some_and(|v|v.parse::<i64>().ok()==Some(id)))).map(|a|a["ref"].clone());json!({"index":i+1,"kind":kind,"ability":ability,"item":null,"weapon_set":(kind=="weapon_set").then_some(e.id+1),"command":null,"icon":null,"ui_icon":(e.icon2>=0).then_some(e.icon2)})}).collect::<Vec<_>>()})).collect::<Vec<_>>();
+    let mut after=bars.into_iter().map(|b|json!({"index":b.index,"kind":b.kind,"selected":b.selected,"selected_slot":b.selected_slot,"slots":b.slots.into_iter().enumerate().map(|(i,(e,id,item_key))|{let kind=match e.msg{0=>"empty",0x8060000=>"ability",0x2030000=>"item",crate::gear::MSG=>"weapon_set",_=>"command"};let ability=id.and_then(|id|c.view.abilities.iter().find(|a|a["id"].as_str().is_some_and(|v|v.parse::<i64>().ok()==Some(id)))).map(|a|a["ref"].clone());json!({"index":i+1,"kind":kind,"ability":ability,"item":null,"item_key":item_key,"weapon_set":(kind=="weapon_set").then_some(e.id+1),"command":null,"icon":null,"ui_icon":(e.icon2>=0).then_some(e.icon2)})}).collect::<Vec<_>>()})).collect::<Vec<_>>();
+    c.resolve_hotbar_items(&mut after);
     let before = std::mem::replace(&mut c.view.hotbar, after);
     if interested("hotbar.changed") && before != c.view.hotbar {
         c.emit(

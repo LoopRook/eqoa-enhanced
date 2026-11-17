@@ -57,6 +57,22 @@ fn claimed() -> bool {
             })
     })
 }
+pub(crate) fn point_in_vm_claim(vm: u64, x: f64, y: f64) -> bool {
+    let frame = CORE.with(|c| c.borrow().frame);
+    POINTER.with(|p| {
+        let p = p.borrow();
+        p.inside
+            && p.claims.get(&vm).is_some_and(|(f, rs)| {
+                frame.saturating_sub(*f) <= 1
+                    && rs.iter().any(|r| {
+                        x >= r[0] as f64
+                            && x <= (r[0] + r[2]) as f64
+                            && y >= r[1] as f64
+                            && y <= (r[1] + r[3]) as f64
+                    })
+            })
+    })
+}
 fn emit(name: &str, button: Option<&str>, steps: Option<f32>) {
     if !native_core::capture_requested() {
         return;

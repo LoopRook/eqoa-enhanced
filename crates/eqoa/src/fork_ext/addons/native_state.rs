@@ -768,24 +768,6 @@ fn install_math(lua: &Lua) -> Result<()> {
             })
         })?,
     )?;
-    for action_name in ["assist", "target_target"] {
-        let sym = format!("eqoa.actions.{action_name}");
-        bind(
-            lua,
-            "actions",
-            action_name,
-            lua.create_function(move |lua, ()| {
-                let in_world = CORE.with(|c| c.borrow().view.in_world);
-                if !in_world {
-                    return error(lua, &sym, "not_in_world", "enter a loaded world first");
-                }
-                if !super::actions::queue_assist() {
-                    return error(lua, &sym, "busy", "assist already queued this tick");
-                }
-                lua.pack_multi((true, Value::Nil))
-            })?,
-        )?;
-    }
     bind(
         lua,
         "windows",
@@ -1213,7 +1195,11 @@ fn install_math(lua: &Lua) -> Result<()> {
         "actions",
         "toggle_stats_box",
         lua.create_function(|lua, ()| {
+            let vm = super::native_events::bus(lua).borrow().vm;
             let addon = super::native::session(lua).borrow().addon.clone();
+            if let Err((code, msg)) = super::gesture::take_single_token(vm, &addon) {
+                return error(lua, "eqoa.actions.toggle_stats_box", code, &msg);
+            }
             if addon != "eqoa_stats_box" {
                 return error(lua, "eqoa.actions.toggle_stats_box", "permission_denied",
                     "this compatibility action belongs to eqoa_stats_box; use eqoa.options.set for your own toggles");
@@ -1363,13 +1349,19 @@ fn install_math(lua: &Lua) -> Result<()> {
                         let data: mlua::Table = et.get("data")?;
                         let down = data.get::<Option<bool>>("down")?.unwrap_or(false);
                         let rep = data.get::<Option<bool>>("repeat")?.unwrap_or(false);
+                        let synthetic = data.get::<Option<bool>>("synthetic")?.unwrap_or(false);
                         let key = data.get::<Option<String>>("key")?.unwrap_or_default();
-                        if down && !rep && super::input::mod_binding_allowed(vm_for_cb) {
+                        if down
+                            && !rep
+                            && !synthetic
+                            && super::input::mod_binding_allowed(vm_for_cb)
+                        {
                             let bound =
                                 crate::fork_ext::bindpage::get_key(&addon_for_cb, &id_for_cb);
                             if bound.is_some_and(|bound| {
                                 !bound.is_empty() && key.eq_ignore_ascii_case(&bound)
                             }) {
+                                super::gesture::arm_mod_key(vm_for_cb);
                                 cb.call::<()>(ev)?;
                             }
                         }

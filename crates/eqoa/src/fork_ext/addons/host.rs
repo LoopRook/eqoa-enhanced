@@ -77,6 +77,7 @@ struct BaseHost {
     snapshot: Rc<Cell<Snapshot>>,
     util: Table,
     window: Table,
+    camera: Table,
     bit: Table,
     clean_os: Table,
     remaining: Rc<Cell<u32>>,
@@ -181,13 +182,115 @@ fn create_base_host() -> Result<BaseHost> {
         lua.create_function(move |_, ()| Ok(state.get().ui_busy))?,
     )?;
     window_mod.set("Mode", ui_mode)?;
-    package_loaded.set("frontiers_forge.window", window_mod.clone())?;
     let state = snapshot.clone();
+    window_mod.set(
+        "IsTextDialogOpen",
+        lua.create_function(move |_, ()| Ok(state.get().ui_mode == 9))?,
+    )?;
+    // Pinned window.lua:830-838 HINT_BUTTON table (exact Forge button hint escape mapping).
+    const FORGE_HINT_BUTTON: &[(&str, &str)] = &[
+        ("x", "cross"),
+        ("t", "triangle"),
+        ("s", "square"),
+        ("c", "circle"),
+        ("8", "r1"),
+        ("-", "dpad_left"),
+        ("+", "dpad_right"),
+    ];
+    window_mod.set(
+        "FormatButtonHint",
+        lua.create_function(|_, (button, label): (Value, Option<String>)| {
+            let label = label.unwrap_or_default();
+            let b = match button {
+                Value::String(s) => s.to_str().ok().map(|v| v.to_string()),
+                _ => None,
+            };
+            if let Some(btn) = b {
+                if let Some((esc, _)) = FORGE_HINT_BUTTON.iter().find(|(_, name)| *name == btn) {
+                    return Ok(format!("|{esc}{label}"));
+                }
+            }
+            Ok(label)
+        })?,
+    )?;
+    window_mod.set(
+        "ParseButtonHint",
+        lua.create_function(|lua, hint: Value| {
+            let Some(text) = hint.as_string().and_then(|s| s.to_str().ok().map(|v| v.to_string()))
+            else {
+                return Ok((Value::Nil, "".to_string()));
+            };
+            if let Some(rest) = text.strip_prefix('|') {
+                if let Some(ch) = rest.chars().next() {
+                    let mut esc_buf = [0u8; 4];
+                    let esc = ch.encode_utf8(&mut esc_buf);
+                    let label = rest[ch.len_utf8()..].to_string();
+                    let button = FORGE_HINT_BUTTON
+                        .iter()
+                        .find(|(e, _)| *e == esc)
+                        .map(|(_, n)| *n);
+                    if let Some(btn) = button {
+                        return Ok((Value::String(lua.create_string(btn)?), label));
+                    }
+                    return Ok((Value::Nil, label));
+                }
+            }
+            Ok((Value::Nil, text))
+        })?,
+    )?;
+    package_loaded.set("frontiers_forge.window", window_mod.clone())?;
+
+    // frontiers_forge.camera — pinned reference camera.lua:6-28
+    let cam_mod = lua.create_table()?;
+    cam_mod.set(
+        "GetCoordinates",
+        lua.create_function(|lua, ()| {
+            let pos = super::native_core::CORE.with(|c| {
+                let c = c.borrow();
+                c.view.camera.get("position").and_then(|p| {
+                    Some((p["x"].as_f64()?, p["y"].as_f64()?, p["z"].as_f64()?))
+                })
+            });
+            let (x, y, z) = pos.unwrap_or((0.0, 0.0, 0.0));
+            let t = lua.create_table()?;
+            t.set("x", x)?;
+            t.set("y", y)?;
+            t.set("z", z)?;
+            Ok(t)
+        })?,
+    )?;
+    cam_mod.set(
+        "GetFacingRadians",
+        lua.create_function(|_, ()| {
+            let rad = super::native_core::CORE.with(|c| c.borrow().view.camera_orbit_x);
+            Ok(rad.map(f64::from))
+        })?,
+    )?;
+    cam_mod.set(
+        "GetFacingDegrees",
+        lua.create_function(|_, ()| {
+            let rad = super::native_core::CORE
+                .with(|c| c.borrow().view.camera_orbit_x)
+                .unwrap_or(0.0);
+            Ok((f64::from(rad).to_degrees()).rem_euclid(360.0))
+        })?,
+    )?;
+    package_loaded.set("frontiers_forge.camera", cam_mod.clone())?;
+
+    util.set(
+        "GetCompassRadians",
+        lua.create_function(|_, ()| {
+            let rad = super::native_core::CORE.with(|c| c.borrow().view.camera_orbit_x);
+            Ok(rad.map(f64::from))
+        })?,
+    )?;
     util.set(
         "GetCompassDegrees",
-        lua.create_function(move |_, ()| {
-            let deg = (state.get().player.heading_rad.to_degrees() as f64).rem_euclid(360.0);
-            Ok(deg)
+        lua.create_function(|_, ()| {
+            let rad = super::native_core::CORE
+                .with(|c| c.borrow().view.camera_orbit_x)
+                .unwrap_or(0.0);
+            Ok(f64::from(rad).to_degrees().rem_euclid(360.0))
         })?,
     )?;
     util.set(
@@ -328,6 +431,7 @@ fn create_base_host() -> Result<BaseHost> {
         snapshot,
         util,
         window: window_mod,
+        camera: cam_mod,
         bit: bit_table,
         clean_os,
         remaining,
@@ -394,6 +498,7 @@ impl Host {
             host_registry,
         };
         host.register_host_module("frontiers_forge.window", Value::Table(base.window))?;
+        host.register_host_module("frontiers_forge.camera", Value::Table(base.camera))?;
         super::player::install_player_adapter(&host)?;
         super::visibility::install_standalone_ui_adapter(&host)?;
         super::group::install_group_adapter(&host)?;
@@ -432,6 +537,7 @@ impl Host {
         let base = create_base_host()?;
         let util_t = base.util.clone();
         let window_t = base.window.clone();
+        let camera_t = base.camera.clone();
         let bit_t = base.bit.clone();
         let os_t = base.clean_os.clone();
         base.lua.globals().set(
@@ -441,6 +547,8 @@ impl Host {
                     Ok(Value::Table(util_t.clone()))
                 } else if name == "frontiers_forge.window" {
                     Ok(Value::Table(window_t.clone()))
+                } else if name == "frontiers_forge.camera" {
+                    Ok(Value::Table(camera_t.clone()))
                 } else if name == "bit" {
                     Ok(Value::Table(bit_t.clone()))
                 } else if name == "os" {
@@ -579,6 +687,11 @@ impl Host {
         if !once || !initialized {
             let _phase = super::native::phase(&self.lua, "entry");
             let _drawing = super::bridge::drawing(!once);
+            let _gesture = (!once).then(|| {
+                let vm = bus.borrow().vm;
+                let addon = super::native::session(&self.lua).borrow().addon.clone();
+                super::gesture::enter_render_scope(vm, &addon)
+            });
             function.call::<()>(())?;
         }
         bus.borrow_mut().initialized = true;

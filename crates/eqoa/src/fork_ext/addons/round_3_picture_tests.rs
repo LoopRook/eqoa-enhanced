@@ -1239,6 +1239,7 @@ fn assert_mod_click(id: &str, option: &str, frame_rect: [f32; 4], vertical: &str
             capture::Owner::Addon
         );
         actions::take_action_requests();
+        crate::fork_ext::addons::action_broker::reset_all_for_test();
         context
             .io_mut()
             .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
@@ -1252,10 +1253,11 @@ fn assert_mod_click(id: &str, option: &str, frame_rect: [f32; 4], vertical: &str
             if summary {
                 request.summary
             } else {
-                request.assist
+                crate::fork_ext::addons::action_broker::queued_kinds_for_test() == vec!["assist"]
             },
             "native action at corner of {id}'s drawn rect"
         );
+        crate::fork_ext::addons::action_broker::reset_all_for_test();
         context
             .io_mut()
             .add_mouse_pos_event([size.0 as f32 - 5., size.1 as f32 - 5.]);

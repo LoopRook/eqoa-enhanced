@@ -29,6 +29,10 @@ pub struct NpcWindows {
     keys: Vec<(i32, bool)>,
 }
 
+impl NpcWindows {
+    pub fn loot_lists(&self) -> (&crate::wndlist::WndList, &crate::wndlist::WndList) { self.loot.read_list() }
+}
+
 /// The modes these windows own.
 pub fn owns(mode: i32) -> bool {
     matches!(mode, 1 | 10 | 15 | 16)
@@ -471,6 +475,7 @@ impl Play {
             }
         }
         self.cues.extend(cues.into_iter().map(crate::sound::Cue::Ui));
+        super::fork_hooks::npcw_requests(self, &mut loot_out, &mut merch_out);
         for o in loot_out {
             eprintln!("play: loot request {o:?}");
             match o {

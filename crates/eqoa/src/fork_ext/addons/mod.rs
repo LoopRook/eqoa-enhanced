@@ -24,7 +24,10 @@ pub(crate) mod ability;
 pub(crate) mod addon_perf;
 mod object_cache;
 mod record_raw;
+pub(crate) mod action_broker;
 pub(crate) mod actions;
+pub(crate) mod window_actions;
+pub(crate) mod gesture;
 mod async_json;
 pub(crate) mod bit;
 pub(crate) mod chat;
@@ -68,6 +71,7 @@ pub(crate) mod native_events;
 pub(crate) mod native_items;
 mod native_media;
 pub(crate) mod native_projection;
+pub(crate) mod native_r6a;
 pub(crate) mod native_settings;
 mod native_state;
 #[cfg(test)]

@@ -67,7 +67,7 @@ impl Session {
             ("actions", "assist target_target toggle_stats_box", 3),
             (
                 "actions",
-                "status cancel target cycle_target assist interact attack cast use_hotbar use_item equip destroy swap_items quick_slot weapon_set prepare_weapon_set assign_ability unmemorize_ability unmemorize_all arrange_ability loot loot_all buy sell bank_move bank_money chat command move look autorun follow stop camera open_window close_window select_row activate_row dialog_answer input_text drop_quest mastery_share mastery_browse mastery_buy mastery_refund buttons menu_command",
+                "status cancel batch stop_batch batch_status target cycle_target assist interact attack cast use_hotbar use_item equip destroy swap_items quick_slot weapon_set prepare_weapon_set assign_ability unmemorize_ability unmemorize_all arrange_ability loot loot_all buy sell bank_move bank_money chat command move look autorun follow stop camera open_window close_window select_row activate_row dialog_answer input_text drop_quest mastery_share mastery_browse mastery_buy mastery_refund buttons menu_command",
                 4,
             ),
             ("bank", "get", 3),
@@ -327,12 +327,21 @@ pub(crate) fn annotate_host(host: &Host) -> Result<()> {
         "frontiers_forge.player.GetCMs",
         "frontiers_forge.player.GetCMsSpent",
         "frontiers_forge.player.GetCMPct",
+        "frontiers_forge.ui.GetDispositionFaceTexId",
+        "frontiers_forge.ui.GetClassIconTexId",
         "frontiers_forge.ui.GetClassIconTexture",
-        "frontiers_forge.ui.GetDispositionIconTexture",
         "frontiers_forge.ui.DrawClassIcon",
         "frontiers_forge.ui.DrawDispositionIcon",
+        "frontiers_forge.camera.GetCoordinates",
+        "frontiers_forge.camera.GetFacingRadians",
+        "frontiers_forge.camera.GetFacingDegrees",
+        "frontiers_forge.window.FormatButtonHint",
+        "frontiers_forge.window.ParseButtonHint",
+        "frontiers_forge.window.IsTextDialogOpen",
+        "frontiers_forge.util.GetCompassRadians",
+        "frontiers_forge.merchant.GetButtonHint",
     ] {
-        describe(lua, path, "not_yet", Some(4), "scheduled for round 4");
+        describe(lua, path, "supported", Some(4), "");
     }
     for path in super::items_forge::DEFERRED {
         describe(
@@ -977,7 +986,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_events::install(host, host.once_mode())?;
     install_fields(lua);
     super::native_state::install(host)?;
+    super::action_broker::install(host)?;
     super::native_items::install(host)?;
+    super::native_r6a::install(host)?;
     super::map_views::install(host)?;
     super::guides::install(host)?;
     super::pointer_api::install(host)?;
@@ -1069,6 +1080,7 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.player.Attributes", "base" | "total") => Some("eqoa.player.SevenStats"),
         ("eqoa.player.Player", "resists") => Some("eqoa.player.Resists"),
         ("eqoa.player.Player", "location") => Some("eqoa.player.Location"),
+        ("eqoa.player.Player", "mastery") => Some("eqoa.mastery.Mastery"),
         (_, "position" | "actor_position" | "velocity") => Some("eqoa.Vec3"),
         ("eqoa.map.MapState", "search_anchor") => Some("eqoa.hud.Rect"),
         ("eqoa.group.Group", "members") => Some("eqoa.group.Member"),
@@ -1106,6 +1118,10 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
             | "eqoa.hud.SinglePanelLayout",
             "panel" | "health" | "power" | "exp",
         ) => Some("eqoa.hud.Rect"),
+        ("eqoa.windows.Windows", "windows") => Some("eqoa.windows.Window"),
+        ("eqoa.windows.Window", "rows") => Some("eqoa.windows.MenuRow"),
+        ("eqoa.windows.Window", "hints") => Some("eqoa.windows.ButtonHint"),
+        ("eqoa.windows.Window", "dialog") => Some("eqoa.windows.Dialog"),
         _ => None,
     }
 }
@@ -1137,7 +1153,7 @@ fn install_fields(lua: &Lua) {
         ("eqoa.client.DisplayMetrics", "width height render_scale"),
         (
             "eqoa.player.Player",
-            "entity id name class_id class_name race_id race_name level experience experience_debt hp_fraction hp power attributes armor resists position velocity speed horizontal_speed heading target_id pet_id auto_attacking dead has_pet fighting location",
+            "entity id name class_id class_name race_id race_name level experience experience_debt hp_fraction hp power attributes armor resists position velocity speed horizontal_speed heading target_id pet_id auto_attacking dead has_pet fighting location mastery",
         ),
         ("eqoa.player.Vital", "current maximum base"),
         ("eqoa.player.Attributes", "base total"),
@@ -1189,7 +1205,7 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.hotbar.HotbarSlot",
-            "index kind ability weapon_set command icon ui_icon",
+            "index kind ability item weapon_set command icon ui_icon",
         ),
         (
             "eqoa.cooldowns.Cooldown",
@@ -1241,7 +1257,10 @@ fn install_fields(lua: &Lua) {
         for field in fields.split_whitespace() {
             let field_round = if matches!(
                 (path, field),
-                ("eqoa.entities.Entity", "actor_position") | ("eqoa.map.MapState", "search_anchor")
+                ("eqoa.entities.Entity", "actor_position")
+                    | ("eqoa.map.MapState", "search_anchor")
+                    | ("eqoa.player.Player", "mastery")
+                    | ("eqoa.hotbar.HotbarSlot", "item")
             ) {
                 Some(4)
             } else if matches!(
@@ -1261,20 +1280,6 @@ fn install_fields(lua: &Lua) {
             );
         }
     }
-    describe(
-        lua,
-        "eqoa.player.Player.mastery",
-        "not_yet",
-        Some(4),
-        "Class Mastery arrives in round 4",
-    );
-    describe(
-        lua,
-        "eqoa.hotbar.HotbarSlot.item",
-        "not_yet",
-        Some(6),
-        "hotbar item slots are not linked to item handles yet",
-    );
 }
 
 pub(crate) fn fatal_memory(error: &mlua::Error) -> bool {

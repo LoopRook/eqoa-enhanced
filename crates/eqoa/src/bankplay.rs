@@ -23,6 +23,10 @@ pub struct BankPlay {
     keys: Vec<(i32, bool)>,
 }
 
+impl BankPlay {
+    pub fn read_lists(&self) -> (&crate::wndlist::WndList, &crate::wndlist::WndList) { self.wnd.read_lists() }
+}
+
 impl Default for BankPlay {
     fn default() -> Self {
         BankPlay { state: 0, auction: crate::auction::Auction::new(), wnd: Bank::default(), search: Default::default(), search_open: None, open: false, keys: Vec::new() }
@@ -213,6 +217,7 @@ impl Play {
             b.wnd.draw(vui, r, &info, &view, &icon, &can_use, now, &mut cues);
         }
         self.cues.extend(cues.into_iter().map(crate::sound::Cue::Ui));
+        super::fork_hooks::bank_requests(self, &mut out);
         for o in out {
             match o {
                 BankOut::Close => self.bank_close(),

@@ -210,7 +210,10 @@ impl Play {
             let def=&self.hud_menus.defs[k];let menu=&self.hud_menus.menus[k];
             let slots=def.entries.iter().take(def.count.max(0) as usize).enumerate().map(|(i,e)|{
                 let kind=match e.msg {0=>"empty",0x8060000=>"ability",0x2030000=>"item",crate::gear::MSG=>"weapon_set",_=>"command"};
-                json!({"index":i+1,"kind":kind,"ability_id":(kind=="ability").then(||self.abilities.get(&e.id).map(|a|a.id.to_string())).flatten(),"item":null,"weapon_set":(kind=="weapon_set").then_some(e.id+1),"command":null,"icon":null,"ui_icon":(e.icon2>=0).then_some(e.icon2)})
+                let item_key = (kind == "item")
+                    .then(|| usize::try_from(e.id).ok().and_then(|idx| self.dump.inventory.items.get(idx)).map(|it| it.inv_index))
+                    .flatten();
+                json!({"index":i+1,"kind":kind,"ability_id":(kind=="ability").then(||self.abilities.get(&e.id).map(|a|a.id.to_string())).flatten(),"item":null,"item_key":item_key,"weapon_set":(kind=="weapon_set").then_some(e.id+1),"command":null,"icon":null,"ui_icon":(e.icon2>=0).then_some(e.icon2)})
             }).collect::<Vec<_>>();
             json!({"index":index+1,"kind":match k {2=>"items",3=>"weapon_sets",_=>"abilities"},"selected":self.hud_menus.sel==k as i32,"selected_slot":(menu.sel>=0 && menu.sel<def.count).then_some(menu.sel+1),"slots":slots})
         }).collect();
@@ -229,7 +232,7 @@ impl Play {
             })
             .flatten();
         let [inventory, bank, loot, merchant] = items::build(self);
-        View {
+        let mut view = View {
             in_world: true,
             phase,
             world_id: Some(self.world_id() as i32),
@@ -266,6 +269,14 @@ impl Play {
             bank,
             loot,
             merchant,
+            quests: Vec::new(),
+            mastery: None,
+            mastery_skills: None,
+            mastery_node: None,
+            camera: Json::Null,
+            camera_compass: None,
+            camera_orbit_x: None,
+            windows_state: crate::fork_ext::addons::native_core::none_windows_json(),
             channel: match self.channel {
                 0 => "say",
                 2 => "shout",
@@ -273,7 +284,9 @@ impl Play {
                 4 => "guild",
                 _ => "other",
             },
-        }
+        };
+        r6a::populate_view(self, walker, &mut view);
+        view
     }
 }
 
@@ -318,7 +331,14 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
                     c.ability_versions.clear();
                     c.item_versions.clear();
                     c.item_revisions.clear();
+                    c.quest_revision = 0;
+                    c.mastery_flags = Default::default();
+                    c.cm_pending_ops = 0;
+                    if matches!(event, Event::WorldEntry { .. }) {
+                        c.mastery_flags.from_dump();
+                    }
                     items::forget();
+                    r6a::forget();
                     c.cooldown_edges.clear();
                     c.unknown_lockouts.clear();
                     c.entity_worlds.clear();
@@ -327,6 +347,11 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
                     c.chat.clear();
                     c.selected_target = None;
                     c.disposition_target = None;
+                }
+                Event::Opcode { op: 0x1402, data } => {
+                    if let Some(op @ 1..=10) = data.first().copied() {
+                        c.cm_pending_ops |= 1u16 << op;
+                    }
                 }
                 _ => {}
             }
@@ -352,11 +377,19 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
             }
             Event::Teleport { .. } => c.reset("zone"),
 
-            Event::WorldEntry { player, .. } => c.reset(if player.world == play.player.world {
-                "respawn"
-            } else {
-                "zone"
-            }),
+            Event::WorldEntry { player, .. } => {
+                c.reset(if player.world == play.player.world {
+                    "respawn"
+                } else {
+                    "zone"
+                });
+                c.mastery_flags.from_dump();
+            }
+            Event::Opcode { op: 0x1402, data } => {
+                if let Some(op @ 1..=10) = data.first().copied() {
+                    c.cm_pending_ops |= 1u16 << op;
+                }
+            }
             Event::Disconnected(_) => c.reset("disconnect"),
             Event::State {
                 channel: 0x42,
@@ -442,6 +475,14 @@ pub(super) mod updates;
 
 #[path = "items_capture.rs"]
 pub(super) mod items;
+#[path = "r6a_capture.rs"]
+pub(super) mod r6a;
 #[cfg(test)]
 #[path = "items_tests.rs"]
 mod items_tests;
+#[cfg(test)]
+#[path = "r6a_tests.rs"]
+mod r6a_tests;
+#[cfg(test)]
+#[path = "r6d_tests.rs"]
+mod r6d_tests;

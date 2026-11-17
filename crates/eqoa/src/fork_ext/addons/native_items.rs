@@ -217,6 +217,71 @@ impl Core {
             self.emit(&event, data);
         }
     }
+
+    pub(crate) fn emit_sandstorm_loot_delta(
+        &mut self,
+        taken: &[SandstormTakenItem],
+        is_all: bool,
+        fallback_before: Option<&Json>,
+    ) {
+        if taken.is_empty() || !native_events::interested("loot.changed") {
+            return;
+        }
+        let before = {
+            let current = peek(&self.view, "loot");
+            if current.is_object() {
+                current.clone()
+            } else if let Some(fb) = fallback_before.filter(|v| v.is_object()) {
+                fb.clone()
+            } else {
+                return;
+            }
+        };
+        let mut after = before.clone();
+        let Some(items) = after["items"].as_array_mut() else {
+            return;
+        };
+        let mut remaining_taken: Vec<(u32, i64, i64)> = taken
+            .iter()
+            .map(|t| (t.inv_index, t.item_id, t.qty))
+            .collect();
+        let mut next_items = Vec::with_capacity(items.len());
+        let mut any_changed = false;
+        for mut entry in items.drain(..) {
+            let key = entry["inventory_key"].as_u64().unwrap_or(u64::MAX) as u32;
+            let qty = entry["quantity"].as_i64().unwrap_or(0);
+            let mut take_here = 0i64;
+            if let Some(slot_taken) = remaining_taken
+                .iter_mut()
+                .find(|(k, _, q)| *k == key && *q > 0)
+            {
+                take_here = slot_taken.2.min(qty);
+                slot_taken.2 -= take_here;
+            }
+            if take_here > 0 {
+                any_changed = true;
+                let left = qty - take_here;
+                if left > 0 {
+                    entry["quantity"] = json!(left);
+                    next_items.push(entry);
+                }
+            } else {
+                next_items.push(entry);
+            }
+        }
+        if !any_changed {
+            return;
+        }
+        *items = next_items;
+        let cause = if is_all { "loot_all" } else { "loot_one" }.to_string();
+        let (event, data) = event_data(ItemChange {
+            name: "loot",
+            before,
+            after,
+            cause,
+        });
+        self.emit(&event, data);
+    }
 }
 
 // ---- Lua ----
@@ -276,6 +341,140 @@ fn locate(v: &Value, c: &Core) -> Option<(&'static str, usize, u64, (String, u64
             && i["ref"]["incarnation"].as_u64() == Some(r.incarnation)
     })?;
     Some((list, index, container["revision"].as_u64().unwrap_or(0), (r.key.clone(), r.incarnation)))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LootItemIdentity {
+    pub item_id: String,
+    pub name: String,
+    pub qty_before: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SandstormTakenItem {
+    pub inv_index: u32,
+    pub item_id: i64,
+    pub qty: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ResolvedItemSpec {
+    pub list: &'static str,
+    pub index: usize,
+    pub inv_index: u32,
+    pub key: String,
+    pub generation: u64,
+    pub incarnation: u64,
+}
+
+pub(crate) fn item_identity_of(v: &Value) -> Option<LootItemIdentity> {
+    CORE.with(|c| {
+        let c = c.borrow();
+        let (list, index, _, _) = locate(v, &c)?;
+        let item = peek(&c.view, list)["items"].as_array()?.get(index)?;
+        Some(LootItemIdentity {
+            item_id: item["id"].as_str()?.to_string(),
+            name: item["name"].as_str()?.to_string(),
+            qty_before: item["quantity"].as_i64().unwrap_or(1),
+        })
+    })
+}
+
+pub(crate) fn re_resolve_loot_handle(
+    ident: &LootItemIdentity,
+    count: Option<i64>,
+) -> Option<ResolvedItemSpec> {
+    let min_qty = count.unwrap_or(1);
+    CORE.with(|c| {
+        let c = c.borrow();
+        let items = peek(&c.view, "loot")["items"].as_array()?;
+        let mut best: Option<(usize, &Json)> = None;
+        for (idx, it) in items.iter().enumerate() {
+            if it["id"].as_str() != Some(ident.item_id.as_str())
+                || it["name"].as_str() != Some(ident.name.as_str())
+            {
+                continue;
+            }
+            let qty = it["quantity"].as_i64().unwrap_or(0);
+            if qty < min_qty {
+                continue;
+            }
+            if qty == ident.qty_before {
+                best = Some((idx, it));
+                break;
+            }
+            if best.is_none() {
+                best = Some((idx, it));
+            }
+        }
+        let (index, item) = best?;
+        let inv_index = item["inventory_key"].as_u64()? as u32;
+        let key = item["ref"]["key"].as_str()?.to_string();
+        let incarnation = item["ref"]["incarnation"].as_u64()?;
+        Some(ResolvedItemSpec {
+            list: "loot",
+            index,
+            inv_index,
+            key,
+            generation: c.generation,
+            incarnation,
+        })
+    })
+}
+
+pub(crate) fn resolve_item_handle(
+    v: &Value,
+) -> std::result::Result<ResolvedItemSpec, (&'static str, String)> {
+    let Some(ud) = v.as_userdata() else {
+        return Err(("invalid_argument", "item must be an item handle".into()));
+    };
+    let Ok(r) = ud.borrow::<Ref>() else {
+        return Err(("invalid_argument", "item must be an item handle".into()));
+    };
+    if r.kind != "item" {
+        return Err(("invalid_argument", format!("expected item handle, got {}", r.kind)));
+    }
+    let key = r.key.clone();
+    let generation = r.generation;
+    let inc = r.incarnation;
+    CORE.with(|c| {
+        let c = c.borrow();
+        let Some((list, index, _rev, (k, incarnation))) = locate(v, &c) else {
+            return Err(("stale_handle", "item handle is stale or item no longer exists".into()));
+        };
+        let Some((_, raw_idx)) = k.split_once(':') else {
+            return Err(("invalid_argument", "malformed item handle key".into()));
+        };
+        let Ok(inv_index) = raw_idx.parse::<u32>() else {
+            return Err(("invalid_argument", "malformed item handle key".into()));
+        };
+        let _ = (key, generation, inc);
+        Ok(ResolvedItemSpec {
+            list,
+            index,
+            inv_index,
+            key: k,
+            generation: c.generation,
+            incarnation,
+        })
+    })
+}
+
+pub(crate) fn is_handle_fresh(spec: &ResolvedItemSpec) -> bool {
+    CORE.with(|c| {
+        let c = c.borrow();
+        if spec.generation != c.generation {
+            return false;
+        }
+        peek(&c.view, spec.list)["items"]
+            .as_array()
+            .is_some_and(|items| {
+                items.iter().any(|i| {
+                    i["ref"]["key"].as_str() == Some(spec.key.as_str())
+                        && i["ref"]["incarnation"].as_u64() == Some(spec.incarnation)
+                })
+            })
+    })
 }
 
 /// The record last built for each stack read, by (generation, revision): a mod (or the Forge item

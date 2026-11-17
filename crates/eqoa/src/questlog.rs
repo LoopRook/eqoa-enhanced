@@ -104,6 +104,9 @@ impl Default for QuestLog {
 }
 
 impl QuestLog {
+    pub fn read_state(&self) -> (i32, i32) {
+        (self.sel, self.top)
+    }
 
     /// A pointer at frame point `p` (`pointer`): with the box up, its
     /// buttons; else a quest selected (`MOVED`), and the selected one asked
