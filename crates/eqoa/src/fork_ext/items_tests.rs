@@ -3146,3 +3146,62 @@ fn round65_open_loot_talk_npc_flags_and_strict_target_guards() {
     action_broker::reset_all_for_test();
     crate::fork_ext::bindpage::reset_in_memory();
 }
+
+#[test]
+fn round65_zero_addon_zero_takeover_probes() {
+    use crate::fork_ext::addons::{action_broker, window_takeover};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    let _ = window_takeover::take_state_borrows_for_test();
+
+    let mut p = ready();
+    let vui = crate::ui::Vui::new(Default::default(), Default::default(), vec![]);
+    let mut raster = crate::pointer::testing::NullRaster;
+    for _ in 0..5 {
+        super::super::begin_iteration(&mut p, true);
+        p.run_npcw(&vui, &mut raster);
+        p.run_bank(&vui, &mut raster);
+    }
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    apply(&mut p, opcode(0x0016, vec![]));
+    apply(&mut p, opcode(0x00B7, shop_bytes(7001, 90, 110, &[sword()], "Shop!")));
+    p.npcw.shop = Default::default();
+    p.mode = 0;
+    apply(&mut p, opcode(0x124D, vec![]));
+    p.mode = 0;
+    assert_eq!(
+        window_takeover::take_state_borrows_for_test(),
+        0,
+        "zero-addon path must perform zero takeover TLS state borrows"
+    );
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round65_reset_all_for_test_clears_hidden_sessions() {
+    use crate::fork_ext::addons::{action_broker, window_takeover};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+
+    let mut p = ready();
+    assert!(window_takeover::takeover(1, "test_mod", window_takeover::TakeoverKind::Loot).is_ok());
+    assert!(window_takeover::takeover(1, "test_mod", window_takeover::TakeoverKind::Merchant).is_ok());
+    assert!(window_takeover::takeover(1, "test_mod", window_takeover::TakeoverKind::Bank).is_ok());
+    assert!(window_takeover::activate_hidden(window_takeover::TakeoverKind::Loot, 9001));
+    assert!(window_takeover::activate_hidden(window_takeover::TakeoverKind::Merchant, 9002));
+    assert!(window_takeover::activate_hidden(window_takeover::TakeoverKind::Bank, 9003));
+    p.npcw.corpse = Some(list(&[gem()]));
+    p.npcw.shop = crate::merchant::read_shop(&shop_bytes(9002, 90, 110, &[sword()], "Hi"));
+    assert!(super::super::loot_session_open(&p));
+    assert!(super::super::merchant_session_open(&p));
+    assert!(super::super::bank_session_open(&p));
+    assert!(window_takeover::has_activity());
+
+    window_takeover::reset_all_for_test();
+    assert!(!window_takeover::has_activity());
+    assert!(!super::super::loot_session_open(&p));
+    assert!(!super::super::merchant_session_open(&p));
+    assert!(!super::super::bank_session_open(&p));
+    assert_eq!(window_takeover::hidden_bank_session(), None);
+}

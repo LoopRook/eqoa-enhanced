@@ -370,27 +370,6 @@ pub(crate) fn begin_game_event(_: &Play, _: &net::session::Event) {}
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn end_game_event(_: &Play, _: ()) {}
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Default)]
-struct HiddenSessions {
-    loot: bool,
-    merchant: bool,
-    bank: bool,
-    banker_id: u32,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-thread_local! {
-    static HIDDEN_SESSIONS: std::cell::RefCell<HiddenSessions> = const {
-        std::cell::RefCell::new(HiddenSessions {
-            loot: false,
-            merchant: false,
-            bank: false,
-            banker_id: u32::MAX,
-        })
-    };
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 struct NoopRaster;
 #[cfg(not(target_arch = "wasm32"))]
 impl vi::ui::Raster for NoopRaster {
@@ -410,24 +389,13 @@ pub(crate) fn window_taken(play: &Play, mode: i32) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
         use crate::fork_ext::addons::window_takeover::{self, TakeoverKind};
+        if !window_takeover::has_activity() {
+            return false;
+        }
         let Some(kind) = TakeoverKind::from_mode(mode) else {
             return false;
         };
-        if !window_takeover::is_taken(kind) {
-            return false;
-        }
-        HIDDEN_SESSIONS.with(|h| {
-            let mut h = h.borrow_mut();
-            match kind {
-                TakeoverKind::Loot => h.loot = true,
-                TakeoverKind::Merchant => h.merchant = true,
-                TakeoverKind::Bank => {
-                    h.bank = true;
-                    h.banker_id = play.target;
-                }
-            }
-        });
-        true
+        window_takeover::activate_hidden(kind, play.target)
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -439,17 +407,13 @@ pub(crate) fn window_taken(play: &Play, mode: i32) -> bool {
 pub(crate) fn bank_taken_tick(play: &mut Play, vui: &crate::ui::Vui) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        use crate::fork_ext::addons::window_takeover::{self, TakeoverKind};
-        if play.mode != 0 || !window_takeover::is_taken(TakeoverKind::Bank) {
+        use crate::fork_ext::addons::window_takeover;
+        if play.mode != 0 || !window_takeover::has_activity() {
             return false;
         }
-        let (active, banker_id) = HIDDEN_SESSIONS.with(|h| {
-            let b = h.borrow();
-            (b.bank, b.banker_id)
-        });
-        if !active {
+        let Some(banker_id) = window_takeover::hidden_bank_session() else {
             return false;
-        }
+        };
         let saved_target = play.target;
         if banker_id != u32::MAX {
             play.target = banker_id;
@@ -474,9 +438,9 @@ pub(crate) fn loot_session_open(play: &Play) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
         (play.mode == 1
-            || (crate::fork_ext::addons::window_takeover::is_taken(
+            || crate::fork_ext::addons::window_takeover::is_hidden_active(
                 crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
-            ) && HIDDEN_SESSIONS.with(|h| h.borrow().loot)))
+            ))
             && play.npcw.corpse.is_some()
     }
     #[cfg(target_arch = "wasm32")]
@@ -489,9 +453,9 @@ pub(crate) fn merchant_session_open(play: &Play) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
         (play.mode == 10
-            || (crate::fork_ext::addons::window_takeover::is_taken(
+            || crate::fork_ext::addons::window_takeover::is_hidden_active(
                 crate::fork_ext::addons::window_takeover::TakeoverKind::Merchant,
-            ) && HIDDEN_SESSIONS.with(|h| h.borrow().merchant)))
+            ))
             && play.npcw.shop.id.is_some()
     }
     #[cfg(target_arch = "wasm32")]
@@ -504,9 +468,9 @@ pub(crate) fn bank_session_open(play: &Play) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
         play.mode == 11
-            || (crate::fork_ext::addons::window_takeover::is_taken(
+            || crate::fork_ext::addons::window_takeover::is_hidden_active(
                 crate::fork_ext::addons::window_takeover::TakeoverKind::Bank,
-            ) && HIDDEN_SESSIONS.with(|h| h.borrow().bank))
+            )
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -517,48 +481,41 @@ pub(crate) fn bank_session_open(play: &Play) -> bool {
 #[cfg(not(target_arch = "wasm32"))]
 fn sync_hidden_sessions(play: &mut Play) {
     use crate::fork_ext::addons::window_takeover::{self, TakeoverKind};
-    let closed = window_takeover::drain_pending_closes();
-    HIDDEN_SESSIONS.with(|h| {
-        let mut h = h.borrow_mut();
-        if closed[TakeoverKind::Loot as usize] && h.loot {
-            h.loot = false;
-            if play.npcw.corpse.take().is_some() {
-                play.session.send_opcode(0x0016);
+    if !window_takeover::has_activity() {
+        return;
+    }
+    window_takeover::sync_sessions(|kind, close_native| {
+        if close_native {
+            match kind {
+                TakeoverKind::Loot => {
+                    if play.npcw.corpse.take().is_some() {
+                        play.session.send_opcode(0x0016);
+                    }
+                }
+                TakeoverKind::Merchant => {
+                    play.npcw.shop = Default::default();
+                }
+                TakeoverKind::Bank => {
+                    play.bank.state = 0;
+                }
             }
         }
-        if closed[TakeoverKind::Merchant as usize] && h.merchant {
-            h.merchant = false;
-            play.npcw.shop = Default::default();
-        }
-        if closed[TakeoverKind::Bank as usize] && h.bank {
-            h.bank = false;
-            h.banker_id = u32::MAX;
-            play.bank.state = 0;
-        }
-        if h.loot && (!window_takeover::is_taken(TakeoverKind::Loot) || play.npcw.corpse.is_none()) {
-            h.loot = false;
-        }
-        if h.merchant
-            && (!window_takeover::is_taken(TakeoverKind::Merchant) || play.npcw.shop.id.is_none())
-        {
-            h.merchant = false;
-        }
-        if h.bank && !window_takeover::is_taken(TakeoverKind::Bank) {
-            h.bank = false;
-            h.banker_id = u32::MAX;
-        }
-        if play.mode == 1 && window_takeover::is_taken(TakeoverKind::Loot) {
-            h.loot = true;
-            play.mode = 0;
-        } else if play.mode == 10 && window_takeover::is_taken(TakeoverKind::Merchant) {
-            h.merchant = true;
-            play.mode = 0;
-        } else if play.mode == 11 && window_takeover::is_taken(TakeoverKind::Bank) {
-            h.bank = true;
-            h.banker_id = play.target;
-            play.mode = 0;
-        }
     });
+    if window_takeover::is_hidden_active(TakeoverKind::Loot) && play.npcw.corpse.is_none() {
+        window_takeover::set_hidden_inactive(TakeoverKind::Loot);
+    }
+    if window_takeover::is_hidden_active(TakeoverKind::Merchant) && play.npcw.shop.id.is_none() {
+        window_takeover::set_hidden_inactive(TakeoverKind::Merchant);
+    }
+    if play.mode == 1 && window_takeover::activate_hidden(TakeoverKind::Loot, play.target) {
+        play.mode = 0;
+    } else if play.mode == 10
+        && window_takeover::activate_hidden(TakeoverKind::Merchant, play.target)
+    {
+        play.mode = 0;
+    } else if play.mode == 11 && window_takeover::activate_hidden(TakeoverKind::Bank, play.target) {
+        play.mode = 0;
+    }
 }
 
 pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
