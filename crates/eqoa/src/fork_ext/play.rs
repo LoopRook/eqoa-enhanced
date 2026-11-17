@@ -63,6 +63,7 @@ pub(crate) enum BrokerReply {
     MasterLoot(bool),
     InvAdd { item_id: i64 },
     InvTook { sound: u8, in_shop: bool },
+    LootOpen,
     LootOne { confirmed_key: Option<u32> },
     LootAll { corpse_before: Vec<(u32, i64)> },
     LootClose,
@@ -80,6 +81,7 @@ pub(crate) enum BrokerReply {
 pub(crate) struct GameEventCapture {
     api: api_capture::ChangeCapture,
     broker_reply: Option<BrokerReply>,
+    loot_inv_add: Option<(i64, i64)>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -88,7 +90,18 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
     if let net::session::Event::MasterLoot(m) = event {
         crate::fork_ext::addons::action_broker::set_master_loot(m.is_some());
     }
-    let broker_reply = if crate::fork_ext::addons::action_broker::has_in_flight() {
+    let loot_inv_add = match event {
+        net::session::Event::InvAdd(item) => Some((item.item.id, item.quantity)),
+        _ => None,
+    };
+    let check_reopen = matches!(
+        event,
+        net::session::Event::Opcode {
+            op: 0x0018 | 0x0085,
+            ..
+        }
+    );
+    let broker_reply = if crate::fork_ext::addons::action_broker::has_in_flight() || check_reopen {
         match event {
             net::session::Event::Assist(id) => Some(BrokerReply::Assist(*id)),
             net::session::Event::AbilitySlot { index, slot, .. } => {
@@ -112,6 +125,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
                 sound: *sound,
                 in_shop: play.npcw.shop.id.is_some() && *sound != 0,
             }),
+            net::session::Event::Opcode { op: 0x0018, .. } => Some(BrokerReply::LootOpen),
             net::session::Event::Opcode { op: 0x0019, data } => {
                 let confirmed_key = data.first().copied().and_then(|slot| {
                     play.npcw
@@ -163,12 +177,19 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
     } else {
         None
     };
-    GameEventCapture { api, broker_reply }
+    GameEventCapture {
+        api,
+        broker_reply,
+        loot_inv_add,
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
     api_capture::end_game_event(play, capture.api);
+    if let Some((item_id, qty)) = capture.loot_inv_add {
+        api_capture::items::note_loot_inv_add(item_id, qty);
+    }
     match capture.broker_reply {
         Some(BrokerReply::Assist(id)) => {
             crate::fork_ext::addons::action_broker::resolve_server_assist(id);
@@ -186,6 +207,7 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
             crate::fork_ext::addons::action_broker::set_master_loot(active);
         }
         Some(BrokerReply::InvAdd { item_id }) => {
+            crate::fork_ext::addons::action_broker::mark_loot_inv_added(item_id);
             let inv_total: i64 = play
                 .dump
                 .inventory
@@ -251,34 +273,26 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
                 state_changed,
             );
         }
+        Some(BrokerReply::LootOpen) => {
+            let is_empty = play
+                .npcw
+                .corpse
+                .as_ref()
+                .is_none_or(|c| c.items.is_empty());
+            let opened_corpse_id = api_capture::items::current_loot_source_id(play);
+            crate::fork_ext::addons::action_broker::resolve_server_loot_open(
+                opened_corpse_id,
+                is_empty,
+            );
+        }
         Some(BrokerReply::LootClose) => {
             LOOT_BUSY.with(|b| b.set(false));
             crate::fork_ext::addons::action_broker::set_master_loot(false);
-            crate::fork_ext::addons::action_broker::resolve_server_loot_one(
-                None,
-                None,
-                Some("corpse closed"),
-                |_| 0,
-            );
-            crate::fork_ext::addons::action_broker::resolve_server_loot_all(
-                None,
-                Some("corpse closed"),
-                false,
-            );
+            crate::fork_ext::addons::action_broker::resolve_server_loot_close();
         }
         Some(BrokerReply::LootBlocked) => {
             LOOT_BUSY.with(|b| b.set(false));
-            crate::fork_ext::addons::action_broker::resolve_server_loot_one(
-                None,
-                Some(false),
-                Some("loot blocked by server"),
-                |_| 0,
-            );
-            crate::fork_ext::addons::action_broker::resolve_server_loot_all(
-                Some(false),
-                Some("loot blocked by server"),
-                false,
-            );
+            crate::fork_ext::addons::action_broker::resolve_server_loot_blocked();
         }
         Some(BrokerReply::TxCancel) => {
             LOOT_BUSY.with(|b| b.set(false));
@@ -413,6 +427,26 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                 );
             }
             let ready = _play.in_world_now();
+            if crate::fork_ext::addons::action_broker::take_loot_timeout_expired() {
+                LOOT_BUSY.with(|b| b.set(false));
+            }
+            let corpse_target = (_play.target != 0
+                && _play
+                    .entities
+                    .slots
+                    .iter()
+                    .flatten()
+                    .any(|e| e.id == _play.target && e.p18 & 2 != 0))
+            .then_some(_play.target);
+            crate::fork_ext::addons::action_broker::set_corpse_target_id(corpse_target);
+            if ready
+                && _play.mode == 0
+                && let Some(reopen_cid) =
+                    crate::fork_ext::addons::action_broker::take_corpse_reopen_ask()
+                && corpse_target == Some(reopen_cid)
+            {
+                _play.attack_press();
+            }
             let wheel = crate::fork_ext::addons::pointer_api::take_wheel();
             if ready && wheel != 0.0 {
                 _play.map.mini_wheel(wheel);
@@ -516,6 +550,18 @@ pub(crate) fn npcw_requests(
         };
         if !_loot_out.is_empty() {
             mark_player_activity(Subsystem::Loot);
+            for o in _loot_out.iter() {
+                match *o {
+                    crate::loot::LootOut::Close => api_capture::items::clear_pending_loot(),
+                    crate::loot::LootOut::One(key, n) => {
+                        api_capture::items::note_loot_send(_play, Some(key as u32), n as i64, false);
+                    }
+                    crate::loot::LootOut::All => {
+                        api_capture::items::note_loot_send(_play, None, 0, true);
+                    }
+                    _ => {}
+                }
+            }
         }
         if !_merch_out.is_empty() {
             mark_player_activity(Subsystem::Merchant);
@@ -550,6 +596,7 @@ pub(crate) fn npcw_requests(
                     .is_some_and(|c| c.items.iter().any(|it| it.inv_index == key))
                 {
                     LOOT_BUSY.with(|b| b.set(true));
+                    api_capture::items::note_loot_send(_play, Some(key), count as i64, false);
                     _loot_out.push(crate::loot::LootOut::One(key as i32, count));
                     mark_deferred_sent("loot");
                 } else {
@@ -582,6 +629,7 @@ pub(crate) fn npcw_requests(
                     .is_some_and(|c| !c.items.is_empty())
                 {
                     LOOT_BUSY.with(|b| b.set(true));
+                    api_capture::items::note_loot_send(_play, None, 0, true);
                     _loot_out.push(crate::loot::LootOut::All);
                     mark_deferred_sent("loot_all");
                 } else {
@@ -1751,7 +1799,11 @@ fn dispatch_broker_action(
             )]);
             DispatchOutcome::Completed { detail: None }
         }
-        ActionKind::Loot { item, count } => {
+        ActionKind::Loot {
+            item,
+            count,
+            identity,
+        } => {
             if play.mode != 1 || play.npcw.corpse.is_none() {
                 return DispatchOutcome::Refused {
                     code: "window_closed",
@@ -1770,12 +1822,21 @@ fn dispatch_broker_action(
                     reason: "loot transaction already pending".into(),
                 };
             }
-            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+            crate::fork_ext::addons::native_core::flush_deferred();
+            let resolved_storage;
+            let item = if crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                item
+            } else if let Some(fresh) = identity.as_ref().and_then(|id| {
+                crate::fork_ext::addons::native_items::re_resolve_loot_handle(id, *count)
+            }) {
+                resolved_storage = fresh;
+                &resolved_storage
+            } else {
                 return DispatchOutcome::Refused {
                     code: "stale_handle",
                     reason: "loot handle is stale or corpse changed".into(),
                 };
-            }
+            };
             let Some(corpse) = play.npcw.corpse.as_ref() else {
                 return DispatchOutcome::Refused {
                     code: "window_closed",
@@ -1810,6 +1871,7 @@ fn dispatch_broker_action(
             DispatchOutcome::Staged {
                 matcher: ServerMatcher::LootOne {
                     key: it.inv_index,
+                    item_id: it.item.id,
                     qty_before: it.quantity,
                     count: n,
                 },

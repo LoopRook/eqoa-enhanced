@@ -1595,3 +1595,274 @@ fn round6_item6_take_all_button_on_corpse_tab() {
     bv.clean();
     super::super::action_broker::reset_all_for_test();
 }
+
+#[test]
+fn round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    let corpse_initial = serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100,"icon":4020},
+        {"name":"Pinch of Skeleton Dust","id":2002,"key":1,"qty":1,"max_stack":100,"icon":4021},
+        {"name":"Black Bloodstone","id":2003,"key":2,"qty":1,"max_stack":100,"icon":4022}
+    ]);
+    // Step 0: Player opens corpse 5001 via 0x0015 -> 0x0018 (NO 0x0019/0x001A anywhere in Sandstorm replay!).
+    bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&corpse_initial);
+    bv.enable();
+    bv.open();
+
+    // Mark Rat Pelt as junk, then click "Take all but junk".
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    bv.click(bv.slot(1));
+    bv.frames(1);
+    let (jx, jy, _, _, _) = bv.menu_row("Mark as junk").unwrap();
+    bv.click((jx, jy));
+    bv.frames(1);
+
+    let (lx, ly, _) = bv.action_hit("Take all but junk").unwrap();
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick(); // Sends 0x0019(key=1, count=1) for Pinch of Skeleton Dust
+    bv.frames(1);
+
+    // Sandstorm response for Step 1: InvAdd + Chat "You receive ...", then 0x0016 LootClose (NO 0x0019!).
+    bv.play.bags_added(&serde_json::json!({"name":"Pinch of Skeleton Dust","id":2002,"key":71,"qty":1,"max_stack":100}));
+    bv.play.bags_chat("You receive Pinch of Skeleton Dust from the corpse.");
+    bv.play.bags_loot_close();
+    bv.frames(1);
+
+    // Log must record Step 1 immediately on 0x0016 close, and batch must still be running (reopen pending).
+    assert_eq!(bv.log().len(), 1, "Sandstorm take must log on InvAdd + 0x0016: {:?}", bv.log());
+    assert!(bv.log()[0].contains("Pinch of Skeleton Dust x1, from a decaying skeleton"), "{:?}", bv.log());
+    assert!(bv.eval::<bool>("require('bags').batch_id ~= nil"), "batch must NOT stop on Sandstorm 0x0016");
+
+    // Next broker tick must send 0x0015 (attack_press) to reopen the same corpse!
+    let sends_before_reask = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_before_reask, "batch must send 0x0015 reopen request");
+
+    // Server answers with smaller 0x0018 where Black Bloodstone re-indexed key 2 -> key 0!
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Black Bloodstone","id":2003,"key":0,"qty":1,"max_stack":100,"icon":4022},
+        {"name":"Rat Pelt","id":2001,"key":1,"qty":1,"max_stack":100,"icon":4020}
+    ]));
+    bv.frames(1);
+    assert_eq!(
+        bv.eval::<Option<String>>("eqoa.loot.get() and eqoa.loot.get().source and eqoa.loot.get().source.name"),
+        Some("a decaying skeleton".into()),
+        "0x0015 reopen must preserve corpse source"
+    );
+
+    // Next broker tick re-resolves Black Bloodstone by item identity (key 0) and sends LootOne(0, 1).
+    let sends_before_step2 = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_before_step2, "batch must dispatch Step 2 at re-indexed key 0");
+    bv.frames(1);
+
+    // Sandstorm response for Step 2: InvAdd + Chat + 0x0016 LootClose.
+    bv.play.bags_added(&serde_json::json!({"name":"Black Bloodstone","id":2003,"key":72,"qty":1,"max_stack":100}));
+    bv.play.bags_chat("You receive Black Bloodstone from the corpse.");
+    bv.play.bags_loot_close();
+    let sends_after_done = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+
+    assert_eq!(bv.play.bags_sends_lost(), sends_after_done, "completed batch must not re-ask corpse");
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Looted 2 of 2".into(), Some(true))
+    );
+    let log = bv.log();
+    assert_eq!(log.len(), 2, "must have exact 2 entries with no duplicates: {log:?}");
+    assert!(log[0].contains("Black Bloodstone x1, from a decaying skeleton"), "{log:?}");
+    assert!(log[1].contains("Pinch of Skeleton Dust x1, from a decaying skeleton"), "{log:?}");
+
+    // Closed-window native UI take on Sandstorm (without InvAdd before 0x0016; next 0x0018 lacks record).
+    bv.toggle();
+    assert!(!bv.is_open());
+    bv.play.bags_target_corpse(5002, "an undead gnoll");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Gnoll Ear","id":2010,"key":0,"qty":1,"max_stack":20},
+        {"name":"Cracked Skull","id":2011,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.play.bags_native_loot_one(0, 1);
+    bv.play.bags_loot_close();
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Cracked Skull","id":2011,"key":0,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(2);
+    assert_eq!(bv.log().len(), 3, "native take without InvAdd logs via smaller same-corpse 0x0018: {:?}", bv.log());
+    assert!(bv.log()[0].contains("Gnoll Ear x1, from an undead gnoll"), "{:?}", bv.log());
+
+    // Negative control 1: Refused take (no InvAdd + next 0x0018 still keeps record, OR 0x0085 refusal) logs NOTHING.
+    let log_len = bv.log().len();
+    bv.play.bags_native_loot_one(0, 1);
+    bv.play.bags_loot_refused(1);
+    bv.play.bags_loot_close();
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Cracked Skull","id":2011,"key":0,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(2);
+    assert_eq!(bv.log().len(), log_len, "negative control: refused take must log nothing");
+
+    // Negative control 2: Tunar-only / 5-byte empty corpse never logs an item.
+    bv.play.bags_loot_close();
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([]));
+    bv.play.bags_chat("You receive 5 tunar from the corpse.");
+    bv.play.bags_tunar(605);
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(bv.log().len(), log_len, "negative control: tunar-only 5-byte corpse must log nothing");
+
+    // Negative control 3: Mid-batch reopen aborted by 0x0085 refusal, 5-byte empty corpse, targeting elsewhere, and Stop.
+    bv.toggle();
+    assert!(bv.is_open());
+    // 3a: 5-byte empty 0x0018 on reopen stops batch cleanly
+    bv.play.bags_target_corpse(5003, "a rotting zombie");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Zombie Flesh","id":2020,"key":0,"qty":1,"max_stack":20},
+        {"name":"Old Coin Tooth","id":2021,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Zombie Flesh","id":2020,"key":73,"qty":1,"max_stack":20}));
+    bv.play.bags_loot_close();
+    bv.play.bags_broker_tick(); // sends 0x0015
+    bv.play.bags_corpse(&serde_json::json!([])); // 5-byte empty list!
+    bv.frames(2);
+    assert_eq!(
+        bv.eval::<(bool, Option<bool>)>("require('bags').batch_id == nil, require('bags').result.ok"),
+        (true, Some(false)),
+        "5-byte empty 0x0018 mid-batch must stop batch cleanly"
+    );
+
+    // 3b: Player targets something else during reopen -> stops batch and sends NO 0x0015
+    bv.play.bags_loot_close();
+    bv.play.bags_target_corpse(5004, "a phantom");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Ectoplasm","id":2022,"key":0,"qty":1,"max_stack":20},
+        {"name":"Wisp Ash","id":2023,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Ectoplasm","id":2022,"key":74,"qty":1,"max_stack":20}));
+    bv.play.bags_loot_close();
+    bv.play.bags_target(2002); // player targeted living Moss Snake!
+    let sends_on_retarget = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_on_retarget, "retargeting elsewhere must send no 0x0015");
+    assert_eq!(
+        bv.eval::<(bool, Option<bool>)>("require('bags').batch_id == nil, require('bags').result.ok"),
+        (true, Some(false)),
+        "retargeting must stop batch"
+    );
+
+    // 3c: 0x0085 refusal during reopen stops batch
+    bv.play.bags_target_corpse(5005, "a bogey");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Item One","id":2024,"key":0,"qty":1,"max_stack":20},
+        {"name":"Item Two","id":2025,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Item One","id":2024,"key":75,"qty":1,"max_stack":20}));
+    bv.play.bags_loot_close();
+    bv.play.bags_broker_tick(); // sends 0x0015
+    bv.play.bags_loot_refused(1); // 0x0085!
+    bv.frames(2);
+    assert_eq!(
+        bv.eval::<(bool, Option<bool>)>("require('bags').batch_id == nil, require('bags').result.ok"),
+        (true, Some(false)),
+        "0x0085 during reopen must stop batch"
+    );
+
+    // 3d: Unanswered 0x001A ("Take all") times out cleanly at 300 ticks without leaving LOOT_BUSY stuck.
+    bv.play.bags_target_corpse(5006, "a goblin");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rusty Coin","id":2026,"key":0,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let (tax, tay, _) = bv.action_hit("Take all").unwrap();
+    bv.click((tax, tay));
+    bv.play.bags_broker_tick(); // sends 0x001A
+    for _ in 0..305 {
+        bv.play.bags_broker_tick();
+    }
+    bv.frames(1);
+    let (res_text, res_ok): (String, Option<bool>) =
+        bv.eval("require('bags').result.text, require('bags').result.ok");
+    assert!(
+        res_text.starts_with("Take all: ") && res_ok == Some(false),
+        "unanswered 0x001A must time out cleanly in status bar: {res_text:?} {res_ok:?}"
+    );
+    // Ensure looting is NOT wedged after 0x001A timeout:
+    bv.click(bv.slot(1));
+    bv.frames(1);
+    let (tx, ty, _, _, _) = bv.menu_row("Take").unwrap();
+    bv.click((tx, ty));
+    let sends_after_timeout = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_after_timeout, "LOOT_BUSY must clear after 0x001A timeout");
+    bv.play.bags_loot_close();
+    bv.frames(2);
+
+    // 3e: Clicking Stop mid-reopen aborts batch cleanly and sends no 0x0015
+    bv.play.bags_target_corpse(5007, "a ghoul");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Ghoul Nail","id":2027,"key":0,"qty":1,"max_stack":20},
+        {"name":"Ghoul Fang","id":2028,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Ghoul Nail","id":2027,"key":76,"qty":1,"max_stack":20}));
+    bv.play.bags_loot_close();
+    bv.frames(1);
+    let (sx, sy, _) = bv.action_hit("Stop").unwrap();
+    bv.click((sx, sy));
+    let sends_on_stop = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_on_stop, "Stop mid-reopen must send no 0x0015");
+    assert!(bv.eval::<bool>("require('bags').batch_id == nil"), "Stop must clear active batch");
+
+    // 3f: Zoning mid-reopen aborts batch cleanly and sends no 0x0015
+    bv.play.bags_target_corpse(5008, "a specter");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Specter Dust","id":2029,"key":0,"qty":1,"max_stack":20},
+        {"name":"Specter Silk","id":2030,"key":1,"qty":1,"max_stack":20}
+    ]));
+    bv.frames(1);
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Specter Dust","id":2029,"key":77,"qty":1,"max_stack":20}));
+    bv.play.bags_loot_close();
+    bv.frames(1);
+    bv.play.bags_zone();
+    let sends_on_zone = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_on_zone, "zoning mid-reopen must send no 0x0015");
+    assert!(bv.eval::<bool>("require('bags').batch_id == nil"), "zoning must clear active batch");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}

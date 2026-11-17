@@ -8,12 +8,12 @@ use super::{
     host::Host,
     native::{bind, describe, error, record, session},
     native_core::CORE,
-    native_items::{ResolvedItemSpec, resolve_item_handle},
+    native_items::{LootItemIdentity, ResolvedItemSpec, item_identity_of, resolve_item_handle},
 };
 use mlua::{AnyUserData, Lua, MetaMethod, Result, UserData, UserDataMethods, Value};
 use serde_json::{Value as Json, json};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{HashMap, VecDeque},
 };
 
@@ -130,7 +130,7 @@ pub(crate) enum ActionKind {
     Equip { item: ResolvedItemSpec },
     SwapItems { a: ResolvedItemSpec, b: ResolvedItemSpec },
     QuickSlot { item: ResolvedItemSpec, slot: u8 },
-    Loot { item: ResolvedItemSpec, count: Option<i64> },
+    Loot { item: ResolvedItemSpec, count: Option<i64>, identity: Option<LootItemIdentity> },
     LootAll,
     Buy { ware: ResolvedItemSpec, count: i64 },
     Sell { item: ResolvedItemSpec, count: i64 },
@@ -252,7 +252,7 @@ pub(crate) enum ServerMatcher {
     AbilitySlot { slot: u8, index: u8 },
     AbilityClearBar,
     AbilityMoveIndex { from: u8, to: u8 },
-    LootOne { key: u32, qty_before: i64, count: i64 },
+    LootOne { key: u32, item_id: i64, qty_before: i64, count: i64 },
     LootAll,
     MerchantBuy { item_id: i64, qty_before: i64, count: i64 },
     MerchantSell { key: u32, qty_before: i64, count: i64 },
@@ -351,6 +351,7 @@ struct InFlightAction {
     detail: Option<Json>,
     saw_pending: bool,
     native_sent: bool,
+    inv_confirmed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -396,6 +397,13 @@ pub(crate) struct BatchResultRecord {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct CorpseReopen {
+    pub corpse_id: u32,
+    pub asked: bool,
+    pub started_tick: u64,
+}
+
+#[derive(Clone, Debug)]
 struct ActiveBatch {
     id: u64,
     vm: u64,
@@ -407,6 +415,8 @@ struct ActiveBatch {
     queued_tick: u64,
     require_window: Option<BatchWindow>,
     rate_wait_start_tick: Option<u64>,
+    corpse_target_id: Option<u32>,
+    corpse_reopen: Option<CorpseReopen>,
 }
 
 #[derive(Default)]
@@ -626,6 +636,11 @@ impl BrokerState {
         self.vms.values().any(|vm| {
             vm.queued.iter().any(|q| q.kind.subsystem() == Some(sub))
                 || vm.in_flight.values().any(|f| f.subsystem == Some(sub))
+                || (sub == Subsystem::Loot
+                    && vm
+                        .active_batch
+                        .as_ref()
+                        .is_some_and(|b| b.corpse_reopen.is_some()))
         })
     }
 
@@ -748,6 +763,10 @@ impl BrokerState {
             queued_tick: now_tick,
             require_window: inferred_window,
             rate_wait_start_tick: None,
+            corpse_target_id: (inferred_window == Some(BatchWindow::Loot))
+                .then(|| CURRENT_CORPSE_TARGET.with(|c| c.get()))
+                .flatten(),
+            corpse_reopen: None,
         };
         vm_state.active_batch = Some(batch);
         vm_state.upsert_batch_retained(BatchResultRecord {
@@ -1082,6 +1101,9 @@ impl BrokerState {
                 .collect();
             for id in expired {
                 if let Some(inflight) = vm_state.in_flight.remove(&id) {
+                    if inflight.subsystem == Some(Subsystem::Loot) {
+                        EXPIRED_LOOT_TIMEOUT.with(|t| t.set(true));
+                    }
                     let rec = ActionResultRecord {
                         id: inflight.id,
                         vm: inflight.vm,
@@ -1221,7 +1243,34 @@ impl BrokerState {
                     );
                 }
             }
-            if let Some(win) = vm_state.active_batch.as_ref().and_then(|b| b.require_window)
+            let reopen_abort = vm_state
+                .active_batch
+                .as_ref()
+                .and_then(|b| b.corpse_reopen.as_ref().map(|r| (b.current_step, r.clone())));
+            if let Some((step, reopen)) = reopen_abort {
+                let target_now = CURRENT_CORPSE_TARGET.with(|c| c.get());
+                if target_now != Some(reopen.corpse_id) {
+                    vm_state.finish_batch(
+                        "refused",
+                        Some(false),
+                        Some("window_closed"),
+                        Some("corpse target changed".into()),
+                        now_tick,
+                        Some(step),
+                        true,
+                    );
+                } else if now_tick.saturating_sub(reopen.started_tick) >= SERVER_TIMEOUT_TICKS {
+                    vm_state.finish_batch(
+                        "unknown",
+                        None,
+                        Some("unknown"),
+                        Some("corpse did not reopen within 10s".into()),
+                        now_tick,
+                        Some(step),
+                        true,
+                    );
+                }
+            } else if let Some(win) = vm_state.active_batch.as_ref().and_then(|b| b.require_window)
                 && !win.is_open(&snapshot)
             {
                 let step = vm_state.active_batch.as_ref().map(|b| b.current_step);
@@ -1421,6 +1470,7 @@ impl BrokerState {
                                         detail,
                                         saw_pending: false,
                                         native_sent: true,
+                                        inv_confirmed: false,
                                     },
                                 );
                                 per_vm_dispatched.insert(vm_id, vm_sent + 1);
@@ -1458,6 +1508,7 @@ impl BrokerState {
                                         detail,
                                         saw_pending: false,
                                         native_sent: false,
+                                        inv_confirmed: false,
                                     },
                                 );
                                 per_vm_dispatched.insert(vm_id, vm_sent + 1);
@@ -1502,7 +1553,7 @@ impl BrokerState {
                                 return None;
                             }
                             let b = v.active_batch.as_ref()?;
-                            if b.waiting_req_id.is_some() {
+                            if b.waiting_req_id.is_some() || b.corpse_reopen.is_some() {
                                 return None;
                             }
                             b.steps.front().cloned()
@@ -1606,6 +1657,7 @@ impl BrokerState {
                                         detail,
                                         saw_pending: false,
                                         native_sent: true,
+                                        inv_confirmed: false,
                                     },
                                 );
                                 if let Some(batch) = vm_state.active_batch.as_mut() {
@@ -1643,6 +1695,7 @@ impl BrokerState {
                                         detail,
                                         saw_pending: false,
                                         native_sent: false,
+                                        inv_confirmed: false,
                                     },
                                 );
                                 if let Some(batch) = vm_state.active_batch.as_mut() {
@@ -1851,7 +1904,17 @@ impl BrokerState {
 
 thread_local! {
     static BROKER: RefCell<BrokerState> = RefCell::new(BrokerState::default());
-    static MASTER_LOOT_ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static MASTER_LOOT_ACTIVE: Cell<bool> = const { Cell::new(false) };
+    static CURRENT_CORPSE_TARGET: Cell<Option<u32>> = const { Cell::new(None) };
+    static EXPIRED_LOOT_TIMEOUT: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(crate) fn set_corpse_target_id(id: Option<u32>) {
+    CURRENT_CORPSE_TARGET.with(|c| c.set(id));
+}
+
+pub(crate) fn take_loot_timeout_expired() -> bool {
+    EXPIRED_LOOT_TIMEOUT.with(|t| t.replace(false))
 }
 
 pub(crate) fn update_native_snapshot(snapshot: NativeSnapshot) {
@@ -1918,6 +1981,8 @@ pub(crate) fn clear_vm(vm: u64, reason: &str) {
 
 pub(crate) fn reset_session(reason: &str) {
     MASTER_LOOT_ACTIVE.with(|m| m.set(false));
+    CURRENT_CORPSE_TARGET.with(|c| c.set(None));
+    EXPIRED_LOOT_TIMEOUT.with(|t| t.set(false));
     BROKER.with(|b| b.borrow_mut().reset_session(reason));
 }
 
@@ -1970,6 +2035,185 @@ pub(crate) fn is_master_loot_active() -> bool {
     MASTER_LOOT_ACTIVE.with(|m| m.get())
 }
 
+pub(crate) fn mark_loot_inv_added(added_item_id: i64) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        for vm in b.vms.values_mut() {
+            for inflight in vm.in_flight.values_mut() {
+                if !inflight.native_sent {
+                    continue;
+                }
+                match inflight.matcher {
+                    ServerMatcher::LootOne { item_id, .. } if item_id == added_item_id => {
+                        inflight.inv_confirmed = true;
+                    }
+                    ServerMatcher::LootAll => {
+                        inflight.inv_confirmed = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    });
+}
+
+pub(crate) fn take_corpse_reopen_ask() -> Option<u32> {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        for vm in b.vms.values_mut() {
+            if let Some(batch) = vm.active_batch.as_mut()
+                && let Some(reopen) = batch.corpse_reopen.as_mut()
+                && !reopen.asked
+            {
+                reopen.asked = true;
+                return Some(reopen.corpse_id);
+            }
+        }
+        None
+    })
+}
+
+pub(crate) fn resolve_server_loot_close() {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        b.native.loot_busy = false;
+        let now_tick = b.tick;
+        if b.resolve_player_activity(Subsystem::Loot) {
+            return;
+        }
+        let vm_ids: Vec<u64> = b.vms.keys().copied().collect();
+        for vm_id in vm_ids {
+            let Some(vm_state) = b.vms.get_mut(&vm_id) else {
+                continue;
+            };
+            let matches_ids: Vec<u64> = vm_state
+                .in_flight
+                .iter()
+                .filter_map(|(&id, f)| {
+                    (f.native_sent
+                        && matches!(f.matcher, ServerMatcher::LootOne { .. } | ServerMatcher::LootAll))
+                    .then_some(id)
+                })
+                .collect();
+            for id in matches_ids {
+                if let Some(inflight) = vm_state.in_flight.remove(&id) {
+                    let ok = inflight.inv_confirmed.then_some(true);
+                    let state = if ok == Some(true) { "completed" } else { "unknown" };
+                    let code = (ok != Some(true)).then_some("unknown");
+                    let reason = (ok != Some(true)).then(|| "corpse closed".to_string());
+                    let rec = ActionResultRecord {
+                        id: inflight.id,
+                        vm: inflight.vm,
+                        kind: inflight.kind,
+                        state,
+                        phase: "server",
+                        ok,
+                        code: code.map(str::to_string),
+                        reason: reason.clone(),
+                        queued_tick: inflight.queued_tick,
+                        dispatched_tick: Some(inflight.dispatched_tick),
+                        completed_tick: Some(now_tick),
+                        detail: inflight.detail,
+                    };
+                    vm_state.upsert_retained(rec.clone());
+                    vm_state.pending_events.push_back(rec);
+                    let is_loot_one = matches!(inflight.matcher, ServerMatcher::LootOne { .. });
+                    vm_state.handle_batch_step_resolution(
+                        id,
+                        now_tick,
+                        state,
+                        ok,
+                        code,
+                        reason,
+                    );
+                    if ok == Some(true)
+                        && is_loot_one
+                        && let Some(batch) = vm_state.active_batch.as_mut()
+                        && !batch.steps.is_empty()
+                        && matches!(batch.steps.front(), Some(ActionKind::Loot { .. }))
+                        && let Some(cid) = batch
+                            .corpse_target_id
+                            .or_else(|| CURRENT_CORPSE_TARGET.with(|c| c.get()))
+                    {
+                        batch.corpse_reopen = Some(CorpseReopen {
+                            corpse_id: cid,
+                            asked: false,
+                            started_tick: now_tick,
+                        });
+                    }
+                }
+            }
+        }
+    });
+}
+
+pub(crate) fn resolve_server_loot_open(opened_corpse_id: Option<u32>, is_empty: bool) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        let now_tick = b.tick;
+        for vm_state in b.vms.values_mut() {
+            let Some(reopen) = vm_state
+                .active_batch
+                .as_ref()
+                .and_then(|batch| batch.corpse_reopen.clone())
+            else {
+                continue;
+            };
+            let step = vm_state.active_batch.as_ref().map(|batch| batch.current_step);
+            if is_empty {
+                vm_state.finish_batch(
+                    "refused",
+                    Some(false),
+                    Some("not_found"),
+                    Some("corpse has no items".into()),
+                    now_tick,
+                    step,
+                    true,
+                );
+            } else if opened_corpse_id.is_some() && opened_corpse_id != Some(reopen.corpse_id) {
+                vm_state.finish_batch(
+                    "refused",
+                    Some(false),
+                    Some("stale_handle"),
+                    Some("corpse changed".into()),
+                    now_tick,
+                    step,
+                    true,
+                );
+            } else if let Some(batch) = vm_state.active_batch.as_mut() {
+                batch.corpse_reopen = None;
+            }
+        }
+    });
+}
+
+pub(crate) fn resolve_server_loot_blocked() {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        let now_tick = b.tick;
+        for vm_state in b.vms.values_mut() {
+            if vm_state
+                .active_batch
+                .as_ref()
+                .is_some_and(|batch| batch.corpse_reopen.is_some())
+            {
+                let step = vm_state.active_batch.as_ref().map(|batch| batch.current_step);
+                vm_state.finish_batch(
+                    "refused",
+                    Some(false),
+                    Some("refused"),
+                    Some("loot blocked by server".into()),
+                    now_tick,
+                    step,
+                    true,
+                );
+            }
+        }
+    });
+    resolve_server_loot_one(None, Some(false), Some("loot blocked by server"), |_| 0);
+    resolve_server_loot_all(Some(false), Some("loot blocked by server"), false);
+}
+
 pub(crate) fn resolve_server_loot_one(
     confirmed_key: Option<u32>,
     ok: Option<bool>,
@@ -1983,7 +2227,7 @@ pub(crate) fn resolve_server_loot_one(
             return;
         }
         b.resolve_matching_sent(|inflight| {
-            let ServerMatcher::LootOne { key, qty_before, count } = inflight.matcher else {
+            let ServerMatcher::LootOne { key, qty_before, count, .. } = inflight.matcher else {
                 return None;
             };
             if let Some(ck) = confirmed_key
@@ -2857,7 +3101,8 @@ fn parse_batch_step(raw: Value) -> std::result::Result<ActionKind, (&'static str
                 };
                 Some(n)
             };
-            Ok(ActionKind::Loot { item: spec, count })
+            let identity = item_identity_of(&item);
+            Ok(ActionKind::Loot { item: spec, count, identity })
         }
         "buy" => {
             let ware = step_field(&t, "ware", None);
@@ -3564,7 +3809,7 @@ fn install_item_actions(lua: &Lua) -> Result<()> {
                 {
                     return Err(("invalid_argument", "loot count must be >= 1".into()));
                 }
-                Ok(ActionKind::Loot { item: spec, count })
+                Ok(ActionKind::Loot { item: spec, count, identity: None })
             })
         })?,
     )?;
@@ -4066,6 +4311,8 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
 #[cfg(test)]
 pub(crate) fn reset_all_for_test() {
     MASTER_LOOT_ACTIVE.with(|m| m.set(false));
+    CURRENT_CORPSE_TARGET.with(|c| c.set(None));
+    EXPIRED_LOOT_TIMEOUT.with(|t| t.set(false));
     BROKER.with(|b| *b.borrow_mut() = BrokerState::default());
 }
 

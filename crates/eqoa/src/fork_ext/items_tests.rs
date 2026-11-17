@@ -148,7 +148,7 @@ fn gem() -> Spec {
 
 /// The session pump's own arm for each event this round follows, then the capture hooks around it.
 fn apply(p: &mut Play, event: Event) {
-    let capture = begin_game_event(p, &event);
+    let capture = super::super::begin_game_event(p, &event);
     match &event {
         Event::InvAdd(item) => {
             let limit = item.item.max_stack;
@@ -171,7 +171,7 @@ fn apply(p: &mut Play, event: Event) {
         }
         other => panic!("not an item event: {other:?}"),
     }
-    end_game_event(p, capture);
+    super::super::end_game_event(p, capture);
 }
 fn opcode(op: u16, data: Vec<u8>) -> Event {
     Event::Opcode { op, data }
@@ -1647,6 +1647,23 @@ impl Play {
         if let Some(item) = added {
             apply(self, Event::InvAdd(Box::new(Spec::from_json(item).net())));
         }
+    }
+    pub(crate) fn bags_loot_refused(&mut self, code: u8) {
+        apply(self, opcode(0x0085, vec![code]));
+    }
+    pub(crate) fn bags_chat(&mut self, text: &str) {
+        let ev = Event::Chat(text.into(), [1.0; 4]);
+        let cap = super::super::begin_game_event(self, &ev);
+        self.server_line(text.into(), [1.0; 4]);
+        super::super::end_game_event(self, cap);
+    }
+    pub(crate) fn bags_native_loot_one(&mut self, key: i32, count: i32) {
+        let mut loot_out = vec![crate::loot::LootOut::One(key, count)];
+        let mut merch_out = Vec::new();
+        super::super::npcw_requests(self, &mut loot_out, &mut merch_out);
+        let mut w = net::stream::Writer::op(0x0019);
+        w.u32(key as u32).u32(count as u32);
+        self.session.send(&w.data);
     }
     pub(crate) fn bags_fill_inventory_to(&mut self, target_len: usize) {
         let mut next_key = 9000u32;
