@@ -21,6 +21,13 @@ local function close()
     for _, token in ipairs(tokens) do eqoa.events.off(token) end
     tokens = {}
     if escape then eqoa.input.release(escape); escape = nil end
+    if eqoa.windows and eqoa.windows.release then
+        eqoa.windows.release("merchant")
+        eqoa.windows.release("bank")
+        if not (eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true) then
+            eqoa.windows.release("loot")
+        end
+    end
     B.clear_corpse_hold()
     B.open, B.hover, B.menu, B.menu_rect, B.grid_scroll = false, nil, nil, nil, 0
     tab_hits, slot_hits, menu_hits, action_hits, log_rect, grid_rect = {}, {}, {}, {}, nil, nil
@@ -31,10 +38,17 @@ local function open()
     if B.open then return end
     if not B.junk_loaded then B.load_junk() end
     B.open, B.grid, B.menu = true, nil, nil
-    listen("render", draw)
-    for _, name in ipairs({"inventory.changed", "bank.changed", "loot.changed", "merchant.changed", "state.reset"}) do
-        listen(name, B.dirty)
+    if eqoa.windows and eqoa.windows.takeover then
+        B.ensure_takeover("loot")
+        B.ensure_takeover("merchant")
+        B.ensure_takeover("bank")
     end
+    listen("render", draw)
+    listen("inventory.changed", B.dirty)
+    listen("bank.changed", function(e) B.on_bank_changed(e.data) end)
+    listen("loot.changed", function(e) B.on_loot_changed(e.data) end)
+    listen("merchant.changed", function(e) B.on_merchant_changed(e.data) end)
+    listen("state.reset", B.dirty)
     listen("action.result", function(e) B.on_action_result(e.data) end)
     listen("batch.progress", function(e) B.on_batch_progress(e.data) end)
     listen("batch.result", function(e) B.on_batch_result(e.data) end)
@@ -88,9 +102,54 @@ eqoa.input.bind({id = "open", label = "Bag viewer", default_key = ""}, function(
 end)
 -- The loot log is the one thing kept while the window is closed, from events only.
 B.load_junk()
-eqoa.events.on("loot.changed", function(e) B.log_loot(e.data) end)
+if eqoa.options and eqoa.options.toggle then
+    eqoa.options.toggle({id = "auto_loot", label = "Auto-loot", default = false})
+end
+eqoa.events.on("loot.changed", function(e)
+    B.log_loot(e.data)
+    if not B.open then B.on_loot_changed(e.data) end
+end)
+eqoa.events.on("target.changed", function()
+    if eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true then
+        B.on_target_update()
+    end
+end)
+eqoa.events.on("player.changed", function()
+    if eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true then
+        B.on_target_update()
+    end
+end)
+eqoa.events.on("entity.changed", function(e)
+    if eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true then
+        B.on_entity_changed(e.data)
+        B.tick_auto_loot()
+    end
+end)
+eqoa.events.on("entity.added", function(e)
+    if eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true then
+        B.on_entity_added(e.data)
+        B.tick_auto_loot()
+    end
+end)
+eqoa.events.on("entity.removed", function(e)
+    if eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true then
+        B.on_entity_removed(e.data)
+    end
+end)
+eqoa.events.on("action.result", function(e)
+    if not B.open then B.on_action_result(e.data) end
+end)
+eqoa.events.on("batch.progress", function(e)
+    if not B.open then B.on_batch_progress(e.data) end
+end)
+eqoa.events.on("batch.result", function(e)
+    if not B.open then B.on_batch_result(e.data) end
+end)
 eqoa.events.on("state.reset", function() B.clear_corpse_hold(); B.reset_icons(); B.dirty() end)
-eqoa.events.on("disabling", close)
+eqoa.events.on("disabling", function()
+    close()
+    if eqoa.windows and eqoa.windows.release then eqoa.windows.release() end
+end)
 
 function draw()
     local grid = B.grid
@@ -115,7 +174,13 @@ function draw()
     local log_y = log_hdr_y + 15
     local bar_y = log_y + LOG_LINES * LINE + 4
     local bar2_y = bar_y + 18
-    local has_ctx_btn = eqoa.merchant.get() ~= nil or eqoa.loot.get() ~= nil
+    local is_corpse = B.tab == 7
+    local is_bank = B.tab == 6
+    local has_ctx_btn = is_corpse
+        or eqoa.merchant.get() ~= nil
+        or eqoa.loot.get() ~= nil
+        or B.nearby_npc("merchant") ~= nil
+        or (is_bank and not (eqoa.bank.get() and eqoa.bank.get().open) and B.nearby_npc("bank") ~= nil)
     local H = (has_ctx_btn and (bar2_y + 18) or (bar_y + 18)) + PAD
     -- centred in the HUD frame, and on screen wherever the window is sized
     local x0 = math.max(0, math.min(dw - W * k, f.offset_x + (640 - W) / 2 * f.scale_x))
@@ -261,7 +326,7 @@ function draw()
         label = cb_lbl, x = x0 + PAD * k, y = y0 + bar_y * k, w = cb_w * k, h = 16 * k,
         run = B.toggle_grey,
     }
-    if B.batch_id ~= nil then
+    if B.batch_id ~= nil or B.pending_open ~= nil then
         local sw = math.max(44, ui.CalcTextSize("Stop") / k + 14)
         local sx = W - PAD - sw
         fill(sx, bar_y, sw, 16, c.raised)
@@ -273,7 +338,7 @@ function draw()
         }
     end
 
-    -- Row 2 (when merchant/corpse open): Sell junk button, or Take all + Take all but junk buttons.
+    -- Row 2: Corpse (Loot / Take all / Take all but junk), Merchant (Sell junk), or Bank (Open bank).
     local function ctx_btn(bx, bw, lbl, col, bcol, run)
         fill(bx, bar2_y, bw, 16, c.raised)
         frame(bx, bar2_y, bw, 16, bcol)
@@ -283,20 +348,35 @@ function draw()
             run = run,
         }
     end
-    if eqoa.merchant.get() ~= nil then
+    local loot = eqoa.loot.get()
+    local merch = eqoa.merchant.get()
+    local near_corpse = B.nearby_corpse()
+    if is_corpse or loot ~= nil then
+        local bw, bgap = W - 2 * PAD, 6
+        local w_loot, w_all = 48, 76
+        local w_non = bw - w_loot - w_all - 2 * bgap
+        local can_open = loot ~= nil or near_corpse ~= nil
+        local has_items = (loot ~= nil and #(loot.items or {}) > 0) or (loot == nil and near_corpse ~= nil)
+        local steps, _ = B.loot_non_junk_list()
+        local can_non_junk = (loot ~= nil and #steps > 0) or (loot == nil and near_corpse ~= nil)
+        ctx_btn(PAD, w_loot, "Loot", can_open and c.text or c.muted, can_open and c.worn or c.border, B.start_loot_button)
+        ctx_btn(PAD + w_loot + bgap, w_all, "Take all", has_items and c.text or c.muted, has_items and c.worn or c.border, B.start_loot_all)
+        ctx_btn(PAD + w_loot + bgap + w_all + bgap, w_non, "Take all but junk", can_non_junk and c.text or c.muted, can_non_junk and c.worn or c.border, B.start_loot_non_junk)
+    elseif merch ~= nil then
         local _, cnt, tunar = B.junk_sell_list()
         local lbl = string.format("Sell junk (%d %s, %s tunar)", cnt, cnt == 1 and "item" or "items", B.tunar(tunar))
         ctx_btn(PAD, W - 2 * PAD, lbl, cnt > 0 and c.text or c.muted, cnt > 0 and c.junk or c.border, B.start_sell_junk)
-    else
-        local loot = eqoa.loot.get()
-        if loot ~= nil then
-            local steps, total = B.loot_non_junk_list()
-            local bw, bgap = W - 2 * PAD, 6
-            local w_all = 88
-            local w_non = bw - w_all - bgap
-            ctx_btn(PAD, w_all, "Take all", total > 0 and c.text or c.muted, total > 0 and c.worn or c.border, B.start_loot_all)
-            ctx_btn(PAD + w_all + bgap, w_non, "Take all but junk", #steps > 0 and c.text or c.muted, #steps > 0 and c.worn or c.border, B.start_loot_non_junk)
-        end
+    elseif is_bank and not (eqoa.bank.get() and eqoa.bank.get().open) and B.nearby_npc("bank") ~= nil then
+        ctx_btn(PAD, W - 2 * PAD, "Open bank", c.text, c.worn, function()
+            B.open_talk_npc("bank", "Open bank", function()
+                B.result = {text = "Bank ready", ok = true}
+                B.dirty()
+            end)
+        end)
+    elseif B.nearby_npc("merchant") ~= nil then
+        local _, cnt = B.junk_sell_list()
+        local lbl = string.format("Sell junk (%d %s)", cnt, cnt == 1 and "item" or "items")
+        ctx_btn(PAD, W - 2 * PAD, lbl, cnt > 0 and c.text or c.muted, cnt > 0 and c.junk or c.border, B.start_sell_junk)
     end
 
     eqoa.input.claim_pointer({x = x0, y = y0, width = W * k, height = H * k})

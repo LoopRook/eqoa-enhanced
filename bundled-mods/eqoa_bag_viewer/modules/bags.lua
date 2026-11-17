@@ -28,8 +28,81 @@ local function keeping_corpse_tab()
     return M.tab == 7 and (loot_batch_active() or M.corpse_tab_kept)
 end
 
+local function dist_sq(a, b)
+    if not a or not b then return nil end
+    local dx = (a.x or 0) - (b.x or 0)
+    local dy = (a.y or 0) - (b.y or 0)
+    local dz = (a.z or 0) - (b.z or 0)
+    return dx * dx + dy * dy + dz * dz
+end
+
+function M.nearby_corpse()
+    local list = eqoa.entities and eqoa.entities.list and eqoa.entities.list()
+    if not list then return nil end
+    local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
+    local ppos = pl and pl.position
+    local best, best_d2 = nil, nil
+    for _, e in ipairs(list) do
+        if e.corpse then
+            local d2 = dist_sq(ppos, e.actor_position or e.position) or 0
+            if not best or d2 < best_d2 then
+                best, best_d2 = e, d2
+            end
+        end
+    end
+    return best, best_d2
+end
+
+local function has_bit(val, b)
+    return val ~= nil and math.floor(val / b) % 2 == 1
+end
+
+function M.nearby_npc(kind)
+    local list = eqoa.entities and eqoa.entities.list and eqoa.entities.list()
+    if not list then return nil end
+    local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
+    local ppos = pl and pl.position
+    local want_bit = kind == "merchant" and 8 or (kind == "bank" and 2 or 0)
+    local best, best_d2 = nil, nil
+    for _, e in ipairs(list) do
+        if not e.corpse and e.npc_flags then
+            local match = want_bit ~= 0 and has_bit(e.npc_flags, want_bit)
+                or (want_bit == 0 and (has_bit(e.npc_flags, 128) or has_bit(e.npc_flags, 8) or has_bit(e.npc_flags, 2) or has_bit(e.npc_flags, 1)))
+            if match then
+                local d2 = dist_sq(ppos, e.actor_position or e.position) or 0
+                if not best or d2 < best_d2 then
+                    best, best_d2 = e, d2
+                end
+            end
+        end
+    end
+    return best, best_d2
+end
+
+function M.ensure_takeover(kind)
+    if not (eqoa.windows and eqoa.windows.takeover and eqoa.windows.taken) then
+        return true
+    end
+    if eqoa.windows.taken(kind) then
+        return true
+    end
+    local ok, err = eqoa.windows.takeover(kind)
+    if not ok then
+        M.result = {text = (err and err.message) or ("cannot take over " .. kind), ok = false}
+        M.dirty()
+        return false
+    end
+    return true
+end
+
 function M.clear_corpse_hold()
     M.corpse_tab_kept = false
+    M.pending_open = nil
+    M.eligible_corpses = {}
+    M.auto_looted = {}
+    M.tracked_target_id = nil
+    M.tracked_target_pos = nil
+    M.recently_dead = nil
 end
 
 M.COLUMNS, M.MAX_ROWS, M.LOG_MAX = 8, 6, 50
@@ -59,7 +132,7 @@ end
 function M.visible_tabs()
     local tabs = {}
     for _, t in ipairs(M.TABS) do tabs[#tabs + 1] = t end
-    if eqoa.loot.get() or keeping_corpse_tab() then
+    if eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse() ~= nil then
         local t = M.CORPSE_TAB
         tabs[#tabs + 1] = {key = t.key, label = t.label, idx = 7}
     end
@@ -168,7 +241,7 @@ local function active_key_and_container()
             if not loot_batch_active() then
                 M.corpse_tab_kept = false
             end
-        elseif keeping_corpse_tab() then
+        elseif keeping_corpse_tab() or M.nearby_corpse() ~= nil then
             c = EMPTY_CORPSE
         else
             M.tab = 1
@@ -245,7 +318,7 @@ function M.dirty()
 end
 
 function M.select(tab)
-    if tab == 7 and (eqoa.loot.get() or keeping_corpse_tab()) and M.tab ~= 7 then
+    if tab == 7 and (eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse() ~= nil) and M.tab ~= 7 then
         M.tab = 7; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
     elseif tab ~= M.tab and M.TABS[tab] then
         M.corpse_tab_kept = false
@@ -365,11 +438,12 @@ end
 function M.junk_sell_list()
     local inv = eqoa.inventory.get()
     if not inv then return {}, 0, 0 end
+    local has_merch = eqoa.merchant.get() ~= nil
     local steps, total_tunar = {}, 0
     for _, it in ipairs(inv.items) do
         if not it.equipped and M.is_junk(it) then
             local qty = it.quantity or 1
-            local q = eqoa.merchant.price(it.ref, "sell", qty)
+            local q = has_merch and eqoa.merchant.price(it.ref, "sell", qty) or 0
             steps[#steps + 1] = {kind = "sell", item = it.ref, count = qty}
             total_tunar = total_tunar + (q or 0)
         end
@@ -389,31 +463,91 @@ function M.loot_non_junk_list()
     return steps, #loot.items
 end
 
+function M.open_loot_corpse(after_kind, corpse_id)
+    if not M.ensure_takeover("loot") then return nil, {message = "window busy"} end
+    local req, err = eqoa.actions.open_loot(corpse_id)
+    if not req then
+        local msg = (err and (err.message or err.code)) or "refused"
+        M.result = {text = "Loot: " .. msg, ok = false}
+        M.dirty()
+        return nil, err
+    end
+    local verb = after_kind == "loot_all" and "Take all"
+        or (after_kind == "loot_non_junk" and "Take all but junk" or "Loot")
+    M.pending_open = {kind = "loot", req = req, after = after_kind, verb = verb}
+    M.result = {text = "Opening corpse...", ok = nil}
+    M.dirty()
+    return req, nil
+end
+
+function M.open_talk_npc(talk_kind, verb, after_fn)
+    if not M.ensure_takeover(talk_kind) then return nil, {message = "window busy"} end
+    local req, err = eqoa.actions.talk(nil, {kind = talk_kind})
+    if not req then
+        local msg = (err and (err.message or err.code)) or "refused"
+        M.result = {text = verb .. ": " .. msg, ok = false}
+        M.dirty()
+        return nil, err
+    end
+    M.pending_open = {kind = talk_kind, req = req, fn = after_fn, verb = verb}
+    M.result = {text = talk_kind == "merchant" and "Opening merchant..." or "Opening bank...", ok = nil}
+    M.dirty()
+    return req, nil
+end
+
+function M.start_loot_button()
+    local l = eqoa.loot.get()
+    if l and l.open then
+        M.select(#M.TABS + 1)
+        M.result = {text = "Corpse ready", ok = true}
+        M.dirty()
+        return true
+    end
+    return M.open_loot_corpse(nil) ~= nil
+end
+
 function M.start_sell_junk()
+    local merch = eqoa.merchant.get()
+    if not merch then
+        if M.nearby_npc("merchant") ~= nil then
+            return M.open_talk_npc("merchant", "Sell junk", M.start_sell_junk) ~= nil
+        end
+        M.result = {text = "Sell junk: merchant is not open", ok = false}
+        return false
+    end
     local steps, count = M.junk_sell_list()
     if count == 0 then
         M.result = {text = "No junk items to sell", ok = false}
-        return
+        return false
     end
     local bid, err = eqoa.actions.batch({steps = steps, require_window = "merchant"})
     if not bid then
         local msg = err and (err.message or err.code) or "refused"
         M.result = {text = "Sell junk: " .. msg, ok = false}
-        return
+        return false
     end
     M.batch_id = bid
     M.batch_kind = "sell"
     M.batch_verb = "Sold"
     M.batch_total = count
     M.result = {text = string.format("Selling junk 0 of %d...", count), ok = nil}
+    return true
 end
 
 function M.start_loot_all()
     local loot = eqoa.loot.get()
-    if not loot or #(loot.items or {}) == 0 then
+    if not loot then
+        if M.nearby_corpse() ~= nil then
+            return M.open_loot_corpse("loot_all") ~= nil
+        end
         M.dirty()
         M.result = {text = "Corpse has no items", ok = false}
-        return
+        return false
+    end
+    if #(loot.items or {}) == 0 then
+        M.dirty()
+        M.result = {text = "Corpse has no items", ok = false}
+        return false
     end
     M.pending_label = "Take all"
     local req, err = eqoa.actions.loot_all()
@@ -421,28 +555,39 @@ function M.start_loot_all()
         local msg = err and (err.message or err.code) or "refused"
         M.result = {text = "Take all: " .. msg, ok = false}
         M.last_req = nil
+        return false
     else
         M.last_req = req
         M.result = {text = "Take all: queued...", ok = nil}
+        return true
     end
 end
 
 function M.start_loot_non_junk()
+    local loot = eqoa.loot.get()
+    if not loot then
+        if M.nearby_corpse() ~= nil then
+            return M.open_loot_corpse("loot_non_junk") ~= nil
+        end
+        M.dirty()
+        M.result = {text = "Corpse has no items", ok = false}
+        return false
+    end
     local steps, total = M.loot_non_junk_list()
     if total == 0 then
         M.dirty()
         M.result = {text = "Corpse has no items", ok = false}
-        return
+        return false
     end
     if #steps == 0 then
         M.result = {text = "Corpse has only junk items", ok = false}
-        return
+        return false
     end
     local bid, err = eqoa.actions.batch({steps = steps, require_window = "loot"})
     if not bid then
         local msg = err and (err.message or err.code) or "refused"
         M.result = {text = "Take all but junk: " .. msg, ok = false}
-        return
+        return false
     end
     M.batch_id = bid
     M.batch_kind = "loot"
@@ -450,9 +595,17 @@ function M.start_loot_non_junk()
     M.batch_total = #steps
     M.corpse_tab_kept = (M.tab == 7)
     M.result = {text = string.format("Looting %d of %d...", 0, #steps), ok = nil}
+    return true
 end
 
 function M.stop_batch()
+    if M.pending_open then
+        local req = M.pending_open.req
+        M.pending_open = nil
+        if req then pcall(eqoa.actions.cancel, req) end
+        M.result = {text = "Stopped", ok = false}
+        M.dirty()
+    end
     if not M.batch_id then return end
     local stopped = eqoa.actions.stop_batch(M.batch_id)
     if stopped then
@@ -511,14 +664,24 @@ function M.build_menu(it, fx, fy)
             loot == nil and "corpse window is not open" or nil,
             function() return eqoa.actions.loot_all() end)
     elseif it.list == "bank" then
+        local near_bank = M.nearby_npc("bank") ~= nil
+        local can_bank = bank_open or near_bank
+        local function bank_move_or_open(qty)
+            if bank and bank.open then
+                return eqoa.actions.bank_move("bank", it.ref, qty)
+            end
+            return M.open_talk_npc("bank", "Withdraw", function()
+                M.run_single("Withdraw", function() return eqoa.actions.bank_move("bank", it.ref, qty) end)
+            end)
+        end
         if it.quantity > 1 then
-            add("Withdraw 1", bank_open, not bank_open and "bank window is not open" or nil,
-                function() return eqoa.actions.bank_move("bank", it.ref, 1) end)
-            add("Withdraw stack (" .. it.quantity .. ")", bank_open, not bank_open and "bank window is not open" or nil,
-                function() return eqoa.actions.bank_move("bank", it.ref, it.quantity) end)
+            add("Withdraw 1", can_bank, not can_bank and "bank window is not open" or nil,
+                function() return bank_move_or_open(1) end)
+            add("Withdraw stack (" .. it.quantity .. ")", can_bank, not can_bank and "bank window is not open" or nil,
+                function() return bank_move_or_open(it.quantity) end)
         else
-            add("Withdraw", bank_open, not bank_open and "bank window is not open" or nil,
-                function() return eqoa.actions.bank_move("bank", it.ref, 1) end)
+            add("Withdraw", can_bank, not can_bank and "bank window is not open" or nil,
+                function() return bank_move_or_open(1) end)
         end
     else
         local can = eqoa.items.can_use(it.ref)
@@ -565,16 +728,25 @@ function M.build_menu(it, fx, fy)
             end
         end
 
-        if bank_open then
+        local near_bank = M.nearby_npc("bank") ~= nil
+        if bank_open or near_bank then
             local dep_deny = it.equipped and "cannot deposit an equipped item" or nil
+            local function dep_move_or_open(qty)
+                if bank_open then
+                    return eqoa.actions.bank_move("inventory", it.ref, qty)
+                end
+                return M.open_talk_npc("bank", "Deposit", function()
+                    M.run_single("Deposit", function() return eqoa.actions.bank_move("inventory", it.ref, qty) end)
+                end)
+            end
             if (it.quantity or 1) > 1 then
                 add("Deposit 1", dep_deny == nil, dep_deny,
-                    function() return eqoa.actions.bank_move("inventory", it.ref, 1) end)
+                    function() return dep_move_or_open(1) end)
                 add("Deposit stack (" .. it.quantity .. ")", dep_deny == nil, dep_deny,
-                    function() return eqoa.actions.bank_move("inventory", it.ref, it.quantity) end)
+                    function() return dep_move_or_open(it.quantity) end)
             else
                 add("Deposit", dep_deny == nil, dep_deny,
-                    function() return eqoa.actions.bank_move("inventory", it.ref, 1) end)
+                    function() return dep_move_or_open(1) end)
             end
         end
     end
@@ -589,6 +761,23 @@ function M.build_menu(it, fx, fy)
     return M.menu
 end
 
+function M.run_single(label, fn)
+    M.pending_label = label
+    local req, err = fn()
+    if not req then
+        local msg = err and (err.message or err.code) or "refused"
+        M.result = {text = label .. ": " .. msg, ok = false}
+        M.last_req = nil
+    else
+        M.last_req = req
+        if not M.pending_open then
+            M.result = {text = label .. ": queued...", ok = nil}
+        end
+    end
+    M.dirty()
+    return req, err
+end
+
 function M.trigger_menu(row)
     if not row then return end
     if row.local_only and row.enabled and row.run then
@@ -599,28 +788,149 @@ function M.trigger_menu(row)
         M.result = {text = row.label .. ": " .. (row.reason or "unavailable"), ok = false}
         return
     end
-    M.pending_label = row.label
-    local req, err = row.run()
-    if not req then
-        local msg = err and (err.message or err.code) or "refused"
-        M.result = {text = row.label .. ": " .. msg, ok = false}
-        M.last_req = nil
-    else
-        M.last_req = req
-        M.result = {text = row.label .. ": queued...", ok = nil}
+    M.run_single(row.label, row.run)
+end
+
+local function finish_pending_open(expected_kind)
+    local p = M.pending_open
+    if not p or p.kind ~= expected_kind then return false end
+    M.pending_open = nil
+    if p.kind == "loot" then
+        if p.after == "loot_all" then
+            M.start_loot_all()
+        elseif p.after == "loot_non_junk" then
+            M.start_loot_non_junk()
+        else
+            M.result = {text = "Corpse ready", ok = true}
+            M.dirty()
+        end
+    elseif p.fn then
+        p.fn()
+    end
+    return true
+end
+
+function M.on_loot_changed(d)
+    if d and d.before and not d.after then
+        if not keeping_corpse_tab() and M.tab == 7 then
+            M.tab = 1
+        end
+    elseif eqoa.loot.get() ~= nil then
+        finish_pending_open("loot")
+    end
+    M.dirty()
+end
+
+function M.on_merchant_changed(d)
+    if eqoa.merchant.get() ~= nil then
+        finish_pending_open("merchant")
+    end
+    M.dirty()
+end
+
+function M.on_bank_changed(d)
+    local b = eqoa.bank.get()
+    if b and b.open then
+        finish_pending_open("bank")
+    end
+    M.dirty()
+end
+
+function M.on_target_update()
+    local e = eqoa.target and eqoa.target.get and eqoa.target.get()
+    if not e and eqoa.player and eqoa.player.get and eqoa.entities and eqoa.entities.find then
+        local pl = eqoa.player.get()
+        if pl and pl.target_id then
+            e = eqoa.entities.find(pl.target_id)
+        end
+    end
+    if e and not e.corpse then
+        M.tracked_target_id = e.id
+        M.tracked_target_pos = e.actor_position or e.position
+    end
+end
+
+function M.on_entity_changed(d)
+    if not (d and d.after) then return end
+    local after = d.after
+    if after.corpse and ((d.before and not d.before.corpse) or after.id == M.tracked_target_id) then
+        if after.id == M.tracked_target_id then
+            M.eligible_corpses = M.eligible_corpses or {}
+            M.eligible_corpses[after.id] = true
+        end
+    elseif not after.corpse and after.id == M.tracked_target_id then
+        M.tracked_target_pos = after.actor_position or after.position
+    end
+end
+
+function M.on_entity_removed(d)
+    if d and d.before and not d.before.corpse and d.before.id == M.tracked_target_id then
+        M.recently_dead = {pos = d.before.actor_position or d.before.position, expires = os.clock() + 3.0}
+    end
+end
+
+function M.on_entity_added(d)
+    local after = d and d.after
+    if not after or not after.corpse then return end
+    if M.recently_dead and os.clock() <= M.recently_dead.expires then
+        local d2 = dist_sq(M.recently_dead.pos, after.actor_position or after.position)
+        if d2 ~= nil and d2 <= 36.0 then
+            M.eligible_corpses = M.eligible_corpses or {}
+            M.eligible_corpses[after.id] = true
+        end
+    end
+end
+
+function M.tick_auto_loot()
+    local enabled = eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true
+    if not enabled then return end
+    if not (M.eligible_corpses and next(M.eligible_corpses)) then return end
+    if M.batch_id or M.pending_open or M.last_req or loot_batch_active() then return end
+    local list = eqoa.entities and eqoa.entities.list and eqoa.entities.list()
+    if not list then return end
+    local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
+    local ppos = pl and pl.position
+    local best, best_d2 = nil, nil
+    for _, e in ipairs(list) do
+        if e.corpse and M.eligible_corpses[e.id] and not (M.auto_looted and M.auto_looted[e.id]) then
+            local d2 = dist_sq(ppos, e.actor_position or e.position)
+            if (d2 == nil or d2 <= 225.0) and (not best or (d2 or 0) < (best_d2 or 0)) then
+                best, best_d2 = e, d2 or 0
+            end
+        end
+    end
+    if best then
+        M.auto_looted = M.auto_looted or {}
+        M.auto_looted[best.id] = true
+        M.open_loot_corpse("loot_non_junk", best.id)
     end
 end
 
 function M.on_action_result(d)
     if not d then return end
+    if M.pending_open and d.request_id == M.pending_open.req then
+        local p = M.pending_open
+        if d.ok == false then
+            M.pending_open = nil
+            local msg = d.reason or d.code or d.state or "refused"
+            M.result = {text = (p.verb or d.kind) .. ": " .. msg, ok = false}
+            M.dirty()
+            return
+        elseif d.ok == true and d.phase ~= "dispatch" then
+            finish_pending_open(p.kind)
+            return
+        end
+    end
     if M.last_req == nil or d.request_id ~= M.last_req then return end
     local label = M.pending_label or d.kind
     if d.state == "dispatched" and d.phase == "dispatch" then
         M.result = {text = label .. ": waiting for server...", ok = nil}
     elseif d.ok == true then
         M.result = {text = label .. ": ok", ok = true}
+        M.last_req = nil
     else
         M.result = {text = label .. ": " .. (d.reason or d.code or d.state), ok = false}
+        M.last_req = nil
     end
 end
 

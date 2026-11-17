@@ -1630,6 +1630,80 @@ impl Play {
     pub(crate) fn bags_open_corpse_mode(&mut self) {
         self.mode = 1;
     }
+    pub(crate) fn bags_player_at(&mut self, pos: [f32; 3]) {
+        self.self_at = Some((pos, None));
+    }
+    pub(crate) fn bags_spawn_npc(
+        &mut self,
+        id: u32,
+        name: &str,
+        npc_flags: u16,
+        p18: u8,
+        pos: [f32; 3],
+    ) {
+        self.player.world = 0;
+        let creature = net::entity::Creature {
+            name: name.into(),
+            npc_flags,
+            ..Default::default()
+        };
+        self.entities.slots.retain(|s| s.as_ref().is_none_or(|e| e.id != id));
+        let slot = self
+            .entities
+            .slots
+            .iter()
+            .position(Option::is_none)
+            .unwrap_or_else(|| {
+                self.entities.slots.push(None);
+                self.entities.slots.len() - 1
+            });
+        self.entities.slots[slot] = Some(net::entity::Entity {
+            id,
+            world: 0,
+            kind: net::entity::TYPE_CREATURE,
+            p18,
+            pos,
+            actor_pos: pos,
+            creature: Some(creature),
+            ..Default::default()
+        });
+        super::updates::capture(
+            self,
+            &super::updates::Kind::Entity(slot),
+            None,
+        );
+    }
+    pub(crate) fn bags_entity_die(&mut self, id: u32) {
+        if let Some(slot) = self
+            .entities
+            .slots
+            .iter()
+            .position(|e| e.as_ref().is_some_and(|e| e.id == id))
+        {
+            if let Some(ent) = self.entities.slots[slot].as_mut() {
+                ent.p18 = 3;
+            }
+            super::updates::capture(
+                self,
+                &super::updates::Kind::Entity(slot),
+                None,
+            );
+        }
+    }
+    pub(crate) fn bags_target_sync(&mut self, id: u32) {
+        self.target = id;
+        super::updates::capture(
+            self,
+            &super::updates::Kind::Player,
+            None,
+        );
+    }
+    pub(crate) fn bags_merchant_packet(&mut self, id: u32) {
+        apply(self, opcode(0x00B7, shop_bytes(id, 90, 110, &[sword()], "Shop")));
+    }
+    pub(crate) fn bags_bank_packet(&mut self) {
+        apply(self, opcode(0x124D, vec![]));
+    }
     pub(crate) fn bags_loot_confirm_all(&mut self) {
         let ev = opcode(0x001A, vec![]);
         let cap = super::super::begin_game_event(self, &ev);

@@ -2278,3 +2278,205 @@ fn round6_sandstorm_duplicate_item_id_stacks_and_partial_take() {
     bv.clean();
     super::super::action_broker::reset_all_for_test();
 }
+
+#[test]
+fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refusal() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+
+    // 1. Addon Manager labels eqoa_bag_viewer as acting on its own + lists eqoa.windows.takeover.
+    let entry = bv
+        .manager
+        .entries()
+        .into_iter()
+        .find(|e| e.metadata.id == "eqoa_bag_viewer")
+        .unwrap();
+    assert!(
+        entry
+            .metadata
+            .requested_capabilities
+            .iter()
+            .any(|c| c == "eqoa.windows.takeover"),
+        "mod.json must declare eqoa.windows.takeover"
+    );
+    assert_eq!(
+        super::super::runtime::autonomous_action_label(&entry.metadata.requested_capabilities)
+            .as_deref(),
+        Some("Actions: can act on its own (all actions)")
+    );
+
+    // Spawn nearby corpse (9001), merchant (9002), and banker (9003); native mode stays 0 throughout.
+    bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 8, 1, [6.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9003, "Banker Dan", 0x80 | 2, 1, [8.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0);
+
+    // 2. Click Corpse tab (visible because corpse is nearby) -> click Loot -> server refuses 0x0085 -> visible server text.
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let (lx, ly, lbl) = bv.action_hit("Loot").unwrap();
+    assert_eq!(lbl, "Loot");
+    let sends_0 = bv.play.bags_sends_lost();
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_0, "Loot opens nearest corpse");
+    bv.play.bags_loot_refused(1);
+    bv.frames(2);
+    let (res_txt, res_ok) = bv.result_text().unwrap();
+    assert_eq!(res_ok, Some(false));
+    assert!(res_txt.contains("too far away"), "must show server refusal text: {res_txt}");
+    assert_eq!(bv.play.mode, 0);
+
+    // 3. Click Loot -> 0x0018 opens corpse silently (mode stays 0!) -> Take all but junk (Sandstorm 2-item per-take reopen without native window).
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['2001'] = true return true end)()"));
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100},
+        {"name":"Bone Chip","id":2004,"key":2,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "corpse window must NOT open natively under takeover");
+    let (nx, ny, _) = bv.action_hit("Take all but junk").unwrap();
+    bv.click((nx, ny));
+    bv.play.bags_broker_tick(); // Take Bloodstone (step 1)
+    bv.play.bags_added(&serde_json::json!({"name":"Bloodstone","id":2003,"key":75,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close(); // Sandstorm 0x0016 close between takes
+    bv.frames(1);
+    bv.play.bags_broker_tick(); // Broker reopens corpse with 0x0015 automatically
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Bone Chip","id":2004,"key":1,"qty":1,"max_stack":100}
+    ]));
+    assert_eq!(bv.play.mode, 0, "reopened corpse must NOT open natively");
+    bv.frames(1);
+    bv.play.bags_broker_tick(); // Take Bone Chip (step 2)
+    bv.play.bags_added(&serde_json::json!({"name":"Bone Chip","id":2004,"key":76,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0);
+    assert_eq!(
+        bv.result_text(),
+        Some(("Looted 2 of 2".into(), Some(true)))
+    );
+
+    // 4. Mark Odd Thing (slot 8) as junk on All tab, then click Sell junk near Merchant (native merchant closed) -> talks & sells without native window!
+    bv.click(bv.tab(1));
+    bv.frames(1);
+    let s8 = bv.slot(8);
+    bv.click(s8);
+    bv.frames(2);
+    let (mx, my, en, _, _) = bv.menu_row("Mark as junk").unwrap();
+    assert!(en);
+    bv.click((mx, my));
+    bv.frames(2);
+
+    let (sx, sy, slbl) = bv.action_hit("Sell junk (").unwrap();
+    assert!(slbl.starts_with("Sell junk (1 item)"), "{slbl}");
+    let sends_merch = bv.play.bags_sends_lost();
+    bv.click((sx, sy));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_merch, "Sell junk must talk to merchant");
+    assert_eq!(bv.play.target, 9002);
+    bv.play.bags_merchant_packet(9002);
+    assert_eq!(bv.play.mode, 0, "native merchant window must stay closed");
+    bv.frames(2);
+    bv.play.bags_broker_tick(); // dispatches step 1 sell
+    assert!(bv.play.bags_shop_pending(), "sell step sent silently");
+    bv.play.bags_sell_confirm(7, 1);
+    bv.frames(2);
+    assert_eq!(bv.result_text(), Some(("Sold 1 of 1".into(), Some(true))));
+
+    // 5. Deposit near Banker (native bank closed): click item -> Deposit -> talks & deposits silently (mode stays 0).
+    let s2 = bv.slot(2); // Healing Potion
+    bv.click(s2);
+    bv.frames(2);
+    let (dx, dy, den, _, _) = bv.menu_row("Deposit 1").unwrap();
+    assert!(den, "Deposit 1 must be enabled when near banker");
+    bv.click((dx, dy));
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.target, 9003);
+    bv.play.bags_bank_packet();
+    assert_eq!(bv.play.mode, 0, "native bank window must stay closed");
+    bv.frames(2);
+    bv.play.bags_broker_tick(); // dispatches bank_move cleanly via bank_taken_tick
+    assert_eq!(bv.play.bags_bank_state(), 2, "bank_move must have sent native 0x1254");
+    bv.play.bags_bank_deposit_confirm(99, 900002, "Healing Potion", 1);
+    bv.frames(2);
+    assert_eq!(bv.result_text(), Some(("Deposit: ok".into(), Some(true))));
+
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+
+    // Auto-loot option is registered and OFF by default.
+    assert_eq!(
+        super::super::options::get_toggle("eqoa_bag_viewer", "auto_loot"),
+        Some(false)
+    );
+
+    // Living target 9010 dies while auto_loot is OFF -> zero actions taken.
+    bv.play.bags_spawn_npc(9010, "a goblin", 0, 1, [3.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9010);
+    bv.frames(2);
+    let sends_off = bv.play.bags_sends_lost();
+    bv.play.bags_entity_die(9010);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends_off, "auto_loot OFF must do nothing");
+
+    // Turn Auto-loot ON; mark Rat Pelt (id 2001) as junk so auto-loot leaves it behind.
+    bv.open();
+    bv.frames(2);
+    assert!(super::super::options::set_toggle("eqoa_bag_viewer", "auto_loot", true));
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['2001'] = true return true end)()"));
+
+    // Kill living target 9011 nearest ([2,0,0] < 9010 at [3,0,0]) -> auto-loot opens corpse & loots non-junk cleanly without native window!
+    bv.play.bags_spawn_npc(9011, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9011);
+    bv.frames(2);
+    let sends_before = bv.play.bags_sends_lost();
+    bv.play.bags_entity_die(9011);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_before, "auto_loot must send 0x0015 open_loot");
+    assert_eq!(bv.play.target, 9011);
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Sapphire","id":2009,"key":1,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "native corpse window must remain closed during auto-loot");
+    bv.play.bags_broker_tick(); // dispatches Take Sapphire (leaves junk Rat Pelt!)
+    bv.play.bags_added(&serde_json::json!({"name":"Sapphire","id":2009,"key":81,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(
+        bv.result_text(),
+        Some(("Looted 1 of 1".into(), Some(true))),
+        "auto-loot must take all non-junk and report completion"
+    );
+
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
