@@ -50,7 +50,7 @@ fn item_json(it: &NetItem, list: &str, index: usize, flags: u32, attack_words: &
         "id": i.id.to_string(),
         "name": i.name,
         "description": i.desc,
-        "icon": u32::try_from(icon).ok().filter(|v| *v != 0),
+        "icon": (icon as i32 != 0 && icon as i32 != -1).then_some(icon as u32),
         "quantity": it.quantity,
         "charges": it.charges,
         "equipped": it.equip_slot >= 0,

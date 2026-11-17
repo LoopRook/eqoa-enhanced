@@ -613,6 +613,8 @@ static ATLAS_CLONE_COUNT: AtomicU64 = AtomicU64::new(0);
 static SAFE_LIBRARY_CLONE_COUNT: AtomicU64 = AtomicU64::new(0);
 #[cfg(not(target_arch = "wasm32"))]
 static LOOKUP_ATTEMPT_COUNT: AtomicU64 = AtomicU64::new(0);
+#[cfg(not(target_arch = "wasm32"))]
+static RESOURCE_CALL_COUNT: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
@@ -634,10 +636,17 @@ pub fn lookup_attempt_count() -> u64 {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
+pub fn resource_call_count() -> u64 {
+    RESOURCE_CALL_COUNT.load(Ordering::Relaxed)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 pub fn reset_test_counters() {
     ATLAS_CLONE_COUNT.store(0, Ordering::Relaxed);
     SAFE_LIBRARY_CLONE_COUNT.store(0, Ordering::Relaxed);
     LOOKUP_ATTEMPT_COUNT.store(0, Ordering::Relaxed);
+    RESOURCE_CALL_COUNT.store(0, Ordering::Relaxed);
 }
 
 #[derive(Default)]
@@ -767,6 +776,14 @@ thread_local! {
 }
 
 pub fn queue_pending_lookup(id: u32) {
+    let already_failed = FAILED_LOOKUPS.with(|fl| {
+        fl.borrow()
+            .as_ref()
+            .is_some_and(|set| set.contains(&id))
+    });
+    if already_failed {
+        return;
+    }
     PENDING_LOOKUPS.with(|p| {
         let mut borrow = p.borrow_mut();
         borrow.get_or_insert_with(HashSet::new).insert(id);
@@ -1406,6 +1423,10 @@ fn install_native(
                         "not_in_world",
                         "enter a loaded world first",
                     );
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                if name == "resource" {
+                    RESOURCE_CALL_COUNT.fetch_add(1, Ordering::Relaxed);
                 }
                 let Some(hash) = super::native_state::uint(&hash, u32::MAX as u64) else {
                     return error(

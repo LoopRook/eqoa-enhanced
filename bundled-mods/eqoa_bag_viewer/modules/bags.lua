@@ -8,9 +8,14 @@ local M = {
     junk_ids = {}, sell_grey = false, junk_loaded = false,
     batch_id = nil, batch_kind = nil, batch_verb = nil, batch_total = 0,
     action_hits = {},
+    icon_req = {}, has_pending_icons = false,
 }
 
 local JUNK_FILE = "junk.cfg"
+local TRIM_OPTS = {trim = true, trim_color = {r = 0, g = 0, b = 0, a = 1}}
+local ICON_RETRY_LIMIT = 5
+local _frame_tried = {}
+local _frame_tex = {}
 
 M.COLUMNS, M.MAX_ROWS, M.LOG_MAX = 8, 8, 50
 -- The game's item-page tabs, in its order, with All first and the bank last. A stack is under a tab when the
@@ -49,6 +54,80 @@ function M.visible_tabs()
     return tabs
 end
 
+function M.reset_icons()
+    for k in pairs(M.icon_req) do M.icon_req[k] = nil end
+    M.has_pending_icons = false
+end
+
+local function clear_pass_cache()
+    for k in pairs(_frame_tried) do _frame_tried[k] = nil end
+    for k in pairs(_frame_tex) do _frame_tex[k] = nil end
+end
+
+local function fetch_entry_icon(entry)
+    local icon = entry.item and entry.item.icon
+    if not icon then return end
+    local st = M.icon_req[icon]
+    if st == "failed" then return end
+    local cached = _frame_tex[icon]
+    if cached then
+        entry.texture = cached
+        return
+    end
+    if _frame_tried[icon] then
+        M.has_pending_icons = true
+        return
+    end
+    local info = eqoa.icons.resource(icon, TRIM_OPTS)
+    if info and info.texture then
+        entry.texture = info.texture
+        M.icon_req[icon] = "ok"
+        _frame_tex[icon] = info.texture
+    else
+        _frame_tried[icon] = true
+        local tries = (type(st) == "number" and st or 0) + 1
+        if tries >= ICON_RETRY_LIMIT then
+            M.icon_req[icon] = "failed"
+        else
+            M.icon_req[icon] = tries
+            M.has_pending_icons = true
+        end
+    end
+end
+
+function M.sync_visible_icons(first_slot, last_slot)
+    local grid = M.grid
+    if not grid then return end
+    M.has_pending_icons = false
+    clear_pass_cache()
+    local items = grid.items
+    for i = 1, #items do
+        local entry = items[i]
+        if i < first_slot or i > last_slot then
+            entry.texture = nil
+        elseif entry.texture == nil then
+            fetch_entry_icon(entry)
+        end
+    end
+    clear_pass_cache()
+end
+
+function M.resolve_pending_icons(first_slot, last_slot)
+    local grid = M.grid
+    if not grid or not M.has_pending_icons then return end
+    M.has_pending_icons = false
+    clear_pass_cache()
+    local items = grid.items
+    local hi = math.min(#items, last_slot)
+    for i = math.max(1, first_slot), hi do
+        local entry = items[i]
+        if entry.texture == nil and entry.item and entry.item.icon then
+            fetch_entry_icon(entry)
+        end
+    end
+    clear_pass_cache()
+end
+
 -- The grid for the tab on show: the items it keeps in the container's own order, with the numbers under it.
 function M.rebuild()
     M.builds = M.builds + 1
@@ -74,12 +153,11 @@ function M.rebuild()
     else
         c = eqoa.inventory.get()
     end
-    if not c then M.grid = false; return false end
+    if not c then M.grid = false; M.has_pending_icons = false; return false end
     local items = {}
     for _, it in ipairs(c.items) do
         if keeps(key, it) then
-            local info = it.icon and eqoa.icons.resource(it.icon, {trim = true, trim_color = {r = 0, g = 0, b = 0, a = 1}})
-            items[#items + 1] = {item = it, texture = info and info.texture}
+            items[#items + 1] = {item = it, texture = nil}
         end
     end
     local slots = math.max(c.capacity or 40, #c.items)
@@ -88,6 +166,7 @@ function M.rebuild()
         items = items, used = c.used, capacity = c.capacity, money = c.money,
         rows = rows, bank = key == "bank", corpse = key == "corpse",
     }
+    M.sync_visible_icons(1, rows * M.COLUMNS)
     M.hover = nil
     M.menu = nil
     return M.grid

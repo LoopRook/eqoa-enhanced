@@ -1233,3 +1233,121 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot()
     bv.clean();
     super::super::action_broker::reset_all_for_test();
 }
+
+fn bv_test_surface_container(surfaces: &[(i32, [u8; 4])]) -> esf::Container {
+    let mut rec = Vec::new();
+    for &(dict_id, rgba) in surfaces {
+        let (w, h, pal_entries) = (16i32, 16i32, 256);
+        let mut body = Vec::new();
+        body.extend_from_slice(&dict_id.to_le_bytes());
+        body.extend_from_slice(&w.to_le_bytes());
+        body.extend_from_slice(&h.to_le_bytes());
+        body.extend_from_slice(&1i32.to_le_bytes());
+        body.extend_from_slice(&1i32.to_le_bytes());
+        body.extend_from_slice(&(pal_entries as i32).to_le_bytes());
+        let mut pal = vec![0u8; pal_entries * 4];
+        pal[4] = rgba[0];
+        pal[5] = rgba[1];
+        pal[6] = rgba[2];
+        pal[7] = rgba[3];
+        body.extend_from_slice(&pal);
+        body.extend_from_slice(&w.to_le_bytes());
+        let pix = vec![1u8; (w * h) as usize];
+        body.extend_from_slice(&pix);
+
+        rec.extend_from_slice(&0x1000u16.to_le_bytes());
+        rec.extend_from_slice(&0i16.to_le_bytes());
+        rec.extend_from_slice(&(body.len() as i32).to_le_bytes());
+        rec.extend_from_slice(&0u32.to_le_bytes());
+        rec.extend_from_slice(&body);
+    }
+    esf::Container::parse_records(rec)
+}
+
+#[test]
+fn round6_item4_lazy_icons_load_without_native_windows_and_zero_per_frame_requests() {
+    let Some(mut bv) = Bv::new() else { return };
+    super::super::icons::set_custom_icon_provider(None);
+    super::super::icons::reset_test_counters();
+
+    let pos_id: i32 = 40011;
+    let neg_id: i32 = -40012;
+    let bank_id: i32 = 40013;
+    let unresolvable_id: u32 = 999_999;
+    let mut lib = esf::Library::new();
+    lib.add(
+        "ITEMICON.ESF",
+        bv_test_surface_container(&[
+            (pos_id, [220, 40, 40, 255]),
+            (neg_id, [40, 180, 220, 255]),
+            (bank_id, [90, 220, 90, 255]),
+        ]),
+    );
+    // Prime live library WITHOUT prefetching pos_id/neg_id/bank_id (mirrors bank, corpse, or unopened UI).
+    super::super::icons::update_live_data(&lib, None, &[]);
+
+    let world = serde_json::json!({
+        "pack": [
+            {"name":"Red Sword","id":900001,"key":11,"wear":12,"icon":pos_id},
+            {"name":"Blue Orb","id":900002,"key":12,"qty":2,"max_stack":20,"icon":neg_id},
+            {"name":"Ghost Charm","id":900003,"key":13,"qty":1,"icon":unresolvable_id}
+        ],
+        "bank": [
+            {"name":"Bank Gem","id":900101,"key":21,"qty":1,"icon":bank_id}
+        ],
+        "tunar": 100,
+        "bank_tunar": 0
+    });
+    bv.play.bags_set(&world);
+    bv.enable();
+    bv.open();
+
+    // Signed negative 32-bit dict_id must not be dropped to nil by items_capture.
+    let neg_icon: Option<u32> = bv.eval("require('bags').grid.items[2].item.icon");
+    assert_eq!(neg_icon, Some(neg_id as u32), "negative signed dict_id must reach Lua as u32");
+
+    // Next Play::frame runs frame_library -> update_live_data, decoding queued lookups into SAFE_LIBRARY.
+    super::super::icons::update_live_data(&lib, None, &[]);
+    bv.frames(1);
+
+    let (t1, t2, t3, r1, r2, pend): (bool, bool, bool, String, String, bool) = bv.eval(
+        "require('bags').grid.items[1].texture ~= nil, require('bags').grid.items[2].texture ~= nil, require('bags').grid.items[3].texture ~= nil, tostring(require('bags').icon_req[40011]), tostring(require('bags').icon_req[4294927284]), require('bags').has_pending_icons",
+    );
+    assert!(
+        t1 && t2,
+        "lazy icons must resolve once SAFE_LIBRARY loads without opening native windows (t1={t1}, t2={t2}, r1={r1}, r2={r2}, pend={pend}, snap1={}, snap2={}, res_cnt={}, lkp_cnt={})",
+        super::super::icons::snapshot_has_icon(pos_id as u32),
+        super::super::icons::snapshot_has_icon(neg_id as u32),
+        super::super::icons::resource_call_count(),
+        super::super::icons::lookup_attempt_count(),
+    );
+    assert!(!t3, "negative control: unresolvable icon stays nil and uses fallback letter");
+
+    // Steady-state frames must issue ZERO resource requests, ZERO ESF lookups, and avoid per-frame allocations.
+    let res_before = super::super::icons::resource_call_count();
+    let lkp_before = super::super::icons::lookup_attempt_count();
+    bv.lua().gc_collect().unwrap();
+    let bytes_before = bv.lua().used_memory();
+    bv.frames(10);
+    let res_after = super::super::icons::resource_call_count();
+    let lkp_after = super::super::icons::lookup_attempt_count();
+    bv.lua().gc_collect().unwrap();
+    let bytes_after = bv.lua().used_memory();
+    assert_eq!(res_after, res_before, "steady frames must not re-request eqoa.icons.resource");
+    assert_eq!(lkp_after, lkp_before, "steady frames must not trigger ESF surface lookups");
+    assert!(bytes_after.saturating_sub(bytes_before) <= 1024, "steady frames must not leak Lua tables (delta={} bytes)", bytes_after.saturating_sub(bytes_before));
+
+    // Bank tab loads its own non-prefetched icon without ever opening native bank UI.
+    bv.click(bv.tab(6));
+    bv.frames(1);
+    super::super::icons::update_live_data(&lib, None, &[]);
+    bv.frames(1);
+    let bank_loaded: bool = bv.eval("require('bags').grid.items[1].texture ~= nil");
+    assert!(bank_loaded, "bank icon must load lazily without opening native bank window");
+    let bank_res_before = super::super::icons::resource_call_count();
+    bv.frames(5);
+    assert_eq!(super::super::icons::resource_call_count(), bank_res_before, "bank tab steady frames must not re-request icons");
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}

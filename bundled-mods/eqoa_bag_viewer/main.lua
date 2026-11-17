@@ -83,11 +83,16 @@ end)
 -- The loot log is the one thing kept while the window is closed, from events only.
 B.load_junk()
 eqoa.events.on("loot.changed", function(e) B.log_loot(e.data) end)
+eqoa.events.on("state.reset", function() B.reset_icons(); B.dirty() end)
 eqoa.events.on("disabling", close)
 
 function draw()
     local grid = B.grid
-    if grid == nil then grid = B.rebuild() end
+    if grid == nil then
+        grid = B.rebuild()
+    elseif B.has_pending_icons then
+        B.resolve_pending_icons(1, grid.rows * B.COLUMNS)
+    end
     if not grid then return end
     local f = eqoa.hud.frame()
     local k = math.min(f.scale_x, f.scale_y)
