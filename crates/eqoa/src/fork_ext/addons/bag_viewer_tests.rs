@@ -1402,6 +1402,7 @@ fn round6_item1_stale_corpse_grid_and_loot_batch_and_log() {
 
     // Full 3-item corpse: Rat Pelt (junk), Spider Silk, Bone Chip -> ONE click must take BOTH non-junk items and log both.
     bv.play.bags_target_corpse(5001, "a decaying skeleton");
+    bv.play.bags_press_loot();
     bv.play.bags_corpse(&bv_corpse());
     bv.frames(1);
     bv.click(bv.tab(7));
