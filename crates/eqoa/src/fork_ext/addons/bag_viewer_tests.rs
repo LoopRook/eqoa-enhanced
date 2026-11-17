@@ -2166,3 +2166,115 @@ fn round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls() {
     bv.clean();
     super::super::action_broker::reset_all_for_test();
 }
+
+#[test]
+fn round6_sandstorm_duplicate_item_id_stacks_and_partial_take() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_target_corpse(5031, "a decaying skeleton");
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Spider Silk","id":2002,"key":1,"qty":3,"max_stack":100},
+        {"name":"Spider Silk","id":2002,"key":2,"qty":5,"max_stack":100},
+        {"name":"Bone Chip","id":2003,"key":3,"qty":4,"max_stack":100}
+    ]));
+    bv.enable();
+    bv.open();
+    bv.click(bv.tab(7));
+    bv.frames(1);
+
+    // Mark Rat Pelt as junk (Slot 1).
+    bv.click(bv.slot(1));
+    bv.frames(1);
+    let (jx, jy, _, _, _) = bv.menu_row("Mark as junk").unwrap();
+    bv.click((jx, jy));
+    bv.frames(1);
+
+    // 1. Partial stack take: click Bone Chip x4 (Slot 4) -> "Take 1" -> logs x1 (not x4).
+    bv.click(bv.slot(4));
+    bv.frames(1);
+    let (tx1, ty1, _, _, lbl) = bv.menu_row("Take 1").unwrap();
+    assert_eq!(lbl, "Take 1");
+    bv.click((tx1, ty1));
+    bv.play.bags_broker_tick();
+    bv.play.bags_added(&serde_json::json!({"name":"Bone Chip","id":2003,"key":71,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(bv.log().len(), 1, "partial take must log exact qty 1: {:?}", bv.log());
+    assert!(bv.log()[0].contains("Bone Chip x1, from a decaying skeleton"), "{:?}", bv.log());
+
+    // Reopen corpse with reduced Bone Chip stack (qty 4 -> qty 3), keeping both Spider Silk stacks + junk Rat Pelt.
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Spider Silk","id":2002,"key":1,"qty":3,"max_stack":100},
+        {"name":"Spider Silk","id":2002,"key":2,"qty":5,"max_stack":100},
+        {"name":"Bone Chip","id":2003,"key":3,"qty":3,"max_stack":100}
+    ]));
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+
+    // 2. "Take all but junk" with two non-junk stacks of identical item_id (2002 qty 3 and qty 5) + partial Bone Chip (qty 3).
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.play.bags_broker_tick(); // Step 1: One(1, 3) -> Spider Silk x3
+    bv.play.bags_added(&serde_json::json!({"name":"Spider Silk","id":2002,"key":72,"qty":3,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(1);
+    assert_eq!(bv.eval::<i64>("require('bags').tab"), 7, "L1 stays on Corpse tab during batch");
+
+    bv.play.bags_broker_tick(); // Sends 0x0015 reopen
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Spider Silk","id":2002,"key":1,"qty":5,"max_stack":100},
+        {"name":"Bone Chip","id":2003,"key":2,"qty":3,"max_stack":100}
+    ]));
+    bv.frames(1);
+    bv.play.bags_broker_tick(); // Step 2: re-resolves Spider Silk x5 at re-indexed key 1!
+    bv.play.bags_added(&serde_json::json!({"name":"Spider Silk","id":2002,"key":73,"qty":5,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(1);
+
+    bv.play.bags_broker_tick(); // Sends 0x0015 reopen
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Bone Chip","id":2003,"key":1,"qty":3,"max_stack":100}
+    ]));
+    bv.frames(1);
+    bv.play.bags_broker_tick(); // Step 3: re-resolves Bone Chip x3 at re-indexed key 1!
+    bv.play.bags_added(&serde_json::json!({"name":"Bone Chip","id":2003,"key":74,"qty":3,"max_stack":100}));
+    bv.play.bags_loot_close();
+    let sends_done = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends_done, "completed 3-step batch sends no further 0x0015");
+    assert_eq!(
+        bv.eval::<(i64, String, Option<bool>)>("require('bags').tab, require('bags').result.text, require('bags').result.ok"),
+        (7, "Looted 3 of 3".into(), Some(true))
+    );
+    let log = bv.log();
+    assert_eq!(log.len(), 4, "must log 1 partial + 3 batch takes with 0 duplicates: {log:?}");
+    assert!(log[0].contains("Bone Chip x3, from a decaying skeleton"), "{log:?}");
+    assert!(log[1].contains("Spider Silk x5, from a decaying skeleton"), "{log:?}");
+    assert!(log[2].contains("Spider Silk x3, from a decaying skeleton"), "{log:?}");
+    assert!(log[3].contains("Bone Chip x1, from a decaying skeleton"), "{log:?}");
+
+    // Negative control: reopening shows only junk Rat Pelt left, and Take all but junk sends 0 packets.
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    let sends_junk = bv.play.bags_sends_lost();
+    bv.click(bv.action_hit("Take all but junk").map(|(x, y, _)| (x, y)).unwrap());
+    bv.frames(1);
+    assert_eq!(bv.play.bags_sends_lost(), sends_junk);
+    assert_eq!(
+        bv.eval::<(String, Option<bool>)>("require('bags').result.text, require('bags').result.ok"),
+        ("Corpse has only junk items".into(), Some(false))
+    );
+
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
