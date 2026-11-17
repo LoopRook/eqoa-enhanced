@@ -186,6 +186,12 @@ end)
 ```
 
 - Poll `eqoa.actions.status(req)` for the retained `ActionResult` record or `eqoa.actions.cancel(req)` while a request is still `queued`.
-- `eqoa.actions.destroy` is `unsupported`; continuous movement/camera controls (`move`, `look`, `buttons`, `camera`) and Part-A window/quest/mastery actions remain `not_yet` and can be queried via `eqoa.capabilities.get(...)`.
+- `eqoa.actions.destroy` is `unsupported`; continuous controls (`move`, `look`, `buttons`) remain `not_yet`; query them with `eqoa.capabilities.get(...)`.
+- Window and quest actions (`drop_quest`, `mastery_share`, `mastery_browse`, `mastery_buy`, `mastery_refund`, `close_window`, `select_row`, `activate_row`, `dialog_answer`, `input_text`, `menu_command`) take a `QuestRef` or `WindowRef` read from `eqoa.quests` / `eqoa.windows`, count rows and options from 1 as listed, and go through the game's own keys, editor and request paths one player gesture at a time. A page change, a closed window or a changed journal makes the handle `stale_handle` at dispatch. Rows and dialog answers are delivered as key presses over the next frames, so `applied` means the keys were handed to the window. Password fields and the support/report window, editor and confirmation never take synthetic input (`permission_denied`). `menu_command` runs only an enabled row's `command` from `Window.rows`; any other string is `unsupported`.
+
+```lua
+local w = eqoa.windows.find("quest_log")
+if w then eqoa.actions.activate_row(w.ref, 1) end
+```
 - See [the bag viewer](../../bundled-mods/eqoa_bag_viewer/main.lua) for click-menu actions (`use_item`, `equip`, `quick_slot`, `sell`, `bank_move`, `loot`, `loot_all`) and `action.result` feedback.
 
