@@ -53,23 +53,28 @@ pub(super) fn event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) ->
 }
 
 pub(super) fn addon_event(app: &mut App, event: &WindowEvent) -> bool {
-    if app.pointer_shut(event) {
-        return true;
-    }
-    if matches!(event, WindowEvent::KeyboardInput { .. })
+    let pointer_shut = app.pointer_shut(event);
+    let merc_key = matches!(event, WindowEvent::KeyboardInput { .. })
         && app
             .play
             .as_ref()
-            .is_some_and(|p| p.typing.is_none() && p.merc_win_owns())
-    {
-        return false;
+            .is_some_and(|p| p.typing.is_none() && p.merc_win_owns());
+    let release = match event {
+        WindowEvent::KeyboardInput { event, .. } => event.state == ElementState::Released,
+        WindowEvent::MouseInput { state, .. } => *state == ElementState::Released,
+        _ => false,
+    };
+    // A release still clears any ownership acquired before focus changed.
+    if (pointer_shut || merc_key) && !release {
+        return pointer_shut;
     }
     let Some(g) = &mut app.gfx else {
-        return false;
+        return pointer_shut;
     };
     let plain_play = crate::fork_ext::is_plain_play(app.play.as_mut());
-    if !g.forge_runtime.event(&g.window, event, plain_play) {
-        return false;
+    let consumed = g.forge_runtime.event(&g.window, event, plain_play);
+    if !consumed || pointer_shut || merc_key {
+        return pointer_shut;
     }
     // Keep physical pointer bookkeeping current without routing an
     // addon-owned hover or drag into gameplay or the native map.

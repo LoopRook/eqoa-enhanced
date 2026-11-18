@@ -6047,7 +6047,6 @@ impl App {
                     p.hud_release();
                     p.map.let_go();
                     p.map.mini_hover(None);
-                    p.chat_let_go();
                 }
             }
             WindowEvent::MouseInput { state, button, .. } if matches!(button, MouseButton::Left | MouseButton::Right) => {
