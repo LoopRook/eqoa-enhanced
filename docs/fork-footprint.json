@@ -63,7 +63,9 @@
     "tools/collect_owner_test.py",
     "tools/make_owner_test_package.py",
     "tools/test_collect_owner_test.py",
-    "tools/test_make_owner_test_package.py"
+    "tools/test_make_owner_test_package.py",
+    "tools/local_scene.py",
+    "tools/test_local_scene.py"
   ],
   "shared": {
     ".gitignore": {
