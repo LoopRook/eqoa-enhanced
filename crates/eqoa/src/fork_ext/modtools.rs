@@ -233,8 +233,9 @@ fn markdown(doc: &Json) -> String {
             aliases.push(row);
         } else if path.contains(".data.")
             || parts
-                .get(2)
-                .is_some_and(|s| s.starts_with(char::is_uppercase))
+                .iter()
+                .skip(1)
+                .any(|s| s.starts_with(char::is_uppercase))
         {
             fields.push(row);
         } else if path.starts_with("eqoa.events.")
@@ -332,6 +333,11 @@ mod tests {
         ] {
             assert!(text.contains(section), "missing {section}");
         }
+        let fields = text.split("## Record fields\n\n").nth(1).unwrap();
+        assert!(
+            fields.contains("`eqoa.Color.a`"),
+            "root record fields must be in the record section"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
