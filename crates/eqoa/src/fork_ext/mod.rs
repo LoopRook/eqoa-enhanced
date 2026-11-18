@@ -24,6 +24,8 @@ pub mod report {
     pub use super::report_label::enhanced_label;
 }
 pub mod report_core;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) mod session_replay;
 pub mod telemetry;
 pub mod version;
 
