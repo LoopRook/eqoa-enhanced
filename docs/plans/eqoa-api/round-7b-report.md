@@ -2,7 +2,36 @@
 
 Branch: `feat/eqoa-api-r7b`, based on develop `9ea6b435`.
 
-**Part B complete; independent review and integration remain with the lead.**
+## Sonnet review follow-up (2026-11-18)
+
+Requested changes are being verified; the original delivery record below is
+historical. `develop` (including Part A merge `8301b288`) merged cleanly as
+`b2144f62`. Both generated references will be rebuilt from this merged code.
+
+The production texture bank requires a device, queue and renderer. Avoiding
+those would require changing the production service rather than using its real
+install path, so this fix uses the approved GPU-test skip convention instead.
+Adapter and device acquisition failures have a distinct error type. Only that
+type prints `SKIP` in the GPU-dependent tests; Lua/discovery/install failures
+still fail. The CLI still returns exit 1 and writes no incomplete reference.
+The command-output test now owns its temporary directory through `Scratch`,
+including early skips and assertion unwinding. DEV-TOOLS identifies `--out` as
+the reliable export and explains terminal-only stdout visibility.
+
+Test-first no-adapter/cleanup run:
+`python tools/run_gates.py --only round --filter round7b_without_adapter round7b_scratch_cleans`
+reported **1 passed, 1 failed, 0 ignored** (225.28 seconds): cleanup passed; the
+real empty-backend adapter request failed at the old unwrap, proving the CI
+failure. The corrected focused run including both command tests reported
+**4 passed, 0 failed, 0 ignored** (343.57 seconds). Its one printed `SKIP` is
+the deliberate empty-backend regression test, which asserts the skip result;
+the command-output test used the real available GPU and completed both exports.
+Regenerated snapshots, the executed drift/cleanup negative controls and full
+release gates remain to be recorded here.
+
+## Original delivery record
+
+**Initial Part B delivery completed; review follow-up is recorded above.**
 The full release gates finished **ALL GATES PASSED** at 01:47:33 local time on
 2026-11-18, covering HEAD `69c2d41f`. The last code commit is `95d1066b`
 (01:00:21); HEAD's generated-document refresh is at 01:03:12. No source or

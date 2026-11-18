@@ -13,12 +13,17 @@ eqoa.exe mod-api --format md --out docs/modding/SUPPORT-TABLE.md
 eqoa.exe mod-api --format json --out docs/modding/eqoa-1-surface.json
 ```
 
-Markdown is the default. `--out` writes UTF-8 to the named file; without it the
-reference goes to stdout. Invalid options, install failures and output errors
+Markdown is the default. **Use `--out <file>` for reliable exports**; it writes
+UTF-8 to the named file. Without it the reference goes to stdout, which is only
+visible when the program is run from a terminal (the Windows application has no
+console of its own). Invalid options, install failures and output errors
 exit with code 1 and an error on stderr. The command installs a scratch native
 addon and its ImGui, texture, font and sound adapters. It uses a headless graphics
 device (required), creates no game window, and needs no disc, login or server.
 It does not run the addon's entry script or call game actions.
+If no adapter or device can be acquired, the command exits 1 without writing a
+reference. GPU-dependent reference tests instead print a `SKIP` line and return,
+following the repository's GPU-test convention; other install errors still fail.
 
 Generate both committed files with a Windows release build, the published
 platform; sound capabilities differ elsewhere. Build provenance uses the compiled

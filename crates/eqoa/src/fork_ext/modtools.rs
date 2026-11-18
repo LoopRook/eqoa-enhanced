@@ -9,6 +9,17 @@ use std::{
 
 const USAGE: &str = "usage: eqoa mod-api [--format md|json] [--out <file>]";
 
+#[derive(Debug)]
+struct GraphicsUnavailable(String);
+
+impl std::fmt::Display for GraphicsUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "mod-api graphics unavailable: {}", self.0)
+    }
+}
+
+impl std::error::Error for GraphicsUnavailable {}
+
 pub fn run(args: &[String]) -> Option<crate::Result<()>> {
     (args.first().map(String::as_str) == Some("mod-api")).then(|| command(&args[1..]))
 }
@@ -68,6 +79,10 @@ impl Drop for Scratch {
 }
 
 fn reference() -> crate::Result<Json> {
+    reference_with_instance(render::wgpu::Instance::default())
+}
+
+fn reference_with_instance(instance: render::wgpu::Instance) -> crate::Result<Json> {
     use dear_imgui_rs::Context;
     use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer};
     use render::wgpu;
@@ -94,10 +109,10 @@ fn reference() -> crate::Result<Json> {
     }
     let addon = &discovered.addons[0];
 
-    let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
-        .map_err(|e| format!("mod-api needs a headless graphics adapter: {e}"))?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))?;
+        .map_err(|e| GraphicsUnavailable(format!("adapter request failed: {e}")))?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
+        .map_err(|e| GraphicsUnavailable(format!("device request failed: {e}")))?;
     let mut context = Context::create();
     context.set_ini_filename::<PathBuf>(None)?;
     let renderer = Rc::new(RefCell::new(WgpuRenderer::new(
@@ -293,21 +308,57 @@ mod tests {
         values.iter().map(|s| s.to_string()).collect()
     }
 
+    fn with_graphics<T>(result: crate::Result<T>) -> Option<T> {
+        match result {
+            Ok(value) => Some(value),
+            Err(error) if error.is::<GraphicsUnavailable>() => {
+                eprintln!("SKIP round7b mod-api reference: {error}");
+                None
+            }
+            Err(error) => panic!("mod-api install failed: {error}"),
+        }
+    }
+
+    #[test]
+    fn round7b_without_adapter_is_an_explicit_skip() {
+        let mut descriptor =
+            render::wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+        descriptor.backends = render::wgpu::Backends::empty();
+        let instance = render::wgpu::Instance::new(descriptor);
+        assert!(with_graphics(reference_with_instance(instance)).is_none());
+    }
+
+    #[test]
+    fn round7b_scratch_cleans_during_unwind() {
+        let scratch = Scratch::new().unwrap();
+        let path = scratch.0.clone();
+        let caught = std::panic::catch_unwind(move || {
+            std::fs::write(scratch.0.join("partial-output"), "partial").unwrap();
+            panic!("exercise scratch cleanup on a failed assertion");
+        });
+        assert!(caught.is_err());
+        let survived = path.exists();
+        if survived {
+            std::fs::remove_dir_all(&path).unwrap();
+        }
+        assert!(!survived, "scratch directory survived unwinding");
+    }
+
     #[test]
     fn round7b_command_dispatch_and_output() {
         assert!(run(&args(&[])).is_none());
         assert!(run(&args(&["boot"])).is_none());
-        let dir = std::env::temp_dir().join(format!("eqoa-mod-api-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let out = dir.join("surface.json");
-        crate::run(&args(&[
+        let dir = Scratch::new().unwrap();
+        let out = dir.0.join("surface.json");
+        let Some(()) = with_graphics(crate::run(&args(&[
             "mod-api",
             "--format",
             "json",
             "--out",
             out.to_str().unwrap(),
-        ]))
-        .unwrap();
+        ]))) else {
+            return;
+        };
         let json: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
         assert!(
@@ -317,10 +368,12 @@ mod tests {
                 .iter()
                 .any(|row| row["path"] == "eqoa.player.get")
         );
-        let md = dir.join("surface.md");
-        run(&args(&["mod-api", "--out", md.to_str().unwrap()]))
-            .unwrap()
-            .unwrap();
+        let md = dir.0.join("surface.md");
+        let Some(()) =
+            with_graphics(run(&args(&["mod-api", "--out", md.to_str().unwrap()])).unwrap())
+        else {
+            return;
+        };
         let text = std::fs::read_to_string(md).unwrap();
         for section in [
             "Generated, do not edit",
@@ -338,7 +391,6 @@ mod tests {
             fields.contains("`eqoa.Color.a`"),
             "root record fields must be in the record section"
         );
-        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -361,7 +413,9 @@ mod tests {
     #[cfg(windows)]
     fn round7b_support_table_matches_the_running_client() {
         const REGENERATE: &str = "Rebuild eqoa, then run: eqoa mod-api --format md --out docs/modding/SUPPORT-TABLE.md AND eqoa mod-api --format json --out docs/modding/eqoa-1-surface.json";
-        let mut current = reference().unwrap();
+        let Some(mut current) = with_graphics(reference()) else {
+            return;
+        };
         let docs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/modding");
         let saved: serde_json::Value = serde_json::from_slice(
             &std::fs::read(docs.join("eqoa-1-surface.json")).expect(REGENERATE),
