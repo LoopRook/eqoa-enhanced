@@ -633,7 +633,7 @@ mod tests {
     }
 
     #[test]
-    fn forge_health_adapter_unsupported_apis_absent() {
+    fn forge_health_adapter_preserves_supported_player_apis_and_omits_unsupported_members() {
         let host = test_host("unsupported_absent_test");
         let token = InstanceToken::next().unwrap();
         let snapshot = Rc::new(Cell::new(HealthSnapshot::new(true, 100, 100)));
@@ -652,6 +652,9 @@ mod tests {
             assert(type(player.GetName) == "function", "full Player API must survive health install")
             assert(type(player.GetLevel) == "function", "full Player API must survive health install")
             assert(type(player.GetTotalStr) == "function", "full Player API must survive health install")
+            assert(type(player.GetCMs) == "function", "full Player API must survive health install")
+            -- The native Player adapter is read-only; health must not add setters.
+            assert(player.SetCurrentHp == nil, "unsupported Player setters must stay absent after health install")
 
             assert(type(ui.DisableHealthBar) == "function")
             assert(type(ui.EnableHealthBar) == "function")
