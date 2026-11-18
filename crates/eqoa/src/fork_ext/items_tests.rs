@@ -636,10 +636,10 @@ fn round5_capabilities_list_every_new_function_and_say_what_is_missing() {
           local c = eqoa.capabilities.get(p)
           if p:find('^eqoa.events') then assert(c.status == 'supported' or c.status == 'unknown', p) else assert(c.status == 'supported', p .. ' ' .. tostring(c.status)) end
         end
-        -- the window state came with the owner-approved accessors; only the button hint is still to come
+        -- window state and the populated button hint are supported
         local c = eqoa.capabilities.get('eqoa.items.Container.view'); assert(c.status == 'supported')
         local c = eqoa.capabilities.get('eqoa.items.MerchantState.mode'); assert(c.status == 'supported')
-        local c = eqoa.capabilities.get('eqoa.items.MerchantState.button_hint'); assert(c.status == 'not_yet' and c.round == 6)
+        local c = eqoa.capabilities.get('eqoa.items.MerchantState.button_hint'); assert(c.status == 'supported')
         assert(eqoa.capabilities.has('eqoa.inventory.get'))
         local listed = {}
         for _, c in ipairs(eqoa.capabilities.list('eqoa.items')) do listed[c.path] = c.status end

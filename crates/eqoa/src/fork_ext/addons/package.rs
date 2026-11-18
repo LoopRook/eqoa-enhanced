@@ -1530,6 +1530,15 @@ mod round7a_more_tests {
         std::fs::write(root.join("sibling/resources/secret.txt"), "other mod").unwrap();
         let addon = discovery::discover(&root).addons.remove(0);
         let host = host::Host::for_addon(&addon).unwrap();
+        if !cfg!(windows) {
+            // The existing secure filesystem backend advertises unsupported
+            // outside Windows. Exercise that refusal instead of skipping.
+            host.lua
+                .load("local v,e=eqoa.files.list(); assert(v==nil and e.code=='unsupported')")
+                .exec()
+                .unwrap();
+            return;
+        }
         let data = root.join("private");
         file_io::install(&host, &addon, Some(data.clone())).unwrap();
         host.lua

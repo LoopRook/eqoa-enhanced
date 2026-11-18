@@ -1,97 +1,59 @@
-# Round 7 Part A audit fixes
+# Round 7 Part A: audit fixes
 
-Branch: `feat/eqoa-api-r7a`, base `9ea6b435`. Work remains in progress.
+Branch `feat/eqoa-api-r7a`, base `9ea6b435`. Implementation and regression controls
+are complete. Validation evidence and the mandatory post-commit gate command are
+recorded below. No push, merge, tag or rebase.
 
-## Reproduction
+Missing services now refuse visibly; excluded Forge modules load guarded tables;
+file listing is implemented; map placeholders and capability claims are explicit.
+Two audit claims did not reproduce: real addon texture installation already works,
+and the native chat consumer lease has no emulator-cave suspension state.
 
-First run: `python tools/run_gates.py --only round --filter round7a_ --timeout 60`:
-1 passed, 11 failed, 0 ignored, 0 SKIP lines. The passing chat test confirms the
-native hook has no emulator suspension mechanism. All eleven failures are assertions
-or Lua calls exposing the audited missing/refusing behavior, not compilation errors.
-The follow-up baseline includes the two GPU/icon tests and all twelve bundled mods.
+## Scope and reference
 
-## Boundaries
+All implementation is in the brief's allowed fork-owned addon files. The user also
+explicitly approved the test-only assertion corrections listed below, including
+one assertion in protected native_tests.rs and the stale hint assertion in ../items_tests.rs. No upstream changes, seed-table changes,
+round-6.5 implementation changes, bundled asset edits or shared-budget increases.
 
-No upstream changes, seed-table changes, round-6.5-owned implementation changes,
-bundled asset changes, or shared-budget increases. The release notes and author docs
-are explicitly reserved for the lead/Part D. No push, merge, tag or rebase.
+Pinned reference, read outside this worktree (portable exact location):
+`%USERPROFILE%/Github Projects/EQOA Native Rust/run/forge-compat-reference/scripts/modules/frontiers_forge/`.
 
-## Reference
+- `icon.lua:330-354,431-443`: failed texture lookup returns **one nil**; success is texture,width,height.
+- `camera.lua:6-15`: x/y/z table; no missing-camera case is defined. Keep the shape and diagnose unavailable.
+- `chat.lua:567-569`: suspension is a wanted emulator hook detached outside the game. Native leases never detach a code cave.
+- `quest.lua:20-35`: new/GetName wrap raw pointers.
+- `cave.lua:69,167,196,204,216,230,237`: IsRegionZero, Alloc, Reserve, Get, Free, Release, Info.
+- `util.lua:400-403`: GetWorldId; native adapter uses the real world ID and nil outside a world.
 
-Pinned read-only reference: `%USERPROFILE%/Github Projects/EQOA Native Rust/run/forge-compat-reference/scripts/modules/frontiers_forge/`.
-Camera: `camera.lua:6-15` returns an x/y/z table and defines no missing-camera case.
-Chat: `chat.lua:567-569` defines suspended as wanted but detached outside the game;
-the native adapter owns a consumer lease, never an emulator patch/cave.
-Quest: `quest.lua:20-35` exposes `new` and `GetName` over raw pointers.
-Cave: `cave.lua` exposes IsRegionZero, Alloc, Reserve, Get, Free, Release and Info.
+## Changes by file
 
-## Validation still pending
+| File under crates/eqoa/src/fork_ext/addons | Change |
+|---|---|
+| icons.rs | Base texture functions diagnose unavailable and retain pinned nil failure arity; removed the base stderr warning. Original source format is unsupported because SafeLibrary/IconProvider retain only decoded RGBA. Production-addon texture/GPU regressions. |
+| native.rs | hidden_by refuses unavailable without a visibility lease; input placeholder refuses until replaced; fonts.game refuses unsupported. Removed dead client.time arity name. Temporary unsupported hand list covers quest/cave and every member, plus source_format. |
+| host.rs | Camera missing-state diagnostic, native GetWorldId, bit descriptor registration. Only the permitted camera/util/bit regions changed. |
+| chat.rs | Reference comment explains why IsSendHookSuspended=false is truthful; no behavior change. |
+| package.rs | Guarded quest/cave tables with per-call and unknown-member diagnostics; util joins host registry; updated old require expectation; production-install regression tests. |
+| bit.rs | Eight supported descriptors and visible unknown-symbol lookup. |
+| file_io.rs | Sorted immediate-child FileEntry listing, private/resource overlay resolver, tombstones, * and ? filename globs, relative paths, no-link/reparse guards, 1,024-entry cap with explicit quota refusal. |
+| map_views.rs | images/load_image unsupported: replaced by eqoa.map.view; waypoint pair not_yet: not built; use eqoa.map.set_guide. |
+| native_items.rs | Remove stale button_hint not_yet override and explicitly declare the populated field supported. |
+| items_forge.rs | Correct implemented hint/action header and empty DEFERRED comment. |
+| health.rs | Extend an existing full player table instead of replacing it; retain standalone health subset; approved assertion correction. |
+| native_tests.rs | Only the user-approved hidden_by refusal assertion changed. |
+| ../items_tests.rs | Only the user-approved stale hint comment and supported expectation changed. |
+| round7a_collect_diagnostics.py | Fail-closed before/after collector for the existing 12-package Manager diagnostic test. |
 
-All fixes, executed mutation controls, bundled before/after diagnostics, full gates,
-release build, footprint and final counts.
+Remaining install placeholders were reviewed: player.get/hud.hide already refuse
+not_in_world; client.get describes a real pre-world state; input.get's invented
+placeholder became unavailable (the production input installer replaces it in the
+same install). No other invented placeholder answer remains in install.
 
-Follow-up baseline: 3 passed, 12 failed, 0 ignored, 0 SKIP lines.
-The production addon icon test and all twelve bundled mods passed; each bundled
-mod produced zero manager diagnostics. The source-format descriptor failed as expected.
+## Reproduction table
 
-## Step 2: quiet placeholders
-
-The base icon bindings now diagnose `unavailable` through the native sink and keep
-Forge's nil texture failure shape. The one-off stderr warning is removed.
-`hud.hidden_by` refuses without its visibility lease. The remaining install placeholders
-were reviewed: player.get/hud.hide already refuse not_in_world; client.get describes a
-true pre-world state; input.get's invented state is replaced by an unavailable refusal
-(the production input installer replaces it later in the same install).
-
-## Step 3: partial answers
-
-`icons.rs` describes source_format unsupported: SafeLibrary/IconProvider retain only
-width, height and decoded RGBA bytes, so the original disc encoding is unavailable.
-Accessing the unsupported record field uses the existing guarded-record diagnostic.
-`host.rs` diagnoses absent camera state while retaining the pinned table shape.
-`chat.rs` records why false is real: the native consumer lease never detaches an
-emulator code cave. Its test passed before changes; no behavior fix was applied.
-
-## Step 4: guarded APIs
-
-`package.rs` registers quest/cave diagnostic tables, including every pinned public
-function and guarded unknown members. The existing reserved-module test now expects
-quest require to succeed and new(0) to refuse; this is the one changed old assertion.
-`host.rs` exposes GetWorldId from the native world state and registers util via the
-package registry; `bit.rs` guards unknown keys and describes all eight functions.
-`fonts.game` refuses: the existing ImGui TrueType atlas service cannot expose the
-native bitmap font without an upstream change (excluded by this brief).
-Per-member unsupported descriptors are closed in step 7's required hand list.
-
-## Step 5: promised names
-
-`file_io.rs` implements immediate-child filename-glob listing through the existing
-mount resolver, private overlay precedence and tombstones. Directory and child
-handles use the existing no-link/reparse guards. Relative UTF-8 paths, sorted
-FileEntry records and the 1,024-entry refusal are explicit; enumeration never
-reports a truncated list as complete. `map_views.rs` refuses images/load_image as
-replaced by map.view and keeps the unbuilt waypoint pair not_yet with set_guide advice.
-
-## Step 6: stale claims and install order
-
-Removed MerchantState.button_hint's stale not_yet override and the dead client.time
-arity name. Updated the item adapter header to describe the implemented hint and
-native action service. The health adapter extends an existing player table, so installing health last cannot
-drop GetName and the rest of the full API. A standalone health-only installer keeps
-its historic two-member subset; the full player installer can still follow it. Both orders are tested.
-
-## Step 7: capability hand list
-
-The temporary annotate_host hand list explicitly marks quest/cave and all nine
-members unsupported with the raw-memory exclusion reason. The icon source-format
-field is also honest on hosts lacking the texture service. Camera and icon texture
-functions remain supported services whose missing state diagnoses unavailable;
-marking them unsupported globally would contradict the production addon test.
-
-## Reproduce table
-
-All test names below have the `round7a_` prefix (shown in full). Baseline was the
-production source at 9ea6b435, with regression tests committed at 30b6ff42.
+All names below are new `round7a_` tests. Tests were written and executed against the
+baseline before production fixes. A passing baseline finding received no behavior fix.
 
 | Finding | Test | Reproduced | Fix commit |
 |---|---|---|---|
@@ -108,40 +70,33 @@ production source at 9ea6b435, with regression tests committed at 30b6ff42.
 | fonts.game is a raw nil-call error | round7a_game_font_refuses | yes | ace06df7 |
 | files.list missing | round7a_files_list_overlay_and_bounds | yes | 8489bd17 |
 | map image/waypoint names give stale generic refusals | round7a_map_refusals | yes | 8489bd17 |
-| MerchantState.button_hint stale not_yet | round7a_merchant_hint_supported | yes | 9f1b453f, follow-up field declaration |
-| Health-last install drops full player API | round7a_player_install_order_retains_members | yes | 9f1b453f, follow-up preserving standalone subset |
+| MerchantState.button_hint stale not_yet | round7a_merchant_hint_supported | yes | 9f1b453f, b9ebaef2 |
+| Health-last install drops full player API | round7a_player_install_order_retains_members | yes | 9f1b453f, b9ebaef2 |
 
-The audit also incorrectly claimed install_fields already declares button_hint. It
-did not: deleting the stale override left the descriptor unknown, exposed by the
-first post-fix run. The field is now explicitly included by its owning installer.
-No gesture policy, capability architecture, round labels or author docs were changed;
-those audit rows belong to round 6.5/Parts C/D and are excluded by this brief.
+Additional independent tests: round7a_bit_descriptors_registered,
+round7a_forge_util_registered, round7a_refusing_forge_members_diagnose,
+round7a_stale_arity_name_removed, round7a_item_header_matches_implemented_hint.
+The last two check source-only stale claims, after starting a production addon host.
 
-## Interim validation
+The audit's claim that install_fields already declares button_hint was also wrong:
+deleting its not_yet override left it unknown. The first post-fix test exposed this;
+its owning installer now declares it supported (b9ebaef2).
 
-First post-fix focused + bundled run: 13 passed, 2 failed, 0 ignored, 0 SKIP lines.
-Failures: Windows directory handles needed the directory-specific parent lock;
-button_hint required its supported field declaration. Corrected run: 15 passed,
-0 failed, 0 ignored, 0 SKIP lines. The bundled-session test passed before and after:
-Wereoxxs UI, ARPG UI, Avoids Modern UI and all nine eqoa_* packages each produced
-zero manager diagnostics (12 before / 12 after). No bundled files were edited.
-
-Pinned texture failure arity is one nil (`icon.lua:330-354`, `431-443`), success is
-texture,width,height. The base adapter now matches that arity exactly, with a
-regression assertion. `util.lua:400-403` is the GetWorldId reference.
+The file fixture covers private files, resource overlay precedence, tombstones,
+nonrecursive directory records, both glob operators, sorted paths, sibling package
+isolation, traversal/absolute/glob-path refusal, exactly 1,024 succeeding and 1,025
+failing quota. Player install order compares the complete member set both ways.
 
 ## Executed negative controls
 
-Command for every row below:
-`python tools/run_gates.py --only round --filter round7a_ --timeout 60`
-(with the mandated shared target, scratch config and worktree disc).
+Command for every Rust row below (same shared target, worktree disc and scratch config):
+`python tools/run_gates.py --only round --filter round7a_ --timeout 60`.
 
-The first control restored baseline implementations while retaining current tests:
-2 passed, 12 failed, 0 ignored, 0 SKIP lines. The complete second control additionally
-made chat.IsSendHookSuspended return true and made attach_icon_cache return before
-installing its real functions. It also ran independent bit/util metadata checks and
-source-hygiene tests. Result: **0 passed, 19 failed, 0 ignored, 0 SKIP lines**.
-All deliberate mutations were restored immediately after the run.
+Control 1 restored baseline implementations while retaining the new tests: 2 passed,
+12 failed, 0 ignored, 0 SKIP lines. The complete control additionally made chat
+suspension true and made attach_icon_cache return before installing real functions:
+**0 passed, 19 failed, 0 ignored, 0 SKIP lines**. Every mutation was restored.
+These are observed failing locations in the mutated build, not current line numbers.
 
 | Test (same command above) | Observed failing line in mutated build |
 |---|---|
@@ -162,44 +117,36 @@ All deliberate mutations were restored immediately after the run.
 | round7a_merchant_hint_supported | `package.rs:1269:5:`: Lua assertion / missing guarded API |
 | round7a_quest_and_cave_guarded | `package.rs:1230:5:`: require throws unsupported FrontiersForge API |
 | round7a_refusing_forge_members_diagnose | `package.rs:1309:20:`: require throws unsupported FrontiersForge API |
-| round7a_stale_arity_name_removed | `package.rs:1290:9:`: assertion failed: !include_str!("native.rs").contains("| \"eqoa.client.time\"") |
+| round7a_stale_arity_name_removed | `package.rs:1290:9:`: assertion excluding the stale client.time arity name failed |
 | round7a_util_and_bit_capabilities | `package.rs:1242:5:`: Lua nil-call / missing member |
 
-The source-hygiene tests cover the dead client.time arity name and stale item-header
-claims, which have no distinct runtime behavior to exercise. Both start from a
-production addon host before checking those source-only claims.
+The diagnostic collector's positive command:
+`python crates/eqoa/src/fork_ext/addons/round7a_collect_diagnostics.py run/round7a-baseline.log <shared-target>/gates/feat-eqoa-api-r7a-addons.log`
+reported twelve empty lists before and after. A copied after log was deliberately
+marked FAILED; the same collector with `run/round7a-bad-diagnostics.log` as its after
+argument exited 1 at line 24:
+`ValueError: bundled diagnostic gate did not run all packages successfully`.
+Absent, ignored and SKIP gates are also rejected; it cannot infer empty diagnostics
+unless the existing Rust gate proved every package ran without any.
 
-## Source-only audit rows and test boundaries
+## Changed existing tests (explicitly approved)
 
-`round7a_stale_arity_name_removed` reproduces the dead guard name and
-`round7a_item_header_matches_implemented_hint` reproduces the stale header claims;
-both failed under the executed complete negative-control command above. Independent
-`round7a_bit_descriptors_registered` and `round7a_forge_util_registered` avoid one
-missing member masking another capability assertion. Every newly refusing quest/cave
-member and unknown member is checked against the native diagnostic sink by
-`round7a_refusing_forge_members_diagnose`.
+- package.rs reserved-module test: quest require now succeeds and new(0) refuses per call, instead of require throwing.
+- native_tests.rs native_pregame_getters_do_not_fabricate_world_or_hud_claims: only the empty hidden_by table assertion becomes nil,Error(unavailable). User approved this protected-file exception.
+- items_tests.rs round5_capabilities_list_every_new_function_and_say_what_is_missing: only the stale button_hint comment and not_yet/round-6 expectation become supported. The user explicitly approved this second outside-allowlist test exception after the full suite exposed it.
+- health.rs forge_health_adapter_unsupported_apis_absent: GetName/GetLevel/GetTotalStr must remain functions after health installs over the full production player module. Existing health/UI assertions remain.
 
-The file fixture covers private files; shared-resource overlay precedence; tombstones;
-nonrecursive directory records; filename * and ? globbing; sorting; another package's
-files remaining unreachable; relative-only paths; forbidden glob paths; exactly 1,024
-entries succeeding; and 1,025 failing quota. The 1,024-entry assertion runs through
-Host::run so the callback gets the production instruction-budget reset; the limit
-and assertions are unchanged. The earlier raw-chunk fixture exhausted its cumulative
-budget after setup and was corrected rather than raising the budget.
+No old test was deleted, newly ignored, or bypassed. A standalone health-only adapter
+still has its historic subset. The file fixture asserts the existing unsupported filesystem contract on non-Windows
+instead of skipping; the positive filesystem cases run on Windows. The large listing assertion uses Host::run, preserving
+the real callback instruction-budget reset, limit and assertions. Raw chunks had
+incorrectly accumulated setup/earlier assertions against that budget; it was not raised.
 
-A standalone health-only adapter retains its original subset, while the new install-order
-test compares the complete player member set in both orders. Changed old assertions
-are listed in the approved test-only scope exception below; no tests were deleted or ignored. Formatting was applied only to changed fork-owned regions.
+## Bundled diagnostics before/after
 
-No implementation edits were made to run data, bundled assets, seed tables, protected round-6.5 files,
-shared upstream code, spec/author docs, release notes or footprint budgets.
-
-## Bundled diagnostics comparison
-
-Collected with the existing `every_bundled_mod_runs_a_play_session_with_zero_manager_diagnostics`
-test before changes and after the implementation. It runs each package alone (with
-its required shared resources/journal), checks all twelve ran, and retains every
-manager diagnostic for the final assertion.
+Collected through every_bundled_mod_runs_a_play_session_with_zero_manager_diagnostics:
+it runs each package alone with required resources/journal, retains all diagnostics,
+asserts all twelve ran, and fails on any diagnostic. The collector records that proof.
 
 | Package | Before | After |
 |---|---:|---:|
@@ -216,52 +163,84 @@ manager diagnostic for the final assertion.
 | eqoa_stats_box | 0 | 0 |
 | eqoa_target_of_target | 0 | 0 |
 
-## Approved test-only scope exception
+## Validation history and final gates
 
-The user explicitly approved these two test-only updates after the first full-addon
-run exposed old expectations incompatible with Part A:
+| Completed run | Passed | Failed | Ignored | SKIP lines |
+|---|---:|---:|---:|---:|
+| First reproduction | 1 | 11 | 0 | 0 |
+| Expanded reproduction plus bundled gate | 3 | 12 | 0 | 0 |
+| First post-fix focused plus bundled gate | 13 | 2 | 0 | 0 |
+| Corrected focused plus bundled gate | 15 | 0 | 0 | 0 |
+| Preliminary expanded focused gate | 18 | 1 | 0 | 0 |
+| Preliminary addon suite | 511 | 3 | 25 | 12 |
+| Isolated rebuilt 1,024/1,025-entry fixture | 1 | 0 | 0 | 0 |
+| Optimized zero-addon allocation gate | 1 | 0 | 0 | 0 |
+| Final expanded focused gate | 19 | 0 | 0 | 0 |
 
-- `native_tests.rs`, native_pregame_getters_do_not_fabricate_world_or_hud_claims:
-  replace only the empty hidden_by table assertion with nil,Error(unavailable).
-  No round-6.5 implementation or other lines in this protected file were changed.
-- `health.rs`, forge_health_adapter_unsupported_apis_absent: require GetName,
-  GetLevel and GetTotalStr to remain functions after health installs over the
-  production full player module. Existing health/UI assertions remain intact.
+The initial focused failures were Windows directory locking and the missing supported
+button_hint field declaration; both corrected. Preliminary suite failures were the
+two obsolete assertions above and the cumulative-budget fixture. Its full-bin run
+was superseded after approval because its binary predated the assertion corrections;
+it is not counted as a completed full suite. Only that runner's verified process tree
+was stopped; its lock was removed after its owner PID was confirmed dead.
 
-These are contract corrections, not skipped tests or disabled assertions. Along with
-the package require assertion, they are the complete list of changed old tests.
-The initial full-addon run was 511 passed, 3 failed, 25 ignored: the two old assertions
-above and the now-corrected cumulative-budget file fixture. Final gates must rerun them.
+A sandbox-only direct fixture attempt refused writes (environment failure, not a
+product result). The rebuilt executable with normal gate access passed the complete
+listing fixture in 18.22s. No new round7a test printed SKIP.
 
-## Additional focused verification
+Optimized command (shared lock/cache, scratch config, worktree disc, static CRT):
+`cargo test --release --locked -p eqoa --bin eqoa play::fork_hooks::native_tests::performance_busy_world_zero_addons_frame_and_packet_allocation_bound -- --exact --test-threads=1 --nocapture`.
+Allocations: world frame 0, menu frame 0, entity packet 0, chat 0; full native views 0.
+Its deliberately allocated 4 KiB control was observed. Measured world/menu frame times
+5.044/4.925 us; packet 0.088 us; chat 0.011 us (this run, not a performance promise).
 
-The rebuilt test executable was run directly with
-`round7a_files_list_overlay_and_bounds --test-threads=1 --nocapture`, a scratch
-EQOA_CONFIG and the same filesystem access as the gates: **1 passed, 0 failed,
-0 ignored, 0 SKIP lines** (18.22s). A sandbox-only attempt refused its fixture
-writes; it is recorded as an environment failure, not a product result.
+Footprint check passed against unchanged reviewed base
+`a76d8d27a1c3f51fca545d7eabaca9e5dc336091`; no budget raised. Tracked-path check passed.
+Only the mandated shared Cargo target was used; no target folder was created here.
 
-`python tools/check_fork_footprint.py --base a76d8d27a1c3f51fca545d7eabaca9e5dc336091`
-passed against the unchanged reviewed policy. Shared budgets were not raised.
-`python -X utf8 tools/check_no_local_paths.py` also passed. The reference path above
-uses %USERPROFILE% so the required external reference is reproducible without a
-tracked personal-profile path. No disc path was recorded.
+Completed comprehensive gate summary, before the last approved stale-test correction:
 
-## Diagnostic collector
+| Suite | Passed | Failed | Ignored | SKIP lines |
+|---|---:|---:|---:|---:|
+| round | 19 | 0 | 0 | 0 |
+| addons | 513 | 1 | 25 | 9 |
+| full | 2394 | 1 | 30 | 50 |
+| Focused corrected hint plus unchanged timing benchmark | 2 | 0 | 0 | 0 |
 
-`round7a_collect_diagnostics.py` consumes the existing Rust Manager gate logs. It
-requires exactly one passed gate, rejects failed/ignored/SKIP results, and records
-that all twelve per-package diagnostic lists are empty only after that assertion.
+WASM, footprint, paths, and player-release passed. The full suite's sole failure
+was the stale button_hint not_yet expectation; the user approved its correction,
+and the focused check above passed after that correction. Existing prerequisite
+SKIP reasons include unavailable symlink privilege, pinned Forge fixtures,
+reviewed UI goldens, client.bin, live S2/save-state fixtures, and the separate 2002
+disc. No new round7a test skips and no ignored-test list changes were introduced.
 
-Positive command:
-`python crates/eqoa/src/fork_ext/addons/round7a_collect_diagnostics.py run/round7a-baseline.log <shared-target>/gates/feat-eqoa-api-r7a-addons.log`
-reported twelve empty lists before and twelve after.
-Negative control: a copied after log marked that gate FAILED, then
-`python crates/eqoa/src/fork_ext/addons/round7a_collect_diagnostics.py run/round7a-baseline.log run/round7a-bad-diagnostics.log`
-exited 1 at collector line 24: `ValueError: bundled diagnostic gate did not run all packages successfully`.
+The final commit is validated with
+`python tools/run_gates.py --filter round7a_ --release --timeout 60`, using the
+mandated shared target, shared lock, worktree disc and scratch configuration.
+Post-commit results are written by that runner to
+`<shared-target>/gates/feat-eqoa-api-r7a-summary.md` and its per-step logs. This
+tracked report records completed runs only; the final response gives the actual
+post-commit result rather than predicting counts here.
 
-The preliminary full-bin run was stopped after the approved test-only changes were
-committed, because its binary predates those assertions. It is not counted as a
-completed full suite. Only its own verified runner process tree was stopped; its
-single-token lock was removed after its owner PID was confirmed dead. Final gates
-will run the complete set on the committed code; no tests are excluded to mask failures.
+One rebuilt addon run completed with 513 passed, 1 failed, 25 ignored and 9 SKIP
+lines. Its only failure was the pre-existing
+round_3_all_four_mods_per_frame_performance_benchmark: 5.164 ms/frame against the
+5 ms debug limit (round_3_picture_tests.rs:976). New regressions and the approved
+old assertions passed. No benchmark threshold, skip, or tested implementation was
+changed. The subsequent isolated rerun, together with the corrected hint test,
+passed: 2 passed, 0 failed, 0 ignored, 0 SKIP. The final post-commit run repeats the
+whole addon suite, including this benchmark.
+
+
+## Deliberate limits and handoff
+
+fonts.game cannot expose the game's bitmap font through the existing ImGui TrueType
+service without an upstream change, so it refuses. Original icon encoding is not
+retained by the decoder service and remains an unsupported field. Map image names
+are replaced by map.view; personal waypoint names remain unbuilt with honest not_yet
+refusals as instructed. These are completed refusal contracts, not silent placeholders.
+
+Action policy, seed/round labels, capability-system redesign, spec/author docs,
+release notes and bundled content belong to round 6.5/Parts C/D and were not edited.
+No release was published and no owner playtest/visual-golden acceptance is claimed.
+The shared experience log was left to the lead under this brief's worktree-only rule.
