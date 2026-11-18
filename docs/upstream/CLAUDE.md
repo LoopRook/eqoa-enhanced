@@ -79,7 +79,8 @@ current.
   town names and the community's markers (suggested from the map, accepted by a GM, the list asked of
   eqoaclassic.com on any server), the waypoints and the group's waypoint, the minimap on N; the quest marks on
   the map and the minimap and the quest tracker from a server that sends them, else the client's own quest
-  guide's, labelled "(guide)"; the Map and the Quest Helper off are the game without them, exactly. The Stats
+  guide's, labelled "(guide)", an ability quest's in green (petition 2285, the owner's yes of 2026-11-17:
+  go-eqoa-server's flags after 0x7E04's set and 0x7E06's tracker, `map::quests::ABILITY`); the Map and the Quest Helper off are the game without them, exactly. The Stats
   Box, the target's mana bar and Target of Target stay out (others' power came back to the group's bars on
   2026-11-12, below); the owner's "they are everywhere" the same day: the
   minimap's rim keeps only the player's own steps' "?", a "!" only where it lies, and the server marks a quest's
@@ -112,6 +113,9 @@ current.
   the target's level in the target box on a server that offers it (Live petition 5130, the owner's "yes lets allow",
   2026-11-15: "Level N" on the "Target" line, `Play::target_level`, go-eqoa-server's `world.con_level`, 0x7E70;
   Extended > UI > Name Plates' Target Level, on by default; off, or on any other server, the game's), and
+  a merc's inventory and spell windows on a server that offers them (the owner's of 2026-11-15: the player's item menu
+  over what the merc holds and the player's spell book over its book with its ten slots, `mercwnd`, `play::mercplay`,
+  `net::mercwin`, go-eqoa-server's 0x7E72-0x7E77; every move the server's to judge; on any other server the boxes), and
   item links in chat on a server that offers them (the GM Jibrish's petition 1463, 2026-11-10: the item menu's Link Item
   and a Shift+click put an item in the chat line as a purple unit, a link in the chat box opens a window of the item at
   the top middle, two at most, R2 held walks the links: `itemlink.rs`, `linkplay.rs`, `net::itemlink`, go-eqoa-server's
@@ -188,7 +192,10 @@ current.
   Hold a change to the names to PCSX2's dumps: `EQOA_PCSX2_DUMPS=<its dumps> cargo test --release -p esf --test pcsx2`
   (the tracer with a hardware renderer, Renderer 14, and DumpReplaceableTextures, under a `HOME` of its own, writes
   them). A change to either row makes every texture again (`App::retexture`: the zones in place, the creatures by
-  `Puppet::textures`, the HUD's layer, the pregame's).
+  `Puppet::textures`, the HUD's layer, the pregame's). Files are made ready by `texcache` (2026-11-18: workers by
+  priority, a RAM budget, BCn kept or made, a disk cache in the platform's cache folder, never the pack's; a test
+  has none unless `texcache::testing::set_dir`); a stand-in's levels stay texel for texel `fit(with_levels(..))`'s
+  (`texcache::tests::a_slice_is_what_fit_with_levels_gives`).
 - The 2002 art (`era.rs`, README "The 2002 art"; the user, 2026-10-24: "texture/model swapping of the eqoa
   2002 era", on F9, "same with loading screens, title screen", and Tunaria keeping Frontiers' "ambient
   sounds and the fog/dust/leaf/flock effects"): a file off the player's USA disc of 2002 stands in for its
@@ -353,7 +360,7 @@ current.
   scripts in `~/.cache/vanilla-boot/ref{1,2}.pad`, `EQOA_NO_SETUP=1` for STATION on): compare shots. Files go through
   `pregame::files` and the network through `pregame::link` (natively threads; in a page its reader and the relay),
   so nothing in a stage is platform code. Headless: `DISPLAY=:99 EQOA_AUDIO=0 EQOA_OFFSCREEN=WxH EQOA_KEYS='enter@3000;
-  text name@4000' EQOA_PAD=... EQOA_SHOTS='3000=a.png' EQOA_QUIT=s eqoa boot <server>` (shots in play's frames too);
+  text name@4000' EQOA_PAD=... EQOA_SHOTS='3000=a.png' EQOA_QUIT=s eqoa boot <server>` (shots in play's frames too); `EQOA_PREGAME_MOUSE` (`press X Y@ms;move X Y@ms;release@ms;wheel N@ms`, frame points) plays the mouse there;
   in a page `web/drive.py --boot --keys/--type`. One login at a time per account, and a run that is killed holds its
   session about a minute: give each run's account time, or another account. `eqoa play <server> <account>` still goes
   straight into the world for scripts and playshots.

@@ -50,10 +50,19 @@
 //! the armour, `aura::body_aura`; `cape` the cape's, `aura::cape_aura`; `main`
 //! and `off` the item held in that hand, kind `epic` or `particles`,
 //! `aura::hand_aura`: `pieceaura=main:0:epic:5FD4AE7C` the Sickle of Avhi
-//! Escron's look on it) puts an aura on a worn piece as the
+//! Escron's look on it; `main2` and `off2` the hand's second aura,
+//! `aura::hand_auras`, drawn beside its first) puts an aura on a worn piece as the
 //! channel's `net::entity::PieceAura` does (`aura::pieces`); kind `trim` or
 //! `trimshell` lights the plate's trim (`aura::piece_trims`), and a black or
 //! near-black colour (000000FF) is a dark aura (`net::npctint::dark`).
+//! `pieceaura=helm:0:hat:F0FAB933` puts a hat another body has built in on
+//! the head in place of the helm (`hat`: the kappa's straw hat);
+//! `pieceaura=hat:0:hat:AA489CBB` puts it in the helm's hat apart, as a
+//! 365-byte channel does, a `pieceaura=helm:...:shell` then drawn on it.
+//! `petdye=RRGGBBAA,RRGGBBAA` and `petmask=0,2,5` draw a pet's two dyed
+//! areas as go-eqoa-server's Pet Groomers put them on (`petdye::apply`: area 2
+//! the palette materials of the mask, area 1 the rest); `petareas=1` prints
+//! each material's triangles and textures, for a petdyeareas row.
 //! `helm=N` puts on armour set N's helm (`SetHelm`, on the node and seated
 //! as a player's character wears it: `slotless::helm_on`), in the helm's
 //! tint (`tint=T`); `helmfit=0` seats it as the PS2 does, without this
@@ -109,6 +118,11 @@ pub struct Words {
     /// GM looks on the hair, a gnome's cap and glasses), in order.
     pub paints: Vec<(Vec<u8>, u32)>,
     pub sex: i32,
+    /// The locomotion played instead of standing (`walk=N`: 1 a walk, 2 a run).
+    pub walk: Option<i32>,
+    /// A second body beside it (`beside=DictID,size,x,z`: a follower, at that
+    /// size, that far to its right and ahead), bare, playing the same.
+    pub beside: Option<(u32, f32, f32, f32)>,
     /// The helm seated with this client's fit (`slotless::helm_fit`).
     pub helm_fit: bool,
     /// The 2002 disc's art.
@@ -124,6 +138,12 @@ pub struct Words {
     pub npc: Option<crate::npctint::Tint>,
     /// The worn pieces' auras (`pieceaura=`), as the channel carries them.
     pub pieces: [net::entity::PieceAura; net::entity::AURAS],
+    /// A pet's dyes (`petdye=RRGGBBAA,RRGGBBAA` and `petmask=0,2,5`, area 2's
+    /// materials), as go-eqoa-server's Pet Groomers put them on (`petdye`).
+    pub petdye: Option<crate::petdye::PetDye>,
+    /// Each palette material's triangles and textures printed
+    /// (`petareas=1`): what a petdyeareas row names.
+    pub petareas: bool,
 }
 
 /// The node a tried helm seat hangs on.
@@ -145,8 +165,10 @@ pub fn parse(words: &[String]) -> Result<Words, String> {
     let (mut helm_fit, mut y2002, mut head) = (true, false, false);
     let mut seat = None;
     let mut night = false;
+    let (mut walk, mut beside) = (None, None);
     let mut npc: Option<crate::npctint::Tint> = None;
     let mut pieces = [net::entity::PieceAura::default(); net::entity::AURAS];
+    let (mut petdye, mut petareas): (Option<crate::petdye::PetDye>, bool) = (None, false);
     let nums = |v: &str| v.split(',').map(|n| n.trim().parse::<u8>().map_err(|e| format!("{v}: {e}"))).collect::<Result<Vec<u8>, String>>();
     let hex = |w: &str, v: &str| u32::from_str_radix(v.trim_start_matches("0x").trim_start_matches("0X"), 16).map_err(|e| format!("{w}: {e}"));
     for w in words {
@@ -161,6 +183,33 @@ pub fn parse(words: &[String]) -> Result<Words, String> {
                 look.item_color.get_or_insert([[255; 4]; 3])[slot] = [(c >> 16) as u8, (c >> 8) as u8, c as u8, 255];
             }
             "night" => night = v != "0",
+            "walk" => walk = Some(v.parse().map_err(|e| format!("{w}: {e}"))?),
+            "beside" => {
+                let p: Vec<&str> = v.split(',').collect();
+                let f = |i: usize, d: f32| p.get(i).map_or(Ok(d), |s| s.parse::<f32>().map_err(|e| format!("{w}: {e}")));
+                beside = Some((hex(w, p[0])?, f(1, 1.0)?, f(2, 1.5)?, f(3, 0.0)?));
+            }
+            "petdye" => {
+                let d = petdye.get_or_insert_with(Default::default);
+                for (i, c) in v.split(',').take(2).enumerate() {
+                    let h = c.trim().trim_start_matches('#').trim_start_matches("0x");
+                    let c = if h.is_empty() || h == "-" { 0 } else { u32::from_str_radix(h, 16).map_err(|e| format!("{w}: {e}"))? };
+                    d.area[i] = if h.len() == 6 { c << 8 | 0xFF } else { c };
+                }
+            }
+            "petmask" if v == "rule" => petdye.get_or_insert_with(Default::default).rule = true,
+            "petmask" => {
+                let d = petdye.get_or_insert_with(Default::default);
+                d.mask = 0;
+                for n in v.split(',').filter(|n| !n.trim().is_empty()) {
+                    let n: u32 = n.trim().parse().map_err(|e| format!("{w}: {e}"))?;
+                    if n > 63 {
+                        return Err(format!("{w}: materials 0 to 63"));
+                    }
+                    d.mask |= 1 << n;
+                }
+            }
+            "petareas" => petareas = v != "0",
             "npctint" | "npcglow" => {
                 let h = v.trim_start_matches('#').trim_start_matches("0x");
                 let c = u32::from_str_radix(h, 16).map_err(|e| format!("{w}: {e}"))?;
@@ -175,8 +224,8 @@ pub fn parse(words: &[String]) -> Result<Words, String> {
             "pieceaura" => {
                 // slot:RRGGBBAA[:kind[:source[:nodes]]]
                 let parts: Vec<&str> = v.split(':').collect();
-                let usage = || format!("{w}: pieceaura=chest|bracer|gloves|legs|boots|helm|robe|body|cape|main|off:RRGGBBAA[:shell|particles|both|none|trim|trimshell|epic|energy|circlet[:DictID[:nodes]]]");
-                let slot = ["chest", "bracer", "gloves", "legs", "boots", "helm", "robe", "body", "cape", "main", "off"].iter().position(|s| Some(s) == parts.first()).ok_or_else(usage)?;
+                let usage = || format!("{w}: pieceaura=chest|bracer|gloves|legs|boots|helm|robe|body|cape|main|off|main2|off2|hat:RRGGBBAA[:shell|particles|both|none|trim|trimshell|epic|energy|circlet|hat[:DictID[:nodes]]]");
+                let slot = ["chest", "bracer", "gloves", "legs", "boots", "helm", "robe", "body", "cape", "main", "off", "main2", "off2", "hat"].iter().position(|s| Some(s) == parts.first()).ok_or_else(usage)?;
                 let c = u32::from_str_radix(parts.get(1).ok_or_else(usage)?.trim_start_matches('#'), 16).map_err(|e| format!("{w}: {e}"))?;
                 let kind = match parts.get(2).copied() {
                     None | Some("default") => net::npctint::Aura::DEFAULT,
@@ -189,6 +238,10 @@ pub fn parse(words: &[String]) -> Result<Words, String> {
                     Some("epic") => net::npctint::Aura::EPIC,
                     Some("energy") => net::npctint::Aura::ENERGY,
                     Some("circlet") => net::npctint::Aura::CIRCLET,
+                    Some("hat") => net::npctint::Aura::HAT,
+                    Some("lights") => net::npctint::Aura::LIGHTS,
+                    Some("stripes") => net::npctint::Aura::STRIPES,
+                    Some("icing") => net::npctint::Aura::ICING,
                     _ => return Err(usage()),
                 };
                 let source = parts.get(3).map(|v| hex(w, v)).transpose()?.unwrap_or(0);
@@ -208,6 +261,7 @@ pub fn parse(words: &[String]) -> Result<Words, String> {
                             "both" => Aura::BOTH,
                             "trim" => Aura::TRIM,
                             "trimshell" => Aura::TRIM_SHELL,
+                            "hat" => Aura::HAT,
                             _ => return Err(format!("{w}: default, none, shell, particles, both, trim or trimshell")),
                         }
                     }
@@ -304,7 +358,7 @@ pub fn parse(words: &[String]) -> Result<Words, String> {
             _ => return Err(format!("{w}: not a word of a look")),
         }
     }
-    Ok(Words { look, items, race, action, at, size, tilt, cape, opts, paints, sex, helm_fit, y2002, head, seat, night, npc, pieces })
+    Ok(Words { look, items, race, action, at, size, tilt, cape, opts, paints, sex, walk, beside, helm_fit, y2002, head, seat, night, npc, pieces, petdye, petareas })
 }
 
 /// The body drawn in the look, holding what `words` say, from four sides
@@ -393,6 +447,24 @@ pub fn shot(lib: &Library, model: i32, words: &Words, out: &str) -> Result<(), S
             None => eprintln!("helm {}: none on this body", look.armor[5]),
         }
     }
+    // a hat another body has built in (`pieceaura=helm:0:hat[:DictID]`,
+    // `hat::hat_on`), in place of the helm, as the world's `attach` hangs it
+    let npc_hat = words.npc.and_then(|t| crate::hat::npc_hat(&t)).map(|(src, style)| (src, None, style));
+    if let Some((src, hue, style)) = crate::hat::hat_of(&words.pieces).or(npc_hat) {
+        let made = crate::hat::hat_on_styled(lib, model as u32, &cs, true, src, hue, style).map(|(n, mut m)| {
+            // in the helm's colour (`dye=`, `tint=`), as the world dyes it
+            crate::hat::dress(&mut m, style, look.helm_color(&t), look.trim_color.map(|c| c[5]), lib);
+            crate::hat::two_sided(&mut m);
+            (n, m)
+        });
+        match &made {
+            Some((node, m)) => eprintln!("hat of {src:#010X} on node {node}: {} triangles", m.triangles),
+            None => eprintln!("hat of {src:#010X}: none on this body"),
+        }
+        if made.is_some() {
+            helm = made;
+        }
+    }
     crate::play::dress_look(lib, model, &mut mesh, &cs, look, helm.is_some(), &t, true);
     // a circlet (`pieceaura=helm:RRGGBBAA:circlet[:DictID]`, `aura::circlet`)
     // while no helm is worn, hung on the helm's node as the world's `attach` hangs it
@@ -424,6 +496,28 @@ pub fn shot(lib: &Library, model: i32, words: &Words, out: &str) -> Result<(), S
     // an NPC's body tint and glow, and the glow's aura's nodes
     if let Some(t) = words.npc {
         crate::npctint::apply(&mut mesh, t);
+    }
+    // a pet's dyes, each on its area (`petdye`), and the body's materials
+    if words.petareas {
+        eprint!("{}", crate::petdye::areas_report(lib, &mesh, Some(&cs.text_slots)));
+        // `EQOA_TEXDUMP=<dir>`: each material's textures written there as
+        // <DictID>.ppm (what the rule's table was read off by eye)
+        if let Ok(dir) = std::env::var("EQOA_TEXDUMP") {
+            for t in mesh.batches.iter().flat_map(|b| b.layers.iter().map(|l| l.texture)) {
+                if let Some(img) = lib.surface(t).and_then(|(c, s)| s.decode(&c.data)) {
+                    let mut ppm = format!("P6 {} {} 255\n", img.width, img.height).into_bytes();
+                    ppm.extend(img.rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]));
+                    let _ = std::fs::write(format!("{dir}/{:08X}.ppm", t as u32), ppm);
+                }
+            }
+        }
+    }
+    if let Some(d) = words.petdye {
+        if d.rule {
+            crate::petdye::apply_rule(&mut mesh, d, &|id| lib.lookup(id).is_some());
+        } else {
+            crate::petdye::apply(&mut mesh, d);
+        }
     }
     // the auras as the world makes them (`play::build_puppet_in`): the
     // body's own and each worn piece's, their particles and their shells
@@ -517,8 +611,32 @@ pub fn shot(lib: &Library, model: i32, words: &Words, out: &str) -> Result<(), S
         tris(&mesh.batches[kept..]),
         tris(&mesh.batches[..kept])
     );
+    // a gingerbread man's icing (`pieceaura=body:0:icing`, `toys::ice`)
+    if crate::toys::iced(&words.pieces) {
+        let n = mesh.batches.len();
+        let ok = crate::toys::ice(&mut mesh, &cs);
+        eprintln!("icing: {} ({} triangles of icing)", if ok { "on" } else { "browned only" }, mesh.batches[n.min(mesh.batches.len())..].iter().map(|b| b.indices.len() / 3).sum::<usize>());
+    }
     // the cape, fitted to the body as it is built (`cape::model`)
     let cape = (words.cape.style != 0).then(|| crate::cape::model(lib, words.cape, model as u32, &cs)).flatten();
+    // the String of Lights along it (`pieceaura=cape:0:lights`, `toys::cape_lights`)
+    let lights = cape.as_ref().filter(|_| crate::toys::lights_worn(&words.pieces)).and_then(crate::toys::cape_lights);
+    if crate::toys::lights_worn(&words.pieces) {
+        match &lights {
+            Some(l) => eprintln!("lights: {} bulbs, {:.3} across", l.bulbs.len(), l.size),
+            None => eprintln!("lights: no cape outline to hang them on"),
+        }
+    }
+    // a follower beside it (`beside=`), bare
+    let mut follower = match words.beside {
+        Some((id, ..)) => {
+            let r = lib.lookup(id as i32).ok_or_else(|| format!("no body {id:#010x}"))?;
+            let mut fa = AnimScene::<Ee>::default();
+            let fcs = load_csprite(lib, r, &mut fa, &mut AnimCache::new(), &mut Rand(2)).ok_or("beside: not a character")?;
+            Some((lib.build_model(r).ok_or("beside: no mesh")?, fcs, fa, Rand(2)))
+        }
+        None => None,
+    };
     if words.cape.style != 0 {
         match &cape {
             Some(m) => eprintln!("cape {} ({}): {} triangles", words.cape.style, crate::cape::style(words.cape.style).map_or("", |s| s.what), tris(&m.batches)),
@@ -553,10 +671,15 @@ pub fn shot(lib: &Library, model: i32, words: &Words, out: &str) -> Result<(), S
             }
             Some(_) => {}
             None => {
-                cs.set_locomotion(0, &anims, &mut rand);
+                cs.set_locomotion(words.walk.unwrap_or(0), &anims, &mut rand);
             }
         }
         cs.h.process(0, &anims);
+        if let Some((_, fcs, fa, fr)) = follower.as_mut() {
+            fa.time = t;
+            fcs.set_locomotion(words.walk.unwrap_or(0), fa, fr);
+            fcs.h.process(0, fa);
+        }
         if !worn.is_empty() || !held.is_empty() {
             let centre = cs.h.calc_trans_about_center(&Matrix44::identity(), &anims);
             let mut now = crate::aura::worn_emitters(lib, 0, &cs, &worn, &centre, true);
@@ -637,6 +760,29 @@ pub fn shot(lib: &Library, model: i32, words: &Words, out: &str) -> Result<(), S
             hi = hi.max(q);
         }
     }
+    // the follower's place and palette, and the frame round it too
+    let follower = follower.map(|(m, mut fcs, fa, _)| {
+        let (_, size, x, z) = words.beside.unwrap_or_default();
+        let f = F::<Ee>::new;
+        let place = Matrix44::transform(&Vect3::new(F::ZERO, F::ZERO, F::ZERO), f(size), &Vect3::new(f(x), F::ZERO, f(z)));
+        let c = fcs.h.calc_trans_about_center(&place, &fa);
+        fcs.h.set_blend_matrices();
+        let pal: Vec<[[f32; 4]; 4]> = fcs.h.blend.iter().map(|m| m.to_cols()).collect();
+        let fw = Mat4::from_cols_array_2d(&c.to_cols());
+        for (i, p) in m.pos.iter().enumerate() {
+            let (b, wt) = (m.bones.get(i).copied().unwrap_or([255; 4]), m.weights.get(i).copied().unwrap_or([0; 4]));
+            let q = crate::toys::skinned(&pal.iter().map(Mat4::from_cols_array_2d).collect::<Vec<_>>(), Vec3::from(*p), b, wt);
+            let q = fw.transform_point3(q);
+            lo = lo.min(q);
+            hi = hi.max(q);
+        }
+        (m, c, pal)
+    });
+    // the String of Lights where the body has its cape now (`toys::placed`)
+    let lit = lights.as_ref().map(|l| net::decor::Decor { strings: vec![crate::toys::placed(l, &cs, &centre, 0)], ..Default::default() });
+    if let Some(d) = &lit {
+        aura_batches.extend(crate::decorlights::batches_in(d, 0, ((lo + hi) * 0.5).to_array(), at));
+    }
     let mid = (lo + hi) * 0.5;
     let fov = 30f32.to_radians();
     let reach = ((hi.y - lo.y) * 0.5 / 0.86).max((hi.x - lo.x).max(hi.z - lo.z) * 0.5 / 0.7 / (w as f32 / h as f32)) / (fov * 0.5).tan();
@@ -678,6 +824,15 @@ pub fn shot(lib: &Library, model: i32, words: &Words, out: &str) -> Result<(), S
         }
         g
     });
+    // the follower on its own palette and place
+    let mut follower = follower.map(|(m, c, pal)| {
+        let g = r.upload(&device, &queue, &m, &[render::IDENTITY], &textures);
+        r.set_instances(&queue, &g, &[c.to_cols()]);
+        if !pal.is_empty() {
+            r.set_palette(&queue, &g, &pal);
+        }
+        (g, c)
+    });
     // each item (and the helm) on its node's animated place under the centre
     // transform, as the game draws an attached sprite
     let mut items = Vec::new();
@@ -692,9 +847,15 @@ pub fn shot(lib: &Library, model: i32, words: &Words, out: &str) -> Result<(), S
                 crate::aura::recolor(m, c);
             }
             // its hand's aura: an epic's look lent it (`aura::borrow_epic`), as `play::attach` lends it
-            if let (Some(m), Some(a)) = (m.as_mut(), crate::aura::hand_aura(&words.pieces, slot).filter(|a| a.kind != net::npctint::Aura::PARTICLES)) {
+            for (a, _) in crate::aura::hand_auras(&words.pieces, slot).into_iter().filter(|(a, _)| a.kind != net::npctint::Aura::PARTICLES) {
+                let Some(m) = m.as_mut() else { continue };
                 let src = crate::aura::hand_source(&a);
                 let what = if a.kind == net::npctint::Aura::ENERGY { "energy skin" } else { "epic look" };
+                if a.kind == net::npctint::Aura::STRIPES {
+                    crate::aura::lend_hand(lib, m, &a, id);
+                    eprintln!("{id:#010x}: striped as a candy cane ({} triangles)", m.triangles);
+                    continue;
+                }
                 if crate::aura::lend_hand(lib, m, &a, id) {
                     eprintln!("{id:#010x}: the {what} of {src:#010X}{}", crate::aura::hand_hue(&a).map_or(String::new(), |h| format!(" in {h:?}")));
                 } else {
@@ -769,7 +930,18 @@ pub fn shot(lib: &Library, model: i32, words: &Words, out: &str) -> Result<(), S
         if let Some(g) = cape.as_mut() {
             crate::lod::place(g, &centre, &at_eye);
         }
-        let draws: Vec<render::Draw> = std::iter::once(render::Draw::Model(&gpu)).chain(items.iter().map(|(g, _)| render::Draw::Model(g))).chain(cape.iter().map(render::Draw::Model)).collect();
+        if let Some((g, c)) = follower.as_mut() {
+            crate::lod::place(g, c, &at_eye);
+        }
+        // the lights' cord, lit as the decorations' (`decorlights::light_cords`)
+        if let Some(d) = &lit {
+            let mut cords = crate::decorlights::cords_in(d, 0, eye.to_array());
+            crate::decorlights::light_cords(&mut cords, &view);
+            // and each bulb's glass, unlit (`toys::glass`)
+            cords.extend(crate::toys::glass(d, words.at));
+            r.decor = cords;
+        }
+        let draws: Vec<render::Draw> = std::iter::once(render::Draw::Model(&gpu)).chain(items.iter().map(|(g, _)| render::Draw::Model(g))).chain(cape.iter().map(render::Draw::Model)).chain(follower.iter().map(|(g, _)| render::Draw::Model(g))).collect();
         let particles = (!aura_batches.is_empty()).then_some((v, p, aura_batches.as_slice(), &textures as &render::Textures));
         let rgba = render::capture(&device, &queue, &mut r, w, h, &view, &draws, particles);
         for y in 0..h as usize {
@@ -805,8 +977,8 @@ fn held_emitters(lib: &Library, cs: &vi::csprite::CSprite<Ee>, held: &[(i32, u32
         for (k, e) in crate::particles::item_emitters(lib, item).into_iter().enumerate() {
             out.push(InHand { key: (0, hand, item, k), world: Matrix44::mul(&e.member, &at), def: e.def, how: How::Sprite(e.flags), drawn: true, tint });
         }
-        if let Some(a) = crate::aura::hand_aura(&words.pieces, hand) {
-            out.extend(crate::aura::hand_emitters(lib, 0, hand, item, &at, &a, true));
+        for (a, off) in crate::aura::hand_auras(&words.pieces, hand) {
+            out.extend(crate::aura::hand_emitters_at(lib, 0, hand, item, &at, &a, true, off));
         }
     }
     out

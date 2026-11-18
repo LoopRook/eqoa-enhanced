@@ -157,6 +157,8 @@ impl Stage {
             point: None,
             clear: glam::Vec3::ZERO,
             sky_view_proj: None,
+            sky_fog: 0.0,
+            storm_fog: false,
             lights: None,
         };
         // the fog and the sky's colour as the terrain profiles under the eye
@@ -281,7 +283,7 @@ fn sky(lib: &Library, world: &mut World<Ee>, eye: &Eye<Ee>, g: &mut Gpu) -> Opti
         l.add("DATA2/FX.CSF", fx);
     }
     let mut wx = crate::weather::Weather::new(&mut l, 0);
-    wx.frame(world, None, eye, 0, HOUR);
+    wx.frame(world, None, eye, &eye.position, 0, HOUR); // no regional weather here: no roof probed
     if let Some(grid) = world.grid.as_ref() {
         let b = grid.profile_blend(&eye.position);
         let c = vi::tod::TimeOfDay::<Ee>::new().sky(F::new(HOUR), F::ZERO, &b);
@@ -291,6 +293,7 @@ fn sky(lib: &Library, world: &mut World<Ee>, eye: &Eye<Ee>, g: &mut Gpu) -> Opti
     let frame = crate::sky::SkyFrame {
         plane: a.p618,
         lights: a.p618 == 0 && a.overcast != 0,
+        storm: 0.0,
         rot: vi::atmosphere::SkyRotations { sun: a.sky_rot, corona: a.corona_rot, moon: a.moon_rot },
         pals: (0..5).map(|k| a.pals.get(&k).cloned().unwrap_or_default()).collect(),
     };

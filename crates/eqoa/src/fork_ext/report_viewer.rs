@@ -52,6 +52,34 @@ pub(super) fn event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) ->
     }
 }
 
+pub(super) fn addon_event(app: &mut App, event: &WindowEvent) -> bool {
+    if app.pointer_shut(event) {
+        return true;
+    }
+    if matches!(event, WindowEvent::KeyboardInput { .. })
+        && app
+            .play
+            .as_ref()
+            .is_some_and(|p| p.typing.is_none() && p.merc_win_owns())
+    {
+        return false;
+    }
+    let Some(g) = &mut app.gfx else {
+        return false;
+    };
+    let plain_play = crate::fork_ext::is_plain_play(app.play.as_mut());
+    if !g.forge_runtime.event(&g.window, event, plain_play) {
+        return false;
+    }
+    // Keep physical pointer bookkeeping current without routing an
+    // addon-owned hover or drag into gameplay or the native map.
+    if let WindowEvent::CursorMoved { position, .. } = event {
+        app.cursor = (position.x, position.y);
+        app.mouse.moved(position.x, position.y);
+    }
+    true
+}
+
 pub(super) fn surface(
     config: &mut wgpu::SurfaceConfiguration,
     adapter: &wgpu::Adapter,

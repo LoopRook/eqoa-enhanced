@@ -188,6 +188,31 @@ pub fn save(o: &GameOptions) -> bool {
     game.is_ok() && client.is_ok() && keys.is_ok()
 }
 
+/// The Fx and Music Volume kept the moment the Options window changes them
+/// (the client's own; the game keeps them only with Save Changes): into this
+/// window's game.opt and the account's, every other setting there as it was
+/// kept (an unsaved change to another row stays unsaved), the defaults'
+/// where nothing was kept. Whether both were kept; a failure is said.
+pub fn keep_volumes(fx: F<Ee>, music: F<Ee>) -> bool {
+    let set = |b: &mut [u8]| {
+        b[0x08..0x0C].copy_from_slice(&fx.0.to_le_bytes());
+        b[0x0C..0x10].copy_from_slice(&music.0.to_le_bytes());
+    };
+    let defaults = || GameOptions { compact: 1, ..Default::default() }.to_card();
+    let mut card = game_card().unwrap_or_else(|| with_login(defaults()).to_vec());
+    set(&mut card);
+    let game = write_game(&card);
+    let mut acct = account_read("game").and_then(|b| GameOptions::from_card(&b)).or_else(|| GameOptions::from_card(&card)).map_or_else(defaults, |o| o.to_card());
+    set(&mut acct);
+    let account = account_write("game", &acct);
+    for r in [&game, &account] {
+        if let Err(e) = r {
+            crate::say(&format!("the volumes were not kept: {e}"));
+        }
+    }
+    game.is_ok() && account.is_ok()
+}
+
 /// The login STATION's Save Account kept (`VIGameOptions::m_username`,
 /// `m_password`, `m_x90`), from the card's whole record (`Load`): empty and
 /// off when there is none.
@@ -304,6 +329,27 @@ pub fn save_quest_guide(text: &str) -> bool {
         Ok(()) => true,
         Err(e) => {
             crate::say(&format!("the quest guide's record was not kept: {e}"));
+            false
+        }
+    }
+}
+
+// ---- the dyers' colour picker's recent colours (`dyepicker`) -----------------------
+
+/// The picker's recent colours' file: hex words, newest first.
+const DYE_RECENT_FILE: &str = "dyecolours.opt";
+
+/// The recent colours as text (empty when there are none).
+pub fn dye_recent() -> String {
+    store::read(DYE_RECENT_FILE).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
+}
+
+/// Keeps the recent colours: whether they were kept.
+pub fn save_dye_recent(text: &str) -> bool {
+    match store::write(DYE_RECENT_FILE, text.as_bytes()) {
+        Ok(()) => true,
+        Err(e) => {
+            crate::say(&format!("the picker's recent colours were not kept: {e}"));
             false
         }
     }
@@ -1016,11 +1062,23 @@ pub struct ClientOptions {
     /// target or a dead one, the nearest creature fighting the player (else
     /// its pet or group) targeted. Off by default.
     pub auto_target: bool,
+    /// Weapon Swap Back (jibrish, 2026-11-16, work board 1581): a weapon set
+    /// used from the HUD asks the server to put back what it took off when
+    /// pressed again (0x0022's swap-back byte, `gear::use_message`). Off by
+    /// default.
+    pub weapon_swap_back: bool,
     /// Chat Always Shown (Jibwiz's ticket 1914: "allows your chat box to stay
     /// fully visible without auto collapse"): the chat box open at its five
     /// rows with the last lines in it, never sliding away (`chat::WndChat::
     /// always`). Off by default, the game's box.
     pub chat_always: bool,
+    /// R2 Channel Switch (the server owner, 2026-11-18: "for switching chat
+    /// channels hold r2 then dpad left/right can switch channels if players
+    /// have that on"): with R2 held (the chat box's history, mode 33) left
+    /// and right step the channel plain text goes to (Say, Group, Shout,
+    /// Guild) instead of walking the item links (`Play::chat_channel_step`).
+    /// Off by default, the game's R2.
+    pub r2_channels: bool,
     /// Stacked Spell Bars (Jibwiz's ticket 1913): on a computer, the first two
     /// ability bars drawn as two rows of five stacked above the chat box at
     /// 95%, with no name bar, each slot a key of its own on the Controls page
@@ -1081,6 +1139,17 @@ pub struct ClientOptions {
     /// Minimap (on by default): the map's pictures round the player under
     /// the quick menus' name plate (`map::mini`); off, none.
     pub minimap: bool,
+    /// Map and Minimap on a server with the game's own UI (`qol::MAP`: the
+    /// Vanilla Test server; the owner, 2026-11-18: "minimap and map can work
+    /// but make it toggled off by default in extended"): off until the
+    /// player turns them on there, kept apart from `map` and `minimap`, which
+    /// every other server reads.
+    pub map_here: bool,
+    pub minimap_here: bool,
+    /// Item Links on such a server (`qol::ITEM_LINKS`; the owner, 2026-11-18:
+    /// "for item links they can be on in vanilla test but they are toggled
+    /// off by default"): off until turned on there, apart from `item_links`.
+    pub item_links_here: bool,
     /// Minimap Scroll Frame (the owner, 2026-11-13: "make the minimap have
     /// the borders like the spell bar the scroll, with the rollers on top and
     /// bottom"; on by default): the minimap framed as the quick menu's
@@ -1146,17 +1215,30 @@ pub struct ClientOptions {
     /// game is drawn; off, every texel off the base level, sharper and
     /// shimmering in the distance (`render::set_mipmaps`).
     pub mipmaps: bool,
-    /// Flora: on, the radial flora the game grows round the camera out of
-    /// each zone's tables (`vi::flora`, `flora`), as it is drawn; off, none.
-    pub flora: bool,
+    /// Flora: the share of the radial flora the game grows round the camera
+    /// out of each zone's tables (`vi::flora`, `flora`) that is drawn, 0 to
+    /// 100 in tens (`SHARE_STEP`): 100, the game's, every plant as it is
+    /// drawn; below, each plant kept or not by where it stands
+    /// (`flora::kept`), the same ones at every frame; 0, none (the owner's
+    /// of 2026-11-15: a slider "like we have a slider for fog"; On or Off
+    /// before).
+    pub flora: u8,
     /// Shadows: on, the characters' blob shadows as the game draws them
     /// (`vi::shadow`, `shadows`: within 50 of the eye, on the ground and the
     /// props under each); off, none.
     pub shadows: bool,
-    /// Environment: on, the effect volumes placed in the world (ground fog,
-    /// dust, falling leaves, light shafts, the flocks of birds: `fx`), as the
-    /// game draws them; off, none.
-    pub environment: bool,
+    /// Environment: how much of the effect volumes placed in the world
+    /// (ground fog, dust, falling leaves, light shafts, the flocks of birds:
+    /// `fx`) is drawn, 0 to 100 in tens: 100, the game's, as it draws them;
+    /// below, their fans that much as opaque and that share of a flock's
+    /// birds (`fx::Fx::frame`); 0, none (On or Off before 2026-11-15).
+    pub environment: u8,
+    /// Weather (2026-11-15, with Flora's and Environment's sliders): the share
+    /// of the rain's and the snow's drops drawn, and the splashes that much
+    /// as bright, 0 to 100 in tens (`weather::Weather::render`); 100, the
+    /// game's. The weather itself (its sky, its sound, its lightning) is the
+    /// server's as ever.
+    pub weather: u8,
     /// Ground Fog: PS2, the effect volumes' fog blended as the GS blends it
     /// into the PS2's 16-bit frame, dithered and cut to five bits a channel
     /// (`render::fog16`: a low, dim band, as the game shows it); Exact, blended
@@ -1275,7 +1357,28 @@ pub struct ClientOptions {
     /// `textures/SLUS-20744/dumps` under the names PCSX2 gives it
     /// (`texpack`), for a pack to be made from. Off by default.
     pub dump_textures: bool,
+    /// Texture Pack Memory, in MB (the owner's report of 2026-11-18, "some
+    /// textures are not being loaded from texture packs"): how much graphics
+    /// memory a pack's textures may take before the least recently drawn
+    /// are let go and, past what is drawn, made smaller
+    /// (`render::packmem`); 0, Auto, the device's (`render::PackLimits`:
+    /// 256 MB on an integrated chip, a third of a card's memory from 1 to 4
+    /// GB). One of `PACK_MEMORIES`.
+    pub pack_memory: u16,
+    /// Precache Textures (the owner's of 2026-11-18, "lets look at PCSX2 how
+    /// they do texture packs like precaching and we can make a better
+    /// version"): on, every file of a pack is made ready in memory as it is
+    /// read, within its budget (`texcache`), the zones' and what is drawn
+    /// first. Off by default, as PCSX2's.
+    pub pack_precache: bool,
+    /// Pack Compression: 0 Auto (a pack larger than the card's budget kept
+    /// as BC3), 1 Off, 2 On; only ever on a card that draws BCn
+    /// (`texcache`).
+    pub pack_compress: u8,
 }
+
+/// Texture Pack Memory's steps in MB, Auto (0) first.
+pub const PACK_MEMORIES: [u16; 5] = [0, 512, 1024, 2048, 4096];
 
 /// Render Scale's steps, the first the game's picture as drawn.
 pub const RENDER_SCALES: [u8; 3] = [1, 2, 4];
@@ -1357,12 +1460,18 @@ pub const ABILITY_BARS_GAME: u8 = 2;
 pub const ENTITY_SLOTS_GAME: u8 = net::entity::RETAIL_SLOTS as u8;
 pub const ENTITY_SLOTS_MAX: u8 = net::entity::MAX_SLOTS as u8;
 pub const ENTITY_SLOTS_STEP: u8 = 8;
+/// NPC/PC Display's default: 48, twice the game's (the owner, 2026-11-16:
+/// "lets make pc/npc display 48 default and distance 200"); a server that
+/// offers no more slots reads the game's 24 of them whatever this says.
+pub const ENTITY_SLOTS_DEFAULT: u8 = 48;
 /// The game's character draw distance (a player race's LOD body's last
 /// level), the farthest NPC/PC Distance goes (the client reads the
 /// world's zones to 1050 round the player), and its step.
 pub const ENTITY_VIEW_GAME: u16 = 100;
 pub const ENTITY_VIEW_MAX: u16 = 1000;
 pub const ENTITY_VIEW_STEP: u16 = 50;
+/// NPC/PC Distance's default: 200, twice the game's (the owner, 2026-11-16).
+pub const ENTITY_VIEW_DEFAULT: u16 = 200;
 /// The game's name plate distance (`VINameSprite::Raster`: a plate within 22
 /// of the camera), the farthest Name Distance goes (twice the game's
 /// character draw distance: past it a name is a few pixels at any zoom), and
@@ -1400,8 +1509,8 @@ impl Default for ClientOptions {
             capture: false,
             background_sound: true,
             ability_bars: ABILITY_BARS_GAME,
-            entity_slots: ENTITY_SLOTS_GAME,
-            entity_view: ENTITY_VIEW_GAME,
+            entity_slots: ENTITY_SLOTS_DEFAULT,
+            entity_view: ENTITY_VIEW_DEFAULT,
             name_distance: NAME_DISTANCE_GAME,
             overlapping_names: false,
             raid_list: true,
@@ -1418,7 +1527,9 @@ impl Default for ClientOptions {
             item_links: true,
             auto_cast: true,
             auto_target: false,
+            weapon_swap_back: false,
             chat_always: false,
+            r2_channels: false,
             stacked_bars: false,
             spell_bar_opacity: 100,
             chat_tabs: [0; crate::chat::KINDS],
@@ -1429,6 +1540,9 @@ impl Default for ClientOptions {
             profanity_filter: Profanity::High,
             map: true,
             minimap: true,
+            map_here: false,
+            minimap_here: false,
+            item_links_here: false,
             minimap_scroll: true,
             map_pointer: crate::map::Pointer::Facing,
             map_markers: true,
@@ -1442,9 +1556,10 @@ impl Default for ClientOptions {
             update_notices: true,
             text: render::ui::TextFilter::Sharp,
             mipmaps: true,
-            flora: true,
+            flora: SHARE_FULL,
             shadows: true,
-            environment: true,
+            environment: SHARE_FULL,
+            weather: SHARE_FULL,
             ps2_fog: true,
             ps2_particles: true,
             ambient_occlusion: false,
@@ -1464,6 +1579,9 @@ impl Default for ClientOptions {
             touch_low_start: false,
             texture_packs: false,
             dump_textures: false,
+            pack_memory: 0,
+            pack_precache: true,
+            pack_compress: 0,
         }
     }
 }
@@ -1516,10 +1634,10 @@ impl ClientOptions {
         if self.ability_bars != ABILITY_BARS_GAME {
             s.push_str(&format!("ability_bars={}\n", self.ability_bars));
         }
-        if self.entity_slots != ENTITY_SLOTS_GAME {
+        if self.entity_slots != ENTITY_SLOTS_DEFAULT {
             s.push_str(&format!("entity_slots={}\n", self.entity_slots));
         }
-        if self.entity_view != ENTITY_VIEW_GAME {
+        if self.entity_view != ENTITY_VIEW_DEFAULT {
             s.push_str(&format!("entity_view={}\n", self.entity_view));
         }
         if self.name_distance != NAME_DISTANCE_GAME {
@@ -1576,6 +1694,14 @@ impl ClientOptions {
         if self.auto_target {
             s.push_str("auto_target=on\n");
         }
+        // Weapon Swap Back only when on
+        if self.weapon_swap_back {
+            s.push_str("weapon_swap_back=on\n");
+        }
+        // R2 Channel Switch only when on
+        if self.r2_channels {
+            s.push_str("r2_channels=on\n");
+        }
         // Chat Always Shown and Stacked Spell Bars only when on
         if self.chat_always {
             s.push_str("chat_always=on\n");
@@ -1629,6 +1755,12 @@ impl ClientOptions {
                 s.push_str(&format!("{key}=off\n"));
             }
         }
+        // the game's own UI's Map and Minimap only when on (`qol::MAP`)
+        for (on, key) in [(self.map_here, "map_here"), (self.minimap_here, "minimap_here"), (self.item_links_here, "item_links_here")] {
+            if on {
+                s.push_str(&format!("{key}=on\n"));
+            }
+        }
         // Map Pointer only when Camera
         if self.map_pointer != crate::map::Pointer::Facing {
             s.push_str(&format!("map_pointer={}\n", self.map_pointer.key()));
@@ -1652,16 +1784,20 @@ impl ClientOptions {
         if !self.mipmaps {
             s.push_str("mipmaps=off\n");
         }
-        // Flora and Environment only when off
-        if !self.flora {
-            s.push_str("flora=off\n");
+        // Flora, Environment and Weather only when not all of it: 0 as `off`,
+        // as the builds of an On/Off row wrote it (they read a number as on)
+        if let Some(v) = share_text(self.flora) {
+            s.push_str(&format!("flora={v}\n"));
         }
         // Shadows only when off
         if !self.shadows {
             s.push_str("shadows=off\n");
         }
-        if !self.environment {
-            s.push_str("environment=off\n");
+        if let Some(v) = share_text(self.environment) {
+            s.push_str(&format!("environment={v}\n"));
+        }
+        if let Some(v) = share_text(self.weather) {
+            s.push_str(&format!("weather={v}\n"));
         }
         // Ground Fog only when Exact
         if !self.ps2_fog {
@@ -1732,6 +1868,17 @@ impl ClientOptions {
         }
         if self.dump_textures {
             s.push_str("dump_textures=on\n");
+        }
+        // Texture Pack Memory only off Auto
+        if self.pack_memory != 0 {
+            s.push_str(&format!("pack_memory={}\n", self.pack_memory));
+        }
+        // Precache Textures only on, Pack Compression only off Auto
+        if !self.pack_precache {
+            s.push_str("pack_precache=off\n");
+        }
+        if self.pack_compress != 0 {
+            s.push_str(if self.pack_compress == 1 { "pack_compress=off\n" } else { "pack_compress=on\n" });
         }
         s
     }
@@ -1810,7 +1957,11 @@ impl ClientOptions {
                 ("auto_cast", "off") => c.auto_cast = false,
                 ("auto_target", "on") => c.auto_target = true,
                 ("auto_target", "off") => c.auto_target = false,
+                ("weapon_swap_back", "on") => c.weapon_swap_back = true,
+                ("weapon_swap_back", "off") => c.weapon_swap_back = false,
                 ("chat_always", "on") => c.chat_always = true,
+                ("r2_channels", "on") => c.r2_channels = true,
+                ("r2_channels", "off") => c.r2_channels = false,
                 ("chat_always", "off") => c.chat_always = false,
                 ("stacked_bars", "on") => c.stacked_bars = true,
                 ("stacked_bars", "off") => c.stacked_bars = false,
@@ -1845,6 +1996,12 @@ impl ClientOptions {
                 ("map", "off") => c.map = false,
                 ("minimap", "on") => c.minimap = true,
                 ("minimap", "off") => c.minimap = false,
+                ("map_here", "on") => c.map_here = true,
+                ("map_here", "off") => c.map_here = false,
+                ("minimap_here", "on") => c.minimap_here = true,
+                ("minimap_here", "off") => c.minimap_here = false,
+                ("item_links_here", "on") => c.item_links_here = true,
+                ("item_links_here", "off") => c.item_links_here = false,
                 ("minimap_scroll", "on") => c.minimap_scroll = true,
                 ("minimap_scroll", "off") => c.minimap_scroll = false,
                 ("map_pointer", v) => {
@@ -1868,12 +2025,23 @@ impl ClientOptions {
                 ("text", "smooth") => c.text = render::ui::TextFilter::Smooth,
                 ("mipmaps", "on") => c.mipmaps = true,
                 ("mipmaps", "off") => c.mipmaps = false,
-                ("flora", "on") => c.flora = true,
-                ("flora", "off") => c.flora = false,
+                ("flora", v) => {
+                    if let Some(v) = share_of(v) {
+                        c.flora = v;
+                    }
+                }
                 ("shadows", "on") => c.shadows = true,
                 ("shadows", "off") => c.shadows = false,
-                ("environment", "on") => c.environment = true,
-                ("environment", "off") => c.environment = false,
+                ("environment", v) => {
+                    if let Some(v) = share_of(v) {
+                        c.environment = v;
+                    }
+                }
+                ("weather", v) => {
+                    if let Some(v) = share_of(v) {
+                        c.weather = v;
+                    }
+                }
                 ("ground_fog", "ps2") => c.ps2_fog = true,
                 ("ground_fog", "exact") => c.ps2_fog = false,
                 ("particles", "ps2") => c.ps2_particles = true,
@@ -1902,6 +2070,17 @@ impl ClientOptions {
                 ("texture_packs", "off") => c.texture_packs = false,
                 ("dump_textures", "on") => c.dump_textures = true,
                 ("dump_textures", "off") => c.dump_textures = false,
+                ("pack_precache", "on") => c.pack_precache = true,
+                ("pack_precache", "off") => c.pack_precache = false,
+                ("pack_compress", "auto") => c.pack_compress = 0,
+                ("pack_compress", "off") => c.pack_compress = 1,
+                ("pack_compress", "on") => c.pack_compress = 2,
+                ("pack_memory", "auto") => c.pack_memory = 0,
+                ("pack_memory", v) => {
+                    if let Some(mb) = v.parse::<u16>().ok().filter(|mb| PACK_MEMORIES.contains(mb)) {
+                        c.pack_memory = mb;
+                    }
+                }
                 ("hud", "nearest") => c.hud = render::ui::HudFilter::Nearest,
                 ("hud", "sharp") => c.hud = render::ui::HudFilter::Sharp,
                 ("output", v) if !v.is_empty() => c.output = Some(DeviceName::new(v)),
@@ -2008,7 +2187,7 @@ fn read_client() -> ClientOptions {
 /// this one read them).
 fn save_client() -> Result<(), String> {
     let me = place();
-    let mine = client();
+    let mine = kept_client();
     let mut shared = read_shared();
     shared.controller[me] = mine.controller[me];
     shared.slow_unfocused[me] = mine.slow_unfocused[me];
@@ -2043,8 +2222,14 @@ thread_local! {
 }
 
 /// The client's settings now: what this window kept (`read_client`), as the
-/// page changed them since.
+/// page changed them since, less what the server turns off (`qol`).
 pub fn client() -> ClientOptions {
+    qol::masked(kept_client())
+}
+
+/// The client's settings as this window keeps them, whatever the server
+/// turns off (`qol`): what Save Changes writes.
+fn kept_client() -> ClientOptions {
     let me = cache_key();
     CLIENT.with(|c| match c.get() {
         Some((p, v)) if p == me => v,
@@ -2060,8 +2245,205 @@ pub fn client() -> ClientOptions {
 /// Changes them (the Extended page, as its rows move); kept only by Save
 /// Changes (`save`).
 pub fn set_client(v: ClientOptions) {
+    let v = qol::unmasked(v, kept_client());
     let me = cache_key();
     CLIENT.with(|c| c.set(Some((me, v))));
+}
+
+/// The game's own UI on a server that asks for it (go-eqoa-server's
+/// `world.vanilla_ui`, `net::session::OP_VANILLA_UI`; the owner, 2026-11-18,
+/// for the Vanilla Test shard: "disable all quality of life settings like
+/// map, minimap, level display, dps meter, custom colors, the character stats
+/// showing 350/500", "also no quest helper"). The server names, a bit each,
+/// which of this client's own additions are off for the session (`set_off`,
+/// from `Play::frame`); `client()` then reads each one's rows as off (the
+/// numbers' colours Default), while what the player chose is kept as it was
+/// (`set_client` keeps a row that is off as it stood; Save Changes writes the
+/// player's own), so another server, or the next connection before the server
+/// says, has them back. Extended's rows that are off say so ("Off on this
+/// server") and do not change. A server that never sends the message turns
+/// nothing off.
+pub mod qol {
+    use super::ClientOptions;
+    use std::cell::Cell;
+
+    /// The map (M) and the minimap (N) OFF BY DEFAULT, not locked: read
+    /// from `map_here` and `minimap_here`, which Extended's rows and N turn
+    /// and Save Changes keeps (the owner, 2026-11-18: "minimap and map can
+    /// work but make it toggled off by default in extended"). Waypoints, Map
+    /// Markers, the community's marks and the pointer go with the map; its
+    /// quest marks are the Quest Helper's (`QUEST_HELPER`, locked off).
+    pub const MAP: u32 = 1 << 0;
+    /// The Quest Helper: the guide, the tracker, the map's and the minimap's
+    /// quest marks and the marks over quest NPCs' heads.
+    pub const QUEST_HELPER: u32 = 1 << 1;
+    /// A target's level in the target box (Target Level).
+    pub const TARGET_LEVEL: u32 = 1 << 2;
+    /// The DPS meter.
+    pub const DPS_METER: u32 = 1 << 3;
+    /// Number Colors and Merc Colors: every number the game's colour.
+    pub const NUMBER_COLORS: u32 = 1 << 4;
+    /// Character > Summary's stat caps ("346/435"): the value alone and the
+    /// game's column widths (`trainer`).
+    pub const STAT_CAPS: u32 = 1 << 5;
+    /// Others' power under their health (Power Bars).
+    pub const POWER_BARS: u32 = 1 << 6;
+    /// The buff window: the game's effects strip.
+    pub const BUFF_WINDOW: u32 = 1 << 7;
+    /// The pet's effects under its bar (Pet Effects).
+    pub const PET_EFFECTS: u32 = 1 << 8;
+    /// Auto-cast on the quick bars and Auto Target.
+    pub const AUTO_CAST: u32 = 1 << 9;
+    /// Item links in chat (Item Links) OFF BY DEFAULT, not locked: read from
+    /// `item_links_here`, the player's to turn there (plain names until then).
+    pub const ITEM_LINKS: u32 = 1 << 10;
+    /// Ability Bars 3 and 4 and Stacked Spell Bars: the game's two bars, its
+    /// carousel.
+    pub const SPELL_BARS: u32 = 1 << 11;
+    /// An [OG] account's (go-eqoa-server's `world.og_accounts`; the owner,
+    /// 2026-11-18: "[OG] tag shows players you opt-out of the QoL changes to
+    /// EQOA and only use the most basic upgrades like FPS, widescreen, no
+    /// touchscreen, no mouse"): `MAP` and `ITEM_LINKS` LOCKED off, not off by
+    /// default: their rows read Off on this server and do not turn, M and N
+    /// open nothing.
+    pub const LOCKED: u32 = 1 << 12;
+    /// No mouse in the world (an [OG] account's): its buttons, its motion and
+    /// its wheel do nothing there (`viewer`); the keyboard and the
+    /// controllers play.
+    pub const NO_MOUSE: u32 = 1 << 13;
+    /// No touch in the world (an [OG] account's): the touch pad is not drawn
+    /// and a finger does nothing there (`viewer`).
+    pub const NO_TOUCH: u32 = 1 << 14;
+
+    thread_local! {
+        static OFF: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// What the server turns off now (the session's, `Play::frame`); 0 with
+    /// none said, and out of the world.
+    pub fn set_off(bits: u32) {
+        OFF.with(|o| o.set(bits));
+    }
+
+    /// Whether the server turns `bit` off.
+    pub fn off(bit: u32) -> bool {
+        OFF.with(|o| o.get()) & bit != 0
+    }
+
+    /// The bit an Extended row (its item) belongs to, none for a row the
+    /// server never turns off.
+    pub fn of_item(item: i32) -> Option<u32> {
+        Some(match item {
+            44 | 45 | 85 => QUEST_HELPER,
+            70..=72 => DPS_METER,
+            64..=69 | 80 | 81 => NUMBER_COLORS,
+            86 => POWER_BARS,
+            83 => BUFF_WINDOW,
+            58 => PET_EFFECTS,
+            78 | 79 => AUTO_CAST,
+            22 | 90 => SPELL_BARS,
+            _ => return None,
+        })
+    }
+
+    /// Whether Extended's row `item` is the map's, the minimap's or Item Links', off
+    /// by default on this server (`MAP`) but the player's to turn.
+    pub fn item_default_off(item: i32) -> bool {
+        !off(LOCKED) && ((off(MAP) && matches!(item, 41 | 42)) || (off(ITEM_LINKS) && item == 73))
+    }
+
+    /// Whether Extended's row `item` is off on this server (the map's, the
+    /// minimap's and Item Links' too where they are `LOCKED`).
+    pub fn item_off(item: i32, target_level: i32) -> bool {
+        if item == target_level {
+            return off(TARGET_LEVEL);
+        }
+        if off(LOCKED) && ((off(MAP) && matches!(item, 41 | 42)) || (off(ITEM_LINKS) && item == 73)) {
+            return true;
+        }
+        of_item(item).is_some_and(off)
+    }
+
+    /// `c` as the server leaves it: each addition it turns off read as off.
+    pub fn masked(mut c: ClientOptions) -> ClientOptions {
+        if off(MAP) {
+            (c.map, c.minimap) = if off(LOCKED) { (false, false) } else { (c.map_here, c.minimap_here) };
+        }
+        if off(QUEST_HELPER) {
+            (c.quest_helper, c.quest_markers, c.quest_tracker, c.head_marks) = (false, false, false, false);
+        }
+        if off(TARGET_LEVEL) {
+            c.target_level = false;
+        }
+        if off(DPS_METER) {
+            c.dps_meter = false;
+        }
+        if off(NUMBER_COLORS) {
+            c.number_colors = [0; crate::numcolor::ROWS];
+        }
+        if off(POWER_BARS) {
+            c.power_bars = false;
+        }
+        if off(BUFF_WINDOW) {
+            c.buff_window = false;
+        }
+        if off(PET_EFFECTS) {
+            c.pet_effects = false;
+        }
+        if off(AUTO_CAST) {
+            (c.auto_cast, c.auto_target) = (false, false);
+        }
+        if off(ITEM_LINKS) {
+            c.item_links = c.item_links_here && !off(LOCKED);
+        }
+        if off(SPELL_BARS) {
+            (c.ability_bars, c.stacked_bars) = (super::ABILITY_BARS_GAME, false);
+        }
+        c
+    }
+
+    /// `v`, a change made to `masked` settings, with each row the server
+    /// turns off put back as `kept` has it: the player's own choice stays.
+    pub fn unmasked(mut v: ClientOptions, kept: ClientOptions) -> ClientOptions {
+        if off(MAP) {
+            // the rows turned here are this server's kind's own; locked, none
+            // turns and each stays as kept
+            (v.map_here, v.minimap_here) = if off(LOCKED) { (kept.map_here, kept.minimap_here) } else { (v.map, v.minimap) };
+            (v.map, v.minimap) = (kept.map, kept.minimap);
+        }
+        if off(QUEST_HELPER) {
+            (v.quest_helper, v.quest_markers, v.quest_tracker, v.head_marks) = (kept.quest_helper, kept.quest_markers, kept.quest_tracker, kept.head_marks);
+        }
+        if off(TARGET_LEVEL) {
+            v.target_level = kept.target_level;
+        }
+        if off(DPS_METER) {
+            v.dps_meter = kept.dps_meter;
+        }
+        if off(NUMBER_COLORS) {
+            v.number_colors = kept.number_colors;
+        }
+        if off(POWER_BARS) {
+            v.power_bars = kept.power_bars;
+        }
+        if off(BUFF_WINDOW) {
+            v.buff_window = kept.buff_window;
+        }
+        if off(PET_EFFECTS) {
+            v.pet_effects = kept.pet_effects;
+        }
+        if off(AUTO_CAST) {
+            (v.auto_cast, v.auto_target) = (kept.auto_cast, kept.auto_target);
+        }
+        if off(ITEM_LINKS) {
+            v.item_links_here = if off(LOCKED) { kept.item_links_here } else { v.item_links };
+            v.item_links = kept.item_links;
+        }
+        if off(SPELL_BARS) {
+            (v.ability_bars, v.stacked_bars) = (kept.ability_bars, kept.stacked_bars);
+        }
+        v
+    }
 }
 
 /// The frame rate when the player chose none: a page on WebGL2 keeps 30
@@ -2084,6 +2466,48 @@ pub fn camera_turn() -> u16 {
 /// Fog now, 0 (off) to `fog::STEPS`, the game's at `fog::GAME`.
 pub fn fog() -> u8 {
     client().fog
+}
+
+/// Flora's, Environment's and Weather's whole: the game's, all of it drawn.
+pub const SHARE_FULL: u8 = 100;
+/// Their sliders' step.
+pub const SHARE_STEP: u8 = 10;
+
+/// Whether the thing of `key` is drawn at `share` (Flora's, Environment's,
+/// Weather's): every one at `SHARE_FULL`, so the game's picture is not
+/// touched, none at 0; between, a fixed `share` in a hundred of the keys,
+/// each the same at every frame, and a key kept at a share kept at every
+/// share above it (a slider moved up only adds).
+pub fn share_keeps(key: u64, share: u8) -> bool {
+    if share >= SHARE_FULL {
+        return true;
+    }
+    // splitmix64's finaliser: neighbouring keys spread over the hundred
+    let mut z = key.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    z % (SHARE_FULL as u64) < (share as u64)
+}
+
+/// A share's line in client.opt: none at `SHARE_FULL`, `off` at 0 (what the
+/// On/Off rows' builds wrote and read), else its number.
+fn share_text(v: u8) -> Option<String> {
+    match v {
+        SHARE_FULL => None,
+        0 => Some("off".into()),
+        v => Some(v.to_string()),
+    }
+}
+
+/// A share read off client.opt: `on` all of it, `off` none, or a number of
+/// the sliders' steps; anything else None (the default kept).
+fn share_of(v: &str) -> Option<u8> {
+    match v {
+        "on" => Some(SHARE_FULL),
+        "off" => Some(0),
+        v => v.parse::<u8>().ok().filter(|v| *v <= SHARE_FULL && v % SHARE_STEP == 0),
+    }
 }
 
 /// Whether the camera shakes as the game shakes it (Screen Shake).
@@ -2211,6 +2635,16 @@ pub fn auto_cast() -> bool {
 /// Auto Target (`autocast`).
 pub fn auto_target() -> bool {
     client().auto_target
+}
+
+/// Weapon Swap Back (work board 1581).
+pub fn weapon_swap_back() -> bool {
+    client().weapon_swap_back
+}
+
+/// R2 Channel Switch (Extended > UI > Chat; the server owner, 2026-11-18).
+pub fn r2_channels() -> bool {
+    client().r2_channels
 }
 
 /// Chat Always Shown (Extended > UI > Chat; ticket 1914).
@@ -2739,6 +3173,7 @@ pub mod testing {
         super::FRAME_DUE.with(|d| d.set(0.0));
         super::DISPLAY_GAP.with(|g| g.set(1000.0 / 60.0));
         super::FILE_SHARED.with(|f| f.set(None));
+        super::qol::set_off(0);
         super::fork_settings::reset_test_client();
     }
 
@@ -2832,6 +3267,45 @@ mod tests {
         assert_eq!(GameOptions::from_card(&loud).unwrap().fx_volume, F::ONE);
     }
 
+    /// The volumes kept on their own (`keep_volumes`): with nothing kept, the
+    /// defaults with them; over a kept record, every other setting and the
+    /// saved login as they were; with an account known, the account's record
+    /// too (what `game_options` reads), its other settings its own; 0 read
+    /// back as 0, never as unset.
+    #[test]
+    fn volumes_kept_on_their_own() {
+        testing::reset(false);
+        assert!(keep_volumes(F::ZERO, F::new(0.3)));
+        let o = game_options();
+        assert_eq!((o.fx_volume, o.music_volume, o.compact), (F::ZERO, F::new(0.3), 1));
+        assert_eq!(GameOptions { fx_volume: F::ONE, music_volume: F::ONE, ..o }, GameOptions { compact: 1, ..Default::default() });
+        // a kept record and a saved login
+        testing::reset(false);
+        let mut card = GameOptions { battle: 4, no_damage: 1, ..Default::default() }.to_card();
+        card[0x10..0x13].copy_from_slice(b"dab");
+        card[0x90] = 1;
+        testing::put(GAME_FILE, &card);
+        assert!(keep_volumes(F::new(0.3), F::ZERO));
+        let o = game_options();
+        assert_eq!((o.battle, o.no_damage, o.fx_volume, o.music_volume), (4, 1, F::new(0.3), F::ZERO));
+        assert_eq!(saved_login(), ("dab".to_string(), String::new(), true), "the saved login stays");
+        // an account with its own record
+        set_account("eqoaclassic.com", "dab");
+        let acct = account_file("eqoaclassic.com+dab", "game");
+        testing::put(&acct, &GameOptions { battle: 7, ..Default::default() }.to_card());
+        assert_eq!(game_options().fx_volume, F::ONE, "the control: the account's own");
+        assert!(keep_volumes(F::ZERO, F::ZERO));
+        let o = game_options();
+        assert_eq!((o.battle, o.fx_volume, o.music_volume), (7, F::ZERO, F::ZERO));
+        assert!(testing::kept(&acct).unwrap()[0x10..0x91].iter().all(|&b| b == 0), "never the login");
+        let w = GameOptions::from_card(&testing::kept(GAME_FILE).unwrap()).unwrap();
+        assert_eq!((w.battle, w.fx_volume), (4, F::ZERO), "the window's too");
+        set_account_now(None);
+        testing::reset(true);
+        assert!(!keep_volumes(F::ZERO, F::ZERO), "a store that refuses: said");
+        testing::reset(false);
+    }
+
     /// Saved, then loaded as the next run loads them: every setting as it
     /// was; with nothing kept, the defaults (the keyboard Compact); with the
     /// store refusing, the defaults and a save that says it failed.
@@ -2923,11 +3397,11 @@ mod tests {
         assert_eq!(ClientOptions { entity_slots: 128, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nentity_slots=128\n", "NPC/PC Display only when not the game's");
         assert_eq!(ClientOptions::from_text("entity_slots=100").entity_slots, 100, "any number in range");
         for bad in ["entity_slots=23", "entity_slots=205", "entity_slots=999", "entity_slots=lots"] {
-            assert_eq!(ClientOptions::from_text(bad).entity_slots, ENTITY_SLOTS_GAME, "{bad}: the game's 24");
+            assert_eq!(ClientOptions::from_text(bad).entity_slots, ENTITY_SLOTS_DEFAULT, "{bad}: the default 48");
         }
         assert_eq!(ClientOptions { entity_view: 600, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nentity_view=600\n", "NPC/PC Distance only when not the game's");
         for bad in ["entity_view=99", "entity_view=1001", "entity_view=far"] {
-            assert_eq!(ClientOptions::from_text(bad).entity_view, ENTITY_VIEW_GAME, "{bad}: the game's 100");
+            assert_eq!(ClientOptions::from_text(bad).entity_view, ENTITY_VIEW_DEFAULT, "{bad}: the default 200");
         }
         assert_eq!(ClientOptions { name_distance: 60, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nname_distance=60\n", "Name Distance only when not the game's");
         assert_eq!(ClientOptions::from_text("name_distance=60").name_distance, 60, "read back");
@@ -3028,6 +3502,44 @@ mod tests {
         }
     }
 
+    /// Texture Pack Memory: Auto (0) by default and then not kept; each step
+    /// kept and read back; anything else Auto.
+    #[test]
+    fn pack_memory_kept_only_off_auto() {
+        let d = ClientOptions::default();
+        assert_eq!(d.pack_memory, 0, "Auto");
+        assert!(!d.to_text().contains("pack_memory"));
+        for mb in PACK_MEMORIES.into_iter().skip(1) {
+            let c = ClientOptions { pack_memory: mb, ..Default::default() };
+            assert!(c.to_text().ends_with(&format!("pack_memory={mb}\n")));
+            assert_eq!(ClientOptions::from_text(&c.to_text()), c);
+        }
+        for bad in ["pack_memory=300", "pack_memory=-1", "pack_memory=1GB", "pack_memory=", "pack_memory=auto"] {
+            assert_eq!(ClientOptions::from_text(bad).pack_memory, 0, "{bad}: Auto");
+        }
+    }
+
+    /// Precache Textures kept only off (on by default, the owner 2026-11-18), Pack Compression only off Auto; the
+    /// defaults not written, anything else read as the default.
+    #[test]
+    fn pack_precache_and_compression_kept() {
+        let d = ClientOptions::default();
+        assert!(d.pack_precache && d.pack_compress == 0);
+        assert!(!d.to_text().contains("pack_"));
+        for (c, text) in [
+            (ClientOptions { pack_precache: false, ..Default::default() }, "pack_precache=off\n"),
+            (ClientOptions { pack_compress: 1, ..Default::default() }, "pack_compress=off\n"),
+            (ClientOptions { pack_compress: 2, ..Default::default() }, "pack_compress=on\n"),
+        ] {
+            assert!(c.to_text().ends_with(text), "{text}");
+            assert_eq!(ClientOptions::from_text(&c.to_text()), c);
+        }
+        for bad in ["pack_precache=1", "pack_compress=bc3", "pack_compress=", "pack_precache=yes"] {
+            let c = ClientOptions::from_text(bad);
+            assert!(c.pack_precache && c.pack_compress == 0, "{bad}: the default");
+        }
+    }
+
     /// Shadows, on by default (the game's), kept only when off; anything
     /// but on or off leaves it on.
     #[test]
@@ -3037,7 +3549,7 @@ mod tests {
         assert_eq!(ClientOptions { shadows: false, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nshadows=off\n");
         assert!(!d.to_text().contains("shadows"), "the default not written");
         let c = ClientOptions::from_text("shadows=off");
-        assert!(!c.shadows && c.flora && c.environment, "Shadows alone");
+        assert!(!c.shadows && c.flora == 100 && c.environment == 100, "Shadows alone");
         assert!(ClientOptions::from_text("shadows=on") == d);
         for bad in ["shadows=0", "shadows=", "shadow=off"] {
             assert!(ClientOptions::from_text(bad).shadows, "{bad}: on, the default");
@@ -3146,7 +3658,7 @@ mod tests {
         assert_eq!(ClientOptions { ps2_particles: false, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nparticles=exact\n");
         assert!(!d.to_text().contains("particles"), "the default not written");
         let c = ClientOptions::from_text("particles=exact");
-        assert!(!c.ps2_particles && c.ps2_fog && c.environment, "Particles alone");
+        assert!(!c.ps2_particles && c.ps2_fog && c.environment == 100, "Particles alone");
         assert_eq!(ClientOptions::from_text(&c.to_text()), c);
         assert!(ClientOptions::from_text("particles=ps2") == d);
         for bad in ["particles=off", "particles=", "particle=exact", "particles=PS2"] {
@@ -3165,7 +3677,7 @@ mod tests {
         assert_eq!(ClientOptions { ps2_fog: false, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nground_fog=exact\n");
         assert!(!d.to_text().contains("ground_fog"), "the default not written");
         let c = ClientOptions::from_text("ground_fog=exact");
-        assert!(!c.ps2_fog && c.environment && c.flora, "Ground Fog alone");
+        assert!(!c.ps2_fog && c.environment == 100 && c.flora == 100, "Ground Fog alone");
         assert!(ClientOptions::from_text("ground_fog=ps2") == d);
         for bad in ["ground_fog=off", "ground_fog=", "groundfog=exact", "ground_fog=PS2"] {
             assert!(ClientOptions::from_text(bad).ps2_fog, "{bad}: PS2, the default");
@@ -3240,22 +3752,52 @@ mod tests {
         assert!(ClientOptions::from_text("touch_layout=bottom\ntouch_layout=classic").touch_opts() == crate::touch::Opts::default());
     }
 
-    /// Flora and Environment, on by default, each kept only when off;
-    /// anything but on or off leaves it on, and one never moves the other.
+    /// A share keeps every key at all of it and none at 0; between, about
+    /// that many in a hundred, and every key kept at a share kept above it.
+    /// The control: a share of 50 keeps neither all nor none.
     #[test]
-    fn flora_and_environment_kept_only_when_off() {
+    fn a_share_keeps_its_part_and_more_as_it_grows() {
+        let keys = 0..20_000u64;
+        assert!(keys.clone().all(|k| share_keeps(k, SHARE_FULL)), "all at 100");
+        assert!(keys.clone().all(|k| !share_keeps(k, 0)), "none at 0");
+        for share in (SHARE_STEP..SHARE_FULL).step_by(SHARE_STEP as usize) {
+            let n = keys.clone().filter(|&k| share_keeps(k, share)).count();
+            let want = 20_000 * share as usize / 100;
+            assert!(n.abs_diff(want) < 400, "{share}: {n} of 20000, not about {want}");
+            assert!(keys.clone().filter(|&k| share_keeps(k, share)).all(|k| share_keeps(k, share + SHARE_STEP)), "{share}: kept above it too");
+        }
+        let half = keys.clone().filter(|&k| share_keeps(k, 50)).count();
+        assert!(half > 0 && half < 20_000, "the control");
+    }
+
+    /// Flora, Environment and Weather, all of each by default, each kept
+    /// only when less: none as `off` (what the On/Off rows' builds wrote, and
+    /// read, so a file of theirs reads the same), else its number; `on` reads
+    /// as all; anything but a step of ten leaves the default; none moves
+    /// another.
+    #[test]
+    fn flora_environment_and_weather_kept_only_when_less() {
         let d = ClientOptions::default();
-        assert!(d.flora && d.environment, "on, the game's");
-        assert_eq!(ClientOptions { flora: false, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nflora=off\n");
-        assert_eq!(ClientOptions { environment: false, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nenvironment=off\n");
+        assert_eq!((d.flora, d.environment, d.weather), (100, 100, 100), "all of each, the game's");
+        assert_eq!(d.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\n", "nothing kept at the game's");
+        assert_eq!(ClientOptions { flora: 0, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nflora=off\n");
+        assert_eq!(ClientOptions { environment: 0, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nenvironment=off\n");
+        assert_eq!(ClientOptions { flora: 40, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nflora=40\n");
+        assert_eq!(ClientOptions { weather: 30, ..Default::default() }.to_text(), "lod=on\nbrightness=5\ncamera_distance=11\nweather=30\n");
         let c = ClientOptions::from_text("flora=off");
-        assert!(!c.flora && c.environment, "Flora alone");
+        assert_eq!((c.flora, c.environment, c.weather), (0, 100, 100), "Flora alone");
         let c = ClientOptions::from_text("environment=off");
-        assert!(c.flora && !c.environment, "Environment alone");
-        assert!(ClientOptions::from_text("flora=on\nenvironment=on") == d);
-        for bad in ["flora=0", "environment=no", "flora="] {
+        assert_eq!((c.flora, c.environment, c.weather), (100, 0, 100), "Environment alone");
+        let c = ClientOptions::from_text("environment=70\nweather=0");
+        assert_eq!((c.flora, c.environment, c.weather), (100, 70, 0), "numbers");
+        assert!(ClientOptions::from_text("flora=on\nenvironment=on\nweather=on") == d);
+        for v in [0, 10, 50, 90] {
+            let c = ClientOptions { flora: v, environment: v, weather: v, ..Default::default() };
+            assert!(ClientOptions::from_text(&c.to_text()) == c, "{v} read back");
+        }
+        for bad in ["flora=45", "environment=no", "flora=", "weather=110", "weather=-10"] {
             let c = ClientOptions::from_text(bad);
-            assert!(c.flora && c.environment, "{bad}: on, the default");
+            assert_eq!((c.flora, c.environment, c.weather), (100, 100, 100), "{bad}: the default");
         }
     }
 
@@ -3307,10 +3849,97 @@ mod tests {
     #[test]
     fn options_with_the_voice_lines_still_load() {
         let c = ClientOptions::from_text("voice=ptt\nvoice_demo=on\nvoice_volume=15\nflora=off\nloading=instant\n");
-        assert!(!c.flora && !c.loading_longer, "the lines beside them read");
+        assert!(c.flora == 0 && !c.loading_longer, "the lines beside them read");
         let text = c.to_text();
         assert!(!text.contains("voice"), "{text}");
         assert!(text.contains("flora=off\n") && text.contains("loading=instant\n"), "{text}");
+    }
+
+    /// The game's own UI (`qol`, go-eqoa-server's `world.vanilla_ui`): with
+    /// every bit off, each addition reads as off and the numbers Default; a
+    /// change made meanwhile to another row is kept, the player's own choice of
+    /// a row that is off kept as it was (in the settings and in client.opt);
+    /// with none off (another server, or none said), all of it is back. The
+    /// control: nothing off, `client()` is the settings as kept.
+    #[test]
+    fn the_server_turns_additions_off_and_the_choices_stay() {
+        testing::reset(false);
+        let chosen = ClientOptions { dps_meter: true, auto_target: true, number_colors: [3; crate::numcolor::ROWS], ability_bars: 4, stacked_bars: true, ..Default::default() };
+        set_client(chosen);
+        assert_eq!(client(), chosen, "nothing off: as kept");
+        let all = qol::MAP | qol::QUEST_HELPER | qol::TARGET_LEVEL | qol::DPS_METER | qol::NUMBER_COLORS | qol::STAT_CAPS | qol::POWER_BARS | qol::BUFF_WINDOW | qol::PET_EFFECTS | qol::AUTO_CAST | qol::ITEM_LINKS | qol::SPELL_BARS;
+        assert_eq!(all, 0xFFF, "go-eqoa-server's QoLAllOff");
+        qol::set_off(all);
+        let c = client();
+        assert!(!(c.map || c.minimap || map() || minimap()), "the map, off by default");
+        assert!(c.map_markers, "its markers the player's, with it");
+        assert!(!(c.quest_helper || c.quest_markers || c.quest_tracker || c.head_marks || quest_helper() || quest_markers() || quest_tracker()), "the quest helper");
+        assert!(!(c.target_level || c.dps_meter || c.power_bars || c.buff_window || c.pet_effects || c.auto_cast || c.auto_target), "the rest");
+        assert_eq!(c.number_colors, [0; crate::numcolor::ROWS], "every number the game's colour");
+        assert!(!c.item_links && (c.ability_bars, c.stacked_bars) == (ABILITY_BARS_GAME, false), "item links off by default, the game's two bars");
+        let d = ClientOptions::default();
+        assert!((c.raid_list, c.overlapping_names, c.loading_tips, c.flora) == (d.raid_list, d.overlapping_names, d.loading_tips, d.flora), "what is not an addition stays");
+        // a change to another row while they are off (Extended's, or a key's)
+        set_client(ClientOptions { flora: 30, dps_meter: false, ..client() });
+        assert_eq!(client().flora, 30, "the change made");
+        assert!(!client().dps_meter, "a row that is off stays off");
+        // the map turned on here: on here, and kept apart
+        set_client(ClientOptions { map: true, ..client() });
+        set_minimap(true).unwrap();
+        set_client(ClientOptions { item_links: true, ..client() });
+        assert!(map() && minimap() && item_links(), "turned on on this server");
+        save_client().unwrap();
+        let kept = ClientOptions::from_text(&String::from_utf8(store::read(CLIENT_FILE).unwrap()).unwrap());
+        let here = ClientOptions { flora: 30, map_here: true, minimap_here: true, item_links_here: true, ..chosen };
+        assert_eq!(kept, here, "client.opt keeps the player's own choices, the map's here apart");
+        set_client(ClientOptions { minimap: false, ..client() });
+        assert!(map() && !minimap() && kept_client().minimap, "the minimap off here alone");
+        set_minimap(true).unwrap();
+        qol::set_off(0);
+        assert_eq!(client(), here, "none off: all back as chosen");
+        assert!(map() && minimap(), "the map everywhere else as it was");
+        set_client(ClientOptions { map: false, ..client() });
+        assert!(kept_client().map_here, "turned off elsewhere: still on here");
+        set_client(ClientOptions { map: true, ..client() });
+        qol::set_off(qol::DPS_METER);
+        assert!(!client().dps_meter && client().auto_target && client().map, "one bit, one addition");
+        qol::set_off(qol::MAP);
+        assert!(map() && minimap(), "the map's on here: remembered");
+        qol::set_off(qol::ITEM_LINKS);
+        assert!(item_links(), "and the links");
+        qol::set_off(0);
+    }
+
+    /// An [OG] account's (`qol::LOCKED`, go-eqoa-server's `QoLOGOff`, 0x7FFF):
+    /// the map, the minimap and item links are off whatever the player chose,
+    /// here or elsewhere, and turning them changes nothing, kept or here; every
+    /// other addition off as `vanilla_ui`'s. The control: the same choices
+    /// without LOCKED (`vanilla_ui`'s 0xFFF), the map turned on here is on.
+    #[test]
+    fn an_og_account_has_the_map_and_links_locked_off() {
+        testing::reset(false);
+        let chosen = ClientOptions { map_here: true, minimap_here: true, item_links_here: true, dps_meter: true, ..Default::default() };
+        set_client(chosen);
+        qol::set_off(0xFFF);
+        assert!(map() && minimap() && item_links(), "the control: turned on here, on");
+        let og = 0xFFF | qol::LOCKED | qol::NO_MOUSE | qol::NO_TOUCH;
+        assert_eq!(og, 0x7FFF, "go-eqoa-server's QoLOGOff");
+        qol::set_off(og);
+        let c = client();
+        assert!(!(c.map || c.minimap || c.item_links || map() || minimap() || item_links()), "locked off");
+        assert!(!(c.dps_meter || c.quest_tracker || c.target_level), "and every addition");
+        for item in [41, 42, 73] {
+            assert!(qol::item_off(item, 999) && !qol::item_default_off(item), "row {item} off, not off by default");
+        }
+        set_client(ClientOptions { map: true, minimap: true, item_links: true, ..client() });
+        set_minimap(true).unwrap();
+        assert!(!(map() || minimap() || item_links()), "turning them changes nothing");
+        let kept = kept_client();
+        assert!(kept.map_here && kept.minimap_here && kept.item_links_here && kept.map && kept.item_links, "the player's own kept: {kept:?}");
+        qol::set_off(0xFFF);
+        assert!(map() && minimap() && item_links(), "a vanilla_ui server: the choices made here");
+        qol::set_off(0);
+        assert_eq!(client().dps_meter, true, "another server: as chosen");
     }
 
     /// The options kept by a build with the Stats Box, others' mana bars
@@ -3322,7 +3951,7 @@ mod tests {
     fn options_with_the_lines_of_rows_gone_still_load() {
         let old = "target_of_target=on\nmana_bars=off\nminimap=off\nstats_box=on\nquest_markers=off\nquest_tracker=off\nmap_markers=off\nmap_towns=off\nflora=off\nloading=instant\n";
         let c = ClientOptions::from_text(old);
-        let want = ClientOptions { minimap: false, quest_markers: false, quest_tracker: false, map_markers: false, map_towns: false, flora: false, loading_longer: false, ..Default::default() };
+        let want = ClientOptions { minimap: false, quest_markers: false, quest_tracker: false, map_markers: false, map_towns: false, flora: 0, loading_longer: false, ..Default::default() };
         assert_eq!(c, want, "the lines beside them read");
         let text = c.to_text();
         for gone in ["target_of_target", "mana_bars", "stats_box"] {
@@ -3534,6 +4163,36 @@ mod tests {
         // out of range: left at the default
         let bad = ClientOptions::from_text("spell_bar_opacity=45\nchat_tab.loot=4\nchat_tab.nonsense=1\nchat_tab_name.4=x");
         assert_eq!(bad, d);
+    }
+
+    /// Weapon Swap Back (work board 1581): off by default, written only when
+    /// on, read back, an unknown value left at the default.
+    #[test]
+    fn weapon_swap_back_is_kept_only_when_on() {
+        let d = ClientOptions::default();
+        assert!(!d.weapon_swap_back, "off by default");
+        assert!(!d.to_text().contains("weapon_swap_back"));
+        let c = ClientOptions { weapon_swap_back: true, ..Default::default() };
+        let t = c.to_text();
+        assert!(t.contains("weapon_swap_back=on\n"), "{t}");
+        assert_eq!(ClientOptions::from_text(&t), c, "round trip");
+        assert!(!ClientOptions::from_text("weapon_swap_back=off").weapon_swap_back);
+        assert!(!ClientOptions::from_text("weapon_swap_back=maybe").weapon_swap_back, "the default");
+    }
+
+    /// R2 Channel Switch: off by default, written only when on, read back, an
+    /// unknown value left at the default.
+    #[test]
+    fn r2_channels_is_kept_only_when_on() {
+        let d = ClientOptions::default();
+        assert!(!d.r2_channels, "off by default");
+        assert!(!d.to_text().contains("r2_channels"));
+        let c = ClientOptions { r2_channels: true, ..Default::default() };
+        let t = c.to_text();
+        assert!(t.contains("r2_channels=on\n"), "{t}");
+        assert_eq!(ClientOptions::from_text(&t), c, "round trip");
+        assert!(!ClientOptions::from_text("r2_channels=off").r2_channels);
+        assert!(!ClientOptions::from_text("r2_channels=maybe").r2_channels, "the default");
     }
 
     /// Item Links: on by default and written only when off.

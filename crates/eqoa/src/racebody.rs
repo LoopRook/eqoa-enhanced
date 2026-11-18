@@ -54,15 +54,23 @@ pub fn worn_by_a_race(model: u32, races: Option<&Creation>) -> bool {
     model != 0 && (races.is_some_and(|c| c.races.iter().any(|r| r.body.contains(&model))) || crate::raceopts::offered_body(model))
 }
 
-/// Bodies whose shield node their own animations leave at another size than
-/// their other item nodes, and the FixScale that puts it right: the fairy's
-/// (go-eqoa-server's race 19, 0x7A85646C, on both discs). The pixie and the
-/// fairy are a hand high on a skeleton two metres tall, and their animations
-/// draw what they hold at 0.3 by scaling the item nodes; the pixie's do so on
-/// all three, the fairy's on its two hands' and not on its shield's, node 16
-/// (no vertex is skinned to it), so a shield hung there was drawn three and a
-/// third times the size of the fairy (`eqoa dress 7A85646C ... shield=...`).
-const SHIELD_FIX: &[(u32, f32)] = &[(0x7A85_646C, 0.3)];
+/// Keeps `cs`'s item nodes posed by its animations at every distance (petition
+/// 2310, the owner, 2026-11-18: "Fix it in vanilla", a departure from the
+/// game, which drew it so too). `ProcessPlayList` gives a node at or past the
+/// skeleton's level its rest frame, at its art's scale; the pixie and the
+/// fairy (a hand high on a skeleton two metres tall) draw what they hold at
+/// 0.3 by scaling their item nodes, so past a node's level what it held was
+/// drawn at 1.0, three and a third times the body: the fairy's shield (node
+/// 16, level 0) from 5 away, its weapons (nodes 8 and 15, level 1) from 15,
+/// zooming out on a Druid in Fey Mask. An item node's level is made one no
+/// skeleton's level reaches; every other node rests as the game rests it.
+pub fn keep_items_posed(cs: &mut CSprite<Ee>) {
+    for &n in &cs.item_nodes[..3] {
+        if let Some(node) = usize::try_from(n).ok().and_then(|i| cs.h.nodes.get_mut(i)) {
+            node.lod = i32::MAX;
+        }
+    }
+}
 
 /// Where a body whose item nodes are no hands holds a player's items: for
 /// each item slot (main hand, off hand, shield) the node it hangs from and the
@@ -119,30 +127,85 @@ const HAND_SEATS: &[HandSeats] = &[
 pub const MERFOLK: &[u32] = &[0xA316_EB78, 0x74BA_7C3D, 0xBF21_FEF5, 0x1740_427C, 0xD275_EE8F];
 
 /// Bodies whose hair is a part of their mesh that comes out through a helm, and
-/// where it lies in their one texture (palette entry 0, a rect of texture
-/// coordinates each: u0, v0, u1, v1): the merman's, the mermaid's and the two sirens'
-/// (go-eqoa-server's race 32; the owner, 2026-11-12: "the mermaid helms arent
-/// sitting right"), whose long hair streamed out of the back of every helm and
-/// whose crown showed through the top of the smaller ones. Under a helm their
-/// hair is left out, as a player race's `$Hair` is (the sea king has none).
+/// where it lies: a palette entry and a rect of texture coordinates in its
+/// texture (u0, v0, u1, v1; `ALL` the whole entry) each. The merman's, the
+/// mermaid's and the two sirens' (go-eqoa-server's race 32; the owner,
+/// 2026-11-12: "the mermaid helms arent sitting right"), whose long hair
+/// streamed out of the back of every helm and whose crown showed through the top
+/// of the smaller ones: a rect of their one texture, entry 0. The dryads' (race
+/// 26; the owner, 2026-11-16: "cll is a dryad with the helm not sitting
+/// right"), whose locks and long tail stood out of the top, the sides and the
+/// back of every helm: the dryad's own body's a rect of her body's atlas
+/// (entry 0: the box of hair beside the bark, 289 triangles) and her two strands
+/// in a hair strip (entry 6); her kin's (the Erych guardian, the Haliai, the
+/// Erych arbiter) every entry drawn in their hair strip (`87BFA9B5` white,
+/// `9F87C7AF` sea green, `D499494B` red), the fringe at the brow too. Under a
+/// helm their hair is left out, as a player race's `$Hair` is (the sea king has
+/// none).
 const HAIR: [f32; 4] = [0.0, 0.0, 63.0 / 255.0, 128.0 / 255.0];
-const HAIR_UNDER_HELM: &[(u32, &[[f32; 4]])] = &[
-    (0xA316_EB78, &[HAIR]),
-    (0x74BA_7C3D, &[HAIR]),
-    (0xBF21_FEF5, &[HAIR]),
+const ALL: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+/// A part of a body's hair (`HAIR_UNDER_HELM`): its palette entry, the rect of
+/// texture coordinates it lies in, and the nodes its triangles lie on (each
+/// corner weighted most to one of them; `ANY` wherever they lie).
+type Hair = (i32, [f32; 4], &'static [u8]);
+const ANY: &[u8] = &[];
+const HAIR_UNDER_HELM: &[(u32, &[Hair])] = &[
+    (0xA316_EB78, &[(0, HAIR, ANY)]),
+    (0x74BA_7C3D, &[(0, HAIR, ANY)]),
+    (0xBF21_FEF5, &[(0, HAIR, ANY)]),
     // the enchanting siren's tiara too (a strip below the hair, on her head and
     // neck alone), which stood out of the front of every helm
-    (0x1740_427C, &[HAIR, [0.0, 128.0 / 255.0, 63.0 / 255.0, 150.0 / 255.0]]),
+    (0x1740_427C, &[(0, HAIR, ANY), (0, [0.0, 128.0 / 255.0, 63.0 / 255.0, 150.0 / 255.0], ANY)]),
+    (0x70EF_CE05, &[(0, [0.0, 0.30, 0.69, 0.93], ANY), (6, ALL, ANY)]),
+    (0x21F3_11BB, &[(0, ALL, ANY), (1, ALL, ANY), (6, ALL, ANY)]),
+    (0xACE7_1E26, &[(1, ALL, ANY), (6, ALL, ANY)]),
+    (0xB90A_DDD2, &[(0, ALL, ANY), (1, ALL, ANY), (8, ALL, ANY), (9, ALL, ANY), (10, ALL, ANY)]),
+    // the brownie's spikes (entry 2) and the fringe at its brow (1), both in a hair strip
+    (0x4376_EB52, &[(1, ALL, ANY), (2, ALL, ANY)]),
+    // the brownie elder's red cap, a box of its one atlas
+    (0x4946_8331, &[(0, [0.26, 0.25, 0.50, 0.49], ANY)]),
+    // the goblins' topknots, tufts, mohawk and braid, each an entry drawn in an NPC hair
+    // strip (black `B5632329`, auburn `EF0C9AEB`) on the head (a robed grey goblin's
+    // strip on its sleeves, 581B6A80's and 687E7645's entries 9 and 0, stays)
+    (0x6C13_08E0, &[(7, ALL, ANY)]),
+    (0x581B_6A80, &[(7, ALL, ANY)]),
+    (0x9637_1804, &[(0, ALL, ANY)]),
+    (0xBCDF_0C04, &[(7, ALL, ANY)]),
+    (0xE961_79D4, &[(6, ALL, ANY)]),
+    (0xA5F9_2F43, &[(0, ALL, ANY)]),
+    (0xEDB4_E0AD, &[(1, ALL, ANY)]),
+    (0x687E_7645, &[(4, ALL, ANY)]),
+    (0xEC08_85EB, &[(0, ALL, ANY)]),
+    (0x1F8E_11D3, &[(4, ALL, ANY)]),
+    (0x1245_E56B, &[(2, ALL, ANY)]),
+    (0x27A4_E554, &[(7, ALL, ANY)]),
+    (0x507C_4A52, &[(7, ALL, ANY)]),
+    // the maned lion's and the white tiger's manes where they lie on the head (node
+    // 5): what hangs from the neck and the shoulders stays, as hair below a helm
+    (0x5D40_C8AB, &[(1, ALL, &[5])]),
+    (0x77A7_E7B8, &[(2, ALL, &[5])]),
+    // the Deathfist slayer's hair (entry 8) and its four loose strands (0-3)
+    (0xC76F_1FA8, &[(0, ALL, ANY), (1, ALL, ANY), (2, ALL, ANY), (3, ALL, ANY), (8, ALL, ANY)]),
+    // the orcs' long hair and its loose strands
+    (0x84F4_7767, &[(1, ALL, ANY), (2, ALL, ANY), (3, ALL, ANY), (4, ALL, ANY), (5, ALL, ANY)]),
+    (0xB2FB_D7EF, &[(1, ALL, ANY), (2, ALL, ANY), (3, ALL, ANY), (4, ALL, ANY), (5, ALL, ANY)]),
+    (0x0A03_EB92, &[(0, ALL, ANY), (1, ALL, ANY), (2, ALL, ANY), (3, ALL, ANY), (4, ALL, ANY)]),
+    (0xDA51_5962, &[(0, ALL, ANY), (1, ALL, ANY), (2, ALL, ANY), (3, ALL, ANY), (4, ALL, ANY)]),
 ];
 
 /// Takes body `id`'s hair (`HAIR_UNDER_HELM`) out of `model`, a player's
-/// character's wearing a helm: each triangle of entry 0 whose texture
-/// coordinates' centre (its first layer's) lies in the hair's rect.
+/// character's wearing a helm: each triangle of a listed entry whose texture
+/// coordinates' centre (its first layer's) lies in that entry's rect, and whose
+/// corners lie on the part's nodes when it names any.
 pub fn hide_hair(model: &mut esf::Model, id: u32) {
-    let Some(&(_, rects)) = HAIR_UNDER_HELM.iter().find(|(b, _)| *b == id) else { return };
-    let uv = model.uv.clone();
+    let Some(&(_, parts)) = HAIR_UNDER_HELM.iter().find(|(b, _)| *b == id) else { return };
+    let (uv, bones, weights) = (model.uv.clone(), model.bones.clone(), model.weights.clone());
     let mut gone = 0;
-    for b in model.batches.iter_mut().filter(|b| b.material == 0) {
+    for b in model.batches.iter_mut() {
+        let rects: Vec<&Hair> = parts.iter().filter(|(e, _, _)| *e == b.material).collect();
+        if rects.is_empty() {
+            continue;
+        }
         let Some(l) = b.layers.first().cloned() else { continue };
         let before = b.indices.len();
         b.indices = b
@@ -153,7 +216,14 @@ pub fn hide_hair(model: &mut esf::Model, id: u32) {
                     let q = l.apply_uv(uv[v as usize]);
                     [a[0] + q[0].rem_euclid(1.0) / 3.0, a[1] + q[1].rem_euclid(1.0) / 3.0]
                 });
-                !rects.iter().any(|r| c[0] >= r[0] && c[0] < r[2] && c[1] >= r[1] && c[1] < r[3])
+                let on = |nodes: &[u8]| {
+                    nodes.is_empty()
+                        || t.iter().all(|&v| {
+                            let (bo, w) = (bones[v as usize], weights[v as usize]);
+                            (0..4).max_by_key(|&k| w[k]).is_some_and(|k| nodes.contains(&bo[k]))
+                        })
+                };
+                !rects.iter().any(|(_, r, n)| c[0] >= r[0] && c[0] < r[2] && c[1] >= r[1] && c[1] < r[3] && on(n))
             })
             .flatten()
             .copied()
@@ -222,12 +292,13 @@ fn seat_hands(cs: &mut CSprite<Ee>, seats: &HandSeats) {
 
 /// `cs`, made of `model`, holds items when it is a player's character
 /// (`player`) in a body one of the server's races wears (`races`), its shield
-/// on the off hand's hand when it names no node for one, and its shield node
-/// at its hands' size where its animations leave it at another
-/// (`SHIELD_FIX`); otherwise it keeps its header's word and its nodes.
+/// on the off hand's hand when it names no node for one; otherwise it keeps
+/// its header's word and its nodes. Either way its item nodes stay posed by
+/// its animations at any distance (`keep_items_posed`).
 /// Whether it holds items after.
 pub fn grant(cs: &mut CSprite<Ee>, model: u32, player: bool, races: Option<&Creation>) -> bool {
     if !player || !worn_by_a_race(model, races) {
+        keep_items_posed(cs);
         return cs.holds_items;
     }
     if !cs.holds_items {
@@ -245,11 +316,7 @@ pub fn grant(cs: &mut CSprite<Ee>, model: u32, player: bool, races: Option<&Crea
     if let Some(seats) = hand_seats(model) {
         seat_hands(cs, seats);
     }
-    if let Some(&(_, fix)) = SHIELD_FIX.iter().find(|(b, _)| *b == model)
-        && let Some(n) = usize::try_from(cs.item_nodes[2]).ok().and_then(|i| cs.h.nodes.get_mut(i))
-    {
-        n.fix_scale = vi::vect::Vect3::of(fix, fix, fix);
-    }
+    keep_items_posed(cs);
     cs.holds_items
 }
 
@@ -358,14 +425,15 @@ mod tests {
         assert_eq!([human.item_node(0), human.item_node(1), human.item_node(2)], [Some(18), Some(27), Some(28)], "the human as before");
     }
 
-    /// The fairy's shield, as a player of the Fairy race holds it, at its hands'
-    /// size: on the disc its animations draw its two hands' item nodes at 0.3
-    /// and leave its shield node, 16, at 1.0, three and a third times larger;
-    /// `grant` gives that node a FixScale of 0.3, so posed in its idle and its
-    /// walk the shield node is drawn at the off hand's size. The controls: an
-    /// NPC fairy's node keeps the art's 1.0, and the pixie, whose animations
-    /// already draw its shield node at 0.3, is left as it is. Needs
-    /// `run/eqoa.iso`.
+    /// What the fairy and the pixie hold, at their hands' size at every
+    /// distance (petition 2310: a Druid in Fey Mask, whose shield grew as the
+    /// camera pulled back): their animations draw their three item nodes at
+    /// 0.3, and posed at each of the skeleton's levels (-1, nearer than its
+    /// first, to 3, past its last) after `grant` every one of them stays at
+    /// 0.3, a player's and an NPC's alike. The control: the body as loaded,
+    /// without `grant`, draws the fairy's shield node (level 0) at its art's
+    /// 1.0 from level 0 and its hands' (level 1) from level 1, three and a
+    /// third times the body. Needs `run/eqoa.iso`.
     #[test]
     fn the_fairys_shield_at_its_hands_size() {
         let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
@@ -378,11 +446,15 @@ mod tests {
         const FAIRY: u32 = 0x7A85_646C;
         const PIXIE: u32 = 0x94BA_77CD;
         let listed = races(&[[FAIRY, FAIRY], [PIXIE, PIXIE]]);
-        // the world scale of item nodes `nodes` posed in action (None: standing)
-        let scales = |id: u32, player: bool, action: Option<i32>| {
+        // the world scale of the main hand's, the off hand's and the shield's
+        // item nodes posed at level `lod` in action (None: standing); `granted`
+        // false: the body as loaded (the control)
+        let scales = |id: u32, player: bool, granted: bool, lod: i32, action: Option<i32>| {
             let (mut sc, mut cache, mut rand) = (AnimScene::<Ee>::default(), AnimCache::new(), Rand(1));
             let mut cs = load_csprite(&lib, lib.lookup(id as i32).unwrap(), &mut sc, &mut cache, &mut rand).unwrap();
-            grant(&mut cs, id, player, Some(&listed));
+            if granted {
+                grant(&mut cs, id, player, Some(&listed));
+            }
             let mut t = 0;
             while t <= 900 {
                 sc.time = t;
@@ -393,22 +465,30 @@ mod tests {
                     Some(_) => {}
                     None => cs.set_locomotion(0, &sc, &mut rand),
                 }
-                cs.h.process(0, &sc);
+                cs.h.process(lod, &sc);
                 t += 16;
             }
             let s = |n: i32| {
                 let m = cs.h.nodes[n as usize].world.to_cols();
                 (m[0][0] * m[0][0] + m[0][1] * m[0][1] + m[0][2] * m[0][2]).sqrt()
             };
-            (s(cs.item_nodes[1]), s(cs.item_nodes[2]))
+            [s(cs.item_nodes[0]), s(cs.item_nodes[1]), s(cs.item_nodes[2])]
         };
         for action in [None, Some(1)] {
-            let (off, shield) = scales(FAIRY, true, action);
-            assert!((off - 0.3).abs() < 0.01 && (shield - off).abs() < 0.01, "{action:?}: the fairy's shield at its off hand's size ({shield:.3} against {off:.3})");
-            let (_, npc) = scales(FAIRY, false, action);
-            assert!((npc - 1.0).abs() < 0.01, "{action:?}: the control, an NPC's at the art's {npc:.3}");
-            let (off, shield) = scales(PIXIE, true, action);
-            assert!((off - 0.3).abs() < 0.01 && (shield - 0.3).abs() < 0.01, "{action:?}: the pixie's as its art has them");
+            for lod in -1..=3 {
+                for (id, name) in [(FAIRY, "fairy"), (PIXIE, "pixie")] {
+                    for player in [true, false] {
+                        let got = scales(id, player, true, lod, action);
+                        assert!(got.iter().all(|s| (s - 0.3).abs() < 0.01), "{name} (player {player}) at level {lod}, {action:?}: {got:.3?}, each 0.3");
+                    }
+                }
+            }
+            let near = scales(FAIRY, false, false, -1, action);
+            assert!(near.iter().all(|s| (s - 0.3).abs() < 0.01), "the control near, {action:?}: {near:.3?}");
+            let [_, _, shield] = scales(FAIRY, false, false, 0, action);
+            assert!((shield - 1.0).abs() < 0.01, "the control: the shield node rests at its art's 1.0 from level 0 ({shield:.3}), {action:?}");
+            let [main, off, _] = scales(FAIRY, false, false, 1, action);
+            assert!((main - 1.0).abs() < 0.01 && (off - 1.0).abs() < 0.01, "the control: the hands rest at 1.0 from level 1 ({main:.3}, {off:.3}), {action:?}");
         }
     }
 
@@ -572,6 +652,54 @@ mod tests {
             assert!((lo..=hi).contains(&gone), "{id:08X}: {gone} triangles of hair");
             let left: usize = h.batches.iter().map(|b| b.indices.len() / 3).sum();
             assert_eq!(left, h.triangles as usize, "{id:08X}: the count kept");
+        }
+    }
+
+    /// A dryad player's hair is left out under a helm (`hide_hair`; the owner,
+    /// 2026-11-16: "cll is a dryad with the helm not sitting right"): on the dryad
+    /// her locks and tail (289 triangles of her atlas's hair box and her two
+    /// strands), on her kin every triangle in their hair strips; nine in ten of the
+    /// vertices gone are on the head or the neck (nodes 2 to 7, by the vertex's
+    /// heaviest weight; the rest the dryad's tail, down her back to her shoulders),
+    /// so nothing of the bark or the leaves goes. Needs `run/eqoa.iso`.
+    #[test]
+    fn dryad_hair_goes_under_a_helm() {
+        let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        let Ok(mut iso) = iso::Iso::open(&p) else {
+            eprintln!("SKIP: no disc at run/eqoa.iso");
+            return;
+        };
+        let mut lib = esf::Library::new();
+        lib.add("CHAR.ESF", esf::Container::open(iso.read("CHAR.ESF").unwrap()).unwrap());
+        for (id, n) in [(0x70EF_CE05u32, 291), (0x21F3_11BB, 128), (0xACE7_1E26, 80), (0xB90A_DDD2, 418)] {
+            let mut on = std::collections::BTreeMap::new();
+            let m = lib.build_model(lib.lookup(id as i32).unwrap()).unwrap();
+            let mut h = m.clone();
+            hide_hair(&mut h, id);
+            let gone = (m.triangles - h.triangles) as usize;
+            assert_eq!(gone, n, "{id:08X}: triangles of hair");
+            let left: usize = h.batches.iter().map(|b| b.indices.len() / 3).sum();
+            assert_eq!(left, h.triangles as usize, "{id:08X}: the count kept");
+            // each triangle gone, on the head or the neck
+            for (a, b) in m.batches.iter().zip(&h.batches) {
+                let mut kept: Vec<&[u32]> = b.indices.chunks_exact(3).collect();
+                for t in a.indices.chunks_exact(3) {
+                    if let Some(i) = kept.iter().position(|k| *k == t) {
+                        kept.swap_remove(i);
+                        continue;
+                    }
+                    for &v in t {
+                        let (bo, w) = (m.bones[v as usize], m.weights[v as usize]);
+                        let k = (0..4).max_by_key(|&k| w[k]).unwrap();
+                        *on.entry(bo[k]).or_insert(0) += 1;
+                    }
+                }
+            }
+            // the dryad's tail lies on her shoulders (11, 20) and upper arms (12, 21)
+            let all: usize = on.values().sum();
+            let head: usize = on.range(2..=7).map(|(_, n)| n).sum();
+            eprintln!("{id:08X}: the hair's vertices by node {on:?}");
+            assert!(head * 100 >= all * 90, "{id:08X}: {head} of {all} of the hair's vertices on the head and the neck");
         }
     }
 

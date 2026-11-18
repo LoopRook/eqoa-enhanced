@@ -3686,6 +3686,27 @@ mod tests {
         );
         crate::fork_ext::chat_history::reset();
     }
+    /// Hide UI (`hideui`): a click on the compass opens the map only while
+    /// the HUD is shown; hidden, no HUD button is there and the click is the
+    /// world's. The control: shown, the same click opens the map.
+    #[test]
+    fn a_hidden_hud_does_not_open_the_map_from_the_compass() {
+        let mut p = super::super::commands::play();
+        p.hud = Some((
+            crate::ui::Vui::new(Default::default(), Default::default(), Vec::new()),
+            crate::ui::UiAssets::default(),
+            crate::hud::Hud::new(),
+        ));
+        let compass = crate::mouse::Click::Target(39.0, 54.0);
+        crate::hideui::toggle();
+        assert!(crate::hideui::hidden());
+        assert!(!p.point(compass, (640, 448), false), "hidden: the world's click");
+        assert!(!p.map.open);
+        crate::hideui::toggle();
+        assert!(p.point(compass, (640, 448), false), "the control: shown, the HUD's");
+        assert!(p.map.open, "and the compass opens the map");
+    }
+
     pub(super) fn play() -> Play {
         play_as("test")
     }

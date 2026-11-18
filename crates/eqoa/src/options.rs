@@ -21,7 +21,7 @@
 //! WORDS.TXT entry). It opens a menu of its own over the options menu, drawn
 //! as that one is, of four groups (the GM Jibrish's petitions 1631 and 1634,
 //! 2026-11-11: `GROUPS`): Graphics (Video, World, Lighting, Characters,
-//! natively Textures), UI (HUD, HUD Layout, Name Plates, Map, Number Colors,
+//! natively Textures, Weather), UI (HUD, HUD Layout, Name Plates, Map, Number Colors,
 //! Merc Colors, DPS Meter, Chat), Other (General, Combat, Camera, natively
 //! Sound), Touch Controls (Size & Look, Layout: every row of the touch
 //! screen's pad, the GM Jibcrotwo's petition 2084) and the Multi-boxing
@@ -48,10 +48,14 @@
 //!   and far plane in the middle, off at the left, thicker to the right,
 //!   `fog`), Mipmaps (On, the game's: the textures' mip levels sampled by
 //!   depth as the GS samples them, `render::gs_lod_k`; Off: the base level
-//!   alone, `render::set_mipmaps`), Flora (On, the game's: the plants it
-//!   grows round the camera, `flora`; Off: none), Environment (On, the
-//!   game's: the effect volumes, ground fog, dust, leaves, light shafts and
-//!   flocks, `fx`; Off: none), Ground Fog (PS2, the game's look: the effect
+//!   alone, `render::set_mipmaps`), Flora (a slider and its number since
+//!   2026-11-15, the owner's "like we have a slider for fog": the share of
+//!   the plants the game grows round the camera that is drawn, 100, the
+//!   game's, to 0, none, in tens, `flora::kept`; On or Off before),
+//!   Environment (a slider and its number, as Flora's: the effect volumes,
+//!   ground fog, dust, leaves, light shafts and flocks, `fx`, 100 as the game
+//!   draws them, below their fans fainter and fewer of a flock's birds, 0
+//!   none), Ground Fog (PS2, the game's look: the effect
 //!   volumes' fog blended as the GS blends it into the PS2's 16-bit frame,
 //!   `render::fog16`; Exact: at eight bits a channel, a brighter cloud) and
 //!   Art (Frontiers' or the 2002 disc's, `era`,
@@ -82,6 +86,11 @@
 //!   frame, `render::Renderer::set_ps2_particles`, as Ground Fog's fog;
 //!   Exact: at eight bits a channel, where many faint puffs pile up into a
 //!   darker mass; here because World's page is full);
+//! - Weather (2026-11-15, World's page full): Weather (a slider and its
+//!   number: the share of the rain's and the snow's drops drawn and the
+//!   splashes' brightness, 100, the game's, to 0 in tens,
+//!   `weather::Weather::render`; the sky, the sound and the lightning the
+//!   weather's own);
 //! - UI: Ability Bars (the game's 2, or 3 or 4: the HUD's quick menus and
 //!   the spell book's slots, `hudmenu`), Stacked Spell Bars (2026-11-13,
 //!   Jibwiz's ticket 1913, Off by default: On, on a computer, the first two
@@ -156,7 +165,12 @@
 //!   folder cannot be written to, which the page then says, and on
 //!   Android), and on a computer Texture Folder (Open) shows it in the
 //!   system's file manager, the page saying where it is
-//!   (`texpack::open_folder`);
+//!   (`texpack::open_folder`); Precache Textures (On by default; On: every file of a
+//!   pack made ready in memory as the pack is read, within its budget, the
+//!   zones' and what is drawn first, `texcache`), Pack Compression (Auto, a
+//!   pack larger than the card's budget kept as BC3; Off; On) and Rebuild
+//!   Pack Cache (Rebuild: the disk cache's files taken away and the pack
+//!   read anew);
 //! - Map (2026-11-09, the user's "also add the map and quest helper we had in
 //!   a former update"): Map (On: the client's own map on M and the compass's
 //!   click, the minimap, the waypoints on the compass and the group's
@@ -196,7 +210,9 @@
 //!   saying when this server keeps no meter; Auto-Cast (2026-11-11: On, the
 //!   quick bars' slots marked auto used by the client itself, `autocast`; Off,
 //!   none) and Auto Target (Off by default; On: with no target or a dead one,
-//!   the nearest creature fighting the player targeted);
+//!   the nearest creature fighting the player targeted); Weapon Swap Back (Off
+//!   by default; On: a weapon set used again puts back what it took off, the
+//!   server's, work board 1581: `gear::use_message`);
 //! - Chat (2026-11-10, the GM Jibrish's petition 1463: "This should be off by
 //!   default for ps2 players and a toggle option"): Item Links (On by default:
 //!   items linked from the inventory into the chat line, drawn purple in the
@@ -204,7 +220,10 @@
 //!   `Session::agree_item_links`; Off: none, the server sends the plain names a
 //!   PS2 gets), the page saying when this server has no links; Chat Always
 //!   Shown (2026-11-13, Jibwiz's ticket 1914, Off by default: On, the chat box
-//!   stays open at its five rows, the last lines in it, never sliding away).
+//!   stays open at its five rows, the last lines in it, never sliding away);
+//!   R2 Channel Switch (2026-11-18, the server owner's, Off by default: On,
+//!   with R2 held the d-pad's left and right step the chat channel, Say,
+//!   Group, Shout, Guild, `Play::chat_channel_step`, not the item links).
 //! - Multi-boxing settings (2026-11-11, petition 1634): natively Slow When Not
 //!   Focused (Off by default: a window covered or minimised takes its frames
 //!   at its Frame Rate as in front; On: at the game's 30 a second, as every
@@ -856,18 +875,18 @@ impl WndOptions {
                 cues.push(9);
             }
         };
+        // a row the server turns off (`settings::qol`) does not change: its
+        // page says so (`page_note`)
+        if crate::settings::qol::item_off(self.item, TARGET_LEVEL) {
+            cues.push(9);
+            return;
+        }
         match self.item {
             0 => o.follow = (o.follow != 1) as u8,
             1 => o.inverted = (o.inverted == 0) as u8,
             2 => o.battle = ((o.battle as i32 + if d < 0 { tracks - 1 } else { 1 }) % tracks) as u8,
-            3 => {
-                volume(&mut o.fx_volume, cues);
-                ups.push(OptionsUp::Volume(0, o.fx_volume));
-            }
-            4 => {
-                volume(&mut o.music_volume, cues);
-                ups.push(OptionsUp::Volume(1, o.music_volume));
-            }
+            3 => volume(&mut o.fx_volume, cues),
+            4 => volume(&mut o.music_volume, cues),
             5 => {
                 o.stereo ^= 1;
                 ups.push(OptionsUp::Output(o.stereo != 0));
@@ -969,9 +988,26 @@ impl WndOptions {
                     // `viewer`'s `retexture`)
                     50 => c.texture_packs = !c.texture_packs,
                     51 => c.dump_textures = !c.dump_textures,
+                    // Texture Pack Memory: the pack's budget from the next
+                    // texture made (`viewer`, `render::set_pack_memory`),
+                    // round Auto, 512 MB, 1, 2 and 4 GB
+                    PACK_MEMORY => {
+                        let all = crate::settings::PACK_MEMORIES;
+                        let at = all.iter().position(|&k| k == c.pack_memory).unwrap_or(0);
+                        c.pack_memory = all[(at + if d < 0 { all.len() - 1 } else { 1 }) % all.len()];
+                    }
                     // Texture Folder: shown either way, as ✕ shows it
                     // (`select`)
                     55 => cues.push(if crate::texpack::open_folder() { 8 } else { 9 }),
+                    // Precache Textures and Pack Compression: the pack made
+                    // again from the next frame (`texpack::sync`)
+                    PACK_PRECACHE => c.pack_precache = !c.pack_precache,
+                    PACK_COMPRESS => c.pack_compress = (c.pack_compress + if d < 0 { 2 } else { 1 }) % 3,
+                    // Rebuild Pack Cache: done either way, as ✕ does it
+                    PACK_REBUILD => {
+                        crate::texpack::rebuild_cache();
+                        cues.push(8);
+                    }
                     // Text: every font drawn from the next frame (`viewer`)
                     30 => c.text = c.text.other(),
                     // Loading Screens: the next long trip's (`loading`)
@@ -989,10 +1025,15 @@ impl WndOptions {
                     // Mipmaps: every texture's levels from the next frame
                     // (`viewer`, `render::set_mipmaps`)
                     35 => c.mipmaps = !c.mipmaps,
-                    // Flora: grown or let go from the next frame (`viewer`, `flora`)
-                    36 => c.flora = !c.flora,
-                    // Environment: the effect volumes from the next frame (`viewer`, `fx`)
-                    37 => c.environment = !c.environment,
+                    // Flora: that share of the plants from the next frame, at
+                    // 0 let go (`viewer`, `flora`)
+                    36 => slide(&mut c.flora, 0, crate::settings::SHARE_FULL, crate::settings::SHARE_STEP),
+                    // Environment: the effect volumes so from the next frame,
+                    // at 0 none (`viewer`, `fx`)
+                    37 => slide(&mut c.environment, 0, crate::settings::SHARE_FULL, crate::settings::SHARE_STEP),
+                    // Weather: the rain's and snow's drops so from the next
+                    // frame (`weather`)
+                    WEATHER => slide(&mut c.weather, 0, crate::settings::SHARE_FULL, crate::settings::SHARE_STEP),
                     // Shadows: drawn or not from the next frame (`viewer`, `shadows`)
                     46 => c.shadows = !c.shadows,
                     // Ground Fog: the fog's fans from the next frame (`fx`,
@@ -1069,6 +1110,11 @@ impl WndOptions {
                     // game frame
                     78 => c.auto_cast = !c.auto_cast,
                     79 => c.auto_target = !c.auto_target,
+                    // Weapon Swap Back (work board 1581): a weapon set's next
+                    // 0x0022 (`gear::use_message`)
+                    WEAPON_SWAP_BACK => c.weapon_swap_back = !c.weapon_swap_back,
+                    // R2 Channel Switch: R2's next hold (`Play::chat_channel_step`)
+                    R2_CHANNELS => c.r2_channels = !c.r2_channels,
                     // Move Touch Pad: the pad's parts dragged and pinched once
                     // the menu is left (`touch::editing`); a mode, not kept
                     MOVE_TOUCH => crate::touch::set_editing(!crate::touch::editing()),
@@ -1182,6 +1228,21 @@ impl WndOptions {
                 o.music_volume = F::ONE;
             }
         }
+        // a volume: on the device as snapped (0 silent), and kept the moment
+        // it changes (`settings::keep_volumes`), the client's own: the game
+        // keeps it only with Save Changes and Triangle on the menu puts it
+        // back, so a volume turned down came back at the menu's Triangle, or
+        // at the next world entry or start when the window closed another
+        // way (the owner, 2026-11-17: "players turn off sound or turn it down
+        // and the sounds or music comes back"). What Triangle puts back is
+        // the volume kept.
+        if matches!(self.item, 3 | 4) {
+            let (cls, v) = if self.item == 3 { (0, o.fx_volume) } else { (1, o.music_volume) };
+            ups.push(OptionsUp::Volume(cls, v));
+            self.saved.fx_volume = o.fx_volume;
+            self.saved.music_volume = o.music_volume;
+            crate::settings::keep_volumes(o.fx_volume, o.music_volume);
+        }
     }
 
     /// `Select`: X on the menu opens a page (its window 440 wide, six to
@@ -1221,6 +1282,12 @@ impl WndOptions {
         }
         if self.page == 3 && self.cat.is_some() && self.item == 55 {
             cues.push(if crate::texpack::open_folder() { 8 } else { 9 });
+            return false;
+        }
+        // and on Rebuild Pack Cache rebuilds it
+        if self.page == 3 && self.cat.is_some() && self.item == PACK_REBUILD {
+            crate::texpack::rebuild_cache();
+            cues.push(8);
             return false;
         }
         // and on Reset DPS Meter it resets, as left and right do
@@ -1636,7 +1703,14 @@ impl WndOptions {
     /// What category `c`'s page says beside its Back legend (`Note`), its
     /// row being the one drawn last (`item`).
     fn page_note(&self, c: usize) -> Option<String> {
-        match fork_options::pages()[c].note {
+        let cat = &fork_options::pages()[c];
+        if crate::settings::qol::item_off(self.item, TARGET_LEVEL) && cat.items.contains(&self.item) {
+            return Some(OFF_HERE.to_string());
+        }
+        if crate::settings::qol::item_default_off(self.item) && cat.items.contains(&self.item) {
+            return Some(DEFAULT_OFF_HERE.to_string());
+        }
+        match cat.note {
             Note::Reads => Some(touch_note(self.item, &crate::settings::client().touch_opts(), crate::touch::drawn_here).unwrap_or_else(crate::input::reads)),
             Note::Server => self.server_note.clone().filter(|_| matches!(self.item, 23 | 24)),
             Note::Scale => {
@@ -1728,7 +1802,7 @@ const CENTER: [i32; 2] = [320, 246];
 /// Extended's rows, by the item each changes (`change`), and their labels.
 /// A row is drawn by its item (`value_text`, or `slider_at` for a slider)
 /// and shown on the page of the category that lists it (`CATEGORIES`).
-const EXTENDED_ITEMS: [(i32, &str); 93] = [
+const EXTENDED_ITEMS: [(i32, &str); 100] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1822,7 +1896,21 @@ const EXTENDED_ITEMS: [(i32, &str); 93] = [
     (RESET_TOUCH, "Reset Touch Pad"),
     (TOUCH_LAYOUT, "Button Layout"),
     (TARGET_LEVEL, "Target Level"),
+    (WEATHER, "Weather"),
+    (WEAPON_SWAP_BACK, "Weapon Swap Back"),
+    (R2_CHANNELS, "R2 Channel Switch"),
+    (PACK_MEMORY, "Texture Pack Memory"),
+    (PACK_PRECACHE, "Precache Textures"),
+    (PACK_COMPRESS, "Pack Compression"),
+    (PACK_REBUILD, "Rebuild Pack Cache"),
 ];
+
+/// What a page says beside Back while a row the server turns off is chosen
+/// (`settings::qol`, go-eqoa-server's `world.vanilla_ui`).
+const OFF_HERE: &str = "Off on this server";
+/// And while the Map or the Minimap is, where they are off until turned on
+/// (`settings::qol::MAP`).
+const DEFAULT_OFF_HERE: &str = "Off by default on this server";
 
 /// The Chat Tabs rows' first item (ticket 1951): one a kind of line, in
 /// `chat::Kind::ALL`'s order, 92 to 101.
@@ -1850,6 +1938,26 @@ const TOUCH_LAYOUT: i32 = 108;
 /// Target Level's item (Live petition 5130). 120, not the next free, is this
 /// lane's (sibling lanes may take 109 onwards).
 const TARGET_LEVEL: i32 = 120;
+/// Weather's item (2026-11-15, with Flora's and Environment's sliders). 130,
+/// not the next free, is this lane's, as Target Level's 120.
+const WEATHER: i32 = 130;
+/// Weapon Swap Back's item (jibrish, 2026-11-16, work board 1581). 140, not
+/// the next free, as Weather's 130.
+const WEAPON_SWAP_BACK: i32 = 140;
+/// R2 Channel Switch's item (the server owner, 2026-11-18). 150, not the next
+/// free, as Weapon Swap Back's 140.
+const R2_CHANNELS: i32 = 150;
+/// Texture Pack Memory's item (the owner's report of 2026-11-18, "some
+/// textures are not being loaded from texture packs"). 160, not the next
+/// free, as R2 Channel Switch's 150.
+pub(crate) const PACK_MEMORY: i32 = 160;
+/// Precache Textures, Pack Compression and Rebuild Pack Cache's items (the
+/// owner's of 2026-11-18, "lets look at PCSX2 how they do texture packs like
+/// precaching and we can make a better version"). 170, 180 and 190, as
+/// Texture Pack Memory's 160.
+pub(crate) const PACK_PRECACHE: i32 = 170;
+pub(crate) const PACK_COMPRESS: i32 = 180;
+pub(crate) const PACK_REBUILD: i32 = 190;
 
 /// Slow When Not Focused's item (the GM Jibrish's petition 1634; natively:
 /// a page's pace in the back is the browser's).
@@ -1935,7 +2043,7 @@ const GROUPS: [(Group, &str); 5] = [(Group::Graphics, "Graphics"), (Group::Ui, "
 /// Capture Controller and Sound in Background the Multi-boxing settings',
 /// Controller's touch rows Other's Touch; petition 2084, 2026-11-14: Touch a
 /// group of its own, Touch Controls, its rows Size & Look and Layout).
-const ALL_CATEGORIES: [Category; 23] = [
+const ALL_CATEGORIES: [Category; 25] = [
     Category { name: "Video", items: VIDEO, note: Note::Scale, group: Group::Graphics },
     Category { name: "World", items: &[20, 35, 36, 37, 47, 25], note: Note::None, group: Group::Graphics },
     Category { name: "Lighting", items: &[52, 53, 56, 57, 54, 63], note: Note::Lighting, group: Group::Graphics },
@@ -1953,9 +2061,9 @@ const ALL_CATEGORIES: [Category; 23] = [
     Category { name: "Number Colors", items: &crate::numcolor::NUMBER_ITEMS, note: Note::None, group: Group::Ui },
     Category { name: "Merc Colors", items: &crate::numcolor::MERC_ITEMS, note: Note::None, group: Group::Ui },
     Category { name: "DPS Meter", items: &[70, 71, 72], note: Note::Meter, group: Group::Ui },
-    Category { name: "Chat", items: &[73, 89], note: Note::Links, group: Group::Ui },
+    Category { name: "Chat", items: &[73, 89, R2_CHANNELS], note: Note::Links, group: Group::Ui },
     Category { name: "General", items: &[29, 38, 84, SHARED_SHORTCUTS, AUTO_SAVE], note: Note::Shortcuts, group: Group::Other },
-    Category { name: "Combat", items: &[78, 79, PETS_PASS], note: Note::None, group: Group::Other },
+    Category { name: "Combat", items: &[78, 79, PETS_PASS, WEAPON_SWAP_BACK], note: Note::None, group: Group::Other },
     Category { name: "Camera", items: &[15, 17, 18], note: Note::None, group: Group::Other },
     Category { name: "Size & Look", items: &[59, 60, 61, 62], note: Note::Reads, group: Group::Touch },
     Category { name: "Sound", items: &[32], note: Note::Output, group: Group::Other },
@@ -1967,6 +2075,13 @@ const ALL_CATEGORIES: [Category; 23] = [
     // the touch pad's place and buttons (2026-11-14: Move Touch Pad, Button
     // Layout, petition 2084), its sizes' page full
     Category { name: "Layout", items: &[MOVE_TOUCH, TOUCH_LAYOUT, RESET_TOUCH], note: Note::TouchLayout, group: Group::Touch },
+    // the rain and the snow (2026-11-15, with Flora's and Environment's
+    // sliders): World's page is full
+    Category { name: "Weather", items: &[WEATHER], note: Note::None, group: Group::Graphics },
+    // a pack's files made ready (2026-11-18, the owner's "lets look at PCSX2
+    // how they do texture packs like precaching"): Textures' page is full;
+    // natively, as Textures (a page's list ends before it)
+    Category { name: "Texture Cache", items: &[PACK_PRECACHE, PACK_COMPRESS, PACK_REBUILD], note: Note::Textures, group: Group::Graphics },
 ];
 #[cfg(not(target_arch = "wasm32"))]
 const CATEGORIES: &[Category] = &ALL_CATEGORIES;
@@ -1975,7 +2090,7 @@ const CATEGORIES: &[Category] = &ALL_CATEGORIES;
 #[cfg(target_arch = "wasm32")]
 const CATEGORIES: &[Category] = &{
     let a = ALL_CATEGORIES;
-    [a[0], a[1], a[2], a[3], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16], a[17], a[19], a[20], a[21], a[22]]
+    [a[0], a[1], a[2], a[3], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16], a[17], a[19], a[20], a[21], a[22], a[23]]
 };
 
 /// The categories group `g` lists, by their place in `CATEGORIES`.
@@ -2014,9 +2129,18 @@ const MULTIBOX: &[i32] = &[16, 19, 21];
 /// program (`texpack::open_folder`); an Android app's is in its own
 /// storage, which no file manager shows.
 #[cfg(not(target_os = "android"))]
-const TEXTURES: &[i32] = &[50, 51, 55];
+const TEXTURES: &[i32] = &[50, PACK_MEMORY, 51, 55];
 #[cfg(target_os = "android")]
-const TEXTURES: &[i32] = &[50, 51];
+const TEXTURES: &[i32] = &[50, PACK_MEMORY, 51];
+
+/// Texture Pack Memory's value: Auto, or its MB as "512 MB", "1 GB".
+fn pack_memory_text(mb: u16) -> String {
+    match mb {
+        0 => "Auto".to_string(),
+        mb if mb % 1024 == 0 => format!("{} GB", mb / 1024),
+        mb => format!("{mb} MB"),
+    }
+}
 
 /// The most a menu of Extended's lists (a group's categories): its rows and
 /// legend as tall as the fifteen categories' one menu was, which fit.
@@ -2125,10 +2249,12 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         84 => on_off(c.loading_tips),
         50 => on_off(c.texture_packs),
         51 => on_off(c.dump_textures),
+        PACK_MEMORY => wide(&pack_memory_text(c.pack_memory)),
+        PACK_PRECACHE => on_off(c.pack_precache),
+        PACK_COMPRESS => wide(["Auto", "Off", "On"][c.pack_compress.min(2) as usize]),
+        PACK_REBUILD => wide("Rebuild"),
         55 => wide("Open"),
         35 => on_off(c.mipmaps),
-        36 => on_off(c.flora),
-        37 => on_off(c.environment),
         46 => on_off(c.shadows),
         47 => wide(if c.ps2_fog { "PS2" } else { "Exact" }),
         53 => on_off(c.sun_shadows),
@@ -2161,6 +2287,8 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         90 => on_off(c.stacked_bars),
         78 => on_off(c.auto_cast),
         79 => on_off(c.auto_target),
+        WEAPON_SWAP_BACK => on_off(c.weapon_swap_back),
+        R2_CHANNELS => on_off(c.r2_channels),
         52 => on_off(c.dynamic_lighting),
         38 => wide(if c.loading_longer { "Longer" } else { "Instant" }),
         39 => wide(&format!("x{}", c.render_scale)),
@@ -2228,8 +2356,17 @@ fn slider_at(item: i32) -> Option<(f32, Option<u16>)> {
         62 => (c.touch_edge as f32 / TOUCH_EDGE_MAX as f32, Some(c.touch_edge as u16)),
         57 => (at(c.shadow_distance as f32, SHADOW_DISTANCE_GAME as f32, SHADOW_DISTANCE_MAX as f32), Some(c.shadow_distance)),
         SPELL_BAR_OPACITY => (c.spell_bar_opacity as f32 / 100.0, Some(c.spell_bar_opacity as u16)),
+        36 => share_slider(c.flora),
+        37 => share_slider(c.environment),
+        WEATHER => share_slider(c.weather),
         _ => return None,
     })
+}
+
+/// Flora's, Environment's and Weather's slider (items 36, 37, `WEATHER`):
+/// none at the left, all of it, the game's, at the right, and the percent.
+fn share_slider(v: u8) -> (f32, Option<u16>) {
+    (v as f32 / crate::settings::SHARE_FULL as f32, Some(v as u16))
 }
 
 /// Name Distance (item 27): its slider's knob, the game's 22 at the left
@@ -2647,26 +2784,39 @@ mod tests {
         assert_eq!((settings::client().mipmaps, cues.last()), (false, Some(&11)), "off");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().mipmaps, "and back: two values");
-        goto!(36);
-        assert_eq!(w.item, 36, "Flora");
-        assert!(settings::client().flora, "on: the game's");
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().flora, cues.last()), (false, Some(&11)), "off");
-        press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert!(settings::client().flora, "and back: two values");
-        goto!(37);
-        assert_eq!(w.item, 37, "Environment");
-        assert!(settings::client().environment, "on: the game's");
-        press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().environment, settings::client().flora, cues.last()), (false, true, Some(&11)), "off, Flora still on");
-        press(&mut w, &mut o, key::LEFT, &mut cues);
-        assert!(settings::client().environment, "and back: two values");
+        // Flora, Environment (and Weather, on a page of its own): sliders of
+        // tens, all of it, the game's, at their right end
+        for (item, name) in [(36, "Flora"), (37, "Environment"), (WEATHER, "Weather")] {
+            let share = || {
+                let c = settings::client();
+                [c.flora, c.environment, c.weather]
+            };
+            let at = [36, 37, WEATHER].iter().position(|&i| i == item).unwrap();
+            goto!(item);
+            assert_eq!(w.item, item, "{name}");
+            assert_eq!(share(), [100; 3], "{name}: all of each, the game's");
+            assert_eq!(slider_at(item), Some((1.0, Some(100))), "{name}: the knob at the right, its number");
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!((share()[at], cues.last()), (100, Some(&9)), "{name}: no more than all");
+            for _ in 0..11 {
+                press(&mut w, &mut o, key::LEFT, &mut cues);
+            }
+            let mut want = [100; 3];
+            want[at] = 0;
+            assert_eq!((share(), cues.last()), (want, Some(&9)), "{name}: none, at its end, the others kept");
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!((share()[at], cues.last(), slider_at(item)), (10, Some(&11), Some((0.1, Some(10)))), "{name}: a step of ten");
+            for _ in 0..9 {
+                press(&mut w, &mut o, key::RIGHT, &mut cues);
+            }
+            assert_eq!(share(), [100; 3], "{name}: and back");
+        }
         goto!(47);
         assert_eq!(w.item, 47, "Ground Fog");
         assert!(settings::client().ps2_fog, "PS2: the game's look");
         assert_eq!(value_text(&vui, 47), Some(wide("PS2")));
         press(&mut w, &mut o, key::RIGHT, &mut cues);
-        assert_eq!((settings::client().ps2_fog, settings::client().environment, cues.last()), (false, true, Some(&11)), "Exact, Environment still on");
+        assert_eq!((settings::client().ps2_fog, settings::client().environment, cues.last()), (false, 100, Some(&11)), "Exact, Environment still all");
         assert_eq!(value_text(&vui, 47), Some(wide("Exact")));
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::client().ps2_fog, "and back: two values");
@@ -2946,6 +3096,8 @@ mod tests {
         assert_eq!(cues.last(), Some(&11));
         goto!(23);
         assert_eq!(w.item, 23, "NPC/PC Display");
+        assert_eq!(settings::entity_slots(), settings::ENTITY_SLOTS_DEFAULT as usize, "the default 48");
+        settings::set_client(settings::ClientOptions { entity_slots: 24, ..settings::client() });
         assert_eq!(settings::entity_slots(), 24, "the game's 24");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!((settings::entity_slots(), cues.last()), (24, Some(&9)), "no fewer than the game's");
@@ -2968,6 +3120,8 @@ mod tests {
         press(&mut w, &mut o, key::RIGHT, &mut cues);
         goto!(24);
         assert_eq!(w.item, 24, "NPC/PC Distance");
+        assert_eq!(settings::entity_view(), settings::ENTITY_VIEW_DEFAULT, "the default 200");
+        settings::set_client(settings::ClientOptions { entity_view: 100, ..settings::client() });
         assert_eq!(settings::entity_view(), 100, "the game's 100");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!((settings::entity_view(), cues.last()), (100, Some(&9)), "no nearer than the game's");
@@ -3029,6 +3183,42 @@ mod tests {
         assert!(settings::client().texture_packs);
         assert_eq!((value_text(&vui, 50), cues.last()), (Some(wide(vui.words.get(551, vui.language))), Some(&11)));
         assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some("No folder here"));
+        // Texture Pack Memory, beside it: Auto, then round 512 MB, 1, 2 and
+        // 4 GB and back; beside Back, what the pack's textures take of it
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.item, value_text(&vui, PACK_MEMORY)), (PACK_MEMORY, Some(wide("Auto"))), "Texture Pack Memory, Auto");
+        assert!(w.page_note(w.cat.unwrap()).is_some_and(|n| n.starts_with("Pack textures: 0 of ")), "{:?}", w.page_note(w.cat.unwrap()));
+        for (mb, text) in [(512, "512 MB"), (1024, "1 GB"), (2048, "2 GB"), (4096, "4 GB"), (0, "Auto")] {
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!((settings::client().pack_memory, value_text(&vui, PACK_MEMORY), cues.last()), (mb, Some(wide(text)), Some(&11)));
+        }
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert_eq!(settings::client().pack_memory, 4096, "and the other way");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!(settings::client().pack_memory, 0);
+        // Precache Textures under it: On (the default, the owner 2026-11-18),
+        // then Off; Pack Compression: Auto, Off, On and round; Rebuild Pack
+        // Cache: Rebuild, the cache (none in a test) said beside Back
+        goto!(PACK_PRECACHE);
+        assert_eq!((w.item, value_text(&vui, PACK_PRECACHE)), (PACK_PRECACHE, Some(wide(vui.words.get(551, vui.language)))), "Precache Textures, On");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert!(!settings::client().pack_precache);
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::client().pack_precache, "two values");
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.item, value_text(&vui, PACK_COMPRESS)), (PACK_COMPRESS, Some(wide("Auto"))));
+        for (v, text) in [(1, "Off"), (2, "On"), (0, "Auto")] {
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!((settings::client().pack_compress, value_text(&vui, PACK_COMPRESS)), (v, Some(wide(text))));
+        }
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert_eq!(settings::client().pack_compress, 2, "and the other way");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.item, value_text(&vui, PACK_REBUILD)), (PACK_REBUILD, Some(wide("Rebuild"))));
+        assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some("Cache: 0 MB on disk"));
+        press(&mut w, &mut o, key::CROSS, &mut cues);
+        assert_eq!(cues.last(), Some(&8), "rebuilt");
         goto!(51);
         assert_eq!(w.item, 51, "Dump Textures");
         press(&mut w, &mut o, key::LEFT, &mut cues);
@@ -3167,6 +3357,24 @@ mod tests {
         assert_eq!((settings::auto_target(), cues.last()), (true, Some(&11)), "on");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(!settings::auto_target(), "and back");
+        // Weapon Swap Back Off by default (work board 1581), two values
+        goto!(WEAPON_SWAP_BACK);
+        assert_eq!(w.item, WEAPON_SWAP_BACK, "Weapon Swap Back");
+        assert!(!settings::weapon_swap_back(), "off by default");
+        assert_eq!(value_text(&vui, WEAPON_SWAP_BACK), Some(wide(vui.words.get(552, vui.language))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::weapon_swap_back(), cues.last()), (true, Some(&11)), "on");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::weapon_swap_back(), "and back");
+        // R2 Channel Switch Off by default (the server owner, 2026-11-18), two values
+        goto!(R2_CHANNELS);
+        assert_eq!(w.item, R2_CHANNELS, "R2 Channel Switch");
+        assert!(!settings::r2_channels(), "off by default");
+        assert_eq!(value_text(&vui, R2_CHANNELS), Some(wide(vui.words.get(552, vui.language))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::r2_channels(), cues.last()), (true, Some(&11)), "on");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::r2_channels(), "and back");
         // Chat: Item Links On by default, then Off and back (the petition 1463's
         // toggle), the page saying where the server has none
         goto!(73);
@@ -3414,7 +3622,7 @@ mod tests {
     #[test]
     fn each_group_holds_its_kind() {
         let of = |g: usize| group_categories(g).into_iter().map(|c| (CATEGORIES[c].name, CATEGORIES[c].items.iter().map(|&i| label_of(i)).collect::<Vec<_>>())).collect::<Vec<_>>();
-        let textures: Vec<&str> = if cfg!(target_os = "android") { vec!["Texture Packs", "Dump Textures"] } else { vec!["Texture Packs", "Dump Textures", "Texture Folder"] };
+        let textures: Vec<&str> = if cfg!(target_os = "android") { vec!["Texture Packs", "Texture Pack Memory", "Dump Textures"] } else { vec!["Texture Packs", "Texture Pack Memory", "Dump Textures", "Texture Folder"] };
         assert_eq!(
             of(0),
             vec![
@@ -3423,6 +3631,8 @@ mod tests {
                 ("Lighting", vec!["Dynamic Lighting", "Sun Shadows", "Light Shadows", "Shadow Distance", "Ambient Occlusion", "Particles"]),
                 ("Characters", vec!["Level of Detail", "NPC/PC Display", "NPC/PC Distance", "Shadows"]),
                 ("Textures", textures),
+                ("Weather", vec!["Weather"]),
+                ("Texture Cache", vec!["Precache Textures", "Pack Compression", "Rebuild Pack Cache"]),
             ],
             "Graphics: how the world is drawn"
         );
@@ -3438,7 +3648,7 @@ mod tests {
                 ("Number Colors", n[..6].to_vec()),
                 ("Merc Colors", n[6..8].to_vec()),
                 ("DPS Meter", vec!["DPS Meter", "DPS Meter Shows", "Reset DPS Meter"]),
-                ("Chat", vec!["Item Links", "Chat Always Shown"]),
+                ("Chat", vec!["Item Links", "Chat Always Shown", "R2 Channel Switch"]),
                 ("Chat Tabs: Talk", vec!["Say", "Tells", "Group", "Guild", "Shouts"]),
                 ("Chat Tabs: Game", vec!["Combat", "Loot", "Rolls", "Experience", "System"]),
             ],
@@ -3448,7 +3658,7 @@ mod tests {
             of(2),
             vec![
                 ("General", vec!["Update Notices", "Loading Screens", "Loading Tips", "Same Shortcuts", "Auto Save Options"]),
-                ("Combat", vec!["Auto-Cast", "Auto Target", "Pets Pass Through"]),
+                ("Combat", vec!["Auto-Cast", "Auto Target", "Pets Pass Through", "Weapon Swap Back"]),
                 ("Camera", vec!["Camera Distance", "Camera Turn Speed", "Screen Shake"]),
                 ("Sound", vec!["Output Device"]),
             ],
@@ -3757,12 +3967,13 @@ mod tests {
         assert_eq!(w.point([frame + 110.0, y(&w, 2)]), down(2, key::RIGHT), "Frame Rate's value");
         assert_eq!(w.point([frame + 110.0, y(&w, 3)]), down(3, key::RIGHT), "VSync's value");
         assert!(w.point([frame + 110.0, y(&w, VIDEO.len() as i32)]).is_empty(), "the row under the last: nothing");
-        // World: Fog at 5 of 10 (its knob mid-bar), Flora's and Art's values
+        // World: Fog at 5 of 10 (its knob mid-bar), Flora's, Environment's and Art's
         go(&mut w, &vui, &mut o, "World");
         assert_eq!(w.point([slider + 10.0, y(&w, 0)]), vec![key::LEFT], "Fog thinner");
         assert_eq!(w.point([slider + 130.0, y(&w, 0)]), vec![key::RIGHT], "Fog thicker");
-        assert_eq!(w.point([frame + 110.0, y(&w, 2)]), down(2, key::RIGHT), "Flora's value");
-        assert_eq!(w.point([frame + 20.0, y(&w, 3)]), down(3, key::LEFT), "Environment's value");
+        // Flora and Environment at all of it: their knobs at the right end
+        assert_eq!(w.point([slider + 10.0, y(&w, 2)]), down(2, key::LEFT), "Flora less");
+        assert_eq!(w.point([slider + 10.0, y(&w, 3)]), down(3, key::LEFT), "Environment less");
         assert_eq!(w.point([frame + 20.0, y(&w, 4)]), down(4, key::LEFT), "Ground Fog's value");
         // Characters: NPC/PC Display's knob at its left end (the game's 24),
         // then at 128 near its middle
@@ -3826,13 +4037,14 @@ mod tests {
         assert_eq!(CATEGORIES[by_name("DPS Meter")].note, Note::Meter);
         assert_eq!(CATEGORIES[by_name("Chat")].note, Note::Links);
         assert_eq!(CATEGORIES[by_name("HUD Layout")].note, Note::Hud);
-        assert!(CATEGORIES.iter().filter(|c| c.note != Note::None).count() == if cfg!(target_arch = "wasm32") { 12 } else { 14 }, "the notes only");
+        assert!(CATEGORIES.iter().filter(|c| c.note != Note::None).count() == if cfg!(target_arch = "wasm32") { 12 } else { 15 }, "the notes only");
+        assert_eq!(CATEGORIES.iter().find(|c| c.name == "Texture Cache").map(|c| c.note), if cfg!(target_arch = "wasm32") { None } else { Some(Note::Textures) });
         #[cfg(not(target_arch = "wasm32"))]
         {
             // Textures: nothing to say while both are off (a test keeps no
             // folder, so with Texture Packs on there is none to read)
             assert_eq!(CATEGORIES[by_name("Textures")].note, Note::Textures);
-            assert_eq!(CATEGORIES[by_name("Textures")].items, &[50, 51, 55]);
+            assert_eq!(CATEGORIES[by_name("Textures")].items, &[50, PACK_MEMORY, 51, 55]);
             assert_eq!(note(&w, by_name("Textures")), None, "both off: no note");
             crate::settings::set_client(crate::settings::ClientOptions { texture_packs: true, ..crate::settings::client() });
             assert_eq!(note(&w, by_name("Textures")).as_deref(), Some("No folder here"), "on, with no folder to read");
@@ -3878,11 +4090,11 @@ mod tests {
         w.sel = 3;
         w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
         go(&mut w, &vui, &mut o, "Textures");
-        for _ in 0..2 {
+        for _ in 0..3 {
             w.key(&vui, &mut r, &mut o, key::DOWN, 0, &mut cues, &mut ups);
             w.draw(&vui, &mut r, &o, &mut ups);
         }
-        assert_eq!((w.cat, w.item), (Some(textures), 55), "Texture Folder, the third row");
+        assert_eq!((w.cat, w.item), (Some(textures), 55), "Texture Folder, the fourth row");
         assert_eq!(w.page_note(textures).as_deref(), Some("Beside eqoa.exe"));
         for k in [key::RIGHT, key::LEFT, key::CROSS] {
             cues.clear();
@@ -3900,6 +4112,90 @@ mod tests {
         assert_eq!((cues, testing::shown()), (vec![9], vec![]), "the control: no folder");
         crate::settings::testing::reset(false);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The rows a server turns off (`settings::qol`, go-eqoa-server's
+    /// `world.vanilla_ui`): each reads Off, says "Off on this server" beside
+    /// Back and does not change (sound 9); every row of each addition is one
+    /// of them, and no other row is. With none off, the same row turns and
+    /// says nothing, the player's choice there as it was.
+    #[test]
+    fn rows_the_server_turns_off_say_so_and_do_not_change() {
+        use crate::pointer::testing::{NullRaster, vui};
+        use crate::settings::{self, qol, testing};
+        testing::reset(false);
+        let vui = vui();
+        let mut o = GameOptions { auto_attack: 0, ..GameOptions::default() };
+        let mut w = WndOptions::default();
+        let (mut cues, mut ups) = (Vec::new(), Vec::new());
+        w.open(&vui, &NullRaster, &o);
+        w.draw(&vui, &mut NullRaster, &o, &mut Vec::new());
+        for k in [key::DOWN, key::DOWN, key::DOWN, key::CROSS] {
+            w.key(&vui, &mut NullRaster, &mut o, k, 0, &mut cues, &mut ups);
+        }
+        let off_rows = [44, 45, 85, TARGET_LEVEL, 70, 71, 72, 64, 65, 66, 67, 68, 69, 80, 81, 86, 83, 58, 78, 79, 22, 90];
+        qol::set_off(0xFFF);
+        for &(item, _) in EXTENDED_ITEMS.iter() {
+            assert_eq!(qol::item_off(item, TARGET_LEVEL), off_rows.contains(&item), "row {item}");
+        }
+        let off_text = Some(wide(vui.words.get(552, vui.language)));
+        for item in [44, TARGET_LEVEL, 70, 86, 83, 58, 78, 90] {
+            for k in path_to(&w, item) {
+                w.key(&vui, &mut NullRaster, &mut o, k, 0, &mut cues, &mut ups);
+                w.draw(&vui, &mut NullRaster, &o, &mut ups);
+            }
+            assert_eq!(w.item, item);
+            assert_eq!(value_text(&vui, item), off_text, "row {item} reads Off");
+            assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some(OFF_HERE), "row {item} says so");
+            let before = settings::client();
+            for k in [key::RIGHT, key::LEFT] {
+                cues.clear();
+                w.key(&vui, &mut NullRaster, &mut o, k, 0, &mut cues, &mut ups);
+                assert_eq!((settings::client(), cues.as_slice()), (before, &[9][..]), "row {item} does not change");
+            }
+        }
+        assert_eq!(value_text(&vui, 64), Some(wide("Default")), "a number's colour the game's");
+        assert_eq!(value_text(&vui, 22), Some(wide("2")), "the game's two bars");
+        // the Map, the Minimap and Item Links: off by default here, said, and
+        // turned
+        for item in [41, 42, 73] {
+            for k in path_to(&w, item) {
+                w.key(&vui, &mut NullRaster, &mut o, k, 0, &mut cues, &mut ups);
+                w.draw(&vui, &mut NullRaster, &o, &mut ups);
+            }
+            assert_eq!(value_text(&vui, item), off_text, "row {item} Off by default");
+            assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some(DEFAULT_OFF_HERE), "row {item} says so");
+            cues.clear();
+            w.key(&vui, &mut NullRaster, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
+            assert_eq!(cues, [11], "row {item} turns");
+        }
+        assert!(settings::map() && settings::minimap() && settings::item_links(), "on here, as turned");
+        // an [OG] account's (qol::LOCKED): the three read Off, say "Off on
+        // this server" and do not turn
+        qol::set_off(0x7FFF);
+        for item in [41, 42, 73] {
+            for k in path_to(&w, item) {
+                w.key(&vui, &mut NullRaster, &mut o, k, 0, &mut cues, &mut ups);
+                w.draw(&vui, &mut NullRaster, &o, &mut ups);
+            }
+            assert_eq!(value_text(&vui, item), off_text, "row {item} Off, locked");
+            assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some(OFF_HERE), "row {item} says so");
+            let before = settings::client();
+            cues.clear();
+            w.key(&vui, &mut NullRaster, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
+            assert_eq!((settings::client(), cues.as_slice()), (before, &[9][..]), "row {item} does not turn");
+        }
+        qol::set_off(0xFFF);
+        // the next connection's server says nothing: the player's own, on,
+        // and no note
+        qol::set_off(0);
+        assert!(settings::map() && settings::minimap() && settings::item_links(), "the player's choices, on, as they were");
+        assert_eq!(w.page_note(w.cat.unwrap()), None, "nothing said");
+        w.key(&vui, &mut NullRaster, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
+        assert!(!settings::item_links(), "Item Links turns");
+        qol::set_off(qol::ITEM_LINKS);
+        assert!(settings::item_links(), "here they are still on");
+        qol::set_off(0);
     }
 
     /// Sun Shadows' note: only while they are on and Dynamic Lighting is
@@ -4129,6 +4425,66 @@ mod tests {
         let game = GameOptions::from_card(&testing::kept("game.opt").expect("saved")).unwrap();
         assert_eq!((game.no_faction, game.no_damage), (1, 1));
         assert!(settings::auto_save());
+        testing::reset(false);
+    }
+
+    /// The volumes are kept the moment they change (the owner, 2026-11-17:
+    /// "players turn off sound or turn it down and the sounds or music comes
+    /// back"): with Auto Save off, the Sound page's Fx Volume to 0 and Music
+    /// Volume to 30%, then Triangle out with no Save Changes: the device keeps
+    /// them (no volume put back), the window's game.opt holds them for the
+    /// next world entry and start, and the next open's Triangle keeps them.
+    #[test]
+    fn volumes_kept_without_save_changes() {
+        use crate::pointer::testing::{NullRaster, vui};
+        use crate::settings::{self, testing};
+        testing::reset(false);
+        let vui = vui();
+        let mut o = GameOptions::default();
+        let mut w = WndOptions::default();
+        let mut ups = Vec::new();
+        let press = |w: &mut WndOptions, o: &mut GameOptions, k: i32, ups: &mut Vec<OptionsUp>| {
+            w.key(&vui, &mut NullRaster, o, k, 0, &mut Vec::new(), ups);
+            w.draw(&vui, &mut NullRaster, o, ups);
+        };
+        assert!(!settings::auto_save());
+        w.open(&vui, &NullRaster, &o);
+        for k in [key::DOWN, key::DOWN, key::CROSS, key::DOWN] {
+            press(&mut w, &mut o, k, &mut ups);
+        }
+        assert_eq!(w.item, 3, "Fx Volume");
+        for _ in 0..10 {
+            press(&mut w, &mut o, key::LEFT, &mut ups);
+        }
+        press(&mut w, &mut o, key::DOWN, &mut ups);
+        assert_eq!(w.item, 4, "Music Volume");
+        for _ in 0..7 {
+            press(&mut w, &mut o, key::LEFT, &mut ups);
+        }
+        assert_eq!(o.fx_volume, F::ZERO, "0 is silent");
+        let music = o.music_volume;
+        assert!((music.0 - 0.3).abs() < 1e-5, "{music:?}");
+        assert_eq!(ups.iter().filter(|u| matches!(u, OptionsUp::Volume(0, _))).last(), Some(&OptionsUp::Volume(0, F::ZERO)));
+        assert_eq!(ups.last(), Some(&OptionsUp::Volume(1, music)));
+        let kept = GameOptions::from_card(&testing::kept("game.opt").expect("kept at the change")).unwrap();
+        assert_eq!((kept.fx_volume, kept.music_volume), (F::ZERO, music));
+        assert_eq!(settings::game_options().fx_volume, F::ZERO, "what the next world entry reads");
+        // Triangle to the menu and out: no Save Changes, nothing louder put back
+        ups.clear();
+        press(&mut w, &mut o, key::TRIANGLE, &mut ups);
+        press(&mut w, &mut o, key::TRIANGLE, &mut ups);
+        assert_eq!(ups.last(), Some(&OptionsUp::Apply));
+        assert_eq!((o.fx_volume, o.music_volume), (F::ZERO, music), "as turned down");
+        assert!(ups.iter().all(|u| !matches!(u, OptionsUp::Volume(..)) || *u == OptionsUp::Volume(0, F::ZERO) || *u == OptionsUp::Volume(1, music)), "{ups:?}");
+        // a new run: the options read back as kept; another open and Triangle keeps them
+        let mut o = settings::game_options();
+        assert_eq!((o.fx_volume, o.music_volume), (F::ZERO, music));
+        w.open(&vui, &NullRaster, &o);
+        ups.clear();
+        press(&mut w, &mut o, key::TRIANGLE, &mut ups);
+        assert_eq!((o.fx_volume, o.music_volume), (F::ZERO, music));
+        // the other settings' unsaved changes stay unsaved
+        assert_eq!(GameOptions::from_card(&testing::kept("game.opt").unwrap()).unwrap().no_damage, GameOptions::default().no_damage);
         testing::reset(false);
     }
 }
