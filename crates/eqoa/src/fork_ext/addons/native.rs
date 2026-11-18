@@ -323,6 +323,37 @@ pub(crate) fn annotate_host(host: &Host) -> Result<()> {
             "the native client has no matching pointer/config payload",
         );
     }
+    // Temporary hand list until Part C derives this metadata from bindings.
+    for path in [
+        "frontiers_forge.quest",
+        "frontiers_forge.quest.new",
+        "frontiers_forge.quest.GetName",
+        "frontiers_forge.cave",
+        "frontiers_forge.cave.IsRegionZero",
+        "frontiers_forge.cave.Alloc",
+        "frontiers_forge.cave.Reserve",
+        "frontiers_forge.cave.Get",
+        "frontiers_forge.cave.Free",
+        "frontiers_forge.cave.Release",
+        "frontiers_forge.cave.Info",
+    ] {
+        describe(
+            lua,
+            path,
+            "unsupported",
+            None,
+            "raw memory is excluded; use eqoa.quests for native quest records",
+        );
+    }
+    for path in ["eqoa.icons.SurfaceInfo.source_format"] {
+        describe(
+            lua,
+            path,
+            "unsupported",
+            None,
+            "icon provider retains decoded RGBA pixels without original source format",
+        );
+    }
     for path in [
         "frontiers_forge.player.GetCMs",
         "frontiers_forge.player.GetCMsSpent",
@@ -732,7 +763,6 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
                 symbol.as_str(),
                 "eqoa.client.get"
                     | "eqoa.client.display"
-                    | "eqoa.client.time"
                     | "eqoa.player.get"
                     | "eqoa.player.stats"
                     | "eqoa.actions.assist"
@@ -928,6 +958,26 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             Ok(t)
         })?,
     )?;
+    bind(
+        lua,
+        "fonts",
+        "game",
+        lua.create_function(|lua, _: MultiValue| {
+            error(
+                lua,
+                "eqoa.fonts.game",
+                "unsupported",
+                "game bitmap font cannot be represented by the existing ImGui font service",
+            )
+        })?,
+    )?;
+    describe(
+        lua,
+        "eqoa.fonts.game",
+        "unsupported",
+        None,
+        "game bitmap font cannot be represented by the existing ImGui font service",
+    );
     bind(lua,"client","get",lua.create_function(|lua,()| record(lua,"eqoa.client.Client",&json!({"in_world":false,"phase":"pregame","generation":0,"tick":0,"frame":0,"time":0})))?)?;
     bind(
         lua,
@@ -959,17 +1009,25 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua,
         "hud",
         "hidden_by",
-        lua.create_function(|lua, _: Value| lua.create_table())?,
+        lua.create_function(|lua, _: Value| {
+            error(
+                lua,
+                "eqoa.hud.hidden_by",
+                "unavailable",
+                "no visibility lease on this host",
+            )
+        })?,
     )?;
     bind(
         lua,
         "input",
         "get",
         lua.create_function(|lua, ()| {
-            record(
+            error(
                 lua,
-                "eqoa.input.InputState",
-                &json!({"focused":false,"pad":null,"text_capture":false}),
+                "eqoa.input.get",
+                "unavailable",
+                "native input service is not installed on this host",
             )
         })?,
     )?;
