@@ -114,6 +114,12 @@ end)
 eqoa.events.on("player.changed", function()
     if eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true then
         B.on_target_update()
+        B.tick_auto_loot() -- a looting held back by a fight goes on when the fight ends
+    end
+end)
+eqoa.events.on("combat.hit", function(e)
+    if eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true then
+        B.on_combat_hit(e.data)
     end
 end)
 eqoa.events.on("entity.changed", function(e)
@@ -172,6 +178,7 @@ function draw()
     local bar_y = log_y + LOG_LINES * LINE + 4
     local bar2_y = bar_y + 18
     local is_corpse = B.tab == 7
+    if is_corpse then B.renew_loot_session() end
     local is_bank = B.tab == 6
     local has_ctx_btn = is_corpse
         or eqoa.merchant.get() ~= nil

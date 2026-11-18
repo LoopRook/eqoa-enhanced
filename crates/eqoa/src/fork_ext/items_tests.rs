@@ -1690,6 +1690,36 @@ impl Play {
             );
         }
     }
+    /// The player's own id, so combat hits can be told outgoing and a hostile "targeting you".
+    pub(crate) fn bags_self_id(&mut self, id: u64) {
+        self.session.self_id = Some(id);
+    }
+    /// A combat indication `attacker` -> `defender` (negative = damage), as the game's 0x0020 path delivers it.
+    pub(crate) fn bags_combat_hit(&mut self, attacker: u32, defender: u32, amount: i32) {
+        crate::fork_ext::addons::native_core::observe_hit(attacker, defender, amount, None);
+    }
+    /// Creature `id` is of `class` (p256: 2 = player, 0 = NPC) and targets `target`.
+    pub(crate) fn bags_creature(&mut self, id: u32, class: u8, target: u32) {
+        if let Some(slot) = self
+            .entities
+            .slots
+            .iter()
+            .position(|e| e.as_ref().is_some_and(|e| e.id == id))
+        {
+            if let Some(c) = self.entities.slots[slot].as_mut().and_then(|e| e.creature.as_mut()) {
+                c.p256 = class;
+                c.target = target;
+            }
+            super::updates::capture(self, &super::updates::Kind::Entity(slot), None);
+        }
+    }
+    pub(crate) fn bags_corpse_held(&self) -> bool {
+        self.npcw.corpse.is_some()
+    }
+    pub(crate) fn bags_auto_attack(&mut self, on: bool) {
+        self.auto_attack = on;
+        super::updates::capture(self, &super::updates::Kind::Player, None);
+    }
     pub(crate) fn bags_target_sync(&mut self, id: u32) {
         self.target = id;
         super::updates::capture(

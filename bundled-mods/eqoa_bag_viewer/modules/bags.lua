@@ -111,6 +111,7 @@ function M.clear_corpse_hold()
     M.tracked_target_id = nil
     M.tracked_target_pos = nil
     M.recently_dead = nil
+    M.engaged = {}
 end
 
 M.COLUMNS, M.MAX_ROWS, M.LOG_MAX = 8, 6, 50
@@ -865,6 +866,45 @@ function M.on_bank_changed(d)
     M.dirty()
 end
 
+-- Auto-loot's "my kill" signal. The wire does not say who killed a creature or who may loot it, so the best the
+-- client can know is that YOU hit it: an outgoing damage hit (combat.hit, you as the attacker) or your auto-attack
+-- on it while it was your target. A creature nobody on your side touched, another player's kill, a player's corpse
+-- and a pet's are never auto-looted. What stays uncertain: a creature you hit that another player then killed
+-- still counts (the server decides who may loot and its refusal is shown); manual Loot works on any corpse.
+M.ENGAGED_SECS = 120.0
+
+function M.mark_engaged(id)
+    if not id then return end
+    M.engaged = M.engaged or {}
+    M.engaged[id] = os.clock() + M.ENGAGED_SECS
+end
+
+function M.engaged_recently(id)
+    local until_ = M.engaged and M.engaged[id]
+    return until_ ~= nil and os.clock() <= until_
+end
+
+function M.on_combat_hit(d)
+    if d and d.outgoing and d.kind == "damage" and not d.from_pet and d.defender_id then
+        M.mark_engaged(d.defender_id)
+    end
+end
+
+-- The player is in combat: the game's own combat flag (`fighting`, the one that asks for battle music), auto-attack
+-- on, or a live NPC that has the player targeted. Auto-loot must not run then: opening a corpse retargets, which
+-- ends the auto-attack, so it waits until the fight is over.
+function M.in_combat()
+    local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
+    if not pl then return false end
+    if pl.fighting == true or pl.auto_attacking == true then return true end
+    if pl.id and eqoa.entities and eqoa.entities.list then
+        for _, e in ipairs(eqoa.entities.list() or {}) do
+            if e.kind == "npc" and not e.corpse and e.target_id == pl.id then return true end
+        end
+    end
+    return false
+end
+
 function M.on_target_update()
     local e = eqoa.target and eqoa.target.get and eqoa.target.get()
     if not e and eqoa.player and eqoa.player.get and eqoa.entities and eqoa.entities.find then
@@ -876,37 +916,47 @@ function M.on_target_update()
     if e and not e.corpse then
         M.tracked_target_id = e.id
         M.tracked_target_pos = e.actor_position or e.position
+        local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
+        if pl and pl.auto_attacking == true then M.mark_engaged(e.id) end
     end
 end
 
 function M.on_entity_changed(d)
     if not (d and d.after) then return end
     local after = d.after
-    if after.corpse and ((d.before and not d.before.corpse) or after.id == M.tracked_target_id) then
-        if after.id == M.tracked_target_id then
+    if after.corpse then
+        if after.kind ~= "player" and after.kind ~= "pet" and M.engaged_recently(after.id) then
             M.eligible_corpses = M.eligible_corpses or {}
             M.eligible_corpses[after.id] = true
         end
-    elseif not after.corpse and after.id == M.tracked_target_id then
+    elseif after.id == M.tracked_target_id then
         M.tracked_target_pos = after.actor_position or after.position
     end
 end
 
 function M.on_entity_removed(d)
-    if d and d.before and not d.before.corpse and d.before.id == M.tracked_target_id then
-        M.recently_dead = {pos = d.before.actor_position or d.before.position, expires = os.clock() + 3.0}
+    if d and d.before and not d.before.corpse and M.engaged_recently(d.before.id) then
+        M.recently_dead = {
+            id = d.before.id,
+            pos = d.before.actor_position or d.before.position,
+            expires = os.clock() + 3.0,
+        }
     end
 end
 
 function M.on_entity_added(d)
     local after = d and d.after
     if not after or not after.corpse then return end
+    if after.kind == "player" or after.kind == "pet" then return end
     if M.recently_dead and os.clock() <= M.recently_dead.expires then
         local d2 = dist_sq(M.recently_dead.pos, after.actor_position or after.position)
         if d2 ~= nil and d2 <= 36.0 then
             M.eligible_corpses = M.eligible_corpses or {}
             M.eligible_corpses[after.id] = true
         end
+    elseif M.engaged_recently(after.id) then
+        M.eligible_corpses = M.eligible_corpses or {}
+        M.eligible_corpses[after.id] = true
     end
 end
 
@@ -914,7 +964,14 @@ function M.tick_auto_loot()
     local enabled = eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true
     if not enabled then return end
     if not (M.eligible_corpses and next(M.eligible_corpses)) then return end
+    local waiting = false
+    for id in pairs(M.eligible_corpses) do
+        if not (M.auto_looted and M.auto_looted[id]) then waiting = true break end
+    end
+    if not waiting then return end
     if M.batch_id or M.pending_open or M.last_req or loot_batch_active() then return end
+    -- never while fighting: it waits (the corpse stays eligible) and runs when the fight is over
+    if M.in_combat() then return end
     local list = eqoa.entities and eqoa.entities.list and eqoa.entities.list()
     if not list then return end
     local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
@@ -932,6 +989,14 @@ function M.tick_auto_loot()
         M.auto_looted = M.auto_looted or {}
         M.auto_looted[best.id] = true
         M.open_loot_corpse("loot_non_junk", best.id)
+    end
+end
+
+-- A mod's hidden corpse session ends after 15 s without use; showing the Loot tab keeps it alive: asking for the
+-- takeover again while holding it renews the timer (walking away, zoning or releasing still end it).
+function M.renew_loot_session()
+    if eqoa.windows and eqoa.windows.takeover and eqoa.windows.taken and eqoa.windows.taken("loot") and eqoa.loot.get() then
+        eqoa.windows.takeover("loot")
     end
 end
 

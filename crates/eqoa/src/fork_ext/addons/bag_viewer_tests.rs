@@ -2307,7 +2307,8 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     assert_eq!(
         super::super::runtime::autonomous_action_label(&entry.metadata.requested_capabilities)
             .as_deref(),
-        Some("Actions: can act on its own (all actions)")
+        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, bank_move, use_item, equip, quick_slot, batch)"),
+        "L7: the label names exactly the actions the mod uses, not all of them"
     );
 
     // Spawn nearby corpse (9001), merchant (9002), and banker (9003); native mode stays 0 throughout.
@@ -2461,8 +2462,10 @@ fn round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target() {
     assert!(bv.eval::<bool>("(function() require('bags').junk_ids['2001'] = true return true end)()"));
 
     // Kill living target 9011 nearest ([2,0,0] < 9010 at [3,0,0]) -> auto-loot opens corpse & loots non-junk cleanly without native window!
+    bv.play.bags_self_id(77);
     bv.play.bags_spawn_npc(9011, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
     bv.play.bags_target_sync(9011);
+    bv.play.bags_combat_hit(77, 9011, -12); // you hit it: the signal that it is your kill
     bv.frames(2);
     let sends_before = bv.play.bags_sends_lost();
     bv.play.bags_entity_die(9011);
@@ -2490,4 +2493,181 @@ fn round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target() {
     bv.clean();
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
+}
+
+/// L6: Auto-loot's "my kill" signal is that you hit the creature, not that it was merely targeted.
+#[test]
+fn round65_fix_bag_viewer_auto_loot_only_corpses_of_creatures_you_hit() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_self_id(77);
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    assert!(super::super::options::set_toggle("eqoa_bag_viewer", "auto_loot", true));
+
+    // a) targeted but never hit by you (another player's kill, say): not looted
+    bv.play.bags_spawn_npc(9101, "a rat", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9101);
+    bv.frames(2);
+    let before = bv.play.bags_sends_lost();
+    bv.play.bags_entity_die(9101);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), before, "a corpse of a creature you did not hit is not auto-looted");
+
+    // b) hit by someone else only: not looted
+    bv.play.bags_spawn_npc(9102, "a bat", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_combat_hit(555, 9102, -9);
+    bv.frames(1);
+    bv.play.bags_entity_die(9102);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), before, "another player's hit does not make it your kill");
+
+    // c) a player's corpse you hit (a duel, a mistake): never auto-looted
+    bv.play.bags_spawn_npc(9103, "Somebody", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_creature(9103, 2, u32::MAX);
+    bv.play.bags_combat_hit(77, 9103, -9);
+    bv.frames(1);
+    bv.play.bags_entity_die(9103);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), before, "a player's corpse is never auto-looted");
+
+    // d) a creature you hit, even if you had switched target before it died: looted
+    bv.play.bags_spawn_npc(9104, "a snake", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_combat_hit(77, 9104, -9);
+    bv.frames(1);
+    bv.play.bags_entity_die(9104);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > before, "a creature you hit and that died is auto-looted");
+
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// M1: Auto-loot never runs while you are in combat (it retargets, which ends the auto-attack); it waits
+/// and goes on when the fight is over.
+#[test]
+fn round65_fix_bag_viewer_auto_loot_waits_while_in_combat() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_self_id(77);
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    assert!(super::super::options::set_toggle("eqoa_bag_viewer", "auto_loot", true));
+
+    // one kill of yours, while a second hostile still has you targeted
+    bv.play.bags_spawn_npc(9201, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9202, "a gnoll scout", 0, 1, [4.0, 0.0, 0.0]);
+    bv.play.bags_creature(9202, 0, 77);
+    bv.play.bags_target_sync(9201);
+    bv.play.bags_combat_hit(77, 9201, -12);
+    bv.frames(1);
+    let before = bv.play.bags_sends_lost();
+    bv.play.bags_entity_die(9201);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), before, "M1: no auto-loot while a live hostile has you targeted");
+    assert_eq!(bv.play.target, 9201, "M1: the target is not touched during combat");
+
+    // the scout stops (dies): out of combat, the held-back corpse is taken now
+    bv.play.bags_entity_die(9202);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > before, "M1: auto-loot goes on once the fight is over");
+
+    // auto-attack on is combat too
+    bv.play.bags_spawn_npc(9203, "a rat", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9203);
+    bv.play.bags_auto_attack(true);
+    bv.play.bags_combat_hit(77, 9203, -12);
+    bv.frames(1);
+    let before2 = bv.play.bags_sends_lost();
+    bv.play.bags_entity_die(9203);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), before2, "M1: no auto-loot while auto-attack is on");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// L5: the Loot tab keeps the hidden corpse session alive while it shows it; the idle timeout is for sessions
+/// nobody uses.
+#[test]
+fn round65_fix_bag_viewer_loot_tab_keeps_hidden_session_alive() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9301, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let (lx, ly, _) = bv.action_hit("Loot").unwrap();
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick();
+    bv.play.bags_corpse(&bv_corpse());
+    bv.frames(2);
+    let hidden_open = |bv: &Bv| {
+        super::super::window_takeover::is_hidden_active(super::super::window_takeover::TakeoverKind::Loot)
+            && bv.play.bags_corpse_held()
+    };
+    assert!(hidden_open(&bv), "the corpse is open (hidden) in the tab");
+    // the player reads the tab for longer than the idle timeout
+    super::super::window_takeover::expire_hidden_session_for_test(super::super::window_takeover::TakeoverKind::Loot);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert!(hidden_open(&bv), "L5: the Loot tab must renew the session while it is shown");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// L7: the manifest declares exactly the actions the Lua calls.
+#[test]
+fn round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods/eqoa_bag_viewer");
+    let mut used = std::collections::BTreeSet::new();
+    for file in ["main.lua", "modules/bags.lua"] {
+        let src = std::fs::read_to_string(root.join(file)).unwrap();
+        let mut rest = src.as_str();
+        while let Some(i) = rest.find("eqoa.actions.") {
+            rest = &rest[i + "eqoa.actions.".len()..];
+            let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            if !name.is_empty() {
+                used.insert(name);
+            }
+        }
+    }
+    // cancel and stop_batch ask for no capability
+    used.remove("cancel");
+    used.remove("stop_batch");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("mod.json")).unwrap()).unwrap();
+    let declared: std::collections::BTreeSet<String> = manifest["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|c| c.as_str()?.strip_prefix("eqoa.actions.").map(str::to_string))
+        .collect();
+    assert!(!declared.contains("*"), "no blanket eqoa.actions.*");
+    assert_eq!(declared, used, "declared actions must equal the actions the mod calls");
 }
