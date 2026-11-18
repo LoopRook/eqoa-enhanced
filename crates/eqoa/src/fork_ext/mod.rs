@@ -30,7 +30,10 @@ pub mod version;
 /// The client asked to loot corpse `id` (0x0015): the loot window's source, when its list arrives.
 pub(crate) fn loot_requested(_id: u32) {
     #[cfg(not(target_arch = "wasm32"))]
-    loot_source::requested(_id);
+    {
+        loot_source::requested(_id);
+        addons::window_takeover::note_loot_request(_id);
+    }
 }
 
 /// Returns whether the client is in plain gameplay (mode 0 or manual camera 38

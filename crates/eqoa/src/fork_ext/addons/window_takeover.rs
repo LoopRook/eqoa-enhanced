@@ -85,6 +85,10 @@ struct PendingOpen {
     vm: u64,
     target_id: u32,
     expires_at: Instant,
+    /// The mod's own loot request (0x0015) went out after the claim was armed.
+    request_seen: bool,
+    /// Another loot request followed it while the claim waited: the reply cannot be told apart.
+    foreign: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -296,6 +300,8 @@ pub(crate) fn arm_pending_open(kind: TakeoverKind, vm: u64, target_id: u32) -> b
             vm,
             target_id,
             expires_at: Instant::now() + PENDING_OPEN_TIMEOUT,
+            request_seen: false,
+            foreign: false,
         });
         true
     })
@@ -327,33 +333,54 @@ pub(crate) fn hidden_bank_session() -> Option<u32> {
     })
 }
 
-/// The target an incoming open can be tied to: the corpse the client asked for (loot) or the shop's
-/// NPC (merchant) as the packet path observed it; for a bank (0x124D carries no id) the player's
-/// current target, which the mod's `talk` set. `None` when it cannot be told (M2).
-fn known_target(
-    kind: TakeoverKind,
-    observed_target: Option<u32>,
-    fallback_player_target: Option<u32>,
-) -> Option<u32> {
-    match kind {
-        TakeoverKind::Bank => fallback_player_target,
-        TakeoverKind::Loot | TakeoverKind::Merchant => observed_target,
+/// What became of an incoming server open (`0x0018`, `0x00B7`, `0x124D`) the takeover looked at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OpenDecision {
+    /// Nobody holds this kind: nothing to decide.
+    NoHolder,
+    Accepted(&'static str),
+    Declined(&'static str),
+}
+
+impl OpenDecision {
+    pub(crate) fn accepted(self) -> bool {
+        matches!(self, Self::Accepted(_))
     }
 }
 
-/// Accepts an incoming server open (`0x0018`, `0x00B7`, `0x124D`) as hidden when:
+/// A loot request (0x0015) was just sent by the client. The first one after a claim was armed is the
+/// mod's own (the claim is armed in the same step that sends it); any further one while the claim
+/// waits makes the reply ambiguous.
+pub(crate) fn note_loot_request(target_id: u32) {
+    if !has_activity() {
+        return;
+    }
+    with_state_mut(|s| {
+        if let Some(p) = s.pending_opens[TakeoverKind::Loot as usize].as_mut() {
+            if p.request_seen || target_id != p.target_id {
+                p.foreign = true;
+            } else {
+                p.request_seen = true;
+            }
+        }
+    });
+}
+
+/// Decides an incoming server open (`0x0018`, `0x00B7`, `0x124D`): hidden when
 /// - `holder.scope == TakeoverScope::Own` and a pending `open_loot`/`talk` exists whose target the
-///   open is **known** to match (loot and merchant: the observed id; bank: the player's target);
-///   an open that cannot be tied to the pending request is left to the native window, OR
+///   open is **known** to match: loot, when no other loot request overlapped the mod's (the client
+///   knows its own requests, whatever the server's request bookkeeping says; with an overlap, the
+///   observed id decides); merchant: the observed shop id; bank: the player's target. An open that
+///   cannot be tied to the pending request is left to the native window, OR
 /// - `holder.scope == TakeoverScope::All` (both mod-started and player-started opens).
-pub(crate) fn try_accept_open(
+pub(crate) fn decide_open(
     kind: TakeoverKind,
     observed_target: Option<u32>,
     fallback_player_target: Option<u32>,
     self_pos: Option<[f32; 3]>,
-) -> bool {
+) -> OpenDecision {
     if !has_activity() {
-        return false;
+        return OpenDecision::NoHolder;
     }
     let now = Instant::now();
     with_state_mut(|s| {
@@ -366,28 +393,45 @@ pub(crate) fn try_accept_open(
         let Some((holder_vm, holder_scope)) = s.holders[idx].as_ref().map(|h| (h.vm, h.scope))
         else {
             s.pending_opens[idx] = None;
-            return false;
+            return OpenDecision::NoHolder;
         };
+        let mut why: &'static str = "no request of the holder is waiting for this window";
         if let Some(pending) = s.pending_opens[idx] {
             if pending.vm != holder_vm {
                 s.pending_opens[idx] = None;
-            } else if holder_scope == TakeoverScope::All
-                && observed_target.is_none_or(|obs| obs == pending.target_id)
-                || holder_scope == TakeoverScope::Own
-                    && known_target(kind, observed_target, fallback_player_target)
-                        == Some(pending.target_id)
-            {
-                s.pending_opens[idx] = None;
-                s.pending_close[idx] = false;
-                s.hidden[idx] = HiddenSession {
-                    active: true,
-                    vm: holder_vm,
-                    scope: holder_scope,
-                    target_id: pending.target_id,
-                    opened_at_pos: self_pos.map(|p| p.map(f32::to_bits)),
-                    last_activity: now,
+            } else {
+                let matched = match holder_scope {
+                    TakeoverScope::All => {
+                        observed_target.is_none_or(|obs| obs == pending.target_id)
+                    }
+                    TakeoverScope::Own => {
+                        let known = match kind {
+                            TakeoverKind::Bank => fallback_player_target,
+                            TakeoverKind::Merchant => observed_target,
+                            TakeoverKind::Loot if !pending.foreign => Some(pending.target_id),
+                            TakeoverKind::Loot => observed_target,
+                        };
+                        known == Some(pending.target_id)
+                    }
                 };
-                return true;
+                if matched {
+                    s.pending_opens[idx] = None;
+                    s.pending_close[idx] = false;
+                    s.hidden[idx] = HiddenSession {
+                        active: true,
+                        vm: holder_vm,
+                        scope: holder_scope,
+                        target_id: pending.target_id,
+                        opened_at_pos: self_pos.map(|p| p.map(f32::to_bits)),
+                        last_activity: now,
+                    };
+                    return OpenDecision::Accepted("answers the holder's own request");
+                }
+                why = if pending.foreign {
+                    "another loot request overlapped the holder's; the reply cannot be told apart"
+                } else {
+                    "does not match the holder's pending request (other target or unknown)"
+                };
             }
         }
         if holder_scope == TakeoverScope::All {
@@ -400,10 +444,21 @@ pub(crate) fn try_accept_open(
                 opened_at_pos: self_pos.map(|p| p.map(f32::to_bits)),
                 last_activity: now,
             };
-            return true;
+            return OpenDecision::Accepted(
+                "holder takes over every window of this kind (scope all)",
+            );
         }
-        false
+        OpenDecision::Declined(why)
     })
+}
+
+pub(crate) fn try_accept_open(
+    kind: TakeoverKind,
+    observed_target: Option<u32>,
+    fallback_player_target: Option<u32>,
+    self_pos: Option<[f32; 3]>,
+) -> bool {
+    decide_open(kind, observed_target, fallback_player_target, self_pos).accepted()
 }
 
 pub(crate) fn touch_hidden_session(kind: TakeoverKind) {

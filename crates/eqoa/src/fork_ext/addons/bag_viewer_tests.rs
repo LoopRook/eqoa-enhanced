@@ -2671,3 +2671,84 @@ fn round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses() {
     assert!(!declared.contains("*"), "no blanket eqoa.actions.*");
     assert_eq!(declared, used, "declared actions must equal the actions the mod calls");
 }
+
+/// Owner test of round 6.5 (a, b): the corpse button opens the nearest corpse into the Corpse tab and SHOWS its
+/// items, without the game's window and without taking anything; stale loot-request bookkeeping (a request the
+/// server never answered) must not turn the mod's open into a native window.
+#[test]
+fn round65_fix2_open_corpse_shows_items_hidden_even_with_stale_loot_requests() {
+    r65fix2_open_corpse(true);
+}
+
+#[test]
+fn round65_fix2_open_button_only_displays_never_takes() {
+    r65fix2_open_corpse(false);
+}
+
+fn r65fix2_open_corpse(stale: bool) {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play
+        .bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    // requests of earlier play that no list ever answered: the loot-source bookkeeping is tainted for good
+    if stale {
+        crate::fork_ext::loot_requested(7001);
+        crate::fork_ext::loot_requested(7002);
+    }
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let (lx, ly, lbl) = bv.action_hit("Loot").unwrap();
+    assert_eq!(lbl, "Loot");
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100},
+        {"name":"Bone Chip","id":2004,"key":2,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    assert_eq!(
+        bv.play.mode, 0,
+        "the game's corpse window must not open after a Bag Viewer button"
+    );
+    assert!(
+        super::super::window_takeover::is_hidden_active(
+            super::super::window_takeover::TakeoverKind::Loot
+        ),
+        "the open is the mod's hidden session"
+    );
+    let names = bv.names();
+    assert_eq!(
+        names,
+        vec!["Rat Pelt", "Bloodstone", "Bone Chip"],
+        "the Corpse tab shows the corpse's items"
+    );
+    assert_eq!(bv.result_text(), Some(("Corpse ready".into(), Some(true))));
+    // Opening must not leave a take queued for the next broker tick.
+    let sends = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    assert_eq!(
+        bv.play.bags_sends_lost(),
+        sends,
+        "opening must not queue a take request"
+    );
+    assert_eq!(bv.names().len(), 3);
+    assert!(bv.eval::<bool>("#assert(eqoa.loot.get()).items == 3"));
+    if std::env::var_os("EQOA_R6_CAPTURE_DIR").is_some() {
+        let shot = bv.frames(1);
+        bv_r6_png(&rm_pixels(&bv.gpu, &shot), bv.win, "r65-corpse-open.png");
+    }
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+}
+
