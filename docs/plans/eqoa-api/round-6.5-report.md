@@ -76,6 +76,10 @@ commit that follows them.
 
 First full gate run (before the last fix): `round6_m1_loot_all_ignores_unrelated_inv_add_before_close` failed, because the new "no answer" wording replaced the broker's own reason ("corpse closed") for a take the server never confirmed. Fixed in the Bag Viewer (`M.timed_out`: only the broker's 10 s timeout gets the new wording); that old test is the control. `round4_device_recovery_flushes_json_...` failed once under load and passes alone.
 
+### Gates (recovery, final tree)
+
+`python tools/run_gates.py --release`, full, no filter: **ALL GATES PASSED**. addons 507 passed / 0 failed; full 2402 passed / 0 failed / 30 ignored (disc-dependent tests that skip here: no 2002 disc, no live S2, no `run/client.bin`, no symlink privilege, no reviewed UI goldens); wasm, footprint (4 of 6 upstream lines, unchanged), paths, player-release and release build PASS. Oracle tests skip on this machine (no decomp). Live server behaviour (merchant answer, bank range) is not covered by any test.
+
 ### Executed negative controls (recovery)
 
 Each fix was reverted in the working tree and the `round65` tests run; all 28 pass
