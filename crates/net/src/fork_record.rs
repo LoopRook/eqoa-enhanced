@@ -101,6 +101,8 @@ struct Recorder {
     size: usize,
     limit: usize,
     secrets: Vec<Vec<u8>>,
+    credential_drop_logged: bool,
+    part_removal_logged: bool,
 }
 
 fn opcode(ty: u8, data: &[u8]) -> Option<u16> {
@@ -121,19 +123,25 @@ impl Recorder {
             size: 0,
             limit: PART_LIMIT,
             secrets: Vec::new(),
+            credential_drop_logged: false,
+            part_removal_logged: false,
         }
     }
 
     fn note_credentials(&mut self, account: &str, password: &str) {
-        for value in [account, password] {
-            if !value.is_empty() {
-                for bytes in [
-                    value.as_bytes().to_vec(),
-                    value.encode_utf16().flat_map(u16::to_le_bytes).collect(),
-                ] {
-                    if !self.secrets.contains(&bytes) {
-                        self.secrets.push(bytes);
-                    }
+        for value in [account, password].into_iter().filter(|v| !v.is_empty()) {
+            let short = value.chars().take(4).count() < 4;
+            let narrow = value.as_bytes().to_vec();
+            let wide: Vec<u8> = value.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            for (units, mut bytes) in [(narrow.len(), narrow), (wide.len() / 2, wide)] {
+                if short {
+                    // Match a full protocol string field for short values.
+                    let mut field = (units as u32).to_le_bytes().to_vec();
+                    field.extend(bytes);
+                    bytes = field;
+                }
+                if !self.secrets.contains(&bytes) {
+                    self.secrets.push(bytes);
                 }
             }
         }
@@ -178,6 +186,7 @@ impl Recorder {
         // State channels and local connection notifications have no opcode.
         // DRDP system, fragment and connectionless payloads stay outside the file.
         let permitted = match opcode(ty, data) {
+            // Add any new authentication or credential-carrying opcode to this blocklist.
             Some(op) => !matches!(
                 op,
                 0x0000
@@ -198,13 +207,18 @@ impl Recorder {
                     || matches!(ty, drdp::TYPE_CONNECT | drdp::TYPE_DISCONNECT)
             }
         };
-        if !permitted
-            || self
-                .secrets
-                .iter()
-                .any(|s| data.windows(s.len()).any(|w| w == s))
-            || data.len() > self.limit - MAGIC.len() - HEADER_LEN
+        if !permitted || data.len() > self.limit - MAGIC.len() - HEADER_LEN {
+            return Ok(());
+        }
+        if self
+            .secrets
+            .iter()
+            .any(|s| data.windows(s.len()).any(|w| w == s))
         {
+            if !self.credential_drop_logged {
+                eprintln!("session recorder: dropped a message containing a known credential");
+                self.credential_drop_logged = true;
+            }
             return Ok(());
         }
         let size = HEADER_LEN + data.len();
@@ -238,8 +252,12 @@ impl Recorder {
         self.parts.push_back(path);
         self.next_part += 1;
         self.size = MAGIC.len();
-        if self.parts.len() > RETAIN_PARTS {
-            fs::remove_file(self.parts.pop_front().unwrap())?;
+        if self.parts.len() > RETAIN_PARTS
+            && let Err(error) = fs::remove_file(self.parts.pop_front().unwrap())
+            && !self.part_removal_logged
+        {
+            eprintln!("session recorder: could not remove an old recording part: {error}");
+            self.part_removal_logged = true;
         }
         Ok(())
     }
@@ -297,6 +315,37 @@ mod tests {
         }
         fs::remove_dir(recorder.dir).unwrap();
         bytes
+    }
+
+    #[test]
+    fn session_recording_is_inert_without_opt_in() {
+        if std::env::var_os("EQOA_RECORD_SESSION").is_some() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .env_remove("EQOA_RECORD_SESSION")
+                .args([
+                    "--exact",
+                    "fork_record::tests::session_recording_is_inert_without_opt_in",
+                ])
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        let dir = test_recorder("disabled").dir;
+        start(&dir, Some("disabled"));
+        let mut session = test_session();
+        session.state = State::Selecting;
+        let world_dump = drdp::Message {
+            ty: drdp::TYPE_GUARANTEED,
+            connection: session.conn,
+            data: vec![0x0D, 0x00],
+            ..Default::default()
+        };
+        receive(&mut session, &world_dump);
+        assert!(!ENABLED.load(Ordering::Relaxed));
+        assert!(RECORDER.lock().unwrap().is_none());
+        assert!(session.record.is_none());
+        assert!(!dir.exists());
     }
 
     #[test]
@@ -382,5 +431,55 @@ mod tests {
             assert_eq!(part.len(), 25);
             assert_eq!(payloads(part), [(0, 251, &[0x18, 0, counter][..])]);
         }
+    }
+
+    #[test]
+    fn session_recording_short_credentials_match_full_fields() {
+        use crate::stream::Writer;
+
+        let mut recorder = test_recorder("short-credentials");
+        recorder.note_credentials("x", "pw");
+        let mut account = Writer::op(0x000B);
+        account.string(b"x");
+        let mut password = Writer::op(0x000B);
+        password.wide("pw");
+        let mut game = Writer::op(0x000B);
+        game.string(b"extra").wide("spawning");
+        let mut token = Writer::op(0x000B);
+        token.bytes(&crate::auth::udp_token("pw"));
+        let loot = [0x18, 0, 0x55];
+        for bytes in [
+            account.data.as_slice(),
+            &password.data,
+            &game.data,
+            &token.data,
+            &loot,
+        ] {
+            recorder.write(0, 251, bytes).unwrap();
+        }
+        let parts = finish(recorder);
+        assert_eq!(
+            payloads(&parts[0]),
+            [(0, 251, game.data.as_slice()), (0, 251, &loot[..])]
+        );
+    }
+
+    #[test]
+    fn session_recording_rotation_continues_when_an_old_part_cannot_be_removed() {
+        let mut recorder = test_recorder("rotation-remove-error");
+        recorder.limit = 25;
+        for counter in 0..4 {
+            recorder.write(0, 251, &[0x18, 0, counter]).unwrap();
+        }
+        let oldest = recorder.parts.front().unwrap().clone();
+        fs::remove_file(&oldest).unwrap();
+        fs::create_dir(&oldest).unwrap();
+        let rotated = recorder.write(0, 251, &[0x18, 0, 4]);
+        fs::remove_dir(oldest).unwrap();
+        rotated.expect("rotation continues after old-file removal fails");
+        recorder.write(0, 251, &[0x18, 0, 5]).unwrap();
+        let parts = finish(recorder);
+        assert_eq!(parts.len(), 4);
+        assert_eq!(payloads(&parts[3]), [(0, 251, &[0x18, 0, 5][..])]);
     }
 }

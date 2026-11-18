@@ -1885,7 +1885,10 @@ fn session_recording_replays_round6_close_and_smaller_reopen() {
     assert_eq!(rows.len(), 5);
     assert!(rows[1].sent);
     for confirmed in [true, false] {
-        let Some(mut bv) = Bv::new() else { return };
+        let Some(mut bv) = Bv::new() else {
+            eprintln!("SKIP round 6 recording replay: no GPU adapter");
+            return;
+        };
         bv.enable();
         bv.play.bags_target_corpse(5001, "a decaying skeleton");
         bv.play.bags_press_loot();

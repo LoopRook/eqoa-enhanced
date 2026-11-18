@@ -28,8 +28,10 @@ parts of a run. Normal boots use the game's UTC log run stamp and the process ID
 Command-line play uses UTC epoch seconds and the process ID. Part numbers increment from 0001.
 
 One part holds at most 32 MiB. Rotation happens at a message boundary and keeps the newest four
-parts of that process run. Files from previous runs are retained. A row too large for an entire
-part is skipped. The writer opens files exclusively and stops recording after an I/O error.
+parts of that process run. If the recorder cannot remove an old part, it logs the first failure
+and continues writing. Files from previous runs are retained. A row too large for an entire part
+is skipped. The writer opens files exclusively and stops recording after a file creation or write
+error.
 
 Inbound payloads are observed after DRDP reassembly and before protocol dispatch, including
 messages that change session state without producing a Play event. Outbound rows come from
@@ -52,12 +54,16 @@ It also drops these opcodes in either direction after the capture starts.
 - `0x0790`, `0x0791`, `0x0992`, `0x0993` for probe negotiation, token replies and probes.
 - `0x7E0F`, `0x7E65` for bug-note and crash-report bodies.
 
-Before writing, the recorder drops any whole payload containing the account name or password
-that the client registered at login, in either UTF-8 or UTF-16LE, or a derived UDP login token.
-This also catches literal copies of those values in gameplay text. It cannot identify unrelated
-credentials or altered spellings in free text. The collector reports metadata only. The package
-builder excludes recordings when it copies a starting configuration, and Git ignores `.eqrec`
-files at any depth.
+Add each new authentication or credential-carrying opcode to this blocklist when adding protocol
+support.
+Before writing, the recorder drops the entire payload if it matches a known account name,
+password or derived UDP login token. Text values of four or more characters match anywhere in
+UTF-8 or UTF-16LE. Shorter values match complete length-prefixed fields in those encodings, so a
+single character in unrelated gameplay data does not discard the row. The first credential match
+logs a notice without the value or payload. The filter cannot identify unrelated credentials or
+altered spellings in free text. Short values embedded in a longer text field fall outside the
+whole-field check. The collector reports metadata only. The package builder excludes recordings
+when it copies a starting configuration, and Git ignores `.eqrec` files at any depth.
 
 ## Replay and checks
 
