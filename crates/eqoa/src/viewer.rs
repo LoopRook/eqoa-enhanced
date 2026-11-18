@@ -5478,8 +5478,6 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         #[cfg(not(target_arch = "wasm32"))]
         if fork_report::event(self, el, &event) { return; }
-        #[cfg(not(target_arch = "wasm32"))]
-        if fork_report::addon_event(self, &event) { return; }
         let what = crate::stall::event_name(&event);
         self.stall.enter(Instant::now());
         self.handle_window_event(el, id, event);

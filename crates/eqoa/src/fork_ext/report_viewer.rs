@@ -13,6 +13,11 @@ fn claims_key(open: bool, key: &Key, play: Option<&crate::play::Play>) -> bool {
 }
 
 pub(super) fn event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) -> bool {
+    let pointer_shut = app.pointer_shut(event);
+    (!pointer_shut && report_event(app, el, event)) || addon_event(app, event, pointer_shut)
+}
+
+fn report_event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) -> bool {
     match event {
         WindowEvent::KeyboardInput { event, .. }
             if claims_key(
@@ -52,20 +57,19 @@ pub(super) fn event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) ->
     }
 }
 
-pub(super) fn addon_event(app: &mut App, event: &WindowEvent) -> bool {
-    let pointer_shut = app.pointer_shut(event);
-    let merc_key = matches!(event, WindowEvent::KeyboardInput { .. })
+fn addon_event(app: &mut App, event: &WindowEvent, pointer_shut: bool) -> bool {
+    let native_key = matches!(event, WindowEvent::KeyboardInput { .. })
         && app
             .play
             .as_ref()
-            .is_some_and(|p| p.typing.is_none() && p.merc_win_owns());
+            .is_some_and(|p| p.typing.is_none() && (p.merc_win_owns() || p.dyepick_owns()));
     let release = match event {
         WindowEvent::KeyboardInput { event, .. } => event.state == ElementState::Released,
         WindowEvent::MouseInput { state, .. } => *state == ElementState::Released,
         _ => false,
     };
     // A release still clears any ownership acquired before focus changed.
-    if (pointer_shut || merc_key) && !release {
+    if (pointer_shut || native_key) && !release {
         return pointer_shut;
     }
     let Some(g) = &mut app.gfx else {
@@ -73,7 +77,7 @@ pub(super) fn addon_event(app: &mut App, event: &WindowEvent) -> bool {
     };
     let plain_play = crate::fork_ext::is_plain_play(app.play.as_mut());
     let consumed = g.forge_runtime.event(&g.window, event, plain_play);
-    if !consumed || pointer_shut || merc_key {
+    if !consumed || pointer_shut || native_key {
         return pointer_shut;
     }
     // Keep physical pointer bookkeeping current without routing an
