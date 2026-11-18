@@ -225,8 +225,14 @@ pub fn install_health_adapter(
 ) -> mlua::Result<()> {
     let lua = &host.lua;
 
-    // 1. Module `frontiers_forge.player`
-    let player = lua.create_table()?;
+    // Preserve the complete player API regardless of installer order. This
+    // adapter only replaces its two health getters, never the module table.
+    if !host.has_host_module("frontiers_forge.player") {
+        super::player::install_player_adapter(host)?;
+    }
+    let Value::Table(player) = host.registered_modules()["frontiers_forge.player"].clone() else {
+        return Err(mlua::Error::runtime("player adapter must be a table"));
+    };
     let s = snapshot.clone();
     player.set(
         "GetCurrentHp",

@@ -71,3 +71,11 @@ handles use the existing no-link/reparse guards. Relative UTF-8 paths, sorted
 FileEntry records and the 1,024-entry refusal are explicit; enumeration never
 reports a truncated list as complete. `map_views.rs` refuses images/load_image as
 replaced by map.view and keeps the unbuilt waypoint pair not_yet with set_guide advice.
+
+## Step 6: stale claims and install order
+
+Removed MerchantState.button_hint's stale not_yet override and the dead client.time
+arity name. Updated the item adapter header to describe the implemented hint and
+native action service. The health adapter now starts with the full player adapter
+when needed and extends its table, so installing health last cannot drop GetName
+and the rest of the full API. Both orders are tested.

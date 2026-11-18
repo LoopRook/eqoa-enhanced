@@ -732,7 +732,6 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
                 symbol.as_str(),
                 "eqoa.client.get"
                     | "eqoa.client.display"
-                    | "eqoa.client.time"
                     | "eqoa.player.get"
                     | "eqoa.player.stats"
                     | "eqoa.actions.assist"

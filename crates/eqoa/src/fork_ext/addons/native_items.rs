@@ -728,14 +728,7 @@ fn install_fields(lua: &Lua) {
             describe(lua, &format!("{path}.{field}"), "supported", Some(5), "");
         }
     }
-    // the button hint is the game's glyph text (`windows.format_hint`), which is not built yet
-    describe(
-        lua,
-        "eqoa.items.MerchantState.button_hint",
-        "not_yet",
-        Some(6),
-        "needs windows.format_hint, which is not built yet",
-    );
+
 }
 
 pub(crate) fn install(host: &Host) -> Result<()> {
