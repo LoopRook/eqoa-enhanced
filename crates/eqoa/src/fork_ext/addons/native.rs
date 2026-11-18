@@ -323,6 +323,18 @@ pub(crate) fn annotate_host(host: &Host) -> Result<()> {
             "the native client has no matching pointer/config payload",
         );
     }
+    // Temporary hand list until Part C derives this metadata from bindings.
+    for path in [
+        "frontiers_forge.quest", "frontiers_forge.quest.new", "frontiers_forge.quest.GetName",
+        "frontiers_forge.cave", "frontiers_forge.cave.IsRegionZero", "frontiers_forge.cave.Alloc",
+        "frontiers_forge.cave.Reserve", "frontiers_forge.cave.Get", "frontiers_forge.cave.Free",
+        "frontiers_forge.cave.Release", "frontiers_forge.cave.Info",
+    ] {
+        describe(lua, path, "unsupported", None, "raw memory is excluded; use eqoa.quests for native quest records");
+    }
+    for path in ["eqoa.icons.SurfaceInfo.source_format"] {
+        describe(lua, path, "unsupported", None, "icon provider retains decoded RGBA pixels without original source format");
+    }
     for path in [
         "frontiers_forge.player.GetCMs",
         "frontiers_forge.player.GetCMsSpent",

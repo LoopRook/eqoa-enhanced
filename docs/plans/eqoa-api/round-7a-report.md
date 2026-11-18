@@ -79,3 +79,11 @@ arity name. Updated the item adapter header to describe the implemented hint and
 native action service. The health adapter now starts with the full player adapter
 when needed and extends its table, so installing health last cannot drop GetName
 and the rest of the full API. Both orders are tested.
+
+## Step 7: capability hand list
+
+The temporary annotate_host hand list explicitly marks quest/cave and all nine
+members unsupported with the raw-memory exclusion reason. The icon source-format
+field is also honest on hosts lacking the texture service. Camera and icon texture
+functions remain supported services whose missing state diagnoses unavailable;
+marking them unsupported globally would contradict the production addon test.
