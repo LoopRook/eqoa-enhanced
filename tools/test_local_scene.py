@@ -14,6 +14,14 @@ LOOT = "chat: You receive 1 torn fire bat wings from the corpse."
 CLOSE = "play: 0x0016 (0 bytes) in mode 1"
 REFRESH = "play: 0x0018 (3 bytes) in mode 0"
 SCENE = [WORLD, SPAWN, TARGET, KILL, OPEN, REQUEST, LOOT, CLOSE, REFRESH]
+BAG_KEY = "script: mod key pressed"
+BAG_TARGET = "script: mod key pressed"
+BAG_TAKE = "script: mouse click Left at 650 615"
+MEAT = "chat: You receive sliver of fire bat meat from the corpse."
+BAG_LOOT = "scene: Bag Viewer loot log 14:25 sliver of fire bat meat x1, from fire bat"
+R65_OPEN = "takeover: mod open_loot -> corpse 0x1234, opcode 0x0015"
+R65_HIDDEN = "takeover: loot window HIDDEN for the mod (matched target)"
+R65_CLOSE = "takeover: loot hidden session closed (released); 0x0016 sent"
 
 
 class LocalSceneTests(unittest.TestCase):
@@ -47,6 +55,19 @@ class LocalSceneTests(unittest.TestCase):
             with self.subTest(wrong=wrong):
                 log = "\n".join([*SCENE[:index], wrong, *SCENE[index + 1:]])
                 self.assertFalse(all(scene_checks(log).values()))
+
+    def test_bag_requires_loot_after_the_click_and_rejects_junk(self):
+        bag = [*SCENE[:4], BAG_KEY, BAG_TARGET, OPEN, BAG_TAKE, MEAT, BAG_LOOT]
+        self.assertTrue(all(scene_checks("\n".join(bag), "bag-viewer").values()))
+        for log in (bag[:-1], [*bag, LOOT], [*bag[:-3], MEAT, BAG_TAKE, BAG_LOOT]):
+            self.assertFalse(all(scene_checks("\n".join(log), "bag-viewer").values()))
+
+    def test_r65_requires_open_hidden_and_closed_loot_session(self):
+        bag = [*SCENE[:4], BAG_KEY, R65_OPEN, R65_HIDDEN, BAG_TAKE.replace("650", "750"), MEAT, R65_CLOSE, BAG_LOOT]
+        self.assertTrue(all(scene_checks("\n".join(bag), "bag-viewer", True).values()))
+        for missing in (R65_OPEN, R65_HIDDEN, R65_CLOSE):
+            log = "\n".join(line for line in bag if line != missing)
+            self.assertFalse(all(scene_checks(log, "bag-viewer", True).values()))
 
 
 if __name__ == "__main__":

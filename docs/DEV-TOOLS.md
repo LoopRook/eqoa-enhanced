@@ -141,8 +141,38 @@ keep the evidence produced before the failure and exit with a nonzero status. Th
 stops its own server and discards the database copy on exit. This scene is run by the
 lead. The parsing tests can run independently with `python -B tools/test_local_scene.py`.
 
-In the Bag Viewer probe, the scratch profile enabled the addon and a scratch copy of its
-Lua opened the Corpse tab when loot arrived. The screenshots before and after a click on
-**Take all** both showed three items, and the client logged no loot request. `play` uses
-`EQOA_CLICKS` to call the native game's click handler directly. `EQOA_MOUSE` is read by
-the separate shot path. The addon receives pointer events through the window event handler.
+### Bag Viewer scene
+
+Build a release client with the scripted addon input changes, then run either scene.
+
+```powershell
+python -B tools/local_scene.py --scene bag-viewer
+python -B tools/local_scene.py --scene bag-viewer --r65 --exe <round-6.5-release-exe>
+```
+
+The scratch profile enables the bundled Bag Viewer, binds **B** to open it, and marks
+torn fire bat wings as junk. After the GM kills the bat, the develop scene uses the
+game's loot key on the scripted target. It opens the Bag Viewer's **Corpse** tab and
+clicks **Take all but junk**. The runner checks the client's loot receipt, reads the
+Bag Viewer's own loot log through the scene diagnostic, and compares
+the disposable database before and after the run to verify that meat entered the bag
+and wings were left behind. `scene.png` captures the Bag Viewer's loot log.
+
+`--r65` uses Bag Viewer's **Open nearest corpse** and requires the `takeover:` lines
+for the open request, hidden loot window, and hidden session close. The round 6.5 binary
+must also include the scripted addon input changes. `--exe <path>` selects a specific
+build if the executable in the shared Cargo directory is from another branch.
+
+### Addon input replay
+
+- `EQOA_MOUSE` accepts `click X Y@ms`, `rclick @creature name@ms`, `wheel N@ms`,
+  `press l|r@ms`, `release l|r@ms`, `move DX DY@ms`, `drag DX DY@ms`,
+  `ctrl down|up@ms`, and `linkclick [index]@ms`. In the
+  native window these use the same mouse event dispatcher, pointer claims, and ImGui
+  handlers as a physical mouse. `X Y` is measured in screenshot pixels when offscreen.
+- `EQOA_MOD_KEYS` accepts `b@ms`, `enter@ms`, and `text abc@ms`. A named key is
+  held for 100 ms. Text types one character every 80 ms. Keys pass through the addon
+  event and capture rules and reach the game when unclaimed.
+- Separate steps with semicolons. `EQOA_KEYS` remains the pregame script, and
+  `EQOA_PLAY_KEYS` and `EQOA_CLICKS` remain direct game scripts. `playshot` keeps
+  its original `EQOA_MOUSE` path.
