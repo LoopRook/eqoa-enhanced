@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REMOTE = "looprook"
 REPO = "LoopRook/eqoa-enhanced"
 WORKFLOW = "branch-gates.yml"
+WORKFLOW_PATH = ".github/workflows/" + WORKFLOW
 WORKFLOW_NAME = "Branch gates"  # the workflow's `name:`
 PREFIX = "ci/"
 REF_PREFIX = "refs/heads/ci/"
@@ -105,13 +106,20 @@ def remote_sha(branch):
     return out[0] if out else None
 
 
+def only_gate_runs(runs):
+    """Runs of this workflow. Until the file reaches the default branch, GitHub reports its path
+    as `workflowName` (and the `name:` only once the file parses), so accept either."""
+    return [r for r in runs
+            if WORKFLOW_NAME in (r.get("workflowName"), r.get("name"))
+            or WORKFLOW_PATH in (r.get("workflowName"), r.get("name"))]
+
+
 def runs_for(branch, sha=None):
     # No --workflow filter: gh needs the workflow file on the default branch for that, and
     # it lives only on the ci/ branch until it merges.
     out = run(["gh", "run", "list", "--repo", REPO, "--branch", ci_branch(branch), "--limit", "20",
-               "--json", "databaseId,headSha,url,status,conclusion,createdAt,workflowName"]).stdout
-    runs = [r for r in json.loads(out or "[]") if r["workflowName"] == WORKFLOW_NAME]
-    return [r for r in runs if sha is None or r["headSha"] == sha]
+               "--json", "databaseId,headSha,url,status,conclusion,createdAt,workflowName,name"]).stdout
+    return [r for r in only_gate_runs(json.loads(out or "[]")) if sha is None or r["headSha"] == sha]
 
 
 def find_run(branch, sha, wait=90):

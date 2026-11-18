@@ -133,6 +133,18 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
 
+class RunFilterTests(unittest.TestCase):
+    def test_only_this_workflow_counts_under_either_naming(self):
+        runs = [
+            {"workflowName": ".github/workflows/branch-gates.yml", "name": "Branch gates", "id": 1},
+            {"workflowName": ".github/workflows/branch-gates.yml", "name": ".github/workflows/branch-gates.yml", "id": 2},
+            {"workflowName": "Branch gates", "name": "Branch gates", "id": 3},
+            {"workflowName": "Nightly build", "name": "Nightly build", "id": 4},
+            {"workflowName": ".github/workflows/enhanced-dev.yml", "name": "x", "id": 5},
+        ]
+        self.assertEqual([r["id"] for r in ci_gates.only_gate_runs(runs)], [1, 2, 3])
+
+
 class SummaryTests(unittest.TestCase):
     CARGO = (
         "test a ... ok\ntest b ... FAILED\nSKIP: no disc image at run/eqoa.iso\nSKIP: no disc on hand\n"
