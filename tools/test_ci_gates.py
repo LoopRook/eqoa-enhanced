@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """ci_gates.py: argument handling and the ref-refusal rule. No network, no git writes."""
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -195,6 +196,13 @@ class SummaryTests(unittest.TestCase):
 
 class WorkflowTests(unittest.TestCase):
     WORKFLOW = (Path(__file__).resolve().parents[1] / ".github/workflows/branch-gates.yml").read_text(encoding="utf-8")
+
+    def test_single_line_run_values_hold_no_colon_space(self):
+        # `run: throw 'x: y'` is a YAML mapping error: GitHub rejects the file with a 0s failed run.
+        for line in self.WORKFLOW.splitlines():
+            match = re.match(r"\s*(?:- )?(?:run|name): (?!['\"|>])(.+)$", line)
+            if match:
+                self.assertNotIn(": ", match.group(1), line)
 
     def test_workflow_cannot_publish_or_write(self):
         self.assertIn("permissions:\n  contents: read", self.WORKFLOW)

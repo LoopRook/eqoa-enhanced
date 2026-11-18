@@ -94,7 +94,7 @@ jobs:
       - name: Fail when a gate failed
         if: steps.addons.outcome != 'success' || steps.full.outcome != 'success'
         shell: pwsh
-        run: throw 'A gate failed: see the summary'
+        run: throw 'A gate failed (see the summary)'
 
   checks:
     if: github.repository == 'LoopRook/eqoa-enhanced'
@@ -181,4 +181,4 @@ jobs:
       - name: Fail when a gate failed
         if: steps.wasm.outcome != 'success' || steps.footprint.outcome != 'success' || steps.paths.outcome != 'success' || steps.player_release.outcome != 'success' || steps.tools.outcome != 'success'
         shell: pwsh
-        run: throw 'A gate failed: see the summary'
+        run: throw 'A gate failed (see the summary)'

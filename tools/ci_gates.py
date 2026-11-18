@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REMOTE = "looprook"
 REPO = "LoopRook/eqoa-enhanced"
 WORKFLOW = "branch-gates.yml"
+WORKFLOW_NAME = "Branch gates"  # the workflow's `name:`
 PREFIX = "ci/"
 REF_PREFIX = "refs/heads/ci/"
 SUMMARY_JOBS = ("tests", "checks")
@@ -105,9 +106,11 @@ def remote_sha(branch):
 
 
 def runs_for(branch, sha=None):
-    out = run(["gh", "run", "list", "--repo", REPO, "--workflow", WORKFLOW, "--branch", ci_branch(branch),
-               "--limit", "10", "--json", "databaseId,headSha,url,status,conclusion,createdAt"]).stdout
-    runs = json.loads(out or "[]")
+    # No --workflow filter: gh needs the workflow file on the default branch for that, and
+    # it lives only on the ci/ branch until it merges.
+    out = run(["gh", "run", "list", "--repo", REPO, "--branch", ci_branch(branch), "--limit", "20",
+               "--json", "databaseId,headSha,url,status,conclusion,createdAt,workflowName"]).stdout
+    runs = [r for r in json.loads(out or "[]") if r["workflowName"] == WORKFLOW_NAME]
     return [r for r in runs if sha is None or r["headSha"] == sha]
 
 
@@ -133,7 +136,7 @@ def cmd_push(args):
         print(f"run: {found['url']}")
     else:
         print(f"no run appeared for {sha[:10]} (an unchanged commit starts no new run); see "
-              f"https://github.com/{REPO}/actions/workflows/{WORKFLOW}")
+              f"https://github.com/{REPO}/actions")
     return 0
 
 
