@@ -610,12 +610,15 @@ fn sync_hidden_sessions(play: &mut Play) {
     // the opens a mod's request still waits for: a pending claim without one (refused, timed out,
     // cancelled) is dropped, so it can never claim a window the player opens (M2)
     let waiting = crate::fork_ext::addons::action_broker::open_requests_waiting();
+    // the server closes a corpse after every take (0x0016) and the holder's batch is waiting for it to be listed
+    // again: that close is part of the cycle, not the end of the session
+    let reopen_expected = waiting.iter().any(|(_, kinds)| kinds[TakeoverKind::Loot as usize]);
     window_takeover::sync_sessions_with(
         |kind, _target_id, opened_pos| {
             // only the player's own walk since the open ends a session (never how far the corpse or NPC
             // was when it opened: the server decides what it allows, and a far corpse must still show)
             match kind {
-                TakeoverKind::Loot if play.npcw.corpse.is_none() => {
+                TakeoverKind::Loot if play.npcw.corpse.is_none() && !reopen_expected => {
                     return Err("the server closed the corpse");
                 }
                 TakeoverKind::Merchant if play.npcw.shop.id.is_none() => {

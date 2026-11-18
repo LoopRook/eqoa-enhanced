@@ -2865,3 +2865,155 @@ fn round65_fix2_unanswered_bank_requests_fail_visibly() {
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
 }
+
+// ---- Round 6.5 fix round 4, item 2: every open a mod causes stays hidden -------------------------------------------
+
+/// Owner log 2026-11-18: after a hidden open_loot the game's own corpse window showed during auto-loot and batches
+/// ("takeover: loot window left to the game (no request of the holder is waiting for this window ...)"). The live
+/// server closes the corpse after each take (0x0016); the broker asks for it again (0x0015) and the answer (0x0018)
+/// must be the mod's, like the first one: the game's window never shows, and no line of the takeover log says it
+/// was left to the game. `auto_loot` is how the batch starts (the button, or Auto-loot after a kill); `relist` is how
+/// the server goes on after a take: it lists the corpse again by itself right behind its close (what the owner's
+/// log shows: no client request before those lists), or only after the broker asks for it (0x0015).
+fn r65fix4_hidden_batch(auto_loot: bool, relist: bool) {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_self_id(77);
+    bv.enable();
+    let _ = super::super::window_takeover::take_log_for_test();
+    let items = |keys_from: usize| {
+        let all = [("Rat Pelt", 2001), ("Bloodstone", 2003), ("Bone Chip", 2004)];
+        serde_json::Value::Array(
+            all[keys_from..]
+                .iter()
+                .enumerate()
+                .map(|(k, (n, id))| serde_json::json!({"name": n, "id": id, "key": k, "qty": 1, "max_stack": 100}))
+                .collect(),
+        )
+    };
+    if auto_loot {
+        bv.open();
+        bv.frames(2);
+        assert!(super::super::options::set_toggle("eqoa_bag_viewer", "auto_loot", true));
+        bv.play.bags_spawn_npc(9011, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
+        bv.play.bags_target_sync(9011);
+        bv.play.bags_combat_hit(77, 9011, -12);
+        bv.frames(2);
+        bv.play.bags_entity_die(9011);
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+    } else {
+        bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+        bv.open();
+        bv.frames(2);
+        bv.click(bv.tab(7));
+        bv.frames(1);
+        let (lx, ly, _) = bv.action_hit("Take all but junk").unwrap();
+        bv.click((lx, ly));
+        bv.play.bags_broker_tick();
+    }
+    let names = ["Rat Pelt", "Bloodstone", "Bone Chip"];
+    // the list that answers the open
+    bv.play.bags_corpse(&items(0));
+    for (taken, name) in names.iter().enumerate() {
+        bv.frames(2);
+        assert_eq!(bv.play.mode, 0, "the game's corpse window must not show (list {taken})");
+        bv.play.bags_broker_tick(); // the next take
+        let id = [2001, 2003, 2004][taken];
+        bv.play.bags_added(&serde_json::json!({"name": name, "id": id, "key": 80 + taken, "qty": 1, "max_stack": 100}));
+        bv.play.bags_chat(&format!("You receive {name} from the corpse."));
+        bv.play.bags_loot_close(); // the server closes the corpse after every take
+        if taken + 1 < names.len() {
+            if relist {
+                // ... and lists it again at once, with no request of ours before it
+                bv.play.bags_corpse(&items(taken + 1));
+            } else {
+                bv.frames(1);
+                let before = bv.play.bags_sends_lost();
+                bv.play.bags_broker_tick(); // the broker asks for the corpse again: 0x0015
+                assert!(bv.play.bags_sends_lost() > before, "the broker asks for the corpse again (take {taken})");
+                bv.play.bags_corpse(&items(taken + 1));
+            }
+        }
+    }
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "no game window at the end");
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(
+        !log.iter().any(|l| l.contains("left to the game")),
+        "every open the mod caused stays hidden, got: {log:#?}"
+    );
+    assert_eq!(
+        log.iter().filter(|l| l.contains("window HIDDEN for the mod")).count(),
+        3,
+        "the open and each list after a take are all the mod's: {log:#?}"
+    );
+    assert_eq!(bv.result_text(), Some(("Looted 3 of 3".into(), Some(true))));
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+}
+
+#[test]
+fn round65_fix4_item2_take_all_but_junk_relists_stay_hidden() {
+    r65fix4_hidden_batch(false, true);
+}
+
+#[test]
+fn round65_fix4_item2_take_all_but_junk_reopens_asked_by_the_broker_stay_hidden() {
+    r65fix4_hidden_batch(false, false);
+}
+
+#[test]
+fn round65_fix4_item2_auto_loot_relists_stay_hidden() {
+    r65fix4_hidden_batch(true, true);
+}
+
+#[test]
+fn round65_fix4_item2_auto_loot_reopens_asked_by_the_broker_stay_hidden() {
+    r65fix4_hidden_batch(true, false);
+}
+
+/// A corpse the player clicks themselves while a hidden session is up is still theirs: the game's window shows.
+#[test]
+fn round65_fix4_item2_a_players_own_click_on_the_corpse_still_shows_the_game_window() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let (lx, ly, _) = bv.action_hit("Take all but junk").unwrap();
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick();
+    let list = serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100}
+    ]);
+    bv.play.bags_corpse(&list);
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "the mod's open is hidden");
+    // the player presses the loot button on the same corpse themselves: no claim of the mod's stands behind it
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&list);
+    assert_eq!(bv.play.mode, 1, "the player's own request shows the game's corpse window");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+}
+

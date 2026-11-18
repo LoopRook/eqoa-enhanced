@@ -118,6 +118,9 @@ pub(crate) struct HiddenSession {
     pub target_id: u32,
     pub opened_at_pos: Option<[u32; 3]>,
     pub last_activity: Instant,
+    /// The player asked for a corpse themselves (a loot request no claim of the holder stood behind) while
+    /// this session was up: the next list is theirs, not the session's continuing.
+    pub player_asked: bool,
 }
 
 impl Default for HiddenSession {
@@ -129,6 +132,7 @@ impl Default for HiddenSession {
             target_id: u32::MAX,
             opened_at_pos: None,
             last_activity: Instant::now(),
+            player_asked: false,
         }
     }
 }
@@ -389,6 +393,9 @@ pub(crate) fn note_loot_request(target_id: u32) {
             } else {
                 p.request_seen = true;
             }
+        } else if s.hidden[TakeoverKind::Loot as usize].active {
+            // no claim of the holder's stands behind this request: the player's own
+            s.hidden[TakeoverKind::Loot as usize].player_asked = true;
         }
     });
 }
@@ -451,6 +458,7 @@ pub(crate) fn decide_open(
                         target_id: pending.target_id,
                         opened_at_pos: self_pos.map(|p| p.map(f32::to_bits)),
                         last_activity: now,
+                        player_asked: false,
                     };
                     return OpenDecision::Accepted("answers the holder's own request");
                 }
@@ -459,6 +467,23 @@ pub(crate) fn decide_open(
                 } else {
                     "does not match the holder's pending request (other target or unknown)"
                 };
+            }
+        }
+        // The live server closes a corpse after every take (0x0016) and lists it again by itself (0x0018, no
+        // request of the client before it): that list is the holder's hidden session going on, not a window
+        // for the player. Unless the player asked for a corpse themselves meanwhile (`player_asked`).
+        if kind == TakeoverKind::Loot && holder_scope == TakeoverScope::Own {
+            let h = &mut s.hidden[idx];
+            if h.active && h.vm == holder_vm && fallback_player_target == Some(h.target_id) {
+                if h.player_asked {
+                    h.player_asked = false;
+                    why = "the player asked for this corpse themselves";
+                } else {
+                    h.last_activity = now;
+                    return OpenDecision::Accepted(
+                        "the server lists the holder's hidden corpse again (it closes and lists it after each take)",
+                    );
+                }
             }
         }
         if holder_scope == TakeoverScope::All {
@@ -470,6 +495,7 @@ pub(crate) fn decide_open(
                 target_id: observed_target.or(fallback_player_target).unwrap_or(u32::MAX),
                 opened_at_pos: self_pos.map(|p| p.map(f32::to_bits)),
                 last_activity: now,
+                player_asked: false,
             };
             return OpenDecision::Accepted(
                 "holder takes over every window of this kind (scope all)",
