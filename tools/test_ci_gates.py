@@ -193,17 +193,20 @@ class SummaryTests(unittest.TestCase):
             self.assertIn("| full | failure |", md.read_text(encoding="utf-8"))
 
     def test_status_text_lists_failures_and_skips(self):
-        text = ci_gates.format_status(
-            [{"name": "tests", "status": "completed", "conclusion": "failure",
-              "steps": [{"name": "full", "status": "completed", "conclusion": "failure"},
-                        {"name": "Set up job", "status": "completed", "conclusion": "success"}]}],
-            [{"gates": [{"name": "full", "outcome": "failure", "passed": 5, "failed": 1, "ignored": 3,
-                         "skips": 2, "failing": ["b"]}]}])
+        jobs = [{"name": "tests", "status": "completed", "conclusion": "failure",
+                 "steps": [{"name": "full", "status": "completed", "conclusion": "success"},
+                           {"name": "Set up job", "status": "completed", "conclusion": "success"}]}]
+        summary = {"gates": [{"name": "full", "outcome": "failure", "passed": 5, "failed": 1, "ignored": 3,
+                              "skips": 2, "failing": ["b"]}]}
+        text = ci_gates.format_status(jobs, [summary])
         self.assertIn("tests: failure", text)
-        self.assertIn("  full: failure", text)
-        self.assertNotIn("Set up job", text)
-        self.assertIn("2 SKIP", text)
+        self.assertIn("  full: failure; 5 passed, 1 failed, 3 ignored; 2 SKIP", text)
         self.assertIn("FAILING: b", text)
+        # The raw step said success (continue-on-error); it must not be shown as the result.
+        self.assertNotIn("full: success", text)
+        self.assertNotIn("Set up job", text)
+        # Without a summary the steps are shown, marked unverified.
+        self.assertIn("tests/full: success (unverified)", ci_gates.format_status(jobs, []))
 
 
 class WorkflowTests(unittest.TestCase):
@@ -215,6 +218,12 @@ class WorkflowTests(unittest.TestCase):
             match = re.match(r"\s*(?:- )?(?:run|name): (?!['\"|>])(.+)$", line)
             if match:
                 self.assertNotIn(": ", match.group(1), line)
+
+    def test_logs_stay_outside_the_checkout(self):
+        # Untracked files in the checkout fail the footprint gate (seen in the first CI trial).
+        self.assertNotIn("-FilePath gate-logs", self.WORKFLOW)
+        self.assertNotIn("--logs gate-logs", self.WORKFLOW)
+        self.assertEqual(self.WORKFLOW.count("GATE_LOGS=$canonicalTemp"), 2)
 
     def test_workflow_cannot_publish_or_write(self):
         self.assertIn("permissions:\n  contents: read", self.WORKFLOW)

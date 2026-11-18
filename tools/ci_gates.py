@@ -31,6 +31,7 @@ WORKFLOW_NAME = "Branch gates"  # the workflow's `name:`
 PREFIX = "ci/"
 REF_PREFIX = "refs/heads/ci/"
 SUMMARY_JOBS = ("tests", "checks")
+GATE_STEPS = ("addons", "full", "wasm", "footprint", "paths", "player-release", "tools")
 
 # Letters, digits and . _ - / only: no ':', '*', '^', '~', '?', '[', '\', spaces or '@{'.
 BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
@@ -149,12 +150,15 @@ def cmd_push(args):
 
 
 def format_status(jobs, summaries):
-    lines = []
-    for job in jobs:
-        lines.append(f"{job['name']}: {job.get('conclusion') or job['status']}")
-        for step in job.get("steps", []):
-            if step["name"] in ("addons", "full", "wasm", "footprint", "paths", "player-release", "tools"):
-                lines.append(f"  {step['name']}: {step.get('conclusion') or step['status']}")
+    """Per-job result, then per-gate detail. A gate's result comes from the summary artifact:
+    GitHub reports a continue-on-error step as success even when it failed, so the raw step
+    conclusions are shown only when no summary could be fetched."""
+    lines = [f"{job['name']}: {job.get('conclusion') or job['status']}" for job in jobs]
+    if not summaries:
+        for job in jobs:
+            for step in job.get("steps", []):
+                if step["name"] in GATE_STEPS:
+                    lines.append(f"  {job['name']}/{step['name']}: {step.get('conclusion') or step['status']} (unverified)")
     for summary in summaries:
         for gate in summary.get("gates", []):
             bits = [f"{gate['name']}: {gate['outcome']}"]
@@ -174,7 +178,7 @@ def fetch_summaries(run_id):
         with tempfile.TemporaryDirectory() as tmp:
             result = run(["gh", "run", "download", str(run_id), "--repo", REPO, "-n", f"gate-summary-{job}", "-D", tmp],
                          check=False)
-            path = Path(tmp) / f"gate-summary-{job}.json"
+            path = Path(tmp) / "summary.json"
             if result.returncode == 0 and path.exists():
                 summaries.append(json.loads(path.read_text(encoding="utf-8")))
     return summaries
