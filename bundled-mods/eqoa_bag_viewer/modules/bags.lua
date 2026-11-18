@@ -1011,6 +1011,13 @@ function M.no_answer_text(kind)
     return "no answer from the server"
 end
 
+-- The broker's own timeout (nothing came back in 10 s). Other "unknown" outcomes keep their own reason
+-- (for instance "corpse closed" for a take the server never confirmed).
+function M.timed_out(d)
+    if d.state ~= "unknown" and d.code ~= "unknown" then return false end
+    return d.reason == nil or d.reason:find("outcome unknown after", 1, true) ~= nil
+end
+
 function M.on_action_result(d)
     if not d then return end
     if M.pending_open and d.request_id == M.pending_open.req then
@@ -1025,7 +1032,7 @@ function M.on_action_result(d)
         elseif d.ok == true and d.phase ~= "dispatch" then
             finish_pending_open(p.kind)
             return
-        elseif d.ok == nil and (d.state == "unknown" or d.code == "unknown") then
+        elseif d.ok == nil and M.timed_out(d) then
             -- the server never answered the open: say so, never hang on "Opening..."
             M.pending_open = nil
             release_takeover(p.kind)
@@ -1048,7 +1055,7 @@ function M.on_action_result(d)
         end
     else
         local why = d.reason or d.code or d.state
-        if d.ok == nil and (d.state == "unknown" or d.code == "unknown") then
+        if d.ok == nil and M.timed_out(d) then
             why = M.no_answer_text(d.kind)
         end
         M.result = {text = label .. ": " .. why, ok = false}

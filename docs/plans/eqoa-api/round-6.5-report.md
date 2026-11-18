@@ -74,6 +74,8 @@ item, in that order: hidden corpse items, button label/display-only, merchant,
 logs, one close per session + far corpse, bank/timeouts) plus the log-helper
 commit that follows them.
 
+First full gate run (before the last fix): `round6_m1_loot_all_ignores_unrelated_inv_add_before_close` failed, because the new "no answer" wording replaced the broker's own reason ("corpse closed") for a take the server never confirmed. Fixed in the Bag Viewer (`M.timed_out`: only the broker's 10 s timeout gets the new wording); that old test is the control. `round4_device_recovery_flushes_json_...` failed once under load and passes alone.
+
 ### Executed negative controls (recovery)
 
 Each fix was reverted in the working tree and the `round65` tests run; all 28 pass
