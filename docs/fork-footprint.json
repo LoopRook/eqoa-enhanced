@@ -117,9 +117,9 @@
       "reason": "Map controls and focus/input behavior."
     },
     "crates/eqoa/src/main.rs": {
-      "added": 6,
+      "added": 7,
       "deleted": 0,
-      "reason": "Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged."
+      "reason": "Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged. Round 7 Part B: owner-approved single mod-api dispatch hook into fork_ext::modtools (question 6, round-7-plan)."
     },
     "crates/eqoa/src/options.rs": {
       "added": 17,
@@ -288,6 +288,12 @@
   ],
   "claude_upstream_copy": "docs/upstream/CLAUDE.md",
   "hooks": [
+    {
+      "path": "crates/eqoa/src/main.rs",
+      "name": "mod author tools dispatch",
+      "pattern": "fork_ext::modtools::run\\(args\\)",
+      "count": 1
+    },
     {
       "path": "crates/eqoa/src/main.rs",
       "name": "fork boundary module",

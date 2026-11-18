@@ -3,6 +3,14 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod addons;
 #[cfg(not(target_arch = "wasm32"))]
+pub use addons::modtools;
+#[cfg(target_arch = "wasm32")]
+pub mod modtools {
+    pub fn run(_: &[String]) -> Option<crate::Result<()>> {
+        None
+    }
+}
+#[cfg(not(target_arch = "wasm32"))]
 pub mod app_icon;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bundled;
