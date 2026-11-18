@@ -545,23 +545,48 @@ pub(crate) fn bank_session_open(play: &Play) -> bool {
 fn close_hidden_session(
     play: &mut Play,
     kind: crate::fork_ext::addons::window_takeover::TakeoverKind,
+    owed: crate::fork_ext::addons::window_takeover::OwedClose,
 ) {
     use crate::fork_ext::addons::window_takeover::TakeoverKind;
+    if !owed.had_session {
+        // released with no hidden session up: there is nothing of the mod's to close or to send
+        eprintln!(
+            "takeover: {} released with no hidden session ({}); nothing to close",
+            kind.name(),
+            owed.reason
+        );
+        return;
+    }
     match kind {
         TakeoverKind::Loot => {
-            if play.npcw.corpse.is_some() {
+            // one 0x0016 per session, and none when the server already closed the corpse (its own 0x0016 cleared it)
+            let sent = play.npcw.corpse.is_some();
+            if sent {
                 play.session.send_opcode(0x0016);
             }
-            let _ = play.npcw_opcode(0x0016, &[]);
+            eprintln!(
+                "takeover: loot hidden session closed ({}); 0x0016 {}",
+                owed.reason,
+                if sent {
+                    "sent"
+                } else {
+                    "not sent: the server had closed the corpse"
+                }
+            );
+            if sent {
+                let _ = play.npcw_opcode(0x0016, &[]);
+            }
             LOOT_BUSY.with(|b| b.set(false));
             crate::fork_ext::addons::action_broker::set_master_loot(false);
             crate::fork_ext::loot_source::closed();
         }
         TakeoverKind::Merchant => {
+            eprintln!("takeover: merchant hidden session closed ({})", owed.reason);
             play.npcw.merchant.visible = false;
             play.npcw.shop = Default::default();
         }
         TakeoverKind::Bank => {
+            eprintln!("takeover: bank hidden session closed ({})", owed.reason);
             play.bank.state = 0;
         }
     }
@@ -578,26 +603,26 @@ fn sync_hidden_sessions(play: &mut Play) {
     // cancelled) is dropped, so it can never claim a window the player opens (M2)
     let waiting = crate::fork_ext::addons::action_broker::open_requests_waiting();
     window_takeover::sync_sessions_with(
-        |kind, target_id, opened_pos| {
+        |kind, _target_id, opened_pos| {
+            // only the player's own walk since the open ends a session (never how far the corpse or NPC
+            // was when it opened: the server decides what it allows, and a far corpse must still show)
             match kind {
-                TakeoverKind::Loot if play.npcw.corpse.is_none() => return false,
-                TakeoverKind::Merchant if play.npcw.shop.id.is_none() => return false,
+                TakeoverKind::Loot if play.npcw.corpse.is_none() => {
+                    return Err("the server closed the corpse");
+                }
+                TakeoverKind::Merchant if play.npcw.shop.id.is_none() => {
+                    return Err("the merchant session is gone");
+                }
                 _ => {}
             }
             if let Some(pos) = self_pos {
                 if let Some(orig) = opened_pos
                     && ee::lt(625.0, ee_dist_sq(pos, orig))
                 {
-                    return false;
-                }
-                if target_id != u32::MAX
-                    && let Some(ent) = play.entities.slots.iter().flatten().find(|e| e.id == target_id)
-                    && ee::lt(625.0, ee_dist_sq(pos, ent.actor_pos))
-                {
-                    return false;
+                    return Err("walked away (more than 25 units)");
                 }
             }
-            true
+            Ok(())
         },
         |vm, kind| {
             waiting
@@ -610,8 +635,8 @@ fn sync_hidden_sessions(play: &mut Play) {
     if play.mode == 0 {
         let owed = window_takeover::take_owed_closes();
         for kind in TakeoverKind::ALL {
-            if owed[kind as usize] {
-                close_hidden_session(play, kind);
+            if let Some(o) = owed[kind as usize] {
+                close_hidden_session(play, kind, o);
             }
         }
         // M1: the mod is done: the player's own target comes back, unless they chose another

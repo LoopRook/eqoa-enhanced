@@ -117,6 +117,12 @@ impl Default for HiddenSession {
 /// The target the player had before a mod's `open_loot`/`talk` retargeted (M1): put back when the
 /// mod is done, if the player has not chosen another target meanwhile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct OwedClose {
+    pub reason: &'static str,
+    pub had_session: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RestoreTarget {
     pub vm: u64,
     pub prev: u32,
@@ -127,10 +133,12 @@ pub(crate) struct RestoreTarget {
 struct TakeoverState {
     holders: [Option<Holder>; 3],
     pending_opens: [Option<PendingOpen>; 3],
-    pending_close: [bool; 3],
+    /// Why a kind's hidden session is to end (set by release, the mod finishing, the holder going).
+    pending_close: [Option<&'static str>; 3],
     /// A hidden session ended and its close (0x0016 for a corpse, the state reset) is still to be
-    /// done: it waits for a moment when it cannot disturb a native window (M3).
-    close_owed: [bool; 3],
+    /// done: it waits for a moment when it cannot disturb a native window (M3). Carries the reason
+    /// and whether a hidden session was really up (no session, nothing to close or to send).
+    close_owed: [Option<OwedClose>; 3],
     hidden: [HiddenSession; 3],
     restore: Vec<RestoreTarget>,
 }
@@ -139,8 +147,8 @@ impl TakeoverState {
     fn has_activity(&self) -> bool {
         self.holders.iter().any(Option::is_some)
             || self.pending_opens.iter().any(Option::is_some)
-            || self.pending_close.iter().any(|&c| c)
-            || self.close_owed.iter().any(|&c| c)
+            || self.pending_close.iter().any(Option::is_some)
+            || self.close_owed.iter().any(Option::is_some)
             || self.hidden.iter().any(|h| h.active)
             || !self.restore.is_empty()
     }
@@ -224,7 +232,7 @@ pub(crate) fn release(vm: u64, kind: TakeoverKind) -> bool {
         if s.holders[idx].as_ref().is_some_and(|h| h.vm == vm) {
             s.holders[idx] = None;
             s.pending_opens[idx] = None;
-            s.pending_close[idx] = true;
+            s.pending_close[idx] = Some("released by the mod");
             true
         } else {
             false
@@ -239,7 +247,7 @@ pub(crate) fn release_all_for_vm(vm: u64) -> bool {
             if s.holders[idx].as_ref().is_some_and(|h| h.vm == vm) {
                 s.holders[idx] = None;
                 s.pending_opens[idx] = None;
-                s.pending_close[idx] = true;
+                s.pending_close[idx] = Some("mod released or went away");
                 any = true;
             }
         }
@@ -256,7 +264,7 @@ pub(crate) fn release_all() {
         for idx in 0..3 {
             if s.holders[idx].take().is_some() {
                 s.pending_opens[idx] = None;
-                s.pending_close[idx] = true;
+                s.pending_close[idx] = Some("zoning");
             }
         }
     });
@@ -416,7 +424,7 @@ pub(crate) fn decide_open(
                 };
                 if matched {
                     s.pending_opens[idx] = None;
-                    s.pending_close[idx] = false;
+                    s.pending_close[idx] = None;
                     s.hidden[idx] = HiddenSession {
                         active: true,
                         vm: holder_vm,
@@ -435,7 +443,7 @@ pub(crate) fn decide_open(
             }
         }
         if holder_scope == TakeoverScope::All {
-            s.pending_close[idx] = false;
+            s.pending_close[idx] = None;
             s.hidden[idx] = HiddenSession {
                 active: true,
                 vm: holder_vm,
@@ -485,7 +493,11 @@ pub(crate) fn end_session_for_vm(vm: u64, kind: TakeoverKind) {
             && s.hidden[idx].scope == TakeoverScope::Own
         {
             s.hidden[idx] = HiddenSession::default();
-            s.pending_close[idx] = true;
+            s.pending_close[idx] = Some("the mod's action or batch finished");
+            s.close_owed[idx] = Some(OwedClose {
+                reason: "the mod's action or batch finished",
+                had_session: true,
+            });
         }
     });
 }
@@ -495,7 +507,7 @@ pub(crate) fn end_session_for_vm(vm: u64, kind: TakeoverKind) {
 /// timed out, walked away from, window gone: `still_valid`) are reset and their close becomes owed.
 pub(crate) fn sync_sessions_with<F, W>(mut still_valid: F, awaiting: W)
 where
-    F: FnMut(TakeoverKind, u32, Option<[f32; 3]>) -> bool,
+    F: FnMut(TakeoverKind, u32, Option<[f32; 3]>) -> Result<(), &'static str>,
     W: Fn(u64, TakeoverKind) -> bool,
 {
     if !has_activity() {
@@ -515,19 +527,39 @@ where
             }
             if s.hidden[idx].active {
                 let opened_pos = s.hidden[idx].opened_at_pos.map(|b| b.map(f32::from_bits));
-                let timed_out = s.hidden[idx].scope == TakeoverScope::Own
+                let reason: Option<&'static str> = if let Some(r) = closed[idx] {
+                    Some(r)
+                } else if s.holders[idx]
+                    .as_ref()
+                    .is_none_or(|h| h.vm != s.hidden[idx].vm)
+                {
+                    Some("the holding mod is gone")
+                } else if s.hidden[idx].scope == TakeoverScope::Own
                     && now.saturating_duration_since(s.hidden[idx].last_activity)
-                        >= HIDDEN_SESSION_TIMEOUT;
-                let lost = closed[idx]
-                    || s.holders[idx].as_ref().is_none_or(|h| h.vm != s.hidden[idx].vm)
-                    || timed_out
-                    || !still_valid(kind, s.hidden[idx].target_id, opened_pos);
-                if lost {
+                        >= HIDDEN_SESSION_TIMEOUT
+                {
+                    Some("idle timeout (15 s without use)")
+                } else {
+                    still_valid(kind, s.hidden[idx].target_id, opened_pos).err()
+                };
+                if let Some(reason) = reason {
                     s.hidden[idx] = HiddenSession::default();
-                    s.close_owed[idx] = true;
+                    // an earlier owed close (the action finished) keeps its reason
+                    if s.close_owed[idx].is_none() {
+                        s.close_owed[idx] = Some(OwedClose {
+                            reason,
+                            had_session: true,
+                        });
+                    }
                 }
-            } else if closed[idx] {
-                s.close_owed[idx] = true;
+            } else if let Some(reason) = closed[idx] {
+                // released with no hidden session up: nothing to close, nothing to send
+                if s.close_owed[idx].is_none() {
+                    s.close_owed[idx] = Some(OwedClose {
+                        reason,
+                        had_session: false,
+                    });
+                }
             }
         }
     });
@@ -535,9 +567,9 @@ where
 
 /// The closes owed by ended hidden sessions, taken (cleared) so the caller sends each exactly once.
 /// Call only when closing cannot disturb a native window of the player's (M3).
-pub(crate) fn take_owed_closes() -> [bool; 3] {
+pub(crate) fn take_owed_closes() -> [Option<OwedClose>; 3] {
     if !has_activity() {
-        return [false; 3];
+        return [None; 3];
     }
     with_state_mut(|s| std::mem::take(&mut s.close_owed))
 }
@@ -564,7 +596,7 @@ pub(crate) fn take_restorable<I: Fn(u64) -> bool>(vm_idle: I) -> Vec<RestoreTarg
         let busy = |s: &TakeoverState, vm: u64| {
             s.pending_opens.iter().flatten().any(|p| p.vm == vm)
                 || s.hidden.iter().any(|h| h.active && h.vm == vm)
-                || s.close_owed.iter().any(|&c| c)
+                || s.close_owed.iter().any(Option::is_some)
                 || !vm_idle(vm)
         };
         let mut out = Vec::new();

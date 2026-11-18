@@ -3947,3 +3947,141 @@ fn round65_fix2_merchant_uses_native_flags_and_exact_request() {
     window_takeover::reset_all_for_test();
     action_broker::reset_all_for_test();
 }
+
+/// Owner test (5): one close per hidden session, and none when there is nothing to close: the mod's end of a
+/// session that the server already closed, or a release with no session up, sends no 0x0016.
+#[test]
+fn round65_fix2_one_close_per_hidden_session() {
+    use crate::fork_ext::addons::{
+        action_broker,
+        window_takeover::{self, TakeoverKind},
+    };
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let mut p = r65fix_world();
+    let sys = p.session.drdp.system_endpoint;
+    let remote = drdp::address_to_endpoint([127, 0, 0, 1], 10071, drdp::PORT_LEADER);
+    p.session.conn = p.session.drdp.connection_open(sys, remote);
+    assert!(p.session.conn.is_some());
+    p.session.record = Some(vec![]);
+    let closes = |p: &Play| {
+        p.session
+            .record
+            .as_ref()
+            .unwrap()
+            .iter()
+            .filter(|(_, data)| data == &0x0016u16.to_le_bytes())
+            .count()
+    };
+
+    // a) a live hidden session: the mod's release AND an idle expiry in the same pass send exactly one 0x0016
+    r65fix_own(TakeoverKind::Loot);
+    assert!(window_takeover::arm_pending_open(
+        TakeoverKind::Loot,
+        1,
+        9001
+    ));
+    crate::fork_ext::loot_requested(9001);
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 0);
+    window_takeover::expire_hidden_session_for_test(TakeoverKind::Loot);
+    assert!(window_takeover::release(1, TakeoverKind::Loot));
+    let before = closes(&p);
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(closes(&p) - before, 1, "exactly one 0x0016 for the session");
+    super::super::begin_iteration(&mut p, true);
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(
+        closes(&p) - before,
+        1,
+        "no further close on later iterations"
+    );
+    assert!(p.npcw.corpse.is_none());
+
+    // b) the server closed the corpse first (its own 0x0016): our end of the session sends nothing
+    window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    r65fix_own(TakeoverKind::Loot);
+    assert!(window_takeover::arm_pending_open(
+        TakeoverKind::Loot,
+        1,
+        9001
+    ));
+    crate::fork_ext::loot_requested(9001);
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    apply(&mut p, opcode(0x0016, vec![]));
+    let before = closes(&p);
+    assert!(window_takeover::release(1, TakeoverKind::Loot));
+    super::super::begin_iteration(&mut p, true);
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(
+        closes(&p),
+        before,
+        "the server already closed it: no second 0x0016"
+    );
+
+    // c) a release with no hidden session up closes nothing and sends nothing
+    window_takeover::reset_all_for_test();
+    r65fix_own(TakeoverKind::Loot);
+    let before = closes(&p);
+    assert!(window_takeover::release(1, TakeoverKind::Loot));
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(
+        closes(&p),
+        before,
+        "nothing was hidden, so nothing is closed"
+    );
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+}
+
+/// Owner test (a): the corpse the server lets you open may be far from you (the client has no range check):
+/// a session opened on a corpse beyond 25 units must stay up, ending only when the player walks away from where it
+/// opened.
+#[test]
+fn round65_fix2_far_corpse_session_is_not_closed_at_once() {
+    use crate::fork_ext::addons::{
+        action_broker,
+        window_takeover::{self, TakeoverKind},
+    };
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let mut p = r65fix_world();
+    p.entities.slots.push(r65fix_creature(
+        9400,
+        "a far orc corpse",
+        3,
+        0,
+        [40.0, 0.0, 0.0],
+    ));
+    r65fix_own(TakeoverKind::Loot);
+    assert!(window_takeover::arm_pending_open(
+        TakeoverKind::Loot,
+        1,
+        9400
+    ));
+    crate::fork_ext::loot_requested(9400);
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 0);
+    for _ in 0..5 {
+        super::super::begin_iteration(&mut p, true);
+    }
+    assert!(
+        super::super::loot_session_open(&p),
+        "a corpse opened from afar must stay open and show its items"
+    );
+    assert!(p.npcw.corpse.is_some());
+    p.self_at = Some(([0.0, 60.0, 0.0], None)); // the player walks off 60 units
+    super::super::begin_iteration(&mut p, true);
+    assert!(
+        !super::super::loot_session_open(&p),
+        "walking away from where it opened still ends it"
+    );
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+}
+
