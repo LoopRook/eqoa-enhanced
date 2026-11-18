@@ -1,5 +1,122 @@
 # Round 6.5 Report: Capabilities, Standalone Window Takeover, `open_loot`/`talk`, and Bag Viewer Auto-Loot
 
+## Fix round 4, 2026-11-18 (base `909fe54e`): frame rate, hidden re-opens, Auto-loot choice, greyed-out buttons
+
+Owner retest of `909fe54e`: "feels sluggish" (24 fps typical, 13 low; `hud` 10-40 ms a frame, worst with the Bags window
+open), and Auto-loot and batches still showed the game's corpse window. Owner-approved UI changes (2026-11-18) are items 3-6.
+Commits are LoopRook's on `feat/eqoa-api-r6.5`; nothing pushed, merged or tagged. Upstream footprint unchanged: **4 of 6**
+permitted seam lines; every change is in fork-owned files (`window_takeover.rs`, `play.rs` fork hooks, the bundled mod,
+tests).
+
+### 1. Frame rate: cause and fix
+
+**Cause (from the owner's `eqoa.log`, `EQOA_PERF` lines).** With the Bags window open the log shows
+`eqoa_bag_viewer 7.4-10.0 ms (lua 1.9-2.5, api 5.4-7.4)` and `addon-api: eqoa_bag_viewer entities.list 4.0x 5.1-6.7`:
+the window asked for `eqoa.entities.list()` **four times a frame** (`visible_tabs` and the button row each asked
+`nearby_corpse`; the context-button test asked `nearby_npc("merchant")` twice, the bank row once more), and every call clones and
+compares each creature record of the zone (`read.clone`, `record.list` in the `core:` line, 3-10 ms with the window open). The
+fight check of Auto-loot (`in_combat`) scanned the whole zone again on every creature update while a corpse waited. With
+the window closed the mod cost 0.2-0.5 ms; the `wereoxxs_ui` Forge package alone costs 6-8 ms of the quiet `hud` 10 ms
+(not part of this round).
+
+**Fix (`bags.lua`, `main.lua`).** One scan of the zone (`scan_zone`) answers the nearest corpse, merchant and banker, the
+corpses auto-loot may take and the "live hostile has me targeted" check. It is kept 0.5 s and dropped at once when a
+creature is added or removed (events the open window listens to), or turns into a corpse or changes its npc flags or target
+(the auto-loot handlers). Auto-loot's creature handlers are registered only while Auto-loot is on (the default is off), so the
+closed window no longer receives every creature update of the zone.
+
+**Test.** `round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame`: 100-slot pack, 700 creatures (35 updates a
+frame), a corpse and a merchant in reach. The window must ask for the list at most 3 times a second and cost less per frame
+than one list call (any build), and in a release build under 3 ms open and 0.2 ms closed.
+`round65_fix4_item1_waiting_auto_loot_shares_one_scan_of_the_zone`: 200 questions about the zone make one scan.
+
+**Before / after (the Bag Viewer's own time per frame, `addons:` line of the `EQOA_PERF` report).**
+
+| | before (old Lua) | after |
+|---|---|---|
+| Owner's real zone, Bags window open (release, his log) | 7.4-10.0 ms (api 5.4-7.4: `entities.list` 4 calls, 5.1-6.7 ms) | about 2-3 ms, the window's own drawing (estimate, not measured live) |
+| Test scene, 700 creatures, 87 updates a frame, window open, release | **63.8 ms** (53.6 list calls/s, 4 a frame) | **3.0 ms** (no list call in the count) |
+| Test scene, 700 creatures, 35 updates a frame, window open, release, machine busy | **60.0 ms** (70.8 list calls/s) | **5.3 ms** (one scan counted, 0.7 ms of it) |
+| Same, window closed, release | 0.43-1.28 ms (the creature handlers) | 0.02-0.83 ms (0.02 with 35 updates a frame: no creature handlers while Auto-loot is off) |
+| Debug build (what the gates run), window open | 223 ms | 16-18 ms, under one list call (28-32 ms) |
+
+The test scene's list is about 8 times dearer than the owner's real one (one call 7-15 ms against his 1.7 ms), which is why the
+"before" is larger than his log; the number of calls a frame (4 before, none or one in two seconds after) is the same cause. What
+is left when the window is open is the drawing of its 48 visible slots (about 2 ms of Lua in release); the numbers are from the
+release-profile test binary on a machine other agents were using, so they vary 2x between runs.
+
+### 2. Auto-loot and batch re-opens showed the game's corpse window
+
+**Cause (owner log).** After a hidden `open_loot` the live server, after every take, sends the item, the chat line, the
+close (`0x0016`) **and lists the corpse again by itself** (`0x0018`); the log shows `observed None` for each such list, so no
+client request (`0x0015`) preceded it. The first open's claim had been used up by the first list, so each later list
+had no claim and was left to the game ("no request of the holder is waiting for this window"), and the game's window showed
+between the takes. The broker's re-ask (`0x0015`) is a second path (it arms its own claim and already worked); the real
+server does not wait for it.
+
+**Fix.** `window_takeover::decide_open`: a list for the corpse the holder's hidden session is on, with no request of the
+player's own in between, is that session going on (the idle timer renews). `note_loot_request` marks a loot request no claim
+of the holder stood behind as the player's own (`player_asked`), so the player clicking that same corpse still gets the
+game's window. `play.rs` `sync_hidden_sessions`: the session is kept across the server's close while the holder's batch
+waits for the corpse to be listed again.
+
+**Tests** (`bag_viewer_tests.rs`): `round65_fix4_item2_take_all_but_junk_relists_stay_hidden`,
+`round65_fix4_item2_auto_loot_relists_stay_hidden` (server lists again at once, three takes, no `left to the game` line, game
+mode stays 0, three HIDDEN decisions), the same two with the broker asking (`..._reopens_asked_by_the_broker_stay_hidden`),
+and `round65_fix4_item2_a_players_own_click_on_the_corpse_still_shows_the_game_window`.
+
+### 3-6. Owner-approved UI changes (bundled Bag Viewer)
+
+3. **Auto-loot** is a choice **Off / Everything / Everything but junk** (three buttons under the loot log, a one-line
+   explanation under them), saved with the junk marks in `junk.cfg` (`auto=off|all|non_junk`). It replaces the on/off option
+   (the Options page no longer lists one; `eqoa.options.*` capabilities dropped from `mod.json`). Everything is one Take all
+   (junk included); Everything but junk is the old batch. The junk marks file is the addon's own data file; the mod does not
+   key it by character today, so "per character" is exactly as per character as the junk marks are. To make room for the
+   explanation line the loot log shows 5 lines instead of 6 (the window must stay inside the 448-pixel HUD frame; the
+   existing `round6_item5_window_fits_hud_and_scrolls_100_slot_pack` test caught it).
+4. **Labels**: `Look at corpse` (preview only, neutral border) and `Take all` / `Take all but junk` (green when they can act).
+5. **"Also sell grey items"** removed with its setting, rule and code; only marked items are junk. An old file's `grey=` line
+   is ignored and not written back.
+6. **Out-of-range buttons grey out.** `Sell junk`, `Open bank`, `Deposit`, `Withdraw` show "too far from the merchant" /
+   "too far from the banker" (and clicking says the same, nothing is sent) when the nearest merchant/banker is beyond the
+   reach the server last accepted. The reach is learned per session from real answers: the largest distance that got an
+   answer (`ok`) and the smallest that got none (`fail`, only for the broker's ten-second silence); also from a window the
+   player opens by hand. Between a known-good and a known-bad distance the button is allowed; until anything is known the
+   default is 10 units (`M.DEFAULT_REACH`). An open merchant/bank window is never blocked.
+   The Bv test harness now gives the Lua the player's position (it follows `bags_player_at`; before, the snapshot had none
+   and every distance read 0).
+
+**Tests**: `round65_fix4_item3_*` (Off leaves the corpse; Everything takes the junk; Everything but junk leaves it; three
+buttons, explanations, saved across reload, old option gone), `item4_look_and_take_labels`, `item5_no_grey_items_option`,
+`item6_out_of_range_buttons_grey_out_and_the_reach_is_learned` (30 units: greyed; 5 units: answer learned; 9 units: silence
+learned; between: allowed; open shop: not blocked), `item6_bank_rows_follow_the_reach_and_native_opens_teach_it`. Changed to
+follow the new rules: the junk-marks persistence test (grey checkbox gone), the merchant sell-junk batch test (the Rat Pelt
+is marked, not "grey"), the unanswered-bank test (the first silence teaches that 8 units is too far; the second visit stands
+at 4), the "Open nearest corpse" labels, and `bv_auto` instead of the option.
+
+### Executed negative controls (this round)
+
+| Item | How the fix was removed | Result |
+|---|---|---|
+| 1 | old package (`EQOA_R5B_TEST_SOURCE` = the committed Lua) | `item1` window test fails: "asks for the zone's creature list 53.5 times a second" (release), 19.7 (debug) |
+| 3 | old package | `item3_*` (4 tests) fail: no `auto_mode` / no choice buttons |
+| 4 | old package | `item4` fails: buttons were `Open nearest corpse`, `Also sell grey items`, ... |
+| 5 | old package | `item5` fails: "no grey-items checkbox: [Also sell grey items]" |
+| 6 | old package | both `item6` tests fail: "greyed out and says why: Sell junk (1 item)", "14 units: past the default reach" |
+| 2 | `window_takeover.rs` and `play.rs` put back to `909fe54e`, rebuilt | the two `relists` tests fail ("the game's corpse window must not show (list 1)", mode 1); the two `asked` tests and the player-click test pass without the fix (they guard the second path and the player's own window) |
+
+### Gates
+
+Pending: the full `python tools/run_gates.py --release` result is added below when the run ends.
+
+### Not tested here
+
+The server's real behaviour (that it lists the corpse by itself after each take, the reach at which merchants and bankers
+answer, the default of 10 units) is read from the owner's log and not reproduced; the live server decides. The oracle tests
+skip on this machine (no decomp). Owner checklist: `Paseo/targets/r65-checklist-3.txt`.
+
+---
+
 ## Owner-test recovery, 2026-11-18 (base `20b3eebb`)
 
 The earlier gate results below describe the build the owner tested, not acceptance

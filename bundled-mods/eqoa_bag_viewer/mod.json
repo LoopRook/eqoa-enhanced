@@ -30,8 +30,6 @@
     "eqoa.entities.find",
     "eqoa.player.get",
     "eqoa.target.get",
-    "eqoa.options.toggle",
-    "eqoa.options.get",
     "eqoa.files.read",
     "eqoa.files.write",
     "eqoa.hud.frame",

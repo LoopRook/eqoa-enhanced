@@ -5,7 +5,11 @@ local M = {
     open = false, tab = 1, grid = nil, log = {}, scroll = 0, grid_scroll = 0, hover = nil,
     builds = 0, draws = 0, rect = nil, menu = nil, result = nil,
     pending_label = nil, last_req = nil,
-    junk_ids = {}, sell_grey = false, junk_loaded = false,
+    junk_ids = {}, junk_loaded = false,
+    -- Auto-loot: "off", "all" (everything) or "non_junk" (everything but the items marked as junk); saved with the junk marks
+    auto_mode = "off",
+    -- how far the server answered a merchant or a banker (kept per session; see `note_range`)
+    range = {merchant = {}, bank = {}},
     batch_id = nil, batch_kind = nil, batch_verb = nil, batch_total = 0,
     corpse_tab_kept = false,
     action_hits = {},
@@ -120,6 +124,56 @@ function M.nearby_npc(kind)
     local c = data.nearest[kind == "merchant" and "merchant" or (kind == "bank" and "bank" or "any")]
     if not c then return nil end
     return c.e, c.d2
+end
+
+-- How near a merchant or a banker must be. The game has no range check of its own: the server decides, and a
+-- request out of its reach is simply not answered. The mod learns the reach from real answers, per session: the
+-- largest distance that got an answer (`ok`) and the smallest that got none (`fail`). Until a distance is known to
+-- work or not to, the conservative DEFAULT_REACH decides. It only greys out the mod's own buttons: a window the
+-- player opened (or that is open) is never blocked.
+M.DEFAULT_REACH = 10.0
+local TOO_FAR = {merchant = "too far from the merchant", bank = "too far from the banker"}
+
+function M.note_range(kind, dist, answered)
+    local r = M.range[kind]
+    if not r or type(dist) ~= "number" then return end
+    if answered then
+        if not r.ok or dist > r.ok then r.ok = dist end
+        if r.fail and r.fail <= r.ok then r.fail = nil end
+    elseif not (r.ok and dist <= r.ok) then
+        if not r.fail or dist < r.fail then r.fail = dist end
+    end
+end
+
+-- Is `dist` within the reach of a `kind` NPC, as far as the mod knows?
+function M.within_reach(kind, dist)
+    local r = M.range[kind] or {}
+    if r.ok and dist <= r.ok then return true end
+    if r.fail and dist >= r.fail then return false end
+    if r.ok and r.fail then return true end -- between a distance that worked and one that did not: worth trying
+    return dist <= M.DEFAULT_REACH
+end
+
+-- The nearest `kind` NPC's distance (nil when none is in the zone). `fresh` asks the zone again first.
+function M.npc_distance(kind, fresh)
+    if fresh then M.scan_reset() end
+    local npc, d2 = M.nearby_npc(kind)
+    if not npc then return nil end
+    return math.sqrt(d2 or 0), npc
+end
+
+-- Why a button for `kind` is out of reach ("too far from the banker"), or nil when it is in reach or there is none.
+function M.too_far(kind)
+    local dist = M.npc_distance(kind)
+    if dist == nil or M.within_reach(kind, dist) then return nil end
+    return TOO_FAR[kind]
+end
+
+-- A window of `kind` that the player opened by hand answers from where they stand: that is a real answer too.
+function M.learn_native_open(kind)
+    if M.pending_open and M.pending_open.kind == kind then return end
+    local dist = M.npc_distance(kind, true)
+    if dist then M.note_range(kind, dist, true) end
 end
 
 local function release_takeover(kind)
@@ -418,20 +472,33 @@ local function cannot_reason(it, can)
     return "cannot use item"
 end
 
+M.AUTO_MODES = {
+    {key = "off", label = "Off", explain = "Auto-loot: off. Loot with the buttons below."},
+    {key = "all", label = "Everything", explain = "Auto-loot: takes every item from creatures you kill."},
+    {key = "non_junk", label = "Everything but junk", explain = "Auto-loot: takes all but items marked as junk."},
+}
+
+local function auto_mode_valid(key)
+    for _, m in ipairs(M.AUTO_MODES) do
+        if m.key == key then return true end
+    end
+    return false
+end
+
 function M.load_junk()
     M.junk_ids = {}
-    M.sell_grey = false
+    M.auto_mode = "off"
     if eqoa and eqoa.files and eqoa.files.read then
         local data = eqoa.files.read(JUNK_FILE)
         if type(data) == "string" then
             for line in data:gmatch("[^\r\n]+") do
-                if line == "grey=1" then
-                    M.sell_grey = true
-                elseif line == "grey=0" then
-                    M.sell_grey = false
+                local mode = line:match("^auto=(%a[%w_]*)$")
+                if mode then
+                    if auto_mode_valid(mode) then M.auto_mode = mode end
                 elseif line:match("^%d+$") then
                     M.junk_ids[line] = true
                 end
+                -- anything else (a retired "grey=" line of an older version) is ignored
             end
         end
     end
@@ -445,28 +512,34 @@ function M.save_junk()
         if v then ids[#ids + 1] = k end
     end
     table.sort(ids)
-    local lines = {M.sell_grey and "grey=1" or "grey=0"}
+    local lines = {"auto=" .. M.auto_mode}
     for _, k in ipairs(ids) do lines[#lines + 1] = k end
     eqoa.files.write(JUNK_FILE, table.concat(lines, "\n") .. "\n")
 end
 
--- Grey vendor trash: unequipped, non-equippable, non-quickslot misc item without usable/charged role or stats.
-function M.is_grey_item(it)
-    if not it or it.equipped or it.equippable or it.quick_slot ~= nil then return false end
-    local wearable = it.wear_slot ~= nil and it.wear_slot ~= 0 and it.wear_slot ~= 4294967295
-    if wearable then return false end
-    if has_tab(it, "usable") or has_tab(it, "charged") or has_tab(it, "equipment") then return false end
-    if not has_tab(it, "misc") then return false end
-    if (it.charges or 0) > 0 then return false end
-    if it.stats and #it.stats > 0 then return false end
+function M.auto_explain()
+    for _, m in ipairs(M.AUTO_MODES) do
+        if m.key == M.auto_mode then return m.explain end
+    end
+    return ""
+end
+
+function M.set_auto_mode(mode)
+    if not auto_mode_valid(mode) then return false end
+    M.auto_mode = mode
+    -- corpses held for the old choice are not looted under the new one
+    M.eligible_corpses = {}
+    M.auto_looted = {}
+    M.save_junk()
+    M.scan_reset()
+    if M.on_auto_mode then M.on_auto_mode(mode) end
+    M.dirty()
     return true
 end
 
 function M.is_junk(it)
     if not it then return false end
-    if M.junk_ids[tostring(it.id)] then return true end
-    if M.sell_grey and M.is_grey_item(it) then return true end
-    return false
+    return M.junk_ids[tostring(it.id)] == true
 end
 
 function M.set_junk(it, flag)
@@ -479,15 +552,6 @@ function M.set_junk(it, flag)
         M.result = {text = "Unmarked " .. it.name, ok = true}
     end
     M.save_junk()
-end
-
-function M.toggle_grey()
-    M.sell_grey = not M.sell_grey
-    M.save_junk()
-    M.result = {
-        text = M.sell_grey and "Also sell grey items: ON" or "Also sell grey items: OFF",
-        ok = nil,
-    }
 end
 
 function M.junk_sell_list()
@@ -537,6 +601,13 @@ function M.open_loot_corpse(after_kind, corpse_id)
 end
 
 function M.open_talk_npc(talk_kind, verb, after_fn)
+    local dist = M.npc_distance(talk_kind, true)
+    local far = dist ~= nil and not M.within_reach(talk_kind, dist) and TOO_FAR[talk_kind] or nil
+    if far then
+        M.result = {text = verb .. ": " .. far, ok = false}
+        M.dirty()
+        return nil, {message = far}
+    end
     if not M.ensure_takeover(talk_kind) then return nil, {message = "window busy"} end
     local req, err = eqoa.actions.talk(nil, {kind = talk_kind})
     if not req then
@@ -546,7 +617,7 @@ function M.open_talk_npc(talk_kind, verb, after_fn)
         M.dirty()
         return nil, err
     end
-    M.pending_open = {kind = talk_kind, req = req, fn = after_fn, verb = verb}
+    M.pending_open = {kind = talk_kind, req = req, fn = after_fn, verb = verb, dist = dist}
     M.result = {text = talk_kind == "merchant" and "Opening merchant..." or "Opening bank...", ok = nil}
     M.dirty()
     return req, nil
@@ -733,7 +804,9 @@ function M.build_menu(it, fx, fy)
             function() return eqoa.actions.loot_all() end)
     elseif it.list == "bank" then
         local near_bank = M.nearby_npc("bank") ~= nil
-        local can_bank = bank_open or near_bank
+        local bank_far = not bank_open and near_bank and M.too_far("bank") or nil
+        local can_bank = bank_open or (near_bank and not bank_far)
+        local no_bank = bank_far or "bank window is not open"
         local function bank_move_or_open(qty)
             if bank and bank.open then
                 return eqoa.actions.bank_move("bank", it.ref, qty)
@@ -743,12 +816,12 @@ function M.build_menu(it, fx, fy)
             end)
         end
         if it.quantity > 1 then
-            add("Withdraw 1", can_bank, not can_bank and "bank window is not open" or nil,
+            add("Withdraw 1", can_bank, not can_bank and no_bank or nil,
                 function() return bank_move_or_open(1) end)
-            add("Withdraw stack (" .. it.quantity .. ")", can_bank, not can_bank and "bank window is not open" or nil,
+            add("Withdraw stack (" .. it.quantity .. ")", can_bank, not can_bank and no_bank or nil,
                 function() return bank_move_or_open(it.quantity) end)
         else
-            add("Withdraw", can_bank, not can_bank and "bank window is not open" or nil,
+            add("Withdraw", can_bank, not can_bank and no_bank or nil,
                 function() return bank_move_or_open(1) end)
         end
     else
@@ -798,7 +871,8 @@ function M.build_menu(it, fx, fy)
 
         local near_bank = M.nearby_npc("bank") ~= nil
         if bank_open or near_bank then
-            local dep_deny = it.equipped and "cannot deposit an equipped item" or nil
+            local dep_deny = it.equipped and "cannot deposit an equipped item"
+                or (not bank_open and M.too_far("bank")) or nil
             local function dep_move_or_open(qty)
                 if bank_open then
                     return eqoa.actions.bank_move("inventory", it.ref, qty)
@@ -863,6 +937,7 @@ local function finish_pending_open(expected_kind)
     local p = M.pending_open
     if not p or p.kind ~= expected_kind then return false end
     M.pending_open = nil
+    if p.dist then M.note_range(p.kind, p.dist, true) end
     if p.kind == "loot" then
         if p.after == "loot_all" then
             M.start_loot_all()
@@ -1002,8 +1077,7 @@ function M.on_entity_added(d)
 end
 
 function M.tick_auto_loot()
-    local enabled = eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true
-    if not enabled then return end
+    if M.auto_mode == "off" then return end
     if not (M.eligible_corpses and next(M.eligible_corpses)) then return end
     local waiting = false
     for id in pairs(M.eligible_corpses) do
@@ -1029,7 +1103,7 @@ function M.tick_auto_loot()
     if best then
         M.auto_looted = M.auto_looted or {}
         M.auto_looted[best.id] = true
-        M.open_loot_corpse("loot_non_junk", best.id)
+        M.open_loot_corpse(M.auto_mode == "all" and "loot_all" or "loot_non_junk", best.id)
     end
 end
 
@@ -1075,6 +1149,7 @@ function M.on_action_result(d)
             return
         elseif d.ok == nil and M.timed_out(d) then
             -- the server never answered the open: say so, never hang on "Opening..."
+            if p.dist then M.note_range(p.kind, p.dist, false) end
             M.pending_open = nil
             release_takeover(p.kind)
             M.result = {text = (p.verb or d.kind) .. ": " .. M.no_answer_text(p.kind), ok = false}

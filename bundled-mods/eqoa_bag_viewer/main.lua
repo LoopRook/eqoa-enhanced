@@ -4,7 +4,7 @@ local ui = eqoa.imgui
 local B = require("bags")
 
 -- Sizes are in HUD frame pixels (640x448), scaled as the HUD is.
-local W, PAD, SLOT, GAP, LINE, LOG_LINES = 318, 8, 36, 2, 12, 6
+local W, PAD, SLOT, GAP, LINE, LOG_LINES = 318, 8, 36, 2, 12, 5
 local tokens, escape, tab_hits, slot_hits, menu_hits, action_hits, log_rect, grid_rect = {}, nil, {}, {}, {}, {}, nil, nil
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
@@ -103,45 +103,48 @@ eqoa.input.bind({id = "open", label = "Bag viewer", default_key = ""}, function(
 end)
 -- The loot log is the one thing kept while the window is closed, from events only.
 B.load_junk()
-if eqoa.options and eqoa.options.toggle then
-    eqoa.options.toggle({id = "auto_loot", label = "Auto-loot", default = false})
-end
 eqoa.events.on("loot.changed", function(e)
     B.log_loot(e.data)
     if not B.open then B.on_loot_changed(e.data) end
 end)
-eqoa.events.on("target.changed", function()
-    if eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true then
-        B.on_target_update()
+-- Auto-loot listens to the creatures only while it is on (the default is off): every creature update of the zone
+-- would otherwise reach this mod's Lua for nothing.
+local auto_tokens = {}
+local function auto_listeners(on)
+    if on and #auto_tokens == 0 then
+        local function add(name, fn)
+            local token = eqoa.events.on(name, fn)
+            if token then auto_tokens[#auto_tokens + 1] = token end
+        end
+        add("target.changed", function() B.on_target_update() end)
+        add("player.changed", function()
+            B.on_target_update()
+            B.tick_auto_loot() -- a looting held back by a fight goes on when the fight ends
+        end)
+        add("combat.hit", function(e) B.on_combat_hit(e.data) end)
+        add("entity.changed", function(e)
+            B.on_entity_changed(e.data)
+            B.tick_auto_loot()
+        end)
+        add("entity.added", function(e)
+            B.on_entity_added(e.data)
+            B.tick_auto_loot()
+        end)
+        add("entity.removed", function(e) B.on_entity_removed(e.data) end)
+    elseif not on then
+        for _, token in ipairs(auto_tokens) do eqoa.events.off(token) end
+        auto_tokens = {}
     end
+end
+B.on_auto_mode = function(mode) auto_listeners(mode ~= "off") end
+auto_listeners(B.auto_mode ~= "off")
+-- a merchant or bank the player opened by hand is a real answer from where they stand: the mod learns the reach
+eqoa.events.on("merchant.changed", function(e)
+    if e.data and e.data.cause == "open" and eqoa.merchant.get() ~= nil then B.learn_native_open("merchant") end
 end)
-eqoa.events.on("player.changed", function()
-    if eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true then
-        B.on_target_update()
-        B.tick_auto_loot() -- a looting held back by a fight goes on when the fight ends
-    end
-end)
-eqoa.events.on("combat.hit", function(e)
-    if eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true then
-        B.on_combat_hit(e.data)
-    end
-end)
-eqoa.events.on("entity.changed", function(e)
-    if eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true then
-        B.on_entity_changed(e.data)
-        B.tick_auto_loot()
-    end
-end)
-eqoa.events.on("entity.added", function(e)
-    if eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true then
-        B.on_entity_added(e.data)
-        B.tick_auto_loot()
-    end
-end)
-eqoa.events.on("entity.removed", function(e)
-    if eqoa.options and eqoa.options.get and eqoa.options.get("auto_loot") == true then
-        B.on_entity_removed(e.data)
-    end
+eqoa.events.on("bank.changed", function(e)
+    local b = eqoa.bank.get()
+    if e.data and e.data.cause == "open" and b and b.open then B.learn_native_open("bank") end
 end)
 eqoa.events.on("action.result", function(e)
     if not B.open then B.on_action_result(e.data) end
@@ -154,6 +157,7 @@ eqoa.events.on("batch.result", function(e)
 end)
 eqoa.events.on("state.reset", function() B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); B.dirty() end)
 eqoa.events.on("disabling", function()
+    auto_listeners(false)
     close()
     if eqoa.windows and eqoa.windows.release then eqoa.windows.release() end
 end)
@@ -180,7 +184,8 @@ function draw()
     local log_hdr_y = div_y + 4
     local log_y = log_hdr_y + 15
     local bar_y = log_y + LOG_LINES * LINE + 4
-    local bar2_y = bar_y + 18
+    local expl_y = bar_y + 18
+    local bar2_y = expl_y + 14
     local is_corpse = B.tab == 7
     if is_corpse then B.renew_loot_session() end
     local is_bank = B.tab == 6
@@ -189,7 +194,7 @@ function draw()
         or eqoa.loot.get() ~= nil
         or B.nearby_npc("merchant") ~= nil
         or (is_bank and not (eqoa.bank.get() and eqoa.bank.get().open) and B.nearby_npc("bank") ~= nil)
-    local H = (has_ctx_btn and (bar2_y + 18) or (bar_y + 18)) + PAD
+    local H = (has_ctx_btn and (bar2_y + 18) or bar2_y) + PAD
     -- centred in the HUD frame, and on screen wherever the window is sized
     local x0 = math.max(0, math.min(dw - W * k, f.offset_x + (640 - W) / 2 * f.scale_x))
     local y0 = math.max(0, math.min(dh - H * k, f.offset_y + (448 - H) / 2 * f.scale_y))
@@ -322,18 +327,23 @@ function draw()
 
     action_hits = {}
     B.action_hits = action_hits
-    -- Row 1: grey-items toggle checkbox (left) and Stop button when batch running (right).
-    local cb_y = bar_y + 3
-    fill(PAD, cb_y, 11, 11, c.raised)
-    frame(PAD, cb_y, 11, 11, B.sell_grey and c.junk or c.border)
-    if B.sell_grey then fill(PAD + 2, cb_y + 2, 7, 7, c.junk) end
-    local cb_lbl = "Also sell grey items"
-    text(PAD + 15, cb_y - 1, cb_lbl, B.sell_grey and c.text or c.muted)
-    local cb_w = 15 + ui.CalcTextSize(cb_lbl) / k
-    action_hits[#action_hits + 1] = {
-        label = cb_lbl, x = x0 + PAD * k, y = y0 + bar_y * k, w = cb_w * k, h = 16 * k,
-        run = B.toggle_grey,
-    }
+    -- Row 1: the Auto-loot choice (Off / Everything / Everything but junk), and Stop when a batch is running
+    -- (right); the line under it says what the chosen one does.
+    local seg_x = PAD
+    for _, m in ipairs(B.AUTO_MODES) do
+        local on = B.auto_mode == m.key
+        local bw = ui.CalcTextSize(m.label) / k + 12
+        fill(seg_x, bar_y, bw, 16, on and c.menu_hl or c.raised)
+        frame(seg_x, bar_y, bw, 16, on and c.worn or c.border)
+        text(seg_x + 6, bar_y + 2, m.label, on and c.text or c.muted)
+        local mode = m.key
+        action_hits[#action_hits + 1] = {
+            label = "Auto-loot: " .. m.label, x = x0 + seg_x * k, y = y0 + bar_y * k, w = bw * k, h = 16 * k,
+            run = function() B.set_auto_mode(mode) end,
+        }
+        seg_x = seg_x + bw + 3
+    end
+    text(PAD, expl_y, B.auto_explain(), B.auto_mode == "off" and c.muted or c.text, W - 2 * PAD)
     if B.batch_id ~= nil or B.pending_open ~= nil then
         local sw = math.max(44, ui.CalcTextSize("Stop") / k + 14)
         local sx = W - PAD - sw
@@ -360,31 +370,49 @@ function draw()
     local merch = eqoa.merchant.get()
     local near_corpse = B.nearby_corpse()
     if is_corpse or loot ~= nil then
+        -- "Look at corpse" only shows what is in it; the "Take" buttons take (the green ones)
         local bw, bgap = W - 2 * PAD, 6
-        local w_loot, w_all = 122, 56
+        local w_loot, w_all = 94, 56
         local w_non = bw - w_loot - w_all - 2 * bgap
         local can_open = loot ~= nil or near_corpse ~= nil
         local has_items = (loot ~= nil and #(loot.items or {}) > 0) or (loot == nil and near_corpse ~= nil)
         local steps, _ = B.loot_non_junk_list()
         local can_non_junk = (loot ~= nil and #steps > 0) or (loot == nil and near_corpse ~= nil)
-        ctx_btn(PAD, w_loot, "Open nearest corpse", can_open and c.text or c.muted, can_open and c.worn or c.border, B.start_loot_button)
+        ctx_btn(PAD, w_loot, "Look at corpse", can_open and c.text or c.muted, c.border, B.start_loot_button)
         ctx_btn(PAD + w_loot + bgap, w_all, "Take all", has_items and c.text or c.muted, has_items and c.worn or c.border, B.start_loot_all)
         ctx_btn(PAD + w_loot + bgap + w_all + bgap, w_non, "Take all but junk", can_non_junk and c.text or c.muted, can_non_junk and c.worn or c.border, B.start_loot_non_junk)
     elseif merch ~= nil then
+        -- the merchant window is open (the player's own or ours): never blocked by distance
         local _, cnt, tunar = B.junk_sell_list()
         local lbl = string.format("Sell junk (%d %s, %s tunar)", cnt, cnt == 1 and "item" or "items", B.tunar(tunar))
         ctx_btn(PAD, W - 2 * PAD, lbl, cnt > 0 and c.text or c.muted, cnt > 0 and c.junk or c.border, B.start_sell_junk)
     elseif is_bank and not (eqoa.bank.get() and eqoa.bank.get().open) and B.nearby_npc("bank") ~= nil then
-        ctx_btn(PAD, W - 2 * PAD, "Open bank", c.text, c.worn, function()
-            B.open_talk_npc("bank", "Open bank", function()
-                B.result = {text = "Bank ready", ok = true}
+        local far = B.too_far("bank")
+        if far then
+            ctx_btn(PAD, W - 2 * PAD, "Open bank: " .. far, c.muted, c.border, function()
+                B.result = {text = "Open bank: " .. far, ok = false}
                 B.dirty()
             end)
-        end)
+        else
+            ctx_btn(PAD, W - 2 * PAD, "Open bank", c.text, c.worn, function()
+                B.open_talk_npc("bank", "Open bank", function()
+                    B.result = {text = "Bank ready", ok = true}
+                    B.dirty()
+                end)
+            end)
+        end
     elseif B.nearby_npc("merchant") ~= nil then
         local _, cnt = B.junk_sell_list()
-        local lbl = string.format("Sell junk (%d %s)", cnt, cnt == 1 and "item" or "items")
-        ctx_btn(PAD, W - 2 * PAD, lbl, cnt > 0 and c.text or c.muted, cnt > 0 and c.junk or c.border, B.start_sell_junk)
+        local far = B.too_far("merchant")
+        if far then
+            ctx_btn(PAD, W - 2 * PAD, "Sell junk: " .. far, c.muted, c.border, function()
+                B.result = {text = "Sell junk: " .. far, ok = false}
+                B.dirty()
+            end)
+        else
+            local lbl = string.format("Sell junk (%d %s)", cnt, cnt == 1 and "item" or "items")
+            ctx_btn(PAD, W - 2 * PAD, lbl, cnt > 0 and c.text or c.muted, cnt > 0 and c.junk or c.border, B.start_sell_junk)
+        end
     end
 
     eqoa.input.claim_pointer({x = x0, y = y0, width = W * k, height = H * k})

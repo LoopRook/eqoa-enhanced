@@ -14,6 +14,14 @@ newest first ("12:41 Rusty Sword x1, from a decaying skeleton"; the corpse is na
 the corpse you asked to loot); the wheel scrolls it. Moving, selling,
 looting and banking stay in the game's windows.
 
+Buttons (this version): **Look at corpse** only shows the nearest corpse's items;
+**Take all** and **Take all but junk** take them. Mark items as junk from an item's
+menu; **Sell junk** sells them at a merchant. **Auto-loot** is a choice under the
+loot log, **Off**, **Everything** or **Everything but junk**, saved with the junk
+marks. The mod's own opens never show the game's corpse, shop or bank window. A
+button for a merchant or banker that is beyond the reach the server last answered at
+is greyed out ("too far from the banker"); the reach is learned from real answers.
+
 It uses only the public `eqoa/1` API (`eqoa.inventory`, `eqoa.bank`, `eqoa.items`,
 `eqoa.icons`, the `inventory.changed`, `bank.changed` and `loot.changed` events)
 and is the worked example for the items API. While the window is closed it does

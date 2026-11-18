@@ -55,6 +55,8 @@ struct Bv {
     _config: Scratch,
     manager: Manager,
     play: crate::play::Play,
+    /// gives the API the player's position (the snapshot has none without a walker); `frame` sets it from `play.self_at`
+    walker: crate::walker::Walker,
     win: (u32, u32),
     target: Option<wgpu::Texture>,
 }
@@ -111,7 +113,8 @@ impl Bv {
         play.bags_words();
         play.bags_set(&bv_world());
         let manager = gpu.manager(&root.0, Some(config.0.clone()));
-        Some(Bv { gpu, _root: root, _config: config, manager, play, win, target: None })
+        let walker = crate::play::Play::bundled_ui_walker();
+        Some(Bv { gpu, _root: root, _config: config, manager, play, walker, win, target: None })
     }
     fn enable(&mut self) {
         self.manager.queue(Command::Enable(BV.into(), true));
@@ -125,7 +128,11 @@ impl Bv {
         assert!(d.is_empty(), "{d:?}");
     }
     fn frame(&mut self) -> wgpu::Texture {
-        let mut snapshot = self.play.forge_snapshot(None);
+        let at = self.play.bags_player_pos();
+        self.walker.cam.walk.phys.position.x.0 = at[0];
+        self.walker.cam.walk.phys.position.y.0 = at[1];
+        self.walker.cam.walk.phys.position.z.0 = at[2];
+        let mut snapshot = self.play.forge_snapshot(Some(&self.walker));
         snapshot.capture_pending = false;
         self.manager.flush_pending_fonts(&mut self.gpu.context);
         {
@@ -1006,7 +1013,7 @@ fn round6b_bag_viewer_merchant_bank_and_corpse_menus_and_captures() {
 }
 
 #[test]
-fn round6c_bag_viewer_junk_marks_persist_across_reload_grey_off_by_default_and_no_unclicked_actions() {
+fn round6c_bag_viewer_junk_marks_and_auto_loot_choice_persist_across_reload_and_no_unclicked_actions() {
     super::super::action_broker::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
@@ -1017,8 +1024,10 @@ fn round6c_bag_viewer_junk_marks_persist_across_reload_grey_off_by_default_and_n
     bv.enable();
     bv.open();
 
-    // Grey-items rule must be OFF by default and zero actions run without click.
-    assert!(!bv.eval::<bool>("require('bags').sell_grey"));
+    // Auto-loot is Off by default, "Also sell grey items" is gone (item 5), and zero actions run without a click.
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "off");
+    assert!(bv.action_hit("sell grey").is_none(), "the grey-items checkbox is retired");
+    assert!(bv.action_hit("Auto-loot: Off").is_some() && bv.action_hit("Auto-loot: Everything but junk").is_some());
     let sends_before = bv.play.bags_sends_lost();
     bv.frames(4);
     bv.play.bags_broker_tick();
@@ -1044,27 +1053,21 @@ fn round6c_bag_viewer_junk_marks_persist_across_reload_grey_off_by_default_and_n
     bv.click((mx, my));
     bv.frames(2);
     assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"));
-    assert!(!bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "grey item stays non-junk while grey rule off");
+    assert!(!bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "an unmarked misc item is never junk: only the marks decide");
     bv.click(s8);
     bv.frames(2);
     assert!(bv.menu_row("Unmark").is_some(), "menu switches to Unmark once marked");
     bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
     bv.frames(1);
 
-    // Toggle "Also sell grey items" ON -> Rat Pelt (grey misc) gains junk badge too.
-    let (gx, gy, glbl) = bv.action_hit("Also sell grey items").unwrap();
-    assert_eq!(glbl, "Also sell grey items");
+    // Choose Auto-loot "Everything but junk": it is the saved choice, and Rat Pelt (never marked) is not junk.
+    let (gx, gy, glbl) = bv.action_hit("Auto-loot: Everything but junk").unwrap();
+    assert_eq!(glbl, "Auto-loot: Everything but junk");
     bv.click((gx, gy));
     let badge_tex = bv.frames(2);
     bv_r6_png(&rm_pixels(&bv.gpu, &badge_tex), bv.win, "r6-junk-badges.png");
-    assert!(bv.eval::<bool>("require('bags').sell_grey == true"));
-    assert!(bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "Rat Pelt matches grey rule when ON");
-
-    // Toggle back OFF before reload test -> disables & re-enables addon -> marks survive reload!
-    let (gx, gy, _) = bv.action_hit("Also sell grey items").unwrap();
-    bv.click((gx, gy));
-    bv.frames(2);
-    assert!(!bv.eval::<bool>("require('bags').sell_grey"));
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "non_junk");
+    assert!(!bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "Rat Pelt is not junk");
 
     bv.manager.queue(Command::Enable(BV.into(), false));
     bv.frames(2);
@@ -1073,7 +1076,7 @@ fn round6c_bag_viewer_junk_marks_persist_across_reload_grey_off_by_default_and_n
     // Give the player a new stack with the same item id 900008 -> mark applies by item type.
     bv.play.bags_added(&serde_json::json!({"name":"Odd Thing Copy","id":900008,"key":99,"wear":0,"icon":4008}));
     bv.open();
-    assert!(!bv.eval::<bool>("require('bags').sell_grey"), "grey=false survived reload");
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "non_junk", "the Auto-loot choice survived reload");
     assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"), "junk id 900008 survived reload");
     assert!(bv.eval::<bool>("(function() local ok=true for _,e in ipairs(require('bags').grid.items) do if e.item.id==900008 and not require('bags').is_junk(e.item) then ok=false end end return ok end)()"));
 
@@ -1102,8 +1105,8 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot()
     bv.enable();
     bv.open();
 
-    // Mark Chipped Tooth, Torn Cloth, and Cracked Fang as junk (leave Rat Pelt unmarked grey).
-    for slot in [3usize, 4, 5] {
+    // Mark Rat Pelt, Chipped Tooth, Torn Cloth and Cracked Fang as junk (the Rusty Sword stays).
+    for slot in [2usize, 3, 4, 5] {
         let sp = bv.slot(slot);
         bv.click(sp);
         bv.frames(2);
@@ -1113,13 +1116,13 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot()
         bv.frames(1);
     }
 
-    // Open merchant: grey OFF -> shows 3 items; turn grey ON -> shows 4 items with native quote.
+    // Open merchant: the button counts the 4 marked items with the native quote.
     bv.play.bags_open_merchant(44);
     bv.frames(2);
     let (_, _, lbl_off) = bv.action_hit("Sell junk (").unwrap();
-    let quote_3: u64 = bv.eval("select(3, require('bags').junk_sell_list())");
-    assert!(lbl_off.starts_with("Sell junk (3 items, "), "{lbl_off}");
-    assert!(quote_3 > 0, "native quote must be positive");
+    let quote: u64 = bv.eval("select(3, require('bags').junk_sell_list())");
+    assert!(lbl_off.starts_with("Sell junk (4 items, "), "{lbl_off}");
+    assert!(quote > 0, "native quote must be positive");
 
     // Idle frames perform zero sells even with merchant open.
     let sends_idle = bv.play.bags_sends_lost();
@@ -1127,9 +1130,7 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot()
     bv.play.bags_broker_tick();
     assert_eq!(bv.play.bags_sends_lost(), sends_idle);
 
-    // Enable grey items -> count includes Rat Pelt (4 items) -> capture merchant PNG.
-    let (gx, gy, _) = bv.action_hit("Also sell grey items").unwrap();
-    bv.click((gx, gy));
+    // capture merchant PNG
     let merch_tex = bv.frames(2);
     bv_r6_png(&rm_pixels(&bv.gpu, &merch_tex), bv.win, "r6-junk-merchant.png");
     let (bx, by, lbl_on) = bv.action_hit("Sell junk (").unwrap();
@@ -1190,11 +1191,6 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot()
     let (res, ok) = bv.result_text().unwrap();
     assert_eq!(ok, Some(false));
     assert!(res.starts_with("Sold 1 of 2: zone"), "{res}");
-
-    // Turn grey back OFF for corpse test: Rat Pelt id=2001 will be marked explicitly as junk while Bone Chip & Spider Silk stay non-junk.
-    let (gx, gy, _) = bv.action_hit("Also sell grey items").unwrap();
-    bv.click((gx, gy));
-    bv.frames(1);
 
     // Corpse open: mark Rat Pelt (id 2001) as junk, switch to Corpse tab, capture r6-junk-corpse.png.
     bv.play.bags_target_corpse(5001, "a decaying skeleton");
@@ -2328,8 +2324,8 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     // 2. Click Corpse tab (visible because corpse is nearby) -> click Loot -> server refuses 0x0085 -> visible server text.
     bv.click(bv.tab(7));
     bv.frames(1);
-    let (lx, ly, lbl) = bv.action_hit("Open nearest corpse").unwrap();
-    assert_eq!(lbl, "Open nearest corpse");
+    let (lx, ly, lbl) = bv.action_hit("Look at corpse").unwrap();
+    assert_eq!(lbl, "Look at corpse");
     let sends_0 = bv.play.bags_sends_lost();
     bv.click((lx, ly));
     bv.play.bags_broker_tick();
@@ -2440,8 +2436,9 @@ fn round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target() {
 
     // Auto-loot option is registered and OFF by default.
     assert_eq!(
-        super::super::options::get_toggle("eqoa_bag_viewer", "auto_loot"),
-        Some(false)
+        bv.eval::<String>("require('bags').auto_mode"),
+        "off",
+        "Auto-loot is Off until chosen"
     );
 
     // Living target 9010 dies while auto_loot is OFF -> zero actions taken.
@@ -2457,7 +2454,7 @@ fn round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target() {
     // Turn Auto-loot ON; mark Rat Pelt (id 2001) as junk so auto-loot leaves it behind.
     bv.open();
     bv.frames(2);
-    assert!(super::super::options::set_toggle("eqoa_bag_viewer", "auto_loot", true));
+    bv_auto(&bv, "non_junk");
     assert!(bv.eval::<bool>("not eqoa.windows.taken('loot')"), "auto_loot ON must NOT hold loot takeover while idle");
     assert!(bv.eval::<bool>("(function() require('bags').junk_ids['2001'] = true return true end)()"));
 
@@ -2508,7 +2505,7 @@ fn round65_fix_bag_viewer_auto_loot_only_corpses_of_creatures_you_hit() {
     bv.enable();
     bv.open();
     bv.frames(2);
-    assert!(super::super::options::set_toggle("eqoa_bag_viewer", "auto_loot", true));
+    bv_auto(&bv, "non_junk");
 
     // a) targeted but never hit by you (another player's kill, say): not looted
     bv.play.bags_spawn_npc(9101, "a rat", 0, 1, [2.0, 0.0, 0.0]);
@@ -2567,7 +2564,7 @@ fn round65_fix_bag_viewer_auto_loot_waits_while_in_combat() {
     bv.enable();
     bv.open();
     bv.frames(2);
-    assert!(super::super::options::set_toggle("eqoa_bag_viewer", "auto_loot", true));
+    bv_auto(&bv, "non_junk");
 
     // one kill of yours, while a second hostile still has you targeted
     bv.play.bags_spawn_npc(9201, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
@@ -2621,7 +2618,7 @@ fn round65_fix_bag_viewer_loot_tab_keeps_hidden_session_alive() {
     bv.frames(2);
     bv.click(bv.tab(7));
     bv.frames(1);
-    let (lx, ly, _) = bv.action_hit("Open nearest corpse").unwrap();
+    let (lx, ly, _) = bv.action_hit("Look at corpse").unwrap();
     bv.click((lx, ly));
     bv.play.bags_broker_tick();
     bv.play.bags_corpse(&bv_corpse());
@@ -2705,8 +2702,8 @@ fn r65fix2_open_corpse(stale: bool) {
     bv.frames(2);
     bv.click(bv.tab(7));
     bv.frames(1);
-    let (lx, ly, lbl) = bv.action_hit("Open nearest corpse").unwrap();
-    assert_eq!(lbl, "Open nearest corpse");
+    let (lx, ly, lbl) = bv.action_hit("Look at corpse").unwrap();
+    assert_eq!(lbl, "Look at corpse");
     let _ = super::super::window_takeover::take_log_for_test();
     bv.click((lx, ly));
     bv.play.bags_broker_tick();
@@ -2841,7 +2838,11 @@ fn round65_fix2_unanswered_bank_requests_fail_visibly() {
         "open: visible failure, got: {text}"
     );
 
-    // the bank opens, but the deposit itself goes unanswered
+    // the bank opens (the player stands nearer, 4 units: the silence at 8 made 8 and farther too far), but the
+    // deposit itself goes unanswered
+    bv.play.bags_player_at([4.0, 0.0, 0.0]);
+    bv.eval::<bool>("(function() require('bags').scan_reset() return true end)()");
+    bv.frames(2);
     bv.click(s2);
     bv.frames(2);
     let (dx, dy, _, _, _) = bv.menu_row("Deposit 1").unwrap();
@@ -2868,8 +2869,9 @@ fn round65_fix2_unanswered_bank_requests_fail_visibly() {
 
 // ---- Round 6.5 fix round 4, item 1: the Bag Viewer's cost per frame -------------------------------------------------
 
-fn bv_auto(_bv: &Bv, _mode: &str) {
-    assert!(super::super::options::set_toggle("eqoa_bag_viewer", "auto_loot", true));
+/// Chooses Auto-loot in the window's own way (what its button does).
+fn bv_auto(bv: &Bv, mode: &str) {
+    assert!(bv.eval::<bool>(&format!("require('bags').set_auto_mode({mode:?})")), "Auto-loot {mode}");
 }
 
 /// A full pack: `n` distinct stacks (the biggest pack the game has is 100 slots).
@@ -3076,7 +3078,7 @@ fn r65fix4_hidden_batch(auto_loot: bool, relist: bool) {
     if auto_loot {
         bv.open();
         bv.frames(2);
-        assert!(super::super::options::set_toggle("eqoa_bag_viewer", "auto_loot", true));
+        bv_auto(&bv, "non_junk");
         bv.play.bags_spawn_npc(9011, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
         bv.play.bags_target_sync(9011);
         bv.play.bags_combat_hit(77, 9011, -12);
@@ -3194,3 +3196,311 @@ fn round65_fix4_item2_a_players_own_click_on_the_corpse_still_shows_the_game_win
     crate::fork_ext::loot_source::clear();
 }
 
+// ---- Round 6.5 fix round 4, items 3-6: Auto-loot choice, Look/Take labels, no grey items, out-of-range buttons ------
+
+/// A killed creature of yours (you hit it), looted by Auto-loot under `mode`: returns the viewer with the creature
+/// dead, junk Rat Pelt (2001) marked.
+fn r65fix4_auto_kill(mode: &str) -> Option<Bv> {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let mut bv = Bv::new()?;
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_self_id(77);
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['2001'] = true return true end)()"));
+    if mode != "off" {
+        // the window's own button, as a player chooses it
+        let label = if mode == "all" { "Auto-loot: Everything" } else { "Auto-loot: Everything but junk" };
+        let (x, y, _) = bv.action_hit(label).unwrap();
+        bv.click((x, y));
+    }
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), mode);
+    bv.play.bags_spawn_npc(9011, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9011);
+    bv.play.bags_combat_hit(77, 9011, -12);
+    bv.frames(2);
+    bv.play.bags_entity_die(9011);
+    bv.frames(2);
+    Some(bv)
+}
+/// The corpse's list (junk Rat Pelt and Sapphire) answers Auto-loot's open.
+fn r65fix4_auto_list(bv: &mut Bv) {
+    bv.play.bags_broker_tick(); // 0x0015
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Sapphire","id":2009,"key":1,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "the game's corpse window stays closed during Auto-loot");
+}
+
+/// Off: a kill is left alone.
+#[test]
+fn round65_fix4_item3_auto_loot_off_leaves_the_corpse_alone() {
+    let Some(mut bv) = r65fix4_auto_kill("off") else { return };
+    let sends = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends, "Off: nothing is asked of the server");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Everything: the corpse's junk goes too (one Take all).
+#[test]
+fn round65_fix4_item3_auto_loot_everything_takes_the_junk_too() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix4_auto_list(&mut bv);
+    let sends = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick(); // Take all: 0x001A
+    assert!(bv.play.bags_sends_lost() > sends, "Everything sends one Take all");
+    bv.play.bags_loot_confirm_all();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.result_text(), Some(("Take all: ok".into(), Some(true))), "Everything is a Take all, junk included");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Everything but junk: the marked junk stays on the corpse.
+#[test]
+fn round65_fix4_item3_auto_loot_everything_but_junk_leaves_the_junk() {
+    let Some(mut bv) = r65fix4_auto_kill("non_junk") else { return };
+    r65fix4_auto_list(&mut bv);
+    bv.play.bags_broker_tick(); // takes Sapphire only
+    bv.play.bags_added(&serde_json::json!({"name":"Sapphire","id":2009,"key":81,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(bv.result_text(), Some(("Looted 1 of 1".into(), Some(true))), "only the one that is not junk");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// The choice is three buttons with a one-line explanation under them, kept with the junk marks, and it replaces
+/// the old on/off option (the Options page no longer lists one).
+#[test]
+fn round65_fix4_item3_auto_loot_choice_buttons_explanation_and_saved() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "off");
+    let mut explained = Vec::new();
+    for (label, key) in [("Auto-loot: Off", "off"), ("Auto-loot: Everything", "all"), ("Auto-loot: Everything but junk", "non_junk")] {
+        let (x, y, found) = bv.action_hit(label).unwrap_or_else(|| panic!("a button for {label}"));
+        assert_eq!(found, label);
+        bv.click((x, y));
+        bv.frames(1);
+        assert_eq!(bv.eval::<String>("require('bags').auto_mode"), key);
+        let line: String = bv.eval("require('bags').auto_explain()");
+        assert!(line.starts_with("Auto-loot: ") && line.len() < 60, "one short line: {line:?}");
+        explained.push(line);
+    }
+    explained.sort();
+    explained.dedup();
+    assert_eq!(explained.len(), 3, "each choice explains itself");
+    assert_eq!(super::super::options::get_toggle(BV, "auto_loot"), None, "the old on/off option is gone");
+    // kept: written with the junk marks, read back after a reload
+    let saved: String = bv.eval("eqoa.files.read('junk.cfg')");
+    assert!(saved.lines().next() == Some("auto=non_junk"), "{saved:?}");
+    bv.manager.queue(Command::Enable(BV.into(), false));
+    bv.frames(2);
+    bv.manager.queue(Command::Enable(BV.into(), true));
+    bv.frames(3);
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "non_junk");
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item 4: the buttons say what they do: Look only shows, Take takes.
+#[test]
+fn round65_fix4_item4_look_and_take_labels() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(2);
+    let labels: Vec<String> = bv.eval("(function() local t = {} for _, h in ipairs(require('bags').action_hits) do t[#t + 1] = h.label end return t end)()");
+    for want in ["Look at corpse", "Take all", "Take all but junk"] {
+        assert!(labels.iter().any(|l| l == want), "a button {want:?} among {labels:?}");
+    }
+    assert!(!labels.iter().any(|l| l.contains("Open nearest corpse")), "the unclear label is gone: {labels:?}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item 5: no "Also sell grey items": no checkbox, no setting; only the marks make junk; an old file's `grey=` line
+/// is ignored and not written back.
+#[test]
+fn round65_fix4_item5_no_grey_items_option() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    let labels: Vec<String> = bv.eval("(function() local t = {} for _, h in ipairs(require('bags').action_hits) do t[#t + 1] = h.label end return t end)()");
+    assert!(!labels.iter().any(|l| l.to_lowercase().contains("grey")), "no grey-items checkbox: {labels:?}");
+    assert!(bv.eval::<bool>("require('bags').sell_grey == nil and require('bags').toggle_grey == nil and require('bags').is_grey_item == nil"));
+    // an older version's file: its grey line changes nothing, the mark loads, and saving drops the line
+    assert!(bv.eval::<bool>("(function() eqoa.files.write('junk.cfg', 'grey=1\\n900008\\n') require('bags').load_junk() return true end)()"));
+    assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"));
+    assert!(!bv.eval::<bool>("require('bags').is_junk({id = 900007, name = 'Rat Pelt'})"), "a plain misc item is not junk");
+    assert!(bv.eval::<bool>("(function() require('bags').save_junk() return true end)()"));
+    let saved: String = bv.eval("eqoa.files.read('junk.cfg')");
+    assert!(!saved.contains("grey"), "{saved:?}");
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// The nearest NPC list is cached for half a second; a test that moves the player asks again at once.
+fn bv_look_again(bv: &mut Bv) {
+    bv.eval::<bool>("(function() require('bags').scan_reset() return true end)()");
+    bv.frames(2);
+}
+
+/// Item 6: with the nearest merchant or banker beyond the reach the server last accepted, the mod's own buttons
+/// grey out and say why. The reach is learned: an answer at a distance makes that distance fine, silence makes it
+/// (and farther) too far; until known, a conservative default decides. The player's own windows are never blocked.
+#[test]
+fn round65_fix4_item6_out_of_range_buttons_grey_out_and_the_reach_is_learned() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    // the merchant and the banker stand 30 units away: past the default reach
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [30.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9003, "Banker Dan", 0x80 | 2, 1, [0.0, 0.0, 30.0]);
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['900008'] = true return true end)()"));
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(1));
+    bv.frames(2);
+    let sends = bv.play.bags_sends_lost();
+    let (x, y, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.contains("too far from the merchant"), "greyed out and says why: {label}");
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends, "nothing is sent to a merchant out of reach");
+    assert_eq!(bv.result_text(), Some(("Sell junk: too far from the merchant".into(), Some(false))));
+    // Deposit and Withdraw: the rows are there, greyed, with the reason
+    bv.click(bv.slot(2));
+    bv.frames(2);
+    let (_, _, en, reason, _) = bv.menu_row("Deposit").unwrap();
+    assert!(!en && reason.as_deref() == Some("too far from the banker"), "{en} {reason:?}");
+    bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
+    bv.frames(1);
+
+    // walking up to 5 units: in reach; the merchant answers: 5 is a distance that works
+    bv.play.bags_player_at([25.0, 0.0, 0.0]);
+    bv_look_again(&mut bv);
+    let (x, y, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.starts_with("Sell junk (1 item)"), "in reach: {label}");
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends, "the talk request goes out");
+    bv.play.bags_merchant_packet(9002);
+    bv.frames(2);
+    let ok: f64 = bv.eval("require('bags').range.merchant.ok");
+    assert!((ok - 5.0).abs() < 0.01, "an answer at 5 units: {ok}");
+    bv.play.bags_close_merchant();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+
+    // at 9 units (inside the default reach) the merchant says nothing: 9 and farther are too far from now on
+    bv.play.bags_player_at([21.0, 0.0, 0.0]);
+    bv_look_again(&mut bv);
+    let (x, y, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.starts_with("Sell junk (1 item)"), "9 units is inside the default reach: {label}");
+    bv.click((x, y));
+    for _ in 0..330 {
+        bv.play.bags_broker_tick();
+    }
+    bv.frames(2);
+    assert!(bv.result_text().unwrap().0.contains("did not answer"));
+    let fail: f64 = bv.eval("require('bags').range.merchant.fail");
+    assert!((fail - 9.0).abs() < 0.01, "silence at 9 units: {fail}");
+    bv_look_again(&mut bv);
+    let (_, _, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.contains("too far from the merchant"), "9 units is now known to be too far: {label}");
+    // 7 units lies between a distance that worked (5) and one that did not (9): worth trying
+    bv.play.bags_player_at([23.0, 0.0, 0.0]);
+    bv_look_again(&mut bv);
+    let (_, _, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.starts_with("Sell junk (1 item)"), "between worked and failed: {label}");
+
+    // the player's own window is never blocked: far from the merchant, with the shop open, Sell junk works
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_open_merchant(9002);
+    bv_look_again(&mut bv);
+    let (x, y, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.starts_with("Sell junk (1 item"), "open shop: no distance check: {label}");
+    let sends = bv.play.bags_sends_lost();
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert!(bv.play.bags_sends_lost() > sends || bv.play.bags_shop_pending(), "the sell goes out from an open shop");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item 6, bank side: far from the banker the rows are greyed with the reason; a bank the player opened by hand is a
+/// real answer (the reach is learned from it), and an open bank is never blocked.
+#[test]
+fn round65_fix4_item6_bank_rows_follow_the_reach_and_native_opens_teach_it() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9003, "Banker Dan", 0x80 | 2, 1, [0.0, 0.0, 14.0]);
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(1));
+    bv.frames(2);
+    bv.click(bv.slot(2));
+    bv.frames(2);
+    let (_, _, en, reason, _) = bv.menu_row("Deposit").unwrap();
+    assert!(!en, "14 units: past the default reach");
+    assert_eq!(reason.as_deref(), Some("too far from the banker"));
+    bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
+    // the player walks to 4 units and opens the bank themselves: that answer is learned (4 units works)
+    bv.play.bags_player_at([0.0, 0.0, 10.0]);
+    bv_look_again(&mut bv);
+    bv.play.bags_bank_packet();
+    bv.frames(2);
+    let ok: Option<f64> = bv.eval("require('bags').range.bank.ok");
+    assert!(ok.is_some_and(|d| (d - 4.0).abs() < 0.01), "a native open at 4 units teaches the reach: {ok:?}");
+    // with the bank open nothing is blocked, wherever the banker stands
+    bv.play.bags_player_at([0.0, 0.0, -40.0]);
+    bv_look_again(&mut bv);
+    bv.click(bv.slot(2));
+    bv.frames(2);
+    let (_, _, en, reason, _) = bv.menu_row("Deposit").unwrap();
+    assert!(en, "an open bank is never blocked: {reason:?}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
