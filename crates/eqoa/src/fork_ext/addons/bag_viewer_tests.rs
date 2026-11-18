@@ -2707,8 +2707,14 @@ fn r65fix2_open_corpse(stale: bool) {
     bv.frames(1);
     let (lx, ly, lbl) = bv.action_hit("Open nearest corpse").unwrap();
     assert_eq!(lbl, "Open nearest corpse");
+    let _ = super::super::window_takeover::take_log_for_test();
     bv.click((lx, ly));
     bv.play.bags_broker_tick();
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(
+        log.iter().any(|l| l.contains("mod open_loot -> corpse 0x2329") && l.contains("opcode 0x0015")),
+        "the request's entity and opcode are logged: {log:?}"
+    );
     bv.play.bags_corpse(&serde_json::json!([
         {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
         {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100},

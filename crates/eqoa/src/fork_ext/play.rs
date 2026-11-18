@@ -3,6 +3,14 @@
 //! The combat indication adapter; service code only receives plain combat data.
 use super::Play;
 
+/// `tlog!("takeover: ...")`: an always-on takeover diagnostic (see `window_takeover::log`).
+#[allow(unused_macros)]
+macro_rules! tlog {
+    ($($a:tt)*) => {
+        crate::fork_ext::addons::window_takeover::log(format!($($a)*))
+    };
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "api_capture.rs"]
 mod api_capture;
@@ -428,7 +436,7 @@ pub(crate) fn window_taken(play: &Play, mode: i32) -> bool {
         };
         // L4: the window was already open natively before this packet: it is the player's
         if MODE_BEFORE_EVENT.with(std::cell::Cell::get) == mode {
-            eprintln!(
+            tlog!(
                 "takeover: {} window left to the game (already open before the reply)",
                 kind.name()
             );
@@ -449,11 +457,11 @@ pub(crate) fn window_taken(play: &Play, mode: i32) -> bool {
         // always on, like the game's own packet lines, so an owner's log explains a window that did or did not show
         match decision {
             window_takeover::OpenDecision::NoHolder => {}
-            window_takeover::OpenDecision::Accepted(why) => eprintln!(
+            window_takeover::OpenDecision::Accepted(why) => tlog!(
                 "takeover: {} window HIDDEN for the mod ({why}; observed {observed_target:?}, player target {fallback_player_target:?})",
                 kind.name()
             ),
-            window_takeover::OpenDecision::Declined(why) => eprintln!(
+            window_takeover::OpenDecision::Declined(why) => tlog!(
                 "takeover: {} window left to the game ({why}; observed {observed_target:?}, player target {fallback_player_target:?})",
                 kind.name()
             ),
@@ -550,7 +558,7 @@ fn close_hidden_session(
     use crate::fork_ext::addons::window_takeover::TakeoverKind;
     if !owed.had_session {
         // released with no hidden session up: there is nothing of the mod's to close or to send
-        eprintln!(
+        tlog!(
             "takeover: {} released with no hidden session ({}); nothing to close",
             kind.name(),
             owed.reason
@@ -564,7 +572,7 @@ fn close_hidden_session(
             if sent {
                 play.session.send_opcode(0x0016);
             }
-            eprintln!(
+            tlog!(
                 "takeover: loot hidden session closed ({}); 0x0016 {}",
                 owed.reason,
                 if sent {
@@ -581,12 +589,12 @@ fn close_hidden_session(
             crate::fork_ext::loot_source::closed();
         }
         TakeoverKind::Merchant => {
-            eprintln!("takeover: merchant hidden session closed ({})", owed.reason);
+            tlog!("takeover: merchant hidden session closed ({})", owed.reason);
             play.npcw.merchant.visible = false;
             play.npcw.shop = Default::default();
         }
         TakeoverKind::Bank => {
-            eprintln!("takeover: bank hidden session closed ({})", owed.reason);
+            tlog!("takeover: bank hidden session closed ({})", owed.reason);
             play.bank.state = 0;
         }
     }
@@ -1540,7 +1548,7 @@ fn dispatch_broker_action(
                     corpse_id,
                 );
             }
-            eprintln!("takeover: mod open_loot -> corpse {corpse_id:#x}, opcode 0x0015");
+            tlog!("takeover: mod open_loot -> corpse {corpse_id:#x}, opcode 0x0015");
             play.attack_press();
             DispatchOutcome::AwaitingServer {
                 matcher: crate::fork_ext::addons::action_broker::ServerMatcher::OpenLoot {
@@ -1673,7 +1681,7 @@ fn dispatch_broker_action(
                 } else {
                     0x0004
                 };
-                eprintln!(
+                tlog!(
                     "takeover: mod talk -> npc {npc_id:#x}, npc_flags {target_flags:#04x}, opcode {op:#06x} (the game's own interact path)"
                 );
             }

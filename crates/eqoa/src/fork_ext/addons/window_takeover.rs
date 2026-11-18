@@ -10,6 +10,25 @@
 use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
 
+/// One always-on `takeover:` line, like the game's own `play: 0x....` lines: stderr, and (tests only) a buffer a test
+/// reads back with `take_log_for_test`.
+pub(crate) fn log(line: String) {
+    eprintln!("{line}");
+    #[cfg(test)]
+    TEST_LOG.with(|l| l.borrow_mut().push(line));
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_LOG: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The `takeover:` lines logged on this thread since the last call.
+#[cfg(test)]
+pub(crate) fn take_log_for_test() -> Vec<String> {
+    TEST_LOG.with(|l| std::mem::take(&mut *l.borrow_mut()))
+}
+
 const PENDING_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 const HIDDEN_SESSION_TIMEOUT: Duration = Duration::from_secs(15);
 

@@ -1,5 +1,106 @@
 # Round 6.5 Report: Capabilities, Standalone Window Takeover, `open_loot`/`talk`, and Bag Viewer Auto-Loot
 
+## Owner-test recovery, 2026-11-18 (base `20b3eebb`)
+
+The earlier gate results below describe the build the owner tested, not acceptance
+of this recovery. Live owner QA is pending. The interrupted builder's eight-file
+uncommitted diff was preserved under ignored `run/`, reviewed, corrected, and
+completed on `feat/eqoa-api-r6.5` as LoopRook. No push, merge, tag, disc data, or
+server changes are part of this recovery.
+
+### Changes and causes
+
+1. **Hidden corpse reads:** the items snapshot already understands hidden sessions,
+   but scope-own takeover depended on the global loot-source queue being untainted.
+   Old unanswered requests could keep that queue ambiguous, so a mod's later open
+   fell through to the native window. `window_takeover::PendingOpen` now observes
+   the requests sent after arming, including their entity id. A conflicting request
+   in that interval still declines takeover; ordinary player opens remain native.
+   The separate source-name tracker stays conservative: ambiguous source names are
+   not fabricated. The rendered Corpse tab and `eqoa.loot.get()` read the same items.
+2. **Display versus taking:** the button is **Open nearest corpse**. Opening only
+   displays the corpse; it leaves no take queued. Take all, Take all but junk, item
+   menus, and the separate Auto-loot checkbox retain their existing taking paths.
+   Existing round 5/6 take, refusal, Stop, and per-take server-close coverage stays.
+   Button widths and padding fit the full labels at the default width; the
+   rendered fixture lists three items and takes nothing.
+3. **Merchant:** the previous API, spec, Lua discovery, and fixture metadata called
+   bit `0x08` a merchant. The actual native interaction sends `0x004C` for bit
+   `0x01`; bit `0x08` sends smith/repair `0x0061`. Discovery and takeover arming now
+   use `0x01`, and the erroneous immediate "trainer completed" branch is removed.
+   The existing `Play::interact_with_target` is called unchanged. The new test
+   records exact outbound `0x004C + npc_id` bytes, skips a closer smith, and waits
+   for matching `0x00B7` before success. Silence becomes "merchant did not answer"
+   after the broker's existing 300 ticks (ten seconds), rather than leaving
+   "Opening merchant..." indefinitely.
+4. **Diagnostics:** always-on fork-side `takeover:` lines record dispatched mod
+   open_loot/talk entity ids and opcodes, accepted/declined takeover decisions
+   (including already-native windows), and hidden-session close reasons.
+5. **Close once:** outgoing close packets and local `play: 0x0016` handler echoes
+   are different. The old cleanup called `npcw_opcode(0x0016)` even after the server
+   had already cleared the corpse, and again when releasing a holder with no
+   session. This explains repeated log entries without proving repeated outgoing
+   packets. Close obligations now carry whether a real session existed and why it
+   ended; cleanup skips both the packet and native handler when already closed.
+   An accepted distant corpse also stays readable: the old immediate 25-unit
+   corpse-distance rejection is removed. Walking more than 25 units from the
+   position where a hidden session opened still ends it, as does idle expiry.
+6. **Bank:** unanswered opens and moves now end in the result line, mentioning
+   the banker and possible distance. Silence does not establish a range refusal,
+   so the wording is a question; actual refusal text continues unchanged through
+   the existing result path. The server still decides range and permissions.
+
+### Verification record
+
+| Area | Implementation location |
+|---|---|
+| Request observation and hidden open decision | `crates/eqoa/src/fork_ext/addons/window_takeover.rs:362`, `:384` |
+| Always-on decisions and closes | `crates/eqoa/src/fork_ext/play.rs:419`, `:545` |
+| Hidden session lifetime | `crates/eqoa/src/fork_ext/play.rs:596` |
+| Native merchant target and dispatch | `crates/eqoa/src/fork_ext/play.rs:1552` |
+| Corpse display-only action | `bundled-mods/eqoa_bag_viewer/modules/bags.lua:512` |
+| Merchant/banker timeout results | `bundled-mods/eqoa_bag_viewer/modules/bags.lua:1005`, `:1014` |
+
+Always-on lines go through `window_takeover::log` (stderr, plus a test-only
+buffer), so Rust tests assert the exact lines (request entity and opcode, accept,
+decline with reason, close with reason). An earlier Python log checker inside the
+crate was removed: it needed a built test executable and belonged in no test run.
+
+Recovery note: the first builders were cut off with their implementation lost from
+the tree by an interrupted negative control. It was restored from the saved stage
+snapshots, reviewed hunk by hunk, and re-verified. The recovery commits are
+`badf6702`, `1fb74cb6`, `5a720448`, `11bf2ccc`, `f5bc4bac`, `403ce60d` (one per fix
+item, in that order: hidden corpse items, button label/display-only, merchant,
+logs, one close per session + far corpse, bank/timeouts) plus the log-helper
+commit that follows them.
+
+### Executed negative controls (recovery)
+
+Each fix was reverted in the working tree and the `round65` tests run; all 28 pass
+with the fixes. With a fix reverted, these fail (first failing assertion):
+
+| Fix reverted | Failing test |
+|---|---|
+| request-tracked claim (stale loot bookkeeping) | `round65_fix2_open_corpse_shows_items_hidden_even_with_stale_loot_requests`: "the game's corpse window must not open" (mode 1) |
+| Open button takes (`loot_all`) | `round65_fix2_open_button_only_displays_never_takes`: result "Take all: queued..." not "Corpse ready" |
+| merchant flag 0x01 to 0x08 | `round65_fix2_merchant_uses_native_flags_and_exact_request`: smith 0x0061 chosen, no 0x004C |
+| 0x0016 sent even if the server closed | `round65_fix2_one_close_per_hidden_session`: 2 closes, expected 1 |
+| close with no session | same test, part (c) |
+| 25-unit corpse-distance check back | `round65_fix2_far_corpse_session_is_not_closed_at_once` |
+| unanswered result text (merchant, bank open, bank move) | `round65_fix2_unanswered_merchant_talk_fails_visibly`, `round65_fix2_unanswered_bank_requests_fail_visibly` |
+| each log line removed (open_loot, talk, accept, decline, close, release-without-session) | the open, merchant, M2 and one-close tests |
+
+No upstream line was added or changed: **4 of the 6 permitted seam lines remain
+in use** (see `round-6.5-seams.md`). All implementation stays in fork-owned files.
+Bundled file checksums are regenerated with the mod changes.
+
+The native player-initiated windows, live merchant response/range behavior, bank
+range/refusal wording, and ownership permissions still need the owner's server
+test. Protocol-shaped offline replays cannot establish live server acceptance.
+The decomp/oracle is unavailable on this machine; no oracle result is claimed.
+
+---
+
 Branch: `feat/eqoa-api-r6.5` from `develop` (`9046c28b`), reviewed footprint base `a76d8d27a1c3f51fca545d7eabaca9e5dc336091`. Commits are LoopRook's; nothing was pushed, merged, or tagged.
 
 ## Commits

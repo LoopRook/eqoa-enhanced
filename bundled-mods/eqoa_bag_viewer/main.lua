@@ -346,7 +346,7 @@ function draw()
     local function ctx_btn(bx, bw, lbl, col, bcol, run)
         fill(bx, bar2_y, bw, 16, c.raised)
         frame(bx, bar2_y, bw, 16, bcol)
-        text(bx + 6, bar2_y + 2, lbl, col, bw - 10)
+        text(bx + 4, bar2_y + 2, lbl, col, bw - 8)
         action_hits[#action_hits + 1] = {
             label = lbl, x = x0 + bx * k, y = y0 + bar2_y * k, w = bw * k, h = 16 * k,
             run = run,
@@ -357,7 +357,7 @@ function draw()
     local near_corpse = B.nearby_corpse()
     if is_corpse or loot ~= nil then
         local bw, bgap = W - 2 * PAD, 6
-        local w_loot, w_all = 112, 60
+        local w_loot, w_all = 122, 56
         local w_non = bw - w_loot - w_all - 2 * bgap
         local can_open = loot ~= nil or near_corpse ~= nil
         local has_items = (loot ~= nil and #(loot.items or {}) > 0) or (loot == nil and near_corpse ~= nil)

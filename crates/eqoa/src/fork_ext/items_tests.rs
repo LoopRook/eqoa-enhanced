@@ -3676,6 +3676,7 @@ fn round65_fix_m2_pending_open_never_claims_a_player_started_open() {
     for k in TakeoverKind::ALL {
         r65fix_own(k);
     }
+    let _ = window_takeover::take_log_for_test();
 
     // loot: the mod's request and the player's overlap (two outstanding): the reply cannot be
     // told apart, so it must stay a native window, never hidden.
@@ -3684,11 +3685,21 @@ fn round65_fix_m2_pending_open_never_claims_a_player_started_open() {
     crate::fork_ext::loot_requested(9001); // the mod's
     apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
     assert_eq!(p.mode, 1, "overlapping loot requests: the reply must not be claimed by the pending open");
+    let log = window_takeover::take_log_for_test();
+    assert!(
+        log.iter().any(|l| l.contains("loot window left to the game") && l.contains("overlapped")),
+        "a decline is logged with its reason: {log:?}"
+    );
     apply(&mut p, opcode(0x0016, vec![]));
     crate::fork_ext::loot_source::clear();
     crate::fork_ext::loot_requested(9001);
     apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
     assert_eq!(p.mode, 0, "the pending open must still claim its own reply (known matching target)");
+    let log = window_takeover::take_log_for_test();
+    assert!(
+        log.iter().any(|l| l.contains("loot window HIDDEN for the mod")),
+        "an accept is logged: {log:?}"
+    );
     apply(&mut p, opcode(0x0016, vec![]));
     window_takeover::set_hidden_inactive(TakeoverKind::Loot);
 
@@ -3905,6 +3916,7 @@ fn round65_fix2_one_close_per_hidden_session() {
     p.session.conn = p.session.drdp.connection_open(sys, remote);
     assert!(p.session.conn.is_some());
     p.session.record = Some(vec![]);
+    let _ = window_takeover::take_log_for_test();
     let closes = |p: &Play| {
         p.session
             .record
@@ -3938,6 +3950,10 @@ fn round65_fix2_one_close_per_hidden_session() {
         "no further close on later iterations"
     );
     assert!(p.npcw.corpse.is_none());
+    let log = window_takeover::take_log_for_test();
+    let closed: Vec<_> = log.iter().filter(|l| l.contains("loot hidden session closed")).collect();
+    assert_eq!(closed.len(), 1, "one close line per session, with its reason: {log:?}");
+    assert!(closed[0].contains("0x0016 sent"), "{closed:?}");
 
     // b) the server closed the corpse first (its own 0x0016): our end of the session sends nothing
     window_takeover::reset_all_for_test();
@@ -3960,6 +3976,11 @@ fn round65_fix2_one_close_per_hidden_session() {
         before,
         "the server already closed it: no second 0x0016"
     );
+    let log = window_takeover::take_log_for_test();
+    assert!(
+        log.iter().any(|l| l.contains("loot hidden session closed") && l.contains("not sent")),
+        "the close without a packet is logged too: {log:?}"
+    );
 
     // c) a release with no hidden session up closes nothing and sends nothing
     window_takeover::reset_all_for_test();
@@ -3971,6 +3992,11 @@ fn round65_fix2_one_close_per_hidden_session() {
         closes(&p),
         before,
         "nothing was hidden, so nothing is closed"
+    );
+    let log = window_takeover::take_log_for_test();
+    assert!(
+        log.iter().any(|l| l.contains("released with no hidden session")),
+        "{log:?}"
     );
     window_takeover::reset_all_for_test();
     action_broker::reset_all_for_test();
@@ -4044,8 +4070,14 @@ fn round65_fix2_merchant_uses_native_flags_and_exact_request() {
     assert!(p.session.conn.is_some());
     p.session.record = Some(vec![]);
     p.forge_snapshot(None);
+    let _ = window_takeover::take_log_for_test();
     host.execute("assert(eqoa.windows.takeover('merchant')); req = assert(eqoa.actions.talk(nil, {kind='merchant'}))").unwrap();
     super::super::begin_iteration(&mut p, true);
+    let log = window_takeover::take_log_for_test();
+    assert!(
+        log.iter().any(|l| l.contains("mod talk -> npc 0x24b9") && l.contains("opcode 0x004c")),
+        "the request's entity and opcode are logged: {log:?}"
+    );
     assert_eq!(
         p.target, 9401,
         "merchant selection must skip the closer smith"
