@@ -314,3 +314,10 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
   crafting.
 - **Server limit:** the server decides the range for every request; the owner's round 6.5 test shows whether
   "from anywhere" works.
+
+## Auto-loot beyond "you hit it" (owner, 2026-11-17)
+
+- **Status:** Idea. Round 6.5's auto-loot takes only corpses of creatures you hit, out of combat; others need one click on
+  Loot. Later: an Auto-loot setting "my kills only" / "anything the server lets me loot" (ask for every nearby corpse,
+  hide the server's refusals; check that chat stays quiet and the server tolerates it) and group kills (only if the client
+  can see what group members hit: unverified).
