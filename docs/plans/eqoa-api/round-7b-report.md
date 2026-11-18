@@ -2,6 +2,13 @@
 
 Branch: `feat/eqoa-api-r7b`, based on develop `9ea6b435`.
 
+**Part B complete; independent review and integration remain with the lead.**
+The full release gates finished **ALL GATES PASSED** at 01:47:33 local time on
+2026-11-18, covering HEAD `69c2d41f`. The last code commit is `95d1066b`
+(01:00:21); HEAD's generated-document refresh is at 01:03:12. No source or
+generated reference changed after the successful run. Only this report is
+updated afterward, so the full gates were not repeated.
+
 ## Scope and boundaries
 
 Implements Part B of `docs/round-7-audit:docs/plans/eqoa-api/round-7-plan.md`.
@@ -108,7 +115,51 @@ a negative-control result. The successful attempt wrote UTF-8 explicitly.
 
 ### Final gates
 
-The full standard release gate run is pending; results will be appended after it.
+Command: `python tools/run_gates.py --release --filter round7b_`, with the
+shared-target safeguard described below, the shared Cargo lock/cache, the owned
+Frontiers disc at `run/eqoa.iso`, and the runner's scratch configuration.
+
+| Gate | Result | Passed | Failed | Ignored | Printed SKIP lines | Seconds |
+|---|---|---:|---:|---:|---:|---:|
+| round | PASS | 3 | 0 | 0 | 0 | 91.84 |
+| addons | PASS | 498 | 0 | 25 | 9 (9 distinct) | 425.12 |
+| full | PASS | 2379 | 0 | 30 | 50 (30 distinct) | 1918.48 |
+| wasm | PASS | | | | | 34.39 |
+| footprint | PASS | | | | | 2.31 |
+| paths | PASS | | | | | 4.31 |
+| player-release | PASS | | | | | 47.50 |
+| release | PASS | | | | | 136.61 |
+
+Counts and timings are copied from the gate summary. Printed SKIPs can return
+success and therefore appear among passed tests; they are not claimed as
+fixture coverage. Addon skips cover four symlink checks lacking Windows
+privilege, two pinned Forge fixture checks lacking `EQOA_FORGE_SPIKE`, and
+three bundled UI picture comparisons lacking reviewed `EQOA_BUNDLED_UI_GOLDENS`.
+The full run repeats those and skips fixture branches requiring `run/client.bin`,
+a live save state, live/July/local-server S2 assets, the 2002 disc, or server-world
+art. The 50 printed lines include repeated missing-S2 reports; the summary lists
+30 distinct lines. Ignored tests are separate opt-in tests, not counted as run.
+
+Existing bundled load/lifecycle and zero-manager-diagnostic tests passed. The
+existing zero-addon frame/packet allocation-bound test ran and logged zero menu
+frame allocations. The reviewed golden-image comparisons did not run, as noted
+above. No live owner playtest or external decomp/oracle evidence is claimed;
+this gate runs the eqoa binary tests, not the separate oracle workspace suite.
+
+Coverage was checked against git timestamps and a clean `git diff 69c2d41f`.
+Round, wasm and release logs show compilation from this worktree. The round log
+executes the three Part B tests, with 2,456 filtered out, matching this branch's
+2,459-test binary rather than the other branch's cached 2,475-test binary.
+The final footprint passes with main at +7/-0 and its new hook occurring once.
+Path checks, rustfmt on the new source, and the complete branch whitespace check
+pass. There is no worktree-local `target` directory. No existing test was
+deleted, skipped, or weakened by this change; nothing was pushed, merged or tagged.
+
+No Part B implementation remains outstanding. Part C must regenerate both
+references after merging the other API branches and correcting registry claims.
+
+### Earlier verification and corrections
+
 The first launch was cancelled before completing the round step to remove
 Markdown hard-break trailing spaces and the final extra blank line found by
 `git diff --check`. The writer now uses a metadata list and exactly one final
