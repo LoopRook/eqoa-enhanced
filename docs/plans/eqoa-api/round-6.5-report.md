@@ -17,6 +17,9 @@ Branch: `feat/eqoa-api-r6.5` from `develop` (`9046c28b`), reviewed footprint bas
 | `06ea4c10` | `docs(api): fix talk/npc_flags spec and document takeover scoping and limits (L1, L6)` |
 | `b3c11196` | `feat(api): add own/all takeover scope to eqoa.windows.takeover (M1 amendment)` |
 | `01a48721` | `fix(addons): require explicit capability list for actions and takeover (not_declared)` |
+| `edf30939` | `fix(addons): takeover claims need a known matching target, owed closes, target restore, no hiding of open windows (M1 Rust, M2, M3, L4)` |
+| `70b58da4` | `fix(bag_viewer): auto-loot only after you hit it and out of combat; Loot tab renews its session (M1, L5, L6)` |
+| `6d73a1a8` | `fix(bag_viewer): declare exactly the actions the mod uses; spec and notes for the review fixes (L7)` |
 
 ## What Was Delivered
 
@@ -63,6 +66,27 @@ Branch: `feat/eqoa-api-r6.5` from `develop` (`9046c28b`), reviewed footprint bas
 - Updated `docs/modding/GETTING-STARTED.md` (capability requirements in place of one-gesture wording).
 - Updated `FORK-UPDATE-NOTES.md` (`## Unreleased` player-visible notes for autonomous action labels, standalone Bag Viewer takeover, and Auto-loot).
 
+## Review Fixes (Sonnet review: APPROVE WITH CHANGES, no HIGH)
+
+Each fix has a test that failed before it. Rust fixes were written test-first and the failure below is that first red run; the Lua fixes were checked by running the new tests against the previous Lua (`EQOA_R5B_TEST_SOURCE` pointing at a copy of the old package). Items that share code are in one commit (M1 Rust with M2, M3, L4; M1 Lua with L5, L6). L4 needed no new upstream line: the total stays 4 of 6.
+
+| Item | What changed | Test | Failure without the fix |
+|---|---|---|---|
+| M1 retarget | `open_loot`/`talk` record the player's previous target (`window_takeover::note_retarget`). When the mod is done (no pending open, no hidden session, nothing queued, in flight or running: `action_broker::vm_is_idle`) and no native window is up, the previous target returns through the game's own target request, unless the player chose another target or it is gone or a corpse. The spec documents the target change and the restore. | `round65_fix_m1_previous_target_restored_when_the_mods_open_is_done` | With the restore call disabled: `M1: the player's previous target comes back` left 9001, right 9500 (`items_tests.rs:3829`). |
+| M1 combat | Auto-loot (Lua) does not run while in combat and goes on when the fight ends. The signal is the game's own combat flag (`player.fighting`, the one that asks for battle music), auto-attack on, or a live NPC whose `target_id` is the player (the best signal the client has: the wire has no "being attacked" flag beyond these). `player.changed` re-runs the held-back loot. | `round65_fix_bag_viewer_auto_loot_waits_while_in_combat` | Old Lua: `M1: no auto-loot while a live hostile has you targeted` left 1, right 0 (`bag_viewer_tests.rs:2583`). |
+| M2 | Under scope own a pending open claims an open only when its target is known to match: loot and merchant by the observed id, bank by the player's current target. An unmatched open stays native and the pending claim survives for its own reply. A pending claim whose request is refused, timed out or gone is dropped at the next iteration (`action_broker::open_requests_waiting`). `scope = "all"` is unchanged. | `round65_fix_m2_pending_open_never_claims_a_player_started_open`, `round65_fix_m2_refused_open_clears_pending_claim` | `overlapping loot requests: the reply must not be claimed by the pending open` left 0, right 1 (`items_tests.rs:3655`); `a refused talk must not leave a pending claim on the player's own open` left 0, right 10 (`items_tests.rs:3712`). |
+| M3 | `sync_sessions_with` records an owed close per kind (`close_owed`); it is taken and sent only when `mode == 0`, otherwise it stays (and keeps the takeover state active) until a native window no longer blocks it. Corpse, `LOOT_BUSY` and master-loot state are cleared when it is sent. | `round65_fix_m3_hidden_session_end_while_mode_nonzero_is_deferred_not_dropped` | `the owed close must keep the takeover state alive` (`items_tests.rs:3737`); before the fix the close was consumed and never sent. |
+| L4 | `window_taken` declines when the window's mode was already current before the packet (`MODE_BEFORE_EVENT`, set in `begin_game_event`, cleared in `end_game_event`). | `round65_fix_l4_window_already_open_is_not_hidden_on_arrival` (loot, merchant, bank) | `L4: an already-open native corpse window must not be hidden by the reply` left 0, right 1 (`items_tests.rs:3770`). |
+| L5 | `eqoa.windows.takeover(kind)` called again while holding renews a live hidden session's idle timer; the Loot tab calls it every frame it is shown. Walk-away, zoning, release and panel close still end the session. | `round65_fix_bag_viewer_loot_tab_keeps_hidden_session_alive` | Old Lua: `L5: the Loot tab must renew the session while it is shown` (`bag_viewer_tests.rs:2638`). |
+| L6 | Auto-loot's "my kill" signal: you hit the creature (an outgoing damage `combat.hit` that is not your pet's, or your auto-attack on it while targeted). Not a player's or pet's corpse, not one nobody on your side touched, not another player's kill. Still uncertain (the wire carries no kill credit or loot rights): a creature you hit that another player then killed counts, and the server's refusal (shown in the result line) decides; manual **Loot** works on any corpse. | `round65_fix_bag_viewer_auto_loot_only_corpses_of_creatures_you_hit` | Old Lua: `a corpse of a creature you did not hit is not auto-looted` left 1, right 0 (`bag_viewer_tests.rs:2521`). |
+| L7 | `mod.json` declares `eqoa.actions.open_loot, talk, loot, loot_all, sell, bank_move, use_item, equip, quick_slot, batch` instead of `eqoa.actions.*`, so the Mods & Addons label reads "can act on its own (open_loot, talk, loot, loot_all, sell, bank_move, use_item, equip, quick_slot, batch)". `buy` and `bank_money` are not called by the mod, so they are not declared (`cancel` and `stop_batch` ask for no capability). The bundled manifest was regenerated. | `round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses`; the label assertion in `round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refusal` | With the old `mod.json`: `no blanket eqoa.actions.*` (`bag_viewer_tests.rs:2671`). |
+
+The three tests the review asked for: pending open beside a player-started open (`round65_fix_m2_pending_open_never_claims_a_player_started_open`), hidden-session end while `mode != 0` (`round65_fix_m3_...`), window already open on arrival (`round65_fix_l4_...`).
+
+Changes to older tests, forced by the new rules and not weakening them: the bank step of `round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases` no longer retargets before `0x124D` (an unmatched bank open is now native; that case is covered by the M2 test), `round65_loot_release_clears_corpse_visibility_and_master_loot` records its loot request so the reply is known to match, `activate_hidden_for_test` passes the player's target for banks, `round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target` makes the kill a hit of yours, and the label assertion names the declared actions.
+
+Needs the live server: the restore after a mod's open (the server's order of the retarget and the loot request), the owed close under a player's native window, the combat flag in a real fight, and Auto-loot after a real kill.
+
 ## Executed Negative Controls
 
 Each fix was temporarily broken in source, tested against the focused regression test to observe failure, and cleanly restored:
@@ -106,17 +130,16 @@ Each fix was temporarily broken in source, tested against the focused regression
 
 ## Gate & Verification Results (`EQOA_ISO=run/eqoa.iso`)
 
-`python tools/run_gates.py --release` (no `--filter`, no `--skip-step`) + focused verification:
+After the review fixes, `python tools/run_gates.py --release` (no `--filter`, no `--skip-step`): **ALL GATES PASSED**. The `enhanced_report_transport_does_not_follow_redirects` flake did not occur in this run.
 
 | Step | Result | Details |
 |---|---|---|
-| `round65` | PASS | 12 passed, 0 failed, 0 ignored (`cargo test -p eqoa round65 -- --test-threads=1`) |
-| `addons` | PASS (609.60s) | 499 passed, 0 failed, 25 ignored (9 distinct skips: Windows symlink privilege not held x4, `EQOA_FORGE_SPIKE` missing x2, `EQOA_BUNDLED_UI_GOLDENS` missing x3) |
-| `full` | 2385 passed, 1 failed, 30 ignored (2239.74s) | Sole failure: unrelated pre-existing `fork_ext::report_core::tests::enhanced_report_transport_does_not_follow_redirects` (`WouldBlock` timeout under parallel test load; passed in 0.03s when run via `cargo test -p eqoa enhanced_report_transport_does_not_follow_redirects`). 30 distinct skips (`run/client.bin`, `EQOA_2002_ISO`, external `sandstorm-patch-20261015/S2` / `go-eqoa-server` patches, `1.6-savestates`, Windows symlink privilege, `EQOA_FORGE_SPIKE`, `EQOA_BUNDLED_UI_GOLDENS`) |
-| `wasm` | PASS (10.31s) | `cargo check --locked -p eqoa --target wasm32-unknown-unknown` |
-| `footprint` | PASS (3.31s) | `python tools/check_fork_footprint.py --base a76d8d27a1c3f51fca545d7eabaca9e5dc336091` |
-| `paths` | PASS (12.50s) | `python tools/check_no_local_paths.py` |
-| `player-release` | PASS (66.60s) | `python tools/test_player_release.py` |
-| `release` | PASS (283.56s) | Release binary built cleanly (`eqoa.exe`) |
+| `addons` | PASS (500.09s) | 503 passed, 0 failed, 25 ignored (9 distinct skips: Windows symlink privilege not held x4, `EQOA_FORGE_SPIKE` missing x2, `EQOA_BUNDLED_UI_GOLDENS` missing x3) |
+| `full` | PASS (2026.22s) | 2395 passed, 0 failed, 30 ignored (30 distinct skips: `run/client.bin`, `EQOA_2002_ISO`, external Sandstorm/go-eqoa-server patch folders, `1.6-savestates`, Windows symlink privilege, `EQOA_FORGE_SPIKE`, `EQOA_BUNDLED_UI_GOLDENS`) |
+| `wasm` | PASS (21.05s) | `cargo check --locked -p eqoa --target wasm32-unknown-unknown` |
+| `footprint` | PASS (2.30s) | `python tools/check_fork_footprint.py --base a76d8d27a1c3f51fca545d7eabaca9e5dc336091` (no budget change: 4 of 6 upstream lines) |
+| `paths` | PASS (5.30s) | `python tools/check_no_local_paths.py` |
+| `player-release` | PASS (42.03s) | `python tools/test_player_release.py` |
+| `release` | PASS (178.34s) | Release binary built cleanly |
 
-Plus `python tools/update_bundled_manifest.py --check`: `Bundled mod manifests are up to date.`
+Also: `python tools/update_bundled_manifest.py --check` passes after the manifest regeneration. The oracle tests skip on this machine (the decomp and eqoa-port oracle are not here); the 2002-disc, live-S2 and pinned-Forge tests skip as listed above.
