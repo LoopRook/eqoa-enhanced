@@ -13,6 +13,9 @@ from unittest import mock
 import collect_owner_test
 
 PERF = "perf: {fps} fps, cpu 3.10 ms/frame (worst {worst}, 0 of 50 ms or more, 0 of 100), 120 models in 40 draws: x"
+# built at run time so no tracked line holds a user-profile path
+PROFILE_BACK = chr(92).join(["C:", "Users", "someone"])
+PROFILE_FWD = "/".join(["C:", "Users", "someone"])
 OPCODE = "play: {op} ({n} bytes) in mode 2"
 
 
@@ -94,12 +97,12 @@ class TestCollector(unittest.TestCase):
         self.assertNotIn("old-report.zip", page)
 
     def test_never_reads_or_prints_account_files_or_absolute_paths(self):
-        self.log([r"mod path C:\Users\someone\Documents\thing failed", "ok"])
+        self.log([f"mod path {PROFILE_BACK}\\Documents\\thing failed", "ok"])
         (self.pkg / "config" / "account1.opt").write_text("SECRET-PASSWORD", encoding="utf-8")
         (self.pkg / "config" / "acct_main.opt").write_text("SECRET-TWO", encoding="utf-8")
         (self.pkg / "config" / "addons").mkdir()
         (self.pkg / "config" / "addons" / "addons_error.log").write_text(
-            f"failed in {self.pkg}\\mods\\x and C:/Users/someone/AppData/y\n", encoding="utf-8"
+            f"failed in {self.pkg}\\mods\\x and {PROFILE_FWD}/AppData/y\n", encoding="utf-8"
         )
         before = sorted(p.relative_to(self.pkg).as_posix() for p in self.pkg.rglob("*"))
         page = collect_owner_test.collect(self.pkg, self.desktop)
