@@ -428,6 +428,10 @@ pub(crate) fn window_taken(play: &Play, mode: i32) -> bool {
         };
         // L4: the window was already open natively before this packet: it is the player's
         if MODE_BEFORE_EVENT.with(std::cell::Cell::get) == mode {
+            eprintln!(
+                "takeover: {} window left to the game (already open before the reply)",
+                kind.name()
+            );
             return false;
         }
         let observed_target = match kind {
@@ -436,12 +440,25 @@ pub(crate) fn window_taken(play: &Play, mode: i32) -> bool {
             TakeoverKind::Bank => None,
         };
         let fallback_player_target = (play.target != u32::MAX).then_some(play.target);
-        window_takeover::try_accept_open(
+        let decision = window_takeover::decide_open(
             kind,
             observed_target,
             fallback_player_target,
             play.self_at.map(|(p, _)| p),
-        )
+        );
+        // always on, like the game's own packet lines, so an owner's log explains a window that did or did not show
+        match decision {
+            window_takeover::OpenDecision::NoHolder => {}
+            window_takeover::OpenDecision::Accepted(why) => eprintln!(
+                "takeover: {} window HIDDEN for the mod ({why}; observed {observed_target:?}, player target {fallback_player_target:?})",
+                kind.name()
+            ),
+            window_takeover::OpenDecision::Declined(why) => eprintln!(
+                "takeover: {} window left to the game ({why}; observed {observed_target:?}, player target {fallback_player_target:?})",
+                kind.name()
+            ),
+        }
+        decision.accepted()
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -1498,6 +1515,7 @@ fn dispatch_broker_action(
                     corpse_id,
                 );
             }
+            eprintln!("takeover: mod open_loot -> corpse {corpse_id:#x}, opcode 0x0015");
             play.attack_press();
             DispatchOutcome::AwaitingServer {
                 matcher: crate::fork_ext::addons::action_broker::ServerMatcher::OpenLoot {
@@ -1619,6 +1637,20 @@ fn dispatch_broker_action(
                 {
                     let _ = window_takeover::arm_pending_open(TakeoverKind::Bank, vm, npc_id);
                 }
+            }
+            {
+                let op = if target_flags & 1 != 0 {
+                    0x004C
+                } else if target_flags & 2 != 0 {
+                    0x124D
+                } else if target_flags & 8 != 0 {
+                    0x0061
+                } else {
+                    0x0004
+                };
+                eprintln!(
+                    "takeover: mod talk -> npc {npc_id:#x}, npc_flags {target_flags:#04x}, opcode {op:#06x} (the game's own interact path)"
+                );
             }
             play.interact_with_target();
             DispatchOutcome::AwaitingServer {
