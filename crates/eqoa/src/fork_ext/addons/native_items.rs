@@ -717,8 +717,14 @@ fn install_fields(lua: &Lua) {
         ("eqoa.items.LootSource", "entity_id name"),
         ("eqoa.items.CanUse", "allowed reasons"),
         ("eqoa.items.SlotInfo", "id name order"),
-        ("eqoa.items.MerchantState", "entity_id greeting pending sell_rate buy_rate mode selected_option options"),
-        ("eqoa.items.ContainerView", "tab tabs selected selected_row rows"),
+        (
+            "eqoa.items.MerchantState",
+            "entity_id greeting pending sell_rate buy_rate mode selected_option options button_hint",
+        ),
+        (
+            "eqoa.items.ContainerView",
+            "tab tabs selected selected_row rows",
+        ),
         ("eqoa.items.Tab", "index key label"),
         ("eqoa.items.MerchantOption", "key label selected"),
         ("eqoa.gems.Gem", "type rarity stat"),
@@ -728,7 +734,6 @@ fn install_fields(lua: &Lua) {
             describe(lua, &format!("{path}.{field}"), "supported", Some(5), "");
         }
     }
-
 }
 
 pub(crate) fn install(host: &Host) -> Result<()> {

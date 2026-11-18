@@ -225,13 +225,11 @@ pub fn install_health_adapter(
 ) -> mlua::Result<()> {
     let lua = &host.lua;
 
-    // Preserve the complete player API regardless of installer order. This
-    // adapter only replaces its two health getters, never the module table.
-    if !host.has_host_module("frontiers_forge.player") {
-        super::player::install_player_adapter(host)?;
-    }
-    let Value::Table(player) = host.registered_modules()["frontiers_forge.player"].clone() else {
-        return Err(mlua::Error::runtime("player adapter must be a table"));
+    // Extend an already installed full player table. A standalone health host
+    // still exposes only health; installing player later supplies its full API.
+    let player = match host.registered_modules().get("frontiers_forge.player") {
+        Some(Value::Table(table)) => table.clone(),
+        _ => lua.create_table()?,
     };
     let s = snapshot.clone();
     player.set(
@@ -651,9 +649,9 @@ mod tests {
 
             assert(type(player.GetCurrentHp) == "function")
             assert(type(player.GetMaxHp) == "function")
-            assert(player.GetName == nil, "unsupported Player APIs must be absent")
-            assert(player.GetLevel == nil, "unsupported Player APIs must be absent")
-            assert(player.GetTotalStr == nil, "unsupported Player APIs must be absent")
+            assert(type(player.GetName) == "function", "full Player API must survive health install")
+            assert(type(player.GetLevel) == "function", "full Player API must survive health install")
+            assert(type(player.GetTotalStr) == "function", "full Player API must survive health install")
 
             assert(type(ui.DisableHealthBar) == "function")
             assert(type(ui.EnableHealthBar) == "function")

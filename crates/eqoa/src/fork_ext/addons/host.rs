@@ -253,7 +253,12 @@ fn create_base_host() -> Result<BaseHost> {
             });
             // Pinned camera.lua:6-15 defines an x/y/z table, no absent-state case.
             if pos.is_none() {
-                super::native::diagnose(lua, "frontiers_forge.camera.GetCoordinates", "unavailable", "native camera state is unavailable");
+                super::native::diagnose(
+                    lua,
+                    "frontiers_forge.camera.GetCoordinates",
+                    "unavailable",
+                    "native camera state is unavailable",
+                );
             }
             let (x, y, z) = pos.unwrap_or((0.0, 0.0, 0.0));
             let t = lua.create_table()?;
@@ -333,13 +338,20 @@ fn create_base_host() -> Result<BaseHost> {
             }))
         })?,
     )?;
-    // Pinned util.lua GetWorldId: native world identity, absent outside a world.
-    util.set("GetWorldId", lua.create_function(|_, ()| {
-        Ok(super::native_core::CORE.with(|c| {
-            let c = c.borrow();
-            if c.view.in_world { c.view.world_id } else { None }
-        }))
-    })?)?;
+    // Pinned util.lua:400-403 GetWorldId: native world identity; nil outside a world.
+    util.set(
+        "GetWorldId",
+        lua.create_function(|_, ()| {
+            Ok(super::native_core::CORE.with(|c| {
+                let c = c.borrow();
+                if c.view.in_world {
+                    c.view.world_id
+                } else {
+                    None
+                }
+            }))
+        })?,
+    )?;
     util.set(
         "IsBitZero",
         lua.create_function(|_, (value, mask): (u32, u32)| Ok(value & mask == 0))?,

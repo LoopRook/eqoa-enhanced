@@ -225,29 +225,61 @@ pub(crate) fn install_package_loader(
     package_loaded.set("os", Value::Table(os_table.clone()))?;
     package_loaded.set("coroutine", Value::Nil)?;
 
-    // Pinned quest.lua:21-36 and cave.lua:76,191,227,235,247,261,269.
+    // Pinned quest.lua:20-35 and cave.lua:69,167,196,204,216,230,237.
     // These APIs accept raw addresses/code caves, which the native API excludes.
-    host_registry.borrow_mut().insert("frontiers_forge.util".into(), Value::Table(util_table.clone()));
+    host_registry.borrow_mut().insert(
+        "frontiers_forge.util".into(),
+        Value::Table(util_table.clone()),
+    );
     for (module, names) in [
         ("quest", &["new", "GetName"][..]),
-        ("cave", &["IsRegionZero", "Alloc", "Reserve", "Get", "Free", "Release", "Info"][..]),
+        (
+            "cave",
+            &[
+                "IsRegionZero",
+                "Alloc",
+                "Reserve",
+                "Get",
+                "Free",
+                "Release",
+                "Info",
+            ][..],
+        ),
     ] {
         let table = lua.create_table()?;
         for name in names {
             let symbol = format!("frontiers_forge.{module}.{name}");
-            table.set(*name, lua.create_function(move |lua, _: mlua::MultiValue| {
-                super::native::diagnose(lua, &symbol, "unsupported", "raw memory is excluded; use eqoa.quests for native quest records");
-                Ok(Value::Nil)
-            })?)?;
+            table.set(
+                *name,
+                lua.create_function(move |lua, _: mlua::MultiValue| {
+                    super::native::diagnose(
+                        lua,
+                        &symbol,
+                        "unsupported",
+                        "raw memory is excluded; use eqoa.quests for native quest records",
+                    );
+                    Ok(Value::Nil)
+                })?,
+            )?;
         }
         let mt = lua.create_table()?;
         let prefix = format!("frontiers_forge.{module}");
-        mt.set("__index", lua.create_function(move |lua, (_, key): (Table, String)| {
-            super::native::diagnose(lua, &format!("{prefix}.{key}"), "unknown_symbol", "unknown Forge member");
-            Ok(Value::Nil)
-        })?)?;
+        mt.set(
+            "__index",
+            lua.create_function(move |lua, (_, key): (Table, String)| {
+                super::native::diagnose(
+                    lua,
+                    &format!("{prefix}.{key}"),
+                    "unknown_symbol",
+                    "unknown Forge member",
+                );
+                Ok(Value::Nil)
+            })?,
+        )?;
         table.set_metatable(Some(mt))?;
-        host_registry.borrow_mut().insert(format!("frontiers_forge.{module}"), Value::Table(table));
+        host_registry
+            .borrow_mut()
+            .insert(format!("frontiers_forge.{module}"), Value::Table(table));
     }
     let addon_data = addon.clone();
     let host_reg = host_registry;
@@ -735,7 +767,10 @@ mod tests {
         assert_eq!(is_in_game, 0);
 
         // 2. Known excluded APIs load a guarded table and refuse on use.
-        host.lua.load("local q=require('frontiers_forge.quest'); assert(q.new(0)==nil)").exec().unwrap();
+        host.lua
+            .load("local q=require('frontiers_forge.quest'); assert(q.new(0)==nil)")
+            .exec()
+            .unwrap();
 
         // 3. imgui without host module fails naming unsupported reserved module (ignores disk imgui.lua)
         let imgui_err = host
@@ -1217,7 +1252,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod round7a_tests {
     use super::super::{discovery::discover, host::Host, native};
@@ -1237,10 +1271,15 @@ mod round7a_tests {
             }
         };
     }
-    check!(round7a_hidden_by_refuses_without_lease, r#"
+    check!(
+        round7a_hidden_by_refuses_without_lease,
+        r#"
         local v,e = eqoa.hud.hidden_by('health'); assert(v == nil and e.code == 'unavailable')
-    "#);
-    check!(round7a_quest_and_cave_guarded, r#"
+    "#
+    );
+    check!(
+        round7a_quest_and_cave_guarded,
+        r#"
         for module,names in pairs({quest={'new','GetName'}, cave={'IsRegionZero','Alloc','Reserve','Get','Free','Release','Info'}}) do
             local t = require('frontiers_forge.'..module)
             for _,name in ipairs(names) do
@@ -1248,52 +1287,167 @@ mod round7a_tests {
                 assert(eqoa.capabilities.get('frontiers_forge.'..module..'.'..name).status == 'unsupported')
             end
         end
-    "#);
-    check!(round7a_util_and_bit_capabilities, r#"
+    "#
+    );
+    check!(
+        round7a_util_and_bit_capabilities,
+        r#"
         local u = require('frontiers_forge.util')
         assert(u.GetWorldId() == nil)
         assert(eqoa.capabilities.get('frontiers_forge.util.IsInGame').status == 'supported')
         for _,n in ipairs({'tobit','bnot','band','bor','bxor','lshift','rshift','arshift'}) do
             assert(eqoa.capabilities.get('bit.'..n).status == 'supported')
         end
-    "#);
-    check!(round7a_game_font_refuses, r#"
+    "#
+    );
+    check!(
+        round7a_game_font_refuses,
+        r#"
         local v,e = eqoa.fonts.game(); assert(v == nil and e.code == 'unsupported')
-    "#);
-    check!(round7a_map_refusals, r#"
+    "#
+    );
+    check!(
+        round7a_map_refusals,
+        r#"
         for _,n in ipairs({'images','load_image','set_waypoint','clear_waypoint'}) do
             local v,e = eqoa.map[n](); assert(v == nil)
             assert(e.code == ((n == 'images' or n == 'load_image') and 'unsupported' or 'not_yet'))
             assert(e.message ~= 'implementation pending')
         end
-    "#);
-    check!(round7a_merchant_hint_supported, r#"
+    "#
+    );
+    check!(
+        round7a_merchant_hint_supported,
+        r#"
         assert(eqoa.capabilities.get('eqoa.items.MerchantState.button_hint').status == 'supported')
-    "#);
+    "#
+    );
+
+    check!(
+        round7a_bit_descriptors_registered,
+        r#"
+        for _,n in ipairs({'tobit','bnot','band','bor','bxor','lshift','rshift','arshift'}) do
+            assert(eqoa.capabilities.get('bit.'..n).status=='supported')
+        end
+    "#
+    );
+    check!(
+        round7a_forge_util_registered,
+        r#"
+        local rows=eqoa.capabilities.list('frontiers_forge.util')
+        assert(#rows>1)
+        assert(eqoa.capabilities.get('frontiers_forge.util.GetWorldId').status=='supported')
+    "#
+    );
+    #[test]
+    fn round7a_stale_arity_name_removed() {
+        let host = addon_host("arity");
+        host.lua
+            .load("assert(eqoa.capabilities.get('eqoa.client.time').status=='unknown')")
+            .exec()
+            .unwrap();
+        assert!(!include_str!("native.rs").contains("| \"eqoa.client.time\""));
+    }
+    #[test]
+    fn round7a_item_header_matches_implemented_hint() {
+        let host = addon_host("header");
+        host.lua
+            .load("assert(type(eqoa.windows.format_hint)=='function')")
+            .exec()
+            .unwrap();
+        assert!(!include_str!("items_forge.rs").contains("says it is not built (`DEFERRED`)"));
+        assert!(
+            !include_str!("items_forge.rs")
+                .contains("transactions (buy, sell, loot, bank moves) are not built")
+        );
+    }
+    #[test]
+    fn round7a_refusing_forge_members_diagnose() {
+        let host = addon_host("guard_diagnostics");
+        native::drain(&host.lua);
+        host.lua.load(r#"
+            for module,names in pairs({quest={'new','GetName'},cave={'IsRegionZero','Alloc','Reserve','Get','Free','Release','Info'}}) do
+                local t=require('frontiers_forge.'..module)
+                for _,name in ipairs(names) do assert(t[name]()==nil) end
+                assert(t.missing==nil)
+            end
+        "#).exec().unwrap();
+        let diagnostics = native::drain(&host.lua);
+        for (module, names) in [
+            ("quest", &["new", "GetName"][..]),
+            (
+                "cave",
+                &[
+                    "IsRegionZero",
+                    "Alloc",
+                    "Reserve",
+                    "Get",
+                    "Free",
+                    "Release",
+                    "Info",
+                ][..],
+            ),
+        ] {
+            for name in names {
+                let symbol = format!("frontiers_forge.{module}.{name}");
+                assert!(
+                    diagnostics
+                        .iter()
+                        .any(|s| s.contains(&symbol) && s.contains("unsupported")),
+                    "{symbol}: {diagnostics:?}"
+                );
+            }
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|s| s.contains(&format!("frontiers_forge.{module}.missing"))
+                        && s.contains("unknown_symbol"))
+            );
+        }
+    }
     #[test]
     fn round7a_icon_placeholders_diagnose() {
         let host = addon_host("icons");
         native::drain(&host.lua);
-        host.lua.load("local i=require('frontiers_forge.icon'); assert(i.GetTexture(1)==nil); assert(i.GetUITexture(1)==nil)").exec().unwrap();
-        let d=native::drain(&host.lua);
-        assert!(d.iter().any(|s| s.contains("GetTexture") && s.contains("unavailable")), "{d:?}");
-        assert!(d.iter().any(|s| s.contains("GetUITexture") && s.contains("unavailable")), "{d:?}");
+        host.lua.load("local i=require('frontiers_forge.icon'); assert(i.GetTexture(1)==nil); assert(i.GetUITexture(1)==nil); assert(select('#', i.GetTexture(1))==1); assert(select('#', i.GetUITexture(1))==1)").exec().unwrap();
+        let d = native::drain(&host.lua);
+        assert!(
+            d.iter()
+                .any(|s| s.contains("GetTexture") && s.contains("unavailable")),
+            "{d:?}"
+        );
+        assert!(
+            d.iter()
+                .any(|s| s.contains("GetUITexture") && s.contains("unavailable")),
+            "{d:?}"
+        );
     }
     #[test]
     fn round7a_camera_missing_diagnoses() {
         let host = addon_host("camera");
         native::drain(&host.lua);
         host.lua.load("local p=require('frontiers_forge.camera').GetCoordinates(); assert(p.x==0 and p.y==0 and p.z==0)").exec().unwrap();
-        let d=native::drain(&host.lua);
-        assert!(d.iter().any(|s| s.contains("GetCoordinates") && s.contains("unavailable")), "{d:?}");
+        let d = native::drain(&host.lua);
+        assert!(
+            d.iter()
+                .any(|s| s.contains("GetCoordinates") && s.contains("unavailable")),
+            "{d:?}"
+        );
     }
     #[test]
     fn round7a_bit_unknown_diagnoses() {
         let host = addon_host("bit_unknown");
         native::drain(&host.lua);
-        host.lua.load("assert(require('bit').missing == nil)").exec().unwrap();
-        let d=native::drain(&host.lua);
-        assert!(d.iter().any(|s| s.contains("bit.missing") && s.contains("unknown_symbol")), "{d:?}");
+        host.lua
+            .load("assert(require('bit').missing == nil)")
+            .exec()
+            .unwrap();
+        let d = native::drain(&host.lua);
+        assert!(
+            d.iter()
+                .any(|s| s.contains("bit.missing") && s.contains("unknown_symbol")),
+            "{d:?}"
+        );
     }
 }
 
@@ -1302,52 +1456,125 @@ mod round7a_more_tests {
     use super::super::*;
     #[test]
     fn round7a_player_install_order_retains_members() {
-        use std::{cell::{Cell,RefCell},rc::Rc};
-        for health_first in [false,true] {
-            let host=host::Host::new().unwrap();
-            let install_health=|| health::install_health_adapter(&host,health::InstanceToken(700),Rc::new(Cell::new(health::HealthSnapshot::default())),Rc::new(RefCell::new(health::HealthBarClaimsRegistry::new()))).unwrap();
-            if health_first { install_health(); }
+        use std::{
+            cell::{Cell, RefCell},
+            rc::Rc,
+        };
+        let reference = host::Host::new().unwrap();
+        player::install_player_adapter(&reference).unwrap();
+        let mlua::Value::Table(reference_table) =
+            reference.registered_modules()["frontiers_forge.player"].clone()
+        else {
+            panic!()
+        };
+        let expected: std::collections::BTreeSet<String> = reference_table
+            .pairs::<String, mlua::Value>()
+            .map(|p| p.unwrap().0)
+            .collect();
+        assert!(expected.contains("GetName"));
+        for health_first in [false, true] {
+            let host = host::Host::new().unwrap();
+            let install_health = || {
+                health::install_health_adapter(
+                    &host,
+                    health::InstanceToken(700),
+                    Rc::new(Cell::new(health::HealthSnapshot::default())),
+                    Rc::new(RefCell::new(health::HealthBarClaimsRegistry::new())),
+                )
+                .unwrap()
+            };
+            if health_first {
+                install_health();
+            }
             player::install_player_adapter(&host).unwrap();
-            if !health_first { install_health(); }
-            let modules=host.registered_modules();
-            let mlua::Value::Table(t)=&modules["frontiers_forge.player"] else { panic!() };
-            assert!(t.get::<mlua::Value>("GetName").unwrap().is_function(),"health_first={health_first}");
+            if !health_first {
+                install_health();
+            }
+            let modules = host.registered_modules();
+            let mlua::Value::Table(t) = &modules["frontiers_forge.player"] else {
+                panic!()
+            };
+            assert!(
+                t.get::<mlua::Value>("GetName").unwrap().is_function(),
+                "health_first={health_first}"
+            );
             assert!(t.get::<mlua::Value>("GetCurrentHp").unwrap().is_function());
+            let actual: std::collections::BTreeSet<String> = t
+                .clone()
+                .pairs::<String, mlua::Value>()
+                .map(|p| p.unwrap().0)
+                .collect();
+            assert_eq!(
+                actual, expected,
+                "full player member set, health_first={health_first}"
+            );
         }
     }
     #[test]
     fn round7a_files_list_overlay_and_bounds() {
-        let root=std::env::temp_dir().join(format!("eqoa_round7a_files_{}_{:?}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let root = std::env::temp_dir().join(format!(
+            "eqoa_round7a_files_{}_{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         std::fs::create_dir_all(root.join("resources")).unwrap();
-        std::fs::write(root.join("main.lua"),"-- fixture").unwrap();
-        std::fs::write(root.join("resources/a.txt"),"backing").unwrap();
-        std::fs::write(root.join("resources/b.txt"),"hidden").unwrap();
-        let addon=discovery::discover(&root).addons.remove(0);
-        let host=host::Host::for_addon(&addon).unwrap();
-        let data=root.join("private");
-        file_io::install(&host,&addon,Some(data.clone())).unwrap();
-        host.lua.load(r#"
+        std::fs::write(root.join("main.lua"), "-- fixture").unwrap();
+        std::fs::write(root.join("resources/a.txt"), "backing").unwrap();
+        std::fs::write(root.join("resources/b.txt"), "hidden").unwrap();
+        std::fs::create_dir_all(root.join("resources/nested")).unwrap();
+        std::fs::write(root.join("resources/nested/deep.txt"), "not immediate").unwrap();
+        std::fs::create_dir_all(root.join("sibling/resources")).unwrap();
+        std::fs::write(root.join("sibling/resources/secret.txt"), "other mod").unwrap();
+        let addon = discovery::discover(&root).addons.remove(0);
+        let host = host::Host::for_addon(&addon).unwrap();
+        let data = root.join("private");
+        file_io::install(&host, &addon, Some(data.clone())).unwrap();
+        host.lua
+            .load(
+                r#"
             assert(eqoa.files.write('resources/a.txt','overlay'))
             assert(eqoa.files.remove('resources/b.txt'))
             assert(eqoa.files.write('own.txt','private'))
             local t=eqoa.files.list('resources','*.txt')
             assert(#t==1 and t[1].path=='resources/a.txt' and t[1].size==7 and t[1].kind=='file')
+            local all=eqoa.files.list('resources')
+            assert(#all==2 and all[1].path=='resources/a.txt' and all[2].path=='resources/nested')
+            assert(all[2].kind=='directory' and all[2].size==nil)
+            assert(#eqoa.files.list('resources','?.txt')==1)
+            assert(#eqoa.files.list('sibling/resources')==0)
+            local v,e=eqoa.files.list('resources','../*'); assert(v==nil and e.code=='invalid_argument')
             local t=eqoa.files.list('', '*.txt')
             assert(#t==1 and t[1].path=='own.txt')
             for _,p in ipairs({'../','/','C:/','resources/../'}) do
                 local v,e=eqoa.files.list(p); assert(v==nil and e.code=='permission_denied')
             end
-        "#).exec().unwrap();
+        "#,
+            )
+            .exec()
+            .unwrap();
         std::fs::create_dir_all(data.join("files/data/cap")).unwrap();
-        for i in 0..1025 { std::fs::write(data.join(format!("files/data/cap/f{i}")), "").unwrap(); }
-        host.lua.load("local v,e=eqoa.files.list('cap'); assert(v==nil and e.code=='quota')").exec().unwrap();
+        for i in 0..1024 {
+            std::fs::write(data.join(format!("files/data/cap/f{i}")), "").unwrap();
+        }
+        // A separate callback gets the production instruction budget, rather
+        // than inheriting the setup/earlier assertion chunks' consumed budget.
+        host.run(&host.compile("local t=eqoa.files.list('cap'); assert(#t==1024); for i=2,#t do assert(t[i-1].path<t[i].path) end").unwrap()).unwrap();
+        std::fs::write(data.join("files/data/cap/overflow"), "").unwrap();
+        host.lua
+            .load("local v,e=eqoa.files.list('cap'); assert(v==nil and e.code=='quota')")
+            .exec()
+            .unwrap();
     }
     #[test]
     fn round7a_chat_native_hook_has_no_emulator_suspension() {
-        let root=std::env::temp_dir().join(format!("eqoa_round7a_chat_{}",std::process::id()));
-        std::fs::create_dir_all(&root).unwrap(); std::fs::write(root.join("main.lua"),"-- fixture").unwrap();
-        let addon=discovery::discover(&root).addons.remove(0);
-        let host=host::Host::for_addon(&addon).unwrap();
+        let root = std::env::temp_dir().join(format!("eqoa_round7a_chat_{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.lua"), "-- fixture").unwrap();
+        let addon = discovery::discover(&root).addons.remove(0);
+        let host = host::Host::for_addon(&addon).unwrap();
         host.lua.load("local c=require('frontiers_forge.chat'); assert(c.IsSendHookSuspended()==false); c.InstallSendHook(); assert(c.IsSendHookSuspended()==false)").exec().unwrap();
     }
 }
