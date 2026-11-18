@@ -978,6 +978,87 @@
       "status": "supported"
     },
     {
+      "children": [
+        "bit.arshift",
+        "bit.band",
+        "bit.bnot",
+        "bit.bor",
+        "bit.bxor",
+        "bit.lshift",
+        "bit.rshift",
+        "bit.tobit"
+      ],
+      "path": "bit",
+      "reason": "native BitOp subset",
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "bit.arshift",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "bit.band",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "bit.bnot",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "bit.bor",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "bit.bxor",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "bit.lshift",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "bit.rshift",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "bit.tobit",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
       "children": [],
       "path": "eqoa.ChatHistory",
       "reason": "permanent Enhanced compatibility alias",
@@ -5182,6 +5263,7 @@
     },
     {
       "children": [
+        "eqoa.files.FileEntry",
         "eqoa.files.export",
         "eqoa.files.import",
         "eqoa.files.list",
@@ -5196,7 +5278,43 @@
       "reason": null,
       "revision": 1,
       "round": 4,
-      "status": "partial"
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.files.FileEntry.kind",
+        "eqoa.files.FileEntry.path",
+        "eqoa.files.FileEntry.size"
+      ],
+      "path": "eqoa.files.FileEntry",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.files.FileEntry.kind",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.files.FileEntry.path",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.files.FileEntry.size",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
     },
     {
       "children": [],
@@ -5217,10 +5335,10 @@
     {
       "children": [],
       "path": "eqoa.files.list",
-      "reason": "implementation pending",
-      "revision": 0,
+      "reason": null,
+      "revision": 1,
       "round": 4,
-      "status": "not_yet"
+      "status": "supported"
     },
     {
       "children": [],
@@ -5274,6 +5392,7 @@
       "children": [
         "eqoa.fonts.FontInfo",
         "eqoa.fonts.default",
+        "eqoa.fonts.game",
         "eqoa.fonts.load",
         "eqoa.fonts.release"
       ],
@@ -5281,7 +5400,7 @@
       "reason": null,
       "revision": 1,
       "round": 2,
-      "status": "supported"
+      "status": "partial"
     },
     {
       "children": [
@@ -5326,6 +5445,14 @@
       "revision": 1,
       "round": 2,
       "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.fonts.game",
+      "reason": "game bitmap font cannot be represented by the existing ImGui font service",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -6305,6 +6432,14 @@
       "revision": 1,
       "round": 2,
       "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.icons.SurfaceInfo.source_format",
+      "reason": "icon provider retains decoded RGBA pixels without original source format",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -8343,10 +8478,10 @@
     {
       "children": [],
       "path": "eqoa.items.MerchantState.button_hint",
-      "reason": "needs windows.format_hint, which is not built yet",
-      "revision": 0,
-      "round": 6,
-      "status": "not_yet"
+      "reason": null,
+      "revision": 1,
+      "round": 5,
+      "status": "supported"
     },
     {
       "children": [],
@@ -9439,7 +9574,7 @@
     {
       "children": [],
       "path": "eqoa.map.clear_waypoint",
-      "reason": "implementation pending",
+      "reason": "not built; use eqoa.map.set_guide",
       "revision": 0,
       "round": 4,
       "status": "not_yet"
@@ -9455,18 +9590,18 @@
     {
       "children": [],
       "path": "eqoa.map.images",
-      "reason": "implementation pending",
+      "reason": "replaced by eqoa.map.view",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "eqoa.map.load_image",
-      "reason": "implementation pending",
+      "reason": "replaced by eqoa.map.view",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -9495,7 +9630,7 @@
     {
       "children": [],
       "path": "eqoa.map.set_waypoint",
-      "reason": "implementation pending",
+      "reason": "not built; use eqoa.map.set_guide",
       "revision": 0,
       "round": 4,
       "status": "not_yet"
@@ -12089,10 +12224,16 @@
     },
     {
       "children": [
-        "frontiers_forge.cave.Alloc"
+        "frontiers_forge.cave.Alloc",
+        "frontiers_forge.cave.Free",
+        "frontiers_forge.cave.Get",
+        "frontiers_forge.cave.Info",
+        "frontiers_forge.cave.IsRegionZero",
+        "frontiers_forge.cave.Release",
+        "frontiers_forge.cave.Reserve"
       ],
       "path": "frontiers_forge.cave",
-      "reason": "raw memory and FFI are excluded",
+      "reason": "raw memory is excluded; use eqoa.quests for native quest records",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -12100,7 +12241,55 @@
     {
       "children": [],
       "path": "frontiers_forge.cave.Alloc",
-      "reason": "raw memory and FFI are excluded",
+      "reason": "raw memory is excluded; use eqoa.quests for native quest records",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.cave.Free",
+      "reason": "raw memory is excluded; use eqoa.quests for native quest records",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.cave.Get",
+      "reason": "raw memory is excluded; use eqoa.quests for native quest records",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.cave.Info",
+      "reason": "raw memory is excluded; use eqoa.quests for native quest records",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.cave.IsRegionZero",
+      "reason": "raw memory is excluded; use eqoa.quests for native quest records",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.cave.Release",
+      "reason": "raw memory is excluded; use eqoa.quests for native quest records",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.cave.Reserve",
+      "reason": "raw memory is excluded; use eqoa.quests for native quest records",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -14411,6 +14600,33 @@
     },
     {
       "children": [
+        "frontiers_forge.quest.GetName",
+        "frontiers_forge.quest.new"
+      ],
+      "path": "frontiers_forge.quest",
+      "reason": "raw memory is excluded; use eqoa.quests for native quest records",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.quest.GetName",
+      "reason": "raw memory is excluded; use eqoa.quests for native quest records",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.quest.new",
+      "reason": "raw memory is excluded; use eqoa.quests for native quest records",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
+    },
+    {
+      "children": [
         "frontiers_forge.quest_log.GetCount",
         "frontiers_forge.quest_log.GetQuestByIndex",
         "frontiers_forge.quest_log.Quests",
@@ -14788,11 +15004,131 @@
       "status": "supported"
     },
     {
+      "children": [
+        "frontiers_forge.util.GetBearingToPoint",
+        "frontiers_forge.util.GetCompassDegrees",
+        "frontiers_forge.util.GetCompassRadians",
+        "frontiers_forge.util.GetExpRequiredForLevel",
+        "frontiers_forge.util.GetUiMode",
+        "frontiers_forge.util.GetWorldId",
+        "frontiers_forge.util.IsBattleMusicPlaying",
+        "frontiers_forge.util.IsBitZero",
+        "frontiers_forge.util.IsInGame",
+        "frontiers_forge.util.IsStartMenuOpen",
+        "frontiers_forge.util.IsUiBusy",
+        "frontiers_forge.util.LogError",
+        "frontiers_forge.util.UiMode",
+        "frontiers_forge.util.utf16_to_utf8",
+        "frontiers_forge.util.utf8_to_utf16"
+      ],
+      "path": "frontiers_forge.util",
+      "reason": "native Forge compatibility adapter",
+      "revision": 1,
+      "round": 2,
+      "status": "partial"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.util.GetBearingToPoint",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.util.GetCompassDegrees",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
       "children": [],
       "path": "frontiers_forge.util.GetCompassRadians",
       "reason": null,
       "revision": 1,
       "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.util.GetExpRequiredForLevel",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.util.GetUiMode",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.util.GetWorldId",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.util.IsBattleMusicPlaying",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.util.IsBitZero",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.util.IsInGame",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.util.IsStartMenuOpen",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.util.IsUiBusy",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.util.LogError",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "frontiers_forge.util.UiMode",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
       "status": "supported"
     },
     {
@@ -14886,7 +15222,7 @@
   ],
   "metadata": {
     "client_version": "0.5.3",
-    "commit": "95d1066be82cbc82efe0fa9175c3a271b8537c2e",
+    "commit": "db67e26ceb48a2737fd86a443fdb1a10a8e3136c",
     "generated_utc": "2026-11-18",
     "platform": "windows-x86_64"
   },

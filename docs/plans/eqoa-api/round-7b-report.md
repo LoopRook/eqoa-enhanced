@@ -26,8 +26,30 @@ failure. The corrected focused run including both command tests reported
 **4 passed, 0 failed, 0 ignored** (343.57 seconds). Its one printed `SKIP` is
 the deliberate empty-backend regression test, which asserts the skip result;
 the command-output test used the real available GPU and completed both exports.
-Regenerated snapshots, the executed drift/cleanup negative controls and full
-release gates remain to be recorded here.
+The merged static-CRT release build at `db67e26c` passed (223.17 seconds).
+Both DEV-TOOLS `--format ... --out ...` exports were regenerated from that
+executable. The terminal checks again passed four exports and both expected
+exit-1 refusals, with an empty working directory, scratch config and nonexistent
+disc path. The merged registry now has **1,723 descriptors**: 1,623 supported,
+50 not_yet, 27 partial and 23 unsupported. Generation metadata records
+`db67e26ceb48a2737fd86a443fdb1a10a8e3136c`, Windows x86_64, client 0.5.3.
+The regenerated baseline `--only round --filter round7b_` passed **5 tests,
+0 failed, 0 ignored** (221.14 seconds). The only printed SKIP was the deliberate
+empty-backend test; the real-GPU drift comparison passed on the merged registry.
+Review negative controls were then executed together with
+`python tools/run_gates.py --only round --filter round7b_support_table_matches round7b_scratch_cleans`:
+
+- Removing the actual `eqoa.log.write` bind block from `native::install` made
+  the drift equality assertion fail, printing both regeneration commands.
+- Temporarily suppressing `Scratch::drop` for the `partial-output` fixture made
+  the unwind test fail with `scratch directory survived unwinding`. The test
+  removed its deliberately leaked fixture before reporting failure.
+
+Result: **0 passed, 2 failed, 0 ignored, 0 SKIP lines**, 1177.12 seconds
+(including waiting for the shared Cargo lock). Both files were restored byte for
+byte in `finally`; git confirms no remaining source diff. Thus GPU skip handling
+did not hide a real registry mismatch. The full restored release gates remain
+to be recorded here.
 
 ## Original delivery record
 

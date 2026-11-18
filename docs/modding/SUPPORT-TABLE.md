@@ -3,7 +3,7 @@
 Generated, do not edit.
 
 - Client: 0.5.3
-- Commit: 95d1066be82cbc82efe0fa9175c3a271b8537c2e
+- Commit: db67e26ceb48a2737fd86a443fdb1a10a8e3136c
 - Platform: windows-x86_64
 - Date (UTC): 2026-11-18
 
@@ -191,10 +191,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.files` | partial | 4 |  |
+| `eqoa.files` | supported | 4 |  |
 | `eqoa.files.export` | supported | 4 |  |
 | `eqoa.files.import` | supported | 4 |  |
-| `eqoa.files.list` | not_yet | 4 | implementation pending |
+| `eqoa.files.list` | supported | 4 |  |
 | `eqoa.files.load_json` | supported | 4 |  |
 | `eqoa.files.null` | supported | 4 |  |
 | `eqoa.files.read` | supported | 2 |  |
@@ -206,8 +206,9 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.fonts` | supported | 2 |  |
+| `eqoa.fonts` | partial | 2 |  |
 | `eqoa.fonts.default` | supported | 2 |  |
+| `eqoa.fonts.game` | unsupported |  | game bitmap font cannot be represented by the existing ImGui font service |
 | `eqoa.fonts.load` | supported | 2 |  |
 | `eqoa.fonts.release` | supported | 2 |  |
 
@@ -376,14 +377,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 |---|---|---|---|
 | `eqoa.map` | partial | 4 |  |
 | `eqoa.map.clear_guide` | supported | 4 |  |
-| `eqoa.map.clear_waypoint` | not_yet | 4 | implementation pending |
+| `eqoa.map.clear_waypoint` | not_yet | 4 | not built; use eqoa.map.set_guide |
 | `eqoa.map.get` | supported | 4 |  |
-| `eqoa.map.images` | not_yet | 4 | implementation pending |
-| `eqoa.map.load_image` | not_yet | 4 | implementation pending |
+| `eqoa.map.images` | unsupported |  | replaced by eqoa.map.view |
+| `eqoa.map.load_image` | unsupported |  | replaced by eqoa.map.view |
 | `eqoa.map.markers` | supported | 4 |  |
 | `eqoa.map.open` | supported | 4 |  |
 | `eqoa.map.set_guide` | supported | 4 |  |
-| `eqoa.map.set_waypoint` | not_yet | 4 | implementation pending |
+| `eqoa.map.set_waypoint` | not_yet | 4 | not built; use eqoa.map.set_guide |
 | `eqoa.map.view` | supported | 4 |  |
 
 ## eqoa.mastery
@@ -900,6 +901,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.world.entered.data.world_id` | supported | 2 |  |
 | `eqoa.events.world.leaving.data.reason` | supported | 2 |  |
 | `eqoa.events.world.leaving.data.world_id` | supported | 2 |  |
+| `eqoa.files.FileEntry` | supported | 4 |  |
+| `eqoa.files.FileEntry.kind` | supported | 4 |  |
+| `eqoa.files.FileEntry.path` | supported | 4 |  |
+| `eqoa.files.FileEntry.size` | supported | 4 |  |
 | `eqoa.fonts.FontInfo` | supported | 2 |  |
 | `eqoa.fonts.FontInfo.font` | supported | 2 |  |
 | `eqoa.fonts.FontInfo.reason` | supported | 2 |  |
@@ -989,6 +994,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.hud.TargetLayout.panel` | supported | 3 |  |
 | `eqoa.hud.TargetLayout.power` | supported | 3 |  |
 | `eqoa.icons.IconOptions.trim_color` | supported | 2 |  |
+| `eqoa.icons.SurfaceInfo.source_format` | unsupported |  | icon provider retains decoded RGBA pixels without original source format |
 | `eqoa.input.InputState` | supported | 2 |  |
 | `eqoa.input.InputState.focused` | supported | 2 |  |
 | `eqoa.input.InputState.pad` | supported | 2 |  |
@@ -1076,7 +1082,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.items.MerchantOption.label` | supported | 5 |  |
 | `eqoa.items.MerchantOption.selected` | supported | 5 |  |
 | `eqoa.items.MerchantState` | supported | 5 |  |
-| `eqoa.items.MerchantState.button_hint` | not_yet | 6 | needs windows.format_hint, which is not built yet |
+| `eqoa.items.MerchantState.button_hint` | supported | 5 |  |
 | `eqoa.items.MerchantState.buy_rate` | supported | 5 |  |
 | `eqoa.items.MerchantState.entity_id` | supported | 5 |  |
 | `eqoa.items.MerchantState.greeting` | supported | 5 |  |
@@ -1558,6 +1564,15 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `UiForge.RegisterCallback` | supported | 2 |  |
 | `UiForge.resources_path` | supported | 2 |  |
 | `UiForge.scripts_path` | supported | 2 |  |
+| `bit` | supported | 2 | native BitOp subset |
+| `bit.arshift` | supported | 2 |  |
+| `bit.band` | supported | 2 |  |
+| `bit.bnot` | supported | 2 |  |
+| `bit.bor` | supported | 2 |  |
+| `bit.bxor` | supported | 2 |  |
+| `bit.lshift` | supported | 2 |  |
+| `bit.rshift` | supported | 2 |  |
+| `bit.tobit` | supported | 2 |  |
 | `eqoa.ChatHistory` | supported | 2 | permanent Enhanced compatibility alias |
 | `eqoa.WeaponSets` | supported | 2 | permanent Enhanced compatibility alias |
 | `eqoa.WeaponSets.GetBadge` | supported | 2 | permanent Enhanced compatibility alias |
@@ -1616,12 +1631,18 @@ Each module lists its member count and every entry whose status is not `supporte
 
 ### frontiers_forge.cave
 
-1 members; 0 supported.
+7 members; 0 supported.
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.cave` | unsupported |  | raw memory and FFI are excluded |
-| `frontiers_forge.cave.Alloc` | unsupported |  | raw memory and FFI are excluded |
+| `frontiers_forge.cave` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
+| `frontiers_forge.cave.Alloc` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
+| `frontiers_forge.cave.Free` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
+| `frontiers_forge.cave.Get` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
+| `frontiers_forge.cave.Info` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
+| `frontiers_forge.cave.IsRegionZero` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
+| `frontiers_forge.cave.Release` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
+| `frontiers_forge.cave.Reserve` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
 
 ### frontiers_forge.chat
 
@@ -1739,6 +1760,16 @@ Each module lists its member count and every entry whose status is not `supporte
 |---|---|---|---|
 | `frontiers_forge.player` | partial | 2 | native Forge compatibility adapter |
 
+### frontiers_forge.quest
+
+2 members; 0 supported.
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `frontiers_forge.quest` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
+| `frontiers_forge.quest.GetName` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
+| `frontiers_forge.quest.new` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
+
 ### frontiers_forge.quest_log
 
 4 members; 4 supported.
@@ -1757,10 +1788,11 @@ Each module lists its member count and every entry whose status is not `supporte
 
 ### frontiers_forge.util
 
-3 members; 1 supported.
+15 members; 13 supported.
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
+| `frontiers_forge.util` | partial | 2 | native Forge compatibility adapter |
 | `frontiers_forge.util.utf16_to_utf8` | unsupported |  | the native client has no matching pointer/config payload |
 | `frontiers_forge.util.utf8_to_utf16` | unsupported |  | the native client has no matching pointer/config payload |
 
