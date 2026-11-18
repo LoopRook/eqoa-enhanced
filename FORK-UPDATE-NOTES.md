@@ -4,6 +4,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Bag Viewer: **Open nearest corpse** displays the items without taking them or opening the game's corpse window. Take all, Take all but junk, item menus, and the separate Auto-loot option control taking. Corrected merchant discovery for Sell junk; unanswered merchant and banker requests now end with a visible result. Takeover diagnostics record requests, decisions, and close reasons, and corpse cleanup avoids repeated close-handler entries.
 - Upstream's latest changes are in (192 of them: auras and armour looks, stacked spell bars, a buff window on servers that send one, raid lists, Touch Controls and more; see the vanilla client's notes).
 - Options -> Extended is now upstream's five groups (Graphics, UI, Other, Touch Controls, Multi-boxing). The **Enhanced** page (HUD extras and Mods & Addons) is in the **UI** group: Options -> Extended -> UI -> Enhanced. Every row keeps its saved setting.
 - Group members' and your pet's power bars are now the game's own (Options -> Extended -> UI -> Power Bars, on by default). The Mana Bars mod keeps your target's power bar; with Power Bars off the server sends no power, so the target's bar is gone too. A mod that hides the effects strip or the ability bars now also hides the new buff window and stacked spell bars and their clicks.

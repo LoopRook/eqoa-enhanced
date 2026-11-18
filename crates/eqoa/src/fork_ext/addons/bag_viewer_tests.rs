@@ -2346,9 +2346,9 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     bv.click((lx, ly));
     bv.play.bags_broker_tick();
     bv.play.bags_corpse(&serde_json::json!([
-        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
-        {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100},
-        {"name":"Bone Chip","id":2004,"key":2,"qty":1,"max_stack":100}
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100,"icon":4020},
+        {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100,"icon":4021},
+        {"name":"Bone Chip","id":2004,"key":2,"qty":1,"max_stack":100,"icon":4022}
     ]));
     bv.frames(2);
     assert_eq!(bv.play.mode, 0, "corpse window must NOT open natively under takeover");
@@ -2752,7 +2752,6 @@ fn r65fix2_open_corpse(stale: bool) {
     crate::fork_ext::loot_source::clear();
 }
 
-
 /// Owner test (c): a merchant that never answers the talk must end the step visibly after the server timeout,
 /// not stay on "Opening merchant...".
 #[test]
@@ -2802,3 +2801,61 @@ fn round65_fix2_unanswered_merchant_talk_fails_visibly() {
     super::super::action_broker::reset_all_for_test();
 }
 
+/// Owner test (d): a banker who does not answer (out of the server's reach) is told in the result line, for the
+/// open and for a bank action.
+#[test]
+fn round65_fix2_unanswered_bank_requests_fail_visibly() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play
+        .bags_spawn_npc(9003, "Banker Dan", 0x80 | 2, 1, [8.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    // Deposit near a banker: the open (talk) goes unanswered
+    let s2 = bv.slot(2);
+    bv.click(s2);
+    bv.frames(2);
+    let (dx, dy, den, _, _) = bv.menu_row("Deposit 1").unwrap();
+    assert!(den);
+    bv.click((dx, dy));
+    bv.play.bags_broker_tick();
+    for _ in 0..320 {
+        bv.play.bags_broker_tick();
+    }
+    bv.frames(2);
+    let (text, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert!(
+        text.contains("banker did not answer"),
+        "open: visible failure, got: {text}"
+    );
+
+    // the bank opens, but the deposit itself goes unanswered
+    bv.click(s2);
+    bv.frames(2);
+    let (dx, dy, _, _, _) = bv.menu_row("Deposit 1").unwrap();
+    bv.click((dx, dy));
+    bv.play.bags_broker_tick();
+    bv.play.bags_bank_packet();
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_bank_state(), 2, "the deposit request went out");
+    for _ in 0..320 {
+        bv.play.bags_broker_tick();
+    }
+    bv.frames(2);
+    let (text, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert!(
+        text.contains("too far from the banker"),
+        "action: visible failure, got: {text}"
+    );
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}

@@ -1000,9 +1000,13 @@ function M.renew_loot_session()
     end
 end
 
+-- What the result line says when the server gave no answer in time (the game has no range check of its own: the
+-- server decides, and a request out of its reach is simply not answered).
 function M.no_answer_text(kind)
     if kind == "merchant" then return "the merchant did not answer (too far away?)" end
+    if kind == "bank" then return "the banker did not answer (too far from the banker?)" end
     if kind == "loot" then return "the corpse did not open (too far away?)" end
+    if kind == "bank_move" or kind == "bank_money" then return "no answer from the server (too far from the banker?)" end
     if kind == "sell" or kind == "buy" then return "no answer from the server (too far from the merchant?)" end
     return "no answer from the server"
 end

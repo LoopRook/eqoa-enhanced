@@ -14,3 +14,12 @@ Total upstream lines added: **4** inserted one-line hook calls across 2 files (`
 ## Review-fix round (M1-M3, L4-L7)
 
 No upstream line was added or changed: the total stays **4 of 6** inserted lines. L4 (never hide a window that was already open natively) is decided fork-side: `fork_ext/play.rs` records `Play::mode` as each game event begins (`begin_game_event`, already called for every event) and `window_taken` declines when the window's mode was already current before the packet, so the existing `npcw.rs`/`bankplay.rs` hook lines needed no edit.
+
+## Owner-test recovery (2026-11-18)
+
+The owner-test fixes add **zero** upstream lines. The total remains **4 of 6**;
+the two unused lines remain unused. Merchant requests still call the existing
+`Play::interact_with_target`; its flag priority and `0x004C` packet are preserved.
+Loot request observation uses the existing `fork_ext::loot_requested` seam.
+All request diagnostics, hidden-session matching and cleanup changes live in
+fork-owned files. No footprint budget was increased for this recovery.

@@ -3888,66 +3888,6 @@ fn round65_fix_m1_previous_target_restored_when_the_mods_open_is_done() {
     crate::fork_ext::loot_source::clear();
 }
 
-/// Use the native merchant flag, and inspect the actual packet rather than treating any lost
-/// send as a successful merchant request. A closer smith must never win merchant selection.
-#[test]
-fn round65_fix2_merchant_uses_native_flags_and_exact_request() {
-    use crate::fork_ext::addons::{action_broker, window_takeover};
-    action_broker::reset_all_for_test();
-    window_takeover::reset_all_for_test();
-    let host = r65fix_host(&["eqoa.actions.*", "eqoa.windows.takeover"]);
-    let mut p = r65fix_world();
-    p.entities.slots = vec![
-        r65fix_creature(9401, "Merchant", 1, 0x81, [6.0, 0.0, 0.0]),
-        r65fix_creature(9402, "Smith", 1, 0x88, [1.0, 0.0, 0.0]),
-    ];
-    let sys = p.session.drdp.system_endpoint;
-    let remote = drdp::address_to_endpoint([127, 0, 0, 1], 10071, drdp::PORT_LEADER);
-    p.session.conn = p.session.drdp.connection_open(sys, remote);
-    assert!(p.session.conn.is_some());
-    p.session.record = Some(vec![]);
-    p.forge_snapshot(None);
-    host.execute("assert(eqoa.windows.takeover('merchant')); req = assert(eqoa.actions.talk(nil, {kind='merchant'}))").unwrap();
-    super::super::begin_iteration(&mut p, true);
-    assert_eq!(
-        p.target, 9401,
-        "merchant selection must skip the closer smith"
-    );
-    let mut expected = Writer::op(0x004C);
-    expected.u32(9401);
-    assert!(
-        p.session
-            .record
-            .as_ref()
-            .unwrap()
-            .iter()
-            .any(|(_, data)| data == &expected.data),
-        "native merchant opcode and entity id must go out"
-    );
-    assert!(
-        !p.session
-            .record
-            .as_ref()
-            .unwrap()
-            .iter()
-            .any(|(_, data)| data.starts_with(&0x0061u16.to_le_bytes())),
-        "never ask the smith to repair"
-    );
-    host.execute(
-        "assert(eqoa.actions.status(req).state == 'dispatched', 'sending is not success')",
-    )
-    .unwrap();
-    apply(
-        &mut p,
-        opcode(0x00B7, shop_bytes(9401, 90, 110, &[sword()], "Hi")),
-    );
-    assert_eq!(p.mode, 0);
-    host.execute("assert(eqoa.actions.status(req).ok == true)")
-        .unwrap();
-    window_takeover::reset_all_for_test();
-    action_broker::reset_all_for_test();
-}
-
 /// Owner test (5): one close per hidden session, and none when there is nothing to close: the mod's end of a
 /// session that the server already closed, or a release with no session up, sends no 0x0016.
 #[test]
@@ -4085,3 +4025,62 @@ fn round65_fix2_far_corpse_session_is_not_closed_at_once() {
     crate::fork_ext::loot_source::clear();
 }
 
+/// Use the native merchant flag, and inspect the actual packet rather than treating any lost
+/// send as a successful merchant request. A closer smith must never win merchant selection.
+#[test]
+fn round65_fix2_merchant_uses_native_flags_and_exact_request() {
+    use crate::fork_ext::addons::{action_broker, window_takeover};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    let host = r65fix_host(&["eqoa.actions.*", "eqoa.windows.takeover"]);
+    let mut p = r65fix_world();
+    p.entities.slots = vec![
+        r65fix_creature(9401, "Merchant", 1, 0x81, [6.0, 0.0, 0.0]),
+        r65fix_creature(9402, "Smith", 1, 0x88, [1.0, 0.0, 0.0]),
+    ];
+    let sys = p.session.drdp.system_endpoint;
+    let remote = drdp::address_to_endpoint([127, 0, 0, 1], 10071, drdp::PORT_LEADER);
+    p.session.conn = p.session.drdp.connection_open(sys, remote);
+    assert!(p.session.conn.is_some());
+    p.session.record = Some(vec![]);
+    p.forge_snapshot(None);
+    host.execute("assert(eqoa.windows.takeover('merchant')); req = assert(eqoa.actions.talk(nil, {kind='merchant'}))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(
+        p.target, 9401,
+        "merchant selection must skip the closer smith"
+    );
+    let mut expected = Writer::op(0x004C);
+    expected.u32(9401);
+    assert!(
+        p.session
+            .record
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|(_, data)| data == &expected.data),
+        "native merchant opcode and entity id must go out"
+    );
+    assert!(
+        !p.session
+            .record
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|(_, data)| data.starts_with(&0x0061u16.to_le_bytes())),
+        "never ask the smith to repair"
+    );
+    host.execute(
+        "assert(eqoa.actions.status(req).state == 'dispatched', 'sending is not success')",
+    )
+    .unwrap();
+    apply(
+        &mut p,
+        opcode(0x00B7, shop_bytes(9401, 90, 110, &[sword()], "Hi")),
+    );
+    assert_eq!(p.mode, 0);
+    host.execute("assert(eqoa.actions.status(req).ok == true)")
+        .unwrap();
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+}
