@@ -6,13 +6,12 @@
 //! `SLOT`/`STAT`/`ATTACK` names. What Forge reads from a window's private memory (the item page's
 //! tab and selection, the merchant window's mode and selection) comes from the two read-only
 //! accessors the owner approved (`ItemMenu::read_state`, `Merchant::read_state`) through
-//! `Container.view` and `MerchantState`; only the button hint, which needs `windows.format_hint`,
-//! says it is not built (`DEFERRED`) and returns nothing.
-//! Forge's transactions (buy, sell, loot, bank moves) are not built in this round.
+//! `Container.view` and `MerchantState`; the button hint uses `windows.format_hint`.
+//! Transaction support is provided by the native `eqoa.actions` service.
 use super::{host::Host, native::error};
 use mlua::{Function, Lua, MultiValue, Result, Table, Value};
 
-/// Forge functions whose text is not built yet (the button hint is `windows.format_hint`'s).
+/// No deferred Forge item text reads remain.
 pub(super) const DEFERRED: &[&str] = &[];
 
 const ITEM: &str = r#"
