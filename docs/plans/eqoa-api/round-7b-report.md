@@ -74,7 +74,7 @@ approval. The named hook is checked exactly once. No other budget grows.
 ### Release command and generated files
 
 Generated from the Windows static-CRT release executable at code commit
-`955fe5a84c5432c19dc6a5e01890f98e6a99e9df`, client 0.5.3, 2026-11-18 UTC.
+`95d1066b`, client 0.5.3, 2026-11-18 UTC.
 The release build passed. A private copy of that executable was used so another
 worktree could not overwrite it between exports.
 
@@ -109,6 +109,10 @@ a negative-control result. The successful attempt wrote UTF-8 explicitly.
 ### Final gates
 
 The full standard release gate run is pending; results will be appended after it.
+The first launch was cancelled before completing the round step to remove
+Markdown hard-break trailing spaces and the final extra blank line found by
+`git diff --check`. The writer now uses a metadata list and exactly one final
+newline; both files were regenerated from the corrected release executable.
 
 Command tests after the loader correction:
 `python tools/run_gates.py --only round --filter round7b_command`: **2 passed,
