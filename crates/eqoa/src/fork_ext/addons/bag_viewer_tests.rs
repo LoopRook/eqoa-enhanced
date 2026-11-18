@@ -2866,6 +2866,183 @@ fn round65_fix2_unanswered_bank_requests_fail_visibly() {
     super::super::action_broker::reset_all_for_test();
 }
 
+// ---- Round 6.5 fix round 4, item 1: the Bag Viewer's cost per frame -------------------------------------------------
+
+fn bv_auto(_bv: &Bv, _mode: &str) {
+    assert!(super::super::options::set_toggle("eqoa_bag_viewer", "auto_loot", true));
+}
+
+/// A full pack: `n` distinct stacks (the biggest pack the game has is 100 slots).
+fn bv_full_pack(n: usize) -> serde_json::Value {
+    let mut world = bv_world();
+    let pack: Vec<serde_json::Value> = (0..n)
+        .map(|i| serde_json::json!({"name": format!("Pack Item {i}"), "id": 800_000 + i, "key": 100 + i, "qty": 1 + (i % 7), "max_stack": 20, "icon": 4001 + (i % 8)}))
+        .collect();
+    world["pack"] = serde_json::Value::Array(pack);
+    world
+}
+
+/// The first number after `needle` in `line`.
+fn bv_num_after(line: &str, needle: &str) -> Option<f64> {
+    let rest = &line[line.find(needle)? + needle.len()..];
+    let end = rest.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(rest.len());
+    rest[..end].parse().ok()
+}
+
+/// What the Bag Viewer cost over a run of busy frames.
+struct BvCost {
+    /// ms a frame spent in the mod (its Lua and its `eqoa.*` calls)
+    mod_ms: f64,
+    /// `eqoa.entities.list` calls a second of wall time
+    lists_per_s: f64,
+    lines: Vec<String>,
+}
+
+/// One frame's creature updates: every twentieth creature moves and the session tells the API.
+fn bv_churn(bv: &mut Bv, tick: usize) {
+    for i in 3..bv.play.entities.slots.len() {
+        if (tick + i) % 20 != 0 {
+            continue;
+        }
+        if let Some(e) = bv.play.entities.slots[i].as_mut() {
+            if e.id >= 5000 {
+                e.pos[0] += 0.1;
+                e.actor_pos = e.pos;
+                bv.play.entity_slot_changed(i);
+            }
+        }
+    }
+}
+
+/// Runs `n` frames in a busy world (a creature in every twentieth slot changing each frame: 35 updates a frame, what the
+/// owner's log shows in a crowded zone)
+/// and returns what the Bag Viewer cost.
+fn bv_cost(bv: &mut Bv, n: usize) -> BvCost {
+    use super::super::addon_perf;
+    // every creature is touched once before the count starts: the API reports one it has not seen as added, and
+    // each such event (rightly) drops the Bag Viewer's look at the zone
+    for tick in 0..25 {
+        bv_churn(bv, tick);
+        bv.frame();
+    }
+    addon_perf::force_for_test(true);
+    let _ = addon_perf::take_report();
+    let started = std::time::Instant::now();
+    for tick in 25..25 + n {
+        bv_churn(bv, tick);
+        bv.frame();
+    }
+    let secs = started.elapsed().as_secs_f64();
+    let lines = addon_perf::take_report();
+    addon_perf::force_for_test(false);
+    let mod_ms = lines
+        .iter()
+        .find(|l| l.starts_with("addons:"))
+        .and_then(|l| bv_num_after(l, &format!("{BV} ")))
+        .unwrap_or(0.0);
+    let per_frame = lines
+        .iter()
+        .find(|l| l.starts_with("addon-api:") && l.contains(BV))
+        .and_then(|l| bv_num_after(l, "entities.list "))
+        .unwrap_or(0.0);
+    BvCost { mod_ms, lists_per_s: per_frame * n as f64 / secs, lines }
+}
+
+/// What one `eqoa.entities.list()` of the busy zone costs here, in ms (the least of a few: the unit the window's
+/// per-frame budget is counted in, so the test means the same in a debug and a release build).
+fn bv_list_ms(bv: &Bv) -> f64 {
+    (0..5)
+        .map(|_| {
+            let t = std::time::Instant::now();
+            assert!(bv.eval::<i64>("#eqoa.entities.list()") > 700);
+            t.elapsed().as_secs_f64() * 1e3
+        })
+        .fold(f64::MAX, f64::min)
+}
+
+/// The real-shaped scene: a 100-slot pack, 700 creatures round the player, a corpse and a merchant in reach.
+fn bv_busy_scene() -> Option<Bv> {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let mut bv = Bv::new()?;
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_full_pack(100));
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    for i in 0..700 {
+        let a = i as f32 * 2.399_963;
+        let d = 20.0 + (i % 40) as f32 * 5.0;
+        bv.play.entities.slots.push(Some(rm_creature(5000 + i as u32, &format!("Busy Creature {i}"), [a.cos() * d, 0.0, a.sin() * d], 0, 1 + (i % 50) as u8)));
+    }
+    bv.enable();
+    bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
+    Some(bv)
+}
+
+/// Owner log 2026-11-18: with the Bags window open the `hud` time went from about 10 to 22 ms a frame, 7-10 ms of it
+/// the Bag Viewer's, nearly all of it `eqoa.entities.list` (each call clones and compares every creature in the
+/// zone; the window asked for the list four times a frame). The window, open on a 100-slot pack beside a corpse and
+/// a merchant in a 700-creature zone, must ask for the list at most about twice a second, and cost less per frame
+/// than one list call does (counted so in any build; in a release build it must also be under 6 ms a frame, closed under 0.2).
+#[test]
+fn round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame() {
+    let Some(mut bv) = bv_busy_scene() else { return };
+    bv.frames(4);
+    let list_ms = bv_list_ms(&bv);
+    let closed = bv_cost(&mut bv, 120);
+    eprintln!("R65P one list call {list_ms:.3} ms; closed: {:.3} ms/frame, {:.2} list calls/s", closed.mod_ms, closed.lists_per_s);
+    bv.open();
+    bv.frames(6);
+    assert_eq!(bv.names().len(), 100, "the 100-slot pack is on screen");
+    let open = bv_cost(&mut bv, 120);
+    eprintln!("R65P open: {:.3} ms/frame, {:.2} list calls/s", open.mod_ms, open.lists_per_s);
+    for l in &open.lines {
+        eprintln!("R65P     {l}");
+    }
+    assert!(open.lists_per_s <= 3.0, "the open window asks for the zone's creature list {:.1} times a second", open.lists_per_s);
+    assert!(open.mod_ms < list_ms, "the open Bags window costs {:.3} ms a frame; one look at the zone is {list_ms:.3} ms", open.mod_ms);
+    if !cfg!(debug_assertions) {
+        assert!(open.mod_ms < 6.0, "the open Bags window costs {:.3} ms a frame (budget 6.0; before the fix about 60)", open.mod_ms);
+        assert!(closed.mod_ms < 0.2, "the closed Bag Viewer costs {:.3} ms a frame (budget 0.2)", closed.mod_ms);
+    }
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+/// Auto-loot's fight check runs on every creature update while a looted corpse waits; it must share one look at the
+/// zone, not scan 700 creatures per call.
+#[test]
+fn round65_fix4_item1_waiting_auto_loot_shares_one_scan_of_the_zone() {
+    let Some(mut bv) = bv_busy_scene() else { return };
+    bv.frames(4);
+    bv_auto(&bv, "non_junk");
+    bv.frames(2);
+    bv.play.entity_slot_changed(5);
+    bv.frames(2);
+    super::super::addon_perf::force_for_test(true);
+    let _ = super::super::addon_perf::take_report();
+    // 50 questions in one frame: a fight check, then where the nearest corpse, merchant and banker are
+    {
+        let _in_the_mod = super::super::addon_perf::lua_scope(BV);
+        bv.eval::<bool>(
+            "(function() local b = require('bags') for i = 1, 50 do b.in_combat() b.nearby_corpse() b.nearby_npc('merchant') b.nearby_npc('bank') end return true end)()",
+        );
+    }
+    bv.frame();
+    let lines = super::super::addon_perf::take_report();
+    super::super::addon_perf::force_for_test(false);
+    let calls = lines
+        .iter()
+        .find(|l| l.starts_with("addon-api:") && l.contains(BV))
+        .and_then(|l| bv_num_after(l, "entities.list "))
+        .unwrap_or(0.0);
+    eprintln!("R65P 200 questions: {calls:.1} list calls; {lines:?}");
+    assert!(calls <= 2.0, "200 questions about the zone made {calls:.1} full scans of its creatures");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
 // ---- Round 6.5 fix round 4, item 2: every open a mod causes stays hidden -------------------------------------------
 
 /// Owner log 2026-11-18: after a hidden open_loot the game's own corpse window showed during auto-loot and batches

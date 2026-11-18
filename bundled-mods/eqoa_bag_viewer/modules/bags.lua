@@ -36,47 +36,90 @@ local function dist_sq(a, b)
     return dx * dx + dy * dy + dz * dz
 end
 
-function M.nearby_corpse()
-    local list = eqoa.entities and eqoa.entities.list and eqoa.entities.list()
-    if not list then return nil end
-    local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
-    local ppos = pl and pl.position
-    local best, best_d2 = nil, nil
-    for _, e in ipairs(list) do
-        if e.corpse then
-            local d2 = dist_sq(ppos, e.actor_position or e.position) or 0
-            if not best or d2 < best_d2 then
-                best, best_d2 = e, d2
-            end
-        end
-    end
-    return best, best_d2
-end
+-- One look at the zone's creatures answers every per-frame question (the nearest corpse, merchant and banker, the
+-- corpses to loot, a live hostile with the player targeted). `eqoa.entities.list()` hands over a record for every
+-- creature in the zone, so asking it per question, per frame, cost the Bags window 7-10 ms a frame in a busy zone
+-- (owner log 2026-11-18). The look is kept for SCAN_TTL seconds (distances only drift by a step in that time) and
+-- is dropped at once when a creature is added, removed, or turns into a corpse, changes its npc flags or its target
+-- (`note_entity_event`), so a button never waits for a corpse that is already there.
+local SCAN_TTL = 0.5
+local scan_at, scan_data = nil, nil
 
 local function has_bit(val, b)
     return val ~= nil and math.floor(val / b) % 2 == 1
 end
 
-function M.nearby_npc(kind)
+local function scan_zone()
+    local now = os.clock()
+    if scan_data and scan_at and now - scan_at < SCAN_TTL and now >= scan_at then return scan_data end
+    local data = {corpses = {}, nearest = {}}
+    scan_data, scan_at = data, now
     local list = eqoa.entities and eqoa.entities.list and eqoa.entities.list()
-    if not list then return nil end
+    if not list then
+        data.none = true
+        return data
+    end
     local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
     local ppos = pl and pl.position
-    local want_bit = kind == "merchant" and 1 or (kind == "bank" and 2 or 0)
-    local best, best_d2 = nil, nil
+    local pid = pl and pl.id
+    local nearest = data.nearest
+    local function consider(kind, e, d2)
+        local cur = nearest[kind]
+        if not cur or d2 < cur.d2 then nearest[kind] = {e = e, d2 = d2} end
+    end
     for _, e in ipairs(list) do
-        if not e.corpse and e.npc_flags then
-            local match = want_bit ~= 0 and has_bit(e.npc_flags, want_bit)
-                or (want_bit == 0 and (has_bit(e.npc_flags, 128) or has_bit(e.npc_flags, 8) or has_bit(e.npc_flags, 2) or has_bit(e.npc_flags, 1)))
-            if match then
-                local d2 = dist_sq(ppos, e.actor_position or e.position) or 0
-                if not best or d2 < best_d2 then
-                    best, best_d2 = e, d2
+        if e.corpse then
+            local d2 = dist_sq(ppos, e.actor_position or e.position) or 0
+            data.corpses[#data.corpses + 1] = e
+            consider("corpse", e, d2)
+        else
+            if pid and e.kind == "npc" and e.target_id == pid then data.hostile = true end
+            local flags = e.npc_flags
+            if flags then
+                local merchant, bank = has_bit(flags, 1), has_bit(flags, 2)
+                if merchant or bank or has_bit(flags, 128) or has_bit(flags, 8) then
+                    local d2 = dist_sq(ppos, e.actor_position or e.position) or 0
+                    consider("any", e, d2)
+                    if merchant then consider("merchant", e, d2) end
+                    if bank then consider("bank", e, d2) end
                 end
             end
         end
     end
-    return best, best_d2
+    return data
+end
+
+function M.scan_reset()
+    scan_at, scan_data = nil, nil
+end
+
+-- Drops the look when a change that matters to it arrives (the always-on auto-loot handlers and the open window
+-- both pass every creature event through here; it costs a few field comparisons).
+function M.note_entity_event(kind, d)
+    if not scan_data then return end
+    if kind ~= "changed" then M.scan_reset() return end
+    local before, after = d and d.before, d and d.after
+    if not (before and after)
+        or before.corpse ~= after.corpse
+        or before.target_id ~= after.target_id
+        or before.npc_flags ~= after.npc_flags
+    then
+        M.scan_reset()
+    end
+end
+
+function M.nearby_corpse()
+    local data = scan_zone()
+    local c = data.nearest.corpse
+    if not c then return nil end
+    return c.e, c.d2
+end
+
+function M.nearby_npc(kind)
+    local data = scan_zone()
+    local c = data.nearest[kind == "merchant" and "merchant" or (kind == "bank" and "bank" or "any")]
+    if not c then return nil end
+    return c.e, c.d2
 end
 
 local function release_takeover(kind)
@@ -897,12 +940,7 @@ function M.in_combat()
     local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
     if not pl then return false end
     if pl.fighting == true or pl.auto_attacking == true then return true end
-    if pl.id and eqoa.entities and eqoa.entities.list then
-        for _, e in ipairs(eqoa.entities.list() or {}) do
-            if e.kind == "npc" and not e.corpse and e.target_id == pl.id then return true end
-        end
-    end
-    return false
+    return pl.id ~= nil and scan_zone().hostile == true
 end
 
 function M.on_target_update()
@@ -922,6 +960,7 @@ function M.on_target_update()
 end
 
 function M.on_entity_changed(d)
+    M.note_entity_event("changed", d)
     if not (d and d.after) then return end
     local after = d.after
     if after.corpse then
@@ -935,6 +974,7 @@ function M.on_entity_changed(d)
 end
 
 function M.on_entity_removed(d)
+    M.note_entity_event("removed", d)
     if d and d.before and not d.before.corpse and M.engaged_recently(d.before.id) then
         M.recently_dead = {
             id = d.before.id,
@@ -945,6 +985,7 @@ function M.on_entity_removed(d)
 end
 
 function M.on_entity_added(d)
+    M.note_entity_event("added", d)
     local after = d and d.after
     if not after or not after.corpse then return end
     if after.kind == "player" or after.kind == "pet" then return end
@@ -972,13 +1013,13 @@ function M.tick_auto_loot()
     if M.batch_id or M.pending_open or M.last_req or loot_batch_active() then return end
     -- never while fighting: it waits (the corpse stays eligible) and runs when the fight is over
     if M.in_combat() then return end
-    local list = eqoa.entities and eqoa.entities.list and eqoa.entities.list()
-    if not list then return end
+    local data = scan_zone()
+    if data.none then return end
     local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
     local ppos = pl and pl.position
     local best, best_d2 = nil, nil
-    for _, e in ipairs(list) do
-        if e.corpse and M.eligible_corpses[e.id] and not (M.auto_looted and M.auto_looted[e.id]) then
+    for _, e in ipairs(data.corpses) do
+        if M.eligible_corpses[e.id] and not (M.auto_looted and M.auto_looted[e.id]) then
             local d2 = dist_sq(ppos, e.actor_position or e.position)
             if (d2 == nil or d2 <= 225.0) and (not best or (d2 or 0) < (best_d2 or 0)) then
                 best, best_d2 = e, d2 or 0

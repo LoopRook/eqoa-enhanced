@@ -40,7 +40,11 @@ local function open()
     if B.open then return end
     if not B.junk_loaded then B.load_junk() end
     B.open, B.grid, B.menu = true, nil, nil
+    B.scan_reset()
     listen("render", draw)
+    -- creatures arriving or leaving are rare; the look at the zone is dropped for them (see bags.lua `scan_zone`)
+    listen("entity.added", function(e) B.note_entity_event("added", e.data) end)
+    listen("entity.removed", function(e) B.note_entity_event("removed", e.data) end)
     listen("inventory.changed", B.dirty)
     listen("bank.changed", function(e) B.on_bank_changed(e.data) end)
     listen("loot.changed", function(e) B.on_loot_changed(e.data) end)
@@ -148,7 +152,7 @@ end)
 eqoa.events.on("batch.result", function(e)
     if not B.open then B.on_batch_result(e.data) end
 end)
-eqoa.events.on("state.reset", function() B.clear_corpse_hold(); B.reset_icons(); B.dirty() end)
+eqoa.events.on("state.reset", function() B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); B.dirty() end)
 eqoa.events.on("disabling", function()
     close()
     if eqoa.windows and eqoa.windows.release then eqoa.windows.release() end
