@@ -2915,7 +2915,7 @@ fn round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases() {
     });
     p.entities.slots[1] = Some(net::entity::Entity {
         id: 9002, world: 0, kind: net::entity::TYPE_CREATURE, p18: 1, pos: [6.0, 0.0, 0.0], actor_pos: [6.0, 0.0, 0.0],
-        creature: Some(net::entity::Creature { name: "Merchant Kim".into(), npc_flags: 0x80 | 8, ..Default::default() }), ..Default::default()
+        creature: Some(net::entity::Creature { name: "Merchant Kim".into(), npc_flags: 0x80 | 1, ..Default::default() }), ..Default::default()
     });
     p.entities.slots[2] = Some(net::entity::Entity {
         id: 9003, world: 0, kind: net::entity::TYPE_CREATURE, p18: 1, pos: [8.0, 0.0, 0.0], actor_pos: [8.0, 0.0, 0.0],
@@ -3173,7 +3173,7 @@ fn round65_open_loot_talk_npc_flags_and_strict_target_guards() {
             actor_pos: [8.0, 0.0, 0.0],
             creature: Some(net::entity::Creature {
                 name: "Merchant Bob".into(),
-                npc_flags: 0x80 | 8,
+                npc_flags: 0x80 | 1,
                 ..Default::default()
             }),
             ..Default::default()
@@ -3200,7 +3200,7 @@ fn round65_open_loot_talk_npc_flags_and_strict_target_guards() {
         eqoa.events.on("action.result", function(e) results[#results + 1] = e.data end)
         local m = eqoa.entities.find(5004)
         local b = eqoa.entities.find(5005)
-        assert(m.npc_flags == (128 + 8), "merchant npc_flags exported")
+        assert(m.npc_flags == (128 + 1), "merchant npc_flags exported")
         assert(b.npc_flags == (128 + 2), "banker npc_flags exported")
     "#,
     )
@@ -3627,10 +3627,10 @@ fn r65fix_world() -> Play {
     p.self_at = Some(([0.0, 0.0, 0.0], None));
     p.entities.slots = vec![
         r65fix_creature(9001, "a fallen orc", 3, 0, [3.0, 0.0, 0.0]),
-        r65fix_creature(9002, "Merchant Kim", 1, 0x88, [6.0, 0.0, 0.0]),
+        r65fix_creature(9002, "Merchant Kim", 1, 0x81, [6.0, 0.0, 0.0]),
         r65fix_creature(9003, "Banker Dan", 1, 0x82, [8.0, 0.0, 0.0]),
         r65fix_creature(9004, "a fallen gnoll", 3, 0, [4.0, 0.0, 0.0]),
-        r65fix_creature(9005, "Merchant Lee", 1, 0x88, [7.0, 0.0, 0.0]),
+        r65fix_creature(9005, "Merchant Lee", 1, 0x81, [7.0, 0.0, 0.0]),
         r65fix_creature(9007, "Banker Sue", 1, 0x82, [9.0, 0.0, 0.0]),
     ];
     p
@@ -3886,4 +3886,64 @@ fn round65_fix_m1_previous_target_restored_when_the_mods_open_is_done() {
     window_takeover::reset_all_for_test();
     action_broker::reset_all_for_test();
     crate::fork_ext::loot_source::clear();
+}
+
+/// Use the native merchant flag, and inspect the actual packet rather than treating any lost
+/// send as a successful merchant request. A closer smith must never win merchant selection.
+#[test]
+fn round65_fix2_merchant_uses_native_flags_and_exact_request() {
+    use crate::fork_ext::addons::{action_broker, window_takeover};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    let host = r65fix_host(&["eqoa.actions.*", "eqoa.windows.takeover"]);
+    let mut p = r65fix_world();
+    p.entities.slots = vec![
+        r65fix_creature(9401, "Merchant", 1, 0x81, [6.0, 0.0, 0.0]),
+        r65fix_creature(9402, "Smith", 1, 0x88, [1.0, 0.0, 0.0]),
+    ];
+    let sys = p.session.drdp.system_endpoint;
+    let remote = drdp::address_to_endpoint([127, 0, 0, 1], 10071, drdp::PORT_LEADER);
+    p.session.conn = p.session.drdp.connection_open(sys, remote);
+    assert!(p.session.conn.is_some());
+    p.session.record = Some(vec![]);
+    p.forge_snapshot(None);
+    host.execute("assert(eqoa.windows.takeover('merchant')); req = assert(eqoa.actions.talk(nil, {kind='merchant'}))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(
+        p.target, 9401,
+        "merchant selection must skip the closer smith"
+    );
+    let mut expected = Writer::op(0x004C);
+    expected.u32(9401);
+    assert!(
+        p.session
+            .record
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|(_, data)| data == &expected.data),
+        "native merchant opcode and entity id must go out"
+    );
+    assert!(
+        !p.session
+            .record
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|(_, data)| data.starts_with(&0x0061u16.to_le_bytes())),
+        "never ask the smith to repair"
+    );
+    host.execute(
+        "assert(eqoa.actions.status(req).state == 'dispatched', 'sending is not success')",
+    )
+    .unwrap();
+    apply(
+        &mut p,
+        opcode(0x00B7, shop_bytes(9401, 90, 110, &[sword()], "Hi")),
+    );
+    assert_eq!(p.mode, 0);
+    host.execute("assert(eqoa.actions.status(req).ok == true)")
+        .unwrap();
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
 }

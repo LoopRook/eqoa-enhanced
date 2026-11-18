@@ -1523,7 +1523,7 @@ fn dispatch_broker_action(
                     return false;
                 }
                 match kind {
-                    TalkKind::Merchant => c.npc_flags & 8 != 0,
+                    TalkKind::Merchant => c.npc_flags & 1 != 0,
                     TalkKind::Bank => c.npc_flags & 2 != 0,
                     TalkKind::AnyFriendly => {
                         (c.npc_flags & 0x80 != 0) || (c.npc_flags & 0b1011 != 0)
@@ -1586,18 +1586,6 @@ fn dispatch_broker_action(
                     crate::fork_ext::addons::window_takeover::note_retarget(vm, prev, npc_id);
                 }
             }
-            let is_trainer = play
-                .entities
-                .slots
-                .iter()
-                .flatten()
-                .find(|e| e.id == npc_id)
-                .is_some_and(|e| {
-                    talk_target_matches(play, e, *kind)
-                        && e.creature
-                            .as_ref()
-                            .is_some_and(|c| c.npc_flags & 1 != 0 && c.npc_flags & 0b1010 == 0)
-                });
             let still_valid = play.target == npc_id
                 && play
                     .entities
@@ -1622,7 +1610,7 @@ fn dispatch_broker_action(
             if let Some(vm) = crate::fork_ext::addons::action_broker::current_dispatch_vm() {
                 use crate::fork_ext::addons::window_takeover::{self, TakeoverKind};
                 if *kind == TalkKind::Merchant
-                    || (*kind == TalkKind::AnyFriendly && target_flags & 8 != 0)
+                    || (*kind == TalkKind::AnyFriendly && target_flags & 1 != 0)
                 {
                     let _ = window_takeover::arm_pending_open(TakeoverKind::Merchant, vm, npc_id);
                 }
@@ -1633,20 +1621,15 @@ fn dispatch_broker_action(
                 }
             }
             play.interact_with_target();
-            if is_trainer {
-                DispatchOutcome::Completed {
-                    detail: Some(serde_json::json!({ "entity_id": npc_id })),
-                }
-            } else {
-                DispatchOutcome::AwaitingServer {
-                    matcher: crate::fork_ext::addons::action_broker::ServerMatcher::Talk {
-                        npc_id,
-                        kind: *kind,
-                    },
-                    detail: Some(serde_json::json!({ "entity_id": npc_id })),
-                }
+            DispatchOutcome::AwaitingServer {
+                matcher: crate::fork_ext::addons::action_broker::ServerMatcher::Talk {
+                    npc_id,
+                    kind: *kind,
+                },
+                detail: Some(serde_json::json!({ "entity_id": npc_id })),
             }
         }
+
         ActionKind::Attack { on } => {
             if play.is_dead() || !matches!(play.mode, 0 | 38) {
                 return DispatchOutcome::Refused {

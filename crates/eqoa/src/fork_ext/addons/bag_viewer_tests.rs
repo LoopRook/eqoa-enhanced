@@ -2313,7 +2313,7 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
 
     // Spawn nearby corpse (9001), merchant (9002), and banker (9003); native mode stays 0 throughout.
     bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
-    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 8, 1, [6.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
     bv.play.bags_spawn_npc(9003, "Banker Dan", 0x80 | 2, 1, [8.0, 0.0, 0.0]);
     bv.open();
     bv.frames(2);
@@ -2750,5 +2750,55 @@ fn r65fix2_open_corpse(stale: bool) {
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
     crate::fork_ext::loot_source::clear();
+}
+
+
+/// Owner test (c): a merchant that never answers the talk must end the step visibly after the server timeout,
+/// not stay on "Opening merchant...".
+#[test]
+fn round65_fix2_unanswered_merchant_talk_fails_visibly() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play
+        .bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
+    assert!(
+        bv.eval::<bool>("(function() require('bags').junk_ids['900008'] = true return true end)()")
+    );
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(1));
+    bv.frames(2);
+    let (sx, sy, _) = bv.action_hit("Sell junk (").unwrap();
+    let sends = bv.play.bags_sends_lost();
+    bv.click((sx, sy));
+    bv.play.bags_broker_tick();
+    assert!(
+        bv.play.bags_sends_lost() > sends,
+        "the talk request goes out"
+    );
+    assert_eq!(bv.result_text(), Some(("Opening merchant...".into(), None)));
+    // the server says nothing at all
+    for _ in 0..320 {
+        bv.play.bags_broker_tick();
+    }
+    bv.frames(2);
+    let (text, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert!(
+        text.contains("merchant did not answer"),
+        "visible failure, got: {text}"
+    );
+    assert!(
+        bv.eval::<bool>("not eqoa.windows.taken('merchant')"),
+        "the takeover is let go after the failure"
+    );
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
 }
 

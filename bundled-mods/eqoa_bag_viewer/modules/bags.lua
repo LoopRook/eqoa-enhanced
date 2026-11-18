@@ -62,7 +62,7 @@ function M.nearby_npc(kind)
     if not list then return nil end
     local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
     local ppos = pl and pl.position
-    local want_bit = kind == "merchant" and 8 or (kind == "bank" and 2 or 0)
+    local want_bit = kind == "merchant" and 1 or (kind == "bank" and 2 or 0)
     local best, best_d2 = nil, nil
     for _, e in ipairs(list) do
         if not e.corpse and e.npc_flags then
@@ -1000,6 +1000,13 @@ function M.renew_loot_session()
     end
 end
 
+function M.no_answer_text(kind)
+    if kind == "merchant" then return "the merchant did not answer (too far away?)" end
+    if kind == "loot" then return "the corpse did not open (too far away?)" end
+    if kind == "sell" or kind == "buy" then return "no answer from the server (too far from the merchant?)" end
+    return "no answer from the server"
+end
+
 function M.on_action_result(d)
     if not d then return end
     if M.pending_open and d.request_id == M.pending_open.req then
@@ -1013,6 +1020,13 @@ function M.on_action_result(d)
             return
         elseif d.ok == true and d.phase ~= "dispatch" then
             finish_pending_open(p.kind)
+            return
+        elseif d.ok == nil and (d.state == "unknown" or d.code == "unknown") then
+            -- the server never answered the open: say so, never hang on "Opening..."
+            M.pending_open = nil
+            release_takeover(p.kind)
+            M.result = {text = (p.verb or d.kind) .. ": " .. M.no_answer_text(p.kind), ok = false}
+            M.dirty()
             return
         end
     end
@@ -1029,7 +1043,11 @@ function M.on_action_result(d)
             release_takeover(k)
         end
     else
-        M.result = {text = label .. ": " .. (d.reason or d.code or d.state), ok = false}
+        local why = d.reason or d.code or d.state
+        if d.ok == nil and (d.state == "unknown" or d.code == "unknown") then
+            why = M.no_answer_text(d.kind)
+        end
+        M.result = {text = label .. ": " .. why, ok = false}
         M.last_req = nil
         if M.held_for_req then
             local k = M.held_for_req
