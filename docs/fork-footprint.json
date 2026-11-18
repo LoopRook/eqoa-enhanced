@@ -60,7 +60,9 @@
     "tools/test_run_gates.py",
     "tools/update_bundled_manifest.py",
     "tools/test_update_bundled_manifest.py",
+    "tools/collect_owner_test.py",
     "tools/make_owner_test_package.py",
+    "tools/test_collect_owner_test.py",
     "tools/test_make_owner_test_package.py"
   ],
   "shared": {
