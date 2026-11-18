@@ -246,3 +246,22 @@ passed against the unchanged reviewed policy. Shared budgets were not raised.
 `python -X utf8 tools/check_no_local_paths.py` also passed. The reference path above
 uses %USERPROFILE% so the required external reference is reproducible without a
 tracked personal-profile path. No disc path was recorded.
+
+## Diagnostic collector
+
+`round7a_collect_diagnostics.py` consumes the existing Rust Manager gate logs. It
+requires exactly one passed gate, rejects failed/ignored/SKIP results, and records
+that all twelve per-package diagnostic lists are empty only after that assertion.
+
+Positive command:
+`python crates/eqoa/src/fork_ext/addons/round7a_collect_diagnostics.py run/round7a-baseline.log <shared-target>/gates/feat-eqoa-api-r7a-addons.log`
+reported twelve empty lists before and twelve after.
+Negative control: a copied after log marked that gate FAILED, then
+`python crates/eqoa/src/fork_ext/addons/round7a_collect_diagnostics.py run/round7a-baseline.log run/round7a-bad-diagnostics.log`
+exited 1 at collector line 24: `ValueError: bundled diagnostic gate did not run all packages successfully`.
+
+The preliminary full-bin run was stopped after the approved test-only changes were
+committed, because its binary predates those assertions. It is not counted as a
+completed full suite. Only its own verified runner process tree was stopped; its
+single-token lock was removed after its owner PID was confirmed dead. Final gates
+will run the complete set on the committed code; no tests are excluded to mask failures.
