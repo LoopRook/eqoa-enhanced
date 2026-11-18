@@ -4,6 +4,8 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Owner test launchers now save local gameplay recordings alongside the log. The owner test summary lists each recording's size, duration and message counts.
+
 - Third-party Forge mods that call camera.GetCoordinates before a camera exists, or icon.GetTexture on a host without a texture service, now show a diagnostic instead of a silent empty result.
 
 - Upstream's latest changes are in (192 of them: auras and armour looks, stacked spell bars, a buff window on servers that send one, raid lists, Touch Controls and more; see the vanilla client's notes).

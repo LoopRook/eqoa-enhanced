@@ -26,7 +26,7 @@ except ImportError:
 ARCHIVE_SCRIPT_NAME = "archive_previous_run.ps1"
 
 # Sets the previous run's logs aside in results\<date-time>\ (moved, so a third launch
-# cannot erase the first). Only logs and the state snapshot: never account files.
+# cannot erase the first). Moves logs, the state snapshot and local recordings.
 ARCHIVE_SCRIPT = r"""# Sets the previous run's logs aside so no run is lost. Called by the Play .bat files.
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -38,7 +38,8 @@ foreach ($top in 'config', 'play') {
     $dir = Join-Path $root $top
     if (-not (Test-Path $dir)) { continue }
     Get-ChildItem -Path $dir -Recurse -File | Where-Object {
-        $_.Name -like 'eqoa*.log' -or $_.Name -like 'addons_error.log*' -or $_.Name -eq 'state.txt'
+        $_.Name -like 'eqoa*.log' -or $_.Name -like 'addons_error.log*' -or $_.Name -eq 'state.txt' -or
+            ($top -eq 'config' -and $_.DirectoryName -eq $dir -and $_.Name -like 'session-*.eqrec')
     } | ForEach-Object {
         $rel = $_.FullName.Substring($root.Length).TrimStart('\', '/')
         $target = Join-Path $dest $rel
@@ -310,6 +311,7 @@ def make_package(
             "@echo off\r\n"
             f"rem {rem_label} test build: uses the settings copy in .\\config, never updates itself.\r\n"
             "set EQOA_CONFIG=%~dp0config\r\n"
+            "set EQOA_RECORD_SESSION=1\r\n"
             "set EQOA_UPDATE_URL=http://127.0.0.1:9/\r\n"
             + ARCHIVE_CALL
             + f'start "" /D "%~dp0play" "%~dp0play\\{target_exe_name}"\r\n'
@@ -319,6 +321,7 @@ def make_package(
             "@echo off\r\n"
             f"rem {rem_label} test build: uses the settings copy in .\\config, never updates itself.\r\n"
             "set EQOA_CONFIG=%~dp0config\r\n"
+            "set EQOA_RECORD_SESSION=1\r\n"
             "set EQOA_UPDATE_URL=http://127.0.0.1:9/\r\n"
             "set EQOA_PERF=1\r\n"
             + ARCHIVE_CALL
@@ -350,7 +353,10 @@ def make_package(
             config_source = Path(config_source)
 
             if config_source.is_dir():
-                shutil.copytree(config_source, config_dir)
+                shutil.copytree(
+                    config_source, config_dir,
+                    ignore=lambda _folder, names: [name for name in names if name.lower().endswith(".eqrec")],
+                )
             else:
                 config_dir.mkdir(parents=True, exist_ok=True)
 

@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import struct
 import tempfile
 import time
 import unittest
@@ -69,6 +70,22 @@ class TestCollector(unittest.TestCase):
         self.assertLess(page.index("current run"), page.index("20261102-100000"))
         self.assertLess(page.index("20261102-100000"), page.index("20261101-100000"))
         self.assertIn("lowest 11.0", page)
+
+    def test_recording_summaries_follow_current_and_archived_runs(self):
+        archive = self.pkg / "results" / "20261102-100000" / "config"
+        archive.mkdir(parents=True)
+        magic = b"EQREC\x01\r\n"
+        incoming = struct.pack("<QBBI", 100_000, 0, 251, 2) + b"\x18\0"
+        outgoing = struct.pack("<QBBI", 350_000, 1, 251, 2) + b"\x19\0"
+        (self.pkg / "config" / "session-current.eqrec").write_bytes(magic + incoming + outgoing)
+        (archive / "session-old.eqrec").write_bytes(magic + incoming)
+        (archive / "session-truncated.eqrec").write_bytes(magic + incoming[:-1])
+
+        current, old = collect_owner_test.collect(self.pkg, self.desktop).split("== set aside")
+        self.assertIn("session-current.eqrec (40 bytes, 0.250 s, 2 messages, 1 received, 1 sent)", current)
+        self.assertNotIn("session-old.eqrec", current)
+        self.assertIn("session-old.eqrec (24 bytes, 0.000 s, 1 messages, 1 received, 0 sent)", old)
+        self.assertIn("session-truncated.eqrec (23 bytes, truncated message payload)", old)
 
     def test_mod_errors_and_crashes_reported(self):
         self.log(["x"])
