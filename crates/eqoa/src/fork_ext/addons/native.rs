@@ -959,18 +959,14 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua,
         "hud",
         "hidden_by",
-        lua.create_function(|lua, _: Value| lua.create_table())?,
+        lua.create_function(|lua, _: Value| error(lua, "eqoa.hud.hidden_by", "unavailable", "no visibility lease on this host"))?,
     )?;
     bind(
         lua,
         "input",
         "get",
         lua.create_function(|lua, ()| {
-            record(
-                lua,
-                "eqoa.input.InputState",
-                &json!({"focused":false,"pad":null,"text_capture":false}),
-            )
+            error(lua, "eqoa.input.get", "unavailable", "native input service is not installed on this host")
         })?,
     )?;
     let root = guard(lua, root, "eqoa", None)?;

@@ -33,3 +33,12 @@ release build, footprint and final counts.
 Follow-up baseline: 3 passed, 12 failed, 0 ignored, 0 SKIP lines.
 The production addon icon test and all twelve bundled mods passed; each bundled
 mod produced zero manager diagnostics. The source-format descriptor failed as expected.
+
+## Step 2: quiet placeholders
+
+The base icon bindings now diagnose `unavailable` through the native sink and keep
+Forge's three-nil texture failure shape. The one-off stderr warning is removed.
+`hud.hidden_by` refuses without its visibility lease. The remaining install placeholders
+were reviewed: player.get/hud.hide already refuse not_in_world; client.get describes a
+true pre-world state; input.get's invented state is replaced by an unavailable refusal
+(the production input installer replaces it later in the same install).

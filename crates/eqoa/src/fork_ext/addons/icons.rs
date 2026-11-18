@@ -13,7 +13,7 @@ use std::{
     rc::Rc,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::Ordering,
     },
 };
 
@@ -1120,8 +1120,6 @@ pub fn with_active_provider<R, F: FnOnce(&dyn IconProvider) -> R>(f: F) -> R {
     })
 }
 
-static UI_TEX_DIAG_LOGGED: AtomicBool = AtomicBool::new(false);
-
 pub fn install_base_icon_adapter(lua: &Lua, host: &super::host::Host) -> LuaResult<()> {
     let icon_mod = match lua.named_registry_value::<Table>("__forge_icon_mod") {
         Ok(t) => t,
@@ -1173,17 +1171,16 @@ pub fn install_base_icon_adapter(lua: &Lua, host: &super::host::Host) -> LuaResu
 
     icon_mod.set(
         "GetTexture",
-        lua.create_function(|_, (_hash, _opts): (Value, Option<Table>)| {
+        lua.create_function(|lua, (_hash, _opts): (Value, Option<Table>)| {
+            super::native::diagnose(lua, "frontiers_forge.icon.GetTexture", "unavailable", "addon texture service is not installed on this host");
             Ok((Value::Nil, Value::Nil, Value::Nil))
         })?,
     )?;
 
     icon_mod.set(
         "GetUITexture",
-        lua.create_function(|_, _tex_id: Value| {
-            if !UI_TEX_DIAG_LOGGED.swap(true, Ordering::Relaxed) {
-                eprintln!("frontiers_forge.icon: GetUITexture is not implemented in base adapter");
-            }
+        lua.create_function(|lua, _tex_id: Value| {
+            super::native::diagnose(lua, "frontiers_forge.icon.GetUITexture", "unavailable", "addon texture service is not installed on this host");
             Ok((Value::Nil, Value::Nil, Value::Nil))
         })?,
     )?;
