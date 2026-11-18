@@ -1,0 +1,184 @@
+name: Branch gates
+
+# Runs the development gates on a work branch pushed as ci/<name> (tools/ci_gates.py push),
+# so the long test runs happen on GitHub's runners instead of the owner's PC.
+# Verification only: read-only token, no secrets, no release, no tag, no push, nothing
+# published. It never touches develop or enhanced.
+on:
+  push:
+    branches: ['ci/**']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag or commit to check (default: the branch the run was started on)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+# A newer push to the same ci/ branch cancels the older run.
+concurrency:
+  group: branch-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: '0'
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: '1'
+
+jobs:
+  tests:
+    if: github.repository == 'LoopRook/eqoa-enhanced'
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: branch-gates-tests
+      - name: Prepare logs
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path gate-logs | Out-Null
+          $canonicalTemp = (python -c "import os; print(os.path.realpath(os.environ['RUNNER_TEMP']))").Trim()
+          foreach ($name in @('TMPDIR', 'TEMP', 'TMP')) { "$name=$canonicalTemp" >> $env:GITHUB_ENV }
+          "EQOA_CONFIG=$canonicalTemp\eqoa-gates-config" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force -Path "$canonicalTemp\eqoa-gates-config" | Out-Null
+      # Each gate keeps going after a failure so one run reports every result; the
+      # last step fails the job when any gate failed. No disc is present here, so the
+      # disc tests log SKIP; the summary counts them.
+      - name: addons
+        id: addons
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          cargo +1.99.1 test --locked -p eqoa --bin eqoa --target x86_64-pc-windows-msvc fork_ext::addons:: -- --test-threads=1 --nocapture 2>&1 | Tee-Object -FilePath gate-logs/addons.log
+          if ($LASTEXITCODE -ne 0) { throw 'addons failed' }
+      - name: full
+        id: full
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # Upstream's AO test `the_foot_of_a_wall_darkened_and_open_ground_not` needs the GPU
+          # (it fails on untouched upstream and on this runner); skipped as enhanced-dev does.
+          cargo +1.99.1 test --locked --workspace --target x86_64-pc-windows-msvc -- --test-threads=1 --nocapture --skip the_foot_of_a_wall_darkened_and_open_ground_not 2>&1 | Tee-Object -FilePath gate-logs/full.log
+          if ($LASTEXITCODE -ne 0) { throw 'full failed' }
+      - name: Summarize
+        if: always()
+        shell: pwsh
+        env:
+          GATE_ADDONS: ${{ steps.addons.outcome }}
+          GATE_FULL: ${{ steps.full.outcome }}
+        run: |
+          python -X utf8 tools/ci_gates.py summarize --job tests --logs gate-logs --out gate-summary-tests.json --markdown $env:GITHUB_STEP_SUMMARY --result addons=$env:GATE_ADDONS --result full=$env:GATE_FULL
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: gate-summary-tests
+          path: |
+            gate-summary-tests.json
+            gate-logs/*.log
+          retention-days: 7
+      - name: Fail when a gate failed
+        if: steps.addons.outcome != 'success' || steps.full.outcome != 'success'
+        shell: pwsh
+        run: throw 'A gate failed: see the summary'
+
+  checks:
+    if: github.repository == 'LoopRook/eqoa-enhanced'
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Fetch reviewed upstream policy base
+        shell: pwsh
+        run: |
+          $base = (Get-Content docs/fork-footprint.json -Raw | ConvertFrom-Json).reviewed_base
+          git fetch --no-tags https://github.com/DabDavis/eqoa-rust-client-vanilla.git $base
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch reviewed upstream base' }
+          git update-ref refs/remotes/origin/master $base
+      - name: Install toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: branch-gates-checks
+      - name: Prepare logs
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path gate-logs | Out-Null
+      - name: wasm
+        id: wasm
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          cargo +1.99.1 check --locked -p eqoa --target wasm32-unknown-unknown 2>&1 | Tee-Object -FilePath gate-logs/wasm.log
+          if ($LASTEXITCODE -ne 0) { throw 'wasm failed' }
+      - name: footprint
+        id: footprint
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          python -X utf8 tools/check_fork_footprint.py 2>&1 | Tee-Object -FilePath gate-logs/footprint.log
+          if ($LASTEXITCODE -ne 0) { throw 'footprint failed' }
+      - name: paths
+        id: paths
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          python -X utf8 tools/check_no_local_paths.py 2>&1 | Tee-Object -FilePath gate-logs/paths.log
+          if ($LASTEXITCODE -ne 0) { throw 'paths failed' }
+      - name: player-release
+        id: player_release
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          python -X utf8 tools/test_player_release.py 2>&1 | Tee-Object -FilePath gate-logs/player-release.log
+          if ($LASTEXITCODE -ne 0) { throw 'player-release failed' }
+      - name: tools
+        id: tools
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          python -X utf8 -m unittest discover -s tools -p "test_*.py" 2>&1 | Tee-Object -FilePath gate-logs/tools.log
+          if ($LASTEXITCODE -ne 0) { throw 'tools failed' }
+      - name: Summarize
+        if: always()
+        shell: pwsh
+        env:
+          GATE_WASM: ${{ steps.wasm.outcome }}
+          GATE_FOOTPRINT: ${{ steps.footprint.outcome }}
+          GATE_PATHS: ${{ steps.paths.outcome }}
+          GATE_PLAYER: ${{ steps.player_release.outcome }}
+          GATE_TOOLS: ${{ steps.tools.outcome }}
+        run: |
+          python -X utf8 tools/ci_gates.py summarize --job checks --logs gate-logs --out gate-summary-checks.json --markdown $env:GITHUB_STEP_SUMMARY --result wasm=$env:GATE_WASM --result footprint=$env:GATE_FOOTPRINT --result paths=$env:GATE_PATHS --result player-release=$env:GATE_PLAYER --result tools=$env:GATE_TOOLS
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: gate-summary-checks
+          path: |
+            gate-summary-checks.json
+            gate-logs/*.log
+          retention-days: 7
+      - name: Fail when a gate failed
+        if: steps.wasm.outcome != 'success' || steps.footprint.outcome != 'success' || steps.paths.outcome != 'success' || steps.player_release.outcome != 'success' || steps.tools.outcome != 'success'
+        shell: pwsh
+        run: throw 'A gate failed: see the summary'

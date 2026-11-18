@@ -65,7 +65,10 @@
     "tools/test_collect_owner_test.py",
     "tools/test_make_owner_test_package.py",
     "tools/local_scene.py",
-    "tools/test_local_scene.py"
+    "tools/test_local_scene.py",
+    ".github/workflows/branch-gates.yml",
+    "tools/ci_gates.py",
+    "tools/test_ci_gates.py"
   ],
   "shared": {
     ".gitignore": {

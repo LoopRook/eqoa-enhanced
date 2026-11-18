@@ -74,6 +74,9 @@ filled the owner's SSD on 2026-11-09). Never create a per-worktree or per-task t
 finish, delete any `target` folder you made inside a worktree, and the lead deletes a retired worktree's
 folder when its branch merges.
 
+Full gate runs: when the PC's build slot is busy, run them on GitHub's runners with `python tools/ci_gates.py push <branch>`
+then `status <branch>` (and `cleanup <branch>` after); disc, GPU and release-build checks stay local (docs/DEV-TOOLS.md §5).
+
 ## Engineering rules kept from upstream
 
 Upstream's full instructions are preserved verbatim in `docs/upstream/CLAUDE.md`. Read the matching

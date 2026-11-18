@@ -146,3 +146,49 @@ Lua opened the Corpse tab when loot arrived. The screenshots before and after a 
 **Take all** both showed three items, and the client logged no loot request. `play` uses
 `EQOA_CLICKS` to call the native game's click handler directly. `EQOA_MOUSE` is read by
 the separate shot path. The addon receives pointer events through the window event handler.
+
+---
+
+## 5. CI Branch Gates (`tools/ci_gates.py`, `.github/workflows/branch-gates.yml`)
+
+Runs the long test gates on GitHub's free Windows runners, so the owner's PC (one build slot,
+about 40 minutes for a full run) stays free. Use it for full runs when the PC's build slot is
+busy; disc tests, GPU tests and the release build stay on the PC.
+
+```bash
+python tools/ci_gates.py push <local-branch>      # pushes it as ci/<branch> to looprook, prints the run URL
+python tools/ci_gates.py status <local-branch>    # waits, then prints pass/fail per gate, SKIPs, failing tests
+python tools/ci_gates.py cleanup <local-branch>   # deletes the remote ci/<branch>
+python tools/ci_gates.py cleanup --merged         # deletes every remote ci/* already merged into develop
+```
+
+`status` exits 0 only when every gate passed (`--no-wait` prints the current state; `--timeout`
+and `--poll` set the wait). `cleanup --dry-run` shows what would be deleted.
+
+**Safety.** The tool writes only `refs/heads/ci/*`: it builds the destination itself and refuses
+every other ref (tags, `develop`, `enhanced`, `master`, refspecs, odd characters) before it runs
+git. The push is forced, but only on a `ci/` ref. The workflow starts on `ci/**` pushes (and
+`workflow_dispatch` with a `ref` input), has a read-only token, no secrets, no release, no tag
+and no push, and a newer push to the same `ci/` branch cancels the older run. Delete each `ci/`
+branch when its work merges (work branches may sit on the public repository only for CI).
+
+**What runs in CI** (two parallel jobs on `windows-2022`, toolchain 1.99.1, no disc):
+
+| Job | Gate | Same as |
+|---|---|---|
+| tests | `addons`: `fork_ext::addons::` tests | `run_gates.py` addons |
+| tests | `full`: whole workspace, `--test-threads=1`, skipping the GPU-bound upstream AO test | `enhanced-dev.yml` |
+| checks | `wasm`: `cargo check` for `wasm32-unknown-unknown` | `run_gates.py` wasm |
+| checks | `footprint`, `paths`, `player-release` | `run_gates.py` |
+| checks | `tools`: the Python tool tests | `enhanced-dev.yml` |
+
+Each gate runs even when an earlier one failed. The job summary and the `gate-summary-*`
+artifact (kept 7 days) give pass/fail/ignored counts, the number of `SKIP` lines and the
+failing test names. Cargo output is cached with `Swatinem/rust-cache`; a cache belongs to its
+`ci/` branch, so the first run of a new branch is cold and repeat pushes are warm.
+
+**What still needs the owner's PC.** Tests that need the owner's Frontiers disc (about 200 skip
+in CI and are counted as SKIP), GPU and window tests, anything needing the local server or a
+live play session (`local_scene.py`), the optimized zero-addon allocation gate and the release
+build for owner test packages (`enhanced-dev.yml` still runs both when `develop` is pushed), and
+the oracle tests (not on this machine at all).
