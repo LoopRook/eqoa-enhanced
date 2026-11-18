@@ -349,3 +349,10 @@ owner's live test from a branch build, because server order, range and sound can
 4. **Never replaceable:** options, login, reports, updater, Mods & Addons, GM panels. Agreed?
 5. **Timing:** settle the three contract rules before the `eqoa/1` freeze (round 7), build W1 onward after
    it. Or W1 before the freeze?
+
+## Owner answers (2026-11-18)
+
+All five: the recommended option. (1) Order W0-W8 as proposed. (2) "Can answer NPC dialogs" is its own label line.
+(3) The game's own key opens a replacement mod's window when that mod is on; for the Bag Viewer an option, off by
+default. (4) Options, login, reports, updater, Mods & Addons and GM panels are never replaceable. (5) Settle the three
+contract rules before the `eqoa/1` freeze; build W1 onward after it.
