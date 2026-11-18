@@ -243,3 +243,15 @@ Cargo to compile this worktree's eqoa crate rather than reuse another branch's
 newer binary. All Cargo operations still use the runner and shared cache/lock.
 Reviewers sharing this target directory should force a current-worktree compile
 inside the lock and check that the expected tests actually execute.
+
+### Final release gates after review follow-ups (2026-11-18)
+
+Command: `python tools/run_gates.py --release` on c07f6b3d (full run, no filter).
+Result: **ALL GATES PASSED**; wasm, footprint, paths and player-release PASS;
+release PASS (3544.65 s), executable in the shared target. The `--out` note in
+`docs/DEV-TOOLS.md` and the scratch-directory cleanup (with its unwinding test)
+were already in place. This machine has no graphics adapter, so the mod-api
+reference tests print an explicit SKIP (`round7b_without_adapter...`); other
+SKIPs are missing discs/client.bin/live S2, symlink privilege and UI goldens.
+Oracle tests skip here. An earlier attempt was cut off by the tool time limit and
+is not counted.
