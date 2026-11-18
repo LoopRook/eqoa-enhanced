@@ -42,3 +42,12 @@ Forge's three-nil texture failure shape. The one-off stderr warning is removed.
 were reviewed: player.get/hud.hide already refuse not_in_world; client.get describes a
 true pre-world state; input.get's invented state is replaced by an unavailable refusal
 (the production input installer replaces it later in the same install).
+
+## Step 3: partial answers
+
+`icons.rs` describes source_format unsupported: SafeLibrary/IconProvider retain only
+width, height and decoded RGBA bytes, so the original disc encoding is unavailable.
+Accessing the unsupported record field uses the existing guarded-record diagnostic.
+`host.rs` diagnoses absent camera state while retaining the pinned table shape.
+`chat.rs` records why false is real: the native consumer lease never detaches an
+emulator code cave. Its test passed before changes; no behavior fix was applied.

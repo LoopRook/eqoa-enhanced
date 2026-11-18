@@ -1223,6 +1223,10 @@ pub fn attach_icon_cache(
     lua: &Lua,
     textures: Rc<RefCell<Textures>>,
 ) -> LuaResult<Rc<RefCell<IconCache>>> {
+    // SafeLibrary and IconProvider retain decoded RGBA pixels, not the original
+    // disc surface encoding. Do not claim that encoding is available.
+    super::native::describe(lua, "eqoa.icons.SurfaceInfo.source_format", "unsupported", None,
+        "icon provider retains decoded RGBA pixels without original source format");
     let cache = Rc::new(RefCell::new(IconCache::new(textures.clone())));
     ACTIVE_CACHES.with(|caches| caches.borrow_mut().push(Rc::downgrade(&cache)));
 

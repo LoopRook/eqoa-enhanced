@@ -251,6 +251,10 @@ fn create_base_host() -> Result<BaseHost> {
                     Some((p["x"].as_f64()?, p["y"].as_f64()?, p["z"].as_f64()?))
                 })
             });
+            // Pinned camera.lua:6-15 defines an x/y/z table, no absent-state case.
+            if pos.is_none() {
+                super::native::diagnose(lua, "frontiers_forge.camera.GetCoordinates", "unavailable", "native camera state is unavailable");
+            }
             let (x, y, z) = pos.unwrap_or((0.0, 0.0, 0.0));
             let t = lua.create_table()?;
             t.set("x", x)?;
