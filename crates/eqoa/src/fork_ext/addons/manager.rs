@@ -407,6 +407,32 @@ impl Manager {
         self.shutdown_inner(true);
     }
 
+    /// Expose the bundled Bag Viewer's rendered loot log to the local scene runner.
+    pub(super) fn log_bag_viewer_scene(&self) {
+        let Some(instance) = self.entries.iter().find_map(|entry| {
+            (entry.metadata.id == "eqoa_bag_viewer"
+                && super::named_profiles::is_bundled(&entry.metadata))
+            .then_some(entry.instance.as_ref())
+            .flatten()
+        }) else {
+            return;
+        };
+        let log = (|| -> mlua::Result<mlua::Table> {
+            let require = instance.host.lua.globals().get::<Function>("require")?;
+            require.call::<mlua::Table>("bags")?.raw_get("log")
+        })();
+        match log {
+            Ok(log) => {
+                for row in log.sequence_values::<mlua::Table>().take(50).flatten() {
+                    if let Ok(text) = row.raw_get::<String>("text") {
+                        crate::say(&format!("scene: Bag Viewer loot log {text}"));
+                    }
+                }
+            }
+            Err(error) => crate::say(&format!("scene: Bag Viewer loot log unavailable: {error}")),
+        }
+    }
+
     fn diagnostic(&mut self, id: Option<&str>, phase: &'static str, message: String) {
         let details = serde_json::from_str::<serde_json::Value>(&message)
             .ok()

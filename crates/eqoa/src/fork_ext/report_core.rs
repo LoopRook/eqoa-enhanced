@@ -1158,16 +1158,16 @@ mod native {
     /// A key of the window's as the dialog takes it (the keyboard's own
     /// table is `viewer.rs`'s and `binds`'s: these keys are the dialog's
     /// alone, while it is open).
-    pub fn key_of(event: &winit::event::KeyEvent) -> Option<Key> {
+    pub fn key_of(logical: &winit::keyboard::Key, text: Option<&str>) -> Option<Key> {
         use winit::keyboard::{Key as W, NamedKey as N};
-        Some(match &event.logical_key {
+        Some(match logical {
             W::Named(N::Enter) => Key::Enter,
             W::Named(N::Escape) => Key::Escape,
             W::Named(N::Backspace) => Key::Backspace,
             W::Named(N::Tab) => Key::Tab,
             W::Named(N::Delete) => Key::Delete,
             W::Named(N::Space) => Key::Text(" ".into()),
-            _ => Key::Text(event.text.as_ref()?.to_string()),
+            _ => Key::Text(text?.to_string()),
         })
     }
 
