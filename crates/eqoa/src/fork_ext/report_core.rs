@@ -15,6 +15,13 @@ pub fn secret(account: &str, password: &str) {
     #[cfg(not(target_arch = "wasm32"))]
     native::secret(account, password);
     #[cfg(not(target_arch = "wasm32"))]
+    {
+        if let Some(dir) = crate::settings::config_dir().or_else(crate::settings::user_dir) {
+            net::fork_record::start(&dir, None);
+        }
+        net::fork_record::note_credentials(account, password);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     crate::fork_ext::report::refresh_saved_login_cache();
 }
 
@@ -306,6 +313,9 @@ mod native {
 
     pub fn run_started(run: &str) {
         *lock(&RUN) = run.to_string();
+        if let Some(dir) = crate::settings::config_dir() {
+            net::fork_record::start(&dir, Some(run));
+        }
     }
 
     /// Keep only the bounded report tail; logfile owns files, stderr and panics.

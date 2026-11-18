@@ -1493,6 +1493,17 @@ impl Play {
     pub(crate) fn bags_corpse(&mut self, items: &serde_json::Value) {
         apply(self, opcode(0x0018, list_bytes(&specs(items))));
     }
+    pub(crate) fn bags_replay(&mut self, row: &crate::fork_ext::session_replay::Row<'_>) {
+        self.session.state = net::session::State::World;
+        for event in row.deliver(&mut self.session) {
+            apply(self, event);
+        }
+    }
+    pub(crate) fn bags_record_take(&mut self, key: i32, count: i32) -> Vec<(u8, Vec<u8>)> {
+        self.session.record = Some(Vec::new());
+        self.bags_native_loot_one(key, count);
+        self.session.record.take().unwrap()
+    }
     /// 0x0019: the server's answer to taking the corpse's item in `slot`.
     pub(crate) fn bags_loot_one(&mut self, slot: u8) {
         let mut w = Writer::default();

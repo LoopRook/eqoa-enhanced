@@ -5,7 +5,7 @@
 Reads (never copies or changes) a package made by make_owner_test_package.py: the build
 and server, then for the current run and each run set aside in results/<date-time>/ the
 fps lines (lowest, typical, worst frame), the loot/merchant/bank opcode lines, mod
-errors and crash files, and any F3 report zips on the Desktop newer than the package.
+errors, recording metadata and crash files, and any F3 report zips on the Desktop newer than the package.
 Account files are never read. Paths print relative to the package; a local user-profile
 path in a log line is replaced by `~`.
 """
@@ -15,6 +15,11 @@ import re
 import statistics
 import sys
 from pathlib import Path
+
+if __package__:
+    from .rec_dump import records
+else:
+    from rec_dump import records
 
 FPS_LINE = re.compile(r"perf: ([0-9.]+) fps.*?\(worst ([0-9.]+)")
 OPCODE_LINE = re.compile(r"play: (0x[0-9a-fA-F]{4}) \((\d+) bytes\) in mode (\S+)")
@@ -104,6 +109,34 @@ def files_named(folder, test):
     )
 
 
+def recording_summaries(package, base):
+    paths = sorted(p for p in (base / "config").glob("session-*") if p.suffix.lower() == ".eqrec" and p.is_file())
+    if not paths:
+        return ["recordings: none"]
+    out = []
+    for path in paths:
+        label = path.relative_to(package).as_posix()
+        try:
+            with path.open("rb") as stream:
+                size = path.stat().st_size
+                counts = [0, 0]
+                first = last = 0
+                try:
+                    for micros, direction, _, _ in records(stream):
+                        if not any(counts):
+                            first = micros
+                        last = micros
+                        counts[direction] += 1
+                    detail = f"{(last - first) / 1e6:.3f} s, {sum(counts)} messages, {counts[0]} received, {counts[1]} sent"
+                except ValueError as error:
+                    detail = str(error)
+        except OSError:
+            out.append(f"recording: {label} (unreadable)")
+            continue
+        out.append(f"recording: {label} ({size} bytes, {detail})")
+    return out
+
+
 def run_summary(package, label, base):
     out = [f"== {label} =="]
     logs = files_named(base, lambda n: n == "eqoa.log")
@@ -114,6 +147,7 @@ def run_summary(package, label, base):
         out.append(f"log: {log.relative_to(package).as_posix()} ({len(lines)} lines)")
         out.append(fps_summary(lines))
         out.extend(opcode_summary(lines))
+    out.extend(recording_summaries(package, base))
     errors = files_named(base, lambda n: n.startswith("addons_error.log"))
     if not errors:
         out.append("mod errors: none")
