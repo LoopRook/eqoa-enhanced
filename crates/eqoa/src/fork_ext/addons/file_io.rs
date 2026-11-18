@@ -534,7 +534,93 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
     Ok(())
 }
 
+// Filename-only glob with bounded memory and linear backtracking at the last '*'.
+fn filename_matches(pattern: &str, name: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let n: Vec<char> = name.chars().collect();
+    let (mut i, mut j, mut star) = (0, 0, None);
+    while j < n.len() {
+        if i < p.len() && (p[i] == '?' || p[i] == n[j]) { i += 1; j += 1; }
+        else if i < p.len() && p[i] == '*' { star = Some((i, j)); i += 1; }
+        else if let Some((at, matched)) = star {
+            star = Some((at, matched + 1)); i = at + 1; j = matched + 1;
+        } else { return false; }
+    }
+    while i < p.len() && p[i] == '*' { i += 1; }
+    i == p.len()
+}
+
+fn list_entries(mounts: &super::sandbox::Mounts, dir: &str, glob: &str)
+    -> std::result::Result<Vec<serde_json::Value>, (&'static str, String)>
+{
+    let denied = |e| ("permission_denied", e);
+    if dir.starts_with(['/', '\\']) || dir.contains(':') {
+        return Err(denied("native file paths must be relative".into()));
+    }
+    let dir = dir.replace('\\', "/");
+    // A checked sentinel allows the private root (empty dir) and resource roots
+    // without weakening the resolver's validation of individual path components.
+    let probe = if dir.is_empty() { "__list_probe".into() } else { format!("{dir}/__list_probe") };
+    let key = mounts.key(&probe).map_err(denied)?;
+    let key = key.parent().ok_or_else(|| denied("invalid directory".into()))?;
+    let mut roots = Vec::new();
+    if let Some(data) = &mounts.data { roots.push(data.join("files").join(key)); }
+    if !key.starts_with("data") { roots.push(mounts.addon.script_root.join(key)); }
+    let mut names = std::collections::BTreeSet::new();
+    for root in roots {
+        no_links(&root).map_err(denied)?;
+        if !root.exists() { continue; }
+        let _guard = super::sandbox::lock_resource(&root).map_err(denied)?;
+        for entry in fs::read_dir(&root).map_err(|e| ("io_error", e.to_string()))? {
+            let entry = entry.map_err(|e| ("io_error", e.to_string()))?;
+            no_links(&entry.path()).map_err(denied)?;
+            let name = entry.file_name().into_string().map_err(|_| ("io_error", "directory contains a non-UTF-8 name".into()))?;
+            if !filename_matches(glob, &name) { continue; }
+            names.insert(name);
+            if names.len() > 1024 { return Err(("quota", "directory enumeration exceeds 1,024 entries".into())); }
+        }
+    }
+    let mut records = Vec::new();
+    for name in names {
+        let path = if dir.is_empty() { name } else { format!("{dir}/{name}") };
+        let entry_key = mounts.key(&path).map_err(denied)?;
+        let source = match mounts.read_path(&entry_key) {
+            Ok(p) => p,
+            Err(e) if e.starts_with("file not found") => continue,
+            Err(e) => return Err(denied(e)),
+        };
+        let _guard = super::sandbox::lock_resource(&source).map_err(denied)?;
+        let metadata = fs::metadata(&source).map_err(|e| ("io_error", e.to_string()))?;
+        if !metadata.is_file() && !metadata.is_dir() { return Err(denied("special files are excluded".into())); }
+        records.push(serde_json::json!({"path":path,"kind":if metadata.is_dir(){"directory"}else{"file"},"size":if metadata.is_file(){Some(metadata.len())}else{None}}));
+    }
+    Ok(records)
+}
+
 pub(super) fn install_native(host: &Host) -> Result<()> {
+    for path in ["eqoa.files.FileEntry", "eqoa.files.FileEntry.path", "eqoa.files.FileEntry.kind", "eqoa.files.FileEntry.size"] {
+        super::native::describe(&host.lua, path, "supported", Some(4), "");
+    }
+    super::native::bind(&host.lua, "files", "list", host.lua.create_function(|lua, (dir, glob): (Option<Value>, Option<Value>)| {
+        let text = |value: Option<Value>, default: &str| -> Option<String> {
+            match value { None | Some(Value::Nil) => Some(default.into()), Some(Value::String(s)) => s.to_str().ok().map(|s|s.to_string()), _ => None }
+        };
+        let Some(dir) = text(dir, "") else { return super::native::error(lua,"eqoa.files.list","invalid_argument","directory must be a relative UTF-8 string") };
+        let Some(glob) = text(glob, "*") else { return super::native::error(lua,"eqoa.files.list","invalid_argument","glob must be a UTF-8 filename pattern") };
+        if glob.len()>4096 || glob.contains(['/', '\\', ':']) || glob.chars().any(char::is_control) {
+            return super::native::error(lua,"eqoa.files.list","invalid_argument","glob supports filename-only * and ? patterns");
+        }
+        let Some(mounts) = lua.app_data_ref::<super::sandbox::Mounts>().map(|m|m.clone()) else { return super::native::error(lua,"eqoa.files.list","unavailable","file mounts unavailable") };
+        match list_entries(&mounts,&dir,&glob) {
+            Ok(rows) => {
+                let result=lua.create_table()?;
+                for row in rows { result.raw_push(super::native::record(lua,"eqoa.files.FileEntry",&row)?)?; }
+                lua.pack_multi((result,Value::Nil))
+            },
+            Err((code,reason)) => super::native::error(lua,"eqoa.files.list",code,&reason),
+        }
+    })?)?;
+
     for name in ["read", "write", "remove"] {
         super::native::bind(
             &host.lua,

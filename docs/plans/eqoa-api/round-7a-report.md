@@ -62,3 +62,12 @@ package registry; `bit.rs` guards unknown keys and describes all eight functions
 `fonts.game` refuses: the existing ImGui TrueType atlas service cannot expose the
 native bitmap font without an upstream change (excluded by this brief).
 Per-member unsupported descriptors are closed in step 7's required hand list.
+
+## Step 5: promised names
+
+`file_io.rs` implements immediate-child filename-glob listing through the existing
+mount resolver, private overlay precedence and tombstones. Directory and child
+handles use the existing no-link/reparse guards. Relative UTF-8 paths, sorted
+FileEntry records and the 1,024-entry refusal are explicit; enumeration never
+reports a truncated list as complete. `map_views.rs` refuses images/load_image as
+replaced by map.view and keeps the unbuilt waypoint pair not_yet with set_guide advice.
