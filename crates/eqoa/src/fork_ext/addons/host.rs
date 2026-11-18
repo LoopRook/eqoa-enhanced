@@ -333,6 +333,13 @@ fn create_base_host() -> Result<BaseHost> {
             }))
         })?,
     )?;
+    // Pinned util.lua GetWorldId: native world identity, absent outside a world.
+    util.set("GetWorldId", lua.create_function(|_, ()| {
+        Ok(super::native_core::CORE.with(|c| {
+            let c = c.borrow();
+            if c.view.in_world { c.view.world_id } else { None }
+        }))
+    })?)?;
     util.set(
         "IsBitZero",
         lua.create_function(|_, (value, mask): (u32, u32)| Ok(value & mask == 0))?,
@@ -534,6 +541,7 @@ impl Host {
         )?;
         super::file_io::install(&host, addon, None)?;
         super::native::install(&host)?;
+        super::bit::install_native(&host.lua)?;
         Ok(host)
     }
 
@@ -586,6 +594,7 @@ impl Host {
         super::weapon_sets::install(&host)?;
         super::chat_history::install(&host)?;
         super::native::install(&host)?;
+        super::bit::install_native(&host.lua)?;
         Ok(host)
     }
 

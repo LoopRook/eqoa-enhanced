@@ -51,3 +51,14 @@ Accessing the unsupported record field uses the existing guarded-record diagnost
 `host.rs` diagnoses absent camera state while retaining the pinned table shape.
 `chat.rs` records why false is real: the native consumer lease never detaches an
 emulator code cave. Its test passed before changes; no behavior fix was applied.
+
+## Step 4: guarded APIs
+
+`package.rs` registers quest/cave diagnostic tables, including every pinned public
+function and guarded unknown members. The existing reserved-module test now expects
+quest require to succeed and new(0) to refuse; this is the one changed old assertion.
+`host.rs` exposes GetWorldId from the native world state and registers util via the
+package registry; `bit.rs` guards unknown keys and describes all eight functions.
+`fonts.game` refuses: the existing ImGui TrueType atlas service cannot expose the
+native bitmap font without an upstream change (excluded by this brief).
+Per-member unsupported descriptors are closed in step 7's required hand list.

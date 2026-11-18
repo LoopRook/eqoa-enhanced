@@ -928,6 +928,10 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             Ok(t)
         })?,
     )?;
+    bind(lua, "fonts", "game", lua.create_function(|lua, _: MultiValue| {
+        error(lua, "eqoa.fonts.game", "unsupported", "game bitmap font cannot be represented by the existing ImGui font service")
+    })?)?;
+    describe(lua, "eqoa.fonts.game", "unsupported", None, "game bitmap font cannot be represented by the existing ImGui font service");
     bind(lua,"client","get",lua.create_function(|lua,()| record(lua,"eqoa.client.Client",&json!({"in_world":false,"phase":"pregame","generation":0,"tick":0,"frame":0,"time":0})))?)?;
     bind(
         lua,

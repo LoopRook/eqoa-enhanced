@@ -225,6 +225,30 @@ pub(crate) fn install_package_loader(
     package_loaded.set("os", Value::Table(os_table.clone()))?;
     package_loaded.set("coroutine", Value::Nil)?;
 
+    // Pinned quest.lua:21-36 and cave.lua:76,191,227,235,247,261,269.
+    // These APIs accept raw addresses/code caves, which the native API excludes.
+    host_registry.borrow_mut().insert("frontiers_forge.util".into(), Value::Table(util_table.clone()));
+    for (module, names) in [
+        ("quest", &["new", "GetName"][..]),
+        ("cave", &["IsRegionZero", "Alloc", "Reserve", "Get", "Free", "Release", "Info"][..]),
+    ] {
+        let table = lua.create_table()?;
+        for name in names {
+            let symbol = format!("frontiers_forge.{module}.{name}");
+            table.set(*name, lua.create_function(move |lua, _: mlua::MultiValue| {
+                super::native::diagnose(lua, &symbol, "unsupported", "raw memory is excluded; use eqoa.quests for native quest records");
+                Ok(Value::Nil)
+            })?)?;
+        }
+        let mt = lua.create_table()?;
+        let prefix = format!("frontiers_forge.{module}");
+        mt.set("__index", lua.create_function(move |lua, (_, key): (Table, String)| {
+            super::native::diagnose(lua, &format!("{prefix}.{key}"), "unknown_symbol", "unknown Forge member");
+            Ok(Value::Nil)
+        })?)?;
+        table.set_metatable(Some(mt))?;
+        host_registry.borrow_mut().insert(format!("frontiers_forge.{module}"), Value::Table(table));
+    }
     let addon_data = addon.clone();
     let host_reg = host_registry;
     let loading_stack = Rc::new(RefCell::new(Vec::<String>::new()));
@@ -710,17 +734,8 @@ mod tests {
             .unwrap();
         assert_eq!(is_in_game, 0);
 
-        // 2. Unsupported frontiers_forge.* fails naming unsupported API
-        let ff_err = host
-            .lua
-            .load("require('frontiers_forge.quest')")
-            .exec()
-            .unwrap_err()
-            .to_string();
-        assert!(
-            ff_err.contains("unsupported FrontiersForge API: 'frontiers_forge.quest'"),
-            "got: {ff_err}"
-        );
+        // 2. Known excluded APIs load a guarded table and refuse on use.
+        host.lua.load("local q=require('frontiers_forge.quest'); assert(q.new(0)==nil)").exec().unwrap();
 
         // 3. imgui without host module fails naming unsupported reserved module (ignores disk imgui.lua)
         let imgui_err = host
