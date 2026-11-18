@@ -1,6 +1,6 @@
 # Developer Tools
 
-This document describes the three Python developer helper tools located under `tools/`.
+This document describes the Python developer helper tools located under `tools/`.
 
 ## 1. Branch Gates Runner (`tools/run_gates.py`)
 
@@ -101,3 +101,48 @@ python tools/make_owner_test_package.py --exe <path/to/release/eqoa.exe> [option
 - `--force`: Replace `play/` and batch files in an existing output folder. Preserves existing `config/` unless `--fresh-config` is also specified.
 - `--fresh-config`: Overwrite existing `config/` when `--force` is used.
 - `--root <path>`: Repository root path.
+
+---
+
+## 4. Local Loot Scene (`tools/local_scene.py`)
+
+Run on Windows with the local test-server installation and a Frontiers disc image.
+
+```powershell
+python -B tools/local_scene.py
+```
+
+The runner uses the main checkout's `run/eqoa.iso` by default. Set `EQOA_ISO` or pass
+`--iso <path>` to use another image. `--server-dir <directory>` selects a local server
+installation. It must contain `eqoa-server/gameserver.exe`, its seeded `eqoa.db` and
+`config.yaml`, and `accounts.local.txt` with the `lsgm` GM entry and its `Lsgm` character
+in the database. `--host <IPv4>` overrides the installation's `bind_address` if the PC's
+LAN address has changed. Stop any local server already listening on auth TCP 9735 or game
+UDP 10070 before running the scene.
+
+The runner snapshots the seed database for each run and suppresses the welcome dialog
+for the test character in that copy. It starts the installed server binary against the
+copy, selects the default addon profile in a scratch `EQOA_CONFIG`, and launches the
+shared release client offscreen. If the shared release binary is missing, it builds one
+with the `run_gates.py` Cargo lock. An existing shared binary is reused, including one
+built from a different branch. The password is read at run time and passed to the client
+through `EQOA_PASSWORD`.
+
+The GM spawns and kills a fire bat with `#spawn fire bat` and `#kill`. `EQOA_SAY` sends
+these as ordinary chat and the server recognizes the `#` prefix. The client setting
+`commands to the server false` affects forwarding of unrecognized slash commands.
+The game keyboard opens the corpse and takes its first item. A passing run confirms
+the world entry and GM replies, the `0x0018` corpse list, the native item request and
+item receipt, the server's `0x0016` close and `0x0018` refresh, and the in-world screenshot.
+
+Each run leaves `client.log`, `server.log`, `corpse.png`, `scene.png`, and `summary.txt`
+in a timestamped folder under the server installation's `runs/` directory. Failed runs
+keep the evidence produced before the failure and exit with a nonzero status. The runner
+stops its own server and discards the database copy on exit. This scene is run by the
+lead. The parsing tests can run independently with `python -B tools/test_local_scene.py`.
+
+In the Bag Viewer probe, the scratch profile enabled the addon and a scratch copy of its
+Lua opened the Corpse tab when loot arrived. The screenshots before and after a click on
+**Take all** both showed three items, and the client logged no loot request. `play` uses
+`EQOA_CLICKS` to call the native game's click handler directly. `EQOA_MOUSE` is read by
+the separate shot path. The addon receives pointer events through the window event handler.
