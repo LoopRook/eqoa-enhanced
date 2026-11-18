@@ -2328,8 +2328,8 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     // 2. Click Corpse tab (visible because corpse is nearby) -> click Loot -> server refuses 0x0085 -> visible server text.
     bv.click(bv.tab(7));
     bv.frames(1);
-    let (lx, ly, lbl) = bv.action_hit("Loot").unwrap();
-    assert_eq!(lbl, "Loot");
+    let (lx, ly, lbl) = bv.action_hit("Open nearest corpse").unwrap();
+    assert_eq!(lbl, "Open nearest corpse");
     let sends_0 = bv.play.bags_sends_lost();
     bv.click((lx, ly));
     bv.play.bags_broker_tick();
@@ -2621,7 +2621,7 @@ fn round65_fix_bag_viewer_loot_tab_keeps_hidden_session_alive() {
     bv.frames(2);
     bv.click(bv.tab(7));
     bv.frames(1);
-    let (lx, ly, _) = bv.action_hit("Loot").unwrap();
+    let (lx, ly, _) = bv.action_hit("Open nearest corpse").unwrap();
     bv.click((lx, ly));
     bv.play.bags_broker_tick();
     bv.play.bags_corpse(&bv_corpse());
@@ -2705,8 +2705,8 @@ fn r65fix2_open_corpse(stale: bool) {
     bv.frames(2);
     bv.click(bv.tab(7));
     bv.frames(1);
-    let (lx, ly, lbl) = bv.action_hit("Loot").unwrap();
-    assert_eq!(lbl, "Loot");
+    let (lx, ly, lbl) = bv.action_hit("Open nearest corpse").unwrap();
+    assert_eq!(lbl, "Open nearest corpse");
     bv.click((lx, ly));
     bv.play.bags_broker_tick();
     bv.play.bags_corpse(&serde_json::json!([

@@ -342,7 +342,7 @@ function draw()
         }
     end
 
-    -- Row 2: Corpse (Loot / Take all / Take all but junk), Merchant (Sell junk), or Bank (Open bank).
+    -- Row 2: Corpse (Open nearest corpse / Take all / Take all but junk), Merchant (Sell junk), or Bank (Open bank).
     local function ctx_btn(bx, bw, lbl, col, bcol, run)
         fill(bx, bar2_y, bw, 16, c.raised)
         frame(bx, bar2_y, bw, 16, bcol)
@@ -357,13 +357,13 @@ function draw()
     local near_corpse = B.nearby_corpse()
     if is_corpse or loot ~= nil then
         local bw, bgap = W - 2 * PAD, 6
-        local w_loot, w_all = 48, 76
+        local w_loot, w_all = 112, 60
         local w_non = bw - w_loot - w_all - 2 * bgap
         local can_open = loot ~= nil or near_corpse ~= nil
         local has_items = (loot ~= nil and #(loot.items or {}) > 0) or (loot == nil and near_corpse ~= nil)
         local steps, _ = B.loot_non_junk_list()
         local can_non_junk = (loot ~= nil and #steps > 0) or (loot == nil and near_corpse ~= nil)
-        ctx_btn(PAD, w_loot, "Loot", can_open and c.text or c.muted, can_open and c.worn or c.border, B.start_loot_button)
+        ctx_btn(PAD, w_loot, "Open nearest corpse", can_open and c.text or c.muted, can_open and c.worn or c.border, B.start_loot_button)
         ctx_btn(PAD + w_loot + bgap, w_all, "Take all", has_items and c.text or c.muted, has_items and c.worn or c.border, B.start_loot_all)
         ctx_btn(PAD + w_loot + bgap + w_all + bgap, w_non, "Take all but junk", can_non_junk and c.text or c.muted, can_non_junk and c.worn or c.border, B.start_loot_non_junk)
     elseif merch ~= nil then

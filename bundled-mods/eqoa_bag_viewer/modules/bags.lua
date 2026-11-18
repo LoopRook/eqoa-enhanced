@@ -481,12 +481,12 @@ function M.open_loot_corpse(after_kind, corpse_id)
     if not req then
         release_takeover("loot")
         local msg = (err and (err.message or err.code)) or "refused"
-        M.result = {text = "Loot: " .. msg, ok = false}
+        M.result = {text = "Open corpse: " .. msg, ok = false}
         M.dirty()
         return nil, err
     end
     local verb = after_kind == "loot_all" and "Take all"
-        or (after_kind == "loot_non_junk" and "Take all but junk" or "Loot")
+        or (after_kind == "loot_non_junk" and "Take all but junk" or "Open corpse")
     M.pending_open = {kind = "loot", req = req, after = after_kind, verb = verb}
     M.result = {text = "Opening corpse...", ok = nil}
     M.dirty()
