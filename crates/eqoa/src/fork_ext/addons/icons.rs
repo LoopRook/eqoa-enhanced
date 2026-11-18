@@ -1681,3 +1681,44 @@ pub(crate) fn install_test_gpu_for_host(
     let cache = attach_icon_cache(&host.lua, textures.clone()).ok()?;
     Some(Box::new((device, queue, context, bridge, textures, cache)))
 }
+
+
+#[cfg(test)]
+mod round7a_tests {
+    use super::*;
+    #[test]
+    fn round7a_real_addon_texture_install_replaces_placeholders() {
+        let root=std::env::temp_dir().join(format!("eqoa_round7a_texture_{}",std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.lua"),"-- fixture").unwrap();
+        let addon=super::super::discovery::discover(&root).addons.remove(0);
+        let host=super::super::host::Host::for_addon(&addon).unwrap();
+        let instance=render::wgpu::Instance::default();
+        let Ok(adapter)=pollster::block_on(instance.request_adapter(&Default::default())) else { eprintln!("SKIP round7a texture service: no GPU adapter"); return };
+        let (device,queue)=pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let mut context=dear_imgui_rs::Context::create();
+        context.set_ini_filename::<std::path::PathBuf>(None).unwrap();
+        let renderer=Rc::new(RefCell::new(dear_imgui_wgpu::WgpuRenderer::new(dear_imgui_wgpu::WgpuInitInfo::new(device.clone(),queue.clone(),render::wgpu::TextureFormat::Rgba8Unorm),&mut context).unwrap()));
+        let textures=Textures::new(&device,&queue,renderer);
+        let icon: Table=host.lua.named_registry_value("__forge_icon_mod").unwrap();
+        let before:mlua::Function=icon.get("GetTexture").unwrap();
+        Textures::install_for_addon(&textures,&host.lua,&addon).unwrap();
+        let after:mlua::Function=icon.get("GetTexture").unwrap();
+        assert_ne!(before.to_pointer(),after.to_pointer(),"production installer must replace base binding");
+        struct Provider;
+        impl IconProvider for Provider {
+            fn decode_icon(&self,_:u32)->Option<DecodedIcon> {Some(DecodedIcon{width:1,height:1,rgba:vec![255;4]})}
+        }
+        set_custom_icon_provider(Some(Box::new(Provider)));
+        let result=host.lua.load("local i=require('frontiers_forge.icon'); local t,w,h=i.GetTexture(1); assert(t~=nil and w==1 and h==1)").exec();
+        set_custom_icon_provider(None);
+        result.unwrap();
+        assert!(super::super::native::drain(&host.lua).is_empty());
+    }
+    #[test]
+    fn round7a_icon_source_format_describes_decoder_limit() {
+        let host=super::super::host::Host::new().unwrap();
+        let Some(_gpu)=install_test_gpu_for_host(&host) else {eprintln!("SKIP round7a source format: no GPU adapter");return};
+        assert_eq!(super::super::native::status(&host.lua,"eqoa.icons.SurfaceInfo.source_format"),Some("unsupported"));
+    }
+}

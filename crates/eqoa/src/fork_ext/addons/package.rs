@@ -1201,3 +1201,138 @@ mod tests {
         assert_eq!(b2.get::<Value>("marker").unwrap(), Value::Nil);
     }
 }
+
+
+#[cfg(test)]
+mod round7a_tests {
+    use super::super::{discovery::discover, host::Host, native};
+    fn addon_host(name: &str) -> Host {
+        let root = std::env::temp_dir().join(format!("eqoa_round7a_{name}_{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.lua"), "-- round7a fixture").unwrap();
+        Host::for_addon(&discover(&root).addons[0]).unwrap()
+    }
+    macro_rules! check {
+        ($name:ident, $code:expr) => {
+            #[test]
+            fn $name() {
+                let host = addon_host(stringify!($name));
+                native::annotate_host(&host).unwrap();
+                host.lua.load($code).exec().unwrap();
+            }
+        };
+    }
+    check!(round7a_hidden_by_refuses_without_lease, r#"
+        local v,e = eqoa.hud.hidden_by('health'); assert(v == nil and e.code == 'unavailable')
+    "#);
+    check!(round7a_quest_and_cave_guarded, r#"
+        for module,names in pairs({quest={'new','GetName'}, cave={'IsRegionZero','Alloc','Reserve','Get','Free','Release','Info'}}) do
+            local t = require('frontiers_forge.'..module)
+            for _,name in ipairs(names) do
+                assert(type(t[name]) == 'function'); assert(t[name]() == nil)
+                assert(eqoa.capabilities.get('frontiers_forge.'..module..'.'..name).status == 'unsupported')
+            end
+        end
+    "#);
+    check!(round7a_util_and_bit_capabilities, r#"
+        local u = require('frontiers_forge.util')
+        assert(u.GetWorldId() == nil)
+        assert(eqoa.capabilities.get('frontiers_forge.util.IsInGame').status == 'supported')
+        for _,n in ipairs({'tobit','bnot','band','bor','bxor','lshift','rshift','arshift'}) do
+            assert(eqoa.capabilities.get('bit.'..n).status == 'supported')
+        end
+    "#);
+    check!(round7a_game_font_refuses, r#"
+        local v,e = eqoa.fonts.game(); assert(v == nil and e.code == 'unsupported')
+    "#);
+    check!(round7a_map_refusals, r#"
+        for _,n in ipairs({'images','load_image','set_waypoint','clear_waypoint'}) do
+            local v,e = eqoa.map[n](); assert(v == nil)
+            assert(e.code == ((n == 'images' or n == 'load_image') and 'unsupported' or 'not_yet'))
+            assert(e.message ~= 'implementation pending')
+        end
+    "#);
+    check!(round7a_merchant_hint_supported, r#"
+        assert(eqoa.capabilities.get('eqoa.items.MerchantState.button_hint').status == 'supported')
+    "#);
+    #[test]
+    fn round7a_icon_placeholders_diagnose() {
+        let host = addon_host("icons");
+        native::drain(&host.lua);
+        host.lua.load("local i=require('frontiers_forge.icon'); assert(i.GetTexture(1)==nil); assert(i.GetUITexture(1)==nil)").exec().unwrap();
+        let d=native::drain(&host.lua);
+        assert!(d.iter().any(|s| s.contains("GetTexture") && s.contains("unavailable")), "{d:?}");
+        assert!(d.iter().any(|s| s.contains("GetUITexture") && s.contains("unavailable")), "{d:?}");
+    }
+    #[test]
+    fn round7a_camera_missing_diagnoses() {
+        let host = addon_host("camera");
+        native::drain(&host.lua);
+        host.lua.load("local p=require('frontiers_forge.camera').GetCoordinates(); assert(p.x==0 and p.y==0 and p.z==0)").exec().unwrap();
+        let d=native::drain(&host.lua);
+        assert!(d.iter().any(|s| s.contains("GetCoordinates") && s.contains("unavailable")), "{d:?}");
+    }
+    #[test]
+    fn round7a_bit_unknown_diagnoses() {
+        let host = addon_host("bit_unknown");
+        native::drain(&host.lua);
+        host.lua.load("assert(require('bit').missing == nil)").exec().unwrap();
+        let d=native::drain(&host.lua);
+        assert!(d.iter().any(|s| s.contains("bit.missing") && s.contains("unknown_symbol")), "{d:?}");
+    }
+}
+
+#[cfg(test)]
+mod round7a_more_tests {
+    use super::super::*;
+    #[test]
+    fn round7a_player_install_order_retains_members() {
+        use std::{cell::{Cell,RefCell},rc::Rc};
+        for health_first in [false,true] {
+            let host=host::Host::new().unwrap();
+            let install_health=|| health::install_health_adapter(&host,health::InstanceToken(700),Rc::new(Cell::new(health::HealthSnapshot::default())),Rc::new(RefCell::new(health::HealthBarClaimsRegistry::new()))).unwrap();
+            if health_first { install_health(); }
+            player::install_player_adapter(&host).unwrap();
+            if !health_first { install_health(); }
+            let modules=host.registered_modules();
+            let mlua::Value::Table(t)=&modules["frontiers_forge.player"] else { panic!() };
+            assert!(t.get::<mlua::Value>("GetName").unwrap().is_function(),"health_first={health_first}");
+            assert!(t.get::<mlua::Value>("GetCurrentHp").unwrap().is_function());
+        }
+    }
+    #[test]
+    fn round7a_files_list_overlay_and_bounds() {
+        let root=std::env::temp_dir().join(format!("eqoa_round7a_files_{}_{:?}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(root.join("resources")).unwrap();
+        std::fs::write(root.join("main.lua"),"-- fixture").unwrap();
+        std::fs::write(root.join("resources/a.txt"),"backing").unwrap();
+        std::fs::write(root.join("resources/b.txt"),"hidden").unwrap();
+        let addon=discovery::discover(&root).addons.remove(0);
+        let host=host::Host::for_addon(&addon).unwrap();
+        let data=root.join("private");
+        file_io::install(&host,&addon,Some(data.clone())).unwrap();
+        host.lua.load(r#"
+            assert(eqoa.files.write('resources/a.txt','overlay'))
+            assert(eqoa.files.remove('resources/b.txt'))
+            assert(eqoa.files.write('own.txt','private'))
+            local t=eqoa.files.list('resources','*.txt')
+            assert(#t==1 and t[1].path=='resources/a.txt' and t[1].size==7 and t[1].kind=='file')
+            local t=eqoa.files.list('', '*.txt')
+            assert(#t==1 and t[1].path=='own.txt')
+            for _,p in ipairs({'../','/','C:/','resources/../'}) do
+                local v,e=eqoa.files.list(p); assert(v==nil and e.code=='permission_denied')
+            end
+        "#).exec().unwrap();
+        std::fs::create_dir_all(data.join("files/data/cap")).unwrap();
+        for i in 0..1025 { std::fs::write(data.join(format!("files/data/cap/f{i}")), "").unwrap(); }
+        host.lua.load("local v,e=eqoa.files.list('cap'); assert(v==nil and e.code=='quota')").exec().unwrap();
+    }
+    #[test]
+    fn round7a_chat_native_hook_has_no_emulator_suspension() {
+        let root=std::env::temp_dir().join(format!("eqoa_round7a_chat_{}",std::process::id()));
+        std::fs::create_dir_all(&root).unwrap(); std::fs::write(root.join("main.lua"),"-- fixture").unwrap();
+        let addon=discovery::discover(&root).addons.remove(0);
+        let host=host::Host::for_addon(&addon).unwrap();
+        host.lua.load("local c=require('frontiers_forge.chat'); assert(c.IsSendHookSuspended()==false); c.InstallSendHook(); assert(c.IsSendHookSuspended()==false)").exec().unwrap();
+    }
+}
