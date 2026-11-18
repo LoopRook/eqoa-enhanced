@@ -2,6 +2,43 @@
 
 This document describes the Python developer helper tools located under `tools/`.
 
+## Mod API reference (`eqoa mod-api`)
+
+The native client can print the capabilities installed for an `eqoa/1` addon:
+
+```powershell
+eqoa.exe mod-api
+eqoa.exe mod-api --format json
+eqoa.exe mod-api --format md --out docs/modding/SUPPORT-TABLE.md
+eqoa.exe mod-api --format json --out docs/modding/eqoa-1-surface.json
+```
+
+Markdown is the default. **Use `--out <file>` for reliable exports**; it writes
+UTF-8 to the named file. Without it the reference goes to stdout, which is only
+visible when the program is run from a terminal (the Windows application has no
+console of its own). Invalid options, install failures and output errors
+exit with code 1 and an error on stderr. The command installs a scratch native
+addon and its ImGui, texture, font and sound adapters. It uses a headless graphics
+device (required), creates no game window, and needs no disc, login or server.
+It does not run the addon's entry script or call game actions.
+If no adapter or device can be acquired, the command exits 1 without writing a
+reference. GPU-dependent reference tests instead print a `SKIP` line and return,
+following the repository's GPU-test convention; other install errors still fail.
+
+Generate both committed files with a Windows release build, the published
+platform; sound capabilities differ elsewhere. Build provenance uses the compiled
+client version and `EQOA_BUILD_COMMIT` stamp (or explicitly says it is unstamped),
+the platform, and the UTC generation date. After changing the API, rebuild the
+client, rerun both `--out` commands above, and commit both files.
+
+`round7b_support_table_matches_the_running_client` regenerates the reference
+through the same installers and compares every capability and the Markdown
+layout. It retains the committed generation metadata during comparison: another
+date or build stamp alone does not change the API. The Windows snapshot is not
+compared on other platforms. These files report the current capability registry;
+they do not freeze the API or replace the spec's behavior tests. Forge and ImGui
+parity also rely on the bridge tests and bundled UI tests.
+
 ## 1. Branch Gates Runner (`tools/run_gates.py`)
 
 Runs the standard development gates in serial order, managing the shared Cargo build lock, streaming step logs, and emitting a summary Markdown report.
