@@ -1322,16 +1322,29 @@ fn round6_item4_lazy_icons_load_without_native_windows_and_zero_per_frame_reques
     // Steady-state frames must issue ZERO resource requests, ZERO ESF lookups, and avoid per-frame allocations.
     let res_before = super::super::icons::resource_call_count();
     let lkp_before = super::super::icons::lookup_attempt_count();
+    // Three windows of ten frames, a full collection after every frame; a leak grows every window, so at most one may
+    // grow by more than 1 KB. Lua's string table grows by doubling and a collection shrinks it only when it is three
+    // quarters empty, and the window's caches settle once: one window alone measured those one-time steps, not what a
+    // frame keeps (fix round 5: the old package plus 1,500 unused string constants grew 107 KB in one window; a control
+    // keeping 1 KB a frame showed -52 KB then +11.7 KB, so neither one window nor the smaller of two catches it).
     bv.lua().gc_collect().unwrap();
-    let bytes_before = bv.lua().used_memory();
-    bv.frames(10);
+    let mut window = || {
+        let before = bv.lua().used_memory();
+        for _ in 0..10 {
+            bv.frames(1);
+            bv.lua().gc_collect().unwrap();
+        }
+        bv.lua().used_memory() as i64 - before as i64
+    };
+    let grew = [window(), window(), window()];
     let res_after = super::super::icons::resource_call_count();
     let lkp_after = super::super::icons::lookup_attempt_count();
-    bv.lua().gc_collect().unwrap();
-    let bytes_after = bv.lua().used_memory();
     assert_eq!(res_after, res_before, "steady frames must not re-request eqoa.icons.resource");
     assert_eq!(lkp_after, lkp_before, "steady frames must not trigger ESF surface lookups");
-    assert!(bytes_after.saturating_sub(bytes_before) <= 1024, "steady frames must not leak Lua tables (delta={} bytes)", bytes_after.saturating_sub(bytes_before));
+    assert!(
+        grew.iter().filter(|&&d| d > 1024).count() <= 1,
+        "steady frames must not leak Lua tables (three windows of ten frames grew {grew:?} bytes)"
+    );
 
     // Bank tab loads its own non-prefetched icon without ever opening native bank UI.
     bv.click(bv.tab(6));
