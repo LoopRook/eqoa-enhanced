@@ -207,11 +207,11 @@ function M.far_gate(kind, verb)
     local dist = M.npc_distance(kind)
     local now = os.clock()
     local t = M.try_anyway[kind]
-    if t and now <= t.until and dist and math.abs(t.dist - dist) < 2 then
-        t.until = now + 10
+    if t and now <= t.expires and dist and math.abs(t.dist - dist) < 2 then
+        t.expires = now + 10
         return false
     end
-    M.try_anyway[kind] = {dist = dist or 0, until = now + 10}
+    M.try_anyway[kind] = {dist = dist or 0, expires = now + 10}
     M.result = {text = verb .. ": " .. far .. " (click again to try anyway)", ok = false}
     M.dirty()
     return true
