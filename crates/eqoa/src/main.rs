@@ -461,6 +461,7 @@ fn volumes(file: &str) -> Result<()> {
 }
 
 fn run(args: &[String]) -> Result<()> {
+    if let Some(r) = fork_ext::modtools::run(args) { return r; }
     // a server's own worlds are built off the player's disc (`serverworlds`)
     #[cfg(not(target_arch = "wasm32"))]
     serverworlds::install();

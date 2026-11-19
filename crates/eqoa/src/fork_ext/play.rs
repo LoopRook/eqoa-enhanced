@@ -3,6 +3,14 @@
 //! The combat indication adapter; service code only receives plain combat data.
 use super::Play;
 
+/// `tlog!("takeover: ...")`: an always-on takeover diagnostic (see `window_takeover::log`).
+#[allow(unused_macros)]
+macro_rules! tlog {
+    ($($a:tt)*) => {
+        crate::fork_ext::addons::window_takeover::log(format!($($a)*))
+    };
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "api_capture.rs"]
 mod api_capture;
@@ -52,6 +60,9 @@ thread_local! {
     static PENDING_NPCW_TX: std::cell::RefCell<Option<PendingNpcwTx>> = const { std::cell::RefCell::new(None) };
     static PENDING_BANK_TX: std::cell::RefCell<Option<PendingBankTx>> = const { std::cell::RefCell::new(None) };
     static PENDING_CAMERA: std::cell::Cell<Option<PendingCameraReq>> = const { std::cell::Cell::new(None) };
+    /// `Play::mode` as the event now being applied found it (L4): a window already open natively
+    /// before a packet is never taken over by that packet. -1 outside an event.
+    static MODE_BEFORE_EVENT: std::cell::Cell<i32> = const { std::cell::Cell::new(-1) };
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -63,11 +74,14 @@ pub(crate) enum BrokerReply {
     MasterLoot(bool),
     InvAdd { item_id: i64 },
     InvTook { sound: u8, in_shop: bool },
-    LootOpen,
+    LootOpen { mode_before: i32 },
+    OpenLootRefused { code: &'static str, reason: String },
+    MerchantOpen,
+    BankOpen,
     LootOne { confirmed_key: Option<u32> },
     LootAll { corpse_before: Vec<(u32, i64)> },
     LootClose,
-    LootBlocked,
+    LootBlocked(String),
     TxCancel,
     BankMove {
         is_deposit: bool,
@@ -86,6 +100,7 @@ pub(crate) struct GameEventCapture {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> GameEventCapture {
+    MODE_BEFORE_EVENT.with(|m| m.set(play.mode));
     let api = api_capture::begin_game_event(play, event);
     if let net::session::Event::MasterLoot(m) = event {
         crate::fork_ext::addons::action_broker::set_master_loot(m.is_some());
@@ -125,7 +140,15 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
                 sound: *sound,
                 in_shop: play.npcw.shop.id.is_some() && *sound != 0,
             }),
-            net::session::Event::Opcode { op: 0x0018, .. } => Some(BrokerReply::LootOpen),
+            net::session::Event::Opcode { op: 0x0018, .. } => Some(BrokerReply::LootOpen { mode_before: play.mode }),
+            // the live server's answer to a corpse asked for from too far (no 0x0085; owner log 2026-11-18)
+            net::session::Event::Chat(text, _)
+                if text.trim() == "Out of range." && crate::fork_ext::addons::action_broker::open_loot_in_flight() =>
+            {
+                Some(BrokerReply::OpenLootRefused { code: "out_of_range", reason: text.trim().to_string() })
+            }
+            net::session::Event::Opcode { op: 0x00B7, .. } => Some(BrokerReply::MerchantOpen),
+            net::session::Event::Opcode { op: 0x124D, .. } => Some(BrokerReply::BankOpen),
             net::session::Event::Opcode { op: 0x0019, data } => {
                 let confirmed_key = data.first().copied().and_then(|slot| {
                     play.npcw
@@ -146,7 +169,30 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
                 Some(BrokerReply::LootAll { corpse_before })
             }
             net::session::Event::Opcode { op: 0x0016, .. } => Some(BrokerReply::LootClose),
-            net::session::Event::Opcode { op: 0x0085, .. } => Some(BrokerReply::LootBlocked),
+            net::session::Event::Opcode { op: 0x0085, data } => {
+                let code = data.first().copied().unwrap_or(0);
+                let word_id = match code {
+                    1 => Some(673),
+                    2 => Some(674),
+                    3 => Some(675),
+                    _ => None,
+                };
+                let reason = word_id
+                    .and_then(|id| {
+                        play.words
+                            .as_ref()
+                            .map(|w| w.get(id, 0))
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_string)
+                    })
+                    .unwrap_or_else(|| match code {
+                        1 => "That corpse is too far away.".into(),
+                        2 => "Someone else is already looting that corpse.".into(),
+                        3 => "You cannot loot that corpse.".into(),
+                        _ => "Loot blocked by server.".into(),
+                    });
+                Some(BrokerReply::LootBlocked(reason))
+            }
             net::session::Event::Opcode { op: 0x00D7, .. } => Some(BrokerReply::TxCancel),
             net::session::Event::Opcode { op: 0x1250, data } => {
                 let mut r = net::stream::Reader::new(data);
@@ -186,6 +232,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
+    MODE_BEFORE_EVENT.with(|m| m.set(-1));
     api_capture::end_game_event(play, capture.api);
     if let Some((item_id, qty)) = capture.loot_inv_add {
         api_capture::items::note_loot_inv_add(item_id, qty);
@@ -224,6 +271,9 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
         }
         Some(BrokerReply::InvTook { sound, in_shop }) => {
             if in_shop || (play.npcw.shop.id.is_some() && sound != 0) {
+                crate::fork_ext::addons::window_takeover::touch_hidden_session(
+                    crate::fork_ext::addons::window_takeover::TakeoverKind::Merchant,
+                );
                 crate::fork_ext::addons::action_broker::resolve_server_merchant_sell(
                     !play.npcw.shop.pending,
                     |key| {
@@ -239,6 +289,9 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
         }
         Some(BrokerReply::LootOne { confirmed_key }) => {
             LOOT_BUSY.with(|b| b.set(false));
+            crate::fork_ext::addons::window_takeover::touch_hidden_session(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
+            );
             if confirmed_key.is_some()
                 || crate::fork_ext::addons::action_broker::is_player_activity(
                     crate::fork_ext::addons::action_broker::Subsystem::Loot,
@@ -260,6 +313,9 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
         }
         Some(BrokerReply::LootAll { corpse_before }) => {
             LOOT_BUSY.with(|b| b.set(false));
+            crate::fork_ext::addons::window_takeover::touch_hidden_session(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
+            );
             let corpse_after: Vec<(u32, i64)> = play
                 .npcw
                 .corpse
@@ -273,7 +329,32 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
                 state_changed,
             );
         }
-        Some(BrokerReply::LootOpen) => {
+        Some(BrokerReply::OpenLootRefused { code, reason }) => {
+            tlog!("takeover: the server refused the corpse open: {reason}");
+            crate::fork_ext::addons::window_takeover::clear_pending_open(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
+            );
+            crate::fork_ext::addons::action_broker::resolve_server_open_loot_refused(code, &reason);
+        }
+        // the game turns a corpse's list away when another of its windows is up (`npcw` 0x0018 outside mode 0
+        // answers 0x0016): the open is refused at once, never left waiting (upstream's mercenary windows and dye
+        // picker, modes 61 to 63, are such windows)
+        Some(BrokerReply::LootOpen { mode_before })
+            if mode_before != 0 && crate::fork_ext::addons::action_broker::open_loot_in_flight() =>
+        {
+            tlog!("takeover: corpse list turned away by the game (mode {mode_before}: another window is up); the open is refused");
+            crate::fork_ext::addons::window_takeover::clear_pending_open(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
+            );
+            crate::fork_ext::addons::action_broker::resolve_server_open_loot_refused(
+                "busy",
+                "another game window was open; the corpse was closed",
+            );
+        }
+        Some(BrokerReply::LootOpen { .. }) => {
+            crate::fork_ext::addons::window_takeover::touch_hidden_session(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
+            );
             let is_empty = play
                 .npcw
                 .corpse
@@ -290,9 +371,30 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
             crate::fork_ext::addons::action_broker::set_master_loot(false);
             crate::fork_ext::addons::action_broker::resolve_server_loot_close();
         }
-        Some(BrokerReply::LootBlocked) => {
+        Some(BrokerReply::MerchantOpen) => {
+            crate::fork_ext::addons::window_takeover::touch_hidden_session(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Merchant,
+            );
+            crate::fork_ext::addons::action_broker::resolve_server_talk_open(
+                crate::fork_ext::addons::action_broker::TalkKind::Merchant,
+                play.npcw.shop.id,
+            );
+        }
+        Some(BrokerReply::BankOpen) => {
+            crate::fork_ext::addons::window_takeover::touch_hidden_session(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Bank,
+            );
+            crate::fork_ext::addons::action_broker::resolve_server_talk_open(
+                crate::fork_ext::addons::action_broker::TalkKind::Bank,
+                None,
+            );
+        }
+        Some(BrokerReply::LootBlocked(reason)) => {
             LOOT_BUSY.with(|b| b.set(false));
-            crate::fork_ext::addons::action_broker::resolve_server_loot_blocked();
+            crate::fork_ext::addons::window_takeover::clear_pending_open(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
+            );
+            crate::fork_ext::addons::action_broker::resolve_server_loot_blocked(Some(&reason));
         }
         Some(BrokerReply::TxCancel) => {
             LOOT_BUSY.with(|b| b.set(false));
@@ -303,6 +405,9 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
             added_item,
             withdrawn,
         }) => {
+            crate::fork_ext::addons::window_takeover::touch_hidden_session(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Bank,
+            );
             crate::fork_ext::addons::action_broker::resolve_server_bank_move(
                 is_deposit,
                 play.bank.state == 0,
@@ -332,11 +437,273 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
 pub(crate) fn begin_game_event(_: &Play, _: &net::session::Event) {}
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn end_game_event(_: &Play, _: ()) {}
+#[cfg(not(target_arch = "wasm32"))]
+struct NoopRaster;
+#[cfg(not(target_arch = "wasm32"))]
+impl vi::ui::Raster for NoopRaster {
+    fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+    fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+    fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
+    fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
+    fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) {}
+    fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) {}
+    fn string_width(&self, _: &[u16]) -> i32 { 0 }
+    fn point_size(&self) -> i32 { 12 }
+    fn viewport(&self) -> [i32; 4] { [0, 0, 639, 447] }
+    fn set_viewport(&mut self, _: [i32; 4]) {}
+}
+
+pub(crate) fn window_taken(play: &Play, mode: i32) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use crate::fork_ext::addons::window_takeover::{self, TakeoverKind};
+        if !window_takeover::has_activity() {
+            return false;
+        }
+        let Some(kind) = TakeoverKind::from_mode(mode) else {
+            return false;
+        };
+        // L4: the window was already open natively before this packet: it is the player's
+        if MODE_BEFORE_EVENT.with(std::cell::Cell::get) == mode {
+            tlog!(
+                "takeover: {} window left to the game (already open before the reply)",
+                kind.name()
+            );
+            return false;
+        }
+        let observed_target = match kind {
+            TakeoverKind::Loot => crate::fork_ext::loot_source::peek_single(),
+            TakeoverKind::Merchant => play.npcw.shop.id,
+            TakeoverKind::Bank => None,
+        };
+        let fallback_player_target = (play.target != u32::MAX).then_some(play.target);
+        let decision = window_takeover::decide_open(
+            kind,
+            observed_target,
+            fallback_player_target,
+            play.self_at.map(|(p, _)| p),
+        );
+        // always on, like the game's own packet lines, so an owner's log explains a window that did or did not show
+        match decision {
+            window_takeover::OpenDecision::NoHolder => {}
+            window_takeover::OpenDecision::Accepted(why) => tlog!(
+                "takeover: {} window HIDDEN for the mod ({why}; observed {observed_target:?}, player target {fallback_player_target:?})",
+                kind.name()
+            ),
+            window_takeover::OpenDecision::Declined(why) => tlog!(
+                "takeover: {} window left to the game ({why}; observed {observed_target:?}, player target {fallback_player_target:?})",
+                kind.name()
+            ),
+        }
+        decision.accepted()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (play, mode);
+        false
+    }
+}
+
+pub(crate) fn bank_taken_tick(play: &mut Play, vui: &crate::ui::Vui) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use crate::fork_ext::addons::window_takeover;
+        if play.mode != 0 || !window_takeover::has_activity() {
+            return false;
+        }
+        let Some(banker_id) = window_takeover::hidden_bank_session() else {
+            return false;
+        };
+        let saved_target = play.target;
+        if banker_id != u32::MAX {
+            play.target = banker_id;
+        }
+        play.mode = 11;
+        let mut noop = NoopRaster;
+        play.run_bank(vui, &mut noop);
+        play.mode = 0;
+        if banker_id != u32::MAX {
+            play.target = saved_target;
+        }
+        true
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (play, vui);
+        false
+    }
+}
+
+pub(crate) fn loot_session_open(play: &Play) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        (play.mode == 1
+            || crate::fork_ext::addons::window_takeover::is_hidden_active(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
+            ))
+            && play.npcw.corpse.is_some()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        play.mode == 1 && play.npcw.corpse.is_some()
+    }
+}
+
+pub(crate) fn merchant_session_open(play: &Play) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        (play.mode == 10
+            || crate::fork_ext::addons::window_takeover::is_hidden_active(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Merchant,
+            ))
+            && play.npcw.shop.id.is_some()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        play.mode == 10 && play.npcw.shop.id.is_some()
+    }
+}
+
+pub(crate) fn bank_session_open(play: &Play) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        play.mode == 11
+            || crate::fork_ext::addons::window_takeover::is_hidden_active(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Bank,
+            )
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        play.mode == 11
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn close_hidden_session(
+    play: &mut Play,
+    kind: crate::fork_ext::addons::window_takeover::TakeoverKind,
+    owed: crate::fork_ext::addons::window_takeover::OwedClose,
+) {
+    use crate::fork_ext::addons::window_takeover::TakeoverKind;
+    if !owed.had_session {
+        // released with no hidden session up: there is nothing of the mod's to close or to send
+        tlog!(
+            "takeover: {} released with no hidden session ({}); nothing to close",
+            kind.name(),
+            owed.reason
+        );
+        return;
+    }
+    match kind {
+        TakeoverKind::Loot => {
+            // one 0x0016 per session, and none when the server already closed the corpse (its own 0x0016 cleared it)
+            let sent = play.npcw.corpse.is_some();
+            if sent {
+                play.session.send_opcode(0x0016);
+            }
+            tlog!(
+                "takeover: loot hidden session closed ({}); 0x0016 {}",
+                owed.reason,
+                if sent {
+                    "sent"
+                } else {
+                    "not sent: the server had closed the corpse"
+                }
+            );
+            if sent {
+                let _ = play.npcw_opcode(0x0016, &[]);
+            }
+            LOOT_BUSY.with(|b| b.set(false));
+            crate::fork_ext::addons::action_broker::set_master_loot(false);
+            crate::fork_ext::loot_source::closed();
+        }
+        TakeoverKind::Merchant => {
+            tlog!("takeover: merchant hidden session closed ({})", owed.reason);
+            play.npcw.merchant.visible = false;
+            play.npcw.shop = Default::default();
+        }
+        TakeoverKind::Bank => {
+            tlog!("takeover: bank hidden session closed ({})", owed.reason);
+            play.bank.state = 0;
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sync_hidden_sessions(play: &mut Play) {
+    use crate::fork_ext::addons::window_takeover::{self, TakeoverKind};
+    if !window_takeover::has_activity() {
+        return;
+    }
+    let self_pos = play.self_at.map(|(p, _)| p);
+    // the opens a mod's request still waits for: a pending claim without one (refused, timed out,
+    // cancelled) is dropped, so it can never claim a window the player opens (M2)
+    let waiting = crate::fork_ext::addons::action_broker::open_requests_waiting();
+    // the server closes a corpse after every take (0x0016) and the holder's batch is waiting for it to be listed
+    // again: that close is part of the cycle, not the end of the session
+    let reopen_expected = waiting.iter().any(|(_, kinds)| kinds[TakeoverKind::Loot as usize]);
+    window_takeover::sync_sessions_with(
+        |kind, _target_id, opened_pos| {
+            // only the player's own walk since the open ends a session (never how far the corpse or NPC
+            // was when it opened: the server decides what it allows, and a far corpse must still show)
+            match kind {
+                TakeoverKind::Loot if play.npcw.corpse.is_none() && !reopen_expected => {
+                    return Err("the server closed the corpse");
+                }
+                TakeoverKind::Merchant if play.npcw.shop.id.is_none() => {
+                    return Err("the merchant session is gone");
+                }
+                _ => {}
+            }
+            if let Some(pos) = self_pos {
+                if let Some(orig) = opened_pos
+                    && ee::lt(625.0, ee_dist_sq(pos, orig))
+                {
+                    return Err("walked away (more than 25 units)");
+                }
+            }
+            Ok(())
+        },
+        |vm, kind| {
+            waiting
+                .iter()
+                .any(|(w_vm, kinds)| *w_vm == vm && kinds[kind as usize])
+        },
+    );
+    // M3: an ended session's close waits while a native window is up (it would disturb it) and
+    // is sent the moment none is; it is never forgotten
+    if play.mode == 0 {
+        let owed = window_takeover::take_owed_closes();
+        for kind in TakeoverKind::ALL {
+            if let Some(o) = owed[kind as usize] {
+                close_hidden_session(play, kind, o);
+            }
+        }
+        // M1: the mod is done: the player's own target comes back, unless they chose another
+        let restores = window_takeover::take_restorable(|vm| {
+            crate::fork_ext::addons::action_broker::vm_is_idle(vm)
+        });
+        for r in restores {
+            let prev_ok = play
+                .entities
+                .slots
+                .iter()
+                .flatten()
+                .any(|e| e.id == r.prev && play.in_scene(e) && e.p18 & 2 == 0);
+            if play.target == r.mod_target && prev_ok {
+                play.target_id(r.prev);
+            }
+        }
+    }
+}
+
 pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     // others' power is asked for by upstream's Power Bars row alone (`settings::power_bars`);
     // a second request here would contradict it every frame
     #[cfg(not(target_arch = "wasm32"))]
     {
+        sync_hidden_sessions(_play);
+        net::fork_record::drain(&mut _play.session);
         if crate::fork_ext::addons::input::is_text_capture_active() {
             _play.attack_release();
             _play.info_up = false;
@@ -380,7 +747,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         crate::fork_ext::addons::native_core::iteration(_game_step);
         if _game_step {
             if let Some(pending) = PENDING_BANK_TX.with(|b| {
-                if _play.mode != 11 {
+                if !bank_session_open(_play) {
                     b.borrow_mut().take()
                 } else {
                     None
@@ -399,17 +766,17 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                 let mut b = p.borrow_mut();
                 match *b {
                     Some(PendingNpcwTx::LootOne { .. })
-                        if _play.mode != 1 || _play.npcw.corpse.is_none() =>
+                        if !loot_session_open(_play) =>
                     {
                         b.take()
                     }
                     Some(PendingNpcwTx::LootAll)
-                        if _play.mode != 1 || _play.npcw.corpse.is_none() =>
+                        if !loot_session_open(_play) =>
                     {
                         b.take()
                     }
                     Some(PendingNpcwTx::Buy { .. } | PendingNpcwTx::Sell { .. })
-                        if _play.mode != 10 || _play.npcw.shop.id.is_none() =>
+                        if !merchant_session_open(_play) =>
                     {
                         b.take()
                     }
@@ -451,10 +818,15 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                 );
             } else if ready
                 && _play.mode == 0
-                && let Some(reopen_cid) =
+                && let Some((reopen_vm, reopen_cid)) =
                     crate::fork_ext::addons::action_broker::take_corpse_reopen_ask()
                 && corpse_target == Some(reopen_cid)
             {
+                let _ = crate::fork_ext::addons::window_takeover::arm_pending_open(
+                    crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
+                    reopen_vm,
+                    reopen_cid,
+                );
                 _play.attack_press();
             }
             let wheel = crate::fork_ext::addons::pointer_api::take_wheel();
@@ -505,6 +877,13 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                 }
             }
         }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for Play {
+    fn drop(&mut self) {
+        net::fork_record::drain(&mut self.session);
     }
 }
 
@@ -581,7 +960,7 @@ pub(crate) fn npcw_requests(
         };
         match req {
             PendingNpcwTx::LootOne { key, count } => {
-                if _play.mode != 1 || _play.npcw.corpse.is_none() {
+                if !loot_session_open(_play) {
                     PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
                     resolve_in_flight_window_closed("loot", "corpse window is not open");
                     return;
@@ -614,7 +993,7 @@ pub(crate) fn npcw_requests(
                 }
             }
             PendingNpcwTx::LootAll => {
-                if _play.mode != 1 || _play.npcw.corpse.is_none() {
+                if !loot_session_open(_play) {
                     PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
                     resolve_in_flight_window_closed("loot_all", "corpse window is not open");
                     return;
@@ -647,7 +1026,7 @@ pub(crate) fn npcw_requests(
                 }
             }
             PendingNpcwTx::Buy { ware_key, count } => {
-                if _play.mode != 10 || _play.npcw.shop.id.is_none() {
+                if !merchant_session_open(_play) {
                     PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
                     resolve_in_flight_window_closed("buy", "merchant window is not open");
                     return;
@@ -675,7 +1054,7 @@ pub(crate) fn npcw_requests(
                 }
             }
             PendingNpcwTx::Sell { item_key, count } => {
-                if _play.mode != 10 || _play.npcw.shop.id.is_none() {
+                if !merchant_session_open(_play) {
                     PENDING_NPCW_TX.with(|p| *p.borrow_mut() = None);
                     resolve_in_flight_window_closed("sell", "merchant window is not open");
                     return;
@@ -721,7 +1100,7 @@ pub(crate) fn bank_requests(_play: &Play, _out: &mut Vec<crate::bank::BankOut>) 
         let Some(req) = PENDING_BANK_TX.with(|b| *b.borrow()) else {
             return;
         };
-        if _play.mode != 11 {
+        if !bank_session_open(_play) {
             PENDING_BANK_TX.with(|b| *b.borrow_mut() = None);
             let kind = match req {
                 PendingBankTx::Move { .. } => "bank_move",
@@ -950,7 +1329,7 @@ pub(crate) fn art_changed() {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn native_action_snapshot(play: &Play) -> crate::fork_ext::addons::action_broker::NativeSnapshot {
-    let loot_open = play.mode == 1 && play.npcw.corpse.is_some();
+    let loot_open = loot_session_open(play);
     if !loot_open {
         LOOT_BUSY.with(|b| b.set(false));
     }
@@ -961,8 +1340,8 @@ fn native_action_snapshot(play: &Play) -> crate::fork_ext::addons::action_broker
         merchant_pending: play.npcw.shop.pending,
         loot_busy: LOOT_BUSY.with(|b| b.get()),
         inventory_busy: play.waiting,
-        merchant_open: play.mode == 10 && play.npcw.shop.id.is_some(),
-        bank_open: play.mode == 11,
+        merchant_open: merchant_session_open(play),
+        bank_open: bank_session_open(play),
         loot_open,
         master_loot_active: crate::fork_ext::addons::action_broker::is_master_loot_active(),
     }
@@ -1132,6 +1511,230 @@ fn dispatch_broker_action(
             play.interact_with_target();
             DispatchOutcome::Completed { detail: None }
         }
+        ActionKind::OpenLoot { entity_id } => {
+            if play.is_dead() || !matches!(play.mode, 0 | 38) || play.control_client().casting {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot open corpse right now".into(),
+                };
+            }
+            let corpse_id = match entity_id {
+                Some(id) => {
+                    let Some(ent) = play
+                        .entities
+                        .slots
+                        .iter()
+                        .flatten()
+                        .find(|e| e.id == *id && play.in_scene(e) && (e.p18 & 1 != 0))
+                    else {
+                        return DispatchOutcome::Refused {
+                            code: "not_found",
+                            reason: format!("corpse {id} is not in scene"),
+                        };
+                    };
+                    if ent.p18 & 2 == 0 {
+                        return DispatchOutcome::Refused {
+                            code: "invalid_argument",
+                            reason: format!("entity {id} is not a corpse"),
+                        };
+                    }
+                    ent.id
+                }
+                None => {
+                    let self_pos = play.self_at.map(|(p, _)| p);
+                    let mut best: Option<(u32, f32)> = None;
+                    for ent in play.entities.slots.iter().flatten() {
+                        if !play.in_scene(ent) || (ent.p18 & 1 == 0) || (ent.p18 & 2 == 0) {
+                            continue;
+                        }
+                        let d2 = self_pos.map_or(0.0, |p| ee_dist_sq(p, ent.actor_pos));
+                        if best.is_none_or(|(_, best_d2)| ee::lt(d2, best_d2)) {
+                            best = Some((ent.id, d2));
+                        }
+                    }
+                    let Some((id, _)) = best else {
+                        return DispatchOutcome::Refused {
+                            code: "not_found",
+                            reason: "no corpse in scene".into(),
+                        };
+                    };
+                    id
+                }
+            };
+            if play.target != corpse_id {
+                let prev = play.target;
+                play.target_id(corpse_id);
+                if let Some(vm) = crate::fork_ext::addons::action_broker::current_dispatch_vm() {
+                    crate::fork_ext::addons::window_takeover::note_retarget(vm, prev, corpse_id);
+                }
+            }
+            let still_corpse = play.target == corpse_id
+                && play
+                    .entities
+                    .slots
+                    .iter()
+                    .flatten()
+                    .any(|e| e.id == corpse_id && play.in_scene(e) && (e.p18 & 1 != 0) && (e.p18 & 2 != 0));
+            if !still_corpse {
+                return DispatchOutcome::Refused {
+                    code: "not_found",
+                    reason: "target is no longer a valid corpse".into(),
+                };
+            }
+            if let Some(vm) = crate::fork_ext::addons::action_broker::current_dispatch_vm() {
+                let _ = crate::fork_ext::addons::window_takeover::arm_pending_open(
+                    crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
+                    vm,
+                    corpse_id,
+                );
+            }
+            tlog!("takeover: mod open_loot -> corpse {corpse_id:#x}, opcode 0x0015");
+            play.attack_press();
+            DispatchOutcome::AwaitingServer {
+                matcher: crate::fork_ext::addons::action_broker::ServerMatcher::OpenLoot {
+                    corpse_id,
+                },
+                detail: Some(serde_json::json!({ "entity_id": corpse_id })),
+            }
+        }
+        ActionKind::Talk { entity_id, kind } => {
+            use crate::fork_ext::addons::action_broker::TalkKind;
+            fn talk_target_matches(
+                play: &Play,
+                e: &net::entity::Entity,
+                kind: TalkKind,
+            ) -> bool {
+                if !play.in_scene(e) || (e.p18 & 1 == 0) || (e.p18 & 2 != 0) {
+                    return false;
+                }
+                let Some(c) = e.creature.as_ref() else {
+                    return false;
+                };
+                if c.p256 == 2 {
+                    return false;
+                }
+                match kind {
+                    TalkKind::Merchant => c.npc_flags & 1 != 0,
+                    TalkKind::Bank => c.npc_flags & 2 != 0,
+                    TalkKind::AnyFriendly => {
+                        (c.npc_flags & 0x80 != 0) || (c.npc_flags & 0b1011 != 0)
+                    }
+                }
+            }
+            if play.is_dead() || !matches!(play.mode, 0 | 38) || play.control_client().casting {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "cannot interact right now".into(),
+                };
+            }
+            let npc_id = match entity_id {
+                Some(id) => {
+                    let Some(ent) = play
+                        .entities
+                        .slots
+                        .iter()
+                        .flatten()
+                        .find(|e| e.id == *id && play.in_scene(e) && (e.p18 & 1 != 0))
+                    else {
+                        return DispatchOutcome::Refused {
+                            code: "not_found",
+                            reason: format!("NPC {id} is not in scene"),
+                        };
+                    };
+                    if !talk_target_matches(play, ent, *kind) {
+                        return DispatchOutcome::Refused {
+                            code: "invalid_argument",
+                            reason: format!("entity {id} does not match requested talk target"),
+                        };
+                    }
+                    ent.id
+                }
+                None => {
+                    let self_pos = play.self_at.map(|(p, _)| p);
+                    let mut best: Option<(u32, f32)> = None;
+                    for ent in play.entities.slots.iter().flatten() {
+                        if !talk_target_matches(play, ent, *kind) {
+                            continue;
+                        }
+                        let d2 = self_pos.map_or(0.0, |p| ee_dist_sq(p, ent.actor_pos));
+                        if best.is_none_or(|(_, best_d2)| ee::lt(d2, best_d2)) {
+                            best = Some((ent.id, d2));
+                        }
+                    }
+                    let Some((id, _)) = best else {
+                        return DispatchOutcome::Refused {
+                            code: "not_found",
+                            reason: "no matching NPC in scene".into(),
+                        };
+                    };
+                    id
+                }
+            };
+            if play.target != npc_id {
+                let prev = play.target;
+                play.target_id(npc_id);
+                if let Some(vm) = crate::fork_ext::addons::action_broker::current_dispatch_vm() {
+                    crate::fork_ext::addons::window_takeover::note_retarget(vm, prev, npc_id);
+                }
+            }
+            let still_valid = play.target == npc_id
+                && play
+                    .entities
+                    .slots
+                    .iter()
+                    .flatten()
+                    .any(|e| e.id == npc_id && talk_target_matches(play, e, *kind));
+            if !still_valid {
+                return DispatchOutcome::Refused {
+                    code: "not_found",
+                    reason: "target is no longer a valid NPC".into(),
+                };
+            }
+            let target_flags = play
+                .entities
+                .slots
+                .iter()
+                .flatten()
+                .find(|e| e.id == npc_id)
+                .and_then(|e| e.creature.as_ref())
+                .map_or(0, |c| c.npc_flags);
+            if let Some(vm) = crate::fork_ext::addons::action_broker::current_dispatch_vm() {
+                use crate::fork_ext::addons::window_takeover::{self, TakeoverKind};
+                if *kind == TalkKind::Merchant
+                    || (*kind == TalkKind::AnyFriendly && target_flags & 1 != 0)
+                {
+                    let _ = window_takeover::arm_pending_open(TakeoverKind::Merchant, vm, npc_id);
+                }
+                if *kind == TalkKind::Bank
+                    || (*kind == TalkKind::AnyFriendly && target_flags & 2 != 0)
+                {
+                    let _ = window_takeover::arm_pending_open(TakeoverKind::Bank, vm, npc_id);
+                }
+            }
+            {
+                let op = if target_flags & 1 != 0 {
+                    0x004C
+                } else if target_flags & 2 != 0 {
+                    0x124D
+                } else if target_flags & 8 != 0 {
+                    0x0061
+                } else {
+                    0x0004
+                };
+                tlog!(
+                    "takeover: mod talk -> npc {npc_id:#x}, npc_flags {target_flags:#04x}, opcode {op:#06x} (the game's own interact path)"
+                );
+            }
+            play.interact_with_target();
+            DispatchOutcome::AwaitingServer {
+                matcher: crate::fork_ext::addons::action_broker::ServerMatcher::Talk {
+                    npc_id,
+                    kind: *kind,
+                },
+                detail: Some(serde_json::json!({ "entity_id": npc_id })),
+            }
+        }
+
         ActionKind::Attack { on } => {
             if play.is_dead() || !matches!(play.mode, 0 | 38) {
                 return DispatchOutcome::Refused {
@@ -1814,7 +2417,7 @@ fn dispatch_broker_action(
             count,
             identity,
         } => {
-            if play.mode != 1 || play.npcw.corpse.is_none() {
+            if !loot_session_open(play) {
                 return DispatchOutcome::Refused {
                     code: "window_closed",
                     reason: "corpse window is not open".into(),
@@ -1889,7 +2492,7 @@ fn dispatch_broker_action(
             }
         }
         ActionKind::LootAll => {
-            if play.mode != 1 || play.npcw.corpse.is_none() {
+            if !loot_session_open(play) {
                 return DispatchOutcome::Refused {
                     code: "window_closed",
                     reason: "corpse window is not open".into(),
@@ -1934,7 +2537,7 @@ fn dispatch_broker_action(
             }
         }
         ActionKind::Buy { ware, count } => {
-            if play.mode != 10 || play.npcw.shop.id.is_none() {
+            if !merchant_session_open(play) {
                 return DispatchOutcome::Refused {
                     code: "window_closed",
                     reason: "merchant window is not open".into(),
@@ -2016,7 +2619,7 @@ fn dispatch_broker_action(
             }
         }
         ActionKind::Sell { item, count } => {
-            if play.mode != 10 || play.npcw.shop.id.is_none() {
+            if !merchant_session_open(play) {
                 return DispatchOutcome::Refused {
                     code: "window_closed",
                     reason: "merchant window is not open".into(),
@@ -2080,7 +2683,7 @@ fn dispatch_broker_action(
             item,
             count,
         } => {
-            if play.mode != 11 {
+            if !bank_session_open(play) {
                 return DispatchOutcome::Refused {
                     code: "window_closed",
                     reason: "bank window is not open".into(),
@@ -2155,7 +2758,7 @@ fn dispatch_broker_action(
             }
         }
         ActionKind::BankMoney { dir, amount } => {
-            if play.mode != 11 {
+            if !bank_session_open(play) {
                 return DispatchOutcome::Refused {
                     code: "window_closed",
                     reason: "bank window is not open".into(),

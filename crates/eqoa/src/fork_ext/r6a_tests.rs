@@ -45,6 +45,7 @@ fn forge_host(tag: &str) -> Host {
         resource_dirs: vec![],
         api: Some("eqoa/1".to_string()),
         entry_mode: Default::default(),
+        capabilities_declared: true,
         requested_capabilities: vec![],
         extensions: Default::default(),
         initially_enabled: true,

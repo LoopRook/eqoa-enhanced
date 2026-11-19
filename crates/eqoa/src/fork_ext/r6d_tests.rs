@@ -27,7 +27,7 @@ fn ready() -> Play {
 
 fn rig() -> (Play, Host) {
     let p = ready();
-    let host = Host::new().unwrap();
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     host.execute(
         r#"
         results = {}
@@ -115,10 +115,11 @@ fn round6d_drop_quest_sends_native_remove_and_refuses_stale_or_ungestured() {
         expect_code(&host, "stale_handle");
     assert_eq!(p.session.sends_lost, sent);
 
-    // outside a gesture the call is refused
+    // outside a gesture the call succeeds autonomously when not stale
+    quests(&mut p, &["Bat Eyes", "The Militia"]);
     r6a::refresh(&p, None);
     host.execute("e1, e2 = eqoa.actions.drop_quest(eqoa.quests.list()[1].ref)").unwrap();
-    host.execute("assert(e1 == nil and e2.code == 'needs_player_action')").unwrap();
+    host.execute("assert(e1 ~= nil and e2 == nil)").unwrap();
 }
 
 #[test]
@@ -236,9 +237,9 @@ fn round6d_window_rows_walk_native_keys_and_refuse_stale_or_bad_rows() {
     gesture(&mut p, &host, "return eqoa.actions.close_window(w_old.ref)");
     expect_code(&host, "stale_handle");
 
-    // outside a gesture
+    // outside a gesture a live ref still succeeds, while stale_handle is still caught
     host.execute("e1, e2 = eqoa.actions.close_window(w_old.ref)").unwrap();
-    host.execute("assert(e1 == nil and e2.code == 'needs_player_action')").unwrap();
+    host.execute("assert(e1 == nil and e2.code == 'stale_handle')").unwrap();
 }
 
 #[test]

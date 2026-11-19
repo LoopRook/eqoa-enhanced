@@ -2,9 +2,10 @@
 //! Round 6 Part A native Lua bindings (`eqoa.quests.*`, `eqoa.mastery.*`, and later camera/windows).
 use super::{
     host::Host,
-    native::{bind, describe, error, record},
+    native::{bind, describe, diagnose, error, record, require_capability, session},
     native_core::{CORE, View},
     native_state::Ref,
+    window_takeover::{self, TakeoverKind, TakeoverScope},
 };
 use mlua::{Lua, Result, Value};
 use serde_json::{Value as Json, json};
@@ -386,6 +387,160 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 record(lua, "eqoa.windows.ButtonHint", &json!(parsed))?,
                 Value::Nil,
             ))
+        })?,
+    )?;
+    bind(
+        lua,
+        "windows",
+        "takeover",
+        lua.create_function(|lua, (kind, opts): (Value, Option<Value>)| {
+            if let Err((code, msg)) =
+                require_capability(lua, "eqoa.windows.takeover", "eqoa.windows.takeover")
+            {
+                return error(lua, "eqoa.windows.takeover", code, &msg);
+            }
+            let Some(kind_str) = kind
+                .as_string()
+                .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+            else {
+                return error(
+                    lua,
+                    "eqoa.windows.takeover",
+                    "invalid_argument",
+                    "kind must be 'loot', 'merchant', or 'bank'",
+                );
+            };
+            let parsed = match TakeoverKind::parse(&kind_str) {
+                Ok(k) => k,
+                Err((code, msg)) => return error(lua, "eqoa.windows.takeover", code, &msg),
+            };
+            let scope = match opts {
+                None | Some(Value::Nil) => TakeoverScope::Own,
+                Some(Value::Table(t)) => match t.get::<Value>("scope")? {
+                    Value::Nil => TakeoverScope::Own,
+                    Value::String(s) => {
+                        let Ok(s) = s.to_str() else {
+                            return error(
+                                lua,
+                                "eqoa.windows.takeover",
+                                "invalid_argument",
+                                "options.scope must be UTF-8",
+                            );
+                        };
+                        match TakeoverScope::parse(&s) {
+                            Ok(sc) => sc,
+                            Err((code, msg)) => {
+                                return error(lua, "eqoa.windows.takeover", code, &msg);
+                            }
+                        }
+                    }
+                    _ => {
+                        return error(
+                            lua,
+                            "eqoa.windows.takeover",
+                            "invalid_argument",
+                            "options.scope must be 'own' or 'all'",
+                        );
+                    }
+                },
+                Some(_) => {
+                    return error(
+                        lua,
+                        "eqoa.windows.takeover",
+                        "invalid_argument",
+                        "options must be a table or nil",
+                    );
+                }
+            };
+            let vm = super::native_events::bus(lua).borrow().vm;
+            let addon = session(lua).borrow().addon.clone();
+            match window_takeover::takeover(vm, &addon, parsed, scope) {
+                Ok(()) => lua.pack_multi((true, Value::Nil)),
+                Err((code, msg)) => {
+                    if code == "busy" {
+                        diagnose(lua, "eqoa.windows.takeover", code, &msg);
+                    }
+                    error(lua, "eqoa.windows.takeover", code, &msg)
+                }
+            }
+        })?,
+    )?;
+    bind(
+        lua,
+        "windows",
+        "release",
+        lua.create_function(|lua, kind: Value| {
+            let vm = super::native_events::bus(lua).borrow().vm;
+            match kind {
+                Value::Nil => {
+                    let released = window_takeover::release_all_for_vm(vm);
+                    lua.pack_multi((released, Value::Nil))
+                }
+                Value::String(s) => {
+                    let Ok(s) = s.to_str() else {
+                        return error(
+                            lua,
+                            "eqoa.windows.release",
+                            "invalid_argument",
+                            "kind must be UTF-8",
+                        );
+                    };
+                    let parsed = match TakeoverKind::parse(&s) {
+                        Ok(k) => k,
+                        Err((code, msg)) => return error(lua, "eqoa.windows.release", code, &msg),
+                    };
+                    let released = window_takeover::release(vm, parsed);
+                    lua.pack_multi((released, Value::Nil))
+                }
+                _ => error(
+                    lua,
+                    "eqoa.windows.release",
+                    "invalid_argument",
+                    "kind must be 'loot', 'merchant', 'bank', or nil",
+                ),
+            }
+        })?,
+    )?;
+    bind(
+        lua,
+        "windows",
+        "taken",
+        lua.create_function(|lua, kind: Value| match kind {
+            Value::Nil => {
+                let holders = lua.create_table()?;
+                for k in TakeoverKind::ALL {
+                    if let Some(h) = window_takeover::holder_of(k) {
+                        holders.set(k.name(), h)?;
+                    }
+                }
+                let tbl = lua.create_table()?;
+                tbl.set("loot", window_takeover::is_taken(TakeoverKind::Loot))?;
+                tbl.set("merchant", window_takeover::is_taken(TakeoverKind::Merchant))?;
+                tbl.set("bank", window_takeover::is_taken(TakeoverKind::Bank))?;
+                tbl.set("holders", holders)?;
+                lua.pack_multi((tbl, Value::Nil))
+            }
+            Value::String(s) => {
+                let Ok(s) = s.to_str() else {
+                    return error(
+                        lua,
+                        "eqoa.windows.taken",
+                        "invalid_argument",
+                        "kind must be UTF-8",
+                    );
+                };
+                let parsed = match TakeoverKind::parse(&s) {
+                    Ok(k) => k,
+                    Err((code, msg)) => return error(lua, "eqoa.windows.taken", code, &msg),
+                };
+                lua.pack_multi((window_takeover::is_taken(parsed), Value::Nil))
+            }
+            _ => error(
+                lua,
+                "eqoa.windows.taken",
+                "invalid_argument",
+                "kind must be 'loot', 'merchant', 'bank', or nil",
+            ),
         })?,
     )?;
 

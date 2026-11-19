@@ -128,3 +128,14 @@ fixtures belong to separate renderer tests outside these commands.
 Detailed logs are under the sync worktree's `target/` and the shared Cargo
 target's `gates/`. The owner play test and the combined Round 6.5 test are
 pending.
+
+## Develop merge (develop `91a66d7d`)
+
+Develop brought Round 6.5 window takeover, Round 7 A/B, the session
+recorder, scripted input, CI gates, Wereoxxs performance and the gate
+runner's stale-binary guard. Three files needed hand resolution.
+
+- `crates/net/src/lib.rs`: kept develop's `fork_record` module and upstream's `hardcore` module, in alphabetical order.
+- `crates/eqoa/src/fork_ext/report_viewer.rs`: kept the sync's input order (an [OG] pointer gate first, then the report, then addons), its `addon_event` and upstream's mercenary and dye-picker keyboard ownership; kept develop's `report_key` and the per-frame scripted-input step. The ownership rule is now `native_owns_keys`, and scripted keys follow it in `scripted_input.rs`: when a native window owns the keyboard the key reaches the game, and addons still receive its release.
+- `FORK-UPDATE-NOTES.md`: kept the sync entry and develop's Bag Viewer, Wereoxxs and recording entries.
+

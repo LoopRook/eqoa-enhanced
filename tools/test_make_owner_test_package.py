@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 import zipfile
@@ -31,6 +32,7 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
         self.fake_config.mkdir(parents=True)
         (self.fake_config / "eqoa.ini").write_text("volume=100\n", encoding="utf-8")
         (self.fake_config / "binds.txt").write_text("bind 1 attack\n", encoding="utf-8")
+        (self.fake_config / "session-previous.eqrec").write_bytes(b"old recording")
 
         self.env_patch = mock.patch.dict(os.environ, {"APPDATA": str(self.fake_appdata)})
         self.env_patch.start()
@@ -75,6 +77,7 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
             "@echo off\r\n"
             "rem Round 4 test build: uses the settings copy in .\\config, never updates itself.\r\n"
             "set EQOA_CONFIG=%~dp0config\r\n"
+            "set EQOA_RECORD_SESSION=1\r\n"
             "set EQOA_UPDATE_URL=http://127.0.0.1:9/\r\n"
             'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0archive_previous_run.ps1"\r\n'
             'start "" /D "%~dp0play" "%~dp0play\\EQOA Enhanced - Nightly.exe"\r\n'
@@ -84,6 +87,7 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
             "@echo off\r\n"
             "rem Round 4 test build: uses the settings copy in .\\config, never updates itself.\r\n"
             "set EQOA_CONFIG=%~dp0config\r\n"
+            "set EQOA_RECORD_SESSION=1\r\n"
             "set EQOA_UPDATE_URL=http://127.0.0.1:9/\r\n"
             "set EQOA_PERF=1\r\n"
             'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0archive_previous_run.ps1"\r\n'
@@ -105,6 +109,7 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
             )
 
         self.assertTrue((self.output_dir / "config" / "eqoa.ini").is_file())
+        self.assertFalse((self.output_dir / "config" / "session-previous.eqrec").exists())
         self.assertEqual(
             (self.output_dir / "config" / "eqoa.ini").read_text(encoding="utf-8"),
             "volume=100\n",
@@ -278,6 +283,7 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
                 return subprocess.CompletedProcess(cmd, 0, stdout=f"{fake_commit}\n", stderr="")
             if cmd[0] == "cargo":
                 self.assertEqual(lock_events, ["acquire"])
+                built_exe.write_bytes(b"MZbuilt-exe")  # cargo relinks the exe after the guard's touch
                 return subprocess.CompletedProcess(
                     cmd,
                     0,
@@ -387,6 +393,65 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
 
         mock_lock.assert_not_called()
 
+    def _run_guarded_build(self, *, rebuild):
+        """Run make_package --build against a fake cargo; `rebuild` says whether cargo rewrites the exe."""
+        fake_home = self.base / "user_home"
+        target = fake_home / "Paseo" / "targets" / "shared"
+        built_exe = target / "release" / "eqoa.exe"
+        built_exe.parent.mkdir(parents=True, exist_ok=True)
+        built_exe.write_bytes(b"MZother-worktree-exe")
+        long_ago = time.time() - 3600
+        os.utime(built_exe, (long_ago, long_ago))
+        crate_main = self.fake_root / "crates" / "eqoa" / "src" / "main.rs"
+        crate_main.parent.mkdir(parents=True, exist_ok=True)
+        crate_main.write_text("fn main() {}\n", encoding="utf-8")
+        os.utime(crate_main, (long_ago, long_ago))
+
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == "git" and "status" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if cmd[0] == "git" and "rev-parse" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="c" * 40 + "\n", stderr="")
+            if cmd[0] == "cargo":
+                # Cargo only rebuilds when it sees a source newer than the last build.
+                if rebuild and crate_main.stat().st_mtime > built_exe.stat().st_mtime:
+                    built_exe.write_bytes(b"MZthis-worktree-exe")
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="    Finished `release` profile\n")
+            raise AssertionError(f"Unexpected command: {cmd}")
+
+        clean_env = {k: v for k, v in os.environ.items() if k not in ("CARGO_TARGET_DIR", "RUSTFLAGS")}
+        clean_env["USERPROFILE"] = str(fake_home)
+        clean_env["APPDATA"] = str(self.fake_appdata)
+        with (
+            mock.patch.dict(os.environ, clean_env, clear=True),
+            mock.patch("pathlib.Path.home", return_value=fake_home),
+            mock.patch("make_owner_test_package.run_gates.CargoLock") as lock,
+            mock.patch("make_owner_test_package.subprocess.run", side_effect=fake_run),
+            mock.patch("make_owner_test_package.build_player_release.build_release", side_effect=self._fake_build_release),
+            mock.patch("sys.stdout", io.StringIO()),
+        ):
+            lock.return_value.__enter__.return_value = lock.return_value
+            try:
+                make_owner_test_package.make_package(
+                    name="Round6",
+                    build=True,
+                    output_dir=self.output_dir,
+                    root=self.fake_root,
+                    config_source=self.fake_config,
+                )
+            finally:
+                touched_mtime = crate_main.stat().st_mtime
+        return touched_mtime, long_ago
+
+    def test_build_touches_sources_so_cargo_rebuilds_other_worktrees_exe(self):
+        touched_mtime, long_ago = self._run_guarded_build(rebuild=True)
+        self.assertGreater(touched_mtime, long_ago + 60)  # sources were marked new
+
+    def test_build_fails_loudly_when_exe_was_not_rebuilt(self):
+        # Negative control: cargo reuses the other worktree's exe, as with a stale shared fingerprint.
+        with self.assertRaisesRegex(RuntimeError, "stale binary"):
+            self._run_guarded_build(rebuild=False)
+
     def test_exe_and_build_mutually_exclusive(self):
         with self.assertRaisesRegex(ValueError, "Cannot specify both"):
             make_owner_test_package.make_package(
@@ -436,6 +501,7 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
         (config / "acct_main.opt").write_text("secret-two", encoding="utf-8")
         (config / "eqoa.log").write_text("run one\n", encoding="utf-8")
         (config / "state.txt").write_text("state one\n", encoding="utf-8")
+        (config / "session-first.eqrec").write_bytes(b"a recording")
         (config / "addons").mkdir()
         (config / "addons" / "addons_error.log").write_text("mod broke\n", encoding="utf-8")
 
@@ -454,6 +520,7 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
         self.assertEqual(texts, ["run one\n", "run two\n"])
         self.assertTrue(any((r / "config" / "addons" / "addons_error.log").is_file() for r in runs))
         self.assertTrue(any((r / "config" / "state.txt").is_file() for r in runs))
+        self.assertTrue(any((r / "config" / "session-first.eqrec").is_file() for r in runs))
         # credentials stay where they were and are never copied
         self.assertEqual((config / "account1.opt").read_text(encoding="utf-8"), "secret-login")
         self.assertTrue((config / "acct_main.opt").is_file())

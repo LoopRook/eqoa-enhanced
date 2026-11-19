@@ -25,6 +25,7 @@ pub(crate) struct DiscoveredAddon {
     pub resource_dirs: Vec<PathBuf>,
     pub api: Option<String>,
     pub entry_mode: EntryMode,
+    pub capabilities_declared: bool,
     pub requested_capabilities: Vec<String>,
     pub extensions: Extensions,
     pub initially_enabled: bool,
@@ -86,6 +87,11 @@ fn extensions(raw: &serde_json::Value) -> Result<Extensions, String> {
 }
 
 impl DiscoveredAddon {
+    pub(crate) fn declared_capabilities(&self) -> Option<&[String]> {
+        self.capabilities_declared
+            .then_some(self.requested_capabilities.as_slice())
+    }
+
     pub fn mods_root(&self) -> PathBuf {
         if let Some(r) = &self.mods_root {
             return r.clone();
@@ -431,6 +437,7 @@ fn discover_script_root(script_root: &Path, canonical_root: &Path, ctx: &mut Dis
                     resource_dirs: deduplicate_dirs(resource_dirs),
                     api: None,
                     entry_mode: Default::default(),
+                    capabilities_declared: false,
                     requested_capabilities: Vec::new(),
                     extensions: Default::default(),
                     initially_enabled: false,
@@ -714,6 +721,7 @@ fn parse_native_manifest(
     }
 
     // Capabilities
+    let capabilities_declared = raw.get("capabilities").is_some();
     let mut requested_capabilities = Vec::new();
     if let Some(caps) = raw.get("capabilities") {
         match caps {
@@ -809,6 +817,7 @@ fn parse_native_manifest(
         resource_dirs: deduplicate_dirs(resource_dirs),
         api: Some("eqoa/1".to_string()),
         entry_mode,
+        capabilities_declared,
         requested_capabilities,
         extensions,
         initially_enabled,
@@ -909,6 +918,7 @@ fn parse_legacy_package(
         resource_dirs: deduplicate_dirs(resource_dirs),
         api: None,
         entry_mode: Default::default(),
+        capabilities_declared: false,
         requested_capabilities: Vec::new(),
         extensions: Default::default(),
         initially_enabled: false,

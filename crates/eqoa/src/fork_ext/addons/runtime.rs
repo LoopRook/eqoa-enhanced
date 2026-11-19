@@ -30,6 +30,7 @@ use render::wgpu;
 use std::{cell::RefCell, path::PathBuf, rc::Rc};
 use winit::{
     event::{ElementState, WindowEvent},
+    keyboard::{Key, NamedKey},
     window::Window,
 };
 
@@ -102,6 +103,120 @@ fn forward_key_to_imgui(
         plain_play,
     )
 }
+
+// Winit does not expose a KeyEvent constructor. Queue the script's logical key
+// and text in the same ImGui IO used by the native platform adapter.
+pub(super) fn queue_scripted_key(context: &mut Context, key: &Key, text: Option<&str>, down: bool) {
+    use NamedKey as N;
+    use dear_imgui_rs::Key as I;
+    let imgui_key = match key {
+        Key::Named(name) => Some(match name {
+            N::Tab => I::Tab,
+            N::Enter => I::Enter,
+            N::Escape => I::Escape,
+            N::Backspace => I::Backspace,
+            N::Space => I::Space,
+            N::ArrowLeft => I::LeftArrow,
+            N::ArrowRight => I::RightArrow,
+            N::ArrowUp => I::UpArrow,
+            N::ArrowDown => I::DownArrow,
+            N::PageUp => I::PageUp,
+            N::PageDown => I::PageDown,
+            N::Home => I::Home,
+            N::End => I::End,
+            N::Insert => I::Insert,
+            N::Delete => I::Delete,
+            N::F1 => I::F1,
+            N::F2 => I::F2,
+            N::F3 => I::F3,
+            N::F4 => I::F4,
+            N::F5 => I::F5,
+            N::F6 => I::F6,
+            N::F7 => I::F7,
+            N::F8 => I::F8,
+            N::F9 => I::F9,
+            N::F10 => I::F10,
+            N::F11 => I::F11,
+            N::F12 => I::F12,
+            _ => I::None,
+        }),
+        Key::Character(s) => {
+            const ASCII: &str = "abcdefghijklmnopqrstuvwxyz0123456789'-,./;=[\\]`";
+            const KEYS: [I; 47] = [
+                I::A,
+                I::B,
+                I::C,
+                I::D,
+                I::E,
+                I::F,
+                I::G,
+                I::H,
+                I::I,
+                I::J,
+                I::K,
+                I::L,
+                I::M,
+                I::N,
+                I::O,
+                I::P,
+                I::Q,
+                I::R,
+                I::S,
+                I::T,
+                I::U,
+                I::V,
+                I::W,
+                I::X,
+                I::Y,
+                I::Z,
+                I::Key0,
+                I::Key1,
+                I::Key2,
+                I::Key3,
+                I::Key4,
+                I::Key5,
+                I::Key6,
+                I::Key7,
+                I::Key8,
+                I::Key9,
+                I::Apostrophe,
+                I::Minus,
+                I::Comma,
+                I::Period,
+                I::Slash,
+                I::Semicolon,
+                I::Equal,
+                I::LeftBracket,
+                I::Backslash,
+                I::RightBracket,
+                I::GraveAccent,
+            ];
+            s.chars()
+                .next()
+                .and_then(|ch| ASCII.find(ch.to_ascii_lowercase()))
+                .map(|i| KEYS[i])
+        }
+        _ => None,
+    };
+    let io = context.io_mut();
+    if down && let Some(text) = text {
+        for ch in text.chars().filter(|&ch| ch != '\u{7f}') {
+            io.add_input_character(ch);
+        }
+    }
+    if let Some(key) = imgui_key.filter(|&key| key != I::None) {
+        io.add_key_event(key, down);
+    }
+}
+
+struct KeyRoute<'a> {
+    button: Button,
+    logical: &'a Key,
+    down: bool,
+    repeat: bool,
+    synthetic: bool,
+}
+
 impl Runtime {
     pub fn from_env() -> Self {
         let _ = super::native_core::time();
@@ -237,32 +352,17 @@ impl Runtime {
                 event,
                 is_synthetic,
                 ..
-            } => {
-                let button = Button::Key(event.physical_key);
-                let code = super::input::winit_key_to_code(event);
-                if !is_synthetic && !event.repeat {
-                    let is_down = event.state == ElementState::Pressed;
-                    if let Some(code) = code {
-                        super::input::record_key_event_only(code, is_down);
-                    }
-                }
-                super::input::route_mod_key(
-                    &event.logical_key,
-                    event.state == ElementState::Pressed,
-                    event.repeat,
-                    *is_synthetic,
-                    plain_play,
-                    keyboard,
-                );
-                let wants_key_capture =
-                    super::input::wants_key_capture(keyboard, code, *is_synthetic, plain_play);
-                match event.state {
-                    ElementState::Pressed => {
-                        self.capture.press(button, wants_key_capture) == Owner::Addon
-                    }
-                    ElementState::Released => self.capture.release(button) == Owner::Addon,
-                }
-            }
+            } => self.route_key(
+                KeyRoute {
+                    button: Button::Key(event.physical_key),
+                    logical: &event.logical_key,
+                    down: event.state.is_pressed(),
+                    repeat: event.repeat,
+                    synthetic: *is_synthetic,
+                },
+                plain_play,
+                keyboard,
+            ),
             WindowEvent::MouseInput { state, button, .. } => match state {
                 ElementState::Pressed => {
                     self.capture.press(Button::Mouse(*button), mouse) == Owner::Addon
@@ -289,6 +389,64 @@ impl Runtime {
             window.request_redraw();
         }
         consumed
+    }
+
+    pub(crate) fn scripted_key(
+        &mut self,
+        id: usize,
+        logical: &Key,
+        text: Option<&str>,
+        state: ElementState,
+        plain_play: bool,
+    ) -> bool {
+        let down = state.is_pressed();
+        let keyboard = match self.graphics.as_mut() {
+            Some(Graphics::Managed(active)) => {
+                let code = super::input::logical_key_to_code(logical);
+                if forward_key_to_imgui(&active.context, code, down, plain_play) {
+                    queue_scripted_key(&mut active.context, logical, text, down);
+                }
+                self.error.is_none() && active.context.io().want_capture_keyboard()
+            }
+            Some(Graphics::Spike(spike)) => spike.scripted_key(logical, text, down),
+            None => false,
+        };
+        self.route_key(
+            KeyRoute {
+                button: Button::ScriptedKey(id),
+                logical,
+                down,
+                repeat: false,
+                synthetic: false,
+            },
+            plain_play,
+            keyboard,
+        )
+    }
+
+    fn route_key(&mut self, event: KeyRoute<'_>, plain_play: bool, keyboard: bool) -> bool {
+        let code = super::input::logical_key_to_code(event.logical);
+        if !event.synthetic
+            && !event.repeat
+            && let Some(code) = code
+        {
+            super::input::record_key_event_only(code, event.down);
+        }
+        super::input::route_mod_key(
+            event.logical,
+            event.down,
+            event.repeat,
+            event.synthetic,
+            plain_play,
+            keyboard,
+        );
+        let wants_capture =
+            super::input::wants_key_capture(keyboard, code, event.synthetic, plain_play);
+        if event.down {
+            self.capture.press(event.button, wants_capture) == Owner::Addon
+        } else {
+            self.capture.release(event.button) == Owner::Addon
+        }
     }
     pub fn captures_motion(&self) -> bool {
         self.capture.motion(self.want_mouse)
@@ -451,6 +609,9 @@ impl Runtime {
         }
         self.stopped = true;
         if let Some(Graphics::Managed(active)) = self.graphics.as_mut() {
+            if std::env::var("EQOA_SCENE_BAG_LOG").is_ok_and(|value| value == "1") {
+                active.manager.log_bag_viewer_scene();
+            }
             active.manager.shutdown();
             active.manager.flush_profile(&mut active.context, true);
             if let Err(e) = active.platform.detach_window(&mut active.context) {
@@ -671,6 +832,27 @@ struct FrameState {
     open: bool,
     settings: Option<String>,
 }
+pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
+    let mut kinds: Vec<&str> = Vec::new();
+    for cap in caps {
+        if cap == "eqoa.actions.*" {
+            if !kinds.contains(&"all actions") {
+                kinds.push("all actions");
+            }
+        } else if let Some(kind) = cap.strip_prefix("eqoa.actions.")
+            && !kind.is_empty()
+            && !kinds.contains(&kind)
+        {
+            kinds.push(kind);
+        }
+    }
+    if kinds.is_empty() {
+        None
+    } else {
+        Some(format!("Actions: can act on its own ({})", kinds.join(", ")))
+    }
+}
+
 fn controls(
     ui: &Ui,
     manager: &mut Manager,
@@ -689,6 +871,13 @@ fn controls(
             ui.separator();ui.text(format!("{} ({})",entry.metadata.name,entry.metadata.id));
             ui.text(match entry.status {super::manager::Status::Disabled=>"Disabled",super::manager::Status::Enabled=>"Enabled",super::manager::Status::Failed=>"Failed — reload to retry"});
             if !entry.metadata.extensions.permissions.is_empty() {ui.text(format!("Permissions: {}",entry.metadata.extensions.permissions.join(", ")));}
+            let caps = entry.metadata.declared_capabilities().unwrap_or(&[]);
+            if !caps.is_empty() {
+                ui.text_wrapped(format!("Capabilities: {}", caps.join(", ")));
+            }
+            if let Some(label) = autonomous_action_label(caps) {
+                ui.text_wrapped(label);
+            }
             let id=&entry.metadata.id;
             let warnings=manager.diagnostics().iter().filter(|d|d.id.as_ref()==Some(id)).count();
             if warnings>0 {ui.same_line();ui.text(format!("[Warnings: {warnings}]"));}
@@ -1263,6 +1452,50 @@ mod tests {
             chat.input_active = ui.is_item_active();
         });
         let _ = context.end_frame();
+    }
+
+    #[test]
+    fn scripted_input_reaches_imgui_text_and_navigation() {
+        let mut context = headless_imgui_context();
+        let mut chat = ChatProbe::default();
+        chat_frame(&mut context, &mut chat);
+        chat.focus_requested = true;
+        for _ in 0..3 {
+            chat_frame(&mut context, &mut chat);
+        }
+        assert!(chat.input_active);
+        assert!(chat.text.is_empty(), "a frame without replay did not type");
+        let z = Key::Character("z".into());
+        queue_scripted_key(&mut context, &z, Some("z"), true);
+        chat_frame(&mut context, &mut chat);
+        queue_scripted_key(&mut context, &z, Some("z"), false);
+        chat_frame(&mut context, &mut chat);
+        assert_eq!(chat.text, "z", "the text is queued once, on press");
+        queue_scripted_key(&mut context, &Key::Named(NamedKey::Enter), None, true);
+        chat_frame(&mut context, &mut chat);
+        assert!(chat.submitted, "the key also reaches ImGui's key queue");
+    }
+
+    #[test]
+    fn scripted_input_preserves_addon_key_ownership_until_release() {
+        let mut runtime = Runtime::new(Paths::select(PathBuf::new(), None, None, None));
+        let key = Key::Character("z".into());
+        let edge =
+            |runtime: &mut Runtime, id, state| runtime.scripted_key(id, &key, None, state, true);
+        assert!(!edge(&mut runtime, 0, ElementState::Pressed));
+        assert!(!edge(&mut runtime, 0, ElementState::Released));
+        super::super::input::testing_text_capture(true);
+        let took_press = edge(&mut runtime, 1, ElementState::Pressed);
+        super::super::input::testing_text_capture(false);
+        assert!(took_press, "an addon editor took the scripted press");
+        assert!(
+            edge(&mut runtime, 1, ElementState::Released),
+            "release follows its press owner"
+        );
+        assert!(
+            !edge(&mut runtime, 2, ElementState::Pressed),
+            "the next unclaimed press goes to the game"
+        );
     }
 
     /// Enter, Enter (empty), Tab with the real routing decision. Returns
@@ -2174,6 +2407,27 @@ mod tests {
         assert!(
             !root.0.join("imgui.ini").exists(),
             "Must never write into mods dir"
+        );
+    }
+
+    #[test]
+    fn round65_addons_ui_labels_autonomous_action_capabilities() {
+        assert_eq!(
+            autonomous_action_label(&["eqoa.inventory.get".into(), "eqoa.actions.*".into()]).as_deref(),
+            Some("Actions: can act on its own (all actions)")
+        );
+        assert_eq!(
+            autonomous_action_label(&[
+                "eqoa.actions.loot".into(),
+                "eqoa.actions.sell".into(),
+                "eqoa.actions.bank_move".into(),
+            ])
+            .as_deref(),
+            Some("Actions: can act on its own (loot, sell, bank_move)")
+        );
+        assert_eq!(
+            autonomous_action_label(&["eqoa.player.stats".into(), "eqoa.hud.text".into()]),
+            None
         );
     }
 }

@@ -65,13 +65,19 @@
     "tools/test_collect_owner_test.py",
     "tools/test_make_owner_test_package.py",
     "tools/local_scene.py",
-    "tools/test_local_scene.py"
+    "tools/test_local_scene.py",
+    "crates/net/src/fork_record.rs",
+    "tools/rec_dump.py",
+    "tools/test_rec_dump.py",
+    ".github/workflows/branch-gates.yml",
+    "tools/ci_gates.py",
+    "tools/test_ci_gates.py"
   ],
   "shared": {
     ".gitignore": {
-      "added": 7,
+      "added": 8,
       "deleted": 0,
-      "reason": "Fork-local generated output and scratch configuration exclusions. 2026-11-09 (owner-approved +1): *.stackdump, so a Git Bash tool's crash note in a checkout cannot fail the footprint check."
+      "reason": "Fork-local generated output and scratch configuration exclusions. 2026-11-09 (owner-approved +1): *.stackdump, so a Git Bash tool's crash note in a checkout cannot fail the footprint check. 2026-11-18: ignore private session recordings."
     },
     "Cargo.lock": {
       "added": 153,
@@ -119,9 +125,9 @@
       "reason": "Map controls and focus/input behavior."
     },
     "crates/eqoa/src/main.rs": {
-      "added": 6,
+      "added": 7,
       "deleted": 0,
-      "reason": "Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged."
+      "reason": "Fork module alias for moved report core and CLI-login redaction hook; upstream logfile lifecycle remains unchanged. Round 7 Part B: owner-approved single mod-api dispatch hook into fork_ext::modtools (question 6, round-7-plan)."
     },
     "crates/eqoa/src/options.rs": {
       "added": 20,
@@ -148,10 +154,15 @@
       "deleted": 11,
       "reason": "Existing fork integration plus native report adapter registration and one-line input, draw, screenshot/surface hooks; preserve upstream resize and Android code. Round 3 Stage C removes hardcoded B key for stats box, lowering added lines from 123 to 102 and deletions from 13 to 11. Fix audit moves Lua preparation before native HUD drawing and submits its separately recorded overlay after the scene; the two named hooks reduce added lines to 101. Round 4 adds three caller replacements (+3/-3): native minimap wheel hit checks (scripted and live) honor the minimap hide lease, and the draw call redirects stock versus held offscreen view without editing the native minimap drawing. Round 4 Part B: tightened to measured divergence after replacing native search/journal with bundled mods."
     },
+    "crates/net/src/lib.rs": {
+      "added": 1,
+      "deleted": 0,
+      "reason": "session recorder seam, lead-approved 2026-11-18"
+    },
     "crates/net/src/session.rs": {
-      "added": 110,
+      "added": 111,
       "deleted": 3,
-      "reason": "Restored group/map/quest protocol state and upstream unanswered offers test (re-baselined at sync 2026-10-31). Live shard 0x7F53/0x7F54 client check and its test (docs/LIVE-CLIENT-COMPATIBILITY.md). Round 4 Part B: tightened to measured divergence after replacing native search/journal with bundled mods. Sync 2026-11-15: upstream now ships the others'-power reader (OP_POWER_BARS, Power Bars row), so the fork's copy is gone. Tightened to measured."
+      "reason": "Restored group/map/quest protocol state and upstream unanswered offers test (re-baselined at sync 2026-10-31). Live shard 0x7F53/0x7F54 client check and its test (docs/LIVE-CLIENT-COMPATIBILITY.md). Round 4 Part B: tightened to measured divergence after replacing native search/journal with bundled mods. Sync 2026-11-15: upstream now ships the others'-power reader (OP_POWER_BARS, Power Bars row), so the fork's copy is gone. Tightened to measured. +1 for session recorder seam, lead-approved 2026-11-18."
     },
     "crates/vi/src/csprite.rs": {
       "added": 85,
@@ -249,9 +260,9 @@
       "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`Loot::read_list`)."
     },
     "crates/eqoa/src/bankplay.rs": {
-      "added": 5,
+      "added": 7,
       "deleted": 0,
-      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`BankPlay::read_lists`). round 6 action hook call: `super::fork_hooks::bank_requests(self, &mut out);` immediately before the BankOut loop."
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`BankPlay::read_lists`). round 6 action hook call: `super::fork_hooks::bank_requests(self, &mut out);` immediately before the BankOut loop. round 6.5 window takeover hook calls (2 inserted one-liners, 0 deleted): `window_taken(self, 11)` on 0x124D and `bank_taken_tick(self, vui)` in run_bank."
     },
     "crates/eqoa/src/bank.rs": {
       "added": 3,
@@ -279,9 +290,9 @@
       "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`ClassMastery::read_state`)."
     },
     "crates/eqoa/src/npcw.rs": {
-      "added": 6,
+      "added": 8,
       "deleted": 1,
-      "reason": "owner-approved 2026-11-15, round 5: merchant accessor. `merchant: Merchant,` becomes `pub merchant: Merchant,` so the fork adapter can read the window's state. round 6 action hook calls, approved by the lead on the owner's delegation 2026-11-16: round 6 read-only accessor `NpcWindows::loot_lists(&self)`. round 6 action hook: `super::fork_hooks::npcw_requests(self, &mut loot_out, &mut merch_out);` immediately before the LootOut/MerchantOut loops."
+      "reason": "owner-approved 2026-11-15, round 5: merchant accessor. `merchant: Merchant,` becomes `pub merchant: Merchant,` so the fork adapter can read the window's state. round 6 action hook calls, approved by the lead on the owner's delegation 2026-11-16: round 6 read-only accessor `NpcWindows::loot_lists(&self)`. round 6 action hook: `super::fork_hooks::npcw_requests(self, &mut loot_out, &mut merch_out);` immediately before the LootOut/MerchantOut loops. round 6.5 window takeover hook calls (2 inserted one-liners, 0 deleted): `window_taken(self, 1)` on 0x0018 and `window_taken(self, 10)` on 0x00B7."
     }
   },
   "immutable": [
@@ -290,6 +301,12 @@
   ],
   "claude_upstream_copy": "docs/upstream/CLAUDE.md",
   "hooks": [
+    {
+      "path": "crates/eqoa/src/main.rs",
+      "name": "mod author tools dispatch",
+      "pattern": "fork_ext::modtools::run\\(args\\)",
+      "count": 1
+    },
     {
       "path": "crates/eqoa/src/main.rs",
       "name": "fork boundary module",
@@ -504,6 +521,24 @@
       "path": "crates/eqoa/src/bankplay.rs",
       "name": "action bank requests",
       "pattern": "fork_hooks::bank_requests\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/npcw.rs",
+      "name": "window takeover npcw",
+      "pattern": "fork_hooks::window_taken\\(",
+      "count": 2
+    },
+    {
+      "path": "crates/eqoa/src/bankplay.rs",
+      "name": "window takeover bank open",
+      "pattern": "fork_hooks::window_taken\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/bankplay.rs",
+      "name": "window takeover bank tick",
+      "pattern": "fork_hooks::bank_taken_tick\\(",
       "count": 1
     },
     {

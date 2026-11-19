@@ -4,6 +4,9 @@
 use super::*;
 use crate::report;
 
+#[path = "scripted_input.rs"]
+mod scripted_input;
+
 /// Whether the local report takes this key: every key while its dialog is
 /// open, and F3, except in the world of a server that offered bug reports
 /// (`Session::bug_reports`), where F3 is Support's request form
@@ -19,29 +22,18 @@ pub(super) fn event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) ->
 
 fn report_event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) -> bool {
     match event {
-        WindowEvent::KeyboardInput { event, .. }
-            if claims_key(
-                report::is_open_local(),
-                &event.logical_key,
-                app.play.as_ref(),
-            ) =>
-        {
-            if event.state == ElementState::Pressed {
-                if report::is_open_local() {
-                    if let Some(key) = report::key_of(event) {
-                        report::key(key);
-                    }
-                } else if !event.repeat
-                    && (app.host.as_ref().is_some_and(|h| h.ui_parts().is_some())
-                        || app.play.as_ref().is_some_and(|p| p.ui_parts().is_some()))
-                {
-                    report::open();
-                    app.let_go_keys(el);
-                    app.grab_pointer(false);
-                }
-            }
-            true
+        WindowEvent::RedrawRequested => {
+            scripted_input::step(app, el);
+            false
         }
+        WindowEvent::KeyboardInput { event, .. } => report_key(
+            app,
+            el,
+            &event.logical_key,
+            event.text.as_deref(),
+            event.state,
+            event.repeat,
+        ),
         WindowEvent::MouseInput { state, .. } if report::is_open_local() => {
             if *state == ElementState::Pressed
                 && let Some(g) = &app.gfx
@@ -57,12 +49,18 @@ fn report_event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) -> boo
     }
 }
 
+/// Whether a native game window (a mercenary's inventory or spells, the dye
+/// picker) owns the keyboard: its keys go to the game, not to addons. Window
+/// keys and scripted keys (`scripted_input::step`) both ask this.
+fn native_owns_keys(app: &App) -> bool {
+    app.play
+        .as_ref()
+        .is_some_and(|p| p.typing.is_none() && (p.merc_win_owns() || p.dyepick_owns()))
+}
+
 fn addon_event(app: &mut App, event: &WindowEvent, pointer_shut: bool) -> bool {
-    let native_key = matches!(event, WindowEvent::KeyboardInput { .. })
-        && app
-            .play
-            .as_ref()
-            .is_some_and(|p| p.typing.is_none() && (p.merc_win_owns() || p.dyepick_owns()));
+    let native_key =
+        matches!(event, WindowEvent::KeyboardInput { .. }) && native_owns_keys(app);
     let release = match event {
         WindowEvent::KeyboardInput { event, .. } => event.state == ElementState::Released,
         WindowEvent::MouseInput { state, .. } => *state == ElementState::Released,
@@ -85,6 +83,34 @@ fn addon_event(app: &mut App, event: &WindowEvent, pointer_shut: bool) -> bool {
     if let WindowEvent::CursorMoved { position, .. } = event {
         app.cursor = (position.x, position.y);
         app.mouse.moved(position.x, position.y);
+    }
+    true
+}
+
+fn report_key(
+    app: &mut App,
+    el: &ActiveEventLoop,
+    logical: &Key,
+    text: Option<&str>,
+    state: ElementState,
+    repeat: bool,
+) -> bool {
+    if !claims_key(report::is_open_local(), logical, app.play.as_ref()) {
+        return false;
+    }
+    if state == ElementState::Pressed {
+        if report::is_open_local() {
+            if let Some(key) = report::key_of(logical, text) {
+                report::key(key);
+            }
+        } else if !repeat
+            && (app.host.as_ref().is_some_and(|h| h.ui_parts().is_some())
+                || app.play.as_ref().is_some_and(|p| p.ui_parts().is_some()))
+        {
+            report::open();
+            app.let_go_keys(el);
+            app.grab_pointer(false);
+        }
     }
     true
 }
