@@ -1625,6 +1625,7 @@
         "eqoa.actions.mastery_share",
         "eqoa.actions.menu_command",
         "eqoa.actions.move",
+        "eqoa.actions.open_loot",
         "eqoa.actions.open_window",
         "eqoa.actions.prepare_weapon_set",
         "eqoa.actions.quick_slot",
@@ -1634,6 +1635,7 @@
         "eqoa.actions.stop",
         "eqoa.actions.stop_batch",
         "eqoa.actions.swap_items",
+        "eqoa.actions.talk",
         "eqoa.actions.target",
         "eqoa.actions.target_target",
         "eqoa.actions.toggle_stats_box",
@@ -2172,6 +2174,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.actions.open_loot",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.actions.open_window",
       "reason": null,
       "revision": 1,
@@ -2237,6 +2247,14 @@
     {
       "children": [],
       "path": "eqoa.actions.swap_items",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.talk",
       "reason": null,
       "revision": 1,
       "round": 4,
@@ -3084,6 +3102,7 @@
         "eqoa.entities.Entity.kind",
         "eqoa.entities.Entity.level",
         "eqoa.entities.Entity.name",
+        "eqoa.entities.Entity.npc_flags",
         "eqoa.entities.Entity.poisoned",
         "eqoa.entities.Entity.position",
         "eqoa.entities.Entity.power",
@@ -3198,6 +3217,14 @@
     {
       "children": [],
       "path": "eqoa.entities.Entity.name",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.entities.Entity.npc_flags",
       "reason": null,
       "revision": 1,
       "round": 2,
@@ -11420,7 +11447,10 @@
         "eqoa.windows.get",
         "eqoa.windows.get_window",
         "eqoa.windows.open",
-        "eqoa.windows.parse_hint"
+        "eqoa.windows.parse_hint",
+        "eqoa.windows.release",
+        "eqoa.windows.taken",
+        "eqoa.windows.takeover"
       ],
       "path": "eqoa.windows",
       "reason": null,
@@ -11840,6 +11870,30 @@
     {
       "children": [],
       "path": "eqoa.windows.parse_hint",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.release",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.taken",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.takeover",
       "reason": null,
       "revision": 1,
       "round": 4,
@@ -15222,8 +15276,8 @@
   ],
   "metadata": {
     "client_version": "0.5.3",
-    "commit": "db67e26ceb48a2737fd86a443fdb1a10a8e3136c",
-    "generated_utc": "2026-11-18",
+    "commit": "unstamped local build",
+    "generated_utc": "2026-11-19",
     "platform": "windows-x86_64"
   },
   "schema_version": 1
