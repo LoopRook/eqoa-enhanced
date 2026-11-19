@@ -136,7 +136,12 @@ def _build_release_exe(root, channel):
         build_env["RUSTFLAGS"] = f"{rustflags} -C target-feature=+crt-static".strip()
 
     cmd = ["cargo", "build", "--locked", "--release", "-p", "eqoa"]
+    exe_path = run_gates._release_exe_path(cargo_target_dir).resolve()
     with run_gates.CargoLock():
+        # Always touch: the shared target dir may hold another worktree's exe, and the stamped
+        # commit must come from a build of this tree (the touch also reruns build.rs).
+        guard = run_gates.SharedTargetGuard(root, cargo_target_dir)
+        guard.begin(force=True)
         proc = subprocess.run(
             cmd,
             cwd=root,
@@ -146,6 +151,14 @@ def _build_release_exe(root, channel):
             encoding="utf-8",
             errors="replace",
         )
+        stale = None
+        if proc.returncode == 0:
+            try:
+                (_, mtime), = guard.verify([exe_path])
+                print(f"Built {run_gates.describe_exe(exe_path, mtime)}")
+            except run_gates.StaleBinaryError as exc:
+                stale = exc
+        guard.end()
 
     combined = "\n".join(part for part in (proc.stdout, proc.stderr) if part)
     summary_lines = [
@@ -161,8 +174,10 @@ def _build_release_exe(root, channel):
             for line in tail:
                 print(line)
         raise RuntimeError(f"cargo build failed with exit code {proc.returncode}")
+    if stale is not None:
+        raise RuntimeError(f"stale binary: {stale}")
 
-    return (cargo_target_dir / "release" / "eqoa.exe").resolve()
+    return exe_path
 
 
 def make_package(
