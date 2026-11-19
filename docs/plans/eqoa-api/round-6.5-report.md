@@ -1,5 +1,142 @@
 # Round 6.5 Report: Capabilities, Standalone Window Takeover, `open_loot`/`talk`, and Bag Viewer Auto-Loot
 
+## Fix round 5, 2026-11-18 (base `838e48d0`, develop merged as `d12944fb`): Auto-loot stopped for good
+
+Owner live test (r65-retest3 log): "auto-loot doesn't seem to work; I may have triggered something by trying to loot".
+The log: Auto-loot opened corpse 0x187ca (coin only) and released it; corpse 0x187c3 got "Yours alone for 5:12 more." and
+"Out of range." in chat and nothing else, a second open of it (the player's own button) got "Out of range." again, both
+timed out silently; the player opened a corpse in the game's window twice; corpse 0x187de opened hidden and Take all
+worked; then about eight minutes with no auto-loot activity at all. Commits are LoopRook's on `feat/eqoa-api-r6.5`;
+nothing pushed or merged. Upstream footprint unchanged: **4 of 6** seam lines (footprint PASS).
+
+Step 0: the fix round 4 agent had left a test-only diff; committed as `47a1970b`. `develop` merged (`d12944fb`): conflicts
+in `fork_ext/play.rs` (`sync_hidden_sessions` beside the session recorder's `fork_record::drain`; both kept) and
+`FORK-UPDATE-NOTES.md` (both kept). After the merge, round 7's `round7b_support_table_matches_the_running_client` needed the
+generated table to list round 6.5's API: regenerated from the built client (`docs/modding/SUPPORT-TABLE.md`,
+`eqoa-1-surface.json`; adds `open_loot`, `talk`, `windows.*`, `Entity.npc_flags`).
+
+### 1. Why Auto-loot stopped (diagnosis)
+
+- Reproduction of the owner's exact sequence (`round65_fix5_auto_loot_keeps_going_after_the_owners_sequence`: coin-only
+  corpse, "Out of range." and silence with a second unanswered open, the player's own open and close in the game's window
+  during a fight, a hidden Take all, then two more kills) **passes on the old Lua** (run against a copy of the pre-fix
+  package through `EQOA_R5B_TEST_SOURCE`). No state is left stuck by the no-answer, the player's click or the Take all.
+- The fight check was the blocker: Auto-loot waits while "a live NPC has you targeted", and that counted every NPC in the
+  zone list: the player's **mercenary** (a group member; the owner's log shows "Your mercenary Quinor is back at your
+  side"), a **merchant or banker** spoken to (they keep the player as target), and a creature at the far end of the zone
+  that once chased the player. Any of these keeps Auto-loot waiting for good. `round65_fix5_a_friendly_or_distant_npc_targeting_you_is_not_a_fight`
+  fails on the old Lua at its first case ("a mercenary targeting you is not a fight", `bag_viewer_tests.rs:4000`).
+- Honest limit: the owner's log has no line that names which NPC it was (that is what item 2 adds). The mercenary is
+  the likeliest: it was in the group the whole session.
+- Fix (`bags.lua` `M.not_a_fight`, used by the zone scan): an NPC with the player targeted is a fight only if it is not
+  the player's pet, not in the group (`eqoa.group.get`, now declared), not a merchant/banker/trainer (`npc_flags`
+  1/2/8/128), and within 30 units (`M.FIGHT_RANGE`). The game's own combat flag and auto-attack still hold Auto-loot back
+  as before (`round65_fix_bag_viewer_auto_loot_waits_while_in_combat` unchanged and passing).
+
+### 2. Always-on log lines
+
+- `eqoa.log.write` now reaches the game's log: every line goes to eqoa.log as `addon <id>: [level] text`; `info` and
+  `debug` stop there, `warn` and `error` also become Mods & Addons diagnostics as before (`manager.rs` `mod_log_line`;
+  spec line for `eqoa.log.write` updated). Before, every line became a diagnostic, which is why the mod could not log
+  routine decisions (the bundled-mod tests require zero diagnostics). This is a small API contract change for the lead to
+  confirm.
+- The Bag Viewer writes one line per corpse and reason (`bags.lua` `M.alog`): `mode Everything for <name>` /
+  `mode Off for <name>: kills are left alone` (when the character's choice is read or changed), `corpse 0x..: <name>, your
+  kill: queued for Auto-loot`, `waiting: in combat (<why>)` (the game's flag, auto-attack, or `<name> has you targeted`),
+  `waiting: too far (N units; Auto-loot opens within 15)`, `<name>: skipped, not your kill (you did not hit it)` (corpses
+  within 40 units), `skipped, already looted`, `opening it (N units away, Take all, try 1 of 3)`, `the server did not open
+  it (<reason>): will retry ...`, `gave up after 3 tries`, `done: Take all ok (N items)` / `done: took N of M items (junk
+  left)` / `done: no items on it (coin only)` / `done: only junk on it, left there`.
+- "mode Off" is logged when the mode is read or set, not per corpse: with Auto-loot off the mod does not listen to creature
+  updates at all (round 6.5 fix round 4's frame-rate rule).
+
+### 3. Unanswered corpses are retried
+
+- A corpse Auto-loot asked for that did not open (no answer in 10 s, "Out of range.", a refusal, an immediate refusal) is
+  asked again when the player is 2 units closer than at the last try, or 5 s later; three tries in all, then it gives up
+  and says so (`M.auto_open_failed`, `M.AUTO_TRIES/AUTO_CLOSER/AUTO_RETRY_SECS`).
+- The live server answers a corpse asked for from too far with the chat line "Out of range." and no 0x0085. The broker now
+  ends the waiting `open_loot` (and a batch's re-ask of its corpse) as refused with the server's words at once
+  (`play.rs` `BrokerReply::OpenLootRefused`, `action_broker.rs` `resolve_server_open_loot_refused`), only while an
+  `open_loot` is in flight; the result line shows "Out of range.".
+- One corpse open at a time: a second open while the first is unanswered is refused with "still waiting for the server to
+  open a corpse" (the owner's second click on 0x187c3 replaced the first request, whose answer then reached nobody).
+
+### 4. Windows that turn a corpse list away (modes 61/62/63 after the 11-18 upstream sync)
+
+- Upstream's `npcw` answers a 0x0018 that arrives outside mode 0 with its own 0x0016 and opens nothing. Before, the
+  broker took that list as "opened", and the mod went on to a Take all on a closed corpse ("Take all: cannot open corpse
+  right now"). Now, with an `open_loot` in flight and the mode not 0 when the list arrived, the open ends as refused at
+  once ("another game window was open; the corpse was closed"), the pending takeover claim is cleared and Auto-loot asks
+  again later. Tested here with the start menu (mode 13), which takes the same upstream path as the mercenary windows and
+  dye picker.
+- **After the sync merge**: re-run `round65_fix5_item4_a_list_the_game_turns_away_ends_the_open` with modes 61 and 63, and
+  check the bank action while a mercenary window or the dye picker is up (a held hidden bank session cannot be paused and
+  resumed cleanly on this branch: those windows do not exist here). Not done in this round.
+
+### Tests (all in `bag_viewer_tests.rs`)
+
+| Test | Proves | Without the fix |
+|---|---|---|
+| `round65_fix5_auto_loot_keeps_going_after_the_owners_sequence` | the owner's sequence leaves nothing stuck | passes on the old Lua too (diagnosis, see 1) |
+| `round65_fix5_a_friendly_or_distant_npc_targeting_you_is_not_a_fight` | mercenary, merchant, far creature do not block | old Lua: `a mercenary targeting you is not a fight` (`:4000`) |
+| `round65_fix5_item2_auto_loot_decisions_are_in_the_game_log` | the lines reach eqoa.log, zero diagnostics | old Lua: `the game log has 'mode Everything for': []` (`:4208`); routing disabled in `manager.rs`: the Addon Manager diagnostic `eqoa/1 [info] auto-loot: mode Off ...` fails `clean()` (`:128`) |
+| `round65_fix5_item3_unanswered_corpse_is_retried_when_closer_at_most_three_times` | retry when closer, not standing still, 3 tries | old Lua: fails (no retry, no log; `:198`) |
+| `round65_fix5_item3_out_of_range_ends_the_open_at_once_and_is_retried` | "Out of range." ends the open at once, retried closer | Rust arm disabled: still waiting, `assert_eq!(ok, Some(false))` fails (`:4099`) |
+| `round65_fix5_item4_a_list_the_game_turns_away_ends_the_open` | refused at once, no loop, asked again after | Rust branch disabled: `Take all: cannot open corpse right now` (`:4143`); old Lua: no retry (`:4152`) |
+
+Negative controls were executed (Lua: the pre-fix package via `EQOA_R5B_TEST_SOURCE`; Rust: each fix disabled with
+`false &&` in a scratch edit, run, then restored with `git checkout`, tree confirmed clean). All six pass on the fixed tree.
+`tools/test_local_scene.py` (6 tests) passes, including the new `--auto-loot` check.
+
+### Build-tool hazard found (reported to the lead)
+
+All worktrees share one `CARGO_TARGET_DIR` and with it the eqoa test binary's fingerprint. When another worktree builds
+after this worktree's last edit, cargo calls the binary fresh and runs the other worktree's code: two of this round's runs
+reported "0 passed, 2486 filtered out" (this branch has 2539 tests). The gates in this round were run through a wrapper
+that touches `crates/eqoa/src/main.rs` right after taking the build lock (`Paseo/targets/scratch/gate_touch.py`, not in
+the repository).
+
+### Gates
+
+Final tree (`de224d81`), `python tools/run_gates.py --release` (through the touch wrapper): **ALL GATES PASSED**.
+addons 562 passed, 0 failed, 25 ignored; full 2459 passed, 0 failed, 30 ignored (the usual skips: no `run/client.bin`, no
+2002 disc, no live S2/savestates, symlink privilege, `EQOA_FORGE_SPIKE`, `EQOA_BUNDLED_UI_GOLDENS`, mod-api without an
+adapter); wasm, footprint (4 of 6 seam lines), paths, player-release and release PASS. `update_bundled_manifest.py
+--check` up to date. The oracle tests skip on this machine (no decomp, no eqoa-port oracle).
+
+The first full run failed one older test, `round6_item4_lazy_icons_load_without_native_windows_and_zero_per_frame_requests`
+("steady frames must not leak Lua tables", 83,904 bytes). Not a leak: the pre-fix package passed, and the pre-fix package
+plus 1,500 never-executed string constants failed too (107 KB). Variants removing `log.write`, `group.get`, the mode
+lines, the fight check or all of `alog` all showed the same 83,904 bytes. The single ten-frame window measured Lua's
+string table doubling (a collection does not shrink it) and caches settling, which follow the package's code size.
+The check now takes three ten-frame windows with a collection after every frame and allows at most one to grow over
+1 KB (`de224d81`). Control: a package keeping 1 KB a frame fails (`[-52119, 11710, 11966]`); the old, padded and new
+packages pass. Two intermediate forms were tried and rejected because the leak control passed them (one window after a
+warm-up; the smaller of two windows).
+
+### Commits (this round)
+
+- `de224d81` test(bag_viewer): the steady-frame Lua memory check measures three windows with a collection after every frame
+- `0c8d989e` docs(notes): Auto-loot keeps working, retries unanswered corpses, logs its decisions
+- `e91be3c1` chore(bundled): manifest after the Bag Viewer README's Auto-loot paragraph
+- `d4acd2bc` docs(mod-api): regenerate the support table and surface with round 6.5's API (open_loot, talk, windows.*, npc_flags) after the develop merge
+- `cc03ce5b` feat(tools): local_scene --auto-loot checks Auto-loot's log lines
+- `4b2c169a` fix(takeover): a corpse open ends at once on the server's "Out of range." or when the game turns the list away (another window up, modes 61-63 after the upstream sync)
+- `ccaed037` feat(addons): eqoa.log.write lines go to eqoa.log; info and debug stay out of the Mods & Addons diagnostics
+- `cb543061` fix(bag_viewer): Auto-loot no longer stops for good: a mercenary, a merchant or a far creature with you targeted is not a fight; unanswered corpses retried (closer or 5 s, 3 tries); every decision logged
+- `47a1970b` test: per-character Auto-loot test drives sync_character directly; H1 single-take keeps the corpse held (left uncommitted by fix round 4)
+- plus the develop merge `d12944fb` and this report.
+
+### Not tested here (needs the live server)
+
+- Auto-loot through real fights with the mercenary out, and the real server's "Out of range." retry.
+- The local scene's GM `#kill` is not the player's hit, so it cannot show a real auto-loot; `--auto-loot` checks the mode
+  line and the "not your kill" line end to end.
+- `python tools/local_scene.py --scene bag-viewer --r65 --auto-loot` against the local server with this build:
+**PASS**, 21 of 21 checks (run `20261119-035207-73e21148`), including `auto-loot: mode Everything but junk for Lsgm` and
+`auto-loot: corpse 0x186e0: fire bat: skipped, not your kill (you did not hit it)` in the real client's log.
+
 ## Fix round 4, 2026-11-18 (base `909fe54e`): frame rate, hidden re-opens, Auto-loot choice, greyed-out buttons
 
 Owner retest of `909fe54e`: "feels sluggish" (24 fps typical, 13 low; `hud` 10-40 ms a frame, worst with the Bags window
