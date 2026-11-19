@@ -76,6 +76,32 @@ python tools/run_gates.py [options]
 
 While waiting for the Cargo build lock, `Waiting for cargo lock` messages include the holder PID from its token file when one is present. While any step runs, a flushed progress line is printed every 60 seconds showing the step name, elapsed minutes, and—for `cargo test` steps—the number of `test ... ok/FAILED/ignored` lines seen so far; full child output continues to be written to each step's log file.
 
+### Shared target directory: stale-binary guard
+
+All worktrees build into one `CARGO_TARGET_DIR`. Cargo's fingerprint for the `eqoa` unit is
+the same in every worktree, so cargo only compares this worktree's source mtimes with the time
+of the last build by *any* worktree. If another worktree built after your last edit, `cargo test`
+prints `Finished ... in 0.87s` and runs the other worktree's binary, so a gate can pass on code
+that is not yours. Never trust a "Finished in under a second" test run; use `run_gates.py`.
+
+Inside the cargo lock, before each cargo step, `run_gates.py` therefore:
+
+1. Touches every workspace crate's root source (`crates/*/src/main.rs`, `lib.rs`, `build.rs`) so
+   cargo sees this worktree as newer than any shared artifact. It skips the touch only when
+   `<target>/gates/last-build.json` shows this worktree built last and no cargo dep-info file in
+   the target dir is newer than that record (so consecutive steps of one run do not rebuild).
+2. After a test or release step, parses the `Running ... (path)` lines (or the release exe path)
+   and requires every executable to be newer than the touch. Otherwise the step FAILS with
+   `STALE BINARY CHECK FAILED` in its log and a `**STALE BINARY**` line in the summary. A test
+   step that reports no executable also fails.
+3. Lists each tested executable with its modification time in the summary
+   (`Tested executable: ...`).
+
+`make_owner_test_package.py --build` always touches (it also reruns `build.rs`, so the stamped
+`EQOA_BUILD_COMMIT` comes from this tree) and refuses a release exe that was not rebuilt.
+
+The cost: the first cargo step after another worktree built recompiles the workspace crates.
+
 ---
 
 ## 2. Bundled Mod Manifest Updater (`tools/update_bundled_manifest.py`)
