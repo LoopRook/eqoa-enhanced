@@ -1066,6 +1066,23 @@ mod tests {
     include!("round_minimap_manager_tests.rs");
     include!("bag_viewer_tests.rs");
     include!("perf_round_tests.rs");
+
+    /// Runs a test's body on its own thread with a 16 MiB stack. The GPU addon harnesses hold a `Play`
+    /// (about 110 KB), a `Manager` and more by value (`Bv` about 170 KB, `Rm` about 190 KB), and a debug
+    /// build copies them several times while building one, so these tests sit near the 2 MiB default
+    /// test-thread stack; CI's build went over it (2026-11-19, STATUS_STACK_OVERFLOW, which aborts the
+    /// whole test binary). A panic in the body fails the test as before.
+    fn big_stack(body: fn()) {
+        let joined = std::thread::Builder::new()
+            .name(std::thread::current().name().unwrap_or("big-stack test").to_owned())
+            .stack_size(16 << 20)
+            .spawn(body)
+            .expect("spawn the test's thread")
+            .join();
+        if let Err(panic) = joined {
+            std::panic::resume_unwind(panic);
+        }
+    }
     use super::*;
     use dear_imgui_rs::Context;
     use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo};
@@ -1761,6 +1778,9 @@ mod tests {
 
     #[test]
     fn forge_manager_health_pending_cleanup_pause_reload_and_coherent_snapshot() {
+        big_stack(forge_manager_health_pending_cleanup_pause_reload_and_coherent_snapshot_body)
+    }
+    fn forge_manager_health_pending_cleanup_pause_reload_and_coherent_snapshot_body() {
         let Some(mut gpu) = Gpu::new() else { return };
         let scripts = Scratch::new();
         let config = Scratch::new();
@@ -2600,6 +2620,9 @@ mod tests {
 
     #[test]
     fn round6b_frame_mode_and_forge_widget_click_grants_one_gesture_via_manager() {
+        big_stack(round6b_frame_mode_and_forge_widget_click_grants_one_gesture_via_manager_body)
+    }
+    fn round6b_frame_mode_and_forge_widget_click_grants_one_gesture_via_manager_body() {
         super::super::action_broker::reset_all_for_test();
         super::super::native_core::CORE.with(|c| {
             let mut core = super::super::native_core::Core::default();

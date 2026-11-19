@@ -126,6 +126,9 @@ fn r4_pixels(gpu: &Gpu, target: &wgpu::Texture) -> Vec<u8> {
 }
 #[test]
 fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost() {
+    big_stack(round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost_body)
+}
+fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost_body() {
     use super::super::{hud_layout, input, native_core};
     use std::time::{Duration, Instant};
     use winit::keyboard::{Key, NamedKey};

@@ -123,6 +123,9 @@ fn wereoxxs_busy_frame(rm: &mut Rm, tick: usize) {
 
 #[test]
 fn wereoxxs_busy_zone_frame_cost() {
+    big_stack(wereoxxs_busy_zone_frame_cost_body)
+}
+fn wereoxxs_busy_zone_frame_cost_body() {
     let reference = std::env::var_os("EQOA_WEREOXXS_REFERENCE_CHAT").map(PathBuf::from);
     let before = reference
         .as_deref()
@@ -343,6 +346,9 @@ fn perf_wait_for_loads(rm: &mut Rm) {
 /// millisecond a frame, and the guide's dots really are drawn on the minimap.
 #[test]
 fn round4_guide_costs_under_half_a_millisecond() {
+    big_stack(round4_guide_costs_under_half_a_millisecond_body)
+}
+fn round4_guide_costs_under_half_a_millisecond_body() {
     super::super::addon_perf::force_for_test(false);
     let packages = |p: &str| matches!(p, "eqoa_creature_journal" | "eqoa_map_search" | "eqoa_round_minimap");
     let samples: usize = std::env::var("R4C_SAMPLES").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
@@ -392,6 +398,9 @@ fn round4_guide_costs_under_half_a_millisecond() {
 /// `entity.*` event pay per entity).
 #[test]
 fn round4_record_build_micro() {
+    big_stack(round4_record_build_micro_body)
+}
+fn round4_record_build_micro_body() {
     let Some(mut rm) = Rm::with(|p| p == "eqoa_round_minimap", 20) else { return };
     rm.frames(8);
     let json = super::super::native_core::CORE.with(|c| c.borrow().view.entities[6].clone());
@@ -455,6 +464,9 @@ fn round4_record_build_micro() {
 /// GPU, the ImGui pass, to the GPU's completion. Printed per mod (`addons:`, `core:`, `addon-api:`).
 #[test]
 fn round4_seven_mods_in_a_real_shaped_scene() {
+    big_stack(round4_seven_mods_in_a_real_shaped_scene_body)
+}
+fn round4_seven_mods_in_a_real_shaped_scene_body() {
     use super::super::{addon_perf, hud_layer};
     let real = crate::map::extension::use_real_ui(true);
     eprintln!("R4P art: {}", if real { "the disc's atlas and strings (surfaces and font are stand-ins)" } else { "stand-ins (no disc)" });
@@ -515,6 +527,9 @@ fn round4_seven_mods_in_a_real_shaped_scene() {
 /// (each UI ran and drew).
 #[test]
 fn round4_forge_uis_split_between_our_layer_and_their_lua() {
+    big_stack(round4_forge_uis_split_between_our_layer_and_their_lua_body)
+}
+fn round4_forge_uis_split_between_our_layer_and_their_lua_body() {
     use super::super::addon_perf;
     let real = crate::map::extension::use_real_ui(true);
     eprintln!("R4P art: {}", if real { "the disc's atlas and strings" } else { "stand-ins (no disc)" });
@@ -565,6 +580,9 @@ fn round4_forge_uis_split_between_our_layer_and_their_lua() {
 /// What one Forge adapter call pays to read the snapshot: the cell hands out a copy of the whole struct.
 #[test]
 fn round4_snapshot_read_cost_micro() {
+    big_stack(round4_snapshot_read_cost_micro_body)
+}
+fn round4_snapshot_read_cost_micro_body() {
     let cell = std::rc::Rc::new(std::cell::Cell::new(Snapshot::default()));
     let n = 20_000;
     let t = std::time::Instant::now();
