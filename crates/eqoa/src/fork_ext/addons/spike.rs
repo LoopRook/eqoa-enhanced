@@ -132,6 +132,16 @@ impl Spike {
         }
     }
 
+    pub(super) fn scripted_key(
+        &mut self,
+        key: &winit::keyboard::Key,
+        text: Option<&str>,
+        down: bool,
+    ) -> bool {
+        super::runtime::queue_scripted_key(&mut self.context, key, text, down);
+        down && self.enabled && self.error.is_none() && self.context.io().want_capture_keyboard()
+    }
+
     pub fn draw(
         &mut self,
         window: &Window,

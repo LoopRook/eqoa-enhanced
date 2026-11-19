@@ -674,6 +674,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         sync_hidden_sessions(_play);
+        net::fork_record::drain(&mut _play.session);
         if crate::fork_ext::addons::input::is_text_capture_active() {
             _play.attack_release();
             _play.info_up = false;
@@ -847,6 +848,13 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                 }
             }
         }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for Play {
+    fn drop(&mut self) {
+        net::fork_record::drain(&mut self.session);
     }
 }
 

@@ -2286,6 +2286,7 @@ impl Session {
         }
         let mut events = std::mem::take(&mut self.held);
         while let Some(m) = self.drdp.receive() {
+            crate::fork_record::receive(self, &m);
             if self.debug {
                 debug_line(&format!("[net] message type {} size {} src {:#x}", m.ty, m.data.len(), m.src));
             }

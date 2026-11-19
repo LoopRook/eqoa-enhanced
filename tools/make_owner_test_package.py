@@ -23,6 +23,38 @@ except ImportError:
     from tools import run_gates
 
 
+ARCHIVE_SCRIPT_NAME = "archive_previous_run.ps1"
+
+# Sets the previous run's logs aside in results\<date-time>\ (moved, so a third launch
+# cannot erase the first). Moves logs, the state snapshot and local recordings.
+ARCHIVE_SCRIPT = r"""# Sets the previous run's logs aside so no run is lost. Called by the Play .bat files.
+$ErrorActionPreference = 'Stop'
+$root = $PSScriptRoot
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$dest = Join-Path $root (Join-Path 'results' $stamp)
+$n = 1
+while (Test-Path $dest) { $n++; $dest = Join-Path $root (Join-Path 'results' ($stamp + '-' + $n)) }
+foreach ($top in 'config', 'play') {
+    $dir = Join-Path $root $top
+    if (-not (Test-Path $dir)) { continue }
+    Get-ChildItem -Path $dir -Recurse -File | Where-Object {
+        $_.Name -like 'eqoa*.log' -or $_.Name -like 'addons_error.log*' -or $_.Name -eq 'state.txt' -or
+            ($top -eq 'config' -and $_.DirectoryName -eq $dir -and $_.Name -like 'session-*.eqrec')
+    } | ForEach-Object {
+        $rel = $_.FullName.Substring($root.Length).TrimStart('\', '/')
+        $target = Join-Path $dest $rel
+        New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
+        Move-Item -LiteralPath $_.FullName -Destination $target
+    }
+}
+"""
+
+ARCHIVE_CALL = (
+    "powershell -NoProfile -ExecutionPolicy Bypass -File "
+    f'"%~dp0{ARCHIVE_SCRIPT_NAME}"\r\n'
+)
+
+
 class LiveConfigOverlapError(ValueError):
     """Raised when output folder overlaps the live configuration directory."""
     pass
@@ -147,6 +179,7 @@ def make_package(
     force=False,
     fresh_config=False,
     config_source=None,
+    checklist=None,
 ):
     if root is None:
         root = Path(__file__).resolve().parent.parent
@@ -160,6 +193,11 @@ def make_package(
         exe = Path(exe).resolve()
         if not exe.is_file():
             raise FileNotFoundError(f"Executable not found: {exe}")
+
+    if checklist is not None:
+        checklist = Path(checklist).resolve()
+        if not checklist.is_file():
+            raise FileNotFoundError(f"Checklist not found: {checklist.name}")
 
     if output_dir is None:
         output_dir = Path.home() / "Downloads" / f"EQOA-Enhanced-{name}-Test"
@@ -273,23 +311,31 @@ def make_package(
             "@echo off\r\n"
             f"rem {rem_label} test build: uses the settings copy in .\\config, never updates itself.\r\n"
             "set EQOA_CONFIG=%~dp0config\r\n"
+            "set EQOA_RECORD_SESSION=1\r\n"
             "set EQOA_UPDATE_URL=http://127.0.0.1:9/\r\n"
-            f'start "" /D "%~dp0play" "%~dp0play\\{target_exe_name}"\r\n'
+            + ARCHIVE_CALL
+            + f'start "" /D "%~dp0play" "%~dp0play\\{target_exe_name}"\r\n'
         )
 
         fps_bat_content = (
             "@echo off\r\n"
             f"rem {rem_label} test build: uses the settings copy in .\\config, never updates itself.\r\n"
             "set EQOA_CONFIG=%~dp0config\r\n"
+            "set EQOA_RECORD_SESSION=1\r\n"
             "set EQOA_UPDATE_URL=http://127.0.0.1:9/\r\n"
             "set EQOA_PERF=1\r\n"
-            f'start "" /D "%~dp0play" "%~dp0play\\{target_exe_name}"\r\n'
+            + ARCHIVE_CALL
+            + f'start "" /D "%~dp0play" "%~dp0play\\{target_exe_name}"\r\n'
         )
 
         stage_bat_normal = stage_dir / f"Play EQOA {name} Test.bat"
         stage_bat_fps = stage_dir / f"Play EQOA {name} Test (fps log).bat"
         stage_bat_normal.write_bytes(normal_bat_content.encode("ascii"))
         stage_bat_fps.write_bytes(fps_bat_content.encode("ascii"))
+
+        (stage_dir / ARCHIVE_SCRIPT_NAME).write_bytes(
+            ARCHIVE_SCRIPT.replace("\n", "\r\n").encode("ascii")
+        )
 
         # Build succeeded! Now apply to destination output_dir
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -307,7 +353,10 @@ def make_package(
             config_source = Path(config_source)
 
             if config_source.is_dir():
-                shutil.copytree(config_source, config_dir)
+                shutil.copytree(
+                    config_source, config_dir,
+                    ignore=lambda _folder, names: [name for name in names if name.lower().endswith(".eqrec")],
+                )
             else:
                 config_dir.mkdir(parents=True, exist_ok=True)
 
@@ -319,6 +368,9 @@ def make_package(
         # Replace bats
         shutil.copy2(stage_bat_normal, output_dir / f"Play EQOA {name} Test.bat")
         shutil.copy2(stage_bat_fps, output_dir / f"Play EQOA {name} Test (fps log).bat")
+        shutil.copy2(stage_dir / ARCHIVE_SCRIPT_NAME, output_dir / ARCHIVE_SCRIPT_NAME)
+        if checklist is not None:
+            shutil.copy2(checklist, output_dir / "CHECKLIST.txt")
 
     print(f"Created owner test package at: {output_dir}")
     print(f"  config: {config_dir}")
@@ -346,6 +398,7 @@ def main():
     parser.add_argument("--version", help="version assertion for build_player_release")
     parser.add_argument("--force", action="store_true", help="overwrite existing output folder")
     parser.add_argument("--fresh-config", action="store_true", help="replace config even when --force is used")
+    parser.add_argument("--checklist", type=Path, help="copy this round's checklist into the package as CHECKLIST.txt")
     args = parser.parse_args()
 
     try:
@@ -361,6 +414,7 @@ def main():
             version=args.version,
             force=args.force,
             fresh_config=args.fresh_config,
+            checklist=args.checklist,
         )
     except LiveConfigOverlapError as error:
         parser.exit(2, f"Security error: {error}\n")

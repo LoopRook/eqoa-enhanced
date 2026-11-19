@@ -302,3 +302,36 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
   `unsupported`, because their pages and sub-dialogs are not readable from fork code (review D, Gemini Hydrogen).
 - **To enable:** five read-only accessors proposed in `docs/plans/eqoa-api/round-6b-seams.md` (feat/eqoa-api-r6).
   The typed actions (sell, buy, bank move/money, mastery buy/refund, drop_quest) already cover these windows.
+
+## Helper mod ideas on round 6.5's window takeover (owner, 2026-11-17)
+
+- **Status:** Ideas, not scheduled. Each is a mod, not an API change, unless noted.
+- **Helpers** (a mod opens its own hidden session, does the job, closes; a player-opened window stays normal):
+  auto-sell junk near a merchant (e.g. from an info bar); auto-loot your kills (Bag Viewer option, round 6.5);
+  restock (keep N of an item, buy up to N from a merchant that sells it); auto-bank (deposit crafting materials or
+  marked items near a banker); loot filters (always/never take, bag-nearly-full warning); one-key versions of each.
+- **Need the takeover extended first** (API work, one window at a time): quest turn-ins (NPC dialogs), trainers,
+  crafting.
+- **Server limit:** the server decides the range for every request; the owner's round 6.5 test shows whether
+  "from anywhere" works.
+
+## Auto-loot beyond "you hit it" (owner, 2026-11-17)
+
+- **Status:** Idea. Round 6.5's auto-loot takes only corpses of creatures you hit, out of combat; others need one click on
+  Loot. Later: an Auto-loot setting "my kills only" / "anything the server lets me loot" (ask for every nearby corpse,
+  hide the server's refusals; check that chat stays quiet and the server tolerates it) and group kills (only if the client
+  can see what group members hit: unverified).
+
+## Scripted-input follow-ups (review 2026-11-18)
+
+- **Status:** Small, not scheduled. `EQOA_MOD_KEYS` alone leaves `input::from_device()` true (`input.rs:518` lists the upstream
+  script variables); count it as scripted fork-side without editing input.rs. The bag-viewer scene clicks fixed pixels
+  (fails closed if the layout moves); add a negative control for a missing loot receipt in tools/test_local_scene.py.
+
+## Window takeover and upstream's keyboard-owning windows (sync review 2026-11-18)
+
+- **Status:** For round 6.5 / window replacement. Upstream's mercenary windows and dye picker only open from modes 0, 7, 9
+  (`mercplay.rs:142`, `dyeplay.rs:255`); a hidden takeover session leaves mode 0, so they can open while a mod holds a hidden
+  bank/loot session (the mod's bank action then stalls until the picker closes; a loot request made in modes 61/63 is
+  refused by upstream with 0x0016 and the pending open must be cleared). `report_viewer.rs:61` keeps keys from addons only for
+  `merc_win_owns() || dyepick_owns()`: a "not plain play" rule (mode not 0/38) would survive future upstream windows.

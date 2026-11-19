@@ -31,6 +31,7 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
         self.fake_config.mkdir(parents=True)
         (self.fake_config / "eqoa.ini").write_text("volume=100\n", encoding="utf-8")
         (self.fake_config / "binds.txt").write_text("bind 1 attack\n", encoding="utf-8")
+        (self.fake_config / "session-previous.eqrec").write_bytes(b"old recording")
 
         self.env_patch = mock.patch.dict(os.environ, {"APPDATA": str(self.fake_appdata)})
         self.env_patch.start()
@@ -75,7 +76,9 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
             "@echo off\r\n"
             "rem Round 4 test build: uses the settings copy in .\\config, never updates itself.\r\n"
             "set EQOA_CONFIG=%~dp0config\r\n"
+            "set EQOA_RECORD_SESSION=1\r\n"
             "set EQOA_UPDATE_URL=http://127.0.0.1:9/\r\n"
+            'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0archive_previous_run.ps1"\r\n'
             'start "" /D "%~dp0play" "%~dp0play\\EQOA Enhanced - Nightly.exe"\r\n'
         )
 
@@ -83,8 +86,10 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
             "@echo off\r\n"
             "rem Round 4 test build: uses the settings copy in .\\config, never updates itself.\r\n"
             "set EQOA_CONFIG=%~dp0config\r\n"
+            "set EQOA_RECORD_SESSION=1\r\n"
             "set EQOA_UPDATE_URL=http://127.0.0.1:9/\r\n"
             "set EQOA_PERF=1\r\n"
+            'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0archive_previous_run.ps1"\r\n'
             'start "" /D "%~dp0play" "%~dp0play\\EQOA Enhanced - Nightly.exe"\r\n'
         )
 
@@ -103,6 +108,7 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
             )
 
         self.assertTrue((self.output_dir / "config" / "eqoa.ini").is_file())
+        self.assertFalse((self.output_dir / "config" / "session-previous.eqrec").exists())
         self.assertEqual(
             (self.output_dir / "config" / "eqoa.ini").read_text(encoding="utf-8"),
             "volume=100\n",
@@ -406,6 +412,84 @@ class TestMakeOwnerTestPackage(unittest.TestCase):
                 with self.assertRaises(SystemExit) as cm:
                     make_owner_test_package.main()
                 self.assertEqual(cm.exception.code, 2)
+
+
+    def _make(self, **kwargs):
+        with mock.patch("make_owner_test_package.build_player_release.build_release", side_effect=self._fake_build_release):
+            return make_owner_test_package.make_package(
+                name="Round7",
+                exe=self.fake_exe,
+                output_dir=self.output_dir,
+                root=self.fake_root,
+                config_source=self.fake_config,
+                **kwargs,
+            )
+
+    def _run_archive(self):
+        subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+             str(self.output_dir / "archive_previous_run.ps1")],
+            check=True, capture_output=True,
+        )
+
+    @unittest.skipUnless(sys.platform == "win32", "the launcher helper is PowerShell on Windows")
+    def test_launcher_sets_each_run_aside_and_keeps_account_files(self):
+        self._make()
+        config = self.output_dir / "config"
+        (config / "account1.opt").write_text("secret-login", encoding="utf-8")
+        (config / "acct_main.opt").write_text("secret-two", encoding="utf-8")
+        (config / "eqoa.log").write_text("run one\n", encoding="utf-8")
+        (config / "state.txt").write_text("state one\n", encoding="utf-8")
+        (config / "session-first.eqrec").write_bytes(b"a recording")
+        (config / "addons").mkdir()
+        (config / "addons" / "addons_error.log").write_text("mod broke\n", encoding="utf-8")
+
+        self._run_archive()
+        (config / "eqoa.log").write_text("run two\n", encoding="utf-8")
+        self._run_archive()
+
+        self.assertFalse((config / "eqoa.log").exists())
+        self.assertFalse((config / "state.txt").exists())
+        runs = sorted((self.output_dir / "results").iterdir())
+        self.assertEqual(len(runs), 2, "a second launch must not erase the first run")
+        texts = sorted(
+            (r / "config" / "eqoa.log").read_text(encoding="utf-8")
+            for r in runs if (r / "config" / "eqoa.log").exists()
+        )
+        self.assertEqual(texts, ["run one\n", "run two\n"])
+        self.assertTrue(any((r / "config" / "addons" / "addons_error.log").is_file() for r in runs))
+        self.assertTrue(any((r / "config" / "state.txt").is_file() for r in runs))
+        self.assertTrue(any((r / "config" / "session-first.eqrec").is_file() for r in runs))
+        # credentials stay where they were and are never copied
+        self.assertEqual((config / "account1.opt").read_text(encoding="utf-8"), "secret-login")
+        self.assertTrue((config / "acct_main.opt").is_file())
+        moved = [p.name for p in (self.output_dir / "results").rglob("*") if p.is_file()]
+        self.assertFalse([n for n in moved if n.endswith(".opt")], moved)
+
+    @unittest.skipUnless(sys.platform == "win32", "the launcher helper is PowerShell on Windows")
+    def test_launcher_with_nothing_to_set_aside_makes_no_results_folder(self):
+        self._make()
+        (self.output_dir / "config" / "eqoa.ini").write_text("x", encoding="utf-8")
+        self._run_archive()
+        self.assertFalse((self.output_dir / "results").exists())
+
+    def test_checklist_copied_as_checklist_txt(self):
+        checklist = self.base / "round7-list.txt"
+        checklist.write_text("1. Log in. You see the world.\n", encoding="utf-8")
+        self._make(checklist=checklist)
+        self.assertEqual(
+            (self.output_dir / "CHECKLIST.txt").read_text(encoding="utf-8"),
+            "1. Log in. You see the world.\n",
+        )
+
+    def test_package_without_checklist_has_none(self):
+        self._make()
+        self.assertFalse((self.output_dir / "CHECKLIST.txt").exists())
+
+    def test_missing_checklist_refused_before_anything_is_written(self):
+        with self.assertRaises(FileNotFoundError):
+            self._make(checklist=self.base / "nope.txt")
+        self.assertFalse(self.output_dir.exists())
 
 
 if __name__ == "__main__":

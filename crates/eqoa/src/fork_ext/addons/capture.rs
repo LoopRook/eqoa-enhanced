@@ -9,6 +9,7 @@ use winit::{event::MouseButton, keyboard::PhysicalKey};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Button {
     Key(PhysicalKey),
+    ScriptedKey(usize),
     Mouse(MouseButton),
 }
 

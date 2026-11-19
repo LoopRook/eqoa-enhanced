@@ -180,6 +180,38 @@ fn info(lua: &Lua, lease: &Lease) -> Result<Value> {
 }
 pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
+    for (name, status, reason) in [
+        ("images", "unsupported", "replaced by eqoa.map.view"),
+        ("load_image", "unsupported", "replaced by eqoa.map.view"),
+        (
+            "set_waypoint",
+            "not_yet",
+            "not built; use eqoa.map.set_guide",
+        ),
+        (
+            "clear_waypoint",
+            "not_yet",
+            "not built; use eqoa.map.set_guide",
+        ),
+    ] {
+        let symbol = format!("eqoa.map.{name}");
+        bind(
+            lua,
+            "map",
+            name,
+            lua.create_function(move |lua, _: mlua::MultiValue| {
+                error(lua, &symbol, status, reason)
+            })?,
+        )?;
+        super::native::describe(
+            lua,
+            &format!("eqoa.map.{name}"),
+            status,
+            if status == "not_yet" { Some(4) } else { None },
+            reason,
+        );
+    }
+
     bind(
         lua,
         "map",

@@ -636,10 +636,10 @@ fn round5_capabilities_list_every_new_function_and_say_what_is_missing() {
           local c = eqoa.capabilities.get(p)
           if p:find('^eqoa.events') then assert(c.status == 'supported' or c.status == 'unknown', p) else assert(c.status == 'supported', p .. ' ' .. tostring(c.status)) end
         end
-        -- the window state came with the owner-approved accessors; only the button hint is still to come
+        -- window state and the populated button hint are supported
         local c = eqoa.capabilities.get('eqoa.items.Container.view'); assert(c.status == 'supported')
         local c = eqoa.capabilities.get('eqoa.items.MerchantState.mode'); assert(c.status == 'supported')
-        local c = eqoa.capabilities.get('eqoa.items.MerchantState.button_hint'); assert(c.status == 'not_yet' and c.round == 6)
+        local c = eqoa.capabilities.get('eqoa.items.MerchantState.button_hint'); assert(c.status == 'supported')
         assert(eqoa.capabilities.has('eqoa.inventory.get'))
         local listed = {}
         for _, c in ipairs(eqoa.capabilities.list('eqoa.items')) do listed[c.path] = c.status end
@@ -1492,6 +1492,17 @@ impl Play {
     /// 0x0018: a corpse's list arrives and its window opens.
     pub(crate) fn bags_corpse(&mut self, items: &serde_json::Value) {
         apply(self, opcode(0x0018, list_bytes(&specs(items))));
+    }
+    pub(crate) fn bags_replay(&mut self, row: &crate::fork_ext::session_replay::Row<'_>) {
+        self.session.state = net::session::State::World;
+        for event in row.deliver(&mut self.session) {
+            apply(self, event);
+        }
+    }
+    pub(crate) fn bags_record_take(&mut self, key: i32, count: i32) -> Vec<(u8, Vec<u8>)> {
+        self.session.record = Some(Vec::new());
+        self.bags_native_loot_one(key, count);
+        self.session.record.take().unwrap()
     }
     /// 0x0019: the server's answer to taking the corpse's item in `slot`.
     pub(crate) fn bags_loot_one(&mut self, slot: u8) {

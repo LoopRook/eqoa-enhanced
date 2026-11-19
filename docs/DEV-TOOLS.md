@@ -1,6 +1,43 @@
 # Developer Tools
 
-This document describes the three Python developer helper tools located under `tools/`.
+This document describes the Python developer helper tools located under `tools/`.
+
+## Mod API reference (`eqoa mod-api`)
+
+The native client can print the capabilities installed for an `eqoa/1` addon:
+
+```powershell
+eqoa.exe mod-api
+eqoa.exe mod-api --format json
+eqoa.exe mod-api --format md --out docs/modding/SUPPORT-TABLE.md
+eqoa.exe mod-api --format json --out docs/modding/eqoa-1-surface.json
+```
+
+Markdown is the default. **Use `--out <file>` for reliable exports**; it writes
+UTF-8 to the named file. Without it the reference goes to stdout, which is only
+visible when the program is run from a terminal (the Windows application has no
+console of its own). Invalid options, install failures and output errors
+exit with code 1 and an error on stderr. The command installs a scratch native
+addon and its ImGui, texture, font and sound adapters. It uses a headless graphics
+device (required), creates no game window, and needs no disc, login or server.
+It does not run the addon's entry script or call game actions.
+If no adapter or device can be acquired, the command exits 1 without writing a
+reference. GPU-dependent reference tests instead print a `SKIP` line and return,
+following the repository's GPU-test convention; other install errors still fail.
+
+Generate both committed files with a Windows release build, the published
+platform; sound capabilities differ elsewhere. Build provenance uses the compiled
+client version and `EQOA_BUILD_COMMIT` stamp (or explicitly says it is unstamped),
+the platform, and the UTC generation date. After changing the API, rebuild the
+client, rerun both `--out` commands above, and commit both files.
+
+`round7b_support_table_matches_the_running_client` regenerates the reference
+through the same installers and compares every capability and the Markdown
+layout. It retains the committed generation metadata during comparison: another
+date or build stamp alone does not change the API. The Windows snapshot is not
+compared on other platforms. These files report the current capability registry;
+they do not freeze the API or replace the spec's behavior tests. Forge and ImGui
+parity also rely on the bridge tests and bundled UI tests.
 
 ## 1. Branch Gates Runner (`tools/run_gates.py`)
 
@@ -101,3 +138,78 @@ python tools/make_owner_test_package.py --exe <path/to/release/eqoa.exe> [option
 - `--force`: Replace `play/` and batch files in an existing output folder. Preserves existing `config/` unless `--fresh-config` is also specified.
 - `--fresh-config`: Overwrite existing `config/` when `--force` is used.
 - `--root <path>`: Repository root path.
+
+---
+
+## 4. Local Loot Scene (`tools/local_scene.py`)
+
+Run on Windows with the local test-server installation and a Frontiers disc image.
+
+```powershell
+python -B tools/local_scene.py
+```
+
+The runner uses the main checkout's `run/eqoa.iso` by default. Set `EQOA_ISO` or pass
+`--iso <path>` to use another image. `--server-dir <directory>` selects a local server
+installation. It must contain `eqoa-server/gameserver.exe`, its seeded `eqoa.db` and
+`config.yaml`, and `accounts.local.txt` with the `lsgm` GM entry and its `Lsgm` character
+in the database. `--host <IPv4>` overrides the installation's `bind_address` if the PC's
+LAN address has changed. Stop any local server already listening on auth TCP 9735 or game
+UDP 10070 before running the scene.
+
+The runner snapshots the seed database for each run and suppresses the welcome dialog
+for the test character in that copy. It starts the installed server binary against the
+copy, selects the default addon profile in a scratch `EQOA_CONFIG`, and launches the
+shared release client offscreen. If the shared release binary is missing, it builds one
+with the `run_gates.py` Cargo lock. An existing shared binary is reused, including one
+built from a different branch. The password is read at run time and passed to the client
+through `EQOA_PASSWORD`.
+
+The GM spawns and kills a fire bat with `#spawn fire bat` and `#kill`. `EQOA_SAY` sends
+these as ordinary chat and the server recognizes the `#` prefix. The client setting
+`commands to the server false` affects forwarding of unrecognized slash commands.
+The game keyboard opens the corpse and takes its first item. A passing run confirms
+the world entry and GM replies, the `0x0018` corpse list, the native item request and
+item receipt, the server's `0x0016` close and `0x0018` refresh, and the in-world screenshot.
+
+Each run leaves `client.log`, `server.log`, `corpse.png`, `scene.png`, and `summary.txt`
+in a timestamped folder under the server installation's `runs/` directory. Failed runs
+keep the evidence produced before the failure and exit with a nonzero status. The runner
+stops its own server and discards the database copy on exit. This scene is run by the
+lead. The parsing tests can run independently with `python -B tools/test_local_scene.py`.
+
+### Bag Viewer scene
+
+Build a release client with the scripted addon input changes, then run either scene.
+
+```powershell
+python -B tools/local_scene.py --scene bag-viewer
+python -B tools/local_scene.py --scene bag-viewer --r65 --exe <round-6.5-release-exe>
+```
+
+The scratch profile enables the bundled Bag Viewer, binds **B** to open it, and marks
+torn fire bat wings as junk. After the GM kills the bat, the develop scene uses the
+game's loot key on the scripted target. It opens the Bag Viewer's **Corpse** tab and
+clicks **Take all but junk**. The runner checks the client's loot receipt, reads the
+Bag Viewer's own loot log through the scene diagnostic, and compares
+the disposable database before and after the run to verify that meat entered the bag
+and wings were left behind. `scene.png` captures the Bag Viewer's loot log.
+
+`--r65` uses Bag Viewer's **Open nearest corpse** and requires the `takeover:` lines
+for the open request, hidden loot window, and hidden session close. The round 6.5 binary
+must also include the scripted addon input changes. `--exe <path>` selects a specific
+build if the executable in the shared Cargo directory is from another branch.
+
+### Addon input replay
+
+- `EQOA_MOUSE` accepts `click X Y@ms`, `rclick @creature name@ms`, `wheel N@ms`,
+  `press l|r@ms`, `release l|r@ms`, `move DX DY@ms`, `drag DX DY@ms`,
+  `ctrl down|up@ms`, and `linkclick [index]@ms`. In the
+  native window these use the same mouse event dispatcher, pointer claims, and ImGui
+  handlers as a physical mouse. `X Y` is measured in screenshot pixels when offscreen.
+- `EQOA_MOD_KEYS` accepts `b@ms`, `enter@ms`, and `text abc@ms`. A named key is
+  held for 100 ms. Text types one character every 80 ms. Keys pass through the addon
+  event and capture rules and reach the game when unclaimed.
+- Separate steps with semicolons. `EQOA_KEYS` remains the pregame script, and
+  `EQOA_PLAY_KEYS` and `EQOA_CLICKS` remain direct game scripts. `playshot` keeps
+  its original `EQOA_MOUSE` path.

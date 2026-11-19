@@ -1871,6 +1871,52 @@ fn round6_l1_loot_batch_keeps_corpse_tab_across_close_and_summary() {
 }
 
 #[test]
+fn session_recording_replays_round6_close_and_smaller_reopen() {
+    let fixture: Vec<u8> = include_str!("round6_loot_recording.hex")
+        .split_whitespace()
+        .flat_map(|line| line.as_bytes().chunks_exact(2))
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect();
+    let rows = crate::fork_ext::session_replay::rows(&fixture).unwrap();
+    assert_eq!(rows.len(), 5);
+    assert!(rows[1].sent);
+    for confirmed in [true, false] {
+        let Some(mut bv) = Bv::new() else {
+            eprintln!("SKIP round 6 recording replay: no GPU adapter");
+            return;
+        };
+        bv.enable();
+        bv.play.bags_target_corpse(5001, "a decaying skeleton");
+        bv.play.bags_press_loot();
+        bv.play.bags_replay(&rows[0]);
+        bv.frames(1);
+        assert_eq!(bv.eval::<usize>("#eqoa.loot.get().items"), 2);
+
+        let sent = bv.play.bags_record_take(1, 1);
+        assert_eq!(sent, [(rows[1].ty, rows[1].bytes.to_vec())]);
+        if confirmed {
+            bv.play.bags_replay(&rows[2]); // 0x003B inventory confirmation
+        }
+        bv.play.bags_replay(&rows[3]); // 0x0016 close
+        bv.frames(1);
+        assert!(bv.eval::<bool>("eqoa.loot.get() == nil"));
+        bv.play.bags_replay(&rows[4]); // smaller 0x0018 reopens the corpse
+        bv.frames(1);
+        assert_eq!(bv.eval::<usize>("#eqoa.loot.get().items"), 1);
+        assert_eq!(bv.eval::<String>("eqoa.loot.get().items[1].name"), "Rat Pelt");
+        let log = bv.log();
+        if confirmed {
+            assert_eq!(log.len(), 1, "{log:?}");
+            assert!(log[0].contains("Skeleton Dust x1, from a decaying skeleton"), "{log:?}");
+        } else {
+            assert!(log.is_empty(), "a close and smaller reopen alone gave credit: {log:?}");
+        }
+        bv.clean();
+        super::super::action_broker::reset_all_for_test();
+    }
+}
+
+#[test]
 fn round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls() {
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();

@@ -44,7 +44,8 @@ The manifest lists explicit ownership patterns for:
   and render map module/shader are shared upstream paths, with exact per-file budgets
   only where they still differ. Their identical files have no dormant allowance.
 - The named map generators, map-bundle helper, parser launcher helper/tests,
-  and footprint checker/tests. Ownership does not extend to every `tools/` file.
+  footprint checker/tests, and local scene runner/tests. Ownership does not extend
+  to every `tools/` file.
 
 A new file outside these patterns requires explicit review. A binary edit in a
 shared file always fails; fork-owned binary map assets remain permitted.
