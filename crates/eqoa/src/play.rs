@@ -13031,7 +13031,7 @@ mod commands {
             out
         };
         asked(&mut p);
-        crate::settings::set_client(crate::settings::ClientOptions { entity_slots: 128, entity_view: crate::settings::ENTITY_VIEW_GAME, ..Default::default() });
+        crate::settings::set_client(crate::settings::ClientOptions { entity_slots: 128, ..Default::default() });
 
         p.agree_entity_view();
         assert!(asked(&mut p).is_empty(), "the control: no offer, nothing sent");
