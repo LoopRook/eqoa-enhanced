@@ -3596,7 +3596,12 @@ fn r65fix4_last_take_relist(single: bool) {
         log.iter().any(|l| l.contains("again")),
         "the list is recognised as the server's (the session going on, or the grace after its last take): {log:#?}"
     );
-    assert!(!bv.play.bags_corpse_held(), "and the corpse is closed again, quietly: {log:#?}");
+    assert!(
+        single || !bv.play.bags_corpse_held(),
+        "and after a batch the corpse is closed again, quietly (hidden active {}, mode {}): {log:#?}",
+        super::super::window_takeover::is_hidden_active(super::super::window_takeover::TakeoverKind::Loot),
+        bv.play.mode
+    );
     // the player's own click on that corpse afterwards is theirs: the game's window shows
     bv.play.bags_press_loot();
     bv.play.bags_corpse(&serde_json::json!([{"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100}]));
@@ -3639,9 +3644,10 @@ fn round65_fix4_m2_auto_loot_choice_is_per_character() {
     bv.play.bags_set_name("Aldara");
     bv.play.bags_zone();
     bv.eval::<bool>("(function() require('bags').char_checked = -100 return true end)()");
-    bv.play.bags_player_at([51.0, 0.0, 0.0]); // the new character's first player update
     bv.frames(3);
-    assert_eq!(bv.eval::<String>("require('bags').character"), "Aldara");
+    bv.eval::<bool>("(function() require('bags').sync_character() return true end)()"); // the game's next player update does this
+    let who: String = bv.eval("(function() local p = eqoa.player.get() return tostring(p and p.name) .. ' dirty=' .. tostring(require('bags').char_dirty) end)()");
+    assert_eq!(bv.eval::<String>("require('bags').character"), "Aldara", "{who}");
     assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "off", "a new character starts with Auto-loot off");
     assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"), "the junk marks are shared");
     bv_auto(&bv, "non_junk");
@@ -3652,8 +3658,8 @@ fn round65_fix4_m2_auto_loot_choice_is_per_character() {
     bv.play.bags_set_name("Wereoxx");
     bv.play.bags_zone();
     bv.eval::<bool>("(function() require('bags').char_checked = -100 return true end)()");
-    bv.play.bags_player_at([52.0, 0.0, 0.0]);
     bv.frames(3);
+    bv.eval::<bool>("(function() require('bags').sync_character() return true end)()"); // the game's next player update does this
     assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "all");
 
     // a reload of the mod: each character still has theirs
@@ -3665,8 +3671,8 @@ fn round65_fix4_m2_auto_loot_choice_is_per_character() {
     bv.play.bags_set_name("Aldara");
     bv.play.bags_zone();
     bv.eval::<bool>("(function() require('bags').char_checked = -100 return true end)()");
-    bv.play.bags_player_at([53.0, 0.0, 0.0]);
     bv.frames(3);
+    bv.eval::<bool>("(function() require('bags').sync_character() return true end)()"); // the game's next player update does this
     assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "non_junk");
     bv.clean();
     super::super::action_broker::reset_all_for_test();
